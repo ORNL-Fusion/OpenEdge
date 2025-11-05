@@ -46,5 +46,5 @@ $ mpirun -np 4 ./build/src/spa_mpi -in input.in
 
 
 ## License
-OpenEdge is licensed under GPL-3.0-or-later. It is a derivative work of SPARTA (GPL-3.0-or-later).
+OpenEdge is licensed under GPL-3.0. It is a derivative work of SPARTA (GPL-3.0).
 Original SPARTA notices are preserved in file headers.
