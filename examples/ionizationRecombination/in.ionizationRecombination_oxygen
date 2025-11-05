@@ -1,0 +1,71 @@
+################################################################################
+# plasma parameters
+variable n            equal 5e18  #1/m^3
+variable fnum         equal 1e15
+variable T            equal 12.0*11604.505     # 12 eV
+variable Tev          equal 12.0     # 12 eV
+variable time         equal 40e-3 # s
+variable dt           equal 1e-07     # 1 ns
+variable numStep      equal floor(${time}/${dt})
+variable dumpFreq1    equal floor(${numStep}/200)
+
+############################################--------------############################################
+
+seed                1245
+dimension           2
+boundary            p p p
+global              gridcut 0 comm/sort yes
+create_box          1.8 3.22 -1 1 -0.5 0.5
+create_grid         1 1 1
+balance_grid        rcb cell
+
+############################################--------------##############################################
+global              nrho $n  fnum ${fnum} temp $T
+
+
+##################################--- Impurity species setting----######################################
+species             plasma.species O8+ O7+ O6+ O5+ O4+ O3+ O2+ O+ O
+mixture             species O8+   frac 1    # type 1
+mixture             species O7+   frac 0.    # type 2
+mixture             species O6+   frac 0.    # type 3
+mixture             species O5+   frac 0.    # type 4
+mixture             species O4+   frac 0.    # type 5
+mixture             species O3+   frac 0.    # type 6
+mixture             species O2+   frac 0.    # type 7
+mixture             species O+    frac 0.    # type 8
+mixture             species O     frac 0.    # type 9
+
+##################################---creating particles----######################################
+create_particles    species n 2000                # create number of particles using global readl density, fnum and system volume
+
+##################################---diagnostic----######################################
+compute 1 grid all species nrho                 # compute spatial number density
+fix 1 ave/grid all 1 10 10 c_1[*]                 # time-averaged value on cell
+dump 1 grid all 100 output/tmp.grid.oxygen id xc yc f_1[*]    # save 2D densities for all species on tmp.grid file
+
+##################################---timestepping and run simulation----######################################
+
+
+
+compute cnear plasma/fields/constant all all magnetic_field 0 0.0 0. electric_field 0 0 0 temp_e 12 temp_i 12. dens_e $n dens_i $n parrflow 0 surfid mindist bx by bz ex ey ez temp_e temp_i dens_i dens_e
+
+
+variable density grid "v_n"
+variable temp grid "v_Tev"
+fix 2 chem/adas 1 8 plasma.reactions plasma c_cnear[10] c_cnear[11]
+
+
+fix     fixID ave/grid all 1 1 1  c_cnear[*] ave running
+dump    dumpID  grid   all 1 tmp.grid id  f_fixID[*]
+
+
+dump 10 particle all ${dumpFreq1} state_ion_rec  id type x y z
+
+timestep            ${dt}
+stats              100
+stats_style         step cpu np
+
+run         ${numStep}
+
+#EOF
+

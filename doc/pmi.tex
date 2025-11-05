@@ -1,0 +1,267 @@
+\documentclass{article}
+\usepackage{hyperref}
+
+\title{OpenEdge Documentation}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Overview}
+
+OpenEdge is an extension of the SPARTA code that introduces additional functionalities for modeling plasma interactions and magnetic fields. This document provides an overview of the new features, commands, and parameters added to OpenEdge.
+
+\section{Commands and Parameters}
+
+\subsection{\texttt{read\_plasma\_state}}
+
+The \texttt{read\_plasma\_state} command sets the plasma background and magnetic fields data. It supports two types of plasma state: \texttt{constant} and \texttt{file}. The \texttt{constant} option sets uniform values across the simulation domain, while the \texttt{file} option reads spatially varying data from an input file.
+
+\subsubsection{Syntax}
+
+\begin{verbatim}
+read_plasma_state plasma_state <type> [options]
+\end{verbatim}
+
+\subsubsection{Parameters}
+
+\begin{itemize}
+    \item \texttt{<type>}: Specifies the type of plasma state. It can be either \texttt{constant} or \texttt{file}.
+    \item \texttt{[options]}: Additional parameters depending on the chosen type.
+\end{itemize}
+
+\subsubsection{Example}
+
+\begin{verbatim}
+read_plasma_state plasma_state constant efield 0 0 0 bfield 1 0 0 flow 0 0 0 dens_i 1e19 dens_e 1e19 temp_e 11600 temp_i 11600
+\end{verbatim}
+
+This command sets a constant plasma state with the following properties:
+
+\begin{itemize}
+    \item \textbf{Electric Field (\texttt{efield})}: (0, 0, 0)
+    \item \textbf{Magnetic Field (\texttt{bfield})}: (1, 0, 0)
+    \item \textbf{Flow Velocity (\texttt{flow})}: (0, 0, 0)
+    \item \textbf{Ion Density (\texttt{dens\_i})}: \(1 \times 10^{19}\) m\(^{-3}\)
+    \item \textbf{Electron Density (\texttt{dens\_e})}: \(1 \times 10^{19}\) m\(^{-3}\)
+    \item \textbf{Electron Temperature (\texttt{temp\_e})}: 11600 K
+    \item \textbf{Ion Temperature (\texttt{temp\_i})}: 11600 K
+\end{itemize}
+
+\subsection{\texttt{global lorentz\_force}}
+
+The \texttt{global lorentz\_force} command enables or disables the Lorentz force calculation in the simulation. When enabled, the Lorentz force is calculated for each particle using the electric and magnetic fields specified in the plasma state.
+
+\subsubsection{Syntax}
+
+\begin{verbatim}
+global lorentz_force <value>
+\end{verbatim}
+
+\subsubsection{Parameters}
+
+\begin{itemize}
+    \item \texttt{<value>}: Specifies whether to enable (\texttt{yes}) or disable (\texttt{no}) the Lorentz force calculation.
+\end{itemize}
+
+\subsubsection{Example}
+
+\begin{verbatim}
+global lorentz_force yes
+\end{verbatim}
+
+This command enables the Lorentz force calculation in the simulation.
+
+\subsection{\texttt{global plasma\_background\_material}}
+
+The \texttt{global plasma\_background\_material} command sets the species, mass, and charge of the plasma background material.
+
+\subsubsection{Syntax}
+
+\begin{verbatim}
+global plasma_background_material <species> mass <mass> charge <charge>
+\end{verbatim}
+
+\subsubsection{Parameters}
+
+\begin{itemize}
+    \item \texttt{<species>}: Specifies the species of the plasma background material (e.g., \texttt{D} for Deuterium, \texttt{O} for Oxygen).
+    \item \texttt{<mass>}: The mass of the species (in atomic mass units).
+    \item \texttt{<charge>}: The charge of the species (in elementary charge units).
+\end{itemize}
+
+\subsubsection{Example}
+
+\begin{verbatim}
+global plasma_background_material D mass 2.0 charge 1.0
+\end{verbatim}
+
+This command sets the plasma background material to Deuterium with a mass of 2.0 atomic mass units and a charge of +1 elementary charge unit.
+
+\section{Code Implementation}
+
+\subsection{Setting the Plasma State}
+
+The plasma state is initialized using the \texttt{read\_plasma\_state} command. The implementation involves reading the specified parameters and storing them in appropriate data structures. For a constant plasma state, the values are uniform across all grid cells.
+
+\subsection{Enabling the Lorentz Force}
+
+The Lorentz force is enabled using the \texttt{global lorentz\_force} command. The implementation involves checking the flag during particle motion calculations and applying the Lorentz force if the flag is set.
+
+\subsection{Particle Motion with Lorentz Force}
+
+When the Lorentz force is enabled, the particle motion is calculated using the Boris algorithm, which is efficient and accurate for integrating the equations of motion in the presence of electromagnetic fields.
+
+\section{Example Usage}
+
+\begin{verbatim}
+# Set a constant plasma state
+read_plasma_state plasma_state constant efield 0 0 0 bfield 1 0 0 flow 0 0 0 dens_i 1e19 dens_e 1e19 temp_e 11600 temp_i 11600
+
+# Enable Lorentz force calculation
+global lorentz_force yes
+
+# Set plasma background material
+global plasma_background_material D mass 2.0 charge 1.0
+\end{verbatim}
+
+In this example, the simulation is configured with a constant plasma state, the Lorentz force calculation is enabled, and the plasma background material is set to Deuterium with a mass of 2.0 atomic mass units and a charge of +1 elementary charge unit.
+
+
+\section{Plasma Data File Structure}
+
+OpenEdge supports loading and interpolating plasma background data for use in plasma simulations. Plasma data can be loaded from an HDF5 file structured with 1D and 2D datasets to represent parameters such as density, temperature, and gradients for electrons and ions. The HDF5 file should follow the naming convention presented below.
+
+\subsection{HDF5 File Structure}
+
+Each plasma data HDF5 file contains plasma background data organized as follows:
+
+\begin{verbatim}
+struct PlasmaData {
+    std::vector<std::vector<double>> dens_e;       // Electron density grid (200, 200)
+    std::vector<std::vector<double>> dens_i;       // Ion density grid (200, 200)
+    std::vector<std::vector<double>> grad_temp_e;  // Electron temperature gradient grid (200, 200)
+    std::vector<std::vector<double>> grad_temp_i;  // Ion temperature gradient grid (200, 200)
+    std::vector<std::vector<double>> parr_flow;    // Parallel flow grid (200, 200)
+    std::vector<double> r;                         // Radial positions (200,)
+    std::vector<std::vector<double>> temp_e;       // Electron temperature grid (200, 200)
+    std::vector<std::vector<double>> temp_i;       // Ion temperature grid (200, 200)
+    std::vector<double> z;                         // Axial positions (200,)
+};
+\end{verbatim}
+
+This structure allows for efficient interpolation over the plasma parameters in both radial (r) and axial (z) directions, making it suitable for simulation needs. The expected datasets within each file are organized by the following names:
+
+\begin{itemize}
+    \item \textbf{dens\_e}: 2D array representing electron density over the (r, z) grid.
+    \item \textbf{dens\_i}: 2D array representing ion density over the (r, z) grid.
+    \item \textbf{grad\_temp\_e}: 2D array containing the gradient of electron temperature over the (r, z) grid.
+    \item \textbf{grad\_temp\_i}: 2D array containing the gradient of ion temperature over the (r, z) grid.
+    \item \textbf{parr\_flow}: 2D array containing the parallel flow values over the (r, z) grid.
+    \item \textbf{r}: 1D array representing radial positions.
+    \item \textbf{temp\_e}: 2D array containing electron temperature over the (r, z) grid.
+    \item \textbf{temp\_i}: 2D array containing ion temperature over the (r, z) grid.
+    \item \textbf{z}: 1D array representing axial positions.
+\end{itemize}
+
+\subsection{Example Usage}
+
+To load a plasma data file in OpenEdge, use the following command:
+\begin{verbatim}
+read_plasma_data plasma_data file plasma_data_openedge.h5
+\end{verbatim}
+
+For cases where a specific plasma parameter needs to be constant, the command can specify the constant values as follows:
+\begin{verbatim}
+read_plasma_data plasma_data constant parameter {value}
+\end{verbatim}
+
+In this case, the specified parameter will be assumed to be uniform and constant across the domain with the given value.
+
+
+
+\section{Magnetic Field Data File Structure}
+
+OpenEdge supports loading and interpolating magnetic field data for use in plasma simulations. Magnetic field data can be loaded from an HDF5 file structured with 1D and 2D datasets to represent radial (r), axial (z), and field components \(B_r\), \(B_z\), and \(B_t\). The HDF5 file should follow a naming convention presented below. 
+
+\subsection{HDF5 File Structure}
+
+Each magnetic field data HDF5 file contains field data organized as follows:
+
+\begin{verbatim}
+struct MagneticFieldData {
+    std::vector<double> r;                    // Radial positions
+    std::vector<double> z;                    // Axial positions
+    std::vector<std::vector<double>> br;      // Radial magnetic field component (B_r) grid
+    std::vector<std::vector<double>> bz;      // Axial magnetic field component (B_z) grid
+    std::vector<std::vector<double>> bt;      // Tangential magnetic field component (B_t) grid
+};
+\end{verbatim}
+
+This structure allows for efficient interpolation over the magnetic field in both radial (r) and axial (z) directions, making it suitable for both 1D and 2D representations. The expected datasets within each file are organized by the following names:
+
+\begin{itemize}
+    \item \textbf{r}: 1D array representing radial positions.
+    \item \textbf{z}: 1D array representing axial positions.
+    \item \textbf{br}: 2D array containing values of the radial magnetic field component \(B_r\) over the (r, z) grid.
+    \item \textbf{bz}: 2D array containing values of the axial magnetic field component \(B_z\) over the (r, z) grid.
+    \item \textbf{bt}: 2D array containing values of the tangential magnetic field component \(B_t\) over the (r, z) grid.
+\end{itemize}
+
+\subsection{Example Usage}
+
+To load a magnetic field data file in OpenEdge, use the following command:
+\begin{verbatim}
+read_magnetic_fields magnetic_fields file bfield_openedge.h5
+\end{verbatim}
+
+For cases where the magnetic field is constant, the command can specify the constant field values for each component \(B_r\), \(B_t\), and \(B_z\) as follows:
+\begin{verbatim}
+read_magnetic_fields magnetic_fields constant bfield {B_r} {B_t} {B_z}
+\end{verbatim}
+
+In this case, the magnetic field will be assumed to be uniform and constant across the domain with the specified vector values.
+
+
+\section{Surface Data File Structure}
+
+OpenEdge supports loading and interpolating surface data from Ftridyn or other Binary Collision Approximation (BCA) codes. The expected file format is an HDF5 file, named following the convention: {incident\_species\_atomic\_number}\_on\_{target\_species\_atomic\_number}.h5. A separate file is required for each incident species. For example, in the case of an oxygen plasma interacting with a tungsten wall, the required files would be 8\_on\_74.h5 (for oxygen on tungsten) and 74\_on\_74.h5 (for tungsten on tungsten).
+
+Each HDF5 file contains surface interaction data in the following structure:
+
+\begin{verbatim} struct SurfaceData 
+{ 
+std::vector<double> E; 
+ Energies std::vector<double> A; 
+ Angles std::vector<std::vector<double>> rpyld; 
+ Reflection yield std::vector<std::vector<double>> spyld; 
+ Sputtering yield 
+ }; 
+ \end{verbatim}
+
+\paragraph{Description of Fields:}
+\begin{itemize}
+\item {\bf E}: A 1D array of incident particle energies (in eV).
+\item {\bf A}: A 1D array of incident angles (in degrees), measured relative to the surface normal.
+\item {\bf rpyld}: A 2D array of reflection yields, where each element corresponds to the reflection coefficient for a given combination of energy (E) and angle (A).
+\item {\bf spyld}: A 2D array of sputtering yields, where each element corresponds to the sputtering coefficient for the same energy and angle combination.
+The dimensions of the {\bf rpyld} and {\bf spyld} arrays are (E.size(), A.size()), meaning that for each energy value in E, there is a corresponding array of sputtering and reflection coefficients for each angle in A.
+\end{itemize}
+
+\paragraph{Example:}
+
+For an oxygen species (atomic number 8) impinging on a tungsten target (atomic number 74), the file 8\_on\_74.h5 will contain:
+
+\begin{itemize}
+\item A 1D array of energies (E), e.g., [10, 20, 30, ...] eV.
+\item A 1D array of angles (A), e.g., [0, 30, 60, 90] degrees.
+\item Corresponding 2D arrays of reflection yields (rpyld) and sputtering yields (spyld) for every combination of energy and angle.
+\end{itemize}
+
+
+
+
+\end{document}
+

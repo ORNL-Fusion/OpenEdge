@@ -1,0 +1,10 @@
+OpenEdge supports loading and interpolating surface data from Ftridyn or other Binary Collision Approximation (BCA) codes. The expected file format is an HDF5 file, named following the convention: {incident species atomic number}_on_{target species atomic number}.h5. A separate file is required for each incident species. For example, in the case of an oxygen plasma interacting with a tungsten wall, the required files would be 8_on_74.h5 (for oxygen on tungsten) and 74_on_74.h5 (for tungsten on tungsten).
+
+Each HDF5 file contains surface interaction data in the following structure:
+
+E 1D array
+A 1D array
+rpyld 2D array (E,A)
+spyld 2D array (E,A)
+
+

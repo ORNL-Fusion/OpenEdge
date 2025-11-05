@@ -1,0 +1,132 @@
+
+################################################################################
+#
+# read in plasma and optimization parameters
+#
+############################################------set domain-------#####################################
+#
+seed                12345
+dimension           2
+boundary            p p p
+global              gridcut 0.0  comm/sort yes
+create_box          1.82 3.2 -1 1 -0.05 0.05
+create_grid         1000 100 1
+balance_grid        rcb cell
+#
+############################################------set plasma data-------#####################################
+global plasma_background_material D mass 2.0 charge 1.0
+global target_material W mass 184.0 charge 74.0 binding_energy 8.79
+
+#
+species input/plasma.species W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+ W11+ W12+ W13+ W14+ W15+ W16+ W17+ W18+ W19+ W20+ W21+ W22+ W23+ W24+ W25+
+
+#
+mixture             tungstenSource  W    frac 1.
+mixture             tungstenSource  W+   frac 0.
+mixture             tungstenSource  W2+  frac 0.
+mixture             tungstenSource  W3+  frac 0.
+mixture             tungstenSource  W4+  frac 0.
+mixture             tungstenSource  W5+  frac 0.
+mixture             tungstenSource  W6+  frac 0.
+mixture             tungstenSource  W7+  frac 0.
+mixture             tungstenSource  W8+  frac 0.
+mixture             tungstenSource  W9+  frac 0.
+mixture             tungstenSource  W10+ frac 0.
+mixture             tungstenSource  W11+ frac 0.
+mixture             tungstenSource  W12+ frac 0.
+mixture             tungstenSource  W13+ frac 0.
+mixture             tungstenSource  W14+ frac 0.
+mixture             tungstenSource  W15+ frac 0.
+mixture             tungstenSource  W16+ frac 0.
+mixture             tungstenSource  W17+ frac 0.
+mixture             tungstenSource  W18+ frac 0.
+mixture             tungstenSource  W19+ frac 0.
+mixture             tungstenSource  W20+ frac 0.
+mixture             tungstenSource  W21+ frac 0.
+mixture             tungstenSource  W22+ frac 0.
+mixture             tungstenSource  W23+ frac 0.
+mixture             tungstenSource  W24+ frac 0.
+mixture             tungstenSource  W25+ frac 0.
+
+############################################- wall surface and model -#####################################
+#
+variable temp_wall equal 1.*11600
+read_surf           input/wall.txt group 1 particle check
+surf_collide        DIFFUSEID vanish #diffuse ${temp_wall} 1
+#surf_react          WALL prob none #input/plasma.reactions
+surf_modify         1 collide DIFFUSEID react none #WALL
+
+############################################- core surface and model -#####################################
+#
+variable Tcore equal 40.*11600
+read_surf           input/core.txt invert group CORE particle check
+surf_collide        DIFFUSECore diffuse ${Tcore} 0.0
+surf_modify         CORE collide DIFFUSECore react none
+#
+############################################------ forces/solver-------#####################################
+
+variable Teject equal 4.64*11600
+global fnum 1e9 temp ${Teject}
+
+## Compute Sheath Electric and magnetic fields and plasma data
+
+## Ionization/Recombination
+
+compute cnear plasma/fields/file all 1 input/plasma.h5 input/bfield.h5 mindist surfid bx by bz temp_e dens_e temp_i dens_i parrflow ex ey ez nesheath grad_te_r grad_te_t grad_te_z grad_ti_r grad_ti_t grad_ti_z
+
+
+# Ionization/Recombination
+fix 22 chem/adas 100 74 input/plasma.adas plasma c_cnear[6] c_cnear[9]
+
+## Push particles
+fix bB bfield/grid c_cnear[3] c_cnear[4] c_cnear[5]
+global bfield grid bB 1
+
+fix Esheath efield/grid c_cnear[11]  c_cnear[12]  c_cnear[13]
+global efield grid Esheath 1
+
+fix ET ethermal/grid c_cnear[15]  c_cnear[16]  c_cnear[17]
+global ethermal grid ET 1
+
+fix IT ithermal/grid c_cnear[18]  c_cnear[19]  c_cnear[20]
+global ithermal grid IT 1
+
+# background collision
+fix BC coll/background 100 2.0 1 plasma c_cnear[6] c_cnear[7] c_cnear[9] c_cnear[10] bfield c_cnear[3] c_cnear[4] c_cnear[5]
+
+#
+group            up_div surf id <> 222 259
+group            lo_div surf id <> 380 423
+group            limiter surf id <> 20 110
+group            baffle surf id <> 435 436
+
+fix            1 emit/surf/file tungstenSource up_div  subsonic input/flux_oe.h5  4.64
+fix            2 emit/surf/file tungstenSource lo_div  subsonic input/flux_oe.h5  4.64
+fix            3 emit/surf/file tungstenSource limiter subsonic input/flux_oe.h5  4.64
+fix            4 emit/surf/file tungstenSource baffle  subsonic input/flux_oe.h5  4.64
+
+##################################--- set atomic processes----###########################################
+#
+#
+##################################--- set diagnostic ----###########################################
+#
+variable N  equal floor(1e6)
+variable N2 equal floor($N/10)
+#dump 10 particle all ${N2} output/state id type x y z vx vy vz
+#
+compute computeID grid all species nrho
+fix     fixID ave/grid all 10 100 1000 c_computeID[*] ave running
+dump    dumpID  grid all ${N2} output/tmp.grid.density id xc yc f_fixID[*]
+#
+
+# ---- Computes: per mixture and all-species
+compute 2 surf all all nflux_incident mflux etot press
+fix     f_all ave/surf all 1 ${N2} ${N2} c_2[*] ave running
+dump    d_all  surf all ${N} output/tmp.all.surf id v1x v1y v2x v2y f_f_all[*]
+
+timestep        5e-08
+stats           1
+stats_style     step cpu np
+run             $N
+
+

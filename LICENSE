@@ -1,0 +1,26 @@
+OpenEdge — extensions to SPARTA for plasma–material interaction (PMI)
+Copyright (C) 2023–2025  Abdourahmane Diaw, Oak Ridge National Laboratory
+
+OpenEdge is a derivative work of SPARTA (Copyright © 2014 Sandia Corporation).
+OpenEdge is licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later).
+This repository includes and modifies SPARTA source files, which remain under the GPL with
+their original notices preserved. See NOTICES for attribution details.
+
+NOTICES
+
+Upstream project:
+- SPARTA – Stochastic PArallel Rarefied-gas Time-accurate Analyzer
+  Copyright (2014) Sandia Corporation
+  https://sparta.github.io
+  License: GPL-3.0-or-later
+  Notes: Original copyright and license notices preserved in file headers.
+
+OpenEdge authors:
+- Abdourahmane Diaw (ORNL) and contributors (2023–2025)
+  Additional functionality: PMI physics, ADAS-based ionization/recombination, surface emission,
+  sheath/E/B-field modules, diagnostics, etc.
+
+Data / external dependencies:
+- ADAS rate tables (not software). Check redistribution terms; if redistribution is restricted,
+  keep them out of the repo and document how to download locally.
+
