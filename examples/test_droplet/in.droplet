@@ -1,0 +1,65 @@
+# Copyright 2024, OpenEdge contributors
+# Authors: Abdou Diaw
+# License: GPL-2.0 license
+# This script simulate lithium (Li) droplet dynamics in a uniform plasma environment using CAT.
+# Setup: 2D domain with magnetic field equilibrium and plasma at sound speed along magnetic field lines.
+
+
+############################################------simulation domain setup-------#####################################
+seed                12345
+dimension           2
+boundary            r r p
+global              gridcut 0.0 comm/sort no
+create_box          2. 6 -4. 3.8 -0.05 0.05
+
+create_grid         1000 1000 1
+balance_grid        rcb  cell
+
+############################################------species in the plasma (current and future)-------#####################################
+species droplet.species Ligament
+mixture             LigamentSource  Ligament        frac 1.0
+
+
+############################################------set properties of wall: material and interaction-------#####################################
+#global target_material Li mass 7.0 charge 3.0 binding_energy 1.64
+
+read_surf          wall.surf group surfID particle check
+surf_collide       wallColModel vanish
+surf_modify        all collide wallColModel
+
+read_surf          core.surf invert group surfID2 particle check
+surf_modify        surfID2 collide wallColModel
+
+variable pmass  particle mass
+#variable pmass  particle temp
+
+global              nrho 1e16 fnum 1
+
+group            divertor_outer surf id <> 37 50
+group            divertor_inner surf id <> 10 17
+fix                 in emit/surf LigamentSource divertor_outer normal yes  n 1 perspecies no
+
+variable dt equal 1e-3
+variable time equal 8.5 # seconds
+variable N equal floor(${time}/${dt})
+variable N1 equal floor($N/10)
+variable N2 equal floor($N/100)
+
+dump 10 particle all ${N1} LigamentSource  id type x y z vx vy vz v_pmass temp radius
+
+variable min_dt equal 0.05
+variable nevery equal 1 #${min_dt}/${dt}
+variable temp equal 773.15 # Kelvin
+variable rd equal 0.01 # m
+variable md equal 2.236813969e-03
+fix 22 evap ${nevery} mass ${md} radius ${rd} temp ${temp} heatflux/file heatflux.h5
+#fix 22 evap ${nevery} mass ${md} radius ${rd} temp ${temp} heatflux/constant 50e6
+
+timestep ${dt}
+
+stats 1
+run 1
+unfix in
+stats ${N2}
+run $N
+
