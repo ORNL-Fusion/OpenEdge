@@ -641,9 +641,9 @@ int Particle::add_particle(int id, int ispecies, int icell,
   p->erot = erot;
   p->evib = evib;
   p->flag = PKEEP;
-  p->temp = 500.0;      // not needed due to memset in grow() ??
-  p->radius = 4.99751e-05;    // not needed due to memset in grow() ??
-  p->mass = 2.791846102485784e-10; //      not needed due to memset in grow() ??
+  p->temp = 0.0;      // not needed due to memset in grow() ??
+  p->radius = 0.0; //4.99751e-05;    // not needed due to memset in grow() ??
+  p->mass = 0.0; //2.791846102485784e-10; //      not needed due to memset in grow() ??
 
   //p->dtremain = 0.0;    not needed due to memset in grow() ??
   //p->weight = 1.0;      not needed due to memset in grow() ??
