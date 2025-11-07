@@ -1,0 +1,132 @@
+# ------------------------------------------------------------------------------
+#  OpenEdge/SPARTA Test: Charged Particle Orbits in Tokamak Magnetic Field
+# ------------------------------------------------------------------------------
+#  Purpose:
+#    Reproduce the banana and passing orbits
+#
+#  Description:
+#    This input file initializes a 3-D domain with a single charged particle
+#    (H+) moving in the analytical, axisymmetric tokamak magnetic field:
+#        Bx = -B0*(2*R0*y + x*z)/(2*R^2)
+#        By =  B0*(2*R0*x - y*z)/(2*R^2)
+#        Bz =  B0*(R - R0)/(2*R)
+#    and no electric field.
+#
+#    Two test cases are provided:
+#       - Banana orbit  →  read_particles source_banana_orb 0
+#       - Passing orbit →  read_particles source_passing_orb 0
+#    Uncomment the desired case before running.
+# ------------------------------------------------------------------------------
+
+################################################################################
+# --- Plasma parameters (for normalization only) -------------------------------
+################################################################################
+variable realDensity  equal 1e19        # [1/m^3] background plasma density
+variable fnum         equal 1e15        # scaling factor for density normalization
+variable T            equal 12.0*11604.505  # temperature = 12 eV (in Kelvin-equivalent)
+
+################################################################################
+# --- Simulation domain and global setup ---------------------------------------
+################################################################################
+seed                 1245
+dimension            3
+boundary             p p p              # periodic boundaries
+global               gridcut 0 comm/sort no
+create_box -1.5 1.5 -1.5 1.5 -0.5 0.5
+create_grid 40 40 20
+
+balance_grid         rcb part
+
+# normalized density and number scaling
+global               nrho ${realDensity} fnum ${fnum}
+
+################################################################################
+# --- Plasma background (constant, no dynamics) --------------------------------
+################################################################################
+read_plasma_state    plasma_state constant temp_e $T temp_i $T  dens_e ${realDensity} dens_i ${realDensity}
+
+# Turn on self-consistent force evaluation (Lorentz term will act per particle)
+global               no_forces no
+
+################################################################################
+# --- Impurity / test particle species -----------------------------------------
+################################################################################
+species              plasma.species H+
+mixture              species H+ frac 1.0
+
+################################################################################
+# --- Load initial particle conditions -----------------------------------------
+################################################################################
+read_particles    source_ripples_banana_orb 0
+
+################################################################################
+# --- Define analytical magnetic and electric fields ---------------------------
+################################################################################
+
+# ---------------------------------------------------------------
+# Toroidal-field ripple magnetic configuration (Eq. 40, JFE 2021)
+# Normalization: B0 = R0 = 1
+# ---------------------------------------------------------------
+
+variable B0       equal 1.0
+variable R0       equal 1.0
+variable eps      equal 1e-6                # avoid singularity at R → 0
+variable R        particle "sqrt(x*x + y*y + v_eps*v_eps)"
+variable Z        particle "z"
+variable phi      particle "atan2(y,x)"
+
+variable deltaTF0 equal 3.5e-3
+variable N        equal 20
+variable Rr       equal 0.888
+variable k        equal 1.0
+
+# Toroidal-field ripple amplitude δ_TF = δ_TF0 * I0(F)
+# Here use bessel0(x) as the modified Bessel I0(x)
+variable F   particle "v_N * sqrt(((v_Rr - v_R)*(v_Rr - v_R) + v_k*v_Z*v_Z)/(v_Rr*v_R))"
+variable bTF particle "v_deltaTF0 * bessel0(v_F) * cos(v_N*v_phi)"
+
+# Magnetic-field components (Eq. 40, B0=R0=1)
+variable Bx particle "-v_B0*(2.0*y + x*z + 2.0*v_bTF*y)/(2.0*v_R*v_R)"
+variable By particle " v_B0*(2.0*x - y*z + 2.0*v_bTF*x)/(2.0*v_R*v_R)"
+variable Bz particle " v_B0*(v_R - v_R0)/(2.0*v_R)"
+
+
+print "bTF(sample) = $(v_deltaTF0*bessel0(0.2)*cos(v_N*0.1))"
+print "I0(0)   = $(bessel0(0))"         # expect 1.0
+print "I0(0.2) = $(bessel0(0.2))"       # ~ 1.02020134
+print "I0(1.0) = $(bessel0(1.0))"       # ~ 1.26606588
+
+
+# Electric field is zero (pure magnetic confinement)
+variable Ex particle "0."
+variable Ey particle "0."
+variable Ez particle "0."
+
+################################################################################
+# --- Field application and integration settings -------------------------------
+################################################################################
+variable dt         equal 0.314          # normalized timestep = π/10
+variable numStep    equal floor(5.9E5)  # total steps (≈8×10^5)
+variable dumpFreq1  equal floor(${numStep}/1000)
+
+# Register field fixes and make them global
+fix       1 efield/particle Ex Ey Ez
+fix       2 bfield/particle Bx By Bz
+global    efield particle 1
+global    bfield particle 2
+
+################################################################################
+# --- Diagnostics and execution ------------------------------------------------
+################################################################################
+dump      10 particle all ${dumpFreq1} state id type x y z vx vy vz
+timestep  ${dt}
+stats     ${dumpFreq1}
+stats_style step cpu np
+
+run       ${numStep}
+
+# ------------------------------------------------------------------------------
+#  End of file
+# ------------------------------------------------------------------------------
+
+

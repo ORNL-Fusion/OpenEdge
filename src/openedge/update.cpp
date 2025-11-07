@@ -413,7 +413,15 @@ void Update::run(int nsteps)
   if (fstyle == GFIELD && fieldfreq == 0)
     modify->fix[ifieldfix]->compute_field();
 
-  
+    // external per grid cell electric field
+  if (efstyle == GFIELD && fieldfreq == 0)
+    modify->fix[efieldfix]->compute_field();
+
+    // external per grid cell magnetic field
+  if (bfstyle == GFIELD && fieldfreq == 0)
+    modify->fix[bfieldfix]->compute_field();
+
+    // external per grid cell electron thermal gradient field
   // cellweightflag = 1 if grid-based particle weighting is ON
 
   int cellweightflag = 0;
@@ -1996,12 +2004,14 @@ void Update::global(int narg, char **arg)
       } else error->all(FLERR,"Illegal global field command");
 
     } 
-    // E field 
+      // --------------- E field ----------------
     else if (strcmp(arg[iarg],"efield") == 0) {
       if (iarg+1 > narg) error->all(FLERR,"Illegal global command");
+
       if (strcmp(arg[iarg+1],"none") == 0) {
         efstyle = NOFIELD;
         iarg += 2;
+
       } else if (strcmp(arg[iarg+1],"particle") == 0) {
         if (iarg+3 > narg) error->all(FLERR,"Illegal global e field command");
         delete [] efieldID;
@@ -2010,6 +2020,7 @@ void Update::global(int narg, char **arg)
         efieldID = new char[n];
         strcpy(efieldID,arg[iarg+2]);
         iarg += 3;
+
       } else if (strcmp(arg[iarg+1],"grid") == 0) {
         if (iarg+4 > narg) error->all(FLERR,"Illegal global e field command");
         delete [] efieldID;
@@ -2017,17 +2028,21 @@ void Update::global(int narg, char **arg)
         int n = strlen(arg[iarg+2]) + 1;
         efieldID = new char[n];
         strcpy(efieldID,arg[iarg+2]);
-        fieldfreq = input->inumeric(FLERR,arg[iarg+3]);
-        if (fieldfreq < 0) error->all(FLERR,"Illegal global field command");
+        fieldfreq = input->inumeric(FLERR,arg[iarg+3]);   // <— own freq
+        if (fieldfreq < 0) error->all(FLERR,"Illegal global e field command");
         iarg += 4;
-      } else error->all(FLERR,"Illegal global field command");
+
+      } else error->all(FLERR,"Illegal global e field command");
     }
-    // B field
+
+    // --------------- B field ----------------
     else if (strcmp(arg[iarg],"bfield") == 0) {
       if (iarg+1 > narg) error->all(FLERR,"Illegal global command");
+
       if (strcmp(arg[iarg+1],"none") == 0) {
         bfstyle = NOFIELD;
         iarg += 2;
+
       } else if (strcmp(arg[iarg+1],"particle") == 0) {
         if (iarg+3 > narg) error->all(FLERR,"Illegal global b field command");
         delete [] bfieldID;
@@ -2035,7 +2050,10 @@ void Update::global(int narg, char **arg)
         int n = strlen(arg[iarg+2]) + 1;
         bfieldID = new char[n];
         strcpy(bfieldID,arg[iarg+2]);
-        iarg += 3;
+        fieldfreq = input->inumeric(FLERR,arg[iarg+3]);   // <— own freq
+        if (fieldfreq < 0) error->all(FLERR,"Illegal global b field command");
+        iarg += 4;
+
       } else if (strcmp(arg[iarg+1],"grid") == 0) {
         if (iarg+4 > narg) error->all(FLERR,"Illegal global b field command");
         delete [] bfieldID;
@@ -2043,11 +2061,12 @@ void Update::global(int narg, char **arg)
         int n = strlen(arg[iarg+2]) + 1;
         bfieldID = new char[n];
         strcpy(bfieldID,arg[iarg+2]);
-        fieldfreq = input->inumeric(FLERR,arg[iarg+3]);
+        fieldfreq = input->inumeric(FLERR,arg[iarg+3]);   // <— own freq
         if (fieldfreq < 0) error->all(FLERR,"Illegal global b field command");
         iarg += 4;
-      }
-      else error->all(FLERR,"Illegal global b field command");
+
+      } else error->all(FLERR,"Illegal global b field command");
+
 
     }
     // Ethermal field

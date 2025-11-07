@@ -1,0 +1,97 @@
+# ------------------------------------------------------------------------------
+#  OpenEdge/SPARTA Test: Charged Particle Orbits in Tokamak Magnetic Field
+# ------------------------------------------------------------------------------
+#  Purpose:
+#    Reproduce the banana and passing orbits
+#
+#  Description:
+#    This input file initializes a 3-D domain with a single charged particle
+#    (H+) moving in the analytical, axisymmetric tokamak magnetic field:
+#        Bx = -B0*(2*R0*y + x*z)/(2*R^2)
+#        By =  B0*(2*R0*x - y*z)/(2*R^2)
+#        Bz =  B0*(R - R0)/(2*R)
+#    and no electric field.
+#
+#    Two test cases are provided:
+#       - Banana orbit  →  read_particles source_banana_orb 0
+#       - Passing orbit →  read_particles source_passing_orb 0
+#    Uncomment the desired case before running.
+# ------------------------------------------------------------------------------
+
+################################################################################
+# --- Plasma parameters (for normalization only) -------------------------------
+################################################################################
+variable realDensity  equal 1e19        # [1/m^3] background plasma density
+variable fnum         equal 1e15        # scaling factor for density normalization
+variable T            equal 12.0*11604.505  # temperature = 12 eV (in Kelvin-equivalent)
+
+################################################################################
+# --- Simulation domain and global setup ---------------------------------------
+################################################################################
+seed                 1245
+dimension            3
+boundary             p p p              # periodic boundaries
+global               gridcut 0 comm/sort no
+create_box           -2 2 -2 2 -2 2
+create_grid          10 10 10
+balance_grid         rcb part
+
+# normalized density and number scaling
+global               nrho ${realDensity} fnum ${fnum}
+
+################################################################################
+################################################################################
+# --- Impurity / test particle species -----------------------------------------
+################################################################################
+species              plasma.species H+
+mixture              species H+ frac 1.0
+
+################################################################################
+# --- Load initial particle conditions -----------------------------------------
+################################################################################
+# Choose one of the two sources below:
+read_particles    source_banana_orb 0   # use for banana orbit test
+
+################################################################################
+# --- Define analytical magnetic and electric fields ---------------------------
+################################################################################
+# Equation (32) from the paper, normalized with B0 = R0 = 1
+variable B0   equal 1.0
+variable R0   equal 1.0
+variable eps  equal 1e-6                 # to avoid singularity at R → 0
+variable R    particle "sqrt(x*x + y*y + v_eps*v_eps)"
+
+# Magnetic field components (axisymmetric tokamak)
+variable Bx particle "-v_B0*(2.0*v_R0*y + x*z)/(2.0*v_R*v_R)"
+variable By particle "v_B0*(2.0*v_R0*x - y*z)/(2.0*v_R*v_R)"
+variable Bz particle "v_B0*(v_R - v_R0)/(2.0*v_R)"
+
+# Register field fixes and make them global
+fix       2 bfield/particle Bx By Bz
+global    bfield particle 2 1
+
+
+################################################################################
+# --- Field application and integration settings -------------------------------
+################################################################################
+variable dt         equal 0.314          # normalized timestep = π/10
+variable numStep    equal floor(8.14E4)  # total steps (≈8×10^5)
+variable dumpFreq1  equal floor(${numStep}/1000)
+
+
+
+################################################################################
+# --- Diagnostics and execution ------------------------------------------------
+################################################################################
+dump      10 particle all ${dumpFreq1} state id type x y z vx vy vz
+timestep  ${dt}
+stats     ${dumpFreq1}
+stats_style step cpu np
+
+run       ${numStep}
+
+# ------------------------------------------------------------------------------
+#  End of file
+# ------------------------------------------------------------------------------
+
+
