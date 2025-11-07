@@ -68,13 +68,14 @@ variable R    particle "sqrt(x*x + y*y + v_eps*v_eps)"
 
 # Magnetic field components (axisymmetric tokamak)
 variable Bx particle "-v_B0*(2.0*v_R0*y + x*z)/(2.0*v_R*v_R)"
-variable By particle " v_B0*(2.0*v_R0*x - y*z)/(2.0*v_R*v_R)"
-variable Bz particle " v_B0*(v_R - v_R0)/(2.0*v_R)"
+variable By particle "v_B0*(2.0*v_R0*x - y*z)/(2.0*v_R*v_R)"
+variable Bz particle "v_B0*(v_R - v_R0)/(2.0*v_R)"
 
 # Electric field is zero (pure magnetic confinement)
 variable Ex particle "0."
 variable Ey particle "0."
 variable Ez particle "0."
+
 
 ################################################################################
 # --- Field application and integration settings -------------------------------
@@ -83,11 +84,14 @@ variable dt         equal 0.314          # normalized timestep = π/10
 variable numStep    equal floor(8.14E5)  # total steps (≈8×10^5)
 variable dumpFreq1  equal floor(${numStep}/1000)
 
+
 # Register field fixes and make them global
-fix       1 efield/particle Ex Ey Ez
+#fix       1 efield/particle Ex Ey Ez
 fix       2 bfield/particle Bx By Bz
-global    efield particle 1
-global    bfield particle 2
+#global    efield particle 1
+global    bfield particle 2 1
+
+
 
 ################################################################################
 # --- Diagnostics and execution ------------------------------------------------
