@@ -647,12 +647,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
 
       if (pflag == PKEEP) {
         dtremain = dt;
-        if (charge ==0) {;
-        xnew[0] = x[0] + dtremain*v[0] * NEUTRAL_DYNAMICS_SCALE;
-        xnew[1] = x[1] + dtremain*v[1] * NEUTRAL_DYNAMICS_SCALE;
-        if (DIM != 2) xnew[2] = x[2] + dtremain*v[2] * NEUTRAL_DYNAMICS_SCALE;
-        }
-        else if (DIM == 2)
+        if (DIM == 2)
         {
           pusherBoris2D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
@@ -661,13 +656,8 @@ template < int DIM, int SURF, int OPT > void Update::move()
           pusher_boris3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
       } else if (pflag == PINSERT) {
-        if (charge ==0){
-          dtremain = particles[i].dtremain;
-          xnew[0] = x[0] + dtremain*v[0]* NEUTRAL_DYNAMICS_SCALE;
-          xnew[1] = x[1] + dtremain*v[1]* NEUTRAL_DYNAMICS_SCALE;
-          if (DIM != 2) xnew[2] = x[2] + dtremain*v[2]* NEUTRAL_DYNAMICS_SCALE;
-        } else if (DIM == 2) {
-          pusherBoris2D(i,particles[i].icell,dt, x,v,xnew,charge,mass);
+        if (DIM == 2) {
+          pusherBoris2D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
         else if (DIM == 3) {
           pusher_boris3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
@@ -1118,8 +1108,8 @@ template < int DIM, int SURF, int OPT > void Update::move()
 
               if (nsurf_tally)
                 for (m = 0; m < nsurf_tally; m++)
-                  slist_active[m]->surf_tally(minsurf,icell,reaction,
-                                              &iorig,ipart,jpart);
+                      slist_active[m]->surf_tally(dtremain,minsurf,icell,reaction,
+                                                                    &iorig,ipart,jpart);
 
               // stuck_iterate = consecutive iterations particle is immobile
 
@@ -1317,7 +1307,9 @@ template < int DIM, int SURF, int OPT > void Update::move()
           if (nboundary_tally)
             for (m = 0; m < nboundary_tally; m++)
               blist_active[m]->
-                boundary_tally(outface,bflag,reaction,&iorig,ipart,jpart);
+                // boundary_tally(outface,bflag,reaction,&iorig,ipart,jpart);
+                boundary_tally(dtremain,outface,bflag,reaction,&iorig,ipart,jpart);
+
 
           if (DIM == 1) {
             xnew[0] = x[0] + dtremain*v[0];
@@ -3397,35 +3389,52 @@ void Update::pusherBoris2D(int i, int icell, double dt,
                            double *x, double *v, double *xnew,
                            double charge, double mass)
 {
-  // ---------- geometry ----------
-  const double R   = std::max(x[0], 1e-12);
-  const double Zc  = x[1];
-  const double phi = x[2];
-  const double cphi = std::cos(phi), sphi = std::sin(phi);
 
-  auto cyl_to_cart = [&](double vr, double vphi, double vz,
-                         double &vx, double &vy, double &vz_out) {
-    vx =  vr*cphi - vphi*sphi;
-    vy =  vr*sphi + vphi*cphi;
-    vz_out = vz;
-  };
-  auto cart_to_cyl = [&](double vx, double vy, double vz,
-                         double phi_now, double &vr, double &vphi, double &vz_out) {
-    const double c = std::cos(phi_now), s = std::sin(phi_now);
-    vr     =  vx*c + vy*s;
-    vphi   = -vx*s + vy*c;
-    vz_out =  vz;
-  };
+    if (perturbflag) {
+      // pull cylindrical accelerations (a_r, a_z, a_phi) from the active columns
+      double **array = modify->fix[ifieldfix]->array_grid;
+      double ar = 0.0, az = 0.0, aphi = 0.0;
+      int icol = 0;
+      if (field_active[0]) ar   = array[icell][icol++];  // a_r [m/s^2]
+      if (field_active[1]) az   = array[icell][icol++];  // a_z [m/s^2]
+      if (field_active[2]) aphi = array[icell][icol++];  // a_phi [m/s^2]
 
-  // ---------- q/m & early exit for neutrals ----------
-  const double Zabs = std::abs(charge);            // charge in units of e
-  if (Zabs == 0.0) { // neutral: ballistic
-    xnew[0] = R + v[0]*dt;
-    xnew[1] = Zc + v[1]*dt;
-    xnew[2] = phi + (v[2]/std::max(R,1e-12))*dt;   // crude φ advance if needed
-    return;
-  }
-  const double qm = (charge * echarge) / mass;
+      const double dt2  = dt*dt;
+      const double R0   = x[0];
+      const double Z0   = x[1];
+      const double phi0 = x[2];
+      const double vr0  = v[0];
+      const double vz0  = v[1];
+      const double vphi0= v[2];
+
+      // velocities (explicit Euler on a)
+      const double vr1   = vr0   + ar   * dt;
+      const double vz1   = vz0   + az   * dt;
+      const double vphi1 = vphi0 + aphi * dt;
+
+      // positions: include drift + 0.5 a dt^2
+      const double R1    = R0  + vr0   * dt + 0.5 * ar   * dt2;
+      const double Z1    = Z0  + vz0   * dt + 0.5 * az   * dt2;
+
+      // angular advance: use averaged v_phi and averaged R to be stable
+      const double Ravg  = std::max(0.5*(R0 + R1), 1e-12);
+      const double vphi_avg = 0.5*(vphi0 + vphi1);
+      const double phi1  = phi0 + (vphi_avg / Ravg) * dt;
+
+      // write back
+      v[0]    = vr1;
+      v[1]    = vz1;
+      v[2]    = vphi1;
+      xnew[0] = R1;
+      xnew[1] = Z1;
+      xnew[2] = phi1;
+
+      // helpful debug: print the actual a and the NEW x
+      // printf("Particle %d: a=(%g,%g,%g) m/s^2, xnew=(%g,%g,%g)\n",
+            // i, ar, az, aphi, xnew[0], xnew[1], xnew[2]);
+      return;
+    }
+
 
   // ---------- load fields ----------
   double E_cyl[3] = {0.0, 0.0, 0.0};
@@ -3481,6 +3490,46 @@ void Update::pusherBoris2D(int i, int icell, double dt,
       if (ithermal_active[2]) gradTe_i[2] += arr[icell][col++];
     }
   }
+
+
+  // if no perturbations, do simple ballistic step and return
+  if (!eperturbflag && !bperturbflag && !ethermalflag && !ithermalflag) {
+        double dtremain = dt;
+        xnew[0] = x[0] + v[0]*dtremain;
+        xnew[1] = x[1] + v[1]*dtremain;
+        // xnew[2] = x[2] + (v[2]/std::
+        return;
+    }
+
+  // ---------- geometry ----------
+  const double R   = std::max(x[0], 1e-12);
+  const double Zc  = x[1];
+  const double phi = x[2];
+  const double cphi = std::cos(phi), sphi = std::sin(phi);
+
+  auto cyl_to_cart = [&](double vr, double vphi, double vz,
+                         double &vx, double &vy, double &vz_out) {
+    vx =  vr*cphi - vphi*sphi;
+    vy =  vr*sphi + vphi*cphi;
+    vz_out = vz;
+  };
+  auto cart_to_cyl = [&](double vx, double vy, double vz,
+                         double phi_now, double &vr, double &vphi, double &vz_out) {
+    const double c = std::cos(phi_now), s = std::sin(phi_now);
+    vr     =  vx*c + vy*s;
+    vphi   = -vx*s + vy*c;
+    vz_out =  vz;
+  };
+
+  // ---------- q/m & early exit for neutrals ----------
+  const double Zabs = std::abs(charge);            // charge in units of e
+  if (Zabs == 0.0) { // neutral: ballistic
+    xnew[0] = R + v[0]*dt;
+    xnew[1] = Zc + v[1]*dt;
+    xnew[2] = phi + (v[2]/std::max(R,1e-12))*dt;   // crude φ advance if needed
+    return;
+  }
+  const double qm = (charge * echarge) / mass;
 
   // ---------- B (cyl->cart) once; used for b-hat and rotation ----------
   double Bx=0, By=0, Bz=0;

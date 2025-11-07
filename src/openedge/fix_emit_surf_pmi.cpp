@@ -593,7 +593,8 @@ void FixEmitSurfPmi::perform_task()
 
         if (nsurf_tally)
           for (int k = 0; k < nsurf_tally; k++)
-            slist_active[k]->surf_tally(isurf,pcell,0,NULL,p,NULL);
+            // slist_active[k]->surf_tally(isurf,pcell,0,NULL,p,NULL);
+            slist_active[k]->surf_tally(p->dtremain,isurf,pcell,0,NULL,p,NULL);
 
         if (nfix_update_custom)
           modify->update_custom(particle->nlocal-1,temp_thermal,

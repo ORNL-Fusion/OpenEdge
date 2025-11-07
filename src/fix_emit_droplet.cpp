@@ -566,7 +566,8 @@ void FixEmitDroplet::perform_task()
 
         if (nsurf_tally)
           for (int k = 0; k < nsurf_tally; k++)
-            slist_active[k]->surf_tally(isurf,pcell,0,NULL,p,NULL);
+            slist_active[k]->surf_tally(p->dtremain,isurf,pcell,0,NULL,p,NULL);
+
 
       }
       nsingle += nactual;

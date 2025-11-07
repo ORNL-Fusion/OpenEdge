@@ -1,10 +1,15 @@
 /* ----------------------------------------------------------------------
-    OpenEdge:
-    Impurity Transport in Modeling of SOL and Edge Physics:
-    This code built on top of SPARTA, a parallel DSMC code.
-    Abdourahmane Diaw,  diawa@ornl.gov (2023)
-    Oak Ridge National Laboratory
-https://github.com/ORNL-Fusion/OpenEdge
+   SPARTA - Stochastic PArallel Rarefied-gas Time-accurate Analyzer
+   http://sparta.github.io
+   Steve Plimpton, sjplimp@gmail.com, Michael Gallis, magalli@sandia.gov
+   Sandia National Laboratories
+
+   Copyright (2014) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level SPARTA directory.
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -28,31 +33,8 @@ class FixEmitSurf : public FixEmit {
   ~FixEmitSurf();
   void init();
 
-  void grid_changed();
-
- private:
-  int imix,groupbit,normalflag,subsonic,subsonic_style,subsonic_warning;
-  int npertask,nthresh;
-  double psubsonic,tsubsonic,nsubsonic;
-  double tprefactor,soundspeed_mixture;
-
-    double xpos, ypos, zpos;  // fixed particle positions
-  double theta_deg, phi_deg, energy_eV; // velocity direction and energy
-  int npmode,np;    // npmode = FLOW,CONSTANT,VARIABLE
-  int npvar;
-  char *npstr;
-
-  // copies of data from other classes
-
-  int dimension,nspecies;
-  double fnum,dt;
-  double nrho,temp_thermal,temp_rot,temp_vib;
-  double *fraction,*cummulative;
-
-  class Cut2d *cut2d;
-  class Cut3d *cut3d;
-
-  // one insertion task for a cell and a surf
+  void grid_changed() override;
+  void custom_surf_changed();
 
   struct Task {
     double area;                // area of overlap of surf with cell
@@ -79,6 +61,28 @@ class FixEmitSurf : public FixEmit {
     int npoint;                 // # of points in path
   };
 
+ protected:
+  int imix,groupbit,normalflag,subsonic,subsonic_style,subsonic_warning;
+  int npertask,nthresh,twopass,max_npoint;
+  double psubsonic,tsubsonic,nsubsonic;
+  double tprefactor,soundspeed_mixture;
+
+  int npmode,np;    // npmode = FLOW,CONSTANT,VARIABLE
+  int npvar;
+  char *npstr;
+
+  // copies of data from other classes
+
+  int dimension,nspecies;
+  double fnum,dt;
+  double nrho,temp_thermal,temp_rot,temp_vib;
+  double *fraction,*cummulative;
+
+  class Cut2d *cut2d;
+  class Cut3d *cut3d;
+
+  // one insertion task for a cell and a surf
+
                          // ntask = # of tasks is stored by parent class
   Task *tasks;           // list of particle insertion tasks
   int ntaskmax;          // max # of tasks allocated
@@ -102,16 +106,19 @@ class FixEmitSurf : public FixEmit {
   int maxactive;
   int *activecell;
 
-  // private methods
+  // protected methods
 
-  void create_task(int);
-  void perform_task();
-  void grow_task();
+  virtual void create_task(int);
+  virtual void perform_task();
+  void perform_task_onepass();
+  virtual void perform_task_twopass();
+  virtual void grow_task();
 
   void subsonic_inflow();
   void subsonic_sort();
   void subsonic_grid();
 
+  virtual void realloc_nspecies();
   int option(int, char **);
 };
 

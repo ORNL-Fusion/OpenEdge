@@ -121,69 +121,75 @@ if __name__ == "__main__":
 
 #    path = '../'
 #    run_path = '../'
-##    wall = surface("input/reduce_surf.txt", "2D")
-#    wall = surface("../surfaces/wall.txt", "2D")
-#    fname = os.path.join(run_path, "mesh.extra")
-#    d = np.loadtxt(fname)
-#    _rwall = np.vstack((d[:,0], d[:,2]))
-#    _zwall = np.vstack((d[:,1], d[:,3]))
-#    domain = wall.polygon
-#    Rwall, Zwall = domain.exterior.xy
-#    filename = f"state/state_yes"
-#    filename1 = f"state/state_no"
+    wall = surface("wall.surf", "2D")
+    domain = wall.polygon
+    Rwall, Zwall = domain.exterior.xy
+    core = surface('core.surf', "2D")
+    domain = core.polygon
+    rcore, zcore = domain.exterior.xy
     import numpy as np
     import matplotlib.pyplot as plt
 
 #    # Load your data
-    timesteps, x_coords, y_coords, z_coords, vx_coords, vy_coords, vz_coords, mass, temp, radius = parse_file("LigamentSource")
-
-#    # Ensure numpy arrays
-    dt = 1e-3
-    times  = np.asarray(timesteps*np.asarray(dt), dtype=float)
-    radii = np.asarray(radius, dtype=float)
-    temp = np.asarray(temp-np.asarray(273.15), dtype=float)
+    timesteps, x_coords, y_coords, z_coords, vx_coords, vy_coords, vz_coords, mass, temp, radius = parse_file("LigamentSource_no_g")
 
 
-    #fig, ax1 = plt.subplots(figsize=(10, 6))
-    fig, ax1 = plt.subplots(1, 1, figsize=(6, 4), dpi=300)
-    ax1.tick_params(axis='both', direction='in')
-#    # Slice data to show every 10th point
-#    times_sampled = t
-#    radii_sampled = radius
+    fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+    # overlay walls, tidy axes
+    ax.plot(rcore, zcore, "k", lw=2.5)
+    ax.plot(Rwall, Zwall ,"k", lw=2.5)
+    ax.plot(x_coords,y_coords, 'go')
+    timesteps, x_coords, y_coords, z_coords, vx_coords, vy_coords, vz_coords, mass, temp, radius = parse_file("LigamentSource_w_g")
 
-    # Plot radius with log-scaled charge color using 'cividis' colormap
-#    sc = ax1.scatter(times_sampled, radii_sampled, c=norm_charges_sampled, cmap='cividis', s=80, edgecolor='k') #, label="Radius (m)")
-    ax1.plot(times, radii, color="navy", lw=2)  # Keep the full line plot for context
-    ax1.set_xlabel("Time (s)")
-    ax1.set_ylabel("Radius (m)", color="navy")
-    ax1.tick_params(axis="y", labelcolor="navy")
-    ax1.grid(True, linestyle="--", alpha=0.5)
-#    ax1.set_ylim(0, max(radii_sampled)+max(radii_sampled)*1e-1)
-    # Second y-axis for temperature using a contrasting color
-    ax2 = ax1.twinx()
-    ax2.plot(times, temp, color="darkorange", lw=2)
-    ax2.set_ylabel("Temperature (°C)", color="darkorange")
-    ax2.tick_params(axis="y", labelcolor="darkorange")
+    ax.plot(x_coords,y_coords, 'ko')
+    ax.set_aspect("equal")
 
-    # Lower and resize the colorbar
-#    cbar_ax = fig.add_axes([0.25, 0.3, 0.5, 0.02])  # [left, bottom, width, height]
-#    cbar = fig.colorbar(sc, cax=cbar_ax, orientation="horizontal", label="Charge ($10^7 e$)")
-#    cbar.ax.tick_params(labelsize=8)  # Reduce tick label size if needed
-
-
-            
-    plt.tight_layout(pad=2.0)  # Increase padding
-#    Q_g = 1e-6*Qs
-#    ax1.set_title(f"Droplet lifetime: ($Q_g$ = {Q_g} $MW/m^2$, $T_0$ = {T0}°C)", fontsize=12, weight='bold')
-
-    ax1.grid(True, linestyle='--', alpha=0.7)
-
-    # Save the figure with improved DPI, tight bounding box, and specified background color
-#    plt.savefig(f"Figs/case_{case}.png",
-#            dpi=300, bbox_inches="tight", facecolor='white')
-
-
-
+    ax.set_xlabel("R (m)", weight="semibold", fontsize=10)
+    ax.set_ylabel("Z (m)", weight="semibold", fontsize=10)
+    ax.grid(alpha=0.3, linestyle="--")
+    ax.set_xlim(3, 3.8);
+    ax.set_ylim(-3.8, -3)
     plt.show()
+            
+
+    PlotterMassEvol=False
+    
+    if PlotterMassEvol:
+    #    # Ensure numpy arrays
+        dt = 1e-3
+        times  = np.asarray(timesteps*np.asarray(dt), dtype=float)
+        radii = np.asarray(radius, dtype=float)
+        temp = np.asarray(temp-np.asarray(273.15), dtype=float)
+
+
+        #fig, ax1 = plt.subplots(figsize=(10, 6))
+        fig, ax1 = plt.subplots(1, 1, figsize=(6, 4), dpi=300)
+        ax1.tick_params(axis='both', direction='in')
+        ax1.plot(times, radii, color="navy", lw=2)  # Keep the full line plot for context
+        ax1.set_xlabel("Time (s)")
+        ax1.set_ylabel("Radius (m)", color="navy")
+        ax1.tick_params(axis="y", labelcolor="navy")
+        ax1.grid(True, linestyle="--", alpha=0.5)
+    #    ax1.set_ylim(0, max(radii_sampled)+max(radii_sampled)*1e-1)
+        # Second y-axis for temperature using a contrasting color
+        ax2 = ax1.twinx()
+        ax2.plot(times, temp, color="darkorange", lw=2)
+        ax2.set_ylabel("Temperature (°C)", color="darkorange")
+        ax2.tick_params(axis="y", labelcolor="darkorange")
+
+                
+        plt.tight_layout(pad=2.0)  # Increase padding
+    #    Q_g = 1e-6*Qs
+    #    ax1.set_title(f"Droplet lifetime: ($Q_g$ = {Q_g} $MW/m^2$, $T_0$ = {T0}°C)", fontsize=12, weight='bold')
+
+        ax1.grid(True, linestyle='--', alpha=0.7)
+
+        # Save the figure with improved DPI, tight bounding box, and specified background color
+    #    plt.savefig(f"Figs/case_{case}.png",
+    #            dpi=300, bbox_inches="tight", facecolor='white')
+
+
+
+        plt.show()
 
 
