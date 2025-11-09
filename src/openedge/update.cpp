@@ -52,7 +52,6 @@ enum{NOFIELD,CFIELD,PFIELD,GFIELD};             // several files
 
 #define MAXSTUCK 20
 #define EPSPARAM 1.0e-7
-#define NEUTRAL_DYNAMICS_SCALE 1e-1
 #define MAXLINE 16384
 
 #define CORE_GROUP_NAME "CORE"
@@ -669,17 +668,17 @@ template < int DIM, int SURF, int OPT > void Update::move()
           if (DIM < 3 && SURF) icell = split2d(icell,x);
           particles[i].icell = icell;
         }
-        dtremain = particles[i].dtremain * NEUTRAL_DYNAMICS_SCALE;
+        dtremain = particles[i].dtremain;
         xnew[0] = x[0] + dtremain*v[0];
         xnew[1] = x[1] + dtremain*v[1];
         if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
       } else if (pflag == PEXIT) {
-        dtremain = particles[i].dtremain * NEUTRAL_DYNAMICS_SCALE;
+        dtremain = particles[i].dtremain;
         xnew[0] = x[0] + dtremain*v[0];
         xnew[1] = x[1] + dtremain*v[1];
         if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
       } else if (pflag >= PSURF) {
-        dtremain = particles[i].dtremain * NEUTRAL_DYNAMICS_SCALE;
+        dtremain = particles[i].dtremain;
         xnew[0] = x[0] + dtremain*v[0];
         xnew[1] = x[1] + dtremain*v[1];
         if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
@@ -3429,6 +3428,9 @@ void Update::pusherBoris2D(int i, int icell, double dt,
       xnew[1] = Z1;
       xnew[2] = phi1;
 
+      // helpful debug: print the actual a and the NEW x
+      // printf("Particle %d: a=(%g,%g,%g) m/s^2, xnew=(%g,%g,%g)\n",
+            // i, ar, az, aphi, xnew[0], xnew[1], xnew[2]);
       return;
     }
 

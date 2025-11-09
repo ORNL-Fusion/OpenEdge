@@ -442,7 +442,7 @@ void ComputePlasmaFieldsConstant::compute_per_grid()
   field_vector_along_minus_n(S, normal, Ex, Ey, Ez);
   double Emag = S.E_mag;
   // printf("ComputePlasmaFieldsConstant:: icell=%d d(m)=%g alpha_deg=%g Phi(V)=%g E_mag(V/m)=%g ne_sheath(m^-3)=%g\n",
-         icell, d_m, alpha_deg, S.phi, Emag, nesheath);
+        //  icell, d_m, alpha_deg, S.phi, Emag, nesheath);
 
     // --- 3e) Write all requested outputs for this cell -----------------------
     for (int iv = 0; iv < nvalue; ++iv) {

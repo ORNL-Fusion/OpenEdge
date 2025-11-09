@@ -54,8 +54,11 @@ protected:
     bigint* tally_reactions, * tally_reactions_all;
     int tally_flag;
     int maxgrid;
+    int imix;
+    int nspecies;
+      double *fraction,*cummulative;
+// double fraction;
     virtual void end_of_step_no_average();
-
     // PMI
     std::string heatfluxFilename;
     void droplet_evaporation_model(Particle::OnePart *);
@@ -66,12 +69,11 @@ protected:
 
     // HeatFluxData  heat_flux_data;
     void broadcastHeatFluxData(HeatFluxData& );
-    HeatFluxParams interpHeatFluxAt(int icell, const HeatFluxData& data) const;
+    HeatFluxParams interpHeatFluxAtPos(double r, double z, const HeatFluxData& data) const;
     mutable std::unordered_map<int, HeatFluxParams> flux_cache;
     HeatFluxData readHeatFlux(const std::string& filePath);
     void initializeHeatFluxData();
 
-    
 };
 
 } // namespace SPARTA_NS
