@@ -16,15 +16,20 @@ create_grid         1000 1000 1
 balance_grid        rcb  cell
 
 ############################################------species in the plasma (current and future)-------#####################################
-species droplet.species mist
-mixture             LigamentSource  mist        frac 1.0
+species droplet.species mist Li Li+ Li2+ Li3+
 
+mixture             LigamentSource  mist        frac 1.0 nrho 1 
+
+mixture             LiSource  Li        frac 1.0 nrho 1e16 #fnum 1e15
+mixture             LiSource  Li+       frac 0.0
+mixture             LiSource  Li2+      frac 0.0
+mixture             LiSource  Li3+      frac 0.0
 
 ############################################------set properties of wall: material and interaction-------#####################################
 #global target_material Li mass 7.0 charge 3.0 binding_energy 1.64
 
 read_surf          wall.surf group surfID particle check
-surf_collide       wallColModel vanish
+surf_collide       wallColModel specular
 surf_modify        all collide wallColModel
 
 read_surf          core.surf invert group surfID2 particle check
@@ -45,11 +50,15 @@ variable E_eV equal ${E_J}/1.602176634e-19      # eV
 variable kB   equal 1.380649e-23             # J/K
 variable T  equal (2.0/3.0)*${E_J}/${kB}
 
-global              nrho 1e16 fnum 1 temp $T
+#global              nrho 1e16 fnum 1 temp $T
+global              fnum 1 temp $T
+region              slit block INF INF -4 2.8 INF INF
+#create_particles LiSource n 10 region slit
 
-fix              in emit/surf LigamentSource divertor_outer normal yes n 1 perspecies no
 
-variable dt equal 1e-5
+
+
+variable dt equal 1e-8
 variable time equal 8.5 # seconds
 variable N equal floor(${time}/${dt})
 variable N1 equal floor($N/100)
@@ -62,15 +71,37 @@ variable nevery equal 1 #${min_dt}/${dt}
 variable temp equal 773.15 # Kelvin
 variable rd equal 50e-6 # m
 variable md equal 2.796017461694916e-10
-#fix 22 evap ${nevery} mass ${md} radius ${rd} temp ${temp} heatflux/file heatflux.h5
-fix 22 evap ${nevery} mass ${md} radius ${rd} temp ${temp} heatflux/constant 50e6
-dump 10 particle all 10 LigamentSource_no_g  id type x y z vx vy vz v_pmass temp radius
+
+# Emit one droplet
+# compute evap and emit if necessary
+fix 22 evap ${nevery} LigamentSource mass ${md} radius ${rd} temp ${temp} heatflux/file heatflux.h5 # heatflux/constant 50e6
+
+fix              in droplet/emission LigamentSource divertor_outer normal yes n 1 perspecies no evap 22
+fix outer emit/surf/file LiSource divertor_outer subsonic fluxes_2_oe.h5  1.64
+
+
+#region              slit block INF INF 4.5 5.5 INF INF
+#fix                 in emit/surf air all normal yes perspecies no region slit
+
+
+
+
+#fix Fdist ave/grid all 1 1 1 f_22[*]
+#dump 1 grid all 1 tmp.grid id f_22[*]
+
+stats_style step cpu np
+
+
+#fix 22 evap ${nevery} mass ${md} radius ${rd} temp ${temp} heatflux/constant 50e6
+dump 10 particle all 1 LigamentSource_no_g  id type x y z vx vy vz v_pmass #temp radius
 
 
 timestep ${dt}
 
 stats 1
 run 1
+exit
+global fnum 1e14
 unfix in
 variable g equal -9.8
 variable gradBx grid "v_g"
@@ -80,6 +111,6 @@ variable gradBx grid "v_g"
 variable npart equal np
 fix 31 halt 1000 v_npart <= 0
 
-stats  100 #${N2}
-run 34000 #$N
+stats  10 #00 #${N2}
+run 20 #34000 #$N
 

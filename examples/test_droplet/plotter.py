@@ -130,50 +130,79 @@ if __name__ == "__main__":
     import numpy as np
     import matplotlib.pyplot as plt
 
-#    # Load your data
-    timesteps, x_coords, y_coords, z_coords, vx_coords, vy_coords, vz_coords, mass, temp, radius = parse_file("LigamentSource_no_g")
+    # Load your data
+    timesteps, x_coords, y_coords, z_coords, vx_coords, vy_coords, vz_coords, mass, temp, radius = parse_file("LigamentSource_w_g")
 
-
+    print(radius)
     fig, ax = plt.subplots(1, 1, figsize=(8, 5))
     # overlay walls, tidy axes
     ax.plot(rcore, zcore, "k", lw=2.5)
     ax.plot(Rwall, Zwall ,"k", lw=2.5)
-    ax.plot(x_coords,y_coords, 'go')
-    timesteps, x_coords, y_coords, z_coords, vx_coords, vy_coords, vz_coords, mass, temp, radius = parse_file("LigamentSource_w_g")
 
     ax.plot(x_coords,y_coords, 'ko')
+    
+
     ax.set_aspect("equal")
 
     ax.set_xlabel("R (m)", weight="semibold", fontsize=10)
     ax.set_ylabel("Z (m)", weight="semibold", fontsize=10)
     ax.grid(alpha=0.3, linestyle="--")
-    ax.set_xlim(3, 3.8);
-    ax.set_ylim(-3.8, -3)
+    ax.set_xlim(2.38, 3.75);
+    ax.set_ylim(-3.75, -2.25)
     plt.show()
-            
+    
+#    exit()
+#
 
-    PlotterMassEvol=False
+    PlotterMassEvol=True
     
     if PlotterMassEvol:
     #    # Ensure numpy arrays
-        dt = 1e-3
-        times  = np.asarray(timesteps*np.asarray(dt), dtype=float)
-        radii = np.asarray(radius, dtype=float)
-        temp = np.asarray(temp-np.asarray(273.15), dtype=float)
+        dt = 1e-5*1000
+        time=8.5
+        N = int(time/dt)
+        N1 = int(N/100)
+#        dt = 1e-07*N1
 
 
+#        rd  =  50e-6
+#        temp0 = 773.15
+#        times  = np.asarray(timesteps*np.asarray(dt), dtype=float)
+#        radii = np.asarray(radius/np.array(rd), dtype=float)
+
+        rd     = 50e-6           # meters
+        temp0K = 773.15          # Kelvin
+        dt     = float(dt)
+     
+        # build arrays
+        times  = np.asarray(timesteps, dtype=float) * dt
+        
+        radii  = np.asarray(radius,   dtype=float)      # normalized so t0 should be 1.0
+        tempC  = np.asarray(temp,     dtype=float)
+
+#        times = np.insert(times, 0, 0.0)
+        radii[0] = rd
+#        tempC = np.insert(tempC, 0, temp0K)            # initial temp in °C
+        tempC[0] = temp0K
+        print(np.unique(tempC))
+        
         #fig, ax1 = plt.subplots(figsize=(10, 6))
+        import matplotlib.ticker as mticker
         fig, ax1 = plt.subplots(1, 1, figsize=(6, 4), dpi=300)
         ax1.tick_params(axis='both', direction='in')
-        ax1.plot(times, radii, color="navy", lw=2)  # Keep the full line plot for context
+        ax1.plot(times, radii/rd, color="navy", lw=2)  # Keep the full line plot for context
+        
         ax1.set_xlabel("Time (s)")
-        ax1.set_ylabel("Radius (m)", color="navy")
+        ax1.set_ylabel("$R_d(t)/R_d(0)$", color="navy")
         ax1.tick_params(axis="y", labelcolor="navy")
         ax1.grid(True, linestyle="--", alpha=0.5)
-    #    ax1.set_ylim(0, max(radii_sampled)+max(radii_sampled)*1e-1)
-        # Second y-axis for temperature using a contrasting color
+
+        fmt = mticker.ScalarFormatter(useOffset=False, useMathText=True)
+        fmt.set_scientific(False)
+        ax1.yaxis.set_major_formatter(fmt)
+
         ax2 = ax1.twinx()
-        ax2.plot(times, temp, color="darkorange", lw=2)
+        ax2.plot(times, tempC-273, color="darkorange", lw=2)
         ax2.set_ylabel("Temperature (°C)", color="darkorange")
         ax2.tick_params(axis="y", labelcolor="darkorange")
 
