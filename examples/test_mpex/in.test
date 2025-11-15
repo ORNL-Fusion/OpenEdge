@@ -1,0 +1,84 @@
+# ------------------------------------------------------------------------------
+#  OpenEdge/SPARTA Test: MPEX case
+# ------------------------------------------------------------------------------
+#  Purpose:
+#    MPEX challenge
+#
+#  Description:
+#
+# ------------------------------------------------------------------------------
+log     output/log.openedge
+
+include include_sheath
+
+variable realDensity  equal 1e17
+variable fnum         equal 1e08
+variable dt           equal 1e-06
+
+#global weight cell radius
+
+################################################################################
+# --- Simulation domain and global setup ---------------------------------------
+################################################################################
+seed                 1245
+dimension            3
+boundary             o o o
+global               gridcut 0 comm/sort no
+create_box           -0.01 0.15 -0.01 0.15 -0.01 0.2
+create_grid          10 10 50 #50 50 200
+balance_grid         rcb part
+
+#region sheathRegion block -3.0 5.0 INF 10.0 INF INF
+#group patch grid region leftedge all
+
+
+# normalized density and number scaling
+global               fnum ${fnum}
+#global fnum ${fnum} weight cell volume
+
+
+species              input/plasma.species Ta Ta+ Ta2+ Ta3+ Ta4+ Ta5+ Ta6+ Ta7+ Ta8+ Ta9+ Ta10+
+
+mixture             TantalumSource  Ta   frac 0.0
+mixture             TantalumSource  Ta+  frac 0.0
+mixture             TantalumSource  Ta2+ frac 0.08
+mixture             TantalumSource  Ta3+ frac 0.62
+mixture             TantalumSource  Ta4+ frac 0.30
+mixture             TantalumSource  Ta5+  frac 0.
+mixture             TantalumSource  Ta6+  frac 0.
+mixture             TantalumSource  Ta7+  frac 0.
+mixture             TantalumSource  Ta8+  frac 0.
+mixture             TantalumSource  Ta9+  frac 0.
+mixture             TantalumSource  Ta10+ frac 0.
+
+# read in skimmer geometry file
+
+
+
+# read in target geometry file
+read_surf           surfaces/target_0deg.txt group 4 particle check
+surf_collide        targetCollideModel vanish
+surf_modify         4 collide targetCollideModel react none
+
+group sphere surf id <> 0 100
+
+global nrho 1 fnum 0.001
+
+#fix            in emit/face/file TantalumSource zlo ta_inlet.dat ZLO #frac 0.5
+fix                 in emit/surf TantalumSource sphere normal yes n 10 perspecies no
+
+
+
+dump      10 particle all 10 output/state id type x y z vx vy vz
+
+
+
+
+
+
+timestep  0.000001 #${dt}
+stats     10
+stats_style step cpu np
+
+run     100
+

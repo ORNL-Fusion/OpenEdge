@@ -662,6 +662,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
           pusher_boris3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
       } else if (pflag == PENTRY) {
+        printf("We are in PENTRY move\n");
         icell = particles[i].icell;
         if (cells[icell].nsplit > 1) {
           if (DIM == 3 && SURF) icell = split3d(icell,x);
@@ -673,6 +674,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
         xnew[1] = x[1] + dtremain*v[1];
         if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
       } else if (pflag == PEXIT) {
+        printf("We are in PEXIT move\n");
         dtremain = particles[i].dtremain;
         xnew[0] = x[0] + dtremain*v[0];
         xnew[1] = x[1] + dtremain*v[1];
@@ -3388,6 +3390,127 @@ void Update::pusherBoris2D(int i, int icell, double dt,
                            double *x, double *v, double *xnew,
                            double charge, double mass)
 {
+  // // -----------------------------------------------------------------------------
+  // // Hard-coded Epstein drag verification (constant background; exact update)
+  // // Turn on only for the unit test / sanity check path.
+  // // -----------------------------------------------------------------------------
+  // const bool epstein_test_flag = true;
+  // if (epstein_test_flag) {
+
+  //   // --- background (constant) ---
+  //   const double Ti_eV  = 10.0;                 // [eV]
+  //   const double Ni     = 1.5746e20;            // [m^-3]
+  //   const double rd_m   = 50.0e-6;              // [m]
+  //   const double rho_d  = 534.0;                // [kg/m^3] (Li)
+  //   const double alphaE = 1.26;                 // 1.0–1.4
+
+  //   const double mi   = 2.0 * update->proton_mass;  // [kg] (D+)
+  //   const double eV_J = update->echarge;            // [J/eV]
+
+  //   // thermal quantities
+  //   const double Ti_J = Ti_eV * eV_J;
+  //   const double vth  = std::sqrt(8.0 * Ti_J / (M_PI * mi));  // [m/s]
+  //   const double rho_g = Ni * mi;                              // [kg/m^3]
+
+  //   // Epstein rate: nuE = alpha * rho_g * vth / (rho_d * r_d)
+  //   const double nuE = alphaE * (rho_g * vth) / (rho_d * rd_m);  // [1/s]
+
+  //   // background flow & gravity
+  //   const double ux = 0.0, uy = 0.0, uz = 0.0;  // [m/s]
+  //   const double gx = 0.0, gy = 0.0, gz = -9.8; // [m/s^2]
+
+  //   // --- cylindrical -> Cartesian at t^n ---
+  //   const double R0   = std::max(x[0], 1e-12);
+  //   const double Z0   = x[1];
+  //   const double phi0 = x[2];
+  //   const double c0   = std::cos(phi0), s0 = std::sin(phi0);
+
+  //   const double X0 = R0 * c0;
+  //   const double Y0 = R0 * s0;
+
+  //   // v[] holds (v_r, v_z, v_phi)
+  //   auto cyl_to_cart_v = [&](double vr, double vphi, double vz,
+  //                           double &vx, double &vy, double &vz_out) {
+  //     vx     =  vr*c0 - vphi*s0;
+  //     vy     =  vr*s0 + vphi*c0;
+  //     vz_out =  vz;
+  //   };
+  //   double vx0, vy0, vz0;
+  //   cyl_to_cart_v(/*vr=*/v[0], /*vphi=*/v[2], /*vz=*/v[1], vx0, vy0, vz0);
+
+  //   // helpers for stable formulas
+  //   const double s      = nuE * dt;
+  //   const double NU_EPS = 1e-14;  // absolute guard on nuE
+  //   const double S_EPS  = 1e-8;   // small-argument guard on s
+
+  //   // outputs at t^{n+1}
+  //   double vx1, vy1, vz1, X1, Y1, Z1;
+
+  //   if (std::abs(nuE) < NU_EPS) {
+  //     // ---------------- ballistic limit (nuE ~ 0) ----------------
+  //     vx1 = vx0 + gx * dt;
+  //     vy1 = vy0 + gy * dt;
+  //     vz1 = vz0 + gz * dt;
+
+  //     X1  = X0  + vx0 * dt + 0.5 * gx * dt * dt;
+  //     Y1  = Y0  + vy0 * dt + 0.5 * gy * dt * dt;
+  //     Z1  = Z0  + vz0 * dt + 0.5 * gz * dt * dt;
+
+  //   } else {
+  //     // ---------------- drag + gravity (stable) ----------------
+  //     // A1 = (1 - e^{-s})/nuE, B1 = (dt - A1)/nuE
+  //     double A1, B1;
+  //     if (std::abs(s) < S_EPS) {
+  //       // series expansions for s << 1
+  //       A1 = dt * (1.0 - 0.5*s + (1.0/6.0)*s*s);
+  //       B1 = 0.5*dt*dt - (1.0/6.0)*s*dt*dt;
+  //     } else {
+  //       const double em1 = std::expm1(-s);  // e^{-s} - 1  (negative)
+  //       A1 = -em1 / nuE;                    // (1 - e^{-s})/nuE
+  //       B1 = (dt - A1) / nuE;               // = (dt/nuE) + em1/(nuE*nuE)
+  //     }
+
+  //     const double inv_nu = 1.0 / nuE;
+  //     const double efac   = std::exp(-s);
+
+  //     // velocities: v1 = u + (v0 - u - g/nuE) e^{-s} + g/nuE
+  //     vx1 = ux + (vx0 - ux - gx*inv_nu) * efac + gx*inv_nu;
+  //     vy1 = uy + (vy0 - uy - gy*inv_nu) * efac + gy*inv_nu;
+  //     vz1 = uz + (vz0 - uz - gz*inv_nu) * efac + gz*inv_nu;
+
+  //     // positions: x1 = x0 + u dt + (v0 - u) A1 + g B1
+  //     X1 = X0 + ux*dt + (vx0 - ux)*A1 + gx*B1;
+  //     Y1 = Y0 + uy*dt + (vy0 - uy)*A1 + gy*B1;
+  //     Z1 = Z0 + uz*dt + (vz0 - uz)*A1 + gz*B1;
+  //   }
+
+  //   // --- Cartesian -> cylindrical at t^{n+1} ---
+  //   const double R1   = std::hypot(X1, Y1);
+  //   const double phi1 = std::atan2(Y1, X1);
+  //   const double c1   = std::cos(phi1), s1 = std::sin(phi1);
+
+  //   auto cart_to_cyl_v = [&](double vx, double vy, double vz,
+  //                           double c, double s,
+  //                           double &vr, double &vphi, double &vz_out) {
+  //     vr     =  vx*c + vy*s;
+  //     vphi   = -vx*s + vy*c;
+  //     vz_out =  vz;
+  //   };
+  //   double vr1, vphi1, vz1_cyl;
+  //   cart_to_cyl_v(vx1, vy1, vz1, c1, s1, vr1, vphi1, vz1_cyl);
+
+  //   // write back
+  //   v[0]    = vr1;        // v_r
+  //   v[1]    = vz1_cyl;    // v_z
+  //   v[2]    = vphi1;      // v_phi
+  //   xnew[0] = std::max(R1, 1e-12);
+  //   xnew[1] = Z1;
+  //   xnew[2] = phi1;
+
+  //   return;
+  // }
+    // -------------------------------------------------------------------------
+
 
     if (perturbflag) {
       // pull cylindrical accelerations (a_r, a_z, a_phi) from the active columns
@@ -3493,13 +3616,16 @@ void Update::pusherBoris2D(int i, int icell, double dt,
 
   // if no perturbations, do simple ballistic step and return
   if (!eperturbflag && !bperturbflag && !ethermalflag && !ithermalflag) {
+      const double R = std::max(x[0], 1e-12);
+
         double dtremain = dt;
         xnew[0] = x[0] + v[0]*dtremain;
         xnew[1] = x[1] + v[1]*dtremain;
-        // xnew[2] = x[2] + (v[2]/std::
+        xnew[2] = x[2] + (v[2]/R) * dtremain;  
         return;
     }
 
+    printf("Axisymmetric Boris pusher invoked for particle %d\n", i);
   // ---------- geometry ----------
   const double R   = std::max(x[0], 1e-12);
   const double Zc  = x[1];
@@ -3635,6 +3761,9 @@ void Update::pusherBoris2D(int i, int icell, double dt,
   xnew[0] = Rn;
   xnew[1] = Zn;
   xnew[2] = phin;
+   // print v and xnew for debug
+   printf("Particle %d: v=(%g,%g,%g) m/s, xnew=(%g,%g,%g)\n",
+        i, v[0], v[1], v[2], xnew[0], xnew[1], xnew[2]);
 }
 
 

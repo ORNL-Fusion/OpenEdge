@@ -1,0 +1,2 @@
+variable fd grid "min(max( 0.98992 + 5.1220e-3*v_alpha - 7.0040e-4*v_alpha^2 + 3.3591e-5*v_alpha^3 - 8.2917e-7*v_alpha^4 + 9.5856e-9*v_alpha^5 - 4.2682e-11*v_alpha^6 , 0.0), 1.0)"
+

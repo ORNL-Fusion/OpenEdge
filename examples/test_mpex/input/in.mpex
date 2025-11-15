@@ -1,0 +1,160 @@
+# ------------------------------------------------------------------------------
+#  OpenEdge/SPARTA Test: MPEX case
+# ------------------------------------------------------------------------------
+#  Purpose:
+#    MPEX challenge
+#
+#  Description:
+#
+# ------------------------------------------------------------------------------
+log     output/log.openedge
+
+include include_sheath
+
+variable realDensity  equal 1e17
+variable fnum         equal 1e09
+variable time         equal 0.1
+variable dt           equal 0.00001 #1e-08
+variable N            equal 50 #0 #0 #floor(${time}/${dt})
+variable Nfreq        equal 5 #floor(${N}/100)
+
+global nrho 1e16
+#global weight cell radius
+
+################################################################################
+# --- Simulation domain and global setup ---------------------------------------
+################################################################################
+seed                 1245
+dimension            3
+boundary             o o o
+global               gridcut 0 comm/sort no
+create_box           -0.01 0.15 -0.01 0.15 0.0 0.2
+create_grid          20 20 100
+balance_grid         rcb part
+
+# normalized density and number scaling
+global               fnum ${fnum}
+#global fnum ${fnum} weight cell volume
+
+
+species              input/plasma.species Ta Ta+ Ta2+ Ta3+ Ta4+ Ta5+ Ta6+ Ta7+ Ta8+ Ta9+ Ta10+
+
+mixture             TantalumSource  Ta   frac 0.0
+mixture             TantalumSource  Ta+  frac 0.0
+mixture             TantalumSource  Ta2+ frac 0.08
+mixture             TantalumSource  Ta3+ frac 0.62
+mixture             TantalumSource  Ta4+ frac 0.30
+mixture             TantalumSource  Ta5+  frac 0.
+mixture             TantalumSource  Ta6+  frac 0.
+mixture             TantalumSource  Ta7+  frac 0.
+mixture             TantalumSource  Ta8+  frac 0.
+mixture             TantalumSource  Ta9+  frac 0.
+mixture             TantalumSource  Ta10+ frac 0.
+
+# read in skimmer geometry file
+
+
+
+# read in target geometry file
+read_surf           surfaces/target_0deg.txt group 4 particle check
+surf_collide        targetCollideModel vanish
+surf_modify         4 collide targetCollideModel react none
+
+
+read_surf           surfaces/skimmer_ring.txt group 3 particle check
+surf_collide        skimmerCollideModel vanish
+surf_modify         3 collide skimmerCollideModel react none
+
+
+# Magnetic field components
+variable B0 equal 0.5
+variable Bx grid "0."
+variable By grid "0."
+variable Bz grid "v_B0"
+
+# define electron density/temperature
+variable r0  equal 0.02
+variable ne0 equal 1e19
+variable te0 equal 1.0
+variable te1 equal 4.0
+
+variable eps equal 1e-10
+variable xc grid 0.5*(cxlo+cxhi)
+variable yc grid 0.5*(cylo+cyhi)
+variable zc grid 0.5*(czlo+czhi)
+
+variable r  grid "sqrt(v_xc*v_xc+v_yc*v_yc+v_eps)"
+variable ne grid "v_ne0*exp(-(v_r/v_r0)^12)"
+variable te grid "v_te0+v_te1*exp(-(v_r/v_r0)^12)"
+
+
+group exposedTarget surf id <> 321 1260
+
+#0.01 0.15
+
+region targetZone block 0.02 0.08  0.02 0.08  0.12 0.16
+group   nearTarget grid region targetZone all
+
+
+compute cnear plasma/fields/file nearTarget exposedTarget input/plasma.h5 input/bfield.h5 mindist surfid bx by bz temp_e dens_e temp_i dens_i parrflow ex ey ez nesheath
+
+
+
+compute             22 surf all all n press ke
+fix                 save ave/surf all 1 10 10 c_22[*] ave running
+region              slab block INF INF INF INF -0.1 0.1
+dump                2 image all 10 image.*.ppm type type pdiam 0.0051 &
+                    view 90 0 size 512 512 axes yes 0.9 0.02 &
+                    gridz .0 proc gline yes 0.005 &
+                    surf f_save[2] 0.0
+dump_modify        2 pad 4 region slab
+dump_modify         2 cmap surf min max cf 0.0 2 min orange max green
+
+
+# te, ne ti ni c_cnear[6] c_cnear[7] c_cnear[8] c_cnear[9]
+# BFIEL D c_cnear[3] c_cnear[4] c_cnear[5]
+# EFIELD c_cnear[11]  c_cnear[12]  c_cnear[13]
+#compute computeID2 distsurf/grid all 4  dir 0 0 1
+
+#fix     fixID2 ave/grid nearTarget 1 1 1 c_cnear[7] c_cnear[14] c_cnear[11]  c_cnear[12]  c_cnear[13]  ave running
+#dump 12 grid nearTarget 1 tmp.grid id f_fixID2[*]
+
+# Tantalatum emission from ZLO face
+fix            in emit/face/file TantalumSource zlo ta_inlet.dat ZLO #frac 0.5
+
+
+# Register field fixes and make them global
+fix       2 bfield/grid Bx By Bz
+global    bfield grid 2 1
+
+
+fix       3 efield/grid c_cnear[11]  c_cnear[12]  c_cnear[13] ##Ex Ey Ez
+global    efield grid 3 1
+
+#fix 22 chem/adas 1 73 input/plasma.adas plasma te ne
+
+
+################################################################################
+# --- Diagnostics and execution ------------------------------------------------
+################################################################################
+
+compute 1 temp
+compute 2 grid all TantalumSource temp
+compute 3 reduce ave c_2[*]
+#dump      10 particle all ${Nfreq} output/state id type x y z vx vy vz
+
+dump      10 particle all 1 output/state id type x y z vx vy vz
+
+
+#variable N2 equal floor(${N}/10)
+#compute computeID grid all species nrho
+#fix     fixID ave/grid all 1 ${N2} ${N2} c_computeID[*] ave running
+#dump    dumpID  grid all ${N} tmp.grid.density id xc yc zc f_fixID[*]
+
+
+timestep  ${dt}
+stats     1 #000
+stats_style step cpu c_1 c_3 np
+
+run    $N
+

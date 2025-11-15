@@ -108,6 +108,18 @@ FixViscous::FixViscous(SPARTA *sparta, int narg, char **arg) :
                      srcNi.kind==COLL_SRC_VAR || srcVpar.kind==COLL_SRC_VAR);
   use_grid_bfield = (srcBr.kind==COLL_SRC_VAR || srcBt.kind==COLL_SRC_VAR || srcBz.kind==COLL_SRC_VAR);
 
+  if (iarg < narg && strcmp(arg[iarg], "gravity") == 0) {
+  ++iarg;
+  if (iarg + 2 >= narg)
+    error->all(FLERR, "fix viscous: 'gravity' needs 3 components");
+
+  // numeric parse (same helper style you use elsewhere)
+  g_input_[0] = input->numeric(FLERR, arg[iarg++]);
+  g_input_[1] = input->numeric(FLERR, arg[iarg++]);
+  g_input_[2] = input->numeric(FLERR, arg[iarg++]);
+  use_gravity = true;
+}
+
   // defaults
   maxgrid_plasma = maxgrid_b = 0;
   plasma_grid = b_grid = nullptr;
@@ -128,7 +140,8 @@ FixViscous::~FixViscous()
 int FixViscous::setmask()
 {
   int mask = 0;
-  mask |= END_OF_STEP;
+  mask |= START_OF_STEP;   // pre-Boris half-kick
+  mask |= END_OF_STEP;     // post-Boris half-kick
   return mask;
 }
 
@@ -144,6 +157,16 @@ void FixViscous::init()
   }
 
   
+  if (use_gravity) {
+  for (int k = 0; k < modify->nfix; ++k) {
+    if (strcmp(modify->fix[k]->style, "gravity") == 0) {
+      error->all(FLERR,
+        "Do not use 'fix gravity' together with 'gravity' inside fix viscous");
+    }
+  }
+}
+
+
     // --- resolve VAR sources (grid variables) ---
   auto bind_var = [&](CollGridSrc &S, const char *label){
     if (S.kind != COLL_SRC_VAR) return;
@@ -231,8 +254,9 @@ void FixViscous::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
 
+  const double dt_half = 0.5 * update->dt;
   if (!particle->sorted) particle->sort();
-  end_of_step_no_average();
+  kick_half(dt_half);
 }
 
 
@@ -241,38 +265,17 @@ void FixViscous::end_of_step()
 ---------------------------------------------------------------------- */
 void FixViscous::end_of_step_no_average()
 {
-  // Refresh grid-sourced inputs (if any)
-// Refresh grid VAR buffers if requested
-if (use_grid_plasma) compute_plasma_grid();
-if (use_grid_bfield) compute_bfield_grid();
+  // keep for compatibility; prefer start_of_step/end_of_step + kick_half
+  if (use_grid_plasma) compute_plasma_grid();
+  if (use_grid_bfield) compute_bfield_grid();
+  refresh_compute_src(srcTe); refresh_compute_src(srcTi);
+  refresh_compute_src(srcNi); refresh_compute_src(srcVpar);
+  refresh_compute_src(srcBr); refresh_compute_src(srcBt); refresh_compute_src(srcBz);
 
-// Refresh all COMP sources exactly once this step
-refresh_compute_src(srcTe);   refresh_compute_src(srcTi);
-refresh_compute_src(srcNi);   refresh_compute_src(srcVpar);
-refresh_compute_src(srcBr);   refresh_compute_src(srcBt);
-refresh_compute_src(srcBz);
-
-
-  // Cheap early-outs
-  if (grid->nlocal == 0) return;
-  if (particle->nlocal == 0) return;   // if your Particle has nlocal; remove if not available
-
-  Particle::OnePart  * const particles = particle->particles;
-  Particle::Species  * const species   = particle->species;  // kept for symmetry; not used here
-  int                * const next      = particle->next;
-  Grid::ChildInfo    * const cinfo     = grid->cinfo;
-  const int nglocal = grid->nlocal;
-
-  for (int icell = 0; icell < nglocal; ++icell) {
-    if (cinfo[icell].count == 0) continue;
-
-    int ip = cinfo[icell].first;   // no outer 'ip' → no shadowing
-    while (ip >= 0) {
-      backgroundCollisions(&particles[ip]);
-      ip = next[ip];
-    }
-  }
+  if (!particle->sorted) particle->sort();
+  kick_half(0.5 * update->dt);
 }
+
 
 
 /* ----------------------------------------------------------------------
@@ -291,7 +294,7 @@ double FixViscous::memory_usage()
 
 void FixViscous::backgroundCollisions(Particle::OnePart *ip) {
   
-    // printf("Background collisions\n");
+    printf("Background collisions\n");
   Particle::Species *species = particle->species;
   int icell = ip->icell;
   int isp = ip->ispecies;
@@ -347,7 +350,7 @@ void FixViscous::backgroundCollisions(Particle::OnePart *ip) {
   
     // Epstein frequency
   const double nuE = epstein_nu(dens, ti_eV, rd);
-  printf("  Epstein nuE=%.3e Hz for rd=%.3e m\n", nuE, rd);
+
   if (nuE <= 0.0) return;
 
   // stable exponential update: v <- upar + (v - upar)*exp(-nuE*dt)
@@ -428,17 +431,138 @@ inline void FixViscous::refresh_compute_src(CollGridSrc &S) {
 }
 
 
-double FixViscous::epstein_nu(double Ni, double Ti_eV, double rd_m) const
-{
-  if (Ni <= 0.0 || Ti_eV <= 0.0 || rd_m <= 0.0 || rho_d <= 0.0) return 0.0;
-
-  const double mi   = A_background * update->proton_mass;           // kg
-  const double kB   = update->boltz;                                 // J/K
-  const double eV_J = update->echarge;                                    // J/eV
-  const double Ti_J = Ti_eV * eV_J;                                  // J
-  const double vth  = std::sqrt(8.0*Ti_J/(M_PI*mi));                 // m/s
-  const double rho_g = Ni * mi;                                      // kg/m^3
-
-  // Epstein nu_E = alpha * rho_g * v_th / (rho_d * r_d)
+double FixViscous::epstein_nu(double Ni, double Ti_eV, double rd_m) const {
+  if (Ni<=0.0 || Ti_eV<=0.0 || rd_m<=0.0 || rho_d<=0.0) return 0.0;
+  const double mi   = A_background * update->proton_mass;
+  const double vth  = std::sqrt(8.0 * (Ti_eV*update->echarge) / (M_PI*mi));
+  const double rho_g= Ni * mi;
   return alpha_E * (rho_g * vth) / (rho_d * rd_m);
+}
+
+void FixViscous::start_of_step()
+{
+  // apply every 'nevery' steps, like end_of_step
+  if ((update->ntimestep % nevery) != 0) return;
+
+  // refresh grid VAR buffers so pre-kick uses fresh fields
+  if (use_grid_plasma) compute_plasma_grid();
+  if (use_grid_bfield) compute_bfield_grid();
+
+  // refresh COMP sources once per step
+  refresh_compute_src(srcTe);   refresh_compute_src(srcTi);
+  refresh_compute_src(srcNi);   refresh_compute_src(srcVpar);
+  refresh_compute_src(srcBr);   refresh_compute_src(srcBt);
+  refresh_compute_src(srcBz);
+
+  const double dt_half = 0.5 * update->dt;
+  if (!particle->sorted) particle->sort();
+  kick_half(dt_half);
+}
+
+
+void FixViscous::kick_half(double dt_half)
+{
+  if (grid->nlocal == 0) return;
+  auto * const parts = particle->particles;
+  int * const next   = particle->next;
+  auto * const cinfo = grid->cinfo;
+
+  const int nglocal = grid->nlocal;
+
+  for (int icell = 0; icell < nglocal; ++icell) {
+    if (cinfo[icell].count == 0) continue;
+
+    int ip = cinfo[icell].first;
+    while (ip >= 0) {
+      Particle::OnePart &p = parts[ip];
+
+      double nuE; double upar[3] = {0,0,0};
+      epstein_params(icell, p, nuE, upar);
+      if (nuE > 0.0 && std::isfinite(nuE)) {
+        // stable exponential: v <- u + (v - u)*exp(-nuE*dt_half)
+        double *v = p.v;
+        double gr=0, gz=0, gphi=0;
+        if (use_gravity) {
+          const double c = cos(parts[ip].x[2]), sp = sin(parts[ip].x[2]);
+          const double gx = g_input_[0];
+          const double gy = g_input_[1];
+          const double gz_cart = g_input_[2];
+          gr   =  gx*c + gy*sp;
+          gphi = -gx*sp + gy*c;
+          gz   =  gz_cart;
+       }
+
+      const double s   = nuE * dt_half;
+      const double ex  = (fabs(s) < 1e-8) ? (1.0 - s + 0.5*s*s) : exp(-s);
+      const double inv = (nuE > 0) ? (1.0/nuE) : 0.0;
+
+      v[0] = upar[0] + (v[0] - upar[0] - gr   *inv)*ex + gr   *inv;
+      v[1] = upar[1] + (v[1] - upar[1] - gz   *inv)*ex + gz   *inv;
+      v[2] = upar[2] + (v[2] - upar[2] - gphi *inv)*ex + gphi *inv;
+
+
+      }
+      ip = next[ip];
+    }
+  }
+}
+inline void FixViscous::epstein_params(int icell, const Particle::OnePart &p,
+                                       double &nuE, double upar_cyl[3])
+{
+  auto read_src = [&](const CollGridSrc& S, int col_plasma, int col_b)->double {
+    if (S.kind == COLL_SRC_COMP)
+      return (S.arr_cache && S.src_index >= 0) ? S.arr_cache[icell][S.src_index] : 0.0;
+    if (S.kind == COLL_SRC_VAR)
+      return (col_plasma >= 0) ? plasma_grid[icell][col_plasma] : b_grid[icell][col_b];
+    return 0.0;
+  };
+
+  // const double Ti_eV = std::max(read_src(srcTi, 1, -1), 0.0);
+  // const double Ni    = std::max(read_src(srcNi, 2, -1), 0.0);
+  // const double Vpar  =          read_src(srcVpar, 3, -1);
+
+
+    //   const double Ti_eV  = 10.0;                 // [eV]
+  //   const double Ni     = 1.5746e20;            // [m^-3]
+  //   const double rd_m   = 50.0e-6;              // [m]
+  //   const double rho_d  = 534.0;                // [kg/m^3] (Li)
+  //   const double alphaE = 1.26;                 // 1.0–1.4
+
+    const double Ti_eV = 10.0;                 // [eV]
+    const double Ni    = 1.5746e20;            // [m^-3]
+    const double Vpar  =      0;
+    const double rd = 50.0e-6;              // [m]
+
+  // B components are in cylindrical basis: (Br, Bt, Bz) ~ (e_r, e_phi, e_z)
+  const double Br = read_src(srcBr, -1, 0);
+  const double Bt = read_src(srcBt, -1, 1);
+  const double Bz = read_src(srcBz, -1, 2);
+  const double Bn = std::sqrt(Br*Br + Bt*Bt + Bz*Bz);
+
+  // droplet radius required for nuE
+  // const double rd = p.radius;
+  if (rd <= 0.0 || Ni <= 0.0 || Ti_eV <= 0.0) {
+    nuE = 0.0;
+    upar_cyl[0] = upar_cyl[1] = upar_cyl[2] = 0.0;
+    return;
+  }
+
+  // Epstein frequency (SI)
+  nuE = epstein_nu(Ni, Ti_eV, rd);
+
+  // Build u_parallel in CYLINDRICAL components to match storage (v_r, v_z, v_phi)
+  if (Bn > 1e-12) {
+    const double br = Br / Bn;
+    const double bt = Bt / Bn;
+    const double bz = Bz / Bn;
+    // NOTE ordering: [0]=u_r, [1]=u_z, [2]=u_phi
+    upar_cyl[0] = Vpar * br;
+    upar_cyl[1] = Vpar * bz;
+    upar_cyl[2] = Vpar * bt;
+  } else {
+    // No reliable B direction: relax toward zero flow (or choose a default axis if desired)
+    upar_cyl[0] = 0.0;
+    upar_cyl[1] = 0.0;
+    upar_cyl[2] = 0.0;
+  }
 }

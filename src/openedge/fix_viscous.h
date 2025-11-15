@@ -1,15 +1,12 @@
 #ifdef FIX_CLASS
-
 FixStyle(viscous,FixViscous)
-
 #else
-
 #ifndef SPARTA_FIX_VISCOUS_H
 #define SPARTA_FIX_VISCOUS_H
 
 #include "fix.h"
-#include "fix_coll_background.h"   // CollSrcKind, CollGridSrc (canonical)
-#include "particle.h"              // for Particle::OnePart
+#include "fix_coll_background.h"
+#include "particle.h"
 #include <cstdio>
 
 namespace SPARTA_NS {
@@ -23,46 +20,48 @@ public:
 
   int  setmask() override;
   void init() override;
-  void end_of_step() override;
+  void start_of_step() override;      // NEW: pre-Boris half-kick
+  void end_of_step() override;        // post-Boris half-kick
   double memory_usage() override;
+bool   use_gravity = false;
+double g_input_[3] = {0.0, 0.0, 0.0};  // 
+
 
 protected:
-  // RNG handle
   RanKnuth* rng = nullptr;
 
-  // grid/plasma source selectors
-  int use_grid_plasma = 0;
-  int use_grid_bfield = 0;
+  // half-kick and parameter builder
+  void   kick_half(double dt_half);    
+  inline void epstein_params(int icell, const Particle::OnePart &p,
+                             double &nuE, double upar[3]);
 
-  // plasma sources (Te, Ti, Ni, v_parallel) and B-field
+  // source selectors
+  int use_grid_plasma = 0, use_grid_bfield = 0;
   CollGridSrc srcTe, srcTi, srcNi, srcVpar;
   CollGridSrc srcBr, srcBt, srcBz;
 
-  // cached grid arrays
+  // cached arrays
   double **plasma_grid = nullptr;   // [nlocal][4] : Te,Ti,Ni,Vpar
   double **b_grid      = nullptr;   // [nlocal][3] : Br,Bt,Bz
-  int maxgrid_plasma = 0;
-  int maxgrid_b      = 0;
-
-  // background ion identity for Epstein (mass)
-  double A_background = 2.0;  // amu, e.g. D+
-  double Z_background = 1.0;  // (not used by Epstein; kept for future)
+  int maxgrid_plasma = 0, maxgrid_b = 0;
 
   // Epstein parameters
-  int    model_epstein = 1;   // 1 → Epstein drag active
-  double rho_d = 534.0;       // kg/m^3 (Li)
-  double alpha_E = 1.26;      // accommodation factor (~1.0–1.4)
+  double A_background = 2.0;   // amu (e.g., D+)
+  double Z_background = 1.0;   // kept for future
+  int    model_epstein = 1;
+  double rho_d  = 534.0;       // kg/m^3
+  double alpha_E = 1.26;       // accommodation
 
-  // main worker
-  void end_of_step_no_average();
+  // legacy worker (no longer used for a full dt kick)
+  void   end_of_step_no_average();
 
-  // helpers
+  // grid helpers
   void   compute_plasma_grid();
   void   compute_bfield_grid();
   double fetch_compute_cell_value(const CollGridSrc& S, int icell);
   inline void refresh_compute_src(CollGridSrc &S);
 
-  // per-particle drag update
+  // legacy per-particle update (kept for reference)
   void   backgroundCollisions(Particle::OnePart *ip);
 
   // Epstein frequency (SI)
@@ -70,6 +69,5 @@ protected:
 };
 
 } // namespace SPARTA_NS
-
-#endif // SPARTA_FIX_VISCOUS_H
-#endif // FIX_CLASS
+#endif
+#endif
