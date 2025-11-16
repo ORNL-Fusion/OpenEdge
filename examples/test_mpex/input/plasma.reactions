@@ -1,0 +1,42 @@
+# -------------------------------------------------------
+# Surface reactions for Ta-on-W, with neutralization
+# No sputtering, no W creation. On reaction, ions → Ta.
+# Reflection probabilities are handled in surf_collide
+# via RN(θ), RE(θ).
+# -------------------------------------------------------
+
+# neutrals stay neutral (no-op, but keeps syntax uniform)
+Ta      --> Ta
+E S 1.0
+
+# all ions neutralize to Ta when a reaction occurs
+Ta+     --> Ta
+E S 1.0
+
+Ta2+    --> Ta
+E S 1.0
+
+Ta3+    --> Ta
+E S 1.0
+
+Ta4+    --> Ta
+E S 1.0
+
+Ta5+    --> Ta
+E S 1.0
+
+Ta6+    --> Ta
+E S 1.0
+
+Ta7+    --> Ta
+E S 1.0
+
+Ta8+    --> Ta
+E S 1.0
+
+Ta9+    --> Ta
+E S 1.0
+
+Ta10+   --> Ta
+E S 1.0
+

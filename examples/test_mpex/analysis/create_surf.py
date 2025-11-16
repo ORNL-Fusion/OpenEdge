@@ -106,8 +106,46 @@ def make_target(angle_deg=0.0, filename="target.stl"):
         theta = math.radians(angle_deg)
         gmsh.model.occ.rotate([(2, surf)],
                               xc, yc, z_target,  # point on axis
-                              0.0, 1.0, 0.0,      # rotate about y
+                              0.0, 0.0, 1.0,      # rotate about y
                               theta)
+
+    gmsh.model.occ.synchronize()
+
+    gmsh.model.addPhysicalGroup(2, [surf], 1)
+    gmsh.model.setPhysicalName(2, 1, f"target_{angle_deg:g}deg")
+
+    gmsh.option.setNumber("Mesh.CharacteristicLengthMin", lc_min)
+    gmsh.option.setNumber("Mesh.CharacteristicLengthMax", lc_max)
+
+    gmsh.model.mesh.generate(2)
+    gmsh.write(filename)
+    gmsh.finalize()
+    print(f"Wrote {filename}")
+
+
+def make_target(angle_deg=0.0, filename="target.stl"):
+    """
+    8 x 8 cm W target centered on axis, located at z_target.
+    Surface normal is rotated by angle_deg relative to +z
+    about the y-axis through the plate center.
+    """
+    gmsh.initialize()
+    gmsh.model.add(f"target_{angle_deg:g}")
+
+    x0 = xc - target_size / 2.0
+    y0 = yc - target_size / 2.0
+
+    surf = gmsh.model.occ.addRectangle(x0, y0, z_target,
+                                       target_size, target_size)
+
+    if abs(angle_deg) > 1e-10:
+        theta = math.radians(angle_deg)
+        gmsh.model.occ.rotate(
+            [(2, surf)],
+            xc, yc, z_target,   # point on axis
+            1.0, 0.0, 0.0,      # rotate about **y** axis
+            theta               # use -theta here if you want the opposite lean
+        )
 
     gmsh.model.occ.synchronize()
 

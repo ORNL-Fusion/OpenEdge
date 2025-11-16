@@ -49,21 +49,40 @@ def interpolate_and_save_plasma_field(solps_folder, openedge_plasma_file, opened
     # find inner and outer flux
     # Assuming plasma_data.crx and plasma_data.cry are arrays of r and z coordinates for flux surfaces
 
+    import numpy as np
 
+    # radial and axial grid sizes
     n_r = 100
     n_z = 120
 
-    # radial (0–15 cm) and axial (-1–20 cm) grids
-    r = np.linspace(0.0, 4, n_r)
+    # --- geometry in METERS ---
+    # box: x,y in [-0.01, 0.15] → radius up to ~0.15 m from axis
+    r_max = 0.15          # cover whole cross-section of the box
+    r = np.linspace(0.0, r_max, n_r)
+
+    # z covers from a little upstream of skimmer to downstream target
     z = np.linspace(-0.01, 0.20, n_z)
 
+    # mesh: axis 0 = z, axis 1 = r  (matches field[iz][ir] in C++)
     R, Z = np.meshgrid(r, z, indexing="xy")
 
-    # super-Gaussian Te(r)
-    Te = 1.0 + 4.0 * np.exp(-(R / 0.02)**12)
-    ne = 1e19 * np.exp(-(R / 0.02)**12)
-    ni =ne
+    # --- MPEX super-Gaussian profile at the SHEATH ENTRANCE ---
+    r0 = 0.02             # 2 cm radius (meters)
+    Te0 = 1.0             # background Te [eV]
+    Te1 = 4.0             # super-Gaussian bump [eV]
+    ne0 = 1e19            # on-axis density [m^-3]
+
+    Te = Te0 + Te1 * np.exp(-(R / r0)**12)
+    ne = ne0 * np.exp(-(R / r0)**12)
+
+    # optional: density floor so ne never becomes exactly 0
+    ne_floor = 1e14       # or whatever "halo" you want
+    ne = np.maximum(ne, ne_floor)
+
+    # ions same as electrons in this simplified model
     Ti = Te
+    ni = ne
+
     
     
 ##     Interpolate all fields
@@ -145,21 +164,63 @@ def interpolate_and_save_plasma_field_const(solps_folder,  # unused, kept for AP
     n_r = 100
     n_z = 120
 
-    # radial (0–15 cm) and axial (-1–20 cm) grids
-    grid_r = np.linspace(0.0, 0.15, n_r)      # [m]
-    grid_z = np.linspace(-0.01, 0.20, n_z)    # [m]
+    r_max = 0.15          # meters
+    r = np.linspace(0.0, r_max, n_r)
+    z = np.linspace(-0.01, 0.20, n_z)
 
-    # 2D mesh for fields
-    R, Z = np.meshgrid(grid_r, grid_z, indexing="xy")   # shape (n_z, n_r)
+    R, Z = np.meshgrid(r, z, indexing="xy")
 
-    # --- analytic profiles (all in eV and m^-3) ---
+    r0 = 0.02             # 2 cm
+    Te = 1.0 + 4.0 * np.exp(-(R / r0)**12)
+    ne = 1e19 * np.exp(-(R / r0)**12)
+    Ti = Te
+    ni = ne
+    
+
+#226 0.0275 0.0575 0.001 0.147 485 0 0 0.5 1.01355 3.38764e+16 1.01355 3.38764e+16 0 0 0 0 3.38764e+16
+   
+#    import numpy as np
+
+    # box bounds must match SPARTA input
+    xmin, xmax = 0.0, 0.1
+    ymin, ymax = 0.0, 0.1
+
+    x0 = 0.5 * (xmin + xmax)
+    y0 = 0.5 * (ymin + ymax)
+
+    # from tmp.grid line for cell 293:
+    x = 0.0275
+    y = 0.0575
+
+    dx = x - x0
+    dy = y - y0
+    R = np.sqrt(dx*dx + dy*dy)
+
     r0 = 0.02  # 2 cm
-    ne0 = 1e19
+    Te = 1.0 + 4.0 * np.exp(-(R / r0)**12)
+    ne = 1e19 * np.exp(-(R / r0)**12)
 
-    ne = ne0 * np.exp(-(R / r0) ** 12)
-    Te = 1.0 + 4.0 * np.exp(-(R / r0) ** 12)
-    Ti = Te.copy()
-    ni = ne.copy()
+    print("R [cm] =", 100*R)
+    print("Te =", Te, "ne =", ne/1e16)
+
+
+
+    exit()
+#    # radial (0–15 cm) and axial (-1–20 cm) grids
+    grid_r = r #np.linspace(0.0, 0.15, n_r)      # [m]
+    grid_z = z #np.linspace(-0.01, 0.20, n_z)    # [m]
+#
+#    # 2D mesh for fields
+#    R, Z = np.meshgrid(grid_r, grid_z, indexing="xy")   # shape (n_z, n_r)
+#
+#    # --- analytic profiles (all in eV and m^-3) ---
+#    r0 = 0.02  # 2 cm
+#    ne0 = 1e19
+#
+#    ne = ne0 * np.exp(-(R / r0) ** 12)
+#    Te = 1.0 + 4.0 * np.exp(-(R / r0) ** 12)
+#    Ti = Te.copy()
+#    ni = ne.copy()
 
     # zeros with same 2D shape
     zeros = np.zeros_like(Te)

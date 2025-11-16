@@ -126,7 +126,7 @@ TARGET_SIZE     = 0.08        # 8 cm x 8 cm plate
 
 def main():
     # 3 coords + Nfields (here: 11 f_fixID[*])
-    data = parser("tmp.grid.density", 3, 3 + 1 + 10)
+    data = parser("output/tmp.grid.density", 3, 3 + 1 + 5)
 
     last_timestep = max(data.keys())
     xcs, ycs, zcs = data[last_timestep][:3]
@@ -209,29 +209,6 @@ def main():
                      weight="semibold", fontsize=12)
     fig.colorbar(pcm, ax=ax_map) #, label='Density (m$^{-3}$)')
 
-#    # skimmer aperture footprint (circle)
-#    circ = patches.Circle(
-#        (xc0, yc0), radius=R_SKIMMER_IN,
-#        fill=False, linestyle='-', linewidth=1.2
-#    )
-#    ax_map.add_patch(circ)
-#    ax_map.text(
-#        xc0, yc0 + R_SKIMMER_IN + 0.003,
-#        "Skimmer", ha='center', va='bottom', fontsize=9
-#    )
-
-    # target footprint (square plate)
-#    half = TARGET_SIZE / 2.0
-#    rect = patches.Rectangle(
-#        (xc0 - half, yc0 - half),
-#        TARGET_SIZE, TARGET_SIZE,
-#        fill=False, linestyle='--', linewidth=1.2
-#    )
-#    ax_map.add_patch(rect)
-#    ax_map.text(
-#        xc0 + half + 0.003, yc0,
-#        "Target", ha='left', va='center', fontsize=9
-#    )
 
     # ----- 1D radial-averaged n(z) for each charge state -----
     species_labels = [
