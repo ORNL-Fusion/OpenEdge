@@ -1,4 +1,3 @@
-
 #ifdef FIX_CLASS
 
 FixStyle(evap,FixEvap)
@@ -41,7 +40,6 @@ public:
     virtual ~FixEvap();
     int setmask();
     void init();
-    void end_of_step();
     double memory_usage();
 
       HeatFluxData heat_flux_data;
@@ -54,11 +52,19 @@ protected:
     bigint* tally_reactions, * tally_reactions_all;
     int tally_flag;
     int maxgrid;
-    virtual void end_of_step_no_average();
+    int imix;
+    int nspecies;
+      double *fraction,*cummulative;
+// double fraction;
+    void end_of_step();
+    void start_of_step() override;      // NEW: pre-Boris half-kick
 
     // PMI
     std::string heatfluxFilename;
-    void droplet_evaporation_model(Particle::OnePart *);
+    // void droplet_evaporation_model(Particle::OnePart *);
+    void droplet_evaporation_model(Particle::OnePart *ip,
+                                        const double dt_half,
+                                        const int icell);
     double set_mass = -1.0;
     double set_temp = -1.0;    // EXPECTED IN KELVIN
     double set_radius = -1.0;
@@ -66,12 +72,12 @@ protected:
 
     // HeatFluxData  heat_flux_data;
     void broadcastHeatFluxData(HeatFluxData& );
-    HeatFluxParams interpHeatFluxAt(int icell, const HeatFluxData& data) const;
+    HeatFluxParams interpHeatFluxAtPos(double r, double z, const HeatFluxData& data) const;
     mutable std::unordered_map<int, HeatFluxParams> flux_cache;
     HeatFluxData readHeatFlux(const std::string& filePath);
     void initializeHeatFluxData();
+    void evap_half(double dt_half);
 
-    
 };
 
 } // namespace SPARTA_NS

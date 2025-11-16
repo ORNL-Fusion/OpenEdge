@@ -110,11 +110,11 @@ FixEvap::~FixEvap()
 }
 
 /* ---------------------------------------------------------------------- */
-
 int FixEvap::setmask()
 {
   int mask = 0;
-  mask |= END_OF_STEP;
+  mask |= START_OF_STEP;   // pre-Boris half "evap"
+  mask |= END_OF_STEP;     // post-Boris half "evap"
   return mask;
 }
 
@@ -151,22 +151,36 @@ void FixEvap::init() {
 
 /* ---------------------------------------------------------------------- */
 
+void FixEvap::start_of_step()
+{
+  if ((update->ntimestep % nevery) != 0) return;
+  evap_half(0.5 * update->dt);
+}
+
 void FixEvap::end_of_step()
 {
-  if (!particle->sorted) particle->sort();
-  end_of_step_no_average();
+  if ((update->ntimestep % nevery) != 0) return;
+  evap_half(0.5 * update->dt);
 }
 
 /* ----------------------------------------------------------------------
-   current thermal temperature is calculated on a per-cell basis
----------------------------------------------------------------------- */
+   memory usage
+------------------------------------------------------------------------- */
 
-void FixEvap::end_of_step_no_average()
+double FixEvap::memory_usage() {
+  double bytes = 0.0;
+  bytes += maxgrid * size_per_grid_cols * sizeof(double);
+  return bytes;
+}
+
+
+// advance (r_d, T_d, m_d) by dt_half using current Q_s and model
+void FixEvap::evap_half(double dt_half)
 {
-  if (update->ntimestep % nevery) return;        // honor nevery
+  if ((update->ntimestep % nevery) != 0) return;
   if (!particle->sorted) particle->sort();
 
-   // (Re)alloc if grid grew
+  // (Re)alloc per-grid arrays if needed
   if (grid->nlocal > maxgrid) {
     maxgrid = grid->maxlocal;
     memory->destroy(array_grid);
@@ -179,9 +193,9 @@ void FixEvap::end_of_step_no_average()
   Particle::OnePart *parts = particle->particles;
   int *next = particle->next;
   Grid::ChildInfo *cinfo = grid->cinfo;
-  const int nglocal = grid->nlocal;;
+  const int nglocal = grid->nlocal;
 
-  int *s2g = particle->mixture[imix]->species2group; // ← same as computes
+  int *s2g = particle->mixture[imix]->species2group;
 
   for (int icell = 0; icell < nglocal; icell++) {
     if (cinfo[icell].count == 0) continue;
@@ -189,41 +203,27 @@ void FixEvap::end_of_step_no_average()
     while (ip >= 0) {
       const int is  = parts[ip].ispecies;
       const int ig  = s2g[is];
-      if (ig < 0) { ip = next[ip]; continue; }        
+      if (ig < 0) { ip = next[ip]; continue; }
 
-      // --- seed-once behavior: set only if not initialized
+      // one-time seeding
       if (set_mass   > 0.0 && parts[ip].mass   <= 0.0) parts[ip].mass   = set_mass;
       if (set_radius > 0.0 && parts[ip].radius <= 0.0) parts[ip].radius = set_radius;
-      if (set_temp   > 0.0 && parts[ip].temp   <= 0.0) parts[ip].temp   = set_temp;  // Kelvin
+      if (set_temp   > 0.0 && parts[ip].temp   <= 0.0) parts[ip].temp   = set_temp;
 
-      droplet_evaporation_model(&parts[ip]);
+      droplet_evaporation_model(&parts[ip], dt_half, icell);
+
       ip = next[ip];
     }
   }
 }
 
 
-/* ----------------------------------------------------------------------
-   memory usage
-------------------------------------------------------------------------- */
-
-double FixEvap::memory_usage() {
-  double bytes = 0.0;
-  bytes += maxgrid * size_per_grid_cols * sizeof(double);
-  return bytes;
-}
-
 /*----------------------------------------------------------------------
 Sergey's Evaporation Model
 ----------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------
- Li droplet update (mirrors Python reference)
- - No use of fnum in physics updates
- - Mass comes from radius via ρ and 4/3 π R^3
- - N_emit is diagnostic only (atoms emitted this step)
-----------------------------------------------------------------------*/
-void FixEvap::droplet_evaporation_model(Particle::OnePart *ip)
+void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
+                                        const double dt_half,
+                                        const int icell)
 {
   // --- constants ---
   const double AM   = 1.53e-26;      // Li atom mass [kg/atom]
@@ -231,14 +231,30 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip)
   const double Cp   = 4200.0;        // J/kg-K
   const double DHm  = 3.158e+03;     // J/mol  (your Python uses this; consider ~1e5 J/mol physically)
   const double AN   = 6.022e+23;     // 1/mol
-  const double DT   = update->dt;
+  const double DT   = dt_half;
 
+    // microscopic cutoffs shared with viscous
+  // constexpr double R_STOP = 5e-9;   // m
+  // constexpr double R_ATOM = 5e-9;   // m, same as R_STOP
+  // constexpr double AM_LI  = 1.53e-26; // kg
+
+      // microscopic cutoffs shared with viscous
+  constexpr double R_STOP = 5e-8;   // m
+  constexpr double R_ATOM = 5e-8;   // m, same as R_STOP
+  constexpr double AM_LI  = 1.53e-25; // kg
   // --- current state (Kelvin in OpenEdge) ---
   const double mass   = (ip->mass   > 0.0) ? ip->mass   : particle->species[ip->ispecies].mass;
   const double radius = (ip->radius > 0.0) ? ip->radius : pow((3.0*mass)/(4.0*M_PI*Rho), 1.0/3.0);
   const double TK     = (ip->temp   > 0.0) ? ip->temp   : 300.0;
 
-  const int icell = ip->icell;
+    // If already microscopic: freeze and skip evap math
+  if (radius <= R_STOP) {
+    ip->radius =  5e-9;
+    if (ip->mass > 0.0 && ip->mass != AM_LI) ip->mass = 1.53e-26;
+    ip->temp   = 0.0;
+    return;
+  }
+
   const double rpos = ip->x[0];
   const double zpos = ip->x[1];
 
@@ -256,14 +272,21 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip)
     error->all(FLERR,"Fix evap: heatflux mode not set properly");
   }
 
+  if (Qs <= 0.0) 
+  {
+        // --- write back ---
+    ip->radius = radius;
+    ip->temp   = TK;
+    ip->mass   = mass;
+    return;   // no evaporation if no heat flux
+  }
+ 
   // --- Antoine vapor pressure (your Python fit) ---
   const double a1 = 5.055;
   const double b1 = -8023.0;
   const double xm1 = 6.939;             // molar mass used in your fit
   const double vpres1 = 760.0 * pow(10.0, (a1 + b1 / TK));  // mmHg
 
-  // --- Evaporation flux Gevap ---
-  // IMPORTANT: In your Python, Gevap as used with dRdt = -AM*Gevap/Rho implies Gevap has units of atoms/(m^2 s).
   // Keep that here so the math matches exactly.
   const double Gevap_atoms = 1.0e4 * 3.513e22 * vpres1 / sqrt(xm1 * TK);  // atoms/(m^2 s)
 
@@ -283,7 +306,7 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip)
   const double N_emit_diag = Gevap_atoms * Adrop * DT;  // atoms emitted this step (no fnum)
 
   // --- guards ---
-  if (T_new < 0.0)
+  if (T_new < 0.0 || R_new < 0.0 || mass_new < 0.0)
     error->all(FLERR,"Fix evap: particle temperature dropped below 0 K");
 
   // --- write back ---
@@ -297,102 +320,7 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip)
     array_grid[icell][2]  = Qs;
   }
 
-  // more digits helps you *see* evolution at small DT
-  // printf("Droplet evap: R=% .9e m, mass=% .9e kg, T=% .6f K, Qs=% .3e, Gevap(atoms)=% .3e, N_emit=% .3e, icell=%d\n",
-        //  ip->radius, ip->mass, ip->temp, Qs, Gevap_atoms, N_emit_diag, icell);
 }
-
-// void FixEvap::droplet_evaporation_model(Particle::OnePart *ip)
-// {
-//   // --- constants ---
-//   const double AM  = 1.53e-26;      // Li atom mass [kg/atom]
-//   const double Rho = 534.0;         // kg/m^3
-//   const double Cp  = 4200.0;        // J/kg-K
-//   const double DH  = 3.158e+03;     // J/mol
-//   const double DHm = 3.158e+03;  // J/mol   <-- verify! Li latent heat is typically much larger (~1e5 J/mol)
-//   const double AN  = 6.022e+23;     // 1/mol
-//   const double DT  = update->dt;
-//   const double L_atom = DHm / AN; // J per atom
-
-//   // --- current state (Kelvin temp) ---
-//   double mass   = (ip->mass > 0.0) ? ip->mass   : particle->species[ip->ispecies].mass;
-//   double radius = (ip->radius > 0.0) ? ip->radius : pow((3.0*mass)/(4.0*M_PI*Rho), 1.0/3.0);
-//   double TK     = (ip->temp   > 0.0) ? ip->temp   : 300.0; 
-//   const double mass_old   = (ip->mass   > 0.0) ? ip->mass   : particle->species[ip->ispecies].mass;
-//   const double radius_old = (ip->radius > 0.0) ? ip->radius : pow((3.0*mass_old)/(4.0*M_PI*Rho), 1.0/3.0);
-
-//   // --- heat flux 
-//   // const double Qs = 5.0e7; // W/m^2 
-//   int icell = ip->icell;
-//   // get particle position
-//   const double rpos = ip->x[0];
-//   const double zpos = ip->x[1];
-//   // get cell centers 
-//   // Access cell and calculate midpoints
-//   if (domain->dimension != 2) {
-//     error->all(FLERR,"Fix evap: currently only 2D geometry is supported for heat flux interpolation");
-//   }
-
-//     double Qs = 0.0;
-//   if (heatflux_mode == HF_CONST) {
-//     // use constant heat flux
-//     Qs = Qs_const;   // already set
-//   } else if (heatflux_mode == HF_FILE) {
-//     // interpolate from data
-//     HeatFluxParams hp = interpHeatFluxAtPos(rpos, zpos, heat_flux_data);
-//     Qs = hp.q_mag;
-//     if (!std::isfinite(Qs) || Qs < 0.0) Qs = 0.0;  // clamp bad values to zero
-
-//   } else {
-//     error->all(FLERR,"Fix evap: heatflux mode not set properly");
-//   }
-
-
-//   // --- Antoine fit (TK in Kelvin) ---
-//   const double a1 = 5.055;
-//   const double b1 = -8023.0;
-//   const double xm1 = 6.939;
-//   const double vpres1 = 760.0 * pow(10.0, (a1 + b1 / TK));  // mmHg
-//   const double vpres_mmHg = 760.0 * pow(10.0, (a1 + b1/TK));   // mmHg (double-check!)
-
-//   // --- evaporation flux (kg/m^2/s) ---
-//   const double Gevap = 1.0e4 * 3.513e22 * vpres1 / sqrt(xm1 * TK);
-
-//   // --- radius rate and update ---
-//   const double dRdt = -AM * Gevap / Rho;
-//   const double R_new = std::max(0.0, radius + dRdt * DT);
-
-//   const double HF = Qs - Gevap * (DH / AN);   // intentionally match Python
-
-//   // lumped heating: dT/dt = 3/(rho*Cp) * HF  (spherical lump)
-//   const double dTdt = (3.0 / (Rho * Cp)) * HF;
-//   // const double T_new = std::max(0.0, TK + dTdt * DT);
-//   const double T_new = TK + dTdt * DT;        // let it evolve; sanity-check separately
-  
-//   const double dm_dt = Gevap * AM * 4.0 * M_PI * R_new * R_new;  // kg/s
-
-//     // if temp negative exit error
-//   if (ip->temp < 0.0) {
-//     error->all(FLERR,"Fix evap: particle temperature dropped below zero Kelvin");
-//   }
-//   // --- write back ---
-//   ip->mass   = mass_new;
-//   ip->radius = pow((3.0*mass_new)/(4.0*M_PI*Rho), 1.0/3.0) ;  // recalc radius from mass
-//   ip->temp   = T_new;   // Kelvin
-
-//     // accumulate per-cell outputs
-//   if (icell >= 0 && icell < grid->nlocal) {
-//     array_grid[icell][0] += N_emit;      // sum emitted real atoms this step
-//     array_grid[icell][1]  = icell;       // droplet cell id
-//     array_grid[icell][2]  = Qs;           // heat flux W/m^2
-//   }
-
-//   // print new radius and cell id mass and Qs temp 
-//   printf("Droplet evap: new radius=%g, cell id=%d, mass=%g, Qs=%g, temp=%g\n", ip->radius, icell, ip->mass, Qs, ip->temp);
-
-// }
-
-
 /* ----------------------------------------------------------------------
    Read plasma data from HDF5 file
 ------------------------------------------------------------------------- */

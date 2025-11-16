@@ -112,6 +112,14 @@ ComputePlasmaFieldsFile(SPARTA *sparta, int narg, char **arg) :
   vector_grid = NULL;
   vals = NULL;
 
+  nsurf = 0;
+  slist = NULL;
+  sctr  = NULL;
+
+  plasma_arr = NULL;
+  mag_arr    = NULL;
+
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -124,6 +132,23 @@ ComputePlasmaFieldsFile::~ComputePlasmaFieldsFile()
   memory->destroy(vals);
   delete [] nmap;
   memory->destroy(map);
+  if (slist) {
+    memory->destroy(slist);
+    slist = NULL;
+  }
+  if (sctr) {
+    memory->destroy(sctr);
+    sctr = NULL;
+  }
+
+  if (plasma_arr) {
+    memory->destroy(plasma_arr);
+    plasma_arr = NULL;
+  }
+  if (mag_arr) {
+    memory->destroy(mag_arr);
+    mag_arr = NULL;
+  } 
   
 }
 
@@ -135,46 +160,109 @@ void ComputePlasmaFieldsFile::init()
 
   const int me     = comm->me;
   const int ncells = grid->nlocal;
+  const int dim    = domain->dimension;
 
-  // 1) load on rank 0, broadcast to all ranks
+  // --- 0) clean old geometry state (in case init() called multiple times) ----
+  if (slist) {
+    memory->destroy(slist);
+    slist = NULL;
+  }
+  if (sctr) {
+    memory->destroy(sctr);
+    sctr = NULL;
+  }
+  nsurf = 0;
+
+
+  // NEW: also clean any old pre-sampled field arrays
+  if (plasma_arr) {
+    memory->destroy(plasma_arr);
+    plasma_arr = NULL;
+  }
+  if (mag_arr) {
+    memory->destroy(mag_arr);
+    mag_arr = NULL;
+  }
+
+
+  // --- 1) load plasma & B files on rank 0 and broadcast ----------------------
   if (me == 0) {
-      plasma_data = readPlasmaFileData(plasmaStatePath);
+    plasma_data   = readPlasmaFileData(plasmaStatePath);
+    magnetic_data = readMagneticFieldFileData(magneticFieldsPath);
   }
   broadcastPlasmaData(plasma_data);
-
-  // read magnetic field data
-  if (me == 0) {
-      magnetic_data = readMagneticFieldFileData(magneticFieldsPath);
-  }
   broadcastMagneticData(magnetic_data);
 
+  // --- 2) pre-sample plasma & B on this grid (store in arrays) ---------------
   Grid::ChildCell *cells = grid->cells;
   Grid::ChildInfo *cinfo = grid->cinfo;
-  const int dim = domain->dimension;
+
+  // >>> THIS WAS COMMENTED OUT, NEEDS TO BE ACTIVE <<<
+  memory->create(plasma_arr, ncells, "plasma/fields/file:plasma_arr");
+  memory->create(mag_arr,    ncells, "plasma/fields/file:mag_arr");
 
   for (int icell = 0; icell < ncells; ++icell) {
-    if (!(cinfo[icell].mask & groupbit)) continue;   // respect the grid group
+    if (!(cinfo[icell].mask & groupbit)) continue;   // respect grid group
     if (cells[icell].nsplit < 1)         continue;   // skip empty
 
-    // cell center (axisym note: use y for 2D, z for 3D)
-    double *lo = cells[icell].lo;
-    double *hi = cells[icell].hi;
-    const double R = 0.5 * (lo[0] + hi[0]);
-    const double Z = (dim == 2) ? 0.5 * (lo[1] + hi[1])
-                                : 0.5 * (lo[2] + hi[2]);
-
-    // sample all fields from the file at (R,Z)
-    PlasmaFileParams P = bilinearInterpolationPlasma(icell, plasma_data);
-    plasma_map[icell] = P;
-
-    // sample magnetic field at (R,Z)
-    MagneticFieldFileDataParams B = bilinearInterpolationMagneticField(icell, magnetic_data);
-    magnetic_map[icell] = B;
+    plasma_arr[icell] = bilinearInterpolationPlasma(icell, plasma_data);
+    mag_arr[icell]    = bilinearInterpolationMagneticField(icell, magnetic_data);
   }
 
+  // --- 3) build list of eligible surfaces and their centers ------------------
+  const int ntotal = surf->nsurf;
+  Surf::Line *lines = surf->lines;
+  Surf::Tri  *tris  = surf->tris;
+
+  // allocate slist to hold up to all surfaces
+  memory->create(slist, ntotal, "plasma/fields/file:slist");
+  nsurf = 0;
+
+  if (dim == 2) {
+    // 2D: line segments
+    for (int i = 0; i < ntotal; ++i) {
+      if (!(lines[i].mask & sgroupbit)) continue; // wrong surf group
+      // keep only "visible" side wrt sdir
+      if (MathExtra::dot3(lines[i].norm, sdir) <= 0.0) {
+        slist[nsurf++] = i;  // store ARRAY index m
+      }
+    }
+  } else {
+    // 3D: triangles
+    for (int i = 0; i < ntotal; ++i) {
+      if (!(tris[i].mask & sgroupbit)) continue;
+      if (MathExtra::dot3(tris[i].norm, sdir) <= 0.0) {
+        slist[nsurf++] = i;  // store ARRAY index m
+      }
+    }
+  }
+
+  if (nsurf == 0)
+    error->all(FLERR,"plasma/fields/file: no eligible surfaces found for sheath");
+
+  // centers for each eligible surface
+  memory->create(sctr, nsurf, 3, "plasma/fields/file:sctr");
+
+  const double invthird = 1.0/3.0;
+  for (int is = 0; is < nsurf; ++is) {
+    const int m = slist[is];
+    if (dim == 2) {
+      double *p1 = lines[m].p1;
+      double *p2 = lines[m].p2;
+      sctr[is][0] = 0.5 * (p1[0] + p2[0]);
+      sctr[is][1] = 0.5 * (p1[1] + p2[1]);
+      sctr[is][2] = 0.0;
+    } else {
+      double *p1 = tris[m].p1;
+      double *p2 = tris[m].p2;
+      double *p3 = tris[m].p3;
+      sctr[is][0] = invthird * (p1[0] + p2[0] + p3[0]);
+      sctr[is][1] = invthird * (p1[1] + p2[1] + p3[1]);
+      sctr[is][2] = invthird * (p1[2] + p2[2] + p3[2]);
+    }
+  }
 }
 
-/* ---------------------------------------------------------------------- */
 
 void ComputePlasmaFieldsFile::compute_per_grid()
 {
@@ -194,74 +282,28 @@ void ComputePlasmaFieldsFile::compute_per_grid()
   const int dim = domain->dimension;
   Surf::Line *lines = surf->lines;
   Surf::Tri  *tris  = surf->tris;
-  const int ntotal = surf->nsurf;
+  const int ntotal = surf->nsurf;   // still available if needed
 
   // --- 0) Safe defaults so readers never see garbage -------------------------
   for (int ic = 0; ic < nglocal; ++ic)
     for (int iv = 0; iv < nvalue; ++iv)
       vals[ic][iv] = (value[iv] == MINDIST) ? BIG : -1.0;
 
-  // --- 1) Build eligible-surface list (respect sgroupbit and visibility) -----
-  int *eflag,*slist;
-  int nsurf = 0;
-
-  memory->create(eflag,ntotal,"plasma/fields/file:eflag");
-  memory->create(slist,ntotal,"plasma/fields/file:slist");
-
-  if (dim == 2) {
-    for (i = 0; i < ntotal; i++) {
-      eflag[i] = 0;
-      if (!(lines[i].mask & sgroupbit)) continue;
-      if (MathExtra::dot3(lines[i].norm,sdir) <= 0.0) { // “visible” side
-        eflag[i] = 1;
-        slist[nsurf++] = i;           // store ARRAY INDEX m
-      }
-    }
-  } else {
-    for (i = 0; i < ntotal; i++) {
-      eflag[i] = 0;
-      if (!(tris[i].mask & sgroupbit)) continue;
-      if (MathExtra::dot3(tris[i].norm,sdir) <= 0.0) {
-        eflag[i] = 1;
-        slist[nsurf++] = i;           // store ARRAY INDEX m
-      }
-    }
-  }
-
-  // --- 2) Precompute eligible surface "centers" (for visibility prefilter) ---
-  const double invthird = 1.0/3.0;
-  double **sctr;
-  memory->create(sctr,nsurf,3,"plasma/fields:sctr");
-  for (i = 0; i < nsurf; i++) {
-    m = slist[i];
-    if (dim == 2) {
-      p1 = lines[m].p1; p2 = lines[m].p2;
-      sctr[i][0] = 0.5*(p1[0]+p2[0]);
-      sctr[i][1] = 0.5*(p1[1]+p2[1]);
-      sctr[i][2] = 0.0;
-    } else {
-      p1 = tris[m].p1; p2 = tris[m].p2; p3 = tris[m].p3;
-      sctr[i][0] = invthird*(p1[0]+p2[0]+p3[0]);
-      sctr[i][1] = invthird*(p1[1]+p2[1]+p3[1]);
-      sctr[i][2] = invthird*(p1[2]+p2[2]+p3[2]);
-    }
-  }
-
   Grid::ChildCell *cells = grid->cells;
   Grid::ChildInfo *cinfo = grid->cinfo;
   Grid::SplitInfo *sinfo = grid->sinfo;
-
+  
   // --- 3) Loop over cells -----------------------------------------------------
   for (int icell = 0; icell < nglocal; icell++) {
     if (!(cinfo[icell].mask & groupbit)) continue;
     if (cells[icell].nsplit < 1) continue;
 
-    // Base fields (global files if present)
-
     // --- Base fields from file (self-contained map) --------------------------
-    PlasmaFileParams P = {};
-    auto it = plasma_map.find(icell);
-    if (it != plasma_map.end()) P = it->second;
+    // PlasmaFileParams P = {};
+    // auto it = plasma_map.find(icell);
+    // if (it != plasma_map.end()) P = it->second;
+
+    const PlasmaFileParams &P = plasma_arr[icell];
 
     const double Ti = P.temp_i;                    // eV
     const double Te = P.temp_e;                    // eV
@@ -275,30 +317,42 @@ void ComputePlasmaFieldsFile::compute_per_grid()
     double grad_ti_t = P.grad_temp_i_t;
     double grad_ti_z = P.grad_temp_i_z;
 
+    // MagneticFieldFileDataParams B = {};
+    // auto itb = magnetic_map.find(icell);
+    // if (itb != magnetic_map.end()) B = itb->second;
+    const MagneticFieldFileDataParams &B = mag_arr[icell];
 
-   // Magnetic field is NOT in the file (per your note) → hard-set to zero
-   MagneticFieldFileDataParams B = {};
-    auto itb = magnetic_map.find(icell);
-    if (itb != magnetic_map.end()) B = itb->second;
     const double Bx = B.br;    // T
     const double By = B.bt;    // T
     const double Bz = B.bz;    // T
+    // printf("Cell %d: B = (%g, %g, %g) T\n", icell, Bx, By, Bz);
+    // PRINT NE AND TE FOR DEBUG
+    // GET position x,y,z of cell center
+
 
     // Electric field will be set by the sheath model; default to zero
     double Ex = 0.0, Ey = 0.0, Ez = 0.0;
-    
-    double nesheath = 0; // have_nesheathconst ? nesheathconst : 0.0;
+    double nesheath = 0.0;
 
     // --- 3a) Quick overlap branch: any eligible face exactly in this cell ----
-    // If overlap: set dist=0, SURFID to some eligible touching face, ZERO E, propagate
     int found = -1; // ARRAY INDEX into lines[]/tris[]
+
     if (cells[icell].nsurf) {
       n = cells[icell].nsurf;
       csurfs = cells[icell].csurfs;
+
       for (i = 0; i < n; i++) {
-        m = csurfs[i];                // ARRAY index
-        if (eflag[m]) { found = m; break; }  // first eligible touching face is fine
+        m = csurfs[i];  // ARRAY index into lines[]/tris[]
+        // check if this surface is in the precomputed eligible list slist[]
+        for (int is = 0; is < nsurf; ++is) {
+          if (slist[is] == m) {
+            found = m;
+            break;
+          }
+        }
+        if (found >= 0) break;
       }
+
       if (found >= 0) {
         const int sid = (dim == 2) ? lines[found].id : tris[found].id;
 
@@ -355,7 +409,8 @@ void ComputePlasmaFieldsFile::compute_per_grid()
     int closest_surf_id  = -1; // user-visible ID → for output
 
     for (i = 0; i < nsurf; i++) {
-      m = slist[i]; // ARRAY index
+      m = slist[i]; // ARRAY index into lines[]/tris[]
+
       // cheap back-side reject using center-to-center vector
       cell2surf[0] = sctr[i][0] - cctr[0];
       cell2surf[1] = sctr[i][1] - cctr[1];
@@ -378,13 +433,13 @@ void ComputePlasmaFieldsFile::compute_per_grid()
     }
 
     // --- 3d) Sheath model inputs & guards ------------------------------------
-    // Physical files
-    const double q_e  = update->echarge;     // 1.602e-19 C
-    const double eps0 = update->epsilon_0;   // 8.854e-12 F/m
+    const double q_e  = update->echarge;
+    const double eps0 = update->epsilon_0;
 
-    constexpr double NE_FLOOR_FOR_LD = 1e10;                  // pick your floor
+    constexpr double NE_FLOOR_FOR_LD = 1e10;
     const double ne_for_lambda = std::max(ne, NE_FLOOR_FOR_LD);
-    double lambda_D_m = (Te > 0.0) ? std::sqrt( (eps0 * Te) / (ne_for_lambda * q_e) ) : 0.0;
+    double lambda_D_m = (Te > 0.0) ?
+      std::sqrt( (eps0 * Te) / (ne_for_lambda * q_e) ) : 0.0;
 
     // write mindist & surfid regardless (already defaulted above)
     for (int iv = 0; iv < nvalue; ++iv) {
@@ -394,8 +449,6 @@ void ComputePlasmaFieldsFile::compute_per_grid()
 
     // If no valid neighbor or invalid plasma inputs: zero E and finalize
     if (closest_surf_idx < 0 || lambda_D_m <= 0.0 || !(mindist < BIG)) {
-      // Ex = Ey = Ez = 0.0;
-      // write remaining fields
       for (int iv = 0; iv < nvalue; ++iv) {
         switch (value[iv]) {
           case BX: vals[icell][iv] = Bx; break;
@@ -422,13 +475,12 @@ void ComputePlasmaFieldsFile::compute_per_grid()
       continue;
     }
 
-   // print icell and te 
-  //  printf("icell=%d te=%g ne=%g mindist=%g\n", icell, Te, ne, mindist); 
-    // distance in Debye lengths
-    const double QE   = 1.602176634e-19;      // C
-    const double KB   = 1.380649e-23;         // J/K
-    const double MP   = 1.67262192369e-27;    // kg
-    const double MI_D = 2.0 * MP;             // deuteron mass [kg]
+    // distance in meters (sheath model expects >= 0)
+    const double QE   = 1.602176634e-19;
+    const double KB   = 1.380649e-23;
+    const double MP   = 1.67262192369e-27;
+    const double MI_D = 2.0 * MP;
+
     double normal[3];
     if (dim == 2) {
       normal[0] = lines[closest_surf_idx].norm[0];
@@ -443,22 +495,40 @@ void ComputePlasmaFieldsFile::compute_per_grid()
     // grazing angle α (deg): α = 90° - angle(B,n)
     const double B_mag = sqrt(Bx*Bx + By*By + Bz*Bz);
     double alpha_deg = 0.0;
+    double theta_deg = 0.0;  // angle(B,n)
     if (B_mag > 0.0) {
       double cos_theta = (Bx*normal[0] + By*normal[1] + Bz*normal[2]) / B_mag;
+      cos_theta = fabs(cos_theta);
       cos_theta = max(-1.0, min(1.0, cos_theta));
-      alpha_deg = 90.0 - std::acos(cos_theta) * 180.0/M_PI;
+      
+      double theta = std::acos(cos_theta);        // radians
+      theta_deg = theta * 180.0 / M_PI;
+
+      alpha_deg = 90.0 - fabs(theta_deg);
       if (alpha_deg < 0.0) alpha_deg = 0.0;
     }
-    
-  const double d_m      = std::max(0.0, mindist);
-  const SheathParams S = eval_ds_mps(d_m, Te, Ti, ne, B_mag, alpha_deg, MI_D);
-  // store sheath density for chemistry/output
-  nesheath = S.ne;
 
-  // project field along -normal so ions accelerate toward the wall
-  // double Ex, Ey, Ez;
-  field_vector_along_minus_n(S, normal, Ex, Ey, Ez);
-  double Emag = S.E_mag;
+    const double d_m = std::max(0.0, mindist);
+    const SheathParams S = eval_ds_mps(d_m, Te, Ti, ne, B_mag, alpha_deg, MI_D);
+
+    nesheath = S.ne;
+    field_vector_along_minus_n(S, normal, Ex, Ey, Ez);
+    double Emag = S.E_mag; // currently unused here, but you keep it if needed
+
+        // DEBUG: print a few cells near the wall
+    // static int debug_count = 0;
+    // if (debug_count < 50 && closest_surf_id > 0 && mindist < 5e-3) {
+    //   printf("DEBUG icell=%d surfid=%d\n", icell, closest_surf_id);
+    //   printf("  cctr=(%g,%g,%g), mindist=%g\n", cctr[0], cctr[1], cctr[2], mindist);
+    //   printf("  B=(%g,%g,%g) |B|=%g\n", Bx, By, Bz, B_mag);
+    //   printf("  n=(%g,%g,%g)\n", normal[0], normal[1], normal[2]);
+    //   printf("  theta(B,n)=%g deg, alpha_deg=%g deg\n", theta_deg, alpha_deg);
+    //   printf("  Te=%g eV, ne=%g m^-3\n", Te, ne);
+    //   printf("  E_sheath=(%g,%g,%g) V/m, |E|=%g V/m\n", Ex, Ey, Ez, Emag);
+    //   debug_count++;
+    // }
+
+
 
     // --- 3e) Write all requested outputs for this cell -----------------------
     for (int iv = 0; iv < nvalue; ++iv) {
@@ -474,7 +544,7 @@ void ComputePlasmaFieldsFile::compute_per_grid()
         case NI:        vals[icell][iv] = ni; break;
         case NE:        vals[icell][iv] = ne; break;
         case PARRFLOW:  vals[icell][iv] = parrflow; break;
-        case NESHEATH: vals[icell][iv] = nesheath; break;
+        case NESHEATH:  vals[icell][iv] = nesheath; break;
         case GRAD_TE_R: vals[icell][iv] = grad_te_r; break;
         case GRAD_TE_T: vals[icell][iv] = grad_te_t; break;
         case GRAD_TE_Z: vals[icell][iv] = grad_te_z; break;
@@ -487,11 +557,8 @@ void ComputePlasmaFieldsFile::compute_per_grid()
     }
   } // end cell loop
 
-  // --- 4) Clean up -----------------------------------------------------------
-  memory->destroy(eflag);
-  memory->destroy(slist);
-  memory->destroy(sctr);
 }
+
 
 /* ----------------------------------------------------------------------
    reallocate vector if nglocal has changed
@@ -522,17 +589,6 @@ bigint ComputePlasmaFieldsFile::memory_usage()
 
 
 
-int ComputePlasmaFieldsFile::query_tally_grid(int index, double **&array, int *&cols)
-{
-  index--;
-  int ivalue = index % nvalue;
-
-  array = vals;            // <-- IMPORTANT: give SPARTA the data source
-  cols  = map[ivalue];     // pick the column for this output
-  return nmap[ivalue];     // (# inputs per output col, here 1)
-}
-
-
 void ComputePlasmaFieldsFile::
 post_process_grid(int index, int nsample,
                   double **etally, int *emap, double *vec, int nstride)
@@ -554,34 +610,57 @@ post_process_grid(int index, int nsample,
 
 
 
+int ComputePlasmaFieldsFile::query_tally_grid(int index, double **&array, int *&cols)
+{
+  index--;
+  int ivalue = index % nvalue;
 
+  array = vals;            // <-- IMPORTANT: give SPARTA the data source
+  cols  = map[ivalue];     // pick the column for this output
+  return nmap[ivalue];     // (# inputs per output col, here 1)
+}
 
 // / core evaluator
 SheathParams ComputePlasmaFieldsFile::eval_ds_mps(double d_m,        // distance from wall (m), d >= 0
-                       double Te_eV,      // electron temperature (eV)
-                       double Ti_eV,      // ion temperature (eV)
-                       double ne0_m3,     // upstream electron density (m^-3)
-                       double B_T,        // magnetic field magnitude (T)
-                       double alpha_deg,  // grazing angle in degrees
-                       double mi_kg) // ion mass (kg)
+                                                  double Te_eV,      // electron temperature (eV)
+                                                  double Ti_eV,      // ion temperature (eV)
+                                                  double ne0_m3,     // upstream electron density (m^-3)
+                                                  double B_T,        // magnetic field magnitude (T)
+                                                  double alpha_deg,  // grazing angle in degrees
+                                                  double mi_kg)      // ion mass (kg)
 {
+  constexpr double QE   = 1.602176634e-19;   // C
+  constexpr double EPS0 = 8.8541878128e-12;  // F/m
+  constexpr double MP   = 1.67262192369e-27; // kg
 
-   constexpr double QE   = 1.602176634e-19;     // C
-   constexpr double EPS0 = 8.8541878128e-12;    // F/m
-   constexpr double MP   = 1.67262192369e-27;   // kg
+  // You can tune these two numbers:
+  constexpr double NE_MIN_SHEATH = 1e16;   // below this: treat as "no sheath"
+  constexpr double NE_FLOOR_LD   = 1e16;   // floor used inside lambda_D
+  constexpr double MIN_EXP_WEIGHT = 1e-8;  // below this, field is negligible
 
   double pot_mult = 3.0;
-  SheathParams sheathParams{0.0, 0.0, ne0_m3};
+  SheathParams S{0.0, 0.0, ne0_m3};
 
-  // basic guards
   if (d_m < 0.0) d_m = 0.0;
-  if (Te_eV <= 0.0 || ne0_m3 <= 0.0 || mi_kg <= 0.0) return sheathParams;
+  if (Te_eV <= 0.0 || ne0_m3 <= 0.0 || mi_kg <= 0.0) {
+    // invalid inputs -> no sheath, already zeroed
+    return S;
+  }
 
-  const double fd = fd_poly_deg(alpha_deg);
+  // If the density is basically vacuum, don't even bother: no sheath
+  if (ne0_m3 < NE_MIN_SHEATH) {
+    // phi = 0, E = 0, ne stays = ne0_m3
+    return S;
+  }
+
+  // Use a density floor inside lambda_D, so it doesn't blow up
+  double ne_eff = std::max(ne0_m3, NE_FLOOR_LD);
+
+  const double fd  = fd_poly_deg(alpha_deg);
   const double pot = pot_mult * Te_eV; // volts (1 eV ≡ 1 V)
 
-  // Debye length (Te in eV): lambdaD = sqrt( EPS0 * Te / (ne0 * QE) )
-  const double lambdaD = std::sqrt(EPS0 * Te_eV / (ne0_m3 * QE));
+  // Debye length with floored density
+  const double lambdaD = std::sqrt(EPS0 * Te_eV / (ne_eff * QE));
 
   // ion-sound speed and ion gyro radius
   const double cs       = std::sqrt(std::max(Te_eV + Ti_eV, 0.0) * QE / mi_kg);
@@ -589,27 +668,42 @@ SheathParams ComputePlasmaFieldsFile::eval_ds_mps(double d_m,        // distance
   const double rho_i    = (omega_ci > 0.0) ? (cs / omega_ci) : 1e300; // large if B=0
   const double L_MPS    = rho_i;
 
-  // exponentials (avoid overflow)
-  const double e_DS  = std::exp(- d_m / (2.0 * lambdaD));
-  const double e_MPS = std::exp(- d_m / std::max(L_MPS, 1e-300));
+  // arguments for exponentials
+  double arg_DS  = - d_m / (2.0 * lambdaD);
+  double arg_MPS = - d_m / std::max(L_MPS, 1e-12);
+
+  // clamp them so we don't underflow to crazy tiny numbers
+  const double ARG_MIN = -50.0;  // e^-50 ~ 2e-22, already negligible
+  if (arg_DS  < ARG_MIN) arg_DS  = ARG_MIN;
+  if (arg_MPS < ARG_MIN) arg_MPS = ARG_MIN;
+
+  const double e_DS  = std::exp(arg_DS);
+  const double e_MPS = std::exp(arg_MPS);
+
+  // If both weights are tiny, just call it zero field
+  if (e_DS < MIN_EXP_WEIGHT && e_MPS < MIN_EXP_WEIGHT) {
+    // phi = 0, E = 0, ne ~ ne0
+    S.ne = ne0_m3;
+    return S;
+  }
 
   // potential (negative toward the wall)
   const double phi = - pot * ( fd * e_DS + (1.0 - fd) * e_MPS );
 
   // field magnitude (positive)
   const double E_DS  =  pot * ( fd / (2.0 * lambdaD) ) * e_DS;
-  const double E_MPS =  pot * ( (1.0 - fd) / std::max(L_MPS, 1e-300) ) * e_MPS;
-  const double E_mag =  std::abs(E_DS + E_MPS);
+  const double E_MPS =  pot * ( (1.0 - fd) / std::max(L_MPS, 1e-12) ) * e_MPS;
+  const double E_mag = std::abs(E_DS + E_MPS);
 
-  // Boltzmann electrons (clamp exponent for safety)
-  double x = phi / std::max(Te_eV, 1e-300);
+  // Boltzmann electrons for ne(d)
+  double x = phi / std::max(Te_eV, 1e-3); // avoid division by tiny Te
   x = std::max(-100.0, std::min(50.0, x));
   const double ne = ne0_m3 * std::exp(x);
 
-  sheathParams.phi   = phi;
-  sheathParams.E_mag = E_mag;
-  sheathParams.ne    = ne;
-  return sheathParams;
+  S.phi   = phi;
+  S.E_mag = E_mag;
+  S.ne    = ne;
+  return S;
 }
 
 // Project the field along -n so ions accelerate toward the wall
@@ -712,7 +806,6 @@ PlasmaFileData ComputePlasmaFieldsFile::readPlasmaFileData(const std::string& fi
         throw;
     }
 
-    printf("Finished reading plasma data from file: %s\n", filePath.c_str());
     return data;
 }
 
@@ -825,165 +918,246 @@ void ComputePlasmaFieldsFile::broadcastMagneticData(MagneticFieldFileData& data)
   broadcast2DVector(data.bz);
 }
 
-// bilinearInterpolationMagneticField
-/*--------------------------------- 
-  Bilinear interpolation plasma
------------------------------------*/
+/*----------------------------------------------------------------------
+   bilinear interpolation of plasma data at cell center
+------------------------------------------------------------------------- */
 
-PlasmaFileParams ComputePlasmaFieldsFile::bilinearInterpolationPlasma(int icell, const PlasmaFileData& data) {
-    // Check cache
-    auto it = plasmaDataCache.find(icell);
-    if (it != plasmaDataCache.end()) return it->second;
+PlasmaFileParams ComputePlasmaFieldsFile::bilinearInterpolationPlasma(
+    int icell, const PlasmaFileData &data)
+{
+  PlasmaFileParams P{};  // default all zeros
 
-    // Validate coordinate arrays
-    if (data.r.empty() || data.z.empty()) {
-        throw std::runtime_error("Plasma data coordinate arrays are empty.");
-    }
+  const int dim = domain->dimension;
+  if (data.r.empty() || data.z.empty()) return P;
 
-    const auto& r_vals = data.r;
-    const auto& z_vals = data.z;
+  // --- 1) cell center in Cartesian ------------------------------------------
+    Grid::ChildCell *cell = &grid->cells[icell];
+  double x = 0.5 * (cell->lo[0] + cell->hi[0]);
+  double y = 0.5 * (cell->lo[1] + cell->hi[1]);
+  double zc = (dim == 3)
+              ? 0.5 * (cell->lo[2] + cell->hi[2])
+              : 0.5 * (cell->lo[1] + cell->hi[1]);
 
-    // Get cell midpoint
-    Grid::ChildCell* cell = &grid->cells[icell];
-    double r = 0.5 * (cell->lo[0] + cell->hi[0]);
-    double z = 0.5 * (cell->lo[1] + cell->hi[1]);
+  // center of the plasma column in the box (works for your -0.01..0.15 box)
+  const double x0 = 0.5 * (domain->boxlo[0] + domain->boxhi[0]);
+  const double y0 = 0.5 * (domain->boxlo[1] + domain->boxhi[1]);
 
-    // Out-of-bounds check
-    if (r < r_vals.front() || r > r_vals.back() || z < z_vals.front() || z > z_vals.back()) {
-        return PlasmaFileParams{}; // return zeroed struct
-    }
 
-    // Locate surrounding grid indices
-    auto r_it = std::lower_bound(r_vals.begin(), r_vals.end(), r);
-    auto z_it = std::lower_bound(z_vals.begin(), z_vals.end(), z);
-    int r1 = std::max(0, static_cast<int>(r_it - r_vals.begin()) - 1);
-    int r2 = std::min(static_cast<int>(r_vals.size()) - 1, r1 + 1);
-    int z1 = std::max(0, static_cast<int>(z_it - z_vals.begin()) - 1);
-    int z2 = std::min(static_cast<int>(z_vals.size()) - 1, z1 + 1);
+  double r, z;
+  if (dim == 2) {
+    r = x;          // in 2D you may already be using (r,z) directly
+    z = y;
+  } else {
+    double dx = x- x0;
+    double dy = y- y0;
+    r = std::sqrt(dx*dx + dy*dy);  // distance from axis
+    z = zc;
+  }
 
-    double R1 = r_vals[r1], R2 = r_vals[r2];
-    double Z1 = z_vals[z1], Z2 = z_vals[z2];
-    double denom = (R2 - R1) * (Z2 - Z1);
+  const std::vector<double> &r_vals = data.r;
+  const std::vector<double> &z_vals = data.z;
+  const int nr = r_vals.size();
+  const int nz = z_vals.size();
 
-    // Bilinear interpolation lambda
-    auto interp = [&](const std::vector<std::vector<double>>& field) -> double {
-        if (field.size() <= z2 || field[0].size() <= r2) return 0.0;
+  // --- 3) clamp (r,z) into table --------------------------------------------
+  double r_clamp = std::min(std::max(r, r_vals.front()), r_vals.back());
+  double z_clamp = std::min(std::max(z, z_vals.front()), z_vals.back());
 
-        double Q11 = field[z1][r1];
-        double Q21 = field[z1][r2];
-        double Q12 = field[z2][r1];
-        double Q22 = field[z2][r2];
 
-        if (denom == 0.0) return (Q11 + Q21 + Q12 + Q22) / 4.0;
+  // --- 4) find surrounding indices safely -----------------------------------
+  auto r_it = std::lower_bound(r_vals.begin(), r_vals.end(), r_clamp);
+  int ir2 = int(r_it - r_vals.begin());
+  if (ir2 <= 0)       ir2 = 1;
+  if (ir2 >= nr)      ir2 = nr - 1;
+  int ir1 = ir2 - 1;
 
-        return (
-            Q11 * (R2 - r) * (Z2 - z) +
-            Q21 * (r - R1) * (Z2 - z) +
-            Q12 * (R2 - r) * (z - Z1) +
-            Q22 * (r - R1) * (z - Z1)
-        ) / denom;
-    };
+  auto z_it = std::lower_bound(z_vals.begin(), z_vals.end(), z_clamp);
+  int iz2 = int(z_it - z_vals.begin());
+  if (iz2 <= 0)       iz2 = 1;
+  if (iz2 >= nz)      iz2 = nz - 1;
+  int iz1 = iz2 - 1;
 
-    // Fill and cache interpolated values
-    PlasmaFileParams result;
-    result.dens_e        = interp(data.dens_e);
-    result.temp_e        = interp(data.temp_e);
-    result.dens_i        = interp(data.dens_i);
-    result.temp_i        = interp(data.temp_i);
-    result.parr_flow     = interp(data.parr_flow);
-    result.parr_flow_r   = interp(data.parr_flow_r);
-    result.parr_flow_t   = interp(data.parr_flow_t);
-    result.parr_flow_z   = interp(data.parr_flow_z);
-    result.grad_temp_e_r = interp(data.grad_temp_e_r);
-    result.grad_temp_e_t = interp(data.grad_temp_e_t);
-    result.grad_temp_e_z = interp(data.grad_temp_e_z);
-    result.grad_temp_i_r = interp(data.grad_temp_i_r);
-    result.grad_temp_i_t = interp(data.grad_temp_i_t);
-    result.grad_temp_i_z = interp(data.grad_temp_i_z);
+  double R1 = r_vals[ir1], R2 = r_vals[ir2];
+  double Z1 = z_vals[iz1], Z2 = z_vals[iz2];
 
-    plasmaDataCache[icell] = result;
-    return result;
+  double denomR = (R2 - R1);
+  double denomZ = (Z2 - Z1);
+  if (denomR == 0.0 || denomZ == 0.0) {
+    // degenerate cell, just pick one node
+    double tE = data.temp_e[iz1][ir1];
+    double nE = data.dens_e[iz1][ir1];
+    double tI = data.temp_i[iz1][ir1];
+    double nI = data.dens_i[iz1][ir1];
+    double uE = data.parr_flow[iz1][ir1];
+    double gte_r = data.grad_temp_e_r[iz1][ir1];
+    double gte_t = data.grad_temp_e_t[iz1][ir1];
+    double gte_z = data.grad_temp_e_z[iz1][ir1];
+    double gti_r = data.grad_temp_i_r[iz1][ir1];
+    double gti_t = data.grad_temp_i_t[iz1][ir1];
+    double gti_z = data.grad_temp_i_z[iz1][ir1];
+    P.temp_e = tE;
+    P.dens_e = nE;
+    P.temp_i = tI;
+    P.dens_i = nI;
+    P.parr_flow = uE;
+    P.grad_temp_e_r = gte_r;
+    P.grad_temp_e_t = gte_t;
+    P.grad_temp_e_z = gte_z;
+    P.grad_temp_i_r = gti_r;
+    P.grad_temp_i_t = gti_t;
+    P.grad_temp_i_z = gti_z;
+
+    
+    return P;
+  }
+
+  double t = (r_clamp - R1) / denomR;  // ∈ [0,1]
+  double u = (z_clamp - Z1) / denomZ;  // ∈ [0,1]
+
+  auto bilinear = [&](const std::vector<std::vector<double>> &field) -> double {
+    const double Q11 = field[iz1][ir1];
+    const double Q21 = field[iz1][ir2];
+    const double Q12 = field[iz2][ir1];
+    const double Q22 = field[iz2][ir2];
+
+    return (1-t)*(1-u)*Q11 +
+           t    *(1-u)*Q21 +
+           (1-t)*u    *Q12 +
+           t    *u    *Q22;
+  };
+
+  // --- 5) fill all plasma parameters -----------------------------------------
+  P.temp_e = bilinear(data.temp_e);
+  P.dens_e = bilinear(data.dens_e);
+  P.temp_i = bilinear(data.temp_i);
+  P.dens_i = bilinear(data.dens_i);
+
+  P.grad_temp_e_r = bilinear(data.grad_temp_e_r);
+  P.grad_temp_e_t = bilinear(data.grad_temp_e_t);
+  P.grad_temp_e_z = bilinear(data.grad_temp_e_z);
+  P.grad_temp_i_r = bilinear(data.grad_temp_i_r);
+  P.grad_temp_i_t = bilinear(data.grad_temp_i_t);
+  P.grad_temp_i_z = bilinear(data.grad_temp_i_z);
+  P.parr_flow_r   = bilinear(data.parr_flow_r);
+  P.parr_flow_t   = bilinear(data.parr_flow_t);
+  P.parr_flow_z   = bilinear(data.parr_flow_z);
+
+  P.parr_flow     = bilinear(data.parr_flow);
+
+  return P;
 }
+
 
 /*---------------------------------
   Bilinear interpolation plasma
 -----------------------------------*/
-MagneticFieldFileDataParams ComputePlasmaFieldsFile::bilinearInterpolationMagneticField(int icell, const MagneticFieldFileData& data) {
-   // Check if the result is already cached
-   auto cache_it = magneticFieldDataCache.find(icell);
-   if (cache_it != magneticFieldDataCache.end()) {
-       return cache_it->second;
-   }
 
-   if (data.r.empty() || data.z.empty()) {
-       printf("Data arrays are empty.\n");
-       throw std::runtime_error("Data arrays are empty.");
-   }
+MagneticFieldFileDataParams
+ComputePlasmaFieldsFile::bilinearInterpolationMagneticField(
+    int icell, const MagneticFieldFileData &data)
+{
+  // --- 0) default + cache check ----------------------------------------------
+  MagneticFieldFileDataParams B{};  // all zeros
 
-   const std::vector<double>& r_values = data.r;
-   const std::vector<double>& z_values = data.z;
+  // cached?
+  auto cache_it = magneticFieldDataCache.find(icell);
+  if (cache_it != magneticFieldDataCache.end()) {
+    return cache_it->second;
+  }
 
-   // Access cell and calculate midpoints
-   Grid::ChildCell* cell = &grid->cells[icell];
-   double r_val = 0.5 * (cell->lo[0] + cell->hi[0]);
-   double z_val = 0.5 * (cell->lo[1] + cell->hi[1]);
+  const int dim = domain->dimension;
+  if (data.r.empty() || data.z.empty()) {
+    return B;
+  }
 
-   // Ensure r and z are within the data bounds
-   if (r_val < r_values.front() || r_val > r_values.back() ||
-       z_val < z_values.front() || z_val > z_values.back()) {
-       // printf("Interpolation point (r_val: %f, z_val: %f) is outside the bounds of the data grid.\n", r_val, z_val);
-       MagneticFieldFileDataParams params = {};
-       return params;
-   }
+  // --- 1) cell center in Cartesian ------------------------------------------
+  Grid::ChildCell *cell = &grid->cells[icell];
 
+  double x = 0.5 * (cell->lo[0] + cell->hi[0]);
+  double y = 0.5 * (cell->lo[1] + cell->hi[1]);
+  double zc = (dim == 3)
+              ? 0.5 * (cell->lo[2] + cell->hi[2])
+              : 0.5 * (cell->lo[1] + cell->hi[1]);
 
-    // Locate indices for surrounding grid points
-    auto r_it = std::lower_bound(r_values.begin(), r_values.end(), r_val);
-    auto z_it = std::lower_bound(z_values.begin(), z_values.end(), z_val);
+  // same plasma-axis definition as in bilinearInterpolationPlasma
+  const double x0 = 0.5 * (domain->boxlo[0] + domain->boxhi[0]);
+  const double y0 = 0.5 * (domain->boxlo[1] + domain->boxhi[1]);
 
-    int r1_idx = std::max(0, int(r_it - r_values.begin()) - 1);
-    int r2_idx = std::min(int(r_values.size()) - 1, r1_idx + 1);
-    int z1_idx = std::max(0, int(z_it - z_values.begin()) - 1);
-    int z2_idx = std::min(int(z_values.size()) - 1, z1_idx + 1);
+  // --- 2) cylindrical (R,Z) --------------------------------------------------
+  double r, z;
+  if (dim == 2) {
+    r = x;      // 2D: assume x=r, y=z
+    z = y;
+  } else {
+    double dx = x - x0;
+    double dy = y - y0;
+    r = std::sqrt(dx*dx + dy*dy);  // distance from axis
+    z = zc;
+  }
 
-    // Get surrounding grid values
-    double r1 = r_values[r1_idx];
-    double r2 = r_values[r2_idx];
-    double z1 = z_values[z1_idx];
-    double z2 = z_values[z2_idx];
+  const std::vector<double> &r_vals = data.r;
+  const std::vector<double> &z_vals = data.z;
+  const int nr = r_vals.size();
+  const int nz = z_vals.size();
 
-    // Lambda for bilinear interpolation
-    auto bilinearInterpolation = [&](const std::vector<std::vector<double>>& field) -> double {
-        double Q11 = field[z1_idx][r1_idx];
-        double Q12 = field[z2_idx][r1_idx];
-        double Q21 = field[z1_idx][r2_idx];
-        double Q22 = field[z2_idx][r2_idx];
-        double denom = (r2 - r1) * (z2 - z1);
+  // --- 3) clamp (r,z) into table --------------------------------------------
+  double r_clamp = std::min(std::max(r, r_vals.front()), r_vals.back());
+  double z_clamp = std::min(std::max(z, z_vals.front()), z_vals.back());
 
-        // Check for zero denominators
-        if (denom == 0.0) {
-            return (Q11 + Q12 + Q21 + Q22) / 4.0;
-        }
+  // --- 4) find surrounding indices safely -----------------------------------
+  auto r_it = std::lower_bound(r_vals.begin(), r_vals.end(), r_clamp);
+  int ir2 = int(r_it - r_vals.begin());
+  if (ir2 <= 0)   ir2 = 1;
+  if (ir2 >= nr)  ir2 = nr - 1;
+  int ir1 = ir2 - 1;
 
-        return (Q11 * (r2 - r_val) * (z2 - z_val) +
-                Q21 * (r_val - r1) * (z2 - z_val) +
-                Q12 * (r2 - r_val) * (z_val - z1) +
-                Q22 * (r_val - r1) * (z_val - z1)) / denom;
-    };
+  auto z_it = std::lower_bound(z_vals.begin(), z_vals.end(), z_clamp);
+  int iz2 = int(z_it - z_vals.begin());
+  if (iz2 <= 0)   iz2 = 1;
+  if (iz2 >= nz)  iz2 = nz - 1;
+  int iz1 = iz2 - 1;
 
+  double R1 = r_vals[ir1], R2 = r_vals[ir2];
+  double Z1 = z_vals[iz1], Z2 = z_vals[iz2];
 
-   // pusher_Bororm bilinear interpolation for each field component
-    MagneticFieldFileDataParams params;
-    params.br = bilinearInterpolation(data.br);
-    params.bt = bilinearInterpolation(data.bt);
-    params.bz = bilinearInterpolation(data.bz);
+  double denomR = (R2 - R1);
+  double denomZ = (Z2 - Z1);
 
-  
- // Cache the result
-    magneticFieldDataCache[icell] = params;
+  // --- 5) handle degenerate cell (just pick one node) -----------------------
+  if (denomR == 0.0 || denomZ == 0.0) {
+    B.br = data.br[iz1][ir1];
+    B.bt = data.bt[iz1][ir1];
+    B.bz = data.bz[iz1][ir1];
+    magneticFieldDataCache[icell] = B;
+    return B;
+  }
 
-   return params;
+  double t = (r_clamp - R1) / denomR;  // ∈ [0,1]
+  double u = (z_clamp - Z1) / denomZ;  // ∈ [0,1]
+
+  auto bilinear = [&](const std::vector<std::vector<double>> &field) -> double {
+    const double Q11 = field[iz1][ir1];
+    const double Q21 = field[iz1][ir2];
+    const double Q12 = field[iz2][ir1];
+    const double Q22 = field[iz2][ir2];
+
+    return (1-t)*(1-u)*Q11 +
+           t    *(1-u)*Q21 +
+           (1-t)*u    *Q12 +
+           t    *u    *Q22;
+  };
+
+  // --- 6) fill B-field components -------------------------------------------
+  B.br = bilinear(data.br);
+  B.bt = bilinear(data.bt);
+  B.bz = bilinear(data.bz);
+
+  // cache and return
+  magneticFieldDataCache[icell] = B;
+  return B;
 }
+
+
 
 /* ----------------------------------------------------------------------
    read magnetic field data from file

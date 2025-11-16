@@ -9,36 +9,36 @@ https://github.com/ORNL-Fusion/OpenEdge
 
 #ifdef SURF_REACT_CLASS
 
-SurfReactStyle(prob,SurfReactProb)
+SurfReactStyle(mpex,SurfReactMpex)
 
 #else
 
-#ifndef SPARTA_SURF_REACT_Prob_H
-#define SPARTA_SURF_REACT_Prob_H
+#ifndef SPARTA_SURF_REACT_MPEX_H
+#define SPARTA_SURF_REACT_MPEX_H
 
 #include "surf_react.h"
 #include <vector> 
 
 namespace SPARTA_NS {
 
-struct ReactionProbabilities {
-    double reflection;
-    double sputtering;
-};
 
-class SurfReactProb : public SurfReact {
+class SurfReactMpex : public SurfReact {
  public:
-  SurfReactProb(class SPARTA *, int, char **);
-  SurfReactProb(class SPARTA *sparta) : SurfReact(sparta) {} // needed for Kokkos
-  virtual ~SurfReactProb();
+  SurfReactMpex(class SPARTA *, int, char **);
+  SurfReactMpex(class SPARTA *sparta) : SurfReact(sparta) {} // needed for Kokkos
+  virtual ~SurfReactMpex();
   virtual void init();
-  int react(Particle::OnePart *&, int, double *, Particle::OnePart *&, int &);
+  int react(Particle::OnePart *&ip,
+          int isurf,
+          double *norm,
+          Particle::OnePart *&jp,
+          int &velreset);
+
   char *reactionID(int);
   double reaction_coeff(int);
   int match_reactant(char *, int);
   int match_product(char *, int);
 
-  double sputtering_yield_sample(const std::vector<double>& yields);
 
   // reaction info, as read from file
 
@@ -55,34 +55,19 @@ class SurfReactProb : public SurfReact {
   };
 
    double random_energy_thompson(double , double );
-   double bohdansky_heavy_sputtering_yield(double , double , double , double , double , double );
-   double bohdansky_light_sputtering_yield(double , double , double , double , double , double );
-   double thomas_reflection(double , double , double , double , double , double );
-   double wierzbicki_biersack(double , double , double , double , double , double );
-   int findSpeciesID(double , double );
-   void get_probability_ref_sputter(Particle::OnePart *&);
-   ReactionProbabilities get_probability_sputter(Particle::OnePart *&);
 
-     inline double clamp(double x, double lo, double hi) { return std::max(lo, std::min(hi, x)); }
 
-// Linear interpolation on a sorted grid, clamped at the ends
-inline double interp1d_clamped(const double* xs, const double* ys, int n, double x) {
-    if (x <= xs[0]) return ys[0];
-    if (x >= xs[n-1]) return ys[n-1];
-    // find interval: xs[i] <= x < xs[i+1]
-    int i = 0, j = n - 1;
-    while (j - i > 1) {
-        int m = (i + j) / 2;
-        if (x >= xs[m]) i = m; else j = m;
-    }
-    double t = (x - xs[i]) / (xs[i+1] - xs[i]);
-    return ys[i] + t * (ys[i+1] - ys[i]);
-}
+    inline double clamp(double x, double lo, double hi) { return std::max(lo, std::min(hi, x)); }
 
-  double thomas_reflection(double Z1, double M1, double Z2, double M2,
-                                double energy_eV);
- double yamamura_yield_normal(double Z1, double m1, double Z2, double m2,
-                                    double energy_eV);
+
+    // helper for analytic Te(r) [eV]
+  static inline double Te_profile(double x, double y)
+  {
+    const double R0 = 0.02;  // 2 cm
+    double r = sqrt(x*x + y*y);
+    return 1.0 + 4.0 * exp( -pow(r / R0, 12.0) );
+  }
+
 
  protected:
   class RanKnuth *random;     // RNG for reaction probabilities

@@ -368,22 +368,13 @@ void ComputePlasmaFieldsConstant::compute_per_grid()
       }
     }
 
-    // --- 3d) Sheath model inputs & guards ------------------------------------
     // Physical constants
     const double q_e  = update->echarge;     // 1.602e-19 C
     const double eps0 = update->epsilon_0;   // 8.854e-12 F/m
 
-    // Debye length (Te in eV, ne in m^-3). Using eV→J with q_e in denominator:
-    // lambda_D = sqrt( eps0 * (Te*e) / (ne * e^2) ) = sqrt( eps0 * Te / (ne * e) )
-    // double lambda_D_m = 0.0;
-
     constexpr double NE_FLOOR_FOR_LD = 1e10;                  // pick your floor
     const double ne_for_lambda = std::max(ne, NE_FLOOR_FOR_LD);
     double lambda_D_m = (Te > 0.0) ? std::sqrt( (eps0 * Te) / (ne_for_lambda * q_e) ) : 0.0;
-
-
-    // if (ne > 0.0 && Te > 0.0) lambda_D_m = sqrt( (eps0 * Te) / (ne * q_e) );
-
 
     // write mindist & surfid regardless (already defaulted above)
     for (int iv = 0; iv < nvalue; ++iv) {

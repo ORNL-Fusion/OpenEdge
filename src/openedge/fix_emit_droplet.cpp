@@ -713,6 +713,7 @@ void FixEmitDroplet::perform_task_onepass()
             rn = random->uniform();
             p1 = &tasks[i].path[0];
             p2 = &tasks[i].path[3];
+            rn =0.5;
             x[0] = p1[0] + rn * (p2[0]-p1[0]);
             x[1] = p1[1] + rn * (p2[1]-p1[1]);
             x[2] = 0.0;
@@ -824,9 +825,15 @@ void FixEmitDroplet::perform_task_onepass()
           rn = random->uniform();
           p1 = &tasks[i].path[0];
           p2 = &tasks[i].path[3];
+          // get midpoint of line segment
+          double x1 = 0.5 * (p1[0] + p2[0]);
+          double x2 = 0.5 * (p1[1] + p2[1]);
+          // printf("Midpoint: x=%f y=%f\n",x1,x2);
+          rn=0.5;
           x[0] = p1[0] + rn * (p2[0]-p1[0]);
           x[1] = p1[1] + rn * (p2[1]-p1[1]);
           x[2] = 0.0;
+          // printf("Random point: x=%f y=%f\n",x[0],x[1]);
         } else {
           rn = random->uniform();
           ntri = tasks[i].npoint - 2;
@@ -864,26 +871,14 @@ void FixEmitDroplet::perform_task_onepass()
         else vnmag = beta_un*vscale[isp] + indot;
 
         theta = MY_2PI * random->uniform();
-        // vr = vscale[isp] * sqrt(-log(random->uniform()));
-        // vr = magVelocity; // * sqrt(-log(random->uniform()));
-        // double angle = incidentAngle * MY_PI / 180.0;
-        // printf("vr=%f\n",vr);
-        // printf("vstream=%f %f %f\n",vstream[0],vstream[1],vstream[2]);
-        // if (normalflag) {
-        //   vamag = vr * sin(theta);
-        //   vbmag = vr * cos(theta);
-        // } else {
-        //   vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
-        //   vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
-        // }
 
-
-         vr = magVelocity;             // total speed (>=0)
+        vr = magVelocity;             // total speed (>=0)
         const double ang = incidentAngle * MY_PI / 180.0; 
         vnmag = vr * cos(ang);
         const double vt = vr * sin(ang);
         vamag = vt * cos(theta);
         vbmag = vt * sin(theta);
+
 
         const double vs_n = MathExtra::dot3(vstream, normal);
         const double vs_a = MathExtra::dot3(vstream, atan);
@@ -1042,6 +1037,7 @@ void FixEmitDroplet::perform_task_twopass()
             rn = random->uniform();
             p1 = &tasks[i].path[0];
             p2 = &tasks[i].path[3];
+            rn =0.5;
             x[0] = p1[0] + rn * (p2[0]-p1[0]);
             x[1] = p1[1] + rn * (p2[1]-p1[1]);
             x[2] = 0.0;
@@ -1143,6 +1139,7 @@ void FixEmitDroplet::perform_task_twopass()
           rn = random->uniform();
           p1 = &tasks[i].path[0];
           p2 = &tasks[i].path[3];
+          rn = 0.5;
           x[0] = p1[0] + rn * (p2[0]-p1[0]);
           x[1] = p1[1] + rn * (p2[1]-p1[1]);
           x[2] = 0.0;

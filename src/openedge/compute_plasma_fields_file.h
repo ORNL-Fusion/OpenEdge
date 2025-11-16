@@ -95,15 +95,19 @@ void compute_dist_grid3(
 void compute_dist_grid(int icell, double& mindistance, double*& norm, int& surf_id, int& type_group, int& mask_group, double surf_center[3]) ;
 
 // set plasma data
-std::unordered_map<int, PlasmaFileParams> plasma_map;
+// std::unordered_map<int, PlasmaFileParams> plasma_map;
+PlasmaFileParams *plasma_arr;   // size = grid->nlocal
 std::unordered_map<int, PlasmaFileParams> plasmaDataCache;
+
 PlasmaFileData plasma_data;
 void broadcastPlasmaData(PlasmaFileData& data);
 PlasmaFileParams bilinearInterpolationPlasma(int icell, const PlasmaFileData& data) ;
 PlasmaFileData readPlasmaFileData(const std::string& path);
 
 // set magnetic field data
-std::unordered_map<int, MagneticFieldFileDataParams> magnetic_map;
+// std::unordered_map<int, MagneticFieldFileDataParams> magnetic_map;
+MagneticFieldFileDataParams *mag_arr;
+
 std::unordered_map<int, MagneticFieldFileDataParams> magneticFieldDataCache;
 MagneticFieldFileData magnetic_data;
 void initializeMagneticData();
@@ -112,6 +116,10 @@ MagneticFieldFileDataParams bilinearInterpolationMagneticField(int icell, const 
 MagneticFieldFileData readMagneticFieldFileData(const std::string& filePath);
 
 protected:
+
+  int    nsurf;   // number of eligible surfaces
+  int   *slist;   // array indices of eligible surfaces (into surf->lines/tris)
+  double **sctr;  // centers [nsurf][3] of those surfaces
 
 int nglocal,groupbit,sgroupbit;
 double sdir[3];
@@ -123,40 +131,12 @@ int *value;        // which outputs (enum)
 int *nmap;      // # of inputs per output col (always 1 here)
 int **map;      // map[index][0] = which source slot to use
 double **vals;        // [nglocal x nvalue] raw results per cell per keyword
-double bconst[3];
-double econst[3];
-double teconst;
-double ticonst;
-double niconst;
-double neconst;
-double parrflowconst;
-double exconst, eyconst, ezconst;
-double nesheathconst;
-int  have_bconst;     // 0/1: whether magnetic_field_constant was parsed
-int  have_econst;     // 0/1: whether electric_field_constant was parsed
-int  have_parrflowconst;
-int have_nesheathconst;
-int have_niconst;
-int have_teconst;
-int have_ticonst;
-int have_neconst;
-int  have_sheath;
-double alpha_const_deg, dwall_const;
 int query_tally_grid(int index, double **&array, int *&cols);
-void post_process_grid(int index, int nsample,
-                double **etally, int *emap, double *vec, int nstride);
-void sheathEfieldChoduraBrooks(
-    const double *B,
-    double Te_eV,
-    double Ti_eV,
-    double ne0_m3,
-    double alpha_deg,
-    double d_wall_m,
-    double V_DS,
-    double V_MPS,
-    double &E_mag_SI,
-    double &ne_m3);
 
+  void post_process_grid(int index, int nsample,
+                         double **etally, int *emap,
+                         double *vec, int nstride) override;
+                         
     // angle polynomial fd(α in deg) from GITRm
 inline double fd_poly_deg(double a_deg) {
   const double a = a_deg;
