@@ -1,0 +1,233 @@
+SPARTA-OPENEDGE (20 Jan 2025)
+Running on 1 MPI task(s)
+
+seed                12345
+dimension           2
+boundary            r r p
+global              gridcut 0.0 comm/sort no
+create_box          -50. 50 -50. 50.8 -0.05 0.05
+Created orthogonal box = (-50 -50 -0.05) to (50 50.8 0.05)
+
+create_grid         100 100 1
+Created 10000 child grid cells
+  CPU time = 0.000871 secs
+  create/ghost percent = 45.1206 54.8794
+balance_grid        rcb  cell
+Balance grid migrated 0 cells
+  CPU time = 0.000587 secs
+  reassign/sort/migrate/ghost percent = 21.4651 3.06644 10.2215 65.247
+
+############################################------species in the plasma (current and future)-------#####################################
+species droplet.species mist Li Li+ Li2+ Li3+
+
+
+mixture             LigamentSource  mist        frac 1.0 nrho 1
+variable pmass  particle mass
+
+#Load initial conditions
+read_particles source.1 0
+Read 1 particles out of 1
+  CPU time = 0.00038 secs
+
+variable dt   equal 1e-05
+variable time equal 2.
+variable N equal floor(${time}/${dt})
+variable N equal floor(2/${dt})
+variable N equal floor(2/1e-05)
+variable N1 equal floor($N/100)
+variable N1 equal floor(199999/100)
+
+variable min_dt equal 0.05
+variable nevery equal 1.5 #${min_dt}/${dt}
+variable temp equal 773.15 # Kelvin
+variable rd equal 50e-6 # m
+variable md equal 2.796017461694916e-10
+
+
+# compute evap and emit if necessary
+fix 22 evap 1 LigamentSource mass ${md} radius ${rd} temp ${temp} heatflux/constant 50e6
+fix 22 evap 1 LigamentSource mass 2.79601746169492e-10 radius ${rd} temp ${temp} heatflux/constant 50e6
+fix 22 evap 1 LigamentSource mass 2.79601746169492e-10 radius 5e-05 temp ${temp} heatflux/constant 50e6
+fix 22 evap 1 LigamentSource mass 2.79601746169492e-10 radius 5e-05 temp 773.15 heatflux/constant 50e6
+
+# viscous/gravity
+variable te grid "10"
+variable ni grid "1.5746e20"
+variable ti grid "10"
+variable vp grid "0"
+variable Br grid "0"
+variable Bt grid "0"
+variable Bz grid "0"
+fix BC viscous 1 2.0 1 plasma te ti ni vp bfield Br Bt Bz gravity 0 0 -9.8
+
+
+# save data
+dump 10 particle all ${N1} case.1 id type x y z vx vy vz v_pmass temp radius
+dump 10 particle all 1999 case.1 id type x y z vx vy vz v_pmass temp radius
+
+
+timestep ${dt}
+timestep 1e-05
+stats ${N1}
+stats 1999
+stats_style step cpu np
+
+run $N
+run 199999
+Memory usage per proc in Mbytes:
+  particles (ave,min,max) = 2.0625 2.0625 2.0625
+  grid      (ave,min,max) = 2.95129 2.95129 2.95129
+  surf      (ave,min,max) = 0 0 0
+  total     (ave,min,max) = 6.26379 6.26379 6.26379
+Step CPU Np 
+       0            0        1 
+    1999     0.727326        1 
+    3998     1.102972        1 
+    5997     1.476773        1 
+    7996     1.850129        1 
+    9995     2.222587        1 
+   11994     2.603303        1 
+   13993     2.976881        1 
+   15992     3.352391        1 
+   17991     3.729577        1 
+   19990     4.101244        1 
+   21989     4.473128        1 
+   23988     4.845138        1 
+   25987     5.219133        1 
+   27986     5.596575        1 
+   29985     5.968822        1 
+   31984     6.340838        1 
+   33983     6.712999        1 
+   35982      7.08486        1 
+   37981     7.456594        1 
+   39980     7.828623        1 
+   41979     8.200586        1 
+   43978     8.572625        1 
+   45977     8.949631        1 
+   47976      9.32168        1 
+   49975     9.693131        1 
+   51974    10.064779        1 
+   53973    10.436547        1 
+   55972    10.808071        1 
+   57971    11.179535        1 
+   59970    11.553538        1 
+   61969    11.925551        1 
+   63968    12.296893        1 
+   65967    12.668365        1 
+   67966    13.039754        1 
+   69965    13.411036        1 
+   71964     13.78241        1 
+   73963    14.154346        1 
+   75962    14.526085        1 
+   77961    14.899185        1 
+   79960    15.271022        1 
+   81959    15.642808        1 
+   83958    16.014384        1 
+   85957    16.386054        1 
+   87956    16.757508        1 
+   89955    17.129078        1 
+   91954    17.500316        1 
+   93953    17.871723        1 
+   95952     18.24336        1 
+   97951    18.615363        1 
+   99950    18.992051        1 
+  101949    19.364511        1 
+  103948    19.735773        1 
+  105947    20.107063        1 
+  107946    20.478815        1 
+  109945    20.850472        1 
+  111944    21.222393        1 
+  113943     21.60017        1 
+  115942    21.996179        1 
+  117941    22.370855        1 
+  119940    22.744462        1 
+  121939    23.117275        1 
+  123938     23.48928        1 
+  125937    23.861133        1 
+  127936    24.234789        1 
+  129935    24.612567        1 
+  131934    24.988231        1 
+  133933    25.362652        1 
+  135932    25.734715        1 
+  137931    26.106109        1 
+  139930    26.477127        1 
+  141929     26.84919        1 
+  143928    27.224219        1 
+  145927    27.601208        1 
+  147926    27.977268        1 
+  149925    28.349491        1 
+  151924    28.722033        1 
+  153923    29.095223        1 
+  155922    29.468706        1 
+  157921    29.841303        1 
+  159920    30.213647        1 
+  161919    30.586332        1 
+  163918    30.958524        1 
+  165917     31.33109        1 
+  167916    31.703696        1 
+  169915    32.077618        1 
+  171914    32.452147        1 
+  173913    32.825441        1 
+  175912    33.199352        1 
+  177911    33.586163        1 
+  179910    33.961446        1 
+  181909    34.333943        1 
+  183908    34.706865        1 
+  185907    35.079771        1 
+  187906    35.452398        1 
+  189905    35.825026        1 
+  191904    36.198086        1 
+  193903     36.57292        1 
+  195902    37.477714        1 
+  197901    38.187801        1 
+  199900      38.5603        1 
+  199999    38.578753        1 
+Loop time of 38.5788 on 1 procs for 199999 steps with 1 particles
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Move    | 0.014488   | 0.014488   | 0.014488   |   0.0 |  0.04
+Coll    | 0          | 0          | 0          |   0.0 |  0.00
+Sort    | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0.00959    | 0.00959    | 0.00959    |   0.0 |  0.02
+Modify  | 38.536     | 38.536     | 38.536     |   0.0 | 99.89
+Output  | 0.002865   | 0.002865   | 0.002865   |   0.0 |  0.01
+Other   |            | 0.01549    |            |       |  0.04
+
+Particle moves    = 199999 (0.2M)
+Cells touched     = 200008 (0.2M)
+Particle comms    = 0 (0K)
+Boundary collides = 0 (0K)
+Boundary exits    = 0 (0K)
+SurfColl checks   = 0 (0K)
+SurfColl occurs   = 0 (0K)
+Surf reactions    = 0 (0K)
+Collide attempts  = 0 (0K)
+Collide occurs    = 0 (0K)
+Reactions         = 0 (0K)
+Particles stuck   = 0
+Axisymm bad moves = 0
+
+Particle-moves/CPUsec/proc: 5184.17
+Particle-moves/step: 1
+Cell-touches/particle/step: 1.00005
+Particle comm iterations/step: 1
+Particle fraction communicated: 0
+Particle fraction colliding with boundary: 0
+Particle fraction exiting boundary: 0
+Surface-checks/particle/step: 0
+Surface-collisions/particle/step: 0
+Surf-reactions/particle/step: 0
+Collision-attempts/particle/step: 0
+Collisions/particle/step: 0
+Reactions/particle/step: 0
+
+Particles: 1 ave 1 max 1 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Cells:      10000 ave 10000 max 10000 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+GhostCell: 0 ave 0 max 0 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+EmptyCell: 0 ave 0 max 0 min
+Histogram: 1 0 0 0 0 0 0 0 0 0

@@ -1,0 +1,191 @@
+SPARTA-OPENEDGE (20 Jan 2025)
+Running on 1 MPI task(s)
+
+# set parameters
+variable dt   equal 1e-05
+variable time equal 1
+variable N equal  floor(${time}/${dt})
+variable N equal  floor(1/${dt})
+variable N equal  floor(1/1e-05)
+variable N1 equal floor($N/40000)
+variable N1 equal floor(99999/40000)
+
+
+variable temp equal 773.15 # Kelvin
+variable           droplet index mist Instability Ligament
+variable surfId    index 37 38 39 40 42 44 46 48 50
+variable vmag      index 0.1 1.0 10.0
+variable angle     index 2.0 45. 87.0
+variable md        index 2.796017461694916e-10 3.495021827118645e-05 2.236813969355933e-03  # mist instability ligament
+variable Rho       equal 534.0
+variable rd        equal (3.0*${md}/(4.0*PI*${Rho}))^(1.0/3.0)
+variable rd        equal (3.0*2.796017461694916e-10/(4.0*PI*${Rho}))^(1.0/3.0)
+variable rd        equal (3.0*2.796017461694916e-10/(4.0*PI*534))^(1.0/3.0)
+
+seed                12345
+dimension           2
+boundary            r r p
+global              gridcut 0.0 comm/sort no
+create_box          2. 6 -4. 3.8 -0.05 0.05
+Created orthogonal box = (2 -4 -0.05) to (6 3.8 0.05)
+create_grid         100 100 1
+Created 10000 child grid cells
+  CPU time = 0.000857 secs
+  create/ghost percent = 44.9242 55.0758
+balance_grid        rcb  cell
+Balance grid migrated 0 cells
+  CPU time = 0.000611 secs
+  reassign/sort/migrate/ghost percent = 20.6219 2.94599 10.311 66.1211
+
+############################################------species in the plasma (current and future)-------#####################################
+species droplet.species ${droplet} Li Li+ Li2+ Li3+
+species droplet.species mist Li Li+ Li2+ Li3+
+
+
+mixture             LigamentSource  ${droplet}  frac 1.0 nrho 1
+mixture             LigamentSource  mist  frac 1.0 nrho 1
+variable            pmass  particle mass
+
+read_surf          wall.surf group surfID particle check
+  156 lines
+  2.43158 5.6 xlo xhi
+  -3.77748 3.77748 ylo yhi
+  0 0 zlo zhi
+  0.0146051 min line length
+  360 0 = cells overlapping surfs, overlap cells with unmarked corner pts
+  4623 5017 360 = cells outside/inside/overlapping surfs
+  360 = surf cells with 1,2,etc splits
+  14.8969 14.8969 = cell-wise and global flow volume
+  CPU time = 0.00147 secs
+  read/check/sort/surf2grid/ghost/inout/particle percent = 14.5578 3.46939 4.62585 48.4354 28.9116 14.898 0
+  surf2grid time = 0.000712 secs
+  map/comm1/comm2/comm3/comm4/split percent = 29.2135 2.80899 32.7247 2.52809 6.17978 12.0787
+surf_collide       wallColModel vanish
+surf_modify        all collide wallColModel
+
+read_surf          core.surf invert group surfID2 particle check
+  296 lines
+  2.8168 5.26754 xlo xhi
+  -2.20288 2.19899 ylo yhi
+  0 0 zlo zhi
+  4.44089e-16 min line length
+  594 0 = cells overlapping surfs, overlap cells with unmarked corner pts
+WARNING: Surface check found 4 points nearly on lines (/Users/42d/OpenEdge_ORNL_GITHUB/src/surf.cpp:1752)
+  1894 7512 594 = cells outside/inside/overlapping surfs
+  594 = surf cells with 1,2,etc splits
+  6.75111 6.75111 = cell-wise and global flow volume
+  CPU time = 0.001495 secs
+  read/check/sort/surf2grid/ghost/inout/particle percent = 17.3244 2.87625 3.94649 47.6923 28.1605 14.8495 0
+  surf2grid time = 0.000713 secs
+  map/comm1/comm2/comm3/comm4/split percent = 27.77 3.22581 34.3619 2.9453 5.8906 13.4642
+surf_modify        surfID2 collide wallColModel
+
+
+group            divertor_inner surf id ${surfId}
+group            divertor_inner surf id 37
+0 = initial surface count in group divertor_inner
+1 = final surface count in group divertor_inner
+fix              droplet_emission emit/droplet LigamentSource divertor_inner normal no n 1 perspecies no magVelocity ${vmag} incidentAngle ${angle}
+fix              droplet_emission emit/droplet LigamentSource divertor_inner normal no n 1 perspecies no magVelocity 0.1 incidentAngle ${angle}
+fix              droplet_emission emit/droplet LigamentSource divertor_inner normal no n 1 perspecies no magVelocity 0.1 incidentAngle 2.0
+
+dump 10 particle all ${N1} case.outer.${droplet}.site.${surfId}.vmag.${vmag}.angle.${angle} id type x y z vx vy vz v_pmass temp radius
+dump 10 particle all 2 case.outer.${droplet}.site.${surfId}.vmag.${vmag}.angle.${angle} id type x y z vx vy vz v_pmass temp radius
+dump 10 particle all 2 case.outer.mist.site.${surfId}.vmag.${vmag}.angle.${angle} id type x y z vx vy vz v_pmass temp radius
+dump 10 particle all 2 case.outer.mist.site.37.vmag.${vmag}.angle.${angle} id type x y z vx vy vz v_pmass temp radius
+dump 10 particle all 2 case.outer.mist.site.37.vmag.0.1.angle.${angle} id type x y z vx vy vz v_pmass temp radius
+dump 10 particle all 2 case.outer.mist.site.37.vmag.0.1.angle.2.0 id type x y z vx vy vz v_pmass temp radius
+
+variable npart equal np
+
+timestep ${dt}
+timestep 1e-05
+stats 1
+stats_style step cpu np
+run 1
+Memory usage per proc in Mbytes:
+  particles (ave,min,max) = 0 0 0
+  grid      (ave,min,max) = 2.95129 2.95129 2.95129
+  surf      (ave,min,max) = 0.0465546 0.0465546 0.0465546
+  total     (ave,min,max) = 2.99785 2.99785 2.99785
+Step CPU Np 
+       0            0        0 
+       1     0.000137        2 
+Loop time of 0.000139 on 1 procs for 1 steps with 2 particles
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Move    | 1e-05      | 1e-05      | 1e-05      |   0.0 |  7.19
+Coll    | 0          | 0          | 0          |   0.0 |  0.00
+Sort    | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 1e-06      | 1e-06      | 1e-06      |   0.0 |  0.72
+Modify  | 0.000126   | 0.000126   | 0.000126   |   0.0 | 90.65
+Output  | 2e-06      | 2e-06      | 2e-06      |   0.0 |  1.44
+Other   |            | 0          |            |       |  0.00
+
+Particle moves    = 2 (0.002K)
+Cells touched     = 2 (0.002K)
+Particle comms    = 0 (0K)
+Boundary collides = 0 (0K)
+Boundary exits    = 0 (0K)
+SurfColl checks   = 6 (0.006K)
+SurfColl occurs   = 0 (0K)
+Surf reactions    = 0 (0K)
+Collide attempts  = 0 (0K)
+Collide occurs    = 0 (0K)
+Reactions         = 0 (0K)
+Particles stuck   = 0
+Axisymm bad moves = 0
+
+Particle-moves/CPUsec/proc: 14388.5
+Particle-moves/step: 2
+Cell-touches/particle/step: 1
+Particle comm iterations/step: 1
+Particle fraction communicated: 0
+Particle fraction colliding with boundary: 0
+Particle fraction exiting boundary: 0
+Surface-checks/particle/step: 3
+Surface-collisions/particle/step: 0
+Surf-reactions/particle/step: 0
+Collision-attempts/particle/step: 0
+Collisions/particle/step: 0
+Reactions/particle/step: 0
+
+Particles: 2 ave 2 max 2 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Cells:      10000 ave 10000 max 10000 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+GhostCell: 0 ave 0 max 0 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+EmptyCell: 0 ave 0 max 0 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Surfs:    452 ave 452 max 452 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+GhostSurf: 0 ave 0 max 0 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+unfix droplet_emission
+
+fix 22 evap 1 LigamentSource mass ${md} radius ${rd} temp ${temp} heatflux/constant 50e6
+fix 22 evap 1 LigamentSource mass 2.796017461694916e-10 radius ${rd} temp ${temp} heatflux/constant 50e6
+fix 22 evap 1 LigamentSource mass 2.796017461694916e-10 radius 5e-05 temp ${temp} heatflux/constant 50e6
+fix 22 evap 1 LigamentSource mass 2.796017461694916e-10 radius 5e-05 temp 773.15 heatflux/constant 50e6
+compute cnear plasma/fields/file all surfID ../plasma.h5 ../bfield.h5 mindist surfid bx by bz temp_e dens_e temp_i dens_i parrflow
+fix BC viscous 1 2.0 1 plasma c_cnear[5] c_cnear[6] c_cnear[9] c_cnear[10] bfield c_cnear[3] c_cnear[4] c_cnear[5] gravity 0 0 -9.8
+
+
+fix 31 halt ${N1} v_npart <= 0
+fix 31 halt 2 v_npart <= 0
+
+timestep ${dt}
+timestep 1e-05
+stats ${N1}
+stats 2
+stats_style step cpu np
+
+log log.openedge.case.outer.${droplet}.site.${surfId}.vmag.${vmag}.angle.${angle}
+log log.openedge.case.outer.mist.site.${surfId}.vmag.${vmag}.angle.${angle}
+log log.openedge.case.outer.mist.site.37.vmag.${vmag}.angle.${angle}
+log log.openedge.case.outer.mist.site.37.vmag.0.1.angle.${angle}
+log log.openedge.case.outer.mist.site.37.vmag.0.1.angle.2.0
