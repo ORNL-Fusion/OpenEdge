@@ -44,7 +44,7 @@ group            divertor_inner surf id <> 10 17
 # emit a droplet at given surface and angle and velocity
 fix              droplet_emission emit/droplet LigamentSource divertor_outer normal no n 1 perspecies no magVelocity 10 incidentAngle 45
 #dump S particle all 1 source  id type x y z vx vy vz
-read_particles source 1
+#read_particles source 1
 run 1
 #exit
 unfix droplet_emission
@@ -60,7 +60,7 @@ variable N1 equal floor($N/100)
 
 
 # compute evap
-fix 22 evap 1 LigamentSource mass mass radius radius temp temp heatflux/file heatflux.h5 # heatflux/constant 50e6
+#fix 22 evap 1 LigamentSource mass mass radius radius temp temp heatflux/file heatflux.h5 # heatflux/constant 50e6
 
 
 # Emit one droplet
@@ -78,17 +78,20 @@ fix 31 halt ${N1} v_npart <= 0
 # Forces Gravity
 variable g equal -9.8
 variable gradBx grid "v_g"
-fix BY field/grid NULL gradBx NULL
-global   field grid BY 1
+#fix BY field/grid NULL gradBx NULL
+#global   field grid BY 1
 
 
 compute cnear plasma/fields/file all surfID plasma.h5 bfield.h5 mindist surfid bx by bz temp_e dens_e temp_i dens_i parrflow ex ey ez nesheath grad_te_r grad_te_t grad_te_z grad_ti_r grad_ti_t grad_ti_z
 
 fix BC viscous 1 2.0 1 plasma c_cnear[5] c_cnear[6] c_cnear[9] c_cnear[10] bfield c_cnear[3] c_cnear[4] c_cnear[5]
 
+fix Fdist ave/grid all 1 1 1 c_cnear[3] c_cnear[4] c_cnear[5]
+dump 1 grid all 1 tmp.grid id f_Fdist[*]
+
 
 timestep ${dt}
 stats 1000
 stats_style step cpu np
 
-run 1 #$N
+run 1000 #$N
