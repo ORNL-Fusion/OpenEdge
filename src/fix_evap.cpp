@@ -27,6 +27,8 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include <domain.h>
 #include "random_knuth.h"
 #include "mixture.h"
+#include <stdexcept>
+
 
 enum HeatfluxMode { HF_NONE=0, HF_FILE, HF_CONST };
 HeatfluxMode heatflux_mode = HF_NONE;

@@ -18,6 +18,8 @@ SurfReactStyle(mpex,SurfReactMpex)
 
 #include "surf_react.h"
 #include <vector> 
+#include <cmath>
+
 
 namespace SPARTA_NS {
 

@@ -37,6 +37,8 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
+
 
 using namespace SPARTA_NS;
 

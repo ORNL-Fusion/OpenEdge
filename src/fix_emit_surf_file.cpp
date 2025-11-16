@@ -29,6 +29,8 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "memory.h"
 #include "error.h"
 #include <unordered_map>
+#include <algorithm>
+
 
 using namespace SPARTA_NS;
 using namespace MathConst;
