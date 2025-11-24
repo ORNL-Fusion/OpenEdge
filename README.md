@@ -38,9 +38,10 @@ OpenEdge is a research code for kinetic transport of charged and neutral particl
 
 ```ruby
 $ git clone https://github.com/ORNL-Fusion/OpenEdge.git
+$ cp OpenEdge/src/openedge/* OpenEdge/src/
 $ mkdir build
 $ cmake -C OpenEdge/cmake/presets/mpi.cmake -B build OpenEdge/cmake
-$ make -j 8
+$ make -j 4
 $ mpirun -np 4 ./build/src/spa_mpi -in input.in
 
 
