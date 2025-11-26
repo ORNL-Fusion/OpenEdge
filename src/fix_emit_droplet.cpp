@@ -1,15 +1,10 @@
 /* ----------------------------------------------------------------------
-   SPARTA - Stochastic PArallel Rarefied-gas Time-accurate Analyzer
-   http://sparta.github.io
-   Steve Plimpton, sjplimp@gmail.com, Michael Gallis, magalli@sandia.gov
-   Sandia National Laboratories
-
-   Copyright (2014) Sandia Corporation.  Under the terms of Contract
-   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
-   certain rights in this software.  This software is distributed under
-   the GNU General Public License.
-
-   See the README file in the top-level SPARTA directory.
+    OpenEdge:
+    Impurity Transport in Modeling of SOL and Edge Physics:
+    This code built on top of SPARTA, a parallel DSMC code.
+    Abdourahmane Diaw,  diawa@ornl.gov (2023)
+    Oak Ridge National Laboratory
+https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
 #include "stdlib.h"
@@ -803,9 +798,10 @@ void FixEmitDroplet::perform_task_onepass()
       // ninsert = rounded-down (ntarget + random number)
 
       if (npmode == FLOW) ntarget = tasks[i].ntarget;
-      else if (npmode == CONSTANT) ntarget = np/2;// * tasks[i].ntarget;
+      else if (npmode == CONSTANT) ntarget = np* tasks[i].ntarget;
       else if (npmode == VARIABLE) ntarget = npcurrent * tasks[i].ntarget;
-      ninsert = static_cast<int> (0.5 + random->uniform());
+      // ninsert = static_cast<int> (0.5 + random->uniform());
+      ninsert = static_cast<int> (ntarget + random->uniform());
       // printf("ntarget=%f ninsert=%d\n",ntarget,ninsert);
       // loop over ninsert for all species
       // use cummulative fractions to assign species for each insertion
@@ -871,13 +867,22 @@ void FixEmitDroplet::perform_task_onepass()
         else vnmag = beta_un*vscale[isp] + indot;
 
         theta = MY_2PI * random->uniform();
+        vr = vscale[isp] * sqrt(-log(random->uniform()));
 
-        vr = magVelocity;             // total speed (>=0)
-        const double ang = incidentAngle * MY_PI / 180.0; 
-        vnmag = vr * cos(ang);
-        const double vt = vr * sin(ang);
-        vamag = vt * cos(theta);
-        vbmag = vt * sin(theta);
+        // vr = magVelocity;             // total speed (>=0)
+
+          double u = random->uniform();      // u ~ U(0,1)
+          double sinAng = sqrt(u);           // from F(θ) = sin^2 θ
+          double cosAng = sqrt(1.0 - u);     // cos θ
+
+          // decompose speed into normal and tangential components
+          double vnmag = vr * cosAng;
+          double vt    = vr * sinAng;
+
+          // random azimuthal angle around the normal
+          double phi = MY_2PI * random->uniform();
+          double vamag = vt * cos(phi);
+          double vbmag = vt * sin(phi);
 
 
         const double vs_n = MathExtra::dot3(vstream, normal);
@@ -891,6 +896,11 @@ void FixEmitDroplet::perform_task_onepass()
         v[1] = vnmag*normal[1] + vamag*atan[1] + vbmag*btan[1];
         v[2] = vnmag*normal[2] + vamag*atan[2] + vbmag*btan[2];
 
+        // compute angle between v and surface normal
+          double vmag = MathExtra::len3(v);
+          double vdotn = MathExtra::dot3(v, normal);
+          double angle = acos(vdotn/vmag) * 180.0 / MY_PI;
+  
         erot = particle->erot(ispecies,temp_rot,random);
         evib = particle->evib(ispecies,temp_vib,random);
         id = MAXSMALLINT*random->uniform();
@@ -1750,3 +1760,4 @@ void FixEmitDroplet::options2(int narg, char **arg)
     iarg += consumed;
   }
 }
+
