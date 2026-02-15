@@ -43,20 +43,20 @@ surf_modify         all collide 1
 read_particles particles.dat 0
 
 
-compute cnear plasma/fields/constant all all magnetic_field 0 0.0 5.3 electric_field 0 0 0 temp_e 22.6 temp_i 22.6 dens_e 1e20 dens_i 1e20 parrflow 1e5 surfid mindist bx by bz ex ey ez temp_e temp_i dens_i dens_e parrflow nesheath
+compute cnear plasma/fields/constant all magnetic_field 0 0.0 5.3 electric_field 0 0 0 temp_e 22.6 temp_i 22.6 dens_e 1e20 dens_i 1e20 parrflow 1e5 bx by bz ex ey ez temp_e temp_i dens_i dens_e parrflow
 
 fix Fdist ave/grid all 1 1 1 c_cnear[*]
 dump 1 grid all 1 tmp.grid id f_Fdist[*]
 
 
 # Ionization/Recombination
-fix 22 chem/adas 100 74 input/plasma.adas plasma c_cnear[6] c_cnear[9]
+fix 22 chem/adas 100 74 input/plasma.adas plasma c_cnear[4] c_cnear[7]
 
 ## Push particles
-fix bB bfield/grid c_cnear[3] c_cnear[4] c_cnear[5]
+fix bB bfield/grid c_cnear[1] c_cnear[2] c_cnear[3]
 global bfield grid bB 1
 
-fix Esheath efield/grid c_cnear[11]  c_cnear[12]  c_cnear[13]
+fix Esheath efield/grid c_cnear[4]  c_cnear[5]  c_cnear[6]
 global efield grid Esheath 1
 
 
@@ -68,4 +68,3 @@ stats_style         step cpu  np
 
 
 run              1 #000 #20000
-

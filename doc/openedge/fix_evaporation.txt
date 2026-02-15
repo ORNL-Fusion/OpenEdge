@@ -1,0 +1,65 @@
+"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+
+:link(sws,https://sparta.github.io)
+:link(sd,../Manual.html)
+:link(sc,../Section_commands.html#comm)
+
+:line
+
+fix evaporation command :h3
+
+[Syntax:]
+
+fix ID evaporation nevery mix-ID keyword values ... :pre
+
+ID is documented in "fix"_../fix.html command
+evaporation = style name of this fix command
+nevery = perform update every this many timesteps
+mix-ID = mixture ID to which evaporation is applied
+keyword = one or more optional keywords
+  {mass} value = initial particle mass seed (kg)
+  {radius} value = initial particle radius seed (m)
+  {temp} value = initial particle temperature seed (K)
+  {heatflux/constant} value = uniform surface heat flux (W/m^2)
+  {heatflux/file} filename = HDF5 heat flux map :ul
+
+[Examples:]
+
+fix fevap evaporation 1 Droplet mass 2.796e-10 radius 5.0e-5 temp 773.15 heatflux/file heatflux.h5 :pre
+
+[Description:]
+
+Update droplet thermodynamic state ({mass}, {radius}, {temp}) using the
+OpenEdge evaporation model.  This fix executes as a symmetric half-step
+at start and end of timestep.
+
+Per-particle fields are stored directly in particle state and are
+available for output with "dump particle"_../dump.html:
+
+dump d1 particle all 100 out.dump id type x y z vx vy vz v_pmass temp radius :pre
+
+Notes:
+
+{temp} and {radius} are native dump particle attributes.
+{mass} is output via a particle-style variable:
+  variable pmass particle mass
+  dump ... v_pmass ... :ul
+
+[Restart, output info:]
+
+This fix provides a per-grid array with 3 columns (diagnostic values
+including emitted amount and local heat flux).
+
+[Restrictions:]
+
+Current implementation enforces 2d geometry for evaporation/heat-flux
+interpolation.
+
+[Related commands:]
+
+"fix"_../fix.html, "dump"_../dump.html, "variable"_../variable.html, "fix viscous"_fix_viscous.html
+
+[Default:]
+
+No defaults for required arguments.  One heat-flux mode
+({heatflux/constant} or {heatflux/file}) must be provided.

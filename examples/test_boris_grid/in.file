@@ -1,0 +1,31 @@
+# Grid-based Boris test using plasma/fields FILE mode (same style as test_read_plasma/in.file)
+
+seed                1245
+dimension           3
+boundary            p p p
+global              gridcut 0.0 comm/sort no
+
+create_box          1.82 3.2 -1.0 1.0 -0.05 0.05
+create_grid         120 100 1
+balance_grid        rcb cell
+
+species             plasma.species H+
+mixture             species H+ frac 1.0
+read_particles      source.single 0
+
+compute cpf plasma/fields all file ../test_read_plasma/plasma.h5 ../test_read_plasma/bfield.h5 bx by bz ex ey ez dens_e temp_e
+
+fix bB bfield/grid c_cpf[1] c_cpf[2] c_cpf[3]
+global bfield grid bB 1
+
+fix eE efield/grid c_cpf[4] c_cpf[5] c_cpf[6]
+global efield grid eE 1
+
+shell mkdir -p output
+dump dpart particle all 1 output/state.file id type x y z vx vy vz
+dump_modify dpart first yes
+
+timestep            1.0e-9
+stats               500
+stats_style         step cpu np
+run                 5000

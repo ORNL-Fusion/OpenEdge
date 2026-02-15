@@ -1,0 +1,100 @@
+<HTML>
+<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "../Manual.html">SPARTA Documentation</A> - <A HREF = "../Section_commands.html#comm">SPARTA Commands</A>
+</CENTER>
+
+<HR>
+
+<H3>compute plasma/fields command</H3>
+
+<P><B>Syntax:</B></P>
+<PRE>compute ID plasma/fields group-ID mode args values ...</PRE>
+
+<UL>
+<LI>ID is documented in <A HREF="../compute.html">compute</A> command
+<LI>plasma/fields = style name of this compute command
+<LI>group-ID = grid group ID
+<LI>mode = <I>file</I> or <I>constant</I>
+</UL>
+
+<P><B>Mode forms:</B></P>
+<PRE>compute ID plasma/fields group-ID file plasma.h5 bfield.h5 values ...</PRE>
+<PRE>compute ID plasma/fields group-ID constant keyword values ...</PRE>
+
+<P><B>Constant keywords:</B></P>
+<PRE>magnetic_field Br Bt Bz
+electric_field Er Et Ez
+temp_e value
+temp_i value
+dens_e value
+dens_i value
+parrflow value</PRE>
+
+<P><B>Output values:</B></P>
+<P>Cylindrical components:</P>
+<PRE>br bt bz
+er et ez
+vr vt vz</PRE>
+
+<P>Cartesian aliases:</P>
+<PRE>bx by (bz shared)
+ex ey (ez shared)
+vx vy (vz shared)</PRE>
+
+<P>Scalars:</P>
+<PRE>temp_e temp_i dens_e dens_i parrflow
+epar
+grad_te_r grad_te_t grad_te_z
+grad_ti_r grad_ti_t grad_ti_z</PRE>
+
+<P><B>Examples:</B></P>
+<PRE>compute cplasma plasma/fields all file plasma.h5 bfield.h5 br bt bz temp_e dens_e
+compute cconst plasma/fields all constant magnetic_field 0 0 2.5 electric_field 0 0 0 temp_e 10 temp_i 10 dens_e 1e19 dens_i 1e19 parrflow 0 br bt bz er et ez</PRE>
+
+<P><B>Description:</B></P>
+<P>This compute samples plasma and magnetic data from 2D <I>r,z</I> tables
+(HDF5 file mode) or from constant values (constant mode), and outputs
+per-grid fields.</P>
+
+<P>OpenEdge/SPARTA may run in 2D (<I>r,z</I>) or 3D Cartesian (<I>x,y,z</I>).
+Plasma data remains cylindrical. Native outputs are cylindrical
+(<I>br/bt/bz</I>, <I>er/et/ez</I>, <I>vr/vt/vz</I>).</P>
+
+<P>In 3D Cartesian runs, aliases <I>bx/by</I>, <I>ex/ey</I>, and <I>vx/vy</I>
+are computed by rotating cylindrical vectors at each grid-cell center
+using the local toroidal angle around the domain centerline in
+<I>x,y</I>.</P>
+
+<P><I>epar</I> is the parallel electric field from the electron pressure
+term:
+<I>epar = -(bhat dot grad(pe)) / (ne*e)</I>,
+with <I>pe = e*ne*Te</I> when <I>Te</I> is in eV and <I>ne</I> in 1/m^3.
+This also assumes <I>grad_te_*</I> inputs are in eV/m.
+Here <I>bhat</I> is the unit vector along
+<I>B</I>.</P>
+
+<P><B>Notes on scope:</B></P>
+<P>Current <I>epar</I> output includes only the electron-pressure-gradient
+contribution (the <I>-(bhat dot grad pe)/(ne*e)</I> term). It does not yet
+include additional generalized Ohm's law terms (e.g. resistive/current
+term, electron-inertia/time-derivative term, or potential-solve based
+electric field). For WEST workflows, externally supplied electric
+field maps (e.g. <I>efield.h5</I> with <I>er/et/ez</I>) may therefore have
+larger amplitude and smoother structure than this pressure-only
+<I>epar</I>.</P>
+
+<P><B>Removed outputs:</B></P>
+<P>Surface/sheath outputs are not provided by this compute.
+<I>mindist</I>, <I>surfid</I>, and <I>nesheath</I> are removed.</P>
+
+<P><B>Restrictions:</B></P>
+<P>Input plasma and magnetic tables are 2D cylindrical maps on
+<I>r,z</I>. Requested value names must be from the lists above.</P>
+
+<P><B>Related commands:</B></P>
+<P><A HREF="../compute.html">compute</A>,
+<A HREF="../dump.html">dump</A>,
+<A HREF="fix_viscous.html">fix viscous</A></P>
+
+<P><B>Default:</B> none</P>
+
+</HTML>

@@ -51,6 +51,9 @@ protected:
   int    model_epstein = 1;
   double rho_d  = 534.0;       // kg/m^3
   double alpha_E = 1.26;       // accommodation
+  double seed_mass = -1.0;     // optional one-time particle mass seed (kg)
+  double seed_radius = -1.0;   // optional one-time particle radius seed (m)
+  double seed_temp = -1.0;     // optional one-time particle temperature seed (K)
 
   // legacy worker (no longer used for a full dt kick)
   void   end_of_step_no_average();

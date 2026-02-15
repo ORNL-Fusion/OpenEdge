@@ -1,0 +1,110 @@
+"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+
+:link(sws,https://sparta.github.io)
+:link(sd,../Manual.html)
+:link(sc,../Section_commands.html#comm)
+
+:line
+
+compute plasma/fields command :h3
+
+[Syntax:]
+
+compute ID plasma/fields group-ID mode args values ... :pre
+
+ID is documented in "compute"_../compute.html command
+plasma/fields = style name of this compute command
+group-ID = grid group ID
+mode = {file} or {constant}
+args = mode-specific arguments
+values = one or more output fields :ul
+
+File mode:
+
+compute ID plasma/fields group-ID file plasma.h5 bfield.h5 values ... :pre
+
+Constant mode:
+
+compute ID plasma/fields group-ID constant keyword values ... :pre
+
+Constant keywords:
+
+{magnetic_field} Br Bt Bz = constant cylindrical magnetic field
+{electric_field} Er Et Ez = constant cylindrical electric field
+{temp_e} value = constant electron temperature
+{temp_i} value = constant ion temperature
+{dens_e} value = constant electron density
+{dens_i} value = constant ion density
+{parrflow} value = constant parallel flow magnitude :ul
+
+[Output values:]
+
+Cylindrical components:
+{br} {bt} {bz}
+{er} {et} {ez}
+{vr} {vt} {vz}
+
+Cartesian aliases:
+{bx} {by} ({bz} shared)
+{ex} {ey} ({ez} shared)
+{vx} {vy} ({vz} shared)
+
+Scalars:
+{temp_e} {temp_i} {dens_e} {dens_i} {parrflow}
+{epar}
+{grad_te_r} {grad_te_t} {grad_te_z}
+{grad_ti_r} {grad_ti_t} {grad_ti_z} :ul
+
+[Examples:]
+
+compute cplasma plasma/fields all file plasma.h5 bfield.h5 br bt bz temp_e dens_e :pre
+
+compute cconst plasma/fields all constant magnetic_field 0 0 2.5 electric_field 0 0 0 temp_e 10 temp_i 10 dens_e 1e19 dens_i 1e19 parrflow 0 br bt bz er et ez :pre
+
+[Description:]
+
+This compute samples plasma and magnetic data from 2D {r,z} tables
+(HDF5 file mode) or from constant values (constant mode), and produces
+per-grid outputs.
+
+OpenEdge/SPARTA may run in 2D ({r,z}) or 3D Cartesian ({x,y,z}).
+Plasma data remains cylindrical.  The command is cylindrical-first:
+{br/bt/bz}, {er/et/ez}, and {vr/vt/vz} are native outputs.
+
+In 3D Cartesian runs, aliases {bx/by}, {ex/ey}, and {vx/vy} are
+computed by rotating cylindrical vectors at each grid-cell center using
+the local toroidal angle about the domain centerline in {x,y}.
+
+{epar} is the parallel electric field from the electron pressure term:
+{epar = -(bhat dot grad(pe)) / (ne*e)},
+with {pe = e*ne*Te} when {Te} is in eV and {ne} in 1/m^3.
+This also assumes {grad_te_*} inputs are in eV/m.
+Here {bhat} is the unit vector along {B}.
+
+[Notes on scope:]
+
+Current {epar} output includes only the electron-pressure-gradient
+contribution (the {-(bhat dot grad pe)/(ne*e)} term).  It does not yet
+include additional generalized Ohm's law terms (e.g. resistive/current
+term, electron-inertia/time-derivative term, or potential-solve based
+electric field).  For WEST workflows, externally supplied electric
+field maps (e.g. {efield.h5} with {er/et/ez}) may therefore have
+larger amplitude and smoother structure than this pressure-only {epar}.
+
+[Removed outputs:]
+
+Surface/sheath outputs are not provided by this compute:
+{mindist}, {surfid}, and {nesheath} were removed.
+
+[Restrictions:]
+
+Input plasma and magnetic tables are 2D cylindrical maps on {r,z}.
+Requested value names must be from the lists above.
+
+[Related commands:]
+
+"compute"_../compute.html, "dump"_../dump.html, "fix viscous"_fix_viscous.html
+
+[Default:]
+
+No defaults for required mode and values.

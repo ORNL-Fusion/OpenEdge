@@ -74,7 +74,7 @@ variable md equal 2.796017461694916e-10
 
 # Emit one droplet
 # compute evap and emit if necessary
-fix 22 evap ${nevery} LigamentSource mass ${md} radius ${rd} temp ${temp} heatflux/file heatflux.h5 # heatflux/constant 50e6
+fix 22 evaporation ${nevery} LigamentSource mass ${md} radius ${rd} temp ${temp} heatflux/file heatflux.h5 # heatflux/constant 50e6
 
 fix              in droplet/emission LigamentSource divertor_outer normal yes n 1 perspecies no evap 22
 fix outer emit/surf/file LiSource divertor_outer subsonic fluxes_2_oe.h5  1.64
@@ -92,7 +92,7 @@ fix outer emit/surf/file LiSource divertor_outer subsonic fluxes_2_oe.h5  1.64
 stats_style step cpu np
 
 
-#fix 22 evap ${nevery} mass ${md} radius ${rd} temp ${temp} heatflux/constant 50e6
+#fix 22 evaporation ${nevery} mass ${md} radius ${rd} temp ${temp} heatflux/constant 50e6
 dump 10 particle all 1 LigamentSource_no_g  id type x y z vx vy vz v_pmass #temp radius
 
 

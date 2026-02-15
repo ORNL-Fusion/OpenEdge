@@ -33,7 +33,7 @@
 #include "math_const.h"
 #include "memory.h"
 #include "error.h"
-#include "fix_evap.h"
+#include "fix_evaporation.h"
 
 using namespace SPARTA_NS;
 using namespace MathConst;

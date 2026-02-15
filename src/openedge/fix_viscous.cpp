@@ -16,6 +16,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "memory.h"
 #include "error.h"
 #include "comm.h"
+#include "domain.h"
 #include "math.h"
 #include "react_bird.h"
 #include "input.h"
@@ -118,6 +119,27 @@ FixViscous::FixViscous(SPARTA *sparta, int narg, char **arg) :
   g_input_[2] = input->numeric(FLERR, arg[iarg++]);
   use_gravity = true;
 }
+
+  // Optional one-time state seeding for runs without fix evaporation.
+  while (iarg < narg) {
+    if (strcmp(arg[iarg], "mass") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "fix viscous: missing value for mass");
+      seed_mass = input->numeric(FLERR, arg[iarg+1]);
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "radius") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "fix viscous: missing value for radius");
+      seed_radius = input->numeric(FLERR, arg[iarg+1]);
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "temp") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "fix viscous: missing value for temp");
+      seed_temp = input->numeric(FLERR, arg[iarg+1]);
+      iarg += 2;
+    } else {
+      char msg[200];
+      snprintf(msg,sizeof(msg),"fix viscous: unknown optional keyword '%s'", arg[iarg]);
+      error->all(FLERR, msg);
+    }
+  }
 
   // defaults
   maxgrid_plasma = maxgrid_b = 0;
@@ -374,31 +396,50 @@ void FixViscous::kick_half(double dt_half)
     while (ip >= 0) {
       Particle::OnePart &p = parts[ip];
 
+      // Optional one-time initialization when evaporation fix is not used.
+      if (seed_mass > 0.0 && p.mass <= 0.0) p.mass = seed_mass;
+      if (seed_radius > 0.0 && p.radius <= 0.0) p.radius = seed_radius;
+      if (seed_temp > 0.0 && p.temp <= 0.0) p.temp = seed_temp;
+
       double nuE; double upar[3] = {0,0,0};
       epstein_params(icell, p, nuE, upar);
-      if (nuE > 0.0 && std::isfinite(nuE)) {
-        // stable exponential: v <- u + (v - u)*exp(-nuE*dt_half)
-        double *v = p.v;
-        double gr=0, gz=0, gphi=0;
-        if (use_gravity) {
-          const double c = cos(parts[ip].x[2]), sp = sin(parts[ip].x[2]);
-          const double gx = g_input_[0];
-          const double gy = g_input_[1];
-          const double gz_cart = g_input_[2];
-          gr   =  gx*c + gy*sp;
-          gphi = -gx*sp + gy*c;
-          gz   =  gz_cart;
-       }
+      double *v = p.v;
 
-      const double s   = nuE * dt_half;
-      const double ex  = (fabs(s) < 1e-8) ? (1.0 - s + 0.5*s*s) : exp(-s);
-      const double inv = (nuE > 0) ? (1.0/nuE) : 0.0;
-
-      v[0] = upar[0] + (v[0] - upar[0] - gr   *inv)*ex + gr   *inv;
-      v[1] = upar[1] + (v[1] - upar[1] - gz   *inv)*ex + gz   *inv;
-      v[2] = upar[2] + (v[2] - upar[2] - gphi *inv)*ex + gphi *inv;
-
+      // Gravity in local velocity basis:
+      // - Cartesian (2D/3D): (gx,gy,gz) -> (v0,v1,v2)
+      // - Axisymmetric:      (gx,gy,gz) -> (gr,gz,gphi)
+      double g0 = 0.0, g1 = 0.0, g2 = 0.0;
+      if (use_gravity) {
+        if (!domain->axisymmetric) {
+          g0 = g_input_[0];
+          g1 = g_input_[1];
+          g2 = g_input_[2];
+        } else {
+          const double c = std::cos(p.x[2]);
+          const double s = std::sin(p.x[2]);
+          g0 =  g_input_[0]*c + g_input_[1]*s;   // gr
+          g1 =  g_input_[2];                     // gz
+          g2 = -g_input_[0]*s + g_input_[1]*c;   // gphi
+        }
       }
+
+      if (nuE > 0.0 && std::isfinite(nuE)) {
+        // Exact linear drag+forcing half-step:
+        // dv/dt = -nuE (v - upar) + g_local
+        const double s   = nuE * dt_half;
+        const double ex  = (std::fabs(s) < 1e-8) ? (1.0 - s + 0.5*s*s) : std::exp(-s);
+        const double inv = 1.0 / nuE;
+
+        v[0] = upar[0] + (v[0] - upar[0] - g0*inv)*ex + g0*inv;
+        v[1] = upar[1] + (v[1] - upar[1] - g1*inv)*ex + g1*inv;
+        v[2] = upar[2] + (v[2] - upar[2] - g2*inv)*ex + g2*inv;
+      } else if (use_gravity) {
+        // Pure gravity when drag is inactive
+        v[0] += g0 * dt_half;
+        v[1] += g1 * dt_half;
+        v[2] += g2 * dt_half;
+      }
+
       ip = next[ip];
     }
   }
@@ -435,15 +476,22 @@ inline void FixViscous::epstein_params(int icell, const Particle::OnePart &p,
   // Epstein frequency (SI)
   nuE = epstein_nu(Ni, Ti_eV, rd);
 
-  // Build u_parallel in CYLINDRICAL components to match storage (v_r, v_z, v_phi)
+  // Build u_parallel in local velocity basis:
+  // - Cartesian (2D/3D): [vx,vy,vz]
+  // - Axisymmetric:      [vr,vz,vphi]
   if (Bn > 1e-12) {
     const double br = Br / Bn;
     const double bt = Bt / Bn;
     const double bz = Bz / Bn;
-    // NOTE ordering: [0]=u_r, [1]=u_z, [2]=u_phi
-    upar_cyl[0] = Vpar * br;
-    upar_cyl[1] = Vpar * bz;
-    upar_cyl[2] = Vpar * bt;
+    if (!domain->axisymmetric) {
+      upar_cyl[0] = Vpar * br;
+      upar_cyl[1] = Vpar * bt;
+      upar_cyl[2] = Vpar * bz;
+    } else {
+      upar_cyl[0] = Vpar * br;
+      upar_cyl[1] = Vpar * bz;
+      upar_cyl[2] = Vpar * bt;
+    }
   } else {
     // No reliable B direction: relax toward zero flow (or choose a default axis if desired)
     upar_cyl[0] = 0.0;

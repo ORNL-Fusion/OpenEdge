@@ -1,0 +1,58 @@
+"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+
+:link(sws,https://sparta.github.io)
+:link(sd,Manual.html)
+:link(sc,Section_commands.html#comm)
+
+:line
+
+fix gravity command :h3
+
+[Syntax:]
+
+fix ID gravity group-ID gx gy gz :pre
+
+ID is documented in "fix"_fix.html command
+gravity = style name of this fix command
+group-ID = particle group ID
+gx,gy,gz = constant acceleration components (distance/time^2 units) :ul
+
+[Examples:]
+
+fix g1 gravity all 0.0 0.0 -9.81
+fix g2 gravity all 0.0 1.5e3 0.0 :pre
+
+[Description:]
+
+Apply a constant body-force acceleration to all particles every
+timestep.  The acceleration is applied as a symmetric half-kick at the
+start and end of particle advection:
+
+v <- v + g*(dt/2)   (start of step)
+advection/collisions
+v <- v + g*(dt/2)   (end of step) :pre
+
+For standard 2d/3d simulations, {gx}, {gy}, and {gz} are Cartesian
+components applied to {vx}, {vy}, and {vz}.
+
+For axisymmetric simulations, SPARTA stores particle state as
+(R,Z,phi) and velocity as (v_r,v_z,v_phi).  In that case this fix
+interprets {gx,gy,gz} as Cartesian and rotates the in-plane
+acceleration into cylindrical (r,phi) components using each
+particle's current {phi}.
+
+[Restart, output info:]
+
+No information about this fix is written to "binary restart
+files"_restart.html.
+
+This fix does not compute a scalar, vector, or array used by output
+commands.
+
+[Restrictions:] none
+
+[Related commands:]
+
+"fix viscous (OpenEdge)"_openedge/fix_viscous.html
+
+[Default:] none

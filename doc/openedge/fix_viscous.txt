@@ -1,0 +1,89 @@
+"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+
+:link(sws,https://sparta.github.io)
+:link(sd,../Manual.html)
+:link(sc,../Section_commands.html#comm)
+
+:line
+
+fix viscous command :h3
+
+[Syntax:]
+
+fix ID viscous nevery A_bg Z_bg plasma TeSrc TiSrc NiSrc VparSrc bfield BrSrc BtSrc BzSrc [gravity gx gy gz] [mass m0] [radius r0] [temp T0] :pre
+
+ID is documented in "fix"_../fix.html command
+viscous = style name of this fix command
+nevery = perform update every this many timesteps
+A_bg = background ion atomic mass (amu)
+Z_bg = background ion charge state
+TeSrc,TiSrc,NiSrc,VparSrc = plasma sources
+BrSrc,BtSrc,BzSrc = magnetic-field component sources
+gravity gx gy gz = optional constant gravity/acceleration components :ul
+mass m0 = optional one-time particle mass seed (kg)
+radius r0 = optional one-time particle radius seed (m)
+temp T0 = optional one-time particle temperature seed (K) :ul
+
+Each source can be either:
+
+grid-style variable name
+or
+c_ID\[I\] (column I from a per-grid compute) :ulb,l
+
+[Examples:]
+
+fix fv viscous 1 2.0 1 plasma te ti ni vpar bfield Br Bt Bz
+fix fv viscous 1 2.0 1 plasma te ti ni vpar bfield Br Bt Bz gravity 0 0 -9.81
+fix fv viscous 1 2.0 1 plasma te ti ni vpar bfield Br Bt Bz gravity 0 0 -9.81 mass 2.796e-10 radius 5.0e-5 temp 773.15
+fix fv viscous 5 2.0 1 plasma c_pf[1] c_pf[2] c_pf[3] c_pf[4] bfield c_bf[1] c_bf[2] c_bf[3] :pre
+
+[Description:]
+
+Apply Epstein drag to particles with optional constant gravity forcing.
+The update is split as a half-step at start/end of timestep for stable
+coupling with particle advection.
+
+For drag coefficient {nuE}, parallel flow {u_parallel}, and local
+gravity {g}, the model is:
+
+dv/dt = -nuE * (v - u_parallel) + g :pre
+
+The implementation uses an exact exponential update for constant {nuE}
+over each half-step.
+
+If {mass}/{radius}/{temp} are provided, missing particle values are
+seeded one time (only when current value <= 0).  This allows
+drag+gravity validation without enabling evaporation physics.
+
+Geometry handling:
+
+For Cartesian 2d/3d, gravity and velocity components map directly to
+(vx,vy,vz).
+For axisymmetric, input {gx,gy,gz} is interpreted in Cartesian and
+rotated into (v_r,v_z,v_phi) using each particle's {phi}. :ulb,l
+
+Validation note:
+
+For viscous/gravity validation, analytic assumptions must match case
+inputs exactly, especially initial {v_z(0)} and background parallel
+flow {u_g} (from {VparSrc} and B direction).  A mismatch in these
+assumptions will produce apparent simulation/model disagreement even
+when the implementation is correct. :ulb,l
+
+[Restart, output info:]
+
+No information about this fix is written to restart files.
+This fix does not currently expose fix scalar/vector/array output.
+
+[Restrictions:]
+
+Do not combine optional {gravity ...} in this fix with a separate
+"fix gravity"_../fix_gravity.html in the same run.
+
+[Related commands:]
+
+"fix gravity"_../fix_gravity.html, "fix evaporation"_fix_evaporation.html, "variable"_../variable.html, "compute"_../compute.html
+
+[Default:]
+
+No default optional gravity (disabled unless requested).

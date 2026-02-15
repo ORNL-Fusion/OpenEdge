@@ -44,6 +44,7 @@ Fix::Fix(SPARTA *sparta, int, char **arg) : Pointers(sparta)
 
   // set child class defaults
 
+  nevery = 1;
   time_depend = 0;
   gridmigrate = 0;
   flag_update_custom = flag_gas_react = flag_surf_react = 0;

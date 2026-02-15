@@ -83,8 +83,6 @@ class Input : protected Pointers {
   void dump_modify();
   void fix();
   void global();
-  void read_plasma_state();
-  void read_magnetic_fields();
   void group();
   void mixture();
   void package();

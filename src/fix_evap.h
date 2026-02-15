@@ -1,6 +1,6 @@
 #ifdef FIX_CLASS
 
-FixStyle(evap,FixEvap)
+FixStyle(evaporation,FixEvap)
 
 #else
 

@@ -31,6 +31,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "random_mars.h"
 #include "timer.h"
 #include "math_extra.h"
+#include "boris_grid.h"
 #include "memory.h"
 #include "error.h"
 #include <chrono>
@@ -124,46 +125,14 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
 
   copymode = 0;
 
-  plasma_state = NULL;
-  plasmaStyle = 0;
-  // plasma_data = NULL;
-  efield[0] = efield[1] = efield[2] = 0.0;
-  bfield[0] = bfield[1] = bfield[2] = 0.0;
-  flow_v[0] = flow_v[1] = flow_v[2] = 0.0;
-  grad_ti_r = grad_ti_t = grad_ti_z = 0.0;
-  grad_te_r = grad_te_t = grad_te_z = 0.0;
-  grad_temp_i[0] = grad_temp_i[1] = grad_temp_i[2] = 0.0;
-  grad_temp_e[0] = grad_temp_e[1] = grad_temp_e[2] = 0.0;
 
-
-  target_material = NULL;
-  target_material_charge = 74.0;  //tungsten default
-  target_material_mass   = 184.0;
-  target_material_binding_energy = 8.79;
-
-  std::string magneticFieldsPath = "";
-  std::string plasmaStatePath = "";
-  ionization_flag = 0;
-  recombination_flag = 0;
-  materials = std::vector<int>();
-  magneticFieldsStyle = 0;
-  cross_field_diffusion_flag = 0;
-  background_collision_flag = 0;
-  d_perp = 0;
-  sheath_field_flag = 0;
   thermal_gradient_forces_flag = 0;
-  cross_diffusion_flag = 0;
-
-    // Plasma background material
-  plasma_background_charge = 1.0; // Default to Deuterium
-  plasma_background_mass = 2.0;
-  plasma_background_material = NULL;
-
-  // wall target material
-  target_material = NULL;
-  target_material_charge = 74.0;  // tungsten default
-  target_material_mass   = 184.0;
-  target_material_binding_energy = 8.79;
+  boris_dump_flag = 0;
+  boris_dump_every = 1;
+  boris_subcycles = 1;
+  boris_bad_dt_check = 1;
+  boris_bad_dt_warned = 0;
+  boris_bad_dt_limit = 0.1;
 
 }
 
@@ -325,6 +294,7 @@ void Update::init()
     bfield_active = modify->fix[bfieldfix]->field_active;  // packed columns
     bperturbflag = 1;
   }
+
   ethermalflag = 0;
   if (ethermalstyle==GFIELD) {
     ethermalfix = modify->find_fix(ethermalID);        
@@ -360,9 +330,6 @@ void Update::init()
   if (moveperturb) perturbflag = 1;
   else perturbflag = 0;
 
-  // if (plasmaStyle == 1) 
-  initializePlasmaData();
-  if (magneticFieldsStyle == 1) initializeMagneticData();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1490,155 +1457,28 @@ template < int DIM, int SURF, int OPT > void Update::move()
    array in fix[ifieldfix] stores per particle perturbations for x and v
 ------------------------------------------------------------------------- */
 
-void Update::field_per_particle(int i, int icell, double dt, double* x, double* v)
+void Update::field_per_particle(int i, int icell, double dt, double *x, double *v)
 {
-    // Grab per-particle field row, accounting for packed active components
-    double** arr = modify->fix[ifieldfix]->array_particle;
+  double dtsq = 0.5*dt*dt;
+  double **array = modify->fix[ifieldfix]->array_particle;
 
-    // Map columns according to field_active[]
-    int col = 0;
-    double E[3] = {0,0,0};
-    double B[3] = {0,0,0};
-
-    // If your layout really is Bx,By,Bz in 0..2 and E is zero, keep:
-    B[0] = arr[i][0]; B[1] = arr[i][1]; B[2] = arr[i][2];
-    // E remains zeros unless you actually store it.
-
-    // Species & charge/mass
-    Particle::OnePart* parts  = particle->particles;
-    Particle::Species* specs  = particle->species;
-    const int is = parts[i].ispecies;
-    const double m  = specs[is].mass;
-    const double q  = specs[is].charge * update->echarge;   // Z*e in Coulombs
-    const double qom = q / m;
-
-    const double half_dt = 0.5 * dt;
-
-    // 1) Half E-kick
-    double v_minus[3] = {
-        v[0] + qom * E[0] * half_dt,
-        v[1] + qom * E[1] * half_dt,
-        v[2] + qom * E[2] * half_dt
-    };
-
-    // 2) B-rotation (standard Boris)
-    double t[3] = { qom * B[0] * half_dt, qom * B[1] * half_dt, qom * B[2] * half_dt };
-    double t2 = MathExtra::dot3(t, t);
-    double s[3] = { 2.0 * t[0] / (1.0 + t2), 2.0 * t[1] / (1.0 + t2), 2.0 * t[2] / (1.0 + t2) };
-
-    double v_prime[3];
-    MathExtra::cross3(v_minus, t, v_prime);
-    v_prime[0] += v_minus[0];
-    v_prime[1] += v_minus[1];
-    v_prime[2] += v_minus[2];
-
-    double v_plus[3];
-    MathExtra::cross3(v_prime, s, v_plus);
-    v_plus[0] += v_minus[0];
-    v_plus[1] += v_minus[1];
-    v_plus[2] += v_minus[2];
-
-    // 3) Second half E-kick → v_new
-    double v_new[3] = {
-        v_plus[0] + qom * E[0] * half_dt,
-        v_plus[1] + qom * E[1] * half_dt,
-        v_plus[2] + qom * E[2] * half_dt
-    };
-
-    // 4) Position update with v_new
-    x[0] += v_new[0] * dt;
-    x[1] += v_new[1] * dt;
-    x[2] += v_new[2] * dt;
-
-    // Write back velocity
-    v[0] = v_new[0];
-    v[1] = v_new[1];
-    v[2] = v_new[2];
-}
-
-
-
-
-// /* ----------------------------------------------------------------------
-//    calculate motion perturbation for a single particle I
-//      due to external per particle field
-//    array in fix[ifieldfix] stores per particle perturbations for x and v
-// ------------------------------------------------------------------------- */
-// void Update::field_per_particle(int i, int icell, double dt, double *x, double *v)
-// {
-//   Particle::Species *species = particle->species;
-//   Particle::OnePart *particles = particle->particles;
-//   Grid::ChildInfo *cinfo = grid->cinfo;
-//   double **array = modify->fix[ifieldfix]->array_particle;
-
-//   const PlasmaDataParams &plasma_data = plasma_data_map[icell];
-
-//   // Physical parameters from plasma data
-//   double temp_i = std::max(0.0, plasma_data.temp_i);
-//   double temp_e = plasma_data.temp_e;
-//   double dens_i = std::max(0.0, plasma_data.dens_i);
-//   double dens_e = plasma_data.dens_e;
-//   double v_parr = plasma_data.parr_flow;
-
-//   double flow_velocity[3] = {
-//     plasma_data.parr_flow_r,
-//     plasma_data.parr_flow_z,
-//     plasma_data.parr_flow_t
-//   };
-
-//   // Physical constants
-//   // constexpr double Rho = 534.0;                // lithium density [kg/m^3]
-//   constexpr double background_mass = 2.0 * 1.67e-27 * 1e3;  // kg
-//   constexpr double background_charge = 1.0; // un
-//   constexpr double viscosity_scale = 0.8E-2;
-//   constexpr double pi = M_PI;
-
-//   // Compute viscosity (if valid inputs)
-//   double viscosity = 0.0;
-//   if (temp_i > 0.0 && dens_i > 0.0) {
-//     double dens_i_cm = dens_i * 1e-6;
-//     viscosity = eta(dens_i_cm, background_mass, background_charge, temp_i) * viscosity_scale;
-//   }
-
-//   // Compute relative velocity between particle and plasma flow
-//   double relative_velocity[3] = {
-//     v[0] - flow_velocity[0],
-//     v[1] - flow_velocity[1],
-//     v[2] - flow_velocity[2]
-//   };
-
-//   // Particle properties
-//   double droplet_mass = species[i].mass;
-//   double radius = particles[i].radius;
-
-//   // Avoid division by zero
-//   if (droplet_mass <= 0.0) return;
-
-//   // Stokes drag (in-plane only)
-//   double drag_acc_x = 6.0 * pi * viscosity * radius * relative_velocity[0] / droplet_mass;
-//   double drag_acc_y = 6.0 * pi * viscosity * radius * relative_velocity[1] / droplet_mass;
-
-//   // Update position and velocity due to field and drag
-//   double dtsq = 0.5 * dt * dt;
-//   int icol = 0;
-
-//   if (field_active[0]) {
-//     x[0] += dtsq * array[i][icol] + dtsq * drag_acc_x;
-//     v[0] += dt * array[i][icol] + dt * drag_acc_x;
-//     icol++;
-//   }
-//   if (field_active[1]) {
-//     x[1] += dtsq * array[i][icol] + dtsq * drag_acc_y;
-//     v[1] += dt * array[i][icol] + dt * drag_acc_y;
-//     icol++;
-//   }
-//   if (field_active[2]) {
-//     x[2] += dtsq * array[i][icol];
-//     v[2] += dt * array[i][icol];
-//     icol++;
-//   }
-// }
-
+  int icol = 0;
+  if (field_active[0]) {
+    x[0] += dtsq*array[i][icol];
+    v[0] += dt*array[i][icol];
+    icol++;
+  }
+  if (field_active[1]) {
+    x[1] += dtsq*array[i][icol];
+    v[1] += dt*array[i][icol];
+    icol++;
+  }
+  if (field_active[2]) {
+    x[2] += dtsq*array[i][icol];
+    v[2] += dt*array[i][icol];
+    icol++;
+  }
+};
 
 /* ----------------------------------------------------------------------
    calculate motion perturbation for a single particle I in grid cell Icell
@@ -1668,6 +1508,125 @@ void Update::field_per_grid(int i, int icell, double dt, double *x, double *v)
     icol++;
   }
 };
+
+/* ----------------------------------------------------------------------
+   Boris pusher for 2D (x,y) positions with full 3-component velocity
+------------------------------------------------------------------------- */
+
+void Update::pusherBoris2D(int i, int icell, double dt,
+                           double *x, double *v, double *xnew,
+                           double charge, double mass)
+{
+  if (mass <= 0.0) error->all(FLERR, "Boris pusher requires positive particle mass");
+
+  const double qm = (charge * echarge) / mass;
+  const int nsub = (boris_subcycles > 0) ? boris_subcycles : 1;
+  const double dt_sub = dt / static_cast<double>(nsub);
+
+  double xcur[2] = {x[0], x[1]};
+  double vcur[3] = {v[0], v[1], v[2]};
+
+  for (int isub = 0; isub < nsub; isub++) {
+    double E[3] = {0.0, 0.0, 0.0};
+    double B[3] = {0.0, 0.0, 0.0};
+
+    if (eperturbflag)
+      BorisGrid::read_field_from_fix(modify->fix[efieldfix], (efstyle == GFIELD),
+                                     efield_active, i, icell, E);
+    if (bperturbflag)
+      BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
+                                     bfield_active, i, icell, B);
+
+    if (boris_bad_dt_check && !boris_bad_dt_warned) {
+      const double bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
+      const double bad = std::fabs(qm) * bmag * dt_sub;
+      if (bad > boris_bad_dt_limit) {
+        if (comm->me == 0)
+          error->warning(FLERR, "OpenEdge Boris warning: |q/m|*|B|*dt_sub is large");
+        boris_bad_dt_warned = 1;
+      }
+    }
+
+    BorisGrid::push_velocity(qm, dt_sub, E, B, vcur);
+    xcur[0] += vcur[0] * dt_sub;
+    xcur[1] += vcur[1] * dt_sub;
+
+    if (boris_dump_flag && (ntimestep % boris_dump_every == 0)) {
+      if (comm->me == 0 && i == 0) {
+        printf("boris2D step=%lld icell=%d sub=%d/%d qm=%g E=(%g,%g,%g) B=(%g,%g,%g)\n",
+               (long long) ntimestep, icell, isub+1, nsub, qm,
+               E[0], E[1], E[2], B[0], B[1], B[2]);
+      }
+    }
+  }
+
+  v[0] = vcur[0];
+  v[1] = vcur[1];
+  v[2] = vcur[2];
+  xnew[0] = xcur[0];
+  xnew[1] = xcur[1];
+  xnew[2] = x[2];
+}
+
+/* ----------------------------------------------------------------------
+   Boris pusher for 3D cartesian coordinates
+------------------------------------------------------------------------- */
+
+void Update::pusher_boris3D(int i, int icell, double dt,
+                            double *x, double *v, double *xnew,
+                            double charge, double mass)
+{
+  if (mass <= 0.0) error->all(FLERR, "Boris pusher requires positive particle mass");
+
+  const double qm = (charge * echarge) / mass;
+  const int nsub = (boris_subcycles > 0) ? boris_subcycles : 1;
+  const double dt_sub = dt / static_cast<double>(nsub);
+
+  double xcur[3] = {x[0], x[1], x[2]};
+  double vcur[3] = {v[0], v[1], v[2]};
+
+  for (int isub = 0; isub < nsub; isub++) {
+    double E[3] = {0.0, 0.0, 0.0};
+    double B[3] = {0.0, 0.0, 0.0};
+
+    if (eperturbflag)
+      BorisGrid::read_field_from_fix(modify->fix[efieldfix], (efstyle == GFIELD),
+                                     efield_active, i, icell, E);
+    if (bperturbflag)
+      BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
+                                     bfield_active, i, icell, B);
+
+    if (boris_bad_dt_check && !boris_bad_dt_warned) {
+      const double bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
+      const double bad = std::fabs(qm) * bmag * dt_sub;
+      if (bad > boris_bad_dt_limit) {
+        if (comm->me == 0)
+          error->warning(FLERR, "OpenEdge Boris warning: |q/m|*|B|*dt_sub is large");
+        boris_bad_dt_warned = 1;
+      }
+    }
+
+    BorisGrid::push_velocity(qm, dt_sub, E, B, vcur);
+    xcur[0] += vcur[0] * dt_sub;
+    xcur[1] += vcur[1] * dt_sub;
+    xcur[2] += vcur[2] * dt_sub;
+
+    if (boris_dump_flag && (ntimestep % boris_dump_every == 0)) {
+      if (comm->me == 0 && i == 0) {
+        printf("boris3D step=%lld icell=%d sub=%d/%d qm=%g E=(%g,%g,%g) B=(%g,%g,%g)\n",
+               (long long) ntimestep, icell, isub+1, nsub, qm,
+               E[0], E[1], E[2], B[0], B[1], B[2]);
+      }
+    }
+  }
+
+  v[0] = vcur[0];
+  v[1] = vcur[1];
+  v[2] = vcur[2];
+  xnew[0] = xcur[0];
+  xnew[1] = xcur[1];
+  xnew[2] = xcur[2];
+}
 
 /* ----------------------------------------------------------------------
    particle is entering split parent icell at x
@@ -2176,179 +2135,41 @@ void Update::global(int narg, char **arg)
       if (reorder_period < 0) error->all(FLERR,"Illegal global command");
       iarg += 2;
     } 
-    // PMI
-
-     // target material take mass and charge
-    else if (strcmp(arg[iarg], "target_material") == 0) {
-        if (iarg + 5 > narg) error->all(FLERR, "Illegal global command");
-        int n = strlen(arg[iarg+1]) + 1;
-        target_material = new char[n];
-        strcpy(target_material, arg[iarg+1]);
-        iarg += 2;
-
-        // Parse mass
-        if (strcmp(arg[iarg], "mass") != 0) 
-            error->all(FLERR, "Expected 'mass' in global command");
-        double target_material_mass = atof(arg[iarg+1]);
-        iarg += 2;
-
-        // Parse charge
-        if (strcmp(arg[iarg], "charge") != 0) 
-            error->all(FLERR, "Expected 'charge' in global command");
-        double target_material_charge = atof(arg[iarg+1]);
-        iarg += 2;
-
-        // parse target_material_binding_energy
-        if (strcmp(arg[iarg], "binding_energy") != 0) 
-            error->all(FLERR, "Expected 'binding_energy' in global command");
-        double target_material_binding_energy = atof(arg[iarg+1]);
-        iarg += 2;
-    }
-
-    else if (strcmp(arg[iarg], "plasma_background_material") == 0) {
-            if (iarg + 6 > narg) error->all(FLERR, "Illegal global command");
-            // Read the material name
-            const char* material_name = arg[iarg + 1];
-            iarg += 2;
-            if (strcmp(arg[iarg], "mass") != 0)
-                error->all(FLERR, "Expected 'mass' in global command");
-            plasma_background_mass = atof(arg[iarg + 1]);
-            iarg += 2;
-            if (strcmp(arg[iarg], "charge") != 0)
-                error->all(FLERR, "Expected 'charge' in global command");
-            plasma_background_charge = atof(arg[iarg + 1]);
-            iarg += 2;
-        }
-
-    else if (strcmp(arg[iarg], "target_material") == 0) {
-        if (iarg + 5 > narg) error->all(FLERR, "Illegal global command");
-        int n = strlen(arg[iarg+1]) + 1;
-        target_material = new char[n];
-        strcpy(target_material, arg[iarg+1]);
-        iarg += 2;
-
-        // Parse mass
-        if (strcmp(arg[iarg], "mass") != 0) 
-            error->all(FLERR, "Expected 'mass' in global command");
-         target_material_mass = atof(arg[iarg+1]);
-        iarg += 2;
-
-        // Parse charge
-        if (strcmp(arg[iarg], "charge") != 0) 
-            error->all(FLERR, "Expected 'charge' in global command");
-         target_material_charge = atof(arg[iarg+1]);
-        iarg += 2;
-
-        // parse target_material_binding_energy
-        if (strcmp(arg[iarg], "binding_energy") != 0) 
-            error->all(FLERR, "Expected 'binding_energy' in global command");
-         target_material_binding_energy = atof(arg[iarg+1]);
-        iarg += 2;
-    }
-
-        else if (strcmp(arg[iarg], "cross_field_diffusion") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global cross_diffusion_flag command");
-      
-      if (strcmp(arg[iarg + 1], "yes") == 0) {
-          cross_diffusion_flag = 1;
-      } else if (strcmp(arg[iarg + 1], "no") == 0) {
-          cross_diffusion_flag = 0;
-      } else {
-          error->all(FLERR, "Illegal global cross_diffusion_flag command, expected 'yes' or 'no'");
-      }
-      
-      iarg += 2;  
-    }
-
+    // OpenEdge additions
     else if (strcmp(arg[iarg], "thermal_gradient_forces") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global thermal_gradient_forces_flag command");
-      
-      if (strcmp(arg[iarg + 1], "yes") == 0) {
-          thermal_gradient_forces_flag = 1;
-      } else if (strcmp(arg[iarg + 1], "no") == 0) {
-          thermal_gradient_forces_flag = 0;
-      } else {
-          error->all(FLERR, "Illegal global thermal_gradient_forces_flag command, expected 'yes' or 'no'");
-      }
-      
-      iarg += 2;  
-  }
-
-
-    else if (strcmp(arg[iarg], "sheath") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
-      
-      if (strcmp(arg[iarg + 1], "yes") == 0) {
-          sheath_field_flag = 1;
-      } else if (strcmp(arg[iarg + 1], "no") == 0) {
-          sheath_field_flag = 0;
-      } else {
-          error->all(FLERR, "Illegal global sheath command, expected 'yes' or 'no'");
-      }
-      
-      iarg += 2;  // Move past "sheath" and "yes"/"no"
-  }
-    else if (strcmp(arg[iarg], "ionization") == 0) {
-      if (iarg + 2 > narg) error->all(FLERR, "Illegal global command");
-      if (strcmp(arg[iarg + 1], "yes") == 0) ionization_flag = 1;
-      else if (strcmp(arg[iarg + 1], "no") == 0) ionization_flag = 0;
-      else error->all(FLERR, "Illegal global command");
+      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global thermal_gradient_forces command");
+      if (strcmp(arg[iarg + 1], "yes") == 0) thermal_gradient_forces_flag = 1;
+      else if (strcmp(arg[iarg + 1], "no") == 0) thermal_gradient_forces_flag = 0;
+      else error->all(FLERR, "Illegal global thermal_gradient_forces command");
       iarg += 2;
-  } else if (strcmp(arg[iarg], "recombination") == 0) {
-      if (iarg + 2 > narg) error->all(FLERR, "Illegal global command");
-      if (strcmp(arg[iarg + 1], "yes") == 0) recombination_flag = 1;
-      else if (strcmp(arg[iarg + 1], "no") == 0) recombination_flag = 0;
-      else error->all(FLERR, "Illegal global command");
+    } else if (strcmp(arg[iarg], "boris_dump") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_dump command");
+      if (strcmp(arg[iarg + 1], "yes") == 0) boris_dump_flag = 1;
+      else if (strcmp(arg[iarg + 1], "no") == 0) boris_dump_flag = 0;
+      else error->all(FLERR, "Illegal global boris_dump command");
       iarg += 2;
-  } else if (strcmp(arg[iarg], "adas_rates_path") == 0) {
-    if (iarg + 2 > narg) error->all(FLERR, "Illegal global command");
-    adas_rates_path = arg[iarg + 1]; // Store the path
-    iarg += 2;
-  } else if (strcmp(arg[iarg], "cross_field_diffusion") == 0) {
-    if (iarg + 2 > narg) error->all(FLERR, "Illegal global command");
-    if (strcmp(arg[iarg + 1], "yes") == 0) {
-        cross_field_diffusion_flag = 1;
-        iarg += 2;
-        if (iarg + 2 > narg) error->all(FLERR, "Illegal global command");
-        if (strcmp(arg[iarg], "d_perp") != 0)
-            error->all(FLERR, "Expected 'd_perp' in global command");
-        d_perp = atof(arg[iarg + 1]);
-        iarg += 2;
-    } else if (strcmp(arg[iarg + 1], "no") == 0) {
-        cross_field_diffusion_flag = 0;
-        iarg += 2;
-    } else {
-        error->all(FLERR, "Illegal global command");
-    }
-}
-
-
-else if (strcmp(arg[iarg], "background_collisions") == 0) {
-    if (iarg + 1 >= narg) error->all(FLERR, "Illegal global background_collisions command");
-    if (strcmp(arg[iarg + 1], "yes") == 0) {
-        background_collision_flag = 1;
-    } else if (strcmp(arg[iarg + 1], "no") == 0) {
-        background_collision_flag = 0;
-    } else {
-        error->all(FLERR, "Illegal global background_collisions command, expected 'yes' or 'no'");
-    }
-    iarg += 2;
-}
-
-  else if (strcmp(arg[iarg], "materials") == 0) {
-    iarg++; // Move to the first material atomic number
-    // Clear existing materials list if any
-    materials.clear();
-    // Continue reading and storing material atomic numbers until the end of arguments
-    while (iarg < narg && strcmp(arg[iarg], "materials") != 0) {
-        int atomic_number = atoi(arg[iarg]); // Convert string to integer
-        if (atomic_number <= 0) {
-            error->all(FLERR, "Invalid atomic number in materials command");
-        }
-        materials.push_back(atomic_number);
-        iarg++; // Move to the next argument
-      }
-    }else if (strcmp(arg[iarg],"mem/limit") == 0) {
+    } else if (strcmp(arg[iarg], "boris_dump_every") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_dump_every command");
+      boris_dump_every = input->inumeric(FLERR, arg[iarg + 1]);
+      if (boris_dump_every <= 0) error->all(FLERR, "Illegal global boris_dump_every command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "boris_subcycles") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_subcycles command");
+      boris_subcycles = input->inumeric(FLERR, arg[iarg + 1]);
+      if (boris_subcycles <= 0) error->all(FLERR, "Illegal global boris_subcycles command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "boris_bad_dt_check") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_bad_dt_check command");
+      if (strcmp(arg[iarg + 1], "yes") == 0) boris_bad_dt_check = 1;
+      else if (strcmp(arg[iarg + 1], "no") == 0) boris_bad_dt_check = 0;
+      else error->all(FLERR, "Illegal global boris_bad_dt_check command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "boris_bad_dt_limit") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_bad_dt_limit command");
+      boris_bad_dt_limit = input->numeric(FLERR, arg[iarg + 1]);
+      if (boris_bad_dt_limit <= 0.0) error->all(FLERR, "Illegal global boris_bad_dt_limit command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"mem/limit") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal global command");
       if (strcmp(arg[iarg+1],"grid") == 0) mem_limit_grid_flag = 1;
       else {
@@ -2446,1502 +2267,4 @@ int Update::have_mem_limit()
     mem_limit_flag = 1;
 
   return mem_limit_flag;
-}
-
-// END of SPARTA
-
-// Begin PMI
-
-/* ----------------------------------------------------------------------
-   set global properites via read_plasma_state
-------------------------------------------------------------------------- */
-void Update::read_plasma_state(int narg, char **arg)
-{
-  if (narg < 1) error->all(FLERR, "Illegal read_plasma_state command");
-
-  int iarg = 0;
-  while (iarg < narg) {
-    if (strcmp(arg[iarg], "plasma_state") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Illegal plasma_background command");
-      
-      if (strcmp(arg[iarg+1], "constant") == 0) {
-        plasmaStyle = 0;
-        printf("Setting constant plasma background\n");
-        iarg += 2; // Move past 'plasma_background constant'
-        while (iarg < narg && strcmp(arg[iarg], "file") != 0) {
-          if (strcmp(arg[iarg], "temp_i") == 0) {
-            if (iarg+1 >= narg) error->all(FLERR, "Illegal read_plasma_state command");
-            temp_i = input->numeric(FLERR, arg[iarg+1]);
-            temp_thermal = temp_i * ev2kelvin;
-            iarg += 2;
-          } else if (strcmp(arg[iarg], "temp_e") == 0) {
-            if (iarg+1 >= narg) error->all(FLERR, "Illegal read_plasma_state command");
-            temp_e = input->numeric(FLERR, arg[iarg+1]);
-            iarg += 2;
-          } else if (strcmp(arg[iarg], "dens_i") == 0) {
-            if (iarg+1 >= narg) error->all(FLERR, "Illegal read_plasma_state command");
-            dens_i = input->numeric(FLERR, arg[iarg+1]);
-            nrho = dens_i;
-            iarg += 2;
-          } else if (strcmp(arg[iarg], "dens_e") == 0) {
-            if (iarg+1 >= narg) error->all(FLERR, "Illegal read_plasma_state command");
-            dens_e = input->numeric(FLERR, arg[iarg+1]);
-            iarg += 2;
-          } else if (strcmp(arg[iarg], "flow") == 0) {
-            if (iarg+3 >= narg) error->all(FLERR, "Illegal read_plasma_state command");
-            flow_v[0] = input->numeric(FLERR, arg[iarg+1]);
-            flow_v[1] = input->numeric(FLERR, arg[iarg+2]);
-            flow_v[2] = input->numeric(FLERR, arg[iarg+3]);
-            vstream[0] = flow_v[0];
-            vstream[1] = flow_v[1];
-            vstream[2] = flow_v[2];
-            iarg += 4;
-          } else if (strcmp(arg[iarg], "grad_te") == 0) {
-            if (iarg+3 >= narg) error->all(FLERR, "Illegal read_plasma_state command");
-            grad_te_r = input->numeric(FLERR, arg[iarg+1]);
-            grad_te_t = input->numeric(FLERR, arg[iarg+2]);
-            grad_te_z = input->numeric(FLERR, arg[iarg+3]);
-            iarg += 4;
-          } else if (strcmp(arg[iarg], "grad_ti") == 0) {
-            if (iarg+3 >= narg) error->all(FLERR, "Illegal read_plasma_state command");
-            grad_ti_r = input->numeric(FLERR, arg[iarg+1]);
-            grad_ti_t = input->numeric(FLERR, arg[iarg+2]);
-            grad_ti_z = input->numeric(FLERR, arg[iarg+3]);
-            iarg += 4;
-          }  else if (strcmp(arg[iarg], "efield") == 0) {
-            if (iarg+3 >= narg) error->all(FLERR, "Illegal read_plasma_state command");
-            efield[0] = input->numeric(FLERR, arg[iarg+1]);
-            efield[1] = input->numeric(FLERR, arg[iarg+2]);
-            efield[2] = input->numeric(FLERR, arg[iarg+3]);
-            iarg += 4;
-          } else {
-            error->all(FLERR, "Unrecognized parameter in plasma_background constant");
-          }
-        }
-      } else if (strcmp(arg[iarg+1], "file") == 0) {
-        plasmaStyle = 1;
-        if (iarg+2 >= narg) error->all(FLERR, "Illegal read_plasma_state command");
-        plasmaStatePath = arg[iarg+2];
-        iarg += 3;  
-      } else {
-        error->all(FLERR, "Illegal read_plasma_state command");
-      }
-    } else {
-      error->all(FLERR, "Illegal read_plasma_state command");
-    }
-  }
-}
-
-
-/*---------------------------------
-  Bilinear interpolation plasma
------------------------------------*/
-MagneticFieldDataParams Update::bilinearInterpolationMagneticField(int icell, const MagneticFieldData& data) {
-   // Check if the result is already cached
-   auto cache_it = magneticFieldDataCache.find(icell);
-   if (cache_it != magneticFieldDataCache.end()) {
-       return cache_it->second;
-   }
-
-   if (data.r.empty() || data.z.empty()) {
-       printf("Data arrays are empty.\n");
-       throw std::runtime_error("Data arrays are empty.");
-   }
-
-   const std::vector<double>& r_values = data.r;
-   const std::vector<double>& z_values = data.z;
-
-   // Access cell and calculate midpoints
-   Grid::ChildCell* cell = &grid->cells[icell];
-   double r_val = 0.5 * (cell->lo[0] + cell->hi[0]);
-   double z_val = 0.5 * (cell->lo[1] + cell->hi[1]);
-
-   // Ensure r and z are within the data bounds
-   if (r_val < r_values.front() || r_val > r_values.back() ||
-       z_val < z_values.front() || z_val > z_values.back()) {
-       // printf("Interpolation point (r_val: %f, z_val: %f) is outside the bounds of the data grid.\n", r_val, z_val);
-       MagneticFieldDataParams params = {};
-       return params;
-   }
-
-
-    // Locate indices for surrounding grid points
-    auto r_it = std::lower_bound(r_values.begin(), r_values.end(), r_val);
-    auto z_it = std::lower_bound(z_values.begin(), z_values.end(), z_val);
-
-    int r1_idx = std::max(0, int(r_it - r_values.begin()) - 1);
-    int r2_idx = std::min(int(r_values.size()) - 1, r1_idx + 1);
-    int z1_idx = std::max(0, int(z_it - z_values.begin()) - 1);
-    int z2_idx = std::min(int(z_values.size()) - 1, z1_idx + 1);
-
-    // Get surrounding grid values
-    double r1 = r_values[r1_idx];
-    double r2 = r_values[r2_idx];
-    double z1 = z_values[z1_idx];
-    double z2 = z_values[z2_idx];
-
-    // Lambda for bilinear interpolation
-    auto bilinearInterpolation = [&](const std::vector<std::vector<double>>& field) -> double {
-        double Q11 = field[z1_idx][r1_idx];
-        double Q12 = field[z2_idx][r1_idx];
-        double Q21 = field[z1_idx][r2_idx];
-        double Q22 = field[z2_idx][r2_idx];
-        double denom = (r2 - r1) * (z2 - z1);
-
-        // Check for zero denominators
-        if (denom == 0.0) {
-            return (Q11 + Q12 + Q21 + Q22) / 4.0;
-        }
-
-        return (Q11 * (r2 - r_val) * (z2 - z_val) +
-                Q21 * (r_val - r1) * (z2 - z_val) +
-                Q12 * (r2 - r_val) * (z_val - z1) +
-                Q22 * (r_val - r1) * (z_val - z1)) / denom;
-    };
-
-
-   // pusher_Bororm bilinear interpolation for each field component
-    MagneticFieldDataParams params;
-    params.br = bilinearInterpolation(data.br);
-    params.bt = bilinearInterpolation(data.bt);
-    params.bz = bilinearInterpolation(data.bz);
-
-  
- // Cache the result
-    magneticFieldDataCache[icell] = params;
-
-   return params;
-}
-
-
-/*---------------------------------
- Bilinear interpolation
------------------------------------*/
-double Update::bilinearInterpolation(double r, double z,
-                            const std::vector<double>& r_values,
-                            const std::vector<double>& z_values,
-                            const std::vector<std::vector<double>>& data) {
-   // Ensure r and z are within the data bounds
-   if (r < r_values.front() || r > r_values.back() ||
-       z < z_values.front() || z > z_values.back()) {
-       // printf("Interpolation point is outside the bounds of the data grid.\n");
-       return 0.0;
-   }
-
-   // Locate indices for surrounding grid points
-   auto r_it = std::lower_bound(r_values.begin(), r_values.end(), r);
-   auto z_it = std::lower_bound(z_values.begin(), z_values.end(), z);
-
-   int r1_idx = std::max(0, int(r_it - r_values.begin()) - 1);
-   int r2_idx = std::min(int(r_values.size()) - 1, r1_idx + 1);
-   int z1_idx = std::max(0, int(z_it - z_values.begin()) - 1);
-   int z2_idx = std::min(int(z_values.size()) - 1, z1_idx + 1);
-
-   // Get surrounding grid values
-   double r1 = r_values[r1_idx];
-   double r2 = r_values[r2_idx];
-   double z1 = z_values[z1_idx];
-   double z2 = z_values[z2_idx];
-   double Q11 = data[z1_idx][r1_idx];
-   double Q12 = data[z2_idx][r1_idx];
-   double Q21 = data[z1_idx][r2_idx];
-   double Q22 = data[z2_idx][r2_idx];
-
-   // Check for zero denominators
-   double denom = (r2 - r1) * (z2 - z1);
-   if (denom == 0.0) {
-       // printf("Degenerate grid detected, returning average of surrounding points.\n");
-       return (Q11 + Q12 + Q21 + Q22) / 4.0;
-   }
-
-   // Perform bilinear interpolation
-   double interp_value = Q11 * (r2 - r) * (z2 - z) +
-                         Q21 * (r - r1) * (z2 - z) +
-                         Q12 * (r2 - r) * (z - z1) +
-                         Q22 * (r - r1) * (z - z1);
-   return interp_value / denom;
-}
-
-
-/* ----------------------------------------------------------------------
-  read magnetic field data from file
-------------------------------------------------------------------------- */
-/* ----------------------------------------------------------------------
-   Read plasma data from HDF5 file
-------------------------------------------------------------------------- */
-PlasmaData Update::readPlasmaData(const std::string& filePath) {
-    printf("Reading plasma data from file: %s\n", filePath.c_str());
-    PlasmaData data;
-
-    try {
-        H5::H5File file(filePath, H5F_ACC_RDONLY);
-
-        // Utility to read 1D dataset
-        auto read1D = [&](const std::string& name) -> std::vector<double> {
-            H5::DataSet ds = file.openDataSet(name);
-            H5::DataSpace space = ds.getSpace();
-            hsize_t dim;
-            space.getSimpleExtentDims(&dim);
-            std::vector<double> vec(dim);
-            ds.read(vec.data(), H5::PredType::NATIVE_DOUBLE);
-            return vec;
-        };
-
-        // First read coordinates
-        data.r = read1D("r");
-        data.z = read1D("z");
-        size_t nr = data.r.size();
-        size_t nz = data.z.size();
-
-        // Utility to read 2D dataset with shape validation
-        auto read2D = [&](const std::string& name) -> std::vector<std::vector<double>> {
-            H5::DataSet ds = file.openDataSet(name);
-            H5::DataSpace space = ds.getSpace();
-            hsize_t dims[2];
-            space.getSimpleExtentDims(dims);
-
-            if (dims[0] != nz || dims[1] != nr) {
-                throw std::runtime_error("Dataset '" + name + "' shape mismatch: expected " +
-                                         std::to_string(nz) + " x " + std::to_string(nr) +
-                                         ", got " + std::to_string(dims[0]) + " x " + std::to_string(dims[1]));
-            }
-
-            std::vector<double> raw(dims[0] * dims[1]);
-            ds.read(raw.data(), H5::PredType::NATIVE_DOUBLE);
-
-            std::vector<std::vector<double>> grid(nz, std::vector<double>(nr));
-            for (size_t i = 0; i < nz; ++i) {
-                for (size_t j = 0; j < nr; ++j) {
-                    grid[i][j] = raw[i * nr + j];
-                }
-            }
-            return grid;
-        };
-
-        // Load 2D fields with strict shape check
-        data.dens_e        = read2D("dens_e");
-        data.temp_e        = read2D("temp_e");
-        data.dens_i        = read2D("dens_i");
-        data.temp_i        = read2D("temp_i");
-
-        data.parr_flow     = read2D("parr_flow");
-        data.parr_flow_r   = read2D("parr_flow_r");
-        data.parr_flow_t   = read2D("parr_flow_t");
-        data.parr_flow_z   = read2D("parr_flow_z");
-
-        data.grad_temp_e_r = read2D("grad_te_r");
-        data.grad_temp_e_t = read2D("grad_te_t");
-        data.grad_temp_e_z = read2D("grad_te_z");
-
-        data.grad_temp_i_r = read2D("grad_ti_r");
-        data.grad_temp_i_t = read2D("grad_ti_t");
-        data.grad_temp_i_z = read2D("grad_ti_z");
-
-    } catch (const H5::Exception& e) {
-        fprintf(stderr, "HDF5 error: %s\n", e.getCDetailMsg());
-        throw;
-    } catch (const std::exception& e) {
-        fprintf(stderr, "Error: %s\n", e.what());
-        throw;
-    }
-
-    printf("Finished reading plasma data from file: %s\n", filePath.c_str());
-    return data;
-}
-
-
-
-/*---------------------------------
-  initialize plasma data
------------------------------------*/
-void Update::initializePlasmaData() {
-  const int me     = comm->me;
-  const int ncells = grid->nlocal;
-
-  if (plasmaStyle == 0) {
-    // // -------- CONSTANT BACKGROUND --------
-
-    for (int icell = 0; icell < ncells; ++icell) {
-      PlasmaDataParams params;     // value-init in case the struct grows later
-      params.dens_e = dens_e;
-      params.temp_e = temp_e;
-      params.dens_i = dens_i;
-      params.temp_i = temp_i;
-
-      const double v0 = flow_v[0], v1 = flow_v[1], v2 = flow_v[2];
-      params.parr_flow   = std::sqrt(v0*v0 + v1*v1 + v2*v2);
-      params.parr_flow_r = v0;
-      params.parr_flow_t = v1;
-      params.parr_flow_z = v2;
-
-      params.grad_temp_e_r = grad_te_r;
-      params.grad_temp_e_t = grad_te_t;
-      params.grad_temp_e_z = grad_te_z;
-
-      params.grad_temp_i_r = grad_ti_r;
-      params.grad_temp_i_t = grad_ti_t;
-      params.grad_temp_i_z = grad_ti_z;
-
-      plasma_data_map[icell] = params;
-    }
-  } else if (plasmaStyle == 1) {
-    if (me == 0) plasma_data = readPlasmaData(plasmaStatePath);
-     broadcastPlasmaData(plasma_data);
-
-  for (int icell = 0; icell < ncells; ++icell) {
-    plasma_data_map[icell] = bilinearInterpolationPlasma(icell, plasma_data);
-  }
-  }
-  else {
-    error->all(FLERR, "Unknown plasmaStyle:");
-  }
-}
-
-
-
-/*----------------------------------------------------------------------
-   broadcast plasma data
-------------------------------------------------------------------------- */
-void Update::broadcastPlasmaData(PlasmaData& data) {
-    int me = comm->me;
-
-    // Broadcast sizes of 1D vectors (r and z)
-    int r_size = data.r.size();
-    int z_size = data.z.size();
-    MPI_Bcast(&r_size, 1, MPI_INT, 0, world);
-    MPI_Bcast(&z_size, 1, MPI_INT, 0, world);
-
-    // Resize vectors on non-root processes
-    if (me != 0) {
-        data.r.resize(r_size);
-        data.z.resize(z_size);
-    }
-
-    // Broadcast 1D vector data
-    MPI_Bcast(data.r.data(), r_size, MPI_DOUBLE, 0, world);
-    MPI_Bcast(data.z.data(), z_size, MPI_DOUBLE, 0, world);
-
-    // Broadcast 2D vectors (dens_e, temp_e, dens_i, temp_i, parr_flow, grad_temp_e, grad_temp_i)
-    auto broadcast2DVector = [&](std::vector<std::vector<double>>& vec) {
-        int dim1 = vec.size();
-        int dim2 = dim1 ? vec[0].size() : 0;
-
-        MPI_Bcast(&dim1, 1, MPI_INT, 0, world);
-        MPI_Bcast(&dim2, 1, MPI_INT, 0, world);
-
-        // Resize the outer vector and each inner vector on non-root processes
-        if (me != 0) {
-            vec.resize(dim1, std::vector<double>(dim2));
-        }
-
-        for (int i = 0; i < dim1; ++i) {
-            MPI_Bcast(vec[i].data(), dim2, MPI_DOUBLE, 0, world);
-        }
-    };
-
-    broadcast2DVector(data.dens_e);
-    broadcast2DVector(data.temp_e);
-    broadcast2DVector(data.dens_i);
-    broadcast2DVector(data.temp_i);
-
-    broadcast2DVector(data.parr_flow);
-    broadcast2DVector(data.parr_flow_r);
-    broadcast2DVector(data.parr_flow_t);
-    broadcast2DVector(data.parr_flow_z);
-
-    broadcast2DVector(data.grad_temp_e_r);
-    broadcast2DVector(data.grad_temp_e_t);
-    broadcast2DVector(data.grad_temp_e_z);
-
-    broadcast2DVector(data.grad_temp_i_r);
-    broadcast2DVector(data.grad_temp_i_t);
-    broadcast2DVector(data.grad_temp_i_z);
-}
-
-/* ----------------------------------------------------------------------
-   set global properites via read_magnetic_fields
-------------------------------------------------------------------------- */
-void Update::read_magnetic_fields(int narg, char **arg)
-{
-  if (narg < 1) error->all(FLERR, "Illegal read_plasma_state command");
-
-  int iarg = 0;
-  while (iarg < narg) {
-    if (strcmp(arg[iarg], "magnetic_fields") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Illegal magnetic_fields command");
-      if (strcmp(arg[iarg+1], "constant") == 0) {
-        magneticFieldsStyle = 0;
-        iarg += 2; // Move past 'constant'
-        while (iarg < narg && strcmp(arg[iarg], "file") != 0) {
-         if (strcmp(arg[iarg], "bfield") == 0) {
-            if (iarg+3 >= narg) error->all(FLERR, "Illegal magnetic_fields command");
-            bfield[0] = input->numeric(FLERR, arg[iarg+1]);
-            bfield[1] = input->numeric(FLERR, arg[iarg+2]);
-            bfield[2] = input->numeric(FLERR, arg[iarg+3]);
-            iarg += 4;
-          } else {
-            error->all(FLERR, "Unrecognized parameter in magnetic_fields constant");
-          }
-        }
-      } else if (strcmp(arg[iarg+1], "file") == 0) {
-        magneticFieldsStyle = 1;
-        if (iarg+2 >= narg) error->all(FLERR, "Illegal magnetic_fields command");
-        magneticFieldsPath = arg[iarg+2];
-        iarg += 3;  
-      } else {
-        error->all(FLERR, "Illegal magnetic_fields command");
-      }
-    } else {
-      error->all(FLERR, "Illegal magnetic_fields command");
-    }
-  }
-}
-/*----------------------------------------------------------------------
-   broadcast magnetic field data
-------------------------------------------------------------------------- */
-void Update::broadcastMagneticData(MagneticFieldData& data) {
-  int me = comm->me;
-
-  // Broadcast sizes of 1D vectors (e.g., r and z for the magnetic field)
-  int r_size = data.r.size();
-  int z_size = data.z.size();
-  MPI_Bcast(&r_size, 1, MPI_INT, 0, world);
-  MPI_Bcast(&z_size, 1, MPI_INT, 0, world);
-
-  // Resize vectors on non-root processes
-  if (me != 0) {
-      data.r.resize(r_size);
-      data.z.resize(z_size);
-  }
-
-  // Broadcast 1D vector data (r and z)
-  MPI_Bcast(data.r.data(), r_size, MPI_DOUBLE, 0, world);
-  MPI_Bcast(data.z.data(), z_size, MPI_DOUBLE, 0, world);
-
-  // Broadcast 2D vectors (e.g., br, bt, bz)
-  auto broadcast2DVector = [&](std::vector<std::vector<double>>& vec) {
-      int dim1 = vec.size();
-      int dim2 = dim1 ? vec[0].size() : 0;
-
-      MPI_Bcast(&dim1, 1, MPI_INT, 0, world);
-      MPI_Bcast(&dim2, 1, MPI_INT, 0, world);
-
-      // Resize the outer vector and each inner vector on non-root processes
-      if (me != 0) {
-          vec.resize(dim1, std::vector<double>(dim2));
-      }
-
-      for (int i = 0; i < dim1; ++i) {
-          MPI_Bcast(vec[i].data(), dim2, MPI_DOUBLE, 0, world);
-      }
-  };
-
-  // Broadcast the magnetic field components
-  broadcast2DVector(data.br);
-  broadcast2DVector(data.bt);
-  broadcast2DVector(data.bz);
-}
-
-/* ----------------------------------------------------------------------
-   read magnetic field data from file
-------------------------------------------------------------------------- */
-MagneticFieldData Update::readMagneticFieldData(const std::string& filePath) {
-  printf("Reading magnetic field data from file: %s\n", filePath.c_str());
-    MagneticFieldData data; // Initialize an empty MagneticFieldData struct
-    try {
-        H5::H5File file(filePath, H5F_ACC_RDONLY);
-        
-        auto read1DDataSet = [&file](const std::string& datasetPath) {
-            H5::DataSet ds = file.openDataSet(datasetPath);
-            H5::DataSpace space = ds.getSpace();
-            std::vector<hsize_t> dims(1);
-            space.getSimpleExtentDims(dims.data(), NULL);
-            
-            std::vector<double> data(dims[0]);
-            ds.read(data.data(), H5::PredType::NATIVE_DOUBLE);
-            return data;
-        };
-        
-        auto read2DDataSet = [&file](const std::string& datasetPath) {
-            H5::DataSet ds = file.openDataSet(datasetPath);
-            H5::DataSpace space = ds.getSpace();
-            std::vector<hsize_t> dims(2);
-            space.getSimpleExtentDims(dims.data(), NULL);
-            
-            std::vector<std::vector<double>> data(dims[0], std::vector<double>(dims[1]));
-            std::vector<double> rawData(dims[0] * dims[1]);
-            ds.read(rawData.data(), H5::PredType::NATIVE_DOUBLE);
-            
-            for (hsize_t i = 0; i < dims[0]; ++i) {
-                for (hsize_t j = 0; j < dims[1]; ++j) {
-                    data[i][j] = rawData[i * dims[1] + j];
-                }
-            }
-            return data;
-        };
-        
-        // Read the required datasets
-        data.r = read1DDataSet("r");
-        data.z = read1DDataSet("z");
-        data.br = read2DDataSet("br");
-        data.bz = read2DDataSet("bz");
-        data.bt = read2DDataSet("bt");
-        file.close();
-    } catch (const H5::Exception& e) {
-        printf("Error reading magnetic field file file: %s\n", e.getCDetailMsg());
-        throw;  // Re-throw the exception to handle it outside
-    } catch (const std::exception& e) {
-        printf("Error: %s\n", e.what());
-        throw;
-    }
-    printf("Finished reading magnetic field data from file: %s\n", filePath.c_str());
-    return data;
-}
-/*---------------------------------
-  initialize magnetic field data
------------------------------------*/
-void Update::initializeMagneticData() {
-  int me = comm->me;
-// 
-
-  // Load magnetic field data only on the root process
-  if (me == 0) {
-      magnetic_data = readMagneticFieldData(magneticFieldsPath);
-  }
-
-  // Broadcast the magnetic field data to all processes
-  broadcastMagneticData(magnetic_data);
-
-  // Perform interpolation for each cell on all processes
-  // int ncells = grid->ncell;
-  int ncells = grid->nlocal;
-  for (int icell = 0; icell < ncells; ++icell) {
-      magnetic_data_map[icell] = bilinearInterpolationMagneticField(icell, magnetic_data);      
-  }
-
-}
-
-
-/*---------------------------------
-  Bilinear interpolation plasma
------------------------------------*/
-
-PlasmaDataParams Update::bilinearInterpolationPlasma(int icell, const PlasmaData& data) {
-    // Check cache
-    auto it = plasmaDataCache.find(icell);
-    if (it != plasmaDataCache.end()) return it->second;
-
-    // Validate coordinate arrays
-    if (data.r.empty() || data.z.empty()) {
-        throw std::runtime_error("Plasma data coordinate arrays are empty.");
-    }
-
-    const auto& r_vals = data.r;
-    const auto& z_vals = data.z;
-
-    // Get cell midpoint
-    Grid::ChildCell* cell = &grid->cells[icell];
-    double r = 0.5 * (cell->lo[0] + cell->hi[0]);
-    double z = 0.5 * (cell->lo[1] + cell->hi[1]);
-
-    // Out-of-bounds check
-    if (r < r_vals.front() || r > r_vals.back() || z < z_vals.front() || z > z_vals.back()) {
-        return PlasmaDataParams{};
-    }
-
-    // Locate surrounding grid indices
-    auto r_it = std::lower_bound(r_vals.begin(), r_vals.end(), r);
-    auto z_it = std::lower_bound(z_vals.begin(), z_vals.end(), z);
-    int r1 = std::max(0, static_cast<int>(r_it - r_vals.begin()) - 1);
-    int r2 = std::min(static_cast<int>(r_vals.size()) - 1, r1 + 1);
-    int z1 = std::max(0, static_cast<int>(z_it - z_vals.begin()) - 1);
-    int z2 = std::min(static_cast<int>(z_vals.size()) - 1, z1 + 1);
-
-    double R1 = r_vals[r1], R2 = r_vals[r2];
-    double Z1 = z_vals[z1], Z2 = z_vals[z2];
-    double denom = (R2 - R1) * (Z2 - Z1);
-
-    // Bilinear interpolation lambda
-    auto interp = [&](const std::vector<std::vector<double>>& field) -> double {
-        if (field.size() <= z2 || field[0].size() <= r2) return 0.0;
-
-        double Q11 = field[z1][r1];
-        double Q21 = field[z1][r2];
-        double Q12 = field[z2][r1];
-        double Q22 = field[z2][r2];
-
-        if (denom == 0.0) return (Q11 + Q21 + Q12 + Q22) / 4.0;
-
-        return (
-            Q11 * (R2 - r) * (Z2 - z) +
-            Q21 * (r - R1) * (Z2 - z) +
-            Q12 * (R2 - r) * (z - Z1) +
-            Q22 * (r - R1) * (z - Z1)
-        ) / denom;
-    };
-
-    // Fill and cache interpolated values
-    PlasmaDataParams result;
-    result.dens_e        = interp(data.dens_e);
-    result.temp_e        = interp(data.temp_e);
-    result.dens_i        = interp(data.dens_i);
-    result.temp_i        = interp(data.temp_i);
-    result.parr_flow     = interp(data.parr_flow);
-    result.parr_flow_r   = interp(data.parr_flow_r);
-    result.parr_flow_t   = interp(data.parr_flow_t);
-    result.parr_flow_z   = interp(data.parr_flow_z);
-    result.grad_temp_e_r = interp(data.grad_temp_e_r);
-    result.grad_temp_e_t = interp(data.grad_temp_e_t);
-    result.grad_temp_e_z = interp(data.grad_temp_e_z);
-    result.grad_temp_i_r = interp(data.grad_temp_i_r);
-    result.grad_temp_i_t = interp(data.grad_temp_i_t);
-    result.grad_temp_i_z = interp(data.grad_temp_i_z);
-
-    plasmaDataCache[icell] = result;
-    return result;
-}
-
-
-/* ----------------------------------------------------------------------
-   Boris pusher for 3D cartesian coordinates  (minimal, API-compatible fix)
-------------------------------------------------------------------------- */
-void Update::pusher_boris3D(int i, int icell, double dt,
-                            double *x, double *v, double *xnew,
-                            double charge, double mass)
-{
-  // Use q/m consistently
-  const double qm = (charge * echarge) / mass;
-
-  // --- Load fields (use independent indices for E and B)
-  double E[3] = {0.0, 0.0, 0.0};
-  double B[3] = {0.0, 0.0, 0.0};
-
-  if (eperturbflag) {
-    double **arr;
-    int colE = 0;
-    if (efstyle == GFIELD) {
-      arr = modify->fix[efieldfix]->array_grid;
-      if (efield_active[0]) E[0] = arr[icell][colE++];
-      if (efield_active[1]) E[1] = arr[icell][colE++];
-      if (efield_active[2]) E[2] = arr[icell][colE++];
-    } else if (efstyle == PFIELD) {
-      arr = modify->fix[efieldfix]->array_particle;
-      if (efield_active[0]) E[0] = arr[i][colE++];
-      if (efield_active[1]) E[1] = arr[i][colE++];
-      if (efield_active[2]) E[2] = arr[i][colE++];
-    }
-  }
-
-  if (bperturbflag) {
-    double **arr;
-    int colB = 0;
-    if (bfstyle == GFIELD) {
-      arr = modify->fix[bfieldfix]->array_grid;
-      if (bfield_active[0]) B[0] = arr[icell][colB++];
-      if (bfield_active[1]) B[1] = arr[icell][colB++];
-      if (bfield_active[2]) B[2] = arr[icell][colB++];
-    } else if (bfstyle == PFIELD) {
-      arr = modify->fix[bfieldfix]->array_particle;
-      if (bfield_active[0]) B[0] = arr[i][colB++];
-      if (bfield_active[1]) B[1] = arr[i][colB++];
-      if (bfield_active[2]) B[2] = arr[i][colB++];
-    }
-  }
-  // --- Boris: half E
-  double v_minus[3] = {
-    v[0] + qm * E[0] * 0.5 * dt,
-    v[1] + qm * E[1] * 0.5 * dt,
-    v[2] + qm * E[2] * 0.5 * dt
-  };
-
-  // --- Boris: rotation
-  const double t[3] = { qm * B[0] * 0.5 * dt,
-                        qm * B[1] * 0.5 * dt,
-                        qm * B[2] * 0.5 * dt };
-  const double t2   = t[0]*t[0] + t[1]*t[1] + t[2]*t[2];
-  const double s[3] = { 2.0*t[0]/(1.0 + t2),
-                        2.0*t[1]/(1.0 + t2),
-                        2.0*t[2]/(1.0 + t2) };
-
-  double v_prime[3], v_plus[3];
-  MathExtra::cross3(v_minus, t, v_prime);
-  v_prime[0] += v_minus[0]; v_prime[1] += v_minus[1]; v_prime[2] += v_minus[2];
-
-  MathExtra::cross3(v_prime, s, v_plus);
-  v_plus[0] += v_minus[0];  v_plus[1] += v_minus[1];  v_plus[2] += v_minus[2];
-
-  // --- Boris: final half E
-  v_plus[0] += qm * E[0] * 0.5 * dt;
-  v_plus[1] += qm * E[1] * 0.5 * dt;
-  v_plus[2] += qm * E[2] * 0.5 * dt;
-
-  // --- Trial position ONLY; do NOT mutate x[] here
-  xnew[0] = x[0] + v_plus[0] * dt;
-  xnew[1] = x[1] + v_plus[1] * dt;
-  xnew[2] = x[2] + v_plus[2] * dt;
-
-  // It's OK to output new velocity via v[] (no separate vnew in API)
-  v[0] = v_plus[0];
-  v[1] = v_plus[1];
-  v[2] = v_plus[2];
-}
-
-
-/* ----------------------------------------------------------------------
-   Cross-field diffusion step
-   Random walk in plane perpendicular to B
-------------------------------------------------------------------------- */  
-void Update::apply_cross_field_diffusion(int icell, double dt, double* B, double* x) {
-  // Compute |B| and normalize it
-  double Bnorm = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
-  double Bx[3];
-
-  if (Bnorm < 1e-10) {
-      // Default to toroidal field if B is nearly zero
-      Bx[0] = 0.0; Bx[1] = 1.0; Bx[2] = 0.0;
-  } else {
-      for (int i = 0; i < 3; ++i) Bx[i] = B[i] / Bnorm;
-  }
-
-  // Find a vector ex perpendicular to B
-  double ex[3];
-  double zdir[3] = {0.0, 0.0, 1.0};
-  MathExtra::cross3(Bx, zdir, ex);
-  double ex_norm = std::sqrt(ex[0]*ex[0] + ex[1]*ex[1] + ex[2]*ex[2]);
-
-  // If B is aligned with z, pick a different reference vector
-  if (ex_norm < 1e-10) {
-      double ydir[3] = {0.0, 1.0, 0.0};
-      MathExtra::cross3(Bx, ydir, ex);
-      ex_norm = std::sqrt(ex[0]*ex[0] + ex[1]*ex[1] + ex[2]*ex[2]);
-  }
-
-  // Normalize ex
-  for (int i = 0; i < 3; ++i) ex[i] /= ex_norm;
-
-  // Compute ey = B × ex (also perpendicular to B)
-  double ey[3];
-  MathExtra::cross3(Bx, ex, ey);
-
-  // Compute random walk step in the perpendicular plane
-  double step = std::sqrt(4.0 * d_perp * dt);
-  double phi = 2.0 * M_PI * update->ranmaster->uniform();
-  double cos_phi = std::cos(phi);
-  double sin_phi = std::sin(phi);
-
-  // Final displacement vector in perpendicular plane
-  for (int i = 0; i < 3; ++i) {
-      double delta = step * (ex[i] * cos_phi + ey[i] * sin_phi);
-      x[i] += delta;
-  }
-}
-
-// All-SI sheath E-field (Brooks/Stangeby style)
-// Inputs:
-//   B[3]          : tesla
-//   Te_eV, Ti_eV  : eV
-//   ne_m3         : m^-3
-//   t_sheath      : dimensionless model constant
-//   alpha_deg     : degrees between B and surface (incidence angle)
-//   d_wall_m      : minimum distance to the wall [m]
-//   n_hat[3]      : outward surface normal (need not be unit)
-// Outputs:
-//   Efield[3]     : V/m  (points from plasma toward wall, i.e. opposite outward normal)
-//   ne_sheath     : m^-3 (placeholder here; keep ne for now)
-//
-// Stangeby P.C. 2000 The Plasma Boundary of Magnetic Fusion
-// Sheath Model from Stangeby
-void Update::sheathEfieldBrooks(double *B, double Te_eV, double ne_m3, double Ti_eV, double t_sheath, double alpha_deg,double d_wall_m, const double* n_hat, double& Emag, double& ne_sheath) 
-{
-  // --- constants (SI) ---
-  const double e    = update->echarge;          // 1.602e-19 C
-  const double me   = update->electron_mass;    // 9.11e-31 kg
-  const double mi   = update->proton_mass;      // 1.67e-27 kg  (TODO: species mass)
-  const double eps0 = update->epsilon_0;         // 8.854e-12 F/m
-
-  // --- angles & magnitudes ---
-  const double alpha = alpha_deg * M_PI / 180.0;
-  const double s_alpha = std::max(std::abs(std::sin(alpha)), 1e-6); // clamp to avoid log(0)
-  const double Bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
-
-  // --- Debye length [m] ---
-  // λ_D = sqrt( ε0 * kTe / (n e^2) ) with kTe = e * Te_eV
-  const double lambda_D = std::sqrt( eps0 * (Te_eV*e) / ( std::max(ne_m3,1e5) * e*e ) );
-
-  // --- ion sound speed and gyro ---
-  // c_s ≈ sqrt( (Te+Ti) * e / mi )  (γ factors omitted for simplicity)
-  const double cs       = std::sqrt( std::max(Te_eV+Ti_eV, 1e-6) * e / mi );
-  const double omega_ci = (Bmag > 0.0 ? e * Bmag / mi : 1e-9);
-
-  // --- Larmor radius and MPS scale length [m] ---
-  const double rho_i = cs / omega_ci; // [m]
-  const double L_MPS = std::abs(rho_i * std::cos(alpha)) * std::sqrt(6.0) * t_sheath;
-
-  // --- potentials [V] ---
-  // kTe/e = Te_eV (1 eV corresponds to 1 V); so "normalizationFactor" is just Te_eV.
-  const double TeV = Te_eV;
-  const double phi_wall  = 0.5 * std::log(2.0 * M_PI * me / mi) * (1.0 + Ti_eV / std::max(Te_eV,1e-9)) * TeV;
-  const double phi_VMPS  = std::log(s_alpha) * TeV;  // <= 0
-  const double phi_UDS   = phi_wall - phi_VMPS;
-
-  // --- field magnitudes at the wall [V/m] ---
-  const double lambda_safe = std::max(lambda_D, 1e-9);   // avoid divide by ~0
-  const double LMPS_safe   = std::max(L_MPS,   1e-9);
-
-  const double E_DS0  =  phi_UDS / lambda_safe; // V/m
-  const double E_MPS0 =  phi_VMPS / LMPS_safe;  // V/m
-
-  // --- radial profiles vs distance to wall [m] ---
-  const double E_DS   = E_DS0  * std::exp( -0.5 * d_wall_m / lambda_safe );
-  const double E_MPS  = E_MPS0 * std::exp(       d_wall_m / (-LMPS_safe) );
-
-  Emag = E_DS + E_MPS;
-
-  // If we are far from the wall in terms of both scales, just zero out
-  const double L_char = std::max(lambda_safe, LMPS_safe);
-  if ( !std::isfinite(Emag) || d_wall_m > 5.0 * L_char ) {
-    Emag = 0.0;
-  }
-
-  // --- unit normal & field direction (into the wall) ---
-  double nx = n_hat[0], ny = n_hat[1], nz = n_hat[2];
-  const double nlen = std::sqrt(nx*nx + ny*ny + nz*nz);
-  if (nlen > 0.0) { nx /= nlen; ny /= nlen; nz /= nlen; }
-
-  // sheath density model (placeholder: keep upstream ne for now)
-  ne_sheath = ne_m3;
-
-}
-
-
-
-inline void cross_rphiz(const double a[3], const double b[3], double out[3]) {
-    // (r, φ, z) behaves like (x, y, z)
-    out[0] = a[1]*b[2] - a[2]*b[1]; // r
-    out[1] = a[2]*b[0] - a[0]*b[2]; // φ
-    out[2] = a[0]*b[1] - a[1]*b[0]; // z
-}
-
-
-// Find bracketing index i0 such that x[i0] <= xq <= x[i0+1], plus weight wx in [0,1]
-inline void bracket_clamped(const std::vector<double>& x, double xq, int& i0, double& wx) {
-    const int N = (int)x.size();
-    if (N < 2) { i0 = 0; wx = 0.0; return; }
-    if (xq <= x.front()) { i0 = 0; wx = 0.0; return; }
-    if (xq >= x.back())  { i0 = N-2; wx = 1.0; return; }
-    auto it = std::upper_bound(x.begin(), x.end(), xq);
-    int i1 = int(it - x.begin());
-    i0 = std::max(0, std::min(i1 - 1, N - 2));
-    double x0 = x[i0], x1 = x[i0+1];
-    wx = (x1 > x0) ? (xq - x0) / (x1 - x0) : 0.0;
-}
-
-// Bilinear sample of a scalar field stored as data[z][r] (Z-major, R-minor)
-inline double bilinear_sample_scalar(
-    double R, double Z,
-    const std::vector<double>& rgrid,
-    const std::vector<double>& zgrid,
-    const std::vector<std::vector<double>>& data)
-{
-    int ir; double wr;
-    int iz; double wz;
-    bracket_clamped(rgrid, R, ir, wr);
-    bracket_clamped(zgrid, Z, iz, wz);
-
-    // corners
-    double Q00 = data[iz][ir];
-    double Q10 = data[iz][ir+1];
-    double Q01 = data[iz+1][ir];
-    double Q11 = data[iz+1][ir+1];
-
-    double Q0 = Q00*(1.0 - wr) + Q10*wr;
-    double Q1 = Q01*(1.0 - wr) + Q11*wr;
-    return Q0*(1.0 - wz) + Q1*wz;
-}
-
-
-
-// Axisymmetric Boris pusher using cylindrical fields (Br, Bz, Bphi) on (R,Z).
-// State: x = [R, Z, phi], v = [v_r, v_z, v_phi].  We rotate to Cartesian,
-// do Boris, then rotate back.  The sheath E is applied ALONG poloidal B
-// and INTO the wall (so E·n <= 0, E×B has no poloidal contribution).
-
-// Helper: cylindrical -> Cartesian rotation for B at angle phi
-inline void cylB_to_cart(double phi, double Br, double Bphi, double Bz_c,
-                         double &Bx, double &By, double &Bz)
-{
-  const double c = std::cos(phi), s = std::sin(phi);
-  // e_R   = ( c,  s, 0)
-  // e_phi = (-s,  c, 0)
-  Bx =  Br*c - Bphi*s;
-  By =  Br*s + Bphi*c;
-  Bz =  Bz_c;
-}
-
-/* ----------------------------------------------------------------------
-   Boris pusher for 2D axisymmetric (R,Z,phi) with optional thermal forces.
-   - x  = {R, Z, phi}
-   - v  = {v_r, v_z, v_phi}
-   - E,B stored in cylindrical comps (Er, Ephi, Ez) at icell/i
-   - Thermal "E_th" built from parallel ∇T_e, ∇T_i (in eV/m!)
-------------------------------------------------------------------------- */
-void Update::pusherBoris2D(int i, int icell, double dt,
-                           double *x, double *v, double *xnew,
-                           double charge, double mass)
-{
-
-    if (perturbflag) {
-      // pull cylindrical accelerations (a_r, a_z, a_phi) from the active columns
-      double **array = modify->fix[ifieldfix]->array_grid;
-      double ar = 0.0, az = 0.0, aphi = 0.0;
-      int icol = 0;
-      if (field_active[0]) ar   = array[icell][icol++];  // a_r [m/s^2]
-      if (field_active[1]) az   = array[icell][icol++];  // a_z [m/s^2]
-      if (field_active[2]) aphi = array[icell][icol++];  // a_phi [m/s^2]
-
-      const double dt2  = dt*dt;
-      const double R0   = x[0];
-      const double Z0   = x[1];
-      const double phi0 = x[2];
-      const double vr0  = v[0];
-      const double vz0  = v[1];
-      const double vphi0= v[2];
-
-      // velocities (explicit Euler on a)
-      const double vr1   = vr0   + ar   * dt;
-      const double vz1   = vz0   + az   * dt;
-      const double vphi1 = vphi0 + aphi * dt;
-
-      // positions: include drift + 0.5 a dt^2
-      const double R1    = R0  + vr0   * dt + 0.5 * ar   * dt2;
-      const double Z1    = Z0  + vz0   * dt + 0.5 * az   * dt2;
-
-      // angular advance: use averaged v_phi and averaged R to be stable
-      const double Ravg  = std::max(0.5*(R0 + R1), 1e-12);
-      const double vphi_avg = 0.5*(vphi0 + vphi1);
-      const double phi1  = phi0 + (vphi_avg / Ravg) * dt;
-
-      // write back
-      v[0]    = vr1;
-      v[1]    = vz1;
-      v[2]    = vphi1;
-      xnew[0] = R1;
-      xnew[1] = Z1;
-      xnew[2] = phi1;
-
-      // helpful debug: print the actual a and the NEW x
-      // printf("Particle %d: a=(%g,%g,%g) m/s^2, xnew=(%g,%g,%g)\n",
-            // i, ar, az, aphi, xnew[0], xnew[1], xnew[2]);
-      return;
-    }
-
-
-  // ---------- load fields ----------
-  double E_cyl[3] = {0.0, 0.0, 0.0};
-  double B_cyl[3] = {0.0, 0.0, 0.0};
-  double gradTe_e[3] = {0.0, 0.0, 0.0}; // MUST be eV/m
-  double gradTe_i[3] = {0.0, 0.0, 0.0}; // MUST be eV/m
-
-  if (eperturbflag) {
-    double **arr; int col=0;
-    if (efstyle == GFIELD) {
-      arr = modify->fix[efieldfix]->array_grid;
-      if (efield_active[0]) E_cyl[0] = arr[icell][col++];
-      if (efield_active[1]) E_cyl[1] = arr[icell][col++];
-      if (efield_active[2]) E_cyl[2] = arr[icell][col++];
-    } else if (efstyle == PFIELD) {
-      arr = modify->fix[efieldfix]->array_particle;
-      if (efield_active[0]) E_cyl[0] = arr[i][col++];
-      if (efield_active[1]) E_cyl[1] = arr[i][col++];
-      if (efield_active[2]) E_cyl[2] = arr[i][col++];
-    }
-  }
-
-  if (bperturbflag) {
-    double **arr; int col=0;
-    if (bfstyle == GFIELD) {
-      arr = modify->fix[bfieldfix]->array_grid;
-      if (bfield_active[0]) B_cyl[0] = arr[icell][col++];
-      if (bfield_active[1]) B_cyl[1] = arr[icell][col++];
-      if (bfield_active[2]) B_cyl[2] = arr[icell][col++];
-    } else if (bfstyle == PFIELD) {
-      arr = modify->fix[bfieldfix]->array_particle;
-      if (bfield_active[0]) B_cyl[0] = arr[i][col++];
-      if (bfield_active[1]) B_cyl[1] = arr[i][col++];
-      if (bfield_active[2]) B_cyl[2] = arr[i][col++];
-    }
-  }
-
-  if (ethermalflag) {
-    double **arr; int col=0;
-    if (ethermalstyle == GFIELD) {
-      arr = modify->fix[ethermalfix]->array_grid;
-      if (ethermal_active[0]) gradTe_e[0] += arr[icell][col++];
-      if (ethermal_active[1]) gradTe_e[1] += arr[icell][col++];
-      if (ethermal_active[2]) gradTe_e[2] += arr[icell][col++];
-    }
-  }
-  if (ithermalflag) {
-    double **arr; int col=0;
-    if (ithermalstyle == GFIELD) {
-      arr = modify->fix[ithermalfix]->array_grid;
-      if (ithermal_active[0]) gradTe_i[0] += arr[icell][col++];
-      if (ithermal_active[1]) gradTe_i[1] += arr[icell][col++];
-      if (ithermal_active[2]) gradTe_i[2] += arr[icell][col++];
-    }
-  }
-
-
-  // if no perturbations, do simple ballistic step and return
-  if (!eperturbflag && !bperturbflag && !ethermalflag && !ithermalflag) {
-      const double R = std::max(x[0], 1e-12);
-
-        double dtremain = dt;
-        xnew[0] = x[0] + v[0]*dtremain;
-        xnew[1] = x[1] + v[1]*dtremain;
-        xnew[2] = x[2] + (v[2]/R) * dtremain;  
-        return;
-    }
-
-  // ---------- geometry ----------
-  const double R   = std::max(x[0], 1e-12);
-  const double Zc  = x[1];
-  const double phi = x[2];
-  const double cphi = std::cos(phi), sphi = std::sin(phi);
-
-  auto cyl_to_cart = [&](double vr, double vphi, double vz,
-                         double &vx, double &vy, double &vz_out) {
-    vx =  vr*cphi - vphi*sphi;
-    vy =  vr*sphi + vphi*cphi;
-    vz_out = vz;
-  };
-  auto cart_to_cyl = [&](double vx, double vy, double vz,
-                         double phi_now, double &vr, double &vphi, double &vz_out) {
-    const double c = std::cos(phi_now), s = std::sin(phi_now);
-    vr     =  vx*c + vy*s;
-    vphi   = -vx*s + vy*c;
-    vz_out =  vz;
-  };
-
-  // ---------- q/m & early exit for neutrals ----------
-  const double Zabs = std::abs(charge);            // charge in units of e
-  if (Zabs == 0.0) { // neutral: ballistic
-    xnew[0] = R + v[0]*dt;
-    xnew[1] = Zc + v[1]*dt;
-    xnew[2] = phi + (v[2]/std::max(R,1e-12))*dt;   // crude φ advance if needed
-    return;
-  }
-  const double qm = (charge * echarge) / mass;
-
-  // ---------- B (cyl->cart) once; used for b-hat and rotation ----------
-  double Bx=0, By=0, Bz=0;
-  cylB_to_cart(phi, B_cyl[0], B_cyl[1], B_cyl[2], Bx, By, Bz);
-  const double Bmag = std::sqrt(Bx*Bx + By*By + Bz*Bz);
-  double bx=0, by=0, bz=0;
-  if (Bmag > 0.0) { bx = Bx/Bmag; by = By/Bmag; bz = Bz/Bmag; }
-
-  // ---------- build thermal E_parallel (∇T in eV/m) ----------
-  // coefficients from your doc (force-level): F_T = - α_e ∇T_e - β_i ∇T_i
-  // => E_th = F_T / (Ze) = -(α_e/Z) ∇T_e - (β_i/Z) ∇T_i (parallel component only)
-  if ((ethermalflag || ithermalflag) && Zabs > 0 && Bmag > 0) {
-    // Rotate gradients to Cartesian to dot with b-hat
-    const double dTe_x =  gradTe_e[0]*cphi - gradTe_e[1]*sphi;
-    const double dTe_y =  gradTe_e[0]*sphi + gradTe_e[1]*cphi;
-    const double dTe_z =  gradTe_e[2];
-    const double dTi_x =  gradTe_i[0]*cphi - gradTe_i[1]*sphi;
-    const double dTi_y =  gradTe_i[0]*sphi + gradTe_i[1]*cphi;
-    const double dTi_z =  gradTe_i[2];
-
-    const double gTe_par = dTe_x*bx + dTe_y*by + dTe_z*bz; // eV/m
-    const double gTi_par = dTi_x*bx + dTi_y*by + dTi_z*bz; // eV/m
-
-    // impurity mass ratio μ = m_s / (m_s + m_i_main)
-    const double m_i_main = proton_mass * plasma_background_mass; // e.g., 2.0 for D
-    const double mu = mass / (mass + m_i_main);
-
-    const double alpha_e = 0.71 * Zabs * Zabs; // your Eq. (6), force-level
-    const double beta_i  = (3.0*( mu
-                           + 5.0*std::sqrt(2.0)*Zabs*Zabs
-                             *(1.1*std::pow(mu,2.5) - 0.35*std::pow(mu,1.5))
-                           - 1.0))
-                           /(2.6 - 2.0*mu + 5.4*mu*mu); // your Eq. (7/8)
-
-    const double Eth_par = -(alpha_e/Zabs)*gTe_par - (beta_i/Zabs)*gTi_par; // V/m
-
-    // Back to components; add into cylindrical E
-    const double Ex_th = Eth_par * bx;
-    const double Ey_th = Eth_par * by;
-    const double Ez_th = Eth_par * bz;
-    const double Er_th   =  Ex_th*cphi + Ey_th*sphi;
-    const double Ephi_th = -Ex_th*sphi + Ey_th*cphi;
-
-    E_cyl[0] += Er_th;
-    E_cyl[1] += Ephi_th;
-    E_cyl[2] += Ez_th;
-  }
-
-  // ---------- transform final E to Cartesian ----------
-  const double Ex =  E_cyl[0]*cphi - E_cyl[1]*sphi;
-  const double Ey =  E_cyl[0]*sphi + E_cyl[1]*cphi;
-  const double Ez =  E_cyl[2];
-
-  // ---------- velocities to Cartesian ----------
-  double vx, vy, vz;
-  // v[] ordering: {v_r, v_z, v_phi}
-  cyl_to_cart(/*vr=*/v[0], /*vphi=*/v[2], /*vz=*/v[1], vx, vy, vz);
-
-  // ---------- Boris: half E-kick ----------
-  double v_minus[3] = {
-    vx + qm * Ex * 0.5 * dt,
-    vy + qm * Ey * 0.5 * dt,
-    vz + qm * Ez * 0.5 * dt
-  };
-
-  // ---------- Boris: rotation (t= q B dt / 2m) ----------
-  const double tvec[3] = { qm * Bx * 0.5 * dt,
-                           qm * By * 0.5 * dt,
-                           qm * Bz * 0.5 * dt };
-  const double t2   = tvec[0]*tvec[0] + tvec[1]*tvec[1] + tvec[2]*tvec[2];
-  const double svec[3] = { 2.0*tvec[0]/(1.0 + t2),
-                           2.0*tvec[1]/(1.0 + t2),
-                           2.0*tvec[2]/(1.0 + t2) };
-
-  double v_prime[3], v_plus[3];
-  MathExtra::cross3(v_minus, tvec, v_prime);
-  v_prime[0] += v_minus[0]; v_prime[1] += v_minus[1]; v_prime[2] += v_minus[2];
-
-  MathExtra::cross3(v_prime, svec, v_plus);
-  v_plus[0] += v_minus[0];  v_plus[1] += v_minus[1];  v_plus[2] += v_minus[2];
-
-  // ---------- Boris: final half E-kick ----------
-  v_plus[0] += qm * Ex * 0.5 * dt;
-  v_plus[1] += qm * Ey * 0.5 * dt;
-  v_plus[2] += qm * Ez * 0.5 * dt;
-
-  // ---------- advance positions ----------
-  const double X0 = R * cphi, Y0 = R * sphi;
-  const double Xn = X0 + v_plus[0] * dt;
-  const double Yn = Y0 + v_plus[1] * dt;
-  const double Zn = Zc + v_plus[2] * dt;
-
-  const double Rn   = std::hypot(Xn, Yn);
-  const double phin = std::atan2(Yn, Xn);
-
-  // ---------- back to cylindrical velocities at new angle ----------
-  double vr_out, vphi_out, vz_out;
-  cart_to_cyl(v_plus[0], v_plus[1], v_plus[2], phin, vr_out, vphi_out, vz_out);
-
-  v[0] = vr_out;   // v_r
-  v[1] = vz_out;   // v_z
-  v[2] = vphi_out; // v_phi
-
-  xnew[0] = Rn;
-  xnew[1] = Zn;
-  xnew[2] = phin;
-}
-
-
-
-PlasmaDataParams Update::interpolatePlasma_RZ_clamped(
-    double R, double Z, const PlasmaData& data)
-{
-  PlasmaDataParams out{};  // zeros by default
-
-  // Fast reject if coords missing
-  if (data.r.size() < 2 || data.z.size() < 2) return out;
-
-  // Sample each field if present (same Z-major, R-minor layout)
-  auto S = [&](const std::vector<std::vector<double>>& f)->double {
-    if (f.empty() || f[0].empty()) return 0.0;
-    return bilinear_sample_scalar(R, Z, data.r, data.z, f);
-  };
-
-  out.dens_e        = S(data.dens_e);
-  out.temp_e        = S(data.temp_e);
-  out.dens_i        = S(data.dens_i);
-  out.temp_i        = S(data.temp_i);
-
-  out.parr_flow     = S(data.parr_flow);
-  out.parr_flow_r   = S(data.parr_flow_r);
-  out.parr_flow_t   = S(data.parr_flow_t);
-  out.parr_flow_z   = S(data.parr_flow_z);
-
-  out.grad_temp_e_r = S(data.grad_temp_e_r);
-  out.grad_temp_e_t = S(data.grad_temp_e_t);
-  out.grad_temp_e_z = S(data.grad_temp_e_z);
-  out.grad_temp_i_r = S(data.grad_temp_i_r);
-  out.grad_temp_i_t = S(data.grad_temp_i_t);
-  out.grad_temp_i_z = S(data.grad_temp_i_z);
-
-  return out;
-}
-
-
-
-PlasmaDataParams Update::interpolatePlasma_RZ_constant()
-{
-  PlasmaDataParams out{};  // zeros by default
-
-
-  out.dens_e        =  dens_e;
-  out.temp_e        =  temp_e;
-
-  out.parr_flow     = 0; //parr_flow;
-  out.parr_flow_r   = 0; //parr_flow_r;
-  out.parr_flow_t   =0; // parr_flow_t;
-  out.parr_flow_z   = 0; //parr_flow_z;
-
-  out.grad_temp_e_r = 0; //grad_temp_e_r;
-  out.grad_temp_e_t = 0; //grad_temp_e_t;
-  out.grad_temp_e_z = 0; //grad_temp_e_z;
-  out.grad_temp_i_r = 0; //grad_temp_i_r;
-  out.grad_temp_i_t = 0; //grad_temp_i_t;
-  out.grad_temp_i_z = 0; //grad_temp_i_z;
-
-  return out;
-}
-
-
-// F_Te = α ∇T_e ,  F_Ti = β ∇T_i     (T in eV, ∇T in eV/m)
-// Effective field:  q E_th = F  ⇒  E_th = (e/ q) (α ∇T_e + β ∇T_i)
-// For an ion with charge q = Z e  →  E_th = (α/Z) ∇T_e + (β/Z) ∇T_i.
-void Update::thermal_gradient_Efield(const double mass, const double charge,
-                                    const double gradTe_e[3],  // ∇T_e in eV/m (R,φ,Z)
-                                    const double gradTe_i[3],  // ∇T_i in eV/m (R,φ,Z)
-                                    double E_th[3])            // out: (Er,Eφ,Ez) in V/m
-{
-    if (std::abs(charge) < 1e-16) { E_th[0]=E_th[1]=E_th[2]=0.0; return; }
-
-    // main-ion mass used in β(μ); set from your background species
-    const double m_i_main = proton_mass * plasma_background_mass; // e.g. D/T -> set factor
-    const double mu = mass / (m_i_main + mass);
-
-    const double Z = (charge != 0.0) ? (charge ) : 0.0;
-
-    const double alpha = 0.71 * Z * Z;
-    const double beta  = 3.0 * (mu + 5.0 * std::sqrt(2.0) * Z * Z *
-                               (1.1 * std::pow(mu, 2.5) - 0.35 * std::pow(mu, 1.5)) - 1.0)
-                         / (2.6 - 2.0 * mu + 5.4 * std::pow(mu, 2));
-
-    const double factor = ev2kelvin * boltz / (charge * echarge);
-
-    E_th[0] = factor * (alpha * gradTe_e[0] + beta * gradTe_i[0]); // Er
-    E_th[1] = factor * (alpha * gradTe_e[1] + beta * gradTe_i[1]); // Eφ
-    E_th[2] = factor * (alpha * gradTe_e[2] + beta * gradTe_i[2]); // Ez
-}
-
-
-// Brownian step in plane ⟂ B with <|ΔX⊥|^2> = 4 Dperp dt
-void Update::apply_cross_field_diffusion_cart(
-    const double dt,
-    const double Bx, const double By, const double Bz,
-    const double u01,                // uniform(0,1)
-    double &Xn, double &Yn, double &Zn)
-{
-  // b-hat
-  const double Bmag = std::sqrt(Bx*Bx + By*By + Bz*Bz);
-  double bx=0, by=0, bz=1; // fallback if |B|≈0
-  if (Bmag > 1e-14) { bx = Bx/Bmag; by = By/Bmag; bz = Bz/Bmag; }
-
-  // Orthonormal basis e1, e2 spanning plane ⟂ b̂
-  // choose a ref not ~parallel to b̂
-  double rx = (std::fabs(bx) < 0.9) ? 1.0 : 0.0;
-  double ry = (rx==0.0) ? 1.0 : 0.0;
-  double rz = 0.0;
-
-  // e1 = normalize(b̂ × ref), e2 = b̂ × e1
-  double e1x =  by*rz - bz*ry;
-  double e1y =  bz*rx - bx*rz;
-  double e1z =  bx*ry - by*rx;
-  double n1  = std::sqrt(e1x*e1x + e1y*e1y + e1z*e1z);
-  if (n1 < 1e-14) { // try ẑ if ref was nearly parallel
-    rx = 0; ry = 0; rz = 1;
-    e1x =  by*rz - bz*ry;
-    e1y =  bz*rx - bx*rz;
-    e1z =  bx*ry - by*rx;
-    n1  = std::sqrt(e1x*e1x + e1y*e1y + e1z*e1z);
-    if (n1 < 1e-14) return; // pathological: give up quietly
-  }
-  e1x/=n1; e1y/=n1; e1z/=n1;
-  const double e2x = bz*e1y - by*e1z;
-  const double e2y = bx*e1z - bz*e1x;
-  const double e2z = by*e1x - bx*e1y;
-
-  // random direction in ⟂ plane
-  const double ang = 2.0*M_PI * std::fmod(std::max(0.0, u01), 1.0);
-  const double ux  = e1x*std::cos(ang) + e2x*std::sin(ang);
-  const double uy  = e1y*std::cos(ang) + e2y*std::sin(ang);
-  const double uz  = e1z*std::cos(ang) + e2z*std::sin(ang);
-
-  // step length for 2D diffusion in the ⟂ plane
-  const double step = std::sqrt(std::max(0.0, 4.0 * dt));
-
-  // apply to Cartesian position
-  Xn += step * ux;
-  Yn += step * uy;
-  Zn += step * uz;
-}
-
-
-double Update::normal01_from_uniforms_() {
-  const double u1 = std::max(1e-12, ranmaster->uniform());
-  const double u2 = std::max(1e-12, ranmaster->uniform());
-  return std::sqrt(-2.0*std::log(u1)) * std::cos(2.0*M_PI*u2);
-}
-
-// ------- BGK collision step (member) -------
-void Update::apply_bgk_collision_step(double dt,
-                                      double R, double Z, double phi,
-                                      double charge, double mass,
-                                      double &vx, double &vy, double &vz)
-{
-  // 1) Background plasma at (R,Z)
-  const PlasmaDataParams Pf = interpolatePlasma_RZ_clamped(R, Z, this->plasma_data);
-
-  const double uflow_r = Pf.parr_flow_r;
-  const double uflow_t = Pf.parr_flow_t;
-  const double uflow_z = Pf.parr_flow_z;
-  const double Te_eV   = Pf.temp_e;
-  const double Ti_eV   = Pf.temp_i;
-  const double ne_m3   = Pf.dens_e;
-  if (Te_eV <= 0.0 || Ti_eV <= 0.0 || ne_m3 <= 0.0) return;
-
-  // 2) Rotate flow to Cartesian
-  const double c = std::cos(phi), s = std::sin(phi);
-  const double ux =  uflow_r * c - uflow_t * s;
-  const double uy =  uflow_r * s + uflow_t * c;
-  const double uz =  uflow_z;
-
-  // 3) Relative velocity
-  double vrx = vx - ux;
-  double vry = vy - uy;
-  double vrz = vz - uz;
-  double vrel = std::sqrt(std::max(1e-30, vrx*vrx + vry*vry + vrz*vrz));
-
-  // 4) Constants from Update members
-  const double eQ   = this->echarge;
-  const double eps0 = this->epsilon_0;
-  const double kB   = this->boltz;
-  const double eV2K = this->ev2kelvin;
-  const double me   = this->electron_mass;
-  const double mp   = this->proton_mass;
-
-  const double Z_bg = (double)this->plasma_background_charge; // dimensionless
-  const double A_bg = (double)this->plasma_background_mass;   // amu
-  const double M_bg = A_bg * mp;
-
-  // 5) Debye length & Coulomb log
-  const double lam_D = std::sqrt(std::max(0.0,
-      eps0 * kB * eV2K * Te_eV / ( ne_m3 * (Z_bg*eQ)*(Z_bg*eQ) )));
-
-  const double Z_imp  = charge;
-  const double Lambda = std::max(1.0, 12.0 * M_PI * ne_m3 * lam_D*lam_D*lam_D / std::max(1e-30, Z_imp));
-  const double lnL    = std::log(Lambda);
-
-  // 6) GITR-like prefactors
-  const double A_imp  = mass / mp; // amu
-  const double pref    = 0.238762895 * (Z_imp*Z_imp) * lnL / std::max(1e-30, A_imp*A_imp);
-  const double gam_eBG = std::max(0.0, pref);
-  const double gam_iBG = std::max(0.0, pref * (Z_bg*Z_bg));
-
-  // 7) Dimensionless speeds and special functions
-  const double xx_i = vrel*vrel * M_bg / (2.0 * eQ * Ti_eV);
-  auto safe_sqrt = [](double x){ return std::sqrt(std::max(0.0, x)); };
-
-  const double psi_prime_i    = 2.0 * safe_sqrt(xx_i/M_PI) * std::exp(-xx_i);
-  const double psi_psiprime_i = std::erf(safe_sqrt(xx_i));
-  const double psi_i          = psi_psiprime_i - psi_prime_i;
-
-  // 8) Base collision frequencies
-  const double vrel3 = vrel*vrel*vrel;
-  const double nu0_i = gam_eBG * ne_m3 / std::max(1e-30, vrel3);
-  // const double nu0_e = gam_iBG * ne_m3 / std::max(1e-30, vrel3); // reserved
-
-  const double nu_friction   = (1.0 + A_imp/std::max(1e-30, A_bg)) * psi_i * nu0_i;
-  const double nu_deflection = 2.0 * (psi_psiprime_i - psi_i/std::max(1e-30, 2.0*xx_i)) * nu0_i;
-  const double nu_parallel   = (psi_i / std::max(1e-30, xx_i)) * nu0_i;
-  const double nu_energy     = 2.0 * ((A_imp/std::max(1e-30, A_bg)) * psi_i - psi_prime_i) * nu0_i;
-
-  // 9) Substep for stability: keep max(nu)*dt_sub <= 0.2
-  const double nu_max = std::max({ std::fabs(nu_friction),
-                                   std::fabs(nu_deflection),
-                                   std::fabs(nu_parallel),
-                                   std::fabs(nu_energy) });
-  const int nsub = std::max(1, (int)std::ceil(nu_max * dt / 0.2));
-  const double dt_sub = dt / nsub;
-
-  auto build_triad = [](double px, double py, double pz,
-                        double &ex1x, double &ex1y, double &ex1z,
-                        double &ex2x, double &ex2y, double &ex2z)
-  {
-    // perp1 = normalize(p × ẑ)
-    ex1x =  py*0.0 - pz*1.0;
-    ex1y =  pz*0.0 - px*0.0;
-    ex1z =  px*1.0 - py*0.0;
-    double n1 = std::sqrt(ex1x*ex1x + ex1y*ex1y + ex1z*ex1z);
-    if (n1 < 1e-14) { // p ~ ẑ; use ŷ
-      ex1x =  py*1.0 - pz*0.0;
-      ex1y =  pz*0.0 - px*1.0;
-      ex1z =  px*0.0 - py*0.0;
-      n1 = std::sqrt(ex1x*ex1x + ex1y*ex1y + ex1z*ex1z);
-      if (n1 < 1e-14) { ex1x=1.0; ex1y=0.0; ex1z=0.0; n1=1.0; }
-    }
-    ex1x/=n1; ex1y/=n1; ex1z/=n1;
-    // perp2 = p × perp1
-    ex2x = py*ex1z - pz*ex1y;
-    ex2y = pz*ex1x - px*ex1z;
-    ex2z = px*ex1y - py*ex1x;
-  };
-
-  for (int is=0; is<nsub; ++is) {
-    // direction from current v_rel
-    double px = vrx / vrel, py = vry / vrel, pz = vrz / vrel;
-    double ex1x, ex1y, ex1z, ex2x, ex2y, ex2z;
-    build_triad(px, py, pz, ex1x, ex1y, ex1z, ex2x, ex2y, ex2z);
-
-    // randoms from member RNG
-    const double n1  = normal01_from_uniforms_();
-    const double n2  = normal01_from_uniforms_();
-    const double xsi = ranmaster->uniform();
-    const double cosX = std::min(1.0, std::cos(2.0*M_PI*xsi) - 0.0028);
-    const double sinX = std::sin(2.0*M_PI*xsi);
-
-    const double c_par   = n1 * std::sqrt(std::max(0.0, 2.0*nu_parallel  * dt_sub));
-    const double c_perp1 = cosX * std::sqrt(std::max(0.0, 0.5*nu_deflection* dt_sub));
-    const double c_perp2 = sinX * std::sqrt(std::max(0.0, 0.5*nu_deflection* dt_sub));
-
-    double nuEdt = nu_energy * dt_sub;
-    if (nuEdt < -1.0) nuEdt = -1.0;
-
-    const double vNormEt = vrel * (1.0 - 0.5*nuEdt);
-    const double vPar_x  = (1.0 + c_par) * px;
-    const double vPar_y  = (1.0 + c_par) * py;
-    const double vPar_z  = (1.0 + c_par) * pz;
-
-    const double vPerp0_x = c_perp1*ex1x + c_perp2*ex2x;
-    const double vPerp0_y = c_perp1*ex1y + c_perp2*ex2y;
-    const double vPerp0_z = c_perp1*ex1z + c_perp2*ex2z;
-    const double vPerp_x  = std::fabs(n2) * vPerp0_x;
-    const double vPerp_y  = std::fabs(n2) * vPerp0_y;
-    const double vPerp_z  = std::fabs(n2) * vPerp0_z;
-
-    const double vPar2_x  = vrel * dt_sub * nu_friction * px;
-    const double vPar2_y  = vrel * dt_sub * nu_friction * py;
-    const double vPar2_z  = vrel * dt_sub * nu_friction * pz;
-
-    // new relative velocity
-    vrx = vNormEt*(vPar_x + vPerp_x) - vPar2_x;
-    vry = vNormEt*(vPar_y + vPerp_y) - vPar2_y;
-    vrz = vNormEt*(vPar_z + vPerp_z) - vPar2_z;
-    vrel = std::sqrt(std::max(1e-30, vrx*vrx + vry*vry + vrz*vrz));
-  }
-
-  // add background flow back
-  vx = vrx + ux;
-  vy = vry + uy;
-  vz = vrz + uz;
-
-  if (!std::isfinite(vx) || !std::isfinite(vy) || !std::isfinite(vz)) {
-    vx = ux; vy = uy; vz = uz; // safety fallback
-  }
 }

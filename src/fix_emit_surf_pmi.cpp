@@ -490,7 +490,7 @@ void FixEmitSurfPmi::perform_task()
 
     //  double nrho_cell = np * fnum / cinfo[icell].volume;
 
-    double nrho_cell = update->plasma_data_map[pcell].dens_i;
+    double nrho_cell = update->nrho;
     tasks[i].nrho = nrho_cell;
     // perspecies yes get_flux(int icell)
       // set ntarget for insertion mode FLOW, CONSTANT, or VARIABLE
@@ -672,10 +672,12 @@ int FixEmitSurfPmi::option(int narg, char **arg)
 double FixEmitSurfPmi::get_flux(int icell)
 {
   
-  double dens = update->plasma_data_map[icell].dens_i;
-  double v_parr = update->plasma_data_map[icell].parr_flow;
-  double flux_density = dens * abs(v_parr);
-  printf(" icell %d dens %g v_parr %g flux_density %g\n",icell,dens,v_parr,flux_density);
+  double dens = update->nrho;
+  double v_parr = sqrt(update->vstream[0]*update->vstream[0] +
+                       update->vstream[1]*update->vstream[1] +
+                       update->vstream[2]*update->vstream[2]);
+  double flux_density = dens * fabs(v_parr);
+  printf(" icell %d dens %g v_stream %g flux_density %g\n",icell,dens,v_parr,flux_density);
   return flux_density;
 
 

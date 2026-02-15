@@ -1,0 +1,20 @@
+seed                12345
+dimension           3
+boundary            p p o
+global              gridcut 0.0 comm/sort no
+
+create_box          -1.0 1.0  -1.0 1.0  -5.0 5.0
+create_grid         8 8 8
+balance_grid        rcb cell
+
+species             ar.species Ar
+read_particles      source.1 0
+
+fix grav gravity    all 0.0 0.0 -9.81
+
+timestep            1.0e-3
+stats               10
+stats_style         step cpu np
+
+dump d1 particle all 1 dump.gravity3d id type x y z vx vy vz
+run                 200

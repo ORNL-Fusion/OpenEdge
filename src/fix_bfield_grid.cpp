@@ -242,16 +242,18 @@ void FixBfieldGrid::fill_from_compute(const GridSrc &S, int icol)
     c->invoked_flag |= INVOKED_PER_GRID;
   }
 
-  double **arr = nullptr; 
-  int *cols = nullptr;
-
-  // If your Compute class exposes a query method:
-  int ok = c->query_tally_grid(S.col, arr, cols);
-  if (ok <= 0 || !arr) error->all(FLERR,"fix bfield/grid: compute has no per-grid data");
-
-  const int src = cols ? cols[0] : (S.col - 1);
   const int ng = grid->nlocal;
-
-  for (int icell = 0; icell < ng; ++icell)
-    array_grid[icell][icol] = arr[icell][src];
+  if (c->size_per_grid_cols == 0) {
+    // Single per-grid value is exposed as vector_grid (column index must be 1).
+    if (S.col != 1 || c->vector_grid == NULL)
+      error->all(FLERR,"fix bfield/grid: compute has no per-grid vector");
+    for (int icell = 0; icell < ng; ++icell)
+      array_grid[icell][icol] = c->vector_grid[icell];
+  } else {
+    if (S.col < 1 || S.col > c->size_per_grid_cols || c->array_grid == NULL)
+      error->all(FLERR,"fix bfield/grid: compute has no per-grid array");
+    const int src = S.col - 1;
+    for (int icell = 0; icell < ng; ++icell)
+      array_grid[icell][icol] = c->array_grid[icell][src];
+  }
 }

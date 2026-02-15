@@ -1,10 +1,15 @@
 /* ----------------------------------------------------------------------
-    OpenEdge:
-    Impurity Transport in Modeling of SOL and Edge Physics:
-    This code built on top of SPARTA, a parallel DSMC code.
-    Abdourahmane Diaw,  diawa@ornl.gov (2023)
-    Oak Ridge National Laboratory
-https://github.com/ORNL-Fusion/OpenEdge
+   SPARTA - Stochastic PArallel Rarefied-gas Time-accurate Analyzer
+   http://sparta.github.io
+   Steve Plimpton, sjplimp@gmail.com, Michael Gallis, magalli@sandia.gov
+   Sandia National Laboratories
+
+   Copyright (2014) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level SPARTA directory.
 ------------------------------------------------------------------------- */
 
 #ifdef SURF_REACT_CLASS
@@ -13,18 +18,12 @@ SurfReactStyle(prob,SurfReactProb)
 
 #else
 
-#ifndef SPARTA_SURF_REACT_Prob_H
-#define SPARTA_SURF_REACT_Prob_H
+#ifndef SPARTA_SURF_REACT_PROB_H
+#define SPARTA_SURF_REACT_PROB_H
 
 #include "surf_react.h"
-#include <vector> 
 
 namespace SPARTA_NS {
-
-struct ReactionProbabilities {
-    double reflection;
-    double sputtering;
-};
 
 class SurfReactProb : public SurfReact {
  public:
@@ -37,8 +36,6 @@ class SurfReactProb : public SurfReact {
   double reaction_coeff(int);
   int match_reactant(char *, int);
   int match_product(char *, int);
-
-  double sputtering_yield_sample(const std::vector<double>& yields);
 
   // reaction info, as read from file
 
@@ -53,36 +50,6 @@ class SurfReactProb : public SurfReact {
     double *coeff;                 // numerical coeffs for reaction
     char *id;                      // reaction ID (formula)
   };
-
-   double random_energy_thompson(double , double );
-   double bohdansky_heavy_sputtering_yield(double , double , double , double , double , double );
-   double bohdansky_light_sputtering_yield(double , double , double , double , double , double );
-   double thomas_reflection(double , double , double , double , double , double );
-   double wierzbicki_biersack(double , double , double , double , double , double );
-   int findSpeciesID(double , double );
-   void get_probability_ref_sputter(Particle::OnePart *&);
-   ReactionProbabilities get_probability_sputter(Particle::OnePart *&);
-
-     inline double clamp(double x, double lo, double hi) { return std::max(lo, std::min(hi, x)); }
-
-// Linear interpolation on a sorted grid, clamped at the ends
-inline double interp1d_clamped(const double* xs, const double* ys, int n, double x) {
-    if (x <= xs[0]) return ys[0];
-    if (x >= xs[n-1]) return ys[n-1];
-    // find interval: xs[i] <= x < xs[i+1]
-    int i = 0, j = n - 1;
-    while (j - i > 1) {
-        int m = (i + j) / 2;
-        if (x >= xs[m]) i = m; else j = m;
-    }
-    double t = (x - xs[i]) / (xs[i+1] - xs[i]);
-    return ys[i] + t * (ys[i+1] - ys[i]);
-}
-
-  double thomas_reflection(double Z1, double M1, double Z2, double M2,
-                                double energy_eV);
- double yamamura_yield_normal(double Z1, double m1, double Z2, double m2,
-                                    double energy_eV);
 
  protected:
   class RanKnuth *random;     // RNG for reaction probabilities
@@ -104,7 +71,6 @@ inline double interp1d_clamped(const double* xs, const double* ys, int n, double
   virtual void init_reactions();
   void readfile(char *);
   int readone(char *, char *, int &, int &);
-  
 };
 
 }

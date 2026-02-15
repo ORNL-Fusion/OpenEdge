@@ -60,7 +60,7 @@ variable N1 equal floor($N/100)
 
 
 # compute evap
-#fix 22 evap 1 LigamentSource mass mass radius radius temp temp heatflux/file heatflux.h5 # heatflux/constant 50e6
+#fix 22 evaporation 1 LigamentSource mass mass radius radius temp temp heatflux/file heatflux.h5 # heatflux/constant 50e6
 
 
 # Emit one droplet

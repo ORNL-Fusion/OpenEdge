@@ -24,7 +24,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "math_const.h"
 #include "math_extra.h"
 #include <cmath>
-#include <domain.h>
+#include "domain.h"
 #include "random_knuth.h"
 #include "mixture.h"
 #include <stdexcept>
@@ -41,7 +41,7 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
   // Required: fix ID style nevery mix-ID ...
-  if (narg < 4) error->all(FLERR,"Illegal fix evap command (need: nevery mix-ID)");
+  if (narg < 4) error->all(FLERR,"Illegal fix evaporation command (need: nevery mix-ID)");
 
   // required positional
   nevery = atoi(arg[2]);

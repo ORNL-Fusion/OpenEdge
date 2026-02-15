@@ -1,0 +1,68 @@
+<HTML>
+<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "../Manual.html">SPARTA Documentation</A> - <A HREF = "../Section_commands.html#comm">SPARTA Commands</A>
+</CENTER>
+
+<HR>
+
+<H3>fix viscous command</H3>
+
+<P><B>Syntax:</B></P>
+<PRE>fix ID viscous nevery A_bg Z_bg plasma TeSrc TiSrc NiSrc VparSrc bfield BrSrc BtSrc BzSrc [gravity gx gy gz] [mass m0] [radius r0] [temp T0]</PRE>
+
+<UL>
+<LI>ID is documented in <A HREF="../fix.html">fix</A> command
+<LI>viscous = style name of this fix command
+<LI>nevery = perform update every this many timesteps
+<LI>A_bg = background ion atomic mass (amu)
+<LI>Z_bg = background ion charge state
+<LI>TeSrc,TiSrc,NiSrc,VparSrc = plasma sources
+<LI>BrSrc,BtSrc,BzSrc = magnetic field sources
+<LI>optional gravity gx gy gz = constant acceleration components
+<LI>optional mass m0 = one-time particle mass seed (kg)
+<LI>optional radius r0 = one-time particle radius seed (m)
+<LI>optional temp T0 = one-time particle temperature seed (K)
+</UL>
+
+<P>Each source can be either a grid-style variable name or <I>c_ID[I]</I> from a per-grid compute.</P>
+
+<P><B>Examples:</B></P>
+<PRE>fix fv viscous 1 2.0 1 plasma te ti ni vpar bfield Br Bt Bz
+fix fv viscous 1 2.0 1 plasma te ti ni vpar bfield Br Bt Bz gravity 0 0 -9.81
+fix fv viscous 1 2.0 1 plasma te ti ni vpar bfield Br Bt Bz gravity 0 0 -9.81 mass 2.796e-10 radius 5.0e-5 temp 773.15
+fix fv viscous 5 2.0 1 plasma c_pf[1] c_pf[2] c_pf[3] c_pf[4] bfield c_bf[1] c_bf[2] c_bf[3]</PRE>
+
+<P><B>Description:</B></P>
+<P>Apply Epstein drag to particles with optional gravity forcing.
+The model is:</P>
+<PRE>dv/dt = -nuE * (v - u_parallel) + g</PRE>
+<P>and is integrated in symmetric half-steps around advection.</P>
+<P>If <I>mass</I>/<I>radius</I>/<I>temp</I> are provided, missing particle values are seeded one time
+(only when current value &lt;= 0), which is useful for no-evaporation drag/gravity tests.</P>
+
+<P>Geometry handling:</P>
+<UL>
+<LI>Cartesian 2d/3d: components map directly to (vx,vy,vz)
+<LI>Axisymmetric (r,z,phi): (gx,gy,gz) is rotated into (v_r,v_z,v_phi) using particle phi
+</UL>
+
+<P><B>Validation note:</B></P>
+<P>For viscous/gravity validation, analytic assumptions must match case inputs:
+initial <I>v_z(0)</I> and background parallel flow <I>u_g</I> (from <I>VparSrc</I> and B direction).
+If these assumptions are inconsistent, simulation/model curves will disagree even with a correct implementation.</P>
+
+<P><B>Restart, output info:</B></P>
+<P>This fix does not currently output a fix scalar/vector/array.</P>
+
+<P><B>Restrictions:</B></P>
+<P>Do not combine <I>gravity ...</I> inside this fix with a separate
+<A HREF="../fix_gravity.html">fix gravity</A> in the same run.</P>
+
+<P><B>Related commands:</B></P>
+<P><A HREF="fix_evaporation.html">fix evaporation</A>,
+<A HREF="../fix_gravity.html">fix gravity</A>,
+<A HREF="../variable.html">variable</A>,
+<A HREF="../compute.html">compute</A></P>
+
+<P><B>Default:</B> optional gravity disabled</P>
+
+</HTML>

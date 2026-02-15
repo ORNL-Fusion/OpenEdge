@@ -93,7 +93,7 @@ variable te  grid "v_te0+v_te1*exp(-(v_r/v_r0)^12)"
 include surfaces/include_surf_ids_${case}
 group exposedTarget_${case} surf id <> ${case_min} ${case_max}
 
-compute cnear plasma/fields/file all exposedTarget_${case} input/plasma.h5 input/bfield.h5 mindist surfid ex ey ez # temp_e dens_e
+compute cnear plasma/fields/file all input/plasma.h5 input/bfield.h5 ex ey ez # temp_e dens_e
 
 # Tantalatum emission from ZLO face
 fix            in emit/face/file TantalumSource zlo input/ta_inlet.dat ZLO 
@@ -107,7 +107,7 @@ variable Bz grid "0.5"
 fix       2 bfield/grid Bx By Bz
 global    bfield grid 2 0
 
-fix       3 efield/grid c_cnear[3] c_cnear[4] c_cnear[5]
+fix       3 efield/grid c_cnear[1] c_cnear[2] c_cnear[3]
 global    efield grid 3 0
 
 fix 22 chem/adas 1 73 input/plasma.adas plasma te ne
@@ -154,4 +154,3 @@ run    $N
 clear
 next case
 jump input/in.mpex
-

@@ -35,8 +35,7 @@ FixGravity::FixGravity(SPARTA *sparta, int narg, char **arg)
 {
   // Expected: fix ID group-ID gravity g1 g2 g3
   if (narg < 6)     error->all(FLERR, "Illegal fix gravity: need group-ID and 3 components (g1 g2 g3)");
-
-
+  
   auto parse_or_die = [&](const char *tok, const char *label) -> double {
     errno = 0;
     char *endp = nullptr;
@@ -89,21 +88,23 @@ void FixGravity::half_kick(double dt_half)
   const double gx = g_[0], gy = g_[1], gz = g_[2];
 
   for (int i = 0; i < nlocal; ++i) {
-    double *v   = parts[i].v;     // stored as (v_r, v_z, v_phi)
-    const double phi = parts[i].x[2];
-    const double c = std::cos(phi), s = std::sin(phi);
+    double *v = parts[i].v;
+    if (!domain->axisymmetric) {
+      // Cartesian storage: v = (vx, vy, vz)
+      v[0] += gx * dt_half;
+      v[1] += gy * dt_half;
+      v[2] += gz * dt_half;
+    } else {
+      // Axisymmetric storage: v = (vr, vz, vphi)
+      const double phi = parts[i].x[2];
+      const double c = std::cos(phi), s = std::sin(phi);
+      const double gr   =  gx*c + gy*s;
+      const double gphi = -gx*s + gy*c;
 
-    // rotate Cartesian g to cylindrical at this phi
-    const double gr   =  gx*c + gy*s;
-    const double gphi = -gx*s + gy*c;
-    // gz stays gz
-
-    v[0] += gr   * dt_half;   // v_r
-    v[1] += gz   * dt_half;   // v_z  <<< what your plot uses
-    v[2] += gphi * dt_half;   // v_phi
-
-    // printf("fix gravity: phi=%g deg, gx=%g gy=%g gz=%g -> gr=%g gphi=%g gz=%g (dt_half=%g)",
-    // phi*180/M_PI, gx, gy, gz, gr, gphi, gz, dt_half); 
+      v[0] += gr   * dt_half;   // vr
+      v[1] += gz   * dt_half;   // vz
+      v[2] += gphi * dt_half;   // vphi
+    }
   }
 }
 

@@ -31,7 +31,6 @@ variable md equal 2.796017461694916e-10
 
 
 # compute evap and emit if necessary
-fix 22 evap 1 LigamentSource mass ${md} radius ${rd} temp ${temp} heatflux/constant 0
 
 # viscous/gravity
 variable te grid "10"
@@ -41,8 +40,7 @@ variable vp grid "0"
 variable Br grid "0"
 variable Bt grid "0"
 variable Bz grid "0"
-fix BC viscous 1 2.0 1 plasma te ti ni vp bfield Br Bt Bz gravity 0 0 -9.8
-
+fix BC viscous 1 2.0 1 plasma te ti ni vp bfield Br Bt Bz gravity 0 0 -9.8 mass ${md} radius ${rd} temp ${temp}
 
 # save data
 dump 10 particle all ${N1} case.2 id type x y z vx vy vz v_pmass temp radius

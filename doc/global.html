@@ -17,7 +17,7 @@
 </PRE>
 <UL><LI>one or more keyword/value pairs 
 
-<LI>keyword = <I>fnum</I> or <I>nrho</I> or <I>vstream</I> or <I>temp</I> or <I>field</I> or <I>surfs</I> or <I>surfgrid</I> or <I>surfmax</I> or <I>splitmax</I> or <I>surftally</I> or <I>gridcut</I> or <I>comm/sort</I> or <I>comm/style</I> or <I>weight</I> or <I>particle/reorder</I> or <I>mem/limit</I> 
+<LI>keyword = <I>fnum</I> or <I>nrho</I> or <I>vstream</I> or <I>temp</I> or <I>field</I> or <I>surfs</I> or <I>surfgrid</I> or <I>surfmax</I> or <I>splitmax</I> or <I>surftally</I> or <I>gridcut</I> or <I>comm/sort</I> or <I>comm/style</I> or <I>weight</I> or <I>particle/reorder</I> or <I>mem/limit</I> or <I>boris_subcycles</I> or <I>boris_dump</I> or <I>boris_dump_every</I> or <I>boris_bad_dt_check</I> or <I>boris_bad_dt_limit</I> 
 
 <PRE>  <I>fnum</I> value = ratio
     ratio = Fnum ratio of physical particles to simulation particles
@@ -73,6 +73,16 @@
     bytes = limit extra particle memory to this amount (in MBytes)
   <I>optmove</I> value = yes or no
     yes/no = use optimized particle move if yes, else use regular move 
+  <I>boris_subcycles</I> value = N
+    N = number of Boris substeps per particle move timestep (N &gt; 0)
+  <I>boris_dump</I> value = yes or no
+    yes/no = print Boris E/B debug line (rank 0, particle index 0)
+  <I>boris_dump_every</I> value = N
+    N = print Boris debug every N timesteps (N &gt; 0)
+  <I>boris_bad_dt_check</I> value = yes or no
+    yes/no = enable warning based on |q/m|*|B|*dt_sub
+  <I>boris_bad_dt_limit</I> value = X
+    X = warning threshold for |q/m|*|B|*dt_sub (X &gt; 0)
 </PRE>
 
 </UL>
@@ -84,6 +94,8 @@ global temp 1000
 global weight cell radius 
 global mem/limit 100 
 global field constant 9.8 0 0 1 
+global boris_subcycles 20
+global boris_bad_dt_check yes boris_bad_dt_limit 0.1
 </PRE>
 <P><B>Description:</B>
 </P>
@@ -155,6 +167,24 @@ computed once at the beginning of each simulation run.  For a field
 with time-dependence you can choose how often to recompute the field,
 depending on how fast it varies.
 </P>
+<P>For OpenEdge Boris particle pushing in 3d, additional controls are
+available:
+</P>
+<P>- <I>boris_subcycles</I> splits each particle move timestep into N Boris
+substeps.
+</P>
+<P>- <I>boris_dump</I> and <I>boris_dump_every</I> control optional Boris debug
+output of q/m and E/B values.
+</P>
+<P>- <I>boris_bad_dt_check</I> and <I>boris_bad_dt_limit</I> enable a runtime
+warning if the substep is too large, using
+|q/m|*|B|*dt_sub &gt; limit.
+</P>
+<P>When using <I>bfield</I> with the <I>grid</I> style, an update frequency of 0
+means field values are computed once at run start and then re-used for
+all subsequent timesteps.  The field is still applied every particle
+move.
+</P>
 <P>See the doc page for the <A HREF = "fix_field_grid.html">fix field/grid</A> command
 for the only current fix in SPARTA which is compatible with the
 <I>grid</I> setting.
@@ -170,6 +200,10 @@ smaller than the number of particles.  However the accuracy of the
 field applied to each particle is more approximate than for the
 <I>particle</I> option.  This is because the field applied to each particle
 is the value it has at the center of the particle's grid cell.
+</P>
+<P>In OpenEdge 3d Boris pushing with per-grid E/B fields, trilinear
+interpolation on uniform grids is used when neighbor cell values are
+available.
 </P>
 <HR>
 

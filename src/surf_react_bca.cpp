@@ -143,21 +143,16 @@ int SurfReactBca::react(Particle::OnePart *&ip, int, double *,
 
   // Calculate kinetic energy in eV
   const double normVel = std::sqrt(std::inner_product(ip->v, ip->v + 3, ip->v, 0.0));
-  const double incident_part_charge = species[ip->ispecies].charge;
-  const double R   = std::max(ip->x[0], 1e-8);
-  const double Z   = ip->x[1];
-  double dens  = update->interpolatePlasma_RZ_clamped(R, Z, update->plasma_data).dens_i;
-  double ti  = update->interpolatePlasma_RZ_clamped(R, Z, update->plasma_data).temp_i;
-  double te  = update->interpolatePlasma_RZ_clamped(R, Z, update->plasma_data).temp_e;
-  double energy = Z * ti + 3 * te;
-  printf("R: %f, Z: %f, ne: %e, ti: %f, te: %f, energy: %f\n", R, Z, dens, ti, te, energy);
-  const double kinetic_energy_eV = incident_part_charge * ti + 3 * te;
+  const double mass = ip->mass;
+  const double kinetic_energy_eV =
+      0.5 * mass * normVel * normVel * update->joule2ev;
 
    // Tungsten is the target
    double target_Z = 74;
    double target_m = 183.84;
-    double reflectionCoeff = thomas_reflection(Z, species[ip->ispecies].molwt, target_Z, target_m, kinetic_energy_eV);
-    double sputteringCoeff = yamamura_yield_normal(Z,species[ip->ispecies].molwt, target_Z, target_m, kinetic_energy_eV);
+    const double incident_Z = std::max(1.0, std::fabs(species[ip->ispecies].charge));
+    double reflectionCoeff = thomas_reflection(incident_Z, species[ip->ispecies].molwt, target_Z, target_m, kinetic_energy_eV);
+    double sputteringCoeff = yamamura_yield_normal(incident_Z,species[ip->ispecies].molwt, target_Z, target_m, kinetic_energy_eV);
 
     double totalCoeff = reflectionCoeff + sputteringCoeff;
 

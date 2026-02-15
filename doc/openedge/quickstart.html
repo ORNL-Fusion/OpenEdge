@@ -1,0 +1,85 @@
+<HTML>
+<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "../Manual.html">SPARTA Documentation</A> - <A HREF = "../Section_commands.html#comm">SPARTA Commands</A>
+</CENTER>
+
+<HR>
+
+<H3>OpenEdge Quickstart (Droplet + Evap + Viscous)</H3>
+
+<P><B>What is OpenEdge?</B></P>
+<P>OpenEdge is a Plasma Material Interaction (PMI) package in SPARTA.
+All core SPARTA functionality is inherited (input language, solver flow,
+grid/particle infrastructure, and standard commands). OpenEdge adds PMI-focused
+models and commands while preserving SPARTA behavior unless explicitly extended.</P>
+
+<P><B>Goal:</B> run droplet particles with evaporation state update and viscous drag/gravity,
+then dump droplet properties.</P>
+
+<P><B>Key commands:</B></P>
+<UL>
+<LI><A HREF="fix_evaporation.html">fix evaporation</A>
+<LI><A HREF="fix_viscous.html">fix viscous</A>
+<LI><A HREF="../dump.html">dump particle</A>
+<LI><A HREF="../variable.html">variable</A>
+</UL>
+
+<P><B>Minimal template:</B></P>
+<PRE>seed                12345
+dimension           2
+boundary            r r p
+global              gridcut 0.0 comm/sort no
+
+create_box          -20 20  -20 20.8  -0.05 0.05
+create_grid         100 100 1
+balance_grid        rcb cell
+
+species             droplet.species Li
+mixture             Droplet Li frac 1.0 nrho 1
+read_particles      source.1 0
+
+fix fevap evaporation 1 Droplet mass 2.796e-10 radius 5.0e-5 temp 773.15 heatflux/constant 0.0
+
+variable te grid "10"
+variable ti grid "10"
+variable ni grid "1.0e20"
+variable vp grid "0"
+variable Br grid "0"
+variable Bt grid "0"
+variable Bz grid "0"
+fix fvis viscous 1 2.0 1 plasma te ti ni vp bfield Br Bt Bz gravity 0 0 -9.81
+
+variable pmass particle mass
+dump d1 particle all 100 dump.droplet id type x y z vx vy vz v_pmass temp radius
+
+timestep            1.0e-5
+run                 10000</PRE>
+
+<P><B>Dump fields:</B></P>
+<UL>
+<LI><I>temp</I> and <I>radius</I> are native particle dump attributes
+<LI><I>mass</I> is output as particle variable: <I>variable pmass particle mass</I> then <I>v_pmass</I>
+</UL>
+
+<P><B>Notes:</B></P>
+<UL>
+<LI>Evaporation style name is <I>evaporation</I>
+<LI>Current evaporation implementation is 2d-only
+<LI>After source edits, rebuild before validation:
+</UL>
+<P>For drag/gravity-only validation (no evaporation active), omit <I>fix fevap ...</I>
+and seed droplet state directly in <I>fix viscous</I>, for example:</P>
+<PRE>fix fvis viscous 1 2.0 1 plasma te ti ni vp bfield Br Bt Bz gravity 0 0 -9.81 mass 2.796e-10 radius 5.0e-5 temp 773.15</PRE>
+<PRE>cd src
+make clean-mpi
+make mpi -j8</PRE>
+
+<P>For standalone gravity tests in this codebase, current syntax is:</P>
+<PRE>fix g1 gravity all 0.0 0.0 -9.81</PRE>
+
+<P>Geometry note for gravity/viscous:</P>
+<UL>
+<LI>Cartesian 3d uses (vx,vy,vz)
+<LI>Axisymmetric (r,z,phi) uses (v_r,v_z,v_phi)
+</UL>
+
+</HTML>

@@ -17,7 +17,6 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include <map>
 #include <string>
 #include <vector> 
-#include <H5Cpp.h>
 #include <map>
 #include <string>
 #include "particle.h"
@@ -45,52 +44,6 @@ struct PairHash {
 };
 
 namespace SPARTA_NS {
-
-  // Structs for plasma data and parameters
-struct PlasmaData{
-  std::vector<double> r;   
-  std::vector<double> z;  
-  std::vector<std::vector<double>> dens_e, temp_e;
-  std::vector<std::vector<double>> dens_i, temp_i;
-  std::vector<std::vector<double>> parr_flow_r, parr_flow_t, parr_flow_z, parr_flow;
-  std::vector<std::vector<double>> grad_temp_e_r, grad_temp_e_t, grad_temp_e_z;
-  std::vector<std::vector<double>> grad_temp_i_r, grad_temp_i_t, grad_temp_i_z;
-};
-
-struct PlasmaDataParams {
-  double dens_e;
-  double temp_e;
-  double dens_i;
-  double temp_i;
-  double parr_flow;
-  double parr_flow_r;
-  double parr_flow_t;
-  double parr_flow_z;
-  double grad_temp_e_r;
-  double grad_temp_e_t;
-  double grad_temp_e_z;
-  double grad_temp_i_r;
-  double grad_temp_i_t;
-  double grad_temp_i_z;
-};
-
-
-// Structs for magnetic field data and parameters
-struct MagneticFieldData {
-  std::vector<double> r;   
-  std::vector<double> z;  
-  std::vector<std::vector<double>> br;
-  std::vector<std::vector<double>> bt;
-  std::vector<std::vector<double>> bz;
-};
-struct MagneticFieldDataParams {
-  double br;
-  double bt;
-  double bz;
-  double r;
-  double z;
-};
-
 
 class Update : protected Pointers {
  public:
@@ -201,9 +154,12 @@ struct SurfHit2D {
   bigint nscheck_running;
   bigint nscollide_running;
 
-  int cross_field_diffusion_flag; // 1 if cross-field diffusion
-  int cross_diffusion_flag;
-  int background_collision_flag; // 1 if background collisions are enabled
+  int boris_dump_flag;         // 1 enables Boris E/B debug prints
+  int boris_dump_every;        // print cadence in timesteps
+  int boris_subcycles;         // Boris velocity/position substeps per move
+  int boris_bad_dt_check;      // 1 warns when |q/m|*|B|*dt_sub is too large
+  int boris_bad_dt_warned;     // suppress repeated warnings
+  double boris_bad_dt_limit;   // recommended max for |q/m|*|B|*dt_sub
   int nstuck;                // # of particles stuck on surfs and deleted
   int naxibad;               // # of particles where axisymm move was bad
                              // in this case, bad means particle ended up
@@ -246,32 +202,7 @@ struct SurfHit2D {
   int split3d(int, double *);
   int split2d(int, double *);
 
-      PlasmaData plasma_data;
   // PMI
-  void read_plasma_state(int , char **);
-  void read_magnetic_fields(int , char **);
-  void broadcastMagneticData(MagneticFieldData& data);
-  void initializeMagneticData();
-
-  PlasmaData   readPlasmaData(const std::string& filePath);
-  double bilinearInterpolation(double r, double z,
-  const std::vector<double>& r_values,
-  const std::vector<double>& z_values,
-  const std::vector<std::vector<double>>& dens_e_grid);
-  PlasmaDataParams bilinearInterpolationPlasma(int icell, const PlasmaData& data);
-  std::unordered_map<int, PlasmaDataParams> plasmaDataCache;
-  std::unordered_map<int, PlasmaDataParams> plasma_data_map;
-  MagneticFieldDataParams bilinearInterpolationMagneticField(int icell, const MagneticFieldData& data);
-  std::unordered_map<int, MagneticFieldDataParams> magneticFieldDataCache;
-  std::unordered_map<int, MagneticFieldDataParams> magnetic_data_map;
-  void initializePlasmaData();
-  void broadcastPlasmaData(PlasmaData& data);
-  void droplet_evaporation_model(double& droplet_mass, double& T, double Qs);
-  void apply_bgk_collision_step(double dt,
-                                double R, double Z, double phi,
-                                double charge, double mass,
-                                double &vx, double &vy, double &vz);  // NOTE: no const
-  std::vector<int> materials;
 
      char *target_material;
 double target_material_charge;
@@ -280,8 +211,6 @@ double target_material_binding_energy;
 void pusherBoris2D( int i, int icell, double dt, double *x, double *v, double *xnew, double charge, double mass);
 
 double distance_to_surface_for_particle(int icell, const double x[3], const BoundaryInfo& info);
-PlasmaDataParams interpolatePlasma_RZ_clamped(double R, double Z, const PlasmaData& data);
-PlasmaDataParams interpolatePlasma_RZ_constant();
 inline double signed_plane_distance(const BoundaryInfo& info, const double x[3]) const {
   // n is unit; plane n·r = plane_d
   // positive if particle is on "outside" side along normal
@@ -368,53 +297,13 @@ static double dist_point_tri(const double p[3], const double a[3],
   return std::min(d1, std::min(d2, d3));
 }
 
-  int plasmaStyle; // UNIFORM, FILE
-
  protected:
 
  int sgroupbit;
 
-
-  BoundaryInfo* boundary_info;   // Array to store boundary information for each cell
-  double** efield_sheath;        // 2D array to store the sheath electric field for each cell
-
-  double normal01_from_uniforms_();  // Box–Muller using ranmaster
-
    // PMI
-   double temp_e;           // electron temperature in eV
-   double temp_i;           // ion temperature in eV
-   double dens_i;           // ion density in m^-3
-   double dens_e;           // electron density in m^-3
-   double flow_v[3];           // flow velocity in m/s
-   double bfield[3];        // magnetic field in T
-   double efield[3];        // electric field in V/m
-   double grad_temp_i[3];   // ion temperature gradient in eV/m
-   double grad_temp_e[3];   // electron temperature gradient in eV/m
-   double grad_te_r;        // radial temperature gradient in eV/m
-   double grad_te_z;        // axial temperature gradient in eV/m
-   double grad_ti_r;        // radial temperature gradient in eV/m
-   double grad_ti_z;        // axial temperature gradient in eV/m
-   double grad_te_t;        // azimuthal temperature gradient in eV/m
-   double grad_ti_t;        // azimuthal temperature gradient in eV/m
-   double d_perp;  // perpendicular diffusion
-   double d_flow_scale; // flow scale for background collisions
-   char *plasma_state; // file containing plasma state
-   MagneticFieldData magnetic_data;
-   std::string plasmaStatePath;
-   int recombination_flag; // 1 if recombination is enabled
-   int ionization_flag; // 1 if ionization is enabled
-   std::string adas_rates_path;
-   std::string magneticFieldsPath;
+   int thermal_gradient_forces_flag;
 
-
-   int sheath_field_flag; // 1 if sheath electric field is enabled
-   char *plasma_background_material; // material for background plasma
-   int thermal_gradient_forces_flag; 
-   int plasma_background_mass;
-   int plasma_background_charge;
- 
-
-  int magneticFieldsStyle; // 0 = constant, 1 = file
   int me,nprocs;
   int maxmigrate;            // max # of particles in mlist
   class RanKnuth *random;     // RNG for particle timestep moves
@@ -505,106 +394,9 @@ static double dist_point_tri(const double p[3], const double a[3],
   //       unless possibly include modify.h and fix.h in this file
   void field_per_particle(int, int, double, double *, double *);
   void field_per_grid(int, int, double, double *, double *);
+  void pusher_boris3D(int i, int icell, double dt, double *x, double *v,
+                      double *xnew, double charge, double mass);
 
-  void initializeIonizationRates();
-  MagneticFieldData readMagneticFieldData(const std::string& filePath);
-  void pusher_boris3D(int i, int icell, double dt, double *x, double *v, double *xnew, double mass, double charge);
-  void pusher_guiding_center_2D(int i, int icell, double dt, double *x, double *v, double mass, double charge);
-  // void compute_dist_grid(int icell, double& mindistance, double*& norm, int& surf_id, int& type_group, int& mask_group, double surf_center[3]);
-//   void compute_dist_grid(
-//     int icell,
-//     double& mindist,
-//     double out_normal[3],
-//     int& surf_id,
-//     int& type_group,
-//     int& mask_group,
-//     double out_center[3]
-// );
-
-// void compute_dist_grid(int icell,
-//                                double& mindist,
-//                                double out_normal[3],
-//                                int&    surf_id,          // external file ID
-//                                int&    surf_local,       // local array index
-//                                int&    type_group,
-//                                int&    mask_group,
-//                                double  out_center[3]);
-
-  // double calculate_angle(const double* Bfield, const double* normal);
-  
-  static inline double box_muller_normal(double u1, double u2)
-{
-  // u1 in (0,1], u2 in [0,1)
-  const double two_pi = 6.283185307179586;
-  return std::sqrt(-2.0 * std::log(u1)) * std::cos(two_pi * u2);
-}
-
-// B_phi(R) = B0 * R0 / R  ;  Br = 0, Bz = 0
-inline void axisymm_toroidal_field_cart(double R, double phi,
-                                        double R0, double B0,
-                                        double &Bx, double &By, double &Bz)
-{
-    const double Bphi = (R > 1e-12) ? B0 * R0 / R : 0.0;
-    const double c = std::cos(phi), s = std::sin(phi);
-    // e_phi = (-sin phi, cos phi, 0)
-    Bx = -Bphi * s;
-    By =  Bphi * c;
-    Bz =  0.0;
-}
-
-
-// Analytic B-field from the paper (Eq. 24), scaled by B0
-static inline void Bfield_qin24_cart(
-    double X, double Y, double Z,
-    double R0, double B0,
-    double &Bx, double &By, double &Bz)
-{
-  const double eps = 1e-14;
-  const double R   = std::sqrt(X*X + Y*Y + Z*Z);
-  const double R2  = std::max(R*R, eps);
-
-  const double Bx_hat = -(2.0*R0*Y + X*Z) / (2.0*R2);
-  const double By_hat =  (2.0*R0*X - Y*Z) / (2.0*R2);
-  const double Bz_hat =  (R - 1.0)       / (2.0*std::max(R, eps));
-
-  Bx = B0 * Bx_hat;
-  By = B0 * By_hat;
-  Bz = B0 * Bz_hat;
-}
-static inline void cart_to_cyl_B(double phi,
-                                 double Bx, double By, double Bz,
-                                 double &Br, double &Bphi, double &Bz_c)
-{
-  const double c = std::cos(phi), s = std::sin(phi);
-  Br   =  Bx*c + By*s;
-  Bphi = -Bx*s + By*c;
-  Bz_c =  Bz;
-}
-
-// // Box–Muller using your RNG (expects rng->uniform() in (0,1))
-// inline static double normal01(Update::RNG *rng) {
-//   const double u1 = std::max(1e-12, rng->uniform());
-//   const double u2 = std::max(1e-12, rng->uniform());
-//   return std::sqrt(-2.0*std::log(u1)) * std::cos(2.0*M_PI*u2);
-// }
-
-
-  #ifdef SPARTA_MAP
-  typedef std::map<bigint, BoundaryInfo> boundaryInfoHash;
-#else
-  typedef std::unordered_map<bigint, BoundaryInfo> boundaryInfoHash;
-#endif
-boundaryInfoHash hash2;
-  void getBoundaryInfo(int icell, double *Bfield, BoundaryInfo& info);
-
-  void sheathEfieldBrooks(double *B, double temp_e, double dens_e, double temp_i, double t_sheath, double alpha, double minDistance, const double* normal_with_min_distance, double& Emag, double& densitySheath);
-  void apply_cross_field_diffusion(int icell, double dt, double* B, double* x);
-  void thermal_gradient_Efield(const double mass, const double charge,
-                                    const double gradTe_e[3],  // ∇T_e in eV/m (R,φ,Z)
-                                    const double gradTe_i[3],  // ∇T_i in eV/m (R,φ,Z)
-                                    double E_th[3]);            // out: (Er,Eφ,Ez) in V/
-  void apply_cross_field_diffusion_cart( const double dt,  const double Bx, const double By, const double Bz,
-  const double u01, double &Xn, double &Yn, double &Zn);
 };
 
 }

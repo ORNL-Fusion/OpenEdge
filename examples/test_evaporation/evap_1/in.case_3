@@ -31,7 +31,7 @@ variable md equal 2.236813969355933e-03
 
 
 # compute evap and emit if necessary
-fix 22 evap 1 LigamentSource mass ${md} radius ${rd} temp ${temp} heatflux/constant 50e6
+fix 22 evaporation 1 LigamentSource mass ${md} radius ${rd} temp ${temp} heatflux/constant 50e6
 
 # viscous/gravity
 variable te grid "10"

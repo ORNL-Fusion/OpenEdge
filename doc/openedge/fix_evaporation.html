@@ -1,0 +1,50 @@
+<HTML>
+<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "../Manual.html">SPARTA Documentation</A> - <A HREF = "../Section_commands.html#comm">SPARTA Commands</A>
+</CENTER>
+
+<HR>
+
+<H3>fix evaporation command</H3>
+
+<P><B>Syntax:</B></P>
+<PRE>fix ID evaporation nevery mix-ID keyword values ...</PRE>
+
+<UL>
+<LI>ID is documented in <A HREF="../fix.html">fix</A> command
+<LI>evaporation = style name of this fix command
+<LI>nevery = perform update every this many timesteps
+<LI>mix-ID = mixture ID to which evaporation is applied
+<LI>keyword/value pairs:
+<PRE>  mass value                = initial particle mass seed (kg)
+  radius value              = initial particle radius seed (m)
+  temp value                = initial particle temperature seed (K)
+  heatflux/constant value   = uniform heat flux (W/m^2)
+  heatflux/file filename    = HDF5 heat-flux map</PRE>
+</UL>
+
+<P><B>Examples:</B></P>
+<PRE>fix fevap evaporation 1 Droplet mass 2.796e-10 radius 5.0e-5 temp 773.15 heatflux/constant 0.0
+fix fevap evaporation 1 Droplet mass 2.796e-10 radius 5.0e-5 temp 773.15 heatflux/file heatflux.h5</PRE>
+
+<P><B>Description:</B></P>
+<P>Update droplet thermodynamic state (<I>mass</I>, <I>radius</I>, <I>temp</I>) using the OpenEdge evaporation model.
+The fix is applied as symmetric half-steps at start and end of each timestep.</P>
+
+<P>Per-particle state output in <A HREF="../dump.html">dump particle</A>:</P>
+<PRE>variable pmass particle mass
+dump d1 particle all 100 out.dump id type x y z vx vy vz v_pmass temp radius</PRE>
+
+<P><B>Restart, output info:</B></P>
+<P>This fix provides a per-grid array (3 columns) for diagnostics.</P>
+
+<P><B>Restrictions:</B></P>
+<P>Current evaporation implementation is restricted to 2d geometry for heat-flux interpolation.</P>
+
+<P><B>Related commands:</B></P>
+<P><A HREF="fix_viscous.html">fix viscous</A>,
+<A HREF="../dump.html">dump</A>,
+<A HREF="../variable.html">variable</A></P>
+
+<P><B>Default:</B> none</P>
+
+</HTML>

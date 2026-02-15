@@ -1,0 +1,20 @@
+"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+
+:link(sws,https://sparta.github.io)
+:link(sd,../Manual.html)
+:link(sc,../Section_commands.html#comm)
+
+:line
+
+OpenEdge Documentation :h3
+
+OpenEdge is a Plasma Material Interaction (PMI) package in SPARTA.
+All core SPARTA functionality is inherited. OpenEdge documentation is
+kept in this directory to keep SPARTA core docs separate and clean.
+
+[Pages:]
+
+"OpenEdge Quickstart"_quickstart.html
+"compute plasma/fields"_compute_plasma_fields.html
+"fix evaporation"_fix_evaporation.html
+"fix viscous"_fix_viscous.html :ul

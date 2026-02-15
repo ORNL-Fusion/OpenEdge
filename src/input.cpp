@@ -723,8 +723,6 @@ int Input::execute_command()
   else if (!strcmp(command,"dump_modify")) dump_modify();
   else if (!strcmp(command,"fix")) fix();
   else if (!strcmp(command,"global")) global();
-  else if (!strcmp(command, "read_plasma_state")) read_plasma_state();
-  else if (!strcmp(command, "read_magnetic_fields")) read_magnetic_fields();
   else if (!strcmp(command,"group")) group();
   else if (!strcmp(command,"package")) package();
   else if (!strcmp(command,"mixture")) mixture();
@@ -1334,19 +1332,6 @@ void Input::global()
 {
   update->global(narg,arg);
 }
-
-/* ---------------------------------------------------------------------- */
-void Input::read_plasma_state()
-{
-    update->read_plasma_state(narg,arg);
-}
-
-/* ---------------------------------------------------------------------- */
-void Input::read_magnetic_fields()
-{
-    update->read_magnetic_fields(narg,arg);
-}
-/* ---------------------------------------------------------------------- */
 
 void Input::group()
 {

@@ -1,0 +1,11 @@
+
+# Generated test artifacts
+examples/test_boris_grid/log.openedge
+examples/test_boris_grid/output/
+examples/test_gravity_3d/dump.gravity3d
+examples/test_gravity_3d/log.openedge
+examples/test_read_plasma/output/
+examples/test_viscous_gravity_3d/dump.viscous_gravity3d
+examples/test_viscous_gravity_3d/log.openedge
+
+.DS_Store

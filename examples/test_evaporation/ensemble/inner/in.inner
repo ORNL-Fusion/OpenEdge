@@ -50,9 +50,9 @@ run 1
 
 unfix droplet_emission
 
-fix 22 evap 1 LigamentSource mass ${md} radius ${rd} temp ${temp} heatflux/constant 50e6
-compute cnear plasma/fields/file all surfID ../plasma.h5 ../bfield.h5 mindist surfid bx by bz temp_e dens_e temp_i dens_i parrflow
-fix BC viscous 1 2.0 1 plasma c_cnear[5] c_cnear[6] c_cnear[9] c_cnear[10] bfield c_cnear[3] c_cnear[4] c_cnear[5] gravity 0 0 -9.8
+fix 22 evaporation 1 LigamentSource mass ${md} radius ${rd} temp ${temp} heatflux/constant 50e6
+compute cnear plasma/fields/file all ../plasma.h5 ../bfield.h5 bx by bz temp_e dens_e temp_i dens_i parrflow
+fix BC viscous 1 2.0 1 plasma c_cnear[3] c_cnear[4] c_cnear[7] c_cnear[8] bfield c_cnear[1] c_cnear[2] c_cnear[3] gravity 0 0 -9.8
 
 variable npart equal np
 fix 31 halt ${N1} v_npart <= 0
