@@ -287,7 +287,6 @@ void FixChemAdas::init()
     int isp = r->reactants[0];
   }
 
-
   // --- resolve VARIABLE sources (old path) ---
 if (srcTe.kind == SRC_VAR) {
   tvar = input->variable->find(tstr);
@@ -366,6 +365,9 @@ void FixChemAdas::end_of_step()
 
 void FixChemAdas::end_of_step_no_average()
 {
+  // Cell Te/ne may change each chemistry step; keep cache step-local
+  // so repeated particle queries in the same cell/species are fast and correct.
+  rateCache.clear();
 
   if (use_grid_plasma) compute_plasma_grid();
   refresh_compute_src(srcTe);
@@ -373,25 +375,21 @@ void FixChemAdas::end_of_step_no_average()
 
 
   Particle::OnePart *particles = particle->particles;
-  Particle::Species *species = particle->species;
   int *next = particle->next;
   Grid::ChildInfo *cinfo = grid->cinfo;
   int nglocal = grid->nlocal;
 
-  int ip;
   for (int icell = 0; icell < nglocal; icell++) {
     if (cinfo[icell].count == 0) continue;
   
     const double Te_eV = std::max(read_cell(srcTe, icell, 0), 1e-6);
     const double ne_m3 = std::max(read_cell(srcNe, icell, 1), 0.0);
-
     int ip = cinfo[icell].first;
     while (ip >= 0) {
       attempt(&particles[ip], Te_eV, ne_m3);
       ip = next[ip];
     }
   }
-  
 }
 
 /* ----------------------------------------------------------------------
@@ -422,7 +420,6 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
 
    if (Te_eV <= 0.0 || ne_m3 <= 0.0) return 0;
 
-// printf("FixChemAdas::attempt: icell=%d isp0=%d Te_eV=%g ne_m3=%g\n", icell, isp0, Te_eV, ne_m3);
   const double logTe    = std::log10(Te_eV);
   const double logne_cm = std::log10(std::max(ne_m3 * 1e-6, 1e-99));
 
@@ -458,7 +455,6 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
     if (!std::isfinite(rate_log10_cm3s)) continue;
 
     const double p = computeReactionProbability(rate_log10_cm3s, update->dt, ne_m3);
-
     if (p > best_p) { best_p = p; best_idx = ridx; }
 
   }
@@ -916,8 +912,8 @@ void FixChemAdas::interpolateRateData(int atomic_number, double charge, int icel
 
   MathExtra::bilinearInterpolate(x0, x1, y0, y1, f00, f01, f10, f11, te, ne, rate_final);
 
-  // Store the result in the cache
-  // rateCache[key] = rate_final;
+  // Store the result in the cache for subsequent particles in this step.
+  rateCache[key] = rate_final;
 }
 
 
@@ -926,54 +922,65 @@ void FixChemAdas::interpolateRateData(int atomic_number, double charge, int icel
 ------------------------------------------------------------------------- */
 
 bool FixChemAdas::setupInterpolation(ReactionType reactionType, int atomic_number, size_t charge_idx, double te, double ne, double& x0, double& x1, double& y0, double& y1, double& f00, double& f01, double& f10, double& f11) {
-  size_t indT, indN;
   auto& material_data = materials_rate_data[atomic_number];
+
+  auto bracket_index = [](const std::vector<double>& grid, double x,
+                          size_t &ilo, size_t &ihi) -> bool {
+    if (grid.size() < 2) return false;
+    if (x <= grid.front()) { ilo = 0; ihi = 1; return true; }
+    if (x >= grid.back())  { ihi = grid.size()-1; ilo = ihi-1; return true; }
+    const size_t hi = std::lower_bound(grid.begin(), grid.end(), x) - grid.begin();
+    if (hi == 0 || hi >= grid.size()) return false;
+    ihi = hi;
+    ilo = hi - 1;
+    return true;
+  };
+
+  size_t tlo, thi, nlo, nhi;
 
   if (reactionType == ReactionType::Recombination) {
       auto& tempGrid = material_data.gridTemperature_Recombination;
       auto& densGrid = material_data.gridDensity_Recombination;
+      if (charge_idx >= material_data.RecombinationRateCoeff.size()) return false;
+      if (!bracket_index(tempGrid, te, tlo, thi)) return false;
+      if (!bracket_index(densGrid, ne, nlo, nhi)) return false;
 
-      indT = std::lower_bound(tempGrid.begin(), tempGrid.end(), te) - tempGrid.begin();
-      indN = std::lower_bound(densGrid.begin(), densGrid.end(), ne) - densGrid.begin();
+      x0 = tempGrid[tlo];
+      x1 = tempGrid[thi];
+      y0 = densGrid[nlo];
+      y1 = densGrid[nhi];
 
-      if (indT >= tempGrid.size()) indT = tempGrid.size() - 1;
-      if (indN >= densGrid.size()) indN = densGrid.size() - 1;
+      const auto &A = material_data.RecombinationRateCoeff[charge_idx];
+      if (A.size() <= thi) return false;
+      if (A[tlo].size() <= nhi || A[thi].size() <= nhi) return false;
 
-      if (indT == 0) indT = 1;
-      if (indN == 0) indN = 1;
-
-      x0 = tempGrid[indT - 1];
-      x1 = tempGrid[indT];
-      y0 = densGrid[indN - 1];
-      y1 = densGrid[indN];
-
-      f00 = material_data.RecombinationRateCoeff[charge_idx][indN - 1][indT - 1];
-      f01 = material_data.RecombinationRateCoeff[charge_idx][indN][indT - 1];
-      f10 = material_data.RecombinationRateCoeff[charge_idx][indN - 1][indT];
-      f11 = material_data.RecombinationRateCoeff[charge_idx][indN][indT];
+      // ADAS data layout is [charge][temperature][density]
+      f00 = A[tlo][nlo];
+      f01 = A[tlo][nhi];
+      f10 = A[thi][nlo];
+      f11 = A[thi][nhi];
 
   } else if (reactionType == ReactionType::Ionization) {
       auto& tempGrid = material_data.gridTemperature_Ionization;
       auto& densGrid = material_data.gridDensity_Ionization;
+      if (charge_idx >= material_data.IonizationRateCoeff.size()) return false;
+      if (!bracket_index(tempGrid, te, tlo, thi)) return false;
+      if (!bracket_index(densGrid, ne, nlo, nhi)) return false;
 
-      indT = std::lower_bound(tempGrid.begin(), tempGrid.end(), te) - tempGrid.begin();
-      indN = std::lower_bound(densGrid.begin(), densGrid.end(), ne) - densGrid.begin();
+      x0 = tempGrid[tlo];
+      x1 = tempGrid[thi];
+      y0 = densGrid[nlo];
+      y1 = densGrid[nhi];
 
-      if (indT >= tempGrid.size()) indT = tempGrid.size() - 1;
-      if (indN >= densGrid.size()) indN = densGrid.size() - 1;
+      const auto &A = material_data.IonizationRateCoeff[charge_idx];
+      if (A.size() <= thi) return false;
+      if (A[tlo].size() <= nhi || A[thi].size() <= nhi) return false;
 
-      if (indT == 0) indT = 1;
-      if (indN == 0) indN = 1;
-
-      x0 = tempGrid[indT - 1];
-      x1 = tempGrid[indT];
-      y0 = densGrid[indN - 1];
-      y1 = densGrid[indN];
-
-      f00 = material_data.IonizationRateCoeff[charge_idx][indN - 1][indT - 1];
-      f01 = material_data.IonizationRateCoeff[charge_idx][indN][indT - 1];
-      f10 = material_data.IonizationRateCoeff[charge_idx][indN - 1][indT];
-      f11 = material_data.IonizationRateCoeff[charge_idx][indN][indT];
+      // ADAS data layout is [charge][temperature][density]
+      f00 = A[tlo][nlo];
+      f01 = A[tlo][nhi];
+      f10 = A[thi][nlo];
+      f11 = A[thi][nhi];
   } else {
       error->all(FLERR, "Illegal ReactionType");
       return false;
@@ -1060,39 +1067,34 @@ void FixChemAdas::broadcastRateData(RateData& rateData) {
 }
 
 
-inline double FixChemAdas::fetch_compute_cell_value(const GridSrc& S, int icell)
+double FixChemAdas::read_cell(const GridSrc &S, int icell, int var_col)
 {
-  // S.kind guaranteed == SRC_COMP
-  Compute *c = modify->compute[S.icompute];
-
-  // Ensure it’s computed on this step
-  if (c->invoked_per_grid != update->ntimestep) {
-    c->compute_per_grid();
+  if (S.kind == SRC_COMP) {
+    if (S.icompute < 0) return 0.0;
+    Compute *c = modify->compute[S.icompute];
+    if (!c) return 0.0;
+    if (c->size_per_grid_cols == 0) {
+      if (!c->vector_grid) return 0.0;
+      return c->vector_grid[icell];
+    }
+    if (!c->array_grid) return 0.0;
+    const int j = S.col - 1;
+    if (j < 0 || j >= c->size_per_grid_cols) return 0.0;
+    return c->array_grid[icell][j];
   }
-
-  // Ask the compute where the data live and which column to read
-  double **arr = nullptr; 
-  int *cols = nullptr;
-  // S.col is 1-based “c_ID[S.col]”
-  int nmap = c->query_tally_grid(S.col, arr, cols);   // returns >=1 if OK
-  // For simple 1:1 columns, cols[0] == (S.col-1)
-  const int src = cols ? cols[0] : (S.col - 1);
-
-  return arr[icell][src];
+  // VAR path
+  return array_grid ? array_grid[icell][var_col] : 0.0;
 }
 
-    inline void FixChemAdas::refresh_compute_src(GridSrc &S) {
+inline void FixChemAdas::refresh_compute_src(GridSrc &S) {
   if (S.kind != SRC_COMP) return;                     // now visible
   if (S.cache_ts == update->ntimestep) return;
 
   Compute *c = modify->compute[S.icompute];
   if (c->invoked_per_grid != update->ntimestep) c->compute_per_grid();
-
-  double **arr = nullptr; 
-  int *cols = nullptr;
-  const int nmap = c->query_tally_grid(S.col, arr, cols);
-
-  S.arr_cache = (nmap > 0) ? arr : nullptr;
-  S.src_index = (nmap > 0) ? (cols ? cols[0] : (S.col - 1)) : -1;
+  // Direct per-grid access is via c->array_grid / c->vector_grid.
+  // query_tally_grid() is for tally-based maps and can return no mapping here.
+  S.arr_cache = c->array_grid;
+  S.src_index = S.col - 1;
   S.cache_ts  = update->ntimestep;
 }

@@ -1,0 +1,72 @@
+"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+
+:link(sws,https://sparta.github.io)
+:link(sd,../Manual.html)
+:link(sc,../Section_commands.html#comm)
+
+:line
+
+fix chem/adas command :h3
+
+[Syntax:]
+
+:pre
+fix ID chem/adas Nevery Z reactions_file plasma TeSrc NeSrc
+
+  ID = fix ID
+  Nevery = chemistry interval (timesteps)
+  Z = atomic number for ADAS table selection (e.g. 8 for oxygen)
+  reactions_file = OpenEdge reactions list
+  plasma = keyword
+  TeSrc = grid Te source (grid variable name or c_ID[col])
+  NeSrc = grid ne source (grid variable name or c_ID[col])
+:pre
+
+[Description:]
+
+Apply ionization/recombination transitions using ADAS rate tables.
+Rates are read from:
+
+:pre
+adas/ADAS_Rates_Z.h5
+:pre
+
+where Z is the atomic number provided in the command.
+
+Te and ne are evaluated per local grid cell every chemistry step.
+`TeSrc` and `NeSrc` can be:
+
+:ul
+grid-style variables
+compute columns using `c_ID[col]` (e.g. `c_cnear[1]`)
+:ul
+
+Unit conventions used by this fix:
+
+:ul
+Te input is in eV
+ne input is in m^-3
+ADAS tables are interpolated in log10(Te[eV]) and log10(ne[cm^-3])
+:ul
+
+Reaction probability is:
+
+:pre
+P = 1 - exp(-k * ne * dt)
+:pre
+
+with k converted from cm^3/s to m^3/s.
+
+[Notes:]
+
+:ul
+If Te or ne are zero/nonphysical in a cell, no reaction is applied in that cell.
+For compute sources, this fix reads directly from compute per-grid arrays/vectors (`array_grid` / `vector_grid`).
+Interpolation is bilinear with boundary clamping on ADAS Te/ne grids.
+:ul
+
+[Related:]
+
+"compute plasma/fields"_compute_plasma_fields.html,
+"OpenEdge index"_index.html
+
