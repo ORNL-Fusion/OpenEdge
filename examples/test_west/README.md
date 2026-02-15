@@ -1,67 +1,50 @@
 # WEST test case (OpenEdge)
 
-This case runs axisymmetric WEST particle pushing using `compute plasma/fields`
-with split plasma and magnetic input files:
-
-- `input/plasma.h5`
-- `input/bfield.h5`
-
-The main input script is:
-
+Primary input:
 - `in.west`
 
+Current workflow in `in.west`:
+1. Load WEST wall/core surfaces.
+2. Apply static `adapt_grid` refinement near lower divertor, upper divertor, limiter, and core.
+3. Compute plasma/background fields with `compute plasma/fields`.
+4. Compute incident plasma flux with `compute incident/plasma/flux`.
+5. Compute sputter source with `compute pmi/surf/data` (`sputter_flux_total`).
+6. Emit sputtered particles with `fix emit/surf/pmi`.
+7. Diagnose wall flux and grid density (`compute grid ... nrho` + `fix ave/grid`).
+
 ## Run
-
 ```bash
 cd examples/test_west
 mpirun -np 4 ../../src/spa_mpi < in.west
 ```
 
-Outputs are written to:
+## Main outputs
+- `output/gamma.only` (incident plasma flux by species on wall)
+- `output/state.west` (particle state)
+- `output/tmp.grid.density` (time-averaged grid density from tracked sputtered particles)
 
-- `output/state.west` (particle trajectories)
-- `output/epar.west.grid` (grid diagnostics, if enabled in `in.west`)
+## Plot helpers
+- `plot_west_rz.py` for trajectory R-Z visualization.
+- `plot_gamma_species_vs_surfid.py` for wall flux by species.
+- `plot_grid_density_west.py` for WEST-style R-Z density maps.
 
-## Plasma/B-file convention
-
-`compute cwest plasma/fields all file input/plasma.h5 input/bfield.h5 ...`
-expects 2D `(r,z)` plasma and B-field tables.
-
-`plasma.h5` can include both:
-
-- legacy main-ion fields (`dens_i`, `temp_i`, `parr_flow`, etc.)
-- optional multi-ion groups (`ion_species/*`, `ions/*`)
-- optional per-ion metadata used by PMI models:
-  - `ion_species/mass_amu`
-  - `ion_species/charge_state_z`
-
-The ion list is not fixed to O charge states. It can include any set of
-species (for example `D+`, `O+..O8+`, `Ne+`, `Li+`, mixed impurity cases).
-
-For current `compute plasma/fields` use in this test, requested fields are read
-by dataset name and are independent of how many optional ion species are stored.
-
-## SOLEDGE conversion
-
-The conversion script is:
-
-- `input/soledge2openedge.py`
-
-It writes `plasma.h5` and `bfield.h5` separately and can also generate debug
-plots for field sanity checks and wall-flux diagnostics.
-
-## Incident Gamma check (1 step)
-
-`in.west` includes `compute incident/flux` and `dump surf` for wall Gamma.
-For a quick validation run:
-
+Example:
 ```bash
-cd examples/test_west
-mpirun -np 4 ../../src/spa_mpi < in.west
+python3 plot_grid_density_west.py \
+  --dump output/tmp.grid.density \
+  --wall input/wall.txt \
+  --out output/grid_density.west.png \
+  --show --log
 ```
 
-Gamma output:
-- `output/gamma.only`
+## Input files
+- `input/plasma.h5`
+- `input/bfield.h5`
+- `input/wall.txt`
+- `input/core.txt`
+- `input/8_on_74.h5` (PMI sputter table)
 
-This can be run with `run 0` or `run 1` depending on whether only field/surface
-interpolation check is desired.
+`plasma.h5` supports multi-ion layout (`ions/*`, `ion_species/*`) and legacy single-ion fields.
+
+## SOLEDGE conversion utility
+- `input/soledge2openedge.py` writes `plasma.h5` + `bfield.h5` and debug plots.

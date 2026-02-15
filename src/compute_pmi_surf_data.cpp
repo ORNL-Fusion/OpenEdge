@@ -1,0 +1,688 @@
+/* ----------------------------------------------------------------------
+   OpenEdge compute pmi/surf/data
+   Uses incident plasma species fluxes + BCA surface data.
+------------------------------------------------------------------------- */
+
+#include "string.h"
+#include "compute_pmi_surf_data.h"
+#include "surf.h"
+#include "domain.h"
+#include "comm.h"
+#include "update.h"
+#include "memory.h"
+#include "error.h"
+
+#include <H5Cpp.h>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+using namespace SPARTA_NS;
+
+ComputePMISurfData::ComputePMISurfData(SPARTA *sparta, int narg, char **arg) :
+  Compute(sparta, narg, arg)
+{
+  if (narg < 8) error->all(FLERR,"Illegal compute pmi/surf/data command");
+
+  int igroup = surf->find_group(arg[2]);
+  if (igroup < 0) error->all(FLERR,"Compute pmi/surf/data surf group ID does not exist");
+  groupbit = surf->bitmask[igroup];
+
+  if (strcmp(arg[3],"file") != 0)
+    error->all(FLERR,"compute pmi/surf/data syntax: compute ID pmi/surf/data surfgroup file plasma.h5 surface.h5 values ...");
+  plasma_path = std::string(arg[4]);
+  surface_path = std::string(arg[5]);
+
+  proj_slot_lo = 2;
+  proj_slot_hi = std::numeric_limits<int>::max();
+  mass_amu = 16.0;
+
+  std::vector<int> which_tmp;
+  std::vector<int> which_species_tmp;
+  int iarg = 6;
+  auto add_kind = [&](int kind, int slot) {
+    which_tmp.push_back(kind);
+    which_species_tmp.push_back(slot);
+  };
+  auto parse_slot_token = [&](const char *tok) -> int {
+    std::string s(tok);
+    if (s.size() > 2 && s.front() == '[' && s.back() == ']')
+      s = s.substr(1,s.size()-2);
+    int slot = 0;
+    try {
+      slot = std::stoi(s);
+    } catch (...) {
+      error->all(FLERR,"Expected species slot integer or all");
+    }
+    return slot;
+  };
+  auto add_slot_list = [&](int kind, const char *slotarg, int sputter_all_range) {
+    std::string tok(slotarg);
+    if (tok == "all" || tok == "[all]") {
+      const int nall = peek_nspec_from_plasma();
+      int lo = 1, hi = nall;
+      if (sputter_all_range) {
+        lo = std::max(1,proj_slot_lo);
+        hi = std::min(nall,proj_slot_hi);
+      }
+      for (int s = lo; s <= hi; s++) add_kind(kind,s);
+    } else {
+      int slot = parse_slot_token(slotarg);
+      if (slot <= 0) error->all(FLERR,"Species slot must be >= 1");
+      add_kind(kind,slot);
+    }
+  };
+
+  while (iarg < narg) {
+    if (strcmp(arg[iarg],"projectile_slots") == 0) {
+      if (iarg+2 >= narg) error->all(FLERR,"projectile_slots needs lo hi");
+      proj_slot_lo = atoi(arg[iarg+1]);
+      proj_slot_hi = atoi(arg[iarg+2]);
+      if (proj_slot_lo <= 0 || proj_slot_hi < proj_slot_lo)
+        error->all(FLERR,"Invalid projectile_slots bounds");
+      iarg += 3;
+    } else if (strcmp(arg[iarg],"mass_amu") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"mass_amu needs value");
+      mass_amu = atof(arg[iarg+1]);
+      if (mass_amu < 0.0) error->all(FLERR,"mass_amu must be >= 0");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"nflux_species") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"nflux_species needs slot or all");
+      add_slot_list(NFLUX_SPECIES,arg[iarg+1],0);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"incident_angle_species") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"incident_angle_species needs slot or all");
+      add_slot_list(INCIDENT_ANGLE_SPECIES,arg[iarg+1],0);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"incident_energy_species") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"incident_energy_species needs slot or all");
+      add_slot_list(INCIDENT_ENERGY_SPECIES,arg[iarg+1],0);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"sputter_yield_species") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"sputter_yield_species needs slot or all");
+      add_slot_list(SPUTTER_YIELD_SPECIES,arg[iarg+1],1);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"sputter_flux_species") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"sputter_flux_species needs slot or all");
+      add_slot_list(SPUTTER_FLUX_SPECIES,arg[iarg+1],1);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"sputter_flux_total") == 0) {
+      add_kind(SPUTTER_FLUX_TOTAL,0);
+      iarg++;
+    } else if (strcmp(arg[iarg],"debug_interp") == 0) {
+      if (iarg+2 >= narg) error->all(FLERR,"debug_interp needs E(eV) angle(deg)");
+      debug_interp = 1;
+      debug_E.push_back(atof(arg[iarg+1]));
+      debug_A.push_back(atof(arg[iarg+2]));
+      iarg += 3;
+    } else {
+      error->all(FLERR,"Invalid compute pmi/surf/data value");
+    }
+  }
+
+  nvalue = static_cast<int>(which_tmp.size());
+  if (nvalue == 0) error->all(FLERR,"No outputs requested for compute pmi/surf/data");
+  which = new int[nvalue];
+  which_species = new int[nvalue];
+  for (int i = 0; i < nvalue; i++) {
+    which[i] = which_tmp[i];
+    which_species[i] = which_species_tmp[i];
+  }
+
+  per_surf_flag = 1;
+  if (nvalue == 1) size_per_surf_cols = 0;
+  else size_per_surf_cols = nvalue;
+  surf_tally_flag = 0;
+  timeflag = 0;
+
+  dimension = domain->dimension;
+  firstflag = 1;
+  debug_interp = 0;
+  distributed = 0;
+  nsown = 0;
+  vector_surf = nullptr;
+  array_surf = nullptr;
+
+  nr = nz = nspec = 0;
+  nE = nA = 0;
+  has_multi_ion = 0;
+  has_bfield = 0;
+  has_temp = 0;
+}
+
+ComputePMISurfData::~ComputePMISurfData()
+{
+  if (copymode) return;
+  delete [] which;
+  delete [] which_species;
+  memory->destroy(vector_surf);
+  memory->destroy(array_surf);
+}
+
+int ComputePMISurfData::peek_nspec_from_plasma() const
+{
+  try {
+    H5::H5File file(plasma_path, H5F_ACC_RDONLY);
+    if (H5Lexists(file.getId(), "ions/dens", H5P_DEFAULT) > 0) {
+      H5::DataSet ds = file.openDataSet("ions/dens");
+      H5::DataSpace sp = ds.getSpace();
+      hsize_t dims[3] = {0,0,0};
+      sp.getSimpleExtentDims(dims);
+      if (dims[0] > 0) return static_cast<int>(dims[0]);
+    }
+  } catch (...) {
+  }
+  return 1;
+}
+
+int ComputePMISurfData::in_projectile_slots(int slot1) const
+{
+  return (slot1 >= proj_slot_lo && slot1 <= proj_slot_hi);
+}
+
+void ComputePMISurfData::load_plasma()
+{
+  H5::H5File file(plasma_path, H5F_ACC_RDONLY);
+
+  auto hasDataset = [&](const std::string& name) -> bool {
+    return H5Lexists(file.getId(), name.c_str(), H5P_DEFAULT) > 0;
+  };
+  auto read1D = [&](const std::string& name, std::vector<double>& out) {
+    H5::DataSet ds = file.openDataSet(name);
+    H5::DataSpace sp = ds.getSpace();
+    hsize_t d0;
+    sp.getSimpleExtentDims(&d0);
+    out.resize(static_cast<size_t>(d0));
+    ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+  };
+  auto read2D = [&](const std::string& name, std::vector<double>& out) {
+    H5::DataSet ds = file.openDataSet(name);
+    H5::DataSpace sp = ds.getSpace();
+    hsize_t dims[2];
+    sp.getSimpleExtentDims(dims);
+    if (static_cast<int>(dims[0]) != nz || static_cast<int>(dims[1]) != nr)
+      throw std::runtime_error("compute pmi/surf/data: plasma 2D dataset shape mismatch");
+    out.resize(static_cast<size_t>(dims[0]*dims[1]));
+    ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+  };
+  auto read3D = [&](const std::string& name, std::vector<double>& out, int& ns_out) {
+    H5::DataSet ds = file.openDataSet(name);
+    H5::DataSpace sp = ds.getSpace();
+    hsize_t dims[3];
+    sp.getSimpleExtentDims(dims);
+    if (static_cast<int>(dims[1]) != nz || static_cast<int>(dims[2]) != nr)
+      throw std::runtime_error("compute pmi/surf/data: plasma 3D dataset shape mismatch");
+    ns_out = static_cast<int>(dims[0]);
+    out.resize(static_cast<size_t>(dims[0]*dims[1]*dims[2]));
+    ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+  };
+
+  read1D("r", rvals);
+  read1D("z", zvals);
+  nr = static_cast<int>(rvals.size());
+  nz = static_cast<int>(zvals.size());
+  if (nr < 2 || nz < 2)
+    throw std::runtime_error("compute pmi/surf/data: plasma r/z must have size >= 2");
+
+  read2D("dens_i", dens_i);
+  if (hasDataset("temp_e")) {
+    read2D("temp_e", temp_e);
+  } else {
+    throw std::runtime_error("compute pmi/surf/data: missing required temp_e for incident_energy_species");
+  }
+  read2D("parr_flow", parr_flow);
+  if (hasDataset("temp_i")) {
+    read2D("temp_i", temp_i);
+    has_temp = 1;
+  }
+  if (hasDataset("parr_flow_r")) read2D("parr_flow_r", parr_flow_r);
+  if (hasDataset("parr_flow_t")) read2D("parr_flow_t", parr_flow_t);
+  if (hasDataset("parr_flow_z")) read2D("parr_flow_z", parr_flow_z);
+  if (hasDataset("br")) read2D("br", br);
+  if (hasDataset("bt")) read2D("bt", bt);
+  if (hasDataset("bz")) read2D("bz", bz);
+  has_bfield = (!br.empty() && !bz.empty());
+
+  has_multi_ion = 0;
+  if (hasDataset("ions/dens") && hasDataset("ions/parr_flow")) {
+    int ns1 = 0, ns2 = 0;
+    read3D("ions/dens", ions_dens, ns1);
+    read3D("ions/parr_flow", ions_parr_flow, ns2);
+    int ns3 = 0, ns4 = 0, ns5 = 0, ns6 = 0;
+    if (hasDataset("ions/parr_flow_r") && hasDataset("ions/parr_flow_z")) {
+      read3D("ions/parr_flow_r", ions_parr_flow_r, ns3);
+      read3D("ions/parr_flow_z", ions_parr_flow_z, ns4);
+      if (hasDataset("ions/parr_flow_t"))
+        read3D("ions/parr_flow_t", ions_parr_flow_t, ns5);
+    }
+    if (hasDataset("ions/temp")) {
+      read3D("ions/temp", ions_temp, ns6);
+      has_temp = 1;
+    }
+    if (ns1 != ns2) throw std::runtime_error("compute pmi/surf/data: ions/dens vs ions/parr_flow nspec mismatch");
+    if (!ions_parr_flow_r.empty() && ns1 != ns3)
+      throw std::runtime_error("compute pmi/surf/data: ions/parr_flow_r nspec mismatch");
+    if (!ions_parr_flow_z.empty() && ns1 != ns4)
+      throw std::runtime_error("compute pmi/surf/data: ions/parr_flow_z nspec mismatch");
+    if (!ions_parr_flow_t.empty() && ns1 != ns5)
+      throw std::runtime_error("compute pmi/surf/data: ions/parr_flow_t nspec mismatch");
+    if (!ions_temp.empty() && ns1 != ns6)
+      throw std::runtime_error("compute pmi/surf/data: ions/temp nspec mismatch");
+    nspec = ns1;
+    has_multi_ion = (nspec > 0);
+    if (hasDataset("ion_species/charge_state_z")) {
+      H5::DataSet ds = file.openDataSet("ion_species/charge_state_z");
+      H5::DataSpace sp = ds.getSpace();
+      hsize_t d0 = 0;
+      sp.getSimpleExtentDims(&d0);
+      ion_charge_state_z.assign(static_cast<size_t>(nspec),1);
+      const int nread = std::min(static_cast<int>(d0),nspec);
+      if (nread > 0) {
+        std::vector<int> tmp(static_cast<size_t>(d0),1);
+        ds.read(tmp.data(), H5::PredType::NATIVE_INT);
+        for (int i = 0; i < nread; i++) ion_charge_state_z[i] = tmp[i];
+      }
+    } else {
+      // Fallback for current WEST ordering: slot1=D+, slot2..=O+..O8+
+      ion_charge_state_z.assign(static_cast<size_t>(nspec),1);
+      for (int i = 1; i < nspec; i++) ion_charge_state_z[i] = i;
+    }
+  } else {
+    nspec = 1;
+    ion_charge_state_z.assign(1,1);
+  }
+}
+
+void ComputePMISurfData::load_surface_data()
+{
+  H5::H5File file(surface_path, H5F_ACC_RDONLY);
+
+  auto read1D = [&](const std::string& name, std::vector<double>& out, int &n) {
+    H5::DataSet ds = file.openDataSet(name);
+    H5::DataSpace sp = ds.getSpace();
+    hsize_t d0;
+    sp.getSimpleExtentDims(&d0);
+    out.resize(static_cast<size_t>(d0));
+    ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+    n = static_cast<int>(d0);
+  };
+  auto read2D = [&](const std::string& name, std::vector<double>& out) {
+    H5::DataSet ds = file.openDataSet(name);
+    H5::DataSpace sp = ds.getSpace();
+    hsize_t dims[2];
+    sp.getSimpleExtentDims(dims);
+    if (static_cast<int>(dims[0]) != nE || static_cast<int>(dims[1]) != nA)
+      throw std::runtime_error("compute pmi/surf/data: spyld shape mismatch");
+    out.resize(static_cast<size_t>(dims[0]*dims[1]));
+    ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+  };
+
+  read1D("E", E_axis, nE);
+  read1D("A", A_axis, nA);
+  if (nE < 2 || nA < 2)
+    throw std::runtime_error("compute pmi/surf/data: E/A axes must have size >= 2");
+  read2D("spyld", spyld);
+}
+
+void ComputePMISurfData::init()
+{
+  if (!surf->exist)
+    error->all(FLERR,"Cannot use compute pmi/surf/data when surfs do not exist");
+  if (surf->implicit)
+    error->all(FLERR,"Cannot use compute pmi/surf/data with implicit surfs");
+
+  try {
+    load_plasma();
+  } catch (const std::exception& e) {
+    error->all(FLERR, e.what());
+  } catch (...) {
+    error->all(FLERR, "compute pmi/surf/data failed reading plasma file");
+  }
+
+  try {
+    load_surface_data();
+  } catch (const std::exception& e) {
+    error->all(FLERR, e.what());
+  } catch (...) {
+    error->all(FLERR, "compute pmi/surf/data failed reading surface file");
+  }
+
+  if (debug_interp && comm->me == 0) {
+    auto interp_yield_raw = [&](double e_eV, double a_deg)->double {
+      const double ec = std::min(std::max(e_eV, E_axis.front()), E_axis.back());
+      const double ac = std::min(std::max(a_deg, A_axis.front()), A_axis.back());
+      auto itE = std::lower_bound(E_axis.begin(), E_axis.end(), ec);
+      auto itA = std::lower_bound(A_axis.begin(), A_axis.end(), ac);
+      int iE2 = static_cast<int>(itE - E_axis.begin());
+      int iA2 = static_cast<int>(itA - A_axis.begin());
+      if (iE2 <= 0) iE2 = 1;
+      if (iA2 <= 0) iA2 = 1;
+      if (iE2 >= nE) iE2 = nE-1;
+      if (iA2 >= nA) iA2 = nA-1;
+      const int iE1 = iE2-1;
+      const int iA1 = iA2-1;
+      const double E1 = E_axis[iE1], E2 = E_axis[iE2];
+      const double A1 = A_axis[iA1], A2 = A_axis[iA2];
+      const double tE = (E2 != E1) ? (ec-E1)/(E2-E1) : 0.0;
+      const double tA = (A2 != A1) ? (ac-A1)/(A2-A1) : 0.0;
+      const double w11 = (1.0-tE)*(1.0-tA);
+      const double w21 = tE*(1.0-tA);
+      const double w12 = (1.0-tE)*tA;
+      const double w22 = tE*tA;
+      auto at = [&](int ie, int ia)->double { return spyld[static_cast<size_t>(ie)*nA + ia]; };
+      return w11*at(iE1,iA1) + w21*at(iE2,iA1) + w12*at(iE1,iA2) + w22*at(iE2,iA2);
+    };
+    for (size_t k = 0; k < debug_E.size(); k++) {
+      const double e = debug_E[k];
+      const double a = debug_A[k];
+      const double yraw = interp_yield_raw(e,a);
+      const double yclamp = interp_yield(e,a);
+      if (screen) fprintf(screen,"PMI debug_interp: E=%g eV angle=%g deg -> spyld_raw=%g spyld_clamped=%g\n",e,a,yraw,yclamp);
+      if (logfile) fprintf(logfile,"PMI debug_interp: E=%g eV angle=%g deg -> spyld_raw=%g spyld_clamped=%g\n",e,a,yraw,yclamp);
+    }
+  }
+
+  distributed = surf->distributed;
+  if (!firstflag) return;
+  firstflag = 0;
+
+  nsown = surf->nown;
+  if (nvalue == 1)
+    memory->create(vector_surf,nsown,"pmi/surf/data:vector_surf");
+  else
+    memory->create(array_surf,nsown,nvalue,"pmi/surf/data:array_surf");
+}
+
+double ComputePMISurfData::interp2D(const std::vector<double> &f, double r, double z) const
+{
+  if (f.empty()) return 0.0;
+  const double rc = std::min(std::max(r, rvals.front()), rvals.back());
+  const double zc = std::min(std::max(z, zvals.front()), zvals.back());
+  auto itR = std::lower_bound(rvals.begin(), rvals.end(), rc);
+  auto itZ = std::lower_bound(zvals.begin(), zvals.end(), zc);
+  int ir2 = static_cast<int>(itR - rvals.begin());
+  int iz2 = static_cast<int>(itZ - zvals.begin());
+  if (ir2 <= 0) ir2 = 1;
+  if (iz2 <= 0) iz2 = 1;
+  if (ir2 >= nr) ir2 = nr-1;
+  if (iz2 >= nz) iz2 = nz-1;
+  const int ir1 = ir2-1;
+  const int iz1 = iz2-1;
+
+  const double r1 = rvals[ir1], r2 = rvals[ir2];
+  const double z1 = zvals[iz1], z2 = zvals[iz2];
+  const double tr = (r2 != r1) ? (rc-r1)/(r2-r1) : 0.0;
+  const double tz = (z2 != z1) ? (zc-z1)/(z2-z1) : 0.0;
+  const double w11 = (1.0-tr)*(1.0-tz);
+  const double w21 = tr*(1.0-tz);
+  const double w12 = (1.0-tr)*tz;
+  const double w22 = tr*tz;
+
+  auto at2 = [&](int iz, int ir)->double { return f[static_cast<size_t>(iz)*nr + ir]; };
+  return w11*at2(iz1,ir1) + w21*at2(iz1,ir2) + w12*at2(iz2,ir1) + w22*at2(iz2,ir2);
+}
+
+double ComputePMISurfData::interp3D(const std::vector<double> &f, int ispec, double r, double z) const
+{
+  if (f.empty() || ispec < 0 || ispec >= nspec) return 0.0;
+  const double rc = std::min(std::max(r, rvals.front()), rvals.back());
+  const double zc = std::min(std::max(z, zvals.front()), zvals.back());
+  auto itR = std::lower_bound(rvals.begin(), rvals.end(), rc);
+  auto itZ = std::lower_bound(zvals.begin(), zvals.end(), zc);
+  int ir2 = static_cast<int>(itR - rvals.begin());
+  int iz2 = static_cast<int>(itZ - zvals.begin());
+  if (ir2 <= 0) ir2 = 1;
+  if (iz2 <= 0) iz2 = 1;
+  if (ir2 >= nr) ir2 = nr-1;
+  if (iz2 >= nz) iz2 = nz-1;
+  const int ir1 = ir2-1;
+  const int iz1 = iz2-1;
+
+  const double r1 = rvals[ir1], r2 = rvals[ir2];
+  const double z1 = zvals[iz1], z2 = zvals[iz2];
+  const double tr = (r2 != r1) ? (rc-r1)/(r2-r1) : 0.0;
+  const double tz = (z2 != z1) ? (zc-z1)/(z2-z1) : 0.0;
+  const double w11 = (1.0-tr)*(1.0-tz);
+  const double w21 = tr*(1.0-tz);
+  const double w12 = (1.0-tr)*tz;
+  const double w22 = tr*tz;
+
+  const size_t off = static_cast<size_t>(ispec) * nz * nr;
+  auto at3 = [&](int iz, int ir)->double { return f[off + static_cast<size_t>(iz)*nr + ir]; };
+  return w11*at3(iz1,ir1) + w21*at3(iz1,ir2) + w12*at3(iz2,ir1) + w22*at3(iz2,ir2);
+}
+
+double ComputePMISurfData::interp_yield(double e_eV, double a_deg) const
+{
+  if (spyld.empty()) return 0.0;
+  const double ec = std::min(std::max(e_eV, E_axis.front()), E_axis.back());
+  const double ac = std::min(std::max(a_deg, A_axis.front()), A_axis.back());
+  auto itE = std::lower_bound(E_axis.begin(), E_axis.end(), ec);
+  auto itA = std::lower_bound(A_axis.begin(), A_axis.end(), ac);
+  int iE2 = static_cast<int>(itE - E_axis.begin());
+  int iA2 = static_cast<int>(itA - A_axis.begin());
+  if (iE2 <= 0) iE2 = 1;
+  if (iA2 <= 0) iA2 = 1;
+  if (iE2 >= nE) iE2 = nE-1;
+  if (iA2 >= nA) iA2 = nA-1;
+  const int iE1 = iE2-1;
+  const int iA1 = iA2-1;
+  const double E1 = E_axis[iE1], E2 = E_axis[iE2];
+  const double A1 = A_axis[iA1], A2 = A_axis[iA2];
+  const double tE = (E2 != E1) ? (ec-E1)/(E2-E1) : 0.0;
+  const double tA = (A2 != A1) ? (ac-A1)/(A2-A1) : 0.0;
+  const double w11 = (1.0-tE)*(1.0-tA);
+  const double w21 = tE*(1.0-tA);
+  const double w12 = (1.0-tE)*tA;
+  const double w22 = tE*tA;
+  auto at = [&](int ie, int ia)->double {
+    return spyld[static_cast<size_t>(ie)*nA + ia];
+  };
+  double y = w11*at(iE1,iA1) + w21*at(iE2,iA1) + w12*at(iE1,iA2) + w22*at(iE2,iA2);
+  if (!std::isfinite(y) || y < 0.0) y = 0.0;
+  return y;
+}
+
+void ComputePMISurfData::compute_per_surf()
+{
+  invoked_per_surf = update->ntimestep;
+  if (nvalue == 1) {
+    for (int i = 0; i < nsown; i++) vector_surf[i] = 0.0;
+  } else {
+    for (int i = 0; i < nsown; i++)
+      for (int j = 0; j < nvalue; j++) array_surf[i][j] = 0.0;
+  }
+
+  Surf::Line *lines = distributed ? surf->mylines : surf->lines;
+  Surf::Tri *tris = distributed ? surf->mytris : surf->tris;
+  const int me = comm->me;
+  const int nprocs = comm->nprocs;
+
+  const int ns = has_multi_ion ? nspec : 1;
+  std::vector<double> gamma_n(ns,0.0), angle_deg(ns,0.0), energy_eV(ns,0.0), yld(ns,0.0), sput_flux(ns,0.0);
+
+  auto clean = [](double x) {
+    return (std::fabs(x) < 1.0e-200 || !std::isfinite(x)) ? 0.0 : x;
+  };
+
+  for (int i = 0; i < nsown; i++) {
+    int m = distributed ? i : me + i*nprocs;
+    const int in_group = (dimension == 2) ? (lines[m].mask & groupbit) : (tris[m].mask & groupbit);
+    if (!in_group) continue;
+
+    double r = 0.0, z = 0.0;
+    if (dimension == 2) {
+      r = 0.5*(lines[m].p1[0] + lines[m].p2[0]);
+      z = 0.5*(lines[m].p1[1] + lines[m].p2[1]);
+    } else {
+      const double xc = (tris[m].p1[0] + tris[m].p2[0] + tris[m].p3[0]) / 3.0;
+      const double yc = (tris[m].p1[1] + tris[m].p2[1] + tris[m].p3[1]) / 3.0;
+      const double zc = (tris[m].p1[2] + tris[m].p2[2] + tris[m].p3[2]) / 3.0;
+      r = std::sqrt(xc*xc + yc*yc);
+      z = zc;
+    }
+
+    double nr_surf = 0.0, nz_surf = 0.0;
+    if (dimension == 2) {
+      nr_surf = lines[m].norm[0];
+      nz_surf = lines[m].norm[1];
+    } else {
+      const double xc = (tris[m].p1[0] + tris[m].p2[0] + tris[m].p3[0]) / 3.0;
+      const double yc = (tris[m].p1[1] + tris[m].p2[1] + tris[m].p3[1]) / 3.0;
+      const double rr = std::sqrt(xc*xc + yc*yc);
+      const double cr = (rr > 0.0) ? xc/rr : 1.0;
+      const double sr = (rr > 0.0) ? yc/rr : 0.0;
+      nr_surf = tris[m].norm[0]*cr + tris[m].norm[1]*sr;
+      nz_surf = tris[m].norm[2];
+    }
+
+    const double dr = (nr > 1) ? std::fabs(rvals[1] - rvals[0]) : 0.0;
+    const double dz = (nz > 1) ? std::fabs(zvals[1] - zvals[0]) : 0.0;
+    const double dprobe = 0.5 * ((dr > 0.0 && dz > 0.0) ? std::min(dr,dz) : (dr + dz));
+
+    auto species_state = [&](int s, double rp, double zp,
+                             double &ni, double &ti, double &vr, double &vt, double &vz) {
+      ni = 0.0; ti = 0.0; vr = vt = vz = 0.0;
+      double vpar = 0.0;
+      if (has_multi_ion) {
+        ni = interp3D(ions_dens, s, rp, zp);
+        if (!ions_temp.empty()) ti = interp3D(ions_temp, s, rp, zp);
+        vpar = interp3D(ions_parr_flow, s, rp, zp);
+        if (!ions_parr_flow_r.empty() && !ions_parr_flow_z.empty()) {
+          vr = interp3D(ions_parr_flow_r, s, rp, zp);
+          vz = interp3D(ions_parr_flow_z, s, rp, zp);
+          if (!ions_parr_flow_t.empty()) vt = interp3D(ions_parr_flow_t, s, rp, zp);
+        } else if (has_bfield) {
+          const double brr = interp2D(br, rp, zp);
+          const double btt = bt.empty() ? 0.0 : interp2D(bt, rp, zp);
+          const double bzz = interp2D(bz, rp, zp);
+          const double bmag = std::sqrt(brr*brr + btt*btt + bzz*bzz);
+          if (bmag > 0.0) {
+            vr = vpar * brr / bmag;
+            vt = vpar * btt / bmag;
+            vz = vpar * bzz / bmag;
+          }
+        }
+      } else {
+        ni = interp2D(dens_i, rp, zp);
+        if (!temp_i.empty()) ti = interp2D(temp_i, rp, zp);
+        vpar = interp2D(parr_flow, rp, zp);
+        if (!parr_flow_r.empty() && !parr_flow_z.empty()) {
+          vr = interp2D(parr_flow_r, rp, zp);
+          vz = interp2D(parr_flow_z, rp, zp);
+          if (!parr_flow_t.empty()) vt = interp2D(parr_flow_t, rp, zp);
+        } else if (has_bfield) {
+          const double brr = interp2D(br, rp, zp);
+          const double btt = bt.empty() ? 0.0 : interp2D(bt, rp, zp);
+          const double bzz = interp2D(bz, rp, zp);
+          const double bmag = std::sqrt(brr*brr + btt*btt + bzz*bzz);
+          if (bmag > 0.0) {
+            vr = vpar * brr / bmag;
+            vt = vpar * btt / bmag;
+            vz = vpar * bzz / bmag;
+          }
+        }
+      }
+    };
+
+    auto total_incident = [&](double rp, double zp)->double {
+      double sum = 0.0;
+      for (int s = 0; s < ns; s++) {
+        double ni,ti,vr,vt,vz;
+        species_state(s,rp,zp,ni,ti,vr,vt,vz);
+        const double vin = -(vr*nr_surf + vz*nz_surf);
+        if (vin > 0.0) sum += ni * vin;
+      }
+      return sum;
+    };
+
+    const double r_minus = r - dprobe * nr_surf;
+    const double z_minus = z - dprobe * nz_surf;
+    const double r_plus  = r + dprobe * nr_surf;
+    const double z_plus  = z + dprobe * nz_surf;
+    const double g_minus = total_incident(r_minus,z_minus);
+    const double g_plus  = total_incident(r_plus,z_plus);
+    if (g_plus > g_minus) { r = r_plus; z = z_plus; }
+    else { r = r_minus; z = z_minus; }
+
+    std::fill(gamma_n.begin(), gamma_n.end(), 0.0);
+    std::fill(angle_deg.begin(), angle_deg.end(), 0.0);
+    std::fill(energy_eV.begin(), energy_eV.end(), 0.0);
+    std::fill(yld.begin(), yld.end(), 0.0);
+    std::fill(sput_flux.begin(), sput_flux.end(), 0.0);
+
+    double sput_total = 0.0;
+    const double te_loc = interp2D(temp_e,r,z);
+    for (int s = 0; s < ns; s++) {
+      double ni,ti,vr,vt,vz;
+      species_state(s,r,z,ni,ti,vr,vt,vz);
+      const double vin = -(vr*nr_surf + vz*nz_surf);
+      if (vin <= 0.0) continue;
+      const double g = ni * vin;
+      gamma_n[s] = g;
+
+      const double vmag = std::sqrt(vr*vr + vt*vt + vz*vz);
+      double a_deg = 0.0;
+      if (vmag > 0.0) {
+        double c = vin / vmag;
+        c = std::max(0.0,std::min(1.0,c));
+        a_deg = std::acos(c) * 180.0 / M_PI;
+      }
+      angle_deg[s] = a_deg;
+
+      const int z_inc = (s >= 0 && s < static_cast<int>(ion_charge_state_z.size())) ?
+        std::max(1,ion_charge_state_z[s]) : 1;
+      const double te_eV = (std::isfinite(te_loc) && te_loc > 0.0) ? te_loc : 0.0;
+      const double ti_eV = (std::isfinite(ti) && ti > 0.0) ? ti : 0.0;
+      double E = 3.0 * te_eV + 2.0 * static_cast<double>(z_inc) * ti_eV;
+      energy_eV[s] = E;
+
+      if (in_projectile_slots(s+1)) {
+        const double ys = interp_yield(E,a_deg);
+        yld[s] = ys;
+        sput_flux[s] = g * ys;
+        sput_total += sput_flux[s];
+      }
+    }
+
+    if (nvalue == 1) {
+      double out = 0.0;
+      if (which[0] == SPUTTER_FLUX_TOTAL) out = sput_total;
+      else {
+        const int slot = which_species[0] - 1;
+        if (slot >= 0 && slot < ns) {
+          if (which[0] == NFLUX_SPECIES) out = gamma_n[slot];
+          else if (which[0] == INCIDENT_ANGLE_SPECIES) out = angle_deg[slot];
+          else if (which[0] == INCIDENT_ENERGY_SPECIES) out = energy_eV[slot];
+          else if (which[0] == SPUTTER_YIELD_SPECIES) out = yld[slot];
+          else if (which[0] == SPUTTER_FLUX_SPECIES) out = sput_flux[slot];
+        }
+      }
+      vector_surf[i] = clean(out);
+    } else {
+      for (int j = 0; j < nvalue; j++) {
+        double out = 0.0;
+        if (which[j] == SPUTTER_FLUX_TOTAL) out = sput_total;
+        else {
+          const int slot = which_species[j] - 1;
+          if (slot >= 0 && slot < ns) {
+            if (which[j] == NFLUX_SPECIES) out = gamma_n[slot];
+            else if (which[j] == INCIDENT_ANGLE_SPECIES) out = angle_deg[slot];
+            else if (which[j] == INCIDENT_ENERGY_SPECIES) out = energy_eV[slot];
+            else if (which[j] == SPUTTER_YIELD_SPECIES) out = yld[slot];
+            else if (which[j] == SPUTTER_FLUX_SPECIES) out = sput_flux[slot];
+          }
+        }
+        array_surf[i][j] = clean(out);
+      }
+    }
+  }
+}
+
+bigint ComputePMISurfData::memory_usage()
+{
+  return static_cast<bigint>(nsown) * nvalue * sizeof(double);
+}

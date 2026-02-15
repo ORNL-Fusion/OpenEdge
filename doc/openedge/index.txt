@@ -17,5 +17,7 @@ kept in this directory to keep SPARTA core docs separate and clean.
 "OpenEdge Quickstart"_quickstart.html
 "compute plasma/fields"_compute_plasma_fields.html
 "compute incident/flux"_compute_incident_flux.html
+"compute pmi/surf/data"_compute_pmi_surf_data.html
+"fix emit/surf/pmi"_fix_emit_surf_pmi.html
 "fix evaporation"_fix_evaporation.html
 "fix viscous"_fix_viscous.html :ul

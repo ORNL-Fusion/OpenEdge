@@ -29,21 +29,19 @@ class FixEmitSurfPmi : public FixEmit {
   void init();
 
   void grid_changed();
+  void custom_surf_changed() { grid_changed(); }
 
  private:
-  int imix,groupbit,normalflag,subsonic,subsonic_style,subsonic_warning;
-  int npertask,nthresh;
-  double psubsonic,tsubsonic,nsubsonic;
-  double tprefactor,soundspeed_mixture;
+  int imix,groupbit,normalflag;
 
-  int npmode,np;    // npmode = FLOW,CONSTANT,VARIABLE
-  int npvar;
+  int npmode,np;    // npmode = FLOW,CONSTANT
   char *npstr;
+  int iflux,flux_index;
 
   // copies of data from other classes
 
   int dimension,nspecies;
-  double fnum,dt;
+  double fnum;
   double nrho,temp_thermal,temp_rot,temp_vib;
   double *fraction,*cummulative;
 
@@ -86,22 +84,15 @@ class FixEmitSurfPmi : public FixEmit {
 
   // custom options for per-surf emission properties
 
-  int max_cummulative;
-  double **cummulative_custom;     // local to this fix, not actually custom data
-
-  // active grid cells assigned to tasks, used by subsonic sorting
-
-  int maxactive;
-  int *activecell;
-
   // private methods
 
   void create_task(int);
   void perform_task();
   void grow_task();
+  int local_isurf_index(surfint) const;
+  double flux_for_surface(surfint);
 
   int option(int, char **);
-  double get_flux(int icell);
 
 };
 

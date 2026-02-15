@@ -23,40 +23,57 @@ using namespace SPARTA_NS;
 ComputeIncidentPlasmaFlux::ComputeIncidentPlasmaFlux(SPARTA *sparta, int narg, char **arg) :
   Compute(sparta, narg, arg)
 {
-  if (narg < 6) error->all(FLERR,"Illegal compute incident/flux command");
+  if (narg < 6) error->all(FLERR,"Illegal compute incident/plasma/flux command");
 
   int igroup = surf->find_group(arg[2]);
-  if (igroup < 0) error->all(FLERR,"Compute incident/flux surf group ID does not exist");
+  if (igroup < 0) error->all(FLERR,"Compute incident/plasma/flux surf group ID does not exist");
   groupbit = surf->bitmask[igroup];
 
   if (strcmp(arg[3],"file") != 0)
-    error->all(FLERR,"compute incident/flux syntax: compute ID incident/flux surfgroup file plasma.h5 nflux_incident");
+    error->all(FLERR,"compute incident/plasma/flux syntax: compute ID incident/plasma/flux surfgroup file plasma.h5 nflux_incident");
   plasma_path = std::string(arg[4]);
 
-  which = new int[narg];
-  which_species = new int[narg];
-  nvalue = 0;
+  std::vector<int> which_tmp;
+  std::vector<int> which_species_tmp;
   int iarg = 5;
+  auto push_request = [&](int kind, int species_slot) {
+    which_tmp.push_back(kind);
+    which_species_tmp.push_back(species_slot);
+  };
   while (iarg < narg) {
     if (strcmp(arg[iarg],"nflux_incident") == 0) {
-      which[nvalue] = NFLUX_INCIDENT;
-      which_species[nvalue] = 0;
-      nvalue++; iarg++;
+      push_request(NFLUX_INCIDENT,0);
+      iarg++;
     } else if (strcmp(arg[iarg],"nflux_normal") == 0) {
-      which[nvalue] = NFLUX_NORMAL;
-      which_species[nvalue] = 0;
-      nvalue++; iarg++;
+      push_request(NFLUX_NORMAL,0);
+      iarg++;
     } else if (strcmp(arg[iarg],"nflux_species") == 0) {
       if (iarg+1 >= narg) error->all(FLERR,"nflux_species needs species slot (1..N)");
-      which[nvalue] = NFLUX_SPECIES;
-      which_species[nvalue] = input->inumeric(FLERR,arg[iarg+1]);
-      nvalue++; iarg += 2;
-    } else if (strcmp(arg[iarg],"nflux_species_normal") == 0) {
-      if (iarg+1 >= narg) error->all(FLERR,"nflux_species_normal needs species slot (1..N)");
-      which[nvalue] = NFLUX_SPECIES_NORMAL;
-      which_species[nvalue] = input->inumeric(FLERR,arg[iarg+1]);
-      nvalue++; iarg += 2;
-    } else error->all(FLERR,"Invalid compute incident/flux value");
+      std::string tok(arg[iarg+1]);
+      if (tok == "all" || tok == "[all]") {
+        const int nall = peek_nspec_from_plasma();
+        for (int s = 1; s <= nall; s++) push_request(NFLUX_SPECIES,s);
+      } else {
+        if (tok.size() > 2 && tok.front() == '[' && tok.back() == ']')
+          tok = tok.substr(1,tok.size()-2);
+        int slot = 0;
+        try {
+          slot = std::stoi(tok);
+        } catch (...) {
+          error->all(FLERR,"nflux_species needs numeric slot or 'all'");
+        }
+        if (slot <= 0) error->all(FLERR,"nflux_species slot must be >= 1");
+        push_request(NFLUX_SPECIES,slot);
+      }
+      iarg += 2;
+    } else error->all(FLERR,"Invalid compute incident/plasma/flux value");
+  }
+  nvalue = static_cast<int>(which_tmp.size());
+  which = new int[nvalue];
+  which_species = new int[nvalue];
+  for (int i = 0; i < nvalue; i++) {
+    which[i] = which_tmp[i];
+    which_species[i] = which_species_tmp[i];
   }
 
   per_surf_flag = 1;
@@ -75,6 +92,23 @@ ComputeIncidentPlasmaFlux::ComputeIncidentPlasmaFlux(SPARTA *sparta, int narg, c
   nr = nz = nspec = 0;
   has_multi_ion = 0;
   has_bfield = 0;
+}
+
+int ComputeIncidentPlasmaFlux::peek_nspec_from_plasma() const
+{
+  try {
+    H5::H5File file(plasma_path, H5F_ACC_RDONLY);
+    if (H5Lexists(file.getId(), "ions/dens", H5P_DEFAULT) > 0) {
+      H5::DataSet ds = file.openDataSet("ions/dens");
+      H5::DataSpace sp = ds.getSpace();
+      hsize_t dims[3] = {0,0,0};
+      sp.getSimpleExtentDims(dims);
+      if (dims[0] > 0) return static_cast<int>(dims[0]);
+    }
+  } catch (...) {
+    // fall through to single-ion default
+  }
+  return 1;
 }
 
 ComputeIncidentPlasmaFlux::~ComputeIncidentPlasmaFlux()
@@ -107,7 +141,7 @@ void ComputeIncidentPlasmaFlux::load_plasma()
     hsize_t dims[2];
     sp.getSimpleExtentDims(dims);
     if (static_cast<int>(dims[0]) != nz || static_cast<int>(dims[1]) != nr)
-      throw std::runtime_error("compute incident/flux: 2D dataset shape mismatch");
+      throw std::runtime_error("compute incident/plasma/flux: 2D dataset shape mismatch");
     out.resize(static_cast<size_t>(dims[0]*dims[1]));
     ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
   };
@@ -117,7 +151,7 @@ void ComputeIncidentPlasmaFlux::load_plasma()
     hsize_t dims[3];
     sp.getSimpleExtentDims(dims);
     if (static_cast<int>(dims[1]) != nz || static_cast<int>(dims[2]) != nr)
-      throw std::runtime_error("compute incident/flux: 3D dataset shape mismatch");
+      throw std::runtime_error("compute incident/plasma/flux: 3D dataset shape mismatch");
     ns_out = static_cast<int>(dims[0]);
     out.resize(static_cast<size_t>(dims[0]*dims[1]*dims[2]));
     ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
@@ -128,7 +162,7 @@ void ComputeIncidentPlasmaFlux::load_plasma()
   nr = static_cast<int>(rvals.size());
   nz = static_cast<int>(zvals.size());
   if (nr < 2 || nz < 2)
-    throw std::runtime_error("compute incident/flux: plasma r/z must have size >= 2");
+    throw std::runtime_error("compute incident/plasma/flux: plasma r/z must have size >= 2");
 
   read2D("dens_i", dens_i);
   read2D("parr_flow", parr_flow);
@@ -152,13 +186,13 @@ void ComputeIncidentPlasmaFlux::load_plasma()
       if (hasDataset("ions/parr_flow_t"))
         read3D("ions/parr_flow_t", ions_parr_flow_t, ns5);
     }
-    if (ns1 != ns2) throw std::runtime_error("compute incident/flux: ions/dens vs ions/parr_flow nspec mismatch");
+    if (ns1 != ns2) throw std::runtime_error("compute incident/plasma/flux: ions/dens vs ions/parr_flow nspec mismatch");
     if (!ions_parr_flow_r.empty() && ns1 != ns3)
-      throw std::runtime_error("compute incident/flux: ions/parr_flow_r nspec mismatch");
+      throw std::runtime_error("compute incident/plasma/flux: ions/parr_flow_r nspec mismatch");
     if (!ions_parr_flow_z.empty() && ns1 != ns4)
-      throw std::runtime_error("compute incident/flux: ions/parr_flow_z nspec mismatch");
+      throw std::runtime_error("compute incident/plasma/flux: ions/parr_flow_z nspec mismatch");
     if (!ions_parr_flow_t.empty() && ns1 != ns5)
-      throw std::runtime_error("compute incident/flux: ions/parr_flow_t nspec mismatch");
+      throw std::runtime_error("compute incident/plasma/flux: ions/parr_flow_t nspec mismatch");
     nspec = ns1;
     has_multi_ion = (nspec > 0);
   }
@@ -175,9 +209,9 @@ void ComputeIncidentPlasmaFlux::load_plasma()
 void ComputeIncidentPlasmaFlux::init()
 {
   if (!surf->exist)
-    error->all(FLERR,"Cannot use compute incident/flux when surfs do not exist");
+    error->all(FLERR,"Cannot use compute incident/plasma/flux when surfs do not exist");
   if (surf->implicit)
-    error->all(FLERR,"Cannot use compute incident/flux with implicit surfs");
+    error->all(FLERR,"Cannot use compute incident/plasma/flux with implicit surfs");
 
   // each rank reads plasma.h5 once (simpler + robust)
   try {
@@ -185,7 +219,7 @@ void ComputeIncidentPlasmaFlux::init()
   } catch (const std::exception& e) {
     error->all(FLERR, e.what());
   } catch (...) {
-    error->all(FLERR, "compute incident/flux failed reading plasma.h5");
+    error->all(FLERR, "compute incident/plasma/flux failed reading plasma.h5");
   }
 
   distributed = surf->distributed;
@@ -404,18 +438,14 @@ void ComputeIncidentPlasmaFlux::compute_per_surf()
     if (nvalue == 1) {
       double g0 = gamma_total;
       if (which[0] == NFLUX_NORMAL) g0 = gamma_n_total;
-      else if (which[0] == NFLUX_SPECIES || which[0] == NFLUX_SPECIES_NORMAL) {
+      else if (which[0] == NFLUX_SPECIES) {
         const int slot = which_species[0] - 1; // user uses 1-based slot
         g0 = 0.0;
         if (has_multi_ion && slot >= 0 && slot < nspec) {
           double ni,vp,vr,vt,vz;
           species_velocity(slot,r,z,ni,vp,vr,vt,vz);
-          if (which[0] == NFLUX_SPECIES) {
-            g0 = std::fabs(ni * vp);
-          } else {
-            const double vin = -(vr*nr_surf + vz*nz_surf);
-            if (vin > 0.0) g0 = ni * vin;
-          }
+          const double vin = -(vr*nr_surf + vz*nz_surf);
+          if (vin > 0.0) g0 = ni * vin;
         }
       }
       vector_surf[i] = clean(g0);
@@ -423,18 +453,14 @@ void ComputeIncidentPlasmaFlux::compute_per_surf()
       for (int j = 0; j < nvalue; j++) {
         if (which[j] == NFLUX_INCIDENT) array_surf[i][j] = clean(gamma_total);
         else if (which[j] == NFLUX_NORMAL) array_surf[i][j] = clean(gamma_n_total);
-        else if (which[j] == NFLUX_SPECIES || which[j] == NFLUX_SPECIES_NORMAL) {
+        else if (which[j] == NFLUX_SPECIES) {
           const int slot = which_species[j] - 1; // user uses 1-based slot
           double g = 0.0;
           if (has_multi_ion && slot >= 0 && slot < nspec) {
             double ni,vp,vr,vt,vz;
             species_velocity(slot,r,z,ni,vp,vr,vt,vz);
-            if (which[j] == NFLUX_SPECIES) {
-              g = std::fabs(ni * vp);
-            } else {
-              const double vin = -(vr*nr_surf + vz*nz_surf);
-              if (vin > 0.0) g = ni * vin;
-            }
+            const double vin = -(vr*nr_surf + vz*nz_surf);
+            if (vin > 0.0) g = ni * vin;
           }
           array_surf[i][j] = clean(g);
         }

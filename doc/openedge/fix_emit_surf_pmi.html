@@ -1,0 +1,67 @@
+<HTML><BODY>
+<CENTER><A HREF="https://sparta.github.io">SPARTA WWW Site</A> -
+<A HREF="../Manual.html">SPARTA Documentation</A> -
+<A HREF="../Section_commands.html#comm">SPARTA Commands</A></CENTER>
+
+<HR>
+<H3>fix emit/surf/pmi command</H3>
+
+<P><B>Syntax:</B></P>
+<PRE>fix ID emit/surf/pmi mix-ID surfgroup-ID compute-ID keyword values ...</PRE>
+
+<P>
+ID, fix, and mix-ID are documented in <A HREF="../fix.html">fix</A> command<br>
+emit/surf/pmi = style name of this fix command<br>
+surfgroup-ID = surface group that emits particles<br>
+compute-ID = per-surf compute that provides flux (typically <I>compute pmi/surf/data</I>)<br>
+</P>
+
+<P><B>Keywords:</B></P>
+<UL>
+<LI><I>flux_index N</I> = use column N from per-surf array output (1-based)
+<LI><I>n M</I> = constant multiplier mode; <I>n 0</I> uses direct flow mode
+<LI><I>normal yes/no</I> = apply stream speed in surface-normal direction
+</UL>
+
+<P><B>Description:</B></P>
+<P>
+This fix inserts particles from selected surfaces using a per-surface
+flux source. For flow mode (<I>n 0</I>, default), insertion target for each
+surface task is:
+</P>
+<P><I>ntarget = flux * area * dt / fnum</I></P>
+<P>
+where <I>flux</I> is read from the referenced per-surf compute, <I>area</I> is the
+surface/cell overlap area, <I>dt</I> is timestep, and <I>fnum</I> is global particle
+weight.
+</P>
+
+<P>
+For a vector per-surf compute, flux is taken directly from that vector.
+For an array per-surf compute, use <I>flux_index N</I> to select the column.
+</P>
+
+<P>
+This fix is intended for plasma-material source terms such as sputtered
+neutral emission from <I>compute pmi/surf/data sputter_flux_total</I>.
+</P>
+
+<P><B>Examples:</B></P>
+<PRE>compute cpmi pmi/surf/data 1 file input/plasma.h5 input/8_on_74.h5 projectile_slots 2 9 sputter_flux_total</PRE>
+<PRE>fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes</PRE>
+
+<P><B>Notes:</B></P>
+<P>
+If grid adapts during run, any grid-based fields used by movers should be
+recomputed with nonzero global field frequency.
+</P>
+
+<P><B>Related commands:</B></P>
+<P>
+<A HREF="compute_pmi_surf_data.html">compute pmi/surf/data</A>,
+<A HREF="compute_incident_flux.html">compute incident/flux</A>,
+<A HREF="../fix_emit_surf.html">fix emit/surf</A>,
+<A HREF="../global.html">global</A>
+</P>
+
+</BODY></HTML>

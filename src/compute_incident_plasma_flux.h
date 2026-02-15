@@ -4,7 +4,7 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(incident/flux,ComputeIncidentPlasmaFlux)
+ComputeStyle(incident/plasma/flux,ComputeIncidentPlasmaFlux)
 
 #else
 
@@ -26,7 +26,7 @@ class ComputeIncidentPlasmaFlux : public Compute {
   bigint memory_usage();
 
  protected:
-  enum {NFLUX_INCIDENT, NFLUX_NORMAL, NFLUX_SPECIES, NFLUX_SPECIES_NORMAL};
+  enum {NFLUX_INCIDENT, NFLUX_NORMAL, NFLUX_SPECIES};
 
   int groupbit,nvalue;
   int dimension,distributed;
@@ -48,6 +48,7 @@ class ComputeIncidentPlasmaFlux : public Compute {
   double interp2D(const std::vector<double> &f, double r, double z) const;
   double interp3D(const std::vector<double> &f, int ispec, double r, double z) const;
   void load_plasma();
+  int peek_nspec_from_plasma() const;
 };
 
 }

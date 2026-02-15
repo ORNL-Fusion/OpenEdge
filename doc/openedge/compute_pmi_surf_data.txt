@@ -1,0 +1,63 @@
+"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+
+:link(sws,https://sparta.github.io)
+:link(sd,../Manual.html)
+:link(sc,../Section_commands.html#comm)
+
+:line
+
+compute pmi/surf/data command :h3
+
+[Syntax:]
+
+compute ID pmi/surf/data surfgroup-ID file plasma.h5 surface.h5 values ... :pre
+
+ID is documented in "compute"_../compute.html command
+pmi/surf/data = style name of this compute command
+surfgroup-ID = surface group ID
+plasma.h5 = plasma data file with species-resolved flows
+surface.h5 = BCA surface data file with {E}, {A}, {spyld} :ul
+
+[Optional modifiers:]
+
+{projectile_slots ILO IHI} = slot range used for sputtering (default 2..N)
+{mass_amu M} = projectile mass in amu for directed kinetic energy term
+(default 16.0) :ul
+
+[Output values:]
+
+{nflux_species N} = incident plasma normal flux for species slot N
+{incident_angle_species N} = incident angle (deg) wrt wall normal
+{incident_energy_species N} = incident energy (eV), from {3*Te + 2*Z_incident*Ti}
+{sputter_yield_species N} = sputter yield from {spyld(E,angle)}
+{sputter_flux_species N} = species sputtered flux = incident flux * yield
+{sputter_flux_total} = sum of sputtered flux over projectile slot range :ul
+
+For species keywords, use {N} or {all}. :p
+
+[Examples:]
+
+compute cpmi pmi/surf/data 1 file input/plasma.h5 input/8_on_74.h5 \
+projectile_slots 2 9 mass_amu 16.0 \
+nflux_species all sputter_flux_species all sputter_flux_total :pre
+
+[Description:]
+
+This compute samples incident plasma species fluxes on surface elements in
+the target surface group. It evaluates species velocities at a probe point
+near each surface, computes inward normal flux, then computes incident angle
+and incident energy for each species. Incident energy is computed as
+{E_inc = 3*Te + 2*Z_incident*Ti} at the same probe location. If species is in {projectile_slots},
+it interpolates sputter yield from {spyld(E,angle)} in {surface.h5}.
+
+This is a plasma-field based source term (not particle-collision tally).
+
+[Required datasets:]
+
+In {plasma.h5}: {r}, {z}, {ions/dens}, {ions/parr_flow} (or legacy single-ion fields)
+In {surface.h5}: {E}, {A}, {spyld} :ul
+
+[Related commands:]
+
+"compute incident/flux"_compute_incident_flux.html,
+"dump surf"_../dump_surf.html

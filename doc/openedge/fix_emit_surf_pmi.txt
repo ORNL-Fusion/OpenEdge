@@ -1,0 +1,61 @@
+"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+
+:link(sws,https://sparta.github.io)
+:link(sd,../Manual.html)
+:link(sc,../Section_commands.html#comm)
+
+:line
+
+fix emit/surf/pmi command :h3
+
+[Syntax:]
+
+fix ID emit/surf/pmi mix-ID surfgroup-ID compute-ID keyword values ... :pre
+
+ID, fix, and mix-ID are documented in "fix"_../fix.html command
+emit/surf/pmi = style name of this fix command
+surfgroup-ID = surface group that emits particles
+compute-ID = per-surf compute that provides flux (typically {compute pmi/surf/data}) :ul
+
+[Keywords:]
+
+{flux_index N} = use column N from per-surf array output (1-based)
+{n M} = constant multiplier mode; {n 0} uses direct flow mode
+{normal yes/no} = apply stream speed in surface-normal direction :ul
+
+[Description:]
+
+This fix inserts particles from selected surfaces using a per-surface
+flux source. For flow mode ({n 0}, default), insertion target for each
+surface task is:
+
+{ntarget = flux * area * dt / fnum}
+
+where {flux} is read from the referenced per-surf compute, {area} is the
+surface/cell overlap area, {dt} is timestep, and {fnum} is global particle
+weight.
+
+For a vector per-surf compute, flux is taken directly from that vector.
+For an array per-surf compute, use {flux_index N} to select the column.
+
+This fix is intended for plasma-material source terms such as sputtered
+neutral emission from {compute pmi/surf/data sputter_flux_total}.
+
+[Examples:]
+
+compute cpmi pmi/surf/data 1 file input/plasma.h5 input/8_on_74.h5 \
+projectile_slots 2 9 sputter_flux_total :pre
+
+fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes :pre
+
+[Notes:]
+
+If grid adapts during run, any grid-based fields used by movers should be
+recomputed with nonzero global field frequency.
+
+[Related commands:]
+
+"compute pmi/surf/data"_compute_pmi_surf_data.html,
+"compute incident/flux"_compute_incident_flux.html,
+"fix emit/surf"_../fix_emit_surf.html,
+"global"_../global.html
