@@ -302,12 +302,30 @@ void ComputePlasmaFields::compute_per_grid()
       }
     }
 
-    const double Bx = Br*cphi - Bt*sphi;
-    const double By = Br*sphi + Bt*cphi;
-    const double Ex = Er*cphi - Et*sphi;
-    const double Ey = Er*sphi + Et*cphi;
-    const double Vx = Vr*cphi - Vt*sphi;
-    const double Vy = Vr*sphi + Vt*cphi;
+    // Component mapping:
+    // - 3D Cartesian: convert (r,t,z) -> (x,y,z) using local phi.
+    // - 2D R-Z SPARTA plane (x=R, y=Z, z=out-of-plane toroidal):
+    //     bx=Br, by=Bz, bz=Bt
+    //     ex=Er, ey=Ez, ez=Et
+    //     vx=Vr, vy=Vz, vz=Vt
+    double Bx, By, Bzz;
+    double Ex, Ey, Ezz;
+    double Vx, Vy, Vzz;
+    if (dim == 2) {
+      Bx = Br;   By = Bzv;  Bzz = Bt;
+      Ex = Er;   Ey = Ezv;  Ezz = Et;
+      Vx = Vr;   Vy = Vzv;  Vzz = Vt;
+    } else {
+      Bx = Br*cphi - Bt*sphi;
+      By = Br*sphi + Bt*cphi;
+      Bzz = Bzv;
+      Ex = Er*cphi - Et*sphi;
+      Ey = Er*sphi + Et*cphi;
+      Ezz = Ezv;
+      Vx = Vr*cphi - Vt*sphi;
+      Vy = Vr*sphi + Vt*cphi;
+      Vzz = Vzv;
+    }
     const double ne = std::max(P.dens_e, tiny);
     // WEST/SOLPS convention used here:
     //   Te in eV, ne in 1/m^3, grad(Te) in eV/m, grad(ne) in 1/m^4.
@@ -331,17 +349,17 @@ void ComputePlasmaFields::compute_per_grid()
       switch (value[iv]) {
         case BR:        vout = Br; break;
         case BT:        vout = Bt; break;
-        case BZ:        vout = Bzv; break;
+        case BZ:        vout = (dim == 2) ? Bzz : Bzv; break;
         case BX:        vout = Bx; break;
         case BY:        vout = By; break;
         case ER:        vout = Er; break;
         case ET:        vout = Et; break;
-        case EZ:        vout = Ezv; break;
+        case EZ:        vout = (dim == 2) ? Ezz : Ezv; break;
         case EX:        vout = Ex; break;
         case EY:        vout = Ey; break;
         case VR:        vout = Vr; break;
         case VT:        vout = Vt; break;
-        case VZ:        vout = Vzv; break;
+        case VZ:        vout = (dim == 2) ? Vzz : Vzv; break;
         case VX:        vout = Vx; break;
         case VY:        vout = Vy; break;
         case TI:        vout = P.temp_i; break;

@@ -73,7 +73,12 @@ Plasma data remains cylindrical.  The command is cylindrical-first:
 
 In 3D Cartesian runs, aliases {bx/by}, {ex/ey}, and {vx/vy} are
 computed by rotating cylindrical vectors at each grid-cell center using
-the local toroidal angle about the domain centerline in {x,y}.
+the local toroidal angle about the {x=0,y=0} axis.
+
+In 2D {r,z} runs, Cartesian aliases map as:
+{bx=br, by=bz, bz=bt},
+{ex=er, ey=ez, ez=et},
+{vx=vr, vy=vz, vz=vt}.
 
 {epar} is the parallel electric field from the electron pressure term:
 {epar = -(bhat dot grad(pe)) / (ne*e)},

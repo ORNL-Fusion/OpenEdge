@@ -15,10 +15,6 @@ create_box          1.82 3.2 -1.0 1.0 -0.05 0.05
 create_grid         100 100 1
 balance_grid        rcb cell
 
-# Materials (kept for compatibility with downstream cases)
-global plasma_background_material D mass 2.0 charge 1.0
-global target_material W mass 184.0 charge 74.0 binding_energy 8.79
-
 # Species list used by WEST workflows
 species input/plasma.species W+
 mixture tungstenSource W+ frac 1.0
@@ -47,23 +43,23 @@ compute cwest plasma/fields all file input/plasma.h5 input/bfield.h5 bx by bz ep
 fix bB bfield/grid c_cwest[1] c_cwest[2] c_cwest[3]
 global bfield grid bB 0
 global efield none
-global ethermal none
-global ithermal none
+
 
 # Diagnostics: particle dump at end of simulation only
 shell mkdir -p output
 dump dpart particle all 1000 output/state.west id type x y z vx vy vz
 dump_modify dpart first no
-dump depar grid all 1 output/epar.west.grid id xc yc c_cwest[4] c_cwest[5] c_cwest[6] c_cwest[7]
-dump_modify depar first yes
+#dump depar grid all 1 output/epar.west.grid id xc yc c_cwest[4] c_cwest[5] c_cwest[6] c_cwest[7]
+#dump_modify depar first yes
 
 
 variable npart equal np
+global boris_subcycles 5
 
 fix 31 halt 1 v_npart <= 0
 
 # One-particle B-only trajectory test
 timestep            5.0e-08
-stats              1  #1000
+stats              1000
 stats_style         step cpu np
-run                1 # 1000000
+run                 1000000

@@ -265,8 +265,6 @@ void ComputePlasmaFields::compute_per_grid()
   Grid::ChildCell *cells = grid->cells;
   Grid::ChildInfo *cinfo = grid->cinfo;
   const int dim = domain->dimension;
-  const double x0 = 0.5 * (domain->boxlo[0] + domain->boxhi[0]);
-  const double y0 = 0.5 * (domain->boxlo[1] + domain->boxhi[1]);
 
   for (int icell = 0; icell < nglocal; icell++) {
     double *row = (nvalue == 1) ? NULL : array_grid[icell];
@@ -295,8 +293,8 @@ void ComputePlasmaFields::compute_per_grid()
     double cphi = 1.0, sphi = 0.0;
     if (dim == 3) {
       const Grid::ChildCell &cell = cells[icell];
-      const double x = 0.5 * (cell.lo[0] + cell.hi[0]) - x0;
-      const double y = 0.5 * (cell.lo[1] + cell.hi[1]) - y0;
+      const double x = 0.5 * (cell.lo[0] + cell.hi[0]);
+      const double y = 0.5 * (cell.lo[1] + cell.hi[1]);
       const double rxy = std::sqrt(x*x + y*y);
       if (rxy > 0.0) {
         cphi = x / rxy;
@@ -304,12 +302,30 @@ void ComputePlasmaFields::compute_per_grid()
       }
     }
 
-    const double Bx = Br*cphi - Bt*sphi;
-    const double By = Br*sphi + Bt*cphi;
-    const double Ex = Er*cphi - Et*sphi;
-    const double Ey = Er*sphi + Et*cphi;
-    const double Vx = Vr*cphi - Vt*sphi;
-    const double Vy = Vr*sphi + Vt*cphi;
+    // Component mapping:
+    // - 3D Cartesian: convert (r,t,z) -> (x,y,z) using local phi.
+    // - 2D R-Z SPARTA plane (x=R, y=Z, z=out-of-plane toroidal):
+    //     bx=Br, by=Bz, bz=Bt
+    //     ex=Er, ey=Ez, ez=Et
+    //     vx=Vr, vy=Vz, vz=Vt
+    double Bx, By, Bzz;
+    double Ex, Ey, Ezz;
+    double Vx, Vy, Vzz;
+    if (dim == 2) {
+      Bx = Br;   By = Bzv;  Bzz = Bt;
+      Ex = Er;   Ey = Ezv;  Ezz = Et;
+      Vx = Vr;   Vy = Vzv;  Vzz = Vt;
+    } else {
+      Bx = Br*cphi - Bt*sphi;
+      By = Br*sphi + Bt*cphi;
+      Bzz = Bzv;
+      Ex = Er*cphi - Et*sphi;
+      Ey = Er*sphi + Et*cphi;
+      Ezz = Ezv;
+      Vx = Vr*cphi - Vt*sphi;
+      Vy = Vr*sphi + Vt*cphi;
+      Vzz = Vzv;
+    }
     const double ne = std::max(P.dens_e, tiny);
     // WEST/SOLPS convention used here:
     //   Te in eV, ne in 1/m^3, grad(Te) in eV/m, grad(ne) in 1/m^4.
@@ -333,17 +349,17 @@ void ComputePlasmaFields::compute_per_grid()
       switch (value[iv]) {
         case BR:        vout = Br; break;
         case BT:        vout = Bt; break;
-        case BZ:        vout = Bzv; break;
+        case BZ:        vout = (dim == 2) ? Bzz : Bzv; break;
         case BX:        vout = Bx; break;
         case BY:        vout = By; break;
         case ER:        vout = Er; break;
         case ET:        vout = Et; break;
-        case EZ:        vout = Ezv; break;
+        case EZ:        vout = (dim == 2) ? Ezz : Ezv; break;
         case EX:        vout = Ex; break;
         case EY:        vout = Ey; break;
         case VR:        vout = Vr; break;
         case VT:        vout = Vt; break;
-        case VZ:        vout = Vzv; break;
+        case VZ:        vout = (dim == 2) ? Vzz : Vzv; break;
         case VX:        vout = Vx; break;
         case VY:        vout = Vy; break;
         case TI:        vout = P.temp_i; break;
@@ -655,8 +671,6 @@ void ComputePlasmaFields::precomputeStencils(
   const int dim = domain->dimension;
   const int nr = static_cast<int>(r_vals.size());
   const int nz = static_cast<int>(z_vals.size());
-  const double x0 = 0.5 * (domain->boxlo[0] + domain->boxhi[0]);
-  const double y0 = 0.5 * (domain->boxlo[1] + domain->boxhi[1]);
 
   for (int icell = 0; icell < ncells; ++icell) {
     BilinearStencil s{};
@@ -674,9 +688,7 @@ void ComputePlasmaFields::precomputeStencils(
       r = x;
       z = y;
     } else {
-      const double dx = x - x0;
-      const double dy = y - y0;
-      r = std::sqrt(dx * dx + dy * dy);
+      r = std::sqrt(x * x + y * y);
       z = zc;
     }
 

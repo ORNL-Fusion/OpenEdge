@@ -38,12 +38,8 @@ global boris_bad_dt_limit 0.1
 
 shell mkdir -p output
 variable dt         equal 5e-8
-#variable numStep    equal 10000000
-#variable dumpFreq1  equal floor(v_numStep/10000)
-
-
-variable dumpFreq1 equal 1        # or 5/10 for debug
-variable numStep   equal 400000   # shorter debug run first
+variable numStep    equal 400000
+variable dumpFreq1  equal floor(v_numStep/100)
 
 dump dpart particle all ${dumpFreq1} output/state.constant id type x y z vx vy vz
 dump_modify dpart first yes

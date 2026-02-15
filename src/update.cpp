@@ -613,7 +613,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
 
       if (pflag == PKEEP) {
         dtremain = dt;
-        if (DIM == 2)
+        if (DIM == 1 || DIM == 2)
         {
           pusherBoris2D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
@@ -622,7 +622,8 @@ template < int DIM, int SURF, int OPT > void Update::move()
           pusher_boris3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
       } else if (pflag == PINSERT) {
-        if (DIM == 2) {
+        dtremain = dt;
+        if (DIM == 1 || DIM == 2) {
           pusherBoris2D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
         else if (DIM == 3) {
@@ -1524,6 +1525,7 @@ void Update::pusherBoris2D(int i, int icell, double dt,
   const double dt_sub = dt / static_cast<double>(nsub);
 
   double xcur[2] = {x[0], x[1]};
+  double zcur = x[2];
   double vcur[3] = {v[0], v[1], v[2]};
 
   for (int isub = 0; isub < nsub; isub++) {
@@ -1550,6 +1552,7 @@ void Update::pusherBoris2D(int i, int icell, double dt,
     BorisGrid::push_velocity(qm, dt_sub, E, B, vcur);
     xcur[0] += vcur[0] * dt_sub;
     xcur[1] += vcur[1] * dt_sub;
+    zcur += vcur[2] * dt_sub;
 
     if (boris_dump_flag && (ntimestep % boris_dump_every == 0)) {
       if (comm->me == 0 && i == 0) {
@@ -1565,7 +1568,7 @@ void Update::pusherBoris2D(int i, int icell, double dt,
   v[2] = vcur[2];
   xnew[0] = xcur[0];
   xnew[1] = xcur[1];
-  xnew[2] = x[2];
+  xnew[2] = zcur;
 }
 
 /* ----------------------------------------------------------------------

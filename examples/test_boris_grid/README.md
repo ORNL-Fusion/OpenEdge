@@ -7,7 +7,6 @@ interpolation on uniform grids (with fallback to cell-centered values
 if neighbor cells are unavailable).
 
 ## Files
-- `in.file`: `compute plasma/fields ... file ...` (from `test_read_plasma` datasets)
 - `in.constant`: `compute plasma/fields ... constant ...`
 - `plasma.species`: one charged species (H+), with `mass` in kg and `charge` in units of `e`
 - `source.single`: one test particle
@@ -42,12 +41,6 @@ You can tune Boris from the input script via `global`:
 - `global boris_bad_dt_limit X`
   - warning threshold for `|q/m|*|B|*dt_sub` (default `0.1`)
 
-## Run file case
-```bash
-mpirun -np 4 ../../src/spa_mpi < in.file
-MPLCONFIGDIR=/tmp /usr/bin/python3 plot_trajectory.py --case file
-```
-
 ## Run constant case
 ```bash
 mpirun -np 4 ../../src/spa_mpi < in.constant
@@ -55,7 +48,5 @@ MPLCONFIGDIR=/tmp /usr/bin/python3 plot_trajectory.py --case constant
 ```
 
 ## Output
-- `output/state.file`
 - `output/state.constant`
-- `output/trajectory_ke.file.png`
 - `output/trajectory_ke.constant.png`
