@@ -1,0 +1,4 @@
+#ifndef SPARTA_COMPUTE_INCIDENT_FLUX_COMPAT_H
+#define SPARTA_COMPUTE_INCIDENT_FLUX_COMPAT_H
+#include "compute_incident_plasma_flux.h"
+#endif

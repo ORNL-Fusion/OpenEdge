@@ -33,6 +33,21 @@ struct PlasmaFileData{
   std::vector<std::vector<double>> parr_flow_r, parr_flow_t, parr_flow_z, parr_flow;
   std::vector<std::vector<double>> grad_temp_e_r, grad_temp_e_t, grad_temp_e_z;
   std::vector<std::vector<double>> grad_temp_i_r, grad_temp_i_t, grad_temp_i_z;
+  // Optional multi-ion extension from plasma.h5
+  std::vector<int> ion_spec_index;
+  std::vector<int> ion_charge_state_z;
+  std::vector<double> ion_mass_amu;
+  std::vector<std::string> ion_names;
+  int ions_nspec = 0;
+  int ions_nz = 0;
+  int ions_nr = 0;
+  // Flat storage layout: ((ispec * nz) + iz) * nr + ir
+  std::vector<double> ions_dens;
+  std::vector<double> ions_temp;
+  std::vector<double> ions_parr_flow;
+  std::vector<double> ions_parr_flow_r;
+  std::vector<double> ions_parr_flow_t;
+  std::vector<double> ions_parr_flow_z;
 };
 
 struct PlasmaFileParams {
@@ -85,6 +100,19 @@ PlasmaFileParams *plasma_arr;   // size = grid->nlocal
 PlasmaFileData plasma_data;
 void broadcastPlasmaData(PlasmaFileData& data);
 PlasmaFileData readPlasmaFileData(const std::string& path);
+int nion_species = 0;
+std::vector<double> ion_mass_amu;
+std::vector<int> ion_charge_state_z;
+std::vector<int> ion_spec_index;
+std::vector<std::string> ion_names;
+// Pre-interpolated per-grid multi-ion fields: flat [nlocal * nion]
+// Layout: icell*nion + ispec
+std::vector<double> ion_dens_grid;
+std::vector<double> ion_temp_grid;
+std::vector<double> ion_parr_flow_grid;
+std::vector<double> ion_parr_flow_r_grid;
+std::vector<double> ion_parr_flow_t_grid;
+std::vector<double> ion_parr_flow_z_grid;
 
 MagneticFieldFileDataParams *mag_arr;
 MagneticFieldFileData magnetic_data;
@@ -131,6 +159,9 @@ std::vector<BilinearStencil> magnetic_stencil;
                    const BilinearStencil &s,
                    double &grad_r,
                    double &grad_z) const;
+  double interpField3DFlat(const std::vector<double> &field,
+                           int ispec, int nz, int nr,
+                           const BilinearStencil &s) const;
 };
 
 }

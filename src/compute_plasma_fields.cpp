@@ -195,6 +195,17 @@ void ComputePlasmaFields::init()
     memory->destroy(mag_arr);
     mag_arr = NULL;
   }
+  nion_species = 0;
+  ion_spec_index.clear();
+  ion_charge_state_z.clear();
+  ion_mass_amu.clear();
+  ion_names.clear();
+  ion_dens_grid.clear();
+  ion_temp_grid.clear();
+  ion_parr_flow_grid.clear();
+  ion_parr_flow_r_grid.clear();
+  ion_parr_flow_t_grid.clear();
+  ion_parr_flow_z_grid.clear();
 
 
   // --- 1) load field source (file or constants) ------------------------------
@@ -219,6 +230,45 @@ void ComputePlasmaFields::init()
       if (cells[icell].nsplit < 1)         continue;
       plasma_arr[icell] = bilinearInterpolationPlasma(icell, plasma_data);
       mag_arr[icell]    = bilinearInterpolationMagneticField(icell, magnetic_data);
+    }
+
+    // Optional species-resolved storage for later sputtering/emission models
+    nion_species = plasma_data.ions_nspec;
+    ion_spec_index = plasma_data.ion_spec_index;
+    ion_charge_state_z = plasma_data.ion_charge_state_z;
+    ion_mass_amu = plasma_data.ion_mass_amu;
+    ion_names = plasma_data.ion_names;
+    if (nion_species > 0) {
+      const int nstore = ncells * nion_species;
+      ion_dens_grid.assign(nstore, 0.0);
+      ion_temp_grid.assign(nstore, 0.0);
+      ion_parr_flow_grid.assign(nstore, 0.0);
+      ion_parr_flow_r_grid.assign(nstore, 0.0);
+      ion_parr_flow_t_grid.assign(nstore, 0.0);
+      ion_parr_flow_z_grid.assign(nstore, 0.0);
+
+      for (int icell = 0; icell < ncells; ++icell) {
+        if (!(cinfo[icell].mask & groupbit)) continue;
+        if (cells[icell].nsplit < 1)         continue;
+        if (icell < 0 || icell >= static_cast<int>(plasma_stencil.size())) continue;
+        const BilinearStencil &s = plasma_stencil[icell];
+        if (!s.valid) continue;
+        const int base = icell * nion_species;
+        for (int is = 0; is < nion_species; ++is) {
+          ion_dens_grid[base + is] =
+            interpField3DFlat(plasma_data.ions_dens, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+          ion_temp_grid[base + is] =
+            interpField3DFlat(plasma_data.ions_temp, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+          ion_parr_flow_grid[base + is] =
+            interpField3DFlat(plasma_data.ions_parr_flow, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+          ion_parr_flow_r_grid[base + is] =
+            interpField3DFlat(plasma_data.ions_parr_flow_r, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+          ion_parr_flow_t_grid[base + is] =
+            interpField3DFlat(plasma_data.ions_parr_flow_t, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+          ion_parr_flow_z_grid[base + is] =
+            interpField3DFlat(plasma_data.ions_parr_flow_z, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+        }
+      }
     }
   } else {
     plasma_stencil.clear();
@@ -442,6 +492,11 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
         size_t nr = data.r.size();
         size_t nz = data.z.size();
 
+        // Utility to test whether dataset/path exists
+        auto hasDataset = [&](const std::string& name) -> bool {
+            return H5Lexists(file.getId(), name.c_str(), H5P_DEFAULT) > 0;
+        };
+
         // Utility to read 2D dataset with shape validation
         auto read2D = [&](const std::string& name) -> std::vector<std::vector<double>> {
             H5::DataSet ds = file.openDataSet(name);
@@ -467,6 +522,53 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
             return grid;
         };
 
+        auto read1DInt = [&](const std::string& name) -> std::vector<int> {
+            H5::DataSet ds = file.openDataSet(name);
+            H5::DataSpace space = ds.getSpace();
+            hsize_t dim;
+            space.getSimpleExtentDims(&dim);
+            std::vector<int> vec(dim);
+            ds.read(vec.data(), H5::PredType::NATIVE_INT);
+            return vec;
+        };
+
+        auto read1DString = [&](const std::string& name) -> std::vector<std::string> {
+            H5::DataSet ds = file.openDataSet(name);
+            H5::DataSpace space = ds.getSpace();
+            hsize_t dim;
+            space.getSimpleExtentDims(&dim);
+            std::vector<std::string> vec(dim);
+            H5::StrType stype = ds.getStrType();
+            std::vector<char*> rdata(dim, nullptr);
+            ds.read(rdata.data(), stype);
+            for (hsize_t i = 0; i < dim; ++i) {
+              if (rdata[i]) vec[i] = std::string(rdata[i]);
+            }
+            return vec;
+        };
+
+        auto read3D = [&](const std::string& name, int &ns_out, int &nz_out, int &nr_out) -> std::vector<double> {
+            H5::DataSet ds = file.openDataSet(name);
+            H5::DataSpace space = ds.getSpace();
+            hsize_t dims[3];
+            space.getSimpleExtentDims(dims);
+
+            const size_t ns = dims[0];
+            if (dims[1] != nz || dims[2] != nr) {
+                throw std::runtime_error("Dataset '" + name + "' shape mismatch: expected (*, " +
+                                         std::to_string(nz) + ", " + std::to_string(nr) +
+                                         "), got (" + std::to_string(dims[0]) + ", " +
+                                         std::to_string(dims[1]) + ", " + std::to_string(dims[2]) + ")");
+            }
+
+            std::vector<double> raw(ns * nz * nr);
+            ds.read(raw.data(), H5::PredType::NATIVE_DOUBLE);
+            ns_out = static_cast<int>(ns);
+            nz_out = static_cast<int>(nz);
+            nr_out = static_cast<int>(nr);
+            return raw;
+        };
+
         // Load 2D fields with strict shape check
         data.dens_e        = read2D("dens_e");
         data.temp_e        = read2D("temp_e");
@@ -485,6 +587,60 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
         data.grad_temp_i_r = read2D("grad_ti_r");
         data.grad_temp_i_t = read2D("grad_ti_t");
         data.grad_temp_i_z = read2D("grad_ti_z");
+
+        // Optional multi-ion extension
+        if (hasDataset("ion_species/spec_index")) {
+          data.ion_spec_index = read1DInt("ion_species/spec_index");
+        }
+        if (hasDataset("ion_species/charge_state_z")) {
+          data.ion_charge_state_z = read1DInt("ion_species/charge_state_z");
+        }
+        if (hasDataset("ion_species/mass_amu")) {
+          data.ion_mass_amu = read1D("ion_species/mass_amu");
+        }
+        if (hasDataset("ion_species/names")) {
+          data.ion_names = read1DString("ion_species/names");
+        }
+
+        if (hasDataset("ions/dens")) {
+          data.ions_dens = read3D("ions/dens", data.ions_nspec, data.ions_nz, data.ions_nr);
+        }
+        auto check3DShape = [&](int ns, int nzf, int nrf, const std::string &name) {
+          if (data.ions_nspec == 0) {
+            data.ions_nspec = ns;
+            data.ions_nz = nzf;
+            data.ions_nr = nrf;
+            return;
+          }
+          if (ns != data.ions_nspec || nzf != data.ions_nz || nrf != data.ions_nr) {
+            throw std::runtime_error("Dataset '" + name + "' 3D shape mismatch with ions/dens");
+          }
+        };
+        if (hasDataset("ions/temp")) {
+          int ns = 0, nzf = 0, nrf = 0;
+          data.ions_temp = read3D("ions/temp", ns, nzf, nrf);
+          check3DShape(ns, nzf, nrf, "ions/temp");
+        }
+        if (hasDataset("ions/parr_flow")) {
+          int ns = 0, nzf = 0, nrf = 0;
+          data.ions_parr_flow = read3D("ions/parr_flow", ns, nzf, nrf);
+          check3DShape(ns, nzf, nrf, "ions/parr_flow");
+        }
+        if (hasDataset("ions/parr_flow_r")) {
+          int ns = 0, nzf = 0, nrf = 0;
+          data.ions_parr_flow_r = read3D("ions/parr_flow_r", ns, nzf, nrf);
+          check3DShape(ns, nzf, nrf, "ions/parr_flow_r");
+        }
+        if (hasDataset("ions/parr_flow_t")) {
+          int ns = 0, nzf = 0, nrf = 0;
+          data.ions_parr_flow_t = read3D("ions/parr_flow_t", ns, nzf, nrf);
+          check3DShape(ns, nzf, nrf, "ions/parr_flow_t");
+        }
+        if (hasDataset("ions/parr_flow_z")) {
+          int ns = 0, nzf = 0, nrf = 0;
+          data.ions_parr_flow_z = read3D("ions/parr_flow_z", ns, nzf, nrf);
+          check3DShape(ns, nzf, nrf, "ions/parr_flow_z");
+        }
 
     } catch (const H5::Exception& e) {
         fprintf(stderr, "HDF5 error: %s\n", e.getCDetailMsg());
@@ -556,6 +712,52 @@ void ComputePlasmaFields::broadcastPlasmaData(PlasmaFileData& data) {
     broadcast2DVector(data.grad_temp_i_r);
     broadcast2DVector(data.grad_temp_i_t);
     broadcast2DVector(data.grad_temp_i_z);
+
+    auto broadcast1DInt = [&](std::vector<int>& vec) {
+      int n = static_cast<int>(vec.size());
+      MPI_Bcast(&n, 1, MPI_INT, 0, world);
+      if (me != 0) vec.resize(n);
+      if (n > 0) MPI_Bcast(vec.data(), n, MPI_INT, 0, world);
+    };
+    auto broadcast1DDouble = [&](std::vector<double>& vec) {
+      int n = static_cast<int>(vec.size());
+      MPI_Bcast(&n, 1, MPI_INT, 0, world);
+      if (me != 0) vec.resize(n);
+      if (n > 0) MPI_Bcast(vec.data(), n, MPI_DOUBLE, 0, world);
+    };
+    auto broadcast1DString = [&](std::vector<std::string>& vec) {
+      int n = static_cast<int>(vec.size());
+      MPI_Bcast(&n, 1, MPI_INT, 0, world);
+      if (me != 0) vec.resize(n);
+      for (int i = 0; i < n; ++i) {
+        int len = me == 0 ? static_cast<int>(vec[i].size()) : 0;
+        MPI_Bcast(&len, 1, MPI_INT, 0, world);
+        if (me != 0) vec[i].assign(len, '\0');
+        if (len > 0) MPI_Bcast(vec[i].data(), len, MPI_CHAR, 0, world);
+      }
+    };
+    auto broadcast3DFlat = [&](std::vector<double>& vec, int &d0, int &d1, int &d2) {
+      MPI_Bcast(&d0, 1, MPI_INT, 0, world);
+      MPI_Bcast(&d1, 1, MPI_INT, 0, world);
+      MPI_Bcast(&d2, 1, MPI_INT, 0, world);
+      const int n = d0 * d1 * d2;
+      if (me != 0) vec.resize(n);
+      if (n > 0) MPI_Bcast(vec.data(), n, MPI_DOUBLE, 0, world);
+    };
+
+    broadcast1DInt(data.ion_spec_index);
+    broadcast1DInt(data.ion_charge_state_z);
+    broadcast1DDouble(data.ion_mass_amu);
+    broadcast1DString(data.ion_names);
+    broadcast3DFlat(data.ions_dens, data.ions_nspec, data.ions_nz, data.ions_nr);
+    {
+      int ns = data.ions_nspec, nz = data.ions_nz, nr = data.ions_nr;
+      broadcast3DFlat(data.ions_temp, ns, nz, nr);
+      broadcast3DFlat(data.ions_parr_flow, ns, nz, nr);
+      broadcast3DFlat(data.ions_parr_flow_r, ns, nz, nr);
+      broadcast3DFlat(data.ions_parr_flow_t, ns, nz, nr);
+      broadcast3DFlat(data.ions_parr_flow_z, ns, nz, nr);
+    }
 }
 
 
@@ -656,6 +858,28 @@ ComputePlasmaFields::bilinearInterpolationMagneticField(
   B.bt = interpField2D(data.bt, s);
   B.bz = interpField2D(data.bz, s);
   return B;
+}
+
+double ComputePlasmaFields::interpField3DFlat(
+    const std::vector<double> &field, int ispec, int nz, int nr,
+    const BilinearStencil &s) const
+{
+  if (!s.valid || field.empty() || nz <= 0 || nr <= 0 || ispec < 0) return 0.0;
+  const size_t nslice = static_cast<size_t>(nz) * static_cast<size_t>(nr);
+  const size_t off = static_cast<size_t>(ispec) * nslice;
+  if (off + nslice > field.size()) return 0.0;
+
+  if (s.iz1 < 0 || s.iz2 >= nz || s.ir1 < 0 || s.ir2 >= nr) return 0.0;
+  const size_t i11 = off + static_cast<size_t>(s.iz1) * nr + static_cast<size_t>(s.ir1);
+  const size_t i21 = off + static_cast<size_t>(s.iz1) * nr + static_cast<size_t>(s.ir2);
+  const size_t i12 = off + static_cast<size_t>(s.iz2) * nr + static_cast<size_t>(s.ir1);
+  const size_t i22 = off + static_cast<size_t>(s.iz2) * nr + static_cast<size_t>(s.ir2);
+
+  const double q11 = field[i11];
+  const double q21 = field[i21];
+  const double q12 = field[i12];
+  const double q22 = field[i22];
+  return s.w11 * q11 + s.w21 * q21 + s.w12 * q12 + s.w22 * q22;
 }
 
 void ComputePlasmaFields::precomputeStencils(

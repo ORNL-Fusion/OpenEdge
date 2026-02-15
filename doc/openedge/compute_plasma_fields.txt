@@ -67,6 +67,39 @@ This compute samples plasma and magnetic data from 2D {r,z} tables
 (HDF5 file mode) or from constant values (constant mode), and produces
 per-grid outputs.
 
+[File-mode data layout:]
+
+File mode uses two HDF5 files:
+
+{plasma.h5} holds plasma scalars/flows on an {r,z} mesh
+{bfield.h5} holds magnetic field components on the same {r,z} mesh :ul
+
+Minimum datasets expected by current WEST/OpenEdge workflows are:
+
+In {plasma.h5}:
+{r} {z} (1D coordinates)
+{dens_e} {temp_e}
+{dens_i} {temp_i}
+{parr_flow} and/or {parr_flow_r} {parr_flow_t} {parr_flow_z}
+{grad_te_r} {grad_te_t} {grad_te_z}
+{grad_ti_r} {grad_ti_t} {grad_ti_z} :ul
+
+In {bfield.h5}:
+{r} {z} (same coordinates as plasma file)
+{br} {bt} {bz} :ul
+
+Optional multi-ion extension datasets (for diagnostics, sputtering, and
+future per-species emission models) can also be present in {plasma.h5},
+for example:
+{ion_species/names}, {ion_species/spec_index},
+{ion_species/mass_amu}, {ion_species/charge_state_z},
+{ions/dens}, {ions/temp}, {ions/parr_flow}, {ions/parr_flow_r/t/z}.
+
+The ion list is not hard-coded.  It may contain any set/number of ion
+species (e.g. D+, O+, O2+, ..., Ne+, Li+, mixed impurity sets).  The
+compute command itself still reads the requested scalar/vector fields by
+name (e.g. {dens_i}, {parr_flow}) and does not assume a fixed chemistry.
+
 OpenEdge/SPARTA may run in 2D ({r,z}) or 3D Cartesian ({x,y,z}).
 Plasma data remains cylindrical.  The command is cylindrical-first:
 {br/bt/bz}, {er/et/ez}, and {vr/vt/vz} are native outputs.

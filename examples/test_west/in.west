@@ -53,13 +53,18 @@ dump_modify dpart first no
 #dump_modify depar first yes
 
 
+compute cgam incident/flux 1 file input/plasma.h5 nflux_incident nflux_normal nflux_species 1 nflux_species_normal 1
+dump dgam surf 1 1 output/gamma.only id c_cgam[*]
+dump_modify dgam first yes
+
+
 variable npart equal np
 global boris_subcycles 5
 
-fix 31 halt 1 v_npart <= 0
+#fix 31 halt 1 v_npart <= 0
 
 # One-particle B-only trajectory test
 timestep            5.0e-08
-stats              1000
+stats              1 #1000
 stats_style         step cpu np
-run                 1000000
+run                 0
