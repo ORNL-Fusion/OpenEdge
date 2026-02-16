@@ -47,6 +47,10 @@ so evaporation advances one full dt whenever {ntimestep % nevery == 0}.
 Droplets are removed when mass falls below 10% of reference mass
 (90% mass loss criterion).
 
+For compatibility with movers that use species mass, the implementation
+also synchronizes {species[ispecies].mass} to updated droplet mass when
+the new mass is positive/finite.
+
 [Expected HDF5 layout for {heatflux/file}:]
 
 Supported coordinate layouts (choose one):
@@ -68,6 +72,8 @@ Validation in reader:
 - q_mag shape must match (nz,nr)
 - axes must be monotonic increasing
 - non-finite/negative q_mag values are clamped to 0 :ul
+- if primary interpolation yields zero, implementation also tries a
+  transposed q_mag index path for robustness with ambiguous file layouts :ul
 
 [Expected HDF5 layout for plasma fields (used elsewhere):]
 

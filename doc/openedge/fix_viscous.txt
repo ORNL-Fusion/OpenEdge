@@ -10,7 +10,7 @@ fix viscous command :h3
 
 [Syntax:]
 
-fix ID viscous nevery A_bg Z_bg plasma TeSrc TiSrc NiSrc VparSrc bfield BrSrc BtSrc BzSrc [gravity gx gy gz] [mass m0] [radius r0] [temp T0] :pre
+fix ID viscous nevery A_bg Z_bg plasma TeSrc TiSrc NiSrc VparSrc bfield BrSrc BtSrc BzSrc [gravity gx gy gz] [mass m0] [radius r0] [temp T0] [diag yes|no] [diag/every N] :pre
 
 ID is documented in "fix"_../fix.html command
 viscous = style name of this fix command
@@ -23,12 +23,18 @@ gravity gx gy gz = optional constant gravity/acceleration components :ul
 mass m0 = optional one-time particle mass seed (kg)
 radius r0 = optional one-time particle radius seed (m)
 temp T0 = optional one-time particle temperature seed (K) :ul
+diag yes|no = optional runtime diagnostics print toggle (default no)
+diag/every N = optional diagnostics interval in timesteps (default 100) :ul
 
 Each source can be either:
 
 grid-style variable name
 or
 c_ID\[I\] (column I from a per-grid compute) :ulb,l
+
+For compute sources, this fix supports both:
+- mapped tally-backed per-grid computes, and
+- standard per-grid array/vector computes (e.g. {compute plasma/fields}). :ul
 
 [Examples:]
 

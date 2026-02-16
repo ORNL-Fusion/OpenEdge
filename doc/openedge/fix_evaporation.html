@@ -36,6 +36,9 @@ START_OF_STEP (<I>dt/2</I>) and END_OF_STEP (<I>dt/2</I>), so one full <I>dt</I>
 per active step where <I>ntimestep % nevery == 0</I>.</P>
 
 <P>Droplets are removed after 90% mass loss (mass <= 0.1 * reference mass).</P>
+<P>For compatibility with movers that use species mass, this fix also synchronizes
+<I>species[ispecies].mass</I> to the updated droplet mass when the new mass is
+positive/finite.</P>
 
 <P><B>Expected HDF5 layout for <I>heatflux/file</I>:</B></P>
 <UL>
@@ -50,6 +53,8 @@ per active step where <I>ntimestep % nevery == 0</I>.</P>
 q_mag shape must match (nz,nr)
 axes monotonic increasing
 non-finite/negative q_mag are clamped to 0</PRE>
+<LI>If primary interpolation yields zero, implementation also tries a transposed
+<I>q_mag</I> index path for robustness with ambiguous file layouts.
 </UL>
 
 <P><B>Expected HDF5 layout for plasma fields (used elsewhere):</B></P>
