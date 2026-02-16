@@ -30,6 +30,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include <cmath>
 #include <algorithm>
 #include <numeric>
+#include <limits>
 #include "compute.h"
 #include "variable.h"
 #include "update.h"
@@ -133,6 +134,17 @@ FixViscous::FixViscous(SPARTA *sparta, int narg, char **arg) :
     } else if (strcmp(arg[iarg], "temp") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "fix viscous: missing value for temp");
       seed_temp = input->numeric(FLERR, arg[iarg+1]);
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "diag") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "fix viscous: missing value for diag yes|no");
+      if (strcmp(arg[iarg+1], "yes") == 0) diag_flag = 1;
+      else if (strcmp(arg[iarg+1], "no") == 0) diag_flag = 0;
+      else error->all(FLERR, "fix viscous: diag must be yes or no");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "diag/every") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "fix viscous: missing value for diag/every");
+      diag_every = input->inumeric(FLERR, arg[iarg+1]);
+      if (diag_every <= 0) error->all(FLERR, "fix viscous: diag/every must be > 0");
       iarg += 2;
     } else {
       char msg[200];
@@ -268,7 +280,7 @@ void FixViscous::end_of_step()
 
   const double dt_half = 0.5 * update->dt;
   if (!particle->sorted) particle->sort();
-  kick_half(dt_half);
+  kick_half(dt_half, 0);
 }
 
 
@@ -325,13 +337,24 @@ double FixViscous::fetch_compute_cell_value(const CollGridSrc& S, int icell)
   Compute *c = modify->compute[S.icompute];
   if (c->invoked_per_grid != update->ntimestep) c->compute_per_grid();
 
+  // First try tally-style mapped access (works for tally-backed computes).
   double **arr = nullptr;
   int *cols = nullptr;
   const int nmap = c->query_tally_grid(S.col, arr, cols);
-  if (nmap <= 0 || !arr) return 0.0;             // defensive: unmapped or no data
+  if (nmap > 0 && arr) {
+    const int src = cols ? cols[0] : (S.col - 1);
+    return arr[icell][src];
+  }
 
-  const int src = cols ? cols[0] : (S.col - 1);  // fallback: 1:1 layout
-  return arr[icell][src];
+  // Fallback for regular per-grid computes (e.g. compute plasma/fields).
+  if (c->size_per_grid_cols > 0 && c->array_grid) {
+    return c->array_grid[icell][S.col - 1];
+  }
+  if (c->size_per_grid_cols == 0 && c->vector_grid && S.col == 1) {
+    return c->vector_grid[icell];
+  }
+
+  return 0.0;
 }
 
 inline void FixViscous::refresh_compute_src(CollGridSrc &S) {
@@ -343,10 +366,23 @@ inline void FixViscous::refresh_compute_src(CollGridSrc &S) {
 
   double **arr = nullptr; int *cols = nullptr;
   const int nmap = c->query_tally_grid(S.col, arr, cols);
-  if (nmap <= 0 || !arr) { S.arr_cache=nullptr; S.src_index=-1; S.cache_ts=update->ntimestep; return; }
+  if (nmap > 0 && arr) {
+    S.arr_cache = arr;
+    S.src_index = cols ? cols[0] : (S.col - 1);
+    S.cache_ts  = update->ntimestep;
+    return;
+  }
 
-  S.arr_cache  = arr;
-  S.src_index  = cols ? cols[0] : (S.col - 1);
+  // Fallback cache for standard per-grid arrays.
+  if (c->size_per_grid_cols > 0 && c->array_grid) {
+    S.arr_cache = c->array_grid;
+    S.src_index = S.col - 1;
+    S.cache_ts  = update->ntimestep;
+    return;
+  }
+
+  S.arr_cache  = nullptr;
+  S.src_index  = -1;
   S.cache_ts   = update->ntimestep;
 }
 
@@ -376,11 +412,11 @@ void FixViscous::start_of_step()
 
   const double dt_half = 0.5 * update->dt;
   if (!particle->sorted) particle->sort();
-  kick_half(dt_half);
+  kick_half(dt_half, 1);
 }
 
 
-void FixViscous::kick_half(double dt_half)
+void FixViscous::kick_half(double dt_half, int diag_phase)
 {
   if (grid->nlocal == 0) return;
   auto * const parts = particle->particles;
@@ -388,6 +424,18 @@ void FixViscous::kick_half(double dt_half)
   auto * const cinfo = grid->cinfo;
 
   const int nglocal = grid->nlocal;
+  const bool do_diag = (diag_flag && diag_phase == 1 && (update->ntimestep % diag_every) == 0);
+  long long n_local = 0, n_nu_local = 0;
+  double nu_sum_local = 0.0;
+  double nu_min_local = std::numeric_limits<double>::infinity();
+  double nu_max_local = 0.0;
+  double rd_min_local = std::numeric_limits<double>::infinity();
+  double rd_max_local = 0.0;
+  long long n_ti_pos_local = 0, n_ni_pos_local = 0;
+  double ti_min_local = std::numeric_limits<double>::infinity();
+  double ti_max_local = -std::numeric_limits<double>::infinity();
+  double ni_min_local = std::numeric_limits<double>::infinity();
+  double ni_max_local = -std::numeric_limits<double>::infinity();
 
   for (int icell = 0; icell < nglocal; ++icell) {
     if (cinfo[icell].count == 0) continue;
@@ -404,6 +452,37 @@ void FixViscous::kick_half(double dt_half)
       double nuE; double upar[3] = {0,0,0};
       epstein_params(icell, p, nuE, upar);
       double *v = p.v;
+      if (do_diag) {
+        const double Ti_eV = std::max((srcTi.kind == COLL_SRC_COMP)
+                                      ? fetch_compute_cell_value(srcTi, icell)
+                                      : plasma_grid[icell][1], 0.0);
+        const double Ni    = std::max((srcNi.kind == COLL_SRC_COMP)
+                                      ? fetch_compute_cell_value(srcNi, icell)
+                                      : plasma_grid[icell][2], 0.0);
+
+        const double rd = p.radius;
+        if (rd > 0.0 && std::isfinite(rd)) {
+          n_local++;
+          rd_min_local = std::min(rd_min_local, rd);
+          rd_max_local = std::max(rd_max_local, rd);
+        }
+        if (Ti_eV > 0.0 && std::isfinite(Ti_eV)) {
+          n_ti_pos_local++;
+          ti_min_local = std::min(ti_min_local, Ti_eV);
+          ti_max_local = std::max(ti_max_local, Ti_eV);
+        }
+        if (Ni > 0.0 && std::isfinite(Ni)) {
+          n_ni_pos_local++;
+          ni_min_local = std::min(ni_min_local, Ni);
+          ni_max_local = std::max(ni_max_local, Ni);
+        }
+        if (nuE > 0.0 && std::isfinite(nuE)) {
+          n_nu_local++;
+          nu_sum_local += nuE;
+          nu_min_local = std::min(nu_min_local, nuE);
+          nu_max_local = std::max(nu_max_local, nuE);
+        }
+      }
 
       // Gravity in local velocity basis:
       // - Cartesian (2D/3D): (gx,gy,gz) -> (v0,v1,v2)
@@ -443,13 +522,66 @@ void FixViscous::kick_half(double dt_half)
       ip = next[ip];
     }
   }
+
+  if (do_diag) {
+    long long n_global = 0, n_nu_global = 0;
+    long long n_ti_pos_global = 0, n_ni_pos_global = 0;
+    double nu_sum_global = 0.0;
+    double nu_min_global = nu_min_local;
+    double nu_max_global = nu_max_local;
+    double rd_min_global = rd_min_local;
+    double rd_max_global = rd_max_local;
+    double ti_min_global = ti_min_local;
+    double ti_max_global = ti_max_local;
+    double ni_min_global = ni_min_local;
+    double ni_max_global = ni_max_local;
+
+    MPI_Allreduce(&n_local, &n_global, 1, MPI_LONG_LONG, MPI_SUM, world);
+    MPI_Allreduce(&n_nu_local, &n_nu_global, 1, MPI_LONG_LONG, MPI_SUM, world);
+    MPI_Allreduce(&n_ti_pos_local, &n_ti_pos_global, 1, MPI_LONG_LONG, MPI_SUM, world);
+    MPI_Allreduce(&n_ni_pos_local, &n_ni_pos_global, 1, MPI_LONG_LONG, MPI_SUM, world);
+    MPI_Allreduce(&nu_sum_local, &nu_sum_global, 1, MPI_DOUBLE, MPI_SUM, world);
+    MPI_Allreduce(&nu_min_global, &nu_min_global, 1, MPI_DOUBLE, MPI_MIN, world);
+    MPI_Allreduce(&nu_max_global, &nu_max_global, 1, MPI_DOUBLE, MPI_MAX, world);
+    MPI_Allreduce(&rd_min_global, &rd_min_global, 1, MPI_DOUBLE, MPI_MIN, world);
+    MPI_Allreduce(&rd_max_global, &rd_max_global, 1, MPI_DOUBLE, MPI_MAX, world);
+    MPI_Allreduce(&ti_min_global, &ti_min_global, 1, MPI_DOUBLE, MPI_MIN, world);
+    MPI_Allreduce(&ti_max_global, &ti_max_global, 1, MPI_DOUBLE, MPI_MAX, world);
+    MPI_Allreduce(&ni_min_global, &ni_min_global, 1, MPI_DOUBLE, MPI_MIN, world);
+    MPI_Allreduce(&ni_max_global, &ni_max_global, 1, MPI_DOUBLE, MPI_MAX, world);
+
+    if (comm->me == 0) {
+      if (n_nu_global == 0) {
+        printf("[fix viscous] step=%lld N(radius>0)=%lld N(Ti>0)=%lld N(Ni>0)=%lld N(nuE>0)=0 rd[min,max]=[%g,%g] Ti[min,max]=[%g,%g] Ni[min,max]=[%g,%g]\n",
+               (long long) update->ntimestep, n_global,
+               n_ti_pos_global, n_ni_pos_global,
+               std::isfinite(rd_min_global) ? rd_min_global : 0.0, rd_max_global,
+               std::isfinite(ti_min_global) ? ti_min_global : 0.0,
+               std::isfinite(ti_max_global) ? ti_max_global : 0.0,
+               std::isfinite(ni_min_global) ? ni_min_global : 0.0,
+               std::isfinite(ni_max_global) ? ni_max_global : 0.0);
+      } else {
+        const double nu_avg = nu_sum_global / static_cast<double>(n_nu_global);
+        printf("[fix viscous] step=%lld N(radius>0)=%lld N(Ti>0)=%lld N(Ni>0)=%lld N(nuE>0)=%lld nuE[min,avg,max]=[%g,%g,%g] rd[min,max]=[%g,%g] Ti[min,max]=[%g,%g] Ni[min,max]=[%g,%g]\n",
+               (long long) update->ntimestep, n_global, n_nu_global,
+               n_ti_pos_global, n_ni_pos_global,
+               std::isfinite(nu_min_global) ? nu_min_global : 0.0, nu_avg, nu_max_global,
+               std::isfinite(rd_min_global) ? rd_min_global : 0.0, rd_max_global,
+               std::isfinite(ti_min_global) ? ti_min_global : 0.0,
+               std::isfinite(ti_max_global) ? ti_max_global : 0.0,
+               std::isfinite(ni_min_global) ? ni_min_global : 0.0,
+               std::isfinite(ni_max_global) ? ni_max_global : 0.0);
+      }
+      fflush(stdout);
+    }
+  }
 }
 inline void FixViscous::epstein_params(int icell, const Particle::OnePart &p,
                                        double &nuE, double upar_cyl[3])
 {
   auto read_src = [&](const CollGridSrc& S, int col_plasma, int col_b)->double {
     if (S.kind == COLL_SRC_COMP)
-      return (S.arr_cache && S.src_index >= 0) ? S.arr_cache[icell][S.src_index] : 0.0;
+      return fetch_compute_cell_value(S, icell);
     if (S.kind == COLL_SRC_VAR)
       return (col_plasma >= 0) ? plasma_grid[icell][col_plasma] : b_grid[icell][col_b];
     return 0.0;

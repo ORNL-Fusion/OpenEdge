@@ -311,6 +311,13 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
   ip->temp   = T_new;
   ip->mass   = mass_new;
 
+  // Optional coupling path for movers that use species mass:
+  // keep species mass synchronized with the evolving droplet mass.
+  // Guard against writing non-positive/invalid values.
+  if (mass_new > 0.0 && std::isfinite(mass_new)) {
+    particle->species[ip->ispecies].mass = mass_new;
+  }
+
   if (icell >= 0 && icell < grid->nlocal && array_grid) {
     array_grid[icell][0] += N_emit_diag;
     array_grid[icell][1] += 1.0;   // particle sample count in this cell
@@ -560,20 +567,41 @@ HeatFluxParams FixEvap::interpHeatFluxAtPos(double r, double z,
   const double w12 = (1.0 - t) * u;
   const double w22 = t * u;
 
-  if (static_cast<int>(data.q_mag.size()) <= iz2 ||
-      static_cast<int>(data.q_mag[iz1].size()) <= ir2 ||
-      static_cast<int>(data.q_mag[iz2].size()) <= ir2) {
-    return res;
-  }
+  auto sample_q = [&](int iz, int ir, bool transposed) -> double {
+    if (!transposed) {
+      if (iz < 0 || iz >= static_cast<int>(data.q_mag.size())) return 0.0;
+      if (ir < 0 || ir >= static_cast<int>(data.q_mag[iz].size())) return 0.0;
+      return safe_val(data.q_mag[iz][ir]);
+    }
+    // Fallback for files where q_mag may be stored as [nr][nz].
+    if (ir < 0 || ir >= static_cast<int>(data.q_mag.size())) return 0.0;
+    if (iz < 0 || iz >= static_cast<int>(data.q_mag[ir].size())) return 0.0;
+    return safe_val(data.q_mag[ir][iz]);
+  };
 
-  const double q11 = safe_val(data.q_mag[iz1][ir1]);
-  const double q21 = safe_val(data.q_mag[iz1][ir2]);
-  const double q12 = safe_val(data.q_mag[iz2][ir1]);
-  const double q22 = safe_val(data.q_mag[iz2][ir2]);
+  const double q11 = sample_q(iz1, ir1, false);
+  const double q21 = sample_q(iz1, ir2, false);
+  const double q12 = sample_q(iz2, ir1, false);
+  const double q22 = sample_q(iz2, ir2, false);
 
   res.r = r_clamp;
   res.z = z_clamp;
-  res.q_mag = w11 * q11 + w21 * q21 + w12 * q12 + w22 * q22;
-  if (!std::isfinite(res.q_mag) || res.q_mag < 0.0) res.q_mag = 0.0;
+  double q_primary = w11 * q11 + w21 * q21 + w12 * q12 + w22 * q22;
+  if (!std::isfinite(q_primary) || q_primary < 0.0) q_primary = 0.0;
+
+  if (q_primary > 0.0) {
+    res.q_mag = q_primary;
+    return res;
+  }
+
+  // If primary sampling is zero, try transposed indexing path.
+  const double tq11 = sample_q(iz1, ir1, true);
+  const double tq21 = sample_q(iz1, ir2, true);
+  const double tq12 = sample_q(iz2, ir1, true);
+  const double tq22 = sample_q(iz2, ir2, true);
+  double q_transposed = w11 * tq11 + w21 * tq21 + w12 * tq12 + w22 * tq22;
+  if (!std::isfinite(q_transposed) || q_transposed < 0.0) q_transposed = 0.0;
+
+  res.q_mag = q_transposed;
   return res;
 }

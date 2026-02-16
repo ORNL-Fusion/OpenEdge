@@ -31,7 +31,7 @@ protected:
   RanKnuth* rng = nullptr;
 
   // half-kick and parameter builder
-  void   kick_half(double dt_half);    
+  void   kick_half(double dt_half, int diag_phase);
   inline void epstein_params(int icell, const Particle::OnePart &p,
                              double &nuE, double upar[3]);
 
@@ -54,6 +54,8 @@ protected:
   double seed_mass = -1.0;     // optional one-time particle mass seed (kg)
   double seed_radius = -1.0;   // optional one-time particle radius seed (m)
   double seed_temp = -1.0;     // optional one-time particle temperature seed (K)
+  int    diag_flag = 0;        // print viscous diagnostics
+  int    diag_every = 100;     // print interval in timesteps
 
   // legacy worker (no longer used for a full dt kick)
   void   end_of_step_no_average();
