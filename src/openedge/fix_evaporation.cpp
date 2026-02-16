@@ -124,9 +124,7 @@ void FixEvap::init() {
     if (heatfluxFilename.empty())
       error->all(FLERR,"Fix evap: heatflux/file given but filename is empty");
     initializeHeatFluxData();               // reads + broadcasts
-  } else if (heatflux_mode == HF_CONST) {
-    Qs_const = Qs_const;   // already set
-  } else {
+  } else if (heatflux_mode != HF_CONST) {
     error->all(FLERR,"Fix evap: must provide heatflux/constant <W/m^2> or heatflux/file <h5>");
   }
 
@@ -192,6 +190,7 @@ void FixEvap::evap_half(double dt_half)
   const int nglocal = grid->nlocal;
 
   int *s2g = particle->mixture[imix]->species2group;
+  int ndeleted = 0;
 
   for (int icell = 0; icell < nglocal; icell++) {
     if (cinfo[icell].count == 0) continue;
@@ -208,9 +207,23 @@ void FixEvap::evap_half(double dt_half)
 
       droplet_evaporation_model(&parts[ip], dt_half, icell);
 
+      // Remove droplet after 90% mass loss relative to its initial reference mass.
+      const double m0_ref = (set_mass > 0.0) ? set_mass : particle->species[is].mass;
+      const double m_cut  = 0.1 * m0_ref;
+      if (parts[ip].mass > 0.0 && m0_ref > 0.0 && parts[ip].mass <= m_cut) {
+        parts[ip].mass = 0.0;
+        parts[ip].radius = 0.0;
+        parts[ip].temp = 0.0;
+        parts[ip].icell = -1;   // particle->compress_rebalance() deletes marked particles
+        ndeleted++;
+      }
+
       ip = next[ip];
     }
   }
+
+  // Physically remove evaporated droplets from the particle list.
+  if (ndeleted > 0) particle->compress_rebalance();
 }
 
 
@@ -229,27 +242,10 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
   const double AN   = 6.022e+23;     // 1/mol
   const double DT   = dt_half;
 
-    // microscopic cutoffs shared with viscous
-  // constexpr double R_STOP = 5e-9;   // m
-  // constexpr double R_ATOM = 5e-9;   // m, same as R_STOP
-  // constexpr double AM_LI  = 1.53e-26; // kg
-
-      // microscopic cutoffs shared with viscous
-  constexpr double R_STOP = 5e-9;    // m
-  constexpr double R_ATOM = 5e-9;    // m, same as R_STOP
-  constexpr double AM_LI  = 1.53e-26; // kg
   // --- current state (Kelvin in OpenEdge) ---
   const double mass   = (ip->mass   > 0.0) ? ip->mass   : particle->species[ip->ispecies].mass;
   const double radius = (ip->radius > 0.0) ? ip->radius : pow((3.0*mass)/(4.0*M_PI*Rho), 1.0/3.0);
   const double TK     = (ip->temp   > 0.0) ? ip->temp   : 300.0;
-
-    // If already microscopic: freeze and skip evap math
-  if (radius <= R_STOP) {
-    ip->radius = R_ATOM;
-    ip->mass   = AM_LI;
-    ip->temp   = TK;
-    return;
-  }
 
   // Plasma backgrounds are 2D (r,z): map particle position for any SPARTA geometry.
   double rpos = 0.0, zpos = 0.0;
@@ -332,6 +328,15 @@ HeatFluxData FixEvap::readHeatFlux(const std::string& filePath) {
     try {
         H5::H5File file(filePath, H5F_ACC_RDONLY);
 
+        auto exists = [&](const std::string& name) -> bool {
+            try {
+                file.openDataSet(name);
+                return true;
+            } catch (const H5::Exception&) {
+                return false;
+            }
+        };
+
         // Utility to read 1D dataset
         auto read1D = [&](const std::string& name) -> std::vector<double> {
             H5::DataSet ds = file.openDataSet(name);
@@ -343,38 +348,98 @@ HeatFluxData FixEvap::readHeatFlux(const std::string& filePath) {
             return vec;
         };
 
-                // First read coordinates
-        data.r = read1D("grid/Rc");
-        data.z = read1D("grid/Zc");
-        size_t nr = data.r.size();
-        size_t nz = data.z.size();
-
-                // Utility to read 2D dataset with shape validation
-        auto read2D = [&](const std::string& name) -> std::vector<std::vector<double>> {
+        // Utility to read 2D dataset (raw)
+        auto read2DRaw = [&](const std::string& name,
+                             std::vector<double>& raw,
+                             hsize_t dims[2]) {
             H5::DataSet ds = file.openDataSet(name);
             H5::DataSpace space = ds.getSpace();
-            hsize_t dims[2];
             space.getSimpleExtentDims(dims);
-
-            if (dims[0] != nz || dims[1] != nr) {
-                throw std::runtime_error("Dataset '" + name + "' shape mismatch: expected " +
-                                         std::to_string(nz) + " x " + std::to_string(nr) +
-                                         ", got " + std::to_string(dims[0]) + " x " + std::to_string(dims[1]));
-            }
-
-            std::vector<double> raw(dims[0] * dims[1]);
+            if (space.getSimpleExtentNdims() != 2)
+                throw std::runtime_error("Dataset '" + name + "' is not 2D");
+            raw.assign(dims[0] * dims[1], 0.0);
             ds.read(raw.data(), H5::PredType::NATIVE_DOUBLE);
+        };
 
+        // Utility to convert flat raw -> vector<vector>
+        auto to2D = [&](const std::vector<double>& raw, size_t nz, size_t nr) {
             std::vector<std::vector<double>> grid(nz, std::vector<double>(nr));
-            for (size_t i = 0; i < nz; ++i) {
-                for (size_t j = 0; j < nr; ++j) {
-                    grid[i][j] = raw[i * nr + j];
+            for (size_t iz = 0; iz < nz; ++iz) {
+                for (size_t ir = 0; ir < nr; ++ir) {
+                    grid[iz][ir] = raw[iz * nr + ir];
                 }
             }
             return grid;
         };
 
-        data.q_mag = read2D("fields/q_mag");
+        const bool has_legacy_1d = exists("grid/Rc") && exists("grid/Zc");
+        const bool has_grid_2d   = exists("grid/R") && exists("grid/Z");
+        const bool has_root_2d   = exists("R") && exists("Z");
+
+        if (has_legacy_1d) {
+            data.r = read1D("grid/Rc");
+            data.z = read1D("grid/Zc");
+        } else if (has_grid_2d || has_root_2d) {
+            const std::string rname = has_grid_2d ? "grid/R" : "R";
+            const std::string zname = has_grid_2d ? "grid/Z" : "Z";
+
+            std::vector<double> rraw, zraw;
+            hsize_t rdims[2] = {0, 0}, zdims[2] = {0, 0};
+            read2DRaw(rname, rraw, rdims);
+            read2DRaw(zname, zraw, zdims);
+            if (rdims[0] != zdims[0] || rdims[1] != zdims[1]) {
+                throw std::runtime_error("Heatflux grid R/Z shape mismatch");
+            }
+            const size_t nz = static_cast<size_t>(rdims[0]);
+            const size_t nr = static_cast<size_t>(rdims[1]);
+            data.r.resize(nr);
+            data.z.resize(nz);
+            for (size_t ir = 0; ir < nr; ++ir) data.r[ir] = rraw[ir];          // first row
+            for (size_t iz = 0; iz < nz; ++iz) data.z[iz] = zraw[iz * nr];     // first col
+        } else {
+            throw std::runtime_error(
+                "Heatflux grid coordinates not found. Expected either "
+                "'grid/Rc'+'grid/Zc' or 2D 'grid/R'+'grid/Z' (or root 'R'+'Z')."
+            );
+        }
+
+        const size_t nr = data.r.size();
+        const size_t nz = data.z.size();
+        if (nr < 2 || nz < 2) {
+            throw std::runtime_error("Heatflux grid must have at least 2 points in both R and Z");
+        }
+
+        auto read2DValidated = [&](const std::string& name) -> std::vector<std::vector<double>> {
+            std::vector<double> raw;
+            hsize_t dims[2] = {0, 0};
+            read2DRaw(name, raw, dims);
+            if (dims[0] != nz || dims[1] != nr) {
+                throw std::runtime_error("Dataset '" + name + "' shape mismatch: expected " +
+                                         std::to_string(nz) + " x " + std::to_string(nr) +
+                                         ", got " + std::to_string(dims[0]) + " x " + std::to_string(dims[1]));
+            }
+            return to2D(raw, nz, nr);
+        };
+
+        if (exists("fields/q_mag")) {
+            data.q_mag = read2DValidated("fields/q_mag");
+        } else if (exists("q_mag")) {
+            data.q_mag = read2DValidated("q_mag");
+        } else {
+            throw std::runtime_error("Missing heatflux dataset: expected 'fields/q_mag' or 'q_mag'");
+        }
+
+        for (size_t iz = 0; iz < nz; ++iz) {
+            for (size_t ir = 0; ir < nr; ++ir) {
+                double &q = data.q_mag[iz][ir];
+                if (!std::isfinite(q) || q < 0.0) q = 0.0;
+            }
+        }
+
+        if (!std::is_sorted(data.r.begin(), data.r.end()) ||
+            !std::is_sorted(data.z.begin(), data.z.end())) {
+            throw std::runtime_error("Heatflux coordinate axes must be monotonic increasing");
+        }
 
     } catch (const H5::Exception& e) {
         fprintf(stderr, "HDF5 error: %s\n", e.getCDetailMsg());
@@ -459,54 +524,56 @@ HeatFluxParams FixEvap::interpHeatFluxAtPos(double r, double z,
 {
   HeatFluxParams res{}; // {r=0,z=0,q_mag=0} by default
 
-  if (data.r.empty() || data.z.empty()) return res;
+  if (data.r.size() < 2 || data.z.size() < 2 || data.q_mag.empty()) return res;
 
-  const auto& r_vals = data.r;   // assumed sorted ascending
+  const auto& r_vals = data.r;
   const auto& z_vals = data.z;
+  const int nr = static_cast<int>(r_vals.size());
+  const int nz = static_cast<int>(z_vals.size());
 
-  // out of bounds -> zero
-  if (r < r_vals.front() || r > r_vals.back() ||
-      z < z_vals.front() || z > z_vals.back()) {
+  // Clamp, matching compute/plasma/fields behavior.
+  const double r_clamp = std::min(std::max(r, r_vals.front()), r_vals.back());
+  const double z_clamp = std::min(std::max(z, z_vals.front()), z_vals.back());
+
+  auto r_it = std::lower_bound(r_vals.begin(), r_vals.end(), r_clamp);
+  auto z_it = std::lower_bound(z_vals.begin(), z_vals.end(), z_clamp);
+
+  int ir2 = static_cast<int>(r_it - r_vals.begin());
+  int iz2 = static_cast<int>(z_it - z_vals.begin());
+  if (ir2 <= 0) ir2 = 1;
+  if (ir2 >= nr) ir2 = nr - 1;
+  if (iz2 <= 0) iz2 = 1;
+  if (iz2 >= nz) iz2 = nz - 1;
+  const int ir1 = ir2 - 1;
+  const int iz1 = iz2 - 1;
+
+  const double R1 = r_vals[ir1], R2 = r_vals[ir2];
+  const double Z1 = z_vals[iz1], Z2 = z_vals[iz2];
+  const double dR = R2 - R1;
+  const double dZ = Z2 - Z1;
+  if (dR <= 0.0 || dZ <= 0.0) return res;
+
+  const double t = (r_clamp - R1) / dR;
+  const double u = (z_clamp - Z1) / dZ;
+  const double w11 = (1.0 - t) * (1.0 - u);
+  const double w21 = t * (1.0 - u);
+  const double w12 = (1.0 - t) * u;
+  const double w22 = t * u;
+
+  if (static_cast<int>(data.q_mag.size()) <= iz2 ||
+      static_cast<int>(data.q_mag[iz1].size()) <= ir2 ||
+      static_cast<int>(data.q_mag[iz2].size()) <= ir2) {
     return res;
   }
 
-  // locate bracketing indices
-  auto r_it = std::lower_bound(r_vals.begin(), r_vals.end(), r);
-  auto z_it = std::lower_bound(z_vals.begin(), z_vals.end(), z);
+  const double q11 = safe_val(data.q_mag[iz1][ir1]);
+  const double q21 = safe_val(data.q_mag[iz1][ir2]);
+  const double q12 = safe_val(data.q_mag[iz2][ir1]);
+  const double q22 = safe_val(data.q_mag[iz2][ir2]);
 
-  int r1 = std::max(0, int(r_it - r_vals.begin()) - 1);
-  int r2 = std::min(int(r_vals.size()) - 1, r1 + 1);
-  int z1 = std::max(0, int(z_it - z_vals.begin()) - 1);
-  int z2 = std::min(int(z_vals.size()) - 1, z1 + 1);
-
-  const double R1 = r_vals[r1], R2 = r_vals[r2];
-  const double Z1 = z_vals[z1], Z2 = z_vals[z2];
-  const double denom = (R2 - R1) * (Z2 - Z1);
-
-  auto interp = [&](const std::vector<std::vector<double>>& field)->double {
-    if (field.size() <= size_t(z2) || field[0].size() <= size_t(r2)) return 0.0;
-
-    // load 4 corners and sanitize NaNs/Infs
-    const double Q11 = safe_val(field[z1][r1]);
-    const double Q21 = safe_val(field[z1][r2]);
-    const double Q12 = safe_val(field[z2][r1]);
-    const double Q22 = safe_val(field[z2][r2]);
-
-    if (denom == 0.0) return 0.25*(Q11 + Q21 + Q12 + Q22);
-
-    double q = (Q11*(R2-r)*(Z2-z) + Q21*(r-R1)*(Z2-z)
-              + Q12*(R2-r)*(z-Z1) + Q22*(r-R1)*(z-Z1)) / denom;
-
-    if (!std::isfinite(q)) q = 0.0; // guard
-    if (q < 0.0) q = 0.0;           // no negative heat flux
-    return q;
-  };
-
-  res.r = r;
-  res.z = z;
-  res.q_mag = interp(data.q_mag);
-
-  // final guard
+  res.r = r_clamp;
+  res.z = z_clamp;
+  res.q_mag = w11 * q11 + w21 * q21 + w12 * q12 + w22 * q22;
   if (!std::isfinite(res.q_mag) || res.q_mag < 0.0) res.q_mag = 0.0;
   return res;
 }

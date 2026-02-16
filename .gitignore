@@ -9,3 +9,13 @@ examples/test_viscous_gravity_3d/dump.viscous_gravity3d
 examples/test_viscous_gravity_3d/log.openedge
 
 .DS_Store
+
+# Local run/test artifacts
+log.*
+dump.*
+*.state
+*.rst
+
+# Python/Jupyter cache artifacts
+**/__pycache__/
+**/.ipynb_checkpoints/

@@ -21,6 +21,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include <string>
 #include <vector> 
 #include <H5Cpp.h>
+#include <hdf5.h>
 
 
 
@@ -76,6 +77,7 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
   // constant mode options
   if (input_mode == MODE_CONSTANT) {
     while (iarg < narg) {
+      if (strcmp(arg[iarg],"values")==0) { iarg++; break; }
       if (iarg + 3 < narg && strcmp(arg[iarg],"magnetic_field")==0) {
         bconst[0] = input->numeric(FLERR,arg[iarg+1]);
         bconst[1] = input->numeric(FLERR,arg[iarg+2]);
@@ -473,6 +475,9 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
     PlasmaFileData data;
 
     try {
+        // Keep HDF5 from printing internal diagnostics to stderr.
+        // We handle errors explicitly via exceptions and return codes.
+        H5::Exception::dontPrint();
         H5::H5File file(filePath, H5F_ACC_RDONLY);
 
         // Utility to read 1D dataset
@@ -494,7 +499,11 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
 
         // Utility to test whether dataset/path exists
         auto hasDataset = [&](const std::string& name) -> bool {
-            return H5Lexists(file.getId(), name.c_str(), H5P_DEFAULT) > 0;
+            htri_t exists = 0;
+            H5E_BEGIN_TRY {
+              exists = H5Oexists_by_name(file.getId(), name.c_str(), H5P_DEFAULT);
+            } H5E_END_TRY;
+            return exists > 0;
         };
 
         // Utility to read 2D dataset with shape validation

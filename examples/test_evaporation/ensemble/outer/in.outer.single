@@ -1,27 +1,27 @@
-# outer-group ensemble emission (thermal launch from global temp)
+# outer-group multi-droplet emission + tracking (thermal launch from global temp)
 
-variable dt   equal 1e-05
-variable time equal 1
+variable dt   equal 1e-06
+variable time equal 100
 variable N equal floor(${time}/${dt})
-variable N1 equal floor($N/40000)
+variable N1 equal floor($N/200000)
 
-# droplet thermal state for evaporation model
-variable temp_droplet equal 773.15
+# droplet thermodynamic state (evaporation model)
+variable temp_droplet    equal 773.15
 
 # emission thermal temperature (controls initial thermal launch speed)
 # NOTE: with md=3.495e-05 kg, reaching O(20 m/s) requires extremely large temp.
-variable temp_emit equal 5.0e20
+variable temp_emit equal .50e20
 
-# no species sweep for this study
+# one droplet class only
 variable droplet index Instability
 
-# requested droplet size proxy value
-variable md   equal 3.495021827118645e-05
-variable Rho  equal 534.0
-variable rd   equal (3.0*${md}/(4.0*PI*${Rho}))^(1.0/3.0)
+# requested droplet size proxy (same value used in species table as particle mass)
+variable md      equal 3.495021827118645e-05
+variable Rho     equal 534.0
+variable rd      equal (3.0*${md}/(4.0*PI*${Rho}))^(1.0/3.0)
 
-# emit a few particles per run from outer divertor group
-variable nemit equal 9
+# emit a few particles at startup
+variable nemit   equal 4
 
 seed                12345
 dimension           2
@@ -49,10 +49,10 @@ group               divertor_outer_upper surf id 44 46 48 50 52 54 56 58 60
 group               divertor_inner       surf id 102 104 106 108 110 112 114 116 118
 group               divertor_inner_upper surf id 84 86 88 90 92 94 96 98 100
 
-# no magVelocity/incidentAngle: let fix_emit_droplet sample thermal velocity from global temp
+# no magVelocity/incidentAngle passed: thermal launch from global temp in fix_emit_droplet
 fix                 droplet_emission emit/droplet LigamentSource divertor_outer normal no n ${nemit} perspecies no
 
-dump 10 particle all ${N1} case.outer.group.${droplet}.n.${nemit}.thermal id type x y z vx vy vz v_pmass temp radius
+dump 10 particle all ${N1} case.outer id type x y z vx vy vz  v_pmass temp radius
 
 variable npart equal np
 
@@ -73,5 +73,4 @@ timestep            ${dt}
 stats               ${N1}
 stats_style         step cpu np
 
-log log.openedge.case.outer.group.${droplet}.n.${nemit}.thermal
 run $N

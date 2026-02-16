@@ -61,6 +61,7 @@ FixEmitDroplet::FixEmitDroplet(SPARTA *sparta, int narg, char **arg) :
   np = 0;
   npmode = FLOW;
   npstr = NULL;
+  user_mag_velocity = 0;
   normalflag = 0;
   subsonic = 0;
   subsonic_style = NOSUBSONIC;
@@ -68,7 +69,8 @@ FixEmitDroplet::FixEmitDroplet(SPARTA *sparta, int narg, char **arg) :
   twopass = 0;
   max_npoint = 0;
 
-  incidentAngle = 0.0;
+  // If not provided by input, sample launch angle per emitted particle.
+  incidentAngle = -1.0;
   magVelocity = 0.0;
 
   nrho_custom_flag = temp_custom_flag = vstream_custom_flag =
@@ -748,13 +750,28 @@ void FixEmitDroplet::perform_task_onepass()
           else vnmag = beta_un*vscale[isp] + indot;
 
           theta = MY_2PI * random->uniform();
-          vr = vscale[isp] * sqrt(-log(random->uniform()));
-          if (normalflag) {
-            vamag = vr * sin(theta);
-            vbmag = vr * cos(theta);
+          if (user_mag_velocity && magVelocity > 0.0) {
+            // User-prescribed launch speed/angle relative to surface normal.
+            const double inc_deg = (incidentAngle >= 0.0) ? incidentAngle : (90.0 * random->uniform());
+            const double inc = inc_deg * MY_PI / 180.0;
+            vnmag = magVelocity * cos(inc);
+            const double vt = magVelocity * sin(inc);
+            vamag = vt * sin(theta);
+            vbmag = vt * cos(theta);
+            if (!normalflag) {
+              vnmag += MathExtra::dot3(vstream,normal);
+              vamag += MathExtra::dot3(vstream,atan);
+              vbmag += MathExtra::dot3(vstream,btan);
+            }
           } else {
-            vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
-            vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+            vr = vscale[isp] * sqrt(-log(random->uniform()));
+            if (normalflag) {
+              vamag = vr * sin(theta);
+              vbmag = vr * cos(theta);
+            } else {
+              vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
+              vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+            }
           }
 
           v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
@@ -867,30 +884,29 @@ void FixEmitDroplet::perform_task_onepass()
         else vnmag = beta_un*vscale[isp] + indot;
 
         theta = MY_2PI * random->uniform();
-        vr = vscale[isp] * sqrt(-log(random->uniform()));
-
-        // vr = magVelocity;             // total speed (>=0)
-
-          double u = random->uniform();      // u ~ U(0,1)
-          double sinAng = sqrt(u);           // from F(θ) = sin^2 θ
-          double cosAng = sqrt(1.0 - u);     // cos θ
-
-          // decompose speed into normal and tangential components
-          double vnmag = vr * cosAng;
-          double vt    = vr * sinAng;
-
-          // random azimuthal angle around the normal
-          double phi = MY_2PI * random->uniform();
-          double vamag = vt * cos(phi);
-          double vbmag = vt * sin(phi);
-
-
-        const double vs_n = MathExtra::dot3(vstream, normal);
-        const double vs_a = MathExtra::dot3(vstream, atan);
-        const double vs_b = MathExtra::dot3(vstream, btan);
-        vnmag += vs_n;
-        vamag += vs_a;
-        vbmag += vs_b;
+        if (user_mag_velocity && magVelocity > 0.0) {
+          // User-prescribed launch speed/angle relative to surface normal.
+          const double inc_deg = (incidentAngle >= 0.0) ? incidentAngle : (90.0 * random->uniform());
+          const double inc = inc_deg * MY_PI / 180.0;
+          vnmag = magVelocity * cos(inc);
+          const double vt = magVelocity * sin(inc);
+          vamag = vt * sin(theta);
+          vbmag = vt * cos(theta);
+          if (!normalflag) {
+            vnmag += MathExtra::dot3(vstream,normal);
+            vamag += MathExtra::dot3(vstream,atan);
+            vbmag += MathExtra::dot3(vstream,btan);
+          }
+        } else {
+          vr = vscale[isp] * sqrt(-log(random->uniform()));
+          if (normalflag) {
+            vamag = vr * sin(theta);
+            vbmag = vr * cos(theta);
+          } else {
+            vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
+            vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+          }
+        }
 
         v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
         v[1] = vnmag*normal[1] + vamag*atan[1] + vbmag*btan[1];
@@ -1087,13 +1103,28 @@ void FixEmitDroplet::perform_task_twopass()
           else vnmag = beta_un*vscale[isp] + indot;
 
           theta = MY_2PI * random->uniform();
-          vr = vscale[isp] * sqrt(-log(random->uniform()));
-          if (normalflag) {
-            vamag = vr * sin(theta);
-            vbmag = vr * cos(theta);
+          if (user_mag_velocity && magVelocity > 0.0) {
+            // User-prescribed launch speed/angle relative to surface normal.
+            const double inc_deg = (incidentAngle >= 0.0) ? incidentAngle : (90.0 * random->uniform());
+            const double inc = inc_deg * MY_PI / 180.0;
+            vnmag = magVelocity * cos(inc);
+            const double vt = magVelocity * sin(inc);
+            vamag = vt * sin(theta);
+            vbmag = vt * cos(theta);
+            if (!normalflag) {
+              vnmag += MathExtra::dot3(vstream,normal);
+              vamag += MathExtra::dot3(vstream,atan);
+              vbmag += MathExtra::dot3(vstream,btan);
+            }
           } else {
-            vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
-            vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+            vr = vscale[isp] * sqrt(-log(random->uniform()));
+            if (normalflag) {
+              vamag = vr * sin(theta);
+              vbmag = vr * cos(theta);
+            } else {
+              vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
+              vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+            }
           }
 
           v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
@@ -1190,13 +1221,28 @@ void FixEmitDroplet::perform_task_twopass()
         else vnmag = beta_un*vscale[isp] + indot;
 
         theta = MY_2PI * random->uniform();
-        vr = vscale[isp] * sqrt(-log(random->uniform()));
-        if (normalflag) {
-          vamag = vr * sin(theta);
-          vbmag = vr * cos(theta);
+        if (user_mag_velocity && magVelocity > 0.0) {
+          // User-prescribed launch speed/angle relative to surface normal.
+          const double inc_deg = (incidentAngle >= 0.0) ? incidentAngle : (90.0 * random->uniform());
+          const double inc = inc_deg * MY_PI / 180.0;
+          vnmag = magVelocity * cos(inc);
+          const double vt = magVelocity * sin(inc);
+          vamag = vt * sin(theta);
+          vbmag = vt * cos(theta);
+          if (!normalflag) {
+            vnmag += MathExtra::dot3(vstream,normal);
+            vamag += MathExtra::dot3(vstream,atan);
+            vbmag += MathExtra::dot3(vstream,btan);
+          }
         } else {
-          vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
-          vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+          vr = vscale[isp] * sqrt(-log(random->uniform()));
+          if (normalflag) {
+            vamag = vr * sin(theta);
+            vbmag = vr * cos(theta);
+          } else {
+            vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
+            vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+          }
         }
 
         v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
@@ -1738,6 +1784,7 @@ void FixEmitDroplet::options2(int narg, char **arg)
       magVelocity = atof(arg[iarg+1]);
       if (!std::isfinite(magVelocity) || magVelocity < 0.0)
         error->all(FLERR,"Illegal fix emit/droplet: magVelocity must be >= 0");
+      user_mag_velocity = 1;
       iarg += 2;
       continue;
     }
@@ -1760,4 +1807,3 @@ void FixEmitDroplet::options2(int narg, char **arg)
     iarg += consumed;
   }
 }
-

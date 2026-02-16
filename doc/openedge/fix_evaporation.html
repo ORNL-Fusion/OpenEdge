@@ -23,28 +23,52 @@
 </UL>
 
 <P><B>Examples:</B></P>
-<PRE>fix fevap evaporation 1 Droplet mass 2.796e-10 radius 5.0e-5 temp 773.15 heatflux/constant 0.0
+<PRE>fix fevap evaporation 1 Droplet mass 2.796e-10 radius 5.0e-5 temp 773.15 heatflux/constant 5.0e6
 fix fevap evaporation 1 Droplet mass 2.796e-10 radius 5.0e-5 temp 773.15 heatflux/file heatflux.h5</PRE>
 
-<P><B>Description:</B></P>
-<P>Update droplet thermodynamic state (<I>mass</I>, <I>radius</I>, <I>temp</I>) using the OpenEdge evaporation model.
-The fix is applied as symmetric half-steps at start and end of each timestep.</P>
+<P><B>Model solved (current implementation):</B></P>
+<PRE>dr_d/dt = -(A_M/rho_L) G_evap
+dT_d/dt = [3/(rho_L C_p r_d)] [Q_s - G_evap (DeltaH_vap/N_A)]</PRE>
 
-<P>Per-particle state output in <A HREF="../dump.html">dump particle</A>:</P>
-<PRE>variable pmass particle mass
-dump d1 particle all 100 out.dump id type x y z vx vy vz v_pmass temp radius</PRE>
+<P><I>Q_s</I> is either constant or interpolated from <I>heatflux.h5</I>.
+The evaporation update is applied as symmetric half-steps:
+START_OF_STEP (<I>dt/2</I>) and END_OF_STEP (<I>dt/2</I>), so one full <I>dt</I>
+per active step where <I>ntimestep % nevery == 0</I>.</P>
 
-<P><B>Restart, output info:</B></P>
-<P>This fix provides a per-grid array (3 columns) for diagnostics.</P>
+<P>Droplets are removed after 90% mass loss (mass <= 0.1 * reference mass).</P>
+
+<P><B>Expected HDF5 layout for <I>heatflux/file</I>:</B></P>
+<UL>
+<LI>Coordinates (choose one):
+<PRE>1) grid/Rc (nr,), grid/Zc (nz,)
+2) grid/R (nz,nr), grid/Z (nz,nr)
+3) R (nz,nr), Z (nz,nr)</PRE>
+<LI>Field dataset:
+<PRE>fields/q_mag (nz,nr)   or   q_mag (nz,nr)</PRE>
+<LI>Reader validation:
+<PRE>nr>=2, nz>=2
+q_mag shape must match (nz,nr)
+axes monotonic increasing
+non-finite/negative q_mag are clamped to 0</PRE>
+</UL>
+
+<P><B>Expected HDF5 layout for plasma fields (used elsewhere):</B></P>
+<PRE>r (nr,), z (nz,)
+required 2D fields (nz,nr):
+dens_e, temp_e, dens_i, temp_i,
+parr_flow, parr_flow_r, parr_flow_t, parr_flow_z,
+grad_te_r, grad_te_t, grad_te_z,
+grad_ti_r, grad_ti_t, grad_ti_z</PRE>
 
 <P><B>Restrictions:</B></P>
 <P>Current evaporation implementation is restricted to 2d geometry for heat-flux interpolation.</P>
 
 <P><B>Related commands:</B></P>
-<P><A HREF="fix_viscous.html">fix viscous</A>,
+<P><A HREF="compute_plasma_fields.html">compute plasma/fields</A>,
+<A HREF="fix_viscous.html">fix viscous</A>,
 <A HREF="../dump.html">dump</A>,
 <A HREF="../variable.html">variable</A></P>
 
-<P><B>Default:</B> none</P>
+<P><B>Default:</B> none. One heat-flux mode (<I>heatflux/constant</I> or <I>heatflux/file</I>) must be provided.</P>
 
 </HTML>

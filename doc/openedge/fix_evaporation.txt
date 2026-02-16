@@ -25,30 +25,59 @@ keyword = one or more optional keywords
 
 [Examples:]
 
+fix fevap evaporation 1 Droplet mass 2.796e-10 radius 5.0e-5 temp 773.15 heatflux/constant 5.0e6
 fix fevap evaporation 1 Droplet mass 2.796e-10 radius 5.0e-5 temp 773.15 heatflux/file heatflux.h5 :pre
 
-[Description:]
+[Model solved (current implementation):]
 
-Update droplet thermodynamic state ({mass}, {radius}, {temp}) using the
-OpenEdge evaporation model.  This fix executes as a symmetric half-step
-at start and end of timestep.
+For each active droplet, OpenEdge updates radius and temperature using
 
-Per-particle fields are stored directly in particle state and are
-available for output with "dump particle"_../dump.html:
+dr_d/dt = -(A_M/rho_L) G_evap
+dT_d/dt = [3/(rho_L C_p r_d)] [Q_s - G_evap (DeltaH_vap/N_A)] :pre
 
-dump d1 particle all 100 out.dump id type x y z vx vy vz v_pmass temp radius :pre
+where {Q_s} is either constant or interpolated from {heatflux.h5}, and
+{G_evap} is the code Antoine/kinetic evaporation flux fit.
 
-Notes:
+The fix is integrated as two symmetric half-steps:
+- START_OF_STEP: dt/2
+- END_OF_STEP: dt/2 :ul
 
-{temp} and {radius} are native dump particle attributes.
-{mass} is output via a particle-style variable:
-  variable pmass particle mass
-  dump ... v_pmass ... :ul
+so evaporation advances one full dt whenever {ntimestep % nevery == 0}.
 
-[Restart, output info:]
+Droplets are removed when mass falls below 10% of reference mass
+(90% mass loss criterion).
 
-This fix provides a per-grid array with 3 columns (diagnostic values
-including emitted amount and local heat flux).
+[Expected HDF5 layout for {heatflux/file}:]
+
+Supported coordinate layouts (choose one):
+1) legacy axes
+  - {grid/Rc} shape (nr,)
+  - {grid/Zc} shape (nz,)
+2) 2D grid coordinates
+  - {grid/R} shape (nz,nr), {grid/Z} shape (nz,nr)
+3) root-level 2D coordinates
+  - {R} shape (nz,nr), {Z} shape (nz,nr) :ul
+
+Heat flux field dataset (required):
+- {fields/q_mag} shape (nz,nr)
+or
+- {q_mag} shape (nz,nr) :ul
+
+Validation in reader:
+- nr>=2 and nz>=2
+- q_mag shape must match (nz,nr)
+- axes must be monotonic increasing
+- non-finite/negative q_mag values are clamped to 0 :ul
+
+[Expected HDF5 layout for plasma fields (used elsewhere):]
+
+The plasma field reader expects in {plasma.h5}:
+- {r} (nr,), {z} (nz,)
+- required 2D fields (nz,nr):
+  {dens_e,temp_e,dens_i,temp_i,
+   parr_flow,parr_flow_r,parr_flow_t,parr_flow_z,
+   grad_te_r,grad_te_t,grad_te_z,
+   grad_ti_r,grad_ti_t,grad_ti_z} :ul
 
 [Restrictions:]
 
@@ -57,9 +86,10 @@ interpolation.
 
 [Related commands:]
 
-"fix"_../fix.html, "dump"_../dump.html, "variable"_../variable.html, "fix viscous"_fix_viscous.html
+"fix"_../fix.html, "compute plasma/fields"_compute_plasma_fields.html,
+"fix viscous"_fix_viscous.html, "dump"_../dump.html, "variable"_../variable.html
 
 [Default:]
 
-No defaults for required arguments.  One heat-flux mode
+No defaults for required arguments. One heat-flux mode
 ({heatflux/constant} or {heatflux/file}) must be provided.

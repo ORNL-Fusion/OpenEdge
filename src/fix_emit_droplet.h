@@ -70,6 +70,7 @@ class FixEmitDroplet : public FixEmit {
   int npmode,np;    // npmode = FLOW,CONSTANT,VARIABLE
   int npvar;
   char *npstr;
+  int user_mag_velocity;
   double incidentAngle;
   double magVelocity;
 
