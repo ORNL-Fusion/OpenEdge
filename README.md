@@ -1,12 +1,18 @@
 # OpenEdge
 
-OpenEdge is a research code for kinetic transport of charged and neutral particles and their interactions with solid surfaces and plasmas. It targets fusion edge/PMI problems but is not limited to them.
+OpenEdge is developed as a package for **SPARTA**, using SPARTA as the particle engine (similar in spirit to domain packages in LAMMPS).
+It is a research code for kinetic transport of charged and neutral particles and their interactions with solid surfaces and plasmas.
+Primary focus is plasma-material interactions (PMI), including lithium droplet physics for the Liquid-Metal SciDAC project.
 
 > **Status:** Early-stage research software—APIs and physics models may change.
 >
 > **Contributors welcome:** Diagnostics, verification cases, and tests are especially helpful.
 
+## Current Development Focus (Feb 17, 2026)
 
+- Integrated PMI workflow for lithium droplets near plasma-facing components
+- OML-based droplet charging (`fix droplet/charge`)
+- Coupled drag + evaporation + Boris trajectory pushing workflows
 
 ## Features
 
@@ -36,14 +42,14 @@ OpenEdge is a research code for kinetic transport of charged and neutral particl
 
 ## Quick Start
 
-```ruby
+```bash
 $ git clone https://github.com/ORNL-Fusion/OpenEdge.git
 $ cp OpenEdge/src/openedge/* OpenEdge/src/
 $ mkdir build
 $ cmake -C OpenEdge/cmake/presets/mpi.cmake OpenEdge/cmake
 $ make -j 4
 $ mpirun -np 4 ./build/src/spa_mpi -in input.in
-
+```
 
 
 ## License
