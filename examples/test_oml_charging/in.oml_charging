@@ -1,0 +1,79 @@
+# Droplet test: 2-particle emission (inner+outer divertor)
+# Physics: drag(epstein)+gravity, evaporation, OML charging, Boris E/B
+
+variable dt       equal 1e-06
+variable time     equal 2e-02
+variable N        equal floor(${time}/${dt})
+variable Ndump    equal 10
+variable Nstats   equal 500
+
+# droplet state seeds
+variable temp_droplet equal 773.15
+variable md           equal 3.495021827118645e-05
+variable rd           equal 1.25e-3
+
+seed                12345
+dimension           2
+boundary            r r p
+global              gridcut 0.0 comm/sort no
+global              temp 800.0
+global              boris_dump yes boris_dump_every 200
+create_box          2.0 6.0 -4.0 3.8 -0.05 0.05
+create_grid         200 200 1
+balance_grid        rcb cell
+
+species             droplet.species Instability
+mixture             LigamentSource Instability frac 1.0 nrho 1
+
+# diagnostics dumped at particle locations
+variable            pcharge particle q
+
+read_surf           wall.surf group surfID particle check
+surf_collide        wallColModel vanish
+surf_modify         all collide wallColModel
+read_surf           core.surf invert group surfID2 particle check
+surf_modify         surfID2 collide wallColModel
+
+# Divertor surface-ID groups from test_evaporation/outer/in.outer.inner
+group               divertor_outer surf id <> 137 150
+group               divertor_inner surf id <> 110 117
+
+# Emit exactly 1 droplet from each region at startup.
+fix                 emit_inner emit/droplet LigamentSource divertor_inner normal no n 1 perspecies no
+fix                 emit_outer emit/droplet LigamentSource divertor_outer normal no n 1 perspecies no
+
+# Plasma/B inputs (E is currently near zero in your dataset, B is non-zero)
+compute cnear plasma/fields all file ../test_evaporation/input/plasma.h5 ../test_evaporation/input/bfield.h5 bx by bz er et ez temp_e dens_e temp_i dens_i parrflow
+
+# Grid field fixes used by Boris.
+# Axisymmetric local basis ordering is (r,z,t) -> use Ez as 2nd component.
+fix bB bfield/grid c_cnear[1] c_cnear[3] c_cnear[2]
+fix eE efield/grid c_cnear[4] c_cnear[6] c_cnear[5]
+global bfield grid bB 0 efield grid eE 0
+
+# Drag + gravity
+fix fdrag droplet/drag/force 1 2.0 1 plasma c_cnear[7] c_cnear[9] c_cnear[10] c_cnear[11] bfield c_cnear[1] c_cnear[3] c_cnear[2] gravity 0 -9.8 0 model epstein mass ${md} radius ${rd} temp ${temp_droplet} diag yes diag/every 1000
+
+# Evaporation
+fix fevap evaporation 1 LigamentSource mass ${md} radius ${rd} temp ${temp_droplet} heatflux/file ../test_evaporation/input/heatflux.fix.h5
+
+# OML charging
+fix fcharge droplet/charge 1 plasma temp_e c_cnear[7] dens_e c_cnear[8] temp_i c_cnear[9] dens_i c_cnear[10] mass ${md} radius ${rd} ion_mass_amu 2.0 thermionic yes richardson_A 1.2e6 work_function_eV 2.9 temp ${temp_droplet} diag yes diag/every 1000
+
+# stop if all droplets are gone
+variable npart equal np
+fix fhalt halt 10 v_npart <= 0
+
+# Output
+dump dtraj particle all ${Ndump} case.oml id type x y z vx vy vz temp radius v_pcharge
+
+# Step 1: perform emission only
+run 1
+unfix emit_inner
+unfix emit_outer
+
+# Main evolution
+timestep            ${dt}
+stats               ${Nstats}
+stats_style         step cpu np
+run                 ${N}
