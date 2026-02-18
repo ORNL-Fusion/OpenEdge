@@ -123,7 +123,27 @@ FixViscous::FixViscous(SPARTA *sparta, int narg, char **arg) :
 
   // Optional one-time state seeding for runs without fix evaporation.
   while (iarg < narg) {
-    if (strcmp(arg[iarg], "mass") == 0) {
+    if (strcmp(arg[iarg], "model") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "fix viscous: missing value for model");
+      if (strcmp(arg[iarg+1], "epstein") == 0) drag_model = DRAG_EPSTEIN;
+      else if (strcmp(arg[iarg+1], "coulomb") == 0) drag_model = DRAG_COULOMB;
+      else error->all(FLERR, "fix viscous: model must be epstein or coulomb");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "coulomb/chi") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "fix viscous: missing value for coulomb/chi");
+      chi_coulomb = input->numeric(FLERR, arg[iarg+1]);
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "coulomb/delta") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "fix viscous: missing value for coulomb/delta");
+      delta_ite = input->numeric(FLERR, arg[iarg+1]);
+      if (delta_ite <= 0.0) error->all(FLERR, "fix viscous: coulomb/delta must be > 0");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "coulomb/lnlambda") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "fix viscous: missing value for coulomb/lnlambda");
+      ln_lambda_coulomb = input->numeric(FLERR, arg[iarg+1]);
+      if (ln_lambda_coulomb < 0.0) error->all(FLERR, "fix viscous: coulomb/lnlambda must be >= 0");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "mass") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "fix viscous: missing value for mass");
       seed_mass = input->numeric(FLERR, arg[iarg+1]);
       iarg += 2;
@@ -396,6 +416,34 @@ double FixViscous::epstein_nu(double Ni, double Ti_eV, double rd_m) const {
   return alpha_E * (rho_g * vth) / (rho_d * rd_m);
 }
 
+double FixViscous::coulomb_drag_multiplier(double u) const
+{
+  // Implements a Coulomb-corrected Epstein scaling using
+  // collisional + orbital terms, normalized by baseline Epstein drag.
+  const double sqrt_pi = std::sqrt(M_PI);
+  const double ueff = std::max(u, 1.0e-8);
+  const double chi_over_delta = chi_coulomb / std::max(delta_ite, 1.0e-12);
+  const double e = std::exp(-ueff * ueff);
+  const double erf_u = std::erf(ueff);
+
+  const double coll_pref = 1.0 / (2.0 * ueff * ueff * ueff * sqrt_pi);
+  const double coll_a = ueff * (2.0 * ueff * ueff + 1.0 + 2.0 * chi_over_delta) * e;
+  const double coll_b =
+      0.5 * sqrt_pi *
+      (4.0 * std::pow(ueff, 4) - 1.0 - 2.0 * (1.0 - 2.0 * ueff * ueff) * chi_over_delta) *
+      erf_u;
+  const double xi_coll = coll_pref * (coll_a + coll_b);
+
+  const double Y =
+      erf_u - (2.0 * ueff / sqrt_pi) * e;
+  const double xi_orb =
+      2.0 * std::pow(chi_over_delta, 2.0) * ln_lambda_coulomb * (Y / ueff);
+
+  const double xi = xi_coll + xi_orb;
+  if (!std::isfinite(xi)) return 0.0;
+  return std::max(0.0, xi);
+}
+
 void FixViscous::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
@@ -605,9 +653,6 @@ inline void FixViscous::epstein_params(int icell, const Particle::OnePart &p,
     return;
   }
 
-  // Epstein frequency (SI)
-  nuE = epstein_nu(Ni, Ti_eV, rd);
-
   // Build u_parallel in local velocity basis:
   // - Cartesian (2D/3D): [vx,vy,vz]
   // - Axisymmetric:      [vr,vz,vphi]
@@ -629,6 +674,24 @@ inline void FixViscous::epstein_params(int icell, const Particle::OnePart &p,
     upar_cyl[0] = 0.0;
     upar_cyl[1] = 0.0;
     upar_cyl[2] = 0.0;
+  }
+
+  // Baseline Epstein frequency (SI)
+  nuE = epstein_nu(Ni, Ti_eV, rd);
+
+  // Optional Coulomb-corrected model.
+  if (drag_model == DRAG_COULOMB && nuE > 0.0) {
+    const double mi = A_background * update->proton_mass;
+    const double vth_i = std::sqrt(8.0 * (Ti_eV * update->echarge) / (M_PI * mi));
+    if (vth_i > 0.0) {
+      const double dv0 = p.v[0] - upar_cyl[0];
+      const double dv1 = p.v[1] - upar_cyl[1];
+      const double dv2 = p.v[2] - upar_cyl[2];
+      const double u = std::sqrt(dv0*dv0 + dv1*dv1 + dv2*dv2) / vth_i;
+      nuE *= coulomb_drag_multiplier(u);
+    } else {
+      nuE = 0.0;
+    }
   }
 
   // print upar_cyl

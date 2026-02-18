@@ -65,6 +65,52 @@ parr_flow, parr_flow_r, parr_flow_t, parr_flow_z,
 grad_te_r, grad_te_t, grad_te_z,
 grad_ti_r, grad_ti_t, grad_ti_z</PRE>
 
+<P><B>Per-cell grid output (SOLPS coupling):</B></P>
+
+<P>Each <I>fix evaporation</I> instance registers three per-grid-cell accumulators
+accessible as <TT>f_ID[1]</TT>, <TT>f_ID[2]</TT>, <TT>f_ID[3]</TT> in SPARTA scripts.
+Arrays are zeroed once at the start of each active timestep and accumulate
+contributions from every droplet in the cell across both half-kicks
+(<I>start_of_step</I> and <I>end_of_step</I>).</P>
+
+<P><B>Column layout (1-based index in SPARTA scripts):</B></P>
+<TABLE border="1" cellpadding="4">
+<TR><TH>Column</TH><TH>Symbol</TH><TH>Formula</TH><TH>Units</TH></TR>
+<TR><TD><TT>f_ID[1]</TT></TD><TD>dm_kg</TD>
+    <TD>&rho; (4/3)&pi; (r<sub>old</sub><sup>3</sup> &minus; r<sub>new</sub><sup>3</sup>)</TD>
+    <TD>kg / cell / step</TD></TR>
+<TR><TD><TT>f_ID[2]</TT></TD><TD>dn_atoms</TD>
+    <TD>dm_kg / A<sub>M</sub></TD>
+    <TD>atoms / cell / step</TD></TR>
+<TR><TD><TT>f_ID[3]</TT></TD><TD>heat_J</TD>
+    <TD>Q<sub>s</sub> &middot; 4&pi; r<sub>new</sub><sup>2</sup> &middot; dt<sub>half</sub></TD>
+    <TD>J / cell / half-step</TD></TR>
+</TABLE>
+
+<P><B>Symbol definitions:</B></P>
+<UL>
+<LI>&rho; = 534 kg/m<sup>3</sup> &nbsp; (liquid Li density)
+<LI>A<sub>M</sub> = 1.53&times;10<sup>&minus;26</sup> kg &nbsp; (Li atom mass)
+<LI>r<sub>old</sub> = droplet radius before the half-step (m)
+<LI>r<sub>new</sub> = droplet radius after the half-step (m), &ge; 0
+<LI>Q<sub>s</sub> = surface heat flux at the droplet position (W/m<sup>2</sup>)
+<LI>dt<sub>half</sub> = dt/2 (half-step duration, s)
+</UL>
+
+<P>Both half-kicks contribute to the same accumulator, so <TT>f_ID[1]</TT> and
+<TT>f_ID[2]</TT> represent the net mass/atom loss over one full timestep
+dt = 2&nbsp;&times;&nbsp;dt<sub>half</sub>.</P>
+
+<P><B>Typical SPARTA script usage (SOLPS coupling):</B></P>
+<PRE># time-average dm_kg and dn_atoms over one dump interval (Ndump steps)
+fix fml  ave/grid all 1 ${Ndump} ${Ndump} f_fevap[1] f_fevap[2]
+dump d_ml grid all ${Ndump} mass_loss.txt id xc yc f_fml[1] f_fml[2]</PRE>
+
+<P><B>Post-processing (Python) &mdash; Li source rate for SOLPS:</B></P>
+<PRE># source_rate [atoms/m^3/s] = mean_dn_atoms_per_step / (dt * cell_vol)
+# where mean_dn_atoms_per_step = column f_fml[2] from mass_loss.txt
+# and cell_vol is computed from grid geometry (xc/yc spacings or read from grid dump)</PRE>
+
 <P><B>Restrictions:</B></P>
 <P>Current evaporation implementation is restricted to 2d geometry for heat-flux interpolation.</P>
 

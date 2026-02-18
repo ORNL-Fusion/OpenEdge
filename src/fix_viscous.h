@@ -1,4 +1,7 @@
 #ifdef FIX_CLASS
+// DEPRECATED: use 'fix drag' (fix_drag.h) instead.
+// The droplet/drag/force and droplet_drag_force aliases have moved to FixDrag.
+// 'viscous' is retained here only for backward compatibility with old input decks.
 FixStyle(viscous,FixViscous)
 #else
 #ifndef SPARTA_FIX_VISCOUS_H
@@ -28,6 +31,8 @@ double g_input_[3] = {0.0, 0.0, 0.0};  //
 
 
 protected:
+  enum DragModel { DRAG_EPSTEIN = 0, DRAG_COULOMB = 1 };
+
   RanKnuth* rng = nullptr;
 
   // half-kick and parameter builder
@@ -49,8 +54,13 @@ protected:
   double A_background = 2.0;   // amu (e.g., D+)
   double Z_background = 1.0;   // kept for future
   int    model_epstein = 1;
+  int    drag_model = DRAG_EPSTEIN;
   double rho_d  = 534.0;       // kg/m^3
   double alpha_E = 1.26;       // accommodation
+  // Coulomb drag closure parameters (dimensionless inputs).
+  double chi_coulomb = 0.0;    // Coulomb parameter chi
+  double delta_ite = 1.0;      // ion-thermal energy ratio delta_ite
+  double ln_lambda_coulomb = 10.0; // Coulomb logarithm
   double seed_mass = -1.0;     // optional one-time particle mass seed (kg)
   double seed_radius = -1.0;   // optional one-time particle radius seed (m)
   double seed_temp = -1.0;     // optional one-time particle temperature seed (K)
@@ -68,6 +78,7 @@ protected:
 
   // Epstein frequency (SI)
   double epstein_nu(double Ni_m3, double Ti_eV, double rd_m) const;
+  double coulomb_drag_multiplier(double u) const;
 };
 
 } // namespace SPARTA_NS

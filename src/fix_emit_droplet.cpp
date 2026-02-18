@@ -700,6 +700,7 @@ void FixEmitDroplet::perform_task_onepass()
         ispecies = species[isp];
         ntarget = tasks[i].ntargetsp[isp]+random->uniform();
         ninsert = static_cast<int> (ntarget);
+
         scosine = indot / vscale[isp];
 
         // loop over ninsert for each species
@@ -1701,47 +1702,6 @@ int FixEmitDroplet::option(int narg, char **arg)
   error->all(FLERR,"Illegal fix emit/dropletcommand");
   return 0;
 }
-
-
-// void FixEmitDroplet::options2(int narg, char **arg)
-// {
-//   nevery = 1;
-//   perspecies = 1;
-//   region = NULL;
-
-//   int iarg = 0;
-//   while (iarg < narg) {
-//     if (strcmp(arg[iarg],"nevery") == 0) {
-//       if (iarg+2 > narg) error->all(FLERR,"Illegal fix droplet/emission command");
-//       nevery = atoi(arg[iarg+1]);
-//       if (nevery <= 0) error->all(FLERR,"Illegal fix droplet/emission command");
-//       iarg += 2;
-//     } else if (strcmp(arg[iarg],"perspecies") == 0) {
-//       if (iarg+2 > narg) error->all(FLERR,"Illegal fix droplet/emission command");
-//       if (strcmp(arg[iarg+1],"yes") == 0) perspecies = 1;
-//       else if (strcmp(arg[iarg+1],"no") == 0) perspecies = 0;
-//       else error->all(FLERR,"Illegal fix droplet/emission command");
-//       iarg += 2;
-//     } else if (strcmp(arg[iarg],"region") == 0) {
-//       if (iarg+2 > narg) error->all(FLERR,"Illegal fix droplet/emission command");
-//       int iregion = domain->find_region(arg[iarg+1]);
-//       if (iregion < 0)
-//         error->all(FLERR,"Fix droplet/emission region does not exist");
-//       region = domain->regions[iregion];
-//       iarg += 2;
-//     } else if (strcmp(arg[iarg],"magVelocity") == 0) {
-//       if (iarg+2 > narg) error->all(FLERR,"Illegal fix droplet/emission command");
-//       magVelocity = atof(arg[iarg+1]);
-//       if (magVelocity <= 0) error->all(FLERR,"Illegal fix droplet/emission command");
-//       iarg += 2;
-//     } else if (strcmp(arg[iarg],"incidentAngle") == 0) {
-//       if (iarg+2 > narg) error->all(FLERR,"Illegal fix droplet/emission command");
-//       incidentAngle = atof(arg[iarg+1]);
-//       if (incidentAngle <= 0) error->all(FLERR,"Illegal fix droplet/emission command");
-//       iarg += 2;
-//     } else iarg += option(narg-iarg,&arg[iarg]);
-//   }
-// }
 
 void FixEmitDroplet::options2(int narg, char **arg)
 {

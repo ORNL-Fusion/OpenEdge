@@ -85,6 +85,52 @@ The plasma field reader expects in {plasma.h5}:
    grad_te_r,grad_te_t,grad_te_z,
    grad_ti_r,grad_ti_t,grad_ti_z} :ul
 
+[Per-cell grid output (SOLPS coupling):]
+
+Each invocation of {fix evaporation} registers three per-grid-cell
+accumulators accessible as {f_ID[1]}, {f_ID[2]}, {f_ID[3]} in SPARTA
+scripts.  They are zeroed once at the start of each active timestep and
+accumulate contributions from every droplet in the cell across both
+half-kicks (start_of_step and end_of_step):
+
+{Column layout (1-based in scripts):}
+
+f_ID[1]  dm_kg     mass lost per cell per full step (kg)
+f_ID[2]  dn_atoms  atoms lost per cell per full step (dimensionless)
+f_ID[3]  heat_J    heat absorbed from plasma per cell per half-step (J) :pre
+
+{Equations:}
+
+dm_kg    = rho * (4/3) * pi * (r_old^3 - r_new^3)   [kg, >= 0]
+
+dn_atoms = dm_kg / A_M                                [atoms]
+
+heat_J   = Q_s * 4*pi * r_new^2 * dt_half            [J] :pre
+
+where:
+- {rho}    = 534 kg/m^3 (liquid Li density)
+- {A_M}    = 1.53e-26 kg (Li atom mass)
+- {r_old}  = droplet radius before the half-step (m)
+- {r_new}  = droplet radius after the half-step (m)
+- {Q_s}    = surface heat flux at the droplet position (W/m^2)
+- {dt_half} = dt/2 (half-step duration, s) :ul
+
+The second half-kick (end_of_step) adds to the same accumulator, so
+{f_ID[1] and f_ID[2] represent the net mass/atom loss over one full
+timestep dt = 2*dt_half.}
+
+{Typical script usage for SOLPS coupling:}
+
+# time-average dm_kg and dn_atoms over one dump interval (Ndump steps)
+fix fml  ave/grid all 1 ${Ndump} ${Ndump} f_fevap[1] f_fevap[2]
+dump d_ml grid all ${Ndump} mass_loss.txt id xc yc f_fml[1] f_fml[2] :pre
+
+{Post-processing (Python) — Li source rate for SOLPS:}
+
+# source_rate [atoms/m^3/s] = mean_atoms_per_step / (dt * cell_vol)
+# where mean_atoms_per_step = f_fml[2] from mass_loss.txt
+# and cell_vol is computed from the grid geometry (e.g. xc/yc spacings) :pre
+
 [Restrictions:]
 
 Current implementation enforces 2d geometry for evaporation/heat-flux

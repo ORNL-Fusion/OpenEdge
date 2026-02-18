@@ -4,14 +4,14 @@
 
 <HR>
 
-<H3>compute incident/flux command</H3>
+<H3>compute incident/plasma/flux command</H3>
 
 <P><B>Syntax:</B></P>
-<PRE>compute ID incident/flux surfgroup-ID file plasma.h5 values ...</PRE>
+<PRE>compute ID incident/plasma/flux surfgroup-ID file plasma.h5 values ...</PRE>
 
 <P>
 ID is documented in <A HREF="../compute.html">compute</A> command<br>
-incident/flux = style name of this compute command<br>
+incident/plasma/flux = preferred style name of this compute command<br>
 surfgroup-ID = surface group ID<br>
 values = one or more output fields
 </P>
@@ -21,13 +21,12 @@ values = one or more output fields
 <LI><B>nflux_incident</B> = total incident ion flux (all ion species)</LI>
 <LI><B>nflux_normal</B> = incident normal ion flux (all ion species)</LI>
 <LI><B>nflux_species N</B> = incident flux for ion species slot N (1-based)</LI>
-<LI><B>nflux_species_normal N</B> = incident normal flux for ion species slot N</LI>
 </UL>
 
 <P><B>Examples:</B></P>
-<PRE>compute cgam incident/flux 1 file input/plasma.h5 nflux_incident nflux_normal
-compute cgam incident/flux 1 file input/plasma.h5 nflux_species 1 nflux_species_normal 1</PRE>
-
+<PRE>compute cgam incident/plasma/flux 1 file input/plasma.h5 nflux_incident nflux_normal
+compute cgam incident/plasma/flux 1 file input/plasma.h5 nflux_species 1
+</PRE>
 <P><B>Description:</B></P>
 <P>
 This compute samples plasma ion data from <B>plasma.h5</B> on the 2D <B>r,z</B>

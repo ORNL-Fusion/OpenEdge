@@ -8,13 +8,8 @@ FixStyle(evaporation,FixEvap)
 #define SPARTA_FIX_EVAP_H
 
 #include <H5Cpp.h>
-#include <map>
-#include <unordered_map>
-#include <tuple>
-#include <stdio.h>
 #include "fix.h"
-#include "update.h"
- #include <string>
+#include <string>
 #include <vector>
 #include <algorithm>
 
@@ -34,6 +29,11 @@ namespace SPARTA_NS {
     };
 
 
+// array_grid columns (0-based index; 1-based in SPARTA script references f_ID[N]):
+//   [0]  dm_kg:    mass lost per cell per full step [kg]      (sum: all droplets + both half-kicks)
+//   [1]  dn_atoms: atoms lost per cell per full step          (= dm_kg / AM,  AM=1.53e-26 kg)
+//   [2]  heat_J:   heat absorbed from plasma per cell [J]    (= Qs*4πR_new²*dt_half, summed)
+
 class FixEvap : public Fix {
 public:
     FixEvap(class SPARTA*, int, char**);
@@ -46,34 +46,21 @@ public:
       double      Qs_const = 0.0;     // when HF_CONST
 
 protected:
-    FILE* fp;
-    int nlist;
-    int atomic_number;
-    bigint* tally_reactions, * tally_reactions_all;
-    int tally_flag;
     int maxgrid;
     int imix;
-    int nspecies;
-      double *fraction,*cummulative;
-// double fraction;
     void end_of_step();
-    void start_of_step() override;      // NEW: pre-Boris half-kick
+    void start_of_step() override;
 
-    // PMI
     std::string heatfluxFilename;
-    // void droplet_evaporation_model(Particle::OnePart *);
     void droplet_evaporation_model(Particle::OnePart *ip,
                                         const double dt_half,
                                         const int icell);
     double set_mass = -1.0;
-    double set_temp = -1.0;    // EXPECTED IN KELVIN
+    double set_temp = -1.0;
     double set_radius = -1.0;
-    int force_override = 0;    // 0 = only set when current value <= 0, 1 = always
 
-    // HeatFluxData  heat_flux_data;
     void broadcastHeatFluxData(HeatFluxData& );
     HeatFluxParams interpHeatFluxAtPos(double r, double z, const HeatFluxData& data) const;
-    mutable std::unordered_map<int, HeatFluxParams> flux_cache;
     HeatFluxData readHeatFlux(const std::string& filePath);
     void initializeHeatFluxData();
     void evap_half(double dt_half);

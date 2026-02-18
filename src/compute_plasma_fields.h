@@ -33,6 +33,10 @@ struct PlasmaFileData{
   std::vector<std::vector<double>> parr_flow_r, parr_flow_t, parr_flow_z, parr_flow;
   std::vector<std::vector<double>> grad_temp_e_r, grad_temp_e_t, grad_temp_e_z;
   std::vector<std::vector<double>> grad_temp_i_r, grad_temp_i_t, grad_temp_i_z;
+  // Optional B-field stored inside plasma.h5 (br, bt, bz datasets).
+  // When present these override the separate bfield.h5 for mag_arr.
+  bool has_bfield = false;
+  std::vector<std::vector<double>> br, bt, bz;
   // Optional multi-ion extension from plasma.h5
   std::vector<int> ion_spec_index;
   std::vector<int> ion_charge_state_z;

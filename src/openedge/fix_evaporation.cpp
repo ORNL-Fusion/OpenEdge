@@ -30,6 +30,9 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include <stdexcept>
 
 
+enum HeatfluxMode { HF_NONE=0, HF_FILE, HF_CONST };
+HeatfluxMode heatflux_mode = HF_NONE;
+
 using namespace SPARTA_NS;
 
 /* ---------------------------------------------------------------------- */
@@ -43,54 +46,52 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
   // required positional
   nevery = atoi(arg[2]);
   imix   = particle->find_mixture(arg[3]);
-  if (imix < 0) error->all(FLERR,"Fix evap: unknown mixture ID");
+  if (imix < 0) error->all(FLERR,"Fix evaporation: unknown mixture ID");
 
   // defaults for optionals
-  set_mass   = NAN;      // or a physical default
+  set_mass   = NAN;
   set_temp   = NAN;
   set_radius = NAN;
-  heatflux_mode = HF_NONE;   // your enum
+  heatflux_mode = HF_NONE;
   Qs_const   = 0.0;
 
   // parse optional keywords starting at arg[4]
   int i = 4;
   while (i < narg) {
     if (strcmp(arg[i],"mass") == 0) {
-      if (i+1 >= narg) error->all(FLERR,"Fix evap: missing value for 'mass'");
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'mass'");
       set_mass = atof(arg[i+1]); i += 2;
 
     } else if (strcmp(arg[i],"temp") == 0) {
-      if (i+1 >= narg) error->all(FLERR,"Fix evap: missing value for 'temp'");
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'temp'");
       set_temp = atof(arg[i+1]); i += 2;
 
     } else if (strcmp(arg[i],"radius") == 0) {
-      if (i+1 >= narg) error->all(FLERR,"Fix evap: missing value for 'radius'");
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'radius'");
       set_radius = atof(arg[i+1]); i += 2;
 
     } else if (strcmp(arg[i],"heatflux/file") == 0) {
-      if (i+1 >= narg) error->all(FLERR,"Fix evap: missing value for 'heatflux/file'");
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'heatflux/file'");
       heatflux_mode = HF_FILE;
       heatfluxFilename = std::string(arg[i+1]);
       i += 2;
 
     } else if (strcmp(arg[i],"heatflux/constant") == 0) {
-      if (i+1 >= narg) error->all(FLERR,"Fix evap: missing value for 'heatflux/constant'");
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'heatflux/constant'");
       heatflux_mode = HF_CONST;
       Qs_const = atof(arg[i+1]);
       i += 2;
 
     } else {
       char msg[256];
-      snprintf(msg,sizeof(msg),"Fix evap: unknown keyword '%s'",arg[i]);
+      snprintf(msg,sizeof(msg),"Fix evaporation: unknown keyword '%s'",arg[i]);
       error->all(FLERR,msg);
     }
   }
 
   // Optional: validate required optionals depending on mode
   if (heatflux_mode == HF_FILE && heatfluxFilename.empty())
-    error->all(FLERR,"Fix evap: empty filename for heatflux/file");
-
-  // per-grid memory initialization
+    error->all(FLERR,"Fix evaporation: empty filename for heatflux/file");
 
   size_per_grid_cols = 3;
   maxgrid = 0;
@@ -120,12 +121,15 @@ int FixEvap::setmask()
 /* ---------------------------------------------------------------------- */
 
 void FixEvap::init() {
+  if (domain->dimension != 2)
+    error->all(FLERR,"Fix evaporation: only 2D geometry supported");
+
   if (heatflux_mode == HF_FILE) {
     if (heatfluxFilename.empty())
-      error->all(FLERR,"Fix evap: heatflux/file given but filename is empty");
+      error->all(FLERR,"Fix evaporation: heatflux/file given but filename is empty");
     initializeHeatFluxData();               // reads + broadcasts
   } else if (heatflux_mode != HF_CONST) {
-    error->all(FLERR,"Fix evap: must provide heatflux/constant <W/m^2> or heatflux/file <h5>");
+    error->all(FLERR,"Fix evaporation: must provide heatflux/constant <W/m^2> or heatflux/file <h5>");
   }
 
     if (grid->nlocal > maxgrid) {
@@ -148,6 +152,15 @@ void FixEvap::init() {
 void FixEvap::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
+  // Zero per-cell accumulators once per full step, before the first half-kick.
+  // end_of_step calls evap_half again; it must NOT re-zero the arrays there.
+  if (grid->nlocal > maxgrid) {
+    maxgrid = grid->maxlocal;
+    memory->destroy(array_grid);
+    memory->create(array_grid, maxgrid, size_per_grid_cols, "array_grid");
+  }
+  if (grid->nlocal)
+    memset(&array_grid[0][0], 0, grid->nlocal * size_per_grid_cols * sizeof(double));
   evap_half(0.5 * update->dt);
 }
 
@@ -172,53 +185,48 @@ double FixEvap::memory_usage() {
 void FixEvap::evap_half(double dt_half)
 {
   if ((update->ntimestep % nevery) != 0) return;
-  if (!particle->sorted) particle->sort();
 
-  // (Re)alloc per-grid arrays if needed
+  // (Re)alloc per-grid arrays if the grid grew since start_of_step.
+  // Zeroing is done once per step in start_of_step() so both half-kicks accumulate.
   if (grid->nlocal > maxgrid) {
     maxgrid = grid->maxlocal;
     memory->destroy(array_grid);
     memory->create(array_grid, maxgrid, size_per_grid_cols, "array_grid");
-  }
-  if (grid->nlocal) {
-    memset(&array_grid[0][0], 0, grid->nlocal * size_per_grid_cols * sizeof(double));
+    // Grid grew mid-step: zero the newly allocated block so no garbage leaks in.
+    if (grid->nlocal)
+      memset(&array_grid[0][0], 0, grid->nlocal * size_per_grid_cols * sizeof(double));
   }
 
   Particle::OnePart *parts = particle->particles;
-  int *next = particle->next;
-  Grid::ChildInfo *cinfo = grid->cinfo;
-  const int nglocal = grid->nlocal;
+  const int nlocal = particle->nlocal;
 
   int *s2g = particle->mixture[imix]->species2group;
   int ndeleted = 0;
 
-  for (int icell = 0; icell < nglocal; icell++) {
-    if (cinfo[icell].count == 0) continue;
-    int ip = cinfo[icell].first;
-    while (ip >= 0) {
-      const int is  = parts[ip].ispecies;
-      const int ig  = s2g[is];
-      if (ig < 0) { ip = next[ip]; continue; }
+  // Iterate particles directly using each particle's icell. This avoids
+  // forcing particle->sort() every half-step, which is expensive for long runs.
+  for (int ip = 0; ip < nlocal; ip++) {
+    const int is  = parts[ip].ispecies;
+    const int ig  = s2g[is];
+    if (ig < 0) continue;
 
-      // one-time seeding
-      if (set_mass   > 0.0 && parts[ip].mass   <= 0.0) parts[ip].mass   = set_mass;
-      if (set_radius > 0.0 && parts[ip].radius <= 0.0) parts[ip].radius = set_radius;
-      if (set_temp   > 0.0 && parts[ip].temp   <= 0.0) parts[ip].temp   = set_temp;
+    // one-time seeding
+    if (set_mass   > 0.0 && parts[ip].mass   <= 0.0) parts[ip].mass   = set_mass;
+    if (set_radius > 0.0 && parts[ip].radius <= 0.0) parts[ip].radius = set_radius;
+    if (set_temp   > 0.0 && parts[ip].temp   <= 0.0) parts[ip].temp   = set_temp;
 
-      droplet_evaporation_model(&parts[ip], dt_half, icell);
+    const int icell = parts[ip].icell;
+    droplet_evaporation_model(&parts[ip], dt_half, icell);
 
-      // Remove droplet after 90% mass loss relative to its initial reference mass.
-      const double m0_ref = (set_mass > 0.0) ? set_mass : particle->species[is].mass;
-      const double m_cut  = 0.1 * m0_ref;
-      if (parts[ip].mass > 0.0 && m0_ref > 0.0 && parts[ip].mass <= m_cut) {
-        parts[ip].mass = 0.0;
-        parts[ip].radius = 0.0;
-        parts[ip].temp = 0.0;
-        parts[ip].icell = -1;   // particle->compress_rebalance() deletes marked particles
-        ndeleted++;
-      }
-
-      ip = next[ip];
+    // Remove droplet after 90% mass loss relative to its initial reference mass.
+    const double m0_ref = (set_mass > 0.0) ? set_mass : particle->species[is].mass;
+    const double m_cut  = 0.1 * m0_ref;
+    if (parts[ip].mass > 0.0 && m0_ref > 0.0 && parts[ip].mass <= m_cut) {
+      parts[ip].mass = 0.0;
+      parts[ip].radius = 0.0;
+      parts[ip].temp = 0.0;
+      parts[ip].icell = -1;   // particle->compress_rebalance() deletes marked particles
+      ndeleted++;
     }
   }
 
@@ -266,7 +274,7 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
     Qs = hp.q_mag;
     if (!std::isfinite(Qs) || Qs < 0.0) Qs = 0.0;
   } else {
-    error->all(FLERR,"Fix evap: heatflux mode not set properly");
+    error->all(FLERR,"Fix evaporation: heatflux mode not set properly");
   }
 
   if (Qs <= 0.0) 
@@ -290,7 +298,9 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
   // --- dR/dt and dT/dt (mirror Python) ---
   const double dRdt = -AM * Gevap_atoms / Rho;                        // m/s
   const double HF   = Qs - Gevap_atoms * (DHm / AN);                  // W/m^2 (DHm/AN = J/atom)
-  const double dTdt = (3.0 / (Rho * Cp * radius)) * HF;               // K/s from sphere energy balance
+  // Spherical droplet energy balance: dT/dt = (3/(rho*Cp*r)) * (q'' - m''*L).
+  const double radius_safe = (radius > 1.0e-20) ? radius : 1.0e-20;
+  const double dTdt = (3.0 / (Rho * Cp * radius_safe)) * HF;          // K/s
 
   // --- advance state ---
   const double R_new = std::max(0.0, radius + dRdt * DT);
@@ -298,13 +308,11 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
   // mass derived from radius (no fnum anywhere)
   const double mass_new = (R_new > 0.0) ? (Rho * (4.0/3.0) * M_PI * R_new*R_new*R_new) : 0.0;
 
-  // --- diagnostics: N_emit this step (atoms), for droplet surface area only ---
-  const double Adrop = 4.0 * M_PI * std::max(R_new, 0.0) * std::max(R_new, 0.0);  // m^2
-  const double N_emit_diag = Gevap_atoms * Adrop * DT;  // atoms emitted this step (no fnum)
-
   // --- guards ---
-  if (T_new < 0.0 || R_new < 0.0 || mass_new < 0.0)
-    error->all(FLERR,"Fix evap: particle temperature dropped below 0 K");
+  // R_new and mass_new are guarded by std::max(0,.) above so can't go negative.
+  // Only T_new can genuinely go negative (excessive cooling).
+  if (T_new < 0.0)
+    error->all(FLERR,"Fix evaporation: particle temperature dropped below 0 K");
 
   // --- write back ---
   ip->radius = R_new;
@@ -318,10 +326,14 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
     particle->species[ip->ispecies].mass = mass_new;
   }
 
+  // Per-cell accumulators: mass lost (kg), atoms lost, heat absorbed (J).
+  // Uses += so multiple droplets per cell and both half-kicks accumulate correctly.
   if (icell >= 0 && icell < grid->nlocal && array_grid) {
-    array_grid[icell][0] += N_emit_diag;
-    array_grid[icell][1] += 1.0;   // particle sample count in this cell
-    array_grid[icell][2] += Qs;    // sum(Qs), divide by col2 for mean if needed
+    const double dm = Rho * (4.0/3.0) * M_PI *
+                      (radius*radius*radius - R_new*R_new*R_new);  // kg, >= 0
+    array_grid[icell][0] += dm;                                    // kg
+    array_grid[icell][1] += dm / AM;                               // atoms
+    array_grid[icell][2] += Qs * 4.0*M_PI * R_new*R_new * DT;    // J
   }
 
 }
@@ -368,7 +380,7 @@ HeatFluxData FixEvap::readHeatFlux(const std::string& filePath) {
             ds.read(raw.data(), H5::PredType::NATIVE_DOUBLE);
         };
 
-        // Utility to convert flat raw -> vector<vector>
+        // Utility to convert flat raw -> vector<vector> with shape [nz][nr]
         auto to2D = [&](const std::vector<double>& raw, size_t nz, size_t nr) {
             std::vector<std::vector<double>> grid(nz, std::vector<double>(nr));
             for (size_t iz = 0; iz < nz; ++iz) {
@@ -401,8 +413,18 @@ HeatFluxData FixEvap::readHeatFlux(const std::string& filePath) {
             const size_t nr = static_cast<size_t>(rdims[1]);
             data.r.resize(nr);
             data.z.resize(nz);
-            for (size_t ir = 0; ir < nr; ++ir) data.r[ir] = rraw[ir];          // first row
-            for (size_t iz = 0; iz < nz; ++iz) data.z[iz] = zraw[iz * nr];     // first col
+            // For 2D coordinate datasets, collapse to separable 1D axes by averaging.
+            // This matches SPARTA's rectilinear bilinear interpolation assumptions.
+            for (size_t ir = 0; ir < nr; ++ir) {
+                double acc = 0.0;
+                for (size_t iz = 0; iz < nz; ++iz) acc += rraw[iz * nr + ir];
+                data.r[ir] = acc / static_cast<double>(nz);
+            }
+            for (size_t iz = 0; iz < nz; ++iz) {
+                double acc = 0.0;
+                for (size_t ir = 0; ir < nr; ++ir) acc += zraw[iz * nr + ir];
+                data.z[iz] = acc / static_cast<double>(nr);
+            }
         } else {
             throw std::runtime_error(
                 "Heatflux grid coordinates not found. Expected either "
@@ -420,12 +442,24 @@ HeatFluxData FixEvap::readHeatFlux(const std::string& filePath) {
             std::vector<double> raw;
             hsize_t dims[2] = {0, 0};
             read2DRaw(name, raw, dims);
-            if (dims[0] != nz || dims[1] != nr) {
-                throw std::runtime_error("Dataset '" + name + "' shape mismatch: expected " +
-                                         std::to_string(nz) + " x " + std::to_string(nr) +
-                                         ", got " + std::to_string(dims[0]) + " x " + std::to_string(dims[1]));
+            if (dims[0] == nz && dims[1] == nr) {
+                return to2D(raw, nz, nr);
             }
-            return to2D(raw, nz, nr);
+            if (dims[0] == nr && dims[1] == nz) {
+                // Accept transposed storage and convert once at read time.
+                std::vector<std::vector<double>> transposed(nz, std::vector<double>(nr, 0.0));
+                for (size_t ir = 0; ir < nr; ++ir) {
+                    for (size_t iz = 0; iz < nz; ++iz) {
+                        transposed[iz][ir] = raw[ir * nz + iz];
+                    }
+                }
+                return transposed;
+            }
+            throw std::runtime_error("Dataset '" + name + "' shape mismatch: expected " +
+                                     std::to_string(nz) + " x " + std::to_string(nr) +
+                                     " (or transposed " + std::to_string(nr) + " x " +
+                                     std::to_string(nz) + "), got " +
+                                     std::to_string(dims[0]) + " x " + std::to_string(dims[1]));
         };
 
         if (exists("fields/q_mag")) {
@@ -567,41 +601,19 @@ HeatFluxParams FixEvap::interpHeatFluxAtPos(double r, double z,
   const double w12 = (1.0 - t) * u;
   const double w22 = t * u;
 
-  auto sample_q = [&](int iz, int ir, bool transposed) -> double {
-    if (!transposed) {
-      if (iz < 0 || iz >= static_cast<int>(data.q_mag.size())) return 0.0;
-      if (ir < 0 || ir >= static_cast<int>(data.q_mag[iz].size())) return 0.0;
-      return safe_val(data.q_mag[iz][ir]);
-    }
-    // Fallback for files where q_mag may be stored as [nr][nz].
-    if (ir < 0 || ir >= static_cast<int>(data.q_mag.size())) return 0.0;
-    if (iz < 0 || iz >= static_cast<int>(data.q_mag[ir].size())) return 0.0;
-    return safe_val(data.q_mag[ir][iz]);
-  };
+  if (iz1 < 0 || iz2 >= static_cast<int>(data.q_mag.size())) return res;
+  if (ir1 < 0 || ir2 >= static_cast<int>(data.q_mag[iz1].size())) return res;
+  if (ir2 >= static_cast<int>(data.q_mag[iz2].size())) return res;
 
-  const double q11 = sample_q(iz1, ir1, false);
-  const double q21 = sample_q(iz1, ir2, false);
-  const double q12 = sample_q(iz2, ir1, false);
-  const double q22 = sample_q(iz2, ir2, false);
+  const double q11 = safe_val(data.q_mag[iz1][ir1]);
+  const double q21 = safe_val(data.q_mag[iz1][ir2]);
+  const double q12 = safe_val(data.q_mag[iz2][ir1]);
+  const double q22 = safe_val(data.q_mag[iz2][ir2]);
 
   res.r = r_clamp;
   res.z = z_clamp;
-  double q_primary = w11 * q11 + w21 * q21 + w12 * q12 + w22 * q22;
-  if (!std::isfinite(q_primary) || q_primary < 0.0) q_primary = 0.0;
-
-  if (q_primary > 0.0) {
-    res.q_mag = q_primary;
-    return res;
-  }
-
-  // If primary sampling is zero, try transposed indexing path.
-  const double tq11 = sample_q(iz1, ir1, true);
-  const double tq21 = sample_q(iz1, ir2, true);
-  const double tq12 = sample_q(iz2, ir1, true);
-  const double tq22 = sample_q(iz2, ir2, true);
-  double q_transposed = w11 * tq11 + w21 * tq21 + w12 * tq12 + w22 * tq22;
-  if (!std::isfinite(q_transposed) || q_transposed < 0.0) q_transposed = 0.0;
-
-  res.q_mag = q_transposed;
+  double q = w11 * q11 + w21 * q21 + w12 * q12 + w22 * q22;
+  if (!std::isfinite(q) || q < 0.0) q = 0.0;
+  res.q_mag = q;
   return res;
 }
