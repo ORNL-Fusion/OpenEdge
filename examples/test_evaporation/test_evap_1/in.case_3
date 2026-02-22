@@ -1,4 +1,3 @@
-
 seed                12345
 dimension           2
 boundary            r r p
@@ -9,29 +8,25 @@ create_grid         100 100 1
 balance_grid        rcb  cell
 
 ############################################------species in the plasma (current and future)-------#####################################
-species droplet.species Ligament Li Li+ Li2+ Li3+
+species droplet.species drop_3
 
-
-mixture             LigamentSource  Ligament        frac 1.0 nrho 1
+mixture             DropletSource  drop_3      frac 1.0 nrho 1
 variable pmass  particle mass
 
-#Load initial conditions
+# Load initial conditions
 read_particles source.1 0
 
 variable dt   equal 1e-05
-variable time equal 10.5
+variable time equal 3.5
 variable N equal floor(${time}/${dt})
-variable N1 equal floor($N/100)
+variable N1 equal 50
 
-variable min_dt equal 0.05
-variable nevery equal 10.5 #${min_dt}/${dt}
 variable temp equal 773.15 # Kelvin
-variable rd equal 0.01 # m
-variable md equal 2.236813969355933e-03
-
+variable rd equal 3.5e-3 # m
+variable md equal 9.590339893613564e-05
 
 # compute evap and emit if necessary
-fix 22 evaporation 1 LigamentSource mass ${md} radius ${rd} temp ${temp} heatflux/constant 50e6
+fix 22 evaporation 1 DropletSource mass ${md} radius ${rd} temp ${temp} heatflux/constant 50e6
 
 # viscous/gravity
 variable te grid "10"
@@ -41,15 +36,15 @@ variable vp grid "0"
 variable Br grid "0"
 variable Bt grid "0"
 variable Bz grid "0"
-#fix BC viscous 1 2.0 1 plasma te ti ni vp bfield Br Bt Bz gravity 0 0 0.0 #9.8
-
 
 # save data
 dump 10 particle all ${N1} case.3 id type x y z vx vy vz v_pmass temp radius
 
-
 timestep ${dt}
 stats ${N1}
 stats_style step cpu np
+
+variable npart equal np
+fix 31 halt 1 v_npart <= 0
 
 run $N

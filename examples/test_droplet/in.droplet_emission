@@ -4,30 +4,34 @@
 variable mode index 1
 
 variable dt    equal 1e-05
-variable time  equal 5
+variable time  equal 10
 variable N     equal floor(${time}/${dt})
-variable Ndump equal floor($N/10000)
+variable Ndump equal floor($N/1000)
 
 variable temp_droplet equal 773.15
-variable temp_emit    equal 1.e18
-variable nemit        equal 174 #85
+variable temp_emit    equal 1e19
+variable nemit        equal 1000
 variable droplet_inner index InstabilityInner
 variable droplet_outer index InstabilityOuter
 variable md   equal 3.495021827118645e-05
 variable Rho  equal 534.0
 variable rd   equal (3.0*${md}/(4.0*PI*${Rho}))^(1.0/3.0)
 
+variable temp_emit    equal 1e19
+variable nemit        equal 1000
 seed                12345
+global              temp ${temp_emit}
+
 timestep            ${dt}
 dimension           2
 boundary            r r p
 global              gridcut 0.0 comm/sort no
-global              temp ${temp_emit}
+
 create_box          2.0 6.0 -4.0 3.8 -0.05 0.05
 create_grid         500 500 1
 balance_grid        rcb cell
 
-global fnum 0.0000000001
+global fnum 0.0000001
 
 species             droplet.species I O
 mixture             LigamentSourceInner I frac 1.0 nrho 1
@@ -35,32 +39,24 @@ mixture             LigamentSourceOuter O frac 1.0 nrho 1
 variable            pmass particle mass
 
 read_surf           wall.surf group surfID particle check
-
-# surf_collide vanish has allowreact=0 so it never calls surf_react and
-# the species mixture may not map OpenEdge droplet species → counts stay 0.
-# Fix: use diffuse (allowreact=1) so surf_react is invoked before reflection.
-# surf_react global 1.0 0.0 → prob_destroy=1, prob_create=0: every particle
-# is absorbed by the reaction before diffuse can reflect it → same behaviour
-# as vanish but the reaction IS tallied by compute surf.
-surf_collide        wallColModel  vanish #diffuse ${temp_droplet} 1.0
-surf_react          wallReact global .5 .5
-surf_modify         surfID collide wallColModel react none #wallReact
+surf_collide scx vanish log yes file collide_vanish_hits.csv
+surf_modify  surfID collide scx react none
 
 group               divertor_outer surf id <> 139 150
 group               divertor_inner surf id <> 111 115
 
 # thermal emission from global temp (no magVelocity/incidentAngle → cosine-law Maxwellian)
-fix                 droplet_emission_outer emit/surf LigamentSourceOuter divertor_outer perspecies no
-fix                 droplet_emission_inner emit/surf LigamentSourceInner divertor_inner perspecies no
+fix                 droplet_emission_outer emit/surf LigamentSourceOuter divertor_outer n ${nemit} perspecies no
+fix                 droplet_emission_inner emit/surf LigamentSourceInner divertor_inner n ${nemit} perspecies no
 
-
-
-
-#read_surf           core.surf invert group surfID2 particle check
-#surf_modify         surfID2 collide wallColModel react wallReact
+read_surf           core.surf invert group surfID2 particle check
+surf_modify         surfID2 collide scx react none
 
 # particle trajectory dump
-dump dtraj particle all ${Ndump} case.drag.mode.${mode} id type x y z vx vy vz v_pmass temp radius
+dump dtraj1 particle LigamentSourceOuter ${Ndump} case.outer id type x y z vx vy vz v_pmass temp radius
+dump dtraj2 particle LigamentSourceInner ${Ndump} case.inner id type x y z vx vy vz v_pmass temp radius
+
+dump dtraj23 particle all 1 case.all id type x y z vx vy vz
 
 # plasma fields
 compute cnear plasma/fields all file ../test_evaporation/input/plasma.h5 &
@@ -113,9 +109,9 @@ fix fcharge droplet/charge 1 plasma &
     ion_mass_amu 2.0 thermionic no
 
 # plasma electric field
-#fix    eS efield/grid c_cnear[9] c_cnear[10] c_cnear[11]
-#global efield grid eS 0
-#global boris_subcycles 5
+fix    eS efield/grid c_cnear[9] c_cnear[10] c_cnear[11]
+global efield grid eS 0
+global boris_subcycles 5
 
 # ---- Surf hit count --------------------------------------------------------
 # Use explicit mixture IDs (LigamentSourceInner / LigamentSourceOuter) rather
@@ -126,11 +122,20 @@ fix fcharge droplet/charge 1 plasma &
 #   → values are fractional; to recover integer hit totals:
 #        total_hits = last_block_value × last_block_timestep
 #   → post-processing (matrix.py): reads the last block and multiplies by T.
-compute inner_hits surf all LigamentSourceInner n
-compute outer_hits surf all LigamentSourceOuter n
-fix     f_inner ave/surf all 1 10 ${Ndump} c_inner_hits[*] ave running
-fix     f_outer ave/surf all 1 10 ${Ndump} c_outer_hits[*] ave running
-dump    d_all surf all ${Ndump} tmp.all.surf id f_f_inner[*] f_f_outer[*]
+
+# ---- Robust per-surface hit counts (works for sticking reactions) ---------
+# c_hit_* = per-surf counts each step; ave/surf running outputs cumulative mean.
+# Total hits at final timestep T are recovered as: value(T) * T.
+compute c_hit_I surf all LigamentSourceInner n
+compute c_hit_O surf all LigamentSourceOuter n
+# sample every step (Nfreq=1), keep cumulative running mean
+fix f_hit_I ave/surf all 1 1 1 c_c_hit_I[1] ave running
+fix f_hit_O ave/surf all 1 1 1 c_c_hit_O[1] ave running
+dump d_hit surf all ${Ndump} tmp.all.surf id f_f_hit_I f_f_hit_O
+
+
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -139,6 +144,9 @@ run 1
 
 unfix droplet_emission_outer
 unfix droplet_emission_inner
+#undump dtraj1
+#undump dtraj2
+undump dtraj23
 
 variable npart equal np
 variable Nd equal ${Ndump}*2
