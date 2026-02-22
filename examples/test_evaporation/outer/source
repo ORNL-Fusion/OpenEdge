@@ -1,0 +1,19 @@
+ITEM: TIMESTEP
+0
+ITEM: NUMBER OF ATOMS
+0
+ITEM: BOX BOUNDS rr rr pp
+2 6
+-4 3.8
+-0.05 0.05
+ITEM: ATOMS id type x y z vx vy vz v_pmass temp radius 
+ITEM: TIMESTEP
+1
+ITEM: NUMBER OF ATOMS
+1
+ITEM: BOX BOUNDS rr rr pp
+2 6
+-4 3.8
+-0.05 0.05
+ITEM: ATOMS id type x y z vx vy vz 
+196150711 1 2.58 -2.8 0 8.15245 0.418462 1.72875
