@@ -1,0 +1,70 @@
+<HTML>
+<HEAD><TITLE>compute surf/ead command</TITLE></HEAD>
+<BODY>
+
+<H3>compute surf/ead command</H3>
+
+<P><B>Syntax:</B></P>
+<PRE>
+compute ID surf/ead group-ID mix-ID Emax NbE Amax NbA [quantities q1 q2 ...]
+</PRE>
+
+<UL>
+<LI><B>group-ID</B> = surface group to tally on</LI>
+<LI><B>mix-ID</B> = mixture used to filter incident species</LI>
+<LI><B>Emax</B> = maximum incident energy in eV</LI>
+<LI><B>NbE</B> = number of energy bins</LI>
+<LI><B>Amax</B> = maximum incidence angle in degrees (from surface normal)</LI>
+<LI><B>NbA</B> = number of angle bins</LI>
+<LI><B>quantities</B> = one or more of <I>sum_weight</I>, <I>sum_particles</I>, <I>hist</I></LI>
+</UL>
+
+<P><B>Examples:</B></P>
+<PRE>
+compute cEAD surf/ead exposedTarget_0 TantalumSource 300 150 90 90
+compute cEAD surf/ead exposedTarget_0 TantalumSource 300 150 90 90 quantities hist
+
+compute cEAD surf/ead exposedTarget_0 TantalumSource 300 150 90 90 &
+        quantities sum_weight sum_particles hist
+fix     fEAD ave/surf exposedTarget_0 1 100 100 c_cEAD[*] ave one
+dump    dEAD surf exposedTarget_0 100 output/ead.surf.0 id f_fEAD[*]
+</PRE>
+
+<P><B>Description:</B></P>
+<P>
+This OpenEdge compute tallies a per-surface energy-angle distribution (EAD)
+for incident particles on explicit surface elements. Only surfaces in
+<I>group-ID</I> and incident species in <I>mix-ID</I> are included.
+</P>
+<P>
+Angles are measured from the outward surface normal and binned from
+0 to <I>Amax</I> degrees. Energies are binned from 0 to <I>Emax</I> eV.
+For <I>units si</I>, kinetic energy is computed in Joules and converted
+internally to eV before binning.
+</P>
+
+<P><B>Output info:</B></P>
+<P>
+This compute produces a per-surf array. Column layout depends on
+the selected quantities:
+</P>
+<UL>
+<LI><I>sum_weight</I>: one column (weighted incident strike count)</LI>
+<LI><I>sum_particles</I>: one column (unweighted incident strike count)</LI>
+<LI><I>hist</I>: <I>NbA*NbE</I> columns, flattened with
+<I>ibin = ia*NbE + ie</I></LI>
+</UL>
+<P>
+If quantities are omitted, default order is:
+<I>sum_weight, sum_particles, hist</I>.
+</P>
+
+<P><B>Related commands:</B>
+<A HREF="compute_surf.html">compute surf</A>,
+<A HREF="fix_ave_surf.html">fix ave/surf</A>,
+<A HREF="dump.html">dump surf</A>
+</P>
+
+</BODY>
+</HTML>
+

@@ -1,4 +1,12 @@
 
+/* ----------------------------------------------------------------------
+    OpenEdge: ADAS ionization/recombination chemistry fix
+    Contributors:
+      - Abdourahmane (Abdou) Diaw (ORNL, diawa@ornl.gov, 2025)
+      - 42d
+    https://github.com/ORNL-Fusion/OpenEdge
+------------------------------------------------------------------------- */
+
 #ifdef FIX_CLASS
 
 FixStyle(chem/adas, FixChemAdas)
@@ -29,6 +37,7 @@ struct GridSrc {
   int   col      = 0;
   char *cid      = nullptr;
   double **arr_cache = nullptr;
+  double  *vec_cache = nullptr;
   int      src_index = -1;
   int      cache_ts  = -1;
 };

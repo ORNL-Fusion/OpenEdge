@@ -1,10 +1,9 @@
 /* ----------------------------------------------------------------------
-    OpenEdge:
-    Impurity Transport in Modeling of SOL and Edge Physics:
-    This code built on top of SPARTA, a parallel DSMC code.
-    Abdourahmane Diaw,  diawa@ornl.gov (2023)
-    Oak Ridge National Laboratory
-https://github.com/ORNL-Fusion/OpenEdge
+    OpenEdge: grid electric field fix
+    Contributors:
+      - Abdourahmane (Abdou) Diaw (ORNL, diawa@ornl.gov, 2025)
+      - 42d
+    https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -33,6 +32,8 @@ class FixEfieldGrid : public Fix {
   char *axstr,*aystr,*azstr;
   int axvar,ayvar,azvar;
   int maxgrid;
+  int nevery_field;
+  bigint last_compute_timestep;
 
 // --- New: allow sourcing from a compute column c_ID[idx] ---
   enum SrcKind { SRC_NONE, SRC_VAR, SRC_COMP };

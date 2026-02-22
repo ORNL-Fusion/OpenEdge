@@ -1,10 +1,9 @@
 /* ----------------------------------------------------------------------
-    OpenEdge:
-    Impurity Transport in Modeling of SOL and Edge Physics:
-    This code built on top of SPARTA, a parallel DSMC code.
-    Abdourahmane Diaw,  diawa@ornl.gov (2023)
-    Oak Ridge National Laboratory
-https://github.com/ORNL-Fusion/OpenEdge
+    OpenEdge: ADAS ionization/recombination chemistry fix
+    Contributors:
+      - Abdourahmane (Abdou) Diaw (ORNL, diawa@ornl.gov, 2025)
+      - 42d
+    https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
 #include "stdlib.h"
@@ -328,12 +327,13 @@ auto bind_compute = [&](GridSrc &S, const char *label){
       error->all(FLERR, msg);
     };
 if (c->size_per_grid_cols == 0) {
-  char msg[160];
-  snprintf(msg, sizeof(msg),
-           "fix chem/adas: compute for %s has no per-grid array", label);
-  error->all(FLERR, msg);
-}
-if (S.col < 1 || S.col > c->size_per_grid_cols) {
+  if (S.col != 1) {
+    char msg[160];
+    snprintf(msg, sizeof(msg),
+             "fix chem/adas: compute column for %s must be 1 for vector source", label);
+    error->all(FLERR, msg);
+  }
+} else if (S.col < 1 || S.col > c->size_per_grid_cols) {
   char msg[160];
   snprintf(msg, sizeof(msg),
            "fix chem/adas: compute column for %s out of range", label);
@@ -1070,31 +1070,28 @@ void FixChemAdas::broadcastRateData(RateData& rateData) {
 double FixChemAdas::read_cell(const GridSrc &S, int icell, int var_col)
 {
   if (S.kind == SRC_COMP) {
-    if (S.icompute < 0) return 0.0;
-    Compute *c = modify->compute[S.icompute];
-    if (!c) return 0.0;
-    if (c->size_per_grid_cols == 0) {
-      if (!c->vector_grid) return 0.0;
-      return c->vector_grid[icell];
+    if (S.src_index < 0) {
+      return S.vec_cache ? S.vec_cache[icell] : 0.0;
     }
-    if (!c->array_grid) return 0.0;
-    const int j = S.col - 1;
-    if (j < 0 || j >= c->size_per_grid_cols) return 0.0;
-    return c->array_grid[icell][j];
+    if (!S.arr_cache) return 0.0;
+    return S.arr_cache[icell][S.src_index];
   }
   // VAR path
   return array_grid ? array_grid[icell][var_col] : 0.0;
 }
 
 inline void FixChemAdas::refresh_compute_src(GridSrc &S) {
-  if (S.kind != SRC_COMP) return;                     // now visible
+  if (S.kind != SRC_COMP) return;
   if (S.cache_ts == update->ntimestep) return;
 
   Compute *c = modify->compute[S.icompute];
-  if (c->invoked_per_grid != update->ntimestep) c->compute_per_grid();
-  // Direct per-grid access is via c->array_grid / c->vector_grid.
-  // query_tally_grid() is for tally-based maps and can return no mapping here.
+  if (!(c->invoked_flag & INVOKED_PER_GRID)) {
+    c->compute_per_grid();
+    c->invoked_flag |= INVOKED_PER_GRID;
+  }
+
   S.arr_cache = c->array_grid;
-  S.src_index = S.col - 1;
+  S.vec_cache = c->vector_grid;
+  S.src_index = (c->size_per_grid_cols == 0) ? -1 : (S.col - 1);
   S.cache_ts  = update->ntimestep;
 }

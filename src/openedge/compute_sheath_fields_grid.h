@@ -1,5 +1,8 @@
 /* ----------------------------------------------------------------------
    OpenEdge: sheath electric field per grid cell from plasma + wall geometry
+   Contributors:
+     - Abdourahmane (Abdou) Diaw (ORNL, diawa@ornl.gov, 2025)
+     - 42d
 ------------------------------------------------------------------------- */
 
 #ifdef COMPUTE_CLASS
@@ -36,6 +39,8 @@ class ComputeSheathFieldsGrid : public Compute {
   double dmax;
   double mach_min;
   double mach_max;
+  double bdotn_min;
+  double bdotn_max;
   double gamma_see;
   double cur_A_m2;
   double mD_amu;
@@ -44,11 +49,13 @@ class ComputeSheathFieldsGrid : public Compute {
   int sheath_model;
 
   enum {
-    EX, EY, EZ, ESHEATH, MACH_PAR, MACH_N, ALPHA, ACTIVE, BDOTN, DIST, SURFID
+    EX, EY, EZ, ESHEATH, MACH_PAR, MACH_N, ALPHA, ACTIVE, BDOTN, DIST, SURFID,
+    LAMBDAD, RHOI, PHI_DS, PHI_CS
   };
   enum {
     MODEL_EIRENE = 0,
-    MODEL_BORODKINA = 1
+    MODEL_BORODKINA = 1,
+    MODEL_STANGEBY = 2
   };
 };
 

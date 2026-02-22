@@ -1,5 +1,8 @@
 /* ----------------------------------------------------------------------
    OpenEdge: sheath electric field per grid cell from plasma + wall geometry
+   Contributors:
+     - Abdourahmane (Abdou) Diaw (ORNL, diawa@ornl.gov, 2025)
+     - 42d
 ------------------------------------------------------------------------- */
 
 #include "compute_sheath_fields_grid.h"
@@ -42,6 +45,8 @@ ComputeSheathFieldsGrid::ComputeSheathFieldsGrid(SPARTA *sparta, int narg, char 
   dmax = 0.02;
   mach_min = 0.8;
   mach_max = 1.2;
+  bdotn_min = -1.0;
+  bdotn_max = 1.0;
   gamma_see = 0.0;
   cur_A_m2 = 0.0;
   mD_amu = 2.01410177811;
@@ -55,6 +60,8 @@ ComputeSheathFieldsGrid::ComputeSheathFieldsGrid(SPARTA *sparta, int narg, char 
     if (strcmp(arg[iarg],"dmax") == 0) dmax = input->numeric(FLERR,arg[iarg+1]);
     else if (strcmp(arg[iarg],"mach_min") == 0) mach_min = input->numeric(FLERR,arg[iarg+1]);
     else if (strcmp(arg[iarg],"mach_max") == 0) mach_max = input->numeric(FLERR,arg[iarg+1]);
+    else if (strcmp(arg[iarg],"bdotn_min") == 0) bdotn_min = input->numeric(FLERR,arg[iarg+1]);
+    else if (strcmp(arg[iarg],"bdotn_max") == 0) bdotn_max = input->numeric(FLERR,arg[iarg+1]);
     else if (strcmp(arg[iarg],"gamma_see") == 0) gamma_see = input->numeric(FLERR,arg[iarg+1]);
     else if (strcmp(arg[iarg],"cur_A_m2") == 0) cur_A_m2 = input->numeric(FLERR,arg[iarg+1]);
     else if (strcmp(arg[iarg],"mD_amu") == 0) mD_amu = input->numeric(FLERR,arg[iarg+1]);
@@ -63,7 +70,8 @@ ComputeSheathFieldsGrid::ComputeSheathFieldsGrid(SPARTA *sparta, int narg, char 
     else if (strcmp(arg[iarg],"model") == 0) {
       if (strcmp(arg[iarg+1],"eirene") == 0) sheath_model = MODEL_EIRENE;
       else if (strcmp(arg[iarg+1],"borodkina") == 0) sheath_model = MODEL_BORODKINA;
-      else error->all(FLERR,"compute sheath/fields/grid model must be eirene or borodkina");
+      else if (strcmp(arg[iarg+1],"stangeby") == 0) sheath_model = MODEL_STANGEBY;
+      else error->all(FLERR,"compute sheath/fields/grid model must be eirene, borodkina, or stangeby");
     }
     else error->all(FLERR,"Illegal compute sheath/fields/grid command");
     iarg += 2;
@@ -88,6 +96,10 @@ ComputeSheathFieldsGrid::ComputeSheathFieldsGrid(SPARTA *sparta, int narg, char 
     else if (strcmp(arg[iarg],"bdotn") == 0) value[iv] = BDOTN;
     else if (strcmp(arg[iarg],"dist") == 0) value[iv] = DIST;
     else if (strcmp(arg[iarg],"surfid") == 0) value[iv] = SURFID;
+    else if (strcmp(arg[iarg],"lambdad") == 0) value[iv] = LAMBDAD;
+    else if (strcmp(arg[iarg],"rhoi") == 0) value[iv] = RHOI;
+    else if (strcmp(arg[iarg],"phi_ds") == 0) value[iv] = PHI_DS;
+    else if (strcmp(arg[iarg],"phi_cs") == 0) value[iv] = PHI_CS;
     else error->all(FLERR,"Illegal compute sheath/fields/grid values entry");
     ++iv;
     ++iarg;
@@ -154,6 +166,7 @@ void ComputeSheathFieldsGrid::compute_per_grid()
     double ex = 0.0, ey = 0.0, ez = 0.0;
     double esh = 0.0, mpar = 0.0, mn = 0.0, alpha = 90.0, active = 0.0, bdotn = 0.0;
     double dist = BIGD, sid = -1.0;
+    double lambdad = 0.0, rhoi = 0.0, phi_ds = 0.0, phi_cs = 0.0;
 
     if ((cinfo[icell].mask & groupbit) && cells[icell].nsplit >= 1) {
       dist = garr[icell][IDIST];
@@ -197,9 +210,8 @@ void ComputeSheathFieldsGrid::compute_per_grid()
 
       const bool near = (dist <= dmax);
       const bool inband = (mpar >= mach_min && mpar <= mach_max);
-      // Do not gate by incoming u_par*(b.n); allow tangential/near-tangential
-      // wall regions (e.g., limiter) to activate based on near-wall + Mach band.
-      const bool active_sheath = near && inband && te > 0.0 && ne > 0.0;
+      const bool facing = (bdotn >= bdotn_min && bdotn <= bdotn_max);
+      const bool active_sheath = near && inband && facing && te > 0.0 && ne > 0.0;
 
       if (active_sheath) {
         if (has_multi) {
@@ -224,12 +236,26 @@ void ComputeSheathFieldsGrid::compute_per_grid()
           esh = sr.esheath_eV;
           const double scale = std::max(dist, 1.0e-5);
           emag = esh / scale;
-        } else {
+        } else if (sheath_model == MODEL_BORODKINA) {
           const double bmag = std::sqrt(bvec[0]*bvec[0] + bvec[1]*bvec[1] + bvec[2]*bvec[2]);
           const SheathModels::BorodkinaSheathResult br =
             SheathModels::borodkina_sheath_at_distance(dist, te, ti, ne, bmag, alpha, mD_amu, borodkina_pot_mult);
           esh = br.esheath_eV;
           emag = br.emag_vpm;
+          lambdad = br.lambdaD_m;
+          rhoi = br.rho_i_m;
+          phi_ds = br.phi_ds_eV;
+          phi_cs = br.phi_cs_eV;
+        } else {
+          const double bmag = std::sqrt(bvec[0]*bvec[0] + bvec[1]*bvec[1] + bvec[2]*bvec[2]);
+          const SheathModels::BorodkinaSheathResult sr =
+            SheathModels::stangeby_sheath_at_distance(dist, te, ti, ne, bmag, alpha, mD_amu, borodkina_pot_mult);
+          esh = sr.esheath_eV;
+          emag = sr.emag_vpm;
+          lambdad = sr.lambdaD_m;
+          rhoi = sr.rho_i_m;
+          phi_ds = sr.phi_ds_eV;
+          phi_cs = sr.phi_cs_eV;
         }
         emag = std::min(emag, emax_vpm);
         // E toward wall (opposite to n)
@@ -252,6 +278,10 @@ void ComputeSheathFieldsGrid::compute_per_grid()
       else if (value[0] == BDOTN) vector_grid[icell] = bdotn;
       else if (value[0] == DIST) vector_grid[icell] = dist;
       else if (value[0] == SURFID) vector_grid[icell] = sid;
+      else if (value[0] == LAMBDAD) vector_grid[icell] = lambdad;
+      else if (value[0] == RHOI) vector_grid[icell] = rhoi;
+      else if (value[0] == PHI_DS) vector_grid[icell] = phi_ds;
+      else if (value[0] == PHI_CS) vector_grid[icell] = phi_cs;
     } else {
       for (int j = 0; j < nvalue; ++j) {
         if (value[j] == EX) array_grid[icell][j] = ex;
@@ -265,6 +295,10 @@ void ComputeSheathFieldsGrid::compute_per_grid()
         else if (value[j] == BDOTN) array_grid[icell][j] = bdotn;
         else if (value[j] == DIST) array_grid[icell][j] = dist;
         else if (value[j] == SURFID) array_grid[icell][j] = sid;
+        else if (value[j] == LAMBDAD) array_grid[icell][j] = lambdad;
+        else if (value[j] == RHOI) array_grid[icell][j] = rhoi;
+        else if (value[j] == PHI_DS) array_grid[icell][j] = phi_ds;
+        else if (value[j] == PHI_CS) array_grid[icell][j] = phi_cs;
       }
     }
   }

@@ -1,10 +1,9 @@
 /* ----------------------------------------------------------------------
-    OpenEdge:
-    Impurity Transport in Modeling of SOL and Edge Physics:
-    This code built on top of SPARTA, a parallel DSMC code.
-    Abdourahmane Diaw,  diawa@ornl.gov (2023)
-    Oak Ridge National Laboratory
-https://github.com/ORNL-Fusion/OpenEdge
+    OpenEdge: grid electric field fix
+    Contributors:
+      - Abdourahmane (Abdou) Diaw (ORNL, diawa@ornl.gov, 2025)
+      - 42d
+    https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
 #include "stdlib.h"
@@ -17,6 +16,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "error.h"
 #include "modify.h"
 #include "compute.h"
+#include "update.h"
 
 #define INVOKED_PER_GRID 16
 
@@ -28,7 +28,16 @@ using namespace SPARTA_NS;
 FixEfieldGrid::FixEfieldGrid(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
-  if (narg != 5) error->all(FLERR,"Illegal fix efield/grid command");
+  if (narg != 5 && narg != 7) error->all(FLERR,"Illegal fix efield/grid command");
+
+  nevery_field = 1;
+  if (narg == 7) {
+    if (strcmp(arg[5],"every") != 0)
+      error->all(FLERR,"Illegal fix efield/grid command");
+    nevery_field = input->inumeric(FLERR,arg[6]);
+    if (nevery_field <= 0)
+      error->all(FLERR,"Illegal fix efield/grid command");
+  }
 
   int ncols = 0;
 
@@ -72,6 +81,8 @@ FixEfieldGrid::FixEfieldGrid(SPARTA *sparta, int narg, char **arg) :
   array_grid = NULL;
   axvar = ayvar = azvar = -1;  
   sx.kind = sy.kind = sz.kind = SRC_NONE;
+
+  last_compute_timestep = -1;
 
 }
 
@@ -151,20 +162,88 @@ void FixEfieldGrid::compute_field()
 {
   if (!grid->nlocal) return;
 
-  // reallocate array_grid if necessary
+  // Optional cadence for expensive sources, similar to fix ablate nevery.
+  if (nevery_field > 1 && last_compute_timestep >= 0 &&
+      (update->ntimestep % nevery_field)) return;
 
+  // Guard against duplicate invocation within same timestep.
+  if (last_compute_timestep == update->ntimestep) return;
+  last_compute_timestep = update->ntimestep;
+
+  // reallocate array_grid if necessary
   if (grid->nlocal > maxgrid) {
     maxgrid = grid->maxlocal;
     memory->destroy(array_grid);
     memory->create(array_grid,maxgrid,size_per_grid_cols,"array_grid");
   }
 
-  // evaluate each grid-style variable
-  // results are put into strided array_grid
-
   int stride = size_per_grid_cols;
   int icol = 0;
 
+  struct RouteEnt { const GridSrc *S; int outcol; };
+  RouteEnt ents[3];
+  int nent = 0;
+
+  auto push_ent = [&](const GridSrc &S) {
+    ents[nent].S = &S;
+    ents[nent].outcol = icol;
+    nent++;
+    icol++;
+  };
+
+  if (field_active[0]) push_ent(sx);
+  if (field_active[1]) push_ent(sy);
+  if (field_active[2]) push_ent(sz);
+
+  // Fast path: all active components from same compute -> single compute call,
+  // single cell loop writing all requested columns.
+  bool all_comp = (nent > 0);
+  int icompute = -1;
+  for (int i = 0; i < nent; i++) {
+    if (ents[i].S->kind != SRC_COMP) { all_comp = false; break; }
+    if (i == 0) icompute = ents[i].S->icompute;
+    else if (ents[i].S->icompute != icompute) { all_comp = false; break; }
+  }
+
+  if (all_comp) {
+    Compute *c = modify->compute[icompute];
+    if (!(c->invoked_flag & INVOKED_PER_GRID)) {
+      c->compute_per_grid();
+      c->invoked_flag |= INVOKED_PER_GRID;
+    }
+
+    const int ng = grid->nlocal;
+    if (c->size_per_grid_cols == 0) {
+      if (c->vector_grid == NULL)
+        error->all(FLERR,"fix efield/grid: compute has no per-grid vector");
+      for (int i = 0; i < nent; i++)
+        if (ents[i].S->col != 1)
+          error->all(FLERR,"fix efield/grid: column for vector source must be 1");
+
+      for (int icell = 0; icell < ng; ++icell) {
+        const double v = c->vector_grid[icell];
+        for (int i = 0; i < nent; i++)
+          array_grid[icell][ents[i].outcol] = v;
+      }
+    } else {
+      if (c->array_grid == NULL)
+        error->all(FLERR,"fix efield/grid: compute has no per-grid array");
+      int srccol[3];
+      for (int i = 0; i < nent; i++) {
+        if (ents[i].S->col < 1 || ents[i].S->col > c->size_per_grid_cols)
+          error->all(FLERR,"fix efield/grid: column out of range");
+        srccol[i] = ents[i].S->col - 1;
+      }
+
+      for (int icell = 0; icell < ng; ++icell)
+        for (int i = 0; i < nent; i++)
+          array_grid[icell][ents[i].outcol] = c->array_grid[icell][srccol[i]];
+    }
+    return;
+  }
+
+  // Generic path.
+  icol = 0;
   auto route = [&](const GridSrc &S){
     if (S.kind == SRC_VAR) {
       input->variable->compute_grid(S.varid,&array_grid[0][icol],stride,0);
@@ -177,6 +256,7 @@ void FixEfieldGrid::compute_field()
   if (field_active[1]) route(sy);
   if (field_active[2]) route(sz);
  }
+
 
  /* ---------------------------------------------------------------------- 
  Parse one token: either grid-var name, or "c_ID[idx]"
@@ -227,11 +307,12 @@ void FixEfieldGrid::parse_src_token(const char *tok, GridSrc &dst, const char *l
     error->all(FLERR,msg);
   }
   if (c->size_per_grid_cols == 0) {
-    char msg[160];
-    snprintf(msg,sizeof(msg),"fix efield/grid: compute for %s has no per-grid array",label);
-    error->all(FLERR,msg);
-  }
-  if (S.col < 1 || S.col > c->size_per_grid_cols) {
+    if (S.col != 1) {
+      char msg[160];
+      snprintf(msg,sizeof(msg),"fix efield/grid: column for %s must be 1 for vector source",label);
+      error->all(FLERR,msg);
+    }
+  } else if (S.col < 1 || S.col > c->size_per_grid_cols) {
     char msg[160];
     snprintf(msg,sizeof(msg),"fix efield/grid: column for %s out of range",label);
     error->all(FLERR,msg);

@@ -1,0 +1,90 @@
+"OpenEdge Documentation"_sd - "OpenEdge Commands"_sc :c
+
+:link(sd,Manual.html)
+:link(sc,Section_commands.html#comm)
+
+:line
+
+compute surf/ead command :h3
+
+[Syntax:]
+
+compute ID surf/ead group-ID mix-ID Emax NbE Amax NbA [quantities q1 q2 ...] :pre
+
+ID is documented in "compute"_compute.html command :ulb,l
+surf/ead = style name of this compute command :l
+group-ID = group ID for which surface elements to perform calculation on :l
+mix-ID = mixture ID for particles to perform calculation on :l
+Emax = maximum incident energy included in histogram (eV) :l
+NbE = number of energy bins :l
+Amax = maximum incidence angle included in histogram (degrees from surface normal) :l
+NbA = number of angle bins :l
+optional quantities list can be appended :l
+q = {sum_weight} or {sum_particles} or {hist} :l
+  sum_weight = weighted incident strike count per surface element
+  sum_particles = unweighted incident strike count per surface element
+  hist = flattened 2d energy-angle histogram per surface element :pre
+:ule
+
+[Examples:]
+
+compute cEAD surf/ead exposedTarget_0 TantalumSource 300 150 90 90
+compute cEAD surf/ead exposedTarget_0 TantalumSource 300 150 90 90 quantities hist :pre
+
+compute cEAD surf/ead exposedTarget_0 TantalumSource 300 150 90 90 &
+        quantities sum_weight sum_particles hist
+fix     fEAD ave/surf exposedTarget_0 1 100 100 c_cEAD\[*\] ave one
+dump    dEAD surf exposedTarget_0 100 output/ead.surf.0 id f_fEAD\[*\] :pre
+
+[Description:]
+
+Define a computation that tallies a per-surface energy-angle
+distribution (EAD) for incident particles on explicit surface
+elements.  Only surface elements in the specified {group-ID} are
+included.  Only incident particle species in the specified {mix-ID}
+are included.
+
+The incidence angle is measured from the outward surface normal.
+Angles are binned from 0 to {Amax} degrees.  Energies are binned from
+0 to {Emax} eV.
+
+For {units si}, kinetic energy is computed from particle mass and
+velocity in SI units (Joules) and converted internally to eV before
+binning.
+
+The results of this compute can be output by "dump surf"_dump.html or
+time-averaged by "fix ave/surf"_fix_ave_surf.html.
+
+:line
+
+[Output info:]
+
+This compute calculates a per-surf array.
+
+The number and meaning of columns depend on the {quantities} list:
+
+{sum_weight} : one column
+{sum_particles} : one column
+{hist} : {NbA*NbE} columns with flattened index
+{ibin = ia*NbE + ie}, where
+{ia = 0..NbA-1} and {ie = 0..NbE-1}. :pre
+
+If {quantities} is omitted, all three outputs are included in this
+order: {sum_weight}, {sum_particles}, then {hist}.
+
+Surface elements not in {group-ID} output zeros.
+
+:line
+
+[Restrictions:] none
+
+[Related commands:]
+
+"compute surf"_compute_surf.html, "fix ave/surf"_fix_ave_surf.html,
+"dump surf"_dump.html
+
+[Default:]
+
+If {quantities} is not specified, default is
+{quantities sum_weight sum_particles hist}.
+
