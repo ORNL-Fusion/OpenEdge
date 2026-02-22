@@ -1,0 +1,102 @@
+# NSTX-like dust baseline (SPARTA/OpenEdge)
+# Goal: closer to DUSTT-style edge dust transport than the droplet test setup.
+
+variable case_tag index dust_nstx
+
+# -------------------- Time control --------------------
+variable dt    equal 1e-6
+variable time  equal 0.02
+variable N     equal floor(${time}/${dt})
+variable Ndump equal floor(${N}/100)
+
+# -------------------- Particle properties --------------------
+# Baseline NSTX-like size scale: micron dust (not mm droplets)
+variable Rho equal 534.0
+variable rd  equal 5.0e-6
+variable md  equal (4.0*PI*${Rho}*${rd}^3)/3.0
+variable temp_dust equal 773.15
+
+# Emission thermostat used as velocity magnitude knob.
+# Tune this so launched speed spans the target 0.1-20 m/s range.
+variable temp_emit equal 1.0e7
+variable nemit     equal 100
+
+
+seed                12345
+timestep            ${dt}
+dimension           2
+boundary            r r p
+global              gridcut 0.0 comm/sort no
+global              temp ${temp_emit}
+create_box          2.0 6.0 -4.0 3.8 -0.05 0.05
+create_grid         500 500 1
+balance_grid        rcb cell
+global fnum 1.0e-10
+
+species             droplet.species II OO
+mixture             DustSourceInner II frac 1.0 nrho 1
+mixture             DustSourceOuter OO frac 1.0 nrho 1
+
+read_surf           wall.surf group surfID particle check
+group               divertor_outer surf id <> 139 150
+group               divertor_inner surf id <> 111 115
+
+# Pure sticking: particles are absorbed at first wall hit.
+surf_collide        wallColModel vanish
+surf_modify         surfID collide wallColModel react none
+
+# Thermal emission from local surface normals (Maxwellian)
+fix                 dust_emit_outer emit/surf DustSourceOuter divertor_outer n ${nemit} perspecies no
+fix                 dust_emit_inner emit/surf DustSourceInner divertor_inner n ${nemit} perspecies no
+
+# Trajectory output
+variable            pmass particle mass
+
+dump dtraj particle all ${Ndump} case.${case_tag} id type x y z vx vy vz v_pmass temp radius
+
+# Plasma/background fields
+compute cnear plasma/fields all file ../test_evaporation/input/plasma.h5 &
+    ../test_evaporation/input/bfield.h5 &
+    bx by bz temp_e dens_e temp_i dens_i parrflow er et ez
+
+# Evaporation/mass loss
+fix fevap_I evaporation 1 DustSourceInner mass ${md} radius ${rd} temp ${temp_dust} &
+    heatflux/file ../test_evaporation/input/heatflux.fix.h5
+fix fevap_O evaporation 1 DustSourceOuter mass ${md} radius ${rd} temp ${temp_dust} &
+    heatflux/file ../test_evaporation/input/heatflux.fix.h5
+
+# Coulomb-enhanced drag + gravity + axisymmetric geometric terms
+fix fdrag drag 1 2.0 1 &
+    plasma c_cnear[4] c_cnear[6] c_cnear[7] c_cnear[8] &
+    bfield c_cnear[1] c_cnear[3] c_cnear[2] &
+    gravity 0 -9.8 0 &
+    model coulomb coulomb/chi 0.2 coulomb/delta 1.0 coulomb/lnlambda 20.0 &
+    mass ${md} radius ${rd} temp ${temp_dust} &
+    cylindrical yes
+
+# OML charging + E-field push
+fix fcharge droplet/charge 1 plasma &
+    temp_e c_cnear[4] temp_i c_cnear[6] &
+    dens_e c_cnear[5] dens_i c_cnear[7] &
+    radius ${rd} mass ${md} temp ${temp_dust} &
+    ion_mass_amu 2.0 thermionic no
+
+fix    eS efield/grid c_cnear[9] c_cnear[10] c_cnear[11]
+global efield grid eS 0
+global boris_subcycles 5
+
+# Surface hit diagnostics
+compute inner_hits surf all DustSourceInner n
+compute outer_hits surf all DustSourceOuter n
+fix     f_inner ave/surf all 1 10 ${Ndump} c_inner_hits[*] ave running
+fix     f_outer ave/surf all 1 10 ${Ndump} c_outer_hits[*] ave running
+dump    d_all surf all ${Ndump} tmp.all.surf id f_f_inner[*] f_f_outer[*]
+
+stats 1
+run 1
+
+unfix dust_emit_inner
+unfix dust_emit_outer
+
+stats 100
+run ${N}
