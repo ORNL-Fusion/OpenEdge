@@ -40,6 +40,12 @@ surf_react_adsorb = surface reaction adsorb models, both GS and PS variants
 thermostat = use of fix temp/rescale as a thermostat
 variable_timestep = use of a variable global timestep
 vibrate = vibrational energy modes in collisions
+test_drag = drag-model comparison for droplet cases
+test_droplet = droplet emission, transport, and surface-interaction workflows
+test_evaporation = evaporation validation and coupled drag+evaporation cases
+test_solps_coupling = OpenEdge-to-SOLPS coupling utilities and validation assets
+test_viscous_gravity_axi = axisymmetric viscous+gravity droplet cases
+test_west_axi = WEST axisymmetric setup with plasma/material inputs
 
 Here is an example of how one of the sample problems can be run and
 visualized:
