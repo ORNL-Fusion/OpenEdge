@@ -536,6 +536,11 @@ template < int DIM, int SURF, int OPT > void Update::move()
 
   double dt = update->dt;
 
+  // Optional built-in per-particle first-hit tracking.
+  // Attributes are created by Particle ctor and dumped via p_hit_flag/p_hit_surf_id.
+  const int hit_flag_index = particle->find_custom((char *) "hit_flag");
+  const int hit_surf_index = particle->find_custom((char *) "hit_surf_id");
+
   // external per particle field
   // fix calculates field acting on all owned particles
 
@@ -608,7 +613,6 @@ template < int DIM, int SURF, int OPT > void Update::move()
                     ? particles[i].mass
                     : species[particles[i].ispecies].mass;
       double charge = species[particles[i].ispecies].charge;
-      
       // apply moveperturb() to PKEEP and PINSERT since are computing xnew
       // not to PENTRY,PEXIT since are just re-computing xnew of sender
       // set xnew[2] to linear move for axisymmetry, will be remapped later
@@ -1058,6 +1062,17 @@ template < int DIM, int SURF, int OPT > void Update::move()
               ipart = &particles[i];
               ipart->icell = icell;
               dtremain *= 1.0 - minparam*frac;
+
+              // Record the first explicit surface hit for this particle ID.
+              if (hit_flag_index >= 0 && hit_surf_index >= 0) {
+                int *hit_flag_vec = particle->eivec[particle->ewhich[hit_flag_index]];
+                int *hit_surf_vec = particle->eivec[particle->ewhich[hit_surf_index]];
+                if (hit_flag_vec && hit_surf_vec && hit_flag_vec[i] == 0) {
+                  hit_flag_vec[i] = 1;
+                  surfint sid = (DIM == 3) ? tris[minsurf].id : lines[minsurf].id;
+                  hit_surf_vec[i] = static_cast<int>(sid);
+                }
+              }
 
               if (nsurf_tally)
                 memcpy(&iorig,&particles[i],sizeof(Particle::OnePart));

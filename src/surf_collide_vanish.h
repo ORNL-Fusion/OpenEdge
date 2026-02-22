@@ -23,6 +23,7 @@ SurfCollideStyle(vanish,SurfCollideVanish)
 
 #include "surf_collide.h"
 #include "particle.h"
+#include <unordered_map>
 
 namespace SPARTA_NS {
 
@@ -30,9 +31,21 @@ class SurfCollideVanish : public SurfCollide {
  public:
   SurfCollideVanish(class SPARTA *, int, char **);
   SurfCollideVanish(class SPARTA *sparta) : SurfCollide(sparta) {} // needed for Kokkos
-  virtual ~SurfCollideVanish() {}
+  virtual ~SurfCollideVanish();
   Particle::OnePart *collide(Particle::OnePart *&, double &,
                              int, double *, int, int &);
+
+ protected:
+  int me;
+  int logflag;
+  FILE *logfp;
+  char *logfile;
+  std::unordered_map<long long,long long> surf_hit_counts;
+
+  void open_logfile();
+  void close_logfile();
+  void log_event(Particle::OnePart *, int);
+  void write_counts_file();
 };
 
 }

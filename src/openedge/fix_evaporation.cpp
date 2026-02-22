@@ -93,6 +93,8 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
   if (heatflux_mode == HF_FILE && heatfluxFilename.empty())
     error->all(FLERR,"Fix evaporation: empty filename for heatflux/file");
 
+  per_grid_flag = 1;
+  per_grid_freq = nevery;
   size_per_grid_cols = 3;
   maxgrid = 0;
   array_grid = NULL;

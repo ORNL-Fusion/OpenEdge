@@ -91,6 +91,12 @@ Particle::Particle(SPARTA *sparta) : Pointers(sparta)
   edarray = NULL;
   edcol = NULL;
 
+  // Built-in per-particle hit tracking for ID-based transfer matrices.
+  //  hit_flag    : 0 = never hit a surface, 1 = first hit recorded
+  //  hit_surf_id : explicit surface ID of first hit (0 if unset)
+  add_custom((char *) "hit_flag",INT,0);
+  add_custom((char *) "hit_surf_id",INT,0);
+
   // RNG for particle weighting
 
   wrandom = NULL;
@@ -667,6 +673,7 @@ int Particle::add_particle()
     reallocflag = 1;
   }
 
+  if (ncustom) zero_custom(nlocal);
   nlocal++;
   return reallocflag;
 }

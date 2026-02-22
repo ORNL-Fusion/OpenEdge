@@ -516,7 +516,8 @@ void FixDropletCharge::apply_charge_update()
       }
 
       const double qd_coulomb = 4.0 * M_PI * eps0 * rd * phi_s;
-      const double zd = std::fabs(qd_coulomb / qe);
+//      const double zd = std::fabs(qd_coulomb / qe);
+        const double zd =qd_coulomb / qe;
 
       if (std::isfinite(zd)) {
         n_valid_local++;

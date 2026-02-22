@@ -20,6 +20,7 @@
 #include "pointers.h"
 #include "hash3.h"
 #include "hashlittle.h"
+#include "surf.h"       // <-- provides union ubuf
 
 namespace SPARTA_NS {
 

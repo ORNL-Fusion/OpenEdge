@@ -93,6 +93,8 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
   if (heatflux_mode == HF_FILE && heatfluxFilename.empty())
     error->all(FLERR,"Fix evaporation: empty filename for heatflux/file");
 
+  per_grid_flag = 1;
+  per_grid_freq = nevery;
   size_per_grid_cols = 3;
   maxgrid = 0;
   array_grid = NULL;
@@ -285,7 +287,7 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
     ip->mass   = mass;
     return;   // no evaporation if no heat flux
   }
- 
+    Qs = Qs * 3;
   // --- Antoine vapor pressure (your Python fit) ---
   const double a1 = 5.055;
   const double b1 = -8023.0;
@@ -334,6 +336,7 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
     array_grid[icell][0] += dm;                                    // kg
     array_grid[icell][1] += dm / AM;                               // atoms
     array_grid[icell][2] += Qs * 4.0*M_PI * R_new*R_new * DT;    // J
+    
   }
 
 }
