@@ -19,3 +19,10 @@ dump.*
 # Python/Jupyter cache artifacts
 **/__pycache__/
 **/.ipynb_checkpoints/
+
+# Build artifacts
+src/Obj_mpi/
+src/Obj_mac_mpi/
+src/openedge/*.o
+src/STUBS/*.o
+src/STUBS/*.a
