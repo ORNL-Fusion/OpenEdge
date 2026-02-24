@@ -53,13 +53,24 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
   bconst[0] = bconst[1] = bconst[2] = 0.0;
   econst[0] = econst[1] = econst[2] = 0.0;
   teconst = ticonst = niconst = neconst = parrflowconst = 0.0;
+  analytic_r0 = 0.02;
+  analytic_ne0 = 1.0e19;
+  analytic_te0 = 1.0;
+  analytic_te1 = 4.0;
+  analytic_ti0 = 1.0;
+  analytic_eps = 1.0e-10;
+  analytic_x0 = 0.0;
+  analytic_y0 = 0.0;
+  analytic_use_x0 = 0;
+  analytic_use_y0 = 0;
 
   // parse:
   // compute ... plasma/fields ggroup file plasma.h5 bfield.h5 ...
   // compute ... plasma/fields ggroup constant [const args] ...
+  // compute ... plasma/fields ggroup analytic [analytic args] ...
   int iarg = 3;
   if (iarg >= narg)
-    error->all(FLERR,"compute plasma/fields requires mode: file or constant");
+    error->all(FLERR,"compute plasma/fields requires mode: file, constant, or analytic");
   if (strcmp(arg[iarg],"file") == 0) {
     input_mode = MODE_FILE;
     iarg++;
@@ -70,12 +81,15 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
   } else if (strcmp(arg[iarg],"constant") == 0) {
     input_mode = MODE_CONSTANT;
     iarg++;
+  } else if (strcmp(arg[iarg],"analytic") == 0) {
+    input_mode = MODE_ANALYTIC;
+    iarg++;
   } else {
-    error->all(FLERR,"compute plasma/fields mode must be 'file' or 'constant'");
+    error->all(FLERR,"compute plasma/fields mode must be 'file', 'constant', or 'analytic'");
   }
 
-  // constant mode options
-  if (input_mode == MODE_CONSTANT) {
+  // constant/analytic mode options
+  if (input_mode == MODE_CONSTANT || input_mode == MODE_ANALYTIC) {
     while (iarg < narg) {
       if (strcmp(arg[iarg],"values")==0) { iarg++; break; }
       if (iarg + 3 < narg && strcmp(arg[iarg],"magnetic_field")==0) {
@@ -102,6 +116,32 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
         iarg += 2;
       } else if (iarg + 1 < narg && strcmp(arg[iarg],"parrflow")==0) {
         parrflowconst = input->numeric(FLERR,arg[iarg+1]);
+        iarg += 2;
+      } else if (iarg + 1 < narg && strcmp(arg[iarg],"r0")==0) {
+        analytic_r0 = input->numeric(FLERR,arg[iarg+1]);
+        iarg += 2;
+      } else if (iarg + 1 < narg && strcmp(arg[iarg],"ne0")==0) {
+        analytic_ne0 = input->numeric(FLERR,arg[iarg+1]);
+        iarg += 2;
+      } else if (iarg + 1 < narg && strcmp(arg[iarg],"te0")==0) {
+        analytic_te0 = input->numeric(FLERR,arg[iarg+1]);
+        iarg += 2;
+      } else if (iarg + 1 < narg && strcmp(arg[iarg],"te1")==0) {
+        analytic_te1 = input->numeric(FLERR,arg[iarg+1]);
+        iarg += 2;
+      } else if (iarg + 1 < narg && strcmp(arg[iarg],"ti0")==0) {
+        analytic_ti0 = input->numeric(FLERR,arg[iarg+1]);
+        iarg += 2;
+      } else if (iarg + 1 < narg && strcmp(arg[iarg],"eps")==0) {
+        analytic_eps = input->numeric(FLERR,arg[iarg+1]);
+        iarg += 2;
+      } else if (iarg + 1 < narg && strcmp(arg[iarg],"x0")==0) {
+        analytic_x0 = input->numeric(FLERR,arg[iarg+1]);
+        analytic_use_x0 = 1;
+        iarg += 2;
+      } else if (iarg + 1 < narg && strcmp(arg[iarg],"y0")==0) {
+        analytic_y0 = input->numeric(FLERR,arg[iarg+1]);
+        analytic_use_y0 = 1;
         iarg += 2;
       } else break;
     }
@@ -272,7 +312,7 @@ void ComputePlasmaFields::init()
         }
       }
     }
-  } else {
+  } else if (input_mode == MODE_CONSTANT) {
     plasma_stencil.clear();
     magnetic_stencil.clear();
     for (int icell = 0; icell < ncells; ++icell) {
@@ -304,6 +344,52 @@ void ComputePlasmaFields::init()
       b.z = 0.0;
       mag_arr[icell] = b;
     }
+  } else {
+    plasma_stencil.clear();
+    magnetic_stencil.clear();
+    const double x0_use = analytic_use_x0 ? analytic_x0 : 0.5 * (domain->boxlo[0] + domain->boxhi[0]);
+    const double y0_use = analytic_use_y0 ? analytic_y0 : 0.5 * (domain->boxlo[1] + domain->boxhi[1]);
+    const double r0_use = (analytic_r0 > 0.0) ? analytic_r0 : 1.0e-12;
+    const double eps_use = (analytic_eps > 0.0) ? analytic_eps : 0.0;
+    for (int icell = 0; icell < ncells; ++icell) {
+      const double x = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
+      const double y = (domain->dimension == 3) ? 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]) : 0.0;
+      const double dx = x - x0_use;
+      const double dy = (domain->dimension == 3) ? (y - y0_use) : 0.0;
+      const double r = std::sqrt(dx*dx + dy*dy + eps_use);
+      const double rr = r / r0_use;
+      const double expsg = std::exp(-std::pow(rr,12.0));
+      double dexp_dr = 0.0;
+      if (r > 0.0) dexp_dr = expsg * (-12.0 * std::pow(rr,11.0) / r0_use);
+
+      PlasmaFileParams p{};
+      p.dens_e = analytic_ne0 * expsg;
+      p.temp_e = analytic_te0 + analytic_te1 * expsg;
+      p.dens_i = p.dens_e;
+      p.temp_i = analytic_ti0;
+      p.grad_dens_e_r = analytic_ne0 * dexp_dr;
+      p.grad_dens_e_t = 0.0;
+      p.grad_dens_e_z = 0.0;
+      p.parr_flow = parrflowconst;
+      p.parr_flow_r = 0.0;
+      p.parr_flow_t = 0.0;
+      p.parr_flow_z = 0.0;
+      p.grad_temp_e_r = analytic_te1 * dexp_dr;
+      p.grad_temp_e_t = 0.0;
+      p.grad_temp_e_z = 0.0;
+      p.grad_temp_i_r = 0.0;
+      p.grad_temp_i_t = 0.0;
+      p.grad_temp_i_z = 0.0;
+      plasma_arr[icell] = p;
+
+      MagneticFieldFileDataParams b{};
+      b.br = bconst[0];
+      b.bt = bconst[1];
+      b.bz = bconst[2];
+      b.r = r;
+      b.z = (domain->dimension == 3) ? 0.5 * (cells[icell].lo[2] + cells[icell].hi[2]) : 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
+      mag_arr[icell] = b;
+    }
   }
 }
 
@@ -333,9 +419,9 @@ void ComputePlasmaFields::compute_per_grid()
     const double Br = B.br;
     const double Bt = B.bt;
     const double Bzv = B.bz;
-    const double Er = (input_mode == MODE_CONSTANT) ? econst[0] : 0.0;
-    const double Et = (input_mode == MODE_CONSTANT) ? econst[1] : 0.0;
-    const double Ezv = (input_mode == MODE_CONSTANT) ? econst[2] : 0.0;
+    const double Er = (input_mode != MODE_FILE) ? econst[0] : 0.0;
+    const double Et = (input_mode != MODE_FILE) ? econst[1] : 0.0;
+    const double Ezv = (input_mode != MODE_FILE) ? econst[2] : 0.0;
     const double Vr = P.parr_flow_r;
     const double Vt = P.parr_flow_t;
     const double Vzv = P.parr_flow_z;

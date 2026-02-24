@@ -651,7 +651,6 @@ template < int DIM, int SURF, int OPT > void Update::move()
         xnew[1] = x[1] + dtremain*v[1];
         if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
       } else if (pflag == PEXIT) {
-        printf("We are in PEXIT move\n");
         dtremain = particles[i].dtremain;
         xnew[0] = x[0] + dtremain*v[0];
         xnew[1] = x[1] + dtremain*v[1];
@@ -1539,6 +1538,13 @@ void Update::pusherBoris2D(int i, int icell, double dt,
                            double charge, double mass)
 {
   if (mass <= 0.0) error->all(FLERR, "Boris pusher requires positive particle mass");
+  // Fast path for neutrals: pure advection, no E/B field reads or Boris algebra.
+  if (charge == 0.0) {
+    xnew[0] = x[0] + v[0] * dt;
+    xnew[1] = x[1] + v[1] * dt;
+    xnew[2] = x[2] + v[2] * dt;
+    return;
+  }
 
   const double qm = (charge * echarge) / mass;
   const int nsub = (boris_subcycles > 0) ? boris_subcycles : 1;
@@ -1547,18 +1553,19 @@ void Update::pusherBoris2D(int i, int icell, double dt,
   double xcur[2] = {x[0], x[1]};
   double zcur = x[2];
   double vcur[3] = {v[0], v[1], v[2]};
+  double E[3] = {0.0, 0.0, 0.0};
+  double B[3] = {0.0, 0.0, 0.0};
+
+  // Field arrays are precomputed before particle motion. Cache them once per
+  // Boris call to avoid redundant per-subcycle reads.
+  if (eperturbflag)
+    BorisGrid::read_field_from_fix(modify->fix[efieldfix], (efstyle == GFIELD),
+                                   efield_active, i, icell, E);
+  if (bperturbflag)
+    BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
+                                   bfield_active, i, icell, B);
 
   for (int isub = 0; isub < nsub; isub++) {
-    double E[3] = {0.0, 0.0, 0.0};
-    double B[3] = {0.0, 0.0, 0.0};
-
-    if (eperturbflag)
-      BorisGrid::read_field_from_fix(modify->fix[efieldfix], (efstyle == GFIELD),
-                                     efield_active, i, icell, E);
-    if (bperturbflag)
-      BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
-                                     bfield_active, i, icell, B);
-
     if (boris_bad_dt_check && !boris_bad_dt_warned) {
       const double bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
       const double bad = std::fabs(qm) * bmag * dt_sub;
@@ -1575,7 +1582,8 @@ void Update::pusherBoris2D(int i, int icell, double dt,
     zcur += vcur[2] * dt_sub;
 
     if (boris_dump_flag && (ntimestep % boris_dump_every == 0)) {
-      if (comm->me == 0 && i == 0) {
+      const double emag = std::sqrt(E[0]*E[0] + E[1]*E[1] + E[2]*E[2]);
+      if (comm->me == 0 && i == 0 && emag > 0.0) {
         printf("boris2D step=%lld icell=%d sub=%d/%d qm=%g E=(%g,%g,%g) B=(%g,%g,%g)\n",
                (long long) ntimestep, icell, isub+1, nsub, qm,
                E[0], E[1], E[2], B[0], B[1], B[2]);
@@ -1600,6 +1608,13 @@ void Update::pusher_boris3D(int i, int icell, double dt,
                             double charge, double mass)
 {
   if (mass <= 0.0) error->all(FLERR, "Boris pusher requires positive particle mass");
+  // Fast path for neutrals: pure advection, no E/B field reads or Boris algebra.
+  if (charge == 0.0) {
+    xnew[0] = x[0] + v[0] * dt;
+    xnew[1] = x[1] + v[1] * dt;
+    xnew[2] = x[2] + v[2] * dt;
+    return;
+  }
 
   const double qm = (charge * echarge) / mass;
   const int nsub = (boris_subcycles > 0) ? boris_subcycles : 1;
@@ -1607,17 +1622,186 @@ void Update::pusher_boris3D(int i, int icell, double dt,
 
   double xcur[3] = {x[0], x[1], x[2]};
   double vcur[3] = {v[0], v[1], v[2]};
+  double Ebase[3] = {0.0, 0.0, 0.0};
+  double B[3] = {0.0, 0.0, 0.0};
+
+  // Baseline fields from current fixes.
+  if (eperturbflag)
+    BorisGrid::read_field_from_fix(modify->fix[efieldfix], (efstyle == GFIELD),
+                                   efield_active, i, icell, Ebase);
+  if (bperturbflag)
+    BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
+                                   bfield_active, i, icell, B);
+
+  // Temporary per-particle hardcoded sheath model (debug/test mode).
+  // It evaluates a Stangeby-like E_n(d) from nearest active surface element.
+  // Analytic plasma profile (same form used in input/plot tooling):
+  // ne(r)=ne0*exp(-(r/r0)^12), Te(r)=te0+te1*exp(-(r/r0)^12), Ti=ti0.
+  const double prof_r0 = 0.02;
+  const double prof_ne0 = 1.0e19;
+  const double prof_te0 = 1.0;
+  const double prof_te1 = 4.0;
+  const double prof_ti0 = 1.0;
+  const double prof_eps = 1.0e-10;
+  const double me_kg = 9.1093837015e-31;
+  const double mi_kg = 2.0 * 1.67262192369e-27;   // D+
+  const double pi = 3.14159265358979323846;
+  const double sheath_dcut = 2.0e-2;              // apply only in this band
+
+  int sgroupbit = ~0;
+  if (active_surfID) {
+    int igroup = surf->find_group(active_surfID);
+    if (igroup < 0) error->all(FLERR, "active_surf group ID does not exist");
+    sgroupbit = surf->bitmask[igroup];
+  }
+
+  static FILE *fp_sheath = nullptr;
+  static int hdr_written = 0;
+  const int DBG_I = 0;
+  const int DBG_EVERY = 100;
 
   for (int isub = 0; isub < nsub; isub++) {
-    double E[3] = {0.0, 0.0, 0.0};
-    double B[3] = {0.0, 0.0, 0.0};
+    double E[3] = {Ebase[0], Ebase[1], Ebase[2]};
+    double sheath_emag = 0.0;
+    double sheath_rhoi = 0.0;
+    double sheath_dist = BIG;
+    double sheath_phi_over_te = 0.0;
+    double sheath_alpha_deg = -1.0;
+    double sheath_alpha_grazing_deg = -1.0;
+    int sheath_surf_id = -1;
+    double te_loc = prof_te0;
+    double ti_loc = prof_ti0;
+    double ne_loc = prof_ne0;
 
-    if (eperturbflag)
-      BorisGrid::read_field_from_fix(modify->fix[efieldfix], (efstyle == GFIELD),
-                                     efield_active, i, icell, E);
-    if (bperturbflag)
-      BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
-                                     bfield_active, i, icell, B);
+    // Local analytic plasma state at particle position (xcur,ycur).
+    const double x0 = 0.5 * (domain->boxlo[0] + domain->boxhi[0]);
+    const double y0 = 0.5 * (domain->boxlo[1] + domain->boxhi[1]);
+    const double dxp = xcur[0] - x0;
+    const double dyp = xcur[1] - y0;
+    const double r = std::sqrt(dxp*dxp + dyp*dyp + prof_eps);
+    const double rr = std::pow(r / std::max(prof_r0, 1.0e-30), 12.0);
+    const double shape = std::exp(-rr);
+    ne_loc = std::max(prof_ne0 * shape, 1.0e-60);
+    te_loc = std::max(prof_te0 + prof_te1 * shape, 1.0e-12);
+    ti_loc = std::max(prof_ti0, 0.0);
+
+    if (dim == 3 && SURF && surf) {
+      Surf::Tri *tris = surf->tris;
+      const int ntotal = surf->nsurf;
+      double nhat_best[3] = {0.0, 0.0, 0.0};
+      int closest_surf_id = -1;
+
+      // Pass 0: strict facing-side filter (distsurf-like).
+      // Pass 1 fallback: if none found, retry without facing-side reject.
+      for (int pass = 0; pass < 2 && closest_surf_id < 0; ++pass) {
+        for (int m = 0; m < ntotal; ++m) {
+          if (!(tris[m].mask & sgroupbit)) continue;
+          double nvec[3] = {tris[m].norm[0], tris[m].norm[1], tris[m].norm[2]};
+          const double nmag = std::sqrt(nvec[0]*nvec[0] + nvec[1]*nvec[1] + nvec[2]*nvec[2]);
+          if (nmag <= 0.0) continue;
+
+          double nhat[3] = {nvec[0]/nmag, nvec[1]/nmag, nvec[2]/nmag};
+
+          // Eligible surface orientation: keep normals with n.B <= 0.
+          if (nhat[0]*B[0] + nhat[1]*B[1] + nhat[2]*B[2] > 0.0) continue;
+
+          if (pass == 0) {
+            const double ctr[3] = {
+              (tris[m].p1[0] + tris[m].p2[0] + tris[m].p3[0]) / 3.0,
+              (tris[m].p1[1] + tris[m].p2[1] + tris[m].p3[1]) / 3.0,
+              (tris[m].p1[2] + tris[m].p2[2] + tris[m].p3[2]) / 3.0
+            };
+            const double cell2surf[3] = {ctr[0]-xcur[0], ctr[1]-xcur[1], ctr[2]-xcur[2]};
+            if (cell2surf[0]*nhat[0] + cell2surf[1]*nhat[1] + cell2surf[2]*nhat[2] > 0.0) continue;
+          }
+
+          const double dist = std::sqrt(Geometry::distsq_point_tri(
+            xcur, tris[m].p1, tris[m].p2, tris[m].p3, nhat));
+
+          if (dist < sheath_dist) {
+            sheath_dist = dist;
+            nhat_best[0] = nhat[0];
+            nhat_best[1] = nhat[1];
+            nhat_best[2] = nhat[2];
+            closest_surf_id = tris[m].id;
+          }
+        }
+      }
+
+      if (closest_surf_id >= 0 && sheath_dist < sheath_dcut) {
+        const double nn = std::sqrt(nhat_best[0]*nhat_best[0] +
+                                    nhat_best[1]*nhat_best[1] +
+                                    nhat_best[2]*nhat_best[2]);
+        const double bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
+        if (nn > 0.0 && bmag > 0.0) {
+          // alpha_grazing = 90 - angle(B, n)
+          double cos_theta = (B[0]*nhat_best[0] + B[1]*nhat_best[1] + B[2]*nhat_best[2]) / (bmag*nn);
+          cos_theta = std::fabs(cos_theta);
+          if (cos_theta > 1.0) cos_theta = 1.0;
+          const double alpha_normal_deg = std::acos(cos_theta) * 180.0 / pi;
+          double alpha_grazing_deg = alpha_normal_deg;
+          if (alpha_grazing_deg < 0.0) alpha_grazing_deg = 0.0;
+          if (alpha_grazing_deg > 90.0) alpha_grazing_deg = 90.0;
+
+          const double sin_a = std::max(std::fabs(std::sin(alpha_grazing_deg * pi / 180.0)), 1.0e-12);
+          const double lambda_d = std::sqrt(epsilon_0 * te_loc / (ne_loc * echarge));
+          const double cs = std::sqrt((te_loc + ti_loc) * echarge / (2.0 * mi_kg));
+          const double omega_ci = echarge * bmag / mi_kg;
+          sheath_rhoi = cs / std::max(std::fabs(omega_ci), 1.0e-99);
+
+          const double phi_float_mult =
+            0.5 * std::log((mi_kg / std::max(2.0 * pi * me_kg, 1.0e-99)) / (1.0 + ti_loc / te_loc));
+          const double phi_total = std::max(phi_float_mult, 0.0) * te_loc;
+          const double phi_cs = std::min(phi_total, std::max(0.0, -te_loc * std::log(sin_a)));
+          const double phi_ds = std::max(phi_total - phi_cs, 0.0);
+
+          const double e_ds = std::exp(-sheath_dist / std::max(2.0 * lambda_d, 1.0e-99));
+          const double e_cs = std::exp(-sheath_dist / std::max(sheath_rhoi, 1.0e-99));
+          sheath_emag =
+            phi_ds * e_ds / std::max(2.0 * lambda_d, 1.0e-99) +
+            phi_cs * e_cs / std::max(sheath_rhoi, 1.0e-99);
+          sheath_phi_over_te = -(phi_ds * e_ds + phi_cs * e_cs) / std::max(te_loc, 1.0e-99);
+          sheath_alpha_deg = alpha_normal_deg;
+          sheath_alpha_grazing_deg = alpha_grazing_deg;
+          sheath_surf_id = closest_surf_id;
+
+          // Apply sheath along -n_hat (towards wall).
+          E[0] += -sheath_emag * (nhat_best[0] / nn);
+          E[1] += -sheath_emag * (nhat_best[1] / nn);
+          E[2] += -sheath_emag * (nhat_best[2] / nn);
+        }
+      }
+    }
+
+    if (i == DBG_I && comm->me == 0 && (ntimestep % DBG_EVERY == 0)) {
+      if (!fp_sheath) {
+        const char *case_tag = getenv("OPENEDGE_CASE");
+        char fname[128];
+        if (case_tag && case_tag[0] != '\0') snprintf(fname, sizeof(fname), "sheath_trace_%s.csv", case_tag);
+        else snprintf(fname, sizeof(fname), "sheath_trace.csv");
+        fp_sheath = fopen(fname, "w");
+      }
+      if (fp_sheath && !hdr_written) {
+        std::fprintf(fp_sheath,
+                     "timestep,x,y,z,surf_id,dn_over_rhoi,ephi_over_te,Emag,alpha_deg,alpha_grazing_deg,Ex,Ey,Ez\n");
+        hdr_written = 1;
+      }
+      if (fp_sheath) {
+        const double d_over_rhoi =
+          (sheath_rhoi > 0.0 && sheath_dist < BIG) ? (sheath_dist / sheath_rhoi) : -1.0;
+        std::fprintf(fp_sheath, "%lld,%.8e,%.8e,%.8e,%d,%.8e,%.8e,%.8e,%.8e,%.8e,%.8e,%.8e,%.8e\n",
+                     (long long)ntimestep,
+                     xcur[0], xcur[1], xcur[2],
+                     sheath_surf_id,
+                     d_over_rhoi,
+                     sheath_phi_over_te,
+                     sheath_emag,
+                     sheath_alpha_deg,
+                     sheath_alpha_grazing_deg,
+                     E[0], E[1], E[2]);
+        if (ntimestep % (10 * DBG_EVERY) == 0) std::fflush(fp_sheath);
+      }
+    }
 
     if (boris_bad_dt_check && !boris_bad_dt_warned) {
       const double bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
@@ -1635,7 +1819,8 @@ void Update::pusher_boris3D(int i, int icell, double dt,
     xcur[2] += vcur[2] * dt_sub;
 
     if (boris_dump_flag && (ntimestep % boris_dump_every == 0)) {
-      if (comm->me == 0 && i == 0) {
+      const double emag = std::sqrt(E[0]*E[0] + E[1]*E[1] + E[2]*E[2]);
+      if (comm->me == 0 && i == 0 && emag > 0.0) {
         printf("boris3D step=%lld icell=%d sub=%d/%d qm=%g E=(%g,%g,%g) B=(%g,%g,%g)\n",
                (long long) ntimestep, icell, isub+1, nsub, qm,
                E[0], E[1], E[2], B[0], B[1], B[2]);

@@ -84,10 +84,11 @@ SurfCollideVanish::~SurfCollideVanish()
 ------------------------------------------------------------------------- */
 
 Particle::OnePart *SurfCollideVanish::
-collide(Particle::OnePart *&ip, double &, int isurf, double *, int, int &)
+collide(Particle::OnePart *&ip, double &, int isurf, double *normal, int, int &)
 {
   nsingle++;
-  if (logflag) log_event(ip,isurf);
+  // Capture vanish event with surface ID and local collision normal.
+  if (logflag) log_event(ip,isurf,normal);
 
   ip = NULL;
   return NULL;
@@ -111,7 +112,7 @@ void SurfCollideVanish::open_logfile()
     error->one(FLERR,"Cannot open surf_collide vanish log file");
 
   fprintf(logfp,
-          "timestep,rank,surf_index,surf_id,surf_hit_count,id,ispecies,x,y,z,vx,vy,vz,mass,radius,temp,weight,dtremain,erot,evib\n");
+          "timestep,rank,surf_index,surf_id,surf_hit_count,id,ispecies,x,y,z,vx,vy,vz,nx,ny,nz,mass,radius,temp,weight,dtremain,erot,evib\n");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -126,7 +127,7 @@ void SurfCollideVanish::close_logfile()
 
 /* ---------------------------------------------------------------------- */
 
-void SurfCollideVanish::log_event(Particle::OnePart *ip, int isurf)
+void SurfCollideVanish::log_event(Particle::OnePart *ip, int isurf, double *normal)
 {
   open_logfile();
   if (!logfp || ip == NULL) return;
@@ -143,11 +144,12 @@ void SurfCollideVanish::log_event(Particle::OnePart *ip, int isurf)
   }
 
   fprintf(logfp,
-          "%lld,%d,%d,%lld,%lld,%d,%d,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g\n",
+          "%lld,%d,%d,%lld,%lld,%d,%d,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g\n",
           (long long) update->ntimestep, me, isurf, surf_id, count,
           ip->id, ip->ispecies,
           ip->x[0], ip->x[1], ip->x[2],
           ip->v[0], ip->v[1], ip->v[2],
+          normal ? normal[0] : 0.0, normal ? normal[1] : 0.0, normal ? normal[2] : 0.0,
           ip->mass, ip->radius, ip->temp,
           ip->weight, ip->dtremain, ip->erot, ip->evib);
 }

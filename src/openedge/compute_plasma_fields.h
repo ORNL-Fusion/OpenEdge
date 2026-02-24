@@ -132,7 +132,7 @@ protected:
     int valid = 0;
   };
 
-  enum InputMode { MODE_FILE=0, MODE_CONSTANT };
+  enum InputMode { MODE_FILE=0, MODE_CONSTANT, MODE_ANALYTIC };
   InputMode input_mode = MODE_FILE;
 
 int nglocal,groupbit;
@@ -145,6 +145,16 @@ double ticonst;
 double niconst;
 double neconst;
 double parrflowconst;
+double analytic_r0;
+double analytic_ne0;
+double analytic_te0;
+double analytic_te1;
+double analytic_ti0;
+double analytic_eps;
+double analytic_x0;
+double analytic_y0;
+int analytic_use_x0;
+int analytic_use_y0;
 
 int nvalue;        // number of requested outputs (columns)
 int *value;        // which outputs (enum)

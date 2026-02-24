@@ -125,6 +125,7 @@ BorodkinaSheathResult borodkina_sheath_at_distance(double dist_m,
   const double cs = std::sqrt((te + ti) * QE / (2.0 * mD));
   const double omega_ci = QE * bmag / mD;
   const double rho_i = cs / std::max(std::abs(omega_ci), 1.0e-99);
+  out.rho_i_m = rho_i;
 
   const double alpha = std::max(0.0, std::min(90.0, alpha_deg));
   const double alpha_n_rad = alpha * PI / 180.0;
@@ -136,6 +137,8 @@ BorodkinaSheathResult borodkina_sheath_at_distance(double dist_m,
   const double fd = fd_poly_deg(alpha);
   out.fd = fd;
   const double phi0 = std::max(pot_mult, 0.0) * te;
+  out.phi_ds_eV = fd * phi0;
+  out.phi_cs_eV = (1.0 - fd) * phi0;
 
   const double e_ds = std::exp(-d / std::max(2.0 * lambdaD, 1.0e-99));
   const double e_mps = std::exp(-d / std::max(lmps, 1.0e-99));
@@ -146,6 +149,60 @@ BorodkinaSheathResult borodkina_sheath_at_distance(double dist_m,
 
   const double e_ds_vpm = phi0 * fd * e_ds / std::max(2.0 * lambdaD, 1.0e-99);
   const double e_mps_vpm = phi0 * (1.0 - fd) * e_mps / std::max(lmps, 1.0e-99);
+  out.emag_vpm = std::abs(e_ds_vpm + e_mps_vpm);
+  return out;
+}
+
+BorodkinaSheathResult stangeby_sheath_at_distance(double dist_m,
+                                                  double te_eV,
+                                                  double ti_eV,
+                                                  double ne_m3,
+                                                  double bmag_T,
+                                                  double alpha_deg,
+                                                  double mD_amu,
+                                                  double pot_mult)
+{
+  BorodkinaSheathResult out;
+
+  const double d = std::max(dist_m, 0.0);
+  const double te = std::max(te_eV, 1.0e-12);
+  const double ti = std::max(ti_eV, 0.0);
+  const double ne = std::max(ne_m3, 1.0e-60);
+  const double bmag = std::max(std::abs(bmag_T), 1.0e-20);
+  const double mD = std::max(mD_amu * AMU, 1.0e-99);
+
+  const double lambdaD = std::sqrt(EPS0 * te / (ne * QE));
+  out.lambdaD_m = lambdaD;
+
+  const double cs = std::sqrt((te + ti) * QE / (2.0 * mD));
+  const double omega_ci = QE * bmag / mD;
+  const double rho_i = cs / std::max(std::abs(omega_ci), 1.0e-99);
+  out.lmps_m = rho_i;
+  out.rho_i_m = rho_i;
+
+  // In stangeby mode, alpha_deg is used directly as the model angle.
+  const double alpha = std::max(0.0, std::min(90.0, alpha_deg));
+  const double alpha_rad = alpha * PI / 180.0;
+  const double sin_a = std::max(std::abs(std::sin(alpha_rad)), 1.0e-12);
+
+  // Floating-wall total drop: 0.5*ln[(mi/(2*pi*me))/(1+Ti/Te)] * Te (eV).
+  const double phi_float_mult =
+    0.5 * std::log((mD / std::max(2.0 * PI * ME, 1.0e-99)) / (1.0 + ti / te));
+  const double phi_total = (pot_mult > 0.0) ? (pot_mult * te) : (std::max(phi_float_mult, 0.0) * te);
+
+  // CS drop from ln(sin alpha), clipped to total to model DS disappearance.
+  const double phi_cs = std::min(phi_total, std::max(0.0, -te * std::log(sin_a)));
+  const double phi_ds = std::max(phi_total - phi_cs, 0.0);
+  out.fd = (phi_total > 0.0) ? (phi_ds / phi_total) : 0.0;
+  out.phi_ds_eV = phi_ds;
+  out.phi_cs_eV = phi_cs;
+
+  const double e_ds = std::exp(-d / std::max(2.0 * lambdaD, 1.0e-99));
+  const double e_mps = std::exp(-d / std::max(rho_i, 1.0e-99));
+
+  out.esheath_eV = phi_ds * e_ds + phi_cs * e_mps;
+  const double e_ds_vpm = phi_ds * e_ds / std::max(2.0 * lambdaD, 1.0e-99);
+  const double e_mps_vpm = phi_cs * e_mps / std::max(rho_i, 1.0e-99);
   out.emag_vpm = std::abs(e_ds_vpm + e_mps_vpm);
   return out;
 }

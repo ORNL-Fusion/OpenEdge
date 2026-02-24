@@ -44,7 +44,7 @@ class SurfCollideVanish : public SurfCollide {
 
   void open_logfile();
   void close_logfile();
-  void log_event(Particle::OnePart *, int);
+  void log_event(Particle::OnePart *, int, double *);
   void write_counts_file();
 };
 

@@ -22,6 +22,9 @@ struct BorodkinaSheathResult {
   double fd = 0.0;          // DS blending fraction
   double lmps_m = 0.0;      // magnetic pre-sheath scale
   double lambdaD_m = 0.0;   // Debye scale at sheath entrance
+  double rho_i_m = 0.0;     // ion gyro-radius scale
+  double phi_ds_eV = 0.0;   // Debye-sheath contribution at sheath entrance
+  double phi_cs_eV = 0.0;   // Chodura/magnetic pre-sheath contribution at sheath entrance
 };
 
 // c_s = sqrt((Te + Ti) * e / (2*mD))
@@ -61,6 +64,19 @@ BorodkinaSheathResult borodkina_sheath_at_distance(double dist_m,
                                                    double alpha_deg,
                                                    double mD_amu,
                                                    double pot_mult = 2.5);
+
+// Stangeby-style CS/DS profile:
+// - alpha_deg is used directly by the model (deg)
+// - CS drop follows ln(sin(alpha)) and DS can vanish for small alpha
+// - potential profile uses scales 2*lambdaD (DS) and rho_i (CS)
+BorodkinaSheathResult stangeby_sheath_at_distance(double dist_m,
+                                                  double te_eV,
+                                                  double ti_eV,
+                                                  double ne_m3,
+                                                  double bmag_T,
+                                                  double alpha_deg,
+                                                  double mD_amu,
+                                                  double pot_mult = 0.0);
 
 }  // namespace SheathModels
 }  // namespace SPARTA_NS
