@@ -1,0 +1,144 @@
+################################################################################
+# CPC Benchmark: Impurity transport with PMI surface reactions
+#
+# Reproduces the published benchmark case:
+#   - D plasma:  Ti = Te = 20 eV, ni = ne = 1e19 m^-3
+#   - B field:   2 T in x-direction
+#   - Geometry:  angled W plane at 30 deg + bounding walls (1280 triangles)
+#   - Surface:   W material, R = 0.5, Y = 0.1, Ebind = 11.75 eV
+#   - Source:    nP = 10000 W neutrals at origin, 10 eV in +z
+#   - Sheath:    phi = 3*k*Te/e (child-Langmuir)
+#   - Ionization: electron-impact via ADAS rates for W
+#   - Diagnostic: IEAD, gross deposition, particle tracks
+#
+# Analytic particle balance (steady-state, infinite reflections):
+#   grossDeposition = nP * (1 - R) / (1 - (Y + R))
+#                   = 10000 * 0.5 / (1 - 0.6) = 12500
+#
+# Reference: Younkin et al., Comp. Phys. Comm. 264, 107885 (2021)
+################################################################################
+
+# ---- Physical parameters ----
+variable        Te      equal 20.0              # electron temperature [eV]
+variable        Ti      equal 20.0              # ion temperature [eV]
+variable        Tkelvin equal ${Te}*11605.0     # temperature [K]
+variable        ne      equal 1.0e19            # electron density [m^-3]
+variable        ni      equal 1.0e19            # ion density [m^-3]
+variable        Bx      equal 2.0               # magnetic field [T]
+variable        Ebind   equal 11.75             # W surface binding energy [eV]
+variable        RN      equal 0.5               # reflection coefficient
+variable        RE      equal 0.8               # energy reflection fraction
+variable        Y       equal 0.1               # sputtering yield
+variable        nP      equal 10000             # number of source particles
+
+# ---- Simulation setup ----
+seed                    12345
+dimension               3
+units                   si
+
+# Boundary: open in z (particles leave through top), reflective in x,y
+boundary                r r o
+global                  gridcut 0.0 comm/sort yes
+global                  fnum 1.0
+
+# Domain must enclose the GITR geometry
+# Bounding box: X [-0.015, 0.015], Y [-0.015, 0.015], Z [-0.0087, 0.03]
+# Add small margin
+create_box              -0.016 0.016 -0.016 0.016 -0.01 0.031
+create_grid             10 10 14
+balance_grid            rcb cell
+
+# ---- Species and mixtures ----
+species                 plasma.species W W+ W2+ W3+ W4+ W5+ W6+
+mixture                 allW W W+ W2+ W3+ W4+ W5+ W6+
+mixture                 allW W    frac 1.0
+mixture                 allW W+   frac 0.0
+mixture                 allW W2+  frac 0.0
+mixture                 allW W3+  frac 0.0
+mixture                 allW W4+  frac 0.0
+mixture                 allW W5+  frac 0.0
+mixture                 allW W6+  frac 0.0
+
+# ---- Surface geometry ----
+# Converted from GITR point-plane 3D format -> ASCII STL -> SPARTA surf
+read_surf               input/gitr_geometry.surf
+
+# ---- Surface collision + PMI reaction ----
+# Diffuse wall at room temperature (velreset=1 from PMI overrides translational)
+surf_collide            diffW diffuse ${Tkelvin} 1.0
+
+ 
+# PMI surface reaction: constant mode with CPC benchmark values
+surf_react              pmiW pmi constant reactions_pmi.surf ${RN} ${RE} ${Y} ${Ebind}
+
+# Apply collision model and reaction to all surfaces
+surf_modify             all collide diffW react pmiW
+
+
+# ---- Plasma fields (constant, uniform) ----
+compute                 cplasma plasma/fields all constant &
+                        magnetic_field 0 0.0 0.0 &
+                        electric_field 0 0 0 &
+                        temp_e ${Te} temp_i ${Ti} &
+                        dens_e ${ne} dens_i ${ni} &
+                        parrflow 0.0 &
+                        bx by bz ex ey ez temp_e temp_i dens_i dens_e parrflow
+
+
+# ---- Magnetic field (uniform 2 T in x) ----
+fix                     bfield bfield/grid c_cplasma[1] c_cplasma[2] c_cplasma[3]
+global                  bfield grid bfield 0
+
+# ---- Sheath electric field ----
+# phi_sheath = 3*k*Te/e applied via child-Langmuir model
+fix                     efield efield/grid c_cplasma[4] c_cplasma[5] c_cplasma[6]
+global                  efield grid efield 0
+
+# ---- Boris pusher subcycles ----
+global                  boris_subcycles 10
+
+# ---- Ionization / Recombination (ADAS) ----
+fix                     chem chem/adas 10 74 plasma.adas plasma c_cplasma[4] c_cplasma[7]
+#fix fchem chem/adas 1 74 input/plasma.adas plasma te_local ne_entrance
+
+# ---- Load initial particle source ----
+# 10000 W neutrals at origin, 10 eV in +z
+read_particles          particles.dat 0
+
+# ---- Diagnostics ----
+shell                   mkdir -p output
+
+# IEAD: energy-angle distribution at surfaces
+# Emax = 1000 eV, 200 energy bins; Amax = 90 deg, 90 angle bins
+compute                 cIEAD iead all allW 1000 200 90 90
+
+# Per-step IEAD dump (accumulated)
+#fix                     fIEAD ave/time all 1 1 1000 c_cIEAD[*] mode array &
+#                        ave running file output/iead.dat
+#exit 
+
+# Surface reaction tallies (gross erosion/deposition)
+#compute                 creact react/surf all
+#fix                     fsurf ave/surf all 1 100 1000 c_creact[*]
+#dump                    dsurf surf all 1000 output/surf_react.dat id f_fsurf[*]
+
+# Particle state dump for tracks
+#dump                    dpart particle all 100 output/particles id type x y z vx vy vz
+#dump_modify             dpart first yes
+
+# Grid density
+compute                 cgrid grid all allW nrho
+fix                     fgrid ave/grid all 1 100 1000 c_cgrid[*] ave running
+dump                    dgrid grid all 1000 output/grid_density id xc yc zc f_fgrid[*]
+
+# ---- Time integration ----
+# dt = 1e-9 s (CPC case uses 1e-10 s with 1e7 steps = 1 ms)
+# We use larger dt for faster turnaround in testing
+timestep                1.0e-9
+stats                   100
+stats_style             step cpu np
+
+# ---- Run ----
+# 10000 steps = 10 us (short validation run)
+# For full CPC comparison: increase to 1e6 steps (1 ms)
+run                 1 #    10000

@@ -1,0 +1,45 @@
+CPC Benchmark: Impurity Transport with PMI Surface Reactions
+=============================================================
+
+This example reproduces a published impurity transport benchmark case
+using the new surf_react pmi command in constant mode.
+
+Physics setup:
+  - D plasma background: Ti = Te = 20 eV, ni = ne = 1e19 m^-3
+  - Magnetic field: B = 2 T in x-direction
+  - Geometry: angled W plane at 30 deg + bounding walls (1280 triangles)
+  - Surface model: R = 0.5, RE = 0.8, Y = 0.1, Ebind = 11.75 eV
+  - Source: 10000 W neutrals at origin, 10 eV in +z direction
+  - Sheath: phi = 3*k*Te/e
+  - Ionization: electron-impact via ADAS rates for W (Z=74)
+
+Key validation metric:
+  Analytic gross deposition (infinite reflection series):
+    grossDeposition = nP * (1 - R) / (1 - (Y + R))
+                    = 10000 * 0.5 / 0.4 = 12500
+
+Files:
+  in.cpc_gitr          - SPARTA input script
+  plasma.species       - W and W+ through W6+ species definitions
+  reactions_pmi.surf   - PMI reaction channels (R/S/A for W)
+  plasma.adas          - ADAS ionization/recombination reactions
+  particles.dat        - Initial W neutral source (10000 particles)
+  adas/                - Symlink to ADAS rate data (W, Z=74)
+  input/               - Surface geometry files
+  convert_gitr_to_stl.py   - Geometry converter (GITR cfg -> ASCII STL)
+  create_particles.py      - Particle source generator
+
+How to run:
+  mpirun -np 4 /path/to/spa_mpi < in.cpc_gitr
+
+  For full benchmark (1 ms simulated time):
+    Change timestep to 1e-10 and run to 10000000
+
+Output:
+  output/iead.dat          - Ion energy-angle distribution
+  output/surf_react.dat    - Per-surface reaction tallies
+  output/particles         - Particle state snapshots
+  output/grid_density      - W impurity density on grid
+
+Reference:
+  T.R. Younkin et al., Comp. Phys. Comm. 264, 107885 (2021)

@@ -1,0 +1,15 @@
+# PMI surface reactions for CPC benchmark
+# W impurity on W surfaces
+# R=0.5, Y=0.1 (probabilities from constant-mode, not from this file)
+#
+# Reflect: W neutral bounces off surface as W neutral
+W --> W
+R Simple 1.0
+
+# Sputter: W neutral absorbed, new W atom emitted from surface
+W --> W
+S Simple 1.0
+
+# Absorb: W neutral sticks to surface
+W --> NULL
+A Simple 1.0
