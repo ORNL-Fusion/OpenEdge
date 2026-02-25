@@ -1,0 +1,141 @@
+"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+
+:link(sws,https://sparta.github.io)
+:link(sd,../Manual.html)
+:link(sc,../Section_commands.html#comm)
+
+:line
+
+Boris pusher sheath overlay :h3
+
+[Overview:]
+
+The Boris 3D particle pusher ({pusher_boris3D}) supports an optional
+per-particle sheath electric-field overlay.  When enabled, the pusher
+adds a sheath E-field directed toward the nearest wall during each
+Boris sub-cycle, accelerating ions through the sheath potential drop.
+
+[Enabling the sheath overlay:]
+
+The sheath overlay is controlled by {global} command keywords that
+set the following variables:
+
+{sheath_flag} = 1 to enable, 0 to disable (default 0)
+{sheath_geom_cid} = compute ID for the per-grid sheath geometry
+{sheath_plasma_cid} = compute ID for the per-grid plasma fields
+{sheath_model} = 0 for Borodkina (default), 1 for Stangeby
+{sheath_dmax} = maximum wall distance for sheath activation (m, default 0.02)
+{sheath_pot_mult} = potential multiplier (default 2.5)
+{sheath_mD_amu} = ion mass in amu (default 2.014, deuterium)
+{sheath_emax_vpm} = E-field clamp (V/m, default 5e5) :ul
+
+[Required computes:]
+
+Two per-grid computes must be defined and referenced by their IDs:
+
+Geometry compute ({sheath_geom_cid}): provides per-grid arrays with
+5 columns: distance-to-nearest-surface, surface-ID, nx, ny, nz
+(outward surface normal). :ulb,l
+Plasma compute ({sheath_plasma_cid}): provides per-grid plasma
+profiles including electron/ion temperature, density, B-field
+magnitude, and Chodura angle. :l,ule
+
+Both computes are pre-evaluated once per timestep before the
+particle loop and their results are cached for the duration of
+the move.
+
+[Algorithm:]
+
+The sheath field is applied inside each Boris sub-cycle as follows:
+
+Pre-fetch: at the start of {pusher_boris3D}, the grid-cached
+geometry (distance, normal) and plasma data (Te, Ti, ne, Bmag,
+alpha) are read for the particle's cell. :olb,l
+
+Per sub-cycle distance: a fast O(1) wall distance is computed from
+the cell-center distance and the dot product of the particle offset
+with the surface normal:
+{d_particle = d_cell + (x_particle - x_cell) dot n} :l
+
+Model evaluation: if {0 < d_particle < sheath_dmax}, the selected
+sheath model evaluates the local E-field magnitude. :l
+
+Field application: the E-field is applied along the inward normal
+direction: {E += -emag * n}, clamped to {sheath_emax_vpm}. :l,ole
+
+[Performance:]
+
+The grid-cached approach replaces a previous implementation that
+iterated over all surface elements per particle per sub-cycle
+(O(N_surf) cost).  The new design is O(1) per particle because
+geometry and plasma data are pre-computed on the grid:
+
+Geometry and plasma computes are evaluated once per timestep
+and cached. :ulb,l
+Per-particle wall distance uses a single dot product against the
+cached cell-center distance and surface normal. :l
+No per-particle surface-element search is required. :l,ule
+
+This yields a significant speedup for simulations with large
+numbers of surface elements.
+
+[Sheath models:]
+
+Two selectable sheath models are provided in {sheath_models.h}:
+
+[Borodkina DS+MPS model ({sheath_model} = 0):]
+
+Blends a Debye-sheath (DS) component and a magnetic pre-sheath
+(MPS) component using a polynomial angle-dependent blend function.
+The DS drop uses the classical sheath potential scaled by
+{sheath_pot_mult}.  The MPS drop uses Chodura-angle-dependent
+terms with an ion gyro-radius length scale.
+
+[Stangeby CS/DS model ({sheath_model} = 1):]
+
+Uses the Chodura sheath-drop formula with {ln(sin(alpha))} for
+the collective sheath component.  The DS component can vanish at
+small incidence angles.  Potential profile uses scales of
+{2*lambda_D} (DS) and {rho_i} (CS).
+
+Both models return a {BorodkinaSheathResult} struct containing:
+
+{esheath_eV} = local sheath drop (eV)
+{emag_vpm} = local |E| magnitude (V/m)
+{fd} = DS blending fraction
+{lmps_m} = magnetic pre-sheath length scale (m)
+{lambdaD_m} = Debye length (m)
+{rho_i_m} = ion gyro-radius (m)
+{phi_ds_eV} = Debye-sheath potential drop (eV)
+{phi_cs_eV} = Chodura/MPS potential drop (eV) :ul
+
+A helper function {eirene_sheath_ev()} computes an EIRENE-style
+sheath drop from multi-ion moments and is available for diagnostic
+use.
+
+[Example setup:]
+
+compute cgeom sheath/geometry/grid all
+compute cplasma plasma/fields all file plasma.h5 bfield.h5 temp_e temp_i dens_e br bt bz
+global sheath_flag 1
+global sheath_geom_cid cgeom
+global sheath_plasma_cid cplasma
+global sheath_model 0
+global sheath_dmax 0.02
+global sheath_pot_mult 2.5
+global sheath_emax_vpm 5e5 :pre
+
+[Restrictions:]
+
+Both referenced computes must be per-grid ({per_grid_flag = 1}).
+The geometry compute must provide at least 5 per-grid columns.
+The sheath overlay is only applied inside {pusher_boris3D}.
+
+[Related commands:]
+
+"compute plasma/fields"_compute_plasma_fields.html,
+"fix viscous"_fix_viscous.html
+
+[Default:]
+
+Sheath overlay is disabled ({sheath_flag} = 0).

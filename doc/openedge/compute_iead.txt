@@ -1,0 +1,93 @@
+"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+
+:link(sws,https://sparta.github.io)
+:link(sd,../Manual.html)
+:link(sc,../Section_commands.html#comm)
+
+:line
+
+compute iead command :h3
+
+[Syntax:]
+
+compute ID iead surf_group mix_ID Emax NbinsE Amax NbinsA :pre
+
+ID is documented in "compute"_../compute.html command
+iead = style name of this compute command
+surf_group = surface group ID (must exist)
+mix_ID = particle mixture ID defining which species to tally
+Emax = maximum energy for binning (eV)
+NbinsE = number of energy bins in range \[0, Emax)
+Amax = maximum incidence angle for binning (degrees)
+NbinsA = number of angle bins in range \[0, Amax) :ul
+
+[Examples:]
+
+compute cIEAD iead all ions 500.0 200 90.0 90 :pre
+
+fix fIEAD ave/time all 1 1 ${Ndump} c_cIEAD mode array &
+    ave running file output/iead.dat title1 "IEAD: rows=angle cols=energy" :pre
+
+[Description:]
+
+This compute accumulates a 2-D histogram of the Ion Energy-Angle
+Distribution (IEAD) for particles striking surfaces.  The two axes
+of the histogram are the kinetic energy of the incident particle (eV)
+and the incidence angle relative to the surface normal (degrees,
+where 0 = normal incidence and 90 = grazing).
+
+The histogram is accumulated over the entire simulation run; the
+{clear()} callback intentionally does not reset bins.  For
+per-interval statistics, use {fix ave/time} with {ave one} or
+diff successive snapshots.
+
+[How it works:]
+
+When a particle hits a surface element that belongs to {surf_group}
+and the particle species belongs to {mix_ID}, the compute:
+
+evaluates kinetic energy: E = 0.5 * mass * |v|^2, converted to eV
+evaluates incidence angle: theta = acos(|v dot n| / |v||n|) in degrees
+bins the event into the (angle, energy) histogram with the particle weight :ol
+
+Both 2D and 3D simulations are supported.  In 2D the surface normal
+{z}-component is set to zero.
+
+Particles with energy outside \[0, Emax) or angle outside \[0, Amax) are
+silently skipped.
+
+[Output:]
+
+This compute produces a global array of size (NbinsA x NbinsE):
+
+rows = angle bins (bin 0 covers \[0, Amax/NbinsA), etc.)
+columns = energy bins (bin 0 covers \[0, Emax/NbinsE), etc.)
+values = weighted particle count per bin :ul
+
+The array is reduced across MPI ranks via {MPI_Allreduce}.
+
+[Unit handling:]
+
+Energy is computed using {update->mvv2e}.  In SI unit mode the result
+is additionally multiplied by {update->joule2ev} so that output is
+always in eV.
+
+[Particle weighting:]
+
+If {grid->cellweightflag} is enabled, each tally event is weighted by
+{iorig->weight}.  Otherwise the weight is 1.0.
+
+[Restrictions:]
+
+Surfaces must exist before this compute is used.
+All four numeric parameters (Emax, NbinsE, Amax, NbinsA) must be
+positive.
+
+[Related commands:]
+
+"compute"_../compute.html, "compute surf/ead"_../compute_surf_ead.html,
+"fix ave/time"_../fix_ave_time.html
+
+[Default:]
+
+None.
