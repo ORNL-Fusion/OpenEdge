@@ -146,7 +146,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   sheath_dmax = 0.02;
   sheath_pot_mult = 2.5;
   sheath_mD_amu = 2.01410177811;
-  sheath_emax_vpm = 5.0e5;
+  // sheath_emax_vpm removed — no E-field clamp
 
 }
 
@@ -1677,9 +1677,13 @@ void Update::pusher_boris3D(int i, int icell, double dt,
   double sh_xc[3] = {0.0, 0.0, 0.0};  // cell center
   int sh_active = 0;
 
+  int sh_midx = -1;  // nearest-surface array index for exact distance
+
   if (sheath_flag && sheath_geom_cidx >= 0 && sheath_plasma_cidx >= 0) {
     // Read pre-computed geometry arrays (computed once before particle loop)
     Compute *cg = modify->compute[sheath_geom_cidx];
+    auto *csg = static_cast<ComputeSheathGeometryGrid *>(cg);
+    sh_midx = (csg->midx_grid) ? csg->midx_grid[icell] : -1;
 
     // Geometry compute output: dist surfid nx ny nz (5 columns)
     if (cg->array_grid && cg->size_per_grid_cols >= 5) {
@@ -1711,12 +1715,15 @@ void Update::pusher_boris3D(int i, int icell, double dt,
 
         auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
         if (cp) {
-          sh_te = cp->plasma_arr[icell].temp_e;
-          sh_ti = cp->plasma_arr[icell].temp_i;
-          sh_ne = cp->plasma_arr[icell].dens_e;
-          const double br = cp->mag_arr[icell].br;
-          const double bt = cp->mag_arr[icell].bt;
-          const double bz = cp->mag_arr[icell].bz;
+          // Interpolate plasma/B-field at particle position (per-particle)
+          PlasmaFileParams pp = cp->query_plasma_at_point(xcur);
+          sh_te = pp.temp_e;
+          sh_ti = pp.temp_i;
+          sh_ne = pp.dens_e;
+          MagneticFieldFileDataParams bb = cp->query_bfield_at_point(xcur);
+          const double br = bb.br;
+          const double bt = bb.bt;
+          const double bz = bb.bz;
 
           // Convert cylindrical B to Cartesian for 3D
           const double rx = sh_xc[0], ry = sh_xc[1];
@@ -1761,13 +1768,38 @@ void Update::pusher_boris3D(int i, int icell, double dt,
     // grid-cached geometry (which surface, normal) and plasma (Te, ne, B).
     // Distance is computed per-particle via dot product — O(1), not O(Nsurf).
     if (sh_active) {
-      // Signed distance from particle to nearest surface plane:
-      //   d_p = d_cell_center + (xcur - xc) · nhat
-      // nhat points away from wall, so moving toward wall decreases d_p.
-      const double d_particle = sh_d_cell
-        + (xcur[0] - sh_xc[0]) * sh_nx
-        + (xcur[1] - sh_xc[1]) * sh_ny
-        + (xcur[2] - sh_xc[2]) * sh_nz;
+      // Exact point-to-triangle distance (replaces plane projection)
+      double d_particle;
+      if (sh_midx >= 0) {
+        Surf::Tri &tri = surf->tris[sh_midx];
+        double dsq = Geometry::distsq_point_tri(
+            xcur, tri.p1, tri.p2, tri.p3, tri.norm);
+        d_particle = std::sqrt(dsq);
+
+        // Sign: positive = plasma side, negative = behind wall
+        double sctr[3] = {
+          (tri.p1[0] + tri.p2[0] + tri.p3[0]) / 3.0,
+          (tri.p1[1] + tri.p2[1] + tri.p3[1]) / 3.0,
+          (tri.p1[2] + tri.p2[2] + tri.p3[2]) / 3.0};
+        double dot = (xcur[0]-sctr[0])*sh_nx
+                   + (xcur[1]-sctr[1])*sh_ny
+                   + (xcur[2]-sctr[2])*sh_nz;
+        if (dot < 0.0) d_particle = -d_particle;
+
+        // Use triangle's actual normal for E-field direction
+        double nmag = std::sqrt(tri.norm[0]*tri.norm[0]
+                              + tri.norm[1]*tri.norm[1]
+                              + tri.norm[2]*tri.norm[2]);
+        if (nmag > 0.0) {
+          double orient = (tri.norm[0]*sh_nx + tri.norm[1]*sh_ny + tri.norm[2]*sh_nz);
+          double sign = (orient >= 0.0) ? 1.0 : -1.0;
+          sh_nx = sign * tri.norm[0] / nmag;
+          sh_ny = sign * tri.norm[1] / nmag;
+          sh_nz = sign * tri.norm[2] / nmag;
+        }
+      } else {
+        d_particle = sheath_dmax + 1.0;   // no surface -> skip sheath
+      }
 
       if (d_particle > 0.0 && d_particle < sheath_dmax) {
         double emag = 0.0;
@@ -1786,7 +1818,9 @@ void Update::pusher_boris3D(int i, int icell, double dt,
               sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
           emag = sr.emag_vpm;
         }
-        emag = std::min(emag, sheath_emax_vpm);
+        // No E-field clamp — the analytic model sets |E| = -dφ/dd
+        // consistently with the potential.  Energy conservation requires
+        // the full field; clamping would cause KE_wall ≠ KE_init + Z·e·Δφ.
         // E-field points toward wall (along -nhat)
         E[0] += -emag * sh_nx;
         E[1] += -emag * sh_ny;
@@ -2411,8 +2445,8 @@ void Update::global(int narg, char **arg)
           sheath_mD_amu = input->numeric(FLERR, arg[iarg+1]);
           iarg += 2;
         } else if (strcmp(arg[iarg], "emax_vpm") == 0) {
+          // Accepted for backward compatibility but no longer used (no E-clamp).
           if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
-          sheath_emax_vpm = input->numeric(FLERR, arg[iarg+1]);
           iarg += 2;
         } else break;  // next keyword belongs to a different global option
       }

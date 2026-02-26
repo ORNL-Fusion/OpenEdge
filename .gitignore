@@ -23,6 +23,9 @@ dump.*
 # Build artifacts
 src/Obj_mpi/
 src/Obj_mac_mpi/
-src/openedge/*.o
+src/OPENEDGE/*.o
 src/STUBS/*.o
 src/STUBS/*.a
+
+# Package install backup files
+*.sparta_orig

@@ -1,0 +1,83 @@
+################################################################################
+# Nanbu Coulomb collision test: thermal equilibration
+#
+# Two populations of D+ ions (each 5000 particles) are initialized at
+# different temperatures and allowed to collide in a periodic box via
+# binary Nanbu-Takizuka Coulomb scattering.
+#
+# Expected result: the two populations relax toward a common equilibrium
+# temperature on the Spitzer self-collision timescale:
+#     tau_ee ~ 12*pi^(3/2) * eps0^2 * m^(1/2) * (kT)^(3/2)
+#              / (n * e^4 * ln(Lambda))
+#
+# For T~10 eV, n~1e18 m^-3:  tau_ee ~ 10 us
+# At dt=1e-9 s and 50000 steps (50 us), clear thermalization is expected.
+#
+# Momentum is conserved exactly per pair; total kinetic energy
+# is approximately conserved (small fluctuations from stochastic scatter).
+#
+# Usage:
+#     mpirun -np 4 spa_mpi -in in.nanbu_thermalize
+################################################################################
+
+# ---- Physical parameters ----
+variable        Te      equal 10.0          # background electron temperature [eV]
+variable        ne      equal 1.0e18        # background electron density [m^-3]
+
+# ---- Simulation setup ----
+seed            12345
+dimension       3
+units           si
+boundary        p p p
+global          gridcut 0.0 comm/sort yes
+global          fnum 1.0e10
+
+# Domain: 1 cm^3 cube
+create_box      0.0 0.01 0.0 0.01 0.0 0.01
+create_grid     5 5 5
+balance_grid    rcb cell
+
+# ---- Species and mixtures ----
+species         plasma.species D D+ C3+
+mixture         all D D+ C3+
+mixture         all D   frac 0.0
+mixture         all D+  frac 1.0
+mixture         all C3+ frac 0.0
+
+# ---- VSS collision model (for neutral-neutral; benign here) ----
+collide         vss all air.vss
+
+# ---- Plasma fields (constant, uniform) ----
+# These provide Te and Ne for the Coulomb logarithm
+compute         cplasma plasma/fields all constant &
+                magnetic_field 0 0 0 &
+                electric_field 0 0 0 &
+                temp_e ${Te} temp_i ${Te} &
+                dens_e ${ne} dens_i ${ne} &
+                parrflow 0.0 &
+                bx by bz ex ey ez temp_e temp_i dens_i dens_e parrflow
+
+# ---- Nanbu Coulomb collisions ----
+fix             nanbu coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10]
+
+# ---- Create D+ particles from mixture ----
+create_particles all 10000
+
+# ---- Diagnostics ----
+shell           mkdir -p output
+
+# Per-species temperature (kinetic)
+compute         ctemp thermal/grid all all temp
+fix             ftemp ave/grid all 1 100 100 c_ctemp[*] ave one
+dump            dtemp grid all 100 output/temp_grid id xc yc zc f_ftemp[*]
+
+# Particle tracks (sample every 1000 steps)
+dump            dpart particle all 1000 output/particles id type x y z vx vy vz
+
+# ---- Time integration ----
+timestep        1.0e-9
+stats           500
+stats_style     step cpu np
+
+# ---- Run ----
+run             50000

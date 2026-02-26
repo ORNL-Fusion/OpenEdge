@@ -200,6 +200,13 @@ endif()
   # PKG_KOKKOS depends on BUILD_KOKKOS
   set(BUILD_KOKKOS ON)
 endif()
+
+if(PKG_OPENEDGE)
+  set(TARGET_SPARTA_PKG_OPENEDGE pkg_openedge)
+  list(APPEND TARGET_SPARTA_PKGS ${TARGET_SPARTA_PKG_OPENEDGE})
+  set(SPARTA_DEFAULT_CXX_COMPILE_FLAGS -DSPARTA_OPENEDGE
+                                       ${SPARTA_DEFAULT_CXX_COMPILE_FLAGS})
+endif()
 # ################### END PROCESS PKGS ####################
 
 # ################### BEGIN PROCESS TPLS ####################

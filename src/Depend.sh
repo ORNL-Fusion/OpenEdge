@@ -49,3 +49,8 @@ depend () {
 if (test $1 = "FFT") then
   depend KOKKOS
 fi
+
+if (test $1 = "OPENEDGE") then
+  # No child dependencies currently
+  :
+fi

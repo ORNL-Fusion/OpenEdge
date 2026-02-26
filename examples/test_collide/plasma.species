@@ -1,0 +1,10 @@
+# Species data for Nanbu Coulomb collision test
+#
+# Two deuterium charge states for binary Coulomb collision testing.
+# D+ is the primary impurity ion; D (neutral) tests that neutrals
+# are correctly excluded from the Coulomb pairing.
+#
+# ID     Molwt(amu)  Molmass(kg)          RotDof RotRel VibDof VibRel VibTemp(K) SpecWt Charge
+D        2.014       3.34449e-27          0      0.0    0      0.0    0.0        1.0    0.0
+D+       2.014       3.34449e-27          0      0.0    0      0.0    0.0        1.0    1.0
+C3+      12.011      1.99447e-26          0      0.0    0      0.0    0.0        1.0    3.0

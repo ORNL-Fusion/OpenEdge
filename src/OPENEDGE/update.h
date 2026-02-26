@@ -171,7 +171,7 @@ struct SurfHit2D {
   double sheath_dmax;          // max distance for sheath activation (m)
   double sheath_pot_mult;      // potential multiplier
   double sheath_mD_amu;        // ion mass in amu
-  double sheath_emax_vpm;      // max E-field clamp (V/m)
+  // sheath_emax_vpm removed — no E-field clamp; preserves φ↔E consistency
   int nstuck;                // # of particles stuck on surfs and deleted
   int naxibad;               // # of particles where axisymm move was bad
                              // in this case, bad means particle ended up

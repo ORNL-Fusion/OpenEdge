@@ -1,0 +1,285 @@
+"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+
+:link(sws,https://sparta.github.io)
+:link(sd,../Manual.html)
+:link(sc,../Section_commands.html#comm)
+
+:line
+
+fix coll/nanbu command :h3
+
+[Syntax:]
+
+:pre
+fix ID coll/nanbu Nevery plasma TeSrc NeSrc
+
+  ID = user-chosen fix identifier
+  coll/nanbu = style name
+  Nevery = perform collisions every this many timesteps
+  plasma = required keyword
+  TeSrc = per-grid electron-temperature source: c_ID\[col\] (eV)
+  NeSrc = per-grid electron-density source: c_ID\[col\] (m^{-3})
+:pre
+
+[Examples:]
+
+:pre
+fix nanbu coll/nanbu 1 plasma c_cplasma\[7\] c_cplasma\[10\]
+fix colcoul coll/nanbu 10 plasma c_cnear\[4\] c_cnear\[6\]
+:pre
+
+[Description:]
+
+This fix implements binary Coulomb collisions between charged
+simulation particles using the Nanbu (1997) / Takizuka-Abe (1977)
+cumulative small-angle scattering algorithm.
+
+The fix is designed to {coexist} with the standard "collide vss"
+Bird DSMC model: {collide vss} handles neutral-neutral and
+neutral-ion collisions via the variable-soft-sphere model, while
+{fix coll/nanbu} handles Coulomb (charged-charged) collisions.
+Neutral particles (charge = 0) are automatically excluded from
+the Nanbu pairing.  No modifications to the existing Collide or
+CollideVSS classes are required.
+
+[Physical background:]
+
+In a plasma, charged particles interact through the long-range
+Coulomb force.  Unlike neutral-neutral collisions (which are
+dominated by rare, large-angle hard-sphere events), Coulomb
+collisions are dominated by many simultaneous, small-angle
+deflections.  The cumulative effect of these many weak encounters
+over one timestep {dt} is characterised by a single dimensionless
+scattering parameter
+
+:c,image(fix_coll_nanbu_eq_s.png)
+
+:pre
+s_ab = (q_a q_b)^2  n  ln(Lambda)  dt
+       -----------------------------------
+       8 pi epsilon_0^2  mu_ab^2  |g_ab|^3
+:pre
+
+where q_a, q_b are the particle charges (C), mu_ab the reduced
+mass, g_ab the relative velocity, n the collision-partner number
+density, and ln(Lambda) the Coulomb logarithm.  Rather than
+resolving every individual small-angle event, the Nanbu algorithm
+draws a single deflection angle chi from an analytic distribution
+whose variance equals the cumulative effect of all small-angle
+encounters during {dt}.
+
+[Algorithm (per grid cell, per Nevery timesteps):]
+
+1. Collect all charged particles (charge != 0) in the cell. :ulb,l
+
+2. Randomly shuffle the list (Fisher-Yates algorithm). :l
+
+3. Pair particles sequentially: (1,2), (3,4), (5,6), ...
+   If the number is odd, the last particle is paired with a
+   random earlier partner so that every particle participates
+   in exactly one collision per step. :l
+
+4. For each pair (a, b): :l
+
+   a. Compute relative velocity g_ab = v_b - v_a. :l
+
+   b. Compute reduced mass mu_ab = m_a m_b / (m_a + m_b). :l
+
+   c. Compute the Coulomb logarithm from the per-grid Te and ne
+      (see below). :l
+
+   d. Compute the Nanbu scattering parameter s_ab.  The density
+      entering this formula is the physical density of charged
+      simulation particles in the cell:
+      n_partner = N_charged * fnum / V_cell. :l
+
+   e. Sample the polar deflection angle chi: :l
+
+      - s_ab > 6:        cos(chi) = 2U - 1       (isotropic) :ulb,l
+      - 0.01 < s < 6:    cos(chi) = (1/A) ln(exp(-A) + 2 sinh(A) U)
+                          where A(s) is obtained from a pre-built
+                          801-point table with linear interpolation
+                          (Nanbu 1997, Eq. 17). :l
+      - s_ab < 0.01:     cos(chi) = 1 + s ln(U)  (small-angle) :ule,l
+
+   f. Sample a uniform azimuthal angle epsilon in \[0, 2*pi). :l
+
+   g. Rotate the relative velocity g_ab by chi, epsilon in the
+      rest frame of the pair (perpendicular decomposition). :l
+
+   h. Update particle velocities to preserve centre-of-mass
+      momentum exactly: :l
+
+:pre
+      v_a  -=  (m_b / (m_a + m_b)) * Delta_g
+      v_b  +=  (m_a / (m_a + m_b)) * Delta_g
+:pre
+
+      where Delta_g = (1-cos chi) g_ab + sin(chi) h_ab.  :ule,l
+
+[Coulomb logarithm:]
+
+The Coulomb logarithm is computed per cell from the user-supplied
+electron temperature Te (eV) and electron density ne (m^{-3}):
+
+:pre
+lambda_D = sqrt( epsilon_0 * Te_eV * e / (ne * e^2) )
+
+ln(Lambda) = max(2, ln(12 pi ne lambda_D^3))
+:pre
+
+where e is the elementary charge and epsilon_0 the vacuum
+permittivity.  This is the standard Debye-length formulation
+appropriate for weakly coupled plasmas (Lambda >> 1).  The
+floor of 2 prevents unphysical values when the coupling parameter
+approaches unity.
+
+The electron temperature and density are read from per-grid
+computes (e.g. compute plasma/fields) using the c_ID\[col\]
+syntax.  They must be in SI units (eV and m^{-3}).
+
+[Scatter table:]
+
+The mapping from s to A is tabulated at 801 logarithmically
+spaced values of A from 10^5 down to 10^{-3}.  For each A the
+corresponding s is computed from the Nanbu (1997) relation
+
+:pre
+s = -ln( coth(A) - 1/A )
+:pre
+
+(Nanbu 1997, Eq. 10).  At runtime the inverse mapping A(s) is
+obtained by binary search followed by linear interpolation.
+Outside the tabulated range, asymptotic forms are used:
+
+:pre
+s < 0.002:  A = 1/s          (small-angle limit, 0.1% error)
+s > 3.2:    A = 3 exp(-s)    (isotropic limit, 0.1% error)
+:pre
+
+These limits and the table size match those validated in
+Nanbu (1997) Table I.
+
+[Momentum and energy conservation:]
+
+The velocity update preserves centre-of-mass momentum {exactly}
+for each pair.  Total kinetic energy is conserved only in a
+statistical-average sense, consistent with the stochastic nature
+of the Nanbu scheme.  For large particle counts the energy drift
+is negligible over physically relevant timescales.
+
+[Avoiding double-counting of collision effects:]
+
+When {fix coll/nanbu} is used to resolve Coulomb collisions at
+the kinetic (particle) level, the macroscopic transport
+consequences of those collisions -- friction, thermal
+equilibration, and deflection -- are automatically captured by
+the stochastic velocity changes applied to each particle pair.
+
+In particular, the fluid-level thermal-force terms proportional
+to grad(Te) and grad(Ti), as well as the ion temperature-gradient
+force, are {macroscopic manifestations of the same microscopic
+Coulomb collisions} that the Nanbu algorithm resolves directly.
+Adding fluid thermal-force fixes (e.g.
+"fix thermal_force_e"_fix_thermal_force_e.html,
+"fix thermal_force_i"_fix_thermal_force_i.html) on top of
+{fix coll/nanbu} would therefore {double-count} these collision-
+driven transport effects.
+
+The same reasoning applies to {fix coll/background}:  if
+background Fokker-Planck collisions are enabled, the friction
+and diffusion coefficients already encode the information
+contained in the thermal-force terms.  Users should not
+simultaneously apply both a kinetic collision operator (Nanbu
+or Fokker-Planck) and the corresponding fluid thermal force to
+the same species pair.
+
+As a rule of thumb:
+
+:ul
+Use {fix coll/nanbu} (or {fix coll/background}) when the
+  collision physics must be resolved kinetically, e.g. for
+  non-Maxwellian distributions, IEAD calculations, or sputtering
+  studies where the velocity distribution matters. :l
+Use the fluid thermal-force fixes only in the absence of a
+  kinetic collision operator, e.g. for trace-impurity transport
+  in a prescribed background where collisions are not modeled
+  particle-by-particle. :l
+Never combine both approaches for the same interaction. :ule
+
+[Restrictions:]
+
+Only per-grid computes (c_ID\[col\] syntax) are supported for
+the Te and Ne sources.  Grid-style variables are not currently
+accepted (unlike fix coll/background).
+
+All charged particles in a cell are paired together regardless
+of species.  This handles ion-ion Coulomb scattering between
+different impurity charge states automatically.  Electron-ion
+collisions are {not} modeled by this fix (electrons are not
+tracked as simulation particles in typical OpenEdge runs).
+Background electron effects on ions should be handled separately,
+e.g. by "fix coll/background"_fix_coll_background.html.
+
+The current implementation assumes equal particle weights
+(fnum is global).  Per-cell weight variations via
+{global cellweight} are accounted for through the cell volume
+correction V_cell / w_cell, but per-particle weight differences
+between species are not yet handled with the Nanbu-Takizuka
+unequal-weight correction.
+
+[Related commands:]
+
+"collide vss"_collide.html (Bird DSMC neutral-neutral collisions)
+"fix coll/background"_fix_coll_background.html (Fokker-Planck drag
+against a static background plasma)
+
+[References:]
+
+:link(Nanbu1997)
+(Nanbu1997) K. Nanbu, "Theory of cumulative small-angle collisions
+in plasmas," Physical Review E, 55(4), 4642-4652 (1997).
+
+:link(TakizukaAbe1977)
+(TakizukaAbe1977) T. Takizuka and H. Abe, "A binary collision model
+for plasma simulation with a particle code," Journal of Computational
+Physics, 25(3), 205-219 (1977).
+
+:link(NanbuYonemura1998)
+(NanbuYonemura1998) K. Nanbu and S. Yonemura, "Weighted particles
+in Coulomb collision simulations based on the theory of a cumulative
+scattering angle," Journal of Computational Physics, 145(2), 639-654
+(1998).
+
+:link(PerezEtAl2012)
+(PerezEtAl2012) F. Perez, L. Gremillet, A. Decoster, M. Drouin, and
+E. Lefebvre, "Improved modeling of relativistic collisions and
+collisional ionization in particle-in-cell codes," Physics of
+Plasmas, 19(8), 083104 (2012).
+
+:link(BobylrevNanbu2000)
+(BobylrevNanbu2000) Yu. N. Bobylev and K. Nanbu, "Theory of collision
+algorithms for gases and plasmas based on the Boltzmann equation and
+the Landau-Fokker-Planck equation," Physical Review E, 61(4),
+4576-4586 (2000).
+
+:link(Spitzer1962)
+(Spitzer1962) L. Spitzer, "Physics of Fully Ionized Gases,"
+2nd ed., Interscience, New York (1962).
+
+:link(HubaNRL2019)
+(HubaNRL2019) J. D. Huba, "NRL Plasma Formulary," Naval Research
+Laboratory, Washington DC (2019).
+
+:link(CohenEtAl2010)
+(CohenEtAl2010) B. I. Cohen, A. M. Dimits, and D. J. Strozzi,
+"Collision algorithms for reduced-kinetic plasma models," Journal
+of Computational Physics, 229(12), 4730-4745 (2010).
+
+:link(SentokuKemp2008)
+(SentokuKemp2008) Y. Sentoku and A. J. Kemp, "Numerical methods for
+particle simulations at extreme densities and temperatures: weighted
+particles, relativistic collisions and reduced currents," Journal of
+Computational Physics, 227(14), 6846-6861 (2008).
+
+[Default:] none

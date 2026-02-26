@@ -978,6 +978,82 @@ double ComputePlasmaFields::interpField3DFlat(
   return s.w11 * q11 + s.w21 * q21 + s.w12 * q12 + s.w22 * q22;
 }
 
+/*----------------------------------------------------------------------
+   Build a bilinear stencil at an arbitrary (x,y,z) position.
+   This is the factored-out core of precomputeStencils().
+------------------------------------------------------------------------- */
+
+ComputePlasmaFields::BilinearStencil
+ComputePlasmaFields::makeStencilAtPoint(
+    const double xyz[3],
+    const std::vector<double> &r_vals,
+    const std::vector<double> &z_vals) const
+{
+  BilinearStencil s{};
+  if (r_vals.size() < 2 || z_vals.size() < 2) return s;
+
+  const int dim = domain->dimension;
+  double r, z;
+  if (dim == 2) {
+    r = xyz[0];
+    z = xyz[1];
+  } else {
+    r = std::sqrt(xyz[0] * xyz[0] + xyz[1] * xyz[1]);
+    z = xyz[2];
+  }
+
+  const int nr = static_cast<int>(r_vals.size());
+  const int nz = static_cast<int>(z_vals.size());
+  const double r_clamp = std::min(std::max(r, r_vals.front()), r_vals.back());
+  const double z_clamp = std::min(std::max(z, z_vals.front()), z_vals.back());
+
+  auto r_it = std::lower_bound(r_vals.begin(), r_vals.end(), r_clamp);
+  auto z_it = std::lower_bound(z_vals.begin(), z_vals.end(), z_clamp);
+
+  int ir2 = static_cast<int>(r_it - r_vals.begin());
+  int iz2 = static_cast<int>(z_it - z_vals.begin());
+  if (ir2 <= 0) ir2 = 1;
+  if (ir2 >= nr) ir2 = nr - 1;
+  if (iz2 <= 0) iz2 = 1;
+  if (iz2 >= nz) iz2 = nz - 1;
+
+  s.ir1 = ir2 - 1;
+  s.ir2 = ir2;
+  s.iz1 = iz2 - 1;
+  s.iz2 = iz2;
+
+  const double R1 = r_vals[s.ir1];
+  const double R2 = r_vals[s.ir2];
+  const double Z1 = z_vals[s.iz1];
+  const double Z2 = z_vals[s.iz2];
+  const double denomR = R2 - R1;
+  const double denomZ = Z2 - Z1;
+
+  if (denomR == 0.0 || denomZ == 0.0) {
+    s.w11 = 1.0;
+    s.w21 = s.w12 = s.w22 = 0.0;
+    s.valid = 1;
+    return s;
+  }
+
+  const double t = (r_clamp - R1) / denomR;
+  const double u = (z_clamp - Z1) / denomZ;
+  s.t = t;
+  s.u = u;
+  s.inv_dR = 1.0 / denomR;
+  s.inv_dZ = 1.0 / denomZ;
+  s.w11 = (1.0 - t) * (1.0 - u);
+  s.w21 = t * (1.0 - u);
+  s.w12 = (1.0 - t) * u;
+  s.w22 = t * u;
+  s.valid = 1;
+  return s;
+}
+
+/*----------------------------------------------------------------------
+   Precompute stencils for all cell centers (delegates to makeStencilAtPoint)
+------------------------------------------------------------------------- */
+
 void ComputePlasmaFields::precomputeStencils(
     const std::vector<double> &r_vals,
     const std::vector<double> &z_vals,
@@ -986,77 +1062,18 @@ void ComputePlasmaFields::precomputeStencils(
   const int ncells = grid->nlocal;
   stencil.clear();
   stencil.resize(ncells);
-  if (r_vals.size() < 2 || z_vals.size() < 2) return;
 
   const int dim = domain->dimension;
-  const int nr = static_cast<int>(r_vals.size());
-  const int nz = static_cast<int>(z_vals.size());
 
   for (int icell = 0; icell < ncells; ++icell) {
-    BilinearStencil s{};
     Grid::ChildCell *cell = &grid->cells[icell];
-
-    const double x = 0.5 * (cell->lo[0] + cell->hi[0]);
-    const double y = 0.5 * (cell->lo[1] + cell->hi[1]);
-    const double zc = (dim == 3)
-                      ? 0.5 * (cell->lo[2] + cell->hi[2])
-                      : 0.5 * (cell->lo[1] + cell->hi[1]);
-
-    double r = 0.0;
-    double z = 0.0;
-    if (dim == 2) {
-      r = x;
-      z = y;
-    } else {
-      r = std::sqrt(x * x + y * y);
-      z = zc;
-    }
-
-    const double r_clamp = std::min(std::max(r, r_vals.front()), r_vals.back());
-    const double z_clamp = std::min(std::max(z, z_vals.front()), z_vals.back());
-
-    auto r_it = std::lower_bound(r_vals.begin(), r_vals.end(), r_clamp);
-    auto z_it = std::lower_bound(z_vals.begin(), z_vals.end(), z_clamp);
-
-    int ir2 = static_cast<int>(r_it - r_vals.begin());
-    int iz2 = static_cast<int>(z_it - z_vals.begin());
-    if (ir2 <= 0) ir2 = 1;
-    if (ir2 >= nr) ir2 = nr - 1;
-    if (iz2 <= 0) iz2 = 1;
-    if (iz2 >= nz) iz2 = nz - 1;
-
-    s.ir1 = ir2 - 1;
-    s.ir2 = ir2;
-    s.iz1 = iz2 - 1;
-    s.iz2 = iz2;
-
-    const double R1 = r_vals[s.ir1];
-    const double R2 = r_vals[s.ir2];
-    const double Z1 = z_vals[s.iz1];
-    const double Z2 = z_vals[s.iz2];
-    const double denomR = R2 - R1;
-    const double denomZ = Z2 - Z1;
-
-    if (denomR == 0.0 || denomZ == 0.0) {
-      s.w11 = 1.0;
-      s.w21 = s.w12 = s.w22 = 0.0;
-      s.valid = 1;
-      stencil[icell] = s;
-      continue;
-    }
-
-    const double t = (r_clamp - R1) / denomR;
-    const double u = (z_clamp - Z1) / denomZ;
-    s.t = t;
-    s.u = u;
-    s.inv_dR = 1.0 / denomR;
-    s.inv_dZ = 1.0 / denomZ;
-    s.w11 = (1.0 - t) * (1.0 - u);
-    s.w21 = t * (1.0 - u);
-    s.w12 = (1.0 - t) * u;
-    s.w22 = t * u;
-    s.valid = 1;
-    stencil[icell] = s;
+    double cc[3];
+    cc[0] = 0.5 * (cell->lo[0] + cell->hi[0]);
+    cc[1] = 0.5 * (cell->lo[1] + cell->hi[1]);
+    cc[2] = (dim == 3)
+            ? 0.5 * (cell->lo[2] + cell->hi[2])
+            : cc[1];
+    stencil[icell] = makeStencilAtPoint(cc, r_vals, z_vals);
   }
 }
 
@@ -1101,6 +1118,109 @@ void ComputePlasmaFields::gradField2D(
   grad_z = ((1.0 - s.t) * (q12 - q11) + s.t * (q22 - q21)) * s.inv_dZ;
 }
 
+/*----------------------------------------------------------------------
+   Point-query: interpolate plasma fields at arbitrary (x,y,z)
+------------------------------------------------------------------------- */
+
+PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
+    const double xyz[3]) const
+{
+  PlasmaFileParams P{};
+
+  if (input_mode == MODE_CONSTANT) {
+    P.dens_e = neconst;
+    P.temp_e = teconst;
+    P.dens_i = niconst;
+    P.temp_i = ticonst;
+    P.parr_flow = parrflowconst;
+    return P;
+  }
+
+  if (input_mode == MODE_ANALYTIC) {
+    const double x0_use = analytic_use_x0 ? analytic_x0
+                          : 0.5 * (domain->boxlo[0] + domain->boxhi[0]);
+    const double y0_use = analytic_use_y0 ? analytic_y0
+                          : 0.5 * (domain->boxlo[1] + domain->boxhi[1]);
+    const double r0_use = (analytic_r0 > 0.0) ? analytic_r0 : 1.0e-12;
+    const double eps_use = (analytic_eps > 0.0) ? analytic_eps : 0.0;
+
+    const double dx = xyz[0] - x0_use;
+    const double dy = (domain->dimension == 3) ? (xyz[1] - y0_use) : 0.0;
+    const double r = std::sqrt(dx*dx + dy*dy + eps_use);
+    const double rr = r / r0_use;
+    const double expsg = std::exp(-std::pow(rr, 12.0));
+    double dexp_dr = 0.0;
+    if (r > 0.0) dexp_dr = expsg * (-12.0 * std::pow(rr, 11.0) / r0_use);
+
+    P.dens_e = analytic_ne0 * expsg;
+    P.temp_e = analytic_te0 + analytic_te1 * expsg;
+    P.dens_i = P.dens_e;
+    P.temp_i = analytic_ti0;
+    P.grad_dens_e_r = analytic_ne0 * dexp_dr;
+    P.parr_flow = parrflowconst;
+    P.grad_temp_e_r = analytic_te1 * dexp_dr;
+    return P;
+  }
+
+  // MODE_FILE: build stencil on-the-fly and interpolate
+  BilinearStencil s = makeStencilAtPoint(xyz, plasma_data.r, plasma_data.z);
+  if (!s.valid) return P;
+
+  P.temp_e = interpField2D(plasma_data.temp_e, s);
+  P.dens_e = interpField2D(plasma_data.dens_e, s);
+  P.temp_i = interpField2D(plasma_data.temp_i, s);
+  P.dens_i = interpField2D(plasma_data.dens_i, s);
+  gradField2D(plasma_data.dens_e, s, P.grad_dens_e_r, P.grad_dens_e_z);
+  P.grad_dens_e_t = 0.0;
+  P.grad_temp_e_r = interpField2D(plasma_data.grad_temp_e_r, s);
+  P.grad_temp_e_t = interpField2D(plasma_data.grad_temp_e_t, s);
+  P.grad_temp_e_z = interpField2D(plasma_data.grad_temp_e_z, s);
+  P.grad_temp_i_r = interpField2D(plasma_data.grad_temp_i_r, s);
+  P.grad_temp_i_t = interpField2D(plasma_data.grad_temp_i_t, s);
+  P.grad_temp_i_z = interpField2D(plasma_data.grad_temp_i_z, s);
+  P.parr_flow_r   = interpField2D(plasma_data.parr_flow_r, s);
+  P.parr_flow_t   = interpField2D(plasma_data.parr_flow_t, s);
+  P.parr_flow_z   = interpField2D(plasma_data.parr_flow_z, s);
+  P.parr_flow     = interpField2D(plasma_data.parr_flow, s);
+  return P;
+}
+
+/*----------------------------------------------------------------------
+   Point-query: interpolate magnetic field at arbitrary (x,y,z)
+------------------------------------------------------------------------- */
+
+MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
+    const double xyz[3]) const
+{
+  MagneticFieldFileDataParams B{};
+
+  if (input_mode == MODE_CONSTANT || input_mode == MODE_ANALYTIC) {
+    B.br = bconst[0];
+    B.bt = bconst[1];
+    B.bz = bconst[2];
+    if (input_mode == MODE_ANALYTIC) {
+      const double x0_use = analytic_use_x0 ? analytic_x0
+                            : 0.5 * (domain->boxlo[0] + domain->boxhi[0]);
+      const double y0_use = analytic_use_y0 ? analytic_y0
+                            : 0.5 * (domain->boxlo[1] + domain->boxhi[1]);
+      const double eps_use = (analytic_eps > 0.0) ? analytic_eps : 0.0;
+      const double dx = xyz[0] - x0_use;
+      const double dy = (domain->dimension == 3) ? (xyz[1] - y0_use) : 0.0;
+      B.r = std::sqrt(dx*dx + dy*dy + eps_use);
+      B.z = (domain->dimension == 3) ? xyz[2] : xyz[1];
+    }
+    return B;
+  }
+
+  // MODE_FILE: build stencil on-the-fly and interpolate
+  BilinearStencil s = makeStencilAtPoint(xyz, magnetic_data.r, magnetic_data.z);
+  if (!s.valid) return B;
+
+  B.br = interpField2D(magnetic_data.br, s);
+  B.bt = interpField2D(magnetic_data.bt, s);
+  B.bz = interpField2D(magnetic_data.bz, s);
+  return B;
+}
 
 /* ----------------------------------------------------------------------
    read magnetic field data from file
