@@ -1,5 +1,5 @@
 OpenEdge — extensions to SPARTA for plasma–material interaction (PMI)
-Copyright (C) 2023–2025  Abdourahmane Diaw, Oak Ridge National Laboratory
+Copyright (C) 2023–2026  Abdourahmane Diaw, Oak Ridge National Laboratory
 
 OpenEdge is a derivative work of SPARTA (Copyright © 2014 Sandia Corporation).
 OpenEdge is licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later).
@@ -16,7 +16,7 @@ Upstream project:
   Notes: Original copyright and license notices preserved in file headers.
 
 OpenEdge authors:
-- Abdourahmane Diaw (ORNL) and contributors (2023–2025)
+- Abdourahmane Diaw (ORNL) and contributors (2023–2026)
   Additional functionality: PMI physics, ADAS-based ionization/recombination, surface emission,
   sheath/E/B-field modules, diagnostics, etc.
 
