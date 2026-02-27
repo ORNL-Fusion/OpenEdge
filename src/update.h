@@ -107,17 +107,18 @@ struct SurfHit2D {
   char *fieldID;         // fix ID for PFIELD or GFIELD
   int ifieldfix;         // index of external field fix
   int *field_active;     // ptr to field_active flags in fix
-  int fieldfreq;         // update GFIELD every this many timsteps
+  int fieldfreq;         // update GFIELD every this many timesteps
 
-  
-  char *efieldID;       // fix ID for PFIELD
+  char *efieldID;       // fix ID for PFIELD or GFIELD
   int efieldfix;         // index of external electric field fix
   int *efield_active;   // ptr to field_active flags in fix
+  int efieldfreq;        // update efield GFIELD every this many timesteps
 
-  int bfstyle;            // external magnetic field: NOFIELD, PFIELD
-  char *bfieldID;       // fix ID for PFIELD
+  int bfstyle;            // external magnetic field: NOFIELD, PFIELD, GFIELD
+  char *bfieldID;       // fix ID for PFIELD or GFIELD
   int bfieldfix;         // index of external magnetic field fix
   int *bfield_active;   // ptr to field_active flags in fix
+  int bfieldfreq;        // update bfield GFIELD every this many timesteps
 
   int ethermalflag;     // external electron thermal gradient field: NOFIELD, PFIELD
   int ethermalstyle;            // external electron thermal gradient field: NOFIELD, PFIELD

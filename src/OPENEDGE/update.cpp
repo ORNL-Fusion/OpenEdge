@@ -2199,13 +2199,15 @@ void Update::global(int narg, char **arg)
         iarg += 2;
 
       } else if (strcmp(arg[iarg+1],"particle") == 0) {
-        if (iarg+3 > narg) error->all(FLERR,"Illegal global e field command");
+        if (iarg+4 > narg) error->all(FLERR,"Illegal global e field command");
         delete [] efieldID;
         efstyle = PFIELD;
         int n = strlen(arg[iarg+2]) + 1;
         efieldID = new char[n];
         strcpy(efieldID,arg[iarg+2]);
-        iarg += 3;
+        fieldfreq = input->inumeric(FLERR,arg[iarg+3]);
+        if (fieldfreq < 0) error->all(FLERR,"Illegal global e field command");
+        iarg += 4;
 
       } else if (strcmp(arg[iarg+1],"grid") == 0) {
         if (iarg+4 > narg) error->all(FLERR,"Illegal global e field command");

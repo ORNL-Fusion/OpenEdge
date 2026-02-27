@@ -17,7 +17,7 @@
 </PRE>
 <UL><LI>one or more keyword/value pairs 
 
-<LI>keyword = <I>fnum</I> or <I>nrho</I> or <I>vstream</I> or <I>temp</I> or <I>field</I> or <I>surfs</I> or <I>surfgrid</I> or <I>surfmax</I> or <I>splitmax</I> or <I>surftally</I> or <I>gridcut</I> or <I>comm/sort</I> or <I>comm/style</I> or <I>weight</I> or <I>particle/reorder</I> or <I>mem/limit</I> or <I>boris_subcycles</I> or <I>boris_dump</I> or <I>boris_dump_every</I> or <I>boris_bad_dt_check</I> or <I>boris_bad_dt_limit</I> 
+<LI>keyword = <I>fnum</I> or <I>nrho</I> or <I>vstream</I> or <I>temp</I> or <I>field</I> or <I>efield</I> or <I>bfield</I> or <I>surfs</I> or <I>surfgrid</I> or <I>surfmax</I> or <I>splitmax</I> or <I>surftally</I> or <I>gridcut</I> or <I>comm/sort</I> or <I>comm/style</I> or <I>weight</I> or <I>particle/reorder</I> or <I>mem/limit</I> or <I>boris_subcycles</I> or <I>boris_dump</I> or <I>boris_dump_every</I> or <I>boris_bad_dt_check</I> or <I>boris_bad_dt_limit</I>
 
 <PRE>  <I>fnum</I> value = ratio
     ratio = Fnum ratio of physical particles to simulation particles
@@ -38,6 +38,24 @@
       <I>grid</I> args = fixID Nfreq
         fixID = ID of fix that computes per grid cell field components
         Nfreq = update field values every this many timesteps
+  <I>efield</I> values = efstyle args
+    efstyle = <I>none</I> or <I>particle</I> or <I>grid</I>
+      <I>none</I> arg = none
+      <I>particle</I> args = fixID Nfreq
+        fixID = ID of fix efield/particle that computes per particle E-field components
+        Nfreq = update field values every this many timesteps (0 = once at start)
+      <I>grid</I> args = fixID Nfreq
+        fixID = ID of fix efield/grid that computes per grid cell E-field components
+        Nfreq = update field values every this many timesteps (0 = once at start)
+  <I>bfield</I> values = bfstyle args
+    bfstyle = <I>none</I> or <I>particle</I> or <I>grid</I>
+      <I>none</I> arg = none
+      <I>particle</I> args = fixID Nfreq
+        fixID = ID of fix bfield/particle that computes per particle B-field components
+        Nfreq = update field values every this many timesteps (0 = once at start)
+      <I>grid</I> args = fixID Nfreq
+        fixID = ID of fix bfield/grid that computes per grid cell B-field components
+        Nfreq = update field values every this many timesteps (0 = once at start)
   <I>surfs</I> value = explicit or explicit/distributed or implicit
     explicit = surfs defined in read_surf file, each proc owns copy of all surfs
     explicit/distributed = surfs defined in read_surf file, each proc owns
@@ -93,7 +111,11 @@ global vstream 100.0 0 0 fnum 5.0e18
 global temp 1000
 global weight cell radius 
 global mem/limit 100 
-global field constant 9.8 0 0 1 
+global field constant 9.8 0 0 1
+global efield particle 1 1
+global bfield particle 2 1
+global efield grid 1 0
+global bfield grid 2 0
 global boris_subcycles 20
 global boris_bad_dt_check yes boris_bad_dt_limit 0.1
 </PRE>
@@ -166,6 +188,31 @@ time dependence you should set Nfreq to zero; the field will only be
 computed once at the beginning of each simulation run.  For a field
 with time-dependence you can choose how often to recompute the field,
 depending on how fast it varies.
+</P>
+<P>The <I>efield</I> keyword specifies an external electric field for
+OpenEdge Boris particle pushing.  The <I>bfield</I> keyword specifies an
+external magnetic field.  Both keywords use the same syntax:
+</P>
+<PRE>global efield efstyle fixID Nfreq
+global bfield bfstyle fixID Nfreq
+</PRE>
+<P>where efstyle/bfstyle is <I>none</I>, <I>particle</I>, or <I>grid</I>.
+</P>
+<P>The <I>none</I> setting disables the field.
+</P>
+<P>The <I>particle</I> setting evaluates the field per particle every Nfreq
+timesteps using a fix efield/particle or fix bfield/particle.  These
+fixes reference particle-style variables.
+</P>
+<P>The <I>grid</I> setting evaluates the field per grid cell every Nfreq
+timesteps using a fix efield/grid or fix bfield/grid.  These fixes
+reference grid-style variables or compute sources.  An Nfreq of 0
+means the field is computed once at the start of the run and reused
+for all subsequent timesteps.  An Nfreq of 1 means the field is
+recomputed every timestep, which is required for time-dependent fields.
+</P>
+<P>All four variants (<I>efield particle</I>, <I>efield grid</I>, <I>bfield particle</I>,
+<I>bfield grid</I>) use the same argument format: fixID followed by Nfreq.
 </P>
 <P>For OpenEdge Boris particle pushing in 3d, additional controls are
 available:
@@ -470,7 +517,8 @@ defined, e.g. via the <A HREF = "read_surf.html">read_surf</A> command.
 <P><B>Default:</B>
 </P>
 <P>The keyword defaults are fnum = 1.0, nrho = 1.0, vstream = 0.0 0.0
-0.0, temp = 273.15, field = none, surfs = explicit, surfgrid = auto,
+0.0, temp = 273.15, field = none, efield = none, bfield = none,
+surfs = explicit, surfgrid = auto,
 surfmax = 100, splitmax = 10, surftally = auto,
 gridcut = -1.0, comm/sort = no, comm/style = neigh, weight = cell
 none, particle/reorder = 0, mem/limit = 0, optmove = no.
