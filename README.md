@@ -6,7 +6,7 @@
 ![MPI](https://img.shields.io/badge/MPI-OpenMPI%20%7C%20MPICH-purple.svg)
 ![HDF5](https://img.shields.io/badge/HDF5-required-yellow.svg)
 
-OpenEdge is developed as a package for [**SPARTA**](https://github.com/sparta/sparta), using SPARTA as the particle engine (similar in spirit to domain packages in [**LAMMPS**](https://github.com/lammps/lammps)).
+OpenEdge is developed as a package for [**SPARTA**](https://github.com/sparta/sparta), using SPARTA as the particle engine.
 It is a research code for kinetic transport of charged and neutral particles and their interactions with solid surfaces and plasmas.
 Primary focus is plasma-material interactions (PMI), including lithium droplet physics for the Liquid-Metal SciDAC project.
 
