@@ -10,15 +10,7 @@ OpenEdge is developed as a package for [**SPARTA**](https://github.com/sparta/sp
 It is a research code for kinetic transport of charged and neutral particles and their interactions with solid surfaces and plasmas.
 Primary focus is plasma-material interactions (PMI), including lithium droplet physics for the Liquid-Metal SciDAC project.
 
-> **Status:** Early-stage research software—APIs and physics models may change.
->
 > **Contributors welcome:** Diagnostics, verification cases, and tests are especially helpful.
-
-## Current Development Focus (Feb 17, 2026)
-
-- Integrated PMI workflow for lithium droplets near plasma-facing components
-- OML-based droplet charging (`fix droplet/charge`)
-- Coupled drag + evaporation + Boris trajectory pushing workflows
 
 ## Features
 
