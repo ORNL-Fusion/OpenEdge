@@ -1,7 +1,7 @@
-SPARTA example problems
+OpenEdge example problems
 
 Each of these sub-directories contains a sample problem you can run
-with SPARTA.  They should all run quickly in a minute or less on a
+with OpenEdge.  They should all run quickly in a minute or less on a
 desktop machine.  Each problem has an input script (in.*) and produces
 a log file (log.*).  Most have dump commands that can be un-commented
 to produce a series of image files that animate the simulation.
