@@ -9,7 +9,7 @@ boundary             p p p
 global               gridcut 0 comm/sort no
 
 create_box           -2 2 -2 2 -2 2
-create_grid          100 100 100
+create_grid          20 20 20
 balance_grid         rcb part
 
 species              plasma.species H+
