@@ -596,59 +596,6 @@ void FixDrag::kick_half(double dt_half, bool do_diag)
     }
   } // end particle loop — KOKKOS_NOTE: end Kokkos::parallel_for
 
-  // --- MPI reduction + print diagnostics (rank 0 reports global summary)
-  if (do_diag) {
-    // Use separate send/recv buffers to satisfy MPI standard.
-    long long n_part_g = 0, n_nu_g = 0, n_ti_g = 0, n_ni_g = 0;
-    double nu_sum_g = 0.0;
-    double nu_min_g, nu_max_g, rd_min_g, rd_max_g;
-    double ti_min_g, ti_max_g, ni_min_g, ni_max_g;
-
-    MPI_Allreduce(&n_part,   &n_part_g, 1, MPI_LONG_LONG, MPI_SUM,  world);
-    MPI_Allreduce(&n_nu,     &n_nu_g,   1, MPI_LONG_LONG, MPI_SUM,  world);
-    MPI_Allreduce(&n_ti_pos, &n_ti_g,   1, MPI_LONG_LONG, MPI_SUM,  world);
-    MPI_Allreduce(&n_ni_pos, &n_ni_g,   1, MPI_LONG_LONG, MPI_SUM,  world);
-    MPI_Allreduce(&nu_sum,   &nu_sum_g, 1, MPI_DOUBLE,    MPI_SUM,  world);
-    MPI_Allreduce(&nu_min,   &nu_min_g, 1, MPI_DOUBLE,    MPI_MIN,  world);
-    MPI_Allreduce(&nu_max,   &nu_max_g, 1, MPI_DOUBLE,    MPI_MAX,  world);
-    MPI_Allreduce(&rd_min,   &rd_min_g, 1, MPI_DOUBLE,    MPI_MIN,  world);
-    MPI_Allreduce(&rd_max,   &rd_max_g, 1, MPI_DOUBLE,    MPI_MAX,  world);
-    MPI_Allreduce(&ti_min,   &ti_min_g, 1, MPI_DOUBLE,    MPI_MIN,  world);
-    MPI_Allreduce(&ti_max,   &ti_max_g, 1, MPI_DOUBLE,    MPI_MAX,  world);
-    MPI_Allreduce(&ni_min,   &ni_min_g, 1, MPI_DOUBLE,    MPI_MIN,  world);
-    MPI_Allreduce(&ni_max,   &ni_max_g, 1, MPI_DOUBLE,    MPI_MAX,  world);
-
-    if (comm->me == 0) {
-      const char *model_str = (drag_model == DRAG_COULOMB) ? "coulomb" : "epstein";
-      if (n_nu_g == 0) {
-        printf("[fix drag/%s] step=%lld N_part=%lld N_Ti>0=%lld N_Ni>0=%lld "
-               "N_nuE>0=0 "
-               "rd[min,max]=[%g,%g] Ti[min,max]=[%g,%g] Ni[min,max]=[%g,%g]\n",
-               model_str, (long long)update->ntimestep,
-               n_part_g, n_ti_g, n_ni_g,
-               std::isfinite(rd_min_g) ? rd_min_g : 0.0, rd_max_g,
-               std::isfinite(ti_min_g) ? ti_min_g : 0.0,
-               std::isfinite(ti_max_g) ? ti_max_g : 0.0,
-               std::isfinite(ni_min_g) ? ni_min_g : 0.0,
-               std::isfinite(ni_max_g) ? ni_max_g : 0.0);
-      } else {
-        printf("[fix drag/%s] step=%lld N_part=%lld N_nuE>0=%lld "
-               "nuE[min,avg,max]=[%g,%g,%g] "
-               "rd[min,max]=[%g,%g] Ti[min,max]=[%g,%g] Ni[min,max]=[%g,%g]\n",
-               model_str, (long long)update->ntimestep,
-               n_part_g, n_nu_g,
-               std::isfinite(nu_min_g) ? nu_min_g : 0.0,
-               nu_sum_g / (double)n_nu_g,
-               nu_max_g,
-               std::isfinite(rd_min_g) ? rd_min_g : 0.0, rd_max_g,
-               std::isfinite(ti_min_g) ? ti_min_g : 0.0,
-               std::isfinite(ti_max_g) ? ti_max_g : 0.0,
-               std::isfinite(ni_min_g) ? ni_min_g : 0.0,
-               std::isfinite(ni_max_g) ? ni_max_g : 0.0);
-      }
-      fflush(stdout);
-    }
-  }
 }
 
 /* ---------------------------------------------------------------------- */

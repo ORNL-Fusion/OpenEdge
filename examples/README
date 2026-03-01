@@ -1,64 +1,28 @@
 OpenEdge example problems
 
-Each of these sub-directories contains a sample problem you can run
-with OpenEdge.  They should all run quickly in a minute or less on a
-desktop machine.  Each problem has an input script (in.*) and produces
-a log file (log.*).  Most have dump commands that can be un-commented
-to produce a series of image files that animate the simulation.
+Each sub-directory contains a test case you can run with OpenEdge.
+Each problem has an input script (in.*) and most include analysis
+or plotting scripts (Python). Some directories contain a README.md
+with additional details.
 
-A few sample log file outputs on different machines and different
-numbers of processors are included in the directories to compare your
-answers to.  E.g. a log file like log.test.date.machine.P means it ran
-on P processors of machine "machine" with the dated version of SPARTA>
-Note that these problems should get statistically similar answers when
-run on different machines or different numbers of processors, but not
-identical answers to those in the included log files.
-
-These are the sample problems in the various sub-directories.  Many
-are 2d problems so that they run quickly and can be easily visualized.
-
-ablation = 2d and 3d ablation of implicit surfaces
-adapt = static and on-the-fly grid adaptation
-adjust_temp = change surf element temps dynamically due to collisions
-ambi = amibpolar approxiation for ionized flow around a cylinder
-axi = axisymmetric flow around a sphere
-bfield = external magnetic field affecting particle motion
-chem = chemistry in a 3d box
-circle = 2d flow around a circle
-collide = collisional motion in a 3d box
-custom = custom attributes for particles, grid cells, surface elements
-emit = 2d particle emission from surfaces and box face
-fft = 2d and 3d FFTs of energy spectrum of a flow
-flowfile = particle influx defined by a file of mesh points
-free = free molecular motion in a 3d box
-sphere = 3d flow around a sphere
-spiky = 2d flow around a spiky circle
-step = 2d flow around a staircase of steps
-surf = change surfaces between or during runs
-surf_collide = variety of surface collision models
-surf_react_adsorb = surface reaction adsorb models, both GS and PS variants
-thermostat = use of fix temp/rescale as a thermostat
-variable_timestep = use of a variable global timestep
-vibrate = vibrational energy modes in collisions
-test_drag = drag-model comparison for droplet cases
+test_boris_tokamak = Boris pusher with grid-interpolated tokamak B-field
+test_collide = collisional thermalization with Nanbu scattering
+test_cpc_gitr = CPC GITR benchmark for impurity transport with PMI
 test_droplet = droplet emission, transport, and surface-interaction workflows
+test_droplet_charging = OML (orbital motion limited) droplet charging with Boris E/B
+test_droplet_drag = drag-model comparison for droplet cases (Epstein, Stokes, etc.)
+test_droplet_viscous_3d = 3D viscous drag + gravity droplet transport
+test_droplet_viscous_axi = axisymmetric viscous + gravity droplet cases
+test_efield_polarization = polarization-drift validation for Boris pusher (particle and grid fields)
 test_evaporation = evaporation validation and coupled drag+evaporation cases
+test_gca = hybrid Boris/GCA pusher with equilibrium-based magnetic geometry
+test_gravity_3d = 3D gravity-driven droplet transport
+test_ionization_recombination = ionization and recombination with ADAS rates
+test_sheath = sheath electric field with Boris pusher and IEAD diagnostics
 test_solps_coupling = OpenEdge-to-SOLPS coupling utilities and validation assets
-test_viscous_gravity_axi = axisymmetric viscous+gravity droplet cases
-test_west_axi = WEST axisymmetric setup with plasma/material inputs
+test_west_axi = WEST tokamak axisymmetric setup with plasma/material inputs
 
-Here is an example of how one of the sample problems can be run and
-visualized:
+To run a test case:
 
-cd spiky
-cp ../../src/spa_g++ .          # copy DSMC executable to this dir
-spa_g++ < in.spiky              # run the problem
-
-Running the simulation produces the files log.sparta and image.*.ppm
-(if the dump lines in the input script are uncommented).
-
-View or animate the image files as follows:
-
-display image.0100.ppm         # ImageMagick display program
-convert image*ppm movie.gif    # ImageMagick convert -> to animated GIF
-firefox ./movie.gif            # run the animated GIF in a browser
+cd test_efield_polarization
+mpirun -np 4 /path/to/spa_mpi -in in.input.grid

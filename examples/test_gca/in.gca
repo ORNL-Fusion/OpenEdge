@@ -1,0 +1,51 @@
+# GCA validation: hybrid Boris/GCA run
+# Same setup as in.boris but with GCA enabled.
+# Compare trajectory output to pure Boris reference.
+
+seed                 1245
+dimension            3
+boundary             p p p
+global               gridcut 0 comm/sort no
+
+create_box           3.0 5.0 -1.0 1.0 -1.0 1.0
+create_grid          20 20 20
+balance_grid         rcb part
+
+species              input/plasma.species H+
+mixture              species H+ frac 1.0
+
+global               fnum 1
+read_particles       input/source.single 0
+
+# Plasma/fields compute: loads bfield.h5 + plasma.h5 + equilibrium for exact GCA geometry
+compute pfields plasma/fields all file input/plasma.h5 input/bfield.h5 &
+        equilibrium g000001.00001_symm.X4.equ &
+        bx by bz temp_e dens_e temp_i dens_i parrflow
+
+# Wire B from compute to Boris pusher
+fix bB bfield/grid c_pfields[1] c_pfields[2] c_pfields[3]
+global bfield grid bB 0
+global efield none
+
+# Boris fallback settings (used when GCA criterion not met)
+global boris_subcycles 500
+global boris_dump no
+global boris_bad_dt_check yes
+global boris_bad_dt_limit 0.5
+
+# Enable hybrid GCA pusher (ERO2.0-style)
+# pfields compute provides grad(B) from bilinear interpolation of bfield.h5
+global gca plasma_compute pfields switch_factor 2.5
+
+shell mkdir -p output
+variable dt         equal 1e-9
+variable numStep    equal 100000
+variable dumpFreq   equal 1 #floor(v_numStep/200)
+
+dump dpart particle all ${dumpFreq} output/traj.gca id type x y z vx vy vz
+dump_modify dpart first yes
+
+timestep            ${dt}
+stats               ${dumpFreq}
+stats_style         step cpu np
+run                 ${numStep}

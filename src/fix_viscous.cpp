@@ -7,8 +7,12 @@
 https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
-#include "stdlib.h"
-#include "string.h"
+#include <cstdlib>
+#include <cstring>
+#include <cmath>
+#include <algorithm>
+#include <limits>
+
 #include "fix_viscous.h"
 #include "update.h"
 #include "grid.h"
@@ -17,27 +21,13 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "error.h"
 #include "comm.h"
 #include "domain.h"
-#include "math.h"
-#include "react_bird.h"
 #include "input.h"
-#include "collide.h"
 #include "modify.h"
-#include "fix.h"
-#include "random_knuth.h"
-#include "math_const.h"
-#include <filesystem>
-#include "math_extra.h"
-#include <cmath>
-#include <algorithm>
-#include <numeric>
-#include <limits>
 #include "compute.h"
 #include "variable.h"
-#include "update.h"
-
-namespace fs = std::filesystem;
+#include "math_const.h"
 using namespace SPARTA_NS;
-#define INVOKED_PER_GRID 16
+using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
@@ -183,9 +173,22 @@ FixViscous::FixViscous(SPARTA *sparta, int narg, char **arg) :
 FixViscous::~FixViscous()
 {
   if (copymode) return;
-  delete rng;
-  rng = nullptr;
-
+  memory->destroy(plasma_grid);
+  memory->destroy(b_grid);
+  if (srcTe.vname)   delete [] srcTe.vname;
+  if (srcTi.vname)   delete [] srcTi.vname;
+  if (srcNi.vname)   delete [] srcNi.vname;
+  if (srcVpar.vname) delete [] srcVpar.vname;
+  if (srcBr.vname)   delete [] srcBr.vname;
+  if (srcBt.vname)   delete [] srcBt.vname;
+  if (srcBz.vname)   delete [] srcBz.vname;
+  if (srcTe.cid)     delete [] srcTe.cid;
+  if (srcTi.cid)     delete [] srcTi.cid;
+  if (srcNi.cid)     delete [] srcNi.cid;
+  if (srcVpar.cid)   delete [] srcVpar.cid;
+  if (srcBr.cid)     delete [] srcBr.cid;
+  if (srcBt.cid)     delete [] srcBt.cid;
+  if (srcBz.cid)     delete [] srcBz.cid;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -411,7 +414,7 @@ double FixViscous::epstein_nu(double Ni, double Ti_eV, double rd_m) const {
   if (Ni<=0.0 || Ti_eV<=0.0 || rd_m<=0.0 || rho_d<=0.0) return 0.0;
 
   const double mi   = A_background * update->proton_mass;
-  const double vth  = std::sqrt(8.0 * (Ti_eV*update->echarge) / (M_PI*mi));
+  const double vth  = std::sqrt(8.0 * (Ti_eV*update->echarge) / (MY_PI*mi));
   const double rho_g= Ni * mi;
   return alpha_E * (rho_g * vth) / (rho_d * rd_m);
 }
@@ -420,7 +423,7 @@ double FixViscous::coulomb_drag_multiplier(double u) const
 {
   // Implements a Coulomb-corrected Epstein scaling using
   // collisional + orbital terms, normalized by baseline Epstein drag.
-  const double sqrt_pi = std::sqrt(M_PI);
+  const double sqrt_pi = std::sqrt(MY_PI);
   const double ueff = std::max(u, 1.0e-8);
   const double chi_over_delta = chi_coulomb / std::max(delta_ite, 1.0e-12);
   const double e = std::exp(-ueff * ueff);
@@ -571,58 +574,6 @@ void FixViscous::kick_half(double dt_half, int diag_phase)
     }
   }
 
-  if (do_diag) {
-    long long n_global = 0, n_nu_global = 0;
-    long long n_ti_pos_global = 0, n_ni_pos_global = 0;
-    double nu_sum_global = 0.0;
-    double nu_min_global = nu_min_local;
-    double nu_max_global = nu_max_local;
-    double rd_min_global = rd_min_local;
-    double rd_max_global = rd_max_local;
-    double ti_min_global = ti_min_local;
-    double ti_max_global = ti_max_local;
-    double ni_min_global = ni_min_local;
-    double ni_max_global = ni_max_local;
-
-    MPI_Allreduce(&n_local, &n_global, 1, MPI_LONG_LONG, MPI_SUM, world);
-    MPI_Allreduce(&n_nu_local, &n_nu_global, 1, MPI_LONG_LONG, MPI_SUM, world);
-    MPI_Allreduce(&n_ti_pos_local, &n_ti_pos_global, 1, MPI_LONG_LONG, MPI_SUM, world);
-    MPI_Allreduce(&n_ni_pos_local, &n_ni_pos_global, 1, MPI_LONG_LONG, MPI_SUM, world);
-    MPI_Allreduce(&nu_sum_local, &nu_sum_global, 1, MPI_DOUBLE, MPI_SUM, world);
-    MPI_Allreduce(&nu_min_global, &nu_min_global, 1, MPI_DOUBLE, MPI_MIN, world);
-    MPI_Allreduce(&nu_max_global, &nu_max_global, 1, MPI_DOUBLE, MPI_MAX, world);
-    MPI_Allreduce(&rd_min_global, &rd_min_global, 1, MPI_DOUBLE, MPI_MIN, world);
-    MPI_Allreduce(&rd_max_global, &rd_max_global, 1, MPI_DOUBLE, MPI_MAX, world);
-    MPI_Allreduce(&ti_min_global, &ti_min_global, 1, MPI_DOUBLE, MPI_MIN, world);
-    MPI_Allreduce(&ti_max_global, &ti_max_global, 1, MPI_DOUBLE, MPI_MAX, world);
-    MPI_Allreduce(&ni_min_global, &ni_min_global, 1, MPI_DOUBLE, MPI_MIN, world);
-    MPI_Allreduce(&ni_max_global, &ni_max_global, 1, MPI_DOUBLE, MPI_MAX, world);
-
-    if (comm->me == 0) {
-      if (n_nu_global == 0) {
-        printf("[fix viscous] step=%lld N(radius>0)=%lld N(Ti>0)=%lld N(Ni>0)=%lld N(nuE>0)=0 rd[min,max]=[%g,%g] Ti[min,max]=[%g,%g] Ni[min,max]=[%g,%g]\n",
-               (long long) update->ntimestep, n_global,
-               n_ti_pos_global, n_ni_pos_global,
-               std::isfinite(rd_min_global) ? rd_min_global : 0.0, rd_max_global,
-               std::isfinite(ti_min_global) ? ti_min_global : 0.0,
-               std::isfinite(ti_max_global) ? ti_max_global : 0.0,
-               std::isfinite(ni_min_global) ? ni_min_global : 0.0,
-               std::isfinite(ni_max_global) ? ni_max_global : 0.0);
-      } else {
-        const double nu_avg = nu_sum_global / static_cast<double>(n_nu_global);
-        printf("[fix viscous] step=%lld N(radius>0)=%lld N(Ti>0)=%lld N(Ni>0)=%lld N(nuE>0)=%lld nuE[min,avg,max]=[%g,%g,%g] rd[min,max]=[%g,%g] Ti[min,max]=[%g,%g] Ni[min,max]=[%g,%g]\n",
-               (long long) update->ntimestep, n_global, n_nu_global,
-               n_ti_pos_global, n_ni_pos_global,
-               std::isfinite(nu_min_global) ? nu_min_global : 0.0, nu_avg, nu_max_global,
-               std::isfinite(rd_min_global) ? rd_min_global : 0.0, rd_max_global,
-               std::isfinite(ti_min_global) ? ti_min_global : 0.0,
-               std::isfinite(ti_max_global) ? ti_max_global : 0.0,
-               std::isfinite(ni_min_global) ? ni_min_global : 0.0,
-               std::isfinite(ni_max_global) ? ni_max_global : 0.0);
-      }
-      fflush(stdout);
-    }
-  }
 }
 inline void FixViscous::epstein_params(int icell, const Particle::OnePart &p,
                                        double &nuE, double upar_cyl[3])
@@ -682,7 +633,7 @@ inline void FixViscous::epstein_params(int icell, const Particle::OnePart &p,
   // Optional Coulomb-corrected model.
   if (drag_model == DRAG_COULOMB && nuE > 0.0) {
     const double mi = A_background * update->proton_mass;
-    const double vth_i = std::sqrt(8.0 * (Ti_eV * update->echarge) / (M_PI * mi));
+    const double vth_i = std::sqrt(8.0 * (Ti_eV * update->echarge) / (MY_PI * mi));
     if (vth_i > 0.0) {
       const double dv0 = p.v[0] - upar_cyl[0];
       const double dv1 = p.v[1] - upar_cyl[1];

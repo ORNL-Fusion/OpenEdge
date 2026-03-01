@@ -19,7 +19,9 @@ https://github.com/ORNL-Fusion/OpenEdge
 
 #include <tuple>
 #include <string>
-#include <vector> 
+#include <vector>
+#include <fstream>
+#include <sstream>
 #include <H5Cpp.h>
 #include <hdf5.h>
 #include <stdexcept>
@@ -148,6 +150,19 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
     }
   }
 
+  // Optional equilibrium keyword (before value keywords)
+  has_equilibrium = 0;
+  geom_arr = NULL;
+  while (iarg < narg) {
+    if (strcmp(arg[iarg],"equilibrium") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR,"compute plasma/fields equilibrium requires a file path");
+      equilibriumPath = std::string(arg[iarg+1]);
+      has_equilibrium = 1;
+      iarg += 2;
+    } else break;
+  }
+
   if (iarg >= narg)
     error->all(FLERR,"plasma/fields needs values (br/bt/bz, er/et/ez, vr/vt/vz, ...)");
 
@@ -216,8 +231,11 @@ ComputePlasmaFields::~ComputePlasmaFields()
   if (mag_arr) {
     memory->destroy(mag_arr);
     mag_arr = NULL;
-  } 
-  
+  }
+  if (geom_arr) {
+    memory->destroy(geom_arr);
+    geom_arr = NULL;
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -237,6 +255,10 @@ void ComputePlasmaFields::init()
   if (mag_arr) {
     memory->destroy(mag_arr);
     mag_arr = NULL;
+  }
+  if (geom_arr) {
+    memory->destroy(geom_arr);
+    geom_arr = NULL;
   }
   nion_species = 0;
   ion_spec_index.clear();
@@ -313,6 +335,29 @@ void ComputePlasmaFields::init()
         }
       }
     }
+
+    // --- Equilibrium-based magnetic geometry ---
+    if (has_equilibrium) {
+      if (me == 0) {
+        equ_data = readEquilibriumFile(equilibriumPath);
+      }
+      broadcastEquilibriumData(equ_data);
+      memory->create(geom_arr, ncells, "plasma/fields:geom_arr");
+      for (int icell = 0; icell < ncells; ++icell) {
+        MagneticGeometry g{};
+        g.kappa[0] = g.kappa[1] = g.kappa[2] = 0.0;
+        g.curl_b[0] = g.curl_b[1] = g.curl_b[2] = 0.0;
+        g.gradBmag[0] = g.gradBmag[1] = g.gradBmag[2] = 0.0;
+        g.Bmag = 0.0;
+        if (!(cinfo[icell].mask & groupbit)) { geom_arr[icell] = g; continue; }
+        if (cells[icell].nsplit < 1)         { geom_arr[icell] = g; continue; }
+        computeMagneticGeometry(icell, equ_data, g);
+        geom_arr[icell] = g;
+      }
+      if (me == 0)
+        printf("  Equilibrium magnetic geometry precomputed for %d cells\n", ncells);
+    }
+
   } else if (input_mode == MODE_CONSTANT) {
     plasma_stencil.clear();
     magnetic_stencil.clear();
@@ -953,6 +998,21 @@ ComputePlasmaFields::bilinearInterpolationMagneticField(
   B.br = interpField2D(data.br, s);
   B.bt = interpField2D(data.bt, s);
   B.bz = interpField2D(data.bz, s);
+
+  // Compute gradients of each B component using the existing stencil
+  gradField2D(data.br, s, B.dBr_dr, B.dBr_dz);
+  gradField2D(data.bt, s, B.dBt_dr, B.dBt_dz);
+  gradField2D(data.bz, s, B.dBz_dr, B.dBz_dz);
+
+  // |B| and grad(|B|) via chain rule
+  B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+  if (B.Bmag > 0.0) {
+    B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr + B.bz*B.dBz_dr) / B.Bmag;
+    B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz + B.bz*B.dBz_dz) / B.Bmag;
+  } else {
+    B.dBmag_dr = 0.0;
+    B.dBmag_dz = 0.0;
+  }
   return B;
 }
 
@@ -1276,4 +1336,215 @@ MagneticFieldFileData ComputePlasmaFields::readMagneticFieldFileData(const std::
     }
     printf("Finished reading magnetic field data from file: %s\n", filePath.c_str());
     return data;
+}
+
+/* ----------------------------------------------------------------------
+   Read equilibrium (.equ) file: SOLPS format with ψ(R,Z) grid
+------------------------------------------------------------------------- */
+
+EquilibriumData ComputePlasmaFields::readEquilibriumFile(const std::string &path) {
+  printf("Reading equilibrium data from file: %s\n", path.c_str());
+  EquilibriumData equ;
+
+  std::ifstream fin(path);
+  if (!fin.is_open()) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "Cannot open equilibrium file: %s", path.c_str());
+    error->one(FLERR, msg);
+  }
+
+  auto readDoubles = [&](int count) -> std::vector<double> {
+    std::vector<double> vals;
+    vals.reserve(count);
+    std::string line;
+    while (static_cast<int>(vals.size()) < count && std::getline(fin, line)) {
+      std::istringstream iss(line);
+      double v;
+      while (iss >> v) {
+        vals.push_back(v);
+        if (static_cast<int>(vals.size()) >= count) break;
+      }
+    }
+    return vals;
+  };
+
+  std::string line;
+  while (std::getline(fin, line)) {
+    if (line.find("jm") != std::string::npos && line.find("=") != std::string::npos
+        && line.find(":=") == std::string::npos) {
+      std::istringstream iss(line.substr(line.find("=") + 1));
+      iss >> equ.jm;
+    }
+    if (line.find("km") != std::string::npos && line.find("=") != std::string::npos
+        && line.find(":=") == std::string::npos) {
+      if (line.find("km") < line.find("=")) {
+        std::istringstream iss(line.substr(line.find("=") + 1));
+        iss >> equ.km;
+      }
+    }
+    if (line.find("psib") != std::string::npos && line.find("=") != std::string::npos
+        && line.find(":=") == std::string::npos) {
+      std::istringstream iss(line.substr(line.find("=") + 1));
+      iss >> equ.psib;
+    }
+    if (line.find("btf") != std::string::npos && line.find("=") != std::string::npos
+        && line.find(":=") == std::string::npos) {
+      std::istringstream iss(line.substr(line.find("=") + 1));
+      iss >> equ.btf;
+    }
+    if (line.find("rtf") != std::string::npos && line.find("=") != std::string::npos
+        && line.find(":=") == std::string::npos) {
+      std::istringstream iss(line.substr(line.find("=") + 1));
+      iss >> equ.rtf;
+    }
+    if (line.find("r(1:jm)") != std::string::npos) break;
+  }
+
+  if (equ.jm <= 0 || equ.km <= 0)
+    error->one(FLERR, "Equilibrium file: failed to parse jm/km");
+
+  equ.r = readDoubles(equ.jm);
+  if (static_cast<int>(equ.r.size()) != equ.jm)
+    error->one(FLERR, "Equilibrium file: incomplete r array");
+
+  while (std::getline(fin, line)) {
+    if (line.find("z(1:km)") != std::string::npos) break;
+  }
+
+  equ.z = readDoubles(equ.km);
+  if (static_cast<int>(equ.z.size()) != equ.km)
+    error->one(FLERR, "Equilibrium file: incomplete z array");
+
+  while (std::getline(fin, line)) {
+    if (line.find("psi(j,k)") != std::string::npos) break;
+  }
+
+  int total = equ.jm * equ.km;
+  std::vector<double> psi_flat = readDoubles(total);
+  if (static_cast<int>(psi_flat.size()) != total)
+    error->one(FLERR, "Equilibrium file: incomplete psi array");
+
+  equ.psi.resize(equ.km, std::vector<double>(equ.jm));
+  int idx = 0;
+  for (int k = 0; k < equ.km; ++k)
+    for (int j = 0; j < equ.jm; ++j)
+      equ.psi[k][j] = psi_flat[idx++] + equ.psib;
+
+  printf("  Equilibrium: jm=%d km=%d btf=%.3f rtf=%.3f psib=%.6e\n",
+         equ.jm, equ.km, equ.btf, equ.rtf, equ.psib);
+  printf("  R range: [%.4f, %.4f] m, Z range: [%.4f, %.4f] m\n",
+         equ.r.front(), equ.r.back(), equ.z.front(), equ.z.back());
+
+  fin.close();
+  return equ;
+}
+
+void ComputePlasmaFields::broadcastEquilibriumData(EquilibriumData &data) {
+  int me = comm->me;
+  MPI_Bcast(&data.jm, 1, MPI_INT, 0, world);
+  MPI_Bcast(&data.km, 1, MPI_INT, 0, world);
+  MPI_Bcast(&data.btf, 1, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&data.rtf, 1, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&data.psib, 1, MPI_DOUBLE, 0, world);
+  if (me != 0) {
+    data.r.resize(data.jm);
+    data.z.resize(data.km);
+  }
+  MPI_Bcast(data.r.data(), data.jm, MPI_DOUBLE, 0, world);
+  MPI_Bcast(data.z.data(), data.km, MPI_DOUBLE, 0, world);
+  if (me != 0) {
+    data.psi.resize(data.km, std::vector<double>(data.jm));
+  }
+  for (int k = 0; k < data.km; ++k)
+    MPI_Bcast(data.psi[k].data(), data.jm, MPI_DOUBLE, 0, world);
+}
+
+void ComputePlasmaFields::computeMagneticGeometry(
+    int icell, const EquilibriumData &equ, MagneticGeometry &geom)
+{
+  Grid::ChildCell *cells = grid->cells;
+  const int dim = domain->dimension;
+  const double x = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
+  const double y = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
+  const double zc = (dim == 3) ? 0.5 * (cells[icell].lo[2] + cells[icell].hi[2])
+                                : 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
+  double R, Z;
+  if (dim == 2) { R = x; Z = y; }
+  else { R = std::sqrt(x*x + y*y); Z = zc; }
+  if (R < 1.0e-10) return;
+
+  const int jm = equ.jm;
+  const int km = equ.km;
+  if (jm < 3 || km < 3) return;
+
+  const double dr = equ.r[1] - equ.r[0];
+  const double dz = equ.z[1] - equ.z[0];
+  if (dr <= 0.0 || dz <= 0.0) return;
+
+  double fj = (R - equ.r[0]) / dr;
+  double fk = (Z - equ.z[0]) / dz;
+  int jc = static_cast<int>(std::round(fj));
+  int kc = static_cast<int>(std::round(fk));
+  jc = std::max(1, std::min(jc, jm - 2));
+  kc = std::max(1, std::min(kc, km - 2));
+
+  const double dR = equ.r[jc+1] - equ.r[jc-1];
+  const double dZ = equ.z[kc+1] - equ.z[kc-1];
+  const double dpsi_dR = (equ.psi[kc][jc+1] - equ.psi[kc][jc-1]) / dR;
+  const double dpsi_dZ = (equ.psi[kc+1][jc] - equ.psi[kc-1][jc]) / dZ;
+
+  const double dR1 = equ.r[jc+1] - equ.r[jc];
+  const double dR0 = equ.r[jc] - equ.r[jc-1];
+  const double dZ1 = equ.z[kc+1] - equ.z[kc];
+  const double dZ0 = equ.z[kc] - equ.z[kc-1];
+
+  const double d2psi_dR2 = 2.0 * (equ.psi[kc][jc+1] / (dR1*(dR1+dR0))
+                                 - equ.psi[kc][jc] / (dR1*dR0)
+                                 + equ.psi[kc][jc-1] / (dR0*(dR1+dR0)));
+  const double d2psi_dZ2 = 2.0 * (equ.psi[kc+1][jc] / (dZ1*(dZ1+dZ0))
+                                 - equ.psi[kc][jc] / (dZ1*dZ0)
+                                 + equ.psi[kc-1][jc] / (dZ0*(dZ1+dZ0)));
+  const double d2psi_dRdZ = (equ.psi[kc+1][jc+1] - equ.psi[kc+1][jc-1]
+                            - equ.psi[kc-1][jc+1] + equ.psi[kc-1][jc-1]) / (dR * dZ);
+
+  const double invR = 1.0 / R;
+  const double BR = dpsi_dZ * invR;
+  const double BZ = -dpsi_dR * invR;
+  const double Bphi = equ.btf * equ.rtf * invR;
+
+  const double Bmag = std::sqrt(BR*BR + Bphi*Bphi + BZ*BZ);
+  if (Bmag <= 0.0) return;
+  geom.Bmag = Bmag;
+
+  const double invBmag = 1.0 / Bmag;
+  const double bR = BR * invBmag;
+  const double bphi = Bphi * invBmag;
+  const double bZ = BZ * invBmag;
+
+  const double invR2 = invR * invR;
+  const double dBR_dR2 = -dpsi_dZ * invR2 + d2psi_dRdZ * invR;
+  const double dBR_dZ2 = d2psi_dZ2 * invR;
+  const double dBZ_dR2 = dpsi_dR * invR2 - d2psi_dR2 * invR;
+  const double dBZ_dZ2 = -d2psi_dRdZ * invR;
+  const double dBphi_dR = -equ.btf * equ.rtf * invR2;
+  const double dBphi_dZ = 0.0;
+
+  geom.gradBmag[0] = (BR * dBR_dR2 + Bphi * dBphi_dR + BZ * dBZ_dR2) * invBmag;
+  geom.gradBmag[1] = 0.0;
+  geom.gradBmag[2] = (BR * dBR_dZ2 + Bphi * dBphi_dZ + BZ * dBZ_dZ2) * invBmag;
+
+  const double dbR_dR = invBmag * (dBR_dR2 - bR * geom.gradBmag[0]);
+  const double dbR_dZ = invBmag * (dBR_dZ2 - bR * geom.gradBmag[2]);
+  const double dbphi_dR = invBmag * (dBphi_dR - bphi * geom.gradBmag[0]);
+  const double dbphi_dZ = invBmag * (dBphi_dZ - bphi * geom.gradBmag[2]);
+  const double dbZ_dR = invBmag * (dBZ_dR2 - bZ * geom.gradBmag[0]);
+  const double dbZ_dZ = invBmag * (dBZ_dZ2 - bZ * geom.gradBmag[2]);
+
+  geom.kappa[0] = bR * dbR_dR + bZ * dbR_dZ - bphi * bphi * invR;
+  geom.kappa[1] = bR * dbphi_dR + bZ * dbphi_dZ + bR * bphi * invR;
+  geom.kappa[2] = bR * dbZ_dR + bZ * dbZ_dZ;
+
+  geom.curl_b[0] = -dbphi_dZ;
+  geom.curl_b[1] = dbR_dZ - dbZ_dR;
+  geom.curl_b[2] = bphi * invR + dbphi_dR;
 }

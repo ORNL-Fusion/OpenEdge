@@ -45,6 +45,7 @@ ComputeSheathGeometryGrid::ComputeSheathGeometryGrid(SPARTA *sparta, int narg, c
     else if (strcmp(arg[iarg],"nx") == 0) value[iv] = NX;
     else if (strcmp(arg[iarg],"ny") == 0) value[iv] = NY;
     else if (strcmp(arg[iarg],"nz") == 0) value[iv] = NZ;
+    else if (strcmp(arg[iarg],"surfidx") == 0) value[iv] = SURFIDX;
     else error->all(FLERR,"Illegal compute sheath/geometry/grid command");
     ++iarg;
     ++iv;
@@ -55,6 +56,8 @@ ComputeSheathGeometryGrid::ComputeSheathGeometryGrid(SPARTA *sparta, int narg, c
   nglocal = 0;
   vector_grid = nullptr;
   array_grid = nullptr;
+  midx_grid = nullptr;
+  computed_once = 0;
 }
 
 ComputeSheathGeometryGrid::~ComputeSheathGeometryGrid()
@@ -63,6 +66,7 @@ ComputeSheathGeometryGrid::~ComputeSheathGeometryGrid()
   delete [] value;
   memory->destroy(vector_grid);
   memory->destroy(array_grid);
+  memory->destroy(midx_grid);
 }
 
 void ComputeSheathGeometryGrid::init()
@@ -73,6 +77,9 @@ void ComputeSheathGeometryGrid::init()
 void ComputeSheathGeometryGrid::compute_per_grid()
 {
   invoked_per_grid = update->ntimestep;
+
+  // geometry is static: grid and surface don't change, so cache after first eval
+  if (computed_once) return;
   const int dim = domain->dimension;
   Grid::ChildCell *cells = grid->cells;
   Grid::ChildInfo *cinfo = grid->cinfo;
@@ -95,6 +102,7 @@ void ComputeSheathGeometryGrid::compute_per_grid()
     if (!(cinfo[icell].mask & groupbit) || cells[icell].nsplit < 1) {
       if (nvalue == 1) vector_grid[icell] = 0.0;
       else for (int j = 0; j < nvalue; ++j) array_grid[icell][j] = 0.0;
+      midx_grid[icell] = -1;
       continue;
     }
 
@@ -108,15 +116,29 @@ void ComputeSheathGeometryGrid::compute_per_grid()
       (dim == 3) ? 0.5 * (lo[2] + hi[2]) : 0.0
     };
 
+    // For sheath workflows, use perpendicular distance from cell center to the
+    // triangle plane.  This correctly selects the plasma-facing surface even when
+    // multiple triangles (top, bottom, side faces of a slab) have similar
+    // bounding-box distances — which happens whenever a cell is much larger than
+    // the surface feature (e.g. 1×1×N grid with a thin slab surface).
     double mind = DIST_BIG;
     int midx = -1;
     for (int m = 0; m < nsurf_all; ++m) {
       if (!eligible[m]) continue;
       double d = DIST_BIG;
-      if (dim == 2)
-        d = Geometry::dist_line_quad(lines[m].p1, lines[m].p2, lom, him);
-      else
-        d = Geometry::dist_tri_hex(tris[m].p1, tris[m].p2, tris[m].p3, tris[m].norm, lom, him);
+      if (dim == 2) {
+        // 2D: perpendicular distance from cell center to the line
+        const double lnx = lines[m].norm[0];
+        const double lny = lines[m].norm[1];
+        d = std::fabs((ctr[0] - lines[m].p1[0]) * lnx +
+                      (ctr[1] - lines[m].p1[1]) * lny);
+      } else {
+        // 3D: perpendicular distance from cell center to the triangle plane
+        const double *tn = tris[m].norm;
+        d = std::fabs((ctr[0] - tris[m].p1[0]) * tn[0] +
+                      (ctr[1] - tris[m].p1[1]) * tn[1] +
+                      (ctr[2] - tris[m].p1[2]) * tn[2]);
+      }
       if (d < mind) {
         mind = d;
         midx = m;
@@ -152,12 +174,15 @@ void ComputeSheathGeometryGrid::compute_per_grid()
       if (MathExtra::dot3(v, nvec) < 0.0) { nx = -nx; ny = -ny; nz = -nz; }
     }
 
+    midx_grid[icell] = midx;
+
     if (nvalue == 1) {
       if (value[0] == DIST) vector_grid[icell] = (midx >= 0) ? mind : DIST_BIG;
       else if (value[0] == SURFID) vector_grid[icell] = sid;
       else if (value[0] == NX) vector_grid[icell] = nx;
       else if (value[0] == NY) vector_grid[icell] = ny;
       else if (value[0] == NZ) vector_grid[icell] = nz;
+      else if (value[0] == SURFIDX) vector_grid[icell] = static_cast<double>(midx);
     } else {
       for (int j = 0; j < nvalue; ++j) {
         if (value[j] == DIST) array_grid[icell][j] = (midx >= 0) ? mind : DIST_BIG;
@@ -165,11 +190,13 @@ void ComputeSheathGeometryGrid::compute_per_grid()
         else if (value[j] == NX) array_grid[icell][j] = nx;
         else if (value[j] == NY) array_grid[icell][j] = ny;
         else if (value[j] == NZ) array_grid[icell][j] = nz;
+        else if (value[j] == SURFIDX) array_grid[icell][j] = static_cast<double>(midx);
       }
     }
   }
 
   memory->destroy(eligible);
+  computed_once = 1;
 }
 
 void ComputeSheathGeometryGrid::reallocate()
@@ -177,9 +204,11 @@ void ComputeSheathGeometryGrid::reallocate()
   if (grid->nlocal == nglocal) return;
   memory->destroy(vector_grid);
   memory->destroy(array_grid);
+  memory->destroy(midx_grid);
   nglocal = grid->nlocal;
   if (nvalue == 1) memory->create(vector_grid,nglocal,"sheath/geometry/grid:vector");
   else memory->create(array_grid,nglocal,nvalue,"sheath/geometry/grid:array");
+  memory->create(midx_grid,nglocal,"sheath/geometry/grid:midx");
 }
 
 bigint ComputeSheathGeometryGrid::memory_usage()
@@ -187,5 +216,6 @@ bigint ComputeSheathGeometryGrid::memory_usage()
   bigint bytes = 0;
   if (nvalue == 1) bytes += nglocal * sizeof(double);
   else bytes += static_cast<bigint>(nglocal) * nvalue * sizeof(double);
+  bytes += static_cast<bigint>(nglocal) * sizeof(int);
   return bytes;
 }

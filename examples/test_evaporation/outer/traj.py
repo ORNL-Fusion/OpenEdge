@@ -1,1 +1,0 @@
-plot_inner_mode_comparison.py

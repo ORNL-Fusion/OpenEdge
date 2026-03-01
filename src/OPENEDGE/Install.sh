@@ -80,8 +80,6 @@ action compute_plasma_fields.cpp
 action compute_plasma_fields.h
 action compute_pmi_surf_data.cpp
 action compute_pmi_surf_data.h
-action compute_sheath_fields_grid.cpp
-action compute_sheath_fields_grid.h
 action compute_sheath_geometry_grid.cpp
 action compute_sheath_geometry_grid.h
 action compute_surf_ead.cpp

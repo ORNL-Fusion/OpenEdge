@@ -57,6 +57,7 @@ ComputeSheathGeometryGrid::ComputeSheathGeometryGrid(SPARTA *sparta, int narg, c
   vector_grid = nullptr;
   array_grid = nullptr;
   midx_grid = nullptr;
+  computed_once = 0;
 }
 
 ComputeSheathGeometryGrid::~ComputeSheathGeometryGrid()
@@ -76,6 +77,9 @@ void ComputeSheathGeometryGrid::init()
 void ComputeSheathGeometryGrid::compute_per_grid()
 {
   invoked_per_grid = update->ntimestep;
+
+  // geometry is static: grid and surface don't change, so cache after first eval
+  if (computed_once) return;
   const int dim = domain->dimension;
   Grid::ChildCell *cells = grid->cells;
   Grid::ChildInfo *cinfo = grid->cinfo;
@@ -112,15 +116,29 @@ void ComputeSheathGeometryGrid::compute_per_grid()
       (dim == 3) ? 0.5 * (lo[2] + hi[2]) : 0.0
     };
 
+    // For sheath workflows, use perpendicular distance from cell center to the
+    // triangle plane.  This correctly selects the plasma-facing surface even when
+    // multiple triangles (top, bottom, side faces of a slab) have similar
+    // bounding-box distances — which happens whenever a cell is much larger than
+    // the surface feature (e.g. 1×1×N grid with a thin slab surface).
     double mind = DIST_BIG;
     int midx = -1;
     for (int m = 0; m < nsurf_all; ++m) {
       if (!eligible[m]) continue;
       double d = DIST_BIG;
-      if (dim == 2)
-        d = Geometry::dist_line_quad(lines[m].p1, lines[m].p2, lom, him);
-      else
-        d = Geometry::dist_tri_hex(tris[m].p1, tris[m].p2, tris[m].p3, tris[m].norm, lom, him);
+      if (dim == 2) {
+        // 2D: perpendicular distance from cell center to the line
+        const double lnx = lines[m].norm[0];
+        const double lny = lines[m].norm[1];
+        d = std::fabs((ctr[0] - lines[m].p1[0]) * lnx +
+                      (ctr[1] - lines[m].p1[1]) * lny);
+      } else {
+        // 3D: perpendicular distance from cell center to the triangle plane
+        const double *tn = tris[m].norm;
+        d = std::fabs((ctr[0] - tris[m].p1[0]) * tn[0] +
+                      (ctr[1] - tris[m].p1[1]) * tn[1] +
+                      (ctr[2] - tris[m].p1[2]) * tn[2]);
+      }
       if (d < mind) {
         mind = d;
         midx = m;
@@ -178,6 +196,7 @@ void ComputeSheathGeometryGrid::compute_per_grid()
   }
 
   memory->destroy(eligible);
+  computed_once = 1;
 }
 
 void ComputeSheathGeometryGrid::reallocate()

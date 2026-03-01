@@ -16,6 +16,8 @@ FixStyle(evaporation,FixEvap)
 
 namespace SPARTA_NS {
 
+enum HeatfluxMode { HF_NONE=0, HF_FILE, HF_CONST };
+
     struct HeatFluxData{
     std::vector<double> r;   
     std::vector<double> z; 
@@ -37,18 +39,19 @@ namespace SPARTA_NS {
 class FixEvap : public Fix {
 public:
     FixEvap(class SPARTA*, int, char**);
-    virtual ~FixEvap();
-    int setmask();
-    void init();
-    double memory_usage();
+    ~FixEvap() override;
+    int setmask() override;
+    void init() override;
+    double memory_usage() override;
 
       HeatFluxData heat_flux_data;
+      HeatfluxMode heatflux_mode = HF_NONE;
       double      Qs_const = 0.0;     // when HF_CONST
 
 protected:
     int maxgrid;
     int imix;
-    void end_of_step();
+    void end_of_step() override;
     void start_of_step() override;
 
     std::string heatfluxFilename;

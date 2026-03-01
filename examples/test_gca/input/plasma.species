@@ -1,0 +1,3 @@
+# Species file for GCA test: single proton (H+)
+# ID   Molwt(amu)  Molmass(kg)           RotDof RotRel VibDof VibRel VibTemp(K) specwt charge
+H+     1.00794     1.6726219236951e-27   0      0.0    0      0.0    0.0        1.0    1.0

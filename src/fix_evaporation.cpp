@@ -30,10 +30,8 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include <stdexcept>
 
 
-enum HeatfluxMode { HF_NONE=0, HF_FILE, HF_CONST };
-HeatfluxMode heatflux_mode = HF_NONE;
-
 using namespace SPARTA_NS;
+using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
@@ -254,7 +252,7 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
 
   // --- current state (Kelvin in OpenEdge) ---
   const double mass   = (ip->mass   > 0.0) ? ip->mass   : particle->species[ip->ispecies].mass;
-  const double radius = (ip->radius > 0.0) ? ip->radius : pow((3.0*mass)/(4.0*M_PI*Rho), 1.0/3.0);
+  const double radius = (ip->radius > 0.0) ? ip->radius : pow((3.0*mass)/(4.0*MY_PI*Rho), 1.0/3.0);
   const double TK     = (ip->temp   > 0.0) ? ip->temp   : 300.0;
 
   // Plasma backgrounds are 2D (r,z): map particle position for any SPARTA geometry.
@@ -276,7 +274,7 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
     Qs = hp.q_mag;
     if (!std::isfinite(Qs) || Qs < 0.0) Qs = 0.0;
   } else {
-    error->all(FLERR,"Fix evaporation: heatflux mode not set properly");
+    error->one(FLERR,"Fix evaporation: heatflux mode not set properly");
   }
 
   if (Qs <= 0.0) 
@@ -308,34 +306,32 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
   const double R_new = std::max(0.0, radius + dRdt * DT);
   const double T_new = TK + dTdt * DT;                                // Kelvin
   // mass derived from radius (no fnum anywhere)
-  const double mass_new = (R_new > 0.0) ? (Rho * (4.0/3.0) * M_PI * R_new*R_new*R_new) : 0.0;
+  const double mass_new = (R_new > 0.0) ? (Rho * (4.0/3.0) * MY_PI * R_new*R_new*R_new) : 0.0;
 
   // --- guards ---
   // R_new and mass_new are guarded by std::max(0,.) above so can't go negative.
   // Only T_new can genuinely go negative (excessive cooling).
   if (T_new < 0.0)
-    error->all(FLERR,"Fix evaporation: particle temperature dropped below 0 K");
+    error->one(FLERR,"Fix evaporation: particle temperature dropped below 0 K");
 
   // --- write back ---
   ip->radius = R_new;
   ip->temp   = T_new;
   ip->mass   = mass_new;
 
-  // Optional coupling path for movers that use species mass:
-  // keep species mass synchronized with the evolving droplet mass.
-  // Guard against writing non-positive/invalid values.
-  if (mass_new > 0.0 && std::isfinite(mass_new)) {
-    particle->species[ip->ispecies].mass = mass_new;
-  }
+  // NOTE: do NOT write particle->species[].mass here — that is a global
+  // table shared across all ranks and particles.  Per-particle mass lives
+  // in ip->mass (already set above).  Writing the species table from a
+  // per-particle loop is a race condition under MPI and Kokkos.
 
   // Per-cell accumulators: mass lost (kg), atoms lost, heat absorbed (J).
   // Uses += so multiple droplets per cell and both half-kicks accumulate correctly.
   if (icell >= 0 && icell < grid->nlocal && array_grid) {
-    const double dm = Rho * (4.0/3.0) * M_PI *
+    const double dm = Rho * (4.0/3.0) * MY_PI *
                       (radius*radius*radius - R_new*R_new*R_new);  // kg, >= 0
     array_grid[icell][0] += dm;                                    // kg
     array_grid[icell][1] += dm / AM;                               // atoms
-    array_grid[icell][2] += Qs * 4.0*M_PI * R_new*R_new * DT;    // J
+    array_grid[icell][2] += Qs * 4.0*MY_PI * R_new*R_new * DT;    // J
     
   }
 

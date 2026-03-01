@@ -6,13 +6,33 @@ addpath(genpath('/Users/42d/SOLPS-routines/Matlab'));
 addpath(genpath('/Users/42d/SOLPS-routines'));
 
 %% Inputs
-run_path = '/Users/42d/CAT_CASE_LI/fnacore=6.00e22_pheat=90.00MW_cont_dt=1e-6_te_up';
+run_path = '/Users/42d/solps_iter_oe/v0_1';
 run_path_updated = '';  % set later when coupled SOLPS results exist
-dump_path = '/Users/42d/OpenedgeGPU/examples/test_solps_coupling/case.dump';
-equ_file = '/Users/42d/CAT_CASE_LI/baserun/g000001.00001_symm.X4.equ';
+dump_path = '/Users/42d/OpenedgeGPU/examples/test_solps_coupling/output/case.dump';
+equ_file = '/Users/42d/solps_iter_oe/baserun/g000001.00001_symm.X4.equ';
 dt_oe = 1e-5;              % OpenEdge timestep [s]
 dt_solps = 1e-5;           % SOLPS timestep [s] (b2mndr_dtim)
 source_switch_nsteps = 10; % switch every N SOLPS steps (10*1e-5 = 100.d-6)
+switch_guard_fraction = 0.1; % keep sources_time_switch slightly below boundary to avoid tim==tsw
+analytical_mode = false;     % true: write analytical Gaussian sources for coupling test
+analytical_only = false;     % true: stop after writing analytical source/profile files
+analytical_total_steps = 110;
+
+
+analytical_sources_subdir = 'analytical_sources';
+analytical_peak_atoms_m3s = 1.0e25;  % Gaussian peak [atoms/m^3/s]
+analytical_sig_r = 0.10;             % Gaussian sigma in R [m]
+analytical_sig_z = 0.10;             % Gaussian sigma in Z [m]
+analytical_r0_start = 3.565;         % moving center start
+analytical_z0_start = -2.87;
+analytical_r0_end = 2.628;           % moving center end
+analytical_z0_end = -2.355;
+analytical_write_gif = true;
+analytical_show_live = true;       % show source frames on screen while writing
+analytical_gif_name = 'source.gif';
+analytical_gif_delay_s = 0.20;
+analytical_gif_scale = 1.0e25;       % plotted value = source / scale
+analytical_gif_clim = [0 1];
 save_mat = true;
 do_log_plot = false;
 xlim_plot = [2.6 4.5];
@@ -22,13 +42,16 @@ outdir = fullfile(fileparts(dump_path), 'Figs');
 fig_base = 'solps_coupling_overview_paper';
 write_source2d_series = true;
 n_source_files = 10;                               % requested coarse time slicing
-sources_dir = fullfile(run_path, 'SOURCES');      % SOLPS source folder
+sources_dir = fullfile(run_path, 'SOURCES');      % SOLPS source folder (dump-mapped mode)
+deploy_to_run_root = true;                        % copy generated source/profile files into run_path
 source_prefix = 'source2d.';
-source_digits = 4;                                 % source2d.0001 style
+source_digits = 5;                                 % source2d.00001 style (avoid mixed naming)
+source_scale_factor = 1.0;                        % multiply source values before writing source2d.*
 clean_old_sources = true;                          % remove stale source/profile files before writing
 write_b2_profiles = true;                          % write b2.sources.profile chain
 profile_base = 'b2.sources.profile';
-li0_species_idx = 14;                              % MATLAB 1-based index (Li0 commonly 14)
+source_species_idx = 14 + 2;                       % Li+1 is species 14 in SOLPS 0-based indexing
+
 ns_species = [];                                    % [] -> auto from Case.State.ns
 
 % Paper-style plotting
@@ -54,6 +77,42 @@ fprintf('Loaded SOLPS case: %s\n', run_path);
 fprintf('Grid size with guard cells: nx+2=%d, ny+2=%d\n', Case.Geo.nx + 2, Case.Geo.ny + 2);
 [rSep, zSep, rSep2, zSep2] = get_solps_sep_curves(Case.Geo);
 [rCoreEq, zCoreEq] = get_core_from_equ_file(equ_file, psi_core_n, rSep, zSep);
+
+%% Optional analytical Gaussian source mode (for coupling smoke test)
+if analytical_mode
+    if isempty(ns_species)
+        if isfield(Case, 'State') && isfield(Case.State, 'ns') && ~isempty(Case.State.ns)
+            ns_use = Case.State.ns;
+        else
+            ns_use = 17;
+        end
+    else
+        ns_use = ns_species;
+    end
+    if source_species_idx < 1 || source_species_idx > ns_use
+        error('source_species_idx=%d must be within [1, %d].', source_species_idx, ns_use);
+    end
+
+    n_windows = max(1, ceil(double(analytical_total_steps) / double(source_switch_nsteps)));
+    sources_dir = fullfile(run_path, analytical_sources_subdir);
+    write_analytical_gaussian_sources(Case, sources_dir, source_prefix, source_digits, ...
+        profile_base, dt_solps, source_switch_nsteps, switch_guard_fraction, ...
+        analytical_total_steps, n_windows, ns_use, source_species_idx, ...
+        analytical_peak_atoms_m3s, analytical_r0_start, analytical_z0_start, ...
+        analytical_r0_end, analytical_z0_end, analytical_sig_r, analytical_sig_z, ...
+        clean_old_sources, write_b2_profiles, ...
+        analytical_show_live, ...
+        analytical_write_gif, analytical_gif_name, analytical_gif_delay_s, ...
+        analytical_gif_scale, analytical_gif_clim);
+
+    if deploy_to_run_root
+        copy_generated_sources_to_run_root(sources_dir, run_path);
+    end
+    if analytical_only
+        fprintf('Analytical-only source generation complete.\n');
+        return;
+    end
+end
 
 %% Read dump (R,Z,id,type,pmass,timestep)
 [R, Z, ts, ids, types, pmass] = read_case_dump_full(dump_path);
@@ -118,8 +177,8 @@ if write_source2d_series
     else
         ns_use = ns_species;
     end
-    if li0_species_idx < 1 || li0_species_idx > ns_use
-        error('li0_species_idx=%d must be within [1, %d].', li0_species_idx, ns_use);
+    if source_species_idx < 1 || source_species_idx > ns_use
+        error('source_species_idx=%d must be within [1, %d].', source_species_idx, ns_use);
     end
 
     ts_min = min(ts);
@@ -145,11 +204,14 @@ if write_source2d_series
     end
     tw_file = fullfile(sources_dir, 'sources_time_windows.txt');
     fid_tw = fopen(tw_file, 'w');
-    fprintf(fid_tw, '# idx  filename         t_start[s]      t_end[s]        dt_bin[s]      total_atoms/s\n');
+    fprintf(fid_tw, '# idx  filename         t_start[s]      t_end[s]        dt_bin[s]      total_atoms/s   switch_time_solps[s]\n');
     src_names = strings(n_bins,1);
     t_switch = zeros(n_bins,1);
+    src_total = zeros(n_bins,1);
+    src_max = zeros(n_bins,1);
+    src_nz = zeros(n_bins,1);
 
-    fprintf('Writing %d source2d files to %s\n', n_bins, sources_dir);
+    fprintf('Writing %d source2d files to %s (scale factor = %.6g)\n', n_bins, sources_dir, source_scale_factor);
     for ib = 1:n_bins
         t0 = edges(ib);
         t1 = edges(ib+1);
@@ -160,20 +222,38 @@ if write_source2d_series
         atoms_int_bin_2d = reshape(atoms_int_bin_1d, [Case.Geo.nx + 2, Case.Geo.ny + 2]);
         dt_bin = max((t1 - t0) * dt_oe, eps);
         atoms_rate_bin_2d = atoms_int_bin_2d / dt_bin;  % atoms/s per SOLPS cell
+        atoms_rate_bin_2d = source_scale_factor * atoms_rate_bin_2d;
 
         src_names(ib) = sprintf('%s%0*d', source_prefix, source_digits, ib);
         out_src = fullfile(sources_dir, src_names(ib));
-        tot_atoms_s = write_source2d_file(out_src, atoms_rate_bin_2d, ns_use, li0_species_idx);
-        % Absolute switch times expressed on SOLPS clock (not OpenEdge bin time).
-        t_switch(ib) = ib * source_switch_nsteps * dt_solps;
-        fprintf(fid_tw, '%3d  %-16s %.8e  %.8e  %.8e  %.8e\n', ...
+        tot_atoms_s = write_source2d_file(out_src, atoms_rate_bin_2d, ns_use, source_species_idx);
+        src_total(ib) = tot_atoms_s;
+        src_max(ib) = max(atoms_rate_bin_2d(:), [], 'omitnan');
+        src_nz(ib) = nnz(atoms_rate_bin_2d > 0);
+        % Absolute switch times on SOLPS clock; subtract a small guard so
+        % each new switch is strictly greater than current tim at profile read.
+        t_boundary = ib * source_switch_nsteps * dt_solps;
+        t_guard = max(eps(t_boundary), switch_guard_fraction * dt_solps);
+        t_switch(ib) = max(0.0, t_boundary - t_guard);
+        fprintf(fid_tw, '%3d  %-16s %.8e  %.8e  %.8e  %.8e  %.8e\n', ...
             ib, src_names(ib), ...
-            (t0 - ts_min) * dt_oe, (t1 - ts_min) * dt_oe, dt_bin, tot_atoms_s);
+            (t0 - ts_min) * dt_oe, (t1 - ts_min) * dt_oe, dt_bin, tot_atoms_s, t_switch(ib));
     end
     fclose(fid_tw);
     fprintf('Saved source timing table: %s\n', tw_file);
+    if any(diff(t_switch) <= 0)
+        error('Non-increasing t_switch generated. Check source_switch_nsteps and dt_solps.');
+    end
+    fprintf('Source summary (idx file switch[s] total_atoms/s max_cell_atoms/s nonzero_cells)\n');
+    for ib = 1:n_bins
+        fprintf('%3d  %-14s  %.8e  %.8e  %.8e  %d\n', ...
+            ib, src_names(ib), t_switch(ib), src_total(ib), src_max(ib), src_nz(ib));
+    end
     if write_b2_profiles
         write_b2_profile_chain(sources_dir, profile_base, src_names, t_switch);
+    end
+    if deploy_to_run_root
+        copy_generated_sources_to_run_root(sources_dir, run_path);
     end
 end
 
@@ -775,3 +855,188 @@ else
     s = fmt_fortran_d(x);
 end
 end
+
+function write_analytical_gaussian_sources(Case, out_dir, source_prefix, source_digits, ...
+    profile_base, dt_solps, switch_nsteps, switch_guard_fraction, total_steps, n_windows, ...
+    ns_use, li_idx, peak_m3s, r0_start, z0_start, r0_end, z0_end, sig_r, sig_z, ...
+    clean_old_sources, write_b2_profiles, ...
+    show_live, ...
+    write_gif, gif_name, gif_delay_s, gif_scale, gif_clim)
+if ~exist(out_dir, 'dir')
+    mkdir(out_dir);
+end
+if clean_old_sources
+    delete(fullfile(out_dir, 'source2d.*'));
+    delete(fullfile(out_dir, 'b2.sources.profile*'));
+end
+
+src_names = strings(n_windows,1);
+t_switch = zeros(n_windows,1);
+tw_file = fullfile(out_dir, 'sources_time_windows.txt');
+fid_tw = fopen(tw_file, 'w');
+if fid_tw < 0
+    error('Could not open timing table for writing: %s', tw_file);
+end
+c = onCleanup(@() fclose(fid_tw)); %#ok<NASGU>
+fprintf(fid_tw, '# idx  filename         step_start  step_end    t_start[s]      t_end[s]        total_atoms/s   switch_time_solps[s]\n');
+
+gif_file = '';
+if write_gif
+    gif_file = fullfile(out_dir, gif_name);
+    if exist(gif_file, 'file')
+        delete(gif_file);
+    end
+end
+
+for ib = 1:n_windows
+    if n_windows == 1
+        f = 0.0;
+    else
+        f = (ib - 1) / (n_windows - 1);
+    end
+    r0 = r0_start + f * (r0_end - r0_start);
+    z0 = z0_start + f * (z0_end - z0_start);
+
+    source_m3s = analytical_gaussian_on_solps_grid(Case, peak_m3s, r0, z0, sig_r, sig_z);
+    atoms_rate_2d = max(source_m3s, 0.0) .* max(Case.Geo.vol, 0.0);
+
+    src_names(ib) = sprintf('%s%0*d', source_prefix, source_digits, ib);
+    out_src = fullfile(out_dir, src_names(ib));
+    total_atoms_s = write_source2d_file(out_src, atoms_rate_2d, ns_use, li_idx);
+
+    step_start = (ib - 1) * switch_nsteps;
+    step_end = min(ib * switch_nsteps, total_steps);
+    t_start = step_start * dt_solps;
+    t_end = step_end * dt_solps;
+    t_boundary = ib * switch_nsteps * dt_solps;
+    t_guard = max(eps(t_boundary), switch_guard_fraction * dt_solps);
+    t_switch(ib) = max(0.0, t_boundary - t_guard);
+
+    fprintf(fid_tw, '%3d  %-16s %6d      %6d    %.8e  %.8e  %.8e  %.8e\n', ...
+        ib, src_names(ib), step_start, step_end, t_start, t_end, total_atoms_s, t_switch(ib));
+
+    if show_live || write_gif
+        append_analytical_source_gif(ib, n_windows, source_m3s, Case, gif_file, ...
+            gif_delay_s, gif_scale, gif_clim, step_start, step_end, show_live);
+    end
+end
+
+if any(diff(t_switch) <= 0)
+    error('Non-increasing t_switch generated in analytical mode.');
+end
+if write_b2_profiles
+    write_b2_profile_chain(out_dir, profile_base, src_names, t_switch);
+end
+fprintf('Wrote %d analytical source files to %s\n', n_windows, out_dir);
+fprintf('Source species index used (MATLAB 1-based): %d\n', li_idx);
+if write_gif
+    fprintf('Saved analytical source GIF: %s\n', gif_file);
+end
+end
+
+function source = analytical_gaussian_on_solps_grid(Case, A, r0, z0, sig_r, sig_z)
+R = Case.Geo.r2d_cen;
+Z = Case.Geo.z2d_cen;
+arg = ((R - r0).^2) ./ (2.0 * sig_r^2) + ((Z - z0).^2) ./ (2.0 * sig_z^2);
+source = A .* exp(-arg);
+source(~isfinite(source)) = 0.0;
+end
+
+function append_analytical_source_gif(iw, n_windows, source_m3s, Case, gif_file, ...
+    gif_delay_s, gif_scale, gif_clim, step_start, step_end, show_live)
+persistent fig_live ax_live patch_live sep_live sep2_live cb_live
+
+if show_live
+    if isempty(fig_live) || ~isvalid(fig_live)
+        fig_live = figure('Color', 'w', 'Name', 'Analytical Gaussian Source', 'NumberTitle', 'off');
+        ax_live = axes(fig_live);
+        patch_live = patch(ax_live, Case.Geo.pr, Case.Geo.pz, source_m3s(:) ./ gif_scale, ...
+            'FaceColor', 'flat', 'EdgeColor', 'none');
+        hold(ax_live, 'on');
+        [rSep, zSep, rSep2, zSep2] = get_solps_sep_curves(Case.Geo);
+        sep_live = gobjects(0);
+        sep2_live = gobjects(0);
+        if ~isempty(rSep)
+            sep_live = plot(ax_live, rSep, zSep, 'k-', 'LineWidth', 1.2);
+        end
+        if ~isempty(rSep2)
+            sep2_live = plot(ax_live, rSep2, zSep2, 'k--', 'LineWidth', 1.0);
+        end
+        axis(ax_live, 'equal');
+        axis(ax_live, 'tight');
+        colormap(ax_live, turbo);
+        cb_live = colorbar(ax_live);
+    else
+        set(patch_live, 'CData', source_m3s(:) ./ gif_scale);
+        if ~isempty(sep_live) && ~isvalid(sep_live)
+            sep_live = gobjects(0);
+        end
+        if ~isempty(sep2_live) && ~isvalid(sep2_live)
+            sep2_live = gobjects(0);
+        end
+    end
+    if ~isempty(cb_live) && isvalid(cb_live)
+        cb_live.Label.String = sprintf('Li source / %.1e', gif_scale);
+    end
+    if numel(gif_clim) == 2
+        set(ax_live, 'CLim', gif_clim);
+    end
+    xlabel(ax_live, 'R [m]');
+    ylabel(ax_live, 'Z [m]');
+    title(ax_live, sprintf('Analytical Gaussian source %d/%d (steps %d-%d)', ...
+        iw, n_windows, step_start, step_end));
+    drawnow;
+end
+
+fig = figure('Visible', 'off', 'Color', 'w');
+ax = axes(fig);
+patch(ax, Case.Geo.pr, Case.Geo.pz, source_m3s(:) ./ gif_scale, 'FaceColor', 'flat', 'EdgeColor', 'none');
+hold(ax, 'on');
+[rSep, zSep, rSep2, zSep2] = get_solps_sep_curves(Case.Geo);
+if ~isempty(rSep)
+    plot(ax, rSep, zSep, 'k-', 'LineWidth', 1.2);
+end
+if ~isempty(rSep2)
+    plot(ax, rSep2, zSep2, 'k--', 'LineWidth', 1.0);
+end
+axis(ax, 'equal');
+axis(ax, 'tight');
+colormap(ax, turbo);
+cb = colorbar(ax);
+cb.Label.String = sprintf('Li source / %.1e', gif_scale);
+if numel(gif_clim) == 2
+    set(ax, 'CLim', gif_clim);
+end
+xlabel(ax, 'R [m]');
+ylabel(ax, 'Z [m]');
+title(ax, sprintf('Analytical Gaussian source %d/%d (steps %d-%d)', ...
+    iw, n_windows, step_start, step_end));
+drawnow;
+frame = getframe(fig);
+im = frame2im(frame);
+close(fig);
+[A, map] = rgb2ind(im, 256);
+if ~isempty(gif_file)
+    if iw == 1
+        imwrite(A, map, gif_file, 'gif', 'LoopCount', Inf, 'DelayTime', gif_delay_s);
+    else
+        imwrite(A, map, gif_file, 'gif', 'WriteMode', 'append', 'DelayTime', gif_delay_s);
+    end
+end
+end
+
+function copy_generated_sources_to_run_root(src_dir, run_dir)
+if ~isfolder(run_dir)
+    error('Run directory not found: %s', run_dir);
+end
+delete(fullfile(run_dir, 'source2d.*'));
+delete(fullfile(run_dir, 'b2.sources.profile*'));
+copyfile(fullfile(src_dir, 'source2d.*'), run_dir);
+copyfile(fullfile(src_dir, 'b2.sources.profile*'), run_dir);
+if exist(fullfile(src_dir, 'sources_time_windows.txt'), 'file')
+    copyfile(fullfile(src_dir, 'sources_time_windows.txt'), run_dir);
+end
+fprintf('Deployed source2d.* and b2.sources.profile* from %s -> %s\n', src_dir, run_dir);
+end
+
+

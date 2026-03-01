@@ -74,6 +74,22 @@ struct PlasmaFileParams {
   double grad_temp_i_z;
 };
 
+// Equilibrium (ψ) data from .equ file for exact magnetic geometry
+struct EquilibriumData {
+  int jm = 0, km = 0;                          // grid dimensions (R, Z)
+  double btf = 0.0, rtf = 0.0, psib = 0.0;     // toroidal field params
+  std::vector<double> r, z;                      // 1D coordinate arrays [m]
+  std::vector<std::vector<double>> psi;          // ψ(Z,R) on grid [km x jm]
+};
+
+// Per-cell precomputed magnetic geometry from equilibrium
+struct MagneticGeometry {
+  double kappa[3];    // curvature vector κ = (b·∇)b in cylindrical (R, φ, Z)
+  double curl_b[3];   // curl(b̂) in cylindrical (R, φ, Z)
+  double gradBmag[3]; // grad(|B|) in cylindrical (R, φ, Z)
+  double Bmag;        // |B|
+};
+
 // Structs for magnetic field data and parameters
 struct MagneticFieldFileData {
   std::vector<double> r;   
@@ -89,6 +105,13 @@ struct MagneticFieldFileDataParams {
   double bz;
   double r;
   double z;
+  // Gradients of B components in cylindrical (R,Z)
+  double dBr_dr, dBr_dz;
+  double dBt_dr, dBt_dz;
+  double dBz_dr, dBz_dz;
+  // |B| and its gradient
+  double Bmag;
+  double dBmag_dr, dBmag_dz;
 };
 
 class ComputePlasmaFields : public Compute {
@@ -139,6 +162,17 @@ MagneticFieldFileDataParams bilinearInterpolationMagneticField(
     int icell, const MagneticFieldFileData &data);
 PlasmaFileParams bilinearInterpolationPlasma(
     int icell, const PlasmaFileData &data);
+
+// Equilibrium-based magnetic geometry (exact ψ derivatives)
+EquilibriumData equ_data;
+MagneticGeometry *geom_arr;   // size = nlocal, precomputed per cell
+int has_equilibrium;           // 1 if equilibrium file was loaded
+std::string equilibriumPath;
+
+EquilibriumData readEquilibriumFile(const std::string &path);
+void broadcastEquilibriumData(EquilibriumData &data);
+void computeMagneticGeometry(int icell, const EquilibriumData &equ,
+                             MagneticGeometry &geom);
 
 protected:
   enum InputMode { MODE_FILE=0, MODE_CONSTANT, MODE_ANALYTIC };

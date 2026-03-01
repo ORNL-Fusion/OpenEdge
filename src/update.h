@@ -173,6 +173,12 @@ struct SurfHit2D {
   double sheath_pot_mult;      // potential multiplier
   double sheath_mD_amu;        // ion mass in amu
   double sheath_emax_vpm;      // max E-field clamp (V/m)
+  // Hybrid Boris/GCA pusher (ERO2.0-style)
+  int gca_flag;              // 1 if hybrid GCA mode is enabled
+  double gca_switch_factor;  // switching threshold (default 2.5, from ERO2.0)
+  char *gca_plasma_cid;      // compute ID string for plasma/fields (grad B source)
+  int gca_plasma_cidx;       // resolved compute index for plasma/fields
+
   int nstuck;                // # of particles stuck on surfs and deleted
   int naxibad;               // # of particles where axisymm move was bad
                              // in this case, bad means particle ended up
@@ -409,6 +415,8 @@ static double dist_point_tri(const double p[3], const double a[3],
   void field_per_grid(int, int, double, double *, double *);
   void pusher_boris3D(int i, int icell, double dt, double *x, double *v,
                       double *xnew, double charge, double mass);
+  void pusher_hybrid3D(int i, int icell, double dt, double *x, double *v,
+                       double *xnew, double charge, double mass);
 
 };
 

@@ -32,6 +32,8 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "timer.h"
 #include "math_extra.h"
 #include "boris_grid.h"
+#include "gca_pusher.h"
+#include "random_mars.h"
 #include "sheath_models.h"
 #include "compute_sheath_geometry_grid.h"
 #include "compute_plasma_fields.h"
@@ -139,6 +141,11 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   boris_bad_dt_warned = 0;
   boris_bad_dt_limit = 0.1;
 
+  gca_flag = 0;
+  gca_switch_factor = 2.5;
+  gca_plasma_cid = NULL;
+  gca_plasma_cidx = -1;
+
   sheath_flag = 0;
   sheath_geom_cid = NULL;
   sheath_plasma_cid = NULL;
@@ -148,7 +155,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   sheath_dmax = 0.02;
   sheath_pot_mult = 2.5;
   sheath_mD_amu = 2.01410177811;
-  sheath_emax_vpm = 5.0e5;
+  sheath_emax_vpm = 0.0;  // 0 = no cap
 
 }
 
@@ -168,6 +175,7 @@ Update::~Update()
   delete [] ulist_surfcollide;
   delete [] sheath_geom_cid;
   delete [] sheath_plasma_cid;
+  delete [] gca_plasma_cid;
   delete ranmaster;
 }
 
@@ -345,6 +353,17 @@ void Update::init()
       error->all(FLERR,"global sheath: plasma compute ID not found");
     if (!modify->compute[sheath_plasma_cidx]->per_grid_flag)
       error->all(FLERR,"global sheath: plasma compute must be per-grid");
+  }
+
+  // Resolve GCA plasma/fields compute for grad(B)
+  if (gca_flag) {
+    if (!gca_plasma_cid)
+      error->all(FLERR,"global gca requires plasma_compute ID");
+    gca_plasma_cidx = modify->find_compute(gca_plasma_cid);
+    if (gca_plasma_cidx < 0)
+      error->all(FLERR,"global gca: plasma compute ID not found");
+    if (!modify->compute[gca_plasma_cidx]->per_grid_flag)
+      error->all(FLERR,"global gca: plasma compute must be per-grid");
   }
 
   // moveperturb method is set if external field perturbs particle motion
@@ -672,7 +691,10 @@ template < int DIM, int SURF, int OPT > void Update::move()
         }
         else if (DIM == 3)
         {
-          pusher_boris3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+          if (gca_flag)
+            pusher_hybrid3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+          else
+            pusher_boris3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
       } else if (pflag == PINSERT) {
         dtremain = dt;
@@ -680,7 +702,10 @@ template < int DIM, int SURF, int OPT > void Update::move()
           pusherBoris2D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
         else if (DIM == 3) {
-          pusher_boris3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+          if (gca_flag)
+            pusher_hybrid3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+          else
+            pusher_boris3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
       } else if (pflag == PENTRY) {
         // printf("We are in PENTRY move\n");
@@ -1672,56 +1697,99 @@ void Update::pusher_boris3D(int i, int icell, double dt,
   // Grid cell's cached nearest-surface geometry and plasma parameters.
   // These are invariant during subcycling (grid data doesn't change mid-step).
 
-  double sh_nx = 0.0, sh_ny = 0.0, sh_nz = 0.0;  // surface normal (away from wall)
-  double sh_d_cell = BIG;   // distance from cell center to nearest surface
+  double sh_nx = 0.0, sh_ny = 0.0, sh_nz = 0.0;  // raw surface normal (unit)
+  double sh_sref[3] = {0.0, 0.0, 0.0};  // reference point on nearest surface element
   double sh_te = 0.0, sh_ti = 0.0, sh_ne = 0.0;
   double sh_bmag = 0.0, sh_alpha_deg = 90.0;
-  double sh_xc[3] = {0.0, 0.0, 0.0};  // cell center
   int sh_active = 0;
 
   if (sheath_flag && sheath_geom_cidx >= 0 && sheath_plasma_cidx >= 0) {
-    // Read pre-computed geometry arrays (computed once before particle loop)
     Compute *cg = modify->compute[sheath_geom_cidx];
 
-    // Geometry compute output: dist surfid nx ny nz (5 columns)
-    if (cg->array_grid && cg->size_per_grid_cols >= 5) {
-      const double dist_bbox = cg->array_grid[icell][0];  // min dist cell-bbox to surface
-      sh_nx = cg->array_grid[icell][2];
-      sh_ny = cg->array_grid[icell][3];
-      sh_nz = cg->array_grid[icell][4];
-      const double nmag = std::sqrt(sh_nx*sh_nx + sh_ny*sh_ny + sh_nz*sh_nz);
+    // If particle is in a sub-cell (split cell), resolve to parent cell
+    // for geometry/plasma lookup — the compute skips sub-cells.
+    int gcell = icell;
+    Grid::ChildCell *cells_tmp = grid->cells;
+    if (cells_tmp[icell].nsplit <= 0 && cells_tmp[icell].isplit >= 0)
+      gcell = grid->sinfo[cells_tmp[icell].isplit].icell;
 
-      if (nmag > 0.0 && dist_bbox < sheath_dmax) {
-        sh_nx /= nmag;  sh_ny /= nmag;  sh_nz /= nmag;
+    // Get nearest surface element index from geometry compute
+    auto *csg = dynamic_cast<ComputeSheathGeometryGrid *>(cg);
+    if (csg) {
+      int midx = csg->midx_grid[gcell];
 
-        // Cell center coordinates
-        Grid::ChildCell *cells = grid->cells;
-        sh_xc[0] = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
-        sh_xc[1] = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
-        sh_xc[2] = 0.5 * (cells[icell].lo[2] + cells[icell].hi[2]);
+      // When the parent cell contains surface elements, refine midx by
+      // finding the surface nearest to the PARTICLE position (not the
+      // cell center used by the compute).  This fixes wrong-face
+      // selection when a thin slab (top+bottom+side faces) intersects a
+      // single cell and the cell center sits between the faces.
+      Grid::ChildCell *pc = &grid->cells[gcell];
+      if (pc->nsurf > 0) {
+        const int dim = domain->dimension;
+        const int sbit = csg->sgroupbit;
+        surfint *cs = pc->csurfs;
+        double best_d = 1.0e20;
+        int best_m = -1;
+        for (int j = 0; j < pc->nsurf; j++) {
+          int m = static_cast<int>(cs[j]);
+          double d;
+          if (dim == 2) {
+            if (!(surf->lines[m].mask & sbit)) continue;
+            Surf::Line *ln = &surf->lines[m];
+            d = std::fabs((x[0]-ln->p1[0])*ln->norm[0] +
+                          (x[1]-ln->p1[1])*ln->norm[1]);
+          } else {
+            if (!(surf->tris[m].mask & sbit)) continue;
+            Surf::Tri *tr = &surf->tris[m];
+            d = std::fabs((x[0]-tr->p1[0])*tr->norm[0] +
+                          (x[1]-tr->p1[1])*tr->norm[1] +
+                          (x[2]-tr->p1[2])*tr->norm[2]);
+          }
+          if (d < best_d) { best_d = d; best_m = m; }
+        }
+        if (best_m >= 0) midx = best_m;
+      }
 
-        // Distance from cell center to surface =
-        //   dist_bbox + half-cell extent along normal direction
-        const double hx = 0.5 * (cells[icell].hi[0] - cells[icell].lo[0]);
-        const double hy = 0.5 * (cells[icell].hi[1] - cells[icell].lo[1]);
-        const double hz = 0.5 * (cells[icell].hi[2] - cells[icell].lo[2]);
-        const double h_along_n = std::fabs(sh_nx)*hx + std::fabs(sh_ny)*hy + std::fabs(sh_nz)*hz;
-        sh_d_cell = dist_bbox + h_along_n;
+      if (midx >= 0) {
+        // Use RAW triangle/line normal directly from the surface element,
+        // not the per-cell flipped version.  This avoids normal sign flips
+        // in split cells where the cell center is on the opposite side of
+        // the surface from the particle.
+        if (domain->dimension == 2) {
+          Surf::Line *ln = &surf->lines[midx];
+          sh_nx = ln->norm[0];
+          sh_ny = ln->norm[1];
+          sh_nz = 0.0;
+          sh_sref[0] = 0.5*(ln->p1[0]+ln->p2[0]);
+          sh_sref[1] = 0.5*(ln->p1[1]+ln->p2[1]);
+          sh_sref[2] = 0.0;
+        } else {
+          Surf::Tri *tr = &surf->tris[midx];
+          sh_nx = tr->norm[0];
+          sh_ny = tr->norm[1];
+          sh_nz = tr->norm[2];
+          sh_sref[0] = (tr->p1[0]+tr->p2[0]+tr->p3[0]) / 3.0;
+          sh_sref[1] = (tr->p1[1]+tr->p2[1]+tr->p3[1]) / 3.0;
+          sh_sref[2] = (tr->p1[2]+tr->p2[2]+tr->p3[2]) / 3.0;
+        }
+        const double nmag = std::sqrt(sh_nx*sh_nx + sh_ny*sh_ny + sh_nz*sh_nz);
+        if (nmag > 0.0) {
+          sh_nx /= nmag;  sh_ny /= nmag;  sh_nz /= nmag;
+        }
 
         // Read pre-computed plasma arrays
         Compute *cp_base = modify->compute[sheath_plasma_cidx];
-
         auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
         if (cp) {
-          sh_te = cp->plasma_arr[icell].temp_e;
-          sh_ti = cp->plasma_arr[icell].temp_i;
-          sh_ne = cp->plasma_arr[icell].dens_e;
-          const double br = cp->mag_arr[icell].br;
-          const double bt = cp->mag_arr[icell].bt;
-          const double bz = cp->mag_arr[icell].bz;
+          sh_te = cp->plasma_arr[gcell].temp_e;
+          sh_ti = cp->plasma_arr[gcell].temp_i;
+          sh_ne = cp->plasma_arr[gcell].dens_e;
+          const double br = cp->mag_arr[gcell].br;
+          const double bt = cp->mag_arr[gcell].bt;
+          const double bz = cp->mag_arr[gcell].bz;
 
-          // Convert cylindrical B to Cartesian for 3D
-          const double rx = sh_xc[0], ry = sh_xc[1];
+          // Convert cylindrical B to Cartesian at particle position
+          const double rx = x[0], ry = x[1];
           const double rmag = std::sqrt(rx*rx + ry*ry);
           double bvec[3];
           if (rmag > 1.0e-20) {
@@ -1735,6 +1803,7 @@ void Update::pusher_boris3D(int i, int icell, double dt,
           sh_bmag = std::sqrt(bvec[0]*bvec[0] + bvec[1]*bvec[1] + bvec[2]*bvec[2]);
 
           // Chodura angle: angle between B and surface normal
+          // (chodura_metrics uses abs(B·n) so result is independent of normal sign)
           if (sh_bmag > 0.0) {
             double nvec[3] = {sh_nx, sh_ny, sh_nz};
             SheathModels::ChoduraMetrics cm =
@@ -1761,38 +1830,39 @@ void Update::pusher_boris3D(int i, int icell, double dt,
 
     // Per-particle sheath E-field: evaluate at particle position using
     // grid-cached geometry (which surface, normal) and plasma (Te, ne, B).
-    // Distance is computed per-particle via dot product — O(1), not O(Nsurf).
+    // Distance is computed directly from particle to surface plane via dot
+    // product.  The signed distance determines both |d| for the model and
+    // the E-field direction (always toward the wall from whichever side).
     if (sh_active) {
-      // Signed distance from particle to nearest surface plane:
-      //   d_p = d_cell_center + (xcur - xc) · nhat
-      // nhat points away from wall, so moving toward wall decreases d_p.
-      const double d_particle = sh_d_cell
-        + (xcur[0] - sh_xc[0]) * sh_nx
-        + (xcur[1] - sh_xc[1]) * sh_ny
-        + (xcur[2] - sh_xc[2]) * sh_nz;
+      const double d_raw =
+        (xcur[0] - sh_sref[0]) * sh_nx
+      + (xcur[1] - sh_sref[1]) * sh_ny
+      + (xcur[2] - sh_sref[2]) * sh_nz;
+      const double d_particle = std::fabs(d_raw);
 
       if (d_particle > 0.0 && d_particle < sheath_dmax) {
         double emag = 0.0;
         if (sheath_model == 0) {
-          // Borodkina DS+MPS model
           SheathModels::BorodkinaSheathResult sr =
             SheathModels::borodkina_sheath_at_distance(
               d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
               sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
           emag = sr.emag_vpm;
         } else {
-          // Stangeby CS/DS model
           SheathModels::BorodkinaSheathResult sr =
             SheathModels::stangeby_sheath_at_distance(
               d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
               sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
           emag = sr.emag_vpm;
         }
-        emag = std::min(emag, sheath_emax_vpm);
-        // E-field points toward wall (along -nhat)
-        E[0] += -emag * sh_nx;
-        E[1] += -emag * sh_ny;
-        E[2] += -emag * sh_nz;
+        if (sheath_emax_vpm > 0.0) emag = std::min(emag, sheath_emax_vpm);
+        // E-field points toward wall (decreasing |d|):
+        //   d_raw > 0 → particle on +nhat side → E along -nhat
+        //   d_raw < 0 → particle on -nhat side → E along +nhat
+        const double dir = (d_raw > 0.0) ? -1.0 : 1.0;
+        E[0] += dir * emag * sh_nx;
+        E[1] += dir * emag * sh_ny;
+        E[2] += dir * emag * sh_nz;
       }
     }
 // printf("E field due to sheath is %g %g %g\n", E[0], E[1], E[2]);
@@ -1828,6 +1898,309 @@ void Update::pusher_boris3D(int i, int icell, double dt,
   xnew[0] = xcur[0];
   xnew[1] = xcur[1];
   xnew[2] = xcur[2];
+}
+
+/* ----------------------------------------------------------------------
+   Hybrid Boris/GCA 3D pusher (ERO2.0-style)
+   Uses full Boris when Larmor radius is well-resolved by the B gradient
+   scale, and switches to GCA when the gyration is fast (small rho_L).
+   Criterion: use GCA when L_B < switch_factor * rho_L
+   where L_B = B / |grad B| and rho_L = v_perp / (|q/m| * B)
+------------------------------------------------------------------------- */
+
+void Update::pusher_hybrid3D(int i, int icell, double dt,
+                              double *x, double *v, double *xnew,
+                              double charge, double mass)
+{
+  if (mass <= 0.0) error->all(FLERR, "Hybrid pusher requires positive particle mass");
+
+  // Neutrals: pure advection
+  if (charge == 0.0) {
+    xnew[0] = x[0] + v[0] * dt;
+    xnew[1] = x[1] + v[1] * dt;
+    xnew[2] = x[2] + v[2] * dt;
+    return;
+  }
+
+  const double qm = (charge * echarge) / mass;
+  const double qm_abs = std::fabs(qm);
+
+  // --- Read E and B fields (same as pusher_boris3D) ---
+  double E[3] = {0.0, 0.0, 0.0};
+  double B[3] = {0.0, 0.0, 0.0};
+
+  if (eperturbflag)
+    BorisGrid::read_field_from_fix(modify->fix[efieldfix], (efstyle == GFIELD),
+                                   efield_active, i, icell, E);
+  if (bperturbflag)
+    BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
+                                   bfield_active, i, icell, B);
+
+  const double Bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
+
+  // --- Read grad(|B|) from plasma/fields compute ---
+  double gradBmag_cart[3] = {0.0, 0.0, 0.0};
+  double gradBmag_magnitude = 0.0;
+
+  if (gca_plasma_cidx >= 0 && Bmag > 0.0) {
+    Compute *cp_base = modify->compute[gca_plasma_cidx];
+    auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
+    if (cp && icell >= 0) {
+      const double dBmag_dr = cp->mag_arr[icell].dBmag_dr;
+      const double dBmag_dz = cp->mag_arr[icell].dBmag_dz;
+
+      // Convert cylindrical grad(|B|) to Cartesian
+      // grad_x = dB/dr * cos(phi), grad_y = dB/dr * sin(phi), grad_z = dB/dz
+      Grid::ChildCell *cells = grid->cells;
+      const double cx = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
+      const double cy = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
+      const double rmag = std::sqrt(cx*cx + cy*cy);
+      if (rmag > 1.0e-20) {
+        const double cphi = cx / rmag, sphi = cy / rmag;
+        gradBmag_cart[0] = dBmag_dr * cphi;
+        gradBmag_cart[1] = dBmag_dr * sphi;
+      } else {
+        gradBmag_cart[0] = dBmag_dr;
+        gradBmag_cart[1] = 0.0;
+      }
+      gradBmag_cart[2] = dBmag_dz;
+
+      gradBmag_magnitude = std::sqrt(gradBmag_cart[0]*gradBmag_cart[0] +
+                                     gradBmag_cart[1]*gradBmag_cart[1] +
+                                     gradBmag_cart[2]*gradBmag_cart[2]);
+    }
+  }
+
+  // --- Per-particle sheath E-field (same approach as boris3D) ---
+  if (sheath_flag && sheath_geom_cidx >= 0 && sheath_plasma_cidx >= 0) {
+    Compute *cg = modify->compute[sheath_geom_cidx];
+
+    // Resolve sub-cell to parent for geometry/plasma lookup
+    int gcell = icell;
+    Grid::ChildCell *cells_h = grid->cells;
+    if (cells_h[icell].nsplit <= 0 && cells_h[icell].isplit >= 0)
+      gcell = grid->sinfo[cells_h[icell].isplit].icell;
+
+    auto *csg = dynamic_cast<ComputeSheathGeometryGrid *>(cg);
+    if (csg) {
+      int midx = csg->midx_grid[gcell];
+
+      // Refine midx using particle position when cell contains surfaces
+      Grid::ChildCell *pc = &grid->cells[gcell];
+      if (pc->nsurf > 0) {
+        const int dim = domain->dimension;
+        const int sbit = csg->sgroupbit;
+        surfint *cs = pc->csurfs;
+        double best_d = 1.0e20;
+        int best_m = -1;
+        for (int j = 0; j < pc->nsurf; j++) {
+          int m = static_cast<int>(cs[j]);
+          double d;
+          if (dim == 2) {
+            if (!(surf->lines[m].mask & sbit)) continue;
+            Surf::Line *ln = &surf->lines[m];
+            d = std::fabs((x[0]-ln->p1[0])*ln->norm[0] +
+                          (x[1]-ln->p1[1])*ln->norm[1]);
+          } else {
+            if (!(surf->tris[m].mask & sbit)) continue;
+            Surf::Tri *tr = &surf->tris[m];
+            d = std::fabs((x[0]-tr->p1[0])*tr->norm[0] +
+                          (x[1]-tr->p1[1])*tr->norm[1] +
+                          (x[2]-tr->p1[2])*tr->norm[2]);
+          }
+          if (d < best_d) { best_d = d; best_m = m; }
+        }
+        if (best_m >= 0) midx = best_m;
+      }
+
+      if (midx >= 0) {
+        // Use RAW triangle/line normal from the surface element
+        double sh_nx, sh_ny, sh_nz;
+        double sref[3];
+        if (domain->dimension == 2) {
+          Surf::Line *ln = &surf->lines[midx];
+          sh_nx = ln->norm[0]; sh_ny = ln->norm[1]; sh_nz = 0.0;
+          sref[0] = 0.5*(ln->p1[0]+ln->p2[0]);
+          sref[1] = 0.5*(ln->p1[1]+ln->p2[1]);
+          sref[2] = 0.0;
+        } else {
+          Surf::Tri *tr = &surf->tris[midx];
+          sh_nx = tr->norm[0]; sh_ny = tr->norm[1]; sh_nz = tr->norm[2];
+          sref[0] = (tr->p1[0]+tr->p2[0]+tr->p3[0]) / 3.0;
+          sref[1] = (tr->p1[1]+tr->p2[1]+tr->p3[1]) / 3.0;
+          sref[2] = (tr->p1[2]+tr->p2[2]+tr->p3[2]) / 3.0;
+        }
+        const double nmag = std::sqrt(sh_nx*sh_nx + sh_ny*sh_ny + sh_nz*sh_nz);
+        if (nmag > 0.0) { sh_nx /= nmag; sh_ny /= nmag; sh_nz /= nmag; }
+
+        // Signed distance: positive = particle on +nhat side
+        const double d_raw =
+          (x[0]-sref[0])*sh_nx + (x[1]-sref[1])*sh_ny + (x[2]-sref[2])*sh_nz;
+        const double d_particle = std::fabs(d_raw);
+
+        if (d_particle > 0.0 && d_particle < sheath_dmax) {
+          Compute *cp_base = modify->compute[sheath_plasma_cidx];
+          auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
+          if (cp) {
+            const double sh_te = cp->plasma_arr[gcell].temp_e;
+            const double sh_ne = cp->plasma_arr[gcell].dens_e;
+            const double sh_ti = cp->plasma_arr[gcell].temp_i;
+            if (sh_te > 0.0 && sh_ne > 0.0) {
+              const double br = cp->mag_arr[gcell].br;
+              const double bt = cp->mag_arr[gcell].bt;
+              const double bz_cyl = cp->mag_arr[gcell].bz;
+              const double rx = x[0], ry = x[1];
+              const double rmag_sh = std::sqrt(rx*rx + ry*ry);
+              double bvec[3];
+              if (rmag_sh > 1.0e-20) {
+                const double cphi = rx / rmag_sh, sphi = ry / rmag_sh;
+                bvec[0] = br * cphi - bt * sphi;
+                bvec[1] = br * sphi + bt * cphi;
+                bvec[2] = bz_cyl;
+              } else {
+                bvec[0] = br; bvec[1] = 0.0; bvec[2] = bz_cyl;
+              }
+              const double sh_bmag = std::sqrt(bvec[0]*bvec[0]+bvec[1]*bvec[1]+bvec[2]*bvec[2]);
+              double sh_alpha_deg = 90.0;
+              if (sh_bmag > 0.0) {
+                double nvec[3] = {sh_nx, sh_ny, sh_nz};
+                SheathModels::ChoduraMetrics cm =
+                  SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
+                sh_alpha_deg = cm.alpha_deg;
+              }
+
+              double emag = 0.0;
+              if (sheath_model == 0) {
+                SheathModels::BorodkinaSheathResult sr =
+                  SheathModels::borodkina_sheath_at_distance(
+                    d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
+                    sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
+                emag = sr.emag_vpm;
+              } else {
+                SheathModels::BorodkinaSheathResult sr =
+                  SheathModels::stangeby_sheath_at_distance(
+                    d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
+                    sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
+                emag = sr.emag_vpm;
+              }
+              if (sheath_emax_vpm > 0.0) emag = std::min(emag, sheath_emax_vpm);
+              // E-field toward wall: direction from signed distance
+              const double dir = (d_raw > 0.0) ? -1.0 : 1.0;
+              E[0] += dir * emag * sh_nx;
+              E[1] += dir * emag * sh_ny;
+              E[2] += dir * emag * sh_nz;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // --- Switching criterion ---
+  // Compute v_perp and check whether GCA is appropriate
+  bool use_gca = false;
+
+  if (Bmag > 0.0 && qm_abs > 0.0) {
+    const double bhat[3] = {B[0]/Bmag, B[1]/Bmag, B[2]/Bmag};
+    const double v_par = v[0]*bhat[0] + v[1]*bhat[1] + v[2]*bhat[2];
+    const double v2 = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
+    double vperp2 = v2 - v_par * v_par;
+    if (vperp2 < 0.0) vperp2 = 0.0;
+    const double v_perp = std::sqrt(vperp2);
+
+    const double rho_L = GCAPusher::larmor_radius(v_perp, qm_abs, Bmag);
+    const double L_B = GCAPusher::grad_b_length(Bmag, gradBmag_magnitude);
+
+    // ERO2.0 criterion: use GCA when L_B < switch_factor * rho_L
+    // i.e., the gradient scale is smaller than the Larmor orbit
+    // Equivalently: rho_L is large relative to gradient scale → fast gyration
+    // Actually: use GCA when rho_L is SMALL (fast gyration), i.e.,
+    // the particle gyrates many times within one gradient scale length.
+    // ERO2.0: GCA when d_char < 2.5 * rho_L  →  rho_L > L_B / 2.5
+    // Rearranged: use GCA when rho_L < L_B / switch_factor
+    // This means: gradient is gentle relative to orbit → GCA is valid
+    if (rho_L > 0.0 && L_B < 1.0e19) {
+      use_gca = (rho_L < L_B / gca_switch_factor);
+    }
+  }
+
+  if (use_gca) {
+    // --- GCA path ---
+    GCAPusher::GCAState gca = GCAPusher::init_from_particle(x, v, mass, B);
+
+    // Check if equilibrium geometry is available for exact B* + RK4
+    bool have_equ_geom = false;
+    double kappa_cart[3] = {0,0,0};
+    double curl_b_cart[3] = {0,0,0};
+    double gradBmag_equ_cart[3] = {0,0,0};
+    double Bmag_equ = Bmag;
+
+    if (gca_plasma_cidx >= 0) {
+      Compute *cp_base = modify->compute[gca_plasma_cidx];
+      auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
+      if (cp && cp->has_equilibrium && cp->geom_arr && icell >= 0) {
+        const MagneticGeometry &g = cp->geom_arr[icell];
+        if (g.Bmag > 0.0) {
+          have_equ_geom = true;
+          Bmag_equ = g.Bmag;
+
+          // Convert cylindrical (R, φ, Z) -> Cartesian (x, y, z)
+          Grid::ChildCell *cells_g = grid->cells;
+          const double cx = 0.5 * (cells_g[icell].lo[0] + cells_g[icell].hi[0]);
+          const double cy = 0.5 * (cells_g[icell].lo[1] + cells_g[icell].hi[1]);
+          const double rmag = std::sqrt(cx*cx + cy*cy);
+          double cphi = 1.0, sphi = 0.0;
+          if (rmag > 1.0e-20) { cphi = cx / rmag; sphi = cy / rmag; }
+
+          // Cylindrical (R, φ, Z) -> Cartesian: v_x = v_R cos(φ) - v_φ sin(φ), etc.
+          kappa_cart[0] = g.kappa[0]*cphi - g.kappa[1]*sphi;
+          kappa_cart[1] = g.kappa[0]*sphi + g.kappa[1]*cphi;
+          kappa_cart[2] = g.kappa[2];
+
+          curl_b_cart[0] = g.curl_b[0]*cphi - g.curl_b[1]*sphi;
+          curl_b_cart[1] = g.curl_b[0]*sphi + g.curl_b[1]*cphi;
+          curl_b_cart[2] = g.curl_b[2];
+
+          gradBmag_equ_cart[0] = g.gradBmag[0]*cphi - g.gradBmag[1]*sphi;
+          gradBmag_equ_cart[1] = g.gradBmag[0]*sphi + g.gradBmag[1]*cphi;
+          gradBmag_equ_cart[2] = g.gradBmag[2];
+        }
+      }
+    }
+
+    if (have_equ_geom) {
+      // Full Littlejohn with B* correction + RK4
+      GCAPusher::push_gca_rk4(qm, dt, mass, E, B, Bmag_equ,
+                               gradBmag_equ_cart, kappa_cart, curl_b_cart, gca);
+    } else {
+      // Fallback: simple GCA with approximate curvature
+      GCAPusher::push_gca(qm, dt, mass, E, B, gradBmag_cart, gca);
+    }
+
+    // Reconstruct full velocity with random gyrophase
+    double rand_u = ranmaster->uniform();
+    GCAPusher::gca_to_particle(gca, B, mass, rand_u, xnew, v);
+  } else {
+    // --- Boris path (with subcycling) ---
+    const int nsub = (boris_subcycles > 0) ? boris_subcycles : 1;
+    const double dt_sub = dt / static_cast<double>(nsub);
+
+    double xcur[3] = {x[0], x[1], x[2]};
+    double vcur[3] = {v[0], v[1], v[2]};
+
+    for (int isub = 0; isub < nsub; isub++) {
+      // Re-read fields per subcycle only if needed (for first subcycle we
+      // already have E,B; for subsequent subcycles the fields are the same
+      // since we don't update the grid-cached fields mid-step)
+      BorisGrid::push_velocity(qm, dt_sub, E, B, vcur);
+      xcur[0] += vcur[0] * dt_sub;
+      xcur[1] += vcur[1] * dt_sub;
+      xcur[2] += vcur[2] * dt_sub;
+    }
+
+    v[0] = vcur[0]; v[1] = vcur[1]; v[2] = vcur[2];
+    xnew[0] = xcur[0]; xnew[1] = xcur[1]; xnew[2] = xcur[2];
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -2373,6 +2746,29 @@ void Update::global(int narg, char **arg)
       boris_bad_dt_limit = input->numeric(FLERR, arg[iarg + 1]);
       if (boris_bad_dt_limit <= 0.0) error->all(FLERR, "Illegal global boris_bad_dt_limit command");
       iarg += 2;
+
+    // Hybrid Boris/GCA pusher (ERO2.0-style).
+    // Usage: global gca plasma_compute <ID> [switch_factor 2.5]
+    } else if (strcmp(arg[iarg], "gca") == 0) {
+      iarg++;
+      gca_flag = 1;
+      while (iarg < narg) {
+        if (strcmp(arg[iarg], "plasma_compute") == 0) {
+          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global gca command");
+          delete [] gca_plasma_cid;
+          int n = strlen(arg[iarg+1]) + 1;
+          gca_plasma_cid = new char[n];
+          strcpy(gca_plasma_cid, arg[iarg+1]);
+          iarg += 2;
+        } else if (strcmp(arg[iarg], "switch_factor") == 0) {
+          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global gca command");
+          gca_switch_factor = input->numeric(FLERR, arg[iarg+1]);
+          if (gca_switch_factor <= 0.0) error->all(FLERR, "global gca switch_factor must be > 0");
+          iarg += 2;
+        } else break;
+      }
+      if (!gca_plasma_cid)
+        error->all(FLERR, "global gca requires plasma_compute <ID>");
 
     // Per-particle sheath E-field from grid-cached geometry + plasma computes.
     // Usage: global sheath geom_compute <ID> plasma_compute <ID>

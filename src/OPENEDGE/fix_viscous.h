@@ -14,8 +14,6 @@ FixStyle(viscous,FixViscous)
 
 namespace SPARTA_NS {
 
-class RanKnuth;
-
 class FixViscous : public Fix {
 public:
   FixViscous(class SPARTA*, int, char**);
@@ -32,8 +30,6 @@ double g_input_[3] = {0.0, 0.0, 0.0};  //
 
 protected:
   enum DragModel { DRAG_EPSTEIN = 0, DRAG_COULOMB = 1 };
-
-  RanKnuth* rng = nullptr;
 
   // half-kick and parameter builder
   void   kick_half(double dt_half, int diag_phase);

@@ -107,17 +107,18 @@ struct SurfHit2D {
   char *fieldID;         // fix ID for PFIELD or GFIELD
   int ifieldfix;         // index of external field fix
   int *field_active;     // ptr to field_active flags in fix
-  int fieldfreq;         // update GFIELD every this many timsteps
+  int fieldfreq;         // update GFIELD every this many timesteps
 
-  
-  char *efieldID;       // fix ID for PFIELD
+  char *efieldID;       // fix ID for PFIELD or GFIELD
   int efieldfix;         // index of external electric field fix
   int *efield_active;   // ptr to field_active flags in fix
+  int efieldfreq;        // update efield GFIELD every this many timesteps
 
-  int bfstyle;            // external magnetic field: NOFIELD, PFIELD
-  char *bfieldID;       // fix ID for PFIELD
+  int bfstyle;            // external magnetic field: NOFIELD, PFIELD, GFIELD
+  char *bfieldID;       // fix ID for PFIELD or GFIELD
   int bfieldfix;         // index of external magnetic field fix
   int *bfield_active;   // ptr to field_active flags in fix
+  int bfieldfreq;        // update bfield GFIELD every this many timesteps
 
   int ethermalflag;     // external electron thermal gradient field: NOFIELD, PFIELD
   int ethermalstyle;            // external electron thermal gradient field: NOFIELD, PFIELD
@@ -171,7 +172,13 @@ struct SurfHit2D {
   double sheath_dmax;          // max distance for sheath activation (m)
   double sheath_pot_mult;      // potential multiplier
   double sheath_mD_amu;        // ion mass in amu
-  // sheath_emax_vpm removed — no E-field clamp; preserves φ↔E consistency
+  double sheath_emax_vpm;      // max E-field clamp (V/m)
+  // Hybrid Boris/GCA pusher (ERO2.0-style)
+  int gca_flag;              // 1 if hybrid GCA mode is enabled
+  double gca_switch_factor;  // switching threshold (default 2.5, from ERO2.0)
+  char *gca_plasma_cid;      // compute ID string for plasma/fields (grad B source)
+  int gca_plasma_cidx;       // resolved compute index for plasma/fields
+
   int nstuck;                // # of particles stuck on surfs and deleted
   int naxibad;               // # of particles where axisymm move was bad
                              // in this case, bad means particle ended up
@@ -408,6 +415,8 @@ static double dist_point_tri(const double p[3], const double a[3],
   void field_per_grid(int, int, double, double *, double *);
   void pusher_boris3D(int i, int icell, double dt, double *x, double *v,
                       double *xnew, double charge, double mass);
+  void pusher_hybrid3D(int i, int icell, double dt, double *x, double *v,
+                       double *xnew, double charge, double mass);
 
 };
 

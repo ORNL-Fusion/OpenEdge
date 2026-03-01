@@ -22,12 +22,15 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "compute.h"
 #include "variable.h"
 
+#include "math_const.h"
+
 #include <cmath>
 #include <algorithm>
 #include <limits>
 #include <vector>
 
 using namespace SPARTA_NS;
+using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
@@ -392,13 +395,13 @@ bool FixDropletCharge::solve_phi_oml(double Te_eV, double Ti_eV, double ne_m3, d
   const double mi = ion_mass_amu * update->proton_mass; // kg
   const double kB = update->boltz;             // J/K
 
-  const double area_coll = M_PI * rd_m * rd_m;
-  const double area_emit = 4.0 * M_PI * rd_m * rd_m;
+  const double area_coll = MY_PI * rd_m * rd_m;
+  const double area_emit = 4.0 * MY_PI * rd_m * rd_m;
 
   const double Ce = qe * area_coll * ne_m3 *
-                    std::sqrt(8.0 * (Te_eV * qe) / (M_PI * me));
+                    std::sqrt(8.0 * (Te_eV * qe) / (MY_PI * me));
   const double Ci = qe * area_coll * ni_m3 *
-                    std::sqrt(8.0 * (Ti_eV * qe) / (M_PI * mi));
+                    std::sqrt(8.0 * (Ti_eV * qe) / (MY_PI * mi));
 
   auto thermionic_current = [&]() -> double {
     if (!thermionic_on) return 0.0;
@@ -407,7 +410,7 @@ bool FixDropletCharge::solve_phi_oml(double Te_eV, double Ti_eV, double ne_m3, d
     // Size-corrected work function: W(rd)=W_inf - e^2/(16*pi*eps0*rd)
     const double eps0 = 8.8541878128e-12;
     const double W_inf_J = work_function_eV * qe;
-    const double dW = (qe * qe) / (16.0 * M_PI * eps0 * rd_m);
+    const double dW = (qe * qe) / (16.0 * MY_PI * eps0 * rd_m);
     const double W_rd = std::max(0.0, W_inf_J - dW);
     return area_emit * richardson_A * Td_K * Td_K * std::exp(-W_rd / (kB * Td_K));
   };
@@ -464,7 +467,9 @@ bool FixDropletCharge::solve_phi_oml(double Te_eV, double Ti_eV, double ne_m3, d
 
 void FixDropletCharge::apply_charge_update()
 {
-  if (grid->nlocal == 0) return;
+  // Do NOT early-return when grid->nlocal == 0: every rank must reach the
+  // MPI_Allreduce below, otherwise ranks with zero cells deadlock the rest.
+
   if (!particle->sorted) particle->sort();
 
   auto *parts = particle->particles;
@@ -515,7 +520,7 @@ void FixDropletCharge::apply_charge_update()
         continue;
       }
 
-      const double qd_coulomb = 4.0 * M_PI * eps0 * rd * phi_s;
+      const double qd_coulomb = 4.0 * MY_PI * eps0 * rd * phi_s;
 //      const double zd = std::fabs(qd_coulomb / qe);
         const double zd =qd_coulomb / qe;
 
@@ -551,32 +556,4 @@ void FixDropletCharge::apply_charge_update()
     }
   }
 
-  if (diag_flag && (update->ntimestep % diag_every) == 0) {
-    long long n_global = 0;
-    long long n_valid_global = 0;
-    double zd_sum_global = 0.0;
-    double zd_min_global = zd_min_local;
-    double zd_max_global = zd_max_local;
-
-    MPI_Allreduce(&n_local, &n_global, 1, MPI_LONG_LONG, MPI_SUM, world);
-    MPI_Allreduce(&n_valid_local, &n_valid_global, 1, MPI_LONG_LONG, MPI_SUM, world);
-    MPI_Allreduce(&zd_sum_local, &zd_sum_global, 1, MPI_DOUBLE, MPI_SUM, world);
-    MPI_Allreduce(&zd_min_global, &zd_min_global, 1, MPI_DOUBLE, MPI_MIN, world);
-    MPI_Allreduce(&zd_max_global, &zd_max_global, 1, MPI_DOUBLE, MPI_MAX, world);
-
-    if (comm->me == 0) {
-      if (n_valid_global > 0) {
-        const double zd_avg = zd_sum_global / static_cast<double>(n_valid_global);
-        printf("[fix droplet/charge] step=%lld N=%lld Nvalid=%lld Zd[min,avg,max]=[%g,%g,%g]\n",
-               (long long) update->ntimestep, n_global, n_valid_global,
-               std::isfinite(zd_min_global) ? zd_min_global : 0.0,
-               zd_avg,
-               std::isfinite(zd_max_global) ? zd_max_global : 0.0);
-      } else {
-        printf("[fix droplet/charge] step=%lld N=%lld Nvalid=0\n",
-               (long long) update->ntimestep, n_global);
-      }
-      fflush(stdout);
-    }
-  }
 }

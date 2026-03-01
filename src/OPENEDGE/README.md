@@ -19,7 +19,7 @@ The package has two categories of files:
     boris_grid.h  sheath_models.cpp/h  nanbu_scatter_table.h
     compute_iead.cpp/h  compute_incident_plasma_flux.cpp/h
     compute_plasma_fields.cpp/h  compute_pmi_surf_data.cpp/h
-    compute_sheath_fields_grid.cpp/h  compute_sheath_geometry_grid.cpp/h
+    compute_sheath_geometry_grid.cpp/h
     compute_surf_ead.cpp/h  compute_thermal_sheath_grid.cpp/h
     fix_bfield_grid.cpp/h  fix_bfield_particle.cpp/h
     fix_chem_adas.cpp/h  fix_coll_background.cpp/h  fix_coll_nanbu.cpp/h

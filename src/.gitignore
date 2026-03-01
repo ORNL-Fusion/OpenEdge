@@ -41,8 +41,6 @@
 /compute_plasma_fields.h
 /compute_pmi_surf_data.cpp
 /compute_pmi_surf_data.h
-/compute_sheath_fields_grid.cpp
-/compute_sheath_fields_grid.h
 /compute_sheath_geometry_grid.cpp
 /compute_sheath_geometry_grid.h
 /compute_surf_ead.cpp

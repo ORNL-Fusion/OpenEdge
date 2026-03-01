@@ -26,12 +26,14 @@ class ComputeSheathGeometryGrid : public Compute {
 
  public:
   int *midx_grid;           // nearest-surface array index per cell
+  int sgroupbit;            // surface group bitmask (for particle-level refinement)
 
  protected:
   int nglocal;
-  int groupbit, sgroupbit;
+  int groupbit;
   int nvalue;
   int *value;
+  int computed_once;           // 1 after first compute (static geometry cache)
 
   enum {DIST,SURFID,NX,NY,NZ,SURFIDX};
 };
