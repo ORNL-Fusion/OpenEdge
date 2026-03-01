@@ -17,10 +17,4 @@ Upstream project:
 
 OpenEdge authors:
 - Abdourahmane Diaw (ORNL) and contributors (2023–2026)
-  Additional functionality: PMI physics, ADAS-based ionization/recombination, surface emission,
-  sheath/E/B-field modules, diagnostics, etc.
-
-Data / external dependencies:
-- ADAS rate tables (not software). Check redistribution terms; if redistribution is restricted,
-  keep them out of the repo and document how to download locally.
-
+  Additional functionality: PMI/PWI physics.
