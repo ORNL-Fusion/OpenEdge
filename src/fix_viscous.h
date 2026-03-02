@@ -8,7 +8,7 @@ FixStyle(viscous,FixViscous)
 #define SPARTA_FIX_VISCOUS_H
 
 #include "fix.h"
-#include "fix_coll_background.h"
+#include "grid_src.h"
 #include "particle.h"
 #include <cstdio>
 

@@ -1,17 +1,16 @@
 ################################################################################
 # Nanbu Coulomb collision test: thermal equilibration
 #
-# Two populations of D+ ions (each 5000 particles) are initialized at
-# different temperatures and allowed to collide in a periodic box via
-# binary Nanbu-Takizuka Coulomb scattering.
+# D+ (hot, 5000 particles) and C3+ (cold, 5000 particles) ions are
+# initialized at different temperatures (10 eV and 5 eV) and allowed
+# to collide in a periodic box via binary Nanbu-Takizuka Coulomb scattering.
 #
 # Expected result: the two populations relax toward a common equilibrium
-# temperature on the Spitzer self-collision timescale:
-#     tau_ee ~ 12*pi^(3/2) * eps0^2 * m^(1/2) * (kT)^(3/2)
-#              / (n * e^4 * ln(Lambda))
+# temperature (~7.5 eV) on the Spitzer cross-species equipartition timescale.
 #
-# For T~10 eV, n~1e18 m^-3:  tau_ee ~ 10 us
-# At dt=1e-9 s and 50000 steps (50 us), clear thermalization is expected.
+# Physical density: N*fnum/V = 10000*1e7/1e-6 = 1e17 m^-3
+# With T~7.5 eV, n~5e16 per species, lnL~13:  tau_eq ~ 90-100 us
+# At dt=1e-8 s and 400000 steps (4000 us), several tau of thermalization is visible.
 #
 # Momentum is conserved exactly per pair; total kinetic energy
 # is approximately conserved (small fluctuations from stochastic scatter).
@@ -30,7 +29,8 @@ dimension       3
 units           si
 boundary        p p p
 global          gridcut 0.0 comm/sort yes
-global          fnum 1.0e10
+global          fnum 1.0e07
+global          move no
 
 # Domain: 1 cm^3 cube
 create_box      0.0 0.01 0.0 0.01 0.0 0.01
@@ -38,14 +38,14 @@ create_grid     5 5 5
 balance_grid    rcb cell
 
 # ---- Species and mixtures ----
-species         plasma.species D D+ C3+
-mixture         all D D+ C3+
-mixture         all D   frac 0.0
-mixture         all D+  frac 1.0
-mixture         all C3+ frac 0.0
+species         plasma.species D+ C3+
 
-# ---- VSS collision model (for neutral-neutral; benign here) ----
-collide         vss all air.vss
+# Hot and cold mixtures for two-population initialization
+mixture         hot  D+ frac 1.0  #nrho 5.00e+18
+mixture         hot  temp 116045.2         # 10 eV
+
+mixture         cold C3+ frac 1.0 #nrho 5.00e+18 
+mixture         cold temp 58022.6 #nrho 5.00e+18         # 5 eV
 
 # ---- Plasma fields (constant, uniform) ----
 # These provide Te and Ne for the Coulomb logarithm
@@ -60,24 +60,23 @@ compute         cplasma plasma/fields all constant &
 # ---- Nanbu Coulomb collisions ----
 fix             nanbu coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10]
 
-# ---- Create D+ particles from mixture ----
-create_particles all 10000
+# ---- Create two populations at different temperatures ----
+create_particles hot  n 5000
+create_particles cold n 5000
 
 # ---- Diagnostics ----
-shell           mkdir -p output
-
-# Per-species temperature (kinetic)
-compute         ctemp thermal/grid all all temp
-fix             ftemp ave/grid all 1 100 100 c_ctemp[*] ave one
-dump            dtemp grid all 100 output/temp_grid id xc yc zc f_ftemp[*]
+# Per-species temperature: c_ctemp[1]=D+, c_ctemp[2]=C3+
+compute         ctemp grid all species temp
+compute         Tavg_1 reduce ave c_ctemp[1]
+compute         Tavg_2 reduce ave c_ctemp[2]
 
 # Particle tracks (sample every 1000 steps)
-dump            dpart particle all 1000 output/particles id type x y z vx vy vz
+dump            dpart particle all 10000 output/particles id type x y z vx vy vz
 
 # ---- Time integration ----
-timestep        1.0e-9
-stats           500
-stats_style     step cpu np
+timestep        1.0e-8
+stats           5000
+stats_style     step cpu np c_Tavg_1 c_Tavg_2
 
 # ---- Run ----
-run             50000
+run             400000

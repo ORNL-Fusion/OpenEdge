@@ -9,7 +9,7 @@ FixStyle(droplet_charge,FixDropletCharge)
 #define SPARTA_FIX_DROPLET_CHARGE_H
 
 #include "fix.h"
-#include "fix_coll_background.h"
+#include "grid_src.h"
 
 namespace SPARTA_NS {
 

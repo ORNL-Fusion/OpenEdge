@@ -1,0 +1,81 @@
+################################################################################
+# Nanbu Coulomb collision test: background slowing down
+#
+# C3+ impurities (5000 particles at 10 eV) slow down against a fixed
+# background D+ plasma (Ti=2 eV, Vpar=0, Ni=1e17 m^-3) using the Nanbu
+# binary collision algorithm with virtual Maxwellian partners.
+#
+# Expected result: C3+ temperature relaxes exponentially toward the
+# background Ti=2 eV on the Spitzer cross-species equipartition timescale
+# (~9 us with these parameters).
+#
+# Binary particle-particle collisions are negligible (fnum=1, very low
+# simulation density) — only background collisions matter.
+#
+# Usage:
+#     mpirun -np 4 spa_mpi -in in.nanbu_slowdown
+################################################################################
+
+# ---- Physical parameters ----
+variable        Te_bg   equal 10.0          # background electron temperature [eV]
+variable        Ti_bg   equal 2.0           # background ion temperature [eV]
+variable        ne_bg   equal 1.0e17        # background electron density [m^-3]
+variable        ni_bg   equal 1.0e17        # background ion density [m^-3]
+variable        vpar_bg equal 0.0           # background parallel flow [m/s]
+
+# ---- Simulation setup ----
+seed            12345
+dimension       3
+units           si
+boundary        p p p
+global          gridcut 0.0 comm/sort yes
+global          fnum 1
+global          move no
+
+# Domain: 1 cm^3 cube
+create_box      0.0 0.01 0.0 0.01 0.0 0.01
+create_grid     5 5 5
+balance_grid    rcb cell
+
+# ---- Species and mixtures ----
+species         plasma.species C3+
+mixture         impurity C3+ frac 1.0
+mixture         impurity temp 116045         # 10 eV
+
+# ---- Plasma fields (constant, uniform) ----
+# Column mapping: bx=1, by=2, bz=3, ex=4, ey=5, ez=6,
+#                 temp_e=7, temp_i=8, dens_i=9, dens_e=10, parrflow=11
+compute         cplasma plasma/fields all constant &
+                magnetic_field 0 0 1.0 &
+                electric_field 0 0 0 &
+                temp_e ${Te_bg} temp_i ${Ti_bg} &
+                dens_e ${ne_bg} dens_i ${ni_bg} &
+                parrflow ${vpar_bg} &
+                bx by bz ex ey ez temp_e temp_i dens_i dens_e parrflow
+
+# ---- Nanbu Coulomb collisions with background ----
+# Background species: D+ (A=2.014, Z=1)
+# Sources: Ti=col8, Ni=col9, Vpar=col11, Bx=col1, By=col2, Bz=col3
+fix             nanbu coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10] &
+                background 2.014 1.0 &
+                c_cplasma[8] c_cplasma[9] c_cplasma[11] &
+                c_cplasma[1] c_cplasma[2] c_cplasma[3]
+
+# ---- Create impurity particles ----
+create_particles impurity n 5000
+
+# ---- Diagnostics ----
+compute         ctemp grid all species temp
+compute         Tavg reduce ave c_ctemp[1]
+
+# Particle tracks (sample every 1000 steps)
+dump            dpart particle all 1000 output/particles id type x y z vx vy vz
+dump_modify     dpart first yes
+
+# ---- Time integration ----
+timestep        1.0e-8
+stats           500
+stats_style     step cpu np c_Tavg
+
+# ---- Run ----
+run             50000

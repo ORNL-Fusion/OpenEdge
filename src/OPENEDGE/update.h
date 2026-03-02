@@ -100,6 +100,7 @@ struct SurfHit2D {
   double vstream[3];     // streaming velocity of background gas
   double temp_thermal;   // thermal temperature of background gas
   int optmove_flag;      // global optmove option set
+  int move_flag;         // 1 = move particles each step, 0 = skip (collisions only)
 
   int fstyle;            // external field: NOFIELD, CFIELD, PFIELD, GFIELD, 
   int efstyle;            // external electric field: NOFIELD, PFIELD

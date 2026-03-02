@@ -9,15 +9,25 @@
     Takizuka-Abe (1977) algorithm.
 
     Syntax:
-      fix ID coll/nanbu Nevery plasma <TeSrc> <NeSrc>
+      fix ID coll/nanbu Nevery plasma TeSrc NeSrc \
+          [background A_bg Z_bg TiSrc NiSrc VparSrc BxSrc BySrc BzSrc]
 
-    Example:
+    Example (binary only):
       fix nanbu coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10]
+
+    Example (binary + background D+ at Z=1, A=2):
+      fix nanbu coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10] \
+          background 2.0 1.0 c_cplasma[8] c_cplasma[10] c_cplasma[11] \
+          c_cplasma[1] c_cplasma[2] c_cplasma[3]
 
     Te (eV) and Ne (m^-3) from per-grid computes are used for the
     Coulomb logarithm.  The particle density entering the scattering-
     parameter s is computed from the actual charged simulation particles
     in each cell: n_partner = N_charged * fnum / V_cell.
+
+    When the background keyword is present, each charged particle also
+    undergoes a Nanbu collision with a virtual partner sampled from a
+    Maxwellian at the prescribed Ti, Ni, Vpar along the local B-field.
 ------------------------------------------------------------------------- */
 
 #include "fix_coll_nanbu.h"
@@ -48,16 +58,13 @@ using namespace SPARTA_NS;
 FixCollNanbu::FixCollNanbu(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   rng_(nullptr),
+  have_background_(0),
+  A_bg_(0.0), Z_bg_(0.0), m_bg_(0.0), q_bg_(0.0),
   npmax_(0),
   plist_(nullptr)
 {
   // Syntax: fix ID coll/nanbu Nevery plasma TeSrc NeSrc
-  //   arg[0] = fix ID
-  //   arg[1] = style = "coll/nanbu"
-  //   arg[2] = Nevery
-  //   arg[3] = "plasma"
-  //   arg[4] = Te source (c_ID[col])
-  //   arg[5] = Ne source (c_ID[col])
+  //         [background A_bg Z_bg TiSrc NiSrc VparSrc BxSrc BySrc BzSrc]
 
   if (narg < 6)
     error->all(FLERR,
@@ -71,6 +78,31 @@ FixCollNanbu::FixCollNanbu(SPARTA *sparta, int narg, char **arg) :
 
   parse_compute_src(arg[iarg++], srcTe_, "Te");
   parse_compute_src(arg[iarg++], srcNe_, "Ne");
+
+  // optional background keyword
+  if (iarg < narg && strcmp(arg[iarg], "background") == 0) {
+    iarg++;
+    if (iarg + 8 > narg)
+      error->all(FLERR,
+        "fix coll/nanbu background: need A_bg Z_bg TiSrc NiSrc VparSrc BxSrc BySrc BzSrc");
+
+    A_bg_ = input->numeric(FLERR, arg[iarg++]);
+    Z_bg_ = input->numeric(FLERR, arg[iarg++]);
+
+    parse_compute_src(arg[iarg++], srcTi_bg_,  "Ti_bg");
+    parse_compute_src(arg[iarg++], srcNi_bg_,  "Ni_bg");
+    parse_compute_src(arg[iarg++], srcVpar_bg_, "Vpar_bg");
+    parse_compute_src(arg[iarg++], srcBx_,     "Bx");
+    parse_compute_src(arg[iarg++], srcBy_,     "By");
+    parse_compute_src(arg[iarg++], srcBz_,     "Bz");
+
+    // precompute background mass and charge
+    const double amu = 1.66053906660e-27;  // kg
+    m_bg_ = A_bg_ * amu;
+    q_bg_ = Z_bg_ * update->echarge;
+
+    have_background_ = 1;
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -83,6 +115,14 @@ FixCollNanbu::~FixCollNanbu()
   memory->destroy(plist_);
   delete[] srcTe_.cid;
   delete[] srcNe_.cid;
+  if (have_background_) {
+    delete[] srcTi_bg_.cid;
+    delete[] srcNi_bg_.cid;
+    delete[] srcVpar_bg_.cid;
+    delete[] srcBx_.cid;
+    delete[] srcBy_.cid;
+    delete[] srcBz_.cid;
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -109,8 +149,8 @@ void FixCollNanbu::init()
   scatter_table_.initialize();
 
   // resolve compute sources
-  auto bind_compute = [&](NanbuGridSrc &S, const char *label) {
-    if (S.kind != NANBU_SRC_COMP) return;
+  auto bind_compute = [&](CollGridSrc &S, const char *label) {
+    if (S.kind != COLL_SRC_COMP) return;
     S.icompute = modify->find_compute(S.cid);
     if (S.icompute < 0) {
       char msg[200];
@@ -134,6 +174,15 @@ void FixCollNanbu::init()
 
   bind_compute(srcTe_, "Te");
   bind_compute(srcNe_, "Ne");
+
+  if (have_background_) {
+    bind_compute(srcTi_bg_,  "Ti_bg");
+    bind_compute(srcNi_bg_,  "Ni_bg");
+    bind_compute(srcVpar_bg_, "Vpar_bg");
+    bind_compute(srcBx_,     "Bx");
+    bind_compute(srcBy_,     "By");
+    bind_compute(srcBz_,     "Bz");
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -147,6 +196,15 @@ void FixCollNanbu::end_of_step()
   refresh_compute_src(srcTe_);
   refresh_compute_src(srcNe_);
 
+  if (have_background_) {
+    refresh_compute_src(srcTi_bg_);
+    refresh_compute_src(srcNi_bg_);
+    refresh_compute_src(srcVpar_bg_);
+    refresh_compute_src(srcBx_);
+    refresh_compute_src(srcBy_);
+    refresh_compute_src(srcBz_);
+  }
+
   if (grid->nlocal == 0) return;
   if (particle->nlocal == 0) return;
 
@@ -158,7 +216,7 @@ void FixCollNanbu::end_of_step()
 
   for (int icell = 0; icell < nglocal; icell++) {
     int np = cinfo[icell].count;
-    if (np <= 1) continue;
+    if (np < 1) continue;
 
     // build particle list for this cell (same pattern as collide.cpp)
     if (np > npmax_) {
@@ -174,7 +232,11 @@ void FixCollNanbu::end_of_step()
       ip = next[ip];
     }
 
-    nanbu_collisions_cell(icell, n);
+    // binary particle-particle collisions (need >= 2 particles)
+    if (n >= 2) nanbu_collisions_cell(icell, n);
+
+    // background collisions (each particle vs virtual partner)
+    if (have_background_ && n >= 1) nanbu_background_cell(icell, n);
   }
 }
 
@@ -192,9 +254,6 @@ void FixCollNanbu::nanbu_collisions_cell(int icell, int np)
   Grid::ChildInfo   *cinfo     = grid->cinfo;
 
   // collect indices of charged particles from plist_
-  // reuse tail of plist_ for the charged sub-list
-  // (charged_list is a separate local array to avoid aliasing)
-
   static std::vector<int> charged;
   charged.clear();
   charged.reserve(np);
@@ -277,11 +336,11 @@ void FixCollNanbu::nanbu_collisions_cell(int icell, int np)
     if (g_mag == 0.0) continue;
 
     // Nanbu scattering parameter s
-    // s = (qA*qB)^2 * n_partner * ln(Lambda) * dt / (8*pi*eps0^2 * mu^2 * g^3)
+    // s = (qA*qB)^2 * n_partner * ln(Lambda) * dt / (4*pi*eps0^2 * mu^2 * g^3)
     double g_mag3 = g_mag * g_mag * g_mag;
     double qq = qA * qB;
     double s_factor = qq * qq * n_partner * lnLambda * dt /
-                      (8.0 * M_PI * epsilon_0 * epsilon_0 * mu * mu);
+                      (4.0 * M_PI * epsilon_0 * epsilon_0 * mu * mu);
 
     // compute s_ab; guard against division by zero for g_mag3
     double s_ab;
@@ -337,18 +396,197 @@ void FixCollNanbu::nanbu_collisions_cell(int icell, int np)
       h[2] = -g_mag * sin_eps;
     }
 
-    // velocity update (preserves momentum exactly)
+    // velocity update: Δg = g' - g = -(1-cos_chi)*g + sin_chi*h
+    // preserves both momentum and kinetic energy exactly
     double mB_frac = mB / total_mass;
     double mA_frac = mA / total_mass;
 
-    vA[0] -= mB_frac * (one_minus_cos * g[0] + sin_chi * h[0]);
-    vA[1] -= mB_frac * (one_minus_cos * g[1] + sin_chi * h[1]);
-    vA[2] -= mB_frac * (one_minus_cos * g[2] + sin_chi * h[2]);
+    double dg0 = sin_chi * h[0] - one_minus_cos * g[0];
+    double dg1 = sin_chi * h[1] - one_minus_cos * g[1];
+    double dg2 = sin_chi * h[2] - one_minus_cos * g[2];
 
-    vB[0] += mA_frac * (one_minus_cos * g[0] + sin_chi * h[0]);
-    vB[1] += mA_frac * (one_minus_cos * g[1] + sin_chi * h[1]);
-    vB[2] += mA_frac * (one_minus_cos * g[2] + sin_chi * h[2]);
+    vA[0] -= mB_frac * dg0;
+    vA[1] -= mB_frac * dg1;
+    vA[2] -= mB_frac * dg2;
+
+    vB[0] += mA_frac * dg0;
+    vB[1] += mA_frac * dg1;
+    vB[2] += mA_frac * dg2;
   }
+}
+
+/* ----------------------------------------------------------------------
+   Background Nanbu collisions: each charged particle collides with a
+   virtual partner sampled from a Maxwellian at the local background
+   plasma conditions (Ti, Ni, Vpar along B).
+   Only the simulation particle velocity is updated.
+------------------------------------------------------------------------- */
+
+void FixCollNanbu::nanbu_background_cell(int icell, int np)
+{
+  Particle::OnePart *particles = particle->particles;
+  Particle::Species *species   = particle->species;
+  Grid::ChildInfo   *cinfo     = grid->cinfo;
+
+  // cell volume
+  double volume = cinfo[icell].volume / cinfo[icell].weight;
+  if (volume <= 0.0) return;
+
+  // read background plasma fields for this cell
+  double Te_eV   = std::max(read_cell_src(srcTe_, icell), 0.0);
+  double ne      = std::max(read_cell_src(srcNe_, icell), 0.0);
+  double Ti_eV   = std::max(read_cell_src(srcTi_bg_, icell), 0.0);
+  double Ni_bg   = std::max(read_cell_src(srcNi_bg_, icell), 0.0);
+  double Vpar_bg = read_cell_src(srcVpar_bg_, icell);
+  double Bx      = read_cell_src(srcBx_, icell);
+  double By      = read_cell_src(srcBy_, icell);
+  double Bz      = read_cell_src(srcBz_, icell);
+
+  if (Ni_bg <= 0.0 || Ti_eV <= 0.0) return;
+
+  double lnLambda = compute_coulomb_log(ne, Te_eV);
+
+  const double echarge   = update->echarge;
+  const double epsilon_0 = update->epsilon_0;
+  const double dt        = update->dt * nevery;
+
+  // B-field unit vector and orthonormal frame
+  double Bmag = std::sqrt(Bx*Bx + By*By + Bz*Bz);
+  double bhat[3], e1[3], e2[3];
+
+  if (Bmag > 0.0) {
+    bhat[0] = Bx / Bmag;
+    bhat[1] = By / Bmag;
+    bhat[2] = Bz / Bmag;
+  } else {
+    // no B-field: default to z-direction
+    bhat[0] = 0.0; bhat[1] = 0.0; bhat[2] = 1.0;
+  }
+
+  // build e1 perpendicular to bhat (Gram-Schmidt with preferred axis)
+  double ax[3] = {1.0, 0.0, 0.0};
+  if (std::abs(bhat[0]) > 0.9) { ax[0] = 0.0; ax[1] = 1.0; }
+  // e1 = ax - (ax . bhat) * bhat, then normalize
+  double dot = ax[0]*bhat[0] + ax[1]*bhat[1] + ax[2]*bhat[2];
+  e1[0] = ax[0] - dot * bhat[0];
+  e1[1] = ax[1] - dot * bhat[1];
+  e1[2] = ax[2] - dot * bhat[2];
+  double e1mag = std::sqrt(e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2]);
+  e1[0] /= e1mag; e1[1] /= e1mag; e1[2] /= e1mag;
+  // e2 = bhat x e1
+  e2[0] = bhat[1]*e1[2] - bhat[2]*e1[1];
+  e2[1] = bhat[2]*e1[0] - bhat[0]*e1[2];
+  e2[2] = bhat[0]*e1[1] - bhat[1]*e1[0];
+
+  // thermal speed of background species: v_th = sqrt(T[eV]*e / m)
+  double v_thermal = std::sqrt(Ti_eV * echarge / m_bg_);
+
+  // process each charged particle
+  for (int i = 0; i < np; i++) {
+    int idx = plist_[i];
+    int isp = particles[idx].ispecies;
+    if (species[isp].charge == 0.0) continue;
+
+    double *v = particles[idx].v;
+    double m_test = species[isp].mass;
+    double q_test = species[isp].charge * echarge;
+
+    // sample virtual partner velocity from Maxwellian
+    double vpar  = Vpar_bg + box_muller() * v_thermal;
+    double vp1   = box_muller() * v_thermal;
+    double vp2   = box_muller() * v_thermal;
+
+    double v_bg[3];
+    v_bg[0] = vpar * bhat[0] + vp1 * e1[0] + vp2 * e2[0];
+    v_bg[1] = vpar * bhat[1] + vp1 * e1[1] + vp2 * e2[1];
+    v_bg[2] = vpar * bhat[2] + vp1 * e1[2] + vp2 * e2[2];
+
+    // relative velocity
+    double g[3];
+    g[0] = v_bg[0] - v[0];
+    g[1] = v_bg[1] - v[1];
+    g[2] = v_bg[2] - v[2];
+    double g_mag = std::sqrt(g[0]*g[0] + g[1]*g[1] + g[2]*g[2]);
+
+    if (g_mag == 0.0) continue;
+
+    // reduced mass
+    double total_mass = m_test + m_bg_;
+    double mu = m_test * m_bg_ / total_mass;
+
+    // scattering parameter s using background density
+    double g_mag3 = g_mag * g_mag * g_mag;
+    double qq = q_test * q_bg_;
+    double s_factor = qq * qq * Ni_bg * lnLambda * dt /
+                      (4.0 * M_PI * epsilon_0 * epsilon_0 * mu * mu);
+
+    double s_ab;
+    if (6.0 * g_mag3 < s_factor) {
+      s_ab = 7.0;
+    } else {
+      s_ab = s_factor / g_mag3;
+    }
+
+    // sample cos(chi)
+    double cos_chi;
+    if (s_ab > 6.0) {
+      cos_chi = 2.0 * rng_->uniform() - 1.0;
+    } else if (s_ab > 0.01) {
+      double A = scatter_table_.get_A(s_ab);
+      double U = rng_->uniform();
+      cos_chi = (1.0 / A) * std::log(std::exp(-A) + 2.0 * std::sinh(A) * U);
+    } else {
+      double U = rng_->uniform();
+      if (U < 1.0e-30) U = 1.0e-30;
+      cos_chi = 1.0 + s_ab * std::log(U);
+    }
+
+    if (cos_chi > 1.0)  cos_chi = 1.0;
+    if (cos_chi < -1.0) cos_chi = -1.0;
+
+    double one_minus_cos = 1.0 - cos_chi;
+    double sin_chi = std::sqrt(1.0 - cos_chi * cos_chi);
+
+    // random azimuthal angle
+    double eps_angle = 2.0 * M_PI * rng_->uniform();
+    double cos_eps = std::cos(eps_angle);
+    double sin_eps = std::sin(eps_angle);
+
+    // perpendicular component for rotation
+    double g_perp = std::sqrt(g[1]*g[1] + g[2]*g[2]);
+    double h[3];
+    if (g_perp > 1.0e-12 * g_mag) {
+      h[0] =  g_perp * cos_eps;
+      h[1] = -(g[0]*g[1]*cos_eps + g_mag*g[2]*sin_eps) / g_perp;
+      h[2] = -(g[0]*g[2]*cos_eps - g_mag*g[1]*sin_eps) / g_perp;
+    } else {
+      h[0] = 0.0;
+      h[1] = -g_mag * cos_eps;
+      h[2] = -g_mag * sin_eps;
+    }
+
+    // velocity update: only test particle is modified
+    double dg0 = sin_chi * h[0] - one_minus_cos * g[0];
+    double dg1 = sin_chi * h[1] - one_minus_cos * g[1];
+    double dg2 = sin_chi * h[2] - one_minus_cos * g[2];
+
+    double m_bg_frac = m_bg_ / total_mass;
+    v[0] -= m_bg_frac * dg0;
+    v[1] -= m_bg_frac * dg1;
+    v[2] -= m_bg_frac * dg2;
+  }
+}
+
+/* ----------------------------------------------------------------------
+   Box-Muller transform: generate a standard normal random variate
+------------------------------------------------------------------------- */
+
+double FixCollNanbu::box_muller()
+{
+  double u1 = rng_->uniform();
+  double u2 = rng_->uniform();
+  if (u1 < 1.0e-30) u1 = 1.0e-30;
+  return std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2);
 }
 
 /* ----------------------------------------------------------------------
@@ -382,7 +620,7 @@ double FixCollNanbu::memory_usage()
 
 /* ---------------------------------------------------------------------- */
 
-void FixCollNanbu::parse_compute_src(const char *tok, NanbuGridSrc &dst,
+void FixCollNanbu::parse_compute_src(const char *tok, CollGridSrc &dst,
                                      const char *label)
 {
   if (!tok || !*tok) {
@@ -396,7 +634,7 @@ void FixCollNanbu::parse_compute_src(const char *tok, NanbuGridSrc &dst,
     error->all(FLERR,
       "fix coll/nanbu: source must be a compute (c_ID[col])");
 
-  dst.kind = NANBU_SRC_COMP;
+  dst.kind = COLL_SRC_COMP;
   const char *name = tok + 2;
   const char *lb   = strchr(name, '[');
   const char *rb   = lb ? strrchr(name, ']') : nullptr;
@@ -418,35 +656,44 @@ void FixCollNanbu::parse_compute_src(const char *tok, NanbuGridSrc &dst,
 
 /* ---------------------------------------------------------------------- */
 
-void FixCollNanbu::refresh_compute_src(NanbuGridSrc &S)
+void FixCollNanbu::refresh_compute_src(CollGridSrc &S)
 {
-  if (S.kind != NANBU_SRC_COMP) return;
+  if (S.kind != COLL_SRC_COMP) return;
   if (S.cache_ts == update->ntimestep) return;
 
   Compute *c = modify->compute[S.icompute];
   if (c->invoked_per_grid != update->ntimestep) c->compute_per_grid();
 
+  // Try tally-style mapped access first (e.g. compute grid)
   double **arr = nullptr;
   int    *cols = nullptr;
   const int nmap = c->query_tally_grid(S.col, arr, cols);
-
-  if (nmap <= 0 || !arr) {
-    S.arr_cache = nullptr;
-    S.src_index = -1;
+  if (nmap > 0 && arr) {
+    S.arr_cache = arr;
+    S.src_index = cols ? cols[0] : (S.col - 1);
     S.cache_ts  = update->ntimestep;
     return;
   }
 
-  S.arr_cache = arr;
-  S.src_index = cols ? cols[0] : (S.col - 1);
+  // Fallback: standard per-grid array (e.g. compute plasma/fields)
+  if (c->size_per_grid_cols > 0 && c->array_grid) {
+    S.arr_cache = c->array_grid;
+    S.src_index = S.col - 1;
+    S.cache_ts  = update->ntimestep;
+    return;
+  }
+
+  // Source is empty for this step
+  S.arr_cache = nullptr;
+  S.src_index = -1;
   S.cache_ts  = update->ntimestep;
 }
 
 /* ---------------------------------------------------------------------- */
 
-double FixCollNanbu::read_cell_src(const NanbuGridSrc &S, int icell)
+double FixCollNanbu::read_cell_src(const CollGridSrc &S, int icell)
 {
-  if (S.kind != NANBU_SRC_COMP) return 0.0;
+  if (S.kind != COLL_SRC_COMP) return 0.0;
   if (!S.arr_cache || S.src_index < 0) return 0.0;
   return S.arr_cache[icell][S.src_index];
 }

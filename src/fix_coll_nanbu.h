@@ -8,6 +8,10 @@
     fix coll/nanbu: binary Coulomb collisions via the Nanbu (1997) /
     Takizuka-Abe (1977) algorithm.  Coexists with collide vss for
     neutral-neutral collisions.
+
+    Optional background mode: each charged simulation particle also
+    collides with a virtual partner sampled from a prescribed
+    Maxwellian background plasma (Ti, Ni, Vpar, B-field direction).
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -20,34 +24,12 @@ FixStyle(coll/nanbu,FixCollNanbu)
 #define SPARTA_FIX_COLL_NANBU_H
 
 #include "fix.h"
+#include "grid_src.h"
 #include "nanbu_scatter_table.h"
 
 namespace SPARTA_NS {
 
 class RanKnuth;
-
-/* ------------------------------------------------------------------
-   Lightweight source descriptor for per-grid compute arrays.
-   Duplicated here so that coll/nanbu is self-contained and does not
-   depend on fix_coll_background.h.
------------------------------------------------------------------- */
-
-#ifndef NANBU_GRID_SRC_DEFINED
-#define NANBU_GRID_SRC_DEFINED
-enum NanbuSrcKind { NANBU_SRC_NONE, NANBU_SRC_COMP };
-
-struct NanbuGridSrc {
-  NanbuSrcKind kind = NANBU_SRC_NONE;
-  char *cid   = nullptr;
-  int icompute = -1;
-  int col      = 0;        // 1-based column in compute array
-
-  // per-timestep cache
-  double **arr_cache = nullptr;
-  int      src_index = -1;
-  int      cache_ts  = -1;
-};
-#endif
 
 class FixCollNanbu : public Fix {
  public:
@@ -63,20 +45,28 @@ class FixCollNanbu : public Fix {
   RanKnuth *rng_;
 
   // plasma sources for Coulomb logarithm (Te, Ne)
-  NanbuGridSrc srcTe_, srcNe_;
+  CollGridSrc srcTe_, srcNe_;
+
+  // background collision mode
+  int have_background_;
+  double A_bg_, Z_bg_, m_bg_, q_bg_;
+  CollGridSrc srcTi_bg_, srcNi_bg_, srcVpar_bg_;
+  CollGridSrc srcBx_, srcBy_, srcBz_;
 
   // scratch particle list for one cell
   int npmax_;
   int *plist_;
 
   // helper methods
-  void refresh_compute_src(NanbuGridSrc &S);
-  double read_cell_src(const NanbuGridSrc &S, int icell);
-  void parse_compute_src(const char *tok, NanbuGridSrc &dst, const char *label);
+  void refresh_compute_src(CollGridSrc &S);
+  double read_cell_src(const CollGridSrc &S, int icell);
+  void parse_compute_src(const char *tok, CollGridSrc &dst, const char *label);
 
   // core Nanbu algorithm
   void nanbu_collisions_cell(int icell, int np);
+  void nanbu_background_cell(int icell, int np);
   double compute_coulomb_log(double ne, double Te_eV);
+  double box_muller();
 };
 
 }  // namespace SPARTA_NS

@@ -95,6 +95,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   vstream[0] = vstream[1] = vstream[2] = 0.0;
   temp_thermal = 273.15;
   optmove_flag = 0;
+  move_flag = 1;
   fstyle = NOFIELD;
   fieldID = NULL;
   efstyle = NOFIELD;
@@ -515,17 +516,19 @@ void Update::run(int nsteps)
       timer->stamp(TIME_MODIFY);
     }
 
-    // move particles
+    // move particles (skip when global move no)
 
-    if (cellweightflag) particle->pre_weight();
-    (this->*moveptr)();
-    timer->stamp(TIME_MOVE);
+    if (move_flag) {
+      if (cellweightflag) particle->pre_weight();
+      (this->*moveptr)();
+      timer->stamp(TIME_MOVE);
 
-    // communicate particles
+      // communicate particles
 
-    comm->migrate_particles(nmigrate,mlist);
-    if (cellweightflag) particle->post_weight();
-    timer->stamp(TIME_COMM);
+      comm->migrate_particles(nmigrate,mlist);
+      if (cellweightflag) particle->post_weight();
+      timer->stamp(TIME_COMM);
+    }
 
     if (collide) {
       particle->sort();
@@ -2608,6 +2611,12 @@ void Update::global(int narg, char **arg)
       if (iarg+2 > narg) error->all(FLERR,"Illegal global command");
       fnum = input->numeric(FLERR,arg[iarg+1]);
       if (fnum <= 0.0) error->all(FLERR,"Illegal global command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"move") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal global command");
+      if (strcmp(arg[iarg+1],"yes") == 0) move_flag = 1;
+      else if (strcmp(arg[iarg+1],"no") == 0) move_flag = 0;
+      else error->all(FLERR,"Illegal global command");
       iarg += 2;
     } else if (strcmp(arg[iarg],"optmove") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal global command");

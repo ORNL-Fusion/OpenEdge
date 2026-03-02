@@ -45,7 +45,7 @@ FixStyle(droplet_drag_force,FixDrag)
 #define SPARTA_FIX_DRAG_H
 
 #include "fix.h"
-#include "fix_coll_background.h"   // CollGridSrc, CollSrcKind
+#include "grid_src.h"   // CollGridSrc, CollSrcKind
 #include "particle.h"
 #include <cstdio>
 
