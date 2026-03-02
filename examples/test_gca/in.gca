@@ -35,9 +35,8 @@ global boris_bad_dt_limit 0.5
 # Enable hybrid GCA path with normal ERO2.0-style switching.
 global gca plasma_compute pfields switch_factor 2.5
 
-shell mkdir -p output
 variable dt         equal 1e-9
-variable numStep    equal 100000
+variable numStep    equal 5000
 variable dumpFreq   equal 1 #floor(v_numStep/200)
 
 dump dpart particle all ${dumpFreq} output/traj.gca id type x y z vx vy vz

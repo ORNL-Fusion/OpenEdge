@@ -29,7 +29,7 @@ global bfield none
 global efield none
 
 # Pure Boris: high subcycles for accuracy (reference)
-global boris_subcycles 500
+global boris_subcycles 5000
 global boris_dump no
 global boris_bad_dt_check yes
 global boris_bad_dt_limit 0.5
@@ -38,9 +38,8 @@ global boris_bad_dt_limit 0.5
 # but with a huge switch factor so it stays in Boris branch.
 global gca plasma_compute pfields switch_factor 1e12
 
-shell mkdir -p output
 variable dt         equal 1e-9
-variable numStep    equal 100000
+variable numStep    equal 5000
 variable dumpFreq   equal 1 #floor(v_numStep/200)
 
 dump dpart particle all ${dumpFreq} output/traj.boris id type x y z vx vy vz

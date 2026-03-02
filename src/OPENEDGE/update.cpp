@@ -2035,8 +2035,10 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
   if (Bmag > 0.0) {
     if (have_point_b) {
       if (domain->dimension == 2) {
+        // 2D slots: [0]=R, [1]=Z, [2]=toroidal (=0 for axisymmetric)
         gradBmag_cart[0] = Bcyl.dBmag_dr;
-        gradBmag_cart[1] = 0.0;
+        gradBmag_cart[1] = Bcyl.dBmag_dz;
+        gradBmag_cart[2] = 0.0;
       } else {
         const double rx = x[0], ry = x[1];
         const double rxy = std::sqrt(rx*rx + ry*ry);
@@ -2048,61 +2050,67 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
           gradBmag_cart[0] = Bcyl.dBmag_dr;
           gradBmag_cart[1] = 0.0;
         }
+        gradBmag_cart[2] = Bcyl.dBmag_dz;
       }
-      gradBmag_cart[2] = Bcyl.dBmag_dz;
-    } else if (cp_bfield && icell >= 0) {
-      const double dBmag_dr = cp_bfield->mag_arr[icell].dBmag_dr;
-      const double dBmag_dz = cp_bfield->mag_arr[icell].dBmag_dz;
-
-      Grid::ChildCell *cells = grid->cells;
-      const double cx = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
-      const double cy = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
-      const double rmag = std::sqrt(cx*cx + cy*cy);
-      if (rmag > 1.0e-20) {
-        const double cphi = cx / rmag, sphi = cy / rmag;
-        gradBmag_cart[0] = dBmag_dr * cphi;
-        gradBmag_cart[1] = dBmag_dr * sphi;
-      } else {
-        gradBmag_cart[0] = dBmag_dr;
-        gradBmag_cart[1] = 0.0;
-      }
-      gradBmag_cart[2] = dBmag_dz;
     }
+    // No cell-cached fallback: if point query failed, gradBmag stays zero.
 
     gradBmag_magnitude = std::sqrt(gradBmag_cart[0]*gradBmag_cart[0] +
                                    gradBmag_cart[1]*gradBmag_cart[1] +
                                    gradBmag_cart[2]*gradBmag_cart[2]);
 
-    // Use equilibrium-derived kappa and curl(b) for full RK4 GCA.
-    if (cp_bfield && cp_bfield->has_equilibrium && cp_bfield->geom_arr && icell >= 0) {
-      int gcell = icell;
-      Grid::ChildCell *cells_h = grid->cells;
-      if (cells_h[icell].nsplit <= 0 && cells_h[icell].isplit >= 0)
-        gcell = grid->sinfo[cells_h[icell].isplit].icell;
+    // Compute kappa and curl(b̂) at particle position from point-query
+    // B-component derivatives, avoiding cell-center geom_arr cache.
+    if (have_point_b && Bcyl.Bmag > 0.0) {
+      const double invBm = 1.0 / Bcyl.Bmag;
+      const double bR = Bcyl.br * invBm;
+      const double bphi = Bcyl.bt * invBm;
+      const double bZ = Bcyl.bz * invBm;
 
-      const MagneticGeometry &G = cp_bfield->geom_arr[gcell];
+      // ∂b̂_i/∂x = (1/|B|)(∂B_i/∂x - b̂_i ∂|B|/∂x)
+      const double dbR_dR = invBm * (Bcyl.dBr_dr - bR * Bcyl.dBmag_dr);
+      const double dbR_dZ = invBm * (Bcyl.dBr_dz - bR * Bcyl.dBmag_dz);
+      const double dbphi_dR = invBm * (Bcyl.dBt_dr - bphi * Bcyl.dBmag_dr);
+      const double dbphi_dZ = invBm * (Bcyl.dBt_dz - bphi * Bcyl.dBmag_dz);
+      const double dbZ_dR = invBm * (Bcyl.dBz_dr - bZ * Bcyl.dBmag_dr);
+      const double dbZ_dZ = invBm * (Bcyl.dBz_dz - bZ * Bcyl.dBmag_dz);
+
+      double R_pt;
+      if (domain->dimension == 2) R_pt = x[0];
+      else R_pt = std::sqrt(x[0]*x[0] + x[1]*x[1]);
+      if (R_pt < 1.0e-10) R_pt = 1.0e-10;
+      const double invR_pt = 1.0 / R_pt;
+
+      // κ = (b̂·∇)b̂ in cylindrical (axisymmetric, ∂/∂φ = 0)
+      const double kR = bR * dbR_dR + bZ * dbR_dZ - bphi * bphi * invR_pt;
+      const double kphi = bR * dbphi_dR + bZ * dbphi_dZ + bR * bphi * invR_pt;
+      const double kZ = bR * dbZ_dR + bZ * dbZ_dZ;
+
+      // curl(b̂) in cylindrical (axisymmetric, ∂/∂φ = 0)
+      const double cR = -dbphi_dZ;
+      const double cphi_c = dbR_dZ - dbZ_dR;
+      const double cZ = bphi * invR_pt + dbphi_dR;
+
       if (domain->dimension == 2) {
-        kappa_cart[0] = G.kappa[0];
-        kappa_cart[1] = 0.0;
-        kappa_cart[2] = G.kappa[2];
-        curlb_cart[0] = G.curl_b[0];
-        curlb_cart[1] = 0.0;
-        curlb_cart[2] = G.curl_b[2];
+        // 2D slots: [0]=R, [1]=Z, [2]=toroidal
+        kappa_cart[0] = kR;   kappa_cart[1] = kZ;   kappa_cart[2] = kphi;
+        curlb_cart[0] = cR;   curlb_cart[1] = cZ;   curlb_cart[2] = cphi_c;
       } else {
         const double rx = x[0], ry = x[1];
         const double rxy = std::sqrt(rx*rx + ry*ry);
-        double cphi = 1.0, sphi = 0.0;
-        if (rxy > 1.0e-20) { cphi = rx / rxy; sphi = ry / rxy; }
+        double cphi_a = 1.0, sphi_a = 0.0;
+        if (rxy > 1.0e-20) { cphi_a = rx / rxy; sphi_a = ry / rxy; }
 
-        kappa_cart[0] = G.kappa[0] * cphi - G.kappa[1] * sphi;
-        kappa_cart[1] = G.kappa[0] * sphi + G.kappa[1] * cphi;
-        kappa_cart[2] = G.kappa[2];
+        kappa_cart[0] = kR * cphi_a - kphi * sphi_a;
+        kappa_cart[1] = kR * sphi_a + kphi * cphi_a;
+        kappa_cart[2] = kZ;
 
-        curlb_cart[0] = G.curl_b[0] * cphi - G.curl_b[1] * sphi;
-        curlb_cart[1] = G.curl_b[0] * sphi + G.curl_b[1] * cphi;
-        curlb_cart[2] = G.curl_b[2];
+        curlb_cart[0] = cR * cphi_a - cphi_c * sphi_a;
+        curlb_cart[1] = cR * sphi_a + cphi_c * cphi_a;
+        curlb_cart[2] = cZ;
       }
     }
+    // No cell-cached fallback: if point query failed, kappa/curl_b stay zero.
   }
 
   // --- Per-particle sheath E-field (same approach as boris3D) ---
@@ -2176,25 +2184,15 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
           Compute *cp_base = modify->compute[sheath_plasma_cidx];
           auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
           if (cp) {
-            const double sh_te = cp->plasma_arr[gcell].temp_e;
-            const double sh_ne = cp->plasma_arr[gcell].dens_e;
-            const double sh_ti = cp->plasma_arr[gcell].temp_i;
+            // Point-query plasma data at particle position
+            PlasmaFileParams sh_pf = cp->query_plasma_at_point(x);
+            const double sh_te = sh_pf.temp_e;
+            const double sh_ne = sh_pf.dens_e;
+            const double sh_ti = sh_pf.temp_i;
             if (sh_te > 0.0 && sh_ne > 0.0) {
-              const double br = cp->mag_arr[gcell].br;
-              const double bt = cp->mag_arr[gcell].bt;
-              const double bz_cyl = cp->mag_arr[gcell].bz;
-              const double rx = x[0], ry = x[1];
-              const double rmag_sh = std::sqrt(rx*rx + ry*ry);
-              double bvec[3];
-              if (rmag_sh > 1.0e-20) {
-                const double cphi = rx / rmag_sh, sphi = ry / rmag_sh;
-                bvec[0] = br * cphi - bt * sphi;
-                bvec[1] = br * sphi + bt * cphi;
-                bvec[2] = bz_cyl;
-              } else {
-                bvec[0] = br; bvec[1] = 0.0; bvec[2] = bz_cyl;
-              }
-              const double sh_bmag = std::sqrt(bvec[0]*bvec[0]+bvec[1]*bvec[1]+bvec[2]*bvec[2]);
+              // Reuse B[] and Bmag already computed at particle position
+              double bvec[3] = {B[0], B[1], B[2]};
+              const double sh_bmag = Bmag;
               double sh_alpha_deg = 90.0;
               if (sh_bmag > 0.0) {
                 double nvec[3] = {sh_nx, sh_ny, sh_nz};

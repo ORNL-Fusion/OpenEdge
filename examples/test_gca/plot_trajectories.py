@@ -218,7 +218,7 @@ def main():
 
     # --- R-Z trajectory ---
     ax = axes[0, 0]
-    ax.plot(R_boris, Z_boris, "b-", lw=0.5, alpha=0.7, label="Boris (500 sub)")
+    ax.plot(R_boris, Z_boris, "b-", lw=0.5, alpha=0.7, label="Boris (5000 sub)")
     ax.plot(R_gca, Z_gca, "r--", lw=1.0, alpha=0.8, label="GCA hybrid")
     ax.set_xlabel("R [m]")
     ax.set_ylabel("Z [m]")
