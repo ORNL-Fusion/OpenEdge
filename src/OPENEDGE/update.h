@@ -178,6 +178,13 @@ struct SurfHit2D {
   double gca_switch_factor;  // switching threshold (default 2.5, from ERO2.0)
   char *gca_plasma_cid;      // compute ID string for plasma/fields (grad B source)
   int gca_plasma_cidx;       // resolved compute index for plasma/fields
+  // Persistent per-particle GCA state (stored in particle custom vectors)
+  int gca_x_custom;
+  int gca_y_custom;
+  int gca_z_custom;
+  int gca_vpar_custom;
+  int gca_mu_custom;
+  int gca_on_custom;
 
   int nstuck;                // # of particles stuck on surfs and deleted
   int naxibad;               // # of particles where axisymm move was bad

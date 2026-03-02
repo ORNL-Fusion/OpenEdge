@@ -112,32 +112,10 @@ inline void push_gca(double qm, double dt, double mass,
   v_gradB[1] = gradB_coeff * BxgradB[1] * invB;
   v_gradB[2] = gradB_coeff * BxgradB[2] * invB;
 
-  // 3. Curvature drift: v_curv = (v_par^2 / Omega) * (b x kappa)
-  //    where kappa = (b . grad)b ≈ -grad_perp(B)/B for low-beta plasma
-  //    grad_perp(B) = gradBmag - (b . gradBmag) * b
+  // 3. Curvature drift is intentionally omitted in this reduced model.
+  // A stable curvature term requires kappa/curl(b) from equilibrium geometry;
+  // approximating it from grad|B| alone can produce secular radial runaway.
   const double bdotgradB = bhat[0]*gradBmag[0] + bhat[1]*gradBmag[1] + bhat[2]*gradBmag[2];
-  double gradBperp[3];
-  gradBperp[0] = gradBmag[0] - bdotgradB * bhat[0];
-  gradBperp[1] = gradBmag[1] - bdotgradB * bhat[1];
-  gradBperp[2] = gradBmag[2] - bdotgradB * bhat[2];
-
-  // kappa ≈ -gradBperp / B
-  double kappa[3];
-  kappa[0] = -gradBperp[0] * invB;
-  kappa[1] = -gradBperp[1] * invB;
-  kappa[2] = -gradBperp[2] * invB;
-
-  // b x kappa
-  double bxkappa[3];
-  bxkappa[0] = bhat[1]*kappa[2] - bhat[2]*kappa[1];
-  bxkappa[1] = bhat[2]*kappa[0] - bhat[0]*kappa[2];
-  bxkappa[2] = bhat[0]*kappa[1] - bhat[1]*kappa[0];
-
-  const double curv_coeff = state.v_par * state.v_par / Omega;
-  double v_curv[3];
-  v_curv[0] = curv_coeff * bxkappa[0];
-  v_curv[1] = curv_coeff * bxkappa[1];
-  v_curv[2] = curv_coeff * bxkappa[2];
 
   // --- Parallel acceleration ---
   // dv_par/dt = -(mu/m) * (b . gradBmag) + (q/m) * (b . E)
@@ -150,9 +128,9 @@ inline void push_gca(double qm, double dt, double mass,
 
   // Total guiding center velocity
   double dXdt[3];
-  dXdt[0] = v_par_half * bhat[0] + v_ExB[0] + v_gradB[0] + v_curv[0];
-  dXdt[1] = v_par_half * bhat[1] + v_ExB[1] + v_gradB[1] + v_curv[1];
-  dXdt[2] = v_par_half * bhat[2] + v_ExB[2] + v_gradB[2] + v_curv[2];
+  dXdt[0] = v_par_half * bhat[0] + v_ExB[0] + v_gradB[0];
+  dXdt[1] = v_par_half * bhat[1] + v_ExB[1] + v_gradB[1];
+  dXdt[2] = v_par_half * bhat[2] + v_ExB[2] + v_gradB[2];
 
   // Advance position
   state.X[0] += dXdt[0] * dt;

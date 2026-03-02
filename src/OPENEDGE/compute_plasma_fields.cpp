@@ -77,10 +77,12 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
   if (strcmp(arg[iarg],"file") == 0) {
     input_mode = MODE_FILE;
     iarg++;
-    if (iarg + 1 >= narg)
-      error->all(FLERR,"compute plasma/fields file mode needs: plasma.h5 bfield.h5");
+    if (iarg >= narg)
+      error->all(FLERR,"compute plasma/fields file mode needs at least: plasma.h5");
     plasmaStatePath = std::string(arg[iarg++]);
-    magneticFieldsPath = std::string(arg[iarg++]);
+    magneticFieldsPath.clear();
+    if (iarg < narg && strcmp(arg[iarg],"equilibrium") != 0 && strcmp(arg[iarg],"values") != 0)
+      magneticFieldsPath = std::string(arg[iarg++]);
   } else if (strcmp(arg[iarg],"constant") == 0) {
     input_mode = MODE_CONSTANT;
     iarg++;
@@ -162,6 +164,9 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
       iarg += 2;
     } else break;
   }
+
+  if (input_mode == MODE_FILE && magneticFieldsPath.empty() && !has_equilibrium)
+    error->all(FLERR,"compute plasma/fields file mode without bfield.h5 requires equilibrium <file>");
 
   if (iarg >= narg)
     error->all(FLERR,"plasma/fields needs values (br/bt/bz, er/et/ez, vr/vt/vz, ...)");
@@ -282,19 +287,41 @@ void ComputePlasmaFields::init()
 
   if (input_mode == MODE_FILE) {
     if (me == 0) {
-      plasma_data   = readPlasmaFileData(plasmaStatePath);
-      magnetic_data = readMagneticFieldFileData(magneticFieldsPath);
+      plasma_data = readPlasmaFileData(plasmaStatePath);
+      if (!magneticFieldsPath.empty())
+        magnetic_data = readMagneticFieldFileData(magneticFieldsPath);
+      if (has_equilibrium)
+        equ_data = readEquilibriumFile(equilibriumPath);
     }
     broadcastPlasmaData(plasma_data);
-    broadcastMagneticData(magnetic_data);
+    if (!magneticFieldsPath.empty())
+      broadcastMagneticData(magnetic_data);
+    if (has_equilibrium)
+      broadcastEquilibriumData(equ_data);
+
     precomputeStencils(plasma_data.r, plasma_data.z, plasma_stencil);
-    precomputeStencils(magnetic_data.r, magnetic_data.z, magnetic_stencil);
+    if (!magneticFieldsPath.empty())
+      precomputeStencils(magnetic_data.r, magnetic_data.z, magnetic_stencil);
+    else
+      magnetic_stencil.clear();
 
     for (int icell = 0; icell < ncells; ++icell) {
       if (!(cinfo[icell].mask & groupbit)) continue;
       if (cells[icell].nsplit < 1)         continue;
       plasma_arr[icell] = bilinearInterpolationPlasma(icell, plasma_data);
-      mag_arr[icell]    = bilinearInterpolationMagneticField(icell, magnetic_data);
+
+      if (!magneticFieldsPath.empty()) {
+        mag_arr[icell] = bilinearInterpolationMagneticField(icell, magnetic_data);
+      } else if (has_equilibrium) {
+        double xyz[3] = {
+          0.5 * (cells[icell].lo[0] + cells[icell].hi[0]),
+          0.5 * (cells[icell].lo[1] + cells[icell].hi[1]),
+          (domain->dimension == 3)
+            ? 0.5 * (cells[icell].lo[2] + cells[icell].hi[2])
+            : 0.5 * (cells[icell].lo[1] + cells[icell].hi[1])
+        };
+        mag_arr[icell] = query_bfield_at_point(xyz);
+      }
     }
 
     // Optional species-resolved storage for later sputtering/emission models
@@ -1268,17 +1295,94 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
       const double dy = (domain->dimension == 3) ? (xyz[1] - y0_use) : 0.0;
       B.r = std::sqrt(dx*dx + dy*dy + eps_use);
       B.z = (domain->dimension == 3) ? xyz[2] : xyz[1];
+      B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
     }
     return B;
   }
 
-  // MODE_FILE: build stencil on-the-fly and interpolate
-  BilinearStencil s = makeStencilAtPoint(xyz, magnetic_data.r, magnetic_data.z);
-  if (!s.valid) return B;
+  if (!magnetic_data.r.empty() && !magnetic_data.z.empty()) {
+    BilinearStencil s = makeStencilAtPoint(xyz, magnetic_data.r, magnetic_data.z);
+    if (!s.valid) return B;
 
-  B.br = interpField2D(magnetic_data.br, s);
-  B.bt = interpField2D(magnetic_data.bt, s);
-  B.bz = interpField2D(magnetic_data.bz, s);
+    B.br = interpField2D(magnetic_data.br, s);
+    B.bt = interpField2D(magnetic_data.bt, s);
+    B.bz = interpField2D(magnetic_data.bz, s);
+    gradField2D(magnetic_data.br, s, B.dBr_dr, B.dBr_dz);
+    gradField2D(magnetic_data.bt, s, B.dBt_dr, B.dBt_dz);
+    gradField2D(magnetic_data.bz, s, B.dBz_dr, B.dBz_dz);
+    B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+    if (B.Bmag > 0.0) {
+      B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr + B.bz*B.dBz_dr) / B.Bmag;
+      B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz + B.bz*B.dBz_dz) / B.Bmag;
+    }
+    return B;
+  }
+
+  if (!has_equilibrium || equ_data.jm < 3 || equ_data.km < 3) return B;
+
+  const int dim = domain->dimension;
+  const double x = xyz[0];
+  const double y = xyz[1];
+  const double zc = (dim == 3) ? xyz[2] : xyz[1];
+  double R, Z;
+  if (dim == 2) { R = x; Z = y; }
+  else { R = std::sqrt(x*x + y*y); Z = zc; }
+  if (R < 1.0e-10) return B;
+
+  const EquilibriumData &equ = equ_data;
+  const int jm = equ.jm;
+  const int km = equ.km;
+  const double dr = equ.r[1] - equ.r[0];
+  const double dz = equ.z[1] - equ.z[0];
+  if (dr <= 0.0 || dz <= 0.0) return B;
+
+  double fj = (R - equ.r[0]) / dr;
+  double fk = (Z - equ.z[0]) / dz;
+  int jc = static_cast<int>(std::round(fj));
+  int kc = static_cast<int>(std::round(fk));
+  jc = std::max(1, std::min(jc, jm - 2));
+  kc = std::max(1, std::min(kc, km - 2));
+
+  const double dR = equ.r[jc+1] - equ.r[jc-1];
+  const double dZ = equ.z[kc+1] - equ.z[kc-1];
+  const double dpsi_dR = (equ.psi[kc][jc+1] - equ.psi[kc][jc-1]) / dR;
+  const double dpsi_dZ = (equ.psi[kc+1][jc] - equ.psi[kc-1][jc]) / dZ;
+
+  const double dR1 = equ.r[jc+1] - equ.r[jc];
+  const double dR0 = equ.r[jc] - equ.r[jc-1];
+  const double dZ1 = equ.z[kc+1] - equ.z[kc];
+  const double dZ0 = equ.z[kc] - equ.z[kc-1];
+
+  const double d2psi_dR2 = 2.0 * (equ.psi[kc][jc+1] / (dR1*(dR1+dR0))
+                                 - equ.psi[kc][jc] / (dR1*dR0)
+                                 + equ.psi[kc][jc-1] / (dR0*(dR1+dR0)));
+  const double d2psi_dZ2 = 2.0 * (equ.psi[kc+1][jc] / (dZ1*(dZ1+dZ0))
+                                 - equ.psi[kc][jc] / (dZ1*dZ0)
+                                 + equ.psi[kc-1][jc] / (dZ0*(dZ1+dZ0)));
+  const double d2psi_dRdZ = (equ.psi[kc+1][jc+1] - equ.psi[kc+1][jc-1]
+                            - equ.psi[kc-1][jc+1] + equ.psi[kc-1][jc-1]) / (dR * dZ);
+
+  const double invR = 1.0 / R;
+  const double invR2 = invR * invR;
+
+  B.r = R;
+  B.z = Z;
+  B.br = -dpsi_dZ * invR;
+  B.bz = dpsi_dR * invR;
+  B.bt = equ.btf * equ.rtf * invR;
+
+  B.dBr_dr = dpsi_dZ * invR2 - d2psi_dRdZ * invR;
+  B.dBr_dz = -d2psi_dZ2 * invR;
+  B.dBz_dr = -dpsi_dR * invR2 + d2psi_dR2 * invR;
+  B.dBz_dz = d2psi_dRdZ * invR;
+  B.dBt_dr = -equ.btf * equ.rtf * invR2;
+  B.dBt_dz = 0.0;
+
+  B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+  if (B.Bmag > 0.0) {
+    B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr + B.bz*B.dBz_dr) / B.Bmag;
+    B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz + B.bz*B.dBz_dz) / B.Bmag;
+  }
   return B;
 }
 
@@ -1508,8 +1612,8 @@ void ComputePlasmaFields::computeMagneticGeometry(
                             - equ.psi[kc-1][jc+1] + equ.psi[kc-1][jc-1]) / (dR * dZ);
 
   const double invR = 1.0 / R;
-  const double BR = dpsi_dZ * invR;
-  const double BZ = -dpsi_dR * invR;
+  const double BR = -dpsi_dZ * invR;
+  const double BZ = dpsi_dR * invR;
   const double Bphi = equ.btf * equ.rtf * invR;
 
   const double Bmag = std::sqrt(BR*BR + Bphi*Bphi + BZ*BZ);
@@ -1522,10 +1626,10 @@ void ComputePlasmaFields::computeMagneticGeometry(
   const double bZ = BZ * invBmag;
 
   const double invR2 = invR * invR;
-  const double dBR_dR2 = -dpsi_dZ * invR2 + d2psi_dRdZ * invR;
-  const double dBR_dZ2 = d2psi_dZ2 * invR;
-  const double dBZ_dR2 = dpsi_dR * invR2 - d2psi_dR2 * invR;
-  const double dBZ_dZ2 = -d2psi_dRdZ * invR;
+  const double dBR_dR2 = dpsi_dZ * invR2 - d2psi_dRdZ * invR;
+  const double dBR_dZ2 = -d2psi_dZ2 * invR;
+  const double dBZ_dR2 = -dpsi_dR * invR2 + d2psi_dR2 * invR;
+  const double dBZ_dZ2 = d2psi_dRdZ * invR;
   const double dBphi_dR = -equ.btf * equ.rtf * invR2;
   const double dBphi_dZ = 0.0;
 

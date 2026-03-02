@@ -19,13 +19,13 @@ mixture              species H+ frac 1.0
 global               fnum 1
 read_particles       input/source.single 0
 
-# Plasma/fields compute: loads bfield.h5 + plasma.h5
-compute pfields plasma/fields all file input/plasma.h5 input/bfield.h5 &
+# Plasma/fields compute: plasma.h5 + equilibrium (no bfield.h5)
+compute pfields plasma/fields all file input/plasma.h5 &
+        equilibrium g000001.00001_symm.X4.equ &
         bx by bz temp_e dens_e temp_i dens_i parrflow
 
-# Wire B from compute to Boris pusher
-fix bB bfield/grid c_pfields[1] c_pfields[2] c_pfields[3]
-global bfield grid bB 0
+# Do not use grid-cached B field; pusher queries B at particle position from pfields.
+global bfield none
 global efield none
 
 # Pure Boris: high subcycles for accuracy (reference)
@@ -33,6 +33,10 @@ global boris_subcycles 500
 global boris_dump no
 global boris_bad_dt_check yes
 global boris_bad_dt_limit 0.5
+
+# Use hybrid driver only to access point-interpolated B from pfields,
+# but with a huge switch factor so it stays in Boris branch.
+global gca plasma_compute pfields switch_factor 1e12
 
 shell mkdir -p output
 variable dt         equal 1e-9

@@ -123,6 +123,10 @@ class ComputePlasmaFields : public Compute {
   void reallocate();
   bigint memory_usage();
 
+  // Point-query API: interpolate background data at arbitrary (x,y,z)
+  PlasmaFileParams query_plasma_at_point(const double xyz[3]) const;
+  MagneticFieldFileDataParams query_bfield_at_point(const double xyz[3]) const;
+
 PlasmaFileParams *plasma_arr;   // size = grid->nlocal
 PlasmaFileData plasma_data;
 void broadcastPlasmaData(PlasmaFileData& data);
@@ -198,6 +202,10 @@ int nvalue;        // number of requested outputs (columns)
 int *value;        // which outputs (enum)
 std::vector<BilinearStencil> plasma_stencil;
 std::vector<BilinearStencil> magnetic_stencil;
+  BilinearStencil makeStencilAtPoint(
+      const double xyz[3],
+      const std::vector<double> &r_vals,
+      const std::vector<double> &z_vals) const;
   void precomputeStencils(const std::vector<double> &r_vals,
                           const std::vector<double> &z_vals,
                           std::vector<BilinearStencil> &stencil);

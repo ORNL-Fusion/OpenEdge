@@ -16,6 +16,7 @@
 
 /*_kokkos.h
 /*_kokkos.cpp
+!/accelerator_kokkos.h
 
 /kokkos.cpp
 /kokkos.h
@@ -106,4 +107,3 @@
 /remap3d.cpp
 /remap3d.h
 /spafftsettings.h
-

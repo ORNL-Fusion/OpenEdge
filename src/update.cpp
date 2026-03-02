@@ -145,6 +145,12 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   gca_switch_factor = 2.5;
   gca_plasma_cid = NULL;
   gca_plasma_cidx = -1;
+  gca_x_custom = -1;
+  gca_y_custom = -1;
+  gca_z_custom = -1;
+  gca_vpar_custom = -1;
+  gca_mu_custom = -1;
+  gca_on_custom = -1;
 
   sheath_flag = 0;
   sheath_geom_cid = NULL;
@@ -364,6 +370,41 @@ void Update::init()
       error->all(FLERR,"global gca: plasma compute ID not found");
     if (!modify->compute[gca_plasma_cidx]->per_grid_flag)
       error->all(FLERR,"global gca: plasma compute must be per-grid");
+
+    // ERO2.0-style persistent guiding-center state per particle.
+    // Keep this state across timesteps to avoid re-initializing from
+    // instantaneous gyromotion every step.
+    const int custom_double = 1;
+    if (gca_x_custom < 0) {
+      gca_x_custom = particle->find_custom((char *) "gca_x");
+      if (gca_x_custom < 0)
+        gca_x_custom = particle->add_custom((char *) "gca_x", custom_double, 0);
+    }
+    if (gca_y_custom < 0) {
+      gca_y_custom = particle->find_custom((char *) "gca_y");
+      if (gca_y_custom < 0)
+        gca_y_custom = particle->add_custom((char *) "gca_y", custom_double, 0);
+    }
+    if (gca_z_custom < 0) {
+      gca_z_custom = particle->find_custom((char *) "gca_z");
+      if (gca_z_custom < 0)
+        gca_z_custom = particle->add_custom((char *) "gca_z", custom_double, 0);
+    }
+    if (gca_vpar_custom < 0) {
+      gca_vpar_custom = particle->find_custom((char *) "gca_vpar");
+      if (gca_vpar_custom < 0)
+        gca_vpar_custom = particle->add_custom((char *) "gca_vpar", custom_double, 0);
+    }
+    if (gca_mu_custom < 0) {
+      gca_mu_custom = particle->find_custom((char *) "gca_mu");
+      if (gca_mu_custom < 0)
+        gca_mu_custom = particle->add_custom((char *) "gca_mu", custom_double, 0);
+    }
+    if (gca_on_custom < 0) {
+      gca_on_custom = particle->find_custom((char *) "gca_on");
+      if (gca_on_custom < 0)
+        gca_on_custom = particle->add_custom((char *) "gca_on", custom_double, 0);
+    }
   }
 
   // moveperturb method is set if external field perturbs particle motion
@@ -1925,32 +1966,94 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
   const double qm = (charge * echarge) / mass;
   const double qm_abs = std::fabs(qm);
 
-  // --- Read E and B fields (same as pusher_boris3D) ---
+  double *gca_x_vec = NULL;
+  double *gca_y_vec = NULL;
+  double *gca_z_vec = NULL;
+  double *gca_vpar_vec = NULL;
+  double *gca_mu_vec = NULL;
+  double *gca_on_vec = NULL;
+  if (gca_x_custom >= 0 && gca_y_custom >= 0 && gca_z_custom >= 0 &&
+      gca_vpar_custom >= 0 && gca_mu_custom >= 0 && gca_on_custom >= 0) {
+    gca_x_vec = particle->edvec[particle->ewhich[gca_x_custom]];
+    gca_y_vec = particle->edvec[particle->ewhich[gca_y_custom]];
+    gca_z_vec = particle->edvec[particle->ewhich[gca_z_custom]];
+    gca_vpar_vec = particle->edvec[particle->ewhich[gca_vpar_custom]];
+    gca_mu_vec = particle->edvec[particle->ewhich[gca_mu_custom]];
+    gca_on_vec = particle->edvec[particle->ewhich[gca_on_custom]];
+  }
+  const bool have_gca_state =
+    (gca_x_vec && gca_y_vec && gca_z_vec && gca_vpar_vec && gca_mu_vec && gca_on_vec);
+
+  // --- Read E and B fields ---
   double E[3] = {0.0, 0.0, 0.0};
   double B[3] = {0.0, 0.0, 0.0};
 
   if (eperturbflag)
     BorisGrid::read_field_from_fix(modify->fix[efieldfix], (efstyle == GFIELD),
                                    efield_active, i, icell, E);
-  if (bperturbflag)
+
+  ComputePlasmaFields *cp_bfield = NULL;
+  if (gca_plasma_cidx >= 0) {
+    Compute *cp_base = modify->compute[gca_plasma_cidx];
+    cp_bfield = dynamic_cast<ComputePlasmaFields *>(cp_base);
+  }
+
+  MagneticFieldFileDataParams Bcyl{};
+  bool have_point_b = false;
+  if (cp_bfield) {
+    Bcyl = cp_bfield->query_bfield_at_point(x);
+    if (Bcyl.Bmag > 0.0) {
+      have_point_b = true;
+      if (domain->dimension == 2) {
+        B[0] = Bcyl.br;
+        B[1] = Bcyl.bz;
+        B[2] = Bcyl.bt;
+      } else {
+        const double rx = x[0], ry = x[1];
+        const double rxy = std::sqrt(rx*rx + ry*ry);
+        double cphi = 1.0, sphi = 0.0;
+        if (rxy > 1.0e-20) { cphi = rx / rxy; sphi = ry / rxy; }
+        B[0] = Bcyl.br * cphi - Bcyl.bt * sphi;
+        B[1] = Bcyl.br * sphi + Bcyl.bt * cphi;
+        B[2] = Bcyl.bz;
+      }
+    }
+  }
+
+  if (!have_point_b && bperturbflag)
     BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
                                    bfield_active, i, icell, B);
 
   const double Bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
 
-  // --- Read grad(|B|) from plasma/fields compute ---
+  // --- Read grad(|B|) from point-query if available, else cell cache ---
   double gradBmag_cart[3] = {0.0, 0.0, 0.0};
+  double kappa_cart[3] = {0.0, 0.0, 0.0};
+  double curlb_cart[3] = {0.0, 0.0, 0.0};
   double gradBmag_magnitude = 0.0;
 
-  if (gca_plasma_cidx >= 0 && Bmag > 0.0) {
-    Compute *cp_base = modify->compute[gca_plasma_cidx];
-    auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
-    if (cp && icell >= 0) {
-      const double dBmag_dr = cp->mag_arr[icell].dBmag_dr;
-      const double dBmag_dz = cp->mag_arr[icell].dBmag_dz;
+  if (Bmag > 0.0) {
+    if (have_point_b) {
+      if (domain->dimension == 2) {
+        gradBmag_cart[0] = Bcyl.dBmag_dr;
+        gradBmag_cart[1] = 0.0;
+      } else {
+        const double rx = x[0], ry = x[1];
+        const double rxy = std::sqrt(rx*rx + ry*ry);
+        if (rxy > 1.0e-20) {
+          const double cphi = rx / rxy, sphi = ry / rxy;
+          gradBmag_cart[0] = Bcyl.dBmag_dr * cphi;
+          gradBmag_cart[1] = Bcyl.dBmag_dr * sphi;
+        } else {
+          gradBmag_cart[0] = Bcyl.dBmag_dr;
+          gradBmag_cart[1] = 0.0;
+        }
+      }
+      gradBmag_cart[2] = Bcyl.dBmag_dz;
+    } else if (cp_bfield && icell >= 0) {
+      const double dBmag_dr = cp_bfield->mag_arr[icell].dBmag_dr;
+      const double dBmag_dz = cp_bfield->mag_arr[icell].dBmag_dz;
 
-      // Convert cylindrical grad(|B|) to Cartesian
-      // grad_x = dB/dr * cos(phi), grad_y = dB/dr * sin(phi), grad_z = dB/dz
       Grid::ChildCell *cells = grid->cells;
       const double cx = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
       const double cy = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
@@ -1964,10 +2067,41 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
         gradBmag_cart[1] = 0.0;
       }
       gradBmag_cart[2] = dBmag_dz;
+    }
 
-      gradBmag_magnitude = std::sqrt(gradBmag_cart[0]*gradBmag_cart[0] +
-                                     gradBmag_cart[1]*gradBmag_cart[1] +
-                                     gradBmag_cart[2]*gradBmag_cart[2]);
+    gradBmag_magnitude = std::sqrt(gradBmag_cart[0]*gradBmag_cart[0] +
+                                   gradBmag_cart[1]*gradBmag_cart[1] +
+                                   gradBmag_cart[2]*gradBmag_cart[2]);
+
+    // Use equilibrium-derived kappa and curl(b) for full RK4 GCA.
+    if (cp_bfield && cp_bfield->has_equilibrium && cp_bfield->geom_arr && icell >= 0) {
+      int gcell = icell;
+      Grid::ChildCell *cells_h = grid->cells;
+      if (cells_h[icell].nsplit <= 0 && cells_h[icell].isplit >= 0)
+        gcell = grid->sinfo[cells_h[icell].isplit].icell;
+
+      const MagneticGeometry &G = cp_bfield->geom_arr[gcell];
+      if (domain->dimension == 2) {
+        kappa_cart[0] = G.kappa[0];
+        kappa_cart[1] = 0.0;
+        kappa_cart[2] = G.kappa[2];
+        curlb_cart[0] = G.curl_b[0];
+        curlb_cart[1] = 0.0;
+        curlb_cart[2] = G.curl_b[2];
+      } else {
+        const double rx = x[0], ry = x[1];
+        const double rxy = std::sqrt(rx*rx + ry*ry);
+        double cphi = 1.0, sphi = 0.0;
+        if (rxy > 1.0e-20) { cphi = rx / rxy; sphi = ry / rxy; }
+
+        kappa_cart[0] = G.kappa[0] * cphi - G.kappa[1] * sphi;
+        kappa_cart[1] = G.kappa[0] * sphi + G.kappa[1] * cphi;
+        kappa_cart[2] = G.kappa[2];
+
+        curlb_cart[0] = G.curl_b[0] * cphi - G.curl_b[1] * sphi;
+        curlb_cart[1] = G.curl_b[0] * sphi + G.curl_b[1] * cphi;
+        curlb_cart[2] = G.curl_b[2];
+      }
     }
   }
 
@@ -2102,11 +2236,19 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
 
   if (Bmag > 0.0 && qm_abs > 0.0) {
     const double bhat[3] = {B[0]/Bmag, B[1]/Bmag, B[2]/Bmag};
-    const double v_par = v[0]*bhat[0] + v[1]*bhat[1] + v[2]*bhat[2];
-    const double v2 = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
-    double vperp2 = v2 - v_par * v_par;
-    if (vperp2 < 0.0) vperp2 = 0.0;
-    const double v_perp = std::sqrt(vperp2);
+    double v_perp = 0.0;
+    if (have_gca_state && gca_on_vec[i] > 0.5) {
+      // In persistent GCA mode, use stored mu to evaluate rho_L.
+      const double mu_eff = (gca_mu_vec[i] > 0.0) ? gca_mu_vec[i] : 0.0;
+      const double vperp2 = (2.0 * mu_eff * Bmag) / mass;
+      v_perp = (vperp2 > 0.0) ? std::sqrt(vperp2) : 0.0;
+    } else {
+      const double v_par = v[0]*bhat[0] + v[1]*bhat[1] + v[2]*bhat[2];
+      const double v2 = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
+      double vperp2 = v2 - v_par * v_par;
+      if (vperp2 < 0.0) vperp2 = 0.0;
+      v_perp = std::sqrt(vperp2);
+    }
 
     const double rho_L = GCAPusher::larmor_radius(v_perp, qm_abs, Bmag);
     const double L_B = GCAPusher::grad_b_length(Bmag, gradBmag_magnitude);
@@ -2126,59 +2268,39 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
 
   if (use_gca) {
     // --- GCA path ---
-    GCAPusher::GCAState gca = GCAPusher::init_from_particle(x, v, mass, B);
-
-    // Check if equilibrium geometry is available for exact B* + RK4
-    bool have_equ_geom = false;
-    double kappa_cart[3] = {0,0,0};
-    double curl_b_cart[3] = {0,0,0};
-    double gradBmag_equ_cart[3] = {0,0,0};
-    double Bmag_equ = Bmag;
-
-    if (gca_plasma_cidx >= 0) {
-      Compute *cp_base = modify->compute[gca_plasma_cidx];
-      auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
-      if (cp && cp->has_equilibrium && cp->geom_arr && icell >= 0) {
-        const MagneticGeometry &g = cp->geom_arr[icell];
-        if (g.Bmag > 0.0) {
-          have_equ_geom = true;
-          Bmag_equ = g.Bmag;
-
-          // Convert cylindrical (R, φ, Z) -> Cartesian (x, y, z)
-          Grid::ChildCell *cells_g = grid->cells;
-          const double cx = 0.5 * (cells_g[icell].lo[0] + cells_g[icell].hi[0]);
-          const double cy = 0.5 * (cells_g[icell].lo[1] + cells_g[icell].hi[1]);
-          const double rmag = std::sqrt(cx*cx + cy*cy);
-          double cphi = 1.0, sphi = 0.0;
-          if (rmag > 1.0e-20) { cphi = cx / rmag; sphi = cy / rmag; }
-
-          // Cylindrical (R, φ, Z) -> Cartesian: v_x = v_R cos(φ) - v_φ sin(φ), etc.
-          kappa_cart[0] = g.kappa[0]*cphi - g.kappa[1]*sphi;
-          kappa_cart[1] = g.kappa[0]*sphi + g.kappa[1]*cphi;
-          kappa_cart[2] = g.kappa[2];
-
-          curl_b_cart[0] = g.curl_b[0]*cphi - g.curl_b[1]*sphi;
-          curl_b_cart[1] = g.curl_b[0]*sphi + g.curl_b[1]*cphi;
-          curl_b_cart[2] = g.curl_b[2];
-
-          gradBmag_equ_cart[0] = g.gradBmag[0]*cphi - g.gradBmag[1]*sphi;
-          gradBmag_equ_cart[1] = g.gradBmag[0]*sphi + g.gradBmag[1]*cphi;
-          gradBmag_equ_cart[2] = g.gradBmag[2];
-        }
-      }
-    }
-
-    if (have_equ_geom) {
-      // Full Littlejohn with B* correction + RK4
-      GCAPusher::push_gca_rk4(qm, dt, mass, E, B, Bmag_equ,
-                               gradBmag_equ_cart, kappa_cart, curl_b_cart, gca);
+    GCAPusher::GCAState gca;
+    if (have_gca_state && gca_on_vec[i] > 0.5) {
+      gca.X[0] = gca_x_vec[i];
+      gca.X[1] = gca_y_vec[i];
+      gca.X[2] = gca_z_vec[i];
+      gca.v_par = gca_vpar_vec[i];
+      gca.mu = (gca_mu_vec[i] > 0.0) ? gca_mu_vec[i] : 0.0;
     } else {
-      // Fallback: simple GCA with approximate curvature
-      GCAPusher::push_gca(qm, dt, mass, E, B, gradBmag_cart, gca);
+      gca = GCAPusher::init_from_particle(x, v, mass, B);
     }
 
-    // Reconstruct full velocity with random gyrophase
-    double rand_u = ranmaster->uniform();
+    // Full GCA integration (Littlejohn B* form) with RK4.
+    GCAPusher::push_gca_rk4(qm, dt, mass, E, B, Bmag, gradBmag_cart,
+                            kappa_cart, curlb_cart, gca);
+
+    if (have_gca_state) {
+      gca_x_vec[i] = gca.X[0];
+      gca_y_vec[i] = gca.X[1];
+      gca_z_vec[i] = gca.X[2];
+      gca_vpar_vec[i] = gca.v_par;
+      gca_mu_vec[i] = gca.mu;
+      gca_on_vec[i] = 1.0;
+    }
+
+    // Keep persistent GC state, but reconstruct full v for diagnostics and
+    // clean Boris fallback if regime switching happens.
+    const double phi_golden = 0.6180339887498949;
+    const double two_pi = 2.0 * M_PI;
+    const double omega_c = std::fabs(qm) * Bmag;
+    const double phase_turns =
+      particle->particles[i].id * phi_golden +
+      (omega_c * dt * static_cast<double>(ntimestep)) / two_pi;
+    double rand_u = phase_turns - std::floor(phase_turns);
     GCAPusher::gca_to_particle(gca, B, mass, rand_u, xnew, v);
   } else {
     // --- Boris path (with subcycling) ---
@@ -2189,9 +2311,26 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
     double vcur[3] = {v[0], v[1], v[2]};
 
     for (int isub = 0; isub < nsub; isub++) {
-      // Re-read fields per subcycle only if needed (for first subcycle we
-      // already have E,B; for subsequent subcycles the fields are the same
-      // since we don't update the grid-cached fields mid-step)
+      // For point-interpolated B, re-evaluate at the current particle location.
+      if (cp_bfield) {
+        MagneticFieldFileDataParams Bc = cp_bfield->query_bfield_at_point(xcur);
+        if (Bc.Bmag > 0.0) {
+          if (domain->dimension == 2) {
+            B[0] = Bc.br;
+            B[1] = Bc.bz;
+            B[2] = Bc.bt;
+          } else {
+            const double rx = xcur[0], ry = xcur[1];
+            const double rxy = std::sqrt(rx*rx + ry*ry);
+            double cphi = 1.0, sphi = 0.0;
+            if (rxy > 1.0e-20) { cphi = rx / rxy; sphi = ry / rxy; }
+            B[0] = Bc.br * cphi - Bc.bt * sphi;
+            B[1] = Bc.br * sphi + Bc.bt * cphi;
+            B[2] = Bc.bz;
+          }
+        }
+      }
+
       BorisGrid::push_velocity(qm, dt_sub, E, B, vcur);
       xcur[0] += vcur[0] * dt_sub;
       xcur[1] += vcur[1] * dt_sub;
@@ -2200,6 +2339,8 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
 
     v[0] = vcur[0]; v[1] = vcur[1]; v[2] = vcur[2];
     xnew[0] = xcur[0]; xnew[1] = xcur[1]; xnew[2] = xcur[2];
+
+    if (have_gca_state) gca_on_vec[i] = 0.0;
   }
 }
 
