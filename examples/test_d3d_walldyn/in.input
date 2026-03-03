@@ -1,0 +1,32 @@
+seed                12345
+dimension           3
+boundary            o o o
+global              gridcut -1.0 comm/sort yes
+
+create_box          -1.0 3.0  -1.0 2.0  -5.0 5.0
+create_grid         16 16 16
+balance_grid        rcb cell
+
+species             ar.species Ar
+
+# read capped wedge surface (wall + phi-face caps)
+read_surf           d3d_case_wedge_capped.surf particle check
+
+# surface groups: wall = lateral triangles, caps = phi-face caps
+group               wall surf id 1:136
+group               caps surf id 137:268
+
+# physical wall: specular reflection
+surf_collide        WALL specular
+# phi-face periodic BC: rotate by wedge angle (30 deg)
+surf_collide        PERIODIC toroidal 30.0
+
+surf_modify         wall collide WALL react none
+surf_modify         caps collide PERIODIC react none
+
+timestep            1.0e-3
+stats               10
+stats_style         step cpu np
+
+dump d1 particle all 1 dump.d3d id type x y z vx vy vz
+run                 200

@@ -1223,6 +1223,46 @@ template < int DIM, int SURF, int OPT > void Update::move()
               xnew[1] = x[1] + dtremain*v[1];
               if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
 
+              // check if surf_collide teleported particle outside current cell
+              // (occurs with toroidal periodic boundary collision model)
+
+              if (DIM == 3 &&
+                  (x[0] < lo[0] || x[0] > hi[0] ||
+                   x[1] < lo[1] || x[1] > hi[1] ||
+                   x[2] < lo[2] || x[2] > hi[2])) {
+                int newcell = grid->id_find_child(0,0,
+                                  domain->boxlo,domain->boxhi,x);
+                if (newcell >= 0) {
+                  if (cells[newcell].proc == me) {
+                    if (DIM == 3 && SURF) {
+                      if (cells[newcell].nsplit > 1 &&
+                          cells[newcell].nsurf >= 0)
+                        newcell = split3d(newcell,x);
+                    }
+                    icell = newcell;
+                    lo = cells[icell].lo;
+                    hi = cells[icell].hi;
+                    neigh = cells[icell].neigh;
+                    nmask = cells[icell].nmask;
+                    exclude = -1;
+                    nscollide_one++;
+                    continue;
+                  } else {
+                    icell = newcell;
+                    particles[i].icell = icell;
+                    particles[i].flag = PEXIT;
+                    particles[i].dtremain = dtremain;
+                    entryexit = 1;
+                    nscollide_one++;
+                    break;
+                  }
+                } else {
+                  particles[i].flag = PDISCARD;
+                  nscollide_one++;
+                  break;
+                }
+              }
+
               exclude = minsurf;
               nscollide_one++;
 
