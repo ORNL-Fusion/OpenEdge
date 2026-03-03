@@ -10,6 +10,7 @@
 
     Syntax:
       fix ID coll/nanbu Nevery plasma TeSrc NeSrc \
+          [nobinary] \
           [background A_bg Z_bg TiSrc NiSrc VparSrc BxSrc BySrc BzSrc]
 
     Example (binary only):
@@ -19,6 +20,12 @@
       fix nanbu coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10] \
           background 2.0 1.0 c_cplasma[8] c_cplasma[10] c_cplasma[11] \
           c_cplasma[1] c_cplasma[2] c_cplasma[3]
+
+    Example (background-only electron collisions, no binary):
+      fix nanbu_e coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10] \
+          nobinary \
+          background 5.486e-4 -1.0 c_cplasma[7] c_cplasma[10] \
+          c_cplasma[11] c_cplasma[1] c_cplasma[2] c_cplasma[3]
 
     Te (eV) and Ne (m^-3) from per-grid computes are used for the
     Coulomb logarithm.  The particle density entering the scattering-
@@ -58,12 +65,14 @@ using namespace SPARTA_NS;
 FixCollNanbu::FixCollNanbu(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   rng_(nullptr),
+  do_binary_(1),
   have_background_(0),
   A_bg_(0.0), Z_bg_(0.0), m_bg_(0.0), q_bg_(0.0),
   npmax_(0),
   plist_(nullptr)
 {
   // Syntax: fix ID coll/nanbu Nevery plasma TeSrc NeSrc
+  //         [nobinary]
   //         [background A_bg Z_bg TiSrc NiSrc VparSrc BxSrc BySrc BzSrc]
 
   if (narg < 6)
@@ -78,6 +87,12 @@ FixCollNanbu::FixCollNanbu(SPARTA *sparta, int narg, char **arg) :
 
   parse_compute_src(arg[iarg++], srcTe_, "Te");
   parse_compute_src(arg[iarg++], srcNe_, "Ne");
+
+  // optional nobinary keyword
+  if (iarg < narg && strcmp(arg[iarg], "nobinary") == 0) {
+    do_binary_ = 0;
+    iarg++;
+  }
 
   // optional background keyword
   if (iarg < narg && strcmp(arg[iarg], "background") == 0) {
@@ -233,7 +248,7 @@ void FixCollNanbu::end_of_step()
     }
 
     // binary particle-particle collisions (need >= 2 particles)
-    if (n >= 2) nanbu_collisions_cell(icell, n);
+    if (do_binary_ && n >= 2) nanbu_collisions_cell(icell, n);
 
     // background collisions (each particle vs virtual partner)
     if (have_background_ && n >= 1) nanbu_background_cell(icell, n);

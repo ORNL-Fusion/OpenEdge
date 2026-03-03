@@ -44,6 +44,9 @@ class FixCollNanbu : public Fix {
   NanbuScatterTable scatter_table_;
   RanKnuth *rng_;
 
+  // binary particle-particle collisions (0 = off via nobinary keyword)
+  int do_binary_;
+
   // plasma sources for Coulomb logarithm (Te, Ne)
   CollGridSrc srcTe_, srcNe_;
 
