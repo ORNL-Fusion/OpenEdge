@@ -17,6 +17,7 @@ SurfReactStyle(pmi,SurfReactPMI)
 #define SPARTA_SURF_REACT_PMI_H
 
 #include "surf_react.h"
+#include <cstdio>
 #include <vector>
 #include <string>
 
@@ -83,6 +84,17 @@ class SurfReactPMI : public SurfReact {
   SpeciesReactions *species_reactions;
 
   std::string h5_path;
+
+  // impact logging
+  int logflag;
+  FILE *logfp;
+  char *logfile_base;
+  int me;
+  void open_logfile();
+  void close_logfile();
+  void log_impact(Particle::OnePart *ip, int isurf, double *norm,
+                  double E_eV, double theta_deg, int outcome,
+                  double E_out_eV);
 
   virtual void init_reactions();
   void load_surface_file();

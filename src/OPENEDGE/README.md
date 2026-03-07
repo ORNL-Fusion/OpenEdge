@@ -14,10 +14,10 @@ The package has two categories of files:
     fix_emit_face_file.cpp/h  fix_emit_surf.cpp/h  fix_field_grid.cpp/h
     fix_field_particle.cpp/h  surf_collide_diffuse.cpp/h
 
-**New files** (56 files) — entirely new OpenEdge additions:
+**New files** (54 files) — entirely new OpenEdge additions:
 
     boris_grid.h  sheath_models.cpp/h  nanbu_scatter_table.h
-    compute_iead.cpp/h  compute_incident_plasma_flux.cpp/h
+    compute_incident_plasma_flux.cpp/h
     compute_plasma_fields.cpp/h  compute_pmi_surf_data.cpp/h
     compute_sheath_geometry_grid.cpp/h
     compute_surf_ead.cpp/h  compute_thermal_sheath_grid.cpp/h
@@ -139,9 +139,6 @@ evaluated and applied to the particle.  Three models are available:
 - **borodkina** (default) — Polynomial blending between Debye sheath (DS) and
   Chodura/magnetic pre-sheath (CS) based on the Borodkina & Komm (2015)
   parameterization.
-- **stangeby** — CS/DS split using Stangeby's Chodura condition:
-  φ_CS = −Te·ln(cos α), remainder in DS.  CS decays on scale ρ_i/cos(α),
-  DS on scale 2λ_D.
 - **coulette_manfredi** — Two-exponential fit to kinetic PIC data from
   Coulette & Manfredi, PPCF 58 025008 (2016).  Captures the full CS→DS
   transition for α ∈ [2°,90°] with coefficients fit to Vlasov simulation
@@ -177,8 +174,8 @@ Fortran sheath tracker for Ta²⁺/Ta³⁺/Ta⁴⁺ at α = 0°, 45°, 85° with
 ```
 compute   cgeom sheath/geometry/grid all all dist nx ny nz surfidx
 global    sheath geom_compute cgeom plasma_compute cplasma &
-          [model borodkina/stangeby/coulette_manfredi] &
-          [mD_amu 2.0] [pot_mult 0] [dmax 0.02] [emax_vpm 0] &
+          [model borodkina/coulette_manfredi] &
+          [mD_amu 2.0] [pot_mult 0] [dmax 0.02] &
           [kick yes/no]
 ```
 

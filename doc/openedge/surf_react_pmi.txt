@@ -33,6 +33,13 @@ surf_react ID pmi file reaction_file.surf surface_data.h5 :pre
 
 surface_data.h5 = HDF5 file containing energy- and angle-resolved PMI coefficient tables :ulb,l,ule
 
+Optional trailing keywords (either mode):
+
+surf_react ID pmi ... log yes/no file path :pre
+
+log yes/no = enable per-rank CSV logging of every surface impact (default: no) :ulb,l
+file path = base path for CSV log files; per-rank files are written as path.rank0, path.rank1, etc. (implies log yes) :l,ule
+
 [Examples:]
 
 # Constant-mode: quick testing with scalar coefficients
@@ -40,6 +47,10 @@ surf_react myPMI pmi constant reactions_DW.surf 0.5 0.8 0.1 8.68 :pre
 
 # File-mode: FTRIDYN BCA tables for O on W
 surf_react myPMI pmi file reactions_OW.surf O8_on_W74.h5 :pre
+
+# With impact logging for IEAD post-processing
+surf_react myPMI pmi constant reactions_DW.surf 0.5 0.8 0.1 8.68 &
+    log yes file output/pmi_impacts.csv :pre
 
 # Pair with diffuse surface collide (velreset=1, so diffuse only thermalizes rot/vib)
 surf_collide diffwall diffuse 300.0 1.0
@@ -218,11 +229,14 @@ This allows tracking gross erosion (sputter count), gross deposition
 recording the most recent reaction outcome. This provides a
 lightweight hook for companion compute styles. :l
 
-{compute iead compatibility}: Since {surf_react pmi} uses the standard
-{react()} interface, the original particle state ({iorig}) is
-automatically captured by {SurfCollideDiffuse::collide()} and passed to
-surface tally callbacks. The {compute iead} style will automatically
-histogram all surface impacts without any special handling. :l
+{Impact logging for IEADs}: The optional {log yes file <path>} keywords
+enable per-rank CSV logging of every surface impact. Each row records
+timestep, surf_id, species, E_in (eV), theta (deg), outcome (R/S/A),
+E_out (eV), position (x,y,z), velocity (vx,vy,vz), and surface normal
+(nx,ny,nz). Post-process these CSV files with standard tools (Python/pandas)
+to build Ion Energy-Angle Distributions (IEADs) or any other surface
+diagnostic. This replaces the deprecated {compute iead} style and provides
+full per-impact data rather than pre-binned histograms. :l
 
 {compute react/surf}: The standard {compute react/surf} command works
 with {surf_react pmi} to provide per-surface-element reaction counts
@@ -283,7 +297,6 @@ spyld datasets. The E_bind scalar is optional (defaults to 0).
 "surf_collide"_../surf_collide.html,
 "surf_modify"_../surf_modify.html,
 "compute react/surf"_../compute_react_surf.html,
-"compute iead"_compute_iead.html,
 "compute pmi/surf/data"_compute_pmi_surf_data.html
 
 [Reference:]

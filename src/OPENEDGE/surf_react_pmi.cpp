@@ -27,6 +27,8 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "input.h"
 #include "update.h"
 #include "comm.h"
+#include "domain.h"
+#include "surf.h"
 #include "random_mars.h"
 #include "random_knuth.h"
 #include "math_extra.h"
@@ -74,12 +76,19 @@ SurfReactPMI::SurfReactPMI(SPARTA *sparta, int narg, char **arg) :
   nb_cdf = 0;
   has_cdf_R = has_cdf_Y = 0;
   Ebind = 0.0;
+  logflag = 0;
+  logfp = NULL;
+  logfile_base = NULL;
+  me = comm->me;
 
   // parse mode: constant or file
+  // then scan remaining args for log/file keywords
+
+  int iarg_end;
 
   if (strcmp(arg[2],"constant") == 0) {
     mode = 0;
-    if (narg != 8) error->all(FLERR,
+    if (narg < 8) error->all(FLERR,
       "surf_react pmi constant requires: reaction_file RN RE Y Ebind");
     readfile(arg[3]);
     const_RN    = input->numeric(FLERR,arg[4]);
@@ -95,14 +104,42 @@ SurfReactPMI::SurfReactPMI(SPARTA *sparta, int narg, char **arg) :
     if (const_Ebind < 0.0)
       error->all(FLERR,"surf_react pmi: Ebind must be >= 0");
     Ebind = const_Ebind;
+    iarg_end = 8;
   } else if (strcmp(arg[2],"file") == 0) {
     mode = 1;
-    if (narg != 5) error->all(FLERR,
+    if (narg < 5) error->all(FLERR,
       "surf_react pmi file requires: reaction_file surface_data.h5");
     readfile(arg[3]);
     h5_path = std::string(arg[4]);
+    iarg_end = 5;
   } else {
     error->all(FLERR,"surf_react pmi: mode must be 'constant' or 'file'");
+    iarg_end = narg;
+  }
+
+  // parse optional trailing keywords: log yes/no, file <path>
+
+  int iarg = iarg_end;
+  while (iarg < narg) {
+    if (strcmp(arg[iarg],"log") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR,"surf_react pmi: log requires yes/no");
+      if (strcmp(arg[iarg+1],"yes") == 0) logflag = 1;
+      else if (strcmp(arg[iarg+1],"no") == 0) logflag = 0;
+      else error->all(FLERR,"surf_react pmi: log requires yes/no");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"file") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR,"surf_react pmi: file requires a path");
+      delete [] logfile_base;
+      int n = strlen(arg[iarg+1]) + 1;
+      logfile_base = new char[n];
+      strcpy(logfile_base, arg[iarg+1]);
+      logflag = 1;
+      iarg += 2;
+    } else {
+      error->all(FLERR,"surf_react pmi: unknown keyword");
+    }
   }
 
   // setup the reaction tallies
@@ -130,6 +167,8 @@ SurfReactPMI::~SurfReactPMI()
 {
   if (copy) return;
 
+  close_logfile();
+  delete [] logfile_base;
   delete random;
 
   if (rlist) {
@@ -158,6 +197,8 @@ void SurfReactPMI::init()
   SurfReact::init();
   init_reactions();
 
+  if (logflag) open_logfile();
+
   if (mode == 1) {
     try {
       load_surface_file();
@@ -175,7 +216,7 @@ void SurfReactPMI::init()
    sets velreset = 1 (we own the outgoing velocities)
 ------------------------------------------------------------------------- */
 
-int SurfReactPMI::react(Particle::OnePart *&ip, int /*isurf*/,
+int SurfReactPMI::react(Particle::OnePart *&ip, int isurf,
                          double *norm,
                          Particle::OnePart *&jp,
                          int &velreset)
@@ -265,6 +306,9 @@ int SurfReactPMI::react(Particle::OnePart *&ip, int /*isurf*/,
     ip->erot = 0.0;
     ip->evib = 0.0;
 
+    double E_out_eV = RE * E_eV;
+    if (logflag) log_impact(ip, isurf, norm, E_eV, theta_deg, 1, E_out_eV);
+
     nsingle++;
     tally_single[irxn]++;
     last_outcome = 1;
@@ -275,6 +319,9 @@ int SurfReactPMI::react(Particle::OnePart *&ip, int /*isurf*/,
 
     int irxn = sr.isputter;
     OneReaction *r = &rlist[irxn];
+
+    // log before nulling ip
+    if (logflag) log_impact(ip, isurf, norm, E_eV, theta_deg, 2, 0.0);
 
     // save ip position/cell before nulling
     double x[3];
@@ -333,6 +380,7 @@ int SurfReactPMI::react(Particle::OnePart *&ip, int /*isurf*/,
     // ABSORB: ip sticks to surface
 
     int irxn = sr.iabsorb;
+    if (logflag) log_impact(ip, isurf, norm, E_eV, theta_deg, 3, 0.0);
     ip = NULL;
 
     nsingle++;
@@ -839,6 +887,19 @@ void SurfReactPMI::readfile(char *fname)
     word = strtok(NULL," \t\n");
     if (word) error->all(FLERR,"Too many coefficients in a reaction formula");
 
+    // prepend type tag to reaction ID for unambiguous tally output
+    {
+      const char *tag = (r->type == REFLECT) ? "R: " :
+                        (r->type == SPUTTER) ? "S: " : "A: ";
+      int old_len = strlen(r->id);
+      int tag_len = strlen(tag);
+      char *new_id = new char[tag_len + old_len + 1];
+      strcpy(new_id, tag);
+      strcat(new_id, r->id);
+      delete [] r->id;
+      r->id = new_id;
+    }
+
     nlist_prob++;
   }
 
@@ -865,4 +926,67 @@ int SurfReactPMI::readone(char *line1, char *line2, int &n1, int &n2)
   }
 
   return 1;
+}
+
+/* ----------------------------------------------------------------------
+   open per-rank CSV log file for impact logging
+------------------------------------------------------------------------- */
+
+void SurfReactPMI::open_logfile()
+{
+  if (!logflag || logfp) return;
+
+  const char *base = logfile_base ? logfile_base : "surf_react_pmi.csv";
+  int nbase = strlen(base);
+  char *filename = new char[nbase + 32];
+  snprintf(filename, nbase + 32, "%s.rank%d", base, me);
+
+  logfp = fopen(filename, "w");
+  delete [] filename;
+  if (!logfp) return;
+
+  fprintf(logfp,
+          "timestep,rank,surf_id,species,E_in_eV,theta_deg,"
+          "outcome,E_out_eV,x,y,z,vx,vy,vz,nx,ny,nz\n");
+}
+
+/* ---------------------------------------------------------------------- */
+
+void SurfReactPMI::close_logfile()
+{
+  if (logfp) {
+    fclose(logfp);
+    logfp = NULL;
+  }
+}
+
+/* ----------------------------------------------------------------------
+   log a single PMI impact event to CSV
+   outcome: 1=reflect, 2=sputter, 3=absorb
+------------------------------------------------------------------------- */
+
+void SurfReactPMI::log_impact(Particle::OnePart *ip, int isurf, double *norm,
+                               double E_eV, double theta_deg, int outcome,
+                               double E_out_eV)
+{
+  if (!logfp && logflag) open_logfile();
+  if (!logfp || !ip) return;
+
+  long long surf_id = -1;
+  if (isurf >= 0) {
+    if (domain->dimension == 2) surf_id = (long long) surf->lines[isurf].id;
+    else surf_id = (long long) surf->tris[isurf].id;
+  }
+
+  const char *tag = (outcome == 1) ? "R" : (outcome == 2) ? "S" : "A";
+  const char *sname = particle->species[ip->ispecies].id;
+
+  fprintf(logfp,
+          "%lld,%d,%lld,%s,%.6g,%.4f,%s,%.6g,"
+          "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g\n",
+          (long long) update->ntimestep, me, surf_id, sname,
+          E_eV, theta_deg, tag, E_out_eV,
+          ip->x[0], ip->x[1], ip->x[2],
+          ip->v[0], ip->v[1], ip->v[2],
+          norm ? norm[0] : 0.0, norm ? norm[1] : 0.0, norm ? norm[2] : 0.0);
 }

@@ -10,60 +10,80 @@ fix chem/adas command :h3
 
 [Syntax:]
 
-:pre
-fix ID chem/adas Nevery Z reactions_file plasma TeSrc NeSrc
+fix ID chem/adas Nevery Z reactions_file :pre
+fix ID chem/adas Nevery Z reactions_file plasma TeSrc NeSrc :pre
 
-  ID = fix ID
-  Nevery = chemistry interval (timesteps)
-  Z = atomic number for ADAS table selection (e.g. 8 for oxygen)
-  reactions_file = OpenEdge reactions list
-  plasma = keyword
-  TeSrc = grid Te source (grid variable name or c_ID[col])
-  NeSrc = grid ne source (grid variable name or c_ID[col])
-:pre
+ID = fix ID :ulb,l
+Nevery = chemistry interval (timesteps) :l
+Z = atomic number for ADAS table selection (e.g. 74 for tungsten) :l
+reactions_file = OpenEdge reactions list :l
+plasma = optional keyword for explicit Te/ne sources :l
+TeSrc = grid Te source (grid variable name or c_ID\[col\]) :l
+NeSrc = grid ne source (grid variable name or c_ID\[col\]) :l,ule
+
+[Examples:]
+
+# Plasma cache mode (requires sheath or GCA plasma compute):
+fix chem chem/adas 1 74 plasma.adas :pre
+
+# Explicit Te/ne from a compute:
+fix chem chem/adas 10 74 plasma.adas plasma c_cplasma\[7\] c_cplasma\[10\] :pre
 
 [Description:]
 
-Apply ionization/recombination transitions using ADAS rate tables.
-Rates are read from:
+Apply ionization and recombination transitions to charged-particle
+species using ADAS (Atomic Data and Analysis Structure) rate tables.
+Rate data is read from:
 
-:pre
-adas/ADAS_Rates_Z.h5
-:pre
+adas/ADAS_Rates_Z.h5 :pre
 
 where Z is the atomic number provided in the command.
 
-Te and ne are evaluated per local grid cell every chemistry step.
-`TeSrc` and `NeSrc` can be:
+{Plasma cache mode} (no {plasma} keyword): Te and ne are read from
+the per-particle plasma cache populated by {update.cpp} each timestep.
+This requires that a sheath or GCA plasma compute is active (i.e.
+{global sheath ...} or {global gca ...} is configured).  When a sheath
+model is active, the cached ne is Boltzmann-corrected:
 
-:ul
-grid-style variables
-compute columns using `c_ID[col]` (e.g. `c_cnear[1]`)
-:ul
+ne_local = ne_upstream * exp(-phi_sheath / Te) :pre
 
-Unit conventions used by this fix:
+where phi_sheath is the local sheath potential drop at the particle
+position.  This gives physically correct ionization rates inside the
+sheath where the electron density is depleted.
 
-:ul
-Te input is in eV
-ne input is in m^-3
-ADAS tables are interpolated in log10(Te[eV]) and log10(ne[cm^-3])
-:ul
+{Explicit mode} ({plasma TeSrc NeSrc}): Te and ne are read per grid
+cell from grid-style variables or compute columns.  This is a fallback
+for configurations without a sheath/GCA plasma compute.
 
-Reaction probability is:
+If neither the plasma cache is active nor explicit sources are given,
+the fix will error at initialization.
 
-:pre
-P = 1 - exp(-k * ne * dt)
-:pre
+{Poisson competing-channel selection}: When multiple reaction channels
+are possible for a particle (e.g. ionization and recombination), the
+fix computes the Poisson rate for each channel:
 
-with k converted from cm^3/s to m^3/s.
+lambda_i = k_i * ne * dt_chem :pre
+
+where dt_chem = Nevery * dt.  The total probability of any event is:
+
+P = 1 - exp(-lambda_total) :pre
+
+If an event occurs, the channel is selected proportional to
+lambda_i / lambda_total.  This is exact Poisson statistics for
+competing processes.
+
+Unit conventions:
+
+Te input is in eV :ulb,l
+ne input is in m^-3 :l
+ADAS tables are interpolated in log10(Te\[eV\]) and log10(ne\[cm^-3\]) :l
+Rate coefficients k are in cm^3/s in the ADAS tables, converted to m^3/s internally :l,ule
 
 [Notes:]
 
-:ul
-If Te or ne are zero/nonphysical in a cell, no reaction is applied in that cell.
-For compute sources, this fix reads directly from compute per-grid arrays/vectors (`array_grid` / `vector_grid`).
-Interpolation is bilinear with boundary clamping on ADAS Te/ne grids.
-:ul
+If Te or ne are zero or nonphysical for a particle, no reaction is attempted. :ulb,l
+Interpolation is bilinear with boundary clamping on ADAS Te/ne grids. :l
+Nevery = 1 is recommended for accuracy; larger values are handled correctly via the Poisson dt_chem = Nevery * dt formulation. :l,ule
 
 [Related:]
 

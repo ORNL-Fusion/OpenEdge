@@ -72,8 +72,6 @@ action boris_grid.h
 action nanbu_scatter_table.h
 action sheath_models.cpp
 action sheath_models.h
-action compute_iead.cpp
-action compute_iead.h
 action compute_incident_plasma_flux.cpp
 action compute_incident_plasma_flux.h
 action compute_bfield_timedep.cpp

@@ -28,9 +28,8 @@
 #include "random_mars.h"
 #include "random_knuth.h"
 #include "variable.h"
-#include <random>
-#include <cstdlib>  // at top of file for random(), RAND_MAX
 #include "compute.h"
+#include "compute_plasma_fields.h"
 
 namespace fs = std::filesystem;
 using namespace SPARTA_NS;
@@ -52,7 +51,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
 {
     // fix 22 chem/adas  <nevery> <Z>  <reactions_file>  plasma <TeVar> <NeVar>
 
-  if (narg < 8)     error->all(FLERR,"Illegal fix chem/adas command (need: nevery Z reactions_file plasma TeVar NeVar)");
+  if (narg < 5)     error->all(FLERR,"Illegal fix chem/adas command (need: nevery Z reactions_file [plasma TeVar NeVar])");
     nevery = atoi(arg[2]);
     atomic_number = atoi(arg[3]);
 
@@ -84,64 +83,60 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
     tally_reactions = new bigint[nlist];
     tally_reactions_all = new bigint[nlist];
     tally_flag = 0;
+    rng_adas = nullptr;
+    cp_plasma_cached_ = nullptr;
 
-    // 
-   // --- REQUIRED plasma grid args ---
+    //
+   // --- Optional plasma grid args: plasma <TeSrc> <NeSrc> ---
+   // If omitted, Te/ne are read from the per-particle plasma cache
+   // populated by update.cpp (requires sheath or GCA plasma compute).
+
   int iarg = 5;
-  if (strcmp(arg[iarg], "plasma") != 0 || narg < iarg + 3)
-    error->all(FLERR,"fix chem/adas requires: plasma <TeSrc> <NeSrc>");
+  if (iarg < narg && strcmp(arg[iarg], "plasma") == 0) {
+    if (narg < iarg + 3)
+      error->all(FLERR,"fix chem/adas plasma requires: plasma <TeSrc> <NeSrc>");
 
-use_grid_plasma = 1;
+    use_grid_plasma = 1;
 
-// tiny parser for one token (either grid-var name, or c_ID[idx])
-auto parse_src = [&](const char *tok, GridSrc &dst, const char *label) {
-  if (strncmp(tok,"c_",2)==0) {
-    dst.kind = SRC_COMP;
+    auto parse_src = [&](const char *tok, GridSrc &dst, const char *label) {
+      if (strncmp(tok,"c_",2)==0) {
+        dst.kind = SRC_COMP;
+        const char *name = tok + 2;
+        const char *lb   = strchr(name,'[');
+        if (!lb || tok[strlen(tok)-1] != ']') {
+          char msg[160];
+          snprintf(msg, sizeof(msg),
+                  "fix chem/adas: bad %s token (use c_id[idx])", label);
+          error->all(FLERR, msg);
+        }
+        const int idlen = lb - name;
+        dst.cid = new char[idlen+1];
+        strncpy(dst.cid, name, idlen);
+        dst.cid[idlen] = '\0';
+        dst.col = atoi(lb+1);
+        if (dst.col <= 0) {
+          char msg[160];
+          snprintf(msg, sizeof(msg),
+                  "fix chem/adas: %s column must be >=1", label);
+          error->all(FLERR, msg);
+        }
+      } else {
+        dst.kind = SRC_VAR;
+        int n = strlen(tok) + 1;
+        char *copy = new char[n];
+        strcpy(copy, tok);
+        if (&dst == &srcTe) tstr = copy; else nstr = copy;
+      }
+    };
 
-    const char *name = tok + 2;              // after 'c_'
-    const char *lb   = strchr(name,'[');
-    if (!lb || tok[strlen(tok)-1] != ']')
-          {
-            char msg[160];
-            snprintf(msg, sizeof(msg),
-                    "fix chem/adas: bad %s token (use c_id[idx])", label);
-            error->all(FLERR, msg);
-          }
-
-
-    const int idlen = lb - name;
-    dst.cid = new char[idlen+1];
-    strncpy(dst.cid, name, idlen);
-    dst.cid[idlen] = '\0';
-
-    dst.col = atoi(lb+1);                    // 1-based
-    if (dst.col <= 0) {
-      char msg[160];
-      snprintf(msg, sizeof(msg),
-              "fix chem/adas: %s column must be >=1", label);
-      error->all(FLERR, msg);
-} 
-  } else {
-    // treat as grid-variable name (legacy path)
-    dst.kind = SRC_VAR;
-    int n = strlen(tok) + 1;
-    char *copy = new char[n];
-    strcpy(copy, tok);
-    if (&dst == &srcTe) tstr = copy; else nstr = copy;
-  }
-};
-
-// parse Te, ne
-parse_src(arg[iarg+1], srcTe, "Te");
-parse_src(arg[iarg+2], srcNe, "ne");
-
-// keep your existing defaults
-tvar = nvar = -1;
-maxgrid_plasma = 0;
-array_grid = NULL;
-
-
+    parse_src(arg[iarg+1], srcTe, "Te");
+    parse_src(arg[iarg+2], srcNe, "ne");
     use_grid_plasma = (srcTe.kind == SRC_VAR) || (srcNe.kind == SRC_VAR);
+  }
+
+  tvar = nvar = -1;
+  maxgrid_plasma = 0;
+  array_grid = NULL;
 
 }
 
@@ -176,6 +171,7 @@ FixChemAdas::~FixChemAdas()
 
 delete [] tstr; delete [] nstr;
 memory->destroy(array_grid);
+delete rng_adas;
 
 
 
@@ -286,7 +282,15 @@ void FixChemAdas::init()
     int isp = r->reactants[0];
   }
 
-  // --- resolve VARIABLE sources (old path) ---
+  // If no explicit Te/ne sources, require the per-particle plasma cache
+if (srcTe.kind == SRC_NONE && srcNe.kind == SRC_NONE) {
+  if (!update->plasma_cache_flag)
+    error->all(FLERR,
+      "fix chem/adas: no plasma source — either pass 'plasma <Te> <Ne>' "
+      "or configure sheath/GCA so the per-particle plasma cache is active");
+}
+
+// --- resolve VARIABLE sources (old path) ---
 if (srcTe.kind == SRC_VAR) {
   tvar = input->variable->find(tstr);
   if (tvar < 0 || !input->variable->grid_style(tvar))
@@ -341,10 +345,28 @@ if (c->size_per_grid_cols == 0) {
 }
 };
 
-bind_compute(srcTe, "Te");
-bind_compute(srcNe, "ne");
+if (srcTe.kind == SRC_COMP || srcNe.kind == SRC_COMP) {
+  bind_compute(srcTe, "Te");
+  bind_compute(srcNe, "ne");
+}
 
+// initialize SPARTA RNG (same pattern as fix_coll_nanbu)
+if (!rng_adas) {
+  rng_adas = new RanKnuth(update->ranmaster->uniform());
+  double seed = update->ranmaster->uniform();
+  rng_adas->reset(seed, comm->me, 100);
+}
 
+// cache dynamic_cast for per-particle plasma interpolation
+cp_plasma_cached_ = nullptr;
+if (srcTe.kind == SRC_COMP && srcTe.icompute >= 0) {
+  Compute *c = modify->compute[srcTe.icompute];
+  cp_plasma_cached_ = dynamic_cast<ComputePlasmaFields *>(c);
+}
+if (!cp_plasma_cached_ && srcNe.kind == SRC_COMP && srcNe.icompute >= 0) {
+  Compute *c = modify->compute[srcNe.icompute];
+  cp_plasma_cached_ = dynamic_cast<ComputePlasmaFields *>(c);
+}
 
 }
 
@@ -365,23 +387,37 @@ void FixChemAdas::end_of_step()
 
 void FixChemAdas::end_of_step_no_average()
 {
-  // Cell Te/ne may change each chemistry step; keep cache step-local
-  // so repeated particle queries in the same cell/species are fast and correct.
-  rateCache.clear();
-
-  if (use_grid_plasma) compute_plasma_grid();
-  refresh_compute_src(srcTe);
-  refresh_compute_src(srcNe);
-
-
   Particle::OnePart *particles = particle->particles;
   int *next = particle->next;
   Grid::ChildInfo *cinfo = grid->cinfo;
   int nglocal = grid->nlocal;
 
+  // Fast path: read Te/ne from per-particle plasma cache (populated by update)
+  if (update->plasma_cache_flag &&
+      update->pc_te_custom >= 0 && update->pc_ne_custom >= 0) {
+    double *te_vec = particle->edvec[particle->ewhich[update->pc_te_custom]];
+    double *ne_vec = particle->edvec[particle->ewhich[update->pc_ne_custom]];
+
+    for (int icell = 0; icell < nglocal; icell++) {
+      if (cinfo[icell].count == 0) continue;
+      int ip = cinfo[icell].first;
+      while (ip >= 0) {
+        const double Te_eV = std::max(te_vec[ip], 1e-6);
+        const double ne_m3 = std::max(ne_vec[ip], 0.0);
+        attempt(&particles[ip], Te_eV, ne_m3);
+        ip = next[ip];
+      }
+    }
+    return;
+  }
+
+  // Fallback: per-cell values from grid variable or compute
+  if (use_grid_plasma) compute_plasma_grid();
+  refresh_compute_src(srcTe);
+  refresh_compute_src(srcNe);
+
   for (int icell = 0; icell < nglocal; icell++) {
     if (cinfo[icell].count == 0) continue;
-  
     const double Te_eV = std::max(read_cell(srcTe, icell, 0), 1e-6);
     const double ne_m3 = std::max(read_cell(srcNe, icell, 1), 0.0);
     int ip = cinfo[icell].first;
@@ -414,11 +450,10 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
   const int isp0 = ip->ispecies;
   if (reactions[isp0].n == 0) return 0;
 
-      const int icell = ip->icell;
-  if (icell < 0 || icell >= grid->nlocal) return 0;  // safety: particle not mapped to local cell
+  const int icell = ip->icell;
+  if (icell < 0 || icell >= grid->nlocal) return 0;
 
-
-   if (Te_eV <= 0.0 || ne_m3 <= 0.0) return 0;
+  if (Te_eV <= 0.0 || ne_m3 <= 0.0) return 0;
 
   const double logTe    = std::log10(Te_eV);
   const double logne_cm = std::log10(std::max(ne_m3 * 1e-6, 1e-99));
@@ -427,25 +462,33 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
   const int n = reactions[isp].n;
   if (n == 0) return 0;
 
-  // ---- compute per-channel probability and pick the highest ----
-  double best_p   = 0.0;
-  int    best_idx = -1;
+  // Poisson competing-channel selection:
+  //   λ_i = k_i * ne * dt_chem   for each channel i
+  //   λ_total = Σ λ_i
+  //   P(any event) = 1 - exp(-λ_total)
+  //   channel selected proportional to λ_i / λ_total
 
-  for (int i = 0; i < n; ++i) {
+  const double dt_chem = nevery * update->dt;
+
+  double lambda[16];   // per-channel Poisson rates (max 16 channels)
+  int    ridx_map[16]; // reaction index for each channel
+  int    nchan = 0;
+  double lambda_total = 0.0;
+
+  for (int i = 0; i < n && nchan < 16; ++i) {
     const int ridx = reactions[isp].list[i];
     OneReaction *r = &rlist[ridx];
 
-    // species charge (ensure non-negative integer)
     const size_t q = static_cast<size_t>(std::max(0.0, species[isp].charge));
 
-    double rate_log10_cm3s = -INFINITY;  // ADAS returns log10(k[cm^3/s])
+    double rate_log10_cm3s = -INFINITY;
 
     if (r->type == IONIZATION) {
-      if (q >= static_cast<size_t>(atomic_number)) continue; // already fully stripped
+      if (q >= static_cast<size_t>(atomic_number)) continue;
       interpolateRateData(atomic_number, q,   icell, logTe, logne_cm,
                           rate_log10_cm3s, ReactionType::Ionization);
     } else if (r->type == RECOMBINATION) {
-      if (q == 0) continue; // neutral cannot recombine
+      if (q == 0) continue;
       interpolateRateData(atomic_number, q-1, icell, logTe, logne_cm,
                           rate_log10_cm3s, ReactionType::Recombination);
     } else {
@@ -454,18 +497,34 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
 
     if (!std::isfinite(rate_log10_cm3s)) continue;
 
-    const double p = computeReactionProbability(rate_log10_cm3s, update->dt, ne_m3);
-    if (p > best_p) { best_p = p; best_idx = ridx; }
+    const double lam = computeReactionLambda(rate_log10_cm3s, dt_chem, ne_m3);
+    if (lam <= 0.0) continue;
 
+    lambda[nchan] = lam;
+    ridx_map[nchan] = ridx;
+    lambda_total += lam;
+    nchan++;
   }
 
-  if (best_idx < 0 || best_p <= 0.0) return 0;
+  if (nchan == 0 || lambda_total <= 0.0) return 0;
 
-  // one reaction max per step
-  const double u = static_cast<double>(::random()) / (static_cast<double>(RAND_MAX) + 1.0);
+  // P(at least one event in dt_chem) = 1 - exp(-λ_total)
+  const double P_any = -std::expm1(-lambda_total);
+  const double u = rng_adas->uniform();
+  if (u > P_any) return 0;
 
-  if (u > best_p) return 0;
+  // select channel proportional to λ_i / λ_total
+  int chosen = 0;
+  if (nchan > 1) {
+    const double v = rng_adas->uniform() * lambda_total;
+    double cumsum = 0.0;
+    for (int i = 0; i < nchan; i++) {
+      cumsum += lambda[i];
+      if (v <= cumsum) { chosen = i; break; }
+    }
+  }
 
+  const int best_idx = ridx_map[chosen];
   OneReaction *rchosen = &rlist[best_idx];
   tally_reactions[best_idx]++;
   ip->ispecies = rchosen->products[0];
@@ -770,34 +829,26 @@ void FixChemAdas::check_duplicate()
 }
 
 /* ----------------------------------------------------------------------
-   compute reaction probability P from rate coefficient k, dt, ne
-   k [cm^3/s], dt [s], ne [m^-3]
-   P = 1 - exp(-λ) with λ = k [m^3/s] * ne [m^-3] * dt [s]
-   use expm1 for good small-λ accuracy
+   Compute Poisson rate λ = k * ne * dt for a single reaction channel.
+   Returns λ (dimensionless).  Caller sums λ across channels and draws
+   from Poisson: P(≥1 event) = 1 - exp(-λ_total).
 ------------------------------------------------------------------------- */
-double FixChemAdas::computeReactionProbability(double rate_log10_cm3s, // log10(k [cm^3/s])
-                                               double dt,             // [s]
-                                               double ne_m3)          // [m^-3]
+double FixChemAdas::computeReactionLambda(double rate_log10_cm3s, // log10(k [cm^3/s])
+                                          double dt,              // [s]
+                                          double ne_m3)           // [m^-3]
 {
   if (!(dt > 0.0) || !(ne_m3 > 0.0) || !std::isfinite(rate_log10_cm3s))
     return 0.0;
 
-  // k in cm^3/s -> m^3/s
-  const double k_cm3s = std::pow(10.0, rate_log10_cm3s);
+  // k in cm^3/s -> m^3/s  (exp is ~5x faster than pow(10,x))
+  const double k_cm3s = std::exp(rate_log10_cm3s * 2.302585092994046);
   const double k_m3s  = std::max(0.0, k_cm3s) * 1e-6;
 
   // λ = k [m^3/s] * n_e [m^-3] * dt [s]
   double lambda = k_m3s * ne_m3 * dt;
 
-  // numerical safety
-  if (!std::isfinite(lambda)) return 1.0;
-  lambda = std::min(lambda, 50.0); // exp(-50) ~ 1.9e-22
-
-  // P = 1 - exp(-λ) with good small-λ accuracy
-  double P = -std::expm1(-lambda);
-  if (P < 0.0) P = 0.0;
-  if (P > 1.0) P = 1.0;
-  return P;
+  if (!std::isfinite(lambda)) return 50.0;
+  return std::min(lambda, 50.0);
 }
 
 
@@ -805,29 +856,9 @@ double FixChemAdas::computeReactionProbability(double rate_log10_cm3s, // log10(
 /*----------------------------------------------------------------------
    Read ADAS data from HDF5 file
 -------------------------------------------------------------------------*/
-void FixChemAdas::readRateData(const std::string& filePath, RateData& rateData) {
+void FixChemAdas::readRateData(const std::string& filePath, RateData& rd) {
   try {
       H5::H5File file(filePath, H5F_ACC_RDONLY);
-
-      // Helper: Convert flat vector to 2D
-      auto to2D = [](const std::vector<double>& flat, const std::vector<hsize_t>& dims) {
-          std::vector<std::vector<double>> data(dims[0], std::vector<double>(dims[1]));
-          for (hsize_t i = 0; i < dims[0]; ++i)
-              for (hsize_t j = 0; j < dims[1]; ++j)
-                  data[i][j] = flat[i * dims[1] + j];
-          return data;
-      };
-
-      // Helper: Convert flat vector to 3D
-      auto to3D = [](const std::vector<double>& flat, const std::vector<hsize_t>& dims) {
-          std::vector<std::vector<std::vector<double>>> data(dims[0],
-              std::vector<std::vector<double>>(dims[1], std::vector<double>(dims[2])));
-          for (hsize_t i = 0; i < dims[0]; ++i)
-              for (hsize_t j = 0; j < dims[1]; ++j)
-                  for (hsize_t k = 0; k < dims[2]; ++k)
-                      data[i][j][k] = flat[i * dims[1] * dims[2] + j * dims[2] + k];
-          return data;
-      };
 
       // Read 1D dataset
       auto read1D = [&file](const std::string& name) {
@@ -840,38 +871,31 @@ void FixChemAdas::readRateData(const std::string& filePath, RateData& rateData) 
           return data;
       };
 
-      // Read 2D dataset
-      auto read2D = [&file, &to2D](const std::string& name) {
+      // Read 3D dataset as flat contiguous array
+      auto readFlat3D = [&file](const std::string& name,
+                                std::vector<double>& out,
+                                int &d0, int &d1, int &d2) {
           H5::DataSet ds = file.openDataSet(name);
           H5::DataSpace space = ds.getSpace();
-          std::vector<hsize_t> dims(2);
-          space.getSimpleExtentDims(dims.data(), nullptr);
-          std::vector<double> flat(dims[0] * dims[1]);
-          ds.read(flat.data(), H5::PredType::NATIVE_DOUBLE);
-          return to2D(flat, dims);
+          hsize_t dims[3];
+          space.getSimpleExtentDims(dims, nullptr);
+          d0 = static_cast<int>(dims[0]);
+          d1 = static_cast<int>(dims[1]);
+          d2 = static_cast<int>(dims[2]);
+          out.resize(d0 * d1 * d2);
+          ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
       };
 
-      // Read 3D dataset
-      auto read3D = [&file, &to3D](const std::string& name) {
-          H5::DataSet ds = file.openDataSet(name);
-          H5::DataSpace space = ds.getSpace();
-          std::vector<hsize_t> dims(3);
-          space.getSimpleExtentDims(dims.data(), nullptr);
-          std::vector<double> flat(dims[0] * dims[1] * dims[2]);
-          ds.read(flat.data(), H5::PredType::NATIVE_DOUBLE);
-          return to3D(flat, dims);
-      };
+      readFlat3D("IonizationRateCoeff", rd.ion_coeff,
+                 rd.ion_nQ, rd.ion_nT, rd.ion_nD);
+      readFlat3D("RecombinationRateCoeff", rd.rec_coeff,
+                 rd.rec_nQ, rd.rec_nT, rd.rec_nD);
 
-      // Read all datasets into rateData
-      rateData.IonizationRateCoeff         = read3D("IonizationRateCoeff");
-      rateData.RecombinationRateCoeff      = read3D("RecombinationRateCoeff");
-      rateData.gridChargeState_Ionization  = read2D("gridChargeState_Ionization");
-      rateData.gridChargeState_Recombination = read2D("gridChargeState_Recombination");
-      rateData.Atomic_Number               = read1D("Atomic_Number");
-      rateData.gridDensity_Ionization      = read1D("gridDensity_Ionization");
-      rateData.gridDensity_Recombination   = read1D("gridDensity_Recombination");
-      rateData.gridTemperature_Ionization  = read1D("gridTemperature_Ionization");
-      rateData.gridTemperature_Recombination = read1D("gridTemperature_Recombination");
+      rd.Atomic_Number = read1D("Atomic_Number");
+      rd.gridD_ion     = read1D("gridDensity_Ionization");
+      rd.gridD_rec     = read1D("gridDensity_Recombination");
+      rd.gridT_ion     = read1D("gridTemperature_Ionization");
+      rd.gridT_rec     = read1D("gridTemperature_Recombination");
 
   } catch (const H5::Exception& e) {
       throw std::runtime_error("Error reading ADAS file " + filePath + ": " + std::string(e.getCDetailMsg()));
@@ -880,27 +904,9 @@ void FixChemAdas::readRateData(const std::string& filePath, RateData& rateData) 
 
 
 
-void FixChemAdas::interpolateRateData(int atomic_number, double charge, int icell, double te, double ne, double& rate_final, ReactionType reactionType) {
-    
+void FixChemAdas::interpolateRateData(int atomic_number, double charge, int /*icell*/, double te, double ne, double& rate_final, ReactionType reactionType) {
+
   size_t charge_idx = static_cast<size_t>(charge);
-
-  // if ((reactionType == ReactionType::Recombination && charge_idx == 0) ||
-  //     (reactionType == ReactionType::Ionization && charge_idx >= atomic_number)) {
-  //     rate_final = 0.0;
-  //     return;
-  // }
-
-  // Create a cache key
-  InterpolationKey key {icell, static_cast<int>(charge), atomic_number, reactionType};
-  // Check if we already computed this value
-  auto it = rateCache.find(key);
-  if (it != rateCache.end()) {
-      // Use the cached value
-      rate_final = it->second;
-      return;
-  }
-
-
 
   double x0, x1, y0, y1;
   double f00, f01, f10, f11;
@@ -911,9 +917,6 @@ void FixChemAdas::interpolateRateData(int atomic_number, double charge, int icel
   }
 
   MathExtra::bilinearInterpolate(x0, x1, y0, y1, f00, f01, f10, f11, te, ne, rate_final);
-
-  // Store the result in the cache for subsequent particles in this step.
-  rateCache[key] = rate_final;
 }
 
 
@@ -922,15 +925,17 @@ void FixChemAdas::interpolateRateData(int atomic_number, double charge, int icel
 ------------------------------------------------------------------------- */
 
 bool FixChemAdas::setupInterpolation(ReactionType reactionType, int atomic_number, size_t charge_idx, double te, double ne, double& x0, double& x1, double& y0, double& y1, double& f00, double& f01, double& f10, double& f11) {
-  auto& material_data = materials_rate_data[atomic_number];
+  auto& rd = materials_rate_data[atomic_number];
 
   auto bracket_index = [](const std::vector<double>& grid, double x,
                           size_t &ilo, size_t &ihi) -> bool {
-    if (grid.size() < 2) return false;
-    if (x <= grid.front()) { ilo = 0; ihi = 1; return true; }
-    if (x >= grid.back())  { ihi = grid.size()-1; ilo = ihi-1; return true; }
-    const size_t hi = std::lower_bound(grid.begin(), grid.end(), x) - grid.begin();
-    if (hi == 0 || hi >= grid.size()) return false;
+    const size_t n = grid.size();
+    if (n < 2) return false;
+    if (x <= grid[0])   { ilo = 0; ihi = 1; return true; }
+    if (x >= grid[n-1]) { ihi = n-1; ilo = ihi-1; return true; }
+    const size_t hi = static_cast<size_t>(
+        std::lower_bound(grid.begin(), grid.end(), x) - grid.begin());
+    if (hi == 0 || hi >= n) return false;
     ihi = hi;
     ilo = hi - 1;
     return true;
@@ -939,51 +944,31 @@ bool FixChemAdas::setupInterpolation(ReactionType reactionType, int atomic_numbe
   size_t tlo, thi, nlo, nhi;
 
   if (reactionType == ReactionType::Recombination) {
-      auto& tempGrid = material_data.gridTemperature_Recombination;
-      auto& densGrid = material_data.gridDensity_Recombination;
-      if (charge_idx >= material_data.RecombinationRateCoeff.size()) return false;
-      if (!bracket_index(tempGrid, te, tlo, thi)) return false;
-      if (!bracket_index(densGrid, ne, nlo, nhi)) return false;
+      if (static_cast<int>(charge_idx) >= rd.rec_nQ) return false;
+      if (!bracket_index(rd.gridT_rec, te, tlo, thi)) return false;
+      if (!bracket_index(rd.gridD_rec, ne, nlo, nhi)) return false;
 
-      x0 = tempGrid[tlo];
-      x1 = tempGrid[thi];
-      y0 = densGrid[nlo];
-      y1 = densGrid[nhi];
+      x0 = rd.gridT_rec[tlo];  x1 = rd.gridT_rec[thi];
+      y0 = rd.gridD_rec[nlo];  y1 = rd.gridD_rec[nhi];
 
-      const auto &A = material_data.RecombinationRateCoeff[charge_idx];
-      if (A.size() <= thi) return false;
-      if (A[tlo].size() <= nhi || A[thi].size() <= nhi) return false;
+      // flat layout: [charge][temperature][density]
+      f00 = rd.rec_at(charge_idx, tlo, nlo);
+      f01 = rd.rec_at(charge_idx, tlo, nhi);
+      f10 = rd.rec_at(charge_idx, thi, nlo);
+      f11 = rd.rec_at(charge_idx, thi, nhi);
 
-      // ADAS data layout is [charge][temperature][density]
-      f00 = A[tlo][nlo];
-      f01 = A[tlo][nhi];
-      f10 = A[thi][nlo];
-      f11 = A[thi][nhi];
-
-  } else if (reactionType == ReactionType::Ionization) {
-      auto& tempGrid = material_data.gridTemperature_Ionization;
-      auto& densGrid = material_data.gridDensity_Ionization;
-      if (charge_idx >= material_data.IonizationRateCoeff.size()) return false;
-      if (!bracket_index(tempGrid, te, tlo, thi)) return false;
-      if (!bracket_index(densGrid, ne, nlo, nhi)) return false;
-
-      x0 = tempGrid[tlo];
-      x1 = tempGrid[thi];
-      y0 = densGrid[nlo];
-      y1 = densGrid[nhi];
-
-      const auto &A = material_data.IonizationRateCoeff[charge_idx];
-      if (A.size() <= thi) return false;
-      if (A[tlo].size() <= nhi || A[thi].size() <= nhi) return false;
-
-      // ADAS data layout is [charge][temperature][density]
-      f00 = A[tlo][nlo];
-      f01 = A[tlo][nhi];
-      f10 = A[thi][nlo];
-      f11 = A[thi][nhi];
   } else {
-      error->all(FLERR, "Illegal ReactionType");
-      return false;
+      if (static_cast<int>(charge_idx) >= rd.ion_nQ) return false;
+      if (!bracket_index(rd.gridT_ion, te, tlo, thi)) return false;
+      if (!bracket_index(rd.gridD_ion, ne, nlo, nhi)) return false;
+
+      x0 = rd.gridT_ion[tlo];  x1 = rd.gridT_ion[thi];
+      y0 = rd.gridD_ion[nlo];  y1 = rd.gridD_ion[nhi];
+
+      f00 = rd.ion_at(charge_idx, tlo, nlo);
+      f01 = rd.ion_at(charge_idx, tlo, nhi);
+      f10 = rd.ion_at(charge_idx, thi, nlo);
+      f11 = rd.ion_at(charge_idx, thi, nhi);
   }
 
   return true;
@@ -1017,53 +1002,31 @@ void FixChemAdas::readRateDataParallel(const std::string& filePath, RateData& ra
   broadcastRateData(rateData);
 }
 
-void FixChemAdas::broadcastRateData(RateData& rateData) {
-  int me = comm->me;
+void FixChemAdas::broadcastRateData(RateData& rd) {
 
-  // Helper lambda: broadcast 1D vector
+  // Helper: broadcast a flat vector (single MPI_Bcast for the whole buffer)
   auto bcast1D = [this](std::vector<double>& vec) {
-      size_t size = vec.size();
-      MPI_Bcast(&size, 1, MPI_UNSIGNED_LONG_LONG, 0, world);
-      if (comm->me != 0) vec.resize(size);
-      MPI_Bcast(vec.data(), size, MPI_DOUBLE, 0, world);
+      size_t n = vec.size();
+      MPI_Bcast(&n, 1, MPI_UNSIGNED_LONG_LONG, 0, world);
+      if (comm->me != 0) vec.resize(n);
+      if (n > 0) MPI_Bcast(vec.data(), n, MPI_DOUBLE, 0, world);
   };
 
-  // Helper lambda: broadcast 2D vector
-  auto bcast2D = [this](std::vector<std::vector<double>>& vec) {
-      size_t dim1 = vec.size();
-      size_t dim2 = dim1 ? vec[0].size() : 0;
-      MPI_Bcast(&dim1, 1, MPI_UNSIGNED_LONG_LONG, 0, world);
-      MPI_Bcast(&dim2, 1, MPI_UNSIGNED_LONG_LONG, 0, world);
-      if (comm->me != 0) vec.resize(dim1, std::vector<double>(dim2));
-      for (size_t i = 0; i < dim1; ++i)
-          MPI_Bcast(vec[i].data(), dim2, MPI_DOUBLE, 0, world);
-  };
+  // Broadcast dimensions then flat data (one bcast per table, not per row)
+  MPI_Bcast(&rd.ion_nQ, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.ion_nT, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.ion_nD, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.rec_nQ, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.rec_nT, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.rec_nD, 1, MPI_INT, 0, world);
 
-  // Helper lambda: broadcast 3D vector
-  auto bcast3D = [this](std::vector<std::vector<std::vector<double>>>& vec) {
-      size_t dim1 = vec.size();
-      size_t dim2 = dim1 ? vec[0].size() : 0;
-      size_t dim3 = (dim2 && dim1) ? vec[0][0].size() : 0;
-      MPI_Bcast(&dim1, 1, MPI_UNSIGNED_LONG_LONG, 0, world);
-      MPI_Bcast(&dim2, 1, MPI_UNSIGNED_LONG_LONG, 0, world);
-      MPI_Bcast(&dim3, 1, MPI_UNSIGNED_LONG_LONG, 0, world);
-      if (comm->me != 0)
-          vec.resize(dim1, std::vector<std::vector<double>>(dim2, std::vector<double>(dim3)));
-      for (size_t i = 0; i < dim1; ++i)
-          for (size_t j = 0; j < dim2; ++j)
-              MPI_Bcast(vec[i][j].data(), dim3, MPI_DOUBLE, 0, world);
-  };
-
-  // Broadcast all RateData members
-  bcast3D(rateData.IonizationRateCoeff);
-  bcast3D(rateData.RecombinationRateCoeff);
-  bcast2D(rateData.gridChargeState_Ionization);
-  bcast2D(rateData.gridChargeState_Recombination);
-  bcast1D(rateData.Atomic_Number);
-  bcast1D(rateData.gridDensity_Ionization);
-  bcast1D(rateData.gridDensity_Recombination);
-  bcast1D(rateData.gridTemperature_Ionization);
-  bcast1D(rateData.gridTemperature_Recombination);
+  bcast1D(rd.ion_coeff);
+  bcast1D(rd.rec_coeff);
+  bcast1D(rd.Atomic_Number);
+  bcast1D(rd.gridD_ion);
+  bcast1D(rd.gridD_rec);
+  bcast1D(rd.gridT_ion);
+  bcast1D(rd.gridT_rec);
 }
 
 
