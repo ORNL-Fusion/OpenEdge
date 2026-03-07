@@ -141,6 +141,5 @@ python3 compare_iead.py
 ## Git conventions
 
 - Commit messages: imperative mood, concise first line, details in body
-- Do not mention AI tools or add Co-Authored-By lines in commits
 - Main branch: `main`
 - Feature branches: descriptive names (e.g., `seed-timedep-multilayer`)
