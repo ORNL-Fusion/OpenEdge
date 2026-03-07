@@ -20,11 +20,13 @@ Usage:
   python surf_areal_density.py -f output/surf_react.dat --dt 1e-10 \
       --surf input/gitr_geometry.surf --vtp output/vtp
 
-  # Filter specific species columns, save CSV summary
-  python surf_areal_density.py -f output/surf_react.dat -i in.script --csv output/areal.csv
+  # Per-species breakdown (requires reactions file)
+  python surf_areal_density.py -f output/surf_react.dat -i in.script \
+      --reactions reactions_pmi.surf --group species --csv output/areal.csv
 
-  # Plot areal density vs time
-  python surf_areal_density.py -f output/surf_react.dat -i in.script --plot
+  # R/S/A breakdown with plot
+  python surf_areal_density.py -f output/surf_react.dat -i in.script \
+      --reactions reactions_pmi.surf --group all --plot
 """
 from __future__ import annotations
 
@@ -314,21 +316,106 @@ def get_flux_columns(data: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Reaction file parser — maps column index to reaction type (R/S/A)
+# ---------------------------------------------------------------------------
+def parse_reactions_file(filename: str) -> list[dict]:
+    """Parse a surf_react_pmi reactions file.
+
+    Returns a list of dicts (one per reaction, in order), each with:
+      reactant, product, type ('R', 'S', or 'A'), index (0-based)
+    """
+    reactions = []
+    with open(filename) as f:
+        lines = [l.strip() for l in f if l.strip() and not l.strip().startswith("#")]
+
+    i = 0
+    idx = 0
+    while i < len(lines):
+        # Reaction line: "W+ --> W" or "W --> NULL"
+        if "-->" in lines[i]:
+            parts = lines[i].split("-->")
+            reactant = parts[0].strip()
+            product = parts[1].strip()
+            # Next line: "R Simple 1.0" or "S Simple 1.0" or "A Simple 1.0"
+            if i + 1 < len(lines):
+                rtype = lines[i + 1].split()[0].upper()
+                reactions.append({
+                    "reactant": reactant,
+                    "product": product,
+                    "type": rtype,
+                    "index": idx,
+                })
+                idx += 1
+                i += 2
+            else:
+                i += 1
+        else:
+            i += 1
+
+    return reactions
+
+
+def build_column_groups(flux_cols: list[str],
+                        reactions: list[dict] | None = None) -> dict:
+    """Build named groups of flux columns for summation.
+
+    Returns dict: group_name -> list of column names.
+    Always includes 'total'.  If reactions are provided, also includes
+    'reflect', 'sputter', 'absorb', and per-species groups.
+    """
+    groups = {"total": list(flux_cols)}
+
+    if reactions:
+        type_map = {"R": "reflect", "S": "sputter", "A": "absorb"}
+        for gname in type_map.values():
+            groups[gname] = []
+        species_seen = {}
+
+        for rxn in reactions:
+            col_idx = rxn["index"]  # 0-based
+            # Find matching flux column (1-based in SPARTA)
+            col_name = None
+            for fc in flux_cols:
+                m = re.search(r"\[(\d+)\]", fc)
+                if m and int(m.group(1)) == col_idx + 1:
+                    col_name = fc
+                    break
+            if not col_name:
+                continue
+
+            gname = type_map.get(rxn["type"])
+            if gname:
+                groups[gname].append(col_name)
+
+            sp = rxn["reactant"]
+            if sp not in species_seen:
+                species_seen[sp] = []
+            species_seen[sp].append(col_name)
+
+        for sp, cols in species_seen.items():
+            groups[f"sp_{sp}"] = cols
+
+    return groups
+
+
+# ---------------------------------------------------------------------------
 # Areal density computation
 # ---------------------------------------------------------------------------
-def compute_areal_density(data: dict, dt: float, flux_cols: list[str] | None = None):
+def compute_areal_density(data: dict, dt: float,
+                          flux_cols: list[str],
+                          groups: dict | None = None):
     """Compute areal density for each timestep snapshot.
 
+    groups: dict of group_name -> list of column names to sum.
+    If None, defaults to {'total': flux_cols}.
+
     Returns a list of dicts, one per timestep, each containing:
-      step, time, surf_ids, area,
-      flux_<col>: flux array per surf element,
-      sigma_<col>: areal density (flux * time) per surf element,
-      N_<col>: integrated count (sum of sigma * area)
+      step, time, surf_ids, area, n_surfs,
+      sigma_<group>: areal density array per surf element,
+      N_<group>: integrated count (sum of sigma * area)
     """
-    if flux_cols is None:
-        flux_cols = get_flux_columns(data)
-    if not flux_cols:
-        raise ValueError("No flux columns found in surf dump data")
+    if groups is None:
+        groups = {"total": list(flux_cols)}
 
     unique_ts = np.unique(data["timestep"])
     results = []
@@ -337,34 +424,25 @@ def compute_areal_density(data: dict, dt: float, flux_cols: list[str] | None = N
         mask = data["timestep"] == ts
         time = ts * dt
         area = data["area"][mask] if "area" in data else None
+        nsurf = int(mask.sum())
         entry = {
             "step": int(ts),
             "time": time,
             "surf_ids": data["id"][mask],
             "area": area,
-            "n_surfs": int(mask.sum()),
+            "n_surfs": nsurf,
         }
 
-        for col in flux_cols:
-            flux = data[col][mask]
-            entry[f"flux_{col}"] = flux
+        for gname, cols in groups.items():
+            flux = np.zeros(nsurf)
+            for col in cols:
+                flux += data[col][mask]
             sigma = flux * time
-            entry[f"sigma_{col}"] = sigma
+            entry[f"sigma_{gname}"] = sigma
             if area is not None:
-                entry[f"N_{col}"] = float(np.sum(sigma * area))
+                entry[f"N_{gname}"] = float(np.sum(sigma * area))
             else:
-                entry[f"N_{col}"] = float(np.sum(sigma))
-
-        # Total across all species
-        total_flux = np.zeros(int(mask.sum()))
-        for col in flux_cols:
-            total_flux += data[col][mask]
-        entry["flux_total"] = total_flux
-        entry["sigma_total"] = total_flux * time
-        if area is not None:
-            entry["N_total"] = float(np.sum(total_flux * time * area))
-        else:
-            entry["N_total"] = float(np.sum(total_flux * time))
+                entry[f"N_{gname}"] = float(np.sum(sigma))
 
         results.append(entry)
 
@@ -374,30 +452,32 @@ def compute_areal_density(data: dict, dt: float, flux_cols: list[str] | None = N
 # ---------------------------------------------------------------------------
 # Output: summary table
 # ---------------------------------------------------------------------------
-def print_summary(results: list[dict], flux_cols: list[str]):
+def print_summary(results: list[dict], groups: dict):
     """Print a summary table of integrated counts vs time."""
-    header = f"{'step':>12s} {'time':>12s} {'N_total':>14s}"
-    for col in flux_cols:
-        header += f"  {f'N_{col}':>14s}"
+    gnames = list(groups.keys())
+    header = f"{'step':>12s} {'time':>12s}"
+    for g in gnames:
+        header += f"  {f'N_{g}':>14s}"
     print(header)
     print("-" * len(header))
 
     for r in results:
-        line = f"{r['step']:12d} {r['time']:12.4e} {r['N_total']:14.4e}"
-        for col in flux_cols:
-            line += f"  {r[f'N_{col}']:14.4e}"
+        line = f"{r['step']:12d} {r['time']:12.4e}"
+        for g in gnames:
+            line += f"  {r[f'N_{g}']:14.4e}"
         print(line)
 
 
-def write_csv(results: list[dict], flux_cols: list[str], path: str):
+def write_csv(results: list[dict], groups: dict, path: str):
     """Write summary CSV."""
+    gnames = list(groups.keys())
     with open(path, "w") as f:
-        cols = ["step", "time", "N_total"] + [f"N_{c}" for c in flux_cols]
+        cols = ["step", "time"] + [f"N_{g}" for g in gnames]
         f.write(",".join(cols) + "\n")
         for r in results:
-            vals = [str(r["step"]), f"{r['time']:.6e}", f"{r['N_total']:.6e}"]
-            for c in flux_cols:
-                vals.append(f"{r[f'N_{c}']:.6e}")
+            vals = [str(r["step"]), f"{r['time']:.6e}"]
+            for g in gnames:
+                vals.append(f"{r[f'N_{g}']:.6e}")
             f.write(",".join(vals) + "\n")
     print(f"Wrote {path}")
 
@@ -405,24 +485,23 @@ def write_csv(results: list[dict], flux_cols: list[str], path: str):
 # ---------------------------------------------------------------------------
 # Output: plot
 # ---------------------------------------------------------------------------
-def plot_areal_density(results: list[dict], flux_cols: list[str], outfile: str | None):
+def plot_areal_density(results: list[dict], groups: dict, outfile: str | None):
     """Plot integrated particle count vs time."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     times = [r["time"] for r in results]
-    N_total = [r["N_total"] for r in results]
 
     fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
-    ax.plot(times, N_total, "k-o", ms=4, lw=1.5, label="Total")
 
-    for col in flux_cols:
-        Ni = [r[f"N_{col}"] for r in results]
-        # Extract a short label
-        m = re.search(r"\[(\d+)\]", col)
-        label = f"species {m.group(1)}" if m else col
-        ax.plot(times, Ni, "-o", ms=3, lw=1, label=label)
+    for gname in groups:
+        key = f"N_{gname}"
+        Ni = [r[key] for r in results]
+        style = "k-o" if gname == "total" else "-o"
+        ms = 4 if gname == "total" else 3
+        lw = 1.5 if gname == "total" else 1
+        ax.plot(times, Ni, style, ms=ms, lw=lw, label=gname)
 
     ax.set_xlabel("Time [s]")
     ax.set_ylabel("Integrated count (areal density × area)")
@@ -440,7 +519,7 @@ def plot_areal_density(results: list[dict], flux_cols: list[str], outfile: str |
 # ---------------------------------------------------------------------------
 # Output: VTP (optional, requires VTK)
 # ---------------------------------------------------------------------------
-def write_vtp(data: dict, results: list[dict], flux_cols: list[str], outdir: str):
+def write_vtp(data: dict, results: list[dict], groups: dict, outdir: str):
     """Write per-timestep VTP files with areal density as cell data."""
     try:
         import vtk
@@ -493,25 +572,17 @@ def write_vtp(data: dict, results: list[dict], flux_cols: list[str], outdir: str
                 arr_area.SetValue(i, float(r["area"][i]))
             poly.GetCellData().AddArray(arr_area)
 
-        # Total areal density
-        arr_sig = vtk.vtkDoubleArray()
-        arr_sig.SetName("areal_density_total")
-        arr_sig.SetNumberOfTuples(ntri)
-        for i in range(ntri):
-            arr_sig.SetValue(i, float(r["sigma_total"][i]))
-        poly.GetCellData().AddArray(arr_sig)
-        poly.GetCellData().SetActiveScalars("areal_density_total")
-
-        # Per-species areal density
-        for col in flux_cols:
+        # Areal density per group
+        for gname in groups:
             arr = vtk.vtkDoubleArray()
-            m = re.search(r"\[(\d+)\]", col)
-            name = f"areal_density_sp{m.group(1)}" if m else f"areal_density_{col}"
-            arr.SetName(name)
+            arr.SetName(f"areal_density_{gname}")
             arr.SetNumberOfTuples(ntri)
             for i in range(ntri):
-                arr.SetValue(i, float(r[f"sigma_{col}"][i]))
+                arr.SetValue(i, float(r[f"sigma_{gname}"][i]))
             poly.GetCellData().AddArray(arr)
+
+        if "total" in groups:
+            poly.GetCellData().SetActiveScalars("areal_density_total")
 
         outfile = os.path.join(outdir, f"surf_t{step:010d}.vtp")
         writer = vtk.vtkXMLPolyDataWriter()
@@ -543,6 +614,14 @@ def main():
                          "provides triangle vertices when not in dump")
     ap.add_argument("--vtp", default=None, nargs="?", const="vtp_out",
                     help="Write VTP files to this directory")
+    ap.add_argument("--reactions", default=None,
+                    help="Reactions file (reactions_pmi.surf) — enables per-type "
+                         "and per-species grouping")
+    ap.add_argument("--group", default="total",
+                    choices=["total", "all", "species"],
+                    help="Column grouping: 'total' (sum all), 'all' (total + "
+                         "R/S/A breakdown), 'species' (per-species). "
+                         "Requires --reactions for 'all' and 'species'.")
     ap.add_argument("--quiet", action="store_true", help="Suppress summary table")
     args = ap.parse_args()
 
@@ -578,25 +657,55 @@ def main():
         sys.exit(1)
     print(f"  Flux columns: {flux_cols}")
 
+    # Build column groups
+    reactions = None
+    if args.reactions:
+        reactions = parse_reactions_file(args.reactions)
+        print(f"  Parsed {len(reactions)} reactions from {args.reactions}")
+
+    all_groups = build_column_groups(flux_cols, reactions)
+
+    # Select which groups to use based on --group
+    if args.group == "total":
+        groups = {"total": all_groups["total"]}
+    elif args.group == "all":
+        if not reactions:
+            print("WARNING: --group all requires --reactions; falling back to total",
+                  file=sys.stderr)
+            groups = {"total": all_groups["total"]}
+        else:
+            groups = {k: v for k, v in all_groups.items()
+                      if k in ("total", "reflect", "sputter", "absorb")}
+    elif args.group == "species":
+        if not reactions:
+            print("WARNING: --group species requires --reactions; falling back to total",
+                  file=sys.stderr)
+            groups = {"total": all_groups["total"]}
+        else:
+            groups = {k: v for k, v in all_groups.items()
+                      if k == "total" or k.startswith("sp_")}
+
+    print(f"  Groups: {list(groups.keys())}")
+
     # Compute
-    results = compute_areal_density(data, dt, flux_cols)
+    results = compute_areal_density(data, dt, flux_cols, groups)
 
     # Output
     if not args.quiet:
         print()
-        print_summary(results, flux_cols)
+        print_summary(results, groups)
 
     if args.csv:
-        write_csv(results, flux_cols, args.csv)
+        write_csv(results, groups, args.csv)
 
     if args.plot is not None:
-        plot_areal_density(results, flux_cols, args.plot)
+        plot_areal_density(results, groups, args.plot)
 
     if args.vtp is not None:
         if "v1" not in data:
             print("WARNING: No vertex data — use --surf <geometry.surf> to provide vertices")
         else:
-            write_vtp(data, results, flux_cols, args.vtp)
+            write_vtp(data, results, groups, args.vtp)
 
 
 if __name__ == "__main__":
