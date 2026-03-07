@@ -163,6 +163,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   sheath_pot_mult = 2.5;
   sheath_mD_amu = 2.01410177811;
   sheath_emax_vpm = 0.0;  // 0 = no cap
+  sheath_kick = 0;
 
 }
 
@@ -1187,6 +1188,60 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 }
               }
 
+              // --- Sheath kick: apply sheath energy as velocity boost at wall ---
+              if (sheath_kick && sheath_flag &&
+                  sheath_geom_cidx >= 0 && sheath_plasma_cidx >= 0) {
+                // Get surface normal (outward, toward plasma)
+                const double *snorm = (DIM == 3) ? tri->norm : line->norm;
+
+                // Plasma conditions at particle position (point query)
+                Compute *cp_base = modify->compute[sheath_plasma_cidx];
+                auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
+                if (cp) {
+                  PlasmaFileParams sk_pf = cp->query_plasma_at_point(x);
+                  const double sk_te = sk_pf.temp_e;
+                  const double sk_ti = sk_pf.temp_i;
+                  if (sk_te > 0.0) {
+                    constexpr double QE_kick = 1.602176634e-19;
+                    constexpr double ME_kick = 9.1093837015e-31;
+                    constexpr double AMU_kick = 1.66053906660e-27;
+                    constexpr double PI_kick = 3.14159265358979323846;
+
+                    const double mD_kg = sheath_mD_amu * AMU_kick;
+
+                    // Floating potential: phi = 0.5*ln(mD/(2*pi*me)/(1+Ti/Te)) * Te (eV)
+                    const double ti_ratio = (sk_ti > 0.0) ? (sk_ti / sk_te) : 0.0;
+                    const double phi_float_mult =
+                      0.5 * std::log(mD_kg / (2.0 * PI_kick * ME_kick) / (1.0 + ti_ratio));
+                    const double phi_eV = (sheath_pot_mult > 0.0)
+                      ? (sheath_pot_mult * sk_te)
+                      : (std::max(phi_float_mult, 0.0) * sk_te);
+
+                    // Particle charge and mass (from species table, not particle struct)
+                    const int isp = particles[i].ispecies;
+                    const double Z = std::abs(particle->species[isp].charge);
+                    const double pmass = particle->species[isp].mass;
+
+                    if (Z > 0.0 && pmass > 0.0 && phi_eV > 0.0) {
+                      // Normal component of velocity (toward wall = negative v·n)
+                      const double vdotn = v[0]*snorm[0] + v[1]*snorm[1] + v[2]*snorm[2];
+                      // v·n < 0 means particle moving toward wall (against outward normal)
+                      const double vn_toward = -vdotn;  // positive = toward wall
+
+                      // New normal speed: sqrt(vn^2 + 2*Z*e*phi/m)
+                      const double dE_J = Z * QE_kick * phi_eV;
+                      const double vn_new = std::sqrt(vn_toward * vn_toward + 2.0 * dE_J / pmass);
+                      const double dv = vn_new - vn_toward;  // always >= 0
+
+                      // Add kick toward wall (against outward normal)
+                      v[0] -= dv * snorm[0];
+                      v[1] -= dv * snorm[1];
+                      v[2] -= dv * snorm[2];
+                    }
+                  }
+                }
+              }
+
               if (nsurf_tally)
                 memcpy(&iorig,&particles[i],sizeof(Particle::OnePart));
 
@@ -1901,6 +1956,19 @@ void Update::pusher_boris3D(int i, int icell, double dt,
     }
   }
 
+  // Record which side of the wall the particle starts on (sign of d_raw).
+  // During subcycling, only apply sheath E-field while particle remains on
+  // this side.  If it overshoots past the wall, skip E-field to prevent
+  // reverse-field deceleration that causes energy loss.
+  double sh_d0_sign = 0.0;
+  if (sh_active) {
+    const double d0 =
+      (xcur[0] - sh_sref[0]) * sh_nx
+    + (xcur[1] - sh_sref[1]) * sh_ny
+    + (xcur[2] - sh_sref[2]) * sh_nz;
+    sh_d0_sign = (d0 >= 0.0) ? 1.0 : -1.0;
+  }
+
   for (int isub = 0; isub < nsub; isub++) {
     double E[3] = {0.0, 0.0, 0.0};
     double B[3] = {0.0, 0.0, 0.0};
@@ -1917,18 +1985,26 @@ void Update::pusher_boris3D(int i, int icell, double dt,
     // Distance is computed directly from particle to surface plane via dot
     // product.  The signed distance determines both |d| for the model and
     // the E-field direction (always toward the wall from whichever side).
-    if (sh_active) {
+    if (sh_active && !sheath_kick) {
       const double d_raw =
         (xcur[0] - sh_sref[0]) * sh_nx
       + (xcur[1] - sh_sref[1]) * sh_ny
       + (xcur[2] - sh_sref[2]) * sh_nz;
       const double d_particle = std::fabs(d_raw);
 
-      if (d_particle > 0.0 && d_particle < sheath_dmax) {
+      // Skip if particle overshot past wall (sign flipped from initial side)
+      const double d_sign = (d_raw >= 0.0) ? 1.0 : -1.0;
+      if (d_sign == sh_d0_sign && d_particle > 0.0 && d_particle < sheath_dmax) {
         double emag = 0.0;
         if (sheath_model == 0) {
           SheathModels::BorodkinaSheathResult sr =
             SheathModels::borodkina_sheath_at_distance(
+              d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
+              sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
+          emag = sr.emag_vpm;
+        } else if (sheath_model == 2) {
+          SheathModels::BorodkinaSheathResult sr =
+            SheathModels::coulette_manfredi_sheath_at_distance(
               d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
               sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
           emag = sr.emag_vpm;
@@ -2157,7 +2233,7 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
   }
 
   // --- Per-particle sheath E-field (same approach as boris3D) ---
-  if (sheath_flag && sheath_geom_cidx >= 0 && sheath_plasma_cidx >= 0) {
+  if (sheath_flag && !sheath_kick && sheath_geom_cidx >= 0 && sheath_plasma_cidx >= 0) {
     Compute *cg = modify->compute[sheath_geom_cidx];
 
     // Resolve sub-cell to parent for geometry/plasma lookup
@@ -2248,6 +2324,12 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
               if (sheath_model == 0) {
                 SheathModels::BorodkinaSheathResult sr =
                   SheathModels::borodkina_sheath_at_distance(
+                    d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
+                    sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
+                emag = sr.emag_vpm;
+              } else if (sheath_model == 2) {
+                SheathModels::BorodkinaSheathResult sr =
+                  SheathModels::coulette_manfredi_sheath_at_distance(
                     d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
                     sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
                 emag = sr.emag_vpm;
@@ -2984,7 +3066,8 @@ void Update::global(int narg, char **arg)
           if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
           if (strcmp(arg[iarg+1], "borodkina") == 0) sheath_model = 0;
           else if (strcmp(arg[iarg+1], "stangeby") == 0) sheath_model = 1;
-          else error->all(FLERR, "global sheath model must be borodkina or stangeby");
+          else if (strcmp(arg[iarg+1], "coulette_manfredi") == 0) sheath_model = 2;
+          else error->all(FLERR, "global sheath model must be borodkina, stangeby, or coulette_manfredi");
           iarg += 2;
         } else if (strcmp(arg[iarg], "dmax") == 0) {
           if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
@@ -3001,6 +3084,12 @@ void Update::global(int narg, char **arg)
         } else if (strcmp(arg[iarg], "emax_vpm") == 0) {
           if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
           sheath_emax_vpm = input->numeric(FLERR, arg[iarg+1]);
+          iarg += 2;
+        } else if (strcmp(arg[iarg], "kick") == 0) {
+          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
+          if (strcmp(arg[iarg+1], "yes") == 0) sheath_kick = 1;
+          else if (strcmp(arg[iarg+1], "no") == 0) sheath_kick = 0;
+          else error->all(FLERR, "global sheath kick must be yes or no");
           iarg += 2;
         } else break;  // next keyword belongs to a different global option
       }

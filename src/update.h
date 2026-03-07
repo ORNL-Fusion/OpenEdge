@@ -174,6 +174,7 @@ struct SurfHit2D {
   double sheath_pot_mult;      // potential multiplier
   double sheath_mD_amu;        // ion mass in amu
   double sheath_emax_vpm;      // max E-field clamp (V/m)
+  int sheath_kick;             // 1=apply sheath as velocity kick at wall
   // Hybrid Boris/GCA pusher (ERO2.0-style)
   int gca_flag;              // 1 if hybrid GCA mode is enabled
   double gca_switch_factor;  // switching threshold (default 2.5, from ERO2.0)
