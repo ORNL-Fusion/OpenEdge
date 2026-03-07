@@ -11,10 +11,10 @@ Physics setup matches sheath_tracker.f90:
   Te = Ti = 5 eV,  ni = 1e19 m^-3,  B = 0.5 T
   Ta ions: Ta2+ (8%), Ta3+ (62%), Ta4+ (30%), mass = 180.948 amu
   Tilt angles: 0, 45, 85 deg from wall normal
-  Sheath: Stangeby model with self-consistent floating potential
+  Sheath: Borodkina model (default) with self-consistent floating potential
 
 Note: The Fortran code uses a fixed MPS scale length (rho_D) for all
-angles, while OpenEdge's Stangeby model scales lmps = rho_D/cos(alpha).
+angles, while OpenEdge's Borodkina model scales lmps = rho_D/cos(alpha).
 This produces physically meaningful differences at oblique angles.
 
 Usage:
@@ -88,7 +88,7 @@ dt_fortran = 0.1 * min(2.0 * PI / wci_max, lD / cs_min)
 TIMESTEP = 1.0e-8
 BORIS_SUBCYCLES = int(round(TIMESTEP / dt_fortran))
 BORIS_SUBCYCLES = max(BORIS_SUBCYCLES, 10)
-# BORIS_SUBCYCLES *= 10  # extra resolution for thin Debye sheath (not needed with CM model)
+# BORIS_SUBCYCLES *= 10  # extra resolution for thin Debye sheath
 dt_sub = TIMESTEP / BORIS_SUBCYCLES
 
 # Run steps: need enough time for slowest case (85 deg tilt)
@@ -106,7 +106,7 @@ Z_HI = Lz + 0.002  # small margin above wall
 
 NX, NY, NZ = 4, 4, 20
 
-# Floating potential (matching Fortran Stangeby formula)
+# Floating potential (matching Fortran sheath formula)
 phi_float_eV = 0.5 * math.log(mD / (2.0 * PI * ME) / (1.0 + Ti_eV / Te_eV)) * Te_eV
 
 
@@ -213,7 +213,7 @@ def create_input(alpha_deg, Np_total, fname):
 ################################################################################
 # IEAD test: Ta mixture Chodura sheath, alpha = {alpha_deg} deg
 #
-# Compare against sheath_tracker.f90 Stangeby model.
+# Compare against sheath_tracker.f90 sheath model.
 # Physics: Te=Ti={Te_eV} eV, ni={ni0:.0e}, B={Bmag} T, Ta2+/Ta3+/Ta4+
 # Wall at z = {Lz:.6e} m, sheath entrance at z = 0
 ################################################################################

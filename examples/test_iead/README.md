@@ -53,15 +53,10 @@ Produces `output/iead_comparison.png`, `output/iead_1d_energy.png`,
 ## Sheath modes
 
 The input files use `kick yes` by default (sheath energy applied as velocity
-boost at wall).  To test the spatially-resolved Coulette-Manfredi model,
-edit `create_case.py` and change the sheath line to:
+boost at wall).  To test the spatially-resolved Borodkina model,
+edit `create_case.py` and change `kick yes` to `kick no`.
 
-```
-model coulette_manfredi mD_amu {mD_amu} pot_mult 0
-```
-
-Both modes produce <1% energy error vs Fortran at all angles.  See
-`src/OPENEDGE/README.md` for full sheath documentation.
+See `src/OPENEDGE/README.md` for full sheath documentation.
 
 ## Expected results
 

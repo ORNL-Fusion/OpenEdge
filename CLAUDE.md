@@ -87,7 +87,7 @@ Two approaches for sheath electric fields:
   velocity boost at wall collision. Recommended for IEADs. No per-subcycle
   E-field computation.
 - **Spatial mode** (`global sheath ... model <name>`): spatially-resolved
-  E-field evaluated each Boris subcycle. Models: `borodkina`, `stangeby`,
+  E-field evaluated each Boris subcycle. Models: `borodkina`,
   `coulette_manfredi`. Has overshoot guard to prevent reverse-field energy
   loss when particles cross the wall during subcycling.
 

@@ -19,8 +19,6 @@ FixStyle(chem/adas, FixChemAdas)
 #include <string>
 #include <H5Cpp.h>
 #include <map>
-#include <unordered_map>
-#include <tuple>
 #include <stdio.h>
 #include "fix.h"
 #include "update.h"
@@ -42,28 +40,8 @@ struct GridSrc {
   int      cache_ts  = -1;
 };
 
-struct InterpolationKey {
-    int icell;
-    int charge;
-    int atomic_number;
-    ReactionType reactionType;
-    bool operator==(const InterpolationKey& other) const {
-        return icell == other.icell &&
-               charge == other.charge &&
-               atomic_number == other.atomic_number &&
-               reactionType == other.reactionType;
-    }
-};
-
-struct InterpolationKeyHasher {
-   std::size_t operator()(const InterpolationKey& k) const {
-       std::size_t h1 = std::hash<int>{}(k.icell);
-       std::size_t h2 = std::hash<int>{}(k.charge);
-       std::size_t h3 = std::hash<int>{}(k.atomic_number);
-       std::size_t h4 = std::hash<int>{}(static_cast<int>(k.reactionType));
-       return ((h1 ^ (h2 << 1)) ^ (h3 << 2)) ^ (h4 << 3);
-   }
-};
+class RanKnuth;
+class ComputePlasmaFields;
 
 
 class FixChemAdas : public Fix {
@@ -99,18 +77,28 @@ protected:
 
     struct RateData {
         std::vector<double> Atomic_Number;
-        std::vector<std::vector<std::vector<double>>> IonizationRateCoeff, RecombinationRateCoeff;
-        std::vector<std::vector<double>> gridChargeState_Ionization, gridChargeState_Recombination;
-        std::vector<double> gridDensity_Ionization, gridDensity_Recombination, gridTemperature_Ionization, gridTemperature_Recombination;
+        // Flat contiguous rate tables: data[q * nT * nD + iT * nD + iD]
+        std::vector<double> ion_coeff, rec_coeff;
+        int ion_nQ, ion_nT, ion_nD;
+        int rec_nQ, rec_nT, rec_nD;
+        std::vector<double> gridT_ion, gridD_ion;
+        std::vector<double> gridT_rec, gridD_rec;
+
+        inline double ion_at(int q, int it, int id) const {
+            return ion_coeff[q * ion_nT * ion_nD + it * ion_nD + id];
+        }
+        inline double rec_at(int q, int it, int id) const {
+            return rec_coeff[q * rec_nT * rec_nD + it * rec_nD + id];
+        }
     };
 
-    std::map<std::string, RateData> rateDataCache;
-    std::unordered_map<int, RateData> materials_rate_data;
-    std::unordered_map<InterpolationKey, double, InterpolationKeyHasher> rateCache;
+    std::map<int, RateData> materials_rate_data;
 
     RateData rate_data;
+    RanKnuth *rng_adas;
+    ComputePlasmaFields *cp_plasma_cached_;
     void readRateData(const std::string& filePath, RateData& data);
-    double computeReactionProbability(double rate, double dt, double ne);
+    double computeReactionLambda(double rate_log10_cm3s, double dt, double ne_m3);
     bool setupInterpolation(ReactionType reactionType, int atomic_number, size_t charge_idx,
                     double te, double ne, double& x0, double& x1, double& y0, double& y1,
                     double& f00, double& f01, double& f10, double& f11);
@@ -118,11 +106,6 @@ protected:
                         double& rate_final, ReactionType reactionType);
     void readRateDataParallel(const std::string& filePath, RateData& rateData);
     void broadcastRateData(RateData& rateData);
-    double computeReactionProbability_(double rate,
-                                               double dt,
-                                               double ne,
-                                               bool rate_is_log10 /*=true*/,
-                                               double k_units_scale /*=1.0*/);
 
     struct OneReaction {
         int active;

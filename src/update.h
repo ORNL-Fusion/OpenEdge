@@ -169,12 +169,20 @@ struct SurfHit2D {
   char *sheath_plasma_cid;     // compute ID for plasma/fields
   int sheath_geom_cidx;        // resolved compute index for geometry
   int sheath_plasma_cidx;      // resolved compute index for plasma
-  int sheath_model;            // 0=borodkina, 1=stangeby, 2=eirene
+  int sheath_model;            // 0=borodkina, 1=coulette_manfredi
   double sheath_dmax;          // max distance for sheath activation (m)
   double sheath_pot_mult;      // potential multiplier
   double sheath_mD_amu;        // ion mass in amu
-  double sheath_emax_vpm;      // max E-field clamp (V/m)
+
   int sheath_kick;             // 1=apply sheath as velocity kick at wall
+
+  // Per-particle plasma cache (populated once per step, read by Boris/ADAS/Nanbu)
+  int plasma_cache_flag;       // 1 if plasma cache custom vectors are registered
+  int pc_te_custom, pc_ti_custom, pc_ne_custom, pc_ni_custom;
+  int pc_vpar_custom;
+  int pc_bx_custom, pc_by_custom, pc_bz_custom;
+  void cache_plasma_particles();
+
   // Hybrid Boris/GCA pusher (ERO2.0-style)
   int gca_flag;              // 1 if hybrid GCA mode is enabled
   double gca_switch_factor;  // switching threshold (default 2.5, from ERO2.0)

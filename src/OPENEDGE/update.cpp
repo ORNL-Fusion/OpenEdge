@@ -158,12 +158,16 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   sheath_plasma_cid = NULL;
   sheath_geom_cidx = -1;
   sheath_plasma_cidx = -1;
-  sheath_model = 0;             // 0=borodkina
+  sheath_model = 0;             // 0=borodkina, 1=coulette_manfredi
   sheath_dmax = 0.02;
   sheath_pot_mult = 2.5;
   sheath_mD_amu = 2.01410177811;
-  sheath_emax_vpm = 0.0;  // 0 = no cap
   sheath_kick = 0;
+
+  plasma_cache_flag = 0;
+  pc_te_custom = pc_ti_custom = pc_ne_custom = pc_ni_custom = -1;
+  pc_vpar_custom = -1;
+  pc_bx_custom = pc_by_custom = pc_bz_custom = -1;
 
 }
 
@@ -409,6 +413,33 @@ void Update::init()
     }
   }
 
+  // Register per-particle plasma cache vectors.
+  // Active when any plasma compute is available (sheath or GCA).
+  {
+    int plasma_cidx = -1;
+    if (sheath_flag && sheath_plasma_cidx >= 0) plasma_cidx = sheath_plasma_cidx;
+    else if (gca_flag && gca_plasma_cidx >= 0) plasma_cidx = gca_plasma_cidx;
+
+    if (plasma_cidx >= 0) {
+      const int custom_double = 1;
+      auto reg = [&](int &idx, const char *name) {
+        if (idx < 0) {
+          idx = particle->find_custom((char *) name);
+          if (idx < 0) idx = particle->add_custom((char *) name, custom_double, 0);
+        }
+      };
+      reg(pc_te_custom,   "pc_te");
+      reg(pc_ti_custom,   "pc_ti");
+      reg(pc_ne_custom,   "pc_ne");
+      reg(pc_ni_custom,   "pc_ni");
+      reg(pc_vpar_custom, "pc_vpar");
+      reg(pc_bx_custom,   "pc_bx");
+      reg(pc_by_custom,   "pc_by");
+      reg(pc_bz_custom,   "pc_bz");
+      plasma_cache_flag = 1;
+    }
+  }
+
   // moveperturb method is set if external field perturbs particle motion
   moveperturb = NULL;
 
@@ -517,6 +548,9 @@ void Update::run(int nsteps)
       timer->stamp(TIME_MODIFY);
     }
 
+    // cache plasma fields at particle positions (one query per particle)
+    if (plasma_cache_flag) cache_plasma_particles();
+
     // move particles (skip when global move no)
 
     if (move_flag) {
@@ -529,6 +563,23 @@ void Update::run(int nsteps)
       comm->migrate_particles(nmigrate,mlist);
       if (cellweightflag) particle->post_weight();
       timer->stamp(TIME_COMM);
+    }
+
+    // halt early if all particles have been absorbed/lost
+    {
+      bigint nlocal = particle->nlocal;
+      bigint nglobal;
+      MPI_Allreduce(&nlocal, &nglobal, 1, MPI_SPARTA_BIGINT, MPI_SUM, world);
+      if (nglobal == 0) {
+        if (comm->me == 0)
+          error->warning(FLERR,
+            "All particles absorbed/lost — halting run early");
+        // force final output before breaking
+        output->next = ntimestep;
+        output->write(ntimestep);
+        update->nsteps = i;
+        break;
+      }
     }
 
     if (collide) {
@@ -558,6 +609,174 @@ void Update::run(int nsteps)
   }
 
   modify->post_run();
+}
+
+/* ----------------------------------------------------------------------
+   Cache plasma fields at every particle position using custom vectors.
+   Called once per timestep before the move.  All consumers (Boris sheath,
+   ADAS chemistry, Nanbu collisions) read from these cached values.
+------------------------------------------------------------------------- */
+
+void Update::cache_plasma_particles()
+{
+  // resolve the plasma compute (sheath or GCA — whichever is available)
+  int plasma_cidx = -1;
+  if (sheath_flag && sheath_plasma_cidx >= 0) plasma_cidx = sheath_plasma_cidx;
+  else if (gca_flag && gca_plasma_cidx >= 0) plasma_cidx = gca_plasma_cidx;
+  if (plasma_cidx < 0) return;
+
+  Compute *c_base = modify->compute[plasma_cidx];
+  auto *cp = dynamic_cast<ComputePlasmaFields *>(c_base);
+  if (!cp) return;
+
+  // ensure per-grid data is computed this timestep
+  if (!(c_base->invoked_flag & 16)) {  // INVOKED_PER_GRID = 16
+    c_base->compute_per_grid();
+    c_base->invoked_flag |= 16;
+  }
+
+  // resolve per-particle custom vectors
+  double *te_vec   = particle->edvec[particle->ewhich[pc_te_custom]];
+  double *ti_vec   = particle->edvec[particle->ewhich[pc_ti_custom]];
+  double *ne_vec   = particle->edvec[particle->ewhich[pc_ne_custom]];
+  double *ni_vec   = particle->edvec[particle->ewhich[pc_ni_custom]];
+  double *vpar_vec = particle->edvec[particle->ewhich[pc_vpar_custom]];
+  double *bx_vec   = particle->edvec[particle->ewhich[pc_bx_custom]];
+  double *by_vec   = particle->edvec[particle->ewhich[pc_by_custom]];
+  double *bz_vec   = particle->edvec[particle->ewhich[pc_bz_custom]];
+
+  // Sheath geometry compute (for Boltzmann ne correction)
+  ComputeSheathGeometryGrid *csg = nullptr;
+  if (sheath_flag && sheath_geom_cidx >= 0) {
+    Compute *cg = modify->compute[sheath_geom_cidx];
+    csg = dynamic_cast<ComputeSheathGeometryGrid *>(cg);
+  }
+
+  Particle::OnePart *particles = particle->particles;
+  Grid::ChildCell *cells = grid->cells;
+  const int nlocal = particle->nlocal;
+  const int dim = domain->dimension;
+
+  for (int i = 0; i < nlocal; i++) {
+    const double *x = particles[i].x;
+    PlasmaFileParams pf = cp->query_plasma_at_point(x);
+
+    te_vec[i]   = pf.temp_e;
+    ti_vec[i]   = pf.temp_i;
+    ne_vec[i]   = pf.dens_e;
+    ni_vec[i]   = pf.dens_i;
+    vpar_vec[i] = pf.parr_flow;
+
+    MagneticFieldFileDataParams bf = cp->query_bfield_at_point(x);
+    // store Cartesian B-field at particle position
+    const double rx = x[0], ry = x[1];
+    const double rmag = std::sqrt(rx*rx + ry*ry);
+    double bx, by, bz;
+    if (rmag > 1.0e-20 && dim == 3) {
+      const double cphi = rx / rmag, sphi = ry / rmag;
+      bx = bf.br * cphi - bf.bt * sphi;
+      by = bf.br * sphi + bf.bt * cphi;
+    } else {
+      bx = bf.br;
+      by = (dim == 3) ? 0.0 : bf.bt;
+    }
+    bz = bf.bz;
+    bx_vec[i] = bx;
+    by_vec[i] = by;
+    bz_vec[i] = bz;
+
+    // Boltzmann ne correction: ne_local = ne_upstream * exp(-phi/Te)
+    // where phi = sheath potential drop at particle distance from wall
+    if (csg && pf.temp_e > 0.0 && pf.dens_e > 0.0) {
+      int icell = particles[i].icell;
+      int gcell = icell;
+      if (cells[icell].nsplit <= 0 && cells[icell].isplit >= 0)
+        gcell = grid->sinfo[cells[icell].isplit].icell;
+
+      int midx = csg->midx_grid[gcell];
+
+      // refine to nearest surface at particle position (same as pusher)
+      Grid::ChildCell *pc = &cells[gcell];
+      if (pc->nsurf > 0) {
+        const int sbit = csg->sgroupbit;
+        surfint *cs = pc->csurfs;
+        double best_d = 1.0e20;
+        int best_m = -1;
+        for (int j = 0; j < pc->nsurf; j++) {
+          int m = static_cast<int>(cs[j]);
+          double d;
+          if (dim == 2) {
+            if (!(surf->lines[m].mask & sbit)) continue;
+            Surf::Line *ln = &surf->lines[m];
+            d = std::fabs((x[0]-ln->p1[0])*ln->norm[0] +
+                          (x[1]-ln->p1[1])*ln->norm[1]);
+          } else {
+            if (!(surf->tris[m].mask & sbit)) continue;
+            Surf::Tri *tr = &surf->tris[m];
+            d = std::fabs((x[0]-tr->p1[0])*tr->norm[0] +
+                          (x[1]-tr->p1[1])*tr->norm[1] +
+                          (x[2]-tr->p1[2])*tr->norm[2]);
+          }
+          if (d < best_d) { best_d = d; best_m = m; }
+        }
+        if (best_m >= 0) midx = best_m;
+      }
+
+      if (midx >= 0) {
+        // get surface normal and reference point
+        double sh_nx, sh_ny, sh_nz;
+        double sref[3];
+        if (dim == 2) {
+          Surf::Line *ln = &surf->lines[midx];
+          sh_nx = ln->norm[0]; sh_ny = ln->norm[1]; sh_nz = 0.0;
+          sref[0] = 0.5*(ln->p1[0]+ln->p2[0]);
+          sref[1] = 0.5*(ln->p1[1]+ln->p2[1]);
+          sref[2] = 0.0;
+        } else {
+          Surf::Tri *tr = &surf->tris[midx];
+          sh_nx = tr->norm[0]; sh_ny = tr->norm[1]; sh_nz = tr->norm[2];
+          sref[0] = (tr->p1[0]+tr->p2[0]+tr->p3[0]) / 3.0;
+          sref[1] = (tr->p1[1]+tr->p2[1]+tr->p3[1]) / 3.0;
+          sref[2] = (tr->p1[2]+tr->p2[2]+tr->p3[2]) / 3.0;
+        }
+
+        const double d_particle = std::fabs(
+          (x[0]-sref[0])*sh_nx + (x[1]-sref[1])*sh_ny + (x[2]-sref[2])*sh_nz);
+
+        if (d_particle > 0.0 && d_particle < sheath_dmax) {
+          const double te = pf.temp_e;
+          const double ti = pf.temp_i;
+          const double ne = pf.dens_e;
+          const double bmag = std::sqrt(bx*bx + by*by + bz*bz);
+
+          double alpha_deg = 90.0;
+          if (bmag > 0.0) {
+            double bvec[3] = {bx, by, bz};
+            double nvec[3] = {sh_nx, sh_ny, sh_nz};
+            SheathModels::ChoduraMetrics cm =
+              SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
+            alpha_deg = cm.alpha_deg;
+          }
+
+          SheathModels::BorodkinaSheathResult sr;
+          if (sheath_model == 1) {
+            sr = SheathModels::coulette_manfredi_sheath_at_distance(
+              d_particle, te, ti, ne, bmag,
+              alpha_deg, sheath_mD_amu, sheath_pot_mult);
+          } else {
+            sr = SheathModels::borodkina_sheath_at_distance(
+              d_particle, te, ti, ne, bmag,
+              alpha_deg, sheath_mD_amu, sheath_pot_mult);
+          }
+
+          // Boltzmann: ne_local = ne * exp(-phi/Te), phi = esheath_eV (positive)
+          if (sr.esheath_eV > 0.0 && te > 0.0) {
+            ne_vec[i] = ne * std::exp(-sr.esheath_eV / te);
+          }
+        }
+      }
+    }
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -1784,6 +2003,8 @@ void Update::pusherBoris2D(int i, int icell, double dt,
       }
     }
 
+    double xold[2] = {xcur[0], xcur[1]};
+
     BorisGrid::push_velocity(qm, dt_sub, E, B, vcur);
     xcur[0] += vcur[0] * dt_sub;
     xcur[1] += vcur[1] * dt_sub;
@@ -1795,6 +2016,42 @@ void Update::pusherBoris2D(int i, int icell, double dt,
         printf("boris2D step=%lld icell=%d sub=%d/%d qm=%g E=(%g,%g,%g) B=(%g,%g,%g)\n",
                (long long) ntimestep, icell, isub+1, nsub, qm,
                E[0], E[1], E[2], B[0], B[1], B[2]);
+      }
+    }
+
+    // Per-subcycle surface crossing guard (2D version).
+    // Same logic as 3D guard: check segment xold→xcur against every line
+    // surface in the particle's grid cell.  If crossing detected, stop
+    // subcycling and return to move loop for collision handling.
+
+    if (nsub > 1) {
+      int gcell = icell;
+      Grid::ChildCell *cells_local = grid->cells;
+      if (cells_local[icell].nsplit <= 0 && cells_local[icell].isplit >= 0)
+        gcell = grid->sinfo[cells_local[icell].isplit].icell;
+
+      int nsurf_cell = cells_local[gcell].nsurf;
+      if (nsurf_cell > 0) {
+        surfint *csurfs_local = cells_local[gcell].csurfs;
+        Surf::Line *lines_local = surf->lines;
+        double xc[2];
+        double param;
+        int side;
+        for (int m = 0; m < nsurf_cell; m++) {
+          int isurf = static_cast<int>(csurfs_local[m]);
+          Surf::Line *line = &lines_local[isurf];
+          if (Geometry::line_line_intersect(xold, xcur,
+                                             line->p1, line->p2,
+                                             line->norm, xc, param, side)) {
+            v[0] = vcur[0];
+            v[1] = vcur[1];
+            v[2] = vcur[2];
+            xnew[0] = xcur[0];
+            xnew[1] = xcur[1];
+            xnew[2] = zcur;
+            return;
+          }
+        }
       }
     }
   }
@@ -1996,13 +2253,7 @@ void Update::pusher_boris3D(int i, int icell, double dt,
       const double d_sign = (d_raw >= 0.0) ? 1.0 : -1.0;
       if (d_sign == sh_d0_sign && d_particle > 0.0 && d_particle < sheath_dmax) {
         double emag = 0.0;
-        if (sheath_model == 0) {
-          SheathModels::BorodkinaSheathResult sr =
-            SheathModels::borodkina_sheath_at_distance(
-              d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
-              sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
-          emag = sr.emag_vpm;
-        } else if (sheath_model == 2) {
+        if (sheath_model == 1) {
           SheathModels::BorodkinaSheathResult sr =
             SheathModels::coulette_manfredi_sheath_at_distance(
               d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
@@ -2010,12 +2261,11 @@ void Update::pusher_boris3D(int i, int icell, double dt,
           emag = sr.emag_vpm;
         } else {
           SheathModels::BorodkinaSheathResult sr =
-            SheathModels::stangeby_sheath_at_distance(
+            SheathModels::borodkina_sheath_at_distance(
               d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
               sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
           emag = sr.emag_vpm;
         }
-        if (sheath_emax_vpm > 0.0) emag = std::min(emag, sheath_emax_vpm);
         // E-field points toward wall (decreasing |d|):
         //   d_raw > 0 → particle on +nhat side → E along -nhat
         //   d_raw < 0 → particle on -nhat side → E along +nhat
@@ -2037,6 +2287,8 @@ void Update::pusher_boris3D(int i, int icell, double dt,
       }
     }
 
+    double xold[3] = {xcur[0], xcur[1], xcur[2]};
+
     BorisGrid::push_velocity(qm, dt_sub, E, B, vcur);
     xcur[0] += vcur[0] * dt_sub;
     xcur[1] += vcur[1] * dt_sub;
@@ -2048,6 +2300,54 @@ void Update::pusher_boris3D(int i, int icell, double dt,
         printf("boris3D step=%lld icell=%d sub=%d/%d qm=%g E=(%g,%g,%g) B=(%g,%g,%g)\n",
                (long long) ntimestep, icell, isub+1, nsub, qm,
                E[0], E[1], E[2], B[0], B[1], B[2]);
+      }
+    }
+
+    // Per-subcycle surface crossing guard.
+    // When subcycling, the move loop only sees the straight line from x
+    // (start of timestep) to xnew (end of all subcycles).  If the curved
+    // gyro-orbit crosses a surface during an intermediate subcycle but the
+    // endpoints are on the same side, the crossing is invisible to the
+    // move loop and the particle leaks through.
+    //
+    // Fix: after each subcycle, test the straight-line segment xold→xcur
+    // against every triangle in the particle's grid cell.  If a crossing
+    // is found, stop subcycling immediately and return xcur to the move
+    // loop.  The move loop's straight-line check from x to xnew will then
+    // see the particle on the far side of the surface and handle the
+    // collision normally.
+    //
+    // This check is skipped when nsub==1 (no subcycling) since the move
+    // loop already handles that single segment.
+
+    if (nsub > 1) {
+      int gcell = icell;
+      Grid::ChildCell *cells_local = grid->cells;
+      if (cells_local[icell].nsplit <= 0 && cells_local[icell].isplit >= 0)
+        gcell = grid->sinfo[cells_local[icell].isplit].icell;
+
+      int nsurf_cell = cells_local[gcell].nsurf;
+      if (nsurf_cell > 0) {
+        surfint *csurfs_local = cells_local[gcell].csurfs;
+        Surf::Tri *tris_local = surf->tris;
+        double xc[3];
+        double param;
+        int side;
+        for (int m = 0; m < nsurf_cell; m++) {
+          int isurf = static_cast<int>(csurfs_local[m]);
+          Surf::Tri *tri = &tris_local[isurf];
+          if (Geometry::line_tri_intersect(xold, xcur,
+                                           tri->p1, tri->p2, tri->p3,
+                                           tri->norm, xc, param, side)) {
+            v[0] = vcur[0];
+            v[1] = vcur[1];
+            v[2] = vcur[2];
+            xnew[0] = xcur[0];
+            xnew[1] = xcur[1];
+            xnew[2] = xcur[2];
+            return;
+          }
+        }
       }
     }
   }
@@ -2321,13 +2621,7 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
               }
 
               double emag = 0.0;
-              if (sheath_model == 0) {
-                SheathModels::BorodkinaSheathResult sr =
-                  SheathModels::borodkina_sheath_at_distance(
-                    d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
-                    sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
-                emag = sr.emag_vpm;
-              } else if (sheath_model == 2) {
+              if (sheath_model == 1) {
                 SheathModels::BorodkinaSheathResult sr =
                   SheathModels::coulette_manfredi_sheath_at_distance(
                     d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
@@ -2335,13 +2629,12 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
                 emag = sr.emag_vpm;
               } else {
                 SheathModels::BorodkinaSheathResult sr =
-                  SheathModels::stangeby_sheath_at_distance(
+                  SheathModels::borodkina_sheath_at_distance(
                     d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
                     sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
                 emag = sr.emag_vpm;
               }
-              if (sheath_emax_vpm > 0.0) emag = std::min(emag, sheath_emax_vpm);
-              // E-field toward wall: direction from signed distance
+                    // E-field toward wall: direction from signed distance
               const double dir = (d_raw > 0.0) ? -1.0 : 1.0;
               E[0] += dir * emag * sh_nx;
               E[1] += dir * emag * sh_ny;
@@ -3042,8 +3335,8 @@ void Update::global(int narg, char **arg)
 
     // Per-particle sheath E-field from grid-cached geometry + plasma computes.
     // Usage: global sheath geom_compute <ID> plasma_compute <ID>
-    //          [model borodkina/stangeby] [dmax 0.02] [pot_mult 2.5]
-    //          [mD_amu 2.014] [emax_vpm 5e5]
+    //          [model borodkina/coulette_manfredi] [dmax 0.02] [pot_mult 2.5]
+    //          [mD_amu 2.014]
     } else if (strcmp(arg[iarg], "sheath") == 0) {
       iarg++;
       sheath_flag = 1;
@@ -3065,9 +3358,8 @@ void Update::global(int narg, char **arg)
         } else if (strcmp(arg[iarg], "model") == 0) {
           if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
           if (strcmp(arg[iarg+1], "borodkina") == 0) sheath_model = 0;
-          else if (strcmp(arg[iarg+1], "stangeby") == 0) sheath_model = 1;
-          else if (strcmp(arg[iarg+1], "coulette_manfredi") == 0) sheath_model = 2;
-          else error->all(FLERR, "global sheath model must be borodkina, stangeby, or coulette_manfredi");
+          else if (strcmp(arg[iarg+1], "coulette_manfredi") == 0) sheath_model = 1;
+          else error->all(FLERR, "global sheath model must be borodkina or coulette_manfredi");
           iarg += 2;
         } else if (strcmp(arg[iarg], "dmax") == 0) {
           if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
@@ -3080,10 +3372,6 @@ void Update::global(int narg, char **arg)
         } else if (strcmp(arg[iarg], "mD_amu") == 0) {
           if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
           sheath_mD_amu = input->numeric(FLERR, arg[iarg+1]);
-          iarg += 2;
-        } else if (strcmp(arg[iarg], "emax_vpm") == 0) {
-          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
-          sheath_emax_vpm = input->numeric(FLERR, arg[iarg+1]);
           iarg += 2;
         } else if (strcmp(arg[iarg], "kick") == 0) {
           if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");

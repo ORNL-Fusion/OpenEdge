@@ -65,19 +65,6 @@ BorodkinaSheathResult borodkina_sheath_at_distance(double dist_m,
                                                    double mD_amu,
                                                    double pot_mult = 2.5);
 
-// Stangeby-style CS/DS profile:
-// - alpha_deg is used directly by the model (deg)
-// - CS drop follows ln(sin(alpha)) and DS can vanish for small alpha
-// - potential profile uses scales 2*lambdaD (DS) and rho_i (CS)
-BorodkinaSheathResult stangeby_sheath_at_distance(double dist_m,
-                                                  double te_eV,
-                                                  double ti_eV,
-                                                  double ne_m3,
-                                                  double bmag_T,
-                                                  double alpha_deg,
-                                                  double mD_amu,
-                                                  double pot_mult = 0.0);
-
 // Coulette-Manfredi kinetic PIC sheath model (two-exponential fit)
 // Covers full CS+DS transition; slow component scaled by rho_i/lambdaD.
 BorodkinaSheathResult coulette_manfredi_sheath_at_distance(double dist_m,

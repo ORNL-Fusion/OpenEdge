@@ -153,66 +153,6 @@ BorodkinaSheathResult borodkina_sheath_at_distance(double dist_m,
   return out;
 }
 
-BorodkinaSheathResult stangeby_sheath_at_distance(double dist_m,
-                                                  double te_eV,
-                                                  double ti_eV,
-                                                  double ne_m3,
-                                                  double bmag_T,
-                                                  double alpha_deg,
-                                                  double mD_amu,
-                                                  double pot_mult)
-{
-  BorodkinaSheathResult out;
-
-  const double d = std::max(dist_m, 0.0);
-  const double te = std::max(te_eV, 1.0e-12);
-  const double ti = std::max(ti_eV, 0.0);
-  const double ne = std::max(ne_m3, 1.0e-60);
-  const double bmag = std::max(std::abs(bmag_T), 1.0e-20);
-  const double mD = std::max(mD_amu * AMU, 1.0e-99);
-
-  const double lambdaD = std::sqrt(EPS0 * te / (ne * QE));
-  out.lambdaD_m = lambdaD;
-
-  const double cs = std::sqrt((te + ti) * QE / (2.0 * mD));
-  const double omega_ci = QE * bmag / mD;
-  const double rho_i = cs / std::max(std::abs(omega_ci), 1.0e-99);
-  out.rho_i_m = rho_i;
-
-  // alpha_deg = angle between B and wall normal (0 = B normal, 90 = B tangent).
-  const double alpha = std::max(0.0, std::min(90.0, alpha_deg));
-  const double alpha_rad = alpha * PI / 180.0;
-  const double cos_a = std::abs(std::cos(alpha_rad));
-  const double cos_floor = 0.05;
-
-  // MPS scale length: rho_i / cos(alpha)
-  const double lmps = rho_i / std::max(cos_a, cos_floor);
-  out.lmps_m = lmps;
-
-  // Floating-wall total drop: 0.5*ln[(mi/(2*pi*me))/(1+Ti/Te)] * Te (eV).
-  const double phi_float_mult =
-    0.5 * std::log((mD / std::max(2.0 * PI * ME, 1.0e-99)) / (1.0 + ti / te));
-  const double phi_total = (pot_mult > 0.0) ? (pot_mult * te) : (std::max(phi_float_mult, 0.0) * te);
-
-  // CS drop: -Te*ln(cos(alpha)), clipped to phi_total.
-  // Stangeby Chodura condition: ions must reach sound speed along normal,
-  // so CS potential grows as B becomes more oblique (larger alpha).
-  const double phi_cs = std::min(phi_total, std::max(0.0, -te * std::log(std::max(cos_a, cos_floor))));
-  const double phi_ds = std::max(phi_total - phi_cs, 0.0);
-  out.fd = (phi_total > 0.0) ? (phi_ds / phi_total) : 0.0;
-  out.phi_ds_eV = phi_ds;
-  out.phi_cs_eV = phi_cs;
-
-  const double e_ds = std::exp(-d / std::max(2.0 * lambdaD, 1.0e-99));
-  const double e_mps = std::exp(-d / std::max(lmps, 1.0e-99));
-
-  out.esheath_eV = phi_ds * e_ds + phi_cs * e_mps;
-  const double e_ds_vpm = phi_ds * e_ds / std::max(2.0 * lambdaD, 1.0e-99);
-  const double e_mps_vpm = phi_cs * e_mps / std::max(lmps, 1.0e-99);
-  out.emag_vpm = std::abs(e_ds_vpm + e_mps_vpm);
-  return out;
-}
-
 /* ----------------------------------------------------------------------
    Coulette-Manfredi sheath model (kinetic PIC data fit)
 

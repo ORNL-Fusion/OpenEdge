@@ -32,7 +32,7 @@ Primary focus is plasma-material interactions (PMI), including lithium droplet p
   - Electron and ion thermal gradient forces.
 - **Sheath Physics**
   - Exact point-to-triangle nearest-wall projection per particle.
-  - Sheath models: Borodkina, Stangeby, EIRENE-style multi-ion sheath drop.
+  - Sheath models: Borodkina, Coulette-Manfredi, EIRENE-style multi-ion sheath drop.
   - Per-cell sheath potential and electric field diagnostics.
 - **Geometry**
   - 2D/3D watertight surface meshes; arbitrary domains.

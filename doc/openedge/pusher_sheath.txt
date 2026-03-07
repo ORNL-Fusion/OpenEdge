@@ -23,11 +23,11 @@ set the following variables:
 {sheath_flag} = 1 to enable, 0 to disable (default 0)
 {sheath_geom_cid} = compute ID for the per-grid sheath geometry
 {sheath_plasma_cid} = compute ID for the per-grid plasma fields
-{sheath_model} = 0 for Borodkina (default), 1 for Stangeby
+{sheath_model} = 0 for Borodkina (default), 1 for Coulette-Manfredi
 {sheath_dmax} = maximum wall distance for sheath activation (m, default 0.02)
 {sheath_pot_mult} = potential multiplier (default 2.5)
 {sheath_mD_amu} = ion mass in amu (default 2.014, deuterium)
-{sheath_emax_vpm} = E-field clamp (V/m, default 5e5) :ul
+:ul
 
 [Required computes:]
 
@@ -61,7 +61,26 @@ Model evaluation: if {0 < d_particle < sheath_dmax}, the selected
 sheath model evaluates the local E-field magnitude. :l
 
 Field application: the E-field is applied along the inward normal
-direction: {E += -emag * n}, clamped to {sheath_emax_vpm}. :l,ole
+direction: {E += -emag * n}. :l,ole
+
+[Per-particle plasma cache:]
+
+When the sheath overlay is active, {update.cpp} populates a
+per-particle plasma cache once per timestep (before the move phase).
+This cache stores Te, Ti, ne, ni, Vpar, and B (Cartesian) at each
+particle position.  All consumers — Boris sheath, ADAS chemistry
+({fix chem/adas}), and Nanbu collisions — read from these cached
+values instead of performing independent field queries.
+
+The cached electron density includes a Boltzmann correction for
+particles inside the sheath:
+
+ne_local = ne_upstream * exp(-phi_sheath / Te) :pre
+
+where phi_sheath is the local sheath potential drop computed by the
+active sheath model (Borodkina or Coulette-Manfredi) at the particle's
+distance from the nearest wall.  This ensures that ADAS ionization
+rates correctly reflect the reduced electron density inside the sheath.
 
 [Performance:]
 
@@ -91,12 +110,11 @@ The DS drop uses the classical sheath potential scaled by
 {sheath_pot_mult}.  The MPS drop uses Chodura-angle-dependent
 terms with an ion gyro-radius length scale.
 
-[Stangeby CS/DS model ({sheath_model} = 1):]
+[Coulette-Manfredi model ({sheath_model} = 1):]
 
-Uses the Chodura sheath-drop formula with {ln(sin(alpha))} for
-the collective sheath component.  The DS component can vanish at
-small incidence angles.  Potential profile uses scales of
-{2*lambda_D} (DS) and {rho_i} (CS).
+Two-exponential fit to Vlasov simulation data from Coulette &
+Manfredi, PPCF 58 025008 (2016).  Covers full CS+DS transition
+for alpha in \[2,90\] degrees.
 
 Both models return a {BorodkinaSheathResult} struct containing:
 
@@ -123,7 +141,7 @@ global sheath_plasma_cid cplasma
 global sheath_model 0
 global sheath_dmax 0.02
 global sheath_pot_mult 2.5
-global sheath_emax_vpm 5e5 :pre
+:pre
 
 [Restrictions:]
 
