@@ -124,3 +124,66 @@ make no-openedge
 - `make no-openedge` restores the original SPARTA files from `*.sparta_orig`
   backups and removes new OpenEdge files from `src/`.
 - `make package-status` reports whether the package is currently installed.
+
+## Sheath Models
+
+OpenEdge provides two approaches for applying the sheath electric field to
+particles approaching PFC surfaces:
+
+### Spatially-resolved sheath E-field (`kick no`, default)
+
+The sheath potential profile is modeled as a function of distance to the
+nearest surface element.  At each Boris subcycle, the local E-field is
+evaluated and applied to the particle.  Three models are available:
+
+- **borodkina** (default) — Polynomial blending between Debye sheath (DS) and
+  Chodura/magnetic pre-sheath (CS) based on the Borodkina & Komm (2015)
+  parameterization.
+- **stangeby** — CS/DS split using Stangeby's Chodura condition:
+  φ_CS = −Te·ln(cos α), remainder in DS.  CS decays on scale ρ_i/cos(α),
+  DS on scale 2λ_D.
+- **coulette_manfredi** — Two-exponential fit to kinetic PIC data from
+  Coulette & Manfredi, PPCF 58 025008 (2016).  Captures the full CS→DS
+  transition for α ∈ [2°,90°] with coefficients fit to Vlasov simulation
+  data at ρ_i = 20λ_D, scaled to arbitrary ρ_i/λ_D ratios.
+
+An overshoot guard prevents energy loss when Boris subcycling pushes a
+particle past the wall surface: the initial signed distance is recorded
+before the subcycle loop and sheath E-field is only applied while the
+particle remains on its original side of the wall.
+
+### Sheath velocity kick (`kick yes`, recommended for IEADs)
+
+Instead of resolving the sheath spatially, the full sheath potential drop
+is applied as a velocity boost when the particle hits the wall surface.
+This is the approach used by EIRENE, ERO2.0, and WallDYN.
+
+At each surface collision:
+
+1. Local Te, Ti are queried at the particle position from the plasma compute
+2. The floating potential is computed:
+   φ_float = 0.5·ln[m_D/(2π·m_e)·1/(1 + Ti/Te)] · Te
+3. The particle gains kinetic energy ΔE = Z·e·φ along the wall normal:
+   v_n,new = √(v_n² + 2·Z·e·φ/m)
+
+This guarantees correct total sheath energy regardless of Boris timestep,
+eliminates gyro-orbit resonance at grazing angles, and avoids per-subcycle
+sheath E-field evaluations (faster).  Validated against an independent
+Fortran sheath tracker for Ta²⁺/Ta³⁺/Ta⁴⁺ at α = 0°, 45°, 85° with
+<1% energy error.
+
+### Input syntax
+
+```
+compute   cgeom sheath/geometry/grid all all dist nx ny nz surfidx
+global    sheath geom_compute cgeom plasma_compute cplasma &
+          [model borodkina/stangeby/coulette_manfredi] &
+          [mD_amu 2.0] [pot_mult 0] [dmax 0.02] [emax_vpm 0] &
+          [kick yes/no]
+```
+
+- **pot_mult** — If > 0, use pot_mult·Te as the wall potential (eV).
+  If 0, use the self-consistent floating potential formula.
+- **mD_amu** — Background ion mass (amu) for sound speed and Debye length.
+- **kick yes** — Apply sheath as velocity kick at wall (recommended).
+  When active, the `model` keyword is ignored (no spatial E-field).
