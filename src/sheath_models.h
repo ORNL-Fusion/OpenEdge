@@ -78,6 +78,17 @@ BorodkinaSheathResult stangeby_sheath_at_distance(double dist_m,
                                                   double mD_amu,
                                                   double pot_mult = 0.0);
 
+// Coulette-Manfredi kinetic PIC sheath model (two-exponential fit)
+// Covers full CS+DS transition; slow component scaled by rho_i/lambdaD.
+BorodkinaSheathResult coulette_manfredi_sheath_at_distance(double dist_m,
+                                                           double te_eV,
+                                                           double ti_eV,
+                                                           double ne_m3,
+                                                           double bmag_T,
+                                                           double alpha_deg,
+                                                           double mD_amu,
+                                                           double pot_mult = 0.0);
+
 }  // namespace SheathModels
 }  // namespace SPARTA_NS
 
