@@ -16,8 +16,9 @@ Usage:
   # Auto-detect dt from input script, process all timesteps
   python surf_areal_density.py -f output/surf_react.dat -i in.cpc_gitr
 
-  # Manual dt, write VTP series
-  python surf_areal_density.py -f output/surf_react.dat --dt 1e-10 --vtp
+  # Manual dt, write VTP series (vertices from geometry file)
+  python surf_areal_density.py -f output/surf_react.dat --dt 1e-10 \
+      --surf input/gitr_geometry.surf --vtp output/vtp
 
   # Filter specific species columns, save CSV summary
   python surf_areal_density.py -f output/surf_react.dat -i in.script --csv output/areal.csv
@@ -100,6 +101,122 @@ def parse_input_script(path: str) -> dict:
                     pass
 
     return params
+
+
+# ---------------------------------------------------------------------------
+# SPARTA geometry file parser (read_surf format)
+# ---------------------------------------------------------------------------
+def parse_surf_geometry(filename: str) -> dict:
+    """Parse a SPARTA surface geometry file (Points + Triangles).
+
+    Returns dict with:
+      points: (npts, 3) float array (1-indexed ID -> coordinates)
+      tris:   (ntri, 3) int array of point indices (1-indexed)
+      v1, v2, v3: (ntri, 3) float arrays (triangle vertex coordinates)
+      area: (ntri,) float array
+    """
+    with open(filename) as f:
+        lines = f.readlines()
+
+    npoints = 0
+    ntris = 0
+    points = {}
+    tris = {}
+    section = None
+    i = 0
+
+    while i < len(lines):
+        line = lines[i].strip()
+        if not line or line.startswith("#"):
+            i += 1
+            continue
+
+        tokens = line.split()
+
+        # Header lines: "642 points", "1280 triangles"
+        if len(tokens) == 2 and tokens[1] == "points":
+            npoints = int(tokens[0])
+            i += 1
+            continue
+        if len(tokens) == 2 and tokens[1] in ("triangles", "lines"):
+            ntris = int(tokens[0])
+            i += 1
+            continue
+
+        if tokens[0] == "Points":
+            section = "points"
+            i += 1
+            continue
+        if tokens[0] == "Triangles":
+            section = "triangles"
+            i += 1
+            continue
+        if tokens[0] == "Lines":
+            section = "lines"
+            i += 1
+            continue
+
+        if section == "points" and len(tokens) >= 4:
+            pid = int(tokens[0])
+            points[pid] = [float(tokens[1]), float(tokens[2]), float(tokens[3])]
+            i += 1
+        elif section in ("triangles", "lines") and len(tokens) >= 4:
+            tid = int(tokens[0])
+            tris[tid] = [int(t) for t in tokens[1:4]]
+            i += 1
+        else:
+            i += 1
+
+    if not points or not tris:
+        raise RuntimeError(f"Could not parse geometry from {filename}")
+
+    # Build vertex arrays indexed by triangle ID (1-based)
+    max_tid = max(tris.keys())
+    v1 = np.zeros((max_tid + 1, 3))
+    v2 = np.zeros((max_tid + 1, 3))
+    v3 = np.zeros((max_tid + 1, 3))
+
+    for tid, (p1, p2, p3) in tris.items():
+        v1[tid] = points[p1]
+        v2[tid] = points[p2]
+        v3[tid] = points[p3]
+
+    cross = np.cross(v2[1:] - v1[1:], v3[1:] - v1[1:])
+    area = 0.5 * np.linalg.norm(cross, axis=1)
+
+    return {
+        "v1": v1, "v2": v2, "v3": v3,
+        "area": area,  # indexed 0..ntri-1 (surf ID 1 -> index 0)
+        "ntris": len(tris),
+    }
+
+
+def merge_geometry(data: dict, geom: dict):
+    """Merge vertex/area data from geometry file into surf dump data by ID.
+
+    Adds v1, v2, v3, area arrays to data (matching dump row order).
+    """
+    ids = data["id"]
+    n = len(ids)
+    v1 = np.zeros((n, 3))
+    v2 = np.zeros((n, 3))
+    v3 = np.zeros((n, 3))
+    area = np.zeros(n)
+
+    for i, sid in enumerate(ids):
+        if sid < len(geom["v1"]):
+            v1[i] = geom["v1"][sid]
+            v2[i] = geom["v2"][sid]
+            v3[i] = geom["v3"][sid]
+        # area is 0-indexed (surf ID 1 -> index 0)
+        aidx = sid - 1
+        if 0 <= aidx < len(geom["area"]):
+            area[i] = geom["area"][aidx]
+
+    data["v1"] = v1
+    data["v2"] = v2
+    data["v3"] = v3
+    data["area"] = area
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +538,9 @@ def main():
                     help="Write summary CSV to this path")
     ap.add_argument("--plot", default=None, nargs="?", const="areal_density.png",
                     help="Plot areal density vs time (optionally specify output path)")
+    ap.add_argument("--surf", default=None,
+                    help="SPARTA geometry file (e.g. input/gitr_geometry.surf) — "
+                         "provides triangle vertices when not in dump")
     ap.add_argument("--vtp", default=None, nargs="?", const="vtp_out",
                     help="Write VTP files to this directory")
     ap.add_argument("--quiet", action="store_true", help="Suppress summary table")
@@ -445,6 +565,13 @@ def main():
     print(f"  {len(unique_ts)} snapshots, "
           f"{len(np.unique(data['id']))} surface elements")
 
+    # Merge geometry from surf file if dump lacks vertices
+    if "v1" not in data and args.surf:
+        print(f"Reading geometry from {args.surf} ...")
+        geom = parse_surf_geometry(args.surf)
+        merge_geometry(data, geom)
+        print(f"  Merged {geom['ntris']} triangles")
+
     flux_cols = get_flux_columns(data)
     if not flux_cols:
         print("ERROR: No flux columns (f_*[N]) found in surf dump", file=sys.stderr)
@@ -467,7 +594,7 @@ def main():
 
     if args.vtp is not None:
         if "v1" not in data:
-            print("WARNING: No vertex data in surf dump — cannot write VTP")
+            print("WARNING: No vertex data — use --surf <geometry.surf> to provide vertices")
         else:
             write_vtp(data, results, flux_cols, args.vtp)
 
