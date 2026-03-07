@@ -38,6 +38,8 @@
 /compute_iead.h
 /compute_incident_plasma_flux.cpp
 /compute_incident_plasma_flux.h
+/compute_bfield_timedep.cpp
+/compute_bfield_timedep.h
 /compute_plasma_fields.cpp
 /compute_plasma_fields.h
 /compute_pmi_surf_data.cpp
