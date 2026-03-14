@@ -10,11 +10,11 @@ global              gridcut 0.0 comm/sort yes
 
 # R-Z domain
 create_box          1.82 3.2 -1.0 1.0 -0.05 0.05
-create_grid         80 120 1
+create_grid         200 200 1
 balance_grid        rcb cell
 
 # Species + particles
-global fnum 1e2
+global              fnum 1e4
 
 
 species input/plasma.species W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+
@@ -32,22 +32,23 @@ mixture             tungstenSource  W8+  frac 0.
 mixture             tungstenSource  W9+  frac 0.
 mixture             tungstenSource  W10+ frac 0.
 
-
-
 variable            TbindW equal 4.0*11600.
+variable            TwallK equal 773.15
 mixture             tungstenSource temp ${TbindW}
-
 
 # Surfaces
 read_surf           input/wall.txt group 1 particle check
-surf_collide        DIFFUSEID vanish
-surf_modify         1 collide DIFFUSEID react none
+surf_collide        wallColModel diffuse ${TwallK} 1.0
+surf_react          wallPMI pmi file input/reactions_pmi_west.surf input/74_on_74_pmi.h5
+surf_modify         1 collide wallColModel react wallPMI
 
 # Static mesh adaptation around active source zones:
 # lower divertor, upper divertor, limiter
 region rdiv_lo block 2.0 3.2 -1.0 -0.35 -1 1
 region rdiv_up block 2.0 3.2 0.35 1.0 -1 1
 region rlim   block 1.82 2.35 -0.20 0.20 -1 1
+
+
 
 # For style surf: refinement is blocked if child cell size would be < ssize.
 # Base cell is ~0.017 m, so ssize=0.01 prevents any 2x refinement.
@@ -60,64 +61,73 @@ write_grid output/grid.post_adapt
 balance_grid rcb cell
 
 # 1) Plasma/B-field compute on grid
-# c_cwest: [1]=bx [2]=by [3]=bz [4]=epar [5]=temp_e [6]=dens_e [7]=grad_te_r [8]=grad_te_z
-compute cwest plasma/fields all file input/plasma.h5 input/bfield.h5 bx by bz epar temp_e dens_e grad_te_r grad_te_z
+# c_cwest: [1]=bx [2]=by [3]=bz [4]=epar [5]=temp_e [6]=dens_e
+#          [7]=temp_i [8]=dens_i [9]=parrflow [10]=grad_te_r [11]=grad_te_z
+compute cwest plasma/fields all file input/plasma.h5 input/bfield.h5 &
+                    bx by bz epar temp_e dens_e temp_i dens_i parrflow grad_te_r grad_te_z
 
 
-# 1b) Sheath geometry + E-sheath diagnostics on grid
+# 1b) Sheath geometry for the supported wall-kick sheath model
 compute cgeom sheath/geometry/grid all 1 dist surfid nx ny nz
-compute csheath sheath/fields/grid all cwest cgeom model borodkina pot_mult 2.5 dmax 0.5 mach_min 0.0 mach_max 2.0 values ex ey ez esheath mach_par mach_n alpha active bdotn dist surfid
 
 # Apply B field from compute (static map)
 fix bB bfield/grid c_cwest[1] c_cwest[2] c_cwest[3]
-fix eS efield/grid c_csheath[1] c_csheath[2] c_csheath[3]
 global bfield grid bB 0
-global efield grid eS 0
+global sheath geom_compute cgeom plasma_compute cwest &
+                    mD_amu 2.0 pot_mult 2.5 kick yes
+global efield none
 global boris_subcycles 5
 
 # 1c) ADAS ionization/recombination using local Te/ne from cwest
-# Use sheath-entrance electron density from sheath value:
-# ne_entrance = ne_sh * exp(DeltaPhi_sheath / Te),
-# with DeltaPhi_sheath = c_csheath[4] [eV], Te = c_cwest[5] [eV]
 variable te_local grid "c_cwest[5]"
-variable ne_entrance grid "c_cwest[6]*exp(c_csheath[4]/(c_cwest[5]+1.0e-12))"
-fix fchem chem/adas 1 74 input/plasma.adas adas_dir ../../database/adas plasma te_local ne_entrance
+variable ne_local grid "c_cwest[6]"
+fix fchem chem/adas 1 74 input/plasma.adas adas_dir ../../database/adas plasma te_local ne_local
+
+# 1d) Nanbu Coulomb collisions with plasma background only
+# Background species is the main D+ plasma: A=2.0, Z=1.0
+# `nobinary` disables particle-particle self-collisions and keeps only
+# collisions against the prescribed background moments from cwest.
+fix fnanbu coll/nanbu 1 plasma c_cwest[5] c_cwest[6] &
+                    nobinary &
+                    background 2.0 1.0 &
+                    c_cwest[7] c_cwest[8] c_cwest[9] &
+                    c_cwest[1] c_cwest[2] c_cwest[3]
 
 # 2) Incident plasma flux on wall group 1
-compute cgam incident/plasma/flux 1 file input/plasma.h5 nflux_species all 
+#compute cgam incident/plasma/flux 1 file input/plasma.h5 nflux_species all
 
 # 3) PMI surf data from incident plasma flux + BCA sputtering
 # slot mapping: 1=D, 2=O+, 3=O2+, ... 9=O8+ ; D excluded by projectile_slots 2..9
-compute cpmi pmi/surf/data 1 file input/plasma.h5 input/8_on_74.h5 projectile_slots 2 9 mass_amu 16.0 sputter_flux_total
+compute cpmi pmi/surf/data 1 file input/plasma.h5 ../../database/surface/O_on_W.h5 projectile_slots 2 9 mass_amu 16.0 sputter_flux_total
 
 # 4) Emit sputtered W from cpmi total sputter flux
 # cpmi is vector_surf (single value), so no flux_index needed
 fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes
 
-#compute cpmi pmi/surf/data 1 file input/plasma.h5 input/8_on_74.h5 projectile_slots 2 9 mass_amu 16.0 #nflux_species 9 incident_angle_species 9 incident_energy_species 9 &
+#compute cpmi pmi/surf/data 1 file input/plasma.h5 ../../database/surface/O_on_W.h5 projectile_slots 2 9 mass_amu 16.0 #nflux_species 9 incident_angle_species 9 incident_energy_species 9 &
     #sputter_yield_species 9 sputter_flux_species 9
     
+    
+    
 # 5) Dumps
-shell mkdir -p output
-#dump dgam surf 1 1 output/gamma.only id c_cgam[*]
-#dump_modify dgam first yes
-#dump dpmi surf 1 1 output/pmi.total.only id c_cpmi
-#dump_modify dpmi first yes
+
 
 # Particle state dump for emit wiring check
-#dump dpart particle all 100 output/state.west id type x y z vx vy vz
+#dump dpart particle all 10 output/state.west id type x y z vx vy vz
 #dump_modify dpart first yes
 
 compute computeID grid all species nrho
-fix     fixID ave/grid all 10 50 500 c_computeID[*] ave running
-dump    dumpID  grid all 500 output/tmp.grid.density id xc yc f_fixID[*]
-#dump dsheath grid all 100 output/sheath.grid id xc yc c_csheath[*]
-#dump_modify dsheath first yes
+fix     fixID ave/grid all 1 500 5000 c_computeID[*] ave running
+dump    dumpID  grid all 5000 output/tmp.grid.density id xc yc f_fixID[*]
 
 
 # Short validation run
-# fix 31 halt 1 v_npart <= 0
-timestep            5.0e-08
-stats               10
+#fix 31 halt 1 v_npart <= 0
+timestep            1.0e-08
+stats               500
 stats_style         step cpu np
+run                 5000
+
+unfix femit
+
 run                 100000

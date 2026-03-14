@@ -8,6 +8,7 @@ Example:
     --wall input/wall.txt \
     --out output/grid_density.west.png \
     --show
+      python3 plot_grid_density_west.py --show --log --sum-all
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
+from matplotlib.path import Path as MplPath
 
 
 def parse_surface(path: Path):
@@ -69,6 +71,7 @@ def parse_surface(path: Path):
 
     seg_r = []
     seg_z = []
+    line_pairs = []
     k = i_lines
     nread = 0
     while k < len(lines) and nread < nlines:
@@ -89,9 +92,38 @@ def parse_surface(path: Path):
             r2, z2 = pts[p2]
             seg_r.extend([r1, r2, np.nan])
             seg_z.extend([z1, z2, np.nan])
+            line_pairs.append((p1, p2))
         nread += 1
 
-    return np.array(seg_r), np.array(seg_z)
+    poly_ids = []
+    if line_pairs:
+        poly_ids = [line_pairs[0][0], line_pairs[0][1]]
+        remaining = line_pairs[1:]
+        while remaining:
+            last = poly_ids[-1]
+            match = None
+            for i, (a, b) in enumerate(remaining):
+                if a == last:
+                    poly_ids.append(b)
+                    match = i
+                    break
+                if b == last:
+                    poly_ids.append(a)
+                    match = i
+                    break
+            if match is None:
+                break
+            remaining.pop(match)
+            if poly_ids[-1] == poly_ids[0]:
+                break
+    if not poly_ids:
+        poly_ids = sorted(pts)
+
+    poly = np.array([pts[i] for i in poly_ids if i in pts], dtype=float)
+    if poly.size and not np.allclose(poly[0], poly[-1]):
+        poly = np.vstack([poly, poly[0]])
+
+    return np.array(seg_r), np.array(seg_z), poly
 
 
 def parse_grid_dump(path: Path):
@@ -146,12 +178,100 @@ def make_grid(xc, yc, val):
     return xx, yy, grid
 
 
+def gaussian_kernel1d(sigma: float) -> np.ndarray:
+    if sigma <= 0.0:
+        return np.array([1.0], dtype=float)
+    radius = max(1, int(np.ceil(3.0 * sigma)))
+    x = np.arange(-radius, radius + 1, dtype=float)
+    ker = np.exp(-0.5 * (x / sigma) ** 2)
+    ker /= np.sum(ker)
+    return ker
+
+
+def convolve1d_reflect(arr: np.ndarray, ker: np.ndarray, axis: int) -> np.ndarray:
+    pad = len(ker) // 2
+    pad_width = [(0, 0)] * arr.ndim
+    pad_width[axis] = (pad, pad)
+    padded = np.pad(arr, pad_width, mode="reflect")
+    return np.apply_along_axis(lambda m: np.convolve(m, ker, mode="valid"), axis, padded)
+
+
+def smooth_grid(grid: np.ndarray, sigma: float) -> np.ndarray:
+    if sigma <= 0.0:
+        return grid
+    ker = gaussian_kernel1d(sigma)
+    out = convolve1d_reflect(grid, ker, axis=0)
+    out = convolve1d_reflect(out, ker, axis=1)
+    return out
+
+
+def coarsen_grid(rs: np.ndarray, zs: np.ndarray, grid: np.ndarray, factor: int):
+    if factor <= 1:
+        return rs, zs, grid
+    ny, nx = grid.shape
+    ny2 = ny // factor
+    nx2 = nx // factor
+    if ny2 < 1 or nx2 < 1:
+        return rs, zs, grid
+
+    ny_trim = ny2 * factor
+    nx_trim = nx2 * factor
+    rs2 = rs[:ny_trim, :nx_trim].reshape(ny2, factor, nx2, factor).mean(axis=(1, 3))
+    zs2 = zs[:ny_trim, :nx_trim].reshape(ny2, factor, nx2, factor).mean(axis=(1, 3))
+    grid2 = grid[:ny_trim, :nx_trim].reshape(ny2, factor, nx2, factor).mean(axis=(1, 3))
+    return rs2, zs2, grid2
+
+
+def mask_outside_wall(rs: np.ndarray, zs: np.ndarray, grid: np.ndarray, polygon: np.ndarray):
+    if polygon.size == 0:
+        return np.ma.array(grid, copy=False)
+    path = MplPath(polygon)
+    pts = np.column_stack([rs.ravel(), zs.ravel()])
+    inside = path.contains_points(pts, radius=1.0e-10).reshape(grid.shape)
+    return np.ma.masked_where(~inside, grid)
+
+
 def main():
+    here = Path(__file__).resolve().parent
+    default_dump = here / "output" / "tmp.grid.density"
+    default_wall = here / "input" / "wall.txt"
+
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dump", required=True, help="grid dump file (tmp.grid.density)")
-    ap.add_argument("--wall", required=True, help="wall.txt")
+    ap.add_argument(
+        "--dump",
+        default=str(default_dump),
+        help=f"grid dump file (default: {default_dump})",
+    )
+    ap.add_argument(
+        "--wall",
+        default=str(default_wall),
+        help=f"wall surface file (default: {default_wall})",
+    )
     ap.add_argument("--timestep", default="last", help="last or explicit integer")
     ap.add_argument("--labels", nargs="*", default=None, help="subplot labels")
+    ap.add_argument(
+        "--sum-all",
+        action="store_true",
+        help="sum all value columns and plot a single total-density panel",
+    )
+    ap.add_argument(
+        "--smooth",
+        type=float,
+        default=0.0,
+        help="Gaussian smoothing sigma in grid cells",
+    )
+    ap.add_argument(
+        "--coarsen",
+        type=int,
+        default=1,
+        help="block-average grid by this factor before plotting",
+    )
+    ap.add_argument(
+        "--min-density",
+        type=float,
+        default=0.0,
+        help="mask values below this density before plotting",
+    )
     ap.add_argument("--out", default="grid_density_west.png")
     ap.add_argument("--show", action="store_true")
     ap.add_argument("--log", action="store_true", help="use LogNorm for positive values")
@@ -177,6 +297,13 @@ def main():
 
     values = [cols[i] for i in val_idx]
     names = [header[i] for i in val_idx]
+    if args.sum_all:
+        total = np.zeros_like(values[0], dtype=float)
+        for arr in values:
+            total += arr
+        values = [total]
+        names = ["total tungsten"]
+
     if args.labels:
         labels = args.labels[: len(values)]
         if len(labels) < len(values):
@@ -184,7 +311,7 @@ def main():
     else:
         labels = names
 
-    wall_r, wall_z = parse_surface(Path(args.wall))
+    wall_r, wall_z, wall_poly = parse_surface(Path(args.wall))
 
     nsp = len(values)
     fig, axs = plt.subplots(1, nsp, figsize=(5.8 * nsp, 5.0), constrained_layout=True)
@@ -208,13 +335,22 @@ def main():
             ax.set_title(f"{labels[s]} (insufficient grid)")
             continue
         rs, zs, grid = mesh
+        if args.coarsen > 1:
+            rs, zs, grid = coarsen_grid(rs, zs, grid, args.coarsen)
+        if args.smooth > 0.0:
+            grid = smooth_grid(grid, args.smooth)
 
-        pos = grid[grid > 0.0]
+        grid_plot = mask_outside_wall(rs, zs, grid, wall_poly)
+        mask_floor = max(args.min_density, 0.0)
+        if mask_floor > 0.0:
+            grid_plot = np.ma.masked_less_equal(grid_plot, mask_floor)
+
+        pos = np.asarray(grid_plot.compressed(), dtype=float)
         if args.log and pos.size > 0:
             norm = LogNorm(vmin=np.min(pos), vmax=np.max(pos))
-            m = ax.pcolormesh(rs, zs, grid, shading="auto", cmap=cmap, norm=norm)
+            m = ax.pcolormesh(rs, zs, grid_plot, shading="auto", cmap=cmap, norm=norm)
         else:
-            m = ax.pcolormesh(rs, zs, grid, shading="auto", cmap=cmap)
+            m = ax.pcolormesh(rs, zs, grid_plot, shading="auto", cmap=cmap)
 
         cbar = fig.colorbar(m, ax=ax, pad=0.01, fraction=0.04, shrink=0.85)
         cbar.set_label("Density [m$^{-3}$]", rotation=270, labelpad=15)
