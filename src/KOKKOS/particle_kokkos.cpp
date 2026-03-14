@@ -673,19 +673,23 @@ void ParticleKokkos::sync(ExecutionSpace space, unsigned int mask)
       if (ncustom) {
         if (ncustom_ivec)
           for (int i = 0; i < ncustom_ivec; i++)
-            k_eivec.h_view[i].k_view.sync_device();
+            if (k_eivec.h_view[i].k_view.d_view.data())
+              k_eivec.h_view[i].k_view.sync_device();
 
         if (ncustom_iarray)
           for (int i = 0; i < ncustom_iarray; i++)
-            k_eiarray.h_view[i].k_view.sync_device();
+            if (k_eiarray.h_view[i].k_view.d_view.data())
+              k_eiarray.h_view[i].k_view.sync_device();
 
         if (ncustom_dvec)
           for (int i = 0; i < ncustom_dvec; i++)
-            k_edvec.h_view[i].k_view.sync_device();
+            if (k_edvec.h_view[i].k_view.d_view.data())
+              k_edvec.h_view[i].k_view.sync_device();
 
         if (ncustom_darray)
           for (int i = 0; i < ncustom_darray; i++)
-            k_edarray.h_view[i].k_view.sync_device();
+            if (k_edarray.h_view[i].k_view.d_view.data())
+              k_edarray.h_view[i].k_view.sync_device();
       }
     }
   } else {
@@ -694,19 +698,23 @@ void ParticleKokkos::sync(ExecutionSpace space, unsigned int mask)
     if (mask & CUSTOM_MASK) {
       if (ncustom_ivec)
         for (int i = 0; i < ncustom_ivec; i++)
-          k_eivec.h_view[i].k_view.sync_host();
+          if (k_eivec.h_view[i].k_view.h_view.data())
+            k_eivec.h_view[i].k_view.sync_host();
 
       if (ncustom_iarray)
         for (int i = 0; i < ncustom_iarray; i++)
-          k_eiarray.h_view[i].k_view.sync_host();
+          if (k_eiarray.h_view[i].k_view.h_view.data())
+            k_eiarray.h_view[i].k_view.sync_host();
 
       if (ncustom_dvec)
         for (int i = 0; i < ncustom_dvec; i++)
-          k_edvec.h_view[i].k_view.sync_host();
+          if (k_edvec.h_view[i].k_view.h_view.data())
+            k_edvec.h_view[i].k_view.sync_host();
 
       if (ncustom_darray)
         for (int i = 0; i < ncustom_darray; i++)
-          k_edarray.h_view[i].k_view.sync_host();
+          if (k_edarray.h_view[i].k_view.h_view.data())
+            k_edarray.h_view[i].k_view.sync_host();
     }
   }
 }
@@ -722,19 +730,19 @@ void ParticleKokkos::modify(ExecutionSpace space, unsigned int mask)
       if (ncustom) {
         if (ncustom_ivec)
           for (int i = 0; i < ncustom_ivec; i++)
-            k_eivec.h_view[i].k_view.modify_device();
+            if (k_eivec.h_view[i].k_view.d_view.data()) k_eivec.h_view[i].k_view.modify_device();
 
         if (ncustom_iarray)
           for (int i = 0; i < ncustom_iarray; i++)
-            k_eiarray.h_view[i].k_view.modify_device();
+            if (k_eiarray.h_view[i].k_view.d_view.data()) k_eiarray.h_view[i].k_view.modify_device();
 
         if (ncustom_dvec)
           for (int i = 0; i < ncustom_dvec; i++)
-            k_edvec.h_view[i].k_view.modify_device();
+            if (k_edvec.h_view[i].k_view.d_view.data()) k_edvec.h_view[i].k_view.modify_device();
 
         if (ncustom_darray)
           for (int i = 0; i < ncustom_darray; i++)
-            k_edarray.h_view[i].k_view.modify_device();
+            if (k_edarray.h_view[i].k_view.d_view.data()) k_edarray.h_view[i].k_view.modify_device();
       }
     }
     if (sparta->kokkos->auto_sync)
@@ -746,19 +754,19 @@ void ParticleKokkos::modify(ExecutionSpace space, unsigned int mask)
       if (ncustom) {
         if (ncustom_ivec)
           for (int i = 0; i < ncustom_ivec; i++)
-            k_eivec.h_view[i].k_view.modify_host();
+            if (k_eivec.h_view[i].k_view.h_view.data()) k_eivec.h_view[i].k_view.modify_host();
 
         if (ncustom_iarray)
           for (int i = 0; i < ncustom_iarray; i++)
-            k_eiarray.h_view[i].k_view.modify_host();
+            if (k_eiarray.h_view[i].k_view.h_view.data()) k_eiarray.h_view[i].k_view.modify_host();
 
         if (ncustom_dvec)
           for (int i = 0; i < ncustom_dvec; i++)
-            k_edvec.h_view[i].k_view.modify_host();
+            if (k_edvec.h_view[i].k_view.h_view.data()) k_edvec.h_view[i].k_view.modify_host();
 
         if (ncustom_darray)
           for (int i = 0; i < ncustom_darray; i++)
-            k_edarray.h_view[i].k_view.modify_host();
+            if (k_edarray.h_view[i].k_view.h_view.data()) k_edarray.h_view[i].k_view.modify_host();
       }
     }
   }
