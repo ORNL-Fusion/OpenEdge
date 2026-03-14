@@ -69,6 +69,13 @@ if(PKG_OPENEDGE)
   target_include_directories(${TARGET_SPARTA_PKG_OPENEDGE}
                              PRIVATE ${SPA_INCLUDE_DIRS})
 
+  # When Kokkos is enabled, OPENEDGE files include Kokkos headers
+  # via accelerator_kokkos_defs.h -> Kokkos_Core.hpp
+  if(PKG_KOKKOS)
+    target_link_libraries(${TARGET_SPARTA_PKG_OPENEDGE} LINK_PRIVATE
+                          Kokkos::kokkos)
+  endif()
+
   install(TARGETS ${TARGET_SPARTA_PKG_OPENEDGE}
           DESTINATION lib/sparta/${SPARTA_MACHINE}/pkgs)
   # ######### END   TARGET_SPARTA_PKG_OPENEDGE ##########
