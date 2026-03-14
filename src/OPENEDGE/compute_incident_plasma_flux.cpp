@@ -238,8 +238,10 @@ void ComputeIncidentPlasmaFlux::init()
 double ComputeIncidentPlasmaFlux::interp2D(const std::vector<double> &f, double r, double z) const
 {
   if (f.empty()) return 0.0;
-  const double rc = std::min(std::max(r, rvals.front()), rvals.back());
-  const double zc = std::min(std::max(z, zvals.front()), zvals.back());
+  if (r < rvals.front() || r > rvals.back() ||
+      z < zvals.front() || z > zvals.back()) return 0.0;
+  const double rc = r;
+  const double zc = z;
   auto itR = std::lower_bound(rvals.begin(), rvals.end(), rc);
   auto itZ = std::lower_bound(zvals.begin(), zvals.end(), zc);
   int ir2 = static_cast<int>(itR - rvals.begin());
@@ -267,8 +269,10 @@ double ComputeIncidentPlasmaFlux::interp2D(const std::vector<double> &f, double 
 double ComputeIncidentPlasmaFlux::interp3D(const std::vector<double> &f, int ispec, double r, double z) const
 {
   if (f.empty() || ispec < 0 || ispec >= nspec) return 0.0;
-  const double rc = std::min(std::max(r, rvals.front()), rvals.back());
-  const double zc = std::min(std::max(z, zvals.front()), zvals.back());
+  if (r < rvals.front() || r > rvals.back() ||
+      z < zvals.front() || z > zvals.back()) return 0.0;
+  const double rc = r;
+  const double zc = z;
   auto itR = std::lower_bound(rvals.begin(), rvals.end(), rc);
   auto itZ = std::lower_bound(zvals.begin(), zvals.end(), zc);
   int ir2 = static_cast<int>(itR - rvals.begin());
