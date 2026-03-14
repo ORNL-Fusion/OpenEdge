@@ -87,6 +87,8 @@ class Fix : protected Pointers {
   virtual void gas_react(int) {}
   virtual void surf_react(Particle::OnePart *, int &, int &) {}
   virtual void compute_field() {}
+  virtual bigint gas_react_one() const { return 0; }
+  virtual bigint gas_react_running() const { return 0; }
 
   virtual int pack_grid_one(int, char *, int) {return 0;}
   virtual int unpack_grid_one(int, char *) {return 0;}

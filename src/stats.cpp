@@ -38,6 +38,16 @@
 
 using namespace SPARTA_NS;
 
+static bigint gas_reactions_from_fixes(Modify *modify, int running)
+{
+  bigint n = 0;
+  for (int i = 0; i < modify->nfix; i++) {
+    n += running ? modify->fix[i]->gas_react_running()
+                 : modify->fix[i]->gas_react_one();
+  }
+  return n;
+}
+
 // customize a new keyword by adding to this list:
 
 // step,elapsed,elaplong,dt,cpu,tpcpu,spcpu,wall,
@@ -1200,11 +1210,9 @@ void Stats::compute_nattempt()
 
 void Stats::compute_nreact()
 {
-  if (!collide) bivalue = 0;
-  else {
-    bigint n = collide->nreact_one;
-    MPI_Allreduce(&n,&bivalue,1,MPI_SPARTA_BIGINT,MPI_SUM,world);
-  }
+  bigint n = gas_reactions_from_fixes(modify,0);
+  if (collide) n += collide->nreact_one;
+  MPI_Allreduce(&n,&bivalue,1,MPI_SPARTA_BIGINT,MPI_SUM,world);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1315,13 +1323,11 @@ void Stats::compute_nattemptave()
 
 void Stats::compute_nreactave()
 {
-  if (!collide) dvalue = 0.0;
-  else {
-    MPI_Allreduce(&collide->nreact_running,&bivalue,1,MPI_SPARTA_BIGINT,
-                  MPI_SUM,world);
-    if (update->ntimestep == update->firststep) dvalue = 0.0;
-    else dvalue = 1.0*bivalue / (update->ntimestep - update->firststep);
-  }
+  bigint n = gas_reactions_from_fixes(modify,1);
+  if (collide) n += collide->nreact_running;
+  MPI_Allreduce(&n,&bivalue,1,MPI_SPARTA_BIGINT,MPI_SUM,world);
+  if (update->ntimestep == update->firststep) dvalue = 0.0;
+  else dvalue = 1.0*bivalue / (update->ntimestep - update->firststep);
 }
 
 /* ---------------------------------------------------------------------- */

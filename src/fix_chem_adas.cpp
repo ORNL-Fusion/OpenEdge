@@ -30,13 +30,13 @@
 #include "variable.h"
 #include "compute.h"
 #include "compute_plasma_fields.h"
+#include <algorithm>
 
 namespace fs = std::filesystem;
 using namespace SPARTA_NS;
 enum{IONIZATION,RECOMBINATION};   // other files
 enum{IONIZATIONRATE, RECOMBINATIONRATE};   // other files
 enum{ADAS};                               // other react files
-
 
 #define MAXREACTANT 2
 #define MAXPRODUCT 3
@@ -83,6 +83,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
     tally_reactions = new bigint[nlist];
     tally_reactions_all = new bigint[nlist];
     tally_flag = 0;
+    nreact_one = nreact_running = 0;
     rng_adas = nullptr;
     cp_plasma_cached_ = nullptr;
 
@@ -192,6 +193,7 @@ void FixChemAdas::init()
 {
 
   tally_flag = 0;
+  nreact_one = nreact_running = 0;
   for (int i = 0; i < nlist; i++) tally_reactions[i] = 0;
 
   // convert species IDs to species indices
@@ -376,8 +378,10 @@ void FixChemAdas::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
 
+  nreact_one = 0;
   if (!particle->sorted) particle->sort();
   end_of_step_no_average();
+  nreact_running += nreact_one;
 }
 
 
@@ -472,6 +476,7 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
 
   double lambda[16];   // per-channel Poisson rates (max 16 channels)
   int    ridx_map[16]; // reaction index for each channel
+  double rate_log10_map[16];
   int    nchan = 0;
   double lambda_total = 0.0;
 
@@ -502,6 +507,7 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
 
     lambda[nchan] = lam;
     ridx_map[nchan] = ridx;
+    rate_log10_map[nchan] = rate_log10_cm3s;
     lambda_total += lam;
     nchan++;
   }
@@ -527,6 +533,7 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
   const int best_idx = ridx_map[chosen];
   OneReaction *rchosen = &rlist[best_idx];
   tally_reactions[best_idx]++;
+  nreact_one++;
   ip->ispecies = rchosen->products[0];
   return 1;
 }

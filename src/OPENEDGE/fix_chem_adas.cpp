@@ -83,6 +83,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
     tally_reactions = new bigint[nlist];
     tally_reactions_all = new bigint[nlist];
     tally_flag = 0;
+    nreact_one = nreact_running = 0;
     rng_adas = nullptr;
     cp_plasma_cached_ = nullptr;
 
@@ -192,6 +193,7 @@ void FixChemAdas::init()
 {
 
   tally_flag = 0;
+  nreact_one = nreact_running = 0;
   for (int i = 0; i < nlist; i++) tally_reactions[i] = 0;
 
   // convert species IDs to species indices
@@ -376,8 +378,10 @@ void FixChemAdas::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
 
+  nreact_one = 0;
   if (!particle->sorted) particle->sort();
   end_of_step_no_average();
+  nreact_running += nreact_one;
 }
 
 
@@ -527,6 +531,7 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
   const int best_idx = ridx_map[chosen];
   OneReaction *rchosen = &rlist[best_idx];
   tally_reactions[best_idx]++;
+  nreact_one++;
   ip->ispecies = rchosen->products[0];
   return 1;
 }

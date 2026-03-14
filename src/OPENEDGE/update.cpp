@@ -571,9 +571,6 @@ void Update::run(int nsteps)
       bigint nglobal;
       MPI_Allreduce(&nlocal, &nglobal, 1, MPI_SPARTA_BIGINT, MPI_SUM, world);
       if (nglobal == 0) {
-        if (comm->me == 0)
-          error->warning(FLERR,
-            "All particles absorbed/lost — halting run early");
         // force final output before breaking
         output->next = ntimestep;
         output->write(ntimestep);

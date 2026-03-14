@@ -26,6 +26,8 @@
 #include "surf.h"
 #include "surf_react.h"
 #include "comm.h"
+#include "modify.h"
+#include "fix.h"
 #include "math_extra.h"
 #include "timer.h"
 #include "memory.h"
@@ -37,6 +39,8 @@ using namespace SPARTA_NS;
 static void mpi_timings(const char *label, Timer *t, int tt,
                         MPI_Comm world, const int nprocs,
                         const int me, double time_loop, FILE *scr, FILE *log);
+static bigint gas_reactions_from_fixes(Modify *modify, int running,
+                                       MPI_Comm world);
 
 /* ---------------------------------------------------------------------- */
 
@@ -167,13 +171,16 @@ void Finish::end(int flag, double time_multiple_runs)
                   MPI_SPARTA_BIGINT,MPI_SUM,world);
     MPI_Allreduce(&surf->nreact_running,&nsreact_total,1,
                   MPI_SPARTA_BIGINT,MPI_SUM,world);
+    nreact_total = gas_reactions_from_fixes(modify,1,world);
     if (collide) {
+      bigint nreact_collide_total = 0;
       MPI_Allreduce(&collide->nattempt_running,&nattempt_total,1,
                     MPI_SPARTA_BIGINT,MPI_SUM,world);
       MPI_Allreduce(&collide->ncollide_running,&ncollide_total,1,
                     MPI_SPARTA_BIGINT,MPI_SUM,world);
-      MPI_Allreduce(&collide->nreact_running,&nreact_total,1,
+      MPI_Allreduce(&collide->nreact_running,&nreact_collide_total,1,
                     MPI_SPARTA_BIGINT,MPI_SUM,world);
+      nreact_total += nreact_collide_total;
     }
     MPI_Allreduce(&update->nstuck,&stuck_total,1,MPI_INT,MPI_SUM,world);
     MPI_Allreduce(&update->naxibad,&axibad_total,1,MPI_INT,MPI_SUM,world);
@@ -469,6 +476,19 @@ void Finish::end(int flag, double time_multiple_runs)
   }
 
   if (logfile) fflush(logfile);
+}
+
+static bigint gas_reactions_from_fixes(Modify *modify, int running,
+                                       MPI_Comm world)
+{
+  bigint nlocal = 0;
+  bigint ntotal = 0;
+  for (int i = 0; i < modify->nfix; i++) {
+    nlocal += running ? modify->fix[i]->gas_react_running()
+                      : modify->fix[i]->gas_react_one();
+  }
+  MPI_Allreduce(&nlocal,&ntotal,1,MPI_SPARTA_BIGINT,MPI_SUM,world);
+  return ntotal;
 }
 
 /* ---------------------------------------------------------------------- */

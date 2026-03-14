@@ -52,6 +52,8 @@ public:
     void init();
     void end_of_step();
     double memory_usage();
+    bigint gas_react_one() const override { return nreact_one; }
+    bigint gas_react_running() const override { return nreact_running; }
 
 
 int    use_grid_plasma = 0;
@@ -69,6 +71,7 @@ protected:
     int nlist;
     int atomic_number;
     bigint* tally_reactions, * tally_reactions_all;
+    bigint nreact_one, nreact_running;
     int tally_flag;
     int maxgrid;
     int maxgrid_plasma;
