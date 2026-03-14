@@ -137,6 +137,21 @@ def _cell_centers_from_corners(crx: np.ndarray, cry: np.ndarray,
     return rc, zc
 
 
+def _cell_polygons_from_corners(crx: np.ndarray, cry: np.ndarray,
+                                nx: int, ny: int) -> np.ndarray:
+    """
+    Build SOLPS quadrilateral polygons from cell corners.
+
+    Jeremy's routines reorder corners as [1, 2, 4, 3] to avoid
+    self-intersecting quads in patch plots.
+    """
+    crx4 = crx.reshape(nx + 2, ny + 2, 4, order="F")
+    cry4 = cry.reshape(nx + 2, ny + 2, 4, order="F")
+    corner_order = [0, 1, 3, 2]
+    polys = np.stack((crx4[:, :, corner_order], cry4[:, :, corner_order]), axis=-1)
+    return polys.reshape(-1, 4, 2)
+
+
 def _regular_grid(rc, zc, nr, nz, rmin, rmax, zmin, zmax):
     rvals = rc[np.isfinite(rc)]
     zvals = zc[np.isfinite(zc)]
@@ -156,11 +171,15 @@ def _regular_grid(rc, zc, nr, nz, rmin, rmax, zmin, zmax):
     return r, z, rr, zz
 
 
-def _interp_field(src_rz, values, tgt_rz, nz, nr):
+def _interp_field_points(src_rz, values, tgt_rz):
     v = np.asarray(values, dtype=np.float64).reshape(-1)
     lin = griddata(src_rz, v, tgt_rz, method="linear")
     nn = griddata(src_rz, v, tgt_rz, method="nearest")
-    out = np.where(np.isfinite(lin), lin, nn)
+    return np.where(np.isfinite(lin), lin, nn)
+
+
+def _interp_field(src_rz, values, tgt_rz, nz, nr):
+    out = _interp_field_points(src_rz, values, tgt_rz)
     return out.reshape(nz, nr)
 
 
@@ -461,6 +480,7 @@ def convert_solps_to_openedge(
     crx = gmtry["crx"]
     cry = gmtry["cry"]
     rc, zc = _cell_centers_from_corners(crx, cry, nx, ny)
+    cell_polys = _cell_polygons_from_corners(crx, cry, nx, ny)
 
     r, z, rr, zz = _regular_grid(rc, zc, nr, nz, rmin, rmax, zmin, zmax)
     src_pts = np.column_stack((rc.reshape(-1), zc.reshape(-1)))
@@ -501,6 +521,17 @@ def convert_solps_to_openedge(
     ion_indices = np.where(ion_mask)[0]
     nion = int(ion_indices.size)
     print(f"Charged species: {nion} (skipping {ns - nion} neutrals)")
+    if nion == 0:
+        raise RuntimeError("No charged ion species found in b2fstate")
+
+    main_sidx = int(ion_indices[0])
+    main_dens_raw = na[:, :, main_sidx] if na.ndim == 3 else na
+    if ua_raw.ndim == 3 and ua_raw.shape[2] > main_sidx:
+        main_upar_raw = ua_raw[:, :, main_sidx]
+    elif ua_raw.ndim == 2:
+        main_upar_raw = ua_raw
+    else:
+        main_upar_raw = np.zeros_like(main_dens_raw)
 
     # B-field from equilibrium file only — the only trustworthy source.
     if gfile is not None:
@@ -518,6 +549,7 @@ def convert_solps_to_openedge(
     br_grid = _interp_field(b_pts, br_eq, tgt_pts, nz, nr)
     bt_grid = _interp_field(b_pts, bt_eq, tgt_pts, nz, nr)
     bz_grid = _interp_field(b_pts, bz_eq, tgt_pts, nz, nr)
+    br_cells = _interp_field_points(b_pts, br_eq, src_pts).reshape(nx + 2, ny + 2)
 
     bmag_grid = np.sqrt(br_grid**2 + bt_grid**2 + bz_grid**2)
     eps = 1e-12
@@ -645,29 +677,86 @@ def convert_solps_to_openedge(
 
     # -- Optional plots --
     if plot:
-        _save_plots(r, z, ne_grid, te_grid, dens_i_grid, temp_i_grid,
-                    br_grid, bt_grid, bz_grid, flow_i_par_all[main_k],
-                    plot_prefix or Path("convert_solps_plasma"))
+        _save_plots(
+            cell_polys,
+            ne,
+            te_eV,
+            main_dens_raw,
+            ti_eV,
+            main_upar_raw,
+            br_cells,
+            plot_prefix or Path("convert_solps_plasma"),
+        )
 
-
-def _save_plots(r, z, ne, te, ni, ti, br, bt, bz, upar, prefix):
+def _save_plots(cell_polys, ne, te, ni, ti, upar, br, prefix):
     import matplotlib.pyplot as plt
-    extent = [float(r.min()), float(r.max()), float(z.min()), float(z.max())]
-    panels = [
-        (np.where(ne > 0, np.log10(ne), np.nan), "log10(ne) [m^-3]", "inferno"),
-        (te, "Te [eV]", "magma"),
-        (np.where(ni > 0, np.log10(ni), np.nan), "log10(ni) [m^-3]", "inferno"),
-        (ti, "Ti [eV]", "magma"),
-        (upar, "u_par [m/s]", "RdBu_r"),
-        (br, "Br [T]", "RdBu_r"),
-    ]
-    fig, axes = plt.subplots(2, 3, figsize=(14, 8), constrained_layout=True)
-    for ax, (arr, title, cmap) in zip(axes.flat, panels):
-        im = ax.imshow(arr, origin="lower", extent=extent, aspect="auto", cmap=cmap)
+    from matplotlib import colors
+    from matplotlib.collections import PolyCollection
+
+    valid_poly = np.all(np.isfinite(cell_polys), axis=(1, 2))
+
+    def _flatten(arr):
+        vals = np.asarray(arr, dtype=np.float64).reshape(-1)
+        return vals[valid_poly]
+
+    polys = cell_polys[valid_poly]
+
+    def _add_poly_panel(ax, values, title, cmap, *, log10=False, symmetric=False):
+        vals = _flatten(values)
+        mask = np.isfinite(vals)
+        if log10:
+            mask &= vals > 0.0
+            vals = np.where(mask, np.log10(vals), np.nan)
+        else:
+            vals = np.where(mask, vals, np.nan)
+
+        finite = vals[np.isfinite(vals)]
+        if finite.size == 0:
+            finite = np.array([0.0], dtype=np.float64)
+
+        if symmetric:
+            vmax = float(np.nanmax(np.abs(finite)))
+            if not np.isfinite(vmax) or vmax <= 0.0:
+                vmax = 1.0
+            norm = colors.TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
+        else:
+            vmin = float(np.nanmin(finite))
+            vmax = float(np.nanmax(finite))
+            if not np.isfinite(vmin):
+                vmin = 0.0
+            if not np.isfinite(vmax) or vmax <= vmin:
+                vmax = vmin + 1.0
+            norm = colors.Normalize(vmin=vmin, vmax=vmax)
+
+        coll = PolyCollection(
+            polys,
+            array=vals,
+            cmap=cmap,
+            norm=norm,
+            edgecolors="none",
+            linewidths=0.0,
+            antialiased=False,
+        )
+        ax.add_collection(coll)
+        ax.autoscale_view()
+        ax.set_aspect("equal", adjustable="box")
         ax.set_title(title)
         ax.set_xlabel("R [m]")
         ax.set_ylabel("Z [m]")
-        fig.colorbar(im, ax=ax, shrink=0.9)
+        return coll
+
+    panels = [
+        (ne, "log10(ne) [m^-3]", "inferno", True, False),
+        (te, "Te [eV]", "magma", False, False),
+        (ni, "log10(ni) [m^-3]", "inferno", True, False),
+        (ti, "Ti [eV]", "magma", False, False),
+        (upar, "u_par [m/s]", "RdBu_r", False, True),
+        (br, "Br [T]", "RdBu_r", False, True),
+    ]
+    fig, axes = plt.subplots(2, 3, figsize=(14, 8), constrained_layout=True)
+    for ax, (arr, title, cmap, log10, symmetric) in zip(axes.flat, panels):
+        coll = _add_poly_panel(ax, arr, title, cmap, log10=log10, symmetric=symmetric)
+        fig.colorbar(coll, ax=ax, shrink=0.9)
     fig.savefig(f"{prefix}_plasma.png", dpi=180)
     plt.close(fig)
     print(f"Wrote plot: {prefix}_plasma.png")
