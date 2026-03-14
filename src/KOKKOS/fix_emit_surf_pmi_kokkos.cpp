@@ -4,6 +4,7 @@
 
 #include "fix_emit_surf_pmi_kokkos.h"
 #include "particle_kokkos.h"
+#include "sparta_masks.h"
 
 using namespace SPARTA_NS;
 

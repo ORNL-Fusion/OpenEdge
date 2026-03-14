@@ -9,7 +9,7 @@ using namespace SPARTA_NS;
 SurfReactPMIKokkos::SurfReactPMIKokkos(SPARTA *sparta, int narg, char **arg) :
   SurfReactPMI(sparta, narg, arg)
 {
-  kokkos_flag = 1;
+  kokkosable = 1;
 }
 
 SurfReactPMIKokkos::~SurfReactPMIKokkos()

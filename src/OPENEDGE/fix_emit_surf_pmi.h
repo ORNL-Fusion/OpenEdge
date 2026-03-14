@@ -84,10 +84,11 @@ class FixEmitSurfPmi : public FixEmit {
 
   // custom options for per-surf emission properties
 
-  // private methods
+ protected:
+  virtual void perform_task();
 
+ private:
   void create_task(int);
-  void perform_task();
   void grow_task();
   int local_isurf_index(surfint) const;
   double flux_for_surface(surfint);
