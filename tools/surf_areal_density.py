@@ -46,7 +46,7 @@ def parse_input_script(path: str) -> dict:
     """Extract simulation parameters from a SPARTA input script.
 
     Handles variable substitution for simple `variable X equal <val>` lines.
-    Returns dict with keys: timestep, dump_interval (if found).
+    Returns dict with keys: timestep, nsteps, fnum (if found).
     """
     variables = {}
     params = {}
@@ -99,6 +99,17 @@ def parse_input_script(path: str) -> dict:
                     val = val.replace(f"${vname}", str(vval))
                 try:
                     params["nsteps"] = int(float(val))
+                except ValueError:
+                    pass
+
+            # global fnum <val>
+            if len(tokens) >= 3 and tokens[0] == "global" and tokens[1] == "fnum":
+                val = tokens[2]
+                for vname, vval in variables.items():
+                    val = val.replace(f"${{{vname}}}", str(vval))
+                    val = val.replace(f"${vname}", str(vval))
+                try:
+                    params["fnum"] = float(val)
                 except ValueError:
                     pass
 
@@ -403,7 +414,8 @@ def build_column_groups(flux_cols: list[str],
 # ---------------------------------------------------------------------------
 def compute_areal_density(data: dict, dt: float,
                           flux_cols: list[str],
-                          groups: dict | None = None):
+                          groups: dict | None = None,
+                          fnum: float = 1.0):
     """Compute areal density for each timestep snapshot.
 
     groups: dict of group_name -> list of column names to sum.
@@ -437,7 +449,8 @@ def compute_areal_density(data: dict, dt: float,
             flux = np.zeros(nsurf)
             for col in cols:
                 flux += data[col][mask]
-            sigma = flux * time
+            # Convert simulated-particle flux to physical flux via fnum.
+            sigma = flux * time * float(fnum)
             entry[f"sigma_{gname}"] = sigma
             if area is not None:
                 entry[f"N_{gname}"] = float(np.sum(sigma * area))
@@ -622,20 +635,38 @@ def main():
                     help="Column grouping: 'total' (sum all), 'all' (total + "
                          "R/S/A breakdown), 'species' (per-species). "
                          "Requires --reactions for 'all' and 'species'.")
+    ap.add_argument("--fnum", type=float, default=None,
+                    help="Real/sim particle ratio used to scale areal density. "
+                         "If omitted, auto-detected from input script (global fnum) "
+                         "or defaults to 1.0")
     ap.add_argument("--quiet", action="store_true", help="Suppress summary table")
     args = ap.parse_args()
+
+    input_params = {}
 
     # Get dt
     dt = args.dt
     if dt is None and args.input_script:
-        params = parse_input_script(args.input_script)
-        dt = params.get("timestep")
+        input_params = parse_input_script(args.input_script)
+        dt = input_params.get("timestep")
         if dt:
             print(f"Auto-detected timestep = {dt:.2e} s from {args.input_script}")
     if dt is None:
         print("ERROR: Could not determine timestep. Provide --dt or -i <input_script>",
               file=sys.stderr)
         sys.exit(1)
+
+    fnum = args.fnum
+    if fnum is None:
+        if args.input_script and not input_params:
+            input_params = parse_input_script(args.input_script)
+        fnum = float(input_params.get("fnum", 1.0))
+        if args.input_script and "fnum" in input_params:
+            print(f"Auto-detected fnum = {fnum:.6g} from {args.input_script}")
+        else:
+            print("Using default fnum = 1.0")
+    else:
+        print(f"Using user fnum = {fnum:.6g}")
 
     # Parse surf dump
     print(f"Parsing {args.file} ...")
@@ -688,7 +719,7 @@ def main():
     print(f"  Groups: {list(groups.keys())}")
 
     # Compute
-    results = compute_areal_density(data, dt, flux_cols, groups)
+    results = compute_areal_density(data, dt, flux_cols, groups, fnum=fnum)
 
     # Output
     if not args.quiet:

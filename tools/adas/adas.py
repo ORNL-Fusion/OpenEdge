@@ -12,12 +12,12 @@ import h5py
 
 ################################### Inputs ###################################
 
-AMFilesDir = '/Users/42d/eirene-db/Database/AMdata/Adas_Eirene_2010/adf11'
+AMFilesDir = '/Users/42d/eirene/Database/AMdata/Adas_Eirene_2010/adf11'
 
 reactions = ['acd', 'scd']
 year = '89'#'89'#'96'
-elements = ['w']#['ar', 'b','kr','xe']#['be', 'c', 'he', 'li', 'n', 'ne', 'o']
-element_nuclear_charges = [74]
+elements = ['c']#['ar', 'b','kr','xe']#['be', 'c', 'he', 'li', 'n', 'ne', 'o']
+element_nuclear_charges = [6]
 
 AtomicZ = element_nuclear_charges[0]
 IonRate = RecRate = None
