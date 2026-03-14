@@ -56,9 +56,12 @@ OpenEdge overrides some SPARTA base files. These exist in three places:
 | `src/OPENEDGE/update.cpp` | **Reference** — authoritative OpenEdge version |
 | `src/src/include/update.h` | **NOT compiled** — SPARTA's original header |
 
-When modifying override files, **always edit both** `src/` and `src/OPENEDGE/`
-copies. The build uses `src/`, but `src/OPENEDGE/` is the package reference
-used by `make yes-openedge` / `make no-openedge`.
+**CRITICAL: When modifying ANY file that exists in both `src/` and
+`src/OPENEDGE/`, ALWAYS update BOTH copies.** The build compiles from `src/`,
+but `src/OPENEDGE/` is the package reference. If you only edit one, the other
+goes stale and the build will silently use the old version. This applies to
+all `.cpp` and `.h` files that have copies in both locations (e.g.,
+`fix_chem_adas.cpp`, `update.cpp`, `sheath_models.cpp`, etc.).
 
 New OpenEdge-only files only need to exist in `src/OPENEDGE/` (they get copied
 to `src/` on install, and the cmake build handles this automatically).

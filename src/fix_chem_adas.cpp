@@ -30,13 +30,13 @@
 #include "variable.h"
 #include "compute.h"
 #include "compute_plasma_fields.h"
-#include <algorithm>
 
 namespace fs = std::filesystem;
 using namespace SPARTA_NS;
 enum{IONIZATION,RECOMBINATION};   // other files
 enum{IONIZATIONRATE, RECOMBINATIONRATE};   // other files
 enum{ADAS};                               // other react files
+
 
 #define MAXREACTANT 2
 #define MAXPRODUCT 3
@@ -49,9 +49,9 @@ enum{ADAS};                               // other react files
 FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
-    // fix 22 chem/adas  <nevery> <Z>  <reactions_file>  plasma <TeVar> <NeVar>
+    // fix ID chem/adas <nevery> <Z> <reactions_file> [adas_dir <path>] [plasma <TeVar> <NeVar>]
 
-  if (narg < 5)     error->all(FLERR,"Illegal fix chem/adas command (need: nevery Z reactions_file [plasma TeVar NeVar])");
+  if (narg < 5)     error->all(FLERR,"Illegal fix chem/adas command (need: nevery Z reactions_file [adas_dir path] [plasma TeVar NeVar])");
     nevery = atoi(arg[2]);
     atomic_number = atoi(arg[3]);
 
@@ -62,18 +62,28 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
     readfile(arg[4]);
     check_duplicate();
 
+    // --- Optional adas_dir keyword (default: "adas") ---
+    // Scan remaining args for adas_dir before consuming plasma keyword.
+
+    std::string adas_base_dir = "adas";
+    int iarg = 5;
+    if (iarg < narg && strcmp(arg[iarg], "adas_dir") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR,"fix chem/adas: adas_dir requires a path argument");
+      adas_base_dir = arg[iarg + 1];
+      iarg += 2;
+    }
+
     // read ADAS rate data
 
-   if (comm->me == 0) {
-        fs::path baseDir = "adas";
-        std::string fileNameStr = "ADAS_Rates_" + std::to_string(atomic_number) + ".h5";
-        fs::path fileName = fileNameStr;
-        fs::path fullPath = baseDir / fileName;
-        printf("Reading ADAS data for %d from %s\n", atomic_number, fullPath.string().c_str());
+    {
+      fs::path fullPath = fs::path(adas_base_dir) /
+          ("ADAS_Rates_" + std::to_string(atomic_number) + ".h5");
+      if (comm->me == 0)
+        printf("Reading ADAS data for Z=%d from %s\n",
+               atomic_number, fullPath.string().c_str());
+      readRateDataParallel(fullPath.string(), materials_rate_data[atomic_number]);
     }
-    
-    std::string fullPathStr = "adas/ADAS_Rates_" + std::to_string(atomic_number) + ".h5";
-    readRateDataParallel(fullPathStr, materials_rate_data[atomic_number]);
 
     // //
     maxgrid = 0;
@@ -91,8 +101,6 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
    // --- Optional plasma grid args: plasma <TeSrc> <NeSrc> ---
    // If omitted, Te/ne are read from the per-particle plasma cache
    // populated by update.cpp (requires sheath or GCA plasma compute).
-
-  int iarg = 5;
   if (iarg < narg && strcmp(arg[iarg], "plasma") == 0) {
     if (narg < iarg + 3)
       error->all(FLERR,"fix chem/adas plasma requires: plasma <TeSrc> <NeSrc>");
@@ -284,7 +292,7 @@ void FixChemAdas::init()
     int isp = r->reactants[0];
   }
 
-  // If no explicit Te/ne sources, require the per-particle plasma cache
+// If no explicit Te/ne sources, require the per-particle plasma cache
 if (srcTe.kind == SRC_NONE && srcNe.kind == SRC_NONE) {
   if (!update->plasma_cache_flag)
     error->all(FLERR,
@@ -292,7 +300,7 @@ if (srcTe.kind == SRC_NONE && srcNe.kind == SRC_NONE) {
       "or configure sheath/GCA so the per-particle plasma cache is active");
 }
 
-// --- resolve VARIABLE sources (old path) ---
+  // --- resolve VARIABLE sources (old path) ---
 if (srcTe.kind == SRC_VAR) {
   tvar = input->variable->find(tstr);
   if (tvar < 0 || !input->variable->grid_style(tvar))
@@ -476,7 +484,6 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
 
   double lambda[16];   // per-channel Poisson rates (max 16 channels)
   int    ridx_map[16]; // reaction index for each channel
-  double rate_log10_map[16];
   int    nchan = 0;
   double lambda_total = 0.0;
 
@@ -507,7 +514,6 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
 
     lambda[nchan] = lam;
     ridx_map[nchan] = ridx;
-    rate_log10_map[nchan] = rate_log10_cm3s;
     lambda_total += lam;
     nchan++;
   }
