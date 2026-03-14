@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.optimize import least_squares
 
 # ------------------ load data ------------------
-csv_path = "/Users/42d/Downloads/All_Data.csv"   # columns: alpha_deg  s=x/λ_D  phi_over_Te
+csv_path = "All_Data.csv"   # columns: alpha_deg  s=x/λ_D  phi_over_Te
 alpha, s, phi = np.loadtxt(csv_path, unpack=True)
 m = np.isfinite(alpha) & np.isfinite(s) & np.isfinite(phi)
 alpha, s, phi = alpha[m], np.clip(s[m], 0.0, None), phi[m]

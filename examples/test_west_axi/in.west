@@ -81,7 +81,7 @@ global boris_subcycles 5
 # with DeltaPhi_sheath = c_csheath[4] [eV], Te = c_cwest[5] [eV]
 variable te_local grid "c_cwest[5]"
 variable ne_entrance grid "c_cwest[6]*exp(c_csheath[4]/(c_cwest[5]+1.0e-12))"
-fix fchem chem/adas 1 74 input/plasma.adas plasma te_local ne_entrance
+fix fchem chem/adas 1 74 input/plasma.adas adas_dir ../../database/adas plasma te_local ne_entrance
 
 # 2) Incident plasma flux on wall group 1
 compute cgam incident/plasma/flux 1 file input/plasma.h5 nflux_species all 

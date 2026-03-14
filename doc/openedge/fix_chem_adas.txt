@@ -11,23 +11,29 @@ fix chem/adas command :h3
 [Syntax:]
 
 fix ID chem/adas Nevery Z reactions_file :pre
-fix ID chem/adas Nevery Z reactions_file plasma TeSrc NeSrc :pre
+fix ID chem/adas Nevery Z reactions_file adas_dir path :pre
+fix ID chem/adas Nevery Z reactions_file adas_dir path plasma TeSrc NeSrc :pre
 
 ID = fix ID :ulb,l
 Nevery = chemistry interval (timesteps) :l
 Z = atomic number for ADAS table selection (e.g. 74 for tungsten) :l
 reactions_file = OpenEdge reactions list :l
+adas_dir = optional keyword to set ADAS data directory (default: "adas") :l
+path = path to directory containing ADAS_Rates_Z.h5 files :l
 plasma = optional keyword for explicit Te/ne sources :l
 TeSrc = grid Te source (grid variable name or c_ID\[col\]) :l
 NeSrc = grid ne source (grid variable name or c_ID\[col\]) :l,ule
 
 [Examples:]
 
-# Plasma cache mode (requires sheath or GCA plasma compute):
-fix chem chem/adas 1 74 plasma.adas :pre
+# Plasma cache mode, ADAS data from database/:
+fix chem chem/adas 1 74 plasma.adas adas_dir ../../database/adas :pre
 
 # Explicit Te/ne from a compute:
-fix chem chem/adas 10 74 plasma.adas plasma c_cplasma\[7\] c_cplasma\[10\] :pre
+fix chem chem/adas 10 74 plasma.adas adas_dir ../../database/adas plasma c_cplasma\[7\] c_cplasma\[10\] :pre
+
+# Legacy mode (looks for adas/ in current directory):
+fix chem chem/adas 1 74 plasma.adas :pre
 
 [Description:]
 
@@ -35,9 +41,13 @@ Apply ionization and recombination transitions to charged-particle
 species using ADAS (Atomic Data and Analysis Structure) rate tables.
 Rate data is read from:
 
-adas/ADAS_Rates_Z.h5 :pre
+{adas_dir}/ADAS_Rates_Z.h5 :pre
 
-where Z is the atomic number provided in the command.
+where Z is the atomic number provided in the command and {adas_dir}
+defaults to "adas" (relative to the run directory) if not specified.
+The recommended convention is to use the central database directory:
+
+adas_dir ../../database/adas :pre
 
 {Plasma cache mode} (no {plasma} keyword): Te and ne are read from
 the per-particle plasma cache populated by {update.cpp} each timestep.

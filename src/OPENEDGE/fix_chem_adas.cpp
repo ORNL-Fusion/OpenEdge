@@ -49,9 +49,9 @@ enum{ADAS};                               // other react files
 FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
-    // fix 22 chem/adas  <nevery> <Z>  <reactions_file>  plasma <TeVar> <NeVar>
+    // fix ID chem/adas <nevery> <Z> <reactions_file> [adas_dir <path>] [plasma <TeVar> <NeVar>]
 
-  if (narg < 5)     error->all(FLERR,"Illegal fix chem/adas command (need: nevery Z reactions_file [plasma TeVar NeVar])");
+  if (narg < 5)     error->all(FLERR,"Illegal fix chem/adas command (need: nevery Z reactions_file [adas_dir path] [plasma TeVar NeVar])");
     nevery = atoi(arg[2]);
     atomic_number = atoi(arg[3]);
 
@@ -62,18 +62,28 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
     readfile(arg[4]);
     check_duplicate();
 
+    // --- Optional adas_dir keyword (default: "adas") ---
+    // Scan remaining args for adas_dir before consuming plasma keyword.
+
+    std::string adas_base_dir = "adas";
+    int iarg = 5;
+    if (iarg < narg && strcmp(arg[iarg], "adas_dir") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR,"fix chem/adas: adas_dir requires a path argument");
+      adas_base_dir = arg[iarg + 1];
+      iarg += 2;
+    }
+
     // read ADAS rate data
 
-   if (comm->me == 0) {
-        fs::path baseDir = "adas";
-        std::string fileNameStr = "ADAS_Rates_" + std::to_string(atomic_number) + ".h5";
-        fs::path fileName = fileNameStr;
-        fs::path fullPath = baseDir / fileName;
-        printf("Reading ADAS data for %d from %s\n", atomic_number, fullPath.string().c_str());
+    {
+      fs::path fullPath = fs::path(adas_base_dir) /
+          ("ADAS_Rates_" + std::to_string(atomic_number) + ".h5");
+      if (comm->me == 0)
+        printf("Reading ADAS data for Z=%d from %s\n",
+               atomic_number, fullPath.string().c_str());
+      readRateDataParallel(fullPath.string(), materials_rate_data[atomic_number]);
     }
-    
-    std::string fullPathStr = "adas/ADAS_Rates_" + std::to_string(atomic_number) + ".h5";
-    readRateDataParallel(fullPathStr, materials_rate_data[atomic_number]);
 
     // //
     maxgrid = 0;
@@ -91,8 +101,6 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
    // --- Optional plasma grid args: plasma <TeSrc> <NeSrc> ---
    // If omitted, Te/ne are read from the per-particle plasma cache
    // populated by update.cpp (requires sheath or GCA plasma compute).
-
-  int iarg = 5;
   if (iarg < narg && strcmp(arg[iarg], "plasma") == 0) {
     if (narg < iarg + 3)
       error->all(FLERR,"fix chem/adas plasma requires: plasma <TeSrc> <NeSrc>");

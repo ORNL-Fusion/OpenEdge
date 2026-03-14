@@ -126,7 +126,7 @@ fix                     nanbu coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10] &
                         c_cplasma[1] c_cplasma[2] c_cplasma[3]
 
 # ---- Ionization / Recombination (ADAS) ----
-fix                     chem chem/adas 1 74 plasma.adas # plasma c_cplasma[7] c_cplasma[10]
+fix                     chem chem/adas 1 74 plasma.adas adas_dir ../../database/adas
 
 # ---- read_particles) ----
 

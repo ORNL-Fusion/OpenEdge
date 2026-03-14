@@ -258,7 +258,9 @@ def compute_sputter_flux_on_W(R, Z, soledge_folder,
 
     # ---------- BCA (build once) ----------
     # bca_path = _find_bca_file('O', 'W', bca_dirs)
-    E_axis, A_axis, Y_fn, R_fn = make_bca_interps("/Users/42d/OpenEdge/tools/surface_data/data/O_on_W.h5", log_interp=True)
+    _here = os.path.dirname(os.path.abspath(__file__))
+    _default_bca = os.path.join(_here, '..', '..', 'database', 'surface', 'O_on_W.h5')
+    E_axis, A_axis, Y_fn, R_fn = make_bca_interps(_default_bca, log_interp=True)
 
     # clamp angle to table range and broadcast
     theta = np.asarray(theta_deg, float)
@@ -356,9 +358,10 @@ def compute_sputter_flux_on_W(R, Z, soledge_folder,
 
 if __name__ == "__main__":
     # Set the directory for SOLEDGE3X input files
-    plasma_dir = '/Users/42d/Desktop/OpenEdge/tools/plasma/soledge3x/soledge_data'  
-    bca_dirs = ['/Users/42d/OpenEdge/tools/surface_data/data/O_on_W.h5']
-    geometryFile = '/Users/42d/test_west/input/wall.txt'
+    _here = os.path.dirname(os.path.abspath(__file__))
+    plasma_dir = os.path.join(_here, '..', 'plasma', 'soledge3x', 'soledge_data')
+    bca_dirs = [os.path.join(_here, '..', '..', 'database', 'surface', 'O_on_W.h5')]
+    geometryFile = os.path.join(_here, '..', '..', 'examples', 'test_west_axi', 'input', 'wall.txt')
     wall = surface(geometryFile, "2D")
     domain = wall.polygon
     R, Z = domain.exterior.xy

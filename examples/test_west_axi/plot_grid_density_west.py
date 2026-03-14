@@ -4,9 +4,9 @@ Plot OpenEdge/SPARTA grid density dump in WEST-style R-Z subplots.
 
 Example:
   python3 plot_grid_density_west.py \
-    --dump /Users/42d/OpenedgeGPU/examples/test_west/output/tmp.grid.density \
-    --wall /Users/42d/OpenedgeGPU/examples/test_west/input/wall.txt \
-    --out /Users/42d/OpenedgeGPU/examples/test_west/output/grid_density.west.png \
+    --dump output/tmp.grid.density \
+    --wall input/wall.txt \
+    --out output/grid_density.west.png \
     --show
 """
 

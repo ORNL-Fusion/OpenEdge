@@ -3,6 +3,7 @@
 # File written by from Patrick Tamin
 # Modified by Abdou Diaw
 
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -12,7 +13,9 @@ import h5py
 
 ################################### Inputs ###################################
 
-AMFilesDir = '/Users/42d/eirene/Database/AMdata/Adas_Eirene_2010/adf11'
+# Set ADAS_ADF11_DIR env var or update this path to your local ADAS ADF11 data
+AMFilesDir = os.environ.get('ADAS_ADF11_DIR',
+    os.path.join(os.path.dirname(__file__), 'adf11'))
 
 reactions = ['acd', 'scd']
 year = '89'#'89'#'96'
