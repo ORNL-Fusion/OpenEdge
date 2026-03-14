@@ -2,7 +2,7 @@
 """Generate a sequence of plasma HDF5 snapshots from SOLEDGE3X time outputs.
 
 Takes a list of SOLEDGE3X output directories (one per time snapshot),
-calls soledge2openedge.py conversion for each, and writes a manifest
+calls convert_s3x_plasma.py conversion for each, and writes a manifest
 file compatible with compute plasma/timedep.
 
 Usage:
@@ -49,14 +49,14 @@ def convert_soledge_dirs(soledge_dirs, times, ref_file, outdir,
       - mesh_raptorX.h5 (bfield)
       - plasmaFinal.h5
     """
-    # Import soledge2openedge from the same converters directory
+    # Import convert_s3x_plasma from the same converters directory
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     try:
-        from soledge2openedge import interpolate_and_save_plasma_field
+        from convert_s3x_plasma import interpolate_and_save_plasma_field
         s2oe = interpolate_and_save_plasma_field
     except ImportError:
-        print("ERROR: Cannot import soledge2openedge.interpolate_and_save_plasma_field")
-        print("Make sure soledge2openedge.py is in tools/converters/")
+        print("ERROR: Cannot import convert_s3x_plasma.interpolate_and_save_plasma_field")
+        print("Make sure convert_s3x_plasma.py is in tools/converters/")
         sys.exit(1)
 
     os.makedirs(outdir, exist_ok=True)

@@ -469,9 +469,16 @@ def interpolate_and_save_plasma_field(
     wall_sparta_file=None,
     core_sparta_file=None,
     core_psi_level=None,
+    equ_file=None,
+    gfile=None,
 ):
     """
     Convert SOLEDGE3X plasma/mesh data to OpenEdge-style HDF5.
+
+    B-field source priority:
+      1. GEQDSK file (--gfile) — reconstructed from psi, most trustworthy
+      2. .equ file (--equ-file) — reconstructed from psi
+      3. mesh_raptorX.h5 triangles — S3X equilibrium on the simulation mesh (default)
 
     Backward-compatible legacy fields are still written:
       dens_i/temp_i/parr_flow(/r/t/z) from main ion species.
@@ -521,12 +528,6 @@ def interpolate_and_save_plasma_field(
         Rk = mesh_eirene['/knots/R'][...] / 100.0
         Zk = mesh_eirene['/knots/Z'][...] / 100.0
 
-    # Magnetic field on triangles
-    with h5py.File(bfield_file, 'r') as bfile:
-        b_r_tri = bfile['/triangles/Br'][...].flatten() * B0
-        b_z_tri = bfile['/triangles/Bz'][...].flatten() * B0
-        b_t_tri = bfile['/triangles/Bphi'][...].flatten() * B0
-
     points = np.vstack((Rk, Zk)).T
     triangle_points = np.array([points[tri] for tri in tri_knots.T])
     centroids = triangle_points.mean(axis=1)
@@ -536,10 +537,36 @@ def interpolate_and_save_plasma_field(
     grid_r, grid_z = np.meshgrid(r, z)
     grid_points = np.vstack((grid_r.flatten(), grid_z.flatten())).T
 
-    # Interpolate B once (used for all species velocity components)
-    b_r_grid = _interpolate_field(centroids, grid_points, nZ, nR, b_r_tri)
-    b_z_grid = _interpolate_field(centroids, grid_points, nZ, nR, b_z_tri)
-    b_t_grid = _interpolate_field(centroids, grid_points, nZ, nR, b_t_tri)
+    # Magnetic field: prefer equilibrium file over mesh triangles.
+    if gfile is not None:
+        from convert_solps_plasma import _read_geqdsk_bfield
+        rg, zg, br_eq, bt_eq, bz_eq = _read_geqdsk_bfield(gfile)
+        rr_eq, zz_eq = np.meshgrid(rg, zg)
+        b_pts = np.column_stack((rr_eq.reshape(-1), zz_eq.reshape(-1)))
+        b_r_grid = _interpolate_field(b_pts, grid_points, nZ, nR, br_eq.reshape(-1))
+        b_t_grid = _interpolate_field(b_pts, grid_points, nZ, nR, bt_eq.reshape(-1))
+        b_z_grid = _interpolate_field(b_pts, grid_points, nZ, nR, bz_eq.reshape(-1))
+        print(f"B-field from GEQDSK: {gfile}")
+    elif equ_file is not None:
+        from convert_solps_plasma import _read_equilibrium_bfield
+        rg, zg, br_eq, bt_eq, bz_eq = _read_equilibrium_bfield(equ_file)
+        rr_eq, zz_eq = np.meshgrid(rg, zg)
+        b_pts = np.column_stack((rr_eq.reshape(-1), zz_eq.reshape(-1)))
+        b_r_grid = _interpolate_field(b_pts, grid_points, nZ, nR, br_eq.reshape(-1))
+        b_t_grid = _interpolate_field(b_pts, grid_points, nZ, nR, bt_eq.reshape(-1))
+        b_z_grid = _interpolate_field(b_pts, grid_points, nZ, nR, bz_eq.reshape(-1))
+        print(f"B-field from equilibrium: {equ_file}")
+    else:
+        # Fallback: B-field from S3X mesh_raptorX.h5 triangles
+        with h5py.File(bfield_file, 'r') as bfile:
+            b_r_tri = bfile['/triangles/Br'][...].flatten() * B0
+            b_z_tri = bfile['/triangles/Bz'][...].flatten() * B0
+            b_t_tri = bfile['/triangles/Bphi'][...].flatten() * B0
+        b_r_grid = _interpolate_field(centroids, grid_points, nZ, nR, b_r_tri)
+        b_z_grid = _interpolate_field(centroids, grid_points, nZ, nR, b_z_tri)
+        b_t_grid = _interpolate_field(centroids, grid_points, nZ, nR, b_t_tri)
+        print(f"B-field from S3X mesh: {bfield_file} (consider using --gfile or --equ-file)")
+
     b_mag = np.sqrt(b_r_grid * b_r_grid + b_z_grid * b_z_grid + b_t_grid * b_t_grid)
     eps = 1.0e-12
 
