@@ -30,6 +30,11 @@ void ComputeSheathGeometryGridKokkos::compute_per_grid()
 void ComputeSheathGeometryGridKokkos::sync_to_device()
 {
   int ng = grid->nlocal;
+  if (ng <= 0) return;
+  if (size_per_grid_cols == 0 && !vector_grid) return;
+  if (size_per_grid_cols > 0 && !array_grid) return;
+  if (!midx_grid) return;
+
   int nc = size_per_grid_cols;
   if (nc == 0) nc = 1;  // vector_grid case
 

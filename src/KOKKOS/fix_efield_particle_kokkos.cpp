@@ -36,7 +36,7 @@ void FixEfieldParticleKokkos::init()
 void FixEfieldParticleKokkos::compute_field()
 {
   FixEfieldParticle::compute_field();
-  if (!particle->nlocal) return;
+  if (!particle->nlocal || !array_particle || size_per_particle_cols <= 0) return;
 
   int np = particle->nlocal;
   int nc = size_per_particle_cols;

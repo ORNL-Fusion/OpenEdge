@@ -49,7 +49,7 @@ void FixBfieldGridKokkos::compute_field()
   // Run the host-side compute_field (fills array_grid)
   FixBfieldGrid::compute_field();
 
-  if (!grid->nlocal) return;
+  if (!grid->nlocal || !array_grid || size_per_grid_cols <= 0) return;
 
   int ng = grid->nlocal;
   int nc = size_per_grid_cols;
