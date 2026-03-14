@@ -1,6 +1,17 @@
 if(PKG_OPENEDGE)
   # ######### BEGIN TARGET_SPARTA_PKG_OPENEDGE ##########
 
+  # Copy OpenEdge Kokkos files to src/KOKKOS/ so they are picked up
+  # by the KOKKOS package glob when both PKG_OPENEDGE and PKG_KOKKOS are ON.
+  if(PKG_KOKKOS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/KOKKOS")
+    file(GLOB _OE_KOKKOS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/KOKKOS/*")
+    foreach(_f ${_OE_KOKKOS_FILES})
+      get_filename_component(_fname ${_f} NAME)
+      configure_file(${_f} "${CMAKE_CURRENT_SOURCE_DIR}/../KOKKOS/${_fname}" COPYONLY)
+    endforeach()
+    message(STATUS "OpenEdge: copied Kokkos files to src/KOKKOS/")
+  endif()
+
   file(
     GLOB SPARTA_PKG_OPENEDGE_SRC_FILES
     LIST_DIRECTORIES false

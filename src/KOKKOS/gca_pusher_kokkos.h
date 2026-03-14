@@ -1,0 +1,264 @@
+/* ----------------------------------------------------------------------
+   OpenEdge Guiding Center Approximation (GCA) pusher — Kokkos version.
+
+   Device-callable equivalents of GCAPusher functions for use in the
+   Kokkos particle move kernel.
+
+   Contributors:
+     - Abdourahmane (Abdou) Diaw (ORNL, diawa@ornl.gov)
+------------------------------------------------------------------------- */
+
+#ifndef SPARTA_GCA_PUSHER_KOKKOS_H
+#define SPARTA_GCA_PUSHER_KOKKOS_H
+
+#include "Kokkos_Core.hpp"
+#include <cmath>
+
+namespace SPARTA_NS {
+namespace GCAPusherKokkos {
+
+struct GCAState {
+  double X[3];
+  double v_par;
+  double mu;
+};
+
+/* ---------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+GCAState init_from_particle(const double x[3], const double v[3],
+                             double mass, const double B[3])
+{
+  GCAState s;
+  const double Bmag = Kokkos::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
+
+  s.X[0] = x[0]; s.X[1] = x[1]; s.X[2] = x[2];
+
+  if (Bmag > 0.0) {
+    const double bhat[3] = {B[0]/Bmag, B[1]/Bmag, B[2]/Bmag};
+    s.v_par = v[0]*bhat[0] + v[1]*bhat[1] + v[2]*bhat[2];
+    const double v2 = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
+    const double vperp2 = Kokkos::fmax(v2 - s.v_par * s.v_par, 0.0);
+    s.mu = mass * vperp2 / (2.0 * Bmag);
+  } else {
+    s.v_par = Kokkos::sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+    s.mu = 0.0;
+  }
+  return s;
+}
+
+/* ---------------------------------------------------------------------- */
+
+struct GCARhs {
+  double dXdt[3];
+  double dvpar_dt;
+};
+
+KOKKOS_INLINE_FUNCTION
+GCARhs gca_rhs(double qm, double mass, double v_par, double mu,
+                const double E[3], const double B[3],
+                double Bmag, const double gradBmag[3],
+                const double kappa[3], const double curl_b[3])
+{
+  GCARhs rhs;
+  if (Bmag <= 0.0) {
+    rhs.dXdt[0] = rhs.dXdt[1] = rhs.dXdt[2] = 0.0;
+    rhs.dvpar_dt = 0.0;
+    return rhs;
+  }
+
+  const double invB = 1.0 / Bmag;
+  const double bhat[3] = {B[0]*invB, B[1]*invB, B[2]*invB};
+  const double Omega = qm * Bmag;
+  const double vpar_over_Omega = v_par / Omega;
+
+  double Bstar[3];
+  Bstar[0] = B[0] + vpar_over_Omega * curl_b[0];
+  Bstar[1] = B[1] + vpar_over_Omega * curl_b[1];
+  Bstar[2] = B[2] + vpar_over_Omega * curl_b[2];
+
+  const double Bstar_par = bhat[0]*Bstar[0] + bhat[1]*Bstar[1] + bhat[2]*Bstar[2];
+  if (Kokkos::fabs(Bstar_par) < 1.0e-30) {
+    rhs.dXdt[0] = rhs.dXdt[1] = rhs.dXdt[2] = 0.0;
+    rhs.dvpar_dt = 0.0;
+    return rhs;
+  }
+  const double invBstar_par = 1.0 / Bstar_par;
+
+  // E x bhat
+  double ExB[3];
+  ExB[0] = E[1]*bhat[2] - E[2]*bhat[1];
+  ExB[1] = E[2]*bhat[0] - E[0]*bhat[2];
+  ExB[2] = E[0]*bhat[1] - E[1]*bhat[0];
+
+  // grad-B drift
+  const double gradB_coeff = mu / (mass * Omega);
+  double BxgradB[3];
+  BxgradB[0] = B[1]*gradBmag[2] - B[2]*gradBmag[1];
+  BxgradB[1] = B[2]*gradBmag[0] - B[0]*gradBmag[2];
+  BxgradB[2] = B[0]*gradBmag[1] - B[1]*gradBmag[0];
+
+  rhs.dXdt[0] = invBstar_par * (v_par * Bstar[0] + ExB[0] + gradB_coeff * BxgradB[0] * invB);
+  rhs.dXdt[1] = invBstar_par * (v_par * Bstar[1] + ExB[1] + gradB_coeff * BxgradB[1] * invB);
+  rhs.dXdt[2] = invBstar_par * (v_par * Bstar[2] + ExB[2] + gradB_coeff * BxgradB[2] * invB);
+
+  double force[3];
+  force[0] = -(mu / mass) * gradBmag[0] + qm * E[0];
+  force[1] = -(mu / mass) * gradBmag[1] + qm * E[1];
+  force[2] = -(mu / mass) * gradBmag[2] + qm * E[2];
+
+  rhs.dvpar_dt = invBstar_par * (Bstar[0]*force[0] + Bstar[1]*force[1] + Bstar[2]*force[2]);
+  return rhs;
+}
+
+/* ---------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+void push_gca(double qm, double dt, double mass,
+              const double E[3], const double B[3],
+              const double gradBmag[3], GCAState &state)
+{
+  const double Bmag = Kokkos::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
+  if (Bmag <= 0.0) {
+    state.v_par += qm * Kokkos::sqrt(E[0]*E[0] + E[1]*E[1] + E[2]*E[2]) * dt;
+    state.X[0] += state.v_par * dt;
+    return;
+  }
+
+  const double invB = 1.0 / Bmag;
+  const double bhat[3] = {B[0]*invB, B[1]*invB, B[2]*invB};
+  const double Omega = qm * Bmag;
+  const double Omega_abs = Kokkos::fabs(Omega);
+  if (Omega_abs <= 0.0) return;
+
+  // E x B drift
+  const double invB2 = invB * invB;
+  double v_ExB[3];
+  v_ExB[0] = (E[1]*B[2] - E[2]*B[1]) * invB2;
+  v_ExB[1] = (E[2]*B[0] - E[0]*B[2]) * invB2;
+  v_ExB[2] = (E[0]*B[1] - E[1]*B[0]) * invB2;
+
+  // grad-B drift
+  const double gradB_coeff = state.mu / (mass * Omega);
+  double BxgradB[3];
+  BxgradB[0] = B[1]*gradBmag[2] - B[2]*gradBmag[1];
+  BxgradB[1] = B[2]*gradBmag[0] - B[0]*gradBmag[2];
+  BxgradB[2] = B[0]*gradBmag[1] - B[1]*gradBmag[0];
+  double v_gradB[3];
+  v_gradB[0] = gradB_coeff * BxgradB[0] * invB;
+  v_gradB[1] = gradB_coeff * BxgradB[1] * invB;
+  v_gradB[2] = gradB_coeff * BxgradB[2] * invB;
+
+  const double bdotgradB = bhat[0]*gradBmag[0] + bhat[1]*gradBmag[1] + bhat[2]*gradBmag[2];
+  const double bdotE = bhat[0]*E[0] + bhat[1]*E[1] + bhat[2]*E[2];
+  const double dvpar_dt = -(state.mu / mass) * bdotgradB + qm * bdotE;
+
+  const double v_par_half = state.v_par + 0.5 * dvpar_dt * dt;
+
+  state.X[0] += (v_par_half * bhat[0] + v_ExB[0] + v_gradB[0]) * dt;
+  state.X[1] += (v_par_half * bhat[1] + v_ExB[1] + v_gradB[1]) * dt;
+  state.X[2] += (v_par_half * bhat[2] + v_ExB[2] + v_gradB[2]) * dt;
+
+  state.v_par += dvpar_dt * dt;
+}
+
+/* ---------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+void push_gca_rk4(double qm, double dt, double mass,
+                   const double E[3], const double B[3],
+                   double Bmag, const double gradBmag[3],
+                   const double kappa[3], const double curl_b[3],
+                   GCAState &state)
+{
+  double y[4] = {state.X[0], state.X[1], state.X[2], state.v_par};
+
+  // k1
+  GCARhs r1 = gca_rhs(qm, mass, y[3], state.mu, E, B, Bmag, gradBmag, kappa, curl_b);
+  double k1[4] = {dt*r1.dXdt[0], dt*r1.dXdt[1], dt*r1.dXdt[2], dt*r1.dvpar_dt};
+
+  // k2
+  double y2[4] = {y[0]+0.5*k1[0], y[1]+0.5*k1[1], y[2]+0.5*k1[2], y[3]+0.5*k1[3]};
+  GCARhs r2 = gca_rhs(qm, mass, y2[3], state.mu, E, B, Bmag, gradBmag, kappa, curl_b);
+  double k2[4] = {dt*r2.dXdt[0], dt*r2.dXdt[1], dt*r2.dXdt[2], dt*r2.dvpar_dt};
+
+  // k3
+  double y3[4] = {y[0]+0.5*k2[0], y[1]+0.5*k2[1], y[2]+0.5*k2[2], y[3]+0.5*k2[3]};
+  GCARhs r3 = gca_rhs(qm, mass, y3[3], state.mu, E, B, Bmag, gradBmag, kappa, curl_b);
+  double k3[4] = {dt*r3.dXdt[0], dt*r3.dXdt[1], dt*r3.dXdt[2], dt*r3.dvpar_dt};
+
+  // k4
+  double y4[4] = {y[0]+k3[0], y[1]+k3[1], y[2]+k3[2], y[3]+k3[3]};
+  GCARhs r4 = gca_rhs(qm, mass, y4[3], state.mu, E, B, Bmag, gradBmag, kappa, curl_b);
+  double k4[4] = {dt*r4.dXdt[0], dt*r4.dXdt[1], dt*r4.dXdt[2], dt*r4.dvpar_dt};
+
+  for (int i = 0; i < 3; ++i)
+    state.X[i] = y[i] + (k1[i] + 2.0*k2[i] + 2.0*k3[i] + k4[i]) / 6.0;
+  state.v_par = y[3] + (k1[3] + 2.0*k2[3] + 2.0*k3[3] + k4[3]) / 6.0;
+}
+
+/* ---------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+void gca_to_particle(const GCAState &state, const double B[3],
+                     double mass, double rand_uniform,
+                     double x[3], double v[3])
+{
+  x[0] = state.X[0]; x[1] = state.X[1]; x[2] = state.X[2];
+
+  const double Bmag = Kokkos::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
+  if (Bmag <= 0.0) {
+    v[0] = state.v_par; v[1] = 0.0; v[2] = 0.0;
+    return;
+  }
+
+  const double bhat[3] = {B[0]/Bmag, B[1]/Bmag, B[2]/Bmag};
+  const double vperp = Kokkos::sqrt(2.0 * state.mu * Bmag / mass);
+
+  // Build perpendicular basis
+  double e1[3], e2[3];
+  double ref[3];
+  if (Kokkos::fabs(bhat[0]) < 0.9) {
+    ref[0] = 1.0; ref[1] = 0.0; ref[2] = 0.0;
+  } else {
+    ref[0] = 0.0; ref[1] = 1.0; ref[2] = 0.0;
+  }
+  e1[0] = bhat[1]*ref[2] - bhat[2]*ref[1];
+  e1[1] = bhat[2]*ref[0] - bhat[0]*ref[2];
+  e1[2] = bhat[0]*ref[1] - bhat[1]*ref[0];
+  const double e1mag = Kokkos::sqrt(e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2]);
+  e1[0] /= e1mag; e1[1] /= e1mag; e1[2] /= e1mag;
+
+  e2[0] = bhat[1]*e1[2] - bhat[2]*e1[1];
+  e2[1] = bhat[2]*e1[0] - bhat[0]*e1[2];
+  e2[2] = bhat[0]*e1[1] - bhat[1]*e1[0];
+
+  const double PI = 3.14159265358979323846;
+  const double phi = 2.0 * PI * rand_uniform;
+  const double cp = Kokkos::cos(phi), sp = Kokkos::sin(phi);
+
+  v[0] = state.v_par * bhat[0] + vperp * (cp * e1[0] + sp * e2[0]);
+  v[1] = state.v_par * bhat[1] + vperp * (cp * e1[1] + sp * e2[1]);
+  v[2] = state.v_par * bhat[2] + vperp * (cp * e1[2] + sp * e2[2]);
+}
+
+/* ---------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+double larmor_radius(double v_perp, double qm_abs, double Bmag)
+{
+  if (qm_abs <= 0.0 || Bmag <= 0.0) return 1.0e20;
+  return v_perp / (qm_abs * Bmag);
+}
+
+KOKKOS_INLINE_FUNCTION
+double grad_b_length(double Bmag, double gradBmag_magnitude)
+{
+  if (gradBmag_magnitude <= 0.0) return 1.0e20;
+  return Bmag / gradBmag_magnitude;
+}
+
+}  // namespace GCAPusherKokkos
+}  // namespace SPARTA_NS
+
+#endif  // SPARTA_GCA_PUSHER_KOKKOS_H
