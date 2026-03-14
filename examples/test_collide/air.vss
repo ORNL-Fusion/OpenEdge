@@ -1,0 +1,8 @@
+# VSS parameters for Nanbu test case
+# Only needed so that 'collide vss' can be declared
+# The actual Coulomb physics is handled by fix coll/nanbu
+#
+# species  diam(m)   omega  Tref(K)  alpha
+D          2.92e-10  0.75   300.0    1.0
+D+         2.92e-10  0.75   300.0    1.0
+C3+        3.70e-10  0.75   300.0    1.0
