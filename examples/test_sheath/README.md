@@ -38,7 +38,7 @@ The script prints:
 - Chodura/Bohm checks based on `u_par` and projected normal speed.
 
 By default it now reads `Te`, `Ti`, `ne`, and `upar=parr_flow` from:
-- `../test_west/input/plasma.h5`
+- `../test_west_axi/input/plasma.h5`
 and selects a sheath-entrance cell as the point closest to `|u_par/c_s - 1|`,
 with:
 - `c_s = sqrt((Te + Ti) * e / (2 m_D))`.
@@ -88,9 +88,9 @@ This computes sheath quantities on each wall segment using WEST
 python3 test_borodkina_sheath.py \
   --use-plasma-h5 yes \
   --eirene-wall yes \
-  --plasma-h5 ../test_west/input/plasma.h5 \
-  --bfield-h5 ../test_west/input/bfield.h5 \
-  --wall-file ../test_west/input/wall.txt \
+  --plasma-h5 ../test_west_axi/input/plasma.h5 \
+  --bfield-h5 ../test_west_axi/input/bfield.h5 \
+  --wall-file ../test_west_axi/input/wall.txt \
   --eirene-out output/eirene_sheath_west.png \
   --eirene-csv output/eirene_sheath_west.csv
 ```

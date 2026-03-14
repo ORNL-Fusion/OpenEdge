@@ -3,7 +3,7 @@ import os
 from collections import Counter, defaultdict
 from matplotlib import pyplot as plt
 
-data_path='/Users/42d/ORNL Dropbox/Abdou DIaw/addLi/fnacore=6.00e22_pheat=90.00MW_cont_dt=1e-6_te_up'
+data_path = os.environ.get('SOLPS_CASE_DIR', '.')  # UPDATE: set your SOLPS case directory
 
 fname = os.path.join(data_path, "mesh.extra")
 

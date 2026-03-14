@@ -48,7 +48,7 @@ dump 1 grid all 1 output/tmp.grid.oxygen id xc yc f_1[*]    # save 2D densities 
 
 compute cnear plasma/fields all constant temp_e 12 dens_e $n values temp_e dens_e
 
-fix 2 chem/adas 1 8 plasma.reactions plasma c_cnear[1] c_cnear[2]
+fix 2 chem/adas 1 8 plasma.reactions adas_dir ../../database/adas plasma c_cnear[1] c_cnear[2]
 
 
 timestep            ${dt}

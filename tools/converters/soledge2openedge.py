@@ -786,14 +786,15 @@ def interpolate_and_save_plasma_field(
 if __name__ == '__main__':
     cases = ['1p5MW']
     for case in cases:
-        base_dir = f'/Users/42d/soledge/{case}/run_dir'
-        out_dir = '/Users/42d/OpenedgeGPU/examples/test_west/input'
+        base_dir = f'/path/to/soledge/{case}/run_dir'  # UPDATE: set your SOLEDGE3X output path
+        _here = os.path.dirname(os.path.abspath(__file__))
+        out_dir = os.path.join(_here, '..', '..', 'examples', 'test_west_axi', 'input')
 
         ref_file = os.path.join(base_dir, 'refParam_raptorX.h5')
         mesh_file = os.path.join(base_dir, 'meshEIRENE.h5')
         data_file = os.path.join(base_dir, 'plasmaFinal.h5')
         bfield_file = os.path.join(base_dir, 'mesh_raptorX.h5')
-        wall_file = os.path.join('/Users/42d/OpenedgeGPU/examples/test_west/input', 'wall.txt')
+        wall_file = os.path.join(out_dir, 'wall.txt')
         plasma_out_file = os.path.join(out_dir, 'plasma.h5')
         bfield_out_file = os.path.join(out_dir, 'bfield.h5')
         debug_plot_file = os.path.join(out_dir, f'soledge_fields_{case}.png')

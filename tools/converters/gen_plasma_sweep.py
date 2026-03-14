@@ -49,24 +49,14 @@ def convert_soledge_dirs(soledge_dirs, times, ref_file, outdir,
       - mesh_raptorX.h5 (bfield)
       - plasmaFinal.h5
     """
-    # Try to import soledge2openedge
-    # Look in common locations
-    s2oe = None
-    for search_path in [
-        os.path.join(os.path.dirname(__file__), '..', 'examples', 'test_west_axi', 'input'),
-        os.path.dirname(__file__),
-    ]:
-        sys.path.insert(0, os.path.abspath(search_path))
-        try:
-            from soledge2openedge import interpolate_and_save_plasma_field
-            s2oe = interpolate_and_save_plasma_field
-            break
-        except ImportError:
-            sys.path.pop(0)
-
-    if s2oe is None:
+    # Import soledge2openedge from the same converters directory
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from soledge2openedge import interpolate_and_save_plasma_field
+        s2oe = interpolate_and_save_plasma_field
+    except ImportError:
         print("ERROR: Cannot import soledge2openedge.interpolate_and_save_plasma_field")
-        print("Make sure soledge2openedge.py is in the examples/test_west_axi/input/ directory")
+        print("Make sure soledge2openedge.py is in tools/converters/")
         sys.exit(1)
 
     os.makedirs(outdir, exist_ok=True)

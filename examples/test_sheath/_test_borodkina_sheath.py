@@ -743,19 +743,19 @@ def main() -> None:
     p.add_argument(
         "--plasma-h5",
         type=Path,
-        default=Path("../test_west/input/plasma.h5"),
+        default=Path("../test_west_axi/input/plasma.h5"),
         help="WEST plasma file used to extract Te/Ti/ne/u_par sheath-entrance values",
     )
     p.add_argument(
         "--bfield-h5",
         type=Path,
-        default=Path("../test_west/input/bfield.h5"),
+        default=Path("../test_west_axi/input/bfield.h5"),
         help="WEST magnetic-field file for wall-local Chodura geometry diagnostics",
     )
     p.add_argument(
         "--wall-file",
         type=Path,
-        default=Path("../test_west/input/wall.txt"),
+        default=Path("../test_west_axi/input/wall.txt"),
         help="WEST wall surface file (2D lines)",
     )
     p.add_argument(

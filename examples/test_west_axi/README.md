@@ -51,11 +51,11 @@ python3 plot_grid_density_west.py \
 `plasma.h5` supports multi-ion layout (`ions/*`, `ion_species/*`) and legacy single-ion fields.
 
 ## SOLEDGE conversion utility
-- `input/soledge2openedge.py` writes `plasma.h5`, `bfield.h5`, and `wall.txt` from SOLEDGE HDF5 geometry.
+- `tools/converters/soledge2openedge.py` writes `plasma.h5`, `bfield.h5`, and `wall.txt` from SOLEDGE HDF5 geometry.
 - Core export is disabled for now (can be re-enabled later once core contour source is finalized).
 
 Example:
 ```bash
-cd examples/test_west/input
+cd tools/converters
 python3 soledge2openedge.py
 ```

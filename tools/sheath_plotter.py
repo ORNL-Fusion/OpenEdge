@@ -304,7 +304,7 @@ def plot_surface(pts, tris, save=None, figsize=(8, 6)):
         
 if __name__ == "__main__":
 
-    exec_lmp =   '/Users/42d/OpenEdge/build/src/spa_mac_mpi'
+    exec_lmp =   'spa_mpi'  # UPDATE: path to your OpenEdge executable
     input_file = 'in.test'
     open_edge_dir = 'output'
 
