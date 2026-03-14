@@ -44,7 +44,9 @@ import h5py
 import numpy as np
 from scipy.interpolate import griddata
 
-QUIXOTE_MASTER = Path("/Users/42d/quixote-master")
+# If quixote-master is installed locally, add its path here or install via pip.
+# Example: QUIXOTE_MASTER = Path("/path/to/quixote-master")
+QUIXOTE_MASTER = Path(os.environ.get("QUIXOTE_PATH", "quixote-master"))
 if QUIXOTE_MASTER.exists():
     qpath = str(QUIXOTE_MASTER)
     if qpath not in sys.path:
