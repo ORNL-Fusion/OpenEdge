@@ -19,27 +19,36 @@ Key validation metric:
                     = 10000 * 0.5 / 0.4 = 12500
 
 Files:
-  in.cpc_gitr          - SPARTA input script
-  plasma.species       - W and W+ through W6+ species definitions
-  reactions_pmi.surf   - PMI reaction channels (R/S/A for W)
-  plasma.adas          - ADAS ionization/recombination reactions
-  particles.dat        - Initial W neutral source (10000 particles)
-  adas/                - Symlink to ADAS rate data (W, Z=74)
-  input/               - Surface geometry files
-  convert_gitr_to_stl.py   - Geometry converter (GITR cfg -> ASCII STL)
-  create_particles.py      - Particle source generator
+  input/               - Runtime inputs and geometry/source assets
+    in.cpc_gitr        - SPARTA input script
+    plasma.species     - W and W+ through W6+ species definitions
+    reactions_pmi.surf - PMI reaction channels (R/S/A for W)
+    plasma.adas        - ADAS ionization/recombination reactions
+    particles.dat      - Initial W neutral source (10000 particles)
+    create_particles.py - Particle source generator
+    convert_gitr_to_stl.py - Geometry converter (GITR cfg -> ASCII STL)
+  analysis/            - Postprocessing scripts for PMI/IEAD/deposition analysis
+  adas/                - Symlinked ADAS rate data for W (Z=74)
+  output/              - Runtime outputs and analysis summaries
 
 How to run:
+  cd input
   mpirun -np 4 /path/to/spa_mpi < in.cpc_gitr
 
   For full benchmark (1 ms simulated time):
     Change timestep to 1e-10 and run to 10000000
 
-Output:
-  output/iead.dat          - Ion energy-angle distribution
-  output/surf_react.dat    - Per-surface reaction tallies
-  output/particles         - Particle state snapshots
-  output/grid_density      - W impurity density on grid
+Postprocessing from the example root:
+  python3 analysis/analyze_pmi.py output/pmi_impacts.csv
+  python3 analysis/plot_iead.py --no-show
+  python3 analysis/process_openedge_output.py --no-show
+
+Generated output:
+  output/pmi_impacts.csv.rank*         - Per-impact PMI logs
+  output/surf_react.dat                - Per-surface reaction tallies
+  output/tmp.all.surf.cpc              - Surface geometry/flux dump for analysis
+  output/openedge_gross_deposition_summary.txt - Text summary from deposition postprocessing
+  output/iead_summary.txt              - Text summary from IEAD postprocessing
 
 Reference:
   T.R. Younkin et al., Comp. Phys. Comm. 264, 107885 (2021)
