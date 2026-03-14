@@ -155,11 +155,12 @@ UpdateKokkos::~UpdateKokkos()
 
 void UpdateKokkos::init()
 {
-  // init the UpdateKokkos class if performing a run, else just return
-  // only set first_update if a run is being performed
+  // Call base Update::init() first for OpenEdge-specific initialization:
+  // plasma cache custom vectors, sheath setup, Boris config, field fixes.
+  // UpdateKokkos then overrides moveptr and field fix resolution below.
+  Update::init();
 
   if (runflag == 0) return;
-  first_update = 1;
 
   if (optmove_flag) {
     if (!grid->uniform)
