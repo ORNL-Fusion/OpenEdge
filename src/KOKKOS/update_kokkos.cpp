@@ -550,8 +550,9 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
       }
     }
 
-    particle_kk->sync(Device,PARTICLE_MASK);
+    particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK);
     grid_kk->sync(Device,CELL_MASK|PCELL_MASK|SINFO_MASK|PLEVEL_MASK);
+    d_species = particle_kk->k_species.d_view;
 
     // may be able to move this outside of the while loop
     grid_kk_copy.copy(grid_kk);
@@ -901,24 +902,40 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   if (DIM < 3) xnew[2] = 0.0;
   if (pflag == PKEEP) {
     dtremain = dt;
-    xnew[0] = x[0] + dtremain*v[0];
-    xnew[1] = x[1] + dtremain*v[1];
-    if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
-    if (fstyle == CFIELD) {
-      if (DIM == 3) field3d(dtremain,xnew,v);
-      else if (DIM == 2) field2d(dtremain,xnew,v);
-    } else if (fstyle == PFIELD) field_per_particle(i,particle_i.icell,dtremain,xnew,v);
-    else if (fstyle == GFIELD) field_per_grid(i,particle_i.icell,dtremain,xnew,v);
+    // OpenEdge: use Boris pusher when B-field is active with subcycling
+    if (DIM == 3 && oe_boris_subcycles > 0 && d_bfieldfix_array_grid.data()) {
+      const int ispecies = particle_i.ispecies;
+      const double charge = d_species[ispecies].charge;
+      const double mass = d_species[ispecies].mass;
+      oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+    } else {
+      xnew[0] = x[0] + dtremain*v[0];
+      xnew[1] = x[1] + dtremain*v[1];
+      if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+      if (fstyle == CFIELD) {
+        if (DIM == 3) field3d(dtremain,xnew,v);
+        else if (DIM == 2) field2d(dtremain,xnew,v);
+      } else if (fstyle == PFIELD) field_per_particle(i,particle_i.icell,dtremain,xnew,v);
+      else if (fstyle == GFIELD) field_per_grid(i,particle_i.icell,dtremain,xnew,v);
+    }
   } else if (pflag == PINSERT) {
     dtremain = particle_i.dtremain;
-    xnew[0] = x[0] + dtremain*v[0];
-    xnew[1] = x[1] + dtremain*v[1];
-    if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
-    if (fstyle == CFIELD) {
-      if (DIM == 3) field3d(dtremain,xnew,v);
-      else if (DIM == 2) field2d(dtremain,xnew,v);
-    } else if (fstyle == PFIELD) field_per_particle(i,particle_i.icell,dtremain,xnew,v);
-    else if (fstyle == GFIELD) field_per_grid(i,particle_i.icell,dtremain,xnew,v);
+    // OpenEdge: Boris for newly inserted particles too
+    if (DIM == 3 && oe_boris_subcycles > 0 && d_bfieldfix_array_grid.data()) {
+      const int ispecies = particle_i.ispecies;
+      const double charge = particle_kk_copy.obj.k_species.d_view(ispecies).charge;
+      const double mass = particle_kk_copy.obj.k_species.d_view(ispecies).mass;
+      oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+    } else {
+      xnew[0] = x[0] + dtremain*v[0];
+      xnew[1] = x[1] + dtremain*v[1];
+      if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+      if (fstyle == CFIELD) {
+        if (DIM == 3) field3d(dtremain,xnew,v);
+        else if (DIM == 2) field2d(dtremain,xnew,v);
+      } else if (fstyle == PFIELD) field_per_particle(i,particle_i.icell,dtremain,xnew,v);
+      else if (fstyle == GFIELD) field_per_grid(i,particle_i.icell,dtremain,xnew,v);
+    }
   } else if (pflag == PENTRY) {
     icell = particle_i.icell;
     if (d_cells[icell].nsplit > 1) {

@@ -94,6 +94,7 @@ class UpdateKokkos : public Update {
   t_line_1d d_lines;
   t_tri_1d d_tris;
   t_particle_1d d_particles;
+  t_species_1d d_species;  // OpenEdge: species data for charge/mass lookup
 
   // Base SPARTA field perturbation (fstyle)
   DAT::t_float_2d_lr d_fieldfix_array_particle;
