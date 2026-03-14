@@ -923,8 +923,8 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
     // OpenEdge: Boris for newly inserted particles too
     if (DIM == 3 && oe_boris_subcycles > 0 && d_bfieldfix_array_grid.data()) {
       const int ispecies = particle_i.ispecies;
-      const double charge = particle_kk_copy.obj.k_species.d_view(ispecies).charge;
-      const double mass = particle_kk_copy.obj.k_species.d_view(ispecies).mass;
+      const double charge = d_species[ispecies].charge;
+      const double mass = d_species[ispecies].mass;
       oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
     } else {
       xnew[0] = x[0] + dtremain*v[0];
