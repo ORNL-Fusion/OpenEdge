@@ -12,6 +12,8 @@
    See the README file in the top-level SPARTA directory.
 ------------------------------------------------------------------------- */
 
+#define INVOKED_PER_GRID 16
+
 #include "spatype.h"
 #include "mpi.h"
 #include "math.h"
