@@ -8,18 +8,49 @@ Reads all per-rank CSV files (output/pmi_impacts.csv.rank*) and computes:
   - Impact energy and angle statistics
   - Comparison to analytic gross deposition
 
-Usage:
-    python3 analyze_pmi.py [csv_base]
-
-    csv_base: base path for CSV files (default: output/pmi_impacts.csv)
-              Reads csv_base.rank0, csv_base.rank1, etc.
+Examples:
+    python3 analyze_pmi.py
+    python3 analyze_pmi.py output/pmi_impacts.csv --nP 100000
+    python3 analyze_pmi.py --nP 100000 --R 0.5 --Y 0.1
+     python3 analyze_pmi.py output/pmi_impacts.csv --nP 100000 --R 0.5 --Y 0.1
 """
 
-import sys
+import argparse
 import glob
 import numpy as np
 
-csv_base = sys.argv[1] if len(sys.argv) > 1 else "output/pmi_impacts.csv"
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Analyze PMI impact logs")
+    parser.add_argument(
+        "csv_base",
+        nargs="?",
+        default="output/pmi_impacts.csv",
+        help="Base path for PMI CSV files (reads csv_base.rank*)",
+    )
+    parser.add_argument(
+        "--nP",
+        type=float,
+        default=10000.0,
+        help="Total injected source particles for analytic comparison",
+    )
+    parser.add_argument(
+        "--R",
+        type=float,
+        default=0.5,
+        help="Nominal reflection coefficient for analytic comparison",
+    )
+    parser.add_argument(
+        "--Y",
+        type=float,
+        default=0.1,
+        help="Nominal sputtering yield for analytic comparison",
+    )
+    return parser.parse_args()
+
+
+args = parse_args()
+csv_base = args.csv_base
 
 # Read all rank files
 files = sorted(glob.glob(f"{csv_base}.rank*"))
@@ -38,6 +69,8 @@ for f in files:
         for line in fh:
             parts = line.strip().split(",")
             if len(parts) < 8:
+                continue
+            if any(parts[idx] == "" for idx in (3, 4, 5, 6, 7)):
                 continue
             all_rows.append(parts)
 
@@ -79,14 +112,17 @@ print(f"  Y_eff = {Y_eff:.4f}")
 print(f"  A_eff = {A_eff:.4f}  (1-R-Y = {1-R_eff-Y_eff:.4f})")
 
 # Analytic with nominal values
-nP = 10000
-R_nom, Y_nom = 0.5, 0.1
+nP = args.nP
+R_nom, Y_nom = args.R, args.Y
 gross_analytic = nP * (1 - R_nom) / (1 - R_nom - Y_nom)
 print(f"\nAnalytic gross deposition (R={R_nom}, Y={Y_nom}, nP={nP}):")
 print(f"  grossDep = nP*(1-R)/(1-R-Y) = {gross_analytic:.0f}")
 print(f"  Simulated:  {n_A}")
 if gross_analytic > 0:
     print(f"  Error:      {100*(n_A - gross_analytic)/gross_analytic:+.1f}%")
+print("  Note:      This analytic value assumes full source normalization and")
+print("             asymptotic recycling / steady-state behavior. Early-time or")
+print("             partially converged runs will typically fall below it.")
 
 # Energy statistics
 print(f"\n{'='*50}")

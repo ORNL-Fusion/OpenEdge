@@ -30,7 +30,13 @@ variable        RN      equal 0.5               # reflection coefficient
 variable        RE      equal 0.8               # energy reflection fraction
 variable        Y       equal 0.1               # sputtering yield
 variable        nP      equal 10000             # number of source particles
+variable        nEmit   equal ${nP}             # emitted particles per insertion step
 variable        Vpar    equal -2000.0           # background parallel flow [m/s]
+variable        fnumSrc equal 1.0               # real/sim particle ratio for source
+variable        srcx    equal 0.0               # surface-emission region center x [m]
+variable        srcy    equal 0.0               # surface-emission region center y [m]
+variable        srcz    equal 0.0               # surface-emission region center z [m]
+variable        srcR    equal 3.0e-3            # surface-emission region radius [m]
 
 # ---- Simulation setup ----
 seed                    12345
@@ -38,15 +44,17 @@ dimension               3
 units                   si
 
 # Boundary: reflective (geometry is watertight, particles stay inside)
-boundary                r r r
+boundary                o o o 
 global                  gridcut 0.0 comm/sort yes
-global                  fnum 1.0
+global                  fnum ${fnumSrc}
 
 # Domain must enclose the GITR geometry
 # Bounding box: X [-0.015, 0.015], Y [-0.015, 0.015], Z [-0.0087, 0.03]
 # Add small margin
 create_box              -0.016 0.016 -0.016 0.016 -0.01 0.031
-create_grid             10 10 14
+#create_grid             10 10 14
+create_grid             20 20 28
+
 balance_grid            rcb cell
 
 # ---- Species and mixtures ----
@@ -59,22 +67,28 @@ mixture                 allW W3+  frac 0.0
 mixture                 allW W4+  frac 0.0
 mixture                 allW W5+  frac 0.0
 mixture                 allW W6+  frac 0.0
+#mixture                 allW vstream 2508.4899 0.0 2508.4899 temp 0.0
 
 # ---- Surface geometry ----
 # Converted from GITR point-plane 3D format -> ASCII STL -> SPARTA surf
-read_surf               input/gitr_geometry.surf
+read_surf               input/gitr_geometry.surf invert
 
 # ---- Surface collision + PMI reaction ----
 # Diffuse wall at room temperature (velreset=1 from PMI overrides translational)
 surf_collide            diffW diffuse ${Tkelvin} 1.0
 
 # PMI surface reaction: constant mode with CPC benchmark values
-# log yes writes per-rank CSV files for post-processing IEADs
 surf_react              pmiW pmi constant reactions_pmi.surf ${RN} ${RE} ${Y} ${Ebind} &
                         log yes file output/pmi_impacts.csv
+                    
 
+            
 # Apply collision model and reaction to all surfaces
 surf_modify             all collide diffW react pmiW
+
+# Localized source patch on the surface near (srcx,srcy,srcz)
+region                  src_emit sphere ${srcx} ${srcy} ${srcz} ${srcR}
+group                   src_emit surf region src_emit one
 
 # ---- Plasma fields (constant, uniform) ----
 compute                 cplasma plasma/fields all constant &
@@ -114,32 +128,46 @@ fix                     nanbu coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10] &
 # ---- Ionization / Recombination (ADAS) ----
 fix                     chem chem/adas 1 74 plasma.adas # plasma c_cplasma[7] c_cplasma[10]
 
-# ---- Load initial particle source ----
-# 10000 W neutrals at (0,0,10um), 6 eV in x + 6 eV in z (GITR source)
-read_particles          particles.dat 0
+# ---- read_particles) ----
 
+read_particles particles.dat 0
+read_particles particles.dat 0
+read_particles particles.dat 0
+read_particles particles.dat 0
+read_particles particles.dat 0
+read_particles particles.dat 0
+read_particles particles.dat 0
+read_particles particles.dat 0
+read_particles particles.dat 0
+read_particles particles.dat 0
 # ---- Diagnostics ----
 shell                   mkdir -p output
 
 # Surface reaction tallies (gross erosion/deposition)
 compute                 creact react/surf all pmiW
-fix                     fsurf ave/surf all 1 100 100000 c_creact[*]
-dump                    dsurf surf all 100000 output/surf_react.dat id f_fsurf[*]
+fix                     fsurf ave/surf all 1 100 1000 c_creact[*]
+dump                    dsurf surf all 1000 output/surf_react.dat id f_fsurf[*]
+
+# Per-mixture/all-species incident flux and moments (for areal-density postproc)
+compute                 2b surf all all nflux_incident mflux etot press ke shx shy shz px py pz
+fix                     f_all ave/surf all 1 100 100 c_2b[*] ave running
+dump                    d_all surf all 1000 output/tmp.all.surf.cpc id v1x v1y v1z v2x v2y v2z v3x v3y v3z area f_f_all[*]
+dump_modify             d_all first yes
 
 # Particle state dump for tracks
-dump                    dpart particle all 10000 output/particles id type x y z vx vy vz
-dump_modify             dpart first yes
+#dump                    dpart particle all 10 output/particles id type x y z vx vy vz
+#dump_modify             dpart first yes
 
 # Grid density
 compute                 cgrid grid all allW nrho
-fix                     fgrid ave/grid all 1 1000 100000 c_cgrid[*] ave running
-dump                    dgrid grid all 100000 output/grid_density id xc yc zc f_fgrid[*]
+fix                     fgrid ave/grid all 1 100 1000 c_cgrid[*] ave running
+dump                    dgrid grid all 1000 output/grid_density id xc yc zc f_fgrid[*]
 
 # ---- Time integration ----
 timestep                1.0e-10
-stats                   10000
+stats                   100
 stats_style             step cpu np
 
-# ---- Run ----
-# dt=1e-10 s, 1e7 steps = 1 ms physical time
-run              10000000
+
+# dt=1e-10 s, total 1e7 steps = 1 ms physical time
+run                     9999999

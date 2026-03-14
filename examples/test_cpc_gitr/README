@@ -43,3 +43,34 @@ Output:
 
 Reference:
   T.R. Younkin et al., Comp. Phys. Comm. 264, 107885 (2021)
+
+A/B Runner Scripts
+------------------
+Use these scripts to run OpenEdge and GITR into a shared timestamped layout
+for one-to-one comparison.
+
+- OpenEdge only:
+  `./run_openedge_case.sh`
+
+- GITR only:
+  `./run_gitr_case.sh`
+
+- Run both (recommended):
+  `./run_ab_compare.sh`
+
+Output layout:
+  `compare_runs/<RUN_TAG>/openedge/...`
+  `compare_runs/<RUN_TAG>/gitr/...`
+
+Useful overrides:
+- `RUN_TAG=mytest ./run_ab_compare.sh`
+- `NP=4 SPA_BIN=$HOME/build_oe/src/spa_mac_mpi ./run_openedge_case.sh`
+- `GITR_BIN=/Users/42d/GITR-1.3.0/build_cpu_serial4/GITR ./run_gitr_case.sh`
+- `GITR_CFG=/Users/42d/GITR-CPC-Example/input/gitrInput.cfg ./run_gitr_case.sh`
+
+Single-particle trajectory A/B:
+- `RUN_TAG=trajA NP=1 NSTEP=2000 ./run_single_particle_ab.sh`
+- `GITR_TRAJ_MODE=ballistic` (default): force-disable collisions/chemistry/surface model.
+- `GITR_TRAJ_MODE=physics`: keep source `gitrInput.cfg` physics flags, only force deterministic tracks.
+- `OE_INIT_SOURCE=gitr` (default): OpenEdge reads the same initial particle from `gitr_run/output/particleSource.nc`.
+- `OE_INIT_SOURCE=analytic`: OpenEdge uses the analytic 9 eV +z source.
