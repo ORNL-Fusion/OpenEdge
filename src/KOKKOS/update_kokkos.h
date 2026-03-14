@@ -101,13 +101,13 @@ class UpdateKokkos : public Update {
   DAT::t_float_2d_lr d_fieldfix_array_grid;
   class KokkosBase* KKBaseFieldFix;
 
-  // OpenEdge: separate B-field and E-field fix device views
-  DAT::t_float_2d_lr d_bfieldfix_array_grid;
-  DAT::t_float_2d_lr d_efieldfix_array_grid;
-  class KokkosBase* KKBaseBFieldFix;
-  class KokkosBase* KKBaseEFieldFix;
+  // OpenEdge: plasma compute device view (bypass field fixes)
+  // Boris kernel reads B directly from compute columns
+  DAT::t_float_2d_lr d_oe_plasma_compute;
+  int oe_bx_col, oe_by_col, oe_bz_col;  // column indices for B in compute
+  int oe_ex_col, oe_ey_col, oe_ez_col;  // column indices for E (sheath)
 
-  // OpenEdge: Boris config (copied from Update base at init)
+  // OpenEdge: Boris config
   int oe_boris_subcycles;
   double oe_echarge;
 

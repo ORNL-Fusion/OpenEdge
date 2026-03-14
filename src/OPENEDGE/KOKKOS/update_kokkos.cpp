@@ -257,22 +257,11 @@ void UpdateKokkos::init()
       error->all(FLERR,"External field fix is not Kokkos-enabled");
   }
 
-  // OpenEdge: resolve separate B-field and E-field fixes for Boris pusher
-  KKBaseBFieldFix = NULL;
-  KKBaseEFieldFix = NULL;
+  // OpenEdge: Boris config — read B/E directly from plasma compute view
   oe_boris_subcycles = boris_subcycles;
   oe_echarge = echarge;
-
-  if (bfstyle == GFIELD || bfstyle == PFIELD) {
-    KKBaseBFieldFix = dynamic_cast<KokkosBase*>(modify->fix[bfieldfix]);
-    if (!KKBaseBFieldFix)
-      error->all(FLERR,"OpenEdge bfield fix is not Kokkos-enabled");
-  }
-  if (efstyle == GFIELD || efstyle == PFIELD) {
-    KKBaseEFieldFix = dynamic_cast<KokkosBase*>(modify->fix[efieldfix]);
-    if (!KKBaseEFieldFix)
-      error->all(FLERR,"OpenEdge efield fix is not Kokkos-enabled");
-  }
+  oe_bx_col = oe_by_col = oe_bz_col = -1;
+  oe_ex_col = oe_ey_col = oe_ez_col = -1;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -350,14 +339,20 @@ void UpdateKokkos::run(int nsteps)
     d_fieldfix_array_grid = KKBaseFieldFix->d_array_grid;
   }
 
-  // OpenEdge: fetch B-field and E-field fix views (once at start if time-independent)
-  if (bfstyle == GFIELD && bfieldfreq == 0 && KKBaseBFieldFix) {
-    modify->fix[bfieldfix]->compute_field();
-    d_bfieldfix_array_grid = KKBaseBFieldFix->d_array_grid;
-  }
-  if (efstyle == GFIELD && efieldfreq == 0 && KKBaseEFieldFix) {
-    modify->fix[efieldfix]->compute_field();
-    d_efieldfix_array_grid = KKBaseEFieldFix->d_array_grid;
+  // OpenEdge: fetch plasma compute view for Boris B-field (bypass fixes)
+  // The plasma/fields compute stores bx,by,bz as the first 3 columns
+  if (oe_boris_subcycles > 0 && sheath_plasma_cidx >= 0) {
+    Compute *cp = modify->compute[sheath_plasma_cidx];
+    if (!(cp->invoked_flag & INVOKED_PER_GRID)) {
+      cp->compute_per_grid();
+      cp->invoked_flag |= INVOKED_PER_GRID;
+    }
+    KokkosBase *kk_cp = dynamic_cast<KokkosBase*>(cp);
+    if (kk_cp) {
+      d_oe_plasma_compute = kk_cp->d_array_grid;
+      // Column mapping from compute: bx=0, by=1, bz=2 (first 3 values)
+      oe_bx_col = 0; oe_by_col = 1; oe_bz_col = 2;
+    }
   }
 
   // cellweightflag = 1 if grid-based particle weighting is ON
@@ -505,15 +500,7 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
     d_fieldfix_array_grid = KKBaseFieldFix->d_array_grid;
   }
 
-  // OpenEdge: refresh B/E-field views per timestep if time-dependent
-  if (bfstyle == GFIELD && bfieldfreq && ((ntimestep-1) % bfieldfreq == 0) && KKBaseBFieldFix) {
-    modify->fix[bfieldfix]->compute_field();
-    d_bfieldfix_array_grid = KKBaseBFieldFix->d_array_grid;
-  }
-  if (efstyle == GFIELD && efieldfreq && ((ntimestep-1) % efieldfreq == 0) && KKBaseEFieldFix) {
-    modify->fix[efieldfix]->compute_field();
-    d_efieldfix_array_grid = KKBaseEFieldFix->d_array_grid;
-  }
+  // OpenEdge: plasma compute view refresh (already done per-step by computes)
 
   // one or more loops over particles
   // first iteration = all my particles
@@ -907,7 +894,7 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   if (pflag == PKEEP) {
     dtremain = dt;
     // OpenEdge: use Boris pusher when B-field is active with subcycling
-    if (DIM == 3 && oe_boris_subcycles > 0 && d_bfieldfix_array_grid.data()) {
+    if (DIM == 3 && oe_boris_subcycles > 0 && d_oe_plasma_compute.data()) {
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
@@ -925,7 +912,7 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   } else if (pflag == PINSERT) {
     dtremain = particle_i.dtremain;
     // OpenEdge: Boris for newly inserted particles too
-    if (DIM == 3 && oe_boris_subcycles > 0 && d_bfieldfix_array_grid.data()) {
+    if (DIM == 3 && oe_boris_subcycles > 0 && d_oe_plasma_compute.data()) {
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
@@ -1995,8 +1982,8 @@ int UpdateKokkos::split2d(int icell, double *x) const
 
 /* ----------------------------------------------------------------------
    OpenEdge: device-callable Boris 3D pusher.
-   Reads E from d_efieldfix_array_grid and B from d_bfieldfix_array_grid.
-   No sheath in this initial version — sheath will be added incrementally.
+   Reads B directly from plasma compute device view (bypass field fixes).
+   No sheath E-field in this version — added incrementally.
 ------------------------------------------------------------------------- */
 
 KOKKOS_INLINE_FUNCTION
@@ -2023,19 +2010,14 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
     double E[3] = {0.0, 0.0, 0.0};
     double B[3] = {0.0, 0.0, 0.0};
 
-    // Read B-field from grid fix view
-    if (d_bfieldfix_array_grid.data()) {
-      B[0] = d_bfieldfix_array_grid(icell, 0);
-      B[1] = d_bfieldfix_array_grid(icell, 1);
-      B[2] = d_bfieldfix_array_grid(icell, 2);
+    // Read B-field directly from plasma compute view (no fix intermediary)
+    if (d_oe_plasma_compute.data() && oe_bx_col >= 0) {
+      B[0] = d_oe_plasma_compute(icell, oe_bx_col);
+      B[1] = d_oe_plasma_compute(icell, oe_by_col);
+      B[2] = d_oe_plasma_compute(icell, oe_bz_col);
     }
 
-    // Read E-field from grid fix view
-    if (d_efieldfix_array_grid.data()) {
-      E[0] = d_efieldfix_array_grid(icell, 0);
-      E[1] = d_efieldfix_array_grid(icell, 1);
-      E[2] = d_efieldfix_array_grid(icell, 2);
-    }
+    // E-field from sheath (future: read from compute view too)
 
     BorisGridKokkos::push_velocity(qm, dt_sub, E, B, vcur);
     xcur[0] += vcur[0] * dt_sub;
