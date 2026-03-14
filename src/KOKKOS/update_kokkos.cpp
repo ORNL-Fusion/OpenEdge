@@ -283,7 +283,10 @@ void UpdateKokkos::setup()
   GridKokkos* grid_kk = (GridKokkos*) grid;
   SurfKokkos* surf_kk = (SurfKokkos*) surf;
 
-  particle_kk->sync(Device,ALL_MASK);
+  // Sync particle data EXCLUDING custom vectors (which may be zero-sized
+  // at this point if no particles exist yet). Custom vectors get synced
+  // after setup() populates them.
+  particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK);
   particle_kk->sorted_kk = 0;
 
   if (sparta->kokkos->prewrap) {
