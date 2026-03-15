@@ -40,7 +40,7 @@ class FixCollNanbu : public Fix {
   void end_of_step();
   double memory_usage();
 
- private:
+ protected:
   NanbuScatterTable scatter_table_;
   RanKnuth *rng_;
 
