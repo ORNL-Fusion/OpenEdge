@@ -1056,7 +1056,7 @@ double FixChemAdas::read_cell(const GridSrc &S, int icell, int var_col)
   return array_grid ? array_grid[icell][var_col] : 0.0;
 }
 
-inline void FixChemAdas::refresh_compute_src(GridSrc &S) {
+void FixChemAdas::refresh_compute_src(GridSrc &S) {
   if (S.kind != SRC_COMP) return;
   if (S.cache_ts == update->ntimestep) return;
 
