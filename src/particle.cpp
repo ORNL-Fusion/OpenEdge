@@ -91,11 +91,10 @@ Particle::Particle(SPARTA *sparta) : Pointers(sparta)
   edarray = NULL;
   edcol = NULL;
 
-  // Built-in per-particle hit tracking for ID-based transfer matrices.
-  //  hit_flag    : 0 = never hit a surface, 1 = first hit recorded
-  //  hit_surf_id : explicit surface ID of first hit (0 if unset)
-  add_custom((char *) "hit_flag",INT,0);
-  add_custom((char *) "hit_surf_id",INT,0);
+  // hit_flag/hit_surf_id custom vectors are added in init_hit_custom(),
+  // NOT here, because virtual dispatch doesn't work in constructors.
+  // With Kokkos, the base add_custom would bypass ParticleKokkos::add_custom,
+  // leaving the Kokkos DualViews out of sync.
 
   // RNG for particle weighting
 
@@ -149,6 +148,13 @@ Particle::~Particle()
 
 void Particle::init()
 {
+  // register hit tracking custom vectors (deferred from constructor
+  // so that virtual dispatch to ParticleKokkos::add_custom works)
+  if (find_custom((char *) "hit_flag") < 0)
+    add_custom((char *) "hit_flag",INT,0);
+  if (find_custom((char *) "hit_surf_id") < 0)
+    add_custom((char *) "hit_surf_id",INT,0);
+
   // check for errors in custom particle vectors/arrays
 
   error_custom();

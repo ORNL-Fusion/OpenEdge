@@ -154,6 +154,11 @@ void ParticleKokkos::grow_custom(int index, int nold, int nnew)
 {
   // modifies the inner part of eivec,eiarray,edvec,edarray on whatever, and the outer view on the host
 
+  // ensure minimum allocation of 1 so inner DualViews always have a valid
+  // SharedAllocationRecord — zero-sized DualViews crash on sync/modify
+  int newsize = nold + nnew;
+  if (newsize < 1) newsize = 1;
+
   k_eivec.sync_host();
   k_eiarray.sync_host();
   k_edvec.sync_host();
@@ -164,14 +169,14 @@ void ParticleKokkos::grow_custom(int index, int nold, int nnew)
       int *ivector = eivec[ewhich[index]];
       auto k_ivector = k_eivec.h_view[ewhich[index]].k_view;
       k_ivector.modify_host(); // force resize on host
-      memoryKK->grow_kokkos(k_ivector,ivector,nold+nnew,"particle:eivec");
+      memoryKK->grow_kokkos(k_ivector,ivector,newsize,"particle:eivec");
       k_eivec.h_view[ewhich[index]].k_view = k_ivector;
       eivec[ewhich[index]] = ivector;
     } else {
       int **iarray = eiarray[ewhich[index]];
       auto k_iarray = k_eiarray.h_view[ewhich[index]].k_view;
       k_iarray.modify_host(); // force resize on host
-      memoryKK->grow_kokkos(k_iarray,iarray,nold+nnew,esize[index],"particle:eiarray");
+      memoryKK->grow_kokkos(k_iarray,iarray,newsize,esize[index],"particle:eiarray");
       k_eiarray.h_view[ewhich[index]].k_view = k_iarray;
       eiarray[ewhich[index]] = iarray;
     }
@@ -181,14 +186,14 @@ void ParticleKokkos::grow_custom(int index, int nold, int nnew)
       double *dvector = edvec[ewhich[index]];
       auto k_dvector = k_edvec.h_view[ewhich[index]].k_view;
       k_dvector.modify_host(); // force resize on host
-      memoryKK->grow_kokkos(k_dvector,dvector,nold+nnew,"particle:edvec");
+      memoryKK->grow_kokkos(k_dvector,dvector,newsize,"particle:edvec");
       k_edvec.h_view[ewhich[index]].k_view = k_dvector;
       edvec[ewhich[index]] = dvector;
     } else {
       double **darray = edarray[ewhich[index]];
       auto k_darray = k_edarray.h_view[ewhich[index]].k_view;
       k_darray.modify_host(); // force resize on host
-      memoryKK->grow_kokkos(k_darray,darray,nold+nnew,esize[index],"particle:edarray");
+      memoryKK->grow_kokkos(k_darray,darray,newsize,esize[index],"particle:edarray");
       k_edarray.h_view[ewhich[index]].k_view = k_darray;
       edarray[ewhich[index]] = darray;
     }

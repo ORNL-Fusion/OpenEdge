@@ -14,8 +14,7 @@ create_grid         200 200 1
 balance_grid        rcb cell
 
 # Species + particles
-global              fnum 1e4
-
+global              fnum 1e6
 
 species input/plasma.species W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+
 
@@ -104,6 +103,8 @@ compute cpmi pmi/surf/data 1 file input/plasma.h5 ../../database/surface/O_on_W.
 # cpmi is vector_surf (single value), so no flux_index needed
 fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes
 
+#create_particles tungstenSource n 2000
+
 #compute cpmi pmi/surf/data 1 file input/plasma.h5 ../../database/surface/O_on_W.h5 projectile_slots 2 9 mass_amu 16.0 #nflux_species 9 incident_angle_species 9 incident_energy_species 9 &
     #sputter_yield_species 9 sputter_flux_species 9
     
@@ -113,21 +114,21 @@ fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes
 
 
 # Particle state dump for emit wiring check
-#dump dpart particle all 10 output/state.west id type x y z vx vy vz
-#dump_modify dpart first yes
-
-compute computeID grid all species nrho
-fix     fixID ave/grid all 1 500 5000 c_computeID[*] ave running
-dump    dumpID  grid all 5000 output/tmp.grid.density id xc yc f_fixID[*]
+dump dpart particle all 10 output/state.west id type x y z vx vy vz
+dump_modify dpart first yes
+#
+#compute computeID grid all species nrho
+#fix     fixID ave/grid all 1 500 5000 c_computeID[*] ave running
+#dump    dumpID  grid all 5000 output/tmp.grid.density id xc yc f_fixID[*]
 
 
 # Short validation run
 #fix 31 halt 1 v_npart <= 0
-timestep            1.0e-08
-stats               500
+timestep            1.0e-09
+stats               10
 stats_style         step cpu np
-run                 5000
+run                 50 #00
 
 unfix femit
 
-run                 100000
+#run                 1000 #00

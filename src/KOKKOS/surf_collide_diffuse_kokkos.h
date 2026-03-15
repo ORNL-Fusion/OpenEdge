@@ -31,6 +31,7 @@ SurfCollideStyle(diffuse/kk,SurfCollideDiffuseKokkos)
 #include "fix_vibmode_kokkos.h"
 #include "surf_react_global_kokkos.h"
 #include "surf_react_prob_kokkos.h"
+#include "surf_react_pmi_kokkos.h"
 
 namespace SPARTA_NS {
 
@@ -93,6 +94,7 @@ class SurfCollideDiffuseKokkos : public SurfCollideDiffuse {
   int sr_map[KOKKOS_MAX_TOT_SURF_REACT];
   KKCopy<SurfReactGlobalKokkos> sr_kk_global_copy[KOKKOS_MAX_SURF_REACT_PER_TYPE];
   KKCopy<SurfReactProbKokkos> sr_kk_prob_copy[KOKKOS_MAX_SURF_REACT_PER_TYPE];
+  KKCopy<SurfReactPMIKokkos> sr_kk_pmi_copy[KOKKOS_MAX_SURF_REACT_PER_TYPE];
 
  public:
 
@@ -139,6 +141,9 @@ class SurfCollideDiffuseKokkos : public SurfCollideDiffuse {
           react_kokkos<ATOMIC_REDUCTION>(ip,isurf,norm,jp,velreset,d_retry,d_nlocal);
       } else if (sr_type == 1) {
         reaction = sr_kk_prob_copy[m].obj.
+          react_kokkos<ATOMIC_REDUCTION>(ip,isurf,norm,jp,velreset,d_retry,d_nlocal);
+      } else if (sr_type == 2) {
+        reaction = sr_kk_pmi_copy[m].obj.
           react_kokkos<ATOMIC_REDUCTION>(ip,isurf,norm,jp,velreset,d_retry,d_nlocal);
       }
 

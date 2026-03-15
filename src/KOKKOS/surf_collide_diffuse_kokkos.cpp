@@ -50,6 +50,7 @@ SurfCollideDiffuseKokkos::SurfCollideDiffuseKokkos(SPARTA *sparta, int narg, cha
   fix_vibmode_kk_copy(sparta),
   sr_kk_global_copy{VAL_2(KKCopy<SurfReactGlobalKokkos>(sparta))},
   sr_kk_prob_copy{VAL_2(KKCopy<SurfReactProbKokkos>(sparta))},
+  sr_kk_pmi_copy{VAL_2(KKCopy<SurfReactPMIKokkos>(sparta))},
   rand_pool(12345 + comm->me
 #ifdef SPARTA_KOKKOS_EXACT
             , sparta
@@ -81,6 +82,7 @@ SurfCollideDiffuseKokkos::SurfCollideDiffuseKokkos(SPARTA *sparta) :
   fix_vibmode_kk_copy(sparta),
   sr_kk_global_copy{VAL_2(KKCopy<SurfReactGlobalKokkos>(sparta))},
   sr_kk_prob_copy{VAL_2(KKCopy<SurfReactProbKokkos>(sparta))},
+  sr_kk_pmi_copy{VAL_2(KKCopy<SurfReactPMIKokkos>(sparta))},
   rand_pool(12345 // seed doesn't matter since it will just be copied over
 #ifdef SPARTA_KOKKOS_EXACT
             , sparta
@@ -101,6 +103,7 @@ SurfCollideDiffuseKokkos::~SurfCollideDiffuseKokkos()
     for (int i = 0; i < KOKKOS_MAX_SURF_REACT_PER_TYPE; i++) {
       sr_kk_global_copy[i].uncopy();
       sr_kk_prob_copy[i].uncopy();
+      sr_kk_pmi_copy[i].uncopy();
     }
   }
 
@@ -234,8 +237,8 @@ void SurfCollideDiffuseKokkos::pre_collide()
     error->all(FLERR,"Kokkos currently supports two instances of each surface reaction method");
 
   if (surf->nsr > 0) {
-    int nglob,nprob;
-    nglob = nprob = 0;
+    int nglob,nprob,npmi;
+    nglob = nprob = npmi = 0;
     for (int n = 0; n < surf->nsr; n++) {
       if (!surf->sr[n]->kokkosable)
         error->all(FLERR,"Must use Kokkos-enabled surface reaction method with Kokkos");
@@ -243,7 +246,7 @@ void SurfCollideDiffuseKokkos::pre_collide()
         sr_kk_global_copy[nglob].copy((SurfReactGlobalKokkos*)(surf->sr[n]));
         sr_kk_global_copy[nglob].obj.pre_react();
         sr_type_list[n] = 0;
-        sr_map[n] = nprob;
+        sr_map[n] = nglob;
         nglob++;
       } else if (strcmp(surf->sr[n]->style,"prob") == 0) {
         sr_kk_prob_copy[nprob].copy((SurfReactProbKokkos*)(surf->sr[n]));
@@ -251,12 +254,20 @@ void SurfCollideDiffuseKokkos::pre_collide()
         sr_type_list[n] = 1;
         sr_map[n] = nprob;
         nprob++;
+      } else if (strcmp(surf->sr[n]->style,"pmi") == 0) {
+        sr_kk_pmi_copy[npmi].copy((SurfReactPMIKokkos*)(surf->sr[n]));
+        sr_kk_pmi_copy[npmi].obj.pre_react();
+        sr_type_list[n] = 2;
+        sr_map[n] = npmi;
+        npmi++;
       } else {
         error->all(FLERR,"Unknown Kokkos surface reaction method");
       }
     }
 
-    if (nglob > KOKKOS_MAX_SURF_REACT_PER_TYPE || nprob > KOKKOS_MAX_SURF_REACT_PER_TYPE)
+    if (nglob > KOKKOS_MAX_SURF_REACT_PER_TYPE ||
+        nprob > KOKKOS_MAX_SURF_REACT_PER_TYPE ||
+        npmi > KOKKOS_MAX_SURF_REACT_PER_TYPE)
       error->all(FLERR,"Kokkos currently supports two instances of each surface reaction method");
   }
 
@@ -311,8 +322,8 @@ void SurfCollideDiffuseKokkos::backup()
   d_particles = particle_kk->k_particles.d_view;
 
   if (surf->nsr > 0) {
-    int nglob,nprob;
-    nglob = nprob = 0;
+    int nglob,nprob,npmi;
+    nglob = nprob = npmi = 0;
     for (int n = 0; n < surf->nsr; n++) {
       if (strcmp(surf->sr[n]->style,"global") == 0) {
         sr_kk_global_copy[nglob].obj.backup();
@@ -320,6 +331,9 @@ void SurfCollideDiffuseKokkos::backup()
       } else if (strcmp(surf->sr[n]->style,"prob") == 0) {
         sr_kk_prob_copy[nprob].obj.backup();
         nprob++;
+      } else if (strcmp(surf->sr[n]->style,"pmi") == 0) {
+        sr_kk_pmi_copy[npmi].obj.backup();
+        npmi++;
       }
     }
   }
@@ -336,8 +350,8 @@ void SurfCollideDiffuseKokkos::backup()
 void SurfCollideDiffuseKokkos::restore()
 {
   if (surf->nsr > 0) {
-    int nglob,nprob;
-    nglob = nprob = 0;
+    int nglob,nprob,npmi;
+    nglob = nprob = npmi = 0;
     for (int n = 0; n < surf->nsr; n++) {
       if (strcmp(surf->sr[n]->style,"global") == 0) {
         sr_kk_global_copy[nglob].obj.restore();
@@ -345,6 +359,9 @@ void SurfCollideDiffuseKokkos::restore()
       } else if (strcmp(surf->sr[n]->style,"prob") == 0) {
         sr_kk_prob_copy[nprob].obj.restore();
         nprob++;
+      } else if (strcmp(surf->sr[n]->style,"pmi") == 0) {
+        sr_kk_pmi_copy[npmi].obj.restore();
+        npmi++;
       }
     }
   }
