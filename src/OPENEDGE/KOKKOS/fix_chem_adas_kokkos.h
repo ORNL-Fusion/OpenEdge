@@ -61,8 +61,7 @@ class FixChemAdasKokkos : public FixChemAdas {
   t_particle_1d d_particles;
   t_species_1d d_species;
   DAT::t_float_2d_lr d_plasma;
-  DAT::t_int_1d d_cellcount;
-  DAT::t_int_2d d_plist;
+  int kk_nlocal;
 
   // cached scalars
   double kk_dt_chem;
@@ -77,7 +76,7 @@ class FixChemAdasKokkos : public FixChemAdas {
 
  public:
   KOKKOS_INLINE_FUNCTION
-  void operator()(int icell) const;
+  void operator()(int i) const;
 
  private:
   KOKKOS_INLINE_FUNCTION

@@ -149,9 +149,6 @@ void FixChemAdasKokkos::end_of_step()
   if ((update->ntimestep % nevery) != 0) return;
 
   ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
-  GridKokkos *grid_kk = (GridKokkos *) grid;
-
-  if (!particle_kk->sorted_kk) particle_kk->sort_kokkos();
 
   // refresh compute on host
   refresh_compute_src(srcTe);
@@ -190,13 +187,11 @@ void FixChemAdasKokkos::end_of_step()
 
   // sync to device
   particle_kk->sync(Device, PARTICLE_MASK | SPECIES_MASK);
-  grid_kk->sync(Device, CINFO_MASK);
 
   d_particles = particle_kk->k_particles.d_view;
   d_species = particle_kk->k_species.d_view;
-  d_cellcount = grid_kk->d_cellcount;
-  d_plist = grid_kk->d_plist;
   d_plasma = kk_cp->d_array_grid;
+  kk_nlocal = particle->nlocal;
 
   kk_dt_chem = nevery * update->dt;
 
@@ -204,10 +199,9 @@ void FixChemAdasKokkos::end_of_step()
   Kokkos::deep_copy(d_nreact_one, 0);
   Kokkos::deep_copy(d_tally_reactions, 0);
 
-  // launch kernel
-  const int nglocal = grid->nlocal;
+  // launch per-particle kernel
   copymode = 1;
-  Kokkos::parallel_for(nglocal, *this);
+  Kokkos::parallel_for(kk_nlocal, *this);
   copymode = 0;
 
   // copy tallies back to host
@@ -227,10 +221,9 @@ void FixChemAdasKokkos::end_of_step()
 /* ---------------------------------------------------------------------- */
 
 KOKKOS_INLINE_FUNCTION
-void FixChemAdasKokkos::operator()(int icell) const
+void FixChemAdasKokkos::operator()(int i) const
 {
-  int np = d_cellcount(icell);
-  if (np < 1) return;
+  int icell = d_particles(i).icell;
 
   double Te_eV = d_plasma(icell, col_Te);
   double ne_m3 = d_plasma(icell, col_Ne);
@@ -238,12 +231,7 @@ void FixChemAdasKokkos::operator()(int icell) const
   if (ne_m3 < 0.0) ne_m3 = 0.0;
 
   rand_type rng = rand_pool.get_state();
-
-  for (int j = 0; j < np; j++) {
-    int idx = d_plist(icell, j);
-    kk_attempt(idx, Te_eV, ne_m3, rng);
-  }
-
+  kk_attempt(i, Te_eV, ne_m3, rng);
   rand_pool.free_state(rng);
 }
 
