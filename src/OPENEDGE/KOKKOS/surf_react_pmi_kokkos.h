@@ -1,7 +1,8 @@
 /* ----------------------------------------------------------------------
    OpenEdge: PMI surface reaction — Kokkos implementation.
    Provides react_kokkos() for thread-safe execution in Kokkos parallel
-   regions (OpenMP).  Table lookups use host pointers (shared memory).
+   regions.  All table data is stored in Kokkos device views so this
+   works on both OpenMP and CUDA backends.
 ------------------------------------------------------------------------- */
 
 #ifdef SURF_REACT_CLASS
@@ -21,6 +22,11 @@ SurfReactStyle(pmi/kk,SurfReactPMIKokkos)
 #include "math_const.h"
 
 namespace SPARTA_NS {
+
+// device-friendly version of SpeciesReactions (no pointers)
+struct SpeciesReactionsKK {
+  int ireflect, isputter, iabsorb;
+};
 
 class SurfReactPMIKokkos : public SurfReactPMI {
  public:
@@ -57,6 +63,34 @@ class SurfReactPMIKokkos : public SurfReactPMI {
   // cached constants for device access
   double kk_mvv2e, kk_joule2ev;
   int kk_si_units;
+  int kk_mode;              // copy of mode (0=constant, 1=file)
+  int kk_nE, kk_nA;         // grid dimensions
+  int kk_nb_cdf;
+  int kk_has_cdf_Y;
+  double kk_Ebind;
+  double kk_const_RN, kk_const_RE, kk_const_Y, kk_const_Ebind;
+
+  // ---------- device views for table data ----------
+
+  typedef Kokkos::View<double*, DeviceType> t_double_1d;
+
+  // PMI coefficient tables [nE*nA]
+  t_double_1d d_RN_table;
+  t_double_1d d_RE_table;
+  t_double_1d d_spyld_table;
+
+  // energy/angle axes
+  t_double_1d d_E_axis;
+  t_double_1d d_A_axis;
+
+  // optional CDF for sputter energy [nE*nA*nb_cdf]
+  t_double_1d d_edist_Y;
+
+  // per-species reaction lookup
+  Kokkos::View<SpeciesReactionsKK*, DeviceType> d_species_reactions;
+
+  // first product species index for each reaction
+  DAT::t_int_1d d_react_product0;
 
  public:
 
@@ -72,7 +106,7 @@ class SurfReactPMIKokkos : public SurfReactPMI {
     jp = NULL;
 
     int ispecies = ip->ispecies;
-    SpeciesReactions &sr = species_reactions[ispecies];
+    SpeciesReactionsKK sr = d_species_reactions(ispecies);
 
     if (sr.ireflect < 0 && sr.isputter < 0 && sr.iabsorb < 0) return 0;
 
@@ -102,16 +136,16 @@ class SurfReactPMIKokkos : public SurfReactPMI {
 
     double RN, RE, Y, Eb;
 
-    if (mode == 0) {
-      RN = const_RN;
-      RE = const_RE;
-      Y  = const_Y;
-      Eb = const_Ebind;
+    if (kk_mode == 0) {
+      RN = kk_const_RN;
+      RE = kk_const_RE;
+      Y  = kk_const_Y;
+      Eb = kk_const_Ebind;
     } else {
-      RN = kk_interp_table(RN_table.data(), E_eV, theta_deg);
-      RE = kk_interp_table(RE_table.data(), E_eV, theta_deg);
-      Y  = kk_interp_table(spyld_table.data(), E_eV, theta_deg);
-      Eb = Ebind;
+      RN = kk_interp_table(d_RN_table, E_eV, theta_deg);
+      RE = kk_interp_table(d_RE_table, E_eV, theta_deg);
+      Y  = kk_interp_table(d_spyld_table, E_eV, theta_deg);
+      Eb = kk_Ebind;
     }
 
     if (RN < 0.0) RN = 0.0;
@@ -133,8 +167,7 @@ class SurfReactPMIKokkos : public SurfReactPMI {
       // REFLECT
 
       int irxn = sr.ireflect;
-      OneReaction *r = &rlist[irxn];
-      ip->ispecies = r->products[0];
+      ip->ispecies = d_react_product0(irxn);
 
       double E_out = RE * E_eV;
       double mass_out = d_species[ip->ispecies].mass;
@@ -160,7 +193,6 @@ class SurfReactPMIKokkos : public SurfReactPMI {
       // SPUTTER
 
       int irxn = sr.isputter;
-      OneReaction *r = &rlist[irxn];
 
       double x[3];
       memcpy(x, ip->x, 3*sizeof(double));
@@ -168,21 +200,21 @@ class SurfReactPMIKokkos : public SurfReactPMI {
 
       ip = NULL;
 
-      int sput_species = r->products[0];
+      int sput_species = d_react_product0(irxn);
       double mass_sput = d_species[sput_species].mass;
 
       double E_sput;
-      if (has_cdf_Y) {
+      if (kk_has_cdf_Y) {
         int iE = 0, iA = 0;
-        if (nE > 0) {
-          iE = kk_lower_bound(E_axis.data(), nE, E_eV);
-          if (iE >= nE) iE = nE - 1;
+        if (kk_nE > 0) {
+          iE = kk_lower_bound(d_E_axis, kk_nE, E_eV);
+          if (iE >= kk_nE) iE = kk_nE - 1;
         }
-        if (nA > 0) {
-          iA = kk_lower_bound(A_axis.data(), nA, theta_deg);
-          if (iA >= nA) iA = nA - 1;
+        if (kk_nA > 0) {
+          iA = kk_lower_bound(d_A_axis, kk_nA, theta_deg);
+          if (iA >= kk_nA) iA = kk_nA - 1;
         }
-        E_sput = kk_sample_from_cdf(edist_Y.data(), iE, iA, rand_gen);
+        E_sput = kk_sample_from_cdf(d_edist_Y, iE, iA, rand_gen);
       } else {
         E_sput = kk_sample_thompson(Eb / 2.0, E_eV, rand_gen);
       }
@@ -250,38 +282,37 @@ class SurfReactPMIKokkos : public SurfReactPMI {
   /* ---------------------------------------------------------------------- */
 
   KOKKOS_INLINE_FUNCTION
-  double kk_interp_table(const double *table,
+  double kk_interp_table(const t_double_1d &table,
                          double e_eV, double a_deg) const
   {
-    if (nE < 2 || nA < 2) return 0.0;
-
-    const double *ea = E_axis.data();
-    const double *aa = A_axis.data();
+    if (kk_nE < 2 || kk_nA < 2) return 0.0;
 
     double ec = e_eV, ac = a_deg;
-    if (ec < ea[0]) ec = ea[0];
-    if (ec > ea[nE-1]) ec = ea[nE-1];
-    if (ac < aa[0]) ac = aa[0];
-    if (ac > aa[nA-1]) ac = aa[nA-1];
+    if (ec < d_E_axis(0)) ec = d_E_axis(0);
+    if (ec > d_E_axis(kk_nE-1)) ec = d_E_axis(kk_nE-1);
+    if (ac < d_A_axis(0)) ac = d_A_axis(0);
+    if (ac > d_A_axis(kk_nA-1)) ac = d_A_axis(kk_nA-1);
 
     int iE2 = 1;
-    while (iE2 < nE-1 && ea[iE2] < ec) iE2++;
+    while (iE2 < kk_nE-1 && d_E_axis(iE2) < ec) iE2++;
     int iE1 = iE2 - 1;
 
     int iA2 = 1;
-    while (iA2 < nA-1 && aa[iA2] < ac) iA2++;
+    while (iA2 < kk_nA-1 && d_A_axis(iA2) < ac) iA2++;
     int iA1 = iA2 - 1;
 
-    double tE = (ea[iE2] != ea[iE1]) ? (ec - ea[iE1]) / (ea[iE2] - ea[iE1]) : 0.0;
-    double tA = (aa[iA2] != aa[iA1]) ? (ac - aa[iA1]) / (aa[iA2] - aa[iA1]) : 0.0;
+    double tE = (d_E_axis(iE2) != d_E_axis(iE1)) ?
+      (ec - d_E_axis(iE1)) / (d_E_axis(iE2) - d_E_axis(iE1)) : 0.0;
+    double tA = (d_A_axis(iA2) != d_A_axis(iA1)) ?
+      (ac - d_A_axis(iA1)) / (d_A_axis(iA2) - d_A_axis(iA1)) : 0.0;
 
     double w11 = (1.0 - tE) * (1.0 - tA);
     double w21 = tE * (1.0 - tA);
     double w12 = (1.0 - tE) * tA;
     double w22 = tE * tA;
 
-    double val = w11*table[iE1*nA + iA1] + w21*table[iE2*nA + iA1] +
-                 w12*table[iE1*nA + iA2] + w22*table[iE2*nA + iA2];
+    double val = w11*table(iE1*kk_nA + iA1) + w21*table(iE2*kk_nA + iA1) +
+                 w12*table(iE1*kk_nA + iA2) + w22*table(iE2*kk_nA + iA2);
 
     return val;
   }
@@ -320,7 +351,6 @@ class SurfReactPMIKokkos : public SurfReactPMI {
       arb[0] = 0.0; arb[1] = 1.0; arb[2] = 0.0;
     }
 
-    // cross(norm, arb) -> tangent1
     tangent1[0] = norm[1]*arb[2] - norm[2]*arb[1];
     tangent1[1] = norm[2]*arb[0] - norm[0]*arb[2];
     tangent1[2] = norm[0]*arb[1] - norm[1]*arb[0];
@@ -331,7 +361,6 @@ class SurfReactPMIKokkos : public SurfReactPMI {
       tangent1[0] /= len; tangent1[1] /= len; tangent1[2] /= len;
     }
 
-    // cross(norm, tangent1) -> tangent2
     tangent2[0] = norm[1]*tangent1[2] - norm[2]*tangent1[1];
     tangent2[1] = norm[2]*tangent1[0] - norm[0]*tangent1[2];
     tangent2[2] = norm[0]*tangent1[1] - norm[1]*tangent1[0];
@@ -366,41 +395,40 @@ class SurfReactPMIKokkos : public SurfReactPMI {
   /* ---------------------------------------------------------------------- */
 
   KOKKOS_INLINE_FUNCTION
-  double kk_sample_from_cdf(const double *cdf, int iE, int iA,
+  double kk_sample_from_cdf(const t_double_1d &cdf, int iE, int iA,
                             rand_type &rng) const
   {
-    if (!cdf || nb_cdf <= 0) return 0.0;
+    if (cdf.extent(0) == 0 || kk_nb_cdf <= 0) return 0.0;
 
     double u = rng.drand();
 
-    size_t base = static_cast<size_t>(iE) * nA * nb_cdf +
-                  static_cast<size_t>(iA) * nb_cdf;
+    int base = iE * kk_nA * kk_nb_cdf + iA * kk_nb_cdf;
 
-    int lo = 0, hi = nb_cdf - 1;
+    int lo = 0, hi = kk_nb_cdf - 1;
     while (lo < hi) {
       int mid = (lo + hi) / 2;
-      if (cdf[base + mid] < u)
+      if (cdf(base + mid) < u)
         lo = mid + 1;
       else
         hi = mid;
     }
 
-    double cdf_lo = (lo > 0) ? cdf[base + lo - 1] : 0.0;
-    double cdf_hi = cdf[base + lo];
+    double cdf_lo = (lo > 0) ? cdf(base + lo - 1) : 0.0;
+    double cdf_hi = cdf(base + lo);
     double frac = (cdf_hi > cdf_lo) ? (u - cdf_lo) / (cdf_hi - cdf_lo) : 0.5;
 
-    return (lo + frac) / nb_cdf;
+    return (lo + frac) / kk_nb_cdf;
   }
 
   /* ---------------------------------------------------------------------- */
 
   KOKKOS_INLINE_FUNCTION
-  int kk_lower_bound(const double *arr, int n, double val) const
+  int kk_lower_bound(const t_double_1d &arr, int n, double val) const
   {
     int lo = 0, hi = n;
     while (lo < hi) {
       int mid = (lo + hi) / 2;
-      if (arr[mid] < val) lo = mid + 1;
+      if (arr(mid) < val) lo = mid + 1;
       else hi = mid;
     }
     return lo;
