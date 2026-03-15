@@ -56,13 +56,39 @@ Primary focus is plasma-material interactions (PMI), including lithium droplet p
 
 ## Quick Start
 
+### CPU (MPI + OpenMP)
+
 ```bash
 $ git clone https://github.com/ORNL-Fusion/OpenEdge.git
 $ mkdir build && cd build
 $ cmake -C ../OpenEdge/cmake/presets/mpi.cmake ../OpenEdge/cmake -DPKG_OPENEDGE=ON
 $ make -j 4
-$ mpirun -np 4 ./spa_mpi -in input.in
+$ mpirun -np 4 ./src/spa_mpi -in input.in
 ```
+
+### GPU (CUDA + MPI)
+
+Requires NVIDIA GPU, CUDA toolkit, and Kokkos (bundled in `lib/kokkos`).
+
+```bash
+$ git clone https://github.com/ORNL-Fusion/OpenEdge.git
+$ mkdir build_gpu && cd build_gpu
+$ cmake -C ../OpenEdge/cmake/presets/kokkos_cuda.cmake ../OpenEdge/cmake \
+    -DPKG_OPENEDGE=ON -DPKG_KOKKOS=ON \
+    -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_OPENMP=ON \
+    -DKokkos_ARCH_AMPERE80=ON
+$ make -j 16
+$ mpirun -np 1 ./src/spa_mpi -k on g 1 -sf kk -in input.in
+```
+
+Adjust `Kokkos_ARCH_*` for your GPU: `AMPERE80` (A100), `HOPPER90` (H100),
+`VOLTA70` (V100), `PASCAL60` (P100). On Perlmutter (NERSC), load `cray-hdf5`
+and set `-DHDF5_ROOT=$CRAY_HDF5_PREFIX`.
+
+**Kokkos flags:**
+- `-k on g 1` — use 1 GPU per MPI rank
+- `-sf kk` — auto-select Kokkos-accelerated styles
+- `-k on t 4` — use 4 OpenMP threads (CPU-only Kokkos, no GPU)
 
 
 ## License
