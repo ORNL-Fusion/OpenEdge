@@ -28,7 +28,7 @@ class ComputeGridWeighted : public Compute {
   void reallocate();
   bigint memory_usage();
 
- private:
+ protected:
   int groupbit,imix,nvalue,ngroup;
 
   int *value;                // keyword for each user requested value
