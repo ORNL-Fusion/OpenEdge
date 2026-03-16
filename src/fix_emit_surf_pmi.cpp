@@ -69,6 +69,11 @@ FixEmitSurfPmi::FixEmitSurfPmi(SPARTA *sparta, int narg, char **arg) :
   npmode = FLOW;
   npstr = NULL;
   normalflag = 0;
+  nlaunch_mode = 0;
+  nlaunch_per_surf = 0;
+  flux_thresh = 0.0;
+  pweight_index = -1;
+  pweight_ewhich = -1;
 
   options(narg-iarg,&arg[iarg]);
 
@@ -121,6 +126,15 @@ void FixEmitSurfPmi::init()
     error->all(FLERR,"Fix emit/surf/pmi compute must provide per-surf values");
 
   fnum = update->fnum;
+
+  // look up pweight custom attribute if nlaunch mode is active
+  if (nlaunch_mode) {
+    pweight_index = particle->find_custom((char *) "pweight");
+    if (pweight_index < 0)
+      error->all(FLERR,
+        "Fix emit/surf/pmi nlaunch requires fix particle/weight");
+    pweight_ewhich = particle->ewhich[pweight_index];
+  }
 
   nspecies = particle->mixture[imix]->nspecies;
   fraction = particle->mixture[imix]->fraction;
@@ -366,7 +380,7 @@ void FixEmitSurfPmi::create_task(int icell)
 void FixEmitSurfPmi::perform_task()
 {
   int i,m,n,pcell,isurf,ninsert,nactual,isp,ispecies,ntri,id;
-  double indot,scosine,rn,ntarget,vr,alpha,beta;
+  double indot,scosine,rn,ntarget,vr,alpha,beta,w_emit;
   double beta_un,normalized_distbn_fn,theta,erot,evib;
   double vnmag,vamag,vbmag;
   double *normal,*p1,*p2,*p3,*atan,*btan,*vstream,*vscale;
@@ -386,6 +400,11 @@ void FixEmitSurfPmi::perform_task()
   int nsurf_tally = update->nsurf_tally;
   Compute **slist_active = update->slist_active;
   int nfix_update_custom = modify->n_update_custom;
+
+  // pweight pointer (may be reallocated each step)
+  double *pweight_dvec = NULL;
+  if (nlaunch_mode && pweight_ewhich >= 0)
+    pweight_dvec = particle->edvec[pweight_ewhich];
 
   for (i = 0; i < ntask; i++) {
     pcell = tasks[i].pcell;
@@ -407,10 +426,19 @@ void FixEmitSurfPmi::perform_task()
     if (normalflag) indot = magvstream;
     else indot = vstream[0]*normal[0] + vstream[1]*normal[1] + vstream[2]*normal[2];
 
+    w_emit = fnum;  // default weight = fnum (backward compatible)
+
     if (npmode == FLOW) {
       double flux = flux_for_surface(isurf);
       if (!std::isfinite(flux) || flux <= 0.0) continue;
-      ntarget = flux * tasks[i].area * dt / fnum;
+      if (flux < flux_thresh) continue;
+      if (nlaunch_mode) {
+        // per-particle weight mode: fixed number of particles per surface
+        w_emit = flux * tasks[i].area * dt / nlaunch_per_surf;
+        ntarget = static_cast<double>(nlaunch_per_surf);
+      } else {
+        ntarget = flux * tasks[i].area * dt / fnum;
+      }
     } else {
       ntarget = np * tasks[i].ntarget;
     }
@@ -492,6 +520,11 @@ void FixEmitSurfPmi::perform_task()
           p = &particle->particles[particle->nlocal-1];
           p->flag = PSURF + 1 + isurf;
           p->dtremain = dt * random->uniform();
+
+          if (nlaunch_mode) {
+            pweight_dvec = particle->edvec[pweight_ewhich];
+            pweight_dvec[particle->nlocal-1] = w_emit;
+          }
 
           if (nsurf_tally)
             for (int k = 0; k < nsurf_tally; k++)
@@ -583,6 +616,11 @@ void FixEmitSurfPmi::perform_task()
         p->flag = PSURF + 1 + isurf;
         p->dtremain = dt * random->uniform();
 
+        if (nlaunch_mode) {
+          pweight_dvec = particle->edvec[pweight_ewhich];
+          pweight_dvec[particle->nlocal-1] = w_emit;
+        }
+
         if (nsurf_tally)
           for (int k = 0; k < nsurf_tally; k++)
             slist_active[k]->surf_tally(p->dtremain,isurf,pcell,0,NULL,p,NULL);
@@ -637,6 +675,23 @@ int FixEmitSurfPmi::option(int narg, char **arg)
     if (strcmp(arg[1],"yes") == 0) normalflag = 1;
     else if (strcmp(arg[1],"no") == 0) normalflag = 0;
     else error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    return 2;
+  }
+
+  if (strcmp(arg[0],"nlaunch") == 0) {
+    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    nlaunch_per_surf = atoi(arg[1]);
+    if (nlaunch_per_surf <= 0)
+      error->all(FLERR,"Fix emit/surf/pmi nlaunch must be > 0");
+    nlaunch_mode = 1;
+    return 2;
+  }
+
+  if (strcmp(arg[0],"flux_thresh") == 0) {
+    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    flux_thresh = atof(arg[1]);
+    if (flux_thresh < 0.0)
+      error->all(FLERR,"Fix emit/surf/pmi flux_thresh must be >= 0");
     return 2;
   }
 

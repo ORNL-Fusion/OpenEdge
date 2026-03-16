@@ -99,27 +99,30 @@ fix fnanbu coll/nanbu 1 plasma c_cwest[5] c_cwest[6] &
 # slot mapping: 1=D, 2=O+, 3=O2+, ... 9=O8+ ; D excluded by projectile_slots 2..9
 compute cpmi pmi/surf/data 1 file input/plasma.h5 ../../database/surface/O_on_W.h5 projectile_slots 2 9 mass_amu 16.0 sputter_flux_total
 
-# 4) Emit sputtered W from cpmi total sputter flux
-# cpmi is vector_surf (single value), so no flux_index needed
-fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes
+# 4) Per-particle weight infrastructure for weighted emission
+fix pw particle/weight
 
-#create_particles tungstenSource n 2000
+# 5) Emit sputtered W from cpmi total sputter flux
+#    nlaunch 5 = emit 5 particles per surface element per step (each with weight)
+#    flux_thresh 1e10 = skip surfaces with sputtering flux below 1e10 m-2s-1
+fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes &
+                    nlaunch 5 flux_thresh 1e10
 
-#compute cpmi pmi/surf/data 1 file input/plasma.h5 ../../database/surface/O_on_W.h5 projectile_slots 2 9 mass_amu 16.0 #nflux_species 9 incident_angle_species 9 incident_energy_species 9 &
-    #sputter_yield_species 9 sputter_flux_species 9
-    
-    
-    
-# 5) Dumps
+# 6) Dumps
 
-
-# Particle state dump for emit wiring check
-dump dpart particle all 10 output/state.west id type x y z vx vy vz
+# Particle state dump
+dump dpart particle all 5000 output/state.west id type x y z vx vy vz p_pweight
 dump_modify dpart first yes
-#
-#compute computeID grid all species nrho
-#fix     fixID ave/grid all 1 500 5000 c_computeID[*] ave running
-#dump    dumpID  grid all 5000 output/tmp.grid.density id xc yc f_fixID[*]
+
+# Weighted density (correct physical density with per-particle weights)
+compute cwden grid/weighted all species nrho_w
+fix     fwden ave/grid all 1 500 5000 c_cwden[*] ave running
+dump    dwden grid all 5000 output/tmp.grid.density_weighted id xc yc f_fwden[*]
+
+# Standard density (for comparison — uses fnum, not meaningful with nlaunch)
+compute computeID grid all species nrho
+fix     fixID ave/grid all 1 500 5000 c_computeID[*] ave running
+dump    dumpID  grid all 5000 output/tmp.grid.density id xc yc f_fixID[*]
 
 
 # Short validation run
@@ -127,8 +130,7 @@ dump_modify dpart first yes
 timestep            1.0e-09
 stats               10
 stats_style         step cpu np
-run                 50 #00
-
+run                 10000
 unfix femit
 
 #run                 1000 #00

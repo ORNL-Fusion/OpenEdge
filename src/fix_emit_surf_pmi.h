@@ -38,6 +38,12 @@ class FixEmitSurfPmi : public FixEmit {
   char *npstr;
   int iflux,flux_index;
 
+  int nlaunch_mode;           // 1 if nlaunch per-particle weight mode is active
+  int nlaunch_per_surf;       // # of particles to launch per surface element
+  double flux_thresh;         // minimum flux to emit (skip surfaces below this)
+  int pweight_index;          // index of pweight custom attribute (-1 if none)
+  int pweight_ewhich;         // index into edvec for pweight
+
   // copies of data from other classes
 
   int dimension,nspecies;
