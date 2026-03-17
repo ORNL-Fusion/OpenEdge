@@ -711,7 +711,7 @@ def convert_solps_to_openedge(
     for t in range(ntri_eirene):
         ix, iy = int(b2_ix[t]), int(b2_iy[t])
         if ix >= 0 and iy >= 0 and ix < nx + 2 and iy < ny + 2:
-            mesh_cell_idx[t] = ix * (ny + 2) + iy
+            mesh_cell_idx[t] = iy * (nx + 2) + ix
 
     has_cell = mesh_cell_idx >= 0
     print(f"Eirene mesh -> B2.5 mapping: {has_cell.sum()} triangles with plasma, "
