@@ -124,6 +124,11 @@ compute computeID grid all species nrho
 fix     fixID ave/grid all 1 500 5000 c_computeID[*] ave running
 dump    dumpID  grid all 5000 output/tmp.grid.density id xc yc f_fixID[*]
 
+# Photon emissivity: WI line (ColRadPy PEC, cm^3/s default)
+compute cPE photon_emissivity/grid all species &
+        pec_file ../../database/pec/w_4009_pec.h5 plasma_compute cwest
+fix     fPE ave/grid all 1 500 5000 c_cPE[*] ave running
+dump    dPE grid all 5000 output/photon_emissivity id xc yc f_fPE[*]
 
 # Short validation run
 #fix 31 halt 1 v_npart <= 0
