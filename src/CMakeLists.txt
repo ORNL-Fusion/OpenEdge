@@ -47,10 +47,20 @@ target_link_libraries(${TARGET_SPARTA_LIB} LINK_PUBLIC ${TARGET_SPARTA_PKGS})
 
 include(${SPARTA_CMAKE_COMMON_DIR}/set/style_file_glob.cmake)
 
-add_custom_target(
-  ${TARGET_SPARTA_LIB}_PRE_BUILD
-  COMMAND sh ${SPARTA_CMAKE_DIR}/make_style.sh ${SPARTA_BINARY_DIR}/include
-          ${CMAKE_CURRENT_SOURCE_DIR})
+if(PKG_OPENEDGE AND NOT OPENEDGE_ENABLE_RUSTBCA)
+  add_custom_target(
+    ${TARGET_SPARTA_LIB}_PRE_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E rm -f
+            ${SPARTA_BINARY_DIR}/include/surf_react_pmi_bca.h
+            ${SPARTA_BINARY_DIR}/include/rustbca_interface.h
+    COMMAND sh ${SPARTA_CMAKE_DIR}/make_style.sh ${SPARTA_BINARY_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR})
+else()
+  add_custom_target(
+    ${TARGET_SPARTA_LIB}_PRE_BUILD
+    COMMAND sh ${SPARTA_CMAKE_DIR}/make_style.sh ${SPARTA_BINARY_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
 
 add_dependencies(${TARGET_SPARTA_LIB} ${TARGET_SPARTA_LIB}_PRE_BUILD)
 add_custom_command(
@@ -73,4 +83,3 @@ install(TARGETS ${TARGET_SPARTA} DESTINATION bin)
 # ######### END   GENERATION COMMANDS ##########
 
 # ######### END   TARGET_SPARTA ##########
-
