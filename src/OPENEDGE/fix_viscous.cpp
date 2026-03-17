@@ -590,13 +590,14 @@ inline void FixViscous::epstein_params(int icell, const Particle::OnePart &p,
   const double Ni    = std::max(read_src(srcNi, 2, -1), 0.0);
   const double Vpar  =          read_src(srcVpar, 3, -1);
 
-  // B components are in cylindrical basis: (Br, Bt, Bz) ~ (e_r, e_phi, e_z)
-  const double Br = read_src(srcBr, -1, 0);
-  const double Bt = read_src(srcBt, -1, 1);
-  const double Bz = read_src(srcBz, -1, 2);
-  const double Bn = std::sqrt(Br*Br + Bt*Bt + Bz*Bz);
+  // B components in SPARTA coordinate order (bx, by, bz from compute):
+  //   2D: B[0]=B_R, B[1]=B_Z, B[2]=B_toroidal  (matching v[0..2])
+  //   3D: B[0]=B_x, B[1]=B_y, B[2]=B_z          (Cartesian)
+  const double B0 = read_src(srcBr, -1, 0);
+  const double B1 = read_src(srcBt, -1, 1);
+  const double B2 = read_src(srcBz, -1, 2);
+  const double Bn = std::sqrt(B0*B0 + B1*B1 + B2*B2);
 
-  // const double rd = p.radius;
   const double rd = p.radius;  // in meters
   if (rd <= 0.0 || Ni <= 0.0 || Ti_eV <= 0.0) {
     nuE = 0.0;
@@ -604,24 +605,14 @@ inline void FixViscous::epstein_params(int icell, const Particle::OnePart &p,
     return;
   }
 
-  // Build u_parallel in local velocity basis:
-  // - Cartesian (2D/3D): [vx,vy,vz]
-  // - Axisymmetric:      [vr,vz,vphi]
+  // Build u_parallel in SPARTA velocity basis (matches v[0..2] slots directly)
   if (Bn > 1e-12) {
-    const double br = Br / Bn;
-    const double bt = Bt / Bn;
-    const double bz = Bz / Bn;
-    if (!domain->axisymmetric) {
-      upar_cyl[0] = Vpar * br;
-      upar_cyl[1] = Vpar * bt;
-      upar_cyl[2] = Vpar * bz;
-    } else {
-      upar_cyl[0] = Vpar * br;
-      upar_cyl[1] = Vpar * bz;
-      upar_cyl[2] = Vpar * bt;
-    }
+    const double invBn = 1.0 / Bn;
+    upar_cyl[0] = Vpar * B0 * invBn;
+    upar_cyl[1] = Vpar * B1 * invBn;
+    upar_cyl[2] = Vpar * B2 * invBn;
   } else {
-    // No reliable B direction: relax toward zero flow (or choose a default axis if desired)
+    // No reliable B direction: relax toward zero flow
     upar_cyl[0] = 0.0;
     upar_cyl[1] = 0.0;
     upar_cyl[2] = 0.0;
