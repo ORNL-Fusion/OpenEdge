@@ -489,9 +489,9 @@ void ComputePlasmaFields::compute_per_grid()
     const double Br = B.br;
     const double Bt = B.bt;
     const double Bzv = B.bz;
-    const double Er = (input_mode != MODE_FILE) ? econst[0] : 0.0;
-    const double Et = (input_mode != MODE_FILE) ? econst[1] : 0.0;
-    const double Ezv = (input_mode != MODE_FILE) ? econst[2] : 0.0;
+    double Er = (input_mode != MODE_FILE) ? econst[0] : 0.0;
+    double Et = (input_mode != MODE_FILE) ? econst[1] : 0.0;
+    double Ezv = (input_mode != MODE_FILE) ? econst[2] : 0.0;
     const double Vr = P.parr_flow_r;
     const double Vt = P.parr_flow_t;
     const double Vzv = P.parr_flow_z;
@@ -551,6 +551,22 @@ void ComputePlasmaFields::compute_per_grid()
     const double bhat_z = Bzv * invBmag;
     const double epar =
       (Bmag > tiny) ? (-(gradPe_r*bhat_r + gradPe_t*bhat_t + gradPe_z*bhat_z) / (ne * eQ)) : 0.0;
+
+    // In FILE mode, decompose epar into cylindrical E-field vector
+    // so that er/et/ez output columns are usable with fix efield/grid.
+    if (input_mode == MODE_FILE && epar != 0.0) {
+      Er  = epar * bhat_r;
+      Et  = epar * bhat_t;
+      Ezv = epar * bhat_z;
+      // Recompute Cartesian aliases from updated cylindrical E
+      if (dim == 2) {
+        Ex = Er;   Ey = Ezv;  Ezz = Et;
+      } else {
+        Ex = Er*cphi - Et*sphi;
+        Ey = Er*sphi + Et*cphi;
+        Ezz = Ezv;
+      }
+    }
 
     for (int iv = 0; iv < nvalue; ++iv) {
       double vout = 0.0;

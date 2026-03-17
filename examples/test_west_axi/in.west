@@ -62,8 +62,10 @@ balance_grid rcb cell
 # 1) Plasma/B-field compute on grid
 # c_cwest: [1]=bx [2]=by [3]=bz [4]=epar [5]=temp_e [6]=dens_e
 #          [7]=temp_i [8]=dens_i [9]=parrflow [10]=grad_te_r [11]=grad_te_z
+#          [12]=grad_ti_r [13]=grad_ti_z [14]=ex [15]=ey [16]=ez
 compute cwest plasma/fields all file input/plasma.h5 input/bfield.h5 &
-                    bx by bz epar temp_e dens_e temp_i dens_i parrflow grad_te_r grad_te_z
+                    bx by bz epar temp_e dens_e temp_i dens_i parrflow &
+                    grad_te_r grad_te_z grad_ti_r grad_ti_z ex ey ez
 
 
 # 1b) Sheath geometry for the supported wall-kick sheath model
@@ -74,7 +76,9 @@ fix bB bfield/grid c_cwest[1] c_cwest[2] c_cwest[3]
 global bfield grid bB 0
 global sheath geom_compute cgeom plasma_compute cwest &
                     mD_amu 2.0 pot_mult 2.5 kick yes
-global efield none
+# Ambipolar parallel E-field from electron pressure gradient
+fix fEpar efield/grid c_cwest[14] c_cwest[15] c_cwest[16]
+global efield grid fEpar 0
 global boris_subcycles 5
 
 # 1c) ADAS ionization/recombination using local Te/ne from cwest
@@ -91,6 +95,14 @@ fix fnanbu coll/nanbu 1 plasma c_cwest[5] c_cwest[6] &
                     background 2.0 1.0 &
                     c_cwest[7] c_cwest[8] c_cwest[9] &
                     c_cwest[1] c_cwest[2] c_cwest[3]
+
+# 1e) Braginskii thermal forces on impurity ions
+# Ion thermal force:  F = 2.6 * Z^2 * e * grad_par(Ti) (Neu 1974)
+# Elec thermal force: F = 0.71 * Z^2 * e * grad_par(Te) (Braginskii)
+fix ftf thermal_force 1 &
+                    bfield c_cwest[1] c_cwest[2] c_cwest[3] &
+                    ion_thermal c_cwest[12] c_cwest[13] coeff 2.6 &
+                    elec_thermal c_cwest[10] c_cwest[11] coeff 0.71
 
 # 2) Incident plasma flux on wall group 1
 #compute cgam incident/plasma/flux 1 file input/plasma.h5 nflux_species all
@@ -138,4 +150,3 @@ stats_style         step cpu np
 run                 10000
 unfix femit
 
-#run                 1000 #00

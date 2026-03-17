@@ -108,6 +108,38 @@ Two approaches for sheath electric fields:
   via `global gca ...` with Littlejohn corrections
 - Automatic switching between Boris and GCA based on `gca_switch_factor`
 
+### Thermal forces
+
+- **`fix thermal_force`** — Braginskii ion and electron thermal forces on
+  impurity ions, applied as leapfrog half-kicks (START_OF_STEP + END_OF_STEP).
+  ```
+  fix ID thermal_force Nevery \
+      bfield BxSRC BySRC BzSRC \
+      [ion_thermal gradTiR_SRC gradTiZ_SRC [coeff VAL]] \
+      [elec_thermal gradTeR_SRC gradTeZ_SRC [coeff VAL]]
+  ```
+  - Ion thermal force: `F = beta_i * Z^2 * e * grad_par(Ti)` (default
+    `beta_i = 2.6`, Neu 1974 heavy-impurity limit).
+  - Electron thermal force: `F = alpha_e * Z^2 * e * grad_par(Te)` (default
+    `alpha_e = 0.71`, Braginskii Z_eff=1 limit).
+  - B-field sources must be in SPARTA coordinate order (`bx`, `by`, `bz`),
+    matching the velocity slot mapping. Temperature gradient sources are
+    always cylindrical (`grad_ti_r`, `grad_ti_z`).
+  - Both forces push impurities toward higher temperature (toward the core).
+
+### Ambipolar E-field
+
+- `compute plasma/fields` computes the parallel ambipolar electric field
+  `E_par = -(grad_pe . bhat) / (ne * e)` from electron pressure gradients.
+  In FILE mode, `er`/`et`/`ez` (and `ex`/`ey`) output columns are now
+  populated by decomposing `epar` into vector components via `E = epar * bhat`.
+- To feed into the Boris pusher:
+  ```
+  compute cplasma plasma/fields all file plasma.h5 bfield.h5 ... ex ey ez
+  fix fE efield/grid c_cplasma[ex_col] c_cplasma[ey_col] c_cplasma[ez_col]
+  global efield grid fE 0
+  ```
+
 ### Synthetic diagnostics
 
 - **`compute photon_emissivity/grid`** — per-grid volumetric photon
