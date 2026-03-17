@@ -9,6 +9,13 @@ examples/**/*.png
 .DS_Store
 **/.DS_Store
 
+# Regression test artifacts
+examples/*/regression.log
+examples/*/in.*.regression
+examples/test_iead/in.iead_alpha*
+examples/test_iead/particles_alpha*.dat
+examples/test_iead/wall.surf
+
 # Local run/test artifacts
 log.*
 dump.*
