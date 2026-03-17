@@ -439,6 +439,67 @@ def _write_sparta_wall_from_mesh_extra(mesh_extra: Path, wall_out: Path, tol: fl
 
 
 # ==========================================================================
+# Eirene mesh readers (fort.33, fort.34, fort.35)
+# Following Jeremy Lore's SOLPS-routines conventions
+# ==========================================================================
+
+def read_eirene_mesh(run_path: Path):
+    """
+    Read Eirene triangular mesh from fort.33/34/35.
+
+    Returns:
+        vtx_r, vtx_z: (nvtx,) vertex coordinates in metres
+        tri: (ntri, 3) triangle connectivity (0-based vertex indices)
+        b2_ix, b2_iy: (ntri,) B2.5 cell indices (1-based), or -1 if not in B2.5
+    """
+    ft33 = run_path / "fort.33"
+    ft34 = run_path / "fort.34"
+    ft35 = run_path / "fort.35"
+
+    for f in [ft33, ft34, ft35]:
+        if not f.exists():
+            raise FileNotFoundError(f"Eirene mesh file not found: {f}")
+
+    # fort.33: node coordinates (cm)
+    with ft33.open("r") as f:
+        nnodes = int(f.readline().strip())
+        vals = []
+        for line in f:
+            vals.extend(float(x) for x in line.split())
+    vtx_r = np.array(vals[:nnodes]) / 100.0  # cm -> m
+    vtx_z = np.array(vals[nnodes:2 * nnodes]) / 100.0
+
+    # fort.34: triangle connectivity (1-based -> 0-based)
+    with ft34.open("r") as f:
+        ntri = int(f.readline().strip())
+        tri = np.zeros((ntri, 3), dtype=np.int32)
+        for i, line in enumerate(f):
+            parts = line.split()
+            if len(parts) >= 4:
+                tri[i] = [int(parts[1]) - 1, int(parts[2]) - 1, int(parts[3]) - 1]
+
+    # fort.35: B2.5 cell mapping (last 2 columns = ix, iy)
+    b2_ix = np.full(ntri, -1, dtype=np.int32)
+    b2_iy = np.full(ntri, -1, dtype=np.int32)
+    with ft35.open("r") as f:
+        _ = int(f.readline().strip())
+        for i, line in enumerate(f):
+            parts = line.split()
+            if len(parts) >= 12:
+                ix_val = int(parts[10])
+                iy_val = int(parts[11])
+                if ix_val >= 0 and iy_val >= 0:
+                    b2_ix[i] = ix_val
+                    b2_iy[i] = iy_val
+
+    print(f"Eirene mesh: {nnodes} vertices, {ntri} triangles")
+    has_b2 = (b2_ix >= 0) & (b2_iy >= 0)
+    print(f"  B2.5 mapped: {has_b2.sum()}, vacuum/PFR: {(~has_b2).sum()}")
+
+    return vtx_r, vtx_z, tri, b2_ix, b2_iy
+
+
+# ==========================================================================
 # Main conversion
 # ==========================================================================
 
@@ -616,69 +677,52 @@ def convert_solps_to_openedge(
                  flow_i_r_all, flow_i_t_all, flow_i_z_all]:
         arr3[~np.isfinite(arr3)] = 0.0
 
-    # -- Build SOLPS mesh triangulation --
-    # Triangulate each SOLPS quad cell into 2 triangles.
-    # Store per-cell plasma data on the triangles so the C++ code can
-    # do direct point-in-triangle lookup instead of rectangular interpolation.
-    crx4 = crx.reshape(nx + 2, ny + 2, 4, order="F")
-    cry4 = cry.reshape(nx + 2, ny + 2, 4, order="F")
-    # Corner order from Jeremy's routines: [0,1,3,2] = LL, LR, UR, UL
-    co = [0, 1, 3, 2]
+    # -- Build Eirene mesh with B2.5 plasma data --
+    # Read the Eirene triangulation (fort.33/34/35) which covers the full
+    # SOLPS domain including near-wall regions.  Each Eirene triangle maps
+    # to a B2.5 cell via fort.35, so we assign plasma data from the
+    # corresponding B2.5 cell.  Triangles outside the B2.5 domain (vacuum,
+    # PFR) get zero plasma values and are naturally skipped by the C++ code.
+    eirene_path = run_path  # fort.33/34/35 are in the run directory
+    try:
+        mesh_vtx_r, mesh_vtx_z, mesh_tri_raw, b2_ix, b2_iy = read_eirene_mesh(eirene_path)
+    except FileNotFoundError:
+        # Fall back to baserun directory
+        if b2fgmtry_path and b2fgmtry_path.parent != run_path:
+            mesh_vtx_r, mesh_vtx_z, mesh_tri_raw, b2_ix, b2_iy = read_eirene_mesh(b2fgmtry_path.parent)
+        else:
+            raise
 
-    # Collect all unique vertices and triangle connectivity
-    vtx_r_list = []
-    vtx_z_list = []
-    tri_conn = []      # (ntri, 3) vertex indices
-    tri_cell_ix = []   # (ntri,) SOLPS cell linear index for data lookup
-    vtx_map = {}       # (rounded_r, rounded_z) -> vertex index
+    mesh_tri = mesh_tri_raw
+    ntri_eirene = len(mesh_tri)
 
-    def get_vtx(rr, zz):
-        key = (round(float(rr), 10), round(float(zz), 10))
-        if key not in vtx_map:
-            idx = len(vtx_r_list)
-            vtx_map[key] = idx
-            vtx_r_list.append(float(rr))
-            vtx_z_list.append(float(zz))
-        return vtx_map[key]
-
-    ncells_valid = 0
-    for ix in range(1, nx + 1):
-        for iy in range(1, ny + 1):
-            corners_r = crx4[ix, iy, co]
-            corners_z = cry4[ix, iy, co]
-            if not (np.all(np.isfinite(corners_r)) and np.all(np.isfinite(corners_z))):
-                continue
-            # Skip degenerate cells (zero area)
-            area = 0.5 * abs(
-                (corners_r[1]-corners_r[0])*(corners_z[2]-corners_z[0]) -
-                (corners_r[2]-corners_r[0])*(corners_z[1]-corners_z[0])
-            )
-            if area < 1e-20:
-                continue
-            v = [get_vtx(corners_r[k], corners_z[k]) for k in range(4)]
-            cell_lin = ix * (ny + 2) + iy  # linear index for data lookup
-            # Split quad into 2 triangles: (0,1,2) and (0,2,3)
-            tri_conn.append([v[0], v[1], v[2]])
-            tri_cell_ix.append(cell_lin)
-            tri_conn.append([v[0], v[2], v[3]])
-            tri_cell_ix.append(cell_lin)
-            ncells_valid += 1
-
-    mesh_vtx_r = np.array(vtx_r_list, dtype=np.float64)
-    mesh_vtx_z = np.array(vtx_z_list, dtype=np.float64)
-    mesh_tri = np.array(tri_conn, dtype=np.int32)
-    mesh_cell_idx = np.array(tri_cell_ix, dtype=np.int32)
-    print(f"SOLPS mesh triangulation: {ncells_valid} quads -> {len(mesh_tri)} triangles, {len(mesh_vtx_r)} vertices")
-
-    # Per-cell plasma data in flat (nx+2)*(ny+2) layout matching cell_lin indexing
+    # Map Eirene triangles to B2.5 cell data.
+    # B2.5 arrays are (nx+2, ny+2) with Fortran ordering.
+    # b2_ix, b2_iy are 1-based B2.5 indices.
     ncell_flat = (nx + 2) * (ny + 2)
-    mesh_ne = ne.reshape(ncell_flat, order="F")
-    mesh_te = te_eV.reshape(ncell_flat, order="F")
-    mesh_ti = ti_eV.reshape(ncell_flat, order="F")
+    ne_flat = ne.reshape(ncell_flat, order="F")
+    te_flat = te_eV.reshape(ncell_flat, order="F")
+    ti_flat = ti_eV.reshape(ncell_flat, order="F")
+    ni_flat = main_dens_raw.reshape(ncell_flat, order="F")
+    upar_flat = main_upar_raw.reshape(ncell_flat, order="F")
 
-    # Per-species densities and flows (for the main ion)
-    mesh_ni = main_dens_raw.reshape(ncell_flat, order="F")
-    mesh_upar = main_upar_raw.reshape(ncell_flat, order="F")
+    # Per-triangle cell index into the flat B2.5 array
+    mesh_cell_idx = np.full(ntri_eirene, -1, dtype=np.int32)
+    for t in range(ntri_eirene):
+        ix, iy = int(b2_ix[t]), int(b2_iy[t])
+        if ix >= 0 and iy >= 0 and ix < nx + 2 and iy < ny + 2:
+            mesh_cell_idx[t] = ix * (ny + 2) + iy
+
+    has_cell = mesh_cell_idx >= 0
+    print(f"Eirene mesh -> B2.5 mapping: {has_cell.sum()} triangles with plasma, "
+          f"{(~has_cell).sum()} vacuum/PFR")
+
+    # Per-cell plasma arrays (shared across all triangles referencing the same cell)
+    mesh_ne = ne_flat.copy()
+    mesh_te = te_flat.copy()
+    mesh_ti = ti_flat.copy()
+    mesh_ni = ni_flat.copy()
+    mesh_upar = upar_flat.copy()
 
     # Multi-ion per-cell data
     mesh_ions_dens = np.zeros((nion, ncell_flat), dtype=np.float64)
@@ -693,7 +737,7 @@ def convert_solps_to_openedge(
         elif ua_raw.ndim == 2:
             mesh_ions_upar[k] = ua_raw.reshape(ncell_flat, order="F")
 
-    # NaN cleanup for mesh data
+    # NaN cleanup
     for arr in [mesh_ne, mesh_te, mesh_ti, mesh_ni, mesh_upar,
                 mesh_ions_dens, mesh_ions_temp, mesh_ions_upar]:
         arr[~np.isfinite(arr)] = 0.0
