@@ -196,7 +196,12 @@ void ComputePMISurfData::load_plasma()
   H5::H5File file(plasma_path, H5F_ACC_RDONLY);
 
   auto hasDataset = [&](const std::string& name) -> bool {
-    return H5Lexists(file.getId(), name.c_str(), H5P_DEFAULT) > 0;
+    H5E_auto2_t fn; void *dt;
+    H5Eget_auto2(H5E_DEFAULT, &fn, &dt);
+    H5Eset_auto2(H5E_DEFAULT, NULL, NULL);
+    htri_t rc = H5Lexists(file.getId(), name.c_str(), H5P_DEFAULT);
+    H5Eset_auto2(H5E_DEFAULT, fn, dt);
+    return rc > 0;
   };
   auto read1D = [&](const std::string& name, std::vector<double>& out) {
     H5::DataSet ds = file.openDataSet(name);
@@ -385,7 +390,15 @@ void ComputePMISurfData::load_mesh()
   mesh_nion = 0;
   try {
     H5::H5File file(plasma_path, H5F_ACC_RDONLY);
-    if (H5Lexists(file.getId(), "mesh/triangles", H5P_DEFAULT) <= 0) return;
+    // Silence HDF5 error stack for the existence check — H5Lexists
+    // prints verbose diagnostics on some HDF5 versions when the group
+    // does not exist.
+    H5E_auto2_t old_func; void *old_data;
+    H5Eget_auto2(H5E_DEFAULT, &old_func, &old_data);
+    H5Eset_auto2(H5E_DEFAULT, NULL, NULL);
+    htri_t has = H5Lexists(file.getId(), "mesh/triangles", H5P_DEFAULT);
+    H5Eset_auto2(H5E_DEFAULT, old_func, old_data);
+    if (has <= 0) return;
 
     auto read1D_d = [&](const std::string &name, std::vector<double> &out) {
       H5::DataSet ds = file.openDataSet(name);
