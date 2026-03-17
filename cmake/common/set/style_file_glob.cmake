@@ -1,5 +1,9 @@
 file(GLOB style_files "*.h")
 
+if(DEFINED SPARTA_STYLE_FILE_EXCLUDES)
+  list(REMOVE_ITEM style_files ${SPARTA_STYLE_FILE_EXCLUDES})
+endif()
+
 if (PKG_KOKKOS)
   if (NOT PKG_FFT)
     list(FILTER style_files EXCLUDE REGEX ".*fft.*kokkos.*")

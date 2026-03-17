@@ -1,6 +1,10 @@
 if(PKG_OPENEDGE)
   # ######### BEGIN TARGET_SPARTA_PKG_OPENEDGE ##########
 
+  option(OPENEDGE_ENABLE_RUSTBCA
+         "Build the RustBCA interface and pmi/bca surface reaction style"
+         OFF)
+
   # Copy OpenEdge Kokkos files to src/KOKKOS/ so they are picked up
   # by the KOKKOS package glob when both PKG_OPENEDGE and PKG_KOKKOS are ON.
   if(PKG_KOKKOS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/KOKKOS")
@@ -45,15 +49,35 @@ if(PKG_OPENEDGE)
     ${CMAKE_CURRENT_SOURCE_DIR}/fix_field_particle.h
     ${CMAKE_CURRENT_SOURCE_DIR}/surf_collide_diffuse.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/surf_collide_diffuse.h)
+
+  if(NOT OPENEDGE_ENABLE_RUSTBCA)
+    list(APPEND SPARTA_PKG_OPENEDGE_OVERRIDE_FILES
+      ${CMAKE_CURRENT_SOURCE_DIR}/rustbca_interface.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/rustbca_interface.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/surf_react_pmi_bca.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/surf_react_pmi_bca.h)
+    set(SPARTA_STYLE_FILE_EXCLUDES
+        surf_react_pmi_bca.h
+        rustbca_interface.h)
+  endif()
+
   list(REMOVE_ITEM SPARTA_PKG_OPENEDGE_SRC_FILES
        ${SPARTA_PKG_OPENEDGE_OVERRIDE_FILES})
 
   include(${SPARTA_CMAKE_COMMON_DIR}/set/style_file_glob.cmake)
+  unset(SPARTA_STYLE_FILE_EXCLUDES)
 
   add_library(${TARGET_SPARTA_PKG_OPENEDGE} STATIC
               ${SPARTA_PKG_OPENEDGE_SRC_FILES})
   set_target_properties(${TARGET_SPARTA_PKG_OPENEDGE}
                         PROPERTIES LINKER_LANGUAGE CXX)
+
+  if(OPENEDGE_ENABLE_RUSTBCA)
+    # rustbca_interface.cpp uses dlopen/dlsym/dlclose on platforms where they
+    # live in a separate dynamic loading library.
+    target_link_libraries(${TARGET_SPARTA_PKG_OPENEDGE} PUBLIC
+                          ${CMAKE_DL_LIBS})
+  endif()
 
   # Get MPI header files
   target_link_libraries(${TARGET_SPARTA_PKG_OPENEDGE} LINK_PRIVATE
