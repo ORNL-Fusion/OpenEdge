@@ -72,15 +72,29 @@ class ComputePMISurfData : public Compute {
   std::string boundary_path;
   std::vector<double> boundary_r, boundary_z;
 
+  // SOLPS mesh triangulation for direct cell-based interpolation
+  int has_mesh;
+  int mesh_nvtx, mesh_ntri, mesh_ncell;
+  std::vector<double> mesh_vtx_r, mesh_vtx_z;
+  std::vector<int> mesh_tri;        // (ntri*3) vertex indices
+  std::vector<int> mesh_cell_idx;   // (ntri) cell index per triangle
+  std::vector<double> mesh_ne, mesh_te, mesh_ti, mesh_ni, mesh_upar;
+  int mesh_nion;
+  std::vector<double> mesh_ions_dens, mesh_ions_temp, mesh_ions_upar;
+  // bounding boxes for triangle search acceleration
+  std::vector<double> mesh_tri_rmin, mesh_tri_rmax, mesh_tri_zmin, mesh_tri_zmax;
+
   double interp2D(const std::vector<double> &f, double r, double z) const;
   double interp3D(const std::vector<double> &f, int ispec, double r, double z) const;
   double interp_yield(double e_eV, double a_deg) const;
   void load_plasma();
   void load_surface_data();
   void load_boundary();
+  void load_mesh();
   int peek_nspec_from_plasma() const;
   int in_projectile_slots(int slot1) const;
   int point_in_boundary(double r, double z) const;
+  int find_mesh_triangle(double r, double z) const;
 };
 
 }

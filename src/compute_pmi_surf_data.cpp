@@ -379,6 +379,116 @@ int ComputePMISurfData::point_in_boundary(double r, double z) const
   return inside;
 }
 
+void ComputePMISurfData::load_mesh()
+{
+  has_mesh = 0;
+  mesh_nion = 0;
+  try {
+    H5::H5File file(plasma_path, H5F_ACC_RDONLY);
+    if (H5Lexists(file.getId(), "mesh/triangles", H5P_DEFAULT) <= 0) return;
+
+    auto read1D_d = [&](const std::string &name, std::vector<double> &out) {
+      H5::DataSet ds = file.openDataSet(name);
+      hsize_t d0; ds.getSpace().getSimpleExtentDims(&d0);
+      out.resize(static_cast<size_t>(d0));
+      ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+    };
+    auto read1D_i = [&](const std::string &name, std::vector<int> &out) {
+      H5::DataSet ds = file.openDataSet(name);
+      hsize_t d0; ds.getSpace().getSimpleExtentDims(&d0);
+      out.resize(static_cast<size_t>(d0));
+      ds.read(out.data(), H5::PredType::NATIVE_INT);
+    };
+
+    read1D_d("mesh/vtx_r", mesh_vtx_r);
+    read1D_d("mesh/vtx_z", mesh_vtx_z);
+    mesh_nvtx = static_cast<int>(mesh_vtx_r.size());
+
+    // triangles: (ntri, 3) stored flat
+    {
+      H5::DataSet ds = file.openDataSet("mesh/triangles");
+      H5::DataSpace sp = ds.getSpace();
+      hsize_t dims[2]; sp.getSimpleExtentDims(dims);
+      mesh_ntri = static_cast<int>(dims[0]);
+      mesh_tri.resize(static_cast<size_t>(mesh_ntri * 3));
+      ds.read(mesh_tri.data(), H5::PredType::NATIVE_INT);
+    }
+    read1D_i("mesh/cell_index", mesh_cell_idx);
+    read1D_d("mesh/dens_e", mesh_ne);
+    read1D_d("mesh/temp_e", mesh_te);
+    read1D_d("mesh/dens_i", mesh_ni);
+    read1D_d("mesh/temp_i", mesh_ti);
+    if (H5Lexists(file.getId(), "mesh/parr_flow", H5P_DEFAULT) > 0)
+      read1D_d("mesh/parr_flow", mesh_upar);
+    mesh_ncell = static_cast<int>(mesh_ne.size());
+
+    // Multi-ion mesh data (optional)
+    if (H5Lexists(file.getId(), "mesh/ions/dens", H5P_DEFAULT) > 0) {
+      H5::DataSet ds = file.openDataSet("mesh/ions/dens");
+      H5::DataSpace sp = ds.getSpace();
+      hsize_t dims[2]; sp.getSimpleExtentDims(dims);
+      mesh_nion = static_cast<int>(dims[0]);
+      mesh_ions_dens.resize(static_cast<size_t>(mesh_nion * mesh_ncell));
+      ds.read(mesh_ions_dens.data(), H5::PredType::NATIVE_DOUBLE);
+      if (H5Lexists(file.getId(), "mesh/ions/temp", H5P_DEFAULT) > 0) {
+        mesh_ions_temp.resize(static_cast<size_t>(mesh_nion * mesh_ncell));
+        file.openDataSet("mesh/ions/temp").read(mesh_ions_temp.data(), H5::PredType::NATIVE_DOUBLE);
+      }
+      if (H5Lexists(file.getId(), "mesh/ions/parr_flow", H5P_DEFAULT) > 0) {
+        mesh_ions_upar.resize(static_cast<size_t>(mesh_nion * mesh_ncell));
+        file.openDataSet("mesh/ions/parr_flow").read(mesh_ions_upar.data(), H5::PredType::NATIVE_DOUBLE);
+      }
+    }
+
+    // Build bounding boxes for triangle search acceleration
+    mesh_tri_rmin.resize(mesh_ntri);
+    mesh_tri_rmax.resize(mesh_ntri);
+    mesh_tri_zmin.resize(mesh_ntri);
+    mesh_tri_zmax.resize(mesh_ntri);
+    for (int t = 0; t < mesh_ntri; t++) {
+      const int v0 = mesh_tri[t*3+0], v1 = mesh_tri[t*3+1], v2 = mesh_tri[t*3+2];
+      const double r0 = mesh_vtx_r[v0], r1 = mesh_vtx_r[v1], r2 = mesh_vtx_r[v2];
+      const double z0 = mesh_vtx_z[v0], z1 = mesh_vtx_z[v1], z2 = mesh_vtx_z[v2];
+      mesh_tri_rmin[t] = std::min({r0,r1,r2});
+      mesh_tri_rmax[t] = std::max({r0,r1,r2});
+      mesh_tri_zmin[t] = std::min({z0,z1,z2});
+      mesh_tri_zmax[t] = std::max({z0,z1,z2});
+    }
+
+    has_mesh = 1;
+  } catch (...) {
+    has_mesh = 0;
+  }
+
+  if (has_mesh && comm->me == 0) {
+    if (screen) fprintf(screen, "PMI mesh interpolation: %d triangles, %d vertices, %d cells\n",
+                        mesh_ntri, mesh_nvtx, mesh_ncell);
+    if (logfile) fprintf(logfile, "PMI mesh interpolation: %d triangles, %d vertices, %d cells\n",
+                         mesh_ntri, mesh_nvtx, mesh_ncell);
+  }
+}
+
+int ComputePMISurfData::find_mesh_triangle(double r, double z) const
+{
+  // Brute-force with bounding-box prefilter.
+  // Returns triangle index or -1 if not found.
+  for (int t = 0; t < mesh_ntri; t++) {
+    if (r < mesh_tri_rmin[t] || r > mesh_tri_rmax[t] ||
+        z < mesh_tri_zmin[t] || z > mesh_tri_zmax[t]) continue;
+    const int v0 = mesh_tri[t*3+0], v1 = mesh_tri[t*3+1], v2 = mesh_tri[t*3+2];
+    const double r0 = mesh_vtx_r[v0], z0 = mesh_vtx_z[v0];
+    const double r1 = mesh_vtx_r[v1], z1 = mesh_vtx_z[v1];
+    const double r2 = mesh_vtx_r[v2], z2 = mesh_vtx_z[v2];
+    // Barycentric coordinate test
+    const double d = (r1-r0)*(z2-z0) - (r2-r0)*(z1-z0);
+    if (std::fabs(d) < 1e-30) continue;
+    const double u = ((r-r0)*(z2-z0) - (r2-r0)*(z-z0)) / d;
+    const double v = ((r1-r0)*(z-z0) - (r-r0)*(z1-z0)) / d;
+    if (u >= -1e-10 && v >= -1e-10 && (u+v) <= 1.0+1e-10) return t;
+  }
+  return -1;
+}
+
 void ComputePMISurfData::init()
 {
   if (!surf->exist)
@@ -454,6 +564,7 @@ void ComputePMISurfData::init()
   }
 
   load_boundary();
+  load_mesh();
 
   if (debug_interp && comm->me == 0) {
     auto interp_yield_raw = [&](double e_eV, double a_deg)->double {
@@ -645,8 +756,11 @@ void ComputePMISurfData::compute_per_surf()
       z = zc;
     }
 
-    // Skip surface elements outside SOLPS boundary polygon
-    if (!point_in_boundary(r, z)) continue;
+    // Skip surface elements outside SOLPS domain.
+    // When mesh triangulation is loaded, the point-in-triangle test
+    // inherently limits to the SOLPS domain.  The boundary polygon is
+    // a fallback for rectangular-grid mode.
+    if (!has_mesh && !point_in_boundary(r, z)) continue;
 
     // Surface normal in cylindrical (R, phi, Z)
     double nr_surf = 0.0, nt_surf = 0.0, nz_surf = 0.0;
@@ -680,10 +794,28 @@ void ComputePMISurfData::compute_per_surf()
     if (bmag > 0.0)
       sin_alpha = std::fabs(bp_dot_n) / bmag;
 
+    // Resolve plasma data: mesh-based (exact SOLPS cell) or grid-based (bilinear)
+    int mesh_cell = -1;
+    if (has_mesh) {
+      int tri_idx = find_mesh_triangle(r, z);
+      if (tri_idx >= 0) mesh_cell = mesh_cell_idx[tri_idx];
+      else continue;  // outside SOLPS mesh — zero flux
+    }
+
     // Per-species density/temperature lookup
     auto species_plasma = [&](int s, double &ni, double &ti) {
       ni = 0.0; ti = 0.0;
-      if (has_multi_ion) {
+      if (mesh_cell >= 0) {
+        // Direct SOLPS cell data — no interpolation artifacts
+        if (mesh_nion > 0 && s < mesh_nion) {
+          const size_t off = static_cast<size_t>(s) * mesh_ncell + mesh_cell;
+          ni = mesh_ions_dens[off];
+          if (!mesh_ions_temp.empty()) ti = mesh_ions_temp[off];
+        } else {
+          ni = mesh_ni[mesh_cell];
+          ti = mesh_ti[mesh_cell];
+        }
+      } else if (has_multi_ion) {
         ni = interp3D(ions_dens, s, r, z);
         if (!ions_temp.empty()) ti = interp3D(ions_temp, s, r, z);
       } else {
@@ -699,7 +831,8 @@ void ComputePMISurfData::compute_per_surf()
     std::fill(sput_flux.begin(), sput_flux.end(), 0.0);
 
     double sput_total = 0.0;
-    const double te_loc = interp2D(temp_e, r, z);
+    const double te_loc = (mesh_cell >= 0) ? mesh_te[mesh_cell]
+                                           : interp2D(temp_e, r, z);
 
     for (int s = 0; s < ns; s++) {
       double ni, ti;

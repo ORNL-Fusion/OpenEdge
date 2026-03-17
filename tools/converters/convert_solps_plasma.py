@@ -458,6 +458,7 @@ def convert_solps_to_openedge(
     plot_prefix: Path | None = None,
     wall_out: Path | None = None,
     mesh_extra: Path | None = None,
+    b2fgmtry_path: Path | None = None,
 ) -> None:
     """
     Convert SOLPS run directory to OpenEdge plasma.h5 + bfield.h5.
@@ -465,7 +466,7 @@ def convert_solps_to_openedge(
     Reads b2fgmtry (geometry) and b2fstate (plasma state) directly —
     no quixote dependency.
     """
-    b2fgmtry_file = run_path / "b2fgmtry"
+    b2fgmtry_file = b2fgmtry_path if b2fgmtry_path else run_path / "b2fgmtry"
     b2fstate_file = run_path / "b2fstate"
 
     for f in [b2fgmtry_file, b2fstate_file]:
@@ -615,6 +616,88 @@ def convert_solps_to_openedge(
                  flow_i_r_all, flow_i_t_all, flow_i_z_all]:
         arr3[~np.isfinite(arr3)] = 0.0
 
+    # -- Build SOLPS mesh triangulation --
+    # Triangulate each SOLPS quad cell into 2 triangles.
+    # Store per-cell plasma data on the triangles so the C++ code can
+    # do direct point-in-triangle lookup instead of rectangular interpolation.
+    crx4 = crx.reshape(nx + 2, ny + 2, 4, order="F")
+    cry4 = cry.reshape(nx + 2, ny + 2, 4, order="F")
+    # Corner order from Jeremy's routines: [0,1,3,2] = LL, LR, UR, UL
+    co = [0, 1, 3, 2]
+
+    # Collect all unique vertices and triangle connectivity
+    vtx_r_list = []
+    vtx_z_list = []
+    tri_conn = []      # (ntri, 3) vertex indices
+    tri_cell_ix = []   # (ntri,) SOLPS cell linear index for data lookup
+    vtx_map = {}       # (rounded_r, rounded_z) -> vertex index
+
+    def get_vtx(rr, zz):
+        key = (round(float(rr), 10), round(float(zz), 10))
+        if key not in vtx_map:
+            idx = len(vtx_r_list)
+            vtx_map[key] = idx
+            vtx_r_list.append(float(rr))
+            vtx_z_list.append(float(zz))
+        return vtx_map[key]
+
+    ncells_valid = 0
+    for ix in range(1, nx + 1):
+        for iy in range(1, ny + 1):
+            corners_r = crx4[ix, iy, co]
+            corners_z = cry4[ix, iy, co]
+            if not (np.all(np.isfinite(corners_r)) and np.all(np.isfinite(corners_z))):
+                continue
+            # Skip degenerate cells (zero area)
+            area = 0.5 * abs(
+                (corners_r[1]-corners_r[0])*(corners_z[2]-corners_z[0]) -
+                (corners_r[2]-corners_r[0])*(corners_z[1]-corners_z[0])
+            )
+            if area < 1e-20:
+                continue
+            v = [get_vtx(corners_r[k], corners_z[k]) for k in range(4)]
+            cell_lin = ix * (ny + 2) + iy  # linear index for data lookup
+            # Split quad into 2 triangles: (0,1,2) and (0,2,3)
+            tri_conn.append([v[0], v[1], v[2]])
+            tri_cell_ix.append(cell_lin)
+            tri_conn.append([v[0], v[2], v[3]])
+            tri_cell_ix.append(cell_lin)
+            ncells_valid += 1
+
+    mesh_vtx_r = np.array(vtx_r_list, dtype=np.float64)
+    mesh_vtx_z = np.array(vtx_z_list, dtype=np.float64)
+    mesh_tri = np.array(tri_conn, dtype=np.int32)
+    mesh_cell_idx = np.array(tri_cell_ix, dtype=np.int32)
+    print(f"SOLPS mesh triangulation: {ncells_valid} quads -> {len(mesh_tri)} triangles, {len(mesh_vtx_r)} vertices")
+
+    # Per-cell plasma data in flat (nx+2)*(ny+2) layout matching cell_lin indexing
+    ncell_flat = (nx + 2) * (ny + 2)
+    mesh_ne = ne.reshape(ncell_flat, order="F")
+    mesh_te = te_eV.reshape(ncell_flat, order="F")
+    mesh_ti = ti_eV.reshape(ncell_flat, order="F")
+
+    # Per-species densities and flows (for the main ion)
+    mesh_ni = main_dens_raw.reshape(ncell_flat, order="F")
+    mesh_upar = main_upar_raw.reshape(ncell_flat, order="F")
+
+    # Multi-ion per-cell data
+    mesh_ions_dens = np.zeros((nion, ncell_flat), dtype=np.float64)
+    mesh_ions_temp = np.zeros((nion, ncell_flat), dtype=np.float64)
+    mesh_ions_upar = np.zeros((nion, ncell_flat), dtype=np.float64)
+    for k, sidx in enumerate(ion_indices):
+        n_s = na[:, :, sidx] if na.ndim == 3 else na
+        mesh_ions_dens[k] = n_s.reshape(ncell_flat, order="F")
+        mesh_ions_temp[k] = ti_eV.reshape(ncell_flat, order="F")
+        if ua_raw.ndim == 3 and ua_raw.shape[2] > sidx:
+            mesh_ions_upar[k] = ua_raw[:, :, sidx].reshape(ncell_flat, order="F")
+        elif ua_raw.ndim == 2:
+            mesh_ions_upar[k] = ua_raw.reshape(ncell_flat, order="F")
+
+    # NaN cleanup for mesh data
+    for arr in [mesh_ne, mesh_te, mesh_ti, mesh_ni, mesh_upar,
+                mesh_ions_dens, mesh_ions_temp, mesh_ions_upar]:
+        arr[~np.isfinite(arr)] = 0.0
+
     # -- Write plasma.h5 --
     with h5py.File(plasma_out, "w") as f:
         f.create_dataset("r", data=r)
@@ -654,6 +737,20 @@ def convert_solps_to_openedge(
         f.create_dataset("n_i/dens", data=dens_i_grid)
         f.create_dataset("n_i/temp", data=temp_i_grid)
         f.create_dataset("n_i/parr_flow", data=flow_i_par_all[main_k])
+
+        # SOLPS mesh triangulation for direct point-in-cell interpolation
+        f.create_dataset("mesh/vtx_r", data=mesh_vtx_r)
+        f.create_dataset("mesh/vtx_z", data=mesh_vtx_z)
+        f.create_dataset("mesh/triangles", data=mesh_tri)
+        f.create_dataset("mesh/cell_index", data=mesh_cell_idx)
+        f.create_dataset("mesh/dens_e", data=mesh_ne)
+        f.create_dataset("mesh/temp_e", data=mesh_te)
+        f.create_dataset("mesh/dens_i", data=mesh_ni)
+        f.create_dataset("mesh/temp_i", data=mesh_ti)
+        f.create_dataset("mesh/parr_flow", data=mesh_upar)
+        f.create_dataset("mesh/ions/dens", data=mesh_ions_dens)
+        f.create_dataset("mesh/ions/temp", data=mesh_ions_temp)
+        f.create_dataset("mesh/ions/parr_flow", data=mesh_ions_upar)
 
     # -- Write bfield.h5 --
     with h5py.File(bfield_out, "w") as f:
@@ -785,6 +882,7 @@ def _build_parser():
     p.add_argument("--plot-prefix", type=Path, default=None)
     p.add_argument("--wall-out", type=Path, default=None, help="Output SPARTA wall file from mesh.extra")
     p.add_argument("--mesh-extra", type=Path, default=None)
+    p.add_argument("--b2fgmtry", type=Path, default=None, help="Path to b2fgmtry (if not in run_path)")
     return p
 
 
@@ -803,6 +901,7 @@ def main():
         plot_prefix=args.plot_prefix,
         wall_out=args.wall_out,
         mesh_extra=args.mesh_extra,
+        b2fgmtry_path=args.b2fgmtry,
     )
 
 
