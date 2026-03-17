@@ -68,13 +68,19 @@ class ComputePMISurfData : public Compute {
   std::vector<double> debug_E;
   std::vector<double> debug_A;
 
+  // SOLPS boundary polygon mask (R,Z)
+  std::string boundary_path;
+  std::vector<double> boundary_r, boundary_z;
+
   double interp2D(const std::vector<double> &f, double r, double z) const;
   double interp3D(const std::vector<double> &f, int ispec, double r, double z) const;
   double interp_yield(double e_eV, double a_deg) const;
   void load_plasma();
   void load_surface_data();
+  void load_boundary();
   int peek_nspec_from_plasma() const;
   int in_projectile_slots(int slot1) const;
+  int point_in_boundary(double r, double z) const;
 };
 
 }

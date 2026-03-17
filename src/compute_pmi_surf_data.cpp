@@ -116,6 +116,10 @@ ComputePMISurfData::ComputePMISurfData(SPARTA *sparta, int narg, char **arg) :
       if (iarg+1 >= narg) error->all(FLERR,"bfield needs HDF5 file path");
       bfield_path = std::string(arg[iarg+1]);
       iarg += 2;
+    } else if (strcmp(arg[iarg],"boundary") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"boundary needs polygon file path");
+      boundary_path = std::string(arg[iarg+1]);
+      iarg += 2;
     } else if (strcmp(arg[iarg],"debug_interp") == 0) {
       if (iarg+2 >= narg) error->all(FLERR,"debug_interp needs E(eV) angle(deg)");
       debug_interp = 1;
@@ -331,6 +335,50 @@ void ComputePMISurfData::load_surface_data()
   read2D("spyld", spyld);
 }
 
+void ComputePMISurfData::load_boundary()
+{
+  boundary_r.clear();
+  boundary_z.clear();
+  if (boundary_path.empty()) return;
+
+  FILE *fp = fopen(boundary_path.c_str(), "r");
+  if (!fp) error->all(FLERR, "compute pmi/surf/data: cannot open boundary file");
+  char line[256];
+  while (fgets(line, sizeof(line), fp)) {
+    if (line[0] == '#' || line[0] == '\n') continue;
+    double r, z;
+    if (sscanf(line, "%lf %lf", &r, &z) == 2) {
+      boundary_r.push_back(r);
+      boundary_z.push_back(z);
+    }
+  }
+  fclose(fp);
+  if (boundary_r.size() < 3)
+    error->all(FLERR, "compute pmi/surf/data: boundary polygon needs >= 3 points");
+  if (comm->me == 0) {
+    if (screen) fprintf(screen, "PMI boundary polygon: %d points\n",
+                        static_cast<int>(boundary_r.size()));
+    if (logfile) fprintf(logfile, "PMI boundary polygon: %d points\n",
+                         static_cast<int>(boundary_r.size()));
+  }
+}
+
+int ComputePMISurfData::point_in_boundary(double r, double z) const
+{
+  // Ray-casting point-in-polygon test
+  if (boundary_r.empty()) return 1;  // no boundary = all inside
+  const int n = static_cast<int>(boundary_r.size());
+  int inside = 0;
+  for (int i = 0, j = n - 1; i < n; j = i++) {
+    const double ri = boundary_r[i], zi = boundary_z[i];
+    const double rj = boundary_r[j], zj = boundary_z[j];
+    if (((zi > z) != (zj > z)) &&
+        (r < (rj - ri) * (z - zi) / (zj - zi) + ri))
+      inside = !inside;
+  }
+  return inside;
+}
+
 void ComputePMISurfData::init()
 {
   if (!surf->exist)
@@ -404,6 +452,8 @@ void ComputePMISurfData::init()
   } catch (...) {
     error->all(FLERR, "compute pmi/surf/data failed reading surface file");
   }
+
+  load_boundary();
 
   if (debug_interp && comm->me == 0) {
     auto interp_yield_raw = [&](double e_eV, double a_deg)->double {
@@ -594,6 +644,9 @@ void ComputePMISurfData::compute_per_surf()
       r = std::sqrt(xc*xc + yc*yc);
       z = zc;
     }
+
+    // Skip surface elements outside SOLPS boundary polygon
+    if (!point_in_boundary(r, z)) continue;
 
     // Surface normal in cylindrical (R, phi, Z)
     double nr_surf = 0.0, nt_surf = 0.0, nz_surf = 0.0;

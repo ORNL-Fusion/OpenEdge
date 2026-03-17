@@ -5,8 +5,12 @@
 #   - D+ plasma background from SOLPS (plasma.h5 + bfield.h5)
 #   - D-on-C sputtering via BCA yield table (1_on_6.h5)
 #   - C ionization/recombination via ADAS (Z=6)
-#   - Borodkina spatial sheath model
+#   - Sheath kick model (Bohm sheath potential)
 #   - Boris pusher with subcycling
+#   - Nanbu Coulomb collisions with D+ background
+#   - Braginskii ion + electron thermal forces
+#   - Anomalous cross-field diffusion + gradient-driven pinch
+#   - Ambipolar parallel E-field
 #   - Toroidal periodic BCs on phi-face caps
 ################################################################################
 
@@ -32,7 +36,8 @@ mixture             carbonSource C4+     frac 0.0
 mixture             carbonSource C5+     frac 0.0
 mixture             carbonSource C6+     frac 0.0
 variable            TbindC equal 7.37*11600.
-mixture             carbonSource temp ${TbindC}
+variable            TemitC equal 0.5*v_TbindC
+mixture             carbonSource temp ${TemitC}
 
 # ---- Surface geometry ----
 read_surf           input/d3d_case_wedge_capped.surf particle check
@@ -46,40 +51,100 @@ surf_collide        PERIODIC toroidal 30.0
 surf_modify         wall collide WALL react none
 surf_modify         caps collide PERIODIC react none
 
-# ---- Plasma fields on grid ----
+# ===========================================================================
+# 1) Plasma/B-field compute on grid
+# ===========================================================================
+# c_pfields columns:
+#   [1]=bx [2]=by [3]=bz [4]=epar
+#   [5]=temp_e [6]=dens_e [7]=temp_i [8]=dens_i [9]=parrflow
+#   [10]=grad_te_r [11]=grad_te_z [12]=grad_ti_r [13]=grad_ti_z
+#   [14]=ex [15]=ey [16]=ez
+#   [17]=grad_ne_r [18]=grad_ne_z
 compute             pfields plasma/fields all file input/plasma.h5 input/bfield.h5 &
-                    bx by bz temp_e dens_e temp_i dens_i parrflow
+                    bx by bz epar temp_e dens_e temp_i dens_i parrflow &
+                    grad_te_r grad_te_z grad_ti_r grad_ti_z ex ey ez &
+                    grad_ne_r grad_ne_z
 
-# ---- Magnetic field from plasma compute ----
+# ===========================================================================
+# 2) Boris pusher with B-field, E-field, and sheath kick
+# ===========================================================================
 fix                 bB bfield/grid c_pfields[1] c_pfields[2] c_pfields[3]
 global              bfield grid bB 0
-global              efield none
 
-# ---- Boris pusher ----
+# Ambipolar parallel E-field from electron pressure gradient
+fix                 fEpar efield/grid c_pfields[14] c_pfields[15] c_pfields[16]
+global              efield grid fEpar 0
+
 global              boris_subcycles 5
 
-# ---- Sheath (Borodkina per-particle kick) ----
+# Sheath geometry and kick model
 compute             cgeom sheath/geometry/grid all all dist nx ny nz surfidx
 global              sheath geom_compute cgeom plasma_compute pfields &
-                    mD_amu 2.0 kick yes
+                    mD_amu 2.0 pot_mult 2.5 kick yes
 
-# ---- ADAS ionization/recombination for Carbon (Z=6) ----
+# ===========================================================================
+# 3) ADAS ionization/recombination for Carbon (Z=6)
+# ===========================================================================
 fix                 chem chem/adas 1 6 input/plasma.adas adas_dir ../../database/adas
 
-# ---- Sputtering source ----
+# ===========================================================================
+# 4) Nanbu Coulomb collisions with D+ background
+# ===========================================================================
+fix                 fnanbu coll/nanbu 1 plasma c_pfields[5] c_pfields[6] &
+                    nobinary &
+                    background 2.0 1.0 &
+                    c_pfields[7] c_pfields[8] c_pfields[9] &
+                    c_pfields[1] c_pfields[2] c_pfields[3]
+
+# ===========================================================================
+# 5) Braginskii thermal forces on impurity ions
+# ===========================================================================
+fix                 ftf thermal_force 1 &
+                    bfield c_pfields[1] c_pfields[2] c_pfields[3] &
+                    ion_thermal c_pfields[12] c_pfields[13] coeff 2.6 &
+                    elec_thermal c_pfields[10] c_pfields[11] coeff 0.71
+
+# ===========================================================================
+# 6) Anomalous cross-field diffusion + gradient-driven pinch
+# ===========================================================================
+fix                 fcd cross_diffusion 1 &
+                    bfield c_pfields[1] c_pfields[2] c_pfields[3] &
+                    D_perp 1.0 &
+                    gradient_pinch 2.0 c_pfields[6] c_pfields[17] c_pfields[18]
+
+# ===========================================================================
+# 7) Sputtering source (D-on-C, Bohm flux model)
+# ===========================================================================
 compute             cpmi pmi/surf/data wall file input/plasma.h5 input/1_on_6.h5 &
-                    bfield input/bfield.h5 projectile_slots 1 1 mass_amu 2.0 sputter_flux_total
+                    bfield input/bfield.h5 boundary input/solps_boundary.dat &
+                    projectile_slots 1 1 mass_amu 2.0 sputter_flux_total
 
-fix                 femit emit/surf/pmi carbonSource wall cpmi perspecies no normal yes
+# Per-particle weight infrastructure for weighted emission
+fix                 pw particle/weight
 
-# ---- Diagnostics ----
+# Emit sputtered C from cpmi total sputter flux
+fix                 femit emit/surf/pmi carbonSource wall cpmi perspecies no normal yes &
+                    nlaunch 5 flux_thresh 1e10
+
+# ===========================================================================
+# 8) Diagnostics
+# ===========================================================================
 shell               mkdir -p output
 
-dump                dpmi surf wall 100 output/pmi.d3d id c_cpmi
-dump                dpart particle all 100 output/particles id type x y z vx vy vz
+# Surface sputtering flux
+dump                dpmi surf wall 500 output/pmi.d3d id c_cpmi
+
+# Particle state dump
+dump                dpart particle all 500 output/particles id type x y z vx vy vz p_pweight
+dump_modify         dpart first yes
+
+# Weighted density (correct physical density with per-particle weights)
+compute             cwden grid/weighted all species nrho_w
+fix                 fwden ave/grid all 1 100 500 c_cwden[*] ave running
+dump                dwden grid all 500 output/density_weighted id xc yc zc f_fwden[*]
 
 timestep            1.0e-9
 stats               10
 stats_style         step cpu np
 
-run                 1000
+run                 5000
