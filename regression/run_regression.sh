@@ -72,6 +72,7 @@ declare -a TESTS=(
   "particle_weight_weighted|test_particle_weight|in.weighted|"
   "west_axi|test_west_axi|in.west_regression|"
   "iead|test_iead|in.iead_alpha0|python3 create_case.py"
+  "polarization|test_polarization|in.input|"
 )
 
 # -----------------------------------------------------------------------

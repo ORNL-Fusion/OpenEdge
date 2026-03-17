@@ -15,6 +15,8 @@ examples/*/in.*.regression
 examples/test_iead/in.iead_alpha*
 examples/test_iead/particles_alpha*.dat
 examples/test_iead/wall.surf
+examples/test_polarization/state
+examples/test_polarization/figs_polarization/
 
 # Local run/test artifacts
 log.*
