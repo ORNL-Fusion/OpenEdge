@@ -104,6 +104,11 @@ fix ftf thermal_force 1 &
                     ion_thermal c_cwest[12] c_cwest[13] coeff 2.6 &
                     elec_thermal c_cwest[10] c_cwest[11] coeff 0.71
 
+# 1f) Anomalous cross-field diffusion (constant D_perp = 1.0 m^2/s)
+fix fcd cross_diffusion 1 &
+                    bfield c_cwest[1] c_cwest[2] c_cwest[3] &
+                    D_perp 1.0
+
 # 2) Incident plasma flux on wall group 1
 #compute cgam incident/plasma/flux 1 file input/plasma.h5 nflux_species all
 

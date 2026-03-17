@@ -127,6 +127,25 @@ Two approaches for sheath electric fields:
     always cylindrical (`grad_ti_r`, `grad_ti_z`).
   - Both forces push impurities toward higher temperature (toward the core).
 
+### Cross-field diffusion
+
+- **`fix cross_diffusion`** — anomalous perpendicular diffusion and
+  convective pinch for impurity ions, applied as position displacements
+  at END_OF_STEP.
+  ```
+  fix ID cross_diffusion Nevery \
+      bfield BxSRC BySRC BzSRC \
+      [D_perp VAL | bohm TeSRC [scale VAL]] \
+      [pinch Vr Vz]
+  ```
+  - Constant diffusion: `D_perp 1.0` gives D_⊥ = 1.0 m²/s.
+  - Bohm diffusion: `bohm c_cplasma[Te_col] scale 0.1` gives
+    D = scale × Te/(16eB). Default scale = 1.0.
+  - Pinch: `pinch -50.0 0.0` adds a constant inward velocity in (R, Z).
+  - 2D: displacement in poloidal perpendicular direction only.
+    3D: two perpendicular directions via Gram-Schmidt.
+  - Particles that diffuse outside the domain are reverted (no loss).
+
 ### Ambipolar E-field
 
 - `compute plasma/fields` computes the parallel ambipolar electric field

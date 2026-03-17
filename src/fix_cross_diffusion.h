@@ -1,0 +1,89 @@
+/* ----------------------------------------------------------------------
+    OpenEdge:
+    Impurity Transport in Modeling of SOL and Edge Physics:
+    This code built on top of SPARTA, a parallel DSMC code.
+    Oak Ridge National Laboratory
+    https://github.com/ORNL-Fusion/OpenEdge
+
+    fix cross_diffusion: anomalous perpendicular diffusion and
+    convective pinch for impurity ions.
+
+    Applies per-particle position displacement perpendicular to B:
+      1) Stochastic diffusion:  dx_perp = sqrt(2 * D_perp * dt) * xi
+      2) Deterministic pinch:   dx += V_pinch * dt
+
+    D_perp can be constant or Bohm-like: D_Bohm = Te / (16 * e * |B|).
+    V_pinch is a constant velocity vector in (R, Z) coordinates.
+
+    B-field sources must be in SPARTA coordinate order (bx, by, bz).
+
+    Syntax:
+      fix ID cross_diffusion Nevery \
+          bfield BxSRC BySRC BzSRC \
+          [D_perp VAL | bohm TeSRC [scale VAL]] \
+          [pinch Vr Vz]
+
+    Example:
+      fix fcd cross_diffusion 1 \
+          bfield c_cwest[1] c_cwest[2] c_cwest[3] \
+          D_perp 1.0 \
+          pinch -50.0 0.0
+
+    Example (Bohm):
+      fix fcd cross_diffusion 1 \
+          bfield c_cwest[1] c_cwest[2] c_cwest[3] \
+          bohm c_cwest[5] scale 0.1
+------------------------------------------------------------------------- */
+
+#ifdef FIX_CLASS
+
+FixStyle(cross_diffusion,FixCrossDiffusion)
+
+#else
+
+#ifndef SPARTA_FIX_CROSS_DIFFUSION_H
+#define SPARTA_FIX_CROSS_DIFFUSION_H
+
+#include "fix.h"
+#include "grid_src.h"
+
+namespace SPARTA_NS {
+
+class RanKnuth;
+
+class FixCrossDiffusion : public Fix {
+ public:
+  FixCrossDiffusion(class SPARTA *, int, char **);
+  ~FixCrossDiffusion();
+  int  setmask();
+  void init();
+  void end_of_step();
+
+ protected:
+  RanKnuth *rng_;
+
+  // B-field sources in SPARTA coordinate order
+  CollGridSrc srcBx_, srcBy_, srcBz_;
+
+  // diffusion model
+  int diff_model_;       // 0=none, 1=constant, 2=bohm
+  double D_perp_;        // constant D_perp [m^2/s]
+  CollGridSrc srcTe_;    // Te source for Bohm model
+  double bohm_scale_;    // scale factor for Bohm (default 1.0)
+
+  // pinch velocity (cylindrical R, Z components) [m/s]
+  int have_pinch_;
+  double v_pinch_R_;
+  double v_pinch_Z_;
+
+  // helper methods
+  void parse_compute_src(const char *tok, CollGridSrc &dst, const char *label);
+  void refresh_compute_src(CollGridSrc &S);
+  double read_cell_src(const CollGridSrc &S, int icell) const;
+  void relocate_particle(int ip, const double x_save[3]);
+};
+
+}  // namespace SPARTA_NS
+
+#endif
+#endif
