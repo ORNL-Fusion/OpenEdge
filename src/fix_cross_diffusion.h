@@ -13,7 +13,8 @@
       2) Deterministic pinch:   dx += V_pinch * dt
 
     D_perp can be constant or Bohm-like: D_Bohm = Te / (16 * e * |B|).
-    V_pinch is a constant velocity vector in (R, Z) coordinates.
+    V_pinch can be constant (R, Z) or gradient-driven:
+      V = C_p * D_perp * (grad_perp(ne) / ne)
 
     B-field sources must be in SPARTA coordinate order (bx, by, bz).
 
@@ -21,18 +22,20 @@
       fix ID cross_diffusion Nevery \
           bfield BxSRC BySRC BzSRC \
           [D_perp VAL | bohm TeSRC [scale VAL]] \
-          [pinch Vr Vz]
+          [pinch Vr Vz] \
+          [gradient_pinch Cp neSRC gradNeR_SRC gradNeZ_SRC]
 
-    Example:
+    Example (constant D + constant pinch):
       fix fcd cross_diffusion 1 \
           bfield c_cwest[1] c_cwest[2] c_cwest[3] \
           D_perp 1.0 \
           pinch -50.0 0.0
 
-    Example (Bohm):
+    Example (constant D + gradient-driven pinch):
       fix fcd cross_diffusion 1 \
           bfield c_cwest[1] c_cwest[2] c_cwest[3] \
-          bohm c_cwest[5] scale 0.1
+          D_perp 1.0 \
+          gradient_pinch 2.0 c_cwest[6] c_cwest[18] c_cwest[19]
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -71,10 +74,16 @@ class FixCrossDiffusion : public Fix {
   CollGridSrc srcTe_;    // Te source for Bohm model
   double bohm_scale_;    // scale factor for Bohm (default 1.0)
 
-  // pinch velocity (cylindrical R, Z components) [m/s]
+  // constant pinch velocity (cylindrical R, Z components) [m/s]
   int have_pinch_;
   double v_pinch_R_;
   double v_pinch_Z_;
+
+  // gradient-driven pinch: V = C_p * D_perp * grad_perp(ne) / ne
+  int have_grad_pinch_;
+  double C_p_;
+  CollGridSrc srcNe_;
+  CollGridSrc srcGradNeR_, srcGradNeZ_;
 
   // helper methods
   void parse_compute_src(const char *tok, CollGridSrc &dst, const char *label);

@@ -60,7 +60,9 @@ FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
   bohm_scale_(1.0),
   have_pinch_(0),
   v_pinch_R_(0.0),
-  v_pinch_Z_(0.0)
+  v_pinch_Z_(0.0),
+  have_grad_pinch_(0),
+  C_p_(0.0)
 {
   // fix ID cross_diffusion Nevery bfield BxSRC BySRC BzSRC [keywords...]
 
@@ -112,6 +114,17 @@ FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
       v_pinch_Z_ = input->numeric(FLERR, arg[iarg++]);
       have_pinch_ = 1;
 
+    } else if (strcmp(arg[iarg], "gradient_pinch") == 0) {
+      iarg++;
+      if (iarg + 4 > narg)
+        error->all(FLERR,
+          "fix cross_diffusion gradient_pinch: need Cp neSRC gradNeR_SRC gradNeZ_SRC");
+      C_p_ = input->numeric(FLERR, arg[iarg++]);
+      parse_compute_src(arg[iarg++], srcNe_, "Ne");
+      parse_compute_src(arg[iarg++], srcGradNeR_, "gradNeR");
+      parse_compute_src(arg[iarg++], srcGradNeZ_, "gradNeZ");
+      have_grad_pinch_ = 1;
+
     } else {
       char msg[200];
       snprintf(msg, sizeof(msg),
@@ -120,10 +133,10 @@ FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
     }
   }
 
-  if (diff_model_ == DIFF_NONE && !have_pinch_)
+  if (diff_model_ == DIFF_NONE && !have_pinch_ && !have_grad_pinch_)
     error->all(FLERR,
-      "fix cross_diffusion: at least one of D_perp, bohm, or pinch "
-      "must be specified");
+      "fix cross_diffusion: at least one of D_perp, bohm, pinch, or "
+      "gradient_pinch must be specified");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -137,6 +150,11 @@ FixCrossDiffusion::~FixCrossDiffusion()
   delete[] srcBz_.cid;
   if (diff_model_ == DIFF_BOHM)
     delete[] srcTe_.cid;
+  if (have_grad_pinch_) {
+    delete[] srcNe_.cid;
+    delete[] srcGradNeR_.cid;
+    delete[] srcGradNeZ_.cid;
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -190,6 +208,11 @@ void FixCrossDiffusion::init()
   bind(srcBz_, "Bz");
   if (diff_model_ == DIFF_BOHM)
     bind(srcTe_, "Te");
+  if (have_grad_pinch_) {
+    bind(srcNe_, "Ne");
+    bind(srcGradNeR_, "gradNeR");
+    bind(srcGradNeZ_, "gradNeZ");
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -204,6 +227,11 @@ void FixCrossDiffusion::end_of_step()
   refresh_compute_src(srcBz_);
   if (diff_model_ == DIFF_BOHM)
     refresh_compute_src(srcTe_);
+  if (have_grad_pinch_) {
+    refresh_compute_src(srcNe_);
+    refresh_compute_src(srcGradNeR_);
+    refresh_compute_src(srcGradNeZ_);
+  }
 
   Particle::OnePart *particles = particle->particles;
   Particle::Species *species   = particle->species;
@@ -305,6 +333,57 @@ void FixCrossDiffusion::end_of_step()
           p.x[1] += v_pinch_R_ * sphi * dt;
         }
         p.x[2] += v_pinch_Z_ * dt;
+      }
+    }
+
+    // gradient-driven pinch: V = C_p * D_local * grad_perp(ne) / ne
+    // Direction: perpendicular to B in the poloidal plane
+    if (have_grad_pinch_ && D_local > 0.0) {
+      const double ne_loc = std::max(read_cell_src(srcNe_, icell), 1.0e10);
+      const double gNeR = read_cell_src(srcGradNeR_, icell);  // 1/m^4... actually m^-3/m = m^-4
+      const double gNeZ = read_cell_src(srcGradNeZ_, icell);
+
+      if (dim == 2) {
+        // 2D: perpendicular component of grad(ne) in poloidal plane
+        // e_perp = (-bhat_Z, bhat_R) in SPARTA slots (B[0]=B_R, B[1]=B_Z)
+        const double Bpol = std::sqrt(B0*B0 + B1*B1);
+        if (Bpol > 1.0e-20) {
+          const double inv_Bpol = 1.0 / Bpol;
+          const double eperp0 = -B1 * inv_Bpol;
+          const double eperp1 =  B0 * inv_Bpol;
+          // grad_ne projected onto e_perp (cylindrical grad dotted with poloidal e_perp)
+          const double grad_ne_perp = gNeR * eperp0 + gNeZ * eperp1;
+          const double V_gp = C_p_ * D_local * grad_ne_perp / ne_loc;
+          p.x[0] += V_gp * eperp0 * dt;
+          p.x[1] += V_gp * eperp1 * dt;
+        }
+      } else {
+        // 3D: project cylindrical gradient to Cartesian perpendicular direction
+        const double inv_Bmag = 1.0 / Bmag;
+        const double bhat0 = B0 * inv_Bmag;
+        const double bhat1 = B1 * inv_Bmag;
+        const double bhat2 = B2 * inv_Bmag;
+        // convert cylindrical grad_ne to Cartesian
+        const double rx = p.x[0], ry = p.x[1];
+        const double R = std::sqrt(rx*rx + ry*ry);
+        double gNe_x, gNe_y, gNe_z;
+        if (R > 1.0e-20) {
+          const double cphi = rx / R, sphi = ry / R;
+          gNe_x = gNeR * cphi;
+          gNe_y = gNeR * sphi;
+        } else {
+          gNe_x = gNeR; gNe_y = 0.0;
+        }
+        gNe_z = gNeZ;
+        // remove parallel component: grad_perp = grad - (grad . bhat) bhat
+        const double gdotb = gNe_x*bhat0 + gNe_y*bhat1 + gNe_z*bhat2;
+        const double gp0 = gNe_x - gdotb*bhat0;
+        const double gp1 = gNe_y - gdotb*bhat1;
+        const double gp2 = gNe_z - gdotb*bhat2;
+        const double V_scale = C_p_ * D_local / ne_loc;
+        p.x[0] += V_scale * gp0 * dt;
+        p.x[1] += V_scale * gp1 * dt;
+        p.x[2] += V_scale * gp2 * dt;
       }
     }
 

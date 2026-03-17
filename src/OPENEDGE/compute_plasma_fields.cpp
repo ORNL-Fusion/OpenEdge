@@ -36,7 +36,8 @@ enum {
   ER, ET, EZ, EX, EY,
   VR, VT, VZ, VX, VY,
   TI, TE, NI, NE, PARRFLOW, EPAR,
-  GRAD_TE_R, GRAD_TE_T, GRAD_TE_Z, GRAD_TI_R, GRAD_TI_T, GRAD_TI_Z
+  GRAD_TE_R, GRAD_TE_T, GRAD_TE_Z, GRAD_TI_R, GRAD_TI_T, GRAD_TI_Z,
+  GRAD_NE_R, GRAD_NE_Z
 };
 
 /* ---------------------------------------------------------------------- */
@@ -202,6 +203,8 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
     else if (strcmp(arg[iarg],"grad_ti_r")==0) value[iv] = GRAD_TI_R;
     else if (strcmp(arg[iarg],"grad_ti_t")==0) value[iv] = GRAD_TI_T;
     else if (strcmp(arg[iarg],"grad_ti_z")==0) value[iv] = GRAD_TI_Z;
+    else if (strcmp(arg[iarg],"grad_ne_r")==0) value[iv] = GRAD_NE_R;
+    else if (strcmp(arg[iarg],"grad_ne_z")==0) value[iv] = GRAD_NE_Z;
     else error->all(FLERR,"Illegal plasma/fields value");
   }
 
@@ -601,6 +604,8 @@ void ComputePlasmaFields::compute_per_grid()
         case GRAD_TI_R: vout = P.grad_temp_i_r; break;
         case GRAD_TI_T: vout = P.grad_temp_i_t; break;
         case GRAD_TI_Z: vout = P.grad_temp_i_z; break;
+        case GRAD_NE_R: vout = P.grad_dens_e_r; break;
+        case GRAD_NE_Z: vout = P.grad_dens_e_z; break;
         default:        vout = 0.0; break;
       }
       if (nvalue == 1) vector_grid[icell] = vout;

@@ -141,10 +141,14 @@ Two approaches for sheath electric fields:
   - Constant diffusion: `D_perp 1.0` gives D_⊥ = 1.0 m²/s.
   - Bohm diffusion: `bohm c_cplasma[Te_col] scale 0.1` gives
     D = scale × Te/(16eB). Default scale = 1.0.
-  - Pinch: `pinch -50.0 0.0` adds a constant inward velocity in (R, Z).
+  - Constant pinch: `pinch -50.0 0.0` adds a constant velocity in (R, Z).
+  - Gradient-driven pinch: `gradient_pinch Cp neSRC gradNeR gradNeZ`
+    gives V = Cp × D_⊥ × ∇_⊥(ne)/ne. Typical Cp = 1–3 (ITG turbulence).
   - 2D: displacement in poloidal perpendicular direction only.
     3D: two perpendicular directions via Gram-Schmidt.
   - Particles that diffuse outside the domain are reverted (no loss).
+  - `compute plasma/fields` output columns `grad_ne_r`, `grad_ne_z` provide
+    the electron density gradient (computed via finite differences).
 
 ### Ambipolar E-field
 
