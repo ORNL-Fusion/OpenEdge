@@ -68,7 +68,7 @@ fix                 chem chem/adas 1 6 input/plasma.adas adas_dir ../../database
 
 # ---- Sputtering source ----
 compute             cpmi pmi/surf/data wall file input/plasma.h5 input/1_on_6.h5 &
-                    projectile_slots 1 1 mass_amu 12.0 sputter_flux_total
+                    bfield input/bfield.h5 projectile_slots 1 1 mass_amu 2.0 sputter_flux_total
 
 fix                 femit emit/surf/pmi carbonSource wall cpmi perspecies no normal yes
 

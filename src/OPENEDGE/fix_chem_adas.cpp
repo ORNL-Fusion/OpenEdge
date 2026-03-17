@@ -292,13 +292,9 @@ void FixChemAdas::init()
     int isp = r->reactants[0];
   }
 
-// If no explicit Te/ne sources, require the per-particle plasma cache
-if (srcTe.kind == SRC_NONE && srcNe.kind == SRC_NONE) {
-  if (!update->plasma_cache_flag)
-    error->all(FLERR,
-      "fix chem/adas: no plasma source — either pass 'plasma <Te> <Ne>' "
-      "or configure sheath/GCA so the per-particle plasma cache is active");
-}
+// NOTE: if srcTe/srcNe are SRC_NONE, the per-particle plasma cache
+// (set in update->init) will be checked at runtime in end_of_step().
+// We cannot validate here because init() runs before update->init().
 
   // --- resolve VARIABLE sources (old path) ---
 if (srcTe.kind == SRC_VAR) {
@@ -385,6 +381,14 @@ if (!cp_plasma_cached_ && srcNe.kind == SRC_COMP && srcNe.icompute >= 0) {
 void FixChemAdas::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
+
+  // One-time check: if no explicit Te/ne source, require plasma cache
+  if (srcTe.kind == SRC_NONE && srcNe.kind == SRC_NONE &&
+      !update->plasma_cache_flag) {
+    error->all(FLERR,
+      "fix chem/adas: no plasma source — either pass 'plasma <Te> <Ne>' "
+      "or configure sheath/GCA so the per-particle plasma cache is active");
+  }
 
   nreact_one = 0;
   if (!particle->sorted) particle->sort();

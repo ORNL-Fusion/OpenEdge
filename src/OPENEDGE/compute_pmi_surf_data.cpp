@@ -38,7 +38,7 @@ ComputePMISurfData::ComputePMISurfData(SPARTA *sparta, int narg, char **arg) :
 
   proj_slot_lo = 2;
   proj_slot_hi = std::numeric_limits<int>::max();
-  mass_amu = 16.0;
+  mass_amu = 2.0;  // default: deuterium (used for Bohm sound speed)
 
   std::vector<int> which_tmp;
   std::vector<int> which_species_tmp;
@@ -112,6 +112,10 @@ ComputePMISurfData::ComputePMISurfData(SPARTA *sparta, int narg, char **arg) :
     } else if (strcmp(arg[iarg],"sputter_flux_total") == 0) {
       add_kind(SPUTTER_FLUX_TOTAL,0);
       iarg++;
+    } else if (strcmp(arg[iarg],"bfield") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"bfield needs HDF5 file path");
+      bfield_path = std::string(arg[iarg+1]);
+      iarg += 2;
     } else if (strcmp(arg[iarg],"debug_interp") == 0) {
       if (iarg+2 >= narg) error->all(FLERR,"debug_interp needs E(eV) angle(deg)");
       debug_interp = 1;
@@ -342,6 +346,57 @@ void ComputePMISurfData::init()
     error->all(FLERR, "compute pmi/surf/data failed reading plasma file");
   }
 
+  // Load B-field from separate file if not already in plasma HDF5.
+  // If no explicit bfield path given, try bfield.h5 in the same directory.
+  int bfield_user_specified = !bfield_path.empty();
+  if (!has_bfield && bfield_path.empty()) {
+    std::string dir = plasma_path;
+    size_t slash = dir.find_last_of('/');
+    if (slash != std::string::npos)
+      bfield_path = dir.substr(0, slash + 1) + "bfield.h5";
+    else
+      bfield_path = "bfield.h5";
+  }
+  if (!has_bfield && !bfield_path.empty()) {
+    try {
+      H5::H5File bf(bfield_path, H5F_ACC_RDONLY);
+      auto read1D_bf = [&](const std::string& name, std::vector<double>& out) {
+        H5::DataSet ds = bf.openDataSet(name);
+        H5::DataSpace sp = ds.getSpace();
+        hsize_t d0;
+        sp.getSimpleExtentDims(&d0);
+        out.resize(static_cast<size_t>(d0));
+        ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+      };
+      auto read2D_bf = [&](const std::string& name, std::vector<double>& out,
+                           int nr_bf, int nz_bf) {
+        H5::DataSet ds = bf.openDataSet(name);
+        H5::DataSpace sp = ds.getSpace();
+        hsize_t dims[2];
+        sp.getSimpleExtentDims(dims);
+        if (static_cast<int>(dims[0]) != nz_bf || static_cast<int>(dims[1]) != nr_bf)
+          throw std::runtime_error("bfield HDF5 shape mismatch with plasma grid");
+        out.resize(static_cast<size_t>(dims[0]*dims[1]));
+        ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+      };
+      std::vector<double> r_bf, z_bf;
+      read1D_bf("r", r_bf);
+      read1D_bf("z", z_bf);
+      if (static_cast<int>(r_bf.size()) != nr || static_cast<int>(z_bf.size()) != nz)
+        throw std::runtime_error("bfield r/z grid size does not match plasma grid");
+      read2D_bf("br", br, nr, nz);
+      if (H5Lexists(bf.getId(), "bt", H5P_DEFAULT) > 0)
+        read2D_bf("bt", bt, nr, nz);
+      read2D_bf("bz", bz, nr, nz);
+      has_bfield = (!br.empty() && !bz.empty());
+    } catch (...) {
+      // If user explicitly specified bfield path, this is a fatal error
+      if (bfield_user_specified)
+        error->all(FLERR, "compute pmi/surf/data: failed reading bfield file");
+      // Otherwise auto-detect failed silently — bfield not available
+    }
+  }
+
   try {
     load_surface_data();
   } catch (const std::exception& e) {
@@ -384,6 +439,11 @@ void ComputePMISurfData::init()
       if (logfile) fprintf(logfile,"PMI debug_interp: E=%g eV angle=%g deg -> spyld_raw=%g spyld_clamped=%g\n",e,a,yraw,yclamp);
     }
   }
+
+  if (!has_bfield)
+    error->all(FLERR,
+      "compute pmi/surf/data: plasma HDF5 must contain br and bz datasets "
+      "for Bohm flux model (Gamma = n * cs * sin(alpha_B))");
 
   distributed = surf->distributed;
   if (!firstflag) return;
@@ -493,6 +553,10 @@ double ComputePMISurfData::interp_yield(double e_eV, double a_deg) const
 
 void ComputePMISurfData::compute_per_surf()
 {
+  // Physical constants
+  const double QE  = 1.602176634e-19;   // elementary charge [C]
+  const double AMU = 1.66053906660e-27;  // atomic mass unit [kg]
+
   invoked_per_surf = update->ntimestep;
   if (nvalue == 1) {
     for (int i = 0; i < nsown; i++) vector_surf[i] = 0.0;
@@ -518,6 +582,7 @@ void ComputePMISurfData::compute_per_surf()
     const int in_group = (dimension == 2) ? (lines[m].mask & groupbit) : (tris[m].mask & groupbit);
     if (!in_group) continue;
 
+    // Surface element centroid in cylindrical (R,Z)
     double r = 0.0, z = 0.0;
     if (dimension == 2) {
       r = 0.5*(lines[m].p1[0] + lines[m].p2[0]);
@@ -530,7 +595,8 @@ void ComputePMISurfData::compute_per_surf()
       z = zc;
     }
 
-    double nr_surf = 0.0, nz_surf = 0.0;
+    // Surface normal in cylindrical (R, phi, Z)
+    double nr_surf = 0.0, nt_surf = 0.0, nz_surf = 0.0;
     if (dimension == 2) {
       nr_surf = lines[m].norm[0];
       nz_surf = lines[m].norm[1];
@@ -540,78 +606,38 @@ void ComputePMISurfData::compute_per_surf()
       const double rr = std::sqrt(xc*xc + yc*yc);
       const double cr = (rr > 0.0) ? xc/rr : 1.0;
       const double sr = (rr > 0.0) ? yc/rr : 0.0;
-      nr_surf = tris[m].norm[0]*cr + tris[m].norm[1]*sr;
-      nz_surf = tris[m].norm[2];
+      nr_surf =  tris[m].norm[0]*cr + tris[m].norm[1]*sr;
+      nt_surf = -tris[m].norm[0]*sr + tris[m].norm[1]*cr;
+      nz_surf =  tris[m].norm[2];
     }
 
-    const double dr = (nr > 1) ? std::fabs(rvals[1] - rvals[0]) : 0.0;
-    const double dz = (nz > 1) ? std::fabs(zvals[1] - zvals[0]) : 0.0;
-    const double dprobe = 0.5 * ((dr > 0.0 && dz > 0.0) ? std::min(dr,dz) : (dr + dz));
+    // B-field at surface centroid (cylindrical components)
+    const double br_loc = interp2D(br, r, z);
+    const double bt_loc = bt.empty() ? 0.0 : interp2D(bt, r, z);
+    const double bz_loc = interp2D(bz, r, z);
+    const double bmag = std::sqrt(br_loc*br_loc + bt_loc*bt_loc + bz_loc*bz_loc);
 
-    auto species_state = [&](int s, double rp, double zp,
-                             double &ni, double &ti, double &vr, double &vt, double &vz) {
-      ni = 0.0; ti = 0.0; vr = vt = vz = 0.0;
-      double vpar = 0.0;
+    // B-field incidence angle on wall surface.
+    // Use only poloidal field (Br, Bz) dotted with the poloidal surface
+    // normal (nr, nz).  The toroidal field Bt is tangent to flux surfaces
+    // and does not drive particles into the wall.  Including Bt would
+    // create a spurious dependence on the toroidal triangulation angle.
+    const double bp_dot_n = br_loc * nr_surf + bz_loc * nz_surf;
+    double sin_alpha = 0.0;
+    if (bmag > 0.0)
+      sin_alpha = std::fabs(bp_dot_n) / bmag;
+
+    // Per-species density/temperature lookup
+    auto species_plasma = [&](int s, double &ni, double &ti) {
+      ni = 0.0; ti = 0.0;
       if (has_multi_ion) {
-        ni = interp3D(ions_dens, s, rp, zp);
-        if (!ions_temp.empty()) ti = interp3D(ions_temp, s, rp, zp);
-        vpar = interp3D(ions_parr_flow, s, rp, zp);
-        if (!ions_parr_flow_r.empty() && !ions_parr_flow_z.empty()) {
-          vr = interp3D(ions_parr_flow_r, s, rp, zp);
-          vz = interp3D(ions_parr_flow_z, s, rp, zp);
-          if (!ions_parr_flow_t.empty()) vt = interp3D(ions_parr_flow_t, s, rp, zp);
-        } else if (has_bfield) {
-          const double brr = interp2D(br, rp, zp);
-          const double btt = bt.empty() ? 0.0 : interp2D(bt, rp, zp);
-          const double bzz = interp2D(bz, rp, zp);
-          const double bmag = std::sqrt(brr*brr + btt*btt + bzz*bzz);
-          if (bmag > 0.0) {
-            vr = vpar * brr / bmag;
-            vt = vpar * btt / bmag;
-            vz = vpar * bzz / bmag;
-          }
-        }
+        ni = interp3D(ions_dens, s, r, z);
+        if (!ions_temp.empty()) ti = interp3D(ions_temp, s, r, z);
       } else {
-        ni = interp2D(dens_i, rp, zp);
-        if (!temp_i.empty()) ti = interp2D(temp_i, rp, zp);
-        vpar = interp2D(parr_flow, rp, zp);
-        if (!parr_flow_r.empty() && !parr_flow_z.empty()) {
-          vr = interp2D(parr_flow_r, rp, zp);
-          vz = interp2D(parr_flow_z, rp, zp);
-          if (!parr_flow_t.empty()) vt = interp2D(parr_flow_t, rp, zp);
-        } else if (has_bfield) {
-          const double brr = interp2D(br, rp, zp);
-          const double btt = bt.empty() ? 0.0 : interp2D(bt, rp, zp);
-          const double bzz = interp2D(bz, rp, zp);
-          const double bmag = std::sqrt(brr*brr + btt*btt + bzz*bzz);
-          if (bmag > 0.0) {
-            vr = vpar * brr / bmag;
-            vt = vpar * btt / bmag;
-            vz = vpar * bzz / bmag;
-          }
-        }
+        ni = interp2D(dens_i, r, z);
+        if (!temp_i.empty()) ti = interp2D(temp_i, r, z);
       }
     };
-
-    auto total_incident = [&](double rp, double zp)->double {
-      double sum = 0.0;
-      for (int s = 0; s < ns; s++) {
-        double ni,ti,vr,vt,vz;
-        species_state(s,rp,zp,ni,ti,vr,vt,vz);
-        const double vin = -(vr*nr_surf + vz*nz_surf);
-        if (vin > 0.0) sum += ni * vin;
-      }
-      return sum;
-    };
-
-    const double r_minus = r - dprobe * nr_surf;
-    const double z_minus = z - dprobe * nz_surf;
-    const double r_plus  = r + dprobe * nr_surf;
-    const double z_plus  = z + dprobe * nz_surf;
-    const double g_minus = total_incident(r_minus,z_minus);
-    const double g_plus  = total_incident(r_plus,z_plus);
-    if (g_plus > g_minus) { r = r_plus; z = z_plus; }
-    else { r = r_minus; z = z_minus; }
 
     std::fill(gamma_n.begin(), gamma_n.end(), 0.0);
     std::fill(angle_deg.begin(), angle_deg.end(), 0.0);
@@ -620,33 +646,36 @@ void ComputePMISurfData::compute_per_surf()
     std::fill(sput_flux.begin(), sput_flux.end(), 0.0);
 
     double sput_total = 0.0;
-    const double te_loc = interp2D(temp_e,r,z);
-    for (int s = 0; s < ns; s++) {
-      double ni,ti,vr,vt,vz;
-      species_state(s,r,z,ni,ti,vr,vt,vz);
-      const double vin = -(vr*nr_surf + vz*nz_surf);
-      if (vin <= 0.0) continue;
-      const double g = ni * vin;
-      gamma_n[s] = g;
+    const double te_loc = interp2D(temp_e, r, z);
 
-      const double vmag = std::sqrt(vr*vr + vt*vt + vz*vz);
-      double a_deg = 0.0;
-      if (vmag > 0.0) {
-        double c = vin / vmag;
-        c = std::max(0.0,std::min(1.0,c));
-        a_deg = std::acos(c) * 180.0 / M_PI;
-      }
-      angle_deg[s] = a_deg;
+    for (int s = 0; s < ns; s++) {
+      double ni, ti;
+      species_plasma(s, ni, ti);
+      if (ni <= 0.0) continue;
 
       const int z_inc = (s >= 0 && s < static_cast<int>(ion_charge_state_z.size())) ?
         std::max(1,ion_charge_state_z[s]) : 1;
       const double te_eV = (std::isfinite(te_loc) && te_loc > 0.0) ? te_loc : 0.0;
       const double ti_eV = (std::isfinite(ti) && ti > 0.0) ? ti : 0.0;
+
+      // Bohm sound speed: cs = sqrt((Te + Ti) * e / (2 * m_ion * AMU))
+      const double cs_arg = (te_eV + ti_eV) * QE / (2.0 * mass_amu * AMU);
+      const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
+
+      // Bohm flux: Gamma = n_i * c_s * sin(alpha_B)
+      const double g = ni * cs * sin_alpha;
+      gamma_n[s] = g;
+
+      // Incidence angle for sputter yield = alpha_B
+      const double a_deg = std::asin(std::min(1.0, sin_alpha)) * 180.0 / M_PI;
+      angle_deg[s] = a_deg;
+
+      // Eckstein incident energy: E = 3*Te + 2*Z*Ti
       double E = 3.0 * te_eV + 2.0 * static_cast<double>(z_inc) * ti_eV;
       energy_eV[s] = E;
 
       if (in_projectile_slots(s+1)) {
-        const double ys = interp_yield(E,a_deg);
+        const double ys = interp_yield(E, a_deg);
         yld[s] = ys;
         sput_flux[s] = g * ys;
         sput_total += sput_flux[s];

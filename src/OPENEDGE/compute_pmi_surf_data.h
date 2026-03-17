@@ -44,6 +44,7 @@ class ComputePMISurfData : public Compute {
   int *which_species;   // 1-based species slot for species-specific outputs
   std::string plasma_path;
   std::string surface_path;
+  std::string bfield_path;
 
   // projectile slots for sputtering (inclusive, 1-based)
   int proj_slot_lo, proj_slot_hi;
