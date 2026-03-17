@@ -2,6 +2,9 @@ file(GLOB style_files "*.h")
 
 if(DEFINED SPARTA_STYLE_FILE_EXCLUDES)
   list(REMOVE_ITEM style_files ${SPARTA_STYLE_FILE_EXCLUDES})
+  foreach(file ${SPARTA_STYLE_FILE_EXCLUDES})
+    file(REMOVE ${SPARTA_BINARY_DIR}/include/${file})
+  endforeach()
 endif()
 
 if (PKG_KOKKOS)
