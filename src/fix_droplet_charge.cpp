@@ -21,6 +21,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "modify.h"
 #include "compute.h"
 #include "variable.h"
+#include "OPENEDGE/compute_plasma_fields.h"
 
 #include "math_const.h"
 
@@ -128,6 +129,8 @@ FixDropletCharge::FixDropletCharge(SPARTA *sparta, int narg, char **arg) :
 
   use_grid_plasma = (srcTe.kind == COLL_SRC_VAR || srcTi.kind == COLL_SRC_VAR ||
                      srcNe.kind == COLL_SRC_VAR || srcNi.kind == COLL_SRC_VAR);
+  use_point_plasma = 0;
+  point_plasma_compute = nullptr;
 
   while (iarg < narg) {
     if (strcmp(arg[iarg], "radius") == 0) {
@@ -276,6 +279,20 @@ void FixDropletCharge::init()
   bind_compute(srcTi, "Ti");
   bind_compute(srcNe, "Ne");
   bind_compute(srcNi, "Ni");
+
+  auto same_compute = [&](const CollGridSrc &A, const CollGridSrc &B) {
+    return A.kind == COLL_SRC_COMP && B.kind == COLL_SRC_COMP &&
+           A.icompute >= 0 && A.icompute == B.icompute;
+  };
+
+  if (!use_grid_plasma &&
+      same_compute(srcTe, srcTi) &&
+      same_compute(srcTe, srcNe) &&
+      same_compute(srcTe, srcNi)) {
+    Compute *c = modify->compute[srcTe.icompute];
+    point_plasma_compute = dynamic_cast<ComputePlasmaFields *>(c);
+    use_point_plasma = (point_plasma_compute != nullptr);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -380,6 +397,13 @@ inline double FixDropletCharge::read_cell_src(const CollGridSrc& S, int icell, i
   }
   if (S.kind == COLL_SRC_VAR) return plasma_grid[icell][col_plasma];
   return 0.0;
+}
+
+/* ---------------------------------------------------------------------- */
+
+bool FixDropletCharge::point_plasma_ready() const
+{
+  return use_point_plasma && point_plasma_compute;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -494,15 +518,24 @@ void FixDropletCharge::apply_charge_update()
   for (int icell = 0; icell < nglocal; ++icell) {
     if (cinfo[icell].count == 0) continue;
 
-    const double Te_eV = std::max(read_cell_src(srcTe, icell, 0), 0.0);
-    const double Ti_eV = std::max(read_cell_src(srcTi, icell, 1), 0.0);
-    const double Ne_m3 = std::max(read_cell_src(srcNe, icell, 2), 0.0);
-    const double Ni_m3 = std::max(read_cell_src(srcNi, icell, 3), 0.0);
-
     int ip = cinfo[icell].first;
     while (ip >= 0) {
       Particle::OnePart &p = parts[ip];
       n_local++;
+
+      double Te_eV, Ti_eV, Ne_m3, Ni_m3;
+      if (point_plasma_ready()) {
+        const PlasmaFileParams pp = point_plasma_compute->query_plasma_at_point(p.x);
+        Te_eV = std::max(pp.temp_e, 0.0);
+        Ti_eV = std::max(pp.temp_i, 0.0);
+        Ne_m3 = std::max(pp.dens_e, 0.0);
+        Ni_m3 = std::max(pp.dens_i, 0.0);
+      } else {
+        Te_eV = std::max(read_cell_src(srcTe, icell, 0), 0.0);
+        Ti_eV = std::max(read_cell_src(srcTi, icell, 1), 0.0);
+        Ne_m3 = std::max(read_cell_src(srcNe, icell, 2), 0.0);
+        Ni_m3 = std::max(read_cell_src(srcNi, icell, 3), 0.0);
+      }
 
       double rd = (p.radius > 0.0) ? p.radius : seed_radius;
       const double Td_K = (p.temp > 0.0) ? p.temp : seed_temp;

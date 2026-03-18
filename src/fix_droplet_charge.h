@@ -13,6 +13,8 @@ FixStyle(droplet_charge,FixDropletCharge)
 
 namespace SPARTA_NS {
 
+class ComputePlasmaFields;
+
 class FixDropletCharge : public Fix {
  public:
   FixDropletCharge(class SPARTA*, int, char**);
@@ -26,7 +28,9 @@ class FixDropletCharge : public Fix {
 
  protected:
   int use_grid_plasma = 0;
+  int use_point_plasma = 0;
   CollGridSrc srcTe, srcTi, srcNe, srcNi;
+  ComputePlasmaFields *point_plasma_compute = nullptr;
 
   double **plasma_grid = nullptr;  // [nlocal][4] : Te,Ti,Ne,Ni
   int maxgrid_plasma = 0;
@@ -46,6 +50,7 @@ class FixDropletCharge : public Fix {
                      double Td_K, double rd_m, double &phi_V) const;
   void compute_plasma_grid();
   inline void refresh_compute_src(CollGridSrc &S);
+  bool point_plasma_ready() const;
 
   inline double read_cell_src(const CollGridSrc& S, int icell, int col_plasma) const;
 };

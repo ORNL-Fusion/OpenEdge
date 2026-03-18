@@ -52,6 +52,7 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
   set_radius = NAN;
   heatflux_mode = HF_NONE;
   Qs_const   = 0.0;
+  heatflux_scale = 3.0;
 
   // parse optional keywords starting at arg[4]
   int i = 4;
@@ -78,6 +79,13 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
       if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'heatflux/constant'");
       heatflux_mode = HF_CONST;
       Qs_const = atof(arg[i+1]);
+      i += 2;
+
+    } else if (strcmp(arg[i],"heatflux/scale") == 0) {
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'heatflux/scale'");
+      heatflux_scale = atof(arg[i+1]);
+      if (!std::isfinite(heatflux_scale) || heatflux_scale < 0.0)
+        error->all(FLERR,"Fix evaporation: heatflux/scale must be finite and >= 0");
       i += 2;
 
     } else {
@@ -285,7 +293,7 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
     ip->mass   = mass;
     return;   // no evaporation if no heat flux
   }
-    Qs = Qs * 3;
+  Qs *= heatflux_scale;
   // --- Antoine vapor pressure (your Python fit) ---
   const double a1 = 5.055;
   const double b1 = -8023.0;

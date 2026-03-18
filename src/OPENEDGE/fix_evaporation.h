@@ -47,6 +47,7 @@ public:
       HeatFluxData heat_flux_data;
       HeatfluxMode heatflux_mode = HF_NONE;
       double      Qs_const = 0.0;     // when HF_CONST
+      double      heatflux_scale = 3.0; // legacy multiplier, now user-configurable
 
 protected:
     int maxgrid;
