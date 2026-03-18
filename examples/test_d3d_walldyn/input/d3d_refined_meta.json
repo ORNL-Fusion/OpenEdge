@@ -1,0 +1,118 @@
+{
+  "mesh_extra": "mesh.extra",
+  "phi_min_deg": 0.0,
+  "phi_max_deg": 30.0,
+  "n_rz_original": 68,
+  "n_rz_refined": 920,
+  "n_toroidal_segments": 4,
+  "wall_refine": 10,
+  "divertor_refine": 20,
+  "divertor_region": {
+    "rmin": 1.0,
+    "rmax": 1.8,
+    "zmin": -1.5,
+    "zmax": -0.5
+  },
+  "n_vertices": 4600,
+  "n_wall_triangles": 7360,
+  "n_cap_min_triangles": 918,
+  "n_cap_max_triangles": 918,
+  "n_total_triangles": 9196,
+  "triangle_groups": {
+    "wall": {
+      "first": 1,
+      "last": 7360
+    },
+    "caps": {
+      "first": 7361,
+      "last": 9196
+    },
+    "emit_wall": {
+      "first_ranges": [
+        [
+          33,
+          98
+        ],
+        [
+          581,
+          616
+        ],
+        [
+          713,
+          714
+        ],
+        [
+          883,
+          940
+        ],
+        [
+          1681,
+          1686
+        ],
+        [
+          1873,
+          1938
+        ],
+        [
+          2421,
+          2456
+        ],
+        [
+          2553,
+          2554
+        ],
+        [
+          2723,
+          2780
+        ],
+        [
+          3521,
+          3526
+        ],
+        [
+          3713,
+          3778
+        ],
+        [
+          4261,
+          4296
+        ],
+        [
+          4393,
+          4394
+        ],
+        [
+          4563,
+          4620
+        ],
+        [
+          5361,
+          5366
+        ],
+        [
+          5553,
+          5618
+        ],
+        [
+          6101,
+          6136
+        ],
+        [
+          6233,
+          6234
+        ],
+        [
+          6403,
+          6460
+        ],
+        [
+          7201,
+          7206
+        ]
+      ],
+      "n_triangles": 672,
+      "threshold": 0.01,
+      "n_active_poloidal": 84
+    }
+  }
+}

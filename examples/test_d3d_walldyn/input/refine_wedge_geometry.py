@@ -379,6 +379,15 @@ def parse_args():
     p.add_argument("--divertor-zmin", type=float, default=-1.5)
     p.add_argument("--divertor-zmax", type=float, default=-0.5)
     p.add_argument("--prefix", type=Path, default=Path("d3d_refined"))
+    # Emit mask options (requires h5py and numpy)
+    p.add_argument("--emit-plasma-h5", type=Path, default=None,
+                   help="Plasma HDF5 for emit mask (enables emit_wall generation)")
+    p.add_argument("--emit-bfield-h5", type=Path, default=None,
+                   help="B-field HDF5 for emit mask")
+    p.add_argument("--emit-threshold", type=float, default=0.01,
+                   help="Relative flux threshold for emit_wall (default 0.01)")
+    p.add_argument("--emit-mass-amu", type=float, default=2.0,
+                   help="Background ion mass for Bohm flux (default 2.0 D+)")
     return p.parse_args()
 
 
@@ -473,6 +482,44 @@ def main():
     print(f"  group wall surf id <> {wall_first} {wall_last}")
     print(f"  group caps surf id <> {cap_first} {cap_last}")
     print(f"\nOutput: {out_surf}, {out_stl}, {out_meta}")
+
+    # Optional: generate emit_wall subgroup from plasma/B-field data
+    if args.emit_plasma_h5 is not None and args.emit_bfield_h5 is not None:
+        from generate_emit_groups import (compute_segment_flux,
+                                          active_segments_to_triangle_ids,
+                                          write_sparta_include)
+
+        print(f"\n--- Emit mask generation ---")
+        flux = compute_segment_flux(rz, args.emit_plasma_h5,
+                                    args.emit_bfield_h5, args.emit_mass_amu)
+
+        peak = flux.max()
+        if peak > 0:
+            cutoff = args.emit_threshold * peak
+            active = [i for i in range(n_rz) if flux[i] >= cutoff]
+            ranges = active_segments_to_triangle_ids(active, n_rz, n_tor)
+            n_emit = sum(hi - lo + 1 for lo, hi in ranges)
+
+            print(f"Peak Bohm flux: {peak:.3e} m^-2 s^-1")
+            print(f"Threshold: {args.emit_threshold:.1%} of peak = {cutoff:.3e}")
+            print(f"Active poloidal segments: {len(active)} / {n_rz} "
+                  f"({100*len(active)/n_rz:.1f}%)")
+            print(f"Emit wall triangles: {n_emit} / {n_wall} "
+                  f"({100*n_emit/n_wall:.1f}%)")
+
+            out_emit = Path(f"{prefix}_emit_wall_groups.sparta")
+            write_sparta_include(out_emit, ranges, wall_first, wall_last)
+
+            meta["triangle_groups"]["emit_wall"] = {
+                "first_ranges": [[lo, hi] for lo, hi in ranges],
+                "n_triangles": n_emit,
+                "threshold": args.emit_threshold,
+                "n_active_poloidal": len(active),
+            }
+            Path(out_meta).write_text(json.dumps(meta, indent=2))
+            print(f"Updated {out_meta}")
+        else:
+            print("WARNING: No positive flux found — skipping emit mask")
 
 
 if __name__ == "__main__":
