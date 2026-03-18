@@ -227,7 +227,13 @@ def build_wall_tris(n_rz: int, n_tor: int) -> List[Tri]:
     return tris
 
 
-def build_cap_tris(rz, xyz, offset, phi_rad, outward_sign):
+def build_cap_tris(rz, xyz, offset, phi_rad, outward_sign, wall_tris):
+    """Triangulate a phi-face cap with winding consistent with adjacent wall tris.
+
+    After ear-clipping and normal-based winding, verify that every cap edge
+    shared with a wall triangle runs in the opposite direction (required for
+    a watertight manifold). Fix any inconsistencies.
+    """
     rz_tris = ear_clip_triangulate(rz)
     c_phi = math.cos(phi_rad)
     s_phi = math.sin(phi_rad)
@@ -246,6 +252,27 @@ def build_cap_tris(rz, xyz, offset, phi_rad, outward_sign):
             cap_tris.append((offset+a, offset+b, offset+c))
         else:
             cap_tris.append((offset+a, offset+c, offset+b))
+
+    # Build set of directed wall edges for consistency check
+    wall_edges = set()
+    for a, b, c in wall_tris:
+        wall_edges.add((a, b))
+        wall_edges.add((b, c))
+        wall_edges.add((c, a))
+
+    # Fix any cap triangle whose shared edge has the same direction as wall
+    fixed = 0
+    for i, (a, b, c) in enumerate(cap_tris):
+        edges = [(a, b), (b, c), (c, a)]
+        for e in edges:
+            if e in wall_edges:
+                # Same direction — flip this cap triangle
+                cap_tris[i] = (a, c, b)
+                fixed += 1
+                break
+    if fixed:
+        print(f"  Fixed {fixed} cap triangle windings for watertightness")
+
     return cap_tris
 
 
@@ -336,12 +363,12 @@ def main():
 
     # Cap triangles (use original coarse boundary for cleaner caps)
     # phi_min cap: first ring, indices [0 .. n_rz-1]
-    cap_min_tris = build_cap_tris(rz, xyz, 0, phi0, outward_sign=+1.0)
+    cap_min_tris = build_cap_tris(rz, xyz, 0, phi0, outward_sign=+1.0, wall_tris=wall_tris)
     n_cap_min = len(cap_min_tris)
 
     # phi_max cap: last ring, indices [n_tor*n_rz .. (n_tor+1)*n_rz-1]
     cap_max_offset = n_tor * n_rz
-    cap_max_tris = build_cap_tris(rz, xyz, cap_max_offset, phi1, outward_sign=-1.0)
+    cap_max_tris = build_cap_tris(rz, xyz, cap_max_offset, phi1, outward_sign=-1.0, wall_tris=wall_tris)
     n_cap_max = len(cap_max_tris)
 
     all_tris = wall_tris + cap_min_tris + cap_max_tris
