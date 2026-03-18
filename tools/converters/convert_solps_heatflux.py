@@ -42,20 +42,56 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv") -
     gmtry = read_b2fgmtry(str(b2fgmtry))
     rc, zc = _cell_centers_from_corners(gmtry["crx"], gmtry["cry"], nx, ny)
 
-    fht = b2f_extract("fht", b2fstate)  # (nx+2, ny+2, 2)
-    sx = b2f_extract("sx", b2fstate)    # (nx+2, ny+2)
+    # Total heat flux: use fht if available, otherwise fhe + fhi
+    try:
+        fht = b2f_extract("fht", b2fstate)  # (nx+2, ny+2, 2)
+    except KeyError:
+        fhe = b2f_extract("fhe", b2fstate)
+        fhi = b2f_extract("fhi", b2fstate)
+        if fhe.ndim == 2:
+            fhe = fhe.reshape(nx + 2, ny + 2, -1, order="F")
+        if fhi.ndim == 2:
+            fhi = fhi.reshape(nx + 2, ny + 2, -1, order="F")
+        fht = fhe + fhi
+        print("Using fhe + fhi as total heat flux (fht not in b2fstate)")
+
+    # Face areas: use sx if available, otherwise gs(:,:,0) from geometry
+    # (consistent with Jeremy's SOLPS postprocessing: sx = Geo.gs(:,:,1))
+    try:
+        sx = b2f_extract("sx", b2fstate)    # (nx+2, ny+2)
+    except KeyError:
+        try:
+            gs = b2f_extract("gs", b2fgmtry)  # (nx+2, ny+2, 3)
+            if gs.ndim == 2:
+                gs = gs.reshape(nx + 2, ny + 2, -1, order="F")
+            sx = gs[:, :, 0]  # poloidal face area
+            print("Using gs(:,:,0) from b2fgmtry as poloidal face area")
+        except KeyError:
+            sx = b2f_extract("hx", b2fgmtry)
+            print("WARNING: Using hx from b2fgmtry as face area fallback (gs not found)")
 
     if fht.ndim == 2:
         fht = fht.reshape(nx + 2, ny + 2, -1, order="F")
 
+    # Clip guard cells (ix=0,nx+1 and iy=0,ny+1) which have unphysical
+    # face areas and can produce extreme heat flux density values.
+    s = np.s_[1:-1, 1:-1]  # interior slice
+    rc, zc = rc[s], zc[s]
+    fht = fht[s]
+    sx = sx[s]
+
     qx = np.divide(fht[:, :, 0], sx, out=np.full_like(sx, np.nan), where=sx > 0)
 
     if method == "jeremy_no_jv":
-        fhj = b2f_extract("fhj", b2fstate)
-        if fhj.ndim == 2:
-            fhj = fhj.reshape(nx + 2, ny + 2, -1, order="F")
-        qx = np.divide(fht[:, :, 0] - fhj[:, :, 0], sx,
-                        out=np.full_like(sx, np.nan), where=sx > 0)
+        try:
+            fhj = b2f_extract("fhj", b2fstate)
+            if fhj.ndim == 2:
+                fhj = fhj.reshape(nx + 2, ny + 2, -1, order="F")
+            fhj = fhj[s]
+            qx = np.divide(fht[:, :, 0] - fhj[:, :, 0], sx,
+                            out=np.full_like(sx, np.nan), where=sx > 0)
+        except KeyError:
+            print("fhj not in b2fstate — falling back to jeremy_total method")
 
     if method in ("jeremy_no_jv", "jeremy_total"):
         qx_c = 0.5 * (qx + np.roll(qx, -1, axis=0))
@@ -63,7 +99,19 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv") -
         return rc, zc, np.abs(qx_c)
 
     if method == "vector_mag":
-        sy = b2f_extract("sy", b2fstate)
+        try:
+            sy = b2f_extract("sy", b2fstate)
+        except KeyError:
+            try:
+                gs = b2f_extract("gs", b2fgmtry)
+                if gs.ndim == 2:
+                    gs = gs.reshape(nx + 2, ny + 2, -1, order="F")
+                sy = gs[:, :, 1]  # radial face area
+                print("Using gs(:,:,1) from b2fgmtry as radial face area")
+            except KeyError:
+                sy = b2f_extract("hy", b2fgmtry)
+                print("WARNING: Using hy from b2fgmtry as radial face area fallback")
+        sy = sy[s]
         qy = np.divide(fht[:, :, 1], sy, out=np.full_like(sy, np.nan), where=sy > 0)
         qx_c = 0.5 * (qx + np.roll(qx, -1, axis=0))
         qx_c[-1, :] = np.nan
@@ -139,7 +187,7 @@ def main():
     p.add_argument("--rmax", type=float, default=None)
     p.add_argument("--zmin", type=float, default=None)
     p.add_argument("--zmax", type=float, default=None)
-    p.add_argument("--method", default="jeremy_no_jv",
+    p.add_argument("--method", default="jeremy_total",
                    choices=["jeremy_no_jv", "jeremy_total", "vector_mag"])
     p.add_argument("--plot", action="store_true")
     p.add_argument("--plot-out", type=Path, default=None)
