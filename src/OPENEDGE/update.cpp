@@ -153,6 +153,10 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   gca_mu_custom = -1;
   gca_on_custom = -1;
 
+  cd_flag = 0;
+  cd_nmax = 0;
+  dx_cd = NULL;
+
   sheath_flag = 0;
   sheath_geom_cid = NULL;
   sheath_plasma_cid = NULL;
@@ -188,6 +192,7 @@ Update::~Update()
   delete [] sheath_geom_cid;
   delete [] sheath_plasma_cid;
   delete [] gca_plasma_cid;
+  memory->destroy(dx_cd);
   delete ranmaster;
 }
 
@@ -991,6 +996,18 @@ template < int DIM, int SURF, int OPT > void Update::move()
         xnew[1] = x[1] + dtremain*v[1];
         if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
         if (pflag > PSURF) exclude = pflag - PSURF - 1;
+      }
+
+      // Apply cross-field diffusion displacement (if active).
+      // Only on the initial push (PKEEP/PINSERT), not on re-entries
+      // after migration or surface collision (PENTRY/PEXIT/PSURF).
+      // The displacement was pre-computed by fix cross_diffusion in
+      // START_OF_STEP and stored in dx_cd[i].
+
+      if (cd_flag && (pflag == PKEEP || pflag == PINSERT)) {
+        xnew[0] += dx_cd[i][0];
+        xnew[1] += dx_cd[i][1];
+        if (DIM == 3) xnew[2] += dx_cd[i][2];
       }
 
       // optimized move

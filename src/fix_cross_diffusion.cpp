@@ -162,7 +162,7 @@ FixCrossDiffusion::~FixCrossDiffusion()
 int FixCrossDiffusion::setmask()
 {
   int mask = 0;
-  mask |= END_OF_STEP;
+  mask |= START_OF_STEP;
   return mask;
 }
 
@@ -217,7 +217,7 @@ void FixCrossDiffusion::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixCrossDiffusion::end_of_step()
+void FixCrossDiffusion::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
 
@@ -238,7 +238,19 @@ void FixCrossDiffusion::end_of_step()
   const int nlocal = particle->nlocal;
   const int dim    = domain->dimension;
   const double dt  = update->dt * nevery;
-  const double QE  = update->echarge;
+
+  // (re)allocate displacement buffer if needed
+  if (nlocal > update->cd_nmax) {
+    memory->destroy(update->dx_cd);
+    update->cd_nmax = nlocal + nlocal/10;  // 10% headroom
+    memory->create(update->dx_cd, update->cd_nmax, 3, "update:dx_cd");
+  }
+  update->cd_flag = 1;
+
+  double **dx = update->dx_cd;
+
+  // zero the buffer
+  memset(&dx[0][0], 0, sizeof(double) * nlocal * 3);
 
   for (int ip = 0; ip < nlocal; ip++) {
     Particle::OnePart &p = particles[ip];
@@ -246,9 +258,6 @@ void FixCrossDiffusion::end_of_step()
     if (species[isp].charge == 0.0) continue;  // skip neutrals
 
     const int icell = p.icell;
-
-    // save position for revert on failed relocation
-    const double x_old[3] = {p.x[0], p.x[1], p.x[2]};
 
     // read B in SPARTA coordinate order
     const double B0 = read_cell_src(srcBx_, icell);
@@ -263,7 +272,6 @@ void FixCrossDiffusion::end_of_step()
       D_local = D_perp_;
     } else if (diff_model_ == DIFF_BOHM) {
       const double Te_eV = std::max(read_cell_src(srcTe_, icell), 0.0);
-      // D_Bohm = Te / (16 * e * B)  [m^2/s]  (Te in eV -> Te*e in J)
       D_local = bohm_scale_ * Te_eV / (16.0 * Bmag);
     }
 
@@ -272,27 +280,22 @@ void FixCrossDiffusion::end_of_step()
       const double sigma = std::sqrt(2.0 * D_local * dt);
 
       if (dim == 2) {
-        // 2D: B[0]=B_R, B[1]=B_Z in SPARTA slots
-        // poloidal B magnitude
         const double Bpol = std::sqrt(B0*B0 + B1*B1);
         if (Bpol > 1.0e-20) {
           const double inv_Bpol = 1.0 / Bpol;
-          // perpendicular direction in poloidal plane: (-bhat_Z, bhat_R)
-          const double eperp0 = -B1 * inv_Bpol;  // -bhat_Z (SPARTA slot 0)
-          const double eperp1 =  B0 * inv_Bpol;  //  bhat_R (SPARTA slot 1)
+          const double eperp0 = -B1 * inv_Bpol;
+          const double eperp1 =  B0 * inv_Bpol;
 
           const double xi = rng_->gaussian();
-          p.x[0] += sigma * xi * eperp0;
-          p.x[1] += sigma * xi * eperp1;
+          dx[ip][0] += sigma * xi * eperp0;
+          dx[ip][1] += sigma * xi * eperp1;
         }
       } else {
-        // 3D: two perpendicular directions via Gram-Schmidt
         const double inv_Bmag = 1.0 / Bmag;
         const double bhat0 = B0 * inv_Bmag;
         const double bhat1 = B1 * inv_Bmag;
         const double bhat2 = B2 * inv_Bmag;
 
-        // build e1 perpendicular to bhat
         double ax0 = 1.0, ax1 = 0.0, ax2 = 0.0;
         if (std::fabs(bhat0) > 0.9) { ax0 = 0.0; ax1 = 1.0; }
         double dot = ax0*bhat0 + ax1*bhat1 + ax2*bhat2;
@@ -302,68 +305,59 @@ void FixCrossDiffusion::end_of_step()
         double e1mag = std::sqrt(e1_0*e1_0 + e1_1*e1_1 + e1_2*e1_2);
         e1_0 /= e1mag; e1_1 /= e1mag; e1_2 /= e1mag;
 
-        // e2 = bhat x e1
         double e2_0 = bhat1*e1_2 - bhat2*e1_1;
         double e2_1 = bhat2*e1_0 - bhat0*e1_2;
         double e2_2 = bhat0*e1_1 - bhat1*e1_0;
 
         const double xi1 = rng_->gaussian();
         const double xi2 = rng_->gaussian();
-        p.x[0] += sigma * (xi1*e1_0 + xi2*e2_0);
-        p.x[1] += sigma * (xi1*e1_1 + xi2*e2_1);
-        p.x[2] += sigma * (xi1*e1_2 + xi2*e2_2);
+        dx[ip][0] += sigma * (xi1*e1_0 + xi2*e2_0);
+        dx[ip][1] += sigma * (xi1*e1_1 + xi2*e2_1);
+        dx[ip][2] += sigma * (xi1*e1_2 + xi2*e2_2);
       }
     }
 
     // deterministic pinch displacement (cylindrical R, Z)
     if (have_pinch_) {
       if (dim == 2) {
-        // 2D: slot 0 = R, slot 1 = Z
-        p.x[0] += v_pinch_R_ * dt;
-        p.x[1] += v_pinch_Z_ * dt;
+        dx[ip][0] += v_pinch_R_ * dt;
+        dx[ip][1] += v_pinch_Z_ * dt;
       } else {
-        // 3D: convert cylindrical pinch to Cartesian
         const double rx = p.x[0];
         const double ry = p.x[1];
         const double R = std::sqrt(rx*rx + ry*ry);
         if (R > 1.0e-20) {
           const double cphi = rx / R;
           const double sphi = ry / R;
-          p.x[0] += v_pinch_R_ * cphi * dt;
-          p.x[1] += v_pinch_R_ * sphi * dt;
+          dx[ip][0] += v_pinch_R_ * cphi * dt;
+          dx[ip][1] += v_pinch_R_ * sphi * dt;
         }
-        p.x[2] += v_pinch_Z_ * dt;
+        dx[ip][2] += v_pinch_Z_ * dt;
       }
     }
 
-    // gradient-driven pinch: V = C_p * D_local * grad_perp(ne) / ne
-    // Direction: perpendicular to B in the poloidal plane
+    // gradient-driven pinch
     if (have_grad_pinch_ && D_local > 0.0) {
       const double ne_loc = std::max(read_cell_src(srcNe_, icell), 1.0e10);
-      const double gNeR = read_cell_src(srcGradNeR_, icell);  // 1/m^4... actually m^-3/m = m^-4
+      const double gNeR = read_cell_src(srcGradNeR_, icell);
       const double gNeZ = read_cell_src(srcGradNeZ_, icell);
 
       if (dim == 2) {
-        // 2D: perpendicular component of grad(ne) in poloidal plane
-        // e_perp = (-bhat_Z, bhat_R) in SPARTA slots (B[0]=B_R, B[1]=B_Z)
         const double Bpol = std::sqrt(B0*B0 + B1*B1);
         if (Bpol > 1.0e-20) {
           const double inv_Bpol = 1.0 / Bpol;
           const double eperp0 = -B1 * inv_Bpol;
           const double eperp1 =  B0 * inv_Bpol;
-          // grad_ne projected onto e_perp (cylindrical grad dotted with poloidal e_perp)
           const double grad_ne_perp = gNeR * eperp0 + gNeZ * eperp1;
           const double V_gp = C_p_ * D_local * grad_ne_perp / ne_loc;
-          p.x[0] += V_gp * eperp0 * dt;
-          p.x[1] += V_gp * eperp1 * dt;
+          dx[ip][0] += V_gp * eperp0 * dt;
+          dx[ip][1] += V_gp * eperp1 * dt;
         }
       } else {
-        // 3D: project cylindrical gradient to Cartesian perpendicular direction
         const double inv_Bmag = 1.0 / Bmag;
         const double bhat0 = B0 * inv_Bmag;
         const double bhat1 = B1 * inv_Bmag;
         const double bhat2 = B2 * inv_Bmag;
-        // convert cylindrical grad_ne to Cartesian
         const double rx = p.x[0], ry = p.x[1];
         const double R = std::sqrt(rx*rx + ry*ry);
         double gNe_x, gNe_y, gNe_z;
@@ -375,90 +369,17 @@ void FixCrossDiffusion::end_of_step()
           gNe_x = gNeR; gNe_y = 0.0;
         }
         gNe_z = gNeZ;
-        // remove parallel component: grad_perp = grad - (grad . bhat) bhat
         const double gdotb = gNe_x*bhat0 + gNe_y*bhat1 + gNe_z*bhat2;
         const double gp0 = gNe_x - gdotb*bhat0;
         const double gp1 = gNe_y - gdotb*bhat1;
         const double gp2 = gNe_z - gdotb*bhat2;
         const double V_scale = C_p_ * D_local / ne_loc;
-        p.x[0] += V_scale * gp0 * dt;
-        p.x[1] += V_scale * gp1 * dt;
-        p.x[2] += V_scale * gp2 * dt;
+        dx[ip][0] += V_scale * gp0 * dt;
+        dx[ip][1] += V_scale * gp1 * dt;
+        dx[ip][2] += V_scale * gp2 * dt;
       }
     }
-
-    // relocate particle if it left its cell
-    relocate_particle(ip, x_old);
   }
-}
-
-/* ----------------------------------------------------------------------
-   Relocate particle to correct cell after position displacement.
-   If particle left the domain or cannot find a valid local cell,
-   revert to the saved pre-displacement position.
-------------------------------------------------------------------------- */
-
-void FixCrossDiffusion::relocate_particle(int ip, const double x_save[3])
-{
-  Particle::OnePart &p = particle->particles[ip];
-  Grid::ChildCell *cells = grid->cells;
-  const int dim = domain->dimension;
-
-  const double *lo = cells[p.icell].lo;
-  const double *hi = cells[p.icell].hi;
-
-  // check if still inside current cell
-  bool inside = true;
-  if (p.x[0] < lo[0] || p.x[0] > hi[0]) inside = false;
-  if (p.x[1] < lo[1] || p.x[1] > hi[1]) inside = false;
-  if (dim == 3) {
-    if (p.x[2] < lo[2] || p.x[2] > hi[2]) inside = false;
-  }
-  if (inside) return;
-
-  // check if still inside domain
-  double *boxlo = domain->boxlo;
-  double *boxhi = domain->boxhi;
-  if (p.x[0] <= boxlo[0] || p.x[0] >= boxhi[0] ||
-      p.x[1] <= boxlo[1] || p.x[1] >= boxhi[1]) {
-    p.x[0] = x_save[0]; p.x[1] = x_save[1]; p.x[2] = x_save[2];
-    return;
-  }
-  if (dim == 3) {
-    if (p.x[2] <= boxlo[2] || p.x[2] >= boxhi[2]) {
-      p.x[0] = x_save[0]; p.x[1] = x_save[1]; p.x[2] = x_save[2];
-      return;
-    }
-  }
-
-  // find new cell
-  int newcell = grid->id_find_child(0, 0, boxlo, boxhi, p.x);
-  if (newcell < 0) {
-    p.x[0] = x_save[0]; p.x[1] = x_save[1]; p.x[2] = x_save[2];
-    return;
-  }
-
-  // handle split cells (surface-cut cells)
-  if (dim == 2) {
-    if (cells[newcell].nsplit > 1 && cells[newcell].nsurf >= 0)
-      newcell = update->split2d(newcell, p.x);
-  } else {
-    if (cells[newcell].nsplit > 1 && cells[newcell].nsurf >= 0)
-      newcell = update->split3d(newcell, p.x);
-  }
-
-  if (newcell < 0) {
-    p.x[0] = x_save[0]; p.x[1] = x_save[1]; p.x[2] = x_save[2];
-    return;
-  }
-
-  // if new cell is on a different processor, revert
-  if (cells[newcell].proc != comm->me) {
-    p.x[0] = x_save[0]; p.x[1] = x_save[1]; p.x[2] = x_save[2];
-    return;
-  }
-
-  p.icell = newcell;
 }
 
 /* ---------------------------------------------------------------------- */

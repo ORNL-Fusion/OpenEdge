@@ -196,6 +196,12 @@ struct SurfHit2D {
   int gca_mu_custom;
   int gca_on_custom;
 
+  // Per-particle position displacement buffer (filled by fix cross_diffusion,
+  // consumed by the mover before surface-tracing loop).
+  int cd_flag;               // 1 if cross-diffusion displacement is active
+  int cd_nmax;               // allocated size of dx_cd array
+  double **dx_cd;            // dx_cd[i][0..2] = displacement for particle i
+
   int nstuck;                // # of particles stuck on surfs and deleted
   int naxibad;               // # of particles where axisymm move was bad
                              // in this case, bad means particle ended up

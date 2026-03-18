@@ -60,7 +60,7 @@ class FixCrossDiffusion : public Fix {
   ~FixCrossDiffusion();
   int  setmask();
   void init();
-  void end_of_step();
+  void start_of_step();
 
  protected:
   RanKnuth *rng_;
@@ -89,7 +89,6 @@ class FixCrossDiffusion : public Fix {
   void parse_compute_src(const char *tok, CollGridSrc &dst, const char *label);
   void refresh_compute_src(CollGridSrc &S);
   double read_cell_src(const CollGridSrc &S, int icell) const;
-  void relocate_particle(int ip, const double x_save[3]);
 };
 
 }  // namespace SPARTA_NS
