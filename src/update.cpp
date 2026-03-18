@@ -638,9 +638,13 @@ void Update::cache_plasma_particles()
   }
 
   // resolve per-particle custom vectors
-  // Guard: if custom indices are invalid or no particles, bail out early
-  if (pc_te_custom < 0 || particle->ewhich[pc_te_custom] < 0) return;
+  // Guard: bail out if custom indices are invalid, vectors are NULL,
+  // or no local particles on this rank
   if (particle->nlocal == 0) return;
+  if (pc_te_custom < 0 || pc_ti_custom < 0 || pc_ne_custom < 0 ||
+      pc_ni_custom < 0 || pc_vpar_custom < 0 ||
+      pc_bx_custom < 0 || pc_by_custom < 0 || pc_bz_custom < 0) return;
+  if (particle->ewhich[pc_te_custom] < 0) return;
 
   double *te_vec   = particle->edvec[particle->ewhich[pc_te_custom]];
   double *ti_vec   = particle->edvec[particle->ewhich[pc_ti_custom]];
@@ -650,6 +654,8 @@ void Update::cache_plasma_particles()
   double *bx_vec   = particle->edvec[particle->ewhich[pc_bx_custom]];
   double *by_vec   = particle->edvec[particle->ewhich[pc_by_custom]];
   double *bz_vec   = particle->edvec[particle->ewhich[pc_bz_custom]];
+  if (!te_vec || !ti_vec || !ne_vec || !ni_vec ||
+      !vpar_vec || !bx_vec || !by_vec || !bz_vec) return;
 
   // Sheath geometry compute (for Boltzmann ne correction)
   ComputeSheathGeometryGrid *csg = nullptr;

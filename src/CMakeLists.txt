@@ -50,7 +50,7 @@ include(${SPARTA_CMAKE_COMMON_DIR}/set/style_file_glob.cmake)
 if(PKG_OPENEDGE AND NOT OPENEDGE_ENABLE_RUSTBCA)
   add_custom_target(
     ${TARGET_SPARTA_LIB}_PRE_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E rm -f
+    COMMAND "${CMAKE_COMMAND}" -E remove -f
             ${SPARTA_BINARY_DIR}/include/surf_react_pmi_bca.h
             ${SPARTA_BINARY_DIR}/include/rustbca_interface.h
     COMMAND sh ${SPARTA_CMAKE_DIR}/make_style.sh ${SPARTA_BINARY_DIR}/include
