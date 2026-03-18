@@ -4,13 +4,14 @@
 variable mode index 1
 
 variable dt    equal 1e-05
-variable time  equal 10
+variable time  equal 20
 variable N     equal floor(${time}/${dt})
-variable Ndump equal 100 #floor($N/10000)
+variable Ndump equal 100 # mass_loss dump every 1e-3 s with dt=1e-5
+
+variable heatflux_scale equal 1.
 
 variable temp_droplet equal 773.15
 variable temp_emit    equal 1.e20
-variable nemit        equal 3 #85
 variable droplet_inner index InstabilityInner
 variable droplet_outer index InstabilityOuter
 # --- droplet sizes (rho fixed) ---
@@ -29,18 +30,18 @@ boundary            r r p
 global              gridcut 0.0 comm/sort no
 global              temp ${temp_emit}
 create_box          2.0 6.0 -4.0 3.8 -0.05 0.05
-create_grid         100 100 1
+create_grid         200 200 1
 balance_grid        rcb cell
 
 global fnum 0.0000001
 
-species droplet.species  drop_2
+species input/droplet.species  drop_2
 # one mixture per droplet size (outer source)
 mixture DropletSource drop_2 frac 1.0 nrho 1
 
 variable            pmass particle mass
 
-read_surf           wall.surf group surfID particle check
+read_surf           input/wall.surf group surfID particle check
 
 
 surf_collide        wallColModel  diffuse ${temp_droplet} 1.0
@@ -49,14 +50,15 @@ surf_modify         surfID collide wallColModel react wallReact
 
 group               divertor_outer surf id <> 139 150
 
-read_particles source 1
+read_particles input/particle.source 1
 
-read_surf           core.surf invert group surfID2 particle check
+read_surf           input/core.surf invert group surfID2 particle check
 surf_modify         surfID2 collide wallColModel react wallReact
 
 # particle trajectory dump
 
-dump dtraj_drop1 particle all 1 case.dump id type x y z vx vy vz v_pmass temp radius
+dump dtraj_drop1 particle all 1000 output/case.dump id type x y z vx vy vz v_pmass temp radius
+# Keep trajectory dump much sparser than mass_loss.txt to avoid huge case.dump files.
 
 # plasma fields
 compute cnear plasma/fields all file ../test_evaporation/input/plasma.h5 &
@@ -64,9 +66,8 @@ compute cnear plasma/fields all file ../test_evaporation/input/plasma.h5 &
     bx by bz temp_e dens_e temp_i dens_i parrflow er et ez
 
 
-
 fix fevap_2 evaporation 1 DropletSource mass ${md2} radius ${rd2} temp ${temp_droplet} &
-    heatflux/file ../test_evaporation/input/heatflux.fix.h5
+    heatflux/file ../test_evaporation/input/heatflux.fix.h5 heatflux/scale ${heatflux_scale}
 
 
 fix fdrag2 drag 1 2.0 1 &
@@ -92,7 +93,7 @@ global boris_subcycles 5
 
 fix fml_2 ave/grid all 1 ${Ndump} ${Ndump} f_fevap_2[1] f_fevap_2[2]
 
-dump d_ml grid all ${Ndump} mass_loss.txt id xc yc f_fml_2[1] f_fml_2[2]
+dump d_ml grid all ${Ndump} output/mass_loss.txt id xc yc f_fml_2[1] f_fml_2[2]
 
 # ---------------------------------------------------------------------------
 

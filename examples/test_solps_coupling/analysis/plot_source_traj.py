@@ -257,7 +257,7 @@ def main():
     if not np.isfinite(vmax) or vmax <= vmin:
         vmax = vmin + 1.0
 
-    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(13.5, 5.4), dpi=220, constrained_layout=True)
+    fig, ax0 = plt.subplots(1, 1, figsize=(7.5, 5.4), dpi=220, constrained_layout=True)
 
     norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
     lc = LineCollection(segs, cmap="viridis", norm=norm, linewidth=2.1, alpha=0.95)
@@ -265,25 +265,17 @@ def main():
     ax0.add_collection(lc)
     cbar = fig.colorbar(lc, ax=ax0, pad=0.01)
     cbar.set_label("Cumulative evaporated Li (atoms)")
-    ax0.set_xlim(args.xlim)
-    ax0.set_ylim(args.ylim)
+#    ax0.set_xlim(args.xlim)
+#    ax0.set_ylim(args.ylim)
     ax0.plot(r_wall, z_wall, color="k", lw=2.6, zorder=5, label="Wall")
     ax0.plot(r_core, z_core, color="forestgreen", lw=2.6, zorder=5, label="Core")
     ax0.set_xlabel("R (m)")
     ax0.set_ylabel("Z (m)")
     ax0.grid(True, linestyle="--", alpha=0.3)
-    ax0.set_title(f"Full trajectories colored by cumulative Li\nfinal t={seg_time_s.max():.5f} s")
+#    ax0.set_title(f"Full trajectories colored by cumulative Li\nfinal t={seg_time_s.max():.5f} s")
     ax0.legend(loc="lower right")
 
-    ax1.scatter(r_s.ravel(), z_s.ravel(), s=8, c="black", alpha=0.75, linewidths=0)
-    ax1.plot(r_wall, z_wall, color="k", lw=2.0, zorder=5)
-    ax1.plot(r_core, z_core, color="forestgreen", lw=2.0, zorder=5)
-    ax1.set_xlim(args.xlim)
-    ax1.set_ylim(args.ylim)
-    ax1.set_xlabel("R (m)")
-    ax1.set_ylabel("Z (m)")
-    ax1.grid(True, linestyle="--", alpha=0.3)
-    ax1.set_title("SOLPS grid (R-Z)")
+
 
     out_path = base / args.out
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -305,3 +297,4 @@ if __name__ == "__main__":
 #    --mass-loss mass_loss.txt \
 #    --b2fgmtry "/Users/42d/ORNL Dropbox/Abdou Diaw/addLi/fnacore=6.00e22_pheat=90.00MW_cont_dt=1e-6_te_up/b2fgmtry" \
 #    --out Figs/solps_coupling_overview.png
+
