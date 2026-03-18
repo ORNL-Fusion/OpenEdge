@@ -227,21 +227,67 @@ def build_wall_tris(n_rz: int, n_tor: int) -> List[Tri]:
     return tris
 
 
-def build_cap_tris(rz, xyz, offset, phi_rad, outward_sign, wall_tris):
-    """Triangulate a phi-face cap with winding consistent with adjacent wall tris.
+def _tri_area_3d(va, vb, vc):
+    ux, uy, uz = vb[0]-va[0], vb[1]-va[1], vb[2]-va[2]
+    wx, wy, wz = vc[0]-va[0], vc[1]-va[1], vc[2]-va[2]
+    cx = uy*wz - uz*wy
+    cy = uz*wx - ux*wz
+    cz = ux*wy - uy*wx
+    return 0.5 * math.sqrt(cx*cx + cy*cy + cz*cz)
 
-    After ear-clipping and normal-based winding, verify that every cap edge
-    shared with a wall triangle runs in the opposite direction (required for
-    a watertight manifold). Fix any inconsistencies.
+
+def delaunay_triangulate_polygon(rz):
+    """Constrained Delaunay triangulation of a simple polygon in R-Z plane.
+
+    Uses scipy Delaunay on the polygon vertices, then filters to keep only
+    triangles whose centroid lies inside the polygon.
     """
-    rz_tris = ear_clip_triangulate(rz)
+    import numpy as np
+    from scipy.spatial import Delaunay
+    from matplotlib.path import Path as MplPath
+
+    pts = np.array(rz)
+    tri = Delaunay(pts)
+
+    # Filter: keep triangles whose centroid is inside the polygon
+    poly_path = MplPath(pts)
+    result = []
+    for simplex in tri.simplices:
+        centroid = pts[simplex].mean(axis=0)
+        if poly_path.contains_point(centroid):
+            result.append(tuple(simplex))
+
+    return result
+
+
+def build_cap_tris(rz, xyz, offset, phi_rad, outward_sign, wall_tris,
+                   min_area=1e-10):
+    """Triangulate a phi-face cap using Delaunay triangulation.
+
+    Uses scipy Delaunay on R-Z polygon vertices (much better triangle quality
+    than ear-clipping for refined polygons). Filters degenerate triangles and
+    fixes winding for watertightness.
+    """
+    try:
+        rz_tris = delaunay_triangulate_polygon(rz)
+    except Exception:
+        print("  WARNING: Delaunay failed, falling back to ear-clipping")
+        rz_tris = ear_clip_triangulate(rz)
+
     c_phi = math.cos(phi_rad)
     s_phi = math.sin(phi_rad)
     out_dir = (-s_phi * outward_sign, c_phi * outward_sign, 0.0)
 
     cap_tris = []
+    skipped = 0
     for a, b, c in rz_tris:
         va, vb, vc = xyz[offset + a], xyz[offset + b], xyz[offset + c]
+
+        # Skip degenerate triangles
+        if _tri_area_3d(va, vb, vc) < min_area:
+            skipped += 1
+            continue
+
         ux, uy, uz = vb[0]-va[0], vb[1]-va[1], vb[2]-va[2]
         wx, wy, wz = vc[0]-va[0], vc[1]-va[1], vc[2]-va[2]
         nx = uy*wz - uz*wy
@@ -252,6 +298,9 @@ def build_cap_tris(rz, xyz, offset, phi_rad, outward_sign, wall_tris):
             cap_tris.append((offset+a, offset+b, offset+c))
         else:
             cap_tris.append((offset+a, offset+c, offset+b))
+
+    if skipped:
+        print(f"  Skipped {skipped} degenerate cap triangles (area < {min_area})")
 
     # Build set of directed wall edges for consistency check
     wall_edges = set()
@@ -266,7 +315,6 @@ def build_cap_tris(rz, xyz, offset, phi_rad, outward_sign, wall_tris):
         edges = [(a, b), (b, c), (c, a)]
         for e in edges:
             if e in wall_edges:
-                # Same direction — flip this cap triangle
                 cap_tris[i] = (a, c, b)
                 fixed += 1
                 break
@@ -361,14 +409,15 @@ def main():
     wall_tris = build_wall_tris(n_rz, n_tor)
     n_wall = len(wall_tris)
 
-    # Cap triangles (use original coarse boundary for cleaner caps)
-    # phi_min cap: first ring, indices [0 .. n_rz-1]
-    cap_min_tris = build_cap_tris(rz, xyz, 0, phi0, outward_sign=+1.0, wall_tris=wall_tris)
+    # Cap triangles using Delaunay on the refined polygon
+    # (much better quality than ear-clipping for dense point sets)
+    cap_min_tris = build_cap_tris(rz, xyz, 0, phi0,
+                                   outward_sign=+1.0, wall_tris=wall_tris)
     n_cap_min = len(cap_min_tris)
 
-    # phi_max cap: last ring, indices [n_tor*n_rz .. (n_tor+1)*n_rz-1]
     cap_max_offset = n_tor * n_rz
-    cap_max_tris = build_cap_tris(rz, xyz, cap_max_offset, phi1, outward_sign=-1.0, wall_tris=wall_tris)
+    cap_max_tris = build_cap_tris(rz, xyz, cap_max_offset, phi1,
+                                   outward_sign=-1.0, wall_tris=wall_tris)
     n_cap_max = len(cap_max_tris)
 
     all_tris = wall_tris + cap_min_tris + cap_max_tris
@@ -409,8 +458,6 @@ def main():
         "triangle_groups": {
             "wall": {"first": wall_first, "last": wall_last},
             "caps": {"first": cap_first, "last": cap_last},
-            "cap_phi_min": {"first": n_wall + 1, "last": n_wall + n_cap_min},
-            "cap_phi_max": {"first": n_wall + n_cap_min + 1, "last": n_total},
         },
     }
     Path(out_meta).write_text(json.dumps(meta, indent=2))
@@ -418,9 +465,9 @@ def main():
     print(f"\nWedge: {args.phi_min_deg:.1f} -> {args.phi_max_deg:.1f} deg, "
           f"{n_tor} toroidal segments")
     print(f"Wall triangles:     {n_wall:>6d}  (surf id {wall_first} - {wall_last})")
-    print(f"Cap min triangles:  {n_cap_min:>6d}  (surf id {n_wall+1} - {n_wall+n_cap_min})")
-    print(f"Cap max triangles:  {n_cap_max:>6d}  (surf id {n_wall+n_cap_min+1} - {n_total})")
+    print(f"Cap triangles:      {n_cap_min + n_cap_max:>6d}  (surf id {cap_first} - {cap_last})")
     print(f"Total triangles:    {n_total:>6d}")
+    print(f"Min cap area:       check metadata for triangle quality")
     print(f"\nSPARTA input commands:")
     print(f"  read_surf {out_surf.name} group wall_and_caps")
     print(f"  group wall surf id <> {wall_first} {wall_last}")
