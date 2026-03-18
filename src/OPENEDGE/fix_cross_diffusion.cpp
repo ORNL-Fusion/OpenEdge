@@ -242,7 +242,7 @@ void FixCrossDiffusion::start_of_step()
   // (re)allocate displacement buffer if needed
   if (nlocal > update->cd_nmax) {
     memory->destroy(update->dx_cd);
-    update->cd_nmax = nlocal + nlocal/10;  // 10% headroom
+    update->cd_nmax = nlocal + nlocal/10 + 1;  // headroom, +1 for nlocal=0
     memory->create(update->dx_cd, update->cd_nmax, 3, "update:dx_cd");
   }
   update->cd_flag = 1;
@@ -250,7 +250,8 @@ void FixCrossDiffusion::start_of_step()
   double **dx = update->dx_cd;
 
   // zero the buffer
-  memset(&dx[0][0], 0, sizeof(double) * nlocal * 3);
+  if (nlocal > 0)
+    memset(&dx[0][0], 0, sizeof(double) * nlocal * 3);
 
   for (int ip = 0; ip < nlocal; ip++) {
     Particle::OnePart &p = particles[ip];
