@@ -190,6 +190,18 @@ class EireneMesh:
 
         self.ntri = len(self.tri)
 
+        # Precompute centroids of mapped triangles for nearest-neighbor fallback
+        mapped_mask = self.cell_idx >= 0
+        mapped_indices = np.where(mapped_mask)[0]
+        self.mapped_cr = np.array([
+            (self.vtx_r[self.tri[t, 0]] + self.vtx_r[self.tri[t, 1]] +
+             self.vtx_r[self.tri[t, 2]]) / 3.0 for t in mapped_indices])
+        self.mapped_cz = np.array([
+            (self.vtx_z[self.tri[t, 0]] + self.vtx_z[self.tri[t, 1]] +
+             self.vtx_z[self.tri[t, 2]]) / 3.0 for t in mapped_indices])
+        self.mapped_idx = mapped_indices
+        self.n_mapped = len(mapped_indices)
+
     def find_triangle(self, r: float, z: float) -> int:
         """Return index of mapped triangle containing (r,z), or -1."""
         for t in range(self.ntri):
@@ -212,12 +224,36 @@ class EireneMesh:
                 return t
         return -1
 
+    def find_nearest_mapped(self, r: float, z: float,
+                            max_dist: float = 0.05) -> int:
+        """Nearest mapped triangle centroid within max_dist [m].
+
+        Wall centroids typically fall in the vacuum gap between the B2.5
+        domain and the physical wall (Eirene fills this with unmapped
+        triangles).  This fallback uses the nearest mapped cell's data.
+        """
+        if self.n_mapped == 0:
+            return -1
+        d2 = (self.mapped_cr - r)**2 + (self.mapped_cz - z)**2
+        imin = np.argmin(d2)
+        if d2[imin] <= max_dist * max_dist:
+            return self.mapped_idx[imin]
+        return -1
+
     def plasma_at(self, r: float, z: float):
-        """Return (ni, ti, te) at (r,z) from mesh lookup, or None."""
+        """Return (ni, ti, te) at (r,z) from mesh lookup, or None.
+
+        Tries exact point-in-triangle first, then nearest-neighbor fallback
+        for wall points in the vacuum gap.
+        """
         t = self.find_triangle(r, z)
+        if t < 0:
+            t = self.find_nearest_mapped(r, z)
         if t < 0:
             return None
         cell = self.cell_idx[t]
+        if cell < 0:
+            return None
         return (self.mesh_ni[cell], self.mesh_ti[cell], self.mesh_te[cell])
 
 

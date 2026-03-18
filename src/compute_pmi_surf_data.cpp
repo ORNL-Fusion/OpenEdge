@@ -469,15 +469,32 @@ void ComputePMISurfData::load_mesh()
     }
 
     has_mesh = 1;
+
+    // Precompute centroids of mapped triangles for nearest-neighbor fallback.
+    // Wall surface centroids often fall just outside the B2.5 domain boundary
+    // (in the vacuum gap between plasma mesh and physical wall).
+    mapped_cr.clear();
+    mapped_cz.clear();
+    mapped_idx.clear();
+    for (int t = 0; t < mesh_ntri; t++) {
+      if (mesh_cell_idx[t] < 0) continue;
+      const int v0 = mesh_tri[t*3+0], v1 = mesh_tri[t*3+1], v2 = mesh_tri[t*3+2];
+      mapped_cr.push_back((mesh_vtx_r[v0] + mesh_vtx_r[v1] + mesh_vtx_r[v2]) / 3.0);
+      mapped_cz.push_back((mesh_vtx_z[v0] + mesh_vtx_z[v1] + mesh_vtx_z[v2]) / 3.0);
+      mapped_idx.push_back(t);
+    }
+
   } catch (...) {
     has_mesh = 0;
   }
 
   if (has_mesh && comm->me == 0) {
-    if (screen) fprintf(screen, "PMI mesh interpolation: %d triangles, %d vertices, %d cells\n",
-                        mesh_ntri, mesh_nvtx, mesh_ncell);
-    if (logfile) fprintf(logfile, "PMI mesh interpolation: %d triangles, %d vertices, %d cells\n",
-                         mesh_ntri, mesh_nvtx, mesh_ncell);
+    if (screen) fprintf(screen, "PMI mesh interpolation: %d triangles, %d vertices, %d cells"
+                        " (%d mapped)\n", mesh_ntri, mesh_nvtx, mesh_ncell,
+                        static_cast<int>(mapped_idx.size()));
+    if (logfile) fprintf(logfile, "PMI mesh interpolation: %d triangles, %d vertices, %d cells"
+                         " (%d mapped)\n", mesh_ntri, mesh_nvtx, mesh_ncell,
+                         static_cast<int>(mapped_idx.size()));
   }
 }
 
@@ -500,6 +517,25 @@ int ComputePMISurfData::find_mesh_triangle(double r, double z) const
     if (u >= -1e-10 && v >= -1e-10 && (u+v) <= 1.0+1e-10) return t;
   }
   return -1;
+}
+
+int ComputePMISurfData::find_nearest_mapped_triangle(double r, double z,
+                                                      double max_dist) const
+{
+  // Nearest-centroid fallback for wall points that fall in the vacuum gap
+  // between the B2.5 plasma domain and the physical wall.  This is the
+  // normal situation in SOLPS: Eirene fills the gap with unmapped triangles,
+  // so strict point-in-triangle on mapped cells misses wall locations.
+  const int nm = static_cast<int>(mapped_idx.size());
+  double best_d2 = max_dist * max_dist;
+  int best = -1;
+  for (int i = 0; i < nm; i++) {
+    const double dr = mapped_cr[i] - r;
+    const double dz = mapped_cz[i] - z;
+    const double d2 = dr*dr + dz*dz;
+    if (d2 < best_d2) { best_d2 = d2; best = i; }
+  }
+  return (best >= 0) ? mapped_idx[best] : -1;
 }
 
 void ComputePMISurfData::init()
@@ -811,8 +847,13 @@ void ComputePMISurfData::compute_per_surf()
     int mesh_cell = -1;
     if (has_mesh) {
       int tri_idx = find_mesh_triangle(r, z);
+      // Wall centroids typically fall in the vacuum gap between the B2.5
+      // domain and the physical wall.  Fall back to nearest mapped triangle
+      // within 5 cm (covers typical SOLPS Eirene vacuum layer thickness).
+      if (tri_idx < 0 || mesh_cell_idx[tri_idx] < 0)
+        tri_idx = find_nearest_mapped_triangle(r, z, 0.05);
       if (tri_idx >= 0) mesh_cell = mesh_cell_idx[tri_idx];
-      else continue;  // outside SOLPS mesh — zero flux
+      else continue;  // genuinely outside SOLPS domain — zero flux
     }
 
     // Per-species density/temperature lookup

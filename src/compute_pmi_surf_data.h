@@ -91,6 +91,11 @@ class ComputePMISurfData : public Compute {
   void load_surface_data();
   void load_boundary();
   void load_mesh();
+
+  // Precomputed mapped-triangle centroids for nearest-neighbor fallback
+  std::vector<double> mapped_cr, mapped_cz;  // centroids of mapped triangles
+  std::vector<int> mapped_idx;               // original triangle indices
+  int find_nearest_mapped_triangle(double r, double z, double max_dist) const;
   int peek_nspec_from_plasma() const;
   int in_projectile_slots(int slot1) const;
   int point_in_boundary(double r, double z) const;
