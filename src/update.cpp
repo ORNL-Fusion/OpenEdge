@@ -638,6 +638,10 @@ void Update::cache_plasma_particles()
   }
 
   // resolve per-particle custom vectors
+  // Guard: if custom indices are invalid or no particles, bail out early
+  if (pc_te_custom < 0 || particle->ewhich[pc_te_custom] < 0) return;
+  if (particle->nlocal == 0) return;
+
   double *te_vec   = particle->edvec[particle->ewhich[pc_te_custom]];
   double *ti_vec   = particle->edvec[particle->ewhich[pc_ti_custom]];
   double *ne_vec   = particle->edvec[particle->ewhich[pc_ne_custom]];
