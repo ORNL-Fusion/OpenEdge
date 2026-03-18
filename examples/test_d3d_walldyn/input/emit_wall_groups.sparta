@@ -3,25 +3,13 @@
 # Full wall group is still used for particle-wall collisions.
 #
 # Wall triangles: 1 - 7360
-# Emit wall ranges: 20 contiguous blocks, 672 triangles total
+# Emit wall ranges: 8 contiguous blocks, 384 triangles total
 
-group emit_wall surf id <> 33 98
-group emit_wall surf id <> 581 616
-group emit_wall surf id <> 713 714
-group emit_wall surf id <> 883 940
-group emit_wall surf id <> 1681 1686
-group emit_wall surf id <> 1873 1938
-group emit_wall surf id <> 2421 2456
-group emit_wall surf id <> 2553 2554
-group emit_wall surf id <> 2723 2780
-group emit_wall surf id <> 3521 3526
-group emit_wall surf id <> 3713 3778
-group emit_wall surf id <> 4261 4296
-group emit_wall surf id <> 4393 4394
-group emit_wall surf id <> 4563 4620
-group emit_wall surf id <> 5361 5366
-group emit_wall surf id <> 5553 5618
-group emit_wall surf id <> 6101 6136
-group emit_wall surf id <> 6233 6234
-group emit_wall surf id <> 6403 6460
-group emit_wall surf id <> 7201 7206
+group emit_wall surf id <> 829 880
+group emit_wall surf id <> 891 934
+group emit_wall surf id <> 2669 2720
+group emit_wall surf id <> 2731 2774
+group emit_wall surf id <> 4509 4560
+group emit_wall surf id <> 4571 4614
+group emit_wall surf id <> 6349 6400
+group emit_wall surf id <> 6411 6454

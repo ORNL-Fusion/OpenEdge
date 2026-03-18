@@ -152,8 +152,74 @@ def subdivide_polyline(rz, n_default, n_divertor, rmin, rmax, zmin, zmax):
 
 
 # ---------------------------------------------------------------------------
-# HDF5 field interpolation
+# Eirene mesh lookup (replaces regular-grid interpolation)
 # ---------------------------------------------------------------------------
+
+class EireneMesh:
+    """Point-in-triangle lookup on the SOLPS Eirene triangulation.
+
+    Only triangles mapped to a B2.5 plasma cell (cell_index >= 0) return
+    valid plasma data.  Wall segments whose centroids fall outside the
+    mapped mesh — or inside vacuum/PFR triangles — get zero flux.
+
+    This is the same logic as C++ find_mesh_triangle() + mesh_cell_idx[].
+    """
+
+    def __init__(self, plasma_h5: Path):
+        with h5py.File(plasma_h5, "r") as f:
+            self.vtx_r = np.asarray(f["mesh/vtx_r"])
+            self.vtx_z = np.asarray(f["mesh/vtx_z"])
+            self.tri = np.asarray(f["mesh/triangles"])   # (ntri, 3)
+            self.cell_idx = np.asarray(f["mesh/cell_index"])  # (ntri,)
+            self.mesh_te = np.asarray(f["mesh/temp_e"])
+            self.mesh_ne = np.asarray(f["mesh/dens_e"])
+            self.mesh_ti = np.asarray(f["mesh/temp_i"])
+            self.mesh_ni = np.asarray(f["mesh/dens_i"])
+
+        # Precompute bounding boxes for fast rejection
+        r0 = self.vtx_r[self.tri[:, 0]]
+        r1 = self.vtx_r[self.tri[:, 1]]
+        r2 = self.vtx_r[self.tri[:, 2]]
+        z0 = self.vtx_z[self.tri[:, 0]]
+        z1 = self.vtx_z[self.tri[:, 1]]
+        z2 = self.vtx_z[self.tri[:, 2]]
+        self.bb_rmin = np.minimum(np.minimum(r0, r1), r2)
+        self.bb_rmax = np.maximum(np.maximum(r0, r1), r2)
+        self.bb_zmin = np.minimum(np.minimum(z0, z1), z2)
+        self.bb_zmax = np.maximum(np.maximum(z0, z1), z2)
+
+        self.ntri = len(self.tri)
+
+    def find_triangle(self, r: float, z: float) -> int:
+        """Return index of mapped triangle containing (r,z), or -1."""
+        for t in range(self.ntri):
+            if self.cell_idx[t] < 0:
+                continue
+            if (r < self.bb_rmin[t] or r > self.bb_rmax[t] or
+                    z < self.bb_zmin[t] or z > self.bb_zmax[t]):
+                continue
+            a, b, c = self.tri[t]
+            ar, az = self.vtx_r[a], self.vtx_z[a]
+            br_, bz_ = self.vtx_r[b], self.vtx_z[b]
+            cr, cz = self.vtx_r[c], self.vtx_z[c]
+            # Barycentric coordinate test
+            d = (br_ - ar) * (cz - az) - (cr - ar) * (bz_ - az)
+            if abs(d) < 1e-30:
+                continue
+            u = ((r - ar) * (cz - az) - (z - az) * (cr - ar)) / d
+            v = ((z - az) * (br_ - ar) - (r - ar) * (bz_ - az)) / d
+            if u >= 0 and v >= 0 and (u + v) <= 1.0:
+                return t
+        return -1
+
+    def plasma_at(self, r: float, z: float):
+        """Return (ni, ti, te) at (r,z) from mesh lookup, or None."""
+        t = self.find_triangle(r, z)
+        if t < 0:
+            return None
+        cell = self.cell_idx[t]
+        return (self.mesh_ni[cell], self.mesh_ti[cell], self.mesh_te[cell])
+
 
 def load_regular_grid(h5path, field_name):
     """Load a 2D field on a regular (r, z) grid from HDF5."""
@@ -202,22 +268,27 @@ def compute_segment_flux(rz_refined: List[Point2],
                          mass_amu: float) -> np.ndarray:
     """Compute Bohm sputtering flux at each poloidal segment midpoint.
 
+    Uses the Eirene mesh triangulation from plasma.h5 for plasma lookup
+    (not regular-grid interpolation).  Only wall segments whose centroids
+    fall inside a mapped Eirene triangle (cell_index >= 0) get nonzero flux.
+    B-field is still interpolated on the regular grid (always valid).
+
     Returns array of shape (n_rz,) with Gamma = ni * cs * sin(alpha_B).
     """
     n_rz = len(rz_refined)
 
-    # Load plasma fields (SOLPS convention: dens_e, temp_e, dens_i, temp_i)
-    r_p, z_p, ne = load_regular_grid(plasma_h5, "dens_e")
-    _, _, te = load_regular_grid(plasma_h5, "temp_e")
-    _, _, ni = load_regular_grid(plasma_h5, "dens_i")
-    _, _, ti = load_regular_grid(plasma_h5, "temp_i")
+    # Load Eirene mesh for plasma lookup
+    mesh = EireneMesh(plasma_h5)
+    print(f"  Eirene mesh: {mesh.ntri} triangles, "
+          f"{np.sum(mesh.cell_idx >= 0)} mapped to B2.5")
 
-    # Load B-field
+    # B-field still on regular grid (always covers the full domain)
     r_b, z_b, br = load_regular_grid(bfield_h5, "br")
     _, _, bt = load_regular_grid(bfield_h5, "bt")
     _, _, bz_fld = load_regular_grid(bfield_h5, "bz")
 
     flux = np.zeros(n_rz)
+    n_mapped = 0
 
     for i in range(n_rz):
         r1, z1 = rz_refined[i]
@@ -226,6 +297,15 @@ def compute_segment_flux(rz_refined: List[Point2],
         # Segment midpoint
         rm = 0.5 * (r1 + r2)
         zm = 0.5 * (z1 + z2)
+
+        # Plasma lookup via Eirene mesh (None = outside mapped domain)
+        plasma = mesh.plasma_at(rm, zm)
+        if plasma is None:
+            continue
+        ni_loc, ti_loc, te_loc = plasma
+        if ni_loc <= 0.0:
+            continue
+        n_mapped += 1
 
         # Outward normal (perpendicular to segment, CCW winding -> outward)
         dr = r2 - r1
@@ -236,15 +316,7 @@ def compute_segment_flux(rz_refined: List[Point2],
         nr_s = dz / seg_len    # normal_R = +dz
         nz_s = -dr / seg_len   # normal_Z = -dr
 
-        # Plasma lookup
-        ni_loc = interp2d_regular(r_p, z_p, ni, rm, zm)
-        ti_loc = interp2d_regular(r_p, z_p, ti, rm, zm)
-        te_loc = interp2d_regular(r_p, z_p, te, rm, zm)
-
-        if ni_loc <= 0.0:
-            continue
-
-        # B-field lookup
+        # B-field lookup (regular grid — always valid)
         br_loc = interp2d_regular(r_b, z_b, br, rm, zm)
         bt_loc = interp2d_regular(r_b, z_b, bt, rm, zm)
         bz_loc = interp2d_regular(r_b, z_b, bz_fld, rm, zm)
@@ -264,6 +336,7 @@ def compute_segment_flux(rz_refined: List[Point2],
         # Bohm flux
         flux[i] = ni_loc * cs * sin_alpha
 
+    print(f"  Segments inside mapped Eirene mesh: {n_mapped} / {n_rz}")
     return flux
 
 
