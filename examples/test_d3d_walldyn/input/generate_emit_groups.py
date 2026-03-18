@@ -319,13 +319,8 @@ def write_sparta_include(path: Path, ranges: List[Tuple[int, int]],
         f.write(f"# Emit wall ranges: {len(ranges)} contiguous blocks, "
                 f"{sum(hi - lo + 1 for lo, hi in ranges)} triangles total\n\n")
 
-        for i, (lo, hi) in enumerate(ranges):
-            if i == 0:
-                # First command creates the group with <>
-                f.write(f"group emit_wall surf id <> {lo} {hi}\n")
-            else:
-                # Subsequent commands add to existing group with |
-                f.write(f"group emit_wall surf id | {lo} {hi}\n")
+        for lo, hi in ranges:
+            f.write(f"group emit_wall surf id <> {lo} {hi}\n")
 
     print(f"Wrote {path}  ({len(ranges)} ranges, "
           f"{sum(hi - lo + 1 for lo, hi in ranges)} triangles)")

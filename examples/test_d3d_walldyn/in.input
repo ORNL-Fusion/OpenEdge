@@ -17,7 +17,7 @@
 seed                12345
 dimension           3
 boundary            o o o
-global              gridcut -1.0 comm/sort yes
+global              gridcut -1.0 comm/sort yes surfmax 1000
 global              fnum 1e10
 
 log log.openedge
