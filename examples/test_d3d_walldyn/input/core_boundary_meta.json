@@ -6,8 +6,8 @@
   "n_rz_vertices": 40,
   "min_edge": 0.02,
   "n_wall_triangles": 80,
-  "n_cap_triangles_each": 38,
-  "n_total_triangles": 156,
+  "n_cap_triangles_each": 40,
+  "n_total_triangles": 160,
   "triangle_groups": {
     "core_wall": {
       "first": 1,
@@ -15,11 +15,11 @@
     },
     "cap_phi_min": {
       "first": 81,
-      "last": 118
+      "last": 120
     },
     "cap_phi_max": {
-      "first": 119,
-      "last": 156
+      "first": 121,
+      "last": 160
     }
   }
 }

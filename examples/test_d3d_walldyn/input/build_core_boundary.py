@@ -189,70 +189,65 @@ def rz_to_xyz(rz: List[Point2], phi_rad: float) -> List[Point3]:
 
 
 def build_watertight_wedge(n: int, rz: List[Point2], xyz: List[Point3],
-                           phi0: float, phi1: float) -> List[Tri]:
-    """Build a fully watertight closed wedge surface.
+                           phi0: float, phi1: float) -> Tuple[List[Point3], List[Tri]]:
+    """Build a fully watertight closed wedge surface using centroid-fan caps.
 
     Vertex layout:
-      [0..n-1]   = phi_min ring
-      [n..2n-1]  = phi_max ring
+      [0..n-1]     = phi_min ring
+      [n..2n-1]    = phi_max ring
+      [2n]         = phi_min cap centroid
+      [2n+1]       = phi_max cap centroid
 
-    Wall quads connect the two rings. Caps close each end.
-    All normals point outward (away from the enclosed volume).
+    Returns (extra_vertices, triangles). Extra vertices are the two centroids
+    that must be appended to the xyz list.
 
-    For the wall, "outward" means away from the toroidal axis (radially out
-    from the enclosed core volume). For the caps, outward means in the
-    -phi direction for phi_min cap and +phi direction for phi_max cap.
-
-    The key to watertight: wall boundary edges at phi_min are (i, (i+1)%n)
-    going one direction. The cap must use the REVERSE edge ((i+1)%n, i) to
-    match. Same logic at phi_max.
+    Uses fan triangulation from centroid for caps — this produces small,
+    uniform triangles that SPARTA's cut3d can handle (unlike ear-clipping
+    which creates long spanning triangles).
     """
     tris: List[Tri] = []
 
     # --- Wall triangles ---
-    # Each quad [i, j, n+j, n+i] is split into 2 triangles.
-    # Wall edges at phi_min boundary: edge (i -> j) where j=(i+1)%n
-    # Wall edges at phi_max boundary: edge (n+j -> n+i)
-    # So caps must use reverse edges to match.
+    # Wall edges at phi_min boundary: (i -> j) where j=(i+1)%n
+    # Wall edges at phi_max boundary: (n+j -> n+i)
     for i in range(n):
         j = (i + 1) % n
-        # Two triangles per quad, normals pointing outward
         tris.append((i, j, n + j))
         tris.append((i, n + j, n + i))
 
-    # --- phi_min cap (vertices 0..n-1) ---
-    # Wall uses edge (i -> j) along phi_min boundary.
-    # Cap must use edge (j -> i) = reversed, so cap winding is CW when
-    # viewed from outside (i.e., looking in the +phi direction).
-    # Ear-clip gives CCW triangles in R-Z plane. When viewed from -phi
-    # direction (outside the phi_min cap), CCW in R-Z corresponds to the
-    # cap normal pointing in -phi direction (outward). This means the
-    # ear-clip winding (a,b,c) gives outward normals for phi_min cap.
-    # But we need the boundary edges to be reversed relative to wall.
-    # Wall edge at phi_min: (i, i+1). Cap edge must be (i+1, i).
-    # Ear-clip CCW gives edges going (a->b->c->a). The boundary edges
-    # of the cap polygon go 0->1->2->...->n-1->0 (CCW).
-    # This means cap boundary edge (i, i+1) MATCHES wall edge (i, i+1).
-    # That's the SAME direction = DUPLICATE, not watertight!
-    # Fix: reverse the cap winding to CW = flip each triangle.
-    rz_tris = ear_clip_triangulate(rz)
+    # --- Centroid vertices ---
+    # Compute centroid of R-Z polygon
+    cr = sum(r for r, z in rz) / n
+    cz = sum(z for r, z in rz) / n
 
-    for a, b, c in rz_tris:
-        # Flipped winding for phi_min cap (CW when viewed from R-Z plane)
-        # This makes boundary edges go (i+1 -> i), matching wall's need
-        tris.append((c, b, a))  # reversed
+    c0 = math.cos(phi0)
+    s0 = math.sin(phi0)
+    centroid_min: Point3 = (cr * c0, cr * s0, cz)  # vertex index = 2n
 
-    # --- phi_max cap (vertices n..2n-1) ---
-    # Wall uses edge (n+j -> n+i) along phi_max boundary, i.e., (n+i+1 -> n+i).
-    # Cap must use edge (n+i -> n+i+1) = reversed.
-    # Ear-clip CCW in R-Z plane: boundary goes 0->1->2...
-    # With offset n, boundary edges go (n+0 -> n+1 -> ...).
-    # That matches what we need: (n+i -> n+i+1).
-    # So phi_max cap uses the ear-clip winding directly (not flipped).
-    for a, b, c in rz_tris:
-        tris.append((n + a, n + b, n + c))  # original winding
+    c1 = math.cos(phi1)
+    s1 = math.sin(phi1)
+    centroid_max: Point3 = (cr * c1, cr * s1, cz)  # vertex index = 2n+1
 
-    return tris
+    cmin_idx = 2 * n
+    cmax_idx = 2 * n + 1
+
+    # --- phi_min cap: fan from centroid ---
+    # Wall boundary edge at phi_min: (i -> j) where j=(i+1)%n
+    # Cap must use reversed edge: (j -> i)
+    # Fan triangle: (centroid, j, i) gives boundary edge (j -> i). Good.
+    for i in range(n):
+        j = (i + 1) % n
+        tris.append((cmin_idx, j, i))
+
+    # --- phi_max cap: fan from centroid ---
+    # Wall boundary edge at phi_max: (n+j -> n+i)
+    # Cap must use reversed edge: (n+i -> n+j)
+    # Fan triangle: (centroid, n+i, n+j) gives boundary edge (n+i -> n+j). Good.
+    for i in range(n):
+        j = (i + 1) % n
+        tris.append((cmax_idx, n + i, n + j))
+
+    return [centroid_min, centroid_max], tris
 
 
 def verify_watertight(tris: List[Tri]) -> bool:
@@ -317,13 +312,15 @@ def main() -> None:
     xyz1 = rz_to_xyz(rz, phi1)
     xyz = xyz0 + xyz1
 
-    all_tris = build_watertight_wedge(n, rz, xyz, phi0, phi1)
+    extra_verts, all_tris = build_watertight_wedge(n, rz, xyz, phi0, phi1)
+    xyz = xyz + extra_verts
     n_wall = 2 * n
-    n_cap = n - 2  # ear-clip of n-gon = n-2 triangles
+    n_cap = n  # fan from centroid: n triangles per cap
 
     print(f"Wedge: {args.phi_min_deg:.1f} -> {args.phi_max_deg:.1f} deg")
     print(f"Wall triangles:       {n_wall}")
     print(f"Cap triangles (each): {n_cap}")
+    print(f"Total vertices:       {len(xyz)} (incl. 2 centroids)")
     print(f"Total triangles:      {len(all_tris)}")
 
     # Verify watertight before writing
