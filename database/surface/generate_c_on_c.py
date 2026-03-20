@@ -30,7 +30,7 @@ EB_TARG = 3.0     # bulk binding energy (eV)
 
 
 def run_rustbca_sweep(energies, angles, nsamples=1000):
-    """Run RustBCA for each (E, angle) pair and collect statistics."""
+    """Run RustBCA for each energy, batching all angles into one call."""
     try:
         from libRustBCA import compound_bca_list_py
     except ImportError:
@@ -46,64 +46,106 @@ def run_rustbca_sweep(energies, angles, nsamples=1000):
     RE = np.zeros((nE, nA))
     spyld = np.zeros((nE, nA))
 
+    # Target: single-element carbon (same for all calls)
+    Z_targ_list = [float(Z_TARG)]
+    M_targ_list = [float(M_TARG)]
+    Es_targ_list = [ES_TARG]
+    Ec_targ_list = [EC_TARG]
+    Eb_targ_list = [EB_TARG]
+    n_targ_list = [1.0]
+
     for ie, E in enumerate(energies):
+        if E < EC_TARG:
+            print(f"  E = {E:.1f} eV done ({ie+1}/{nE}) [skipped, below cutoff]")
+            continue
+
+        # Batch all angles x nsamples into one RustBCA call
+        total = nA * nsamples
+        ux = []
+        uy = []
+        uz = []
+        E_list = [E] * total
+        Z_proj_list = [Z_PROJ] * total
+        M_proj_list = [M_PROJ] * total
+        Ec_proj_list = [1.0] * total
+        Es_proj_list = [ES_TARG] * total
+
+        # Tag each particle with its angle index via ordering
         for ia, angle_deg in enumerate(angles):
-            if E < EC_TARG:
-                continue
-
             angle_rad = np.radians(angle_deg)
-            # Direction cosines for incident particle
-            cosx = np.cos(angle_rad)
-            cosy = np.sin(angle_rad)
-            cosz = 0.0
+            cx = np.cos(angle_rad)
+            cy = np.sin(angle_rad)
+            ux.extend([cx] * nsamples)
+            uy.extend([cy] * nsamples)
+            uz.extend([0.0] * nsamples)
 
-            # Lists for compound_bca_list_py
-            # Run nsamples ions
-            ux = [cosx] * nsamples
-            uy = [cosy] * nsamples
-            uz = [cosz] * nsamples
-            E_list = [E] * nsamples
-            Z_proj_list = [Z_PROJ] * nsamples
-            M_proj_list = [M_PROJ] * nsamples
-            Ec_proj_list = [1.0] * nsamples  # cutoff for projectile tracking
-            Es_proj_list = [ES_TARG] * nsamples
+        output = compound_bca_list_py(
+            ux, uy, uz, E_list,
+            Z_proj_list, M_proj_list, Ec_proj_list, Es_proj_list,
+            Z_targ_list, M_targ_list, Es_targ_list, Ec_targ_list,
+            Eb_targ_list, n_targ_list
+        )
 
-            # Target: single-element carbon
-            Z_targ_list = [float(Z_TARG)]
-            M_targ_list = [float(M_TARG)]
-            Es_targ_list = [ES_TARG]
-            Ec_targ_list = [EC_TARG]
-            Eb_targ_list = [EB_TARG]
-            n_targ_list = [1.0]  # stoichiometry
+        # Parse output — need to map back to angle bins
+        # Output particles carry their incident particle index implicitly
+        # RustBCA returns: [Z, m, E, x, y, z, ux, uy, uz, flag, incident_idx]
+        # or just [Z, m, E, x, y, z, ux, uy, uz, flag]
+        # We need to track by incident particle index
 
-            output = compound_bca_list_py(
-                ux, uy, uz, E_list,
-                Z_proj_list, M_proj_list, Ec_proj_list, Es_proj_list,
-                Z_targ_list, M_targ_list, Es_targ_list, Ec_targ_list,
-                Eb_targ_list, n_targ_list
-            )
+        # Initialize per-angle counters
+        n_refl = np.zeros(nA)
+        e_refl = np.zeros(nA)
+        n_sput = np.zeros(nA)
 
-            # Parse output: each entry is [Z, m, E, x, y, z, ux, uy, uz, flag]
-            # flag: 1 = reflected projectile, 2 = sputtered target atom
-            n_reflected = 0
-            e_reflected_sum = 0.0
-            n_sputtered = 0
+        for particle in output:
+            E_out = particle[2]
+            flag = int(particle[9]) if len(particle) > 9 else 0
+            # incident index if available (RustBCA fork dependent)
+            if len(particle) > 10:
+                idx = int(particle[10])
+            else:
+                # Without incident index, we can't map back per-angle
+                # Fall back to per-angle loop below
+                idx = -1
 
-            for particle in output:
-                Z_out = particle[0]
-                E_out = particle[2]
-                flag = int(particle[9]) if len(particle) > 9 else 0
+            if idx >= 0:
+                ia = idx // nsamples
+                if ia >= nA:
+                    continue
+                if flag == 1:
+                    n_refl[ia] += 1
+                    e_refl[ia] += E_out
+                elif flag == 2:
+                    n_sput[ia] += 1
 
-                if flag == 1:  # reflected
-                    n_reflected += 1
-                    e_reflected_sum += E_out
-                elif flag == 2:  # sputtered
-                    n_sputtered += 1
+        if idx < 0:
+            # Fallback: run per-angle (slower but guaranteed)
+            for ia, angle_deg in enumerate(angles):
+                angle_rad = np.radians(angle_deg)
+                cx = np.cos(angle_rad)
+                cy = np.sin(angle_rad)
 
-            RN[ie, ia] = n_reflected / nsamples
-            if n_reflected > 0:
-                RE[ie, ia] = e_reflected_sum / (n_reflected * E)
-            spyld[ie, ia] = n_sputtered / nsamples
+                out_ia = compound_bca_list_py(
+                    [cx]*nsamples, [cy]*nsamples, [0.0]*nsamples,
+                    [E]*nsamples,
+                    [Z_PROJ]*nsamples, [M_PROJ]*nsamples,
+                    [1.0]*nsamples, [ES_TARG]*nsamples,
+                    Z_targ_list, M_targ_list, Es_targ_list,
+                    Ec_targ_list, Eb_targ_list, n_targ_list
+                )
+                for p in out_ia:
+                    fl = int(p[9]) if len(p) > 9 else 0
+                    if fl == 1:
+                        n_refl[ia] += 1
+                        e_refl[ia] += p[2]
+                    elif fl == 2:
+                        n_sput[ia] += 1
+
+        for ia in range(nA):
+            RN[ie, ia] = n_refl[ia] / nsamples
+            if n_refl[ia] > 0:
+                RE[ie, ia] = e_refl[ia] / (n_refl[ia] * E)
+            spyld[ie, ia] = n_sput[ia] / nsamples
 
         print(f"  E = {E:.1f} eV done ({ie+1}/{nE})")
 
