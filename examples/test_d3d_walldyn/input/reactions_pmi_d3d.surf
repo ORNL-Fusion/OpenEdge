@@ -1,0 +1,62 @@
+C --> C
+R Simple 1.0
+
+C --> C
+S Simple 1.0
+
+C --> NULL
+A Simple 1.0
+
+C+ --> C
+R Simple 1.0
+
+C+ --> C
+S Simple 1.0
+
+C+ --> NULL
+A Simple 1.0
+
+C2+ --> C
+R Simple 1.0
+
+C2+ --> C
+S Simple 1.0
+
+C2+ --> NULL
+A Simple 1.0
+
+C3+ --> C
+R Simple 1.0
+
+C3+ --> C
+S Simple 1.0
+
+C3+ --> NULL
+A Simple 1.0
+
+C4+ --> C
+R Simple 1.0
+
+C4+ --> C
+S Simple 1.0
+
+C4+ --> NULL
+A Simple 1.0
+
+C5+ --> C
+R Simple 1.0
+
+C5+ --> C
+S Simple 1.0
+
+C5+ --> NULL
+A Simple 1.0
+
+C6+ --> C
+R Simple 1.0
+
+C6+ --> C
+S Simple 1.0
+
+C6+ --> NULL
+A Simple 1.0

@@ -43,5 +43,14 @@ pre-computed as functions of incident energy and angle.
 |------|--------|-------------|
 | `74_on_74.h5` | W on W | Self-sputtering yields |
 | `O_on_W.h5` | O on W | Oxygen sputtering of tungsten |
+| `6_on_6_pmi.h5` | C on C | Carbon self-sputtering (for surf_react pmi) |
 
-HDF5 structure: `A` (angles), `E` (energies), `rfyld` (reflection yield), `spyld` (sputter yield).
+HDF5 structure for `surf_react pmi`: `E` (energies), `A` (angles), `RN` (reflection probability), `RE` (reflected energy fraction), `spyld` (sputter yield), `E_bind` (binding energy).
+
+Legacy format: `E`, `A`, `rfyld`, `spyld`.
+
+**Generating C-on-C tables with RustBCA:**
+```bash
+cd database/surface
+python generate_c_on_c.py --output 6_on_6_pmi.h5 --nsamples 1000
+```
