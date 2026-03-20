@@ -36,6 +36,10 @@ def parse_args() -> argparse.Namespace:
                    help="Output prefix path")
     p.add_argument("--flip-normals", action="store_true",
                    help="Flip wall normals to point inward (toward core)")
+    p.add_argument("--min-edge", type=float, default=0.01,
+                   help="Minimum edge length [m]; closer points are merged")
+    p.add_argument("--no-caps", action="store_true",
+                   help="Omit phi-face caps (wall-only surface)")
     return p.parse_args()
 
 
@@ -239,12 +243,35 @@ def write_obj(path: Path, xyz: List[Point3], tris: List[Tri]) -> None:
             f.write(f"f {t[0] + 1} {t[1] + 1} {t[2] + 1}\n")
 
 
+def decimate_polygon(rz: List[Point2], min_edge: float) -> List[Point2]:
+    """Remove points that are closer than min_edge to their predecessor."""
+    if len(rz) < 4:
+        return rz
+    result = [rz[0]]
+    for i in range(1, len(rz)):
+        dr = rz[i][0] - result[-1][0]
+        dz = rz[i][1] - result[-1][1]
+        if math.hypot(dr, dz) >= min_edge:
+            result.append(rz[i])
+    # Check last-to-first closure
+    if len(result) > 2:
+        dr = result[-1][0] - result[0][0]
+        dz = result[-1][1] - result[0][1]
+        if math.hypot(dr, dz) < min_edge:
+            result.pop()
+    return result
+
+
 def main() -> None:
     args = parse_args()
 
     rz = read_sparta_2d(args.input)
+    print(f"Read {len(rz)} points from {args.input}")
+
+    # Remove near-duplicate points that cause degenerate triangles
+    rz = decimate_polygon(rz, args.min_edge)
     n = len(rz)
-    print(f"Read {n} points from {args.input}")
+    print(f"After decimation (min_edge={args.min_edge}): {n} points")
 
     # Ensure CCW winding
     if signed_area_rz(rz) < 0.0:
@@ -262,9 +289,12 @@ def main() -> None:
     # particles coming from outside, i.e. from larger psi)
     wall_tris = build_wedge_wall_tris(n, flip=args.flip_normals)
 
-    # Cap tris for periodic boundaries
-    cap_min_tris = build_cap_tris(rz, xyz, 0, phi0, outward_sign=+1.0)
-    cap_max_tris = build_cap_tris(rz, xyz, n, phi1, outward_sign=-1.0)
+    if args.no_caps:
+        cap_min_tris = []
+        cap_max_tris = []
+    else:
+        cap_min_tris = build_cap_tris(rz, xyz, 0, phi0, outward_sign=+1.0)
+        cap_max_tris = build_cap_tris(rz, xyz, n, phi1, outward_sign=-1.0)
 
     all_tris = wall_tris + cap_min_tris + cap_max_tris
     n_wall = len(wall_tris)
@@ -288,18 +318,21 @@ def main() -> None:
         "phi_max_deg": args.phi_max_deg,
         "dphi_deg": args.phi_max_deg - args.phi_min_deg,
         "n_rz_vertices": n,
+        "min_edge": args.min_edge,
         "flip_normals": args.flip_normals,
+        "no_caps": args.no_caps,
         "n_wall_triangles": n_wall,
         "n_cap_min_triangles": n_cap_min,
         "n_cap_max_triangles": n_cap_max,
         "n_total_triangles": len(all_tris),
         "triangle_groups": {
             "core_wall": {"first": 1, "last": n_wall},
-            "cap_phi_min": {"first": n_wall + 1, "last": n_wall + n_cap_min},
-            "cap_phi_max": {"first": n_wall + n_cap_min + 1,
-                            "last": n_wall + n_cap_min + n_cap_max},
         },
     }
+    if not args.no_caps:
+        meta["triangle_groups"]["cap_phi_min"] = {"first": n_wall + 1, "last": n_wall + n_cap_min}
+        meta["triangle_groups"]["cap_phi_max"] = {"first": n_wall + n_cap_min + 1,
+                                                   "last": n_wall + n_cap_min + n_cap_max}
     out_meta.write_text(json.dumps(meta, indent=2))
 
     print(f"Wedge: {args.phi_min_deg:.1f} -> {args.phi_max_deg:.1f} deg")
@@ -309,13 +342,19 @@ def main() -> None:
     print(f"Total triangles:      {len(all_tris)}")
     print()
     print("Add to your SPARTA input script:")
-    print(f"  read_surf          input/{out_surf.name} group core_all")
-    print(f"  group              core_wall surf id 1:{n_wall}")
-    print(f"  group              core_caps surf id {n_wall+1}:{len(all_tris)}")
-    print(f"  surf_collide       CORE_WALL specular")
-    print(f"  surf_collide       CORE_PERIODIC toroidal {args.phi_max_deg - args.phi_min_deg:.1f}")
-    print(f"  surf_modify        core_wall collide CORE_WALL react none")
-    print(f"  surf_modify        core_caps collide CORE_PERIODIC react none")
+    if args.no_caps:
+        print(f"  read_surf          input/{out_surf.name} group core particle none")
+        print(f"  surf_collide       CORE specular")
+        print(f"  surf_modify        core collide CORE react none")
+    else:
+        dphi = args.phi_max_deg - args.phi_min_deg
+        print(f"  read_surf          input/{out_surf.name} invert group core particle none")
+        print(f"  group              core_wall surf id 1:{n_wall}")
+        print(f"  group              core_caps surf id {n_wall+1}:{len(all_tris)}")
+        print(f"  surf_collide       CORE specular")
+        print(f"  surf_collide       CORE_PERIODIC toroidal {dphi:.1f}")
+        print(f"  surf_modify        core_wall collide CORE react none")
+        print(f"  surf_modify        core_caps collide CORE_PERIODIC react none")
     print()
     print(f"Wrote: {out_surf}")
     print(f"Wrote: {out_obj}")
