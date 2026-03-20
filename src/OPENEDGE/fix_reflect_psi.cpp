@@ -11,8 +11,13 @@
 #include "particle.h"
 #include "update.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <sstream>
+#include <string>
 
 using namespace SPARTA_NS;
 
@@ -26,30 +31,28 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
 {
   if (narg < 7)
     error->all(FLERR, "Illegal fix reflect/psi command: "
-               "fix ID reflect/psi Nevery geqdsk PATH psi_norm VALUE "
+               "fix ID reflect/psi Nevery equ PATH psi_norm VALUE "
                "[action reflect|delete]");
 
-  // arg[0] = fix ID
-  // arg[1] = reflect/psi
-  // arg[2] = Nevery
   nevery_ = atoi(arg[2]);
   if (nevery_ <= 0)
     error->all(FLERR, "fix reflect/psi: Nevery must be > 0");
 
-  // Parse keyword arguments
-  psi_threshold_ = 0.05;
+  psi_threshold_ = 0.926;
   action_ = REFLECT;
   nmax_prev_ = 0;
   x_prev_ = NULL;
+  nw_ = nh_ = 0;
+  psi_axis_ = psib_ = 0.0;
 
-  std::string geqdsk_path;
+  std::string equ_path;
 
   int iarg = 3;
   while (iarg < narg) {
-    if (strcmp(arg[iarg], "geqdsk") == 0) {
+    if (strcmp(arg[iarg], "equ") == 0 || strcmp(arg[iarg], "geqdsk") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR, "fix reflect/psi: missing geqdsk path");
-      geqdsk_path = arg[iarg + 1];
+        error->all(FLERR, "fix reflect/psi: missing equ path");
+      equ_path = arg[iarg + 1];
       iarg += 2;
     } else if (strcmp(arg[iarg], "psi_norm") == 0) {
       if (iarg + 1 >= narg)
@@ -71,23 +74,17 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
     }
   }
 
-  if (geqdsk_path.empty())
-    error->all(FLERR, "fix reflect/psi: geqdsk keyword is required");
+  if (equ_path.empty())
+    error->all(FLERR, "fix reflect/psi: equ keyword is required");
 
-  // Read equilibrium
-  int ret = geqdsk_.read(geqdsk_path);
-  if (ret < 0) {
-    char msg[512];
-    snprintf(msg, sizeof(msg),
-             "fix reflect/psi: failed to read geqdsk '%s': %s",
-             geqdsk_path.c_str(), geqdsk_.error_msg().c_str());
-    error->all(FLERR, msg);
-  }
+  read_equ_file(equ_path);
 
-  const GEQDSKData &d = geqdsk_.data();
   if (comm->me == 0) {
-    printf("fix reflect/psi: geqdsk %s\n", geqdsk_path.c_str());
-    printf("  simag = %.6e  sibry = %.6e\n", d.simag, d.sibry);
+    printf("fix reflect/psi: equ %s\n", equ_path.c_str());
+    printf("  grid: %d x %d, R=[%.4f,%.4f], Z=[%.4f,%.4f]\n",
+           nw_, nh_, r_grid_.front(), r_grid_.back(),
+           z_grid_.front(), z_grid_.back());
+    printf("  psi_axis = %.6e  psib = %.6e\n", psi_axis_, psib_);
     printf("  psi_norm threshold = %.4f\n", psi_threshold_);
     printf("  action = %s\n", action_ == REFLECT ? "reflect" : "delete");
   }
@@ -116,14 +113,165 @@ void FixReflectPsi::init() {}
 
 /* ---------------------------------------------------------------------- */
 
+void FixReflectPsi::read_equ_file(const std::string &path)
+{
+  // Read entire file
+  std::ifstream ifs(path);
+  if (!ifs.good()) {
+    char msg[512];
+    snprintf(msg, sizeof(msg),
+             "fix reflect/psi: cannot open file '%s'", path.c_str());
+    error->all(FLERR, msg);
+  }
+  std::string text((std::istreambuf_iterator<char>(ifs)),
+                    std::istreambuf_iterator<char>());
+  ifs.close();
+
+  // Parse jm, km
+  auto parse_int = [&](const char *name) -> int {
+    std::string pat = std::string(name) + " ";
+    // Search for "jm  =  257" pattern
+    size_t pos = text.find(std::string(name));
+    while (pos != std::string::npos) {
+      // Find '=' after name
+      size_t eq = text.find('=', pos);
+      if (eq != std::string::npos && eq - pos < 20) {
+        int val = atoi(text.c_str() + eq + 1);
+        if (val > 0) return val;
+      }
+      pos = text.find(std::string(name), pos + 1);
+    }
+    return 0;
+  };
+
+  nw_ = parse_int("jm");
+  nh_ = parse_int("km");
+
+  if (nw_ <= 0 || nh_ <= 0) {
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+             "fix reflect/psi: cannot parse jm/km from '%s' (got %d, %d)",
+             path.c_str(), nw_, nh_);
+    error->all(FLERR, msg);
+  }
+
+  // Parse psib
+  {
+    size_t pos = text.find("psib");
+    if (pos != std::string::npos) {
+      size_t eq = text.find('=', pos);
+      if (eq != std::string::npos) psib_ = atof(text.c_str() + eq + 1);
+    }
+  }
+
+  // Helper: read N floats starting after a marker string
+  auto read_floats_after = [&](const std::string &marker, int n,
+                               std::vector<double> &out) {
+    size_t pos = text.find(marker);
+    if (pos == std::string::npos) {
+      char msg[256];
+      snprintf(msg, sizeof(msg),
+               "fix reflect/psi: cannot find '%s' in %s",
+               marker.c_str(), path.c_str());
+      error->all(FLERR, msg);
+    }
+    pos += marker.size();
+
+    out.clear();
+    out.reserve(n);
+
+    // Scan for floating-point numbers
+    const char *c = text.c_str() + pos;
+    const char *end = text.c_str() + text.size();
+    while ((int)out.size() < n && c < end) {
+      // Skip non-numeric characters
+      while (c < end && !std::isdigit(*c) && *c != '+' && *c != '-' && *c != '.') c++;
+      if (c >= end) break;
+
+      // Check this is actually a number start (not part of a keyword)
+      char *endp;
+      double val = strtod(c, &endp);
+      if (endp > c) {
+        out.push_back(val);
+        c = endp;
+      } else {
+        c++;
+      }
+    }
+
+    if ((int)out.size() < n) {
+      char msg[256];
+      snprintf(msg, sizeof(msg),
+               "fix reflect/psi: only read %d of %d values after '%s'",
+               (int)out.size(), n, marker.c_str());
+      error->all(FLERR, msg);
+    }
+  };
+
+  // Read r, z, psi arrays
+  read_floats_after("r(1:jm);", nw_, r_grid_);
+  read_floats_after("z(1:km);", nh_, z_grid_);
+
+  // Psi array: stored as (psi - psib) in the .equ file
+  // Marker: ((psi(j,k)-psib,j=1,jm),k=1,km)
+  std::vector<double> psi_minus_psib;
+  read_floats_after("((psi(j,k)-psib,j=1,jm),k=1,km)", nw_ * nh_, psi_minus_psib);
+
+  // Convert to actual psi: psi = (psi - psib) + psib
+  psirz_.resize(nw_ * nh_);
+  for (int i = 0; i < nw_ * nh_; i++)
+    psirz_[i] = psi_minus_psib[i] + psib_;
+
+  // Find psi at magnetic axis (minimum in central region)
+  psi_axis_ = 1e30;
+  int j0 = nh_ / 4, j1 = 3 * nh_ / 4;
+  int i0 = nw_ / 4, i1 = 3 * nw_ / 4;
+  for (int j = j0; j < j1; j++)
+    for (int i = i0; i < i1; i++) {
+      double p = psirz_[j * nw_ + i];
+      if (p < psi_axis_) psi_axis_ = p;
+    }
+}
+
+/* ---------------------------------------------------------------------- */
+
+double FixReflectPsi::psi_norm_at_point(double R, double Z) const
+{
+  if (r_grid_.empty() || z_grid_.empty() || psirz_.empty()) return 1.0;
+
+  // Clamp to grid
+  double Rc = std::min(std::max(R, r_grid_.front()), r_grid_.back());
+  double Zc = std::min(std::max(Z, z_grid_.front()), z_grid_.back());
+
+  double dr = r_grid_[1] - r_grid_[0];
+  double dz = z_grid_[1] - z_grid_[0];
+
+  int i = (int)((Rc - r_grid_[0]) / dr);
+  int j = (int)((Zc - z_grid_[0]) / dz);
+  i = std::min(std::max(i, 0), nw_ - 2);
+  j = std::min(std::max(j, 0), nh_ - 2);
+
+  double t = (Rc - r_grid_[i]) / dr;
+  double u = (Zc - z_grid_[j]) / dz;
+  t = std::min(std::max(t, 0.0), 1.0);
+  u = std::min(std::max(u, 0.0), 1.0);
+
+  double psi = (1-t)*(1-u)*psirz_[j*nw_+i]     + t*(1-u)*psirz_[j*nw_+i+1]
+             + (1-t)*u*psirz_[(j+1)*nw_+i] + t*u*psirz_[(j+1)*nw_+i+1];
+
+  double dpsi = psib_ - psi_axis_;
+  if (std::abs(dpsi) < 1e-30) return 1.0;
+  return (psi - psi_axis_) / dpsi;
+}
+
+/* ---------------------------------------------------------------------- */
+
 void FixReflectPsi::start_of_step()
 {
-  // Save current positions before the move step
   if ((update->ntimestep % nevery_) != 0) return;
 
   int nlocal = particle->nlocal;
 
-  // Grow buffer if needed
   if (nlocal > nmax_prev_) {
     memory->destroy(x_prev_);
     nmax_prev_ = nlocal + nlocal / 10 + 1;
@@ -154,44 +302,38 @@ void FixReflectPsi::end_of_step()
   for (int ip = 0; ip < nlocal; ip++) {
     Particle::OnePart &p = particles[ip];
 
-    // Convert Cartesian (x,y,z) to cylindrical (R,Z)
     double R, Z;
     if (dim == 3) {
       R = sqrt(p.x[0] * p.x[0] + p.x[1] * p.x[1]);
       Z = p.x[2];
     } else {
-      // 2D: x[0]=R, x[1]=Z
       R = p.x[0];
       Z = p.x[1];
     }
 
-    double psi_n = geqdsk_.psi_norm_at_point(R, Z);
+    double psi_n = psi_norm_at_point(R, Z);
 
     if (psi_n < psi_threshold_) {
       if (action_ == DELETE) {
-        // Mark particle for deletion
         p.flag = PDISCARD;
         ndelete++;
       } else {
-        // Reflect: restore previous position and reverse velocity
         if (nmax_prev_ > ip) {
           p.x[0] = x_prev_[ip][0];
           p.x[1] = x_prev_[ip][1];
           p.x[2] = x_prev_[ip][2];
         }
 
-        // Reverse radial velocity component
         if (dim == 3) {
           double phi = atan2(p.v[1], p.v[0]);
-          double vr = p.v[0] * cos(phi) + p.v[1] * sin(phi);
-          double vphi = -p.v[0] * sin(phi) + p.v[1] * cos(phi);
-          // Flip radial component
+          double cphi = cos(phi);
+          double sphi = sin(phi);
+          double vr = p.v[0] * cphi + p.v[1] * sphi;
+          double vphi = -p.v[0] * sphi + p.v[1] * cphi;
           vr = -vr;
-          p.v[0] = vr * cos(phi) - vphi * sin(phi);
-          p.v[1] = vr * sin(phi) + vphi * cos(phi);
-          // Keep vz unchanged
+          p.v[0] = vr * cphi - vphi * sphi;
+          p.v[1] = vr * sphi + vphi * cphi;
         } else {
-          // 2D: flip v[0] (radial)
           p.v[0] = -p.v[0];
         }
         nreflect++;
@@ -199,12 +341,10 @@ void FixReflectPsi::end_of_step()
     }
   }
 
-  // Compress particle list to remove deleted particles
   if (action_ == DELETE && ndelete > 0) {
     particle->compress_rebalance();
   }
 
-  // Optional periodic reporting
   int allreflect, alldelete;
   MPI_Allreduce(&nreflect, &allreflect, 1, MPI_INT, MPI_SUM, world);
   MPI_Allreduce(&ndelete, &alldelete, 1, MPI_INT, MPI_SUM, world);
