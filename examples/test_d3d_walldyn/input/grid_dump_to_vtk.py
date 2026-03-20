@@ -27,14 +27,15 @@ def parse_grid_dump(filename):
         if lines[i].strip() == "ITEM: TIMESTEP":
             timestep = int(lines[i + 1].strip())
             i += 2
-        elif lines[i].strip() == "ITEM: NUMBER OF ATOMS":
+        elif lines[i].strip().startswith("ITEM: NUMBER OF"):
             natoms = int(lines[i + 1].strip())
             i += 2
-        elif lines[i].strip().startswith("ITEM:"):
-            # Parse header: "ITEM: ATOMS id xc yc zc f_fpfields[1] ..."
+        elif lines[i].strip().startswith("ITEM: BOX BOUNDS"):
+            i += 4  # skip 3 lines of box bounds + header line
+        elif lines[i].strip().startswith("ITEM: CELLS") or lines[i].strip().startswith("ITEM: ATOMS"):
             header = lines[i].strip().split()
-            # Skip "ITEM:" and "ATOMS"
-            col_names = header[2:]  # ['id', 'xc', 'yc', 'zc', 'f_fpfields[1]', ...]
+            # Skip "ITEM:" and "CELLS"/"ATOMS"
+            col_names = header[2:]
             i += 1
 
             data = []
