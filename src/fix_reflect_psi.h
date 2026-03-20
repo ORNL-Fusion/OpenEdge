@@ -47,7 +47,6 @@ class FixReflectPsi : public Fix {
   ~FixReflectPsi();
   int  setmask();
   void init();
-  void start_of_step();
 
  protected:
   int nevery_;

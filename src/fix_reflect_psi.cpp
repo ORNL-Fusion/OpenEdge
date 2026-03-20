@@ -89,14 +89,24 @@ FixReflectPsi::~FixReflectPsi() {}
 
 int FixReflectPsi::setmask()
 {
-  int mask = 0;
-  mask |= START_OF_STEP;
-  return mask;
+  return 0;  // no per-step callbacks needed; data is set in init()
 }
 
 /* ---------------------------------------------------------------------- */
 
-void FixReflectPsi::init() {}
+void FixReflectPsi::init()
+{
+  // Pass equilibrium data pointers to update for use in mover
+  update->psi_reflect_flag = 1;
+  update->psi_reflect_threshold = psi_threshold_;
+  update->psi_nw = nw_;
+  update->psi_nh = nh_;
+  update->psi_axis = psi_axis_;
+  update->psi_bry = psib_;
+  update->psi_r_grid = r_grid_.data();
+  update->psi_z_grid = z_grid_.data();
+  update->psi_rz = psirz_.data();
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -234,44 +244,3 @@ double FixReflectPsi::psi_norm_at_point(double R, double Z) const
   return (psi - psi_axis_) / dpsi;
 }
 
-/* ---------------------------------------------------------------------- */
-
-void FixReflectPsi::start_of_step()
-{
-  if ((update->ntimestep % nevery_) != 0) return;
-
-  int nlocal = particle->nlocal;
-  int dim = domain->dimension;
-
-  // Grow buffer if needed
-  if (nlocal > update->psi_reflect_nmax) {
-    memory->destroy(update->psi_do_reflect);
-    update->psi_reflect_nmax = nlocal + nlocal / 10 + 1;
-    memory->create(update->psi_do_reflect, update->psi_reflect_nmax,
-                   "update:psi_do_reflect");
-  }
-
-  update->psi_reflect_flag = 1;
-  memset(update->psi_do_reflect, 0, sizeof(int) * nlocal);
-
-  Particle::OnePart *particles = particle->particles;
-
-  for (int ip = 0; ip < nlocal; ip++) {
-    Particle::OnePart &p = particles[ip];
-
-    double R, Z;
-    if (dim == 3) {
-      R = sqrt(p.x[0] * p.x[0] + p.x[1] * p.x[1]);
-      Z = p.x[2];
-    } else {
-      R = p.x[0];
-      Z = p.x[1];
-    }
-
-    double psi_n = psi_norm_at_point(R, Z);
-
-    if (psi_n < psi_threshold_) {
-      update->psi_do_reflect[ip] = 1;
-    }
-  }
-}

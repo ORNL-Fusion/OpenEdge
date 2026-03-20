@@ -202,11 +202,14 @@ struct SurfHit2D {
   int cd_nmax;               // allocated size of dx_cd array
   double **dx_cd;            // dx_cd[i][0..2] = displacement for particle i
 
-  // Per-particle psi-reflect velocity override (filled by fix reflect/psi,
-  // consumed by the mover to reverse radial velocity when psi < threshold)
-  int psi_reflect_flag;      // 1 if psi-reflect is active
-  int psi_reflect_nmax;      // allocated size of arrays
-  int *psi_do_reflect;       // psi_do_reflect[i] = 1 if particle i should be reflected
+  // Psi-based core boundary (set by fix reflect/psi)
+  int psi_reflect_flag;        // 1 if psi-reflect is active
+  double psi_reflect_threshold;// normalized psi threshold
+  int psi_nw, psi_nh;         // equilibrium grid dimensions
+  double psi_axis, psi_bry;   // psi at axis and boundary
+  double *psi_r_grid;         // R grid [psi_nw] (owned by fix, do not free)
+  double *psi_z_grid;         // Z grid [psi_nh]
+  double *psi_rz;             // psi(R,Z) [psi_nh * psi_nw]
 
   int nstuck;                // # of particles stuck on surfs and deleted
   int naxibad;               // # of particles where axisymm move was bad

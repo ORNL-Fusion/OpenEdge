@@ -158,8 +158,12 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   dx_cd = NULL;
 
   psi_reflect_flag = 0;
-  psi_reflect_nmax = 0;
-  psi_do_reflect = NULL;
+  psi_reflect_threshold = 1.0;
+  psi_nw = psi_nh = 0;
+  psi_axis = psi_bry = 0.0;
+  psi_r_grid = NULL;
+  psi_z_grid = NULL;
+  psi_rz = NULL;
 
   sheath_flag = 0;
   sheath_geom_cid = NULL;
@@ -197,7 +201,7 @@ Update::~Update()
   delete [] sheath_plasma_cid;
   delete [] gca_plasma_cid;
   memory->destroy(dx_cd);
-  memory->destroy(psi_do_reflect);
+  // psi_r_grid, psi_z_grid, psi_rz are owned by fix_reflect_psi, not freed here
   delete ranmaster;
 }
 
@@ -1025,52 +1029,76 @@ template < int DIM, int SURF, int OPT > void Update::move()
         if (DIM == 3) xnew[2] += dx_cd[i][2];
       }
 
-      // Apply psi-reflect: if particle is flagged, reverse radial velocity
-      // so xnew moves away from core instead of into it.
-      // The flag was set by fix reflect/psi in START_OF_STEP based on
-      // the particle's current psi_norm.
-      if (psi_reflect_flag && (pflag == PKEEP || pflag == PINSERT) &&
-          psi_do_reflect[i]) {
-        // Reverse the radial component of displacement (xnew - x)
+      // Psi-based core boundary: check if xnew is inside the core
+      // (psi_norm < threshold). If so, reflect the radial component of
+      // both displacement and velocity so the particle bounces outward.
+      // This check is done here (after Boris push, before surface tracing)
+      // so that the reflected trajectory goes through proper surface checks.
+      if (psi_reflect_flag && (pflag == PKEEP || pflag == PINSERT)) {
+        double Rnew, Znew;
         if (DIM == 3) {
-          double R = sqrt(x[0]*x[0] + x[1]*x[1]);
-          if (R > 1e-10) {
-            double cphi = x[0] / R;
-            double sphi = x[1] / R;
-            double dx = xnew[0] - x[0];
-            double dy = xnew[1] - x[1];
-            // Decompose into radial and toroidal
-            double dr = dx * cphi + dy * sphi;
-            double dphi = -dx * sphi + dy * cphi;
-            // Flip radial displacement
-            dr = -dr;
-            // Reconstruct
-            xnew[0] = x[0] + dr * cphi - dphi * sphi;
-            xnew[1] = x[1] + dr * sphi + dphi * cphi;
-          }
-          // Also reverse radial velocity for subsequent steps
-          double Rv = sqrt(particles[i].v[0]*particles[i].v[0] +
-                           particles[i].v[1]*particles[i].v[1]);
-          if (Rv > 1e-10) {
-            double cpv = particles[i].v[0] / Rv;
-            double spv = particles[i].v[1] / Rv;
-            double R2 = sqrt(x[0]*x[0] + x[1]*x[1]);
-            if (R2 > 1e-10) {
-              double cp2 = x[0] / R2;
-              double sp2 = x[1] / R2;
-              double vr = particles[i].v[0]*cp2 + particles[i].v[1]*sp2;
-              double vp = -particles[i].v[0]*sp2 + particles[i].v[1]*cp2;
-              vr = -vr;
-              particles[i].v[0] = vr*cp2 - vp*sp2;
-              particles[i].v[1] = vr*sp2 + vp*cp2;
-            }
-          }
+          Rnew = sqrt(xnew[0]*xnew[0] + xnew[1]*xnew[1]);
+          Znew = xnew[2];
         } else {
-          // 2D: flip radial displacement and velocity
-          xnew[0] = x[0] - (xnew[0] - x[0]);
-          particles[i].v[0] = -particles[i].v[0];
+          Rnew = xnew[0];
+          Znew = xnew[1];
         }
-        psi_do_reflect[i] = 0;  // consumed
+
+        // Bilinear interpolation of psi_norm at xnew
+        double psi_n = 1.0;
+        if (psi_nw > 1 && psi_nh > 1 && psi_rz) {
+          double Rc = Rnew;
+          double Zc = Znew;
+          if (Rc < psi_r_grid[0]) Rc = psi_r_grid[0];
+          if (Rc > psi_r_grid[psi_nw-1]) Rc = psi_r_grid[psi_nw-1];
+          if (Zc < psi_z_grid[0]) Zc = psi_z_grid[0];
+          if (Zc > psi_z_grid[psi_nh-1]) Zc = psi_z_grid[psi_nh-1];
+
+          double dr = psi_r_grid[1] - psi_r_grid[0];
+          double dz = psi_z_grid[1] - psi_z_grid[0];
+          int ii = (int)((Rc - psi_r_grid[0]) / dr);
+          int jj = (int)((Zc - psi_z_grid[0]) / dz);
+          if (ii < 0) ii = 0; if (ii > psi_nw-2) ii = psi_nw-2;
+          if (jj < 0) jj = 0; if (jj > psi_nh-2) jj = psi_nh-2;
+          double t = (Rc - psi_r_grid[ii]) / dr;
+          double u = (Zc - psi_z_grid[jj]) / dz;
+          if (t < 0.0) t = 0.0; if (t > 1.0) t = 1.0;
+          if (u < 0.0) u = 0.0; if (u > 1.0) u = 1.0;
+
+          double psi_val = (1-t)*(1-u)*psi_rz[jj*psi_nw+ii]
+                         + t*(1-u)*psi_rz[jj*psi_nw+ii+1]
+                         + (1-t)*u*psi_rz[(jj+1)*psi_nw+ii]
+                         + t*u*psi_rz[(jj+1)*psi_nw+ii+1];
+          double dpsi = psi_bry - psi_axis;
+          if (fabs(dpsi) > 1e-30) psi_n = (psi_val - psi_axis) / dpsi;
+        }
+
+        if (psi_n < psi_reflect_threshold) {
+          if (DIM == 3) {
+            double R0 = sqrt(x[0]*x[0] + x[1]*x[1]);
+            if (R0 > 1e-10) {
+              double cphi = x[0] / R0;
+              double sphi = x[1] / R0;
+              // Reverse radial displacement
+              double ddx = xnew[0] - x[0];
+              double ddy = xnew[1] - x[1];
+              double dr_disp = ddx * cphi + ddy * sphi;
+              double dphi_disp = -ddx * sphi + ddy * cphi;
+              dr_disp = -dr_disp;
+              xnew[0] = x[0] + dr_disp * cphi - dphi_disp * sphi;
+              xnew[1] = x[1] + dr_disp * sphi + dphi_disp * cphi;
+              // Reverse radial velocity
+              double vr = particles[i].v[0]*cphi + particles[i].v[1]*sphi;
+              double vp = -particles[i].v[0]*sphi + particles[i].v[1]*cphi;
+              vr = -vr;
+              particles[i].v[0] = vr*cphi - vp*sphi;
+              particles[i].v[1] = vr*sphi + vp*cphi;
+            }
+          } else {
+            xnew[0] = x[0] - (xnew[0] - x[0]);
+            particles[i].v[0] = -particles[i].v[0];
+          }
+        }
       }
 
       // optimized move
