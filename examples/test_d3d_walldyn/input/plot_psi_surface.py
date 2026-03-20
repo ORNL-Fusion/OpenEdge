@@ -15,11 +15,12 @@ def read_equ(path):
     km = int(re.search(r'km\s*=\s*(\d+)', text).group(1))
     psib = float(re.search(r'psib\s*=\s*([^\s;]+)', text).group(1))
 
-    sections = {}
-    for marker in ['r(1:jm)', 'z(1:km)', 'psi(1:jm,1:km)']:
-        idx = text.find(marker)
-        if idx >= 0:
-            sections[marker] = idx + len(marker)
+    def find_section(text, candidates):
+        for c in candidates:
+            idx = text.find(c)
+            if idx >= 0:
+                return idx + len(c)
+        raise KeyError(f"Could not find any of {candidates}")
 
     def read_floats_from(pos, n):
         vals = []
@@ -30,9 +31,17 @@ def read_equ(path):
                 break
         return np.array(vals[:n])
 
-    r = read_floats_from(sections['r(1:jm)'], jm)
-    z = read_floats_from(sections['z(1:km)'], km)
-    psi = read_floats_from(sections['psi(1:jm,1:km)'], jm * km).reshape(km, jm)
+    r_pos = find_section(text, ['r(1:jm);', 'r(1:jm)'])
+    z_pos = find_section(text, ['z(1:km);', 'z(1:km)'])
+    # psi section: could be 'psi(1:jm,1:km)' or '((psi(j,k)-psib,...'
+    psi_pos = find_section(text, ['psi(1:jm,1:km)', '((psi(j,k)-psib,j=1,jm),k=1,km)'])
+
+    r = read_floats_from(r_pos, jm)
+    z = read_floats_from(z_pos, km)
+    psi_data = read_floats_from(psi_pos, jm * km).reshape(km, jm)
+
+    # The .equ file stores (psi - psib), so actual psi = data + psib
+    psi = psi_data + psib
 
     psi_axis = psi[km//4:3*km//4, jm//4:3*jm//4].min()
     return r, z, psi, psi_axis, psib

@@ -38,35 +38,35 @@ def read_equ(path):
             pos += 500
         return np.array(vals[:n])
 
-    # Better approach: split after markers
-    sections = {}
-    for marker in ['r(1:jm)', 'z(1:km)', 'psi(1:jm,1:km)']:
-        idx = text.find(marker)
-        if idx < 0:
-            # Try alternate format
-            alt = marker.replace('jm', str(jm)).replace('km', str(km))
-            idx = text.find(alt)
-        if idx >= 0:
-            sections[marker] = idx + len(marker)
+    def find_section(text, candidates):
+        for c in candidates:
+            idx = text.find(c)
+            if idx >= 0:
+                return idx + len(c)
+        raise KeyError(f"Could not find any of {candidates}")
 
     def read_floats_from(pos, n):
         vals = []
         remaining = text[pos:]
-        # Find all numbers
         for m in re.finditer(r'[+-]?\d+\.\d*[eE][+-]?\d+|[+-]?\d+\.\d+', remaining):
             vals.append(float(m.group()))
             if len(vals) >= n:
                 break
         return np.array(vals[:n])
 
-    r = read_floats_from(sections.get('r(1:jm)', 0), jm)
-    z = read_floats_from(sections.get('z(1:km)', 0), km)
-    psi = read_floats_from(sections.get('psi(1:jm,1:km)', 0), jm * km)
-    psi = psi.reshape(km, jm)
+    r_pos = find_section(text, ['r(1:jm);', 'r(1:jm)'])
+    z_pos = find_section(text, ['z(1:km);', 'z(1:km)'])
+    psi_pos = find_section(text, ['psi(1:jm,1:km)', '((psi(j,k)-psib,j=1,jm),k=1,km)'])
 
-    # Find psi at magnetic axis (minimum of |psi|)
-    psi_axis = psi[psi.shape[0]//4:3*psi.shape[0]//4,
-                   psi.shape[1]//4:3*psi.shape[1]//4].min()
+    r = read_floats_from(r_pos, jm)
+    z = read_floats_from(z_pos, km)
+    psi_data = read_floats_from(psi_pos, jm * km).reshape(km, jm)
+
+    # The .equ file stores (psi - psib), so actual psi = data + psib
+    psi = psi_data + psib
+
+    # Find psi at magnetic axis (minimum in central region)
+    psi_axis = psi[km//4:3*km//4, jm//4:3*jm//4].min()
 
     return r, z, psi, psi_axis, psib, jm, km
 
