@@ -345,17 +345,4 @@ void FixReflectPsi::end_of_step()
     particle->compress_rebalance();
   }
 
-  int allreflect, alldelete;
-  MPI_Allreduce(&nreflect, &allreflect, 1, MPI_INT, MPI_SUM, world);
-  MPI_Allreduce(&ndelete, &alldelete, 1, MPI_INT, MPI_SUM, world);
-
-  if ((allreflect > 0 || alldelete > 0) && comm->me == 0 &&
-      update->ntimestep % (100 * nevery_) == 0) {
-    if (action_ == REFLECT)
-      printf("fix reflect/psi: step %ld, reflected %d particles\n",
-             update->ntimestep, allreflect);
-    else
-      printf("fix reflect/psi: step %ld, deleted %d particles\n",
-             update->ntimestep, alldelete);
-  }
 }
