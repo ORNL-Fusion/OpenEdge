@@ -157,6 +157,10 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   cd_nmax = 0;
   dx_cd = NULL;
 
+  psi_reflect_flag = 0;
+  psi_reflect_nmax = 0;
+  psi_do_reflect = NULL;
+
   sheath_flag = 0;
   sheath_geom_cid = NULL;
   sheath_plasma_cid = NULL;
@@ -193,6 +197,7 @@ Update::~Update()
   delete [] sheath_plasma_cid;
   delete [] gca_plasma_cid;
   memory->destroy(dx_cd);
+  memory->destroy(psi_do_reflect);
   delete ranmaster;
 }
 
@@ -1018,6 +1023,54 @@ template < int DIM, int SURF, int OPT > void Update::move()
         xnew[0] += dx_cd[i][0];
         xnew[1] += dx_cd[i][1];
         if (DIM == 3) xnew[2] += dx_cd[i][2];
+      }
+
+      // Apply psi-reflect: if particle is flagged, reverse radial velocity
+      // so xnew moves away from core instead of into it.
+      // The flag was set by fix reflect/psi in START_OF_STEP based on
+      // the particle's current psi_norm.
+      if (psi_reflect_flag && (pflag == PKEEP || pflag == PINSERT) &&
+          psi_do_reflect[i]) {
+        // Reverse the radial component of displacement (xnew - x)
+        if (DIM == 3) {
+          double R = sqrt(x[0]*x[0] + x[1]*x[1]);
+          if (R > 1e-10) {
+            double cphi = x[0] / R;
+            double sphi = x[1] / R;
+            double dx = xnew[0] - x[0];
+            double dy = xnew[1] - x[1];
+            // Decompose into radial and toroidal
+            double dr = dx * cphi + dy * sphi;
+            double dphi = -dx * sphi + dy * cphi;
+            // Flip radial displacement
+            dr = -dr;
+            // Reconstruct
+            xnew[0] = x[0] + dr * cphi - dphi * sphi;
+            xnew[1] = x[1] + dr * sphi + dphi * cphi;
+          }
+          // Also reverse radial velocity for subsequent steps
+          double Rv = sqrt(particles[i].v[0]*particles[i].v[0] +
+                           particles[i].v[1]*particles[i].v[1]);
+          if (Rv > 1e-10) {
+            double cpv = particles[i].v[0] / Rv;
+            double spv = particles[i].v[1] / Rv;
+            double R2 = sqrt(x[0]*x[0] + x[1]*x[1]);
+            if (R2 > 1e-10) {
+              double cp2 = x[0] / R2;
+              double sp2 = x[1] / R2;
+              double vr = particles[i].v[0]*cp2 + particles[i].v[1]*sp2;
+              double vp = -particles[i].v[0]*sp2 + particles[i].v[1]*cp2;
+              vr = -vr;
+              particles[i].v[0] = vr*cp2 - vp*sp2;
+              particles[i].v[1] = vr*sp2 + vp*cp2;
+            }
+          }
+        } else {
+          // 2D: flip radial displacement and velocity
+          xnew[0] = x[0] - (xnew[0] - x[0]);
+          particles[i].v[0] = -particles[i].v[0];
+        }
+        psi_do_reflect[i] = 0;  // consumed
       }
 
       // optimized move

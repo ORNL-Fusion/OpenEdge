@@ -48,12 +48,10 @@ class FixReflectPsi : public Fix {
   int  setmask();
   void init();
   void start_of_step();
-  void end_of_step();
 
  protected:
   int nevery_;
   double psi_threshold_;     // normalized psi boundary
-  int action_;               // 0 = reflect, 1 = delete
 
   // Equilibrium data
   int nw_, nh_;
@@ -66,10 +64,6 @@ class FixReflectPsi : public Fix {
 
   // File readers
   void read_equ_file(const std::string &path);
-
-  // previous position storage
-  int nmax_prev_;
-  double **x_prev_;
 };
 
 }  // namespace SPARTA_NS

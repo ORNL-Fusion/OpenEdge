@@ -1,6 +1,10 @@
 /* ----------------------------------------------------------------------
     OpenEdge: fix reflect/psi
     See fix_reflect_psi.h for description and syntax.
+
+    Marks particles for radial velocity reflection when psi_norm < threshold.
+    The actual reflection is applied in update.cpp during the move step,
+    ensuring proper surface collision checks.
 ------------------------------------------------------------------------- */
 
 #include "fix_reflect_psi.h"
@@ -22,7 +26,6 @@
 using namespace SPARTA_NS;
 
 enum{PKEEP,PINSERT,PDONE,PDISCARD,PENTRY,PEXIT,PSURF};  // several files
-enum { REFLECT = 0, DELETE = 1 };
 
 /* ---------------------------------------------------------------------- */
 
@@ -31,17 +34,13 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
 {
   if (narg < 7)
     error->all(FLERR, "Illegal fix reflect/psi command: "
-               "fix ID reflect/psi Nevery equ PATH psi_norm VALUE "
-               "[action reflect|delete]");
+               "fix ID reflect/psi Nevery equ PATH psi_norm VALUE");
 
   nevery_ = atoi(arg[2]);
   if (nevery_ <= 0)
     error->all(FLERR, "fix reflect/psi: Nevery must be > 0");
 
   psi_threshold_ = 0.926;
-  action_ = REFLECT;
-  nmax_prev_ = 0;
-  x_prev_ = NULL;
   nw_ = nh_ = 0;
   psi_axis_ = psib_ = 0.0;
 
@@ -58,13 +57,6 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
       if (iarg + 1 >= narg)
         error->all(FLERR, "fix reflect/psi: missing psi_norm value");
       psi_threshold_ = atof(arg[iarg + 1]);
-      iarg += 2;
-    } else if (strcmp(arg[iarg], "action") == 0) {
-      if (iarg + 1 >= narg)
-        error->all(FLERR, "fix reflect/psi: missing action value");
-      if (strcmp(arg[iarg + 1], "reflect") == 0) action_ = REFLECT;
-      else if (strcmp(arg[iarg + 1], "delete") == 0) action_ = DELETE;
-      else error->all(FLERR, "fix reflect/psi: action must be reflect or delete");
       iarg += 2;
     } else {
       char msg[256];
@@ -86,16 +78,12 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
            z_grid_.front(), z_grid_.back());
     printf("  psi_axis = %.6e  psib = %.6e\n", psi_axis_, psib_);
     printf("  psi_norm threshold = %.4f\n", psi_threshold_);
-    printf("  action = %s\n", action_ == REFLECT ? "reflect" : "delete");
   }
 }
 
 /* ---------------------------------------------------------------------- */
 
-FixReflectPsi::~FixReflectPsi()
-{
-  memory->destroy(x_prev_);
-}
+FixReflectPsi::~FixReflectPsi() {}
 
 /* ---------------------------------------------------------------------- */
 
@@ -103,7 +91,6 @@ int FixReflectPsi::setmask()
 {
   int mask = 0;
   mask |= START_OF_STEP;
-  mask |= END_OF_STEP;
   return mask;
 }
 
@@ -115,7 +102,6 @@ void FixReflectPsi::init() {}
 
 void FixReflectPsi::read_equ_file(const std::string &path)
 {
-  // Read entire file
   std::ifstream ifs(path);
   if (!ifs.good()) {
     char msg[512];
@@ -127,13 +113,9 @@ void FixReflectPsi::read_equ_file(const std::string &path)
                     std::istreambuf_iterator<char>());
   ifs.close();
 
-  // Parse jm, km
   auto parse_int = [&](const char *name) -> int {
-    std::string pat = std::string(name) + " ";
-    // Search for "jm  =  257" pattern
     size_t pos = text.find(std::string(name));
     while (pos != std::string::npos) {
-      // Find '=' after name
       size_t eq = text.find('=', pos);
       if (eq != std::string::npos && eq - pos < 20) {
         int val = atoi(text.c_str() + eq + 1);
@@ -155,7 +137,6 @@ void FixReflectPsi::read_equ_file(const std::string &path)
     error->all(FLERR, msg);
   }
 
-  // Parse psib
   {
     size_t pos = text.find("psib");
     if (pos != std::string::npos) {
@@ -164,7 +145,6 @@ void FixReflectPsi::read_equ_file(const std::string &path)
     }
   }
 
-  // Helper: read N floats starting after a marker string
   auto read_floats_after = [&](const std::string &marker, int n,
                                std::vector<double> &out) {
     size_t pos = text.find(marker);
@@ -180,15 +160,11 @@ void FixReflectPsi::read_equ_file(const std::string &path)
     out.clear();
     out.reserve(n);
 
-    // Scan for floating-point numbers
     const char *c = text.c_str() + pos;
     const char *end = text.c_str() + text.size();
     while ((int)out.size() < n && c < end) {
-      // Skip non-numeric characters
       while (c < end && !std::isdigit(*c) && *c != '+' && *c != '-' && *c != '.') c++;
       if (c >= end) break;
-
-      // Check this is actually a number start (not part of a keyword)
       char *endp;
       double val = strtod(c, &endp);
       if (endp > c) {
@@ -208,21 +184,16 @@ void FixReflectPsi::read_equ_file(const std::string &path)
     }
   };
 
-  // Read r, z, psi arrays
   read_floats_after("r(1:jm);", nw_, r_grid_);
   read_floats_after("z(1:km);", nh_, z_grid_);
 
-  // Psi array: stored as (psi - psib) in the .equ file
-  // Marker: ((psi(j,k)-psib,j=1,jm),k=1,km)
   std::vector<double> psi_minus_psib;
   read_floats_after("((psi(j,k)-psib,j=1,jm),k=1,km)", nw_ * nh_, psi_minus_psib);
 
-  // Convert to actual psi: psi = (psi - psib) + psib
   psirz_.resize(nw_ * nh_);
   for (int i = 0; i < nw_ * nh_; i++)
     psirz_[i] = psi_minus_psib[i] + psib_;
 
-  // Find psi at magnetic axis (minimum in central region)
   psi_axis_ = 1e30;
   int j0 = nh_ / 4, j1 = 3 * nh_ / 4;
   int i0 = nw_ / 4, i1 = 3 * nw_ / 4;
@@ -239,7 +210,6 @@ double FixReflectPsi::psi_norm_at_point(double R, double Z) const
 {
   if (r_grid_.empty() || z_grid_.empty() || psirz_.empty()) return 1.0;
 
-  // Clamp to grid
   double Rc = std::min(std::max(R, r_grid_.front()), r_grid_.back());
   double Zc = std::min(std::max(Z, z_grid_.front()), z_grid_.back());
 
@@ -271,33 +241,20 @@ void FixReflectPsi::start_of_step()
   if ((update->ntimestep % nevery_) != 0) return;
 
   int nlocal = particle->nlocal;
-
-  if (nlocal > nmax_prev_) {
-    memory->destroy(x_prev_);
-    nmax_prev_ = nlocal + nlocal / 10 + 1;
-    memory->create(x_prev_, nmax_prev_, 3, "reflect_psi:x_prev");
-  }
-
-  Particle::OnePart *particles = particle->particles;
-  for (int ip = 0; ip < nlocal; ip++) {
-    x_prev_[ip][0] = particles[ip].x[0];
-    x_prev_[ip][1] = particles[ip].x[1];
-    x_prev_[ip][2] = particles[ip].x[2];
-  }
-}
-
-/* ---------------------------------------------------------------------- */
-
-void FixReflectPsi::end_of_step()
-{
-  if ((update->ntimestep % nevery_) != 0) return;
-
-  Particle::OnePart *particles = particle->particles;
-  int nlocal = particle->nlocal;
   int dim = domain->dimension;
 
-  int nreflect = 0;
-  int ndelete = 0;
+  // Grow buffer if needed
+  if (nlocal > update->psi_reflect_nmax) {
+    memory->destroy(update->psi_do_reflect);
+    update->psi_reflect_nmax = nlocal + nlocal / 10 + 1;
+    memory->create(update->psi_do_reflect, update->psi_reflect_nmax,
+                   "update:psi_do_reflect");
+  }
+
+  update->psi_reflect_flag = 1;
+  memset(update->psi_do_reflect, 0, sizeof(int) * nlocal);
+
+  Particle::OnePart *particles = particle->particles;
 
   for (int ip = 0; ip < nlocal; ip++) {
     Particle::OnePart &p = particles[ip];
@@ -314,35 +271,7 @@ void FixReflectPsi::end_of_step()
     double psi_n = psi_norm_at_point(R, Z);
 
     if (psi_n < psi_threshold_) {
-      if (action_ == DELETE) {
-        p.flag = PDISCARD;
-        ndelete++;
-      } else {
-        if (nmax_prev_ > ip) {
-          p.x[0] = x_prev_[ip][0];
-          p.x[1] = x_prev_[ip][1];
-          p.x[2] = x_prev_[ip][2];
-        }
-
-        if (dim == 3) {
-          double phi = atan2(p.v[1], p.v[0]);
-          double cphi = cos(phi);
-          double sphi = sin(phi);
-          double vr = p.v[0] * cphi + p.v[1] * sphi;
-          double vphi = -p.v[0] * sphi + p.v[1] * cphi;
-          vr = -vr;
-          p.v[0] = vr * cphi - vphi * sphi;
-          p.v[1] = vr * sphi + vphi * cphi;
-        } else {
-          p.v[0] = -p.v[0];
-        }
-        nreflect++;
-      }
+      update->psi_do_reflect[ip] = 1;
     }
   }
-
-  if (action_ == DELETE && ndelete > 0) {
-    particle->compress_rebalance();
-  }
-
 }
