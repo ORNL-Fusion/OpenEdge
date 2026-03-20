@@ -1074,20 +1074,17 @@ template < int DIM, int SURF, int OPT > void Update::move()
         }
 
         if (psi_n < psi_reflect_threshold) {
+          // Reject the move: particle stays at current position
+          xnew[0] = x[0];
+          xnew[1] = x[1];
+          if (DIM == 3) xnew[2] = x[2];
+
+          // Reverse radial velocity so particle moves outward next step
           if (DIM == 3) {
             double R0 = sqrt(x[0]*x[0] + x[1]*x[1]);
             if (R0 > 1e-10) {
               double cphi = x[0] / R0;
               double sphi = x[1] / R0;
-              // Reverse radial displacement
-              double ddx = xnew[0] - x[0];
-              double ddy = xnew[1] - x[1];
-              double dr_disp = ddx * cphi + ddy * sphi;
-              double dphi_disp = -ddx * sphi + ddy * cphi;
-              dr_disp = -dr_disp;
-              xnew[0] = x[0] + dr_disp * cphi - dphi_disp * sphi;
-              xnew[1] = x[1] + dr_disp * sphi + dphi_disp * cphi;
-              // Reverse radial velocity
               double vr = particles[i].v[0]*cphi + particles[i].v[1]*sphi;
               double vp = -particles[i].v[0]*sphi + particles[i].v[1]*cphi;
               vr = -vr;
@@ -1095,7 +1092,6 @@ template < int DIM, int SURF, int OPT > void Update::move()
               particles[i].v[1] = vr*sphi + vp*cphi;
             }
           } else {
-            xnew[0] = x[0] - (xnew[0] - x[0]);
             particles[i].v[0] = -particles[i].v[0];
           }
         }
