@@ -26,7 +26,10 @@ The package has two categories of files:
     fix_drag.cpp/h  fix_efield_grid.cpp/h  fix_efield_particle.cpp/h
     fix_emit_droplet.cpp/h  fix_emit_surf_file.cpp/h  fix_emit_surf_pmi.cpp/h
     fix_evaporation.cpp/h  fix_gravity.cpp/h
-    fix_thermal_force_e.cpp/h  fix_thermal_force_i.cpp/h  fix_viscous.cpp/h
+    fix_thermal_force.cpp/h  fix_thermal_force_e.cpp/h  fix_thermal_force_i.cpp/h
+    fix_cross_diffusion.cpp/h  fix_reflect_psi.cpp/h  fix_viscous.cpp/h
+    fix_particle_weight.cpp/h
+    geqdsk_reader.cpp/h  grid_src.h
     surf_react_mpex.cpp/h  surf_react_pmi.cpp/h
 
 ## Prerequisites
@@ -184,3 +187,49 @@ global    sheath geom_compute cgeom plasma_compute cplasma &
 - **mD_amu** — Background ion mass (amu) for sound speed and Debye length.
 - **kick yes** — Apply sheath as velocity kick at wall (recommended).
   When active, the `model` keyword is ignored (no spatial E-field).
+
+## Core Boundary (fix reflect/psi)
+
+Reflects or deletes particles that cross a normalized poloidal flux
+threshold, providing a core boundary without requiring a watertight
+inner surface mesh.
+
+Reads a SOLPS `.equ` equilibrium file, computes psi_norm = (psi - psi_axis) /
+(psib - psi_axis) at each particle position, and reflects (or deletes)
+particles with psi_norm below the threshold.
+
+### Input syntax
+
+```
+fix ID reflect/psi Nevery equ PATH psi_norm VALUE [action reflect|delete]
+```
+
+- **Nevery** — check every N timesteps (1 = every step)
+- **equ PATH** — path to SOLPS `.equ` equilibrium file (also accepts `geqdsk` keyword)
+- **psi_norm VALUE** — normalized psi threshold (0 = axis, 1 = separatrix)
+- **action reflect** (default) — restore previous position and reverse radial velocity
+- **action delete** — remove particle from simulation
+
+### Example
+
+```
+# Reflect particles that enter the core (psi_norm < 0.926)
+fix fcore reflect/psi 1 equ input/g174310.03500_153.X4.equ psi_norm 0.926
+
+# Delete particles instead of reflecting
+fix fcore reflect/psi 1 equ input/g174310.03500_153.X4.equ psi_norm 0.926 action delete
+```
+
+### Determining the psi_norm threshold
+
+Use `check_psi_norm.py` to evaluate psi_norm at the points of a flux surface:
+
+```bash
+python3 input/check_psi_norm.py input/equilibrium.equ input/flux_surface.surf
+```
+
+Use `plot_psi_surface.py` to visualize psi contours with the flux surface overlaid:
+
+```bash
+python3 input/plot_psi_surface.py input/equilibrium.equ input/flux_surface.surf
+```
