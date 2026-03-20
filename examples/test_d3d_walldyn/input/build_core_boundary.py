@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Revolve a 2D flux-surface polygon (R,Z) into a 3D toroidal wedge surface.
+"""Revolve a 2D flux-surface polygon (R,Z) into a closed 3D toroidal wedge.
 
 Reads a SPARTA-format 2D surface file (Points + Lines) and produces a
-triangulated 3D wedge with phi-periodic caps, suitable for use as a core
-boundary in OpenEdge/SPARTA.
+watertight triangulated 3D closed surface for use as a core boundary
+in OpenEdge/SPARTA.
+
+The surface is closed with solid caps at phi_min and phi_max (not periodic).
+All normals point outward by default; use --invert to flip them inward
+(for use with SPARTA's `invert` keyword on read_surf).
 
 Outputs:
 - SPARTA 3D triangular surface (.surf)
@@ -16,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from collections import Counter
 from pathlib import Path
 from typing import List, Tuple
 
@@ -34,12 +39,8 @@ def parse_args() -> argparse.Namespace:
                    help="Wedge end toroidal angle [deg]")
     p.add_argument("--prefix", type=Path, default=Path("core_boundary"),
                    help="Output prefix path")
-    p.add_argument("--flip-normals", action="store_true",
-                   help="Flip wall normals to point inward (toward core)")
     p.add_argument("--min-edge", type=float, default=0.01,
                    help="Minimum edge length [m]; closer points are merged")
-    p.add_argument("--no-caps", action="store_true",
-                   help="Omit phi-face caps (wall-only surface)")
     return p.parse_args()
 
 
@@ -73,15 +74,12 @@ def read_sparta_2d(path: Path) -> List[Point2]:
                 r, z = float(cols[1]), float(cols[2])
                 points[pid] = (r, z)
             elif section == "lines" and len(cols) >= 3:
-                lid = int(cols[0])
                 v1, v2 = int(cols[1]), int(cols[2])
                 lines_section.append((v1, v2))
 
     if not lines_section:
-        # Fall back: just return points in order
         return [points[i] for i in sorted(points.keys())]
 
-    # Follow the line connectivity to get ordered polygon
     adj = {}
     for v1, v2 in lines_section:
         adj.setdefault(v1, []).append(v2)
@@ -104,6 +102,24 @@ def read_sparta_2d(path: Path) -> List[Point2]:
             break
 
     return [points[i] for i in ordered]
+
+
+def decimate_polygon(rz: List[Point2], min_edge: float) -> List[Point2]:
+    """Remove points that are closer than min_edge to their predecessor."""
+    if len(rz) < 4:
+        return rz
+    result = [rz[0]]
+    for i in range(1, len(rz)):
+        dr = rz[i][0] - result[-1][0]
+        dz = rz[i][1] - result[-1][1]
+        if math.hypot(dr, dz) >= min_edge:
+            result.append(rz[i])
+    if len(result) > 2:
+        dr = result[-1][0] - result[0][0]
+        dz = result[-1][1] - result[0][1]
+        if math.hypot(dr, dz) < min_edge:
+            result.pop()
+    return result
 
 
 def signed_area_rz(poly: List[Point2]) -> float:
@@ -172,53 +188,89 @@ def rz_to_xyz(rz: List[Point2], phi_rad: float) -> List[Point3]:
     return [(r * c, r * s, z) for r, z in rz]
 
 
-def build_wedge_wall_tris(n: int, flip: bool = False) -> List[Tri]:
-    """Build wall triangles between phi_min (0..n-1) and phi_max (n..2n-1).
+def build_watertight_wedge(n: int, rz: List[Point2], xyz: List[Point3],
+                           phi0: float, phi1: float) -> List[Tri]:
+    """Build a fully watertight closed wedge surface.
 
-    Default normals point outward (away from axis). With flip=True, normals
-    point inward (toward axis), which is what you want for a core boundary
-    that should reflect/absorb particles coming from outside.
+    Vertex layout:
+      [0..n-1]   = phi_min ring
+      [n..2n-1]  = phi_max ring
+
+    Wall quads connect the two rings. Caps close each end.
+    All normals point outward (away from the enclosed volume).
+
+    For the wall, "outward" means away from the toroidal axis (radially out
+    from the enclosed core volume). For the caps, outward means in the
+    -phi direction for phi_min cap and +phi direction for phi_max cap.
+
+    The key to watertight: wall boundary edges at phi_min are (i, (i+1)%n)
+    going one direction. The cap must use the REVERSE edge ((i+1)%n, i) to
+    match. Same logic at phi_max.
     """
     tris: List[Tri] = []
+
+    # --- Wall triangles ---
+    # Each quad [i, j, n+j, n+i] is split into 2 triangles.
+    # Wall edges at phi_min boundary: edge (i -> j) where j=(i+1)%n
+    # Wall edges at phi_max boundary: edge (n+j -> n+i)
+    # So caps must use reverse edges to match.
     for i in range(n):
         j = (i + 1) % n
-        a, b, c, d = i, j, n + j, n + i
-        if flip:
-            tris.append((a, c, b))
-            tris.append((a, d, c))
-        else:
-            tris.append((a, b, c))
-            tris.append((a, c, d))
+        # Two triangles per quad, normals pointing outward
+        tris.append((i, j, n + j))
+        tris.append((i, n + j, n + i))
+
+    # --- phi_min cap (vertices 0..n-1) ---
+    # Wall uses edge (i -> j) along phi_min boundary.
+    # Cap must use edge (j -> i) = reversed, so cap winding is CW when
+    # viewed from outside (i.e., looking in the +phi direction).
+    # Ear-clip gives CCW triangles in R-Z plane. When viewed from -phi
+    # direction (outside the phi_min cap), CCW in R-Z corresponds to the
+    # cap normal pointing in -phi direction (outward). This means the
+    # ear-clip winding (a,b,c) gives outward normals for phi_min cap.
+    # But we need the boundary edges to be reversed relative to wall.
+    # Wall edge at phi_min: (i, i+1). Cap edge must be (i+1, i).
+    # Ear-clip CCW gives edges going (a->b->c->a). The boundary edges
+    # of the cap polygon go 0->1->2->...->n-1->0 (CCW).
+    # This means cap boundary edge (i, i+1) MATCHES wall edge (i, i+1).
+    # That's the SAME direction = DUPLICATE, not watertight!
+    # Fix: reverse the cap winding to CW = flip each triangle.
+    rz_tris = ear_clip_triangulate(rz)
+
+    for a, b, c in rz_tris:
+        # Flipped winding for phi_min cap (CW when viewed from R-Z plane)
+        # This makes boundary edges go (i+1 -> i), matching wall's need
+        tris.append((c, b, a))  # reversed
+
+    # --- phi_max cap (vertices n..2n-1) ---
+    # Wall uses edge (n+j -> n+i) along phi_max boundary, i.e., (n+i+1 -> n+i).
+    # Cap must use edge (n+i -> n+i+1) = reversed.
+    # Ear-clip CCW in R-Z plane: boundary goes 0->1->2...
+    # With offset n, boundary edges go (n+0 -> n+1 -> ...).
+    # That matches what we need: (n+i -> n+i+1).
+    # So phi_max cap uses the ear-clip winding directly (not flipped).
+    for a, b, c in rz_tris:
+        tris.append((n + a, n + b, n + c))  # original winding
+
     return tris
 
 
-def build_cap_tris(
-    rz: List[Point2],
-    xyz: List[Point3],
-    offset: int,
-    phi_rad: float,
-    outward_sign: float,
-) -> List[Tri]:
-    """Triangulate a phi-face cap with outward-pointing normals."""
-    rz_tris = ear_clip_triangulate(rz)
-    cap_tris: List[Tri] = []
-    c_phi = math.cos(phi_rad)
-    s_phi = math.sin(phi_rad)
-    out_dir = (-s_phi * outward_sign, c_phi * outward_sign, 0.0)
+def verify_watertight(tris: List[Tri]) -> bool:
+    """Check that every directed edge (a,b) has exactly one reverse (b,a)."""
+    edges = Counter()
+    for a, b, c in tris:
+        edges[(a, b)] += 1
+        edges[(b, c)] += 1
+        edges[(c, a)] += 1
 
-    for a, b, c in rz_tris:
-        va, vb, vc = xyz[offset + a], xyz[offset + b], xyz[offset + c]
-        ux, uy, uz = vb[0] - va[0], vb[1] - va[1], vb[2] - va[2]
-        wx, wy, wz = vc[0] - va[0], vc[1] - va[1], vc[2] - va[2]
-        nx = uy * wz - uz * wy
-        ny = uz * wx - ux * wz
-        nz_ = ux * wy - uy * wx
-        dot = nx * out_dir[0] + ny * out_dir[1] + nz_ * out_dir[2]
-        if dot >= 0:
-            cap_tris.append((offset + a, offset + b, offset + c))
-        else:
-            cap_tris.append((offset + a, offset + c, offset + b))
-    return cap_tris
+    duplicates = sum(1 for v in edges.values() if v > 1)
+    unmatched = sum(1 for (a, b) in edges if edges.get((b, a), 0) == 0)
+
+    if duplicates > 0 or unmatched > 0:
+        print(f"  WARNING: {duplicates} duplicate edges, {unmatched} unmatched edges")
+        return False
+    print(f"  Watertight check passed: {len(edges)} directed edges, all matched")
+    return True
 
 
 def write_sparta_3d(path: Path, xyz: List[Point3], tris: List[Tri]) -> None:
@@ -243,37 +295,17 @@ def write_obj(path: Path, xyz: List[Point3], tris: List[Tri]) -> None:
             f.write(f"f {t[0] + 1} {t[1] + 1} {t[2] + 1}\n")
 
 
-def decimate_polygon(rz: List[Point2], min_edge: float) -> List[Point2]:
-    """Remove points that are closer than min_edge to their predecessor."""
-    if len(rz) < 4:
-        return rz
-    result = [rz[0]]
-    for i in range(1, len(rz)):
-        dr = rz[i][0] - result[-1][0]
-        dz = rz[i][1] - result[-1][1]
-        if math.hypot(dr, dz) >= min_edge:
-            result.append(rz[i])
-    # Check last-to-first closure
-    if len(result) > 2:
-        dr = result[-1][0] - result[0][0]
-        dz = result[-1][1] - result[0][1]
-        if math.hypot(dr, dz) < min_edge:
-            result.pop()
-    return result
-
-
 def main() -> None:
     args = parse_args()
 
     rz = read_sparta_2d(args.input)
     print(f"Read {len(rz)} points from {args.input}")
 
-    # Remove near-duplicate points that cause degenerate triangles
     rz = decimate_polygon(rz, args.min_edge)
     n = len(rz)
     print(f"After decimation (min_edge={args.min_edge}): {n} points")
 
-    # Ensure CCW winding
+    # Ensure CCW winding in R-Z plane
     if signed_area_rz(rz) < 0.0:
         rz = list(reversed(rz))
         print("  Reversed winding to CCW")
@@ -285,21 +317,17 @@ def main() -> None:
     xyz1 = rz_to_xyz(rz, phi1)
     xyz = xyz0 + xyz1
 
-    # Wall tris: flip normals so they point inward (core boundary blocks
-    # particles coming from outside, i.e. from larger psi)
-    wall_tris = build_wedge_wall_tris(n, flip=args.flip_normals)
+    all_tris = build_watertight_wedge(n, rz, xyz, phi0, phi1)
+    n_wall = 2 * n
+    n_cap = n - 2  # ear-clip of n-gon = n-2 triangles
 
-    if args.no_caps:
-        cap_min_tris = []
-        cap_max_tris = []
-    else:
-        cap_min_tris = build_cap_tris(rz, xyz, 0, phi0, outward_sign=+1.0)
-        cap_max_tris = build_cap_tris(rz, xyz, n, phi1, outward_sign=-1.0)
+    print(f"Wedge: {args.phi_min_deg:.1f} -> {args.phi_max_deg:.1f} deg")
+    print(f"Wall triangles:       {n_wall}")
+    print(f"Cap triangles (each): {n_cap}")
+    print(f"Total triangles:      {len(all_tris)}")
 
-    all_tris = wall_tris + cap_min_tris + cap_max_tris
-    n_wall = len(wall_tris)
-    n_cap_min = len(cap_min_tris)
-    n_cap_max = len(cap_max_tris)
+    # Verify watertight before writing
+    verify_watertight(all_tris)
 
     prefix = args.prefix
     if prefix.parent != Path(""):
@@ -319,42 +347,22 @@ def main() -> None:
         "dphi_deg": args.phi_max_deg - args.phi_min_deg,
         "n_rz_vertices": n,
         "min_edge": args.min_edge,
-        "flip_normals": args.flip_normals,
-        "no_caps": args.no_caps,
         "n_wall_triangles": n_wall,
-        "n_cap_min_triangles": n_cap_min,
-        "n_cap_max_triangles": n_cap_max,
+        "n_cap_triangles_each": n_cap,
         "n_total_triangles": len(all_tris),
         "triangle_groups": {
             "core_wall": {"first": 1, "last": n_wall},
+            "cap_phi_min": {"first": n_wall + 1, "last": n_wall + n_cap},
+            "cap_phi_max": {"first": n_wall + n_cap + 1, "last": n_wall + 2 * n_cap},
         },
     }
-    if not args.no_caps:
-        meta["triangle_groups"]["cap_phi_min"] = {"first": n_wall + 1, "last": n_wall + n_cap_min}
-        meta["triangle_groups"]["cap_phi_max"] = {"first": n_wall + n_cap_min + 1,
-                                                   "last": n_wall + n_cap_min + n_cap_max}
     out_meta.write_text(json.dumps(meta, indent=2))
 
-    print(f"Wedge: {args.phi_min_deg:.1f} -> {args.phi_max_deg:.1f} deg")
-    print(f"Wall triangles:       {n_wall}")
-    print(f"Cap triangles (min):  {n_cap_min}")
-    print(f"Cap triangles (max):  {n_cap_max}")
-    print(f"Total triangles:      {len(all_tris)}")
     print()
     print("Add to your SPARTA input script:")
-    if args.no_caps:
-        print(f"  read_surf          input/{out_surf.name} group core particle none")
-        print(f"  surf_collide       CORE specular")
-        print(f"  surf_modify        core collide CORE react none")
-    else:
-        dphi = args.phi_max_deg - args.phi_min_deg
-        print(f"  read_surf          input/{out_surf.name} invert group core particle none")
-        print(f"  group              core_wall surf id 1:{n_wall}")
-        print(f"  group              core_caps surf id {n_wall+1}:{len(all_tris)}")
-        print(f"  surf_collide       CORE specular")
-        print(f"  surf_collide       CORE_PERIODIC toroidal {dphi:.1f}")
-        print(f"  surf_modify        core_wall collide CORE react none")
-        print(f"  surf_modify        core_caps collide CORE_PERIODIC react none")
+    print(f"  read_surf          input/{out_surf.name} group core")
+    print(f"  surf_collide       CORE specular")
+    print(f"  surf_modify        core collide CORE react none")
     print()
     print(f"Wrote: {out_surf}")
     print(f"Wrote: {out_obj}")
