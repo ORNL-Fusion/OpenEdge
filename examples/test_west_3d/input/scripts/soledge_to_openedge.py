@@ -300,8 +300,11 @@ def write_equ_file(path, soledge_dir):
     mesh.close()
 
     with open(path, "w") as f:
-        f.write(f"jm={nr}; km={nz};\n")
-        f.write(f"btf={btf:.10e}; rtf={rtf:.10e}; psib={psib:.10e};\n")
+        f.write(f"jm    = {nr}\n")
+        f.write(f"km    = {nz}\n")
+        f.write(f"psib  = {psib:.10e}\n")
+        f.write(f"btf   = {btf:.10e}\n")
+        f.write(f"rtf   = {rtf:.10e}\n")
 
         f.write("r(1:jm);\n")
         for i, r in enumerate(r_1d):
