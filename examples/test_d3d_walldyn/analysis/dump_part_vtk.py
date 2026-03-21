@@ -210,7 +210,7 @@ def state_to_vtk_series(statefile, outdir=None):
         print("Wrote", outfile)
 
 
-def state_to_vtk_trajectories(statefile, outfile=None, min_points=2, max_step=None):
+def state_to_vtk_trajectories(statefile, outfile=None, min_points=2, max_step=None, nparticles=None):
     """
     Write one .vtp containing particle trajectories as polyline cells.
 
@@ -261,6 +261,14 @@ def state_to_vtk_trajectories(statefile, outfile=None, min_points=2, max_step=No
     arr_vz.SetName("vz")
 
     unique_ids, start_idx, counts = np.unique(ids, return_index=True, return_counts=True)
+
+    if nparticles is not None and nparticles < len(unique_ids):
+        rng = np.random.default_rng(42)
+        sel = rng.choice(len(unique_ids), size=nparticles, replace=False)
+        sel.sort()
+        unique_ids = unique_ids[sel]
+        start_idx = start_idx[sel]
+        counts = counts[sel]
 
     nlines = 0
     npts = 0
@@ -339,11 +347,12 @@ if __name__ == "__main__":
     parser.add_argument("--outdir", default="vtk", help="Output directory for series mode")
     parser.add_argument("--output", default=None, help="Output file for points/trajectories mode")
     parser.add_argument("--min-points", type=int, default=2, help="Minimum samples per particle for trajectories mode")
+    parser.add_argument("--nparticles", type=int, default=None, help="Randomly select N particles for trajectories mode (default: all)")
     parser.add_argument(
         "--max-step",
         type=float,
-        default=None,
-        help="Split a trajectory when consecutive points are farther apart than this distance",
+        default=0.3,
+        help="Split a trajectory when consecutive points are farther apart than this distance (default: 0.3 m, catches toroidal periodic jumps)",
     )
     args = parser.parse_args()
 
@@ -363,4 +372,5 @@ if __name__ == "__main__":
             outfile=args.output,
             min_points=args.min_points,
             max_step=args.max_step,
+            nparticles=args.nparticles,
         )
