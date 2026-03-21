@@ -218,16 +218,35 @@ def write_bfield_h5(path, grid):
 
 
 def write_plasma_h5(path, grid):
-    """Write OpenEdge plasma.h5 format with per-species ion data."""
+    """Write OpenEdge plasma.h5 format with per-species ion data.
+
+    Dataset names must match what compute_plasma_fields.cpp expects:
+      dens_e, temp_e, dens_i, temp_i, parr_flow, parr_flow_r/t/z,
+      grad_te_r/t/z, grad_ti_r/t/z
+    """
+    nr, nz = len(grid["r"]), len(grid["z"])
+    zeros = np.zeros((nr, nz))
+
     with h5py.File(path, "w") as f:
         f.create_dataset("r", data=grid["r"])
         f.create_dataset("z", data=grid["z"])
-        f.create_dataset("te", data=grid["te"])
-        f.create_dataset("ne", data=grid["ne"])
-        f.create_dataset("ti", data=grid["ti"])
-        f.create_dataset("ni", data=grid["ni"])
-        f.create_dataset("ve", data=grid["ve"])
-        f.create_dataset("vi", data=grid["vi"])
+        f.create_dataset("dens_e", data=grid["ne"])
+        f.create_dataset("temp_e", data=grid["te"])
+        f.create_dataset("dens_i", data=grid["ni"])
+        f.create_dataset("temp_i", data=grid["ti"])
+        # Parallel flow: vi is the total parallel flow magnitude
+        f.create_dataset("parr_flow", data=grid["vi"])
+        # Flow components (R, toroidal, Z) — set to zero, computed from B-field
+        f.create_dataset("parr_flow_r", data=zeros)
+        f.create_dataset("parr_flow_t", data=zeros)
+        f.create_dataset("parr_flow_z", data=zeros)
+        # Temperature gradients — set to zero (computed by finite differences)
+        f.create_dataset("grad_te_r", data=zeros)
+        f.create_dataset("grad_te_t", data=zeros)
+        f.create_dataset("grad_te_z", data=zeros)
+        f.create_dataset("grad_ti_r", data=zeros)
+        f.create_dataset("grad_ti_t", data=zeros)
+        f.create_dataset("grad_ti_z", data=zeros)
 
         # Per-species ion data for PMI sputtering
         nion = grid["nion"]
