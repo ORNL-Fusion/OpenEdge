@@ -357,7 +357,7 @@ def main() -> None:
 
     print()
     print("Add to your SPARTA input script:")
-    print(f"  read_surf          input/{out_surf.name} group core")
+    print(f"  read_surf          input/geometry/{out_surf.name} group core")
     print(f"  surf_collide       CORE specular")
     print(f"  surf_modify        core collide CORE react none")
     print()

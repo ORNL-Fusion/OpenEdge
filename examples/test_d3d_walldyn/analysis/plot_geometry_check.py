@@ -72,9 +72,9 @@ def triangle_normals(pts, tris):
 
 
 def main():
-    wall_2d_file = "input/wall.txt"
-    surf_3d_file = "input/d3d_case_wedge_capped.surf"
-    plasma_file = "input/plasma.h5"
+    wall_2d_file = "input/data/wall.txt"
+    surf_3d_file = "input/geometry/d3d_refined_wedge_capped.surf"
+    plasma_file = "input/data/plasma.h5"
 
     # Read geometries
     wall_rz = read_sparta_2d_wall(wall_2d_file)

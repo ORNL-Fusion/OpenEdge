@@ -1,5 +1,5 @@
 {
-  "input_file": "input/flux_surface_core.surf",
+  "input_file": "input/geometry/flux_surface_core.surf",
   "phi_min_deg": 0.0,
   "phi_max_deg": 30.0,
   "dphi_deg": 30.0,

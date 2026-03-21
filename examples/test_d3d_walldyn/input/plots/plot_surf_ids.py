@@ -17,7 +17,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "surf_file",
         nargs="?",
-        default="input/d3d_case_wedge_capped.surf",
+        default="input/geometry/d3d_refined_wedge_capped.surf",
         help="Path to SPARTA/OpenEdge 3D surface file",
     )
     parser.add_argument("--alpha", type=float, default=0.18, help="Surface transparency")

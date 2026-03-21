@@ -50,8 +50,8 @@ def read_sparta_surf(path):
 
 
 def main():
-    surf_file = "input/d3d_case_wedge_capped.surf"
-    plasma_file = "input/plasma.h5"
+    surf_file = "input/geometry/d3d_refined_wedge_capped.surf"
+    plasma_file = "input/data/plasma.h5"
 
     pts, tris = read_sparta_surf(surf_file)
     print(f"Surface: {len(pts)} points, {len(tris)} triangles")

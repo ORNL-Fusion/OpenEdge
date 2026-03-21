@@ -100,8 +100,8 @@ def psi_norm_interp(r_grid, z_grid, psi_norm, R_pts, Z_pts):
 if __name__ == "__main__":
     from pathlib import Path
 
-    equ_path = sys.argv[1] if len(sys.argv) > 1 else "input/g174310.03500_153.X4.equ"
-    surf_path = sys.argv[2] if len(sys.argv) > 2 else "input/flux_surface_core.surf"
+    equ_path = sys.argv[1] if len(sys.argv) > 1 else "input/data/g174310.03500_153.X4.equ"
+    surf_path = sys.argv[2] if len(sys.argv) > 2 else "input/geometry/flux_surface_core.surf"
 
     r_grid, z_grid, psi, psi_axis, psib = read_equ(equ_path)
 

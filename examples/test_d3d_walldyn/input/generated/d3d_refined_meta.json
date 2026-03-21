@@ -1,5 +1,5 @@
 {
-  "mesh_extra": "mesh.extra",
+  "mesh_extra": "input/data/mesh.extra",
   "phi_min_deg": 0.0,
   "phi_max_deg": 30.0,
   "n_rz_original": 68,
