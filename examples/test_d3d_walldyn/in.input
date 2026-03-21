@@ -56,6 +56,7 @@ surf_collide        PERIODIC toroidal 30.0
 
 surf_modify         wall collide WALL react none
 surf_modify         caps collide PERIODIC react none
+
 # Local static refinement near the lower divertor and early flight region.
 # Start broad enough to actually capture the emitted trajectories, then tighten later.
 region              rdiv_emit block 2.00 2.42 0.00 0.70 -1.35 -0.90
@@ -64,6 +65,7 @@ region              rdiv_fly  block 1.75 2.50 0.00 1.10 -1.25 -0.45
 adapt_grid          all refine surf all 0.001 maxlevel 3 cells 2 2 2 region rdiv_emit all iterate 2
 adapt_grid          all refine surf all 0.001 maxlevel 3 cells 2 2 2 region rdiv_fly  all iterate 2
 balance_grid        rcb cell
+
 
 # ===========================================================================
 # 1) Plasma/B-field compute on grid
@@ -74,31 +76,26 @@ balance_grid        rcb cell
 #   [10]=grad_te_r [11]=grad_te_z [12]=grad_ti_r [13]=grad_ti_z
 #   [14]=ex [15]=ey [16]=ez
 #   [17]=grad_ne_r [18]=grad_ne_z
-compute             pfields plasma/fields all file input/data/plasma.h5 input/data/bfield.h5 &
+compute             pfields plasma/fields all file input/data/plasma.h5 &
+                    equilibrium input/data/g174310.03500_153.X4.equ &
                     bx by bz epar temp_e dens_e temp_i dens_i parrflow &
                     grad_te_r grad_te_z grad_ti_r grad_ti_z ex ey ez &
                     grad_ne_r grad_ne_z
-#fix fpfields ave/grid all 1 1 1 c_pfields[*] ave one
-#dump dplasma grid all 1 output/plasma_grid id xc yc zc f_fpfields[5]
-#run 1
-#exit
 
 # ===========================================================================
-# 2) Boris pusher with B-field, E-field, and sheath kick
+# 2) Boris pusher with B-field from equilibrium point queries
 # ===========================================================================
-fix                 bB bfield/grid c_pfields[1] c_pfields[2] c_pfields[3]
-global              bfield grid bB 0
+global              bfield_compute pfields
+global              boris_subcycles 5
 
 # Ambipolar parallel E-field from electron pressure gradient
 #fix                 fEpar efield/grid c_pfields[14] c_pfields[15] c_pfields[16]
 #global              efield grid fEpar 0
 
-#global              boris_subcycles 5
-
 # Sheath geometry and kick model
 compute             cgeom sheath/geometry/grid all all dist nx ny nz surfidx
 global              sheath geom_compute cgeom plasma_compute pfields &
-                    mD_amu 2.0 pot_mult 2.5 kick no #yes
+                    mD_amu 2.0 pot_mult 2.5 kick yes
 
 # ===========================================================================
 # 3) ADAS ionization/recombination for Carbon (Z=6)
@@ -138,13 +135,13 @@ compute             cpmi pmi/surf/data emit_wall file input/data/plasma.h5 input
                     projectile_slots 1 1 mass_amu 2.0 sputter_flux_total
 
 # Per-particle weight infrastructure for weighted emission
-fix                 pw particle/weight
+#fix                 pw particle/weight
 
 # Emit sputtered C from cpmi total sputter flux
 fix                 femit emit/surf/pmi carbonSource emit_wall cpmi perspecies no normal yes &
                    nlaunch 1 flux_thresh 1e18
 
-fix fcore reflect/psi 1 equ input/data/g174310.03500_153.X4.equ psi_norm 0.926
+fix fcore reflect/psi 1 equ input/data/g174310.03500_153.X4.equ psi_norm 0.926 action absorb
 
 #read_particles source 1
 
@@ -157,7 +154,6 @@ shell               mkdir -p output
 #dump                dpmi surf emit_wall 500 output/pmi.d3d id c_cpmi
 
 # Particle state dump
-#dump                s particle all 1 source id type x y z vx vy vz
 dump                dpart particle all 100 output/particles id type x y z vx vy vz p_pweight
 #dump_modify         dpart first yes
 
@@ -173,4 +169,4 @@ stats_style         step cpu np
 run 1
 
 unfix femit
-run                 50000 #00
+run                 50000

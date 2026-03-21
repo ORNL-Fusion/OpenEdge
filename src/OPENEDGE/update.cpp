@@ -135,6 +135,9 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
 
 
   thermal_gradient_forces_flag = 0;
+  boris_plasma_cid = NULL;
+  boris_plasma_cidx = -1;
+
   boris_dump_flag = 0;
   boris_dump_every = 1;
   boris_subcycles = 1;
@@ -200,6 +203,7 @@ Update::~Update()
   delete [] ulist_surfcollide;
   delete [] sheath_geom_cid;
   delete [] sheath_plasma_cid;
+  delete [] boris_plasma_cid;
   delete [] gca_plasma_cid;
   memory->destroy(dx_cd);
   // psi_r_grid, psi_z_grid, psi_rz are owned by fix_reflect_psi, not freed here
@@ -380,6 +384,15 @@ void Update::init()
       error->all(FLERR,"global sheath: plasma compute ID not found");
     if (!modify->compute[sheath_plasma_cidx]->per_grid_flag)
       error->all(FLERR,"global sheath: plasma compute must be per-grid");
+  }
+
+  // Resolve Boris point-query B-field compute
+  if (boris_plasma_cid) {
+    boris_plasma_cidx = modify->find_compute(boris_plasma_cid);
+    if (boris_plasma_cidx < 0)
+      error->all(FLERR,"global bfield_compute: compute ID not found");
+    if (!modify->compute[boris_plasma_cidx]->per_grid_flag)
+      error->all(FLERR,"global bfield_compute: compute must be per-grid");
   }
 
   // Resolve GCA plasma/fields compute for grad(B)
@@ -2341,7 +2354,29 @@ void Update::pusher_boris3D(int i, int icell, double dt,
     if (eperturbflag)
       BorisGrid::read_field_from_fix(modify->fix[efieldfix], (efstyle == GFIELD),
                                      efield_active, i, icell, E);
-    if (bperturbflag)
+
+    // Point-query B-field at particle position (equilibrium-derived, full domain)
+    bool have_point_b = false;
+    if (boris_plasma_cidx >= 0) {
+      Compute *cp_base = modify->compute[boris_plasma_cidx];
+      ComputePlasmaFields *cp_bf = dynamic_cast<ComputePlasmaFields *>(cp_base);
+      if (cp_bf) {
+        MagneticFieldFileDataParams Bcyl = cp_bf->query_bfield_at_point(xcur);
+        if (Bcyl.Bmag > 0.0) {
+          have_point_b = true;
+          const double rx = xcur[0], ry = xcur[1];
+          const double rxy = std::sqrt(rx*rx + ry*ry);
+          double cphi = 1.0, sphi = 0.0;
+          if (rxy > 1.0e-20) { cphi = rx / rxy; sphi = ry / rxy; }
+          B[0] = Bcyl.br * cphi - Bcyl.bt * sphi;
+          B[1] = Bcyl.br * sphi + Bcyl.bt * cphi;
+          B[2] = Bcyl.bz;
+        }
+      }
+    }
+
+    // Fall back to grid-stored B-field if no point query
+    if (!have_point_b && bperturbflag)
       BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
                                      bfield_active, i, icell, B);
 
@@ -3416,6 +3451,16 @@ void Update::global(int narg, char **arg)
       if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_bad_dt_limit command");
       boris_bad_dt_limit = input->numeric(FLERR, arg[iarg + 1]);
       if (boris_bad_dt_limit <= 0.0) error->all(FLERR, "Illegal global boris_bad_dt_limit command");
+      iarg += 2;
+
+    // Point-query B-field for Boris pusher from a compute plasma/fields.
+    // Usage: global bfield_compute <ID>
+    } else if (strcmp(arg[iarg], "bfield_compute") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global bfield_compute command");
+      delete [] boris_plasma_cid;
+      int n = strlen(arg[iarg+1]) + 1;
+      boris_plasma_cid = new char[n];
+      strcpy(boris_plasma_cid, arg[iarg+1]);
       iarg += 2;
 
     // Hybrid Boris/GCA pusher (ERO2.0-style).

@@ -156,6 +156,10 @@ struct SurfHit2D {
   bigint nscheck_running;
   bigint nscollide_running;
 
+  // Point-query B-field for Boris pusher (from compute plasma/fields)
+  char *boris_plasma_cid;      // compute ID string (set by global bfield_compute)
+  int boris_plasma_cidx;       // resolved compute index (-1 = not set)
+
   int boris_dump_flag;         // 1 enables Boris E/B debug prints
   int boris_dump_every;        // print cadence in timesteps
   int boris_subcycles;         // Boris velocity/position substeps per move
