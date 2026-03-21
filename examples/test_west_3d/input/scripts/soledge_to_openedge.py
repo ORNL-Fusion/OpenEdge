@@ -207,13 +207,13 @@ def interpolate_to_uniform(data, nr, nz):
 
 
 def write_bfield_h5(path, grid):
-    """Write OpenEdge bfield.h5 format."""
+    """Write OpenEdge bfield.h5 format. 2D arrays stored as (nz, nr)."""
     with h5py.File(path, "w") as f:
         f.create_dataset("r", data=grid["r"])
         f.create_dataset("z", data=grid["z"])
-        f.create_dataset("br", data=grid["br"])
-        f.create_dataset("bt", data=grid["bt"])
-        f.create_dataset("bz", data=grid["bz"])
+        f.create_dataset("br", data=grid["br"].T)
+        f.create_dataset("bt", data=grid["bt"].T)
+        f.create_dataset("bz", data=grid["bz"].T)
     print(f"Wrote {path}")
 
 
@@ -225,17 +225,19 @@ def write_plasma_h5(path, grid):
       grad_te_r/t/z, grad_ti_r/t/z
     """
     nr, nz = len(grid["r"]), len(grid["z"])
-    zeros = np.zeros((nr, nz))
+    # compute_plasma_fields expects 2D arrays with shape (nz, nr)
+    # Our griddata returns (nr, nz), so transpose all 2D fields
+    zeros = np.zeros((nz, nr))
 
     with h5py.File(path, "w") as f:
         f.create_dataset("r", data=grid["r"])
         f.create_dataset("z", data=grid["z"])
-        f.create_dataset("dens_e", data=grid["ne"])
-        f.create_dataset("temp_e", data=grid["te"])
-        f.create_dataset("dens_i", data=grid["ni"])
-        f.create_dataset("temp_i", data=grid["ti"])
+        f.create_dataset("dens_e", data=grid["ne"].T)
+        f.create_dataset("temp_e", data=grid["te"].T)
+        f.create_dataset("dens_i", data=grid["ni"].T)
+        f.create_dataset("temp_i", data=grid["ti"].T)
         # Parallel flow: vi is the total parallel flow magnitude
-        f.create_dataset("parr_flow", data=grid["vi"])
+        f.create_dataset("parr_flow", data=grid["vi"].T)
         # Flow components (R, toroidal, Z) — set to zero, computed from B-field
         f.create_dataset("parr_flow_r", data=zeros)
         f.create_dataset("parr_flow_t", data=zeros)
@@ -252,10 +254,10 @@ def write_plasma_h5(path, grid):
         nion = grid["nion"]
         nr, nz = len(grid["r"]), len(grid["z"])
 
-        # ions/dens: (nion, nr, nz)
-        ions_dens = np.stack(grid["ion_n"], axis=0)
-        ions_temp = np.stack(grid["ion_t"], axis=0)
-        ions_flow = np.stack(grid["ion_v"], axis=0)
+        # ions/dens: (nion, nz, nr) — reader expects dims[1]=nz, dims[2]=nr
+        ions_dens = np.stack([d.T for d in grid["ion_n"]], axis=0)
+        ions_temp = np.stack([d.T for d in grid["ion_t"]], axis=0)
+        ions_flow = np.stack([d.T for d in grid["ion_v"]], axis=0)
         f.create_dataset("ions/dens", data=ions_dens)
         f.create_dataset("ions/temp", data=ions_temp)
         f.create_dataset("ions/parr_flow", data=ions_flow)
