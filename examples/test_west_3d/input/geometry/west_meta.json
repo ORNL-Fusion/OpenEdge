@@ -1,0 +1,21 @@
+{
+  "wall_file": "input/data/wall.txt",
+  "phi_min_deg": 0.0,
+  "phi_max_deg": 30.0,
+  "dphi_deg": 30.0,
+  "n_rz_vertices": 117,
+  "n_wall_triangles": 234,
+  "n_cap_min_triangles": 115,
+  "n_cap_max_triangles": 115,
+  "n_total_triangles": 464,
+  "triangle_groups": {
+    "wall": {
+      "first": 1,
+      "last": 234
+    },
+    "caps": {
+      "first": 235,
+      "last": 464
+    }
+  }
+}

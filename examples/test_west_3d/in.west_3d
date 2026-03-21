@@ -1,0 +1,144 @@
+################################################################################
+# WEST 3D wedge: W impurity transport with erosion, ionization, sheath
+#
+# Physics:
+#   - D+ plasma background from SOLEDGE (plasma.h5 + bfield.h5)
+#   - O-on-W sputtering via BCA yield table (74_on_74_pmi.h5)
+#   - W ionization/recombination via ADAS (Z=74)
+#   - Sheath kick model (Bohm sheath potential)
+#   - Boris pusher with equilibrium B-field point queries
+#   - Toroidal periodic BCs on phi-face caps
+################################################################################
+
+seed                12345
+dimension           3
+boundary            o o o
+global              gridcut -1.0 comm/sort yes surfmax 10000
+global              fnum 1e12
+
+create_box          0.0 3.5  -0.5 2.0  -1.5 1.5
+create_grid         40 40 40
+balance_grid        rcb cell
+
+# ---- Species and mixtures ----
+species input/data/plasma.species W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+
+
+mixture             tungstenSource W       frac 1.0
+mixture             tungstenSource W+      frac 0.0
+mixture             tungstenSource W2+     frac 0.0
+mixture             tungstenSource W3+     frac 0.0
+mixture             tungstenSource W4+     frac 0.0
+mixture             tungstenSource W5+     frac 0.0
+mixture             tungstenSource W6+     frac 0.0
+mixture             tungstenSource W7+     frac 0.0
+mixture             tungstenSource W8+     frac 0.0
+mixture             tungstenSource W9+     frac 0.0
+mixture             tungstenSource W10+    frac 0.0
+
+variable            TbindW equal 4.0*11600.
+variable            TwallK equal 773.15
+mixture             tungstenSource temp ${TbindW}
+
+# ---- Surface geometry ----
+read_surf           input/geometry/west_wedge_capped.surf particle check
+
+group               wall surf id 1:234
+group               caps surf id 235:464
+
+surf_collide        WALL vanish
+surf_collide        PERIODIC toroidal 30.0
+
+surf_modify         wall collide WALL react none
+surf_modify         caps collide PERIODIC react none
+
+# Local static refinement near the divertor regions
+region              rdiv_lo block 2.0 3.2 0.0 1.6 -1.0 -0.35
+region              rdiv_up block 2.0 3.2 0.0 1.6  0.35  0.8
+region              rlim    block 1.5 2.4 -0.5 1.2 -0.2 0.2
+
+adapt_grid          all refine surf all 0.001 maxlevel 3 cells 2 2 2 region rdiv_lo all iterate 2
+adapt_grid          all refine surf all 0.001 maxlevel 3 cells 2 2 2 region rdiv_up all iterate 2
+adapt_grid          all refine surf all 0.001 maxlevel 3 cells 2 2 2 region rlim   all iterate 2
+balance_grid        rcb cell
+
+# ===========================================================================
+# 1) Plasma/B-field compute on grid
+# ===========================================================================
+compute             pfields plasma/fields all file input/data/plasma.h5 &
+                    equilibrium input/data/west_3mw.equ &
+                    bx by bz epar temp_e dens_e temp_i dens_i parrflow &
+                    grad_te_r grad_te_z grad_ti_r grad_ti_z ex ey ez &
+                    grad_ne_r grad_ne_z
+
+# ===========================================================================
+# 2) Boris pusher with B-field from equilibrium point queries
+# ===========================================================================
+global              bfield_compute pfields
+
+global              boris_subcycles 5
+
+# Sheath geometry and kick model
+compute             cgeom sheath/geometry/grid all all dist nx ny nz surfidx
+global              sheath geom_compute cgeom plasma_compute pfields &
+                    mD_amu 2.0 pot_mult 2.5 kick yes
+
+# ===========================================================================
+# 3) ADAS ionization/recombination for Tungsten (Z=74)
+# ===========================================================================
+fix                 chem chem/adas 1 74 input/data/plasma.adas adas_dir ../../database/adas
+
+# ===========================================================================
+# 4) Nanbu Coulomb collisions with D+ background
+# ===========================================================================
+#fix                 fnanbu coll/nanbu 1 plasma c_pfields[5] c_pfields[6] &
+#                    nobinary &
+#                    background 2.0 1.0 &
+#                    c_pfields[7] c_pfields[8] c_pfields[9] &
+#                    c_pfields[1] c_pfields[2] c_pfields[3]
+
+# ===========================================================================
+# 5) Braginskii thermal forces on impurity ions
+# ===========================================================================
+#fix                 ftf thermal_force 1 &
+#                    bfield c_pfields[1] c_pfields[2] c_pfields[3] &
+#                    ion_thermal c_pfields[12] c_pfields[13] coeff 2.6 &
+#                    elec_thermal c_pfields[10] c_pfields[11] coeff 0.71
+
+# ===========================================================================
+# 6) Anomalous cross-field diffusion + gradient-driven pinch
+# ===========================================================================
+#fix                 fcd cross_diffusion 1 &
+#                    bfield c_pfields[1] c_pfields[2] c_pfields[3] &
+#                    D_perp 1.0 &
+#                    gradient_pinch 2.0 c_pfields[6] c_pfields[17] c_pfields[18]
+
+# ===========================================================================
+# 7) Sputtering source (O-on-W, BCA yield)
+# ===========================================================================
+# Plasma species: spec0=e, spec1=D+, spec2=O+, spec3=O2+, ..., spec8=O7+
+# projectile_slots 2 9 selects O charge states as sputtering projectiles
+compute             cpmi pmi/surf/data wall file input/data/plasma.h5 &
+                    input/data/74_on_74_pmi.h5 &
+                    projectile_slots 2 9 mass_amu 16.0 sputter_flux_total
+
+fix                 pw particle/weight
+
+fix                 femit emit/surf/pmi tungstenSource wall cpmi perspecies no normal yes &
+                    nlaunch 5 flux_thresh 1e10
+
+# ===========================================================================
+# 8) Diagnostics
+# ===========================================================================
+shell               mkdir -p output
+
+dump                dpart particle all 100 output/particles id type x y z vx vy vz p_pweight
+#dump_modify         dpart first yes
+
+timestep            1.0e-09
+stats               10
+stats_style         step cpu np
+
+run 1
+
+unfix femit
+run                 50000
