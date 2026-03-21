@@ -158,6 +158,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   dx_cd = NULL;
 
   psi_reflect_flag = 0;
+  psi_reflect_action = 0;
   psi_reflect_threshold = 1.0;
   psi_nw = psi_nh = 0;
   psi_axis = psi_bry = 0.0;
@@ -1074,7 +1075,13 @@ template < int DIM, int SURF, int OPT > void Update::move()
         }
 
         if (psi_n < psi_reflect_threshold) {
-          // Reject the move: particle stays at current position
+          if (psi_reflect_action == 1) {
+            // Absorb: remove particle (same as leaving the domain)
+            particles[i].flag = PDISCARD;
+            break;
+          }
+
+          // Reflect: reject the move, particle stays at current position
           xnew[0] = x[0];
           xnew[1] = x[1];
           if (DIM == 3) xnew[2] = x[2];

@@ -41,6 +41,7 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
     error->all(FLERR, "fix reflect/psi: Nevery must be > 0");
 
   psi_threshold_ = 0.926;
+  action_ = PSI_ACTION_REFLECT;
   nw_ = nh_ = 0;
   psi_axis_ = psib_ = 0.0;
 
@@ -57,6 +58,16 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
       if (iarg + 1 >= narg)
         error->all(FLERR, "fix reflect/psi: missing psi_norm value");
       psi_threshold_ = atof(arg[iarg + 1]);
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "action") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix reflect/psi: missing action value");
+      if (strcmp(arg[iarg + 1], "reflect") == 0)
+        action_ = PSI_ACTION_REFLECT;
+      else if (strcmp(arg[iarg + 1], "absorb") == 0)
+        action_ = PSI_ACTION_ABSORB;
+      else
+        error->all(FLERR, "fix reflect/psi: action must be 'reflect' or 'absorb'");
       iarg += 2;
     } else {
       char msg[256];
@@ -78,6 +89,7 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
            z_grid_.front(), z_grid_.back());
     printf("  psi_axis = %.6e  psib = %.6e\n", psi_axis_, psib_);
     printf("  psi_norm threshold = %.4f\n", psi_threshold_);
+    printf("  action = %s\n", action_ == PSI_ACTION_ABSORB ? "absorb" : "reflect");
   }
 }
 
@@ -98,6 +110,7 @@ void FixReflectPsi::init()
 {
   // Pass equilibrium data pointers to update for use in mover
   update->psi_reflect_flag = 1;
+  update->psi_reflect_action = action_;
   update->psi_reflect_threshold = psi_threshold_;
   update->psi_nw = nw_;
   update->psi_nh = nh_;

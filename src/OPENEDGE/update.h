@@ -204,6 +204,7 @@ struct SurfHit2D {
 
   // Psi-based core boundary (set by fix reflect/psi)
   int psi_reflect_flag;        // 1 if psi-reflect is active
+  int psi_reflect_action;      // 0=reflect, 1=absorb (matches FixReflectPsi enum)
   double psi_reflect_threshold;// normalized psi threshold
   int psi_nw, psi_nh;         // equilibrium grid dimensions
   double psi_axis, psi_bry;   // psi at axis and boundary

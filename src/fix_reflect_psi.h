@@ -18,11 +18,11 @@
     Supports both G-EQDSK and SOLPS .equ equilibrium formats.
 
     Syntax:
-      fix ID reflect/psi Nevery equ PATH psi_norm VALUE [action reflect|delete]
+      fix ID reflect/psi Nevery equ PATH psi_norm VALUE [action reflect|absorb]
 
     Example:
       fix fcore reflect/psi 1 equ input/g174310.03500_153.X4.equ psi_norm 0.926
-      fix fcore reflect/psi 1 equ input/g174310.03500_153.X4.equ psi_norm 0.926 action delete
+      fix fcore reflect/psi 1 equ input/g174310.03500_153.X4.equ psi_norm 0.926 action absorb
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -48,8 +48,11 @@ class FixReflectPsi : public Fix {
   int  setmask();
   void init();
 
+  enum { PSI_ACTION_REFLECT, PSI_ACTION_ABSORB };
+
  protected:
   int nevery_;
+  int action_;                 // PSI_ACTION_REFLECT or PSI_ACTION_ABSORB
   double psi_threshold_;     // normalized psi boundary
 
   // Equilibrium data
