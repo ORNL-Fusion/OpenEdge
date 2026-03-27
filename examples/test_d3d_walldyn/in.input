@@ -21,7 +21,7 @@ global              gridcut -1.0 comm/sort yes surfmax 10000
 global              fnum 1e12
 
 create_box          -1.0 3.0  -1.0 2.0  -2.0 2.0
-create_grid         40 40 40
+create_grid         80 80 80
 balance_grid        rcb cell
 
 
@@ -30,10 +30,10 @@ balance_grid        rcb cell
 # ---- Species and mixtures ----
 species input/data/c.species C C+ C2+ C3+ C4+ C5+ C6+
 
-mixture             carbonSource C       frac 1.0
-mixture             carbonSource C+      frac 0.0
-mixture             carbonSource C2+     frac 0.0
-mixture             carbonSource C3+     frac 0.0
+mixture             carbonSource C       frac 1.
+mixture             carbonSource C+      frac 0.
+mixture             carbonSource C2+     frac 0.
+mixture             carbonSource C3+     frac 0.
 mixture             carbonSource C4+     frac 0.0
 mixture             carbonSource C5+     frac 0.0
 mixture             carbonSource C6+     frac 0.0
@@ -86,21 +86,23 @@ compute             pfields plasma/fields all file input/data/plasma.h5 &
 # 2) Boris pusher with B-field from equilibrium point queries
 # ===========================================================================
 global              bfield_compute pfields
-global              boris_subcycles 5
+global              boris_subcycles 50
 
 # Ambipolar parallel E-field from electron pressure gradient
 #fix                 fEpar efield/grid c_pfields[14] c_pfields[15] c_pfields[16]
 #global              efield grid fEpar 0
 
 # Sheath geometry and kick model
-compute             cgeom sheath/geometry/grid all all dist nx ny nz surfidx
-global              sheath geom_compute cgeom plasma_compute pfields &
-                    mD_amu 2.0 pot_mult 2.5 kick yes
+# Disabled for the B-only trajectory diagnostic so we can distinguish
+# magnetic guiding from near-wall sheath trapping.
+#compute             cgeom sheath/geometry/grid all all dist nx ny nz surfidx
+#global              sheath geom_compute cgeom plasma_compute pfields &
+#                    mD_amu 2.0 pot_mult 2.5 kick yes
 
 # ===========================================================================
 # 3) ADAS ionization/recombination for Carbon (Z=6)
 # ===========================================================================
-fix                 chem chem/adas 1 6 input/data/plasma.adas adas_dir ../../database/adas
+fix                 chem chem/adas 1 6 input/data/plasma.adas adas_dir ../../database/adas plasma c_pfields[5] c_pfields[6]
 
 # ===========================================================================
 # 4) Nanbu Coulomb collisions with D+ background
@@ -122,10 +124,10 @@ fix                 chem chem/adas 1 6 input/data/plasma.adas adas_dir ../../dat
 # ===========================================================================
 # 6) Anomalous cross-field diffusion + gradient-driven pinch
 # ===========================================================================
-#fix                 fcd cross_diffusion 1 &
-#                    bfield c_pfields[1] c_pfields[2] c_pfields[3] &
-#                    D_perp 1.0 &
-#                    gradient_pinch 2.0 c_pfields[6] c_pfields[17] c_pfields[18]
+fix                 fcd cross_diffusion 1 &
+                    bfield c_pfields[1] c_pfields[2] c_pfields[3] &
+                    D_perp 1.0 &
+                    gradient_pinch 2.0 c_pfields[6] c_pfields[17] c_pfields[18]
 
 # ===========================================================================
 # 7) Sputtering source (D-on-C, Bohm flux model)
@@ -135,16 +137,16 @@ compute             cpmi pmi/surf/data emit_wall file input/data/plasma.h5 input
                     projectile_slots 1 1 mass_amu 2.0 sputter_flux_total
 
 # Per-particle weight infrastructure for weighted emission
-#fix                 pw particle/weight
+fix                 pw particle/weight
 
 # Emit sputtered C from cpmi total sputter flux
 fix                 femit emit/surf/pmi carbonSource emit_wall cpmi perspecies no normal yes &
-                   nlaunch 1 flux_thresh 1e18
+                  nlaunch 1 flux_thresh 1e20
 
 fix fcore reflect/psi 1 equ input/data/g174310.03500_153.X4.equ psi_norm 0.926 action absorb
 
-#read_particles source 1
 
+#read_particles source 100000
 # ===========================================================================
 # 8) Diagnostics
 # ===========================================================================
@@ -154,7 +156,9 @@ shell               mkdir -p output
 #dump                dpmi surf emit_wall 500 output/pmi.d3d id c_cpmi
 
 # Particle state dump
-dump                dpart particle all 100 output/particles id type x y z vx vy vz p_pweight
+dump                dpart particle all 1 output/particles id type x y z vx vy vz p_pweight
+dump                1dpart particle all 100000 source id type x y z vx vy vz
+
 #dump_modify         dpart first yes
 
 # Weighted density (correct physical density with per-particle weights)
@@ -169,4 +173,4 @@ stats_style         step cpu np
 run 1
 
 unfix femit
-run                 50000
+run                 100000

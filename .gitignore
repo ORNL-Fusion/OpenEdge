@@ -2,6 +2,7 @@
 # Generated test artifacts and example outputs
 examples/*/output/
 examples/*/log.openedge
+examples/*/source
 examples/**/dump.*
 examples/**/*.png
 
@@ -20,9 +21,14 @@ examples/test_polarization/figs_polarization/
 
 # Local run/test artifacts
 log.*
+log.openedge
 dump.*
+*.dump
 *.state
 *.rst
+*.vtk
+*.vtp
+*.jpg
 
 # Python/Jupyter cache artifacts
 **/__pycache__/

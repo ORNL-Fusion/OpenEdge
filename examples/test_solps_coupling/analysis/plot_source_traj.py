@@ -16,6 +16,26 @@ LI_AMU = 6.94
 LI_ATOM_MASS_KG = LI_AMU * AMU_KG
 
 
+def resolve_existing_path(path_str: str, *search_roots: Path) -> Path:
+    path = Path(path_str).expanduser()
+    if path.is_absolute():
+        if path.exists():
+            return path
+        raise FileNotFoundError(f"File not found: {path}")
+
+    candidates = []
+    for root in (Path.cwd(), *search_roots):
+        candidate = (root / path).resolve()
+        if candidate in candidates:
+            continue
+        candidates.append(candidate)
+        if candidate.exists():
+            return candidate
+
+    searched = "\n".join(f"  - {candidate}" for candidate in candidates)
+    raise FileNotFoundError(f"Could not find {path_str!r}. Searched:\n{searched}")
+
+
 def parse_dump(filepath: Path):
     rows = {k: [] for k in ["timestep", "id", "x", "y"]}
     with filepath.open() as f:
@@ -125,6 +145,7 @@ def extract_total_li_rate_atoms_per_s(block, dt):
 
 def parse_b2fgmtry(path: Path, nx: int, ny: int):
     nxg, nyg = nx + 2, ny + 2
+    num_cells = nxg * nyg
 
     with path.open() as fh:
         lines = fh.readlines()
@@ -156,18 +177,88 @@ def parse_b2fgmtry(path: Path, nx: int, ny: int):
             raise RuntimeError(
                 f"Dataset parse failed for {name} in {path}: needed {count}, got {len(vals)}."
             )
-        datasets[name] = np.asarray(vals[:count], dtype=float)
+        arr = np.asarray(vals[:count], dtype=float)
+        if count != 0 and count % num_cells == 0:
+            arr = arr.reshape((nxg, nyg, count // num_cells), order="F")
+        datasets[name] = arr
 
-    for req in ["crx", "cry", "vol"]:
+    for req in ["crx", "cry", "vol", "nncut", "nnreg", "leftcut", "rightcut", "topcut"]:
         if req not in datasets:
             raise KeyError(f"{req} not found in {path}")
 
-    crx = datasets["crx"].reshape(4, nxg, nyg, order="F")
-    cry = datasets["cry"].reshape(4, nxg, nyg, order="F")
-    r_s = crx.mean(axis=0).T
-    z_s = cry.mean(axis=0).T
-    vol = datasets["vol"].reshape(nxg, nyg, order="F").T
-    return r_s, z_s, vol
+    return {
+        "nx": nx,
+        "ny": ny,
+        "crx": datasets["crx"],
+        "cry": datasets["cry"],
+        "vol": np.squeeze(datasets["vol"]),
+        "nncut": np.ravel(datasets["nncut"]).astype(int),
+        "nnreg": np.ravel(datasets["nnreg"]).astype(int),
+        "leftcut": np.ravel(datasets["leftcut"]).astype(int),
+        "rightcut": np.ravel(datasets["rightcut"]).astype(int),
+        "topcut": np.ravel(datasets["topcut"]).astype(int),
+        "cflags": datasets.get("cflags"),
+    }
+
+
+def is_guard(geom, ix=None, iy=None):
+    cflags = geom.get("cflags")
+    if cflags is None:
+        nxg, nyg = geom["nx"] + 2, geom["ny"] + 2
+        mask = np.zeros((nxg, nyg), dtype=bool)
+        mask[0, :] = True
+        mask[-1, :] = True
+        mask[:, 0] = True
+        mask[:, -1] = True
+    else:
+        mask = cflags[:, :, 0].astype(int) == 9
+
+    if ix is None and iy is None:
+        return mask
+    return mask[ix, iy]
+
+
+def get_sep_from_b2fgmtry(geom):
+    nncut = int(geom["nncut"][0])
+    nnreg = geom["nnreg"]
+    crx = geom["crx"]
+    cry = geom["cry"]
+
+    if nncut == 1 and int(nnreg[0]) == 4:
+        jsep = int(geom["topcut"][0]) - 1
+        iy = (jsep + 1) + 2 - 1
+        return {
+            "r": crx[:, iy, 0],
+            "z": cry[:, iy, 0],
+        }
+
+    if nncut == 2 and int(nnreg[0]) == 8:
+        jsep = int(np.min(geom["topcut"])) - 1
+        iy = (jsep + 1) + 2 - 1
+
+        left2 = int(geom["leftcut"][1])
+        right2 = int(geom["rightcut"][1])
+        idx = np.r_[0 : left2 + 1, right2 + 1 : geom["nx"] + 2]
+
+        sep = {
+            "r": crx[idx, iy, 0],
+            "z": cry[idx, iy, 0],
+        }
+
+        iy2 = int(np.max(geom["topcut"])) + 2 - 1
+        r2 = crx[:, iy2, 0].copy()
+        z2 = cry[:, iy2, 0].copy()
+        guard = is_guard(geom, np.arange(geom["nx"] + 2), iy2)
+        if guard.size:
+            guard[0] = False
+            guard[-1] = False
+            r2[guard] = np.nan
+            z2[guard] = np.nan
+        sep["r2"] = r2
+        sep["z2"] = z2
+        return sep
+
+    return None
 
 
 def build_segments(data, ml_ts, ml_values):
@@ -219,17 +310,19 @@ def main():
     p.add_argument("--ny", type=int, default=36)
     p.add_argument("--xlim", nargs=2, type=float, default=[3.0, 5.0])
     p.add_argument("--ylim", nargs=2, type=float, default=[-4.0, -1.5])
-    p.add_argument("--out", default="Figs/solps_coupling_overview.png")
+    p.add_argument("--out", default="output/Figs/solps_coupling_overview.png")
     args = p.parse_args()
 
-    base = Path(__file__).resolve().parent
-    dump_path = base / args.dump
-    ml_path = base / args.mass_loss
-    b2_path = Path(args.b2fgmtry).expanduser()
-    wall = surface(str(base / "wall.surf"), "2D")
-    core = surface(str(base / "core.surf"), "2D")
+    script_dir = Path(__file__).resolve().parent
+    project_root = script_dir.parent
+    input_dir = project_root / "input"
+    output_dir = project_root / "output"
+
+    dump_path = resolve_existing_path(args.dump, project_root, output_dir, input_dir, script_dir)
+    ml_path = resolve_existing_path(args.mass_loss, project_root, output_dir, input_dir, script_dir)
+    b2_path = resolve_existing_path(args.b2fgmtry, project_root, output_dir, input_dir, script_dir)
+    wall = surface(str(input_dir / "wall.surf"), "2D")
     r_wall, z_wall = wall.polygon.exterior.xy
-    r_core, z_core = core.polygon.exterior.xy
 
     data = parse_dump(dump_path)
     blocks = parse_mass_loss(ml_path)
@@ -250,7 +343,8 @@ def main():
     segs, seg_ts, seg_cum_atoms = build_segments(data, ml_ts, ml_cum_atoms)
     seg_time_s = seg_ts.astype(float) * args.dt
 
-    r_s, z_s, _ = parse_b2fgmtry(b2_path, args.nx, args.ny)
+    geom = parse_b2fgmtry(b2_path, args.nx, args.ny)
+    sep = get_sep_from_b2fgmtry(geom)
 
     vmin = float(max(np.nanmin(seg_cum_atoms), 0.0))
     vmax = float(np.nanmax(seg_cum_atoms))
@@ -265,10 +359,13 @@ def main():
     ax0.add_collection(lc)
     cbar = fig.colorbar(lc, ax=ax0, pad=0.01)
     cbar.set_label("Cumulative evaporated Li (atoms)")
-#    ax0.set_xlim(args.xlim)
-#    ax0.set_ylim(args.ylim)
     ax0.plot(r_wall, z_wall, color="k", lw=2.6, zorder=5, label="Wall")
-    ax0.plot(r_core, z_core, color="forestgreen", lw=2.6, zorder=5, label="Core")
+    if sep is not None:
+        ax0.plot(sep["r"], sep["z"], color="firebrick", lw=2.6, zorder=6, label="Separatrix")
+        if "r2" in sep and "z2" in sep:
+            ax0.plot(sep["r2"], sep["z2"], color="firebrick", lw=2.6, zorder=6)
+    ax0.set_xlim(args.xlim)
+    ax0.set_ylim(args.ylim)
     ax0.set_xlabel("R (m)")
     ax0.set_ylabel("Z (m)")
     ax0.grid(True, linestyle="--", alpha=0.3)
@@ -277,7 +374,9 @@ def main():
 
 
 
-    out_path = base / args.out
+    out_path = Path(args.out).expanduser()
+    if not out_path.is_absolute():
+        out_path = project_root / out_path
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, bbox_inches="tight")
 
@@ -292,9 +391,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-#python3 trajectories.py \
-#    --dump case.dump \
-#    --mass-loss mass_loss.txt \
-#    --b2fgmtry "/Users/42d/ORNL Dropbox/Abdou Diaw/addLi/fnacore=6.00e22_pheat=90.00MW_cont_dt=1e-6_te_up/b2fgmtry" \
-#    --out Figs/solps_coupling_overview.png
-

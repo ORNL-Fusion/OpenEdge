@@ -210,6 +210,12 @@ void FixReflectPsi::read_equ_file(const std::string &path)
   read_floats_after("r(1:jm);", nw_, r_grid_);
   read_floats_after("z(1:km);", nh_, z_grid_);
 
+  if (nw_ < 2 || nh_ < 2)
+    error->all(FLERR, "fix reflect/psi: equilibrium grid must be at least 2x2");
+  if (!std::is_sorted(r_grid_.begin(), r_grid_.end()) ||
+      !std::is_sorted(z_grid_.begin(), z_grid_.end()))
+    error->all(FLERR, "fix reflect/psi: equilibrium R/Z grids must be monotonic increasing");
+
   std::vector<double> psi_minus_psib;
   read_floats_after("((psi(j,k)-psib,j=1,jm),k=1,km)", nw_ * nh_, psi_minus_psib);
 
@@ -236,13 +242,23 @@ double FixReflectPsi::psi_norm_at_point(double R, double Z) const
   double Rc = std::min(std::max(R, r_grid_.front()), r_grid_.back());
   double Zc = std::min(std::max(Z, z_grid_.front()), z_grid_.back());
 
-  double dr = r_grid_[1] - r_grid_[0];
-  double dz = z_grid_[1] - z_grid_[0];
+  auto bracket_index = [](const std::vector<double> &grid, double x) {
+    if (x <= grid.front()) return 0;
+    if (x >= grid.back()) return static_cast<int>(grid.size()) - 2;
+    auto it = std::upper_bound(grid.begin(), grid.end(), x);
+    int idx = static_cast<int>(it - grid.begin()) - 1;
+    if (idx < 0) idx = 0;
+    if (idx > static_cast<int>(grid.size()) - 2)
+      idx = static_cast<int>(grid.size()) - 2;
+    return idx;
+  };
 
-  int i = (int)((Rc - r_grid_[0]) / dr);
-  int j = (int)((Zc - z_grid_[0]) / dz);
-  i = std::min(std::max(i, 0), nw_ - 2);
-  j = std::min(std::max(j, 0), nh_ - 2);
+  int i = bracket_index(r_grid_, Rc);
+  int j = bracket_index(z_grid_, Zc);
+
+  double dr = r_grid_[i+1] - r_grid_[i];
+  double dz = z_grid_[j+1] - z_grid_[j];
+  if (std::abs(dr) < 1e-30 || std::abs(dz) < 1e-30) return 1.0;
 
   double t = (Rc - r_grid_[i]) / dr;
   double u = (Zc - z_grid_[j]) / dz;
@@ -256,4 +272,3 @@ double FixReflectPsi::psi_norm_at_point(double R, double Z) const
   if (std::abs(dpsi) < 1e-30) return 1.0;
   return (psi - psi_axis_) / dpsi;
 }
-

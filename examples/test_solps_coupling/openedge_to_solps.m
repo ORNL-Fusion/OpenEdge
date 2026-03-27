@@ -17,14 +17,16 @@ dt_oe = 1e-5;              % OpenEdge timestep [s]
 dt_solps = 1e-5;           % SOLPS timestep [s] (b2mndr_dtim)
 source_switch_nsteps = 1;  % switch every SOLPS step (preserve OE time evolution)
 switch_guard_fraction = 0.1; % keep sources_time_switch slightly below boundary to avoid tim==tsw
-save_mat = true;
-do_log_plot = false;
+target_source_duration_steps = 1000; % compress full OpenEdge source history into this many SOLPS steps ([] disables compression)
+preserve_integrated_source = true;   % rescale source amplitude when compressing so each bin injects the same total atoms
+save_mat = false;
+do_log_plot = true;
 xlim_plot = [2.6 4.5];
 ylim_plot = [-4 -2];
 psi_core_n = 0.835;         % core contour from equilibrium file
 outdir = fullfile(fileparts(mass_loss_path), 'Figs');
 fig_base = 'solps_coupling_overview_paper';
-build_source_files = false;                        % false: plot-only mode, skip source2d/profile generation
+build_source_files = true;                         % true: regenerate source2d/profile files for the selected SOLPS run
 write_source2d_series = build_source_files;
 n_source_files = 10;                               % framework test: ~10 transient source windows over the nonzero pulse
 sources_dir = fullfile(run_path, 'SOURCES');      % SOLPS source folder (dump-mapped mode)
@@ -99,6 +101,7 @@ end
 ml_block_step = infer_uniform_timestep_stride(ml_ts);
 ml_block_dt_s = infer_dump_block_dt_seconds(ml_ts, dt_oe);
 t_total = sum(ml_block_dt_s);
+ml_t_edges_s = [0.0; cumsum(ml_block_dt_s(:))];
 block_weights = ml_block_dt_s / max(t_total, eps);
 source_m3s_mean_1d = source_m3s_blocks_1d * block_weights;
 occ_1d = sum(source_m3s_blocks_1d > 0, 2);
@@ -116,6 +119,7 @@ fprintf('mass_loss conversion method: %s\n', ml_method);
 fprintf('Total evaporated Li atoms from mass_loss: %.6e\n', sum(atoms_int_1d));
 fprintf('Nonzero source cells: %d\n', nnz(atoms_rate_2d > 0));
 fprintf('Peak source: %.6e atoms/m^3/s\n', max(source_m3s_2d(:)));
+fprintf('Original source duration: %.6e s (%.1f SOLPS steps)\n', t_total, t_total / max(dt_solps, eps));
 
 %% Optional trajectory dump for overview plotting only
 have_dump_for_plot = exist(dump_path, 'file') == 2;
@@ -196,6 +200,31 @@ if write_source2d_series
     src_nz = zeros(n_bins,1);
 
     switch_dt = max(source_switch_nsteps * dt_solps, eps);
+    source_time_scale = 1.0;
+    source_amplitude_scale = 1.0;
+    target_source_duration_s = [];
+    if ~isempty(target_source_duration_steps)
+        target_source_duration_s = target_source_duration_steps * dt_solps;
+        if ~(isfinite(target_source_duration_s) && target_source_duration_s > 0.0)
+            error('target_source_duration_steps must be positive when provided.');
+        end
+        if target_source_duration_s < t_total
+            source_time_scale = target_source_duration_s / max(t_total, eps);
+            if preserve_integrated_source
+                source_amplitude_scale = 1.0 / source_time_scale;
+            end
+        end
+    end
+    if auto_scale_by_switch_dt && (abs(source_time_scale - 1.0) > 1.0e-12)
+        error('Disable auto_scale_by_switch_dt when using timeline compression.');
+    end
+    if abs(source_time_scale - 1.0) > 1.0e-12
+        fprintf('Compressing source timeline: %.6e s -> %.6e s (%.1f -> %d SOLPS steps)\n', ...
+            t_total, target_source_duration_s, t_total / max(dt_solps, eps), target_source_duration_steps);
+        fprintf('Amplitude scale to preserve integrated atoms: %.6e\n', source_amplitude_scale);
+    else
+        fprintf('Source timeline compression disabled; using physical OpenEdge duration.\n');
+    end
     fprintf('Writing %d source2d files to %s (base scale = %.6g, auto_scale_by_switch_dt=%d, switch_dt=%.8e s)\n', ...
         n_bins, sources_dir, source_scale_factor, auto_scale_by_switch_dt, switch_dt);
     for ib = 1:n_bins
@@ -210,7 +239,7 @@ if write_source2d_series
         end
         source_bin_1d = source_m3s_blocks_1d(:, sel_bin) * (w_bin / w_sum);
         atoms_rate_bin_2d = reshape(source_bin_1d .* vol_1d, [Case.Geo.nx + 2, Case.Geo.ny + 2]);  % atoms/s per SOLPS cell
-        bin_scale = source_scale_factor;
+        bin_scale = source_scale_factor * source_amplitude_scale;
         if auto_scale_by_switch_dt
             bin_scale = bin_scale * (w_sum / switch_dt);
         end
@@ -222,8 +251,10 @@ if write_source2d_series
         src_total(ib) = tot_atoms_s;
         src_max(ib) = max(atoms_rate_bin_2d(:), [], 'omitnan');
         src_nz(ib) = nnz(atoms_rate_bin_2d > 0);
-        t0_s = (ml_ts(i0) - ml_ts(1)) * dt_oe;
-        t1_s = (ml_ts(i1) - ml_ts(1)) * dt_oe + ml_block_dt_s(i1);
+        t0_s_orig = ml_t_edges_s(i0);
+        t1_s_orig = ml_t_edges_s(i1 + 1);
+        t0_s = source_time_scale * t0_s_orig;
+        t1_s = source_time_scale * t1_s_orig;
         dt_bin = max(t1_s - t0_s, eps);
         % Absolute switch times on SOLPS clock; subtract a small guard so each
         % new switch is strictly greater than current tim at profile read.
@@ -239,10 +270,10 @@ if write_source2d_series
     if any(diff(t_switch) <= 0)
         error('Non-increasing t_switch generated. Check source_switch_nsteps and dt_solps.');
     end
-    fprintf('Source summary (idx file switch[s] total_atoms/s max_cell_atoms/s nonzero_cells)\n');
+    fprintf('Source summary (idx file switch[s] switch[steps] total_atoms/s max_cell_atoms/s nonzero_cells)\n');
     for ib = 1:n_bins
-        fprintf('%3d  %-14s  %.8e  %.8e  %.8e  %d\n', ...
-            ib, src_names(ib), t_switch(ib), src_total(ib), src_max(ib), src_nz(ib));
+        fprintf('%3d  %-14s  %.8e  %.1f steps  %.8e  %.8e  %d\n', ...
+            ib, src_names(ib), t_switch(ib), t_switch(ib) / max(dt_solps, eps), src_total(ib), src_max(ib), src_nz(ib));
     end
     if write_b2_profiles
         write_b2_profile_chain(sources_dir, profile_base, src_names, t_switch);

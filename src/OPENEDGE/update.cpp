@@ -39,6 +39,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "compute_plasma_fields.h"
 #include "memory.h"
 #include "error.h"
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <fstream>
@@ -1068,30 +1069,42 @@ template < int DIM, int SURF, int OPT > void Update::move()
           if (Zc < psi_z_grid[0]) Zc = psi_z_grid[0];
           if (Zc > psi_z_grid[psi_nh-1]) Zc = psi_z_grid[psi_nh-1];
 
-          double dr = psi_r_grid[1] - psi_r_grid[0];
-          double dz = psi_z_grid[1] - psi_z_grid[0];
-          int ii = (int)((Rc - psi_r_grid[0]) / dr);
-          int jj = (int)((Zc - psi_z_grid[0]) / dz);
-          if (ii < 0) ii = 0; if (ii > psi_nw-2) ii = psi_nw-2;
-          if (jj < 0) jj = 0; if (jj > psi_nh-2) jj = psi_nh-2;
-          double t = (Rc - psi_r_grid[ii]) / dr;
-          double u = (Zc - psi_z_grid[jj]) / dz;
-          if (t < 0.0) t = 0.0; if (t > 1.0) t = 1.0;
-          if (u < 0.0) u = 0.0; if (u > 1.0) u = 1.0;
+          auto bracket_index = [](const double *grid, int n, double x) {
+            if (x <= grid[0]) return 0;
+            if (x >= grid[n-1]) return n - 2;
+            const double *it = std::upper_bound(grid, grid + n, x);
+            int idx = static_cast<int>(it - grid) - 1;
+            if (idx < 0) idx = 0;
+            if (idx > n - 2) idx = n - 2;
+            return idx;
+          };
 
-          double psi_val = (1-t)*(1-u)*psi_rz[jj*psi_nw+ii]
-                         + t*(1-u)*psi_rz[jj*psi_nw+ii+1]
-                         + (1-t)*u*psi_rz[(jj+1)*psi_nw+ii]
-                         + t*u*psi_rz[(jj+1)*psi_nw+ii+1];
-          double dpsi = psi_bry - psi_axis;
-          if (fabs(dpsi) > 1e-30) psi_n = (psi_val - psi_axis) / dpsi;
+          int ii = bracket_index(psi_r_grid, psi_nw, Rc);
+          int jj = bracket_index(psi_z_grid, psi_nh, Zc);
+          double dr = psi_r_grid[ii+1] - psi_r_grid[ii];
+          double dz = psi_z_grid[jj+1] - psi_z_grid[jj];
+          if (fabs(dr) > 1e-30 && fabs(dz) > 1e-30) {
+            double t = (Rc - psi_r_grid[ii]) / dr;
+            double u = (Zc - psi_z_grid[jj]) / dz;
+            if (t < 0.0) t = 0.0; if (t > 1.0) t = 1.0;
+            if (u < 0.0) u = 0.0; if (u > 1.0) u = 1.0;
+
+            double psi_val = (1-t)*(1-u)*psi_rz[jj*psi_nw+ii]
+                           + t*(1-u)*psi_rz[jj*psi_nw+ii+1]
+                           + (1-t)*u*psi_rz[(jj+1)*psi_nw+ii]
+                           + t*u*psi_rz[(jj+1)*psi_nw+ii+1];
+            double dpsi = psi_bry - psi_axis;
+            if (fabs(dpsi) > 1e-30) psi_n = (psi_val - psi_axis) / dpsi;
+          }
         }
 
         if (psi_n < psi_reflect_threshold) {
           if (psi_reflect_action == 1) {
-            // Absorb: remove particle (same as leaving the domain)
+            // Absorb: mark for deletion and let the normal post-move
+            // bookkeeping queue the particle for removal.
             particles[i].flag = PDISCARD;
-            break;
+            icell = particles[i].icell;
+            goto post_move_bookkeeping;
           }
 
           // Reflect: reject the move, particle stays at current position
@@ -1954,6 +1967,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
       // if particle flag set, add particle to migrate list
       // if discarding, migration will delete particle
 
+post_move_bookkeeping:
       particles[i].icell = icell;
 
       if (particles[i].flag != PKEEP) {
