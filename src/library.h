@@ -36,6 +36,10 @@ void *sparta_extract_global(void *, char *);
 void *sparta_extract_compute(void *, char *, int, int);
 void *sparta_extract_variable(void *, char *);
 
+/* OpenEdge coupling extensions */
+void *openedge_extract_fix(void *, char *, int, int);
+int openedge_get_ngrid(void *);
+
 #ifdef __cplusplus
 }
 #endif
