@@ -26,7 +26,9 @@
 #include "particle.h"
 #include "modify.h"
 #include "compute.h"
+#include "fix.h"
 #include "variable.h"
+#include "grid.h"
 
 using namespace SPARTA_NS;
 
@@ -290,4 +292,44 @@ void *sparta_extract_variable(void *ptr, char *name)
   }
 
   return NULL;
+}
+
+/* ======================================================================
+   OpenEdge coupling extensions
+   ====================================================================== */
+
+/* ----------------------------------------------------------------------
+   extract a pointer to per-grid data from a named fix
+   id = fix ID
+   style: 2 = per-grid data (only supported style for now)
+   type: 0 = vector, 1+ = array (returns full array pointer)
+   returns double* for vector, double** for array
+   returns NULL if fix not found or does not produce per-grid data
+------------------------------------------------------------------------- */
+
+void *openedge_extract_fix(void *ptr, char *id, int style, int type)
+{
+  SPARTA *sparta = (SPARTA *) ptr;
+
+  int ifix = sparta->modify->find_fix(id);
+  if (ifix < 0) return NULL;
+  Fix *fix = sparta->modify->fix[ifix];
+
+  if (style == 2) {
+    if (!fix->per_grid_flag) return NULL;
+    if (type == 0) return (void *) fix->vector_grid;
+    return (void *) fix->array_grid;
+  }
+
+  return NULL;
+}
+
+/* ----------------------------------------------------------------------
+   return the number of owned grid cells on this processor
+------------------------------------------------------------------------- */
+
+int openedge_get_ngrid(void *ptr)
+{
+  SPARTA *sparta = (SPARTA *) ptr;
+  return sparta->grid->nlocal;
 }
