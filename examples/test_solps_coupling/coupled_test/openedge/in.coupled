@@ -2,7 +2,7 @@
 # Paths relative to openedge/ directory
 
 variable dt    equal 1e-05
-variable Ndump equal 10
+variable Ndump equal 1000   # set to n_oe_steps for coupling (one dump per chunk)
 variable heatflux_scale equal 1.
 variable temp_droplet equal 773.15
 variable temp_emit    equal 1.e20
@@ -63,7 +63,8 @@ fix    eS efield/grid c_cnear[9] c_cnear[10] c_cnear[11]
 global efield grid eS 0
 global boris_subcycles 5
 
-# Mass loss accumulation and dump
+# Mass loss accumulation and dump — Ndump controls frequency
+# For coupling: set Ndump = n_oe_steps to get one dump at end of chunk
 fix fml ave/grid all 1 ${Ndump} ${Ndump} f_fevap[1] f_fevap[2]
 dump d_ml grid all ${Ndump} output/mass_loss.txt id xc yc f_fml[1] f_fml[2]
 
