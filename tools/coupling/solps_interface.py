@@ -286,21 +286,25 @@ class SolpsInterface:
             result = flat[idx].reshape(nz, nr)
             return result
 
-        ne_reg = interp_field(fields['ne'])
-        te_reg = interp_field(fields['te'])
-        ti_reg = interp_field(fields['ti'])
+        ne_reg = interp_field(fields['ne'])  # m^-3 (same units)
+
+        # SOLPS stores Te, Ti in Joules; OpenEdge expects eV
+        eV = 1.602176634e-19
+        te_reg = interp_field(fields['te']) / eV  # J -> eV
+        ti_reg = interp_field(fields['ti']) / eV  # J -> eV
 
         # Parallel flow: use main ion species (index 1 typically = D+)
         ua_main = fields['ua'][:, :, 1]  # D+ parallel velocity
         upar_reg = interp_field(ua_main)
 
         # Compute gradients via finite differences on regular grid
+        # Te, Ti are already in eV so gradients are in eV/m
         dR = r_grid[1] - r_grid[0]
         dZ = z_grid[1] - z_grid[0]
-        grad_te_r = np.gradient(te_reg, dR, axis=1)
-        grad_te_z = np.gradient(te_reg, dZ, axis=0)
-        grad_ti_r = np.gradient(ti_reg, dR, axis=1)
-        grad_ti_z = np.gradient(ti_reg, dZ, axis=0)
+        grad_te_r = np.gradient(te_reg, dR, axis=1)  # eV/m
+        grad_te_z = np.gradient(te_reg, dZ, axis=0)  # eV/m
+        grad_ti_r = np.gradient(ti_reg, dR, axis=1)  # eV/m
+        grad_ti_z = np.gradient(ti_reg, dZ, axis=0)  # eV/m
 
         # Ion density: use D+ (species 1)
         na_main = fields['na'][:, :, 1]
@@ -319,10 +323,12 @@ class SolpsInterface:
             f.create_dataset('parr_flow_r', data=np.zeros_like(upar_reg))
             f.create_dataset('parr_flow_t', data=np.zeros_like(upar_reg))
             f.create_dataset('parr_flow_z', data=upar_reg)
-            f.create_dataset('grad_temp_e_r', data=grad_te_r)
-            f.create_dataset('grad_temp_e_z', data=grad_te_z)
-            f.create_dataset('grad_temp_i_r', data=grad_ti_r)
-            f.create_dataset('grad_temp_i_z', data=grad_ti_z)
+            f.create_dataset('grad_te_r', data=grad_te_r)
+            f.create_dataset('grad_te_t', data=np.zeros_like(grad_te_r))
+            f.create_dataset('grad_te_z', data=grad_te_z)
+            f.create_dataset('grad_ti_r', data=grad_ti_r)
+            f.create_dataset('grad_ti_t', data=np.zeros_like(grad_ti_r))
+            f.create_dataset('grad_ti_z', data=grad_ti_z)
 
         print(f'Wrote {output_path}: r[{nr}] x z[{nz}], '
               f'ne=[{ne_reg.min():.2e}, {ne_reg.max():.2e}], '
