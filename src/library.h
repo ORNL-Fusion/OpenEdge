@@ -39,6 +39,7 @@ void *sparta_extract_variable(void *, char *);
 /* OpenEdge coupling extensions */
 void *openedge_extract_fix(void *, char *, int, int);
 int openedge_get_ngrid(void *);
+void openedge_reload_plasma(void *, char *, char *);
 
 #ifdef __cplusplus
 }
