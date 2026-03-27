@@ -160,6 +160,52 @@ def map_source_to_solps(xc, yc, dn_atoms, solps, dt_oe):
 # Generate OpenEdge input script for a coupling chunk
 # ======================================================================
 
+def write_openedge_continue_script(output_script, template_script, n_steps,
+                                   plasma_h5_path):
+    """Write an OpenEdge input script that continues from a restart file.
+
+    Reads the template to extract fix/compute/dump definitions that need
+    to be re-registered after read_restart (which only restores grid,
+    particles, surfaces, species, mixtures — not fixes/computes/dumps).
+    """
+    # Parse template for lines that define fixes, computes, dumps, globals
+    redefine_lines = []
+    with open(template_script, 'r') as f:
+        lines = f.readlines()
+
+    # Collect multi-line commands (lines ending with &)
+    full_lines = []
+    buf = ''
+    for line in lines:
+        stripped = line.rstrip()
+        if stripped.endswith('&'):
+            buf += stripped[:-1] + ' '
+        else:
+            buf += stripped
+            full_lines.append(buf)
+            buf = ''
+
+    for line in full_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        # Keep: compute, fix, dump, global, variable, surf_collide, surf_react, surf_modify, stats
+        first_word = stripped.split()[0] if stripped.split() else ''
+        if first_word in ('compute', 'fix', 'dump', 'global', 'variable',
+                          'surf_collide', 'surf_react', 'surf_modify',
+                          'stats', 'mixture', 'group'):
+            redefine_lines.append(stripped)
+
+    with open(output_script, 'w') as f:
+        f.write('# Auto-generated continue script (from restart)\n')
+        f.write('read_restart restart.dat\n\n')
+        f.write('# Re-register fixes, computes, dumps (not saved in restart)\n')
+        for line in redefine_lines:
+            f.write(line + '\n')
+        f.write(f'\nrun {n_steps}\n')
+        f.write('write_restart restart.dat\n')
+
+
 def write_openedge_chunk_script(template_script, output_script, n_steps,
                                 plasma_h5, mass_loss_file, append=False):
     """Write an OpenEdge input script for one coupling chunk.
@@ -216,6 +262,8 @@ def run_coupling(config):
     mpi_np_solps     = config.get('mpi_np_solps', 1)
     plasma_h5_path   = config.get('plasma_h5', os.path.join(oe_run_dir, 'plasma.h5'))
     bfield_h5_path   = config.get('bfield_h5', '')
+    solps_run_script = config.get('solps_run_script', '')
+    coupled_dir      = config.get('coupled_dir', '')
 
     # Initialize SOLPS interface
     solps = SolpsInterface(solps_run_dir, solps_base_dir)
@@ -244,18 +292,39 @@ def run_coupling(config):
         # ---- 1. Run OpenEdge ----
         mass_loss_file = os.path.join(oe_run_dir, 'output', 'mass_loss.txt')
         os.makedirs(os.path.join(oe_run_dir, 'output'), exist_ok=True)
+        # Remove old mass_loss so we only read this chunk's output
+        if os.path.exists(mass_loss_file):
+            os.remove(mass_loss_file)
 
+        restart_file = os.path.join(oe_run_dir, 'restart.dat')
         chunk_script = os.path.join(oe_run_dir, f'in.chunk_{k:04d}')
-        write_openedge_chunk_script(
-            oe_template, chunk_script, n_oe_steps,
-            plasma_h5_path, mass_loss_file)
 
-        print(f'  Running OpenEdge ({n_oe_steps} steps)...')
-        oe_cmd = f'mpirun -np {mpi_np_oe} {oe_binary} -in {chunk_script}'
+        if k == 0:
+            # First chunk: use full template (sets up geometry, species, etc.)
+            with open(oe_template, 'r') as fin:
+                template_content = fin.read()
+            with open(chunk_script, 'w') as fout:
+                fout.write(template_content)
+                fout.write(f'\nrun {n_oe_steps}\n')
+                fout.write(f'write_restart restart.dat\n')
+        else:
+            # Subsequent chunks: read restart, redefine fixes/computes/dumps
+            write_openedge_continue_script(
+                chunk_script, oe_template, n_oe_steps, plasma_h5_path)
+
+        print(f'  Running OpenEdge ({n_oe_steps} steps, '
+              f'{"init" if k == 0 else "restart"})...')
+        oe_cmd = f'mpirun -np {mpi_np_oe} {oe_binary} -in {os.path.basename(chunk_script)}'
         result = subprocess.run(oe_cmd, shell=True, cwd=oe_run_dir,
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, env={
+                                    **os.environ,
+                                    'LD_LIBRARY_PATH': '/usr/lib/x86_64-linux-gnu/hdf5/serial'
+                                })
         if result.returncode != 0:
             print(f'  ERROR: OpenEdge failed:\n{result.stderr[-500:]}')
+            # Save stderr for debugging
+            with open(os.path.join(oe_run_dir, f'error_{k:04d}.log'), 'w') as ef:
+                ef.write(result.stdout + '\n' + result.stderr)
             break
         print(f'  OpenEdge done.')
 
@@ -294,10 +363,15 @@ def run_coupling(config):
         update_b2mn_ntim(solps_run_dir, n_solps_steps)
 
         print(f'  Running SOLPS ({n_solps_steps} steps)...')
-        solps_cmd = f'b2run b2mn'
-        if mpi_np_solps > 1:
-            solps_cmd = f'b2run -m "mpirun -np {mpi_np_solps}" b2mn'
-        result = subprocess.run(solps_cmd, shell=True, cwd=solps_run_dir,
+        if solps_run_script:
+            solps_cmd = f'{solps_run_script} {mpi_np_solps}'
+            cwd = coupled_dir or os.path.dirname(solps_run_dir)
+        else:
+            solps_cmd = f'b2run b2mn'
+            if mpi_np_solps > 1:
+                solps_cmd = f'b2run -m "mpirun -np {mpi_np_solps}" b2mn'
+            cwd = solps_run_dir
+        result = subprocess.run(solps_cmd, shell=True, cwd=cwd,
                                 capture_output=True, text=True)
         if result.returncode != 0:
             print(f'  WARNING: SOLPS may have issues:\n{result.stderr[-300:]}')
