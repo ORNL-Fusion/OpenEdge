@@ -470,6 +470,101 @@ void ComputePlasmaFields::init()
 }
 
 
+/* ----------------------------------------------------------------------
+   Reload plasma background from the current plasmaStatePath.
+   Re-reads HDF5, broadcasts, re-interpolates onto all grid cells.
+   Called by the coupling driver between time chunks to refresh the
+   background plasma without reinitializing the entire compute.
+------------------------------------------------------------------------- */
+
+void ComputePlasmaFields::reload_plasma()
+{
+  if (input_mode != MODE_FILE) return;
+
+  const int me     = comm->me;
+  const int ncells = grid->nlocal;
+  Grid::ChildCell *cells = grid->cells;
+  Grid::ChildInfo *cinfo = grid->cinfo;
+
+  // Re-read plasma file
+  if (me == 0) plasma_data = readPlasmaFileData(plasmaStatePath);
+  broadcastPlasmaData(plasma_data);
+
+  // Re-read magnetic field if provided separately
+  if (!magneticFieldsPath.empty()) {
+    if (me == 0) magnetic_data = readMagneticFieldFileData(magneticFieldsPath);
+    broadcastMagneticData(magnetic_data);
+  }
+
+  // Recompute stencils (grid may not have changed, but R/Z grids in file might)
+  precomputeStencils(plasma_data.r, plasma_data.z, plasma_stencil);
+  if (!magneticFieldsPath.empty())
+    precomputeStencils(magnetic_data.r, magnetic_data.z, magnetic_stencil);
+
+  // Re-interpolate onto grid cells
+  for (int icell = 0; icell < ncells; ++icell) {
+    if (!(cinfo[icell].mask & groupbit)) continue;
+    if (cells[icell].nsplit < 1)         continue;
+    plasma_arr[icell] = bilinearInterpolationPlasma(icell, plasma_data);
+
+    if (!magneticFieldsPath.empty())
+      mag_arr[icell] = bilinearInterpolationMagneticField(icell, magnetic_data);
+  }
+
+  // Update multi-ion species data
+  nion_species = plasma_data.ions_nspec;
+  ion_spec_index = plasma_data.ion_spec_index;
+  ion_charge_state_z = plasma_data.ion_charge_state_z;
+  ion_mass_amu = plasma_data.ion_mass_amu;
+  ion_names = plasma_data.ion_names;
+  if (nion_species > 0) {
+    const int nstore = ncells * nion_species;
+    ion_dens_grid.assign(nstore, 0.0);
+    ion_temp_grid.assign(nstore, 0.0);
+    ion_parr_flow_grid.assign(nstore, 0.0);
+    ion_parr_flow_r_grid.assign(nstore, 0.0);
+    ion_parr_flow_t_grid.assign(nstore, 0.0);
+    ion_parr_flow_z_grid.assign(nstore, 0.0);
+
+    for (int icell = 0; icell < ncells; ++icell) {
+      if (!(cinfo[icell].mask & groupbit)) continue;
+      if (cells[icell].nsplit < 1)         continue;
+      if (icell < 0 || icell >= static_cast<int>(plasma_stencil.size())) continue;
+      const BilinearStencil &s = plasma_stencil[icell];
+      if (!s.valid) continue;
+      const int base = icell * nion_species;
+      for (int is = 0; is < nion_species; ++is) {
+        ion_dens_grid[base + is] =
+          interpField3DFlat(plasma_data.ions_dens, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+        ion_temp_grid[base + is] =
+          interpField3DFlat(plasma_data.ions_temp, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+        ion_parr_flow_grid[base + is] =
+          interpField3DFlat(plasma_data.ions_parr_flow, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+        ion_parr_flow_r_grid[base + is] =
+          interpField3DFlat(plasma_data.ions_parr_flow_r, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+        ion_parr_flow_t_grid[base + is] =
+          interpField3DFlat(plasma_data.ions_parr_flow_t, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+        ion_parr_flow_z_grid[base + is] =
+          interpField3DFlat(plasma_data.ions_parr_flow_z, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+      }
+    }
+  }
+
+  if (me == 0)
+    printf("  Plasma background reloaded from %s (%d cells)\n",
+           plasmaStatePath.c_str(), ncells);
+}
+
+/* ----------------------------------------------------------------------
+   Reload from a new file path (updates plasmaStatePath before reloading)
+------------------------------------------------------------------------- */
+
+void ComputePlasmaFields::reload_plasma(const std::string &new_plasma_path)
+{
+  plasmaStatePath = new_plasma_path;
+  reload_plasma();
+}
+
 void ComputePlasmaFields::compute_per_grid()
 {
   invoked_per_grid = update->ntimestep;

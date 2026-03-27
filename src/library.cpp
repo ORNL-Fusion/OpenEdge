@@ -29,6 +29,7 @@
 #include "fix.h"
 #include "variable.h"
 #include "grid.h"
+#include "OPENEDGE/compute_plasma_fields.h"
 
 using namespace SPARTA_NS;
 
@@ -332,4 +333,27 @@ int openedge_get_ngrid(void *ptr)
 {
   SPARTA *sparta = (SPARTA *) ptr;
   return sparta->grid->nlocal;
+}
+
+/* ----------------------------------------------------------------------
+   reload plasma background on a compute plasma/fields instance
+   compute_id = ID of the compute plasma/fields (e.g. "cnear")
+   new_path = path to new plasma HDF5 file, or NULL to re-read current file
+------------------------------------------------------------------------- */
+
+void openedge_reload_plasma(void *ptr, char *compute_id, char *new_path)
+{
+  SPARTA *sparta = (SPARTA *) ptr;
+
+  int icompute = sparta->modify->find_compute(compute_id);
+  if (icompute < 0) return;
+
+  ComputePlasmaFields *cp =
+    dynamic_cast<ComputePlasmaFields *>(sparta->modify->compute[icompute]);
+  if (!cp) return;
+
+  if (new_path && strlen(new_path) > 0)
+    cp->reload_plasma(std::string(new_path));
+  else
+    cp->reload_plasma();
 }

@@ -136,6 +136,10 @@ class ComputePlasmaFields : public Compute {
   PlasmaFileParams query_plasma_at_point(const double xyz[3]) const;
   MagneticFieldFileDataParams query_bfield_at_point(const double xyz[3]) const;
 
+  // Reload plasma background from file (for coupling: re-reads HDF5 and re-interpolates)
+  void reload_plasma();
+  void reload_plasma(const std::string &new_plasma_path);
+
 PlasmaFileParams *plasma_arr;   // size = grid->nlocal
 PlasmaFileData plasma_data;
 void broadcastPlasmaData(PlasmaFileData& data);
