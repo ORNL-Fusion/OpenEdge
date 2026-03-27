@@ -28,6 +28,7 @@ dump.*
 *.rst
 *.vtk
 *.vtp
+*.vtu
 *.jpg
 
 # Python/Jupyter cache artifacts
