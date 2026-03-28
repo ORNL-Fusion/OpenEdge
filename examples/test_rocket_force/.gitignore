@@ -1,0 +1,14 @@
+droplet.species
+heatflux_rocket.h5
+in.eta_0p0
+in.eta_0p5
+in.eta_1p0
+log.openedge
+rocket_force_comparison.png
+run_eta_0p0.log
+run_eta_0p5.log
+run_eta_1p0.log
+source.1
+traj_eta_0p0
+traj_eta_0p5
+traj_eta_1p0

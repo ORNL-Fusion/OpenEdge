@@ -159,13 +159,9 @@ def convert_solps_heatflux(
         dZ = z[1] - z[0]
         grad_te_r_grid = np.gradient(te_grid, dR, axis=1)  # eV/m
         grad_te_z_grid = np.gradient(te_grid, dZ, axis=0)  # eV/m
-        # Convert eV/m to J/m for the rocket force code
-        eV_to_J = 1.602176634e-19
-        grad_te_r_grid *= eV_to_J
-        grad_te_z_grid *= eV_to_J
         has_grad_te = True
-        print(f"  Computed grad_Te: |grad_Te_r|_max={np.nanmax(np.abs(grad_te_r_grid))/eV_to_J:.1f} eV/m, "
-              f"|grad_Te_z|_max={np.nanmax(np.abs(grad_te_z_grid))/eV_to_J:.1f} eV/m")
+        print(f"  Computed grad_Te: |grad_Te_r|_max={np.nanmax(np.abs(grad_te_r_grid)):.1f} eV/m, "
+              f"|grad_Te_z|_max={np.nanmax(np.abs(grad_te_z_grid)):.1f} eV/m")
     except (KeyError, Exception) as e:
         print(f"  Warning: could not compute grad_Te ({e}), rocket force data not written")
         has_grad_te = False

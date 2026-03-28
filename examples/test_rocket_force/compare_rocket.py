@@ -12,10 +12,14 @@ Usage:
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
 import glob
 import os
 import sys
+
+try:
+    import matplotlib.pyplot as plt
+except ModuleNotFoundError:
+    plt = None
 
 
 def read_particle_dump(pattern):
@@ -108,70 +112,87 @@ if not data:
     print("No data found. Run the simulations first.")
     sys.exit(1)
 
+common_t_end = min(d['time'][-1] for d in data.values())
+
 # ======================================================================
 # Plot
 # ======================================================================
-fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+if plt is not None:
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
 
-# 1. Trajectories (R, Z)
-ax = axes[0, 0]
-for eta, c, lab in zip(eta_values, colors, labels):
-    if eta in data:
-        d = data[eta]
-        ax.plot(d['x'], d['y'], color=c, label=lab, linewidth=1.5)
-ax.set_xlabel('R [m]')
-ax.set_ylabel('Z [m]')
-ax.set_title('Droplet trajectory')
-ax.legend()
-ax.set_aspect('equal')
+    # 1. Trajectories (R, Z)
+    ax = axes[0, 0]
+    for eta, c, lab in zip(eta_values, colors, labels):
+        if eta in data:
+            d = data[eta]
+            ax.plot(d['x'], d['y'], color=c, label=lab, linewidth=1.5)
+    ax.set_xlabel('R [m]')
+    ax.set_ylabel('Z [m]')
+    ax.set_title('Droplet trajectory')
+    ax.legend()
+    ax.set_aspect('equal')
 
-# 2. R position vs time
-ax = axes[0, 1]
-for eta, c, lab in zip(eta_values, colors, labels):
-    if eta in data:
-        d = data[eta]
-        ax.plot(d['time'], d['x'], color=c, label=lab, linewidth=1.5)
-ax.set_xlabel('Time [s]')
-ax.set_ylabel('R [m]')
-ax.set_title('R position vs time')
-ax.legend()
+    # 2. R position vs time
+    ax = axes[0, 1]
+    for eta, c, lab in zip(eta_values, colors, labels):
+        if eta in data:
+            d = data[eta]
+            ax.plot(d['time'], d['x'], color=c, label=lab, linewidth=1.5)
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel('R [m]')
+    ax.set_title('R position vs time')
+    ax.legend()
 
-# 3. vR vs time
-ax = axes[1, 0]
-for eta, c, lab in zip(eta_values, colors, labels):
-    if eta in data:
-        d = data[eta]
-        ax.plot(d['time'], d['vx'], color=c, label=lab, linewidth=1.5)
-ax.set_xlabel('Time [s]')
-ax.set_ylabel(r'$v_R$ [m/s]')
-ax.set_title('Radial velocity (rocket force effect)')
-ax.legend()
+    # 3. vR vs time
+    ax = axes[1, 0]
+    for eta, c, lab in zip(eta_values, colors, labels):
+        if eta in data:
+            d = data[eta]
+            ax.plot(d['time'], d['vx'], color=c, label=lab, linewidth=1.5)
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel(r'$v_R$ [m/s]')
+    ax.set_title('Radial velocity (rocket force effect)')
+    ax.legend()
 
-# 4. Radius vs time (should overlap)
-ax = axes[1, 1]
-for eta, c, lab in zip(eta_values, colors, labels):
-    if eta in data:
-        d = data[eta]
-        r_norm = d['radius'] / d['radius'][0] if d['radius'][0] > 0 else d['radius']
-        ax.plot(d['time'], r_norm, color=c, label=lab, linewidth=1.5)
-ax.set_xlabel('Time [s]')
-ax.set_ylabel(r'$r_d / r_{d,0}$')
-ax.set_title('Normalized radius (should overlap)')
-ax.legend()
+    # 4. Radius vs time (should overlap)
+    ax = axes[1, 1]
+    for eta, c, lab in zip(eta_values, colors, labels):
+        if eta in data:
+            d = data[eta]
+            r_norm = d['radius'] / d['radius'][0] if d['radius'][0] > 0 else d['radius']
+            ax.plot(d['time'], r_norm, color=c, label=lab, linewidth=1.5)
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel(r'$r_d / r_{d,0}$')
+    ax.set_title('Normalized radius (should overlap)')
+    ax.legend()
 
-plt.suptitle('Rocket Force Validation: Single Droplet', fontsize=14, fontweight='bold')
-plt.tight_layout()
-plt.savefig('rocket_force_comparison.png', dpi=150, bbox_inches='tight')
-print(f"\nSaved rocket_force_comparison.png")
+    plt.suptitle('Rocket Force Validation: Single Droplet', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig('rocket_force_comparison.png', dpi=150, bbox_inches='tight')
+    print(f"\nSaved rocket_force_comparison.png")
+else:
+    fig = None
+    print("\nmatplotlib not available; skipping plot generation.")
 
 # Print summary statistics
 print("\n--- Summary ---")
+print(f"  common_t_end = {common_t_end:.4f} s")
 for eta in eta_values:
     if eta in data:
         d = data[eta]
-        dR = d['x'][-1] - d['x'][0]
-        vR_final = d['vx'][-1]
-        print(f"  eta={eta}: deltaR = {dR:.4f} m, vR_final = {vR_final:.4f} m/s, "
-              f"r_final/r0 = {d['radius'][-1]/d['radius'][0]:.4f}")
+        ic = np.searchsorted(d['time'], common_t_end, side='right') - 1
+        ic = max(ic, 0)
+        dR = d['x'][ic] - d['x'][0]
+        vR_common = d['vx'][ic]
+        vR_min = np.min(d['vx'])
+        positive_radius = d['radius'][d['radius'] > 0.0]
+        r0 = positive_radius[0] if len(positive_radius) else d['radius'][0]
+        rratio = d['radius'][ic] / r0 if r0 > 0 else float('nan')
+        print(f"  eta={eta}: deltaR = {dR:.4f} m, vR(t_common) = {vR_common:.4f} m/s, "
+              f"vR_min = {vR_min:.4f} m/s, "
+              f"r_final/r0 = {rratio:.4f}")
 
-plt.show()
+if plt is not None and "--show" in sys.argv:
+    plt.show()
+elif plt is not None:
+    plt.close(fig)
