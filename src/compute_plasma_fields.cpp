@@ -872,6 +872,13 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
         data.grad_temp_i_t = read2D("grad_ti_t");
         data.grad_temp_i_z = read2D("grad_ti_z");
 
+        // Optional heat flux
+        if (hasDataset("q_mag")) {
+          data.q_mag = read2D("q_mag");
+          data.has_qmag = true;
+          printf("  Loaded q_mag from %s\n", filePath.c_str());
+        }
+
         // Optional multi-ion extension
         if (hasDataset("ion_species/spec_index")) {
           data.ion_spec_index = read1DInt("ion_species/spec_index");
@@ -997,6 +1004,9 @@ void ComputePlasmaFields::broadcastPlasmaData(PlasmaFileData& data) {
     broadcast2DVector(data.grad_temp_i_t);
     broadcast2DVector(data.grad_temp_i_z);
 
+    MPI_Bcast(&data.has_qmag, 1, MPI_C_BOOL, 0, world);
+    if (data.has_qmag) broadcast2DVector(data.q_mag);
+
     auto broadcast1DInt = [&](std::vector<int>& vec) {
       int n = static_cast<int>(vec.size());
       MPI_Bcast(&n, 1, MPI_INT, 0, world);
@@ -1120,6 +1130,7 @@ PlasmaFileParams ComputePlasmaFields::bilinearInterpolationPlasma(
   P.parr_flow_t   = interpField2D(data.parr_flow_t, s);
   P.parr_flow_z   = interpField2D(data.parr_flow_z, s);
   P.parr_flow     = interpField2D(data.parr_flow, s);
+  P.q_mag = data.has_qmag ? interpField2D(data.q_mag, s) : 0.0;
 
   return P;
 }
@@ -1385,6 +1396,8 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
   P.parr_flow_t   = interpField2D(plasma_data.parr_flow_t, s);
   P.parr_flow_z   = interpField2D(plasma_data.parr_flow_z, s);
   P.parr_flow     = interpField2D(plasma_data.parr_flow, s);
+  P.q_mag = plasma_data.has_qmag ?
+            interpField2D(plasma_data.q_mag, s) : 0.0;
   return P;
 }
 
