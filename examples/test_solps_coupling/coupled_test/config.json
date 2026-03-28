@@ -12,9 +12,9 @@
     "warmup_ntim": 2,
     "mpi_np_warmup": 32,
 
-    "n_coupling_steps": 5,
+    "n_coupling_steps": 20,
     "n_oe_steps": 1000,
-    "n_solps_steps": 4,
+    "n_solps_steps": 100,
     "dt_oe": 1e-5,
     "relaxation_alpha": 0.5,
     "mpi_np_openedge": 4,
