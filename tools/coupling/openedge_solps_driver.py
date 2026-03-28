@@ -222,15 +222,18 @@ def read_openedge_mass_loss(filepath):
     return np.array(xc), np.array(yc), np.array(dm), np.array(dn)
 
 
-def read_mass_loss_file(filepath):
-    """Read ALL timestep frames from a mass_loss file and sum them.
+def read_particle_mass_loss(filepath, rho=534.0):
+    """Compute per-particle mass loss from a SPARTA particle dump.
 
-    The fix ave/grid outputs time-averaged dm/dn per dump interval.
-    We sum across all non-zero frames to get the total mass loss
-    over the full coupling window.
+    Reads the first and last frames, computes mass from radius
+    (mass = rho * 4/3 * pi * r^3), then dm = mass_first - mass_last.
+    Uses the particle's average position across frames for spatial mapping.
 
-    Returns (xc, yc, dm_total, dn_total) arrays, or (None,)*4 if empty.
+    Returns (R, Z, dm_kg, dn_atoms) arrays, or (None,)*4 if empty.
     """
+    AM = 1.53e-26  # Li atom mass [kg]
+
+    # Parse all frames
     frames = []
     current_lines = []
     with open(filepath, 'r') as f:
@@ -242,49 +245,78 @@ def read_mass_loss_file(filepath):
     if current_lines:
         frames.append(current_lines)
 
-    if not frames:
+    if len(frames) < 2:
         return None, None, None, None
 
-    # Parse first data frame to get cell coords
-    xc, yc = None, None
-    dm_total, dn_total = None, None
-
-    for frame in frames:
-        dm_frame, dn_frame = [], []
-        xc_frame, yc_frame = [], []
+    def parse_frame(frame_lines):
+        """Parse a single frame into {id: (x, y, radius)} dict."""
+        col_map = None
+        particles = {}
         in_data = False
-        for line in frame:
-            line = line.strip()
-            if line.startswith('ITEM: CELLS'):
+        for line in frame_lines:
+            stripped = line.strip()
+            if stripped.startswith('ITEM: ATOMS') \
+                    or stripped.startswith('ITEM: PARTICLES'):
+                cols = stripped.split()[2:]
+                col_map = {c: j for j, c in enumerate(cols)}
                 in_data = True
                 continue
-            if line.startswith('ITEM:'):
+            if stripped.startswith('ITEM:'):
                 in_data = False
                 continue
-            if in_data:
-                parts = line.split()
-                if len(parts) >= 5:
-                    xc_frame.append(float(parts[1]))
-                    yc_frame.append(float(parts[2]))
-                    dm_frame.append(float(parts[3]))
-                    dn_frame.append(float(parts[4]))
+            if in_data and col_map:
+                parts = stripped.split()
+                if len(parts) >= len(col_map):
+                    pid = int(parts[col_map['id']])
+                    x = float(parts[col_map['x']])
+                    y = float(parts[col_map['y']])
+                    r = float(parts[col_map['radius']])
+                    particles[pid] = (x, y, r)
+        return particles
 
-        if not dm_frame:
+    def radius_to_mass(r):
+        return rho * (4.0 / 3.0) * np.pi * r**3 if r > 0 else 0.0
+
+    # Find first frame where particles have nonzero radius (step 0 may
+    # have radius=0 because one-time seeding hasn't run yet).
+    first = None
+    for frame in frames:
+        parsed = parse_frame(frame)
+        if parsed and any(r > 0 for _, _, r in parsed.values()):
+            first = parsed
+            break
+    last = parse_frame(frames[-1])
+
+    if not first:
+        return None, None, None, None
+
+    R_list, Z_list, dm_list = [], [], []
+    for pid, (x0, y0, r0) in first.items():
+        m0 = radius_to_mass(r0)
+        if m0 <= 0:
             continue
-
-        dm_arr = np.array(dm_frame)
-        dn_arr = np.array(dn_frame)
-
-        if xc is None:
-            xc = np.array(xc_frame)
-            yc = np.array(yc_frame)
-            dm_total = dm_arr
-            dn_total = dn_arr
+        if pid in last:
+            x1, y1, r1 = last[pid]
+            m1 = radius_to_mass(r1)
+            dm = m0 - m1
+            R_list.append(0.5 * (x0 + x1))
+            Z_list.append(0.5 * (y0 + y1))
         else:
-            dm_total += dm_arr
-            dn_total += dn_arr
+            dm = m0
+            R_list.append(x0)
+            Z_list.append(y0)
+        if dm > 0:
+            dm_list.append(dm)
+        else:
+            R_list.pop()
+            Z_list.pop()
 
-    return xc, yc, dm_total, dn_total
+    if not dm_list:
+        return None, None, None, None
+
+    dm_arr = np.array(dm_list)
+    dn_arr = dm_arr / AM
+    return np.array(R_list), np.array(Z_list), dm_arr, dn_arr
 
 
 # ======================================================================
@@ -413,7 +445,7 @@ def write_openedge_continue_script(output_script, template_script, n_steps,
                           'surf_modify', 'stats', 'mixture', 'group'):
             # Substitute Ndump to match n_steps
             if first_word == 'variable' and 'Ndump' in stripped:
-                ndump = max(1, n_steps // 5)
+                ndump = max(1, n_steps // 2)
                 stripped = re.sub(
                     r'(variable\s+Ndump\s+equal\s+)\S+',
                     rf'\1{ndump}', stripped)
@@ -767,11 +799,11 @@ def run_coupling(config):
         step_label = f"{k+1}/{n_coupling_steps}"
 
         # ---- 1. Run OpenEdge ----
-        mass_loss_file = os.path.join(oe_run_dir, 'output', 'mass_loss.txt')
+        particle_dump = os.path.join(oe_run_dir, 'output', 'particles.txt')
         os.makedirs(os.path.join(oe_run_dir, 'output'), exist_ok=True)
-        # Remove old mass_loss so we only read this chunk's output
-        if os.path.exists(mass_loss_file):
-            os.remove(mass_loss_file)
+        # Remove old particle dump so we only read this chunk's output
+        if os.path.exists(particle_dump):
+            os.remove(particle_dump)
 
         restart_file = os.path.join(oe_run_dir, 'restart.dat')
         chunk_script = os.path.join(oe_run_dir, f'in.chunk_{k:04d}')
@@ -779,8 +811,9 @@ def run_coupling(config):
         if k == 0:
             with open(oe_template, 'r') as fin:
                 template_content = fin.read()
-            # Substitute Ndump: dump several times per chunk for reliable I/O
-            ndump = max(1, n_oe_steps // 5)
+            # Substitute Ndump: dump at start, middle, and end of chunk.
+            # Step 0 may have radius=0 (before seeding), so we need >= 3 frames.
+            ndump = max(1, n_oe_steps // 2)
             template_content = re.sub(
                 r'(variable\s+Ndump\s+equal\s+)\S+',
                 rf'\g<1>{ndump}',
@@ -824,12 +857,12 @@ def run_coupling(config):
                 f"  [green]OpenEdge done[/green]  "
                 f"Particles: [{npart_color}]{npart}[/{npart_color}]")
 
-            # ---- 2. Read mass loss and map to SOLPS ----
-            if not os.path.exists(mass_loss_file):
-                console.print("  [yellow]No mass_loss file, zero source[/yellow]")
+            # ---- 2. Read particle mass loss and map to SOLPS ----
+            if not os.path.exists(particle_dump):
+                console.print("  [yellow]No particle dump, zero source[/yellow]")
                 source_new = np.zeros((nxp2, nyp2))
             else:
-                xc, yc, dm, dn = read_mass_loss_file(mass_loss_file)
+                xc, yc, dm, dn = read_particle_mass_loss(particle_dump)
                 if xc is not None and len(xc) > 0:
                     source_new = map_source_to_solps(xc, yc, dn, solps, dt_window)
                     li_source = np.sum(source_new)
