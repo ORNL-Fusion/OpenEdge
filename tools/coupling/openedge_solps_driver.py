@@ -46,6 +46,52 @@ eV = 1.602176634e-19
 
 
 # ======================================================================
+# Error handling
+# ======================================================================
+
+class CouplingError(Exception):
+    """Base exception for coupling failures."""
+    pass
+
+class SOLPSError(CouplingError):
+    """SOLPS run failed (XERRAB, missing b2fstate, nonzero returncode)."""
+    pass
+
+class OpenEdgeError(CouplingError):
+    """OpenEdge run failed (nonzero returncode, missing output)."""
+    pass
+
+
+def check_solps_success(solps_run_dir, label="SOLPS"):
+    """Check that SOLPS produced a valid b2fstate. Raise SOLPSError if not."""
+    # Check run.log for XERRAB
+    solps_log = os.path.join(solps_run_dir, 'run.log')
+    if os.path.exists(solps_log):
+        with open(solps_log, 'r') as lf:
+            log_text = lf.read()
+        if 'XERRAB' in log_text or 'xerrab--error' in log_text.lower():
+            # Extract error context
+            err_lines = [l.strip() for l in log_text.splitlines()
+                         if 'XERRAB' in l or 'DUE TO' in l]
+            detail = '; '.join(err_lines[:3]) if err_lines else 'XERRAB detected'
+            raise SOLPSError(
+                f"{label} failed: {detail}\n"
+                f"  Log: {solps_log}")
+
+    # Check b2fstate exists and is large enough
+    b2fstate = os.path.join(solps_run_dir, 'b2fstate')
+    if not os.path.exists(b2fstate):
+        raise SOLPSError(
+            f"{label} failed: no b2fstate produced\n"
+            f"  Run dir: {solps_run_dir}")
+    if os.path.getsize(b2fstate) < 10000:
+        raise SOLPSError(
+            f"{label} failed: b2fstate too small "
+            f"({os.path.getsize(b2fstate)} bytes)\n"
+            f"  Run dir: {solps_run_dir}")
+
+
+# ======================================================================
 # Per-step output archiving
 # ======================================================================
 
@@ -81,14 +127,18 @@ def save_warmup_output(solps_run_dir, coupled_dir, plasma_h5_path):
 
 
 def restore_warmup(warmup_dir, solps_run_dir, plasma_h5_path):
-    """Restore warmup state from a previous run."""
-    # Restore b2fstate -> b2fstati for SOLPS restart
+    """Restore warmup state from a previous run. Raises SOLPSError if
+    the archived warmup state is missing or invalid."""
     warmup_state = os.path.join(warmup_dir, 'b2fstate')
-    if os.path.exists(warmup_state) and os.path.getsize(warmup_state) > 10000:
-        shutil.copy2(warmup_state,
-                     os.path.join(solps_run_dir, 'b2fstati'))
+    if not os.path.exists(warmup_state) \
+            or os.path.getsize(warmup_state) < 10000:
+        raise SOLPSError(
+            f"Cannot restore warmup: b2fstate missing or invalid in "
+            f"{warmup_dir} ({os.path.getsize(warmup_state) if os.path.exists(warmup_state) else 0} bytes).\n"
+            f"  Remove the warmup/ folder and re-run, or set skip_warmup: false.")
 
-    # Restore plasma.h5
+    shutil.copy2(warmup_state, os.path.join(solps_run_dir, 'b2fstati'))
+
     warmup_plasma = os.path.join(warmup_dir, 'plasma.h5')
     if os.path.exists(warmup_plasma):
         shutil.copy2(warmup_plasma, plasma_h5_path)
@@ -575,6 +625,11 @@ def run_coupling(config):
         console.print()
 
     elif n_warmup_steps > 0:
+        # Clean stale warmup folder from previous (possibly failed) run
+        if os.path.exists(warmup_dir):
+            shutil.rmtree(warmup_dir)
+            console.print(f"  [dim]Removed stale warmup/ folder[/dim]")
+
         console.print(Panel(
             f"[bold]SOLPS warmup:[/bold] {n_warmup_steps} rounds x "
             f"{warmup_ntim} timesteps (no Li source)",
@@ -626,16 +681,9 @@ def run_coupling(config):
                 result = subprocess.run(solps_cmd, shell=True, cwd=cwd,
                                         capture_output=True, text=True)
 
-            # Check for errors
-            solps_log = os.path.join(solps_run_dir, 'run.log')
-            if os.path.exists(solps_log):
-                with open(solps_log, 'r') as lf:
-                    log_text = lf.read()
-                if 'XERRAB' in log_text:
-                    err_lines = [l.strip() for l in log_text.splitlines()
-                                 if 'XERRAB' in l or 'Error:' in l]
-                    for el in err_lines[:3]:
-                        console.print(f"    [red]{el}[/red]")
+            # Fail fast on SOLPS errors
+            check_solps_success(solps_run_dir,
+                                label=f"Warmup {w+1}/{n_warmup_steps}")
 
             # Track convergence
             try:
@@ -722,11 +770,13 @@ def run_coupling(config):
         li_source = 0.0
         n_active = 0
         if result.returncode != 0:
-            console.print(f"  [red]OpenEdge failed (rc={result.returncode}), "
-                          f"continuing with zero source[/red]")
-            with open(os.path.join(oe_run_dir, f'error_{k:04d}.log'), 'w') as ef:
+            err_log = os.path.join(oe_run_dir, f'error_{k:04d}.log')
+            with open(err_log, 'w') as ef:
                 ef.write(result.stdout + '\n' + result.stderr)
-            source_new = np.zeros((nxp2, nyp2))
+            raise OpenEdgeError(
+                f"Step {step_label}: OpenEdge failed (rc={result.returncode})\n"
+                f"  Error log: {err_log}\n"
+                f"  Run dir: {oe_run_dir}")
         else:
             npart = parse_openedge_npart(result.stdout)
             npart_color = "green" if npart and npart > 0 else "red"
@@ -821,29 +871,14 @@ def run_coupling(config):
             result = subprocess.run(solps_cmd, shell=True, cwd=cwd,
                                     capture_output=True, text=True)
 
-        # Check SOLPS result — also check run.log for errors
-        solps_log = os.path.join(solps_run_dir, 'run.log')
-        solps_ok = True
+        # Fail fast on SOLPS errors
         if result.returncode != 0:
-            console.print(f"  [red]SOLPS failed (rc={result.returncode})[/red]")
-            solps_ok = False
-        if os.path.exists(solps_log):
-            with open(solps_log, 'r') as lf:
-                log_text = lf.read()
-            if 'xerrab--error' in log_text.lower() or 'XERRAB' in log_text:
-                # Extract the actual error messages
-                err_lines = [l.strip() for l in log_text.splitlines()
-                             if 'XERRAB' in l or 'Error:' in l
-                             or 'error' in l.lower() and 'xerrab' not in l.lower()]
-                for el in err_lines[:5]:
-                    console.print(f"    [red]{el}[/red]")
-                solps_ok = False
-        if not solps_ok:
-            # Check if b2fstate was produced despite errors
-            new_state = os.path.join(solps_run_dir, 'b2fstate')
-            if not os.path.exists(new_state) or os.path.getsize(new_state) < 10000:
-                console.print(f"  [red]No valid b2fstate produced, "
-                              f"plasma unchanged[/red]")
+            raise SOLPSError(
+                f"Step {step_label}: SOLPS process failed "
+                f"(rc={result.returncode})\n"
+                f"  Run dir: {solps_run_dir}")
+        check_solps_success(solps_run_dir,
+                            label=f"Step {step_label}")
 
         # ---- 5. Read updated plasma and refresh OpenEdge ----
         dne_max = None
@@ -853,34 +888,31 @@ def run_coupling(config):
         te_min = te_prev.min()
         te_max = te_prev.max()
 
-        try:
-            solps.load_plasma_state()
-            solps.write_plasma_h5(plasma_h5_path)
+        solps.load_plasma_state()
+        solps.write_plasma_h5(plasma_h5_path)
 
-            fields_new = solps.get_plasma_fields()
-            ne_new = np.array(fields_new['ne'])
-            te_new = np.array(fields_new['te']) / eV
+        fields_new = solps.get_plasma_fields()
+        ne_new = np.array(fields_new['ne'])
+        te_new = np.array(fields_new['te']) / eV
 
-            ne_min, ne_max = ne_new.min(), ne_new.max()
-            te_min, te_max = te_new.min(), te_new.max()
+        ne_min, ne_max = ne_new.min(), ne_new.max()
+        te_min, te_max = te_new.min(), te_new.max()
 
-            # Compute relative changes
-            ne_mask = ne_prev > 1e10
-            te_mask = te_prev > 0.01
-            dne_rel = np.zeros_like(ne_new)
-            dte_rel = np.zeros_like(te_new)
-            dne_rel[ne_mask] = (ne_new[ne_mask] - ne_prev[ne_mask]) / ne_prev[ne_mask]
-            dte_rel[te_mask] = (te_new[te_mask] - te_prev[te_mask]) / te_prev[te_mask]
-            dne_max = float(np.max(np.abs(dne_rel)))
-            dte_max = float(np.max(np.abs(dte_rel)))
+        # Compute relative changes
+        ne_mask = ne_prev > 1e10
+        te_mask = te_prev > 0.01
+        dne_rel = np.zeros_like(ne_new)
+        dte_rel = np.zeros_like(te_new)
+        dne_rel[ne_mask] = (ne_new[ne_mask] - ne_prev[ne_mask]) / ne_prev[ne_mask]
+        dte_rel[te_mask] = (te_new[te_mask] - te_prev[te_mask]) / te_prev[te_mask]
+        dne_max = float(np.max(np.abs(dne_rel)))
+        dte_max = float(np.max(np.abs(dte_rel)))
 
-            ne_prev = ne_new
-            te_prev = te_new
+        ne_prev = ne_new
+        te_prev = te_new
 
-            console.print(f"  [green]SOLPS done[/green]  "
-                          f"|dne/ne|={dne_max:.2e}  |dTe/Te|={dte_max:.2e}")
-        except Exception as e:
-            console.print(f"  [red]Could not update plasma: {e}[/red]")
+        console.print(f"  [green]SOLPS done[/green]  "
+                      f"|dne/ne|={dne_max:.2e}  |dTe/Te|={dte_max:.2e}")
 
         elapsed = time.time() - t0
 
@@ -945,7 +977,23 @@ def main():
     with open(args.config) as f:
         config = json.load(f)
 
-    run_coupling(config)
+    try:
+        run_coupling(config)
+    except SOLPSError as e:
+        console.print(Panel(
+            f"[bold red]SOLPS FAILED[/bold red]\n\n{e}",
+            border_style="red", expand=False))
+        sys.exit(1)
+    except OpenEdgeError as e:
+        console.print(Panel(
+            f"[bold red]OpenEdge FAILED[/bold red]\n\n{e}",
+            border_style="red", expand=False))
+        sys.exit(1)
+    except CouplingError as e:
+        console.print(Panel(
+            f"[bold red]Coupling FAILED[/bold red]\n\n{e}",
+            border_style="red", expand=False))
+        sys.exit(1)
 
 
 if __name__ == '__main__':
