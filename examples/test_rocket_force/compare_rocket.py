@@ -140,7 +140,7 @@ if plt is not None:
         'ytick.right': True,
     })
 
-    fig, axes = plt.subplots(1, 3, figsize=(13, 4.5))
+    fig, axes = plt.subplots(1, 2, figsize=(9, 4.5))
 
     linestyles = ['-', '--', ':']
 
@@ -167,20 +167,6 @@ if plt is not None:
     ax.set_ylabel(r'$v_R$ [m/s]')
     ax.legend(frameon=False)
     ax.text(0.03, 0.95, '(b)', transform=ax.transAxes, fontweight='bold',
-            va='top', fontsize=12)
-
-    # (c) Normalized radius vs time (should overlap)
-    ax = axes[2]
-    for eta, c, lab, ls in zip(eta_values, colors, labels, linestyles):
-        if eta in data:
-            d = data[eta]
-            r_norm = d['radius'] / d['radius'][0] if d['radius'][0] > 0 else d['radius']
-            ax.plot(d['time'] * 1e3, r_norm, color=c, label=lab, linestyle=ls)
-    ax.set_xlabel(r'Time [ms]')
-    ax.set_ylabel(r'$r_d / r_{d,0}$')
-    ax.set_ylim(0.993, 1.001)
-    ax.legend(frameon=False, loc='lower left')
-    ax.text(0.03, 0.95, '(c)', transform=ax.transAxes, fontweight='bold',
             va='top', fontsize=12)
 
     plt.tight_layout(w_pad=2.5)
