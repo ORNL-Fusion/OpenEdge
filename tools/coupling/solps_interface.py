@@ -133,16 +133,118 @@ class SolpsInterface:
     # ------------------------------------------------------------------
 
     def load_plasma_state(self, path=None):
-        """Load SOLPS plasma state from b2fstate.mat."""
+        """Load SOLPS plasma state from b2fstate (text) or b2fstate.mat.
+
+        Prefers text format b2fstate (written by b2run) over .mat format,
+        since .mat files require separate post-processing to generate.
+        """
+        # Try text-format b2fstate first (written directly by b2run)
+        txt_path = path or os.path.join(self.run_dir, 'b2fstate')
+        if os.path.exists(txt_path) and os.path.getsize(txt_path) > 10000:
+            return self._load_plasma_state_text(txt_path)
+
+        # Fall back to .mat format
         if not HAS_SCIPY:
             raise ImportError("scipy required for .mat file reading")
-        path = path or os.path.join(self.run_dir, 'b2fstate.mat')
-        m = sio.loadmat(path)
+        mat_path = path or os.path.join(self.run_dir, 'b2fstate.mat')
+        m = sio.loadmat(mat_path)
         self.state = m['State'][0, 0]
         self.ns = int(self.state['ns'].flat[0])
         if self.nx == 0:
             self.nx = int(self.state['nx'].flat[0])
             self.ny = int(self.state['ny'].flat[0])
+        return self.state
+
+    def _load_plasma_state_text(self, path):
+        """Parse text-format b2fstate/b2fstati written by b2run.
+
+        Format: *cf: header lines followed by data values.
+          *cf:    type    count    name
+        """
+        fields = {}
+        with open(path, 'r') as f:
+            lines = f.readlines()
+
+        i = 0
+        nx = ny = ns = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            if line.startswith('*cf:'):
+                parts = line.split()
+                # *cf:  type  count  name
+                dtype = parts[1]
+                count = int(parts[2])
+                name = parts[3] if len(parts) > 3 else ''
+
+                i += 1
+                # Read data values
+                vals = []
+                while i < len(lines) and not lines[i].strip().startswith('*cf:') \
+                        and not lines[i].strip().startswith('VERSION'):
+                    vals.extend(lines[i].split())
+                    i += 1
+                    if len(vals) >= count:
+                        break
+
+                if dtype == 'int':
+                    arr = np.array([int(v) for v in vals[:count]])
+                    if name == 'nx,ny,ns' and len(arr) == 3:
+                        nx, ny, ns = int(arr[0]), int(arr[1]), int(arr[2])
+                        fields['nx'] = np.array([[nx]])
+                        fields['ny'] = np.array([[ny]])
+                        fields['ns'] = np.array([[ns]])
+                elif dtype == 'real':
+                    arr = np.array([float(v) for v in vals[:count]])
+                    fields[name] = arr
+                elif dtype == 'char':
+                    fields[name] = ' '.join(vals[:count])
+            else:
+                i += 1
+
+        if nx == 0:
+            raise ValueError(f"Could not parse nx,ny,ns from {path}")
+
+        nxp2, nyp2 = nx + 2, ny + 2
+
+        # Reshape key fields to expected dimensions
+        shape_map = {
+            'ne': (nxp2, nyp2),
+            'te': (nxp2, nyp2),
+            'ti': (nxp2, nyp2),
+            'po': (nxp2, nyp2),
+            'fch_p': (nxp2, nyp2),
+            'na': (nxp2, nyp2, ns),
+            'ua': (nxp2, nyp2, ns),
+            'kinrgy': (nxp2, nyp2, ns),
+            'zamin': (ns,),
+            'zamax': (ns,),
+            'zn': (ns,),
+            'am': (ns,),
+            'fna': (nxp2, nyp2, 2, ns),
+            'fhe': (nxp2, nyp2, 2),
+            'fhi': (nxp2, nyp2, 2),
+            'fch': (nxp2, nyp2, 2),
+            'uadia': (nxp2, nyp2, 2, ns),
+        }
+
+        state = {}
+        for name, arr in fields.items():
+            if isinstance(arr, np.ndarray) and name in shape_map:
+                expected = shape_map[name]
+                expected_size = int(np.prod(expected))
+                if len(arr) == expected_size:
+                    state[name] = arr.reshape(expected)
+                else:
+                    state[name] = arr
+            else:
+                state[name] = arr
+
+        # Store as dict-like object compatible with get_plasma_fields
+        self.state = state
+        self.ns = ns
+        if self.nx == 0:
+            self.nx = nx
+            self.ny = ny
         return self.state
 
     def get_plasma_fields(self):
@@ -217,18 +319,22 @@ class SolpsInterface:
                 if next_profile:
                     f.write(f'sources_time_switch={switch_time:.6e}\n')
                     f.write(f'sources_filename="{next_profile}"\n')
+                else:
+                    # No next window: set switch time far in the future so
+                    # SOLPS uses this source for the entire run without error
+                    f.write(f'sources_time_switch={1.0e+20:.6e}\n')
                 f.write('/\n')
 
             t = switch_time
 
     def _find_li_species_idx(self):
-        """Find Li0 neutral species index (zn=3, zamin=0)."""
+        """Find Li+ species index (zn=3, zamin=1)."""
         if self.state is None:
             return -1
         zn = self.state['zn'].flatten()
         zamin = self.state['zamin'].flatten()
         for i in range(len(zn)):
-            if int(zn[i]) == 3 and int(zamin[i]) == 0:
+            if int(zn[i]) == 3 and int(zamin[i]) == 1:
                 return i
         return -1
 

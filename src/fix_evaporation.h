@@ -19,15 +19,19 @@ namespace SPARTA_NS {
 enum HeatfluxMode { HF_NONE=0, HF_FILE, HF_CONST };
 
     struct HeatFluxData{
-    std::vector<double> r;   
-    std::vector<double> z; 
+    std::vector<double> r;
+    std::vector<double> z;
     std::vector<std::vector<double>> q_mag;
+    std::vector<std::vector<double>> grad_te_r;
+    std::vector<std::vector<double>> grad_te_z;
     };
 
     struct HeatFluxParams {
     double r;
     double z;
     double q_mag;
+    double grad_te_r;
+    double grad_te_z;
     };
 
 
@@ -48,6 +52,7 @@ public:
       HeatfluxMode heatflux_mode = HF_NONE;
       double      Qs_const = 0.0;     // when HF_CONST
       double      heatflux_scale = 3.0; // legacy multiplier, now user-configurable
+      double      rocket_eta = 0.0;    // asymmetry parameter for rocket force [0,1]
 
 protected:
     int maxgrid;
