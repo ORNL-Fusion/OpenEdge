@@ -115,61 +115,79 @@ if not data:
 common_t_end = min(d['time'][-1] for d in data.values())
 
 # ======================================================================
-# Plot
+# Plot — publication-quality 3-panel figure
 # ======================================================================
 if plt is not None:
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    plt.rcParams.update({
+        'font.family': 'serif',
+        'font.size': 11,
+        'axes.labelsize': 12,
+        'axes.titlesize': 12,
+        'legend.fontsize': 10,
+        'xtick.labelsize': 10,
+        'ytick.labelsize': 10,
+        'lines.linewidth': 1.8,
+        'axes.linewidth': 0.8,
+        'xtick.direction': 'in',
+        'ytick.direction': 'in',
+        'xtick.major.size': 4,
+        'ytick.major.size': 4,
+        'xtick.minor.size': 2,
+        'ytick.minor.size': 2,
+        'xtick.minor.visible': True,
+        'ytick.minor.visible': True,
+        'xtick.top': True,
+        'ytick.right': True,
+    })
 
-    # 1. Trajectories (R, Z)
-    ax = axes[0, 0]
-    for eta, c, lab in zip(eta_values, colors, labels):
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.5))
+
+    linestyles = ['-', '--', ':']
+
+    # (a) Trajectory (R, Z)
+    ax = axes[0]
+    for eta, c, lab, ls in zip(eta_values, colors, labels, linestyles):
         if eta in data:
             d = data[eta]
-            ax.plot(d['x'], d['y'], color=c, label=lab, linewidth=1.5)
-    ax.set_xlabel('R [m]')
-    ax.set_ylabel('Z [m]')
-    ax.set_title('Droplet trajectory')
-    ax.legend()
+            ax.plot(d['x'], d['y'], color=c, label=lab, linestyle=ls)
+    ax.set_xlabel(r'$R$ [m]')
+    ax.set_ylabel(r'$Z$ [m]')
+    ax.legend(frameon=False)
     ax.set_aspect('equal')
+    ax.text(0.03, 0.95, '(a)', transform=ax.transAxes, fontweight='bold',
+            va='top', fontsize=12)
 
-    # 2. R position vs time
-    ax = axes[0, 1]
-    for eta, c, lab in zip(eta_values, colors, labels):
+    # (b) Radial velocity vs time
+    ax = axes[1]
+    for eta, c, lab, ls in zip(eta_values, colors, labels, linestyles):
         if eta in data:
             d = data[eta]
-            ax.plot(d['time'], d['x'], color=c, label=lab, linewidth=1.5)
-    ax.set_xlabel('Time [s]')
-    ax.set_ylabel('R [m]')
-    ax.set_title('R position vs time')
-    ax.legend()
-
-    # 3. vR vs time
-    ax = axes[1, 0]
-    for eta, c, lab in zip(eta_values, colors, labels):
-        if eta in data:
-            d = data[eta]
-            ax.plot(d['time'], d['vx'], color=c, label=lab, linewidth=1.5)
-    ax.set_xlabel('Time [s]')
+            ax.plot(d['time'] * 1e3, d['vx'], color=c, label=lab, linestyle=ls)
+    ax.set_xlabel(r'Time [ms]')
     ax.set_ylabel(r'$v_R$ [m/s]')
-    ax.set_title('Radial velocity (rocket force effect)')
-    ax.legend()
+    ax.legend(frameon=False)
+    ax.text(0.03, 0.95, '(b)', transform=ax.transAxes, fontweight='bold',
+            va='top', fontsize=12)
 
-    # 4. Radius vs time (should overlap)
-    ax = axes[1, 1]
-    for eta, c, lab in zip(eta_values, colors, labels):
+    # (c) Normalized radius vs time (should overlap)
+    ax = axes[2]
+    for eta, c, lab, ls in zip(eta_values, colors, labels, linestyles):
         if eta in data:
             d = data[eta]
             r_norm = d['radius'] / d['radius'][0] if d['radius'][0] > 0 else d['radius']
-            ax.plot(d['time'], r_norm, color=c, label=lab, linewidth=1.5)
-    ax.set_xlabel('Time [s]')
+            ax.plot(d['time'] * 1e3, r_norm, color=c, label=lab, linestyle=ls)
+    ax.set_xlabel(r'Time [ms]')
     ax.set_ylabel(r'$r_d / r_{d,0}$')
-    ax.set_title('Normalized radius (should overlap)')
-    ax.legend()
+    ax.set_ylim(0.993, 1.001)
+    ax.legend(frameon=False, loc='lower left')
+    ax.text(0.03, 0.95, '(c)', transform=ax.transAxes, fontweight='bold',
+            va='top', fontsize=12)
 
-    plt.suptitle('Rocket Force Validation: Single Droplet', fontsize=14, fontweight='bold')
-    plt.tight_layout()
-    plt.savefig('rocket_force_comparison.png', dpi=150, bbox_inches='tight')
-    print(f"\nSaved rocket_force_comparison.png")
+    plt.tight_layout(w_pad=2.5)
+    for fmt in ['png', 'pdf']:
+        outname = f'rocket_force_comparison.{fmt}'
+        fig.savefig(outname, dpi=300, bbox_inches='tight')
+    print(f"\nSaved rocket_force_comparison.png and .pdf")
 else:
     fig = None
     print("\nmatplotlib not available; skipping plot generation.")
