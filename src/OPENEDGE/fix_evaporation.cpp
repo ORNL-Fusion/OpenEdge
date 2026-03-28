@@ -88,6 +88,13 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
         error->all(FLERR,"Fix evaporation: heatflux/scale must be finite and >= 0");
       i += 2;
 
+    } else if (strcmp(arg[i],"rocket_eta") == 0) {
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'rocket_eta'");
+      rocket_eta = atof(arg[i+1]);
+      if (rocket_eta < 0.0 || rocket_eta > 1.0)
+        error->all(FLERR,"Fix evaporation: rocket_eta must be in [0,1]");
+      i += 2;
+
     } else {
       char msg[256];
       snprintf(msg,sizeof(msg),"Fix evaporation: unknown keyword '%s'",arg[i]);
@@ -322,6 +329,45 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
   if (T_new < 0.0)
     error->one(FLERR,"Fix evaporation: particle temperature dropped below 0 K");
 
+  // --- rocket force (recoil from asymmetric evaporation) ---
+  // Direction: along -grad_Te (away from hot plasma).
+  // Magnitude: F = (dm/dt) * v_thermal_evap, where dm/dt = 4*pi*r^2 * Gevap * m_atom
+  // v_thermal = sqrt(8 * k_B * T_droplet / (pi * m_atom))  [mean speed of half-Maxwellian]
+  if (rocket_eta > 0.0 && heatflux_mode == HF_FILE && mass_new > 0.0 && Gevap_atoms > 0.0) {
+    HeatFluxParams hp = interpHeatFluxAtPos(rpos, zpos, heat_flux_data);
+    const double gtr = hp.grad_te_r;
+    const double gtz = hp.grad_te_z;
+    const double grad_mag = std::sqrt(gtr*gtr + gtz*gtz);
+
+    if (grad_mag > 1.0e-10) {
+      const double kB = 1.380649e-23;             // J/K
+      const double v_thermal = std::sqrt(8.0 * kB * TK / (MY_PI * AM));
+      const double area = 4.0 * MY_PI * radius * radius;
+      const double dmdt = area * Gevap_atoms * AM; // kg/s (positive)
+      // a_rocket = eta * (dmdt * v_thermal / mass) in direction -grad_Te/|grad_Te|
+      const double a_mag = rocket_eta * dmdt * v_thermal / mass_new;
+      const double nr_hat = -gtr / grad_mag;      // unit vector away from hot
+      const double nz_hat = -gtz / grad_mag;
+
+      // Apply velocity kick: dv = a * dt_half
+      // In 2D axisymmetric: v[0] = v_r, v[1] = v_z
+      if (domain->axisymmetric || domain->dimension == 2) {
+        ip->v[0] += a_mag * nr_hat * DT;
+        ip->v[1] += a_mag * nz_hat * DT;
+      } else {
+        // 3D: project r-direction onto x,y
+        const double r_pos = std::sqrt(ip->x[0]*ip->x[0] + ip->x[1]*ip->x[1]);
+        if (r_pos > 1.0e-20) {
+          const double cos_phi = ip->x[0] / r_pos;
+          const double sin_phi = ip->x[1] / r_pos;
+          ip->v[0] += a_mag * nr_hat * cos_phi * DT;
+          ip->v[1] += a_mag * nr_hat * sin_phi * DT;
+          ip->v[2] += a_mag * nz_hat * DT;
+        }
+      }
+    }
+  }
+
   // --- write back ---
   ip->radius = R_new;
   ip->temp   = T_new;
@@ -484,6 +530,13 @@ HeatFluxData FixEvap::readHeatFlux(const std::string& filePath) {
             }
         }
 
+        // Read grad_Te for rocket force direction (optional)
+        if (exists("grad_te_r")) {
+            data.grad_te_r = read2DValidated("grad_te_r");
+            data.grad_te_z = read2DValidated("grad_te_z");
+            printf("  Loaded grad_te_r/z for rocket force\n");
+        }
+
         if (!std::is_sorted(data.r.begin(), data.r.end()) ||
             !std::is_sorted(data.z.begin(), data.z.end())) {
             throw std::runtime_error("Heatflux coordinate axes must be monotonic increasing");
@@ -545,6 +598,8 @@ void FixEvap::broadcastHeatFluxData(HeatFluxData& data) {
 
   // Broadcast the magnetic field components
   broadcast2DVector(data.q_mag);
+  broadcast2DVector(data.grad_te_r);
+  broadcast2DVector(data.grad_te_z);
 }
 
 
@@ -622,5 +677,18 @@ HeatFluxParams FixEvap::interpHeatFluxAtPos(double r, double z,
   double q = w11 * q11 + w21 * q21 + w12 * q12 + w22 * q22;
   if (!std::isfinite(q) || q < 0.0) q = 0.0;
   res.q_mag = q;
+
+  // Interpolate grad_Te for rocket force (if loaded)
+  res.grad_te_r = 0.0;
+  res.grad_te_z = 0.0;
+  if (!data.grad_te_r.empty() && !data.grad_te_z.empty()) {
+    auto interp2 = [&](const std::vector<std::vector<double>>& f) {
+      return w11 * safe_val(f[iz1][ir1]) + w21 * safe_val(f[iz1][ir2])
+           + w12 * safe_val(f[iz2][ir1]) + w22 * safe_val(f[iz2][ir2]);
+    };
+    res.grad_te_r = interp2(data.grad_te_r);
+    res.grad_te_z = interp2(data.grad_te_z);
+  }
+
   return res;
 }

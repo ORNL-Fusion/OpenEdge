@@ -22,15 +22,121 @@ Config file specifies paths, grid parameters, coupling cadence, etc.
 import argparse
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import time
 
 import numpy as np
 
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from rich import box
+
 # Add tools/coupling to path for solps_interface
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from solps_interface import SolpsInterface
+
+console = Console()
+eV = 1.602176634e-19
+
+
+# ======================================================================
+# Per-step output archiving
+# ======================================================================
+
+# Essential SOLPS files to preserve per step (skip huge geometry/database)
+SOLPS_SAVE_FILES = [
+    'b2fstate', 'b2fstati', 'b2fplasma', 'b2fparam', 'b2mn.prt',
+    'run.log', 'b2mn.dat',
+]
+
+def save_warmup_output(solps_run_dir, coupled_dir, plasma_h5_path):
+    """Archive warmup output to warmup/ directory."""
+    warmup_dir = os.path.join(coupled_dir, 'warmup')
+    os.makedirs(warmup_dir, exist_ok=True)
+
+    # Save key SOLPS files
+    for fname in SOLPS_SAVE_FILES:
+        src = os.path.join(solps_run_dir, fname)
+        if os.path.exists(src) and os.path.getsize(src) > 0:
+            shutil.copy2(src, os.path.join(warmup_dir, fname))
+
+    # Save source2d used during warmup
+    for fname in os.listdir(solps_run_dir):
+        if fname.startswith('source2d.'):
+            shutil.copy2(os.path.join(solps_run_dir, fname),
+                         os.path.join(warmup_dir, fname))
+
+    # Save plasma.h5
+    if os.path.exists(plasma_h5_path):
+        shutil.copy2(plasma_h5_path, os.path.join(warmup_dir, 'plasma.h5'))
+
+    console.print(f"  [dim]Warmup output saved to {warmup_dir}[/dim]")
+    return warmup_dir
+
+
+def restore_warmup(warmup_dir, solps_run_dir, plasma_h5_path):
+    """Restore warmup state from a previous run."""
+    # Restore b2fstate -> b2fstati for SOLPS restart
+    warmup_state = os.path.join(warmup_dir, 'b2fstate')
+    if os.path.exists(warmup_state) and os.path.getsize(warmup_state) > 10000:
+        shutil.copy2(warmup_state,
+                     os.path.join(solps_run_dir, 'b2fstati'))
+
+    # Restore plasma.h5
+    warmup_plasma = os.path.join(warmup_dir, 'plasma.h5')
+    if os.path.exists(warmup_plasma):
+        shutil.copy2(warmup_plasma, plasma_h5_path)
+
+    console.print(f"  [green]Restored warmup state from {warmup_dir}[/green]")
+
+
+def save_step_output(step_k, coupled_dir, solps_run_dir, oe_run_dir,
+                     plasma_h5_path, source_used, solps):
+    """Archive coupling step output to step_NNN/ directory."""
+    step_dir = os.path.join(coupled_dir, f'step_{step_k+1:03d}')
+    solps_out = os.path.join(step_dir, 'solps')
+    oe_out = os.path.join(step_dir, 'openedge')
+    os.makedirs(solps_out, exist_ok=True)
+    os.makedirs(oe_out, exist_ok=True)
+
+    # Save key SOLPS files
+    for fname in SOLPS_SAVE_FILES:
+        src = os.path.join(solps_run_dir, fname)
+        if os.path.exists(src) and os.path.getsize(src) > 0:
+            shutil.copy2(src, os.path.join(solps_out, fname))
+
+    # Save source2d used this step
+    for fname in os.listdir(solps_run_dir):
+        if fname.startswith('source2d.'):
+            shutil.copy2(os.path.join(solps_run_dir, fname),
+                         os.path.join(solps_out, fname))
+
+    # Save OpenEdge files
+    for fname in ['restart.dat', f'in.chunk_{step_k:04d}',
+                  'log.openedge', f'error_{step_k:04d}.log']:
+        src = os.path.join(oe_run_dir, fname)
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(oe_out, fname))
+
+    # Save mass_loss
+    ml_src = os.path.join(oe_run_dir, 'output', 'mass_loss.txt')
+    if os.path.exists(ml_src):
+        shutil.copy2(ml_src, os.path.join(oe_out, 'mass_loss.txt'))
+
+    # Save plasma.h5 for this step
+    if os.path.exists(plasma_h5_path):
+        shutil.copy2(plasma_h5_path, os.path.join(step_dir, 'plasma.h5'))
+
+    # Save source array as numpy for easy reloading
+    np.save(os.path.join(step_dir, 'source_used.npy'), source_used)
+
+    console.print(f"  [dim]Step {step_k+1} output saved to {step_dir}[/dim]")
 
 
 # ======================================================================
@@ -101,6 +207,35 @@ def read_last_mass_loss_frame(filepath):
                 dm.append(float(parts[3]))
                 dn.append(float(parts[4]))
     return np.array(xc), np.array(yc), np.array(dm), np.array(dn)
+
+
+# ======================================================================
+# Parse OpenEdge particle count from stdout
+# ======================================================================
+
+def parse_openedge_npart(stdout):
+    """Parse the total particle count from OpenEdge (SPARTA) stats output.
+
+    Stats format: 'Step CPU Np' header followed by data lines.
+    Returns the Np value from the last stats line, or None.
+    """
+    npart = None
+    in_stats = False
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('Step') and 'Np' in stripped:
+            in_stats = True
+            continue
+        if in_stats and stripped and stripped[0].isdigit():
+            parts = stripped.split()
+            if len(parts) >= 3:
+                try:
+                    npart = int(parts[2])
+                except ValueError:
+                    pass
+        elif in_stats and stripped and not stripped[0].isdigit():
+            in_stats = False
+    return npart
 
 
 # ======================================================================
@@ -273,6 +408,102 @@ def write_openedge_chunk_script(template_script, output_script, n_steps,
 
 
 # ======================================================================
+# Rich display helpers
+# ======================================================================
+
+def make_header_panel(config, solps):
+    """Create the header panel with coupling configuration."""
+    n_coupling = config.get('n_coupling_steps', 5)
+    n_oe = config.get('n_oe_steps', 100)
+    n_solps = config.get('n_solps_steps', 2)
+    n_warmup = config.get('n_warmup_solps_steps', 0)
+    warmup_ntim = config.get('warmup_ntim', 500)
+    dt = config.get('dt_oe', 1e-5)
+    alpha = config.get('relaxation_alpha', 0.5)
+    np_oe = config.get('mpi_np_openedge', 1)
+    np_solps = config.get('mpi_np_solps', 1)
+
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
+    table.add_column(style="bold cyan")
+    table.add_column()
+    table.add_row("SOLPS grid", f"nx={solps.nx}  ny={solps.ny}  ns={solps.ns}")
+    if n_warmup > 0:
+        table.add_row("Warmup", f"{n_warmup} rounds x {warmup_ntim} SOLPS steps (no Li)")
+    table.add_row("Coupling steps", str(n_coupling))
+    table.add_row("OpenEdge", f"{n_oe} steps/chunk, dt={dt:.1e}s, {np_oe} MPI ranks")
+    table.add_row("SOLPS", f"{n_solps} steps/chunk, {np_solps} MPI ranks")
+    table.add_row("Relaxation", f"alpha={alpha}")
+
+    return Panel(table, title="[bold]OpenEdge-SOLPS Coupling[/bold]",
+                 border_style="blue", expand=False)
+
+
+def make_history_table(history):
+    """Create the coupling history table from accumulated step data."""
+    table = Table(title="Coupling History", box=box.ROUNDED,
+                  title_style="bold", border_style="dim")
+    table.add_column("Step", style="bold", justify="center", width=6)
+    table.add_column("Particles", justify="right", width=11)
+    table.add_column("Li Source [atoms/s]", justify="right", width=16)
+    table.add_column("ne range [m^-3]", justify="right", width=26)
+    table.add_column("Te range [eV]", justify="right", width=26)
+    table.add_column("max|dne/ne|", justify="right", width=12)
+    table.add_column("max|dTe/Te|", justify="right", width=12)
+    table.add_column("Time [s]", justify="right", width=9)
+
+    for h in history:
+        # Color the delta columns based on magnitude
+        dne_str = f"{h['dne_max']:.2e}" if h['dne_max'] is not None else "--"
+        dte_str = f"{h['dte_max']:.2e}" if h['dte_max'] is not None else "--"
+
+        if h['dne_max'] is not None and h['dne_max'] > 0.01:
+            dne_str = f"[green]{dne_str}[/green]"
+        elif h['dne_max'] is not None and h['dne_max'] > 0.001:
+            dne_str = f"[yellow]{dne_str}[/yellow]"
+
+        if h['dte_max'] is not None and h['dte_max'] > 0.01:
+            dte_str = f"[green]{dte_str}[/green]"
+        elif h['dte_max'] is not None and h['dte_max'] > 0.001:
+            dte_str = f"[yellow]{dte_str}[/yellow]"
+
+        # Color particles: red if 0
+        npart_str = str(h['npart']) if h['npart'] is not None else "--"
+        if h['npart'] == 0:
+            npart_str = f"[red]{npart_str}[/red]"
+
+        ne_str = f"[{h['ne_min']:.2e}, {h['ne_max']:.2e}]"
+        te_str = f"[{h['te_min']:.2e}, {h['te_max']:.2e}]"
+        source_str = f"{h['li_source']:.3e}" if h['li_source'] > 0 else "[dim]0[/dim]"
+
+        table.add_row(
+            h['step_label'],
+            npart_str,
+            source_str,
+            ne_str,
+            te_str,
+            dne_str,
+            dte_str,
+            f"{h['elapsed']:.1f}",
+        )
+    return table
+
+
+def make_status_line(step, total, phase, detail=""):
+    """Create a status line for the current operation."""
+    dots = "." * ((int(time.time() * 2) % 3) + 1)
+    step_str = f"[bold cyan]Step {step}/{total}[/bold cyan]"
+    if phase == "openedge":
+        return f"  {step_str}  [yellow]Running OpenEdge{dots}[/yellow]  {detail}"
+    elif phase == "solps":
+        return f"  {step_str}  [magenta]Running SOLPS{dots}[/magenta]  {detail}"
+    elif phase == "mapping":
+        return f"  {step_str}  [blue]Mapping sources{dots}[/blue]  {detail}"
+    elif phase == "done":
+        return f"  {step_str}  [green]Done[/green]  {detail}"
+    return f"  {step_str}  {phase}  {detail}"
+
+
+# ======================================================================
 # Main coupling driver
 # ======================================================================
 
@@ -289,10 +520,13 @@ def run_coupling(config):
     n_coupling_steps = config.get('n_coupling_steps', 5)
     n_oe_steps       = config.get('n_oe_steps', 100)
     n_solps_steps    = config.get('n_solps_steps', 2)
+    n_warmup_steps   = config.get('n_warmup_solps_steps', 0)
+    warmup_ntim      = config.get('warmup_ntim', 500)
     dt_oe            = config.get('dt_oe', 1e-5)
     alpha            = config.get('relaxation_alpha', 0.5)
     mpi_np_oe        = config.get('mpi_np_openedge', 1)
     mpi_np_solps     = config.get('mpi_np_solps', 1)
+    mpi_np_warmup    = config.get('mpi_np_warmup', mpi_np_solps)
     plasma_h5_path   = config.get('plasma_h5', os.path.join(oe_run_dir, 'plasma.h5'))
     bfield_h5_path   = config.get('bfield_h5', '')
     solps_run_script = config.get('solps_run_script', '')
@@ -302,7 +536,6 @@ def run_coupling(config):
     solps = SolpsInterface(solps_run_dir, solps_base_dir)
     solps.load_geometry()
     solps.load_plasma_state()
-    print(f'SOLPS grid: nx={solps.nx}, ny={solps.ny}, ns={solps.ns}')
 
     # Write initial plasma.h5 from SOLPS state
     solps.write_plasma_h5(plasma_h5_path)
@@ -311,16 +544,145 @@ def run_coupling(config):
     source_prev = np.zeros((nxp2, nyp2))
     dt_window = n_oe_steps * dt_oe
 
-    print(f'\n{"="*60}')
-    print(f'Starting coupling: {n_coupling_steps} steps')
-    print(f'  OpenEdge: {n_oe_steps} steps/chunk, dt={dt_oe:.1e}s')
-    print(f'  SOLPS: {n_solps_steps} steps/chunk')
-    print(f'  Relaxation alpha={alpha}')
-    print(f'{"="*60}\n')
+    # Store initial plasma state for change tracking
+    fields0 = solps.get_plasma_fields()
+    ne_prev = np.array(fields0['ne'])
+    te_prev = np.array(fields0['te']) / eV  # J -> eV
+
+    # Print header
+    console.print()
+    console.print(make_header_panel(config, solps))
+    console.print()
+
+    # ---- Warmup: converge SOLPS without Li source ----
+    skip_warmup = config.get('skip_warmup', False)
+    warmup_dir = os.path.join(coupled_dir, 'warmup') if coupled_dir else \
+        os.path.join(os.path.dirname(solps_run_dir), 'warmup')
+
+    if n_warmup_steps > 0 and skip_warmup and os.path.exists(warmup_dir):
+        # Restore from previous warmup
+        console.print(Panel(
+            f"[bold]Skipping warmup[/bold] — restoring from {warmup_dir}",
+            border_style="green", expand=False))
+        console.print()
+        restore_warmup(warmup_dir, solps_run_dir, plasma_h5_path)
+
+        # Reload plasma state for change tracking
+        solps.load_plasma_state()
+        fields0 = solps.get_plasma_fields()
+        ne_prev = np.array(fields0['ne'])
+        te_prev = np.array(fields0['te']) / eV
+        console.print()
+
+    elif n_warmup_steps > 0:
+        console.print(Panel(
+            f"[bold]SOLPS warmup:[/bold] {n_warmup_steps} rounds x "
+            f"{warmup_ntim} timesteps (no Li source)",
+            border_style="yellow", expand=False))
+        console.print()
+
+        # Ensure valid b2fstati
+        b2fstati_path = os.path.join(solps_run_dir, 'b2fstati')
+        baserun_stati = os.path.join(solps_base_dir, 'b2fstati')
+        if not os.path.exists(b2fstati_path) \
+                or os.path.getsize(b2fstati_path) < 10000:
+            if os.path.exists(baserun_stati):
+                shutil.copy2(baserun_stati, b2fstati_path)
+
+        # Write zero-source profile
+        zero_source = np.zeros((nxp2, nyp2))
+        solps.write_source2d(zero_source, 'source2d.00001')
+        solps.write_sources_profile_chain(
+            n_windows=1, dt_windows=[1.0], t_start=0.0)
+
+        for w in range(n_warmup_steps):
+            t0w = time.time()
+            update_b2mn_ntim(solps_run_dir, warmup_ntim)
+
+            # Copy b2fstate -> b2fstati for restart continuity
+            b2fstate_path = os.path.join(solps_run_dir, 'b2fstate')
+            if w > 0 and os.path.exists(b2fstate_path) \
+                    and os.path.getsize(b2fstate_path) > 10000:
+                shutil.copy2(b2fstate_path, b2fstati_path)
+
+            # Clean outputs
+            for f_clean in ['b2mn.prt', 'b2fstate', 'b2fplasma', 'b2fparam']:
+                p = os.path.join(solps_run_dir, f_clean)
+                if os.path.exists(p):
+                    os.remove(p)
+
+            with console.status(
+                    f"[yellow]Warmup {w+1}/{n_warmup_steps}[/yellow]  "
+                    f"SOLPS ({warmup_ntim} steps, {mpi_np_warmup} ranks, no Li)...",
+                    spinner="dots"):
+                if solps_run_script:
+                    solps_cmd = f'{solps_run_script} {mpi_np_warmup}'
+                    cwd = coupled_dir or os.path.dirname(solps_run_dir)
+                else:
+                    solps_cmd = f'b2run b2mn'
+                    if mpi_np_warmup > 1:
+                        solps_cmd = f'b2run -m "mpirun -np {mpi_np_warmup}" b2mn'
+                    cwd = solps_run_dir
+                result = subprocess.run(solps_cmd, shell=True, cwd=cwd,
+                                        capture_output=True, text=True)
+
+            # Check for errors
+            solps_log = os.path.join(solps_run_dir, 'run.log')
+            if os.path.exists(solps_log):
+                with open(solps_log, 'r') as lf:
+                    log_text = lf.read()
+                if 'XERRAB' in log_text:
+                    err_lines = [l.strip() for l in log_text.splitlines()
+                                 if 'XERRAB' in l or 'Error:' in l]
+                    for el in err_lines[:3]:
+                        console.print(f"    [red]{el}[/red]")
+
+            # Track convergence
+            try:
+                solps.load_plasma_state()
+                fields_w = solps.get_plasma_fields()
+                ne_w = np.array(fields_w['ne'])
+                te_w = np.array(fields_w['te']) / eV
+
+                ne_mask = ne_prev > 1e10
+                te_mask = te_prev > 0.01
+                dne_rel = np.zeros_like(ne_w)
+                dte_rel = np.zeros_like(te_w)
+                dne_rel[ne_mask] = (ne_w[ne_mask] - ne_prev[ne_mask]) / ne_prev[ne_mask]
+                dte_rel[te_mask] = (te_w[te_mask] - te_prev[te_mask]) / te_prev[te_mask]
+                dne_max = float(np.max(np.abs(dne_rel)))
+                dte_max = float(np.max(np.abs(dte_rel)))
+
+                elapsed_w = time.time() - t0w
+                console.print(
+                    f"  [green]Warmup {w+1}/{n_warmup_steps}[/green]  "
+                    f"ne=[{ne_w.min():.2e}, {ne_w.max():.2e}]  "
+                    f"Te=[{te_w.min():.2e}, {te_w.max():.2e}] eV  "
+                    f"|dne|={dne_max:.2e}  |dTe|={dte_max:.2e}  "
+                    f"({elapsed_w:.1f}s)")
+
+                ne_prev = ne_w
+                te_prev = te_w
+            except Exception as e:
+                console.print(f"  [red]Warmup {w+1}: Could not read state: {e}[/red]")
+
+        # Write converged plasma.h5 for OpenEdge
+        solps.write_plasma_h5(plasma_h5_path)
+
+        # Archive warmup output
+        save_warmup_output(solps_run_dir, coupled_dir or
+                           os.path.dirname(solps_run_dir), plasma_h5_path)
+
+        console.print()
+        console.print("[bold green]Warmup complete — starting coupled iterations[/bold green]")
+        console.print()
+
+    # Coupling history for the summary table
+    history = []
 
     for k in range(n_coupling_steps):
         t0 = time.time()
-        print(f'--- Coupling step {k+1}/{n_coupling_steps} ---')
+        step_label = f"{k+1}/{n_coupling_steps}"
 
         # ---- 1. Run OpenEdge ----
         mass_loss_file = os.path.join(oe_run_dir, 'output', 'mass_loss.txt')
@@ -333,7 +695,6 @@ def run_coupling(config):
         chunk_script = os.path.join(oe_run_dir, f'in.chunk_{k:04d}')
 
         if k == 0:
-            # First chunk: use full template (sets up geometry, species, etc.)
             with open(oe_template, 'r') as fin:
                 template_content = fin.read()
             with open(chunk_script, 'w') as fout:
@@ -341,39 +702,53 @@ def run_coupling(config):
                 fout.write(f'\nrun {n_oe_steps}\n')
                 fout.write(f'write_restart restart.dat\n')
         else:
-            # Subsequent chunks: read restart, redefine fixes/computes/dumps
             write_openedge_continue_script(
                 chunk_script, oe_template, n_oe_steps, plasma_h5_path)
 
-        print(f'  Running OpenEdge ({n_oe_steps} steps, '
-              f'{"init" if k == 0 else "restart"})...')
-        oe_cmd = f'mpirun -np {mpi_np_oe} {oe_binary} -in {os.path.basename(chunk_script)}'
-        result = subprocess.run(oe_cmd, shell=True, cwd=oe_run_dir,
-                                capture_output=True, text=True, env={
-                                    **os.environ,
-                                    'LD_LIBRARY_PATH': '/usr/lib/x86_64-linux-gnu/hdf5/serial'
-                                })
+        mode = "init" if k == 0 else "restart"
+        with console.status(
+                f"[yellow]Step {step_label}[/yellow]  "
+                f"Running OpenEdge ({n_oe_steps} steps, {mode})...",
+                spinner="dots"):
+            oe_cmd = (f'mpirun -np {mpi_np_oe} {oe_binary} '
+                      f'-in {os.path.basename(chunk_script)}')
+            result = subprocess.run(oe_cmd, shell=True, cwd=oe_run_dir,
+                                    capture_output=True, text=True, env={
+                                        **os.environ,
+                                        'LD_LIBRARY_PATH': '/usr/lib/x86_64-linux-gnu/hdf5/serial'
+                                    })
+
+        npart = 0
+        li_source = 0.0
+        n_active = 0
         if result.returncode != 0:
-            print(f'  ERROR: OpenEdge failed:\n{result.stderr[-500:]}')
-            # Save stderr for debugging
+            console.print(f"  [red]OpenEdge failed (rc={result.returncode}), "
+                          f"continuing with zero source[/red]")
             with open(os.path.join(oe_run_dir, f'error_{k:04d}.log'), 'w') as ef:
                 ef.write(result.stdout + '\n' + result.stderr)
-            break
-        print(f'  OpenEdge done.')
-
-        # ---- 2. Read mass loss and map to SOLPS ----
-        if not os.path.exists(mass_loss_file):
-            print(f'  WARNING: No mass_loss file, skipping source update')
             source_new = np.zeros((nxp2, nyp2))
         else:
-            xc, yc, dm, dn = read_last_mass_loss_frame(mass_loss_file)
-            if xc is not None and len(xc) > 0:
-                source_new = map_source_to_solps(xc, yc, dn, solps, dt_window)
-                total_source = np.sum(source_new)
-                print(f'  Li source: {total_source:.3e} atoms/s '
-                      f'({np.count_nonzero(source_new)} active cells)')
-            else:
+            npart = parse_openedge_npart(result.stdout)
+            npart_color = "green" if npart and npart > 0 else "red"
+            console.print(
+                f"  [green]OpenEdge done[/green]  "
+                f"Particles: [{npart_color}]{npart}[/{npart_color}]")
+
+            # ---- 2. Read mass loss and map to SOLPS ----
+            if not os.path.exists(mass_loss_file):
+                console.print("  [yellow]No mass_loss file, zero source[/yellow]")
                 source_new = np.zeros((nxp2, nyp2))
+            else:
+                xc, yc, dm, dn = read_last_mass_loss_frame(mass_loss_file)
+                if xc is not None and len(xc) > 0:
+                    source_new = map_source_to_solps(xc, yc, dn, solps, dt_window)
+                    li_source = np.sum(source_new)
+                    n_active = np.count_nonzero(source_new)
+                    console.print(
+                        f"  Li source: [cyan]{li_source:.3e}[/cyan] atoms/s  "
+                        f"({n_active} active SOLPS cells)")
+                else:
+                    source_new = np.zeros((nxp2, nyp2))
 
         # ---- 3. Apply under-relaxation ----
         if k == 0:
@@ -382,55 +757,160 @@ def run_coupling(config):
             source_used = alpha * source_new + (1 - alpha) * source_prev
         source_prev = source_used.copy()
 
+        # ---- Stop if no particles and no source ----
+        if npart == 0 and np.sum(np.abs(source_used)) == 0:
+            console.print(
+                f"  [yellow]All droplets evaporated and Li source is zero — "
+                f"stopping coupling loop[/yellow]")
+            # Still record history for this step
+            history.append({
+                'step_label': step_label,
+                'npart': 0,
+                'li_source': 0.0,
+                'ne_min': ne_prev.min(), 'ne_max': ne_prev.max(),
+                'te_min': te_prev.min(), 'te_max': te_prev.max(),
+                'dne_max': None, 'dte_max': None,
+                'elapsed': time.time() - t0,
+            })
+            break
+
         # ---- 4. Write source2d and run SOLPS ----
         source_file = f'source2d.{k+1:05d}'
         solps.write_source2d(source_used, source_file)
 
-        # Write single-window sources profile
         solps.write_sources_profile_chain(
             n_windows=1,
             dt_windows=[dt_window],
             t_start=k * dt_window)
 
-        # Update b2mn.dat for N_solps steps
         update_b2mn_ntim(solps_run_dir, n_solps_steps)
 
+        # Ensure b2fstati exists for SOLPS restart
+        b2fstate_path = os.path.join(solps_run_dir, 'b2fstate')
+        b2fstati_path = os.path.join(solps_run_dir, 'b2fstati')
+        baserun_stati = os.path.join(solps_base_dir, 'b2fstati')
+        if k > 0 and os.path.exists(b2fstate_path) \
+                and os.path.getsize(b2fstate_path) > 10000:
+            # Use latest SOLPS output as restart
+            shutil.copy2(b2fstate_path, b2fstati_path)
+        elif not os.path.exists(b2fstati_path) \
+                or os.path.getsize(b2fstati_path) < 10000:
+            # Restore from baserun if b2fstati is missing or empty
+            if os.path.exists(baserun_stati):
+                shutil.copy2(baserun_stati, b2fstati_path)
+                console.print(f"  [dim]Restored b2fstati from baserun[/dim]")
+
         # Clean SOLPS output so b2run doesn't skip ("up to date")
-        for f in ['b2mn.prt', 'b2fstate', 'b2fplasma', 'b2fparam']:
-            p = os.path.join(solps_run_dir, f)
+        for f_clean in ['b2mn.prt', 'b2fstate', 'b2fplasma', 'b2fparam']:
+            p = os.path.join(solps_run_dir, f_clean)
             if os.path.exists(p):
                 os.remove(p)
 
-        print(f'  Running SOLPS ({n_solps_steps} steps)...')
-        if solps_run_script:
-            solps_cmd = f'{solps_run_script} {mpi_np_solps}'
-            cwd = coupled_dir or os.path.dirname(solps_run_dir)
-        else:
-            solps_cmd = f'b2run b2mn'
-            if mpi_np_solps > 1:
-                solps_cmd = f'b2run -m "mpirun -np {mpi_np_solps}" b2mn'
-            cwd = solps_run_dir
-        result = subprocess.run(solps_cmd, shell=True, cwd=cwd,
-                                capture_output=True, text=True)
+        with console.status(
+                f"[yellow]Step {step_label}[/yellow]  "
+                f"Running SOLPS ({n_solps_steps} steps)...",
+                spinner="dots"):
+            if solps_run_script:
+                solps_cmd = f'{solps_run_script} {mpi_np_solps}'
+                cwd = coupled_dir or os.path.dirname(solps_run_dir)
+            else:
+                solps_cmd = f'b2run b2mn'
+                if mpi_np_solps > 1:
+                    solps_cmd = f'b2run -m "mpirun -np {mpi_np_solps}" b2mn'
+                cwd = solps_run_dir
+            result = subprocess.run(solps_cmd, shell=True, cwd=cwd,
+                                    capture_output=True, text=True)
+
+        # Check SOLPS result — also check run.log for errors
+        solps_log = os.path.join(solps_run_dir, 'run.log')
+        solps_ok = True
         if result.returncode != 0:
-            print(f'  WARNING: SOLPS may have issues:\n{result.stderr[-300:]}')
-        print(f'  SOLPS done.')
+            console.print(f"  [red]SOLPS failed (rc={result.returncode})[/red]")
+            solps_ok = False
+        if os.path.exists(solps_log):
+            with open(solps_log, 'r') as lf:
+                log_text = lf.read()
+            if 'xerrab--error' in log_text.lower() or 'XERRAB' in log_text:
+                # Extract the actual error messages
+                err_lines = [l.strip() for l in log_text.splitlines()
+                             if 'XERRAB' in l or 'Error:' in l
+                             or 'error' in l.lower() and 'xerrab' not in l.lower()]
+                for el in err_lines[:5]:
+                    console.print(f"    [red]{el}[/red]")
+                solps_ok = False
+        if not solps_ok:
+            # Check if b2fstate was produced despite errors
+            new_state = os.path.join(solps_run_dir, 'b2fstate')
+            if not os.path.exists(new_state) or os.path.getsize(new_state) < 10000:
+                console.print(f"  [red]No valid b2fstate produced, "
+                              f"plasma unchanged[/red]")
 
         # ---- 5. Read updated plasma and refresh OpenEdge ----
-        # Reload state from .mat (b2fstate.mat is updated after each run)
+        dne_max = None
+        dte_max = None
+        ne_min = ne_prev.min()
+        ne_max = ne_prev.max()
+        te_min = te_prev.min()
+        te_max = te_prev.max()
+
         try:
             solps.load_plasma_state()
             solps.write_plasma_h5(plasma_h5_path)
-            print(f'  Updated {plasma_h5_path}')
+
+            fields_new = solps.get_plasma_fields()
+            ne_new = np.array(fields_new['ne'])
+            te_new = np.array(fields_new['te']) / eV
+
+            ne_min, ne_max = ne_new.min(), ne_new.max()
+            te_min, te_max = te_new.min(), te_new.max()
+
+            # Compute relative changes
+            ne_mask = ne_prev > 1e10
+            te_mask = te_prev > 0.01
+            dne_rel = np.zeros_like(ne_new)
+            dte_rel = np.zeros_like(te_new)
+            dne_rel[ne_mask] = (ne_new[ne_mask] - ne_prev[ne_mask]) / ne_prev[ne_mask]
+            dte_rel[te_mask] = (te_new[te_mask] - te_prev[te_mask]) / te_prev[te_mask]
+            dne_max = float(np.max(np.abs(dne_rel)))
+            dte_max = float(np.max(np.abs(dte_rel)))
+
+            ne_prev = ne_new
+            te_prev = te_new
+
+            console.print(f"  [green]SOLPS done[/green]  "
+                          f"|dne/ne|={dne_max:.2e}  |dTe/Te|={dte_max:.2e}")
         except Exception as e:
-            print(f'  WARNING: Could not update plasma: {e}')
+            console.print(f"  [red]Could not update plasma: {e}[/red]")
 
         elapsed = time.time() - t0
-        print(f'  Step {k+1} completed in {elapsed:.1f}s\n')
 
-    print(f'{"="*60}')
-    print(f'Coupling complete: {n_coupling_steps} steps')
-    print(f'{"="*60}')
+        # Record history
+        history.append({
+            'step_label': step_label,
+            'npart': npart,
+            'li_source': li_source,
+            'ne_min': ne_min, 'ne_max': ne_max,
+            'te_min': te_min, 'te_max': te_max,
+            'dne_max': dne_max, 'dte_max': dte_max,
+            'elapsed': elapsed,
+        })
+
+        # Archive step output
+        save_step_output(k, coupled_dir or os.path.dirname(solps_run_dir),
+                         solps_run_dir, oe_run_dir, plasma_h5_path,
+                         source_used, solps)
+
+        # Print running summary table
+        console.print()
+        console.print(make_history_table(history))
+        console.print()
+
+    # Final summary
+    total_time = sum(h['elapsed'] for h in history)
+    console.print(Panel(
+        f"[bold green]Coupling complete[/bold green]  "
+        f"{n_coupling_steps} steps in {total_time:.1f}s",
+        border_style="green", expand=False))
 
 
 def update_b2mn_ntim(run_dir, ntim):
