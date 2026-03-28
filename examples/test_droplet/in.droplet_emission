@@ -87,13 +87,13 @@ compute cnear plasma/fields all file ../test_evaporation/input/plasma.h5 &
     bx by bz temp_e dens_e temp_i dens_i parrflow er et ez
 
 fix fevap_1 evaporation 1 LigamentOuter_1 mass ${md1} radius ${rd1} temp ${temp_droplet} &
-    heatflux/file ../test_evaporation/input/heatflux.fix.h5 heatflux/scale ${heatflux_scale}
+    heatflux/compute cnear heatflux/scale ${heatflux_scale}
 
 fix fevap_2 evaporation 1 LigamentOuter_2 mass ${md2} radius ${rd2} temp ${temp_droplet} &
-    heatflux/file ../test_evaporation/input/heatflux.fix.h5 heatflux/scale ${heatflux_scale}
+    heatflux/compute cnear heatflux/scale ${heatflux_scale}
 
 fix fevap_3 evaporation 1 LigamentOuter_3 mass ${md3} radius ${rd3} temp ${temp_droplet} &
-    heatflux/file ../test_evaporation/input/heatflux.fix.h5 heatflux/scale ${heatflux_scale}
+    heatflux/compute cnear heatflux/scale ${heatflux_scale}
 
 fix fdrag1 drag 1 2.0 1 &
     plasma c_cnear[4] c_cnear[6] c_cnear[7] c_cnear[8] &
