@@ -106,12 +106,6 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
   if (heatflux_mode == HF_FILE && heatfluxFilename.empty())
     error->all(FLERR,"Fix evaporation: empty filename for heatflux/file");
 
-  per_grid_flag = 1;
-  per_grid_freq = nevery;
-  size_per_grid_cols = 3;
-  maxgrid = 0;
-  array_grid = NULL;
-
   }
 
 
@@ -121,7 +115,6 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
 FixEvap::~FixEvap()
 {
   if (copymode) return;
-  memory->destroy(array_grid);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -147,19 +140,6 @@ void FixEvap::init() {
     error->all(FLERR,"Fix evaporation: must provide heatflux/constant <W/m^2> or heatflux/file <h5>");
   }
 
-    if (grid->nlocal > maxgrid) {
-    maxgrid = grid->maxlocal;
-    memory->destroy(array_grid);
-    memory->create(array_grid,maxgrid,size_per_grid_cols,"array_grid");
-  }
-
-  // bigint nbytes = (bigint) grid->nlocal * size_per_grid_cols;
-  // if (nbytes) memset(&array_grid[0][0],0,nbytes*sizeof(double));
-
-  if (grid->nlocal) {
-    memset(&array_grid[0][0], 0, grid->nlocal * size_per_grid_cols * sizeof(double));
-  }
-
 }
 
 /* ---------------------------------------------------------------------- */
@@ -167,15 +147,6 @@ void FixEvap::init() {
 void FixEvap::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
-  // Zero per-cell accumulators once per full step, before the first half-kick.
-  // end_of_step calls evap_half again; it must NOT re-zero the arrays there.
-  if (grid->nlocal > maxgrid) {
-    maxgrid = grid->maxlocal;
-    memory->destroy(array_grid);
-    memory->create(array_grid, maxgrid, size_per_grid_cols, "array_grid");
-  }
-  if (grid->nlocal)
-    memset(&array_grid[0][0], 0, grid->nlocal * size_per_grid_cols * sizeof(double));
   evap_half(0.5 * update->dt);
 }
 
@@ -190,9 +161,7 @@ void FixEvap::end_of_step()
 ------------------------------------------------------------------------- */
 
 double FixEvap::memory_usage() {
-  double bytes = 0.0;
-  bytes += maxgrid * size_per_grid_cols * sizeof(double);
-  return bytes;
+  return 0.0;
 }
 
 
@@ -200,17 +169,6 @@ double FixEvap::memory_usage() {
 void FixEvap::evap_half(double dt_half)
 {
   if ((update->ntimestep % nevery) != 0) return;
-
-  // (Re)alloc per-grid arrays if the grid grew since start_of_step.
-  // Zeroing is done once per step in start_of_step() so both half-kicks accumulate.
-  if (grid->nlocal > maxgrid) {
-    maxgrid = grid->maxlocal;
-    memory->destroy(array_grid);
-    memory->create(array_grid, maxgrid, size_per_grid_cols, "array_grid");
-    // Grid grew mid-step: zero the newly allocated block so no garbage leaks in.
-    if (grid->nlocal)
-      memset(&array_grid[0][0], 0, grid->nlocal * size_per_grid_cols * sizeof(double));
-  }
 
   Particle::OnePart *parts = particle->particles;
   const int nlocal = particle->nlocal;
@@ -230,8 +188,7 @@ void FixEvap::evap_half(double dt_half)
     if (set_radius > 0.0 && parts[ip].radius <= 0.0) parts[ip].radius = set_radius;
     if (set_temp   > 0.0 && parts[ip].temp   <= 0.0) parts[ip].temp   = set_temp;
 
-    const int icell = parts[ip].icell;
-    droplet_evaporation_model(&parts[ip], dt_half, icell);
+    droplet_evaporation_model(&parts[ip], dt_half);
 
     // Remove droplet after 90% mass loss relative to its initial reference mass.
     const double m0_ref = (set_mass > 0.0) ? set_mass : particle->species[is].mass;
@@ -254,8 +211,7 @@ void FixEvap::evap_half(double dt_half)
 Sergey's Evaporation Model
 ----------------------------------------------------------------------*/
 void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
-                                        const double dt_half,
-                                        const int icell)
+                                        const double dt_half)
 {
   // --- constants ---
   const double AM   = 1.53e-26;      // Li atom mass [kg/atom]
@@ -292,7 +248,7 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
     error->one(FLERR,"Fix evaporation: heatflux mode not set properly");
   }
 
-  if (Qs <= 0.0) 
+  if (Qs <= 0.0)
   {
         // --- write back ---
     ip->radius = radius;
@@ -382,17 +338,6 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
   // table shared across all ranks and particles.  Per-particle mass lives
   // in ip->mass (already set above).  Writing the species table from a
   // per-particle loop is a race condition under MPI and Kokkos.
-
-  // Per-cell accumulators: mass lost (kg), atoms lost, heat absorbed (J).
-  // Uses += so multiple droplets per cell and both half-kicks accumulate correctly.
-  if (icell >= 0 && icell < grid->nlocal && array_grid) {
-    const double dm = Rho * (4.0/3.0) * MY_PI *
-                      (radius*radius*radius - R_new*R_new*R_new);  // kg, >= 0
-    array_grid[icell][0] += dm;                                    // kg
-    array_grid[icell][1] += dm / AM;                               // atoms
-    array_grid[icell][2] += Qs * 4.0*MY_PI * R_new*R_new * DT;    // J
-    
-  }
 
 }
 /* ----------------------------------------------------------------------

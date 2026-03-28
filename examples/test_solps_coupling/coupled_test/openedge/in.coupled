@@ -63,9 +63,10 @@ fix    eS efield/grid c_cnear[9] c_cnear[10] c_cnear[11]
 global efield grid eS 0
 global boris_subcycles 5
 
-# Mass loss accumulation and dump — Ndump controls frequency
-# For coupling: set Ndump = n_oe_steps to get one dump at end of chunk
-fix fml ave/grid all 1 ${Ndump} ${Ndump} f_fevap[1] f_fevap[2]
-dump d_ml grid all ${Ndump} output/mass_loss.txt id xc yc f_fml[1] f_fml[2]
+# Particle dump for coupling — radius change between first and last frame
+# gives the Li source via dm = rho * 4/3 * pi * (r0^3 - r1^3).
+dump d_part particle all ${Ndump} output/particles.txt &
+    id type x y z vx vy vz temp radius
+dump_modify d_part format float "%.15e"
 
 stats ${Ndump}
