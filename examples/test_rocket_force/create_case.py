@@ -69,33 +69,46 @@ vy0 = 21.0707
 vphi0 = 0.0
 
 # ======================================================================
-# Write heatflux HDF5 with grad_Te
+# Write plasma.h5 with all fields (including q_mag and grad_Te)
 # ======================================================================
-hf_file = "heatflux_rocket.h5"
-print(f"Writing {hf_file}...")
-with h5py.File(hf_file, 'w') as f:
-    # Write both root-level and grouped coordinate datasets so the file is
-    # accepted by the different heat-flux readers used across OpenEdge trees.
-    f.create_dataset('R', data=r_arr)
-    f.create_dataset('Z', data=z_arr)
+plasma_file = "plasma_rocket.h5"
+print(f"Writing {plasma_file}...")
+with h5py.File(plasma_file, 'w') as f:
     f.create_dataset('r', data=r_arr)
     f.create_dataset('z', data=z_arr)
-    grid = f.create_group('grid')
-    grid.create_dataset('Rc', data=r_arr)
-    grid.create_dataset('Zc', data=z_arr)
-    rr, zz = np.meshgrid(r_arr, z_arr)
-    grid.create_dataset('R', data=rr)
-    grid.create_dataset('Z', data=zz)
 
-    # Uniform heat flux
-    q_mag = np.full((nz, nr), q_mag_val)
-    f.create_dataset('q_mag', data=q_mag)
+    # Uniform plasma background
+    shape = (nz, nr)
+    f.create_dataset('dens_e', data=np.full(shape, ne0))
+    f.create_dataset('temp_e', data=np.full(shape, te0))
+    f.create_dataset('dens_i', data=np.full(shape, ne0))
+    f.create_dataset('temp_i', data=np.full(shape, ti0))
+    f.create_dataset('parr_flow', data=np.full(shape, vp0))
+    f.create_dataset('parr_flow_r', data=np.full(shape, 0.0))
+    f.create_dataset('parr_flow_t', data=np.full(shape, 0.0))
+    f.create_dataset('parr_flow_z', data=np.full(shape, vp0))
 
-    # Uniform temperature gradient (dTe/dR > 0, dTe/dZ = 0)
-    grad_r = np.full((nz, nr), grad_te_r_val)
-    grad_z = np.full((nz, nr), grad_te_z_val)
-    f.create_dataset('grad_te_r', data=grad_r)
-    f.create_dataset('grad_te_z', data=grad_z)
+    # Heat flux
+    f.create_dataset('q_mag', data=np.full(shape, q_mag_val))
+
+    # Temperature gradients
+    f.create_dataset('grad_te_r', data=np.full(shape, grad_te_r_val))
+    f.create_dataset('grad_te_t', data=np.full(shape, 0.0))
+    f.create_dataset('grad_te_z', data=np.full(shape, grad_te_z_val))
+    f.create_dataset('grad_ti_r', data=np.full(shape, 0.0))
+    f.create_dataset('grad_ti_t', data=np.full(shape, 0.0))
+    f.create_dataset('grad_ti_z', data=np.full(shape, 0.0))
+
+# Write dummy bfield.h5 (no magnetic field for this test)
+bfield_file = "bfield_rocket.h5"
+with h5py.File(bfield_file, 'w') as f:
+    f.create_dataset('r', data=r_arr)
+    f.create_dataset('z', data=z_arr)
+    shape = (nz, nr)
+    f.create_dataset('br', data=np.zeros(shape))
+    f.create_dataset('bt', data=np.zeros(shape))
+    f.create_dataset('bz', data=np.zeros(shape))
+print(f"Written {bfield_file}")
 
 print(f"  q_mag = {q_mag_val:.1e} W/m^2")
 print(f"  grad_te_r = {grad_te_r_val:.3e}")
@@ -159,19 +172,22 @@ for eta in eta_values:
         f.write(f"variable dt equal {dt}\n")
         f.write(f"variable N equal {nsteps}\n\n")
         f.write("variable pmass particle mass\n\n")
-        f.write(f"variable te grid \"{te0}\"\n")
-        f.write(f"variable ti grid \"{ti0}\"\n")
-        f.write(f"variable ni grid \"{ne0}\"\n")
-        f.write(f"variable vp grid \"{vp0}\"\n")
-        f.write(f"variable Br grid \"{br0}\"\n")
-        f.write(f"variable Bt grid \"{bt0}\"\n")
-        f.write(f"variable Bz grid \"{bz0}\"\n\n")
+        f.write(f"# Plasma fields from unified HDF5 (includes q_mag, grad_te)\n")
+        f.write(f"compute cp plasma/fields all file {plasma_file} {bfield_file} &\n")
+        f.write(f"    bx by bz temp_e dens_e temp_i dens_i parrflow\n\n")
         f.write(f"# Evaporation with rocket force eta={eta}\n")
         f.write(f"fix fevap evaporation 1 DropletSource &\n")
         f.write(f"    mass {md0:.6e} radius {rd0} temp {Td0} &\n")
-        f.write(f"    heatflux/file {hf_file} &\n")
+        f.write(f"    heatflux/compute cp &\n")
         f.write(f"    rocket_eta {eta}\n\n")
-        f.write("# test_droplet-like transport with synthetic constant plasma inputs\n")
+        f.write("# Drag with constant plasma (no B-field)\n")
+        f.write(f"variable Br grid \"0\"\n")
+        f.write(f"variable Bt grid \"0\"\n")
+        f.write(f"variable Bz grid \"0\"\n")
+        f.write(f"variable te grid \"{te0}\"\n")
+        f.write(f"variable ti grid \"{ti0}\"\n")
+        f.write(f"variable ni grid \"{ne0}\"\n")
+        f.write(f"variable vp grid \"0\"\n")
         f.write(f"fix fdrag drag 1 2.0 1 plasma te ti ni vp bfield Br Bt Bz &\n")
         f.write(f"    gravity 0 -9.81 0 model epstein mass {md0:.6e} radius {rd0} temp {Td0} &\n")
         f.write("    cylindrical yes\n\n")

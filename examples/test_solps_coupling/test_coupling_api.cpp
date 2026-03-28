@@ -60,7 +60,7 @@ int main(int argc, char **argv)
   char cmd[512];
   snprintf(cmd, sizeof(cmd),
     "fix fevap evaporation 1 DropletSource mass %.10e radius %.6e temp 773.15 "
-    "heatflux/file ../test_evaporation/input/heatflux.fix.h5 heatflux/scale 1.0",
+    "heatflux/compute cnear heatflux/scale 1.0",
     md, rd);
   sparta_command(oe, cmd);
 
