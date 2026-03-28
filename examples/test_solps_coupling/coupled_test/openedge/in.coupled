@@ -44,7 +44,7 @@ compute cnear plasma/fields all file plasma.h5 &
     bx by bz temp_e dens_e temp_i dens_i parrflow er et ez
 
 fix fevap evaporation 1 DropletSource mass ${md2} radius ${rd2} temp ${temp_droplet} &
-    heatflux/compute cnear heatflux/scale ${heatflux_scale}
+    heatflux/compute cnear heatflux/scale ${heatflux_scale} rocket_eta 0.5
 
 fix fdrag drag 1 2.0 1 &
     plasma c_cnear[4] c_cnear[6] c_cnear[7] c_cnear[8] &
