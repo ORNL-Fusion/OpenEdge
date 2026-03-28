@@ -649,6 +649,8 @@ def run_coupling(config):
     bfield_h5_path   = config.get('bfield_h5', '')
     solps_run_script = config.get('solps_run_script', '')
     coupled_dir      = config.get('coupled_dir', '')
+    plasma_nr        = config.get('plasma_nr', 200)
+    plasma_nz        = config.get('plasma_nz', 400)
 
     # Initialize SOLPS interface
     solps = SolpsInterface(solps_run_dir, solps_base_dir)
@@ -656,7 +658,7 @@ def run_coupling(config):
     solps.load_plasma_state()
 
     # Write initial plasma.h5 from SOLPS state
-    solps.write_plasma_h5(plasma_h5_path)
+    solps.write_plasma_h5(plasma_h5_path, nr=plasma_nr, nz=plasma_nz)
 
     nxp2, nyp2 = solps.nx + 2, solps.ny + 2
     source_prev = np.zeros((nxp2, nyp2))
@@ -797,7 +799,7 @@ def run_coupling(config):
                 console.print(f"  [red]Warmup {w+1}: Could not read state: {e}[/red]")
 
         # Write converged plasma.h5 for OpenEdge
-        solps.write_plasma_h5(plasma_h5_path)
+        solps.write_plasma_h5(plasma_h5_path, nr=plasma_nr, nz=plasma_nz)
 
         # Archive warmup output
         save_warmup_output(solps_run_dir, coupled_dir or
@@ -981,7 +983,7 @@ def run_coupling(config):
         te_max = te_prev.max()
 
         solps.load_plasma_state()
-        solps.write_plasma_h5(plasma_h5_path)
+        solps.write_plasma_h5(plasma_h5_path, nr=plasma_nr, nz=plasma_nz)
 
         fields_new = solps.get_plasma_fields()
         ne_new = np.array(fields_new['ne'])
