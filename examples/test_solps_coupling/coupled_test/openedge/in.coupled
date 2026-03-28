@@ -3,7 +3,7 @@
 
 variable dt    equal 1e-05
 variable Ndump equal 1000   # set to n_oe_steps for coupling (one dump per chunk)
-variable heatflux_scale equal 1.
+variable heatflux_scale equal 2.0
 variable temp_droplet equal 773.15
 variable temp_emit    equal 1.e20
 variable Rho    equal 534.0
@@ -64,9 +64,8 @@ fix    eS efield/grid c_cnear[9] c_cnear[10] c_cnear[11]
 global efield grid eS 0
 global boris_subcycles 5
 
-# Particle dump for coupling — radius change between first and last frame
-# gives the Li source via dm = rho * 4/3 * pi * (r0^3 - r1^3).
-dump d_part particle all ${Ndump} output/particles.txt &
+# Particle dump every step — captures full trajectory and mass loss
+dump d_part particle all 1 output/particles.txt &
     id type x y z vx vy vz temp radius
 dump_modify d_part format float "%.15e"
 
