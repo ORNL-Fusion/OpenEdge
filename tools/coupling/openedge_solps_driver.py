@@ -222,8 +222,15 @@ def read_openedge_mass_loss(filepath):
     return np.array(xc), np.array(yc), np.array(dm), np.array(dn)
 
 
-def read_last_mass_loss_frame(filepath):
-    """Read the LAST timestep frame from a multi-frame mass_loss file."""
+def read_mass_loss_file(filepath):
+    """Read ALL timestep frames from a mass_loss file and sum them.
+
+    The fix ave/grid outputs time-averaged dm/dn per dump interval.
+    We sum across all non-zero frames to get the total mass loss
+    over the full coupling window.
+
+    Returns (xc, yc, dm_total, dn_total) arrays, or (None,)*4 if empty.
+    """
     frames = []
     current_lines = []
     with open(filepath, 'r') as f:
@@ -238,25 +245,46 @@ def read_last_mass_loss_frame(filepath):
     if not frames:
         return None, None, None, None
 
-    # Parse last frame
-    xc, yc, dm, dn = [], [], [], []
-    in_data = False
-    for line in frames[-1]:
-        line = line.strip()
-        if line.startswith('ITEM: CELLS'):
-            in_data = True
+    # Parse first data frame to get cell coords
+    xc, yc = None, None
+    dm_total, dn_total = None, None
+
+    for frame in frames:
+        dm_frame, dn_frame = [], []
+        xc_frame, yc_frame = [], []
+        in_data = False
+        for line in frame:
+            line = line.strip()
+            if line.startswith('ITEM: CELLS'):
+                in_data = True
+                continue
+            if line.startswith('ITEM:'):
+                in_data = False
+                continue
+            if in_data:
+                parts = line.split()
+                if len(parts) >= 5:
+                    xc_frame.append(float(parts[1]))
+                    yc_frame.append(float(parts[2]))
+                    dm_frame.append(float(parts[3]))
+                    dn_frame.append(float(parts[4]))
+
+        if not dm_frame:
             continue
-        if line.startswith('ITEM:'):
-            in_data = False
-            continue
-        if in_data:
-            parts = line.split()
-            if len(parts) >= 5:
-                xc.append(float(parts[1]))
-                yc.append(float(parts[2]))
-                dm.append(float(parts[3]))
-                dn.append(float(parts[4]))
-    return np.array(xc), np.array(yc), np.array(dm), np.array(dn)
+
+        dm_arr = np.array(dm_frame)
+        dn_arr = np.array(dn_frame)
+
+        if xc is None:
+            xc = np.array(xc_frame)
+            yc = np.array(yc_frame)
+            dm_total = dm_arr
+            dn_total = dn_arr
+        else:
+            dm_total += dm_arr
+            dn_total += dn_arr
+
+    return xc, yc, dm_total, dn_total
 
 
 # ======================================================================
@@ -383,6 +411,12 @@ def write_openedge_continue_script(output_script, template_script, n_steps,
         if first_word in ('timestep', 'compute', 'fix', 'dump',
                           'global', 'variable', 'surf_collide', 'surf_react',
                           'surf_modify', 'stats', 'mixture', 'group'):
+            # Substitute Ndump to match n_steps
+            if first_word == 'variable' and 'Ndump' in stripped:
+                ndump = max(1, n_steps // 5)
+                stripped = re.sub(
+                    r'(variable\s+Ndump\s+equal\s+)\S+',
+                    rf'\1{ndump}', stripped)
             redefine_lines.append(stripped)
 
     # Sort: seed first, variables, then global setup (gridcut/fnum/temp),
@@ -745,6 +779,12 @@ def run_coupling(config):
         if k == 0:
             with open(oe_template, 'r') as fin:
                 template_content = fin.read()
+            # Substitute Ndump: dump several times per chunk for reliable I/O
+            ndump = max(1, n_oe_steps // 5)
+            template_content = re.sub(
+                r'(variable\s+Ndump\s+equal\s+)\S+',
+                rf'\g<1>{ndump}',
+                template_content)
             with open(chunk_script, 'w') as fout:
                 fout.write(template_content)
                 fout.write(f'\nrun {n_oe_steps}\n')
@@ -789,7 +829,7 @@ def run_coupling(config):
                 console.print("  [yellow]No mass_loss file, zero source[/yellow]")
                 source_new = np.zeros((nxp2, nyp2))
             else:
-                xc, yc, dm, dn = read_last_mass_loss_frame(mass_loss_file)
+                xc, yc, dm, dn = read_mass_loss_file(mass_loss_file)
                 if xc is not None and len(xc) > 0:
                     source_new = map_source_to_solps(xc, yc, dn, solps, dt_window)
                     li_source = np.sum(source_new)
