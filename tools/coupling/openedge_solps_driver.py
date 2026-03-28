@@ -440,12 +440,13 @@ def write_openedge_continue_script(output_script, template_script, n_steps,
         if first_word == 'global' and any(kw in stripped for kw in
                 ['gridcut', 'comm/sort']):
             continue
-        if first_word in ('timestep', 'compute', 'fix', 'dump',
+        if first_word in ('timestep', 'compute', 'fix', 'dump', 'dump_modify',
                           'global', 'variable', 'surf_collide', 'surf_react',
                           'surf_modify', 'stats', 'mixture', 'group'):
-            # Substitute Ndump to match n_steps
+            # Substitute Ndump to match n_steps (strip trailing comment)
             if first_word == 'variable' and 'Ndump' in stripped:
                 ndump = max(1, n_steps // 2)
+                stripped = re.sub(r'#.*$', '', stripped).strip()
                 stripped = re.sub(
                     r'(variable\s+Ndump\s+equal\s+)\S+',
                     rf'\1{ndump}', stripped)
@@ -473,6 +474,7 @@ def write_openedge_continue_script(output_script, template_script, n_steps,
         # global commands that reference fixes (efield, boris_subcycles)
         if word == 'global': return (8, 0)
         if word == 'dump': return (9, 0)
+        if word == 'dump_modify': return (9, 1)
         if word == 'stats': return (10, 0)
         return (11, 0)
     redefine_lines.sort(key=sort_key)
