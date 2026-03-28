@@ -51,7 +51,7 @@ int main(int argc, char **argv)
   // Plasma fields compute
   sparta_command(oe, (char*)"compute cnear plasma/fields all file "
     "../test_evaporation/input/plasma.h5 "
-    "../test_evaporation/input/bfield.h5 "
+    "equilibrium ../test_evaporation/input/g000001.00001_symm.X4.equ "
     "bx by bz temp_e dens_e temp_i dens_i parrflow er et ez");
 
   // Evaporation fix
