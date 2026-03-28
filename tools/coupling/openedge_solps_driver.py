@@ -449,7 +449,7 @@ def write_openedge_continue_script(output_script, template_script, n_steps,
                 stripped = re.sub(r'#.*$', '', stripped).strip()
                 stripped = re.sub(
                     r'(variable\s+Ndump\s+equal\s+)\S+',
-                    rf'\1{ndump}', stripped)
+                    rf'\g<1>{ndump}', stripped)
             redefine_lines.append(stripped)
 
     # Sort: seed first, variables, then global setup (gridcut/fnum/temp),
