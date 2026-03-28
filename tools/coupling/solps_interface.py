@@ -19,6 +19,7 @@ Usage:
 
 import numpy as np
 import os
+import sys
 import h5py
 
 try:
@@ -416,6 +417,29 @@ class SolpsInterface:
         na_main = fields['na'][:, :, 1]
         ni_reg = interp_field(na_main)
 
+        # Compute heat flux from SOLPS face fluxes if available
+        qmag_reg = None
+        try:
+            from pathlib import Path
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__),
+                                            '..', 'converters'))
+            from convert_solps_heatflux import compute_heatflux_cell_center
+            from convert_solps_plasma import _interp_field
+            rc_q, zc_q, qmag_q = compute_heatflux_cell_center(
+                Path(self.run_dir), method="jeremy_total")
+            mask_q = np.isfinite(qmag_q.ravel())
+            if mask_q.sum() > 10:
+                src_rz = np.column_stack([rc_q.ravel()[mask_q],
+                                          zc_q.ravel()[mask_q]])
+                RR, ZZ = np.meshgrid(r_grid, z_grid)
+                tgt_rz = np.column_stack([RR.ravel(), ZZ.ravel()])
+                qmag_reg = _interp_field(src_rz, qmag_q.ravel()[mask_q],
+                                         tgt_rz, len(z_grid), len(r_grid))
+                qmag_reg = np.nan_to_num(qmag_reg, nan=0.0)
+                print(f'  q_mag: [{qmag_reg.min():.2e}, {qmag_reg.max():.2e}] W/m^2')
+        except Exception as e:
+            print(f'  WARNING: could not compute q_mag: {e}')
+
         # Write HDF5
         with h5py.File(output_path, 'w') as f:
             f.create_dataset('r', data=r_grid)
@@ -435,6 +459,8 @@ class SolpsInterface:
             f.create_dataset('grad_ti_r', data=grad_ti_r)
             f.create_dataset('grad_ti_t', data=np.zeros_like(grad_ti_r))
             f.create_dataset('grad_ti_z', data=grad_ti_z)
+            if qmag_reg is not None:
+                f.create_dataset('q_mag', data=qmag_reg)
 
         print(f'Wrote {output_path}: r[{nr}] x z[{nz}], '
               f'ne=[{ne_reg.min():.2e}, {ne_reg.max():.2e}], '
