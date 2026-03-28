@@ -91,9 +91,6 @@ global efield grid eS 0
 global boris_subcycles 5
 
 
-fix fml_2 ave/grid all 1 ${Ndump} ${Ndump} f_fevap_2[1] f_fevap_2[2]
-
-dump d_ml grid all ${Ndump} output/mass_loss.txt id xc yc f_fml_2[1] f_fml_2[2]
 
 # ---------------------------------------------------------------------------
 
