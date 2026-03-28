@@ -710,11 +710,22 @@ def run_coupling(config):
             if os.path.exists(baserun_stati):
                 shutil.copy2(baserun_stati, b2fstati_path)
 
-        # Write zero-source profile
-        zero_source = np.zeros((nxp2, nyp2))
-        solps.write_source2d(zero_source, 'source2d.00001')
-        solps.write_sources_profile_chain(
-            n_windows=1, dt_windows=[1.0], t_start=0.0)
+        # Clean old source and profile files from previous runs
+        import glob as _glob
+        for old_src in _glob.glob(os.path.join(solps_run_dir, 'source2d.*')):
+            os.remove(old_src)
+        for old_sp in _glob.glob(os.path.join(solps_run_dir, 'b2.sources.profile*')):
+            os.remove(old_sp)
+        old_tw = os.path.join(solps_run_dir, 'sources_time_windows.txt')
+        if os.path.exists(old_tw):
+            os.remove(old_tw)
+
+        # Disable external source for warmup (no Li)
+        warmup_profile = os.path.join(solps_run_dir, 'b2.sources.profile')
+        with open(warmup_profile, 'w') as f:
+            f.write('&profile\n')
+            f.write('read_sna0_2d=.false.\n')
+            f.write('/\n')
 
         for w in range(n_warmup_steps):
             t0w = time.time()
