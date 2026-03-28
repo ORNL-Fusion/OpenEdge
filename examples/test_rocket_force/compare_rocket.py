@@ -22,6 +22,60 @@ except ModuleNotFoundError:
     plt = None
 
 
+def read_surf(filename):
+    """Read a SPARTA 2D surface file. Returns (R, Z) arrays for plotting."""
+    with open(filename, 'r') as f:
+        text = f.read()
+
+    # Find Points and Lines sections
+    pts = {}
+    in_points = False
+    in_lines = False
+    edges = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == 'Points':
+            in_points, in_lines = True, False
+            continue
+        if stripped == 'Lines':
+            in_points, in_lines = False, True
+            continue
+        if not stripped:
+            continue
+        parts = stripped.split()
+        if in_points and len(parts) >= 3:
+            try:
+                pid = int(parts[0])
+                pts[pid] = (float(parts[1]), float(parts[2]))
+            except ValueError:
+                continue
+        elif in_lines and len(parts) >= 3:
+            try:
+                edges.append((int(parts[1]), int(parts[2])))
+            except ValueError:
+                continue
+
+    # Chain edges into ordered point list
+    ordered = [edges[0][0], edges[0][1]]
+    used = {0}
+    for _ in range(len(edges) - 1):
+        tail = ordered[-1]
+        for j, (a, b) in enumerate(edges):
+            if j in used:
+                continue
+            if a == tail:
+                ordered.append(b)
+                used.add(j)
+                break
+            elif b == tail:
+                ordered.append(a)
+                used.add(j)
+                break
+    r = np.array([pts[i][0] for i in ordered])
+    z = np.array([pts[i][1] for i in ordered])
+    return r, z
+
+
 def read_particle_dump(pattern):
     """Read all frames from a SPARTA particle dump file sequence.
 
@@ -144,15 +198,28 @@ if plt is not None:
 
     linestyles = ['-', '--', ':']
 
-    # (a) Trajectory (R, Z)
+    # (a) Trajectory (R, Z) with wall and separatrix
     ax = axes[0]
+
+    # Load and plot geometry
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    wall_file = os.path.join(script_dir, 'wall.surf')
+    core_file = os.path.join(script_dir, 'core.surf')
+    if os.path.exists(wall_file):
+        rw, zw = read_surf(wall_file)
+        ax.plot(rw, zw, color='k', lw=2.0, label='Wall', zorder=1)
+    if os.path.exists(core_file):
+        rc, zc = read_surf(core_file)
+        ax.fill(rc, zc, color='lightyellow', edgecolor='forestgreen',
+                lw=1.5, label='Separatrix', zorder=1)
+
     for eta, c, lab, ls in zip(eta_values, colors, labels, linestyles):
         if eta in data:
             d = data[eta]
-            ax.plot(d['x'], d['y'], color=c, label=lab, linestyle=ls)
+            ax.plot(d['x'], d['y'], color=c, label=lab, linestyle=ls, zorder=3)
     ax.set_xlabel(r'$R$ [m]')
     ax.set_ylabel(r'$Z$ [m]')
-    ax.legend(frameon=False)
+    ax.legend(frameon=False, fontsize=9)
     ax.set_aspect('equal')
     ax.text(0.03, 0.95, '(a)', transform=ax.transAxes, fontweight='bold',
             va='top', fontsize=12)
