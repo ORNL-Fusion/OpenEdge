@@ -81,6 +81,12 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
       Qs_const = atof(arg[i+1]);
       i += 2;
 
+    } else if (strcmp(arg[i],"heatflux/compute") == 0) {
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing compute ID for 'heatflux/compute'");
+      heatflux_mode = HF_COMPUTE;
+      heatflux_compute_id = std::string(arg[i+1]);
+      i += 2;
+
     } else if (strcmp(arg[i],"heatflux/scale") == 0) {
       if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'heatflux/scale'");
       heatflux_scale = atof(arg[i+1]);
@@ -136,8 +142,15 @@ void FixEvap::init() {
     if (heatfluxFilename.empty())
       error->all(FLERR,"Fix evaporation: heatflux/file given but filename is empty");
     initializeHeatFluxData();               // reads + broadcasts
+  } else if (heatflux_mode == HF_COMPUTE) {
+    int icompute = modify->find_compute(heatflux_compute_id.c_str());
+    if (icompute < 0)
+      error->all(FLERR,"Fix evaporation: compute ID not found for heatflux/compute");
+    cp_heatflux = dynamic_cast<ComputePlasmaFields*>(modify->compute[icompute]);
+    if (!cp_heatflux)
+      error->all(FLERR,"Fix evaporation: heatflux/compute must reference a plasma/fields compute");
   } else if (heatflux_mode != HF_CONST) {
-    error->all(FLERR,"Fix evaporation: must provide heatflux/constant <W/m^2> or heatflux/file <h5>");
+    error->all(FLERR,"Fix evaporation: must provide heatflux/constant, heatflux/file, or heatflux/compute");
   }
 
 }
@@ -236,13 +249,22 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
     zpos = ip->x[2];
   }
 
-  // --- heat flux Qs (W/m^2) ---
+  // --- heat flux Qs (W/m^2) and grad_Te for rocket force ---
   double Qs = 0.0;
+  double grad_te_r_local = 0.0, grad_te_z_local = 0.0;
   if (heatflux_mode == HF_CONST) {
     Qs = Qs_const;
   } else if (heatflux_mode == HF_FILE) {
     HeatFluxParams hp = interpHeatFluxAtPos(rpos, zpos, heat_flux_data);
     Qs = hp.q_mag;
+    grad_te_r_local = hp.grad_te_r;
+    grad_te_z_local = hp.grad_te_z;
+    if (!std::isfinite(Qs) || Qs < 0.0) Qs = 0.0;
+  } else if (heatflux_mode == HF_COMPUTE) {
+    PlasmaFileParams pp = cp_heatflux->query_plasma_at_point(ip->x);
+    Qs = pp.q_mag;
+    grad_te_r_local = pp.grad_temp_e_r;
+    grad_te_z_local = pp.grad_temp_e_z;
     if (!std::isfinite(Qs) || Qs < 0.0) Qs = 0.0;
   } else {
     error->one(FLERR,"Fix evaporation: heatflux mode not set properly");
@@ -289,10 +311,9 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
   // Direction: along -grad_Te (away from hot plasma).
   // Magnitude: F = (dm/dt) * v_thermal_evap, where dm/dt = 4*pi*r^2 * Gevap * m_atom
   // v_thermal = sqrt(8 * k_B * T_droplet / (pi * m_atom))  [mean speed of half-Maxwellian]
-  if (rocket_eta > 0.0 && heatflux_mode == HF_FILE && mass_new > 0.0 && Gevap_atoms > 0.0) {
-    HeatFluxParams hp = interpHeatFluxAtPos(rpos, zpos, heat_flux_data);
-    const double gtr = hp.grad_te_r;
-    const double gtz = hp.grad_te_z;
+  if (rocket_eta > 0.0 && mass_new > 0.0 && Gevap_atoms > 0.0) {
+    const double gtr = grad_te_r_local;
+    const double gtz = grad_te_z_local;
     const double grad_mag = std::sqrt(gtr*gtr + gtz*gtz);
 
     // grad_Te is currently used only to set recoil direction, so do not impose

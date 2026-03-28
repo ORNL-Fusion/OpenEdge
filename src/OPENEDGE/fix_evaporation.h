@@ -9,6 +9,7 @@ FixStyle(evaporation,FixEvap)
 
 #include <H5Cpp.h>
 #include "fix.h"
+#include "compute_plasma_fields.h"
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -16,7 +17,7 @@ FixStyle(evaporation,FixEvap)
 
 namespace SPARTA_NS {
 
-enum HeatfluxMode { HF_NONE=0, HF_FILE, HF_CONST };
+enum HeatfluxMode { HF_NONE=0, HF_FILE, HF_CONST, HF_COMPUTE };
 
     struct HeatFluxData{
     std::vector<double> r;
@@ -55,6 +56,8 @@ protected:
     void start_of_step() override;
 
     std::string heatfluxFilename;
+    std::string heatflux_compute_id;
+    class ComputePlasmaFields *cp_heatflux;
     void droplet_evaporation_model(Particle::OnePart *ip,
                                         const double dt_half);
     double set_mass = -1.0;
