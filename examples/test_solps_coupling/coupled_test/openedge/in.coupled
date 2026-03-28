@@ -39,7 +39,8 @@ read_surf           core.surf invert group surfID2 particle check
 surf_modify         surfID2 collide wallColModel react wallReact
 
 # plasma fields - uses plasma.h5 in this directory (updated by coupling driver)
-compute cnear plasma/fields all file plasma.h5 bfield.h5 &
+compute cnear plasma/fields all file plasma.h5 &
+    equilibrium ../solps/baserun/g000001.00001_symm.X4.equ &
     bx by bz temp_e dens_e temp_i dens_i parrflow er et ez
 
 fix fevap evaporation 1 DropletSource mass ${md2} radius ${rd2} temp ${temp_droplet} &
