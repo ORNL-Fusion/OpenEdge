@@ -191,14 +191,47 @@ def write_openedge_continue_script(output_script, template_script, n_steps,
             continue
         # Keep: compute, fix, dump, global, variable, surf_collide, surf_react, surf_modify, stats
         first_word = stripped.split()[0] if stripped.split() else ''
-        if first_word in ('compute', 'fix', 'dump', 'global', 'variable',
-                          'surf_collide', 'surf_react', 'surf_modify',
-                          'stats', 'mixture', 'group'):
+        # Skip gridcut/comm/sort — hardcoded before balance_grid above
+        if first_word == 'global' and any(kw in stripped for kw in
+                ['gridcut', 'comm/sort']):
+            continue
+        if first_word in ('timestep', 'compute', 'fix', 'dump',
+                          'global', 'variable', 'surf_collide', 'surf_react',
+                          'surf_modify', 'stats', 'mixture', 'group'):
             redefine_lines.append(stripped)
+
+    # Sort: seed first, variables, then global setup (gridcut/fnum/temp),
+    # then surface/compute/fix, then global that references fixes (efield/boris),
+    # then dump/stats
+    def sort_key(line):
+        word = line.split()[0]
+        words = line.split()
+        if word == 'variable': return (0, 0)
+        if word == 'timestep': return (2, 0)
+        # global commands that set up grid/physics (must come before compute/fix)
+        if word == 'global' and len(words) > 1 and words[1] in (
+                'gridcut', 'fnum', 'nrho', 'temp', 'comm/sort'):
+            return (3, 0)
+        if word == 'mixture': return (4, 0)
+        if word == 'group': return (4, 0)
+        if word == 'surf_collide': return (5, 0)
+        if word == 'surf_react': return (5, 1)
+        if word == 'surf_modify': return (5, 2)
+        if word == 'compute': return (6, 0)
+        if word == 'fix': return (7, 0)
+        # global commands that reference fixes (efield, boris_subcycles)
+        if word == 'global': return (8, 0)
+        if word == 'dump': return (9, 0)
+        if word == 'stats': return (10, 0)
+        return (11, 0)
+    redefine_lines.sort(key=sort_key)
 
     with open(output_script, 'w') as f:
         f.write('# Auto-generated continue script (from restart)\n')
-        f.write('read_restart restart.dat\n\n')
+        f.write('read_restart restart.dat\n')
+        f.write('seed 12345\n')
+        f.write('global gridcut 0.0 comm/sort no\n')
+        f.write('balance_grid rcb cell\n\n')
         f.write('# Re-register fixes, computes, dumps (not saved in restart)\n')
         for line in redefine_lines:
             f.write(line + '\n')
@@ -361,6 +394,12 @@ def run_coupling(config):
 
         # Update b2mn.dat for N_solps steps
         update_b2mn_ntim(solps_run_dir, n_solps_steps)
+
+        # Clean SOLPS output so b2run doesn't skip ("up to date")
+        for f in ['b2mn.prt', 'b2fstate', 'b2fplasma', 'b2fparam']:
+            p = os.path.join(solps_run_dir, f)
+            if os.path.exists(p):
+                os.remove(p)
 
         print(f'  Running SOLPS ({n_solps_steps} steps)...')
         if solps_run_script:
