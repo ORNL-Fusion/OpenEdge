@@ -729,7 +729,10 @@ def run_coupling(config):
 
         for w in range(n_warmup_steps):
             t0w = time.time()
-            update_b2mn_ntim(solps_run_dir, warmup_ntim)
+            update_b2mn_dat(solps_run_dir, {
+                "b2mndr_ntim": str(warmup_ntim),
+                "b2sral_inputfile": "0",  # no external source during warmup
+            })
 
             # Copy b2fstate -> b2fstati for restart continuity
             b2fstate_path = os.path.join(solps_run_dir, 'b2fstate')
@@ -917,7 +920,10 @@ def run_coupling(config):
             dt_windows=[dt_window],
             t_start=k * dt_window)
 
-        update_b2mn_ntim(solps_run_dir, n_solps_steps)
+        update_b2mn_dat(solps_run_dir, {
+            "b2mndr_ntim": str(n_solps_steps),
+            "b2sral_inputfile": "2",  # read external source from b2.sources.profile
+        })
 
         # Ensure b2fstati exists for SOLPS restart
         b2fstate_path = os.path.join(solps_run_dir, 'b2fstate')
@@ -1029,8 +1035,14 @@ def run_coupling(config):
         border_style="green", expand=False))
 
 
-def update_b2mn_ntim(run_dir, ntim):
-    """Update b2mndr_ntim in b2mn.dat."""
+def update_b2mn_dat(run_dir, updates):
+    """Update key=value pairs in b2mn.dat.
+
+    Args:
+        run_dir: SOLPS run directory containing b2mn.dat
+        updates: dict of {key: value} to set, e.g.
+                 {"b2mndr_ntim": "100", "b2sral_inputfile": "0"}
+    """
     dat_path = os.path.join(run_dir, 'b2mn.dat')
     if not os.path.exists(dat_path):
         return
@@ -1040,13 +1052,22 @@ def update_b2mn_ntim(run_dir, ntim):
 
     with open(dat_path, 'w') as f:
         for line in lines:
-            if "'b2mndr_ntim'" in line:
-                # Preserve comment
-                parts = line.split('#')
-                comment = ' # ' + parts[1].strip() if len(parts) > 1 else ''
-                f.write(f"'b2mndr_ntim'                      '{ntim}'{comment}\n")
-            else:
+            matched = False
+            for key, val in updates.items():
+                if f"'{key}'" in line:
+                    parts = line.split('#')
+                    comment = ' # ' + parts[1].strip() if len(parts) > 1 else ''
+                    # Pad key to match SOLPS formatting
+                    f.write(f"'{key}'{' ' * max(1, 30 - len(key))}'{val}'{comment}\n")
+                    matched = True
+                    break
+            if not matched:
                 f.write(line)
+
+
+def update_b2mn_ntim(run_dir, ntim):
+    """Update b2mndr_ntim in b2mn.dat."""
+    update_b2mn_dat(run_dir, {"b2mndr_ntim": str(ntim)})
 
 
 # ======================================================================
