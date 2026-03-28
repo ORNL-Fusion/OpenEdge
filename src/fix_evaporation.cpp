@@ -339,7 +339,12 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
     const double gtz = hp.grad_te_z;
     const double grad_mag = std::sqrt(gtr*gtr + gtz*gtz);
 
-    if (grad_mag > 1.0e-10) {
+    // grad_Te is currently used only to set recoil direction, so do not impose
+    // a large absolute cutoff that depends on the chosen unit system.  Real
+    // SOLPS/OpenEdge plasma data stores grad_Te in eV/m, while some legacy
+    // heat-flux converters wrote J/m; both should activate the same branch as
+    // long as the vector is finite and nonzero.
+    if (std::isfinite(grad_mag) && grad_mag > 0.0) {
       const double kB = 1.380649e-23;             // J/K
       const double v_thermal = std::sqrt(8.0 * kB * TK / (MY_PI * AM));
       const double area = 4.0 * MY_PI * radius * radius;
