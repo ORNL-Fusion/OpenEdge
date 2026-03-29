@@ -2,13 +2,12 @@
 """
 Create test case for rocket force validation.
 
-Setup: single droplet in a synthetic plasma with a known temperature gradient.
-The case is intentionally self-contained, but it mirrors the single-droplet
-transport style used in test_droplet: nonzero initial launch velocity plus
-Epstein drag and gravity. Three cases are run with eta = 0.0, 0.5, 1.0.
-
-The temperature gradient is purely in the +R direction, so the rocket force
-should deflect the droplet in the -R direction while it falls under gravity.
+Setup: single droplet launched with the same initial particle state used in
+`test_droplet`, but evolved across three rocket-force values eta = 0.0, 0.5,
+1.0. Unlike the earlier synthetic version of this case, the inputs here reuse
+the real `plasma.h5` heat-flux data and equilibrium-backed magnetic field from
+`examples/test_evaporation/input`, so the rocket-force test follows the same
+plasma/background path as `test_droplet`.
 
 Usage:
     python3 create_case.py
@@ -20,9 +19,9 @@ Usage:
     python3 compare_rocket.py
 """
 
+from pathlib import Path
+
 import numpy as np
-import h5py
-import os
 
 # ======================================================================
 # Parameters
@@ -30,28 +29,12 @@ import os
 # Domain: R in [2, 6], Z in [-4, 3.8] (matching CAT geometry scale)
 r_min, r_max = 2.0, 6.0
 z_min, z_max = -4.0, 3.8
-nr, nz = 200, 400
-
-r_arr = np.linspace(r_min, r_max, nr)
-z_arr = np.linspace(z_min, z_max, nz)
-
-# Constant background plasma used by fix drag (synthetic, no SOLPS input)
-ne0 = 1.5746e20  # m^-3
-te0 = 10.0       # eV
-ti0 = 10.0       # eV
-vp0 = 0.0        # m/s
-br0 = 0.0
-bt0 = 0.0
-bz0 = 0.0
-
-# Constant heat flux. Keep this lower than the original bare rocket-force test
-# so the droplet does not enter the near-zero-mass regime too quickly.
-q_mag_val = 5e6  # W/m^2
-
-# Temperature gradient written in the same units as plasma.h5: eV/m.
-# The rocket-force implementation currently uses grad_Te for direction only.
-grad_te_r_val = 100.0
-grad_te_z_val = 0.0
+base_dir = Path(__file__).resolve().parent
+real_plasma_file = Path("../test_evaporation/input/plasma.h5")
+real_equilibrium_file = Path("../test_evaporation/input/g000001.00001_symm.X4.equ")
+wall_surface_file = Path("wall.surf")
+core_surface_file = Path("core.surf")
+heatflux_scale = 4.0
 
 # Droplet initial conditions (aligned with test_droplet scale)
 rd0 = 2.5e-3     # m
@@ -68,51 +51,17 @@ vx0 = -3.39584
 vy0 = 21.0707
 vphi0 = 0.0
 
-# ======================================================================
-# Write plasma.h5 with all fields (including q_mag and grad_Te)
-# ======================================================================
-plasma_file = "plasma_rocket.h5"
-print(f"Writing {plasma_file}...")
-with h5py.File(plasma_file, 'w') as f:
-    f.create_dataset('r', data=r_arr)
-    f.create_dataset('z', data=z_arr)
+if not (base_dir / real_plasma_file).exists():
+    raise FileNotFoundError(f"Missing plasma input: {base_dir / real_plasma_file}")
+if not (base_dir / real_equilibrium_file).exists():
+    raise FileNotFoundError(f"Missing equilibrium input: {base_dir / real_equilibrium_file}")
+if not (base_dir / wall_surface_file).exists():
+    raise FileNotFoundError(f"Missing wall surface: {base_dir / wall_surface_file}")
 
-    # Uniform plasma background
-    shape = (nz, nr)
-    f.create_dataset('dens_e', data=np.full(shape, ne0))
-    f.create_dataset('temp_e', data=np.full(shape, te0))
-    f.create_dataset('dens_i', data=np.full(shape, ne0))
-    f.create_dataset('temp_i', data=np.full(shape, ti0))
-    f.create_dataset('parr_flow', data=np.full(shape, vp0))
-    f.create_dataset('parr_flow_r', data=np.full(shape, 0.0))
-    f.create_dataset('parr_flow_t', data=np.full(shape, 0.0))
-    f.create_dataset('parr_flow_z', data=np.full(shape, vp0))
-
-    # Heat flux
-    f.create_dataset('q_mag', data=np.full(shape, q_mag_val))
-
-    # Temperature gradients
-    f.create_dataset('grad_te_r', data=np.full(shape, grad_te_r_val))
-    f.create_dataset('grad_te_t', data=np.full(shape, 0.0))
-    f.create_dataset('grad_te_z', data=np.full(shape, grad_te_z_val))
-    f.create_dataset('grad_ti_r', data=np.full(shape, 0.0))
-    f.create_dataset('grad_ti_t', data=np.full(shape, 0.0))
-    f.create_dataset('grad_ti_z', data=np.full(shape, 0.0))
-
-# Write dummy bfield.h5 (no magnetic field for this test)
-bfield_file = "bfield_rocket.h5"
-with h5py.File(bfield_file, 'w') as f:
-    f.create_dataset('r', data=r_arr)
-    f.create_dataset('z', data=z_arr)
-    shape = (nz, nr)
-    f.create_dataset('br', data=np.zeros(shape))
-    f.create_dataset('bt', data=np.zeros(shape))
-    f.create_dataset('bz', data=np.zeros(shape))
-print(f"Written {bfield_file}")
-
-print(f"  q_mag = {q_mag_val:.1e} W/m^2")
-print(f"  grad_te_r = {grad_te_r_val:.3e}")
-print(f"  grad_te_z = {grad_te_z_val}")
+print(f"Using plasma file: {real_plasma_file}")
+print(f"Using equilibrium file: {real_equilibrium_file}")
+print(f"Using wall surface: {wall_surface_file}")
+print(f"Using heatflux/scale = {heatflux_scale}")
 
 # ======================================================================
 # Write species file
@@ -146,9 +95,9 @@ print(f"Written {source_file}")
 # Write input scripts for eta = 0, 0.5, 1.0
 # ======================================================================
 dt = 1e-5
-t_end = 0.05
+t_end = 10.5
 nsteps = int(t_end / dt)
-dump_every = 50
+dump_every = 10
 
 eta_values = [0.0, 0.5, 1.0]
 
@@ -168,28 +117,34 @@ for eta in eta_values:
         f.write("balance_grid        rcb cell\n\n")
         f.write(f"species {species_file} drop_1\n")
         f.write("mixture DropletSource drop_1 frac 1.0 nrho 1\n\n")
+        f.write("# Real wall surface: remove particle when it leaves the vessel\n")
+        f.write(f"read_surf {wall_surface_file.as_posix()} group surfID particle check\n")
+        f.write(f"surf_collide wallVanish vanish log yes file collide_vanish_eta_{eta_str}.csv\n")
+        f.write("surf_modify surfID collide wallVanish react none\n\n")
+        
+        f.write(f"read_surf {core_surface_file.as_posix()} invert group coreID particle check\n")
+        f.write(f"surf_collide coreVanish vanish \n")
+        f.write("surf_modify coreID collide coreVanish react none\n\n")
+
+
         f.write("read_particles source.1 0\n\n")
         f.write(f"variable dt equal {dt}\n")
         f.write(f"variable N equal {nsteps}\n\n")
         f.write("variable pmass particle mass\n\n")
-        f.write(f"# Plasma fields from unified HDF5 (includes q_mag, grad_te)\n")
-        f.write(f"compute cp plasma/fields all file {plasma_file} {bfield_file} &\n")
-        f.write(f"    bx by bz temp_e dens_e temp_i dens_i parrflow\n\n")
+        f.write("# Plasma fields from the real CAT/SOLPS-derived plasma file\n")
+        f.write(f"compute cp plasma/fields all file {real_plasma_file.as_posix()} &\n")
+        f.write(f"    equilibrium {real_equilibrium_file.as_posix()} &\n")
+        f.write("    bx by bz temp_e dens_e temp_i dens_i parrflow er et ez\n\n")
         f.write(f"# Evaporation with rocket force eta={eta}\n")
         f.write(f"fix fevap evaporation 1 DropletSource &\n")
         f.write(f"    mass {md0:.6e} radius {rd0} temp {Td0} &\n")
-        f.write(f"    heatflux/compute cp &\n")
+        f.write(f"    heatflux/compute cp heatflux/scale {heatflux_scale} &\n")
         f.write(f"    rocket_eta {eta}\n\n")
-        f.write("# Drag with constant plasma (no B-field)\n")
-        f.write(f"variable Br grid \"0\"\n")
-        f.write(f"variable Bt grid \"0\"\n")
-        f.write(f"variable Bz grid \"0\"\n")
-        f.write(f"variable te grid \"{te0}\"\n")
-        f.write(f"variable ti grid \"{ti0}\"\n")
-        f.write(f"variable ni grid \"{ne0}\"\n")
-        f.write(f"variable vp grid \"0\"\n")
-        f.write(f"fix fdrag drag 1 2.0 1 plasma te ti ni vp bfield Br Bt Bz &\n")
-        f.write(f"    gravity 0 -9.81 0 model epstein mass {md0:.6e} radius {rd0} temp {Td0} &\n")
+        f.write("# Drag driven by the same real plasma and equilibrium B-field\n")
+        f.write("fix fdrag drag 1 2.0 1 &\n")
+        f.write("    plasma c_cp[4] c_cp[6] c_cp[7] c_cp[8] &\n")
+        f.write("    bfield c_cp[1] c_cp[3] c_cp[2] &\n")
+        f.write(f"    gravity 0 -9.8 0 model epstein mass {md0:.6e} radius {rd0} temp {Td0} &\n")
         f.write("    cylindrical yes\n\n")
         f.write(f"dump 10 particle all {dump_every} {dump_file} &\n")
         f.write("    id type x y z vx vy vz v_pmass temp radius\n\n")
