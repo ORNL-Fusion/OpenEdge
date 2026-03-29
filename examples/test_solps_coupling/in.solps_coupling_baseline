@@ -8,7 +8,7 @@ variable time  equal 20
 variable N     equal floor(${time}/${dt})
 variable Ndump equal 100 # mass_loss dump every 1e-3 s with dt=1e-5
 
-variable heatflux_scale equal 2.0
+variable heatflux_scale equal 5.50
 
 variable temp_droplet equal 773.15
 variable temp_emit    equal 1.e20
