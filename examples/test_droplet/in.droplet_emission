@@ -10,8 +10,8 @@ variable Ndump equal 100 #floor($N/10000)
 
 variable temp_droplet equal 773.15
 variable temp_emit    equal 1.e20
-variable heatflux_scale equal 7.0
-variable nemit        equal 3 #85
+variable heatflux_scale equal 4.0
+variable nemit        equal 3
 variable droplet_inner index InstabilityInner
 variable droplet_outer index InstabilityOuter
 # --- droplet sizes (rho fixed) ---
@@ -143,9 +143,6 @@ fix fcharge3 droplet/charge 1 plasma &
 fix    eS efield/grid c_cnear[9] c_cnear[10] c_cnear[11]
 global efield grid eS 0
 global boris_subcycles 5
-
-
-
 
 
 # ---------------------------------------------------------------------------
