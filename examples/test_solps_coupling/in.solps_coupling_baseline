@@ -8,7 +8,7 @@ variable time  equal 20
 variable N     equal floor(${time}/${dt})
 variable Ndump equal 100 # mass_loss dump every 1e-3 s with dt=1e-5
 
-variable heatflux_scale equal 1.
+variable heatflux_scale equal 4.0
 
 variable temp_droplet equal 773.15
 variable temp_emit    equal 1.e20
@@ -57,7 +57,7 @@ surf_modify         surfID2 collide wallColModel react wallReact
 
 # particle trajectory dump
 
-dump dtraj_drop1 particle all 1000 output/case.dump id type x y z vx vy vz v_pmass temp radius
+dump dtraj_drop1 particle all 10 output/case.dump id type x y z vx vy vz v_pmass temp radius
 # Keep trajectory dump much sparser than mass_loss.txt to avoid huge case.dump files.
 
 # plasma fields
