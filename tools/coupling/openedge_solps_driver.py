@@ -98,7 +98,7 @@ def check_solps_success(solps_run_dir, label="SOLPS"):
 # Essential SOLPS files to preserve per step (skip huge geometry/database)
 SOLPS_SAVE_FILES = [
     'b2fstate', 'b2fstati', 'b2fplasma', 'b2fparam', 'b2mn.prt',
-    'run.log', 'b2mn.dat',
+    'run.log', 'b2mn.dat', 'balance.nc', 'b2tallies',
 ]
 
 def save_warmup_output(solps_run_dir, coupled_dir, plasma_h5_path):
@@ -162,10 +162,10 @@ def save_step_output(step_k, coupled_dir, solps_run_dir, oe_run_dir,
             shutil.copy2(src, os.path.join(solps_out, fname))
 
     # Save source2d used this step
-    for fname in os.listdir(solps_run_dir):
-        if fname.startswith('source2d.'):
-            shutil.copy2(os.path.join(solps_run_dir, fname),
-                         os.path.join(solps_out, fname))
+    source2d_name = f'source2d.{step_k+1:05d}'
+    source2d_src = os.path.join(solps_run_dir, source2d_name)
+    if os.path.exists(source2d_src):
+        shutil.copy2(source2d_src, os.path.join(solps_out, source2d_name))
 
     # Save OpenEdge files
     for fname in ['restart.dat', f'in.chunk_{step_k:04d}',
@@ -174,10 +174,11 @@ def save_step_output(step_k, coupled_dir, solps_run_dir, oe_run_dir,
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(oe_out, fname))
 
-    # Save mass_loss
-    ml_src = os.path.join(oe_run_dir, 'output', 'mass_loss.txt')
-    if os.path.exists(ml_src):
-        shutil.copy2(ml_src, os.path.join(oe_out, 'mass_loss.txt'))
+    # Save mass_loss and particle trajectories
+    for out_fname in ['mass_loss.txt', 'particles.txt']:
+        src = os.path.join(oe_run_dir, 'output', out_fname)
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(oe_out, out_fname))
 
     # Save plasma.h5 for this step
     if os.path.exists(plasma_h5_path):
