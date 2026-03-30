@@ -1,162 +1,349 @@
 /* ----------------------------------------------------------------------
    Standalone validation of the liquid metal strip solver against
-   Sergey Smolentsev's Fortran reference (NVAR=2, NHEAT=3, Ncase=1).
+   Sergey Smolentsev's Fortran reference (main.for / MYGTRI.FOR).
 
-   Outer divertor: h0=5mm, U0=8m/s, Bs=5T, alpha=43deg, Width=1.67m
-   Gaussian heat flux: qss=10 MW/m^2, Qs0 = exp(-0.4*(x - 0.5*Xl)^2)
-   No evaporation (matches Fortran: evaporation line is commented out).
+   Three test cases:
+     1) Gaussian heat flux (NVAR=2, NHEAT=3) -- ref/
+     2) Outer divertor SOLPS heat flux (NVAR=2, NHEAT=2) -- ref_outer/
+     3) Inner divertor SOLPS heat flux (NVAR=1, NHEAT=1) -- ref_inner/
 
    Build:
      g++ -O2 -std=c++11 -I../../src/OPENEDGE test_strip.cpp -o test_strip
 
    Run:
-     ./test_strip
-
-   Compare: Tsurf_dml.dat and h_dim.dat against Fortran reference in ref/
+     ./test_strip            # run all three cases
+     ./test_strip gaussian   # run only Gaussian
+     ./test_strip outer      # run only outer SOLPS
+     ./test_strip inner      # run only inner SOLPS
 ------------------------------------------------------------------------- */
 
 #include "liquid_metal_strip.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <cstring>
 #include <vector>
 #include <string>
 
-int main(int argc, char **argv)
+/* ------------------------------------------------------------------
+   Jeremy Lore's SOLPS heat flux profiles (from main.for SHFo/SHFi).
+   36 data points each, x in [m], heat flux in [MW/m^2].
+------------------------------------------------------------------ */
+
+static const int N_SOLPS = 36;
+
+// Outer divertor
+static const double Xheat_outer[N_SOLPS] = {
+    0.000000, 0.009979, 0.020073, 0.030049, 0.040138,
+    0.050149, 0.059810, 0.069184, 0.078447, 0.087355,
+    0.095605, 0.103290, 0.110514, 0.117186, 0.122969,
+    0.127785, 0.131672, 0.134569, 0.136246, 0.137428,
+    0.139019, 0.140989, 0.143360, 0.146108, 0.149154,
+    0.152461, 0.155975, 0.159607, 0.163345, 0.167207,
+    0.171160, 0.175173, 0.179294, 0.183497, 0.187671,
+    0.191737
+};
+static const double Heat_outer[N_SOLPS] = {
+    2.719710, 3.819670, 4.685440, 5.011570, 5.483040,
+    6.273190, 6.580600, 6.810900, 7.384040, 7.666150,
+    8.260160, 8.739420, 7.412780, 6.371840, 5.682940,
+    4.540650, 3.387410, 2.964730, 2.689490, 2.237820,
+    2.050670, 1.738580, 1.542260, 1.194080, 0.966618,
+    0.924331, 0.769075, 0.733574, 0.568295, 0.561533,
+    0.527683, 0.449960, 0.443661, 0.394544, 0.383064,
+    0.358113
+};
+
+// Inner divertor
+static const double Xheat_inner[N_SOLPS] = {
+    0.000000, 0.019651, 0.039355, 0.058800, 0.078289,
+    0.097963, 0.117531, 0.136670, 0.155480, 0.173746,
+    0.191030, 0.207417, 0.222524, 0.236061, 0.247965,
+    0.258057, 0.266327, 0.272365, 0.275790, 0.278260,
+    0.281586, 0.285741, 0.290674, 0.296141, 0.302082,
+    0.308629, 0.315722, 0.323115, 0.330676, 0.338501,
+    0.346520, 0.354504, 0.362450, 0.370473, 0.378343,
+    0.385966
+};
+static const double Heat_inner[N_SOLPS] = {
+    1.314290, 1.828720, 2.037420, 2.108560, 2.199070,
+    2.339560, 2.270300, 2.385230, 2.302060, 2.470620,
+    2.511400, 2.632190, 2.973900, 2.771880, 2.822800,
+    2.565450, 1.965050, 1.610460, 1.313400, 1.114690,
+    1.010870, 0.802295, 0.749200, 0.571185, 0.459776,
+    0.418857, 0.317604, 0.278340, 0.259040, 0.203935,
+    0.178766, 0.181736, 0.162898, 0.159038, 0.123292,
+    0.111291
+};
+
+/* ------------------------------------------------------------------
+   Interpolate SOLPS heat flux at coordinate x [m].
+   Returns heat flux in MW/m^2.
+   Matches Fortran nearest-bracket + linear interpolation.
+------------------------------------------------------------------ */
+
+static double interp_solps(double coord, const double *Xh, const double *Qh, int npts)
+{
+    // find nearest data point
+    double delmax = 1.0e10;
+    int ks = 0;
+    for (int k = 0; k < npts; k++) {
+        double del = std::fabs(coord - Xh[k]);
+        if (del < delmax) { delmax = del; ks = k; }
+    }
+
+    double result;
+    if (coord >= Xh[ks]) {
+        int kp = (ks < npts - 1) ? ks + 1 : ks;
+        double dx = Xh[kp] - Xh[ks];
+        if (dx > 0.0)
+            result = Qh[ks] + (Qh[kp] - Qh[ks]) * (coord - Xh[ks]) / dx;
+        else
+            result = Qh[ks];
+    } else {
+        int km = (ks > 0) ? ks - 1 : ks;
+        double dx = Xh[ks] - Xh[km];
+        if (dx > 0.0)
+            result = Qh[ks] + (Qh[ks] - Qh[km]) * (coord - Xh[ks]) / dx;
+        else
+            result = Qh[ks];
+    }
+    return result;
+}
+
+/* ------------------------------------------------------------------
+   Compare output against Fortran reference.
+   Returns max relative error (-1 if no reference found).
+------------------------------------------------------------------ */
+
+static double compare_reference(const LiquidMetal::Strip &strip,
+                                const char *ref_path)
+{
+    FILE *ref = fopen(ref_path, "r");
+    if (!ref) return -1.0;
+
+    double max_err = 0.0, max_rel = 0.0;
+    int nref = 0;
+    char line[256];
+    int n = 1;
+
+    while (fgets(line, sizeof(line), ref) && n <= strip.Nx) {
+        double xref, tref;
+        if (sscanf(line, "%lf %lf", &xref, &tref) == 2) {
+            double terr = std::fabs(strip.Tsurf_dim[n] - tref);
+            double trel = (tref > 0.0) ? terr / tref : terr;
+            if (terr > max_err) max_err = terr;
+            if (trel > max_rel) max_rel = trel;
+            nref++;
+        }
+        n++;
+    }
+    fclose(ref);
+
+    printf("  Comparison with Fortran reference (%d points):\n", nref);
+    printf("    Max absolute error: %.4e C\n", max_err);
+    printf("    Max relative error: %.4e\n", max_rel);
+
+    if (max_rel < 1.0e-3)
+        printf("    --> PASS (relative error < 1e-3)\n");
+    else if (max_rel < 1.0e-2)
+        printf("    --> MARGINAL (relative error < 1e-2)\n");
+    else
+        printf("    --> FAIL (relative error >= 1e-2)\n");
+
+    return max_rel;
+}
+
+/* ------------------------------------------------------------------
+   Run one test case.
+------------------------------------------------------------------ */
+
+struct TestResult {
+    const char *name;
+    double max_rel_err;
+    bool has_ref;
+};
+
+static TestResult run_case(const char *name,
+                           double h0, double U0, double Bs, double Bw,
+                           double alpha_deg, double width, double Tin,
+                           double qss, double Xlength,
+                           int nheat,  // 1=inner SOLPS, 2=outer SOLPS, 3=gaussian
+                           const char *ref_dir,
+                           const char *out_prefix)
 {
     LiquidMetal::Strip strip;
 
-    // match Fortran NVAR=2 (outer divertor)
-    strip.h0 = 0.005;
-    strip.U0 = 8.0;
-    strip.Bs = 5.0;
-    strip.Bw = 0.0;
-    strip.alpha_deg = 43.0;
-    strip.width = 1.67;
-    strip.Tin = 350.0;
-
-    // wall conductance
+    strip.h0 = h0;
+    strip.U0 = U0;
+    strip.Bs = Bs;
+    strip.Bw = Bw;
+    strip.alpha_deg = alpha_deg;
+    strip.width = width;
+    strip.Tin = Tin;
+    strip.li.sigma_e = 3.09e6;
     strip.sigma_w = 0.0;
     strip.tw = 0.000025;
 
-    // Fortran uses sigma_e = 3.09e6 (overridden from default 1.1e6)
-    strip.li.sigma_e = 3.09e6;
-
-    // mesh: Fortran uses Nx=1001, Ny=201
     strip.Nx = 1001;
     strip.Ny = 201;
-
-    // solver parameters (match Fortran)
+    strip.qss = qss;
     strip.dt_pseudo = 0.5;
     strip.max_iter = 3000;
     strip.eps_conv = 0.5e-7;
     strip.relax = 1.0;
     strip.ncase = 1;
+    strip.evap_on = 0;  // Fortran has evaporation commented out
 
-    // NHEAT=3: Gaussian heat flux, qss = 10 MW/m^2
-    strip.qss = 10.0e6;
-
-    // no evaporation (Fortran has this line commented out)
-    strip.evap_on = 0;
-
-    // initialize
     strip.init();
 
-    // set up Gaussian heat flux: Qs0(x) = exp(-0.4*(x - 0.5*Xl)^2)
-    double Xlength = 0.191737;  // outer divertor length [m]
+    // set up grid and heat flux
     strip.Xl = Xlength / strip.h0;
     strip.hx = strip.Xl / (strip.Nx - 1);
     strip.Tscale = strip.qss * strip.h0 / strip.li.k_th;
 
     for (int n = 1; n <= strip.Nx; n++) {
         strip.X[n] = (n - 1) * strip.hx;
-        double pexp = 0.4;
-        strip.Qs0[n] = std::exp(-pexp * (strip.X[n] - 0.5 * strip.Xl) *
-                                         (strip.X[n] - 0.5 * strip.Xl));
+        double coord = strip.X[n] * strip.h0;  // physical x [m]
+
+        if (nheat == 3) {
+            // Gaussian
+            double pexp = 0.4;
+            strip.Qs0[n] = std::exp(-pexp * (strip.X[n] - 0.5 * strip.Xl) *
+                                             (strip.X[n] - 0.5 * strip.Xl));
+        } else if (nheat == 2) {
+            // Outer divertor SOLPS (MW/m^2 -> dimensionless via qss)
+            strip.Qs0[n] = interp_solps(coord, Xheat_outer, Heat_outer, N_SOLPS);
+        } else if (nheat == 1) {
+            // Inner divertor SOLPS (MW/m^2 -> dimensionless via qss)
+            strip.Qs0[n] = interp_solps(coord, Xheat_inner, Heat_inner, N_SOLPS);
+        }
         strip.Qs[n] = strip.Qs0[n];
     }
 
-    printf("Strip solver validation (outer divertor, Gaussian heat flux)\n");
-    printf("  Nx=%d  Ny=%d  h0=%.4f  U0=%.1f  Bs=%.1f\n",
-           strip.Nx, strip.Ny, strip.h0, strip.U0, strip.Bs);
-    printf("  Re=%.5e  Fr=%.5e  Ha_s=%.5e\n", strip.Re, strip.Fr, strip.Ha_s);
-    printf("  Be=%.5e  Cw=%.5e  Rtor=%.5e  Pr=%.5e\n",
-           strip.Be, strip.Cw, strip.Rtor, strip.Pr);
-    printf("  Tscale=%.5e  qss=%.2e\n", strip.Tscale, strip.qss);
-    printf("Solving to steady state...\n");
+    printf("\n========================================\n");
+    printf("  %s\n", name);
+    printf("========================================\n");
+    printf("  h0=%.4f  U0=%.1f  Bs=%.1f  alpha=%.1f  width=%.2f  Tin=%.0f\n",
+           h0, U0, Bs, alpha_deg, width, Tin);
+    printf("  Re=%.5e  Fr=%.5e  Ha_s=%.5e  Pr=%.4e\n",
+           strip.Re, strip.Fr, strip.Ha_s, strip.Pr);
+    printf("  Rtor=%.5e  Tscale=%.5e  qss=%.2e\n",
+           strip.Rtor, strip.Tscale, strip.qss);
+    printf("  Solving...\n");
 
     strip.solve_steady();
 
-    // write Tsurf_dml.dat
-    FILE *fp = fopen("Tsurf_dml.dat", "w");
-    for (int n = 1; n <= strip.Nx; n++) {
-        double xdim = strip.X[n] * strip.h0;
-        fprintf(fp, " %9.4f   %.5e\n", xdim, strip.Tsurf_dim[n]);
-    }
-    fclose(fp);
-
-    // write h_dim.dat
-    fp = fopen("h_dim.dat", "w");
-    for (int n = 1; n <= strip.Nx; n++) {
-        double xdim = strip.X[n] * strip.h0;
-        fprintf(fp, " %9.4f   %.5e\n", xdim, strip.h_dim[n]);
-    }
-    fclose(fp);
-
-    // write Q_surface.dat (input heat flux)
-    fp = fopen("Q_surface.dat", "w");
-    for (int n = 1; n <= strip.Nx; n++) {
-        double xdim = strip.X[n] * strip.h0;
-        fprintf(fp, " %12.5e  %12.5e\n", xdim, strip.Qs0[n] * strip.qss);
-    }
-    fclose(fp);
-
-    printf("Output written: Tsurf_dml.dat, h_dim.dat, Q_surface.dat\n");
-
-    // --- Compare against Fortran reference if available ---
-    FILE *ref = fopen("ref/Tsurf_dml.dat", "r");
-    if (ref) {
-        double max_err = 0.0;
-        double max_rel = 0.0;
-        int nref = 0;
-        char line[256];
-        int n = 1;
-        while (fgets(line, sizeof(line), ref) && n <= strip.Nx) {
-            double xref, tref;
-            if (sscanf(line, "%lf %lf", &xref, &tref) == 2) {
-                double terr = std::fabs(strip.Tsurf_dim[n] - tref);
-                double trel = (tref > 0.0) ? terr / tref : terr;
-                if (terr > max_err) max_err = terr;
-                if (trel > max_rel) max_rel = trel;
-                nref++;
-            }
-            n++;
-        }
-        fclose(ref);
-
-        printf("\nComparison with Fortran reference (%d points):\n", nref);
-        printf("  Max absolute error in Tsurf: %.4e C\n", max_err);
-        printf("  Max relative error in Tsurf: %.4e\n", max_rel);
-
-        if (max_rel < 1.0e-3)
-            printf("  PASS (relative error < 1e-3)\n");
-        else if (max_rel < 1.0e-2)
-            printf("  MARGINAL (relative error < 1e-2)\n");
-        else
-            printf("  FAIL (relative error >= 1e-2)\n");
-    } else {
-        printf("\nNo Fortran reference found at ref/Tsurf_dml.dat\n");
-        printf("Copy from /home/cloud/mhd/DATA/ to run comparison.\n");
-    }
-
-    // print a few sample points
-    printf("\nSample T_surf values:\n");
-    printf("  x=0.000 m: T=%.2f C\n", strip.Tsurf_dim[1]);
+    // sample output
     int mid = strip.Nx / 2;
-    printf("  x=%.3f m: T=%.2f C (midpoint)\n",
-           strip.X[mid] * strip.h0, strip.Tsurf_dim[mid]);
-    printf("  x=%.3f m: T=%.2f C (outlet)\n",
-           strip.X[strip.Nx] * strip.h0, strip.Tsurf_dim[strip.Nx]);
+    printf("  T_surf: inlet=%.2f  mid=%.2f  outlet=%.2f C\n",
+           strip.Tsurf_dim[1], strip.Tsurf_dim[mid], strip.Tsurf_dim[strip.Nx]);
 
-    return 0;
+    // find peak temperature
+    double tmax = 0.0;
+    int imax = 1;
+    for (int n = 1; n <= strip.Nx; n++) {
+        if (strip.Tsurf_dim[n] > tmax) { tmax = strip.Tsurf_dim[n]; imax = n; }
+    }
+    printf("  T_peak=%.2f C at x=%.4f m\n", tmax, strip.X[imax] * strip.h0);
+
+    // write output files
+    char fname[256];
+    snprintf(fname, sizeof(fname), "%s_Tsurf_dml.dat", out_prefix);
+    FILE *fp = fopen(fname, "w");
+    for (int n = 1; n <= strip.Nx; n++)
+        fprintf(fp, " %9.4f   %.5e\n", strip.X[n] * strip.h0, strip.Tsurf_dim[n]);
+    fclose(fp);
+
+    snprintf(fname, sizeof(fname), "%s_h_dim.dat", out_prefix);
+    fp = fopen(fname, "w");
+    for (int n = 1; n <= strip.Nx; n++)
+        fprintf(fp, " %9.4f   %.5e\n", strip.X[n] * strip.h0, strip.h_dim[n]);
+    fclose(fp);
+
+    printf("  Output: %s_Tsurf_dml.dat, %s_h_dim.dat\n", out_prefix, out_prefix);
+
+    // compare against Fortran reference
+    TestResult result;
+    result.name = name;
+    snprintf(fname, sizeof(fname), "%s/Tsurf_dml.dat", ref_dir);
+    result.max_rel_err = compare_reference(strip, fname);
+    result.has_ref = (result.max_rel_err >= 0.0);
+
+    return result;
+}
+
+/* ================================================================== */
+
+int main(int argc, char **argv)
+{
+    bool run_gaussian = true, run_outer = true, run_inner = true;
+
+    if (argc > 1) {
+        run_gaussian = run_outer = run_inner = false;
+        for (int i = 1; i < argc; i++) {
+            if (strcmp(argv[i], "gaussian") == 0) run_gaussian = true;
+            if (strcmp(argv[i], "outer") == 0) run_outer = true;
+            if (strcmp(argv[i], "inner") == 0) run_inner = true;
+            if (strcmp(argv[i], "all") == 0)
+                run_gaussian = run_outer = run_inner = true;
+        }
+    }
+
+    printf("Liquid metal strip solver validation\n");
+    printf("Comparing C++ port against Sergey Smolentsev's Fortran code\n");
+
+    std::vector<TestResult> results;
+
+    // --- Case 1: Gaussian (NVAR=2, NHEAT=3) ---
+    if (run_gaussian) {
+        results.push_back(run_case(
+            "Outer divertor, Gaussian heat flux (NHEAT=3)",
+            0.005, 8.0, 5.0, 0.0,       // h0, U0, Bs, Bw
+            43.0, 1.67, 350.0,           // alpha, width, Tin
+            10.0e6, 0.191737,            // qss, Xlength
+            3, "ref", "gaussian"));       // nheat, ref_dir, out_prefix
+    }
+
+    // --- Case 2: Outer divertor SOLPS (NVAR=2, NHEAT=2) ---
+    if (run_outer) {
+        results.push_back(run_case(
+            "Outer divertor, SOLPS heat flux (NHEAT=2)",
+            0.005, 8.0, 5.0, 0.0,
+            43.0, 1.67, 350.0,
+            1.0e6, 0.191737,             // qss=1 MW/m^2 for SOLPS
+            2, "ref_outer", "outer"));
+    }
+
+    // --- Case 3: Inner divertor SOLPS (NVAR=1, NHEAT=1) ---
+    if (run_inner) {
+        results.push_back(run_case(
+            "Inner divertor, SOLPS heat flux (NHEAT=1)",
+            0.005, 3.0, 5.0, 0.0,       // inner: U0=3
+            73.0, 1.43, 350.0,           // inner: alpha=73, width=1.43
+            1.0e6, 0.385966,             // inner: longer divertor
+            1, "ref_inner", "inner"));
+    }
+
+    // --- Summary ---
+    printf("\n========================================\n");
+    printf("  SUMMARY\n");
+    printf("========================================\n");
+    int pass = 0, fail = 0, noref = 0;
+    for (size_t i = 0; i < results.size(); i++) {
+        if (!results[i].has_ref) {
+            printf("  %-50s  NO REF\n", results[i].name);
+            noref++;
+        } else if (results[i].max_rel_err < 1.0e-3) {
+            printf("  %-50s  PASS (%.2e)\n", results[i].name, results[i].max_rel_err);
+            pass++;
+        } else {
+            printf("  %-50s  FAIL (%.2e)\n", results[i].name, results[i].max_rel_err);
+            fail++;
+        }
+    }
+    printf("  ---\n");
+    printf("  %d PASS, %d FAIL, %d NO REF\n", pass, fail, noref);
+
+    return (fail > 0) ? 1 : 0;
 }
