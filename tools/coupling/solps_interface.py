@@ -297,14 +297,26 @@ class SolpsInterface:
                     line = ' '.join(f'{v:.8e}' for v in row)
                     f.write(line + '\n')
 
-    def write_sources_profile_chain(self, n_windows, dt_windows, t_start=0.0):
+    def write_sources_profile_chain(self, n_windows, dt_windows, t_start=0.0,
+                                    source_filenames=None):
         """Write b2.sources.profile and its chain files.
 
         Args:
             n_windows: number of time windows (source2d files)
             dt_windows: list of dt for each window [s]
             t_start: simulation start time [s]
+            source_filenames: optional list of explicit source2d file names
+                              to reference, one per time window
         """
+        if source_filenames is not None:
+            if len(source_filenames) != n_windows:
+                raise ValueError(
+                    "source_filenames must have one entry per time window")
+        else:
+            source_filenames = [
+                f'source2d.{k:05d}' for k in range(1, n_windows + 1)
+            ]
+
         t = t_start
         for k in range(1, n_windows + 1):
             fname = f'b2.sources.profile' if k == 1 else f'b2.sources.profile.{k}'
@@ -316,7 +328,7 @@ class SolpsInterface:
             with open(filepath, 'w') as f:
                 f.write('&profile\n')
                 f.write('read_sna0_2d=.true.\n')
-                f.write(f'sna0_2d_filename="source2d.{k:05d}"\n')
+                f.write(f'sna0_2d_filename="{source_filenames[k - 1]}"\n')
                 if next_profile:
                     f.write(f'sources_time_switch={switch_time:.6e}\n')
                     f.write(f'sources_filename="{next_profile}"\n')
