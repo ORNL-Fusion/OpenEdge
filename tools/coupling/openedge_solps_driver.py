@@ -923,7 +923,8 @@ def run_coupling(config):
         solps.write_sources_profile_chain(
             n_windows=1,
             dt_windows=[dt_window],
-            t_start=k * dt_window)
+            t_start=k * dt_window,
+            source_filenames=[source_file])
 
         update_b2mn_dat(solps_run_dir, {
             "b2mndr_ntim": str(n_solps_steps),
