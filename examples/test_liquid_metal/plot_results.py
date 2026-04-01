@@ -43,8 +43,8 @@ def read_surf_dump(fname):
 
 
 def main():
-    # find latest dump file
-    dumps = sorted(glob.glob("dump.surf.*"))
+    # find latest dump file (check current dir and output/)
+    dumps = sorted(glob.glob("dump.surf.*")) + sorted(glob.glob("output/dump.surf.*"))
     if not dumps:
         print("No dump.surf.* files found. Run OpenEdge first.")
         sys.exit(1)
