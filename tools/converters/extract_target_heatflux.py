@@ -53,6 +53,17 @@ def extract_target_profiles(nc_path: str | Path):
     have_split = "fhe" in ds.variables and "fhi" in ds.variables
     have_total = "fht" in ds.variables
 
+    def _sum_components(prefix):
+        """Sum all heat flux components matching prefix (e.g. 'fhe_')."""
+        acc = None
+        for vn in ds.variables:
+            if vn.startswith(prefix):
+                a = np.array(ds.variables[vn])
+                if a.ndim == 2:
+                    a = a.reshape(ny + 2, nx + 2, -1)
+                acc = a if acc is None else acc + a
+        return acc
+
     if have_split:
         fhe = np.array(ds.variables["fhe"])
         fhi = np.array(ds.variables["fhi"])
@@ -66,18 +77,26 @@ def extract_target_profiles(nc_path: str | Path):
         fht = np.array(ds.variables["fht"])
         if fht.ndim == 2:
             fht = fht.reshape(ny + 2, nx + 2, -1)
-        # total only — split evenly as approximation
         fht_y_e = 0.5 * fht[:, :, 1]
         fht_y_i = 0.5 * fht[:, :, 1]
         print("  Using fht (total heat flux) — electron/ion split unavailable")
     else:
-        # List available variables to help debug
-        hf_vars = [v for v in ds.variables if "fh" in v]
-        ds.close()
-        raise KeyError(
-            f"No heat flux variables found (fhe/fhi or fht). "
-            f"Available fh* variables: {hf_vars}"
-        )
+        # Try summing component variables (fhe_32, fhe_52, fhe_cond, etc.)
+        fhe_sum = _sum_components("fhe_")
+        fhi_sum = _sum_components("fhi_")
+        if fhe_sum is not None and fhi_sum is not None:
+            fht_y_e = fhe_sum[:, :, 1]
+            fht_y_i = fhi_sum[:, :, 1]
+            n_e = sum(1 for v in ds.variables if v.startswith("fhe_"))
+            n_i = sum(1 for v in ds.variables if v.startswith("fhi_"))
+            print(f"  Summed {n_e} fhe_* + {n_i} fhi_* component variables")
+        else:
+            hf_vars = [v for v in ds.variables if "fh" in v]
+            ds.close()
+            raise KeyError(
+                f"No heat flux variables found. "
+                f"Available fh* variables: {hf_vars}"
+            )
 
     # --- Particle flux at faces ---
     # fna: particle flux through faces (ns, ny+2, nx+2, 2)
