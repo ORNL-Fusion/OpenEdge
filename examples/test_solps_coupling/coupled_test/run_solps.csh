@@ -27,3 +27,11 @@ if ($nprocs > 1) then
 else
     b2run b2mn
 endif
+
+# Copy output from b2mn.exe.dir back to run directory
+# (coupling driver expects b2fstate here, not inside b2mn.exe.dir/)
+if (-f b2mn.exe.dir/b2fstate) then
+    cp b2mn.exe.dir/b2fstate .
+    cp b2mn.exe.dir/b2fstate b2fstati
+endif
+if (-f b2mn.exe.dir/b2mn.prt) cp b2mn.exe.dir/b2mn.prt .
