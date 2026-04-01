@@ -49,21 +49,35 @@ def extract_target_profiles(nc_path: str | Path):
     hy = np.array(ds.variables["hy"])
 
     # --- Heat fluxes at faces ---
-    # fhe: electron heat flux through faces (ny+2, nx+2, 2)
-    #   [:,:,0] = poloidal (x) face, [:,:,1] = radial (y) face
-    # fhi: ion heat flux through faces
-    fhe = np.array(ds.variables["fhe"])
-    fhi = np.array(ds.variables["fhi"])
+    # Try fhe/fhi (electron/ion split) first, fall back to fht (total)
+    have_split = "fhe" in ds.variables and "fhi" in ds.variables
+    have_total = "fht" in ds.variables
 
-    # Reshape if needed (some versions store flat)
-    if fhe.ndim == 2:
-        fhe = fhe.reshape(ny + 2, nx + 2, -1)
-    if fhi.ndim == 2:
-        fhi = fhi.reshape(ny + 2, nx + 2, -1)
-
-    # Total heat flux through radial (y) faces
-    fht_y_e = fhe[:, :, 1]  # electron, y-face [W]
-    fht_y_i = fhi[:, :, 1]  # ion, y-face [W]
+    if have_split:
+        fhe = np.array(ds.variables["fhe"])
+        fhi = np.array(ds.variables["fhi"])
+        if fhe.ndim == 2:
+            fhe = fhe.reshape(ny + 2, nx + 2, -1)
+        if fhi.ndim == 2:
+            fhi = fhi.reshape(ny + 2, nx + 2, -1)
+        fht_y_e = fhe[:, :, 1]
+        fht_y_i = fhi[:, :, 1]
+    elif have_total:
+        fht = np.array(ds.variables["fht"])
+        if fht.ndim == 2:
+            fht = fht.reshape(ny + 2, nx + 2, -1)
+        # total only — split evenly as approximation
+        fht_y_e = 0.5 * fht[:, :, 1]
+        fht_y_i = 0.5 * fht[:, :, 1]
+        print("  Using fht (total heat flux) — electron/ion split unavailable")
+    else:
+        # List available variables to help debug
+        hf_vars = [v for v in ds.variables if "fh" in v]
+        ds.close()
+        raise KeyError(
+            f"No heat flux variables found (fhe/fhi or fht). "
+            f"Available fh* variables: {hf_vars}"
+        )
 
     # --- Particle flux at faces ---
     # fna: particle flux through faces (ns, ny+2, nx+2, 2)
