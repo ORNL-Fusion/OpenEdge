@@ -66,7 +66,7 @@ def main():
     order = np.argsort(sid)
     x = np.arange(len(data))  # surface index as x-axis
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig, axes = plt.subplots(3, 2, figsize=(12, 12))
     fig.suptitle("fix liquid_metal: per-surface outputs", fontsize=14)
 
     # Tsurf
@@ -101,6 +101,36 @@ def main():
         ax.plot(x, data[order, ci["s_h_lm"]] * 1e3, "k-", lw=1.5)
         ax.set_ylabel("Film thickness [mm]")
         ax.set_title("Film Thickness")
+        ax.grid(True, alpha=0.3)
+
+    # incident heat flux (derive from Tsurf profile)
+    # Q_incident = qss * Qs0 — for constant source this is uniform,
+    # but we can back-compute net heat flux from Tsurf gradient
+    if "s_Tsurf_lm" in ci and "s_evap_lm" in ci:
+        ax = axes[2, 0]
+        Tsurf = data[order, ci["s_Tsurf_lm"]]
+        evap = data[order, ci["s_evap_lm"]]
+        # evaporative cooling: Q_vapor = H_vap * evap_flux / N_A
+        H_vap = 145920.0  # J/mol
+        N_A = 6.022e23
+        Q_evap = H_vap * evap / N_A  # W/m²
+        ax.plot(x, Q_evap / 1e6, "m-", lw=1.5)
+        ax.set_ylabel("Q_evap [MW/m²]")
+        ax.set_title("Evaporative Cooling")
+        ax.grid(True, alpha=0.3)
+
+    # total source flux = evap + adatom
+    if "s_evap_lm" in ci and "s_adatom_lm" in ci:
+        ax = axes[2, 1]
+        evap = data[order, ci["s_evap_lm"]]
+        adatom = data[order, ci["s_adatom_lm"]]
+        ax.plot(x, evap, "b-", lw=1.5, label="Evaporation")
+        ax.plot(x, adatom, "g-", lw=1.5, label="Ad-atoms")
+        ax.plot(x, evap + adatom, "k--", lw=1.5, label="Total")
+        ax.set_ylabel("Flux [atoms/m²/s]")
+        ax.set_title("Total Li Source (evap + adatom)")
+        ax.set_yscale("log")
+        ax.legend(fontsize=9)
         ax.grid(True, alpha=0.3)
 
     for ax in axes.flat:
