@@ -78,16 +78,24 @@ def check_solps_success(solps_run_dir, label="SOLPS"):
                 f"{label} failed: {detail}\n"
                 f"  Log: {solps_log}")
 
-    # Check b2fstate exists and is large enough
+    # Check SOLPS produced valid output.
+    # b2run moves output to b2fstati and does "touch b2fstate" (0 bytes).
+    # Accept either a valid b2fstate OR b2fstati as success indicator.
     b2fstate = os.path.join(solps_run_dir, 'b2fstate')
-    if not os.path.exists(b2fstate):
+    b2fstati = os.path.join(solps_run_dir, 'b2fstati')
+    balance = os.path.join(solps_run_dir, 'balance.nc')
+
+    state_ok = (os.path.exists(b2fstate) and os.path.getsize(b2fstate) > 10000)
+    stati_ok = (os.path.exists(b2fstati) and os.path.getsize(b2fstati) > 10000)
+
+    if not state_ok and stati_ok:
+        # b2run moved output to b2fstati; copy it to b2fstate for the driver
+        shutil.copy2(b2fstati, b2fstate)
+        state_ok = True
+
+    if not state_ok:
         raise SOLPSError(
-            f"{label} failed: no b2fstate produced\n"
-            f"  Run dir: {solps_run_dir}")
-    if os.path.getsize(b2fstate) < 10000:
-        raise SOLPSError(
-            f"{label} failed: b2fstate too small "
-            f"({os.path.getsize(b2fstate)} bytes)\n"
+            f"{label} failed: no valid b2fstate/b2fstati produced\n"
             f"  Run dir: {solps_run_dir}")
 
 
