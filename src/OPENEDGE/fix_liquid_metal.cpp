@@ -598,6 +598,7 @@ void FixLiquidMetal::end_of_step()
   gather_heat_flux();
   strip.solve_steady();
 
+
   // gather D+ flux for ad-atom calculation
   std::vector<double> dp_per_surf;
   gather_dp_flux(dp_per_surf);

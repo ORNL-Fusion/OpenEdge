@@ -1,0 +1,57 @@
+# Test case for fix liquid_metal
+# Uses wall geometry + plasma from existing test data.
+# Runs MHD film solver, outputs Tsurf/evap/adatom/h per surface element.
+#
+# Run:
+#   cd examples/test_liquid_metal
+#   mpirun -np 1 $OE_BIN -in in.liquid_metal
+#   python3 plot_results.py
+
+seed                12345
+dimension           2
+boundary            r r p
+global              gridcut 0.0 comm/sort no
+global              temp 1.e20
+timestep            1e-05
+
+# --- Domain and grid ---
+create_box          2.0 6.0 -4.0 3.8 -0.05 0.05
+create_grid         100 100 1
+balance_grid        rcb cell
+
+global fnum 0.0000001
+
+# --- Species (need at least one for OpenEdge to run) ---
+species             ../test_solps_coupling/input/droplet.species drop_2
+mixture             all drop_2 frac 1.0 nrho 1
+
+# --- Wall surface ---
+read_surf           ../test_solps_coupling/input/wall.surf group wall particle check
+
+surf_collide        absorb vanish
+surf_modify         wall collide absorb
+
+# --- Plasma fields (loads plasma.h5 + equilibrium B-field) ---
+compute cp plasma/fields all file ../test_evaporation/input/plasma.h5 &
+    equilibrium ../test_evaporation/input/g000001.00001_symm.X4.equ &
+    bx by bz temp_e dens_e temp_i dens_i parrflow er et ez
+
+# --- Liquid metal film model on the wall ---
+# Constant 5 MW/m² heat flux, evaporation enabled
+# D+ flux = 1e22 ions/m²/s for ad-atom calculation
+# Per-surf outputs: Tsurf_lm, evap_lm, adatom_lm, h_lm
+
+fix flm liquid_metal wall 1 5.0e6 &
+    h0 0.005 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350.0 &
+    qss 1.0e6 Nx 201 Ny 51 evap yes &
+    dp_flux 1.0e22 Yad 1e-3 E_eff 0.9
+
+# --- Create one dummy particle so OpenEdge actually steps ---
+create_particles all n 1
+
+# --- Dump per-surface liquid metal outputs ---
+dump dsurf surf wall 1 output/dump.surf.* id s_Tsurf_lm s_evap_lm s_adatom_lm s_h_lm
+
+# --- Run a few steps so end_of_step fires and dump captures result ---
+stats 1
+run 5
