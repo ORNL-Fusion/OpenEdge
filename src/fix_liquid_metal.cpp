@@ -164,12 +164,14 @@ FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
 
   // plasma compute pointer (for PLASMA mode)
   cp_plasma = NULL;
-  if (!id_plasma) id_plasma = NULL;
+  if (hf_source != PLASMA) id_plasma = NULL;
   hf_scale = 1.0;
 
   // target file defaults
-  if (!target_file) target_file = NULL;
-  if (!target_leg) target_leg = NULL;
+  if (hf_source != TARGET) {
+    target_file = NULL;
+    target_leg = NULL;
+  }
 
   // D+ flux source defaults
   id_dp = NULL;
