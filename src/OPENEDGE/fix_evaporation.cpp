@@ -81,11 +81,24 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
       Qs_const = atof(arg[i+1]);
       i += 2;
 
+    } else if (strcmp(arg[i],"heatflux/compute") == 0) {
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing compute ID for 'heatflux/compute'");
+      heatflux_mode = HF_COMPUTE;
+      heatflux_compute_id = std::string(arg[i+1]);
+      i += 2;
+
     } else if (strcmp(arg[i],"heatflux/scale") == 0) {
       if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'heatflux/scale'");
       heatflux_scale = atof(arg[i+1]);
       if (!std::isfinite(heatflux_scale) || heatflux_scale < 0.0)
         error->all(FLERR,"Fix evaporation: heatflux/scale must be finite and >= 0");
+      i += 2;
+
+    } else if (strcmp(arg[i],"rocket_eta") == 0) {
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'rocket_eta'");
+      rocket_eta = atof(arg[i+1]);
+      if (rocket_eta < 0.0 || rocket_eta > 1.0)
+        error->all(FLERR,"Fix evaporation: rocket_eta must be in [0,1]");
       i += 2;
 
     } else {
@@ -99,12 +112,6 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
   if (heatflux_mode == HF_FILE && heatfluxFilename.empty())
     error->all(FLERR,"Fix evaporation: empty filename for heatflux/file");
 
-  per_grid_flag = 1;
-  per_grid_freq = nevery;
-  size_per_grid_cols = 3;
-  maxgrid = 0;
-  array_grid = NULL;
-
   }
 
 
@@ -114,7 +121,6 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
 FixEvap::~FixEvap()
 {
   if (copymode) return;
-  memory->destroy(array_grid);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -136,21 +142,15 @@ void FixEvap::init() {
     if (heatfluxFilename.empty())
       error->all(FLERR,"Fix evaporation: heatflux/file given but filename is empty");
     initializeHeatFluxData();               // reads + broadcasts
+  } else if (heatflux_mode == HF_COMPUTE) {
+    int icompute = modify->find_compute(heatflux_compute_id.c_str());
+    if (icompute < 0)
+      error->all(FLERR,"Fix evaporation: compute ID not found for heatflux/compute");
+    cp_heatflux = dynamic_cast<ComputePlasmaFields*>(modify->compute[icompute]);
+    if (!cp_heatflux)
+      error->all(FLERR,"Fix evaporation: heatflux/compute must reference a plasma/fields compute");
   } else if (heatflux_mode != HF_CONST) {
-    error->all(FLERR,"Fix evaporation: must provide heatflux/constant <W/m^2> or heatflux/file <h5>");
-  }
-
-    if (grid->nlocal > maxgrid) {
-    maxgrid = grid->maxlocal;
-    memory->destroy(array_grid);
-    memory->create(array_grid,maxgrid,size_per_grid_cols,"array_grid");
-  }
-
-  // bigint nbytes = (bigint) grid->nlocal * size_per_grid_cols;
-  // if (nbytes) memset(&array_grid[0][0],0,nbytes*sizeof(double));
-
-  if (grid->nlocal) {
-    memset(&array_grid[0][0], 0, grid->nlocal * size_per_grid_cols * sizeof(double));
+    error->all(FLERR,"Fix evaporation: must provide heatflux/constant, heatflux/file, or heatflux/compute");
   }
 
 }
@@ -160,15 +160,6 @@ void FixEvap::init() {
 void FixEvap::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
-  // Zero per-cell accumulators once per full step, before the first half-kick.
-  // end_of_step calls evap_half again; it must NOT re-zero the arrays there.
-  if (grid->nlocal > maxgrid) {
-    maxgrid = grid->maxlocal;
-    memory->destroy(array_grid);
-    memory->create(array_grid, maxgrid, size_per_grid_cols, "array_grid");
-  }
-  if (grid->nlocal)
-    memset(&array_grid[0][0], 0, grid->nlocal * size_per_grid_cols * sizeof(double));
   evap_half(0.5 * update->dt);
 }
 
@@ -183,9 +174,7 @@ void FixEvap::end_of_step()
 ------------------------------------------------------------------------- */
 
 double FixEvap::memory_usage() {
-  double bytes = 0.0;
-  bytes += maxgrid * size_per_grid_cols * sizeof(double);
-  return bytes;
+  return 0.0;
 }
 
 
@@ -193,17 +182,6 @@ double FixEvap::memory_usage() {
 void FixEvap::evap_half(double dt_half)
 {
   if ((update->ntimestep % nevery) != 0) return;
-
-  // (Re)alloc per-grid arrays if the grid grew since start_of_step.
-  // Zeroing is done once per step in start_of_step() so both half-kicks accumulate.
-  if (grid->nlocal > maxgrid) {
-    maxgrid = grid->maxlocal;
-    memory->destroy(array_grid);
-    memory->create(array_grid, maxgrid, size_per_grid_cols, "array_grid");
-    // Grid grew mid-step: zero the newly allocated block so no garbage leaks in.
-    if (grid->nlocal)
-      memset(&array_grid[0][0], 0, grid->nlocal * size_per_grid_cols * sizeof(double));
-  }
 
   Particle::OnePart *parts = particle->particles;
   const int nlocal = particle->nlocal;
@@ -223,8 +201,7 @@ void FixEvap::evap_half(double dt_half)
     if (set_radius > 0.0 && parts[ip].radius <= 0.0) parts[ip].radius = set_radius;
     if (set_temp   > 0.0 && parts[ip].temp   <= 0.0) parts[ip].temp   = set_temp;
 
-    const int icell = parts[ip].icell;
-    droplet_evaporation_model(&parts[ip], dt_half, icell);
+    droplet_evaporation_model(&parts[ip], dt_half);
 
     // Remove droplet after 90% mass loss relative to its initial reference mass.
     const double m0_ref = (set_mass > 0.0) ? set_mass : particle->species[is].mass;
@@ -247,8 +224,7 @@ void FixEvap::evap_half(double dt_half)
 Sergey's Evaporation Model
 ----------------------------------------------------------------------*/
 void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
-                                        const double dt_half,
-                                        const int icell)
+                                        const double dt_half)
 {
   // --- constants ---
   const double AM   = 1.53e-26;      // Li atom mass [kg/atom]
@@ -273,19 +249,28 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
     zpos = ip->x[2];
   }
 
-  // --- heat flux Qs (W/m^2) ---
+  // --- heat flux Qs (W/m^2) and grad_Te for rocket force ---
   double Qs = 0.0;
+  double grad_te_r_local = 0.0, grad_te_z_local = 0.0;
   if (heatflux_mode == HF_CONST) {
     Qs = Qs_const;
   } else if (heatflux_mode == HF_FILE) {
     HeatFluxParams hp = interpHeatFluxAtPos(rpos, zpos, heat_flux_data);
     Qs = hp.q_mag;
+    grad_te_r_local = hp.grad_te_r;
+    grad_te_z_local = hp.grad_te_z;
+    if (!std::isfinite(Qs) || Qs < 0.0) Qs = 0.0;
+  } else if (heatflux_mode == HF_COMPUTE) {
+    PlasmaFileParams pp = cp_heatflux->query_plasma_at_point(ip->x);
+    Qs = pp.q_mag;
+    grad_te_r_local = pp.grad_temp_e_r;
+    grad_te_z_local = pp.grad_temp_e_z;
     if (!std::isfinite(Qs) || Qs < 0.0) Qs = 0.0;
   } else {
     error->one(FLERR,"Fix evaporation: heatflux mode not set properly");
   }
 
-  if (Qs <= 0.0) 
+  if (Qs <= 0.0)
   {
         // --- write back ---
     ip->radius = radius;
@@ -322,6 +307,49 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
   if (T_new < 0.0)
     error->one(FLERR,"Fix evaporation: particle temperature dropped below 0 K");
 
+  // --- rocket force (recoil from asymmetric evaporation) ---
+  // Direction: along -grad_Te (away from hot plasma).
+  // Magnitude: F = (dm/dt) * v_thermal_evap, where dm/dt = 4*pi*r^2 * Gevap * m_atom
+  // v_thermal = sqrt(8 * k_B * T_droplet / (pi * m_atom))  [mean speed of half-Maxwellian]
+  if (rocket_eta > 0.0 && mass_new > 0.0 && Gevap_atoms > 0.0) {
+    const double gtr = grad_te_r_local;
+    const double gtz = grad_te_z_local;
+    const double grad_mag = std::sqrt(gtr*gtr + gtz*gtz);
+
+    // grad_Te is currently used only to set recoil direction, so do not impose
+    // a large absolute cutoff that depends on the chosen unit system.  Real
+    // SOLPS/OpenEdge plasma data stores grad_Te in eV/m, while some legacy
+    // heat-flux converters wrote J/m; both should activate the same branch as
+    // long as the vector is finite and nonzero.
+    if (std::isfinite(grad_mag) && grad_mag > 0.0) {
+      const double kB = 1.380649e-23;             // J/K
+      const double v_thermal = std::sqrt(8.0 * kB * TK / (MY_PI * AM));
+      const double area = 4.0 * MY_PI * radius * radius;
+      const double dmdt = area * Gevap_atoms * AM; // kg/s (positive)
+      // a_rocket = eta * (dmdt * v_thermal / mass) in direction -grad_Te/|grad_Te|
+      const double a_mag = rocket_eta * dmdt * v_thermal / mass_new;
+      const double nr_hat = -gtr / grad_mag;      // unit vector away from hot
+      const double nz_hat = -gtz / grad_mag;
+
+      // Apply velocity kick: dv = a * dt_half
+      // In 2D axisymmetric: v[0] = v_r, v[1] = v_z
+      if (domain->axisymmetric || domain->dimension == 2) {
+        ip->v[0] += a_mag * nr_hat * DT;
+        ip->v[1] += a_mag * nz_hat * DT;
+      } else {
+        // 3D: project r-direction onto x,y
+        const double r_pos = std::sqrt(ip->x[0]*ip->x[0] + ip->x[1]*ip->x[1]);
+        if (r_pos > 1.0e-20) {
+          const double cos_phi = ip->x[0] / r_pos;
+          const double sin_phi = ip->x[1] / r_pos;
+          ip->v[0] += a_mag * nr_hat * cos_phi * DT;
+          ip->v[1] += a_mag * nr_hat * sin_phi * DT;
+          ip->v[2] += a_mag * nz_hat * DT;
+        }
+      }
+    }
+  }
+
   // --- write back ---
   ip->radius = R_new;
   ip->temp   = T_new;
@@ -331,17 +359,6 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
   // table shared across all ranks and particles.  Per-particle mass lives
   // in ip->mass (already set above).  Writing the species table from a
   // per-particle loop is a race condition under MPI and Kokkos.
-
-  // Per-cell accumulators: mass lost (kg), atoms lost, heat absorbed (J).
-  // Uses += so multiple droplets per cell and both half-kicks accumulate correctly.
-  if (icell >= 0 && icell < grid->nlocal && array_grid) {
-    const double dm = Rho * (4.0/3.0) * MY_PI *
-                      (radius*radius*radius - R_new*R_new*R_new);  // kg, >= 0
-    array_grid[icell][0] += dm;                                    // kg
-    array_grid[icell][1] += dm / AM;                               // atoms
-    array_grid[icell][2] += Qs * 4.0*MY_PI * R_new*R_new * DT;    // J
-    
-  }
 
 }
 /* ----------------------------------------------------------------------
@@ -484,6 +501,13 @@ HeatFluxData FixEvap::readHeatFlux(const std::string& filePath) {
             }
         }
 
+        // Read grad_Te for rocket force direction (optional)
+        if (exists("grad_te_r")) {
+            data.grad_te_r = read2DValidated("grad_te_r");
+            data.grad_te_z = read2DValidated("grad_te_z");
+            printf("  Loaded grad_te_r/z for rocket force\n");
+        }
+
         if (!std::is_sorted(data.r.begin(), data.r.end()) ||
             !std::is_sorted(data.z.begin(), data.z.end())) {
             throw std::runtime_error("Heatflux coordinate axes must be monotonic increasing");
@@ -545,6 +569,8 @@ void FixEvap::broadcastHeatFluxData(HeatFluxData& data) {
 
   // Broadcast the magnetic field components
   broadcast2DVector(data.q_mag);
+  broadcast2DVector(data.grad_te_r);
+  broadcast2DVector(data.grad_te_z);
 }
 
 
@@ -622,5 +648,18 @@ HeatFluxParams FixEvap::interpHeatFluxAtPos(double r, double z,
   double q = w11 * q11 + w21 * q21 + w12 * q12 + w22 * q22;
   if (!std::isfinite(q) || q < 0.0) q = 0.0;
   res.q_mag = q;
+
+  // Interpolate grad_Te for rocket force (if loaded)
+  res.grad_te_r = 0.0;
+  res.grad_te_z = 0.0;
+  if (!data.grad_te_r.empty() && !data.grad_te_z.empty()) {
+    auto interp2 = [&](const std::vector<std::vector<double>>& f) {
+      return w11 * safe_val(f[iz1][ir1]) + w21 * safe_val(f[iz1][ir2])
+           + w12 * safe_val(f[iz2][ir1]) + w22 * safe_val(f[iz2][ir2]);
+    };
+    res.grad_te_r = interp2(data.grad_te_r);
+    res.grad_te_z = interp2(data.grad_te_z);
+  }
+
   return res;
 }

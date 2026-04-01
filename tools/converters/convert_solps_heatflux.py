@@ -143,6 +143,29 @@ def convert_solps_heatflux(
     qmag_grid = _interp_field(src_pts, qmag, tgt_pts, nz, nr)
     qmag_grid = np.nan_to_num(qmag_grid, nan=0.0, posinf=0.0, neginf=0.0)
 
+    # --- Compute grad_Te for rocket force direction ---
+    # Read Te from b2fstate (in eV), interpolate to regular grid, take gradient
+    b2fstate = run_path / "b2fstate"
+    nx_d, ny_d, ns_d = b2f_read_dims(b2fstate)
+    try:
+        te_raw = b2f_extract("te", b2fstate)  # (nx+2, ny+2)
+        if te_raw.ndim == 3:
+            te_raw = te_raw[:, :, 0]  # take first species if multi-species
+        te_cc = te_raw[1:-1, 1:-1]  # clip guard cells
+        te_grid = _interp_field(src_pts, te_cc, tgt_pts, nz, nr)
+        te_grid = np.nan_to_num(te_grid, nan=0.0)
+
+        dR = r[1] - r[0]
+        dZ = z[1] - z[0]
+        grad_te_r_grid = np.gradient(te_grid, dR, axis=1)  # eV/m
+        grad_te_z_grid = np.gradient(te_grid, dZ, axis=0)  # eV/m
+        has_grad_te = True
+        print(f"  Computed grad_Te: |grad_Te_r|_max={np.nanmax(np.abs(grad_te_r_grid)):.1f} eV/m, "
+              f"|grad_Te_z|_max={np.nanmax(np.abs(grad_te_z_grid)):.1f} eV/m")
+    except (KeyError, Exception) as e:
+        print(f"  Warning: could not compute grad_Te ({e}), rocket force data not written")
+        has_grad_te = False
+
     with h5py.File(heatflux_out, "w") as f:
         f.create_dataset("r", data=r)
         f.create_dataset("z", data=z)
@@ -157,6 +180,9 @@ def convert_solps_heatflux(
         f.create_dataset("R", data=rr2d)
         f.create_dataset("Z", data=zz2d)
         f.create_dataset("q_mag", data=qmag_grid)
+        if has_grad_te:
+            f.create_dataset("grad_te_r", data=grad_te_r_grid)
+            f.create_dataset("grad_te_z", data=grad_te_z_grid)
 
     print(f"Wrote heatflux: {heatflux_out} (method={method})")
     print(f"Grid: nr={nr}, nz={nz}, R=[{r[0]:.4f},{r[-1]:.4f}], Z=[{z[0]:.4f},{z[-1]:.4f}]")

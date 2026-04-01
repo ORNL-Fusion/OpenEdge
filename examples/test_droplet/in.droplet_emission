@@ -10,8 +10,8 @@ variable Ndump equal 100 #floor($N/10000)
 
 variable temp_droplet equal 773.15
 variable temp_emit    equal 1.e20
-variable heatflux_scale equal 7.0
-variable nemit        equal 3 #85
+variable heatflux_scale equal 4.0
+variable nemit        equal 3
 variable droplet_inner index InstabilityInner
 variable droplet_outer index InstabilityOuter
 # --- droplet sizes (rho fixed) ---
@@ -47,7 +47,7 @@ mixture LigamentOuter_3 drop_3 frac 1.0 nrho 1
 
 variable            pmass particle mass
 
-read_surf           ../wall.surf group surfID particle check
+read_surf           wall.surf group surfID particle check
 
 # surf_collide vanish has allowreact=0 so it never calls surf_react and
 # the species mixture may not map OpenEdge droplet species → counts stay 0.
@@ -72,7 +72,7 @@ group               divertor_outer surf id <> 139 150
 
 read_particles source 1
 
-read_surf           ../core.surf invert group surfID2 particle check
+read_surf           core.surf invert group surfID2 particle check
 surf_modify         surfID2 collide wallColModel react wallReact
 
 # particle trajectory dump
@@ -82,18 +82,18 @@ dump dtraj_drop1 particle all 1 case.outer id type x y z vx vy vz v_pmass temp r
 #dump dtraj_drop3 particle g_drop3 1 case.outer.drop3 id type x y z vx vy vz v_pmass temp radius
 
 # plasma fields
-compute cnear plasma/fields all file ../../test_evaporation/input/plasma.h5 &
-    ../../test_evaporation/input/bfield.h5 &
+compute cnear plasma/fields all file ../test_evaporation/input/plasma.h5 &
+    equilibrium ../test_evaporation/input/g000001.00001_symm.X4.equ &
     bx by bz temp_e dens_e temp_i dens_i parrflow er et ez
 
 fix fevap_1 evaporation 1 LigamentOuter_1 mass ${md1} radius ${rd1} temp ${temp_droplet} &
-    heatflux/file ../../test_evaporation/input/heatflux.fix.h5 heatflux/scale ${heatflux_scale}
+    heatflux/compute cnear heatflux/scale ${heatflux_scale}
 
 fix fevap_2 evaporation 1 LigamentOuter_2 mass ${md2} radius ${rd2} temp ${temp_droplet} &
-    heatflux/file ../../test_evaporation/input/heatflux.fix.h5 heatflux/scale ${heatflux_scale}
+    heatflux/compute cnear heatflux/scale ${heatflux_scale}
 
 fix fevap_3 evaporation 1 LigamentOuter_3 mass ${md3} radius ${rd3} temp ${temp_droplet} &
-    heatflux/file ../../test_evaporation/input/heatflux.fix.h5 heatflux/scale ${heatflux_scale}
+    heatflux/compute cnear heatflux/scale ${heatflux_scale}
 
 fix fdrag1 drag 1 2.0 1 &
     plasma c_cnear[4] c_cnear[6] c_cnear[7] c_cnear[8] &
@@ -144,16 +144,6 @@ fix    eS efield/grid c_cnear[9] c_cnear[10] c_cnear[11]
 global efield grid eS 0
 global boris_subcycles 5
 
-
-fix fml_1 ave/grid all 1 ${Ndump} ${Ndump} f_fevap_1[1] f_fevap_1[2]
-fix fml_2 ave/grid all 1 ${Ndump} ${Ndump} f_fevap_2[1] f_fevap_2[2]
-fix fml_3 ave/grid all 1 ${Ndump} ${Ndump} f_fevap_3[1] f_fevap_3[2]
-
-dump d_ml grid all ${Ndump} mass_loss_3sizes.txt id xc yc &
-    f_fml_1[1] f_fml_1[2] &
-    f_fml_2[1] f_fml_2[2] &
-    f_fml_3[1] f_fml_3[2]
-    
 
 # ---------------------------------------------------------------------------
 

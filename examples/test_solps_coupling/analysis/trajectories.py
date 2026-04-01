@@ -219,8 +219,9 @@ def main():
     fig, ax = plt.subplots(
         1,
         1,
-        figsize=(6.8, 5.4),
-        dpi=400,
+        figsize=(4.8, 3.4),
+#        figsize=(6.8, 5.4),
+        dpi=200,
         gridspec_kw={"wspace": 0.0015},
     )
     cmap = "viridis"

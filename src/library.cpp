@@ -26,7 +26,10 @@
 #include "particle.h"
 #include "modify.h"
 #include "compute.h"
+#include "fix.h"
 #include "variable.h"
+#include "grid.h"
+#include "OPENEDGE/compute_plasma_fields.h"
 
 using namespace SPARTA_NS;
 
@@ -290,4 +293,67 @@ void *sparta_extract_variable(void *ptr, char *name)
   }
 
   return NULL;
+}
+
+/* ======================================================================
+   OpenEdge coupling extensions
+   ====================================================================== */
+
+/* ----------------------------------------------------------------------
+   extract a pointer to per-grid data from a named fix
+   id = fix ID
+   style: 2 = per-grid data (only supported style for now)
+   type: 0 = vector, 1+ = array (returns full array pointer)
+   returns double* for vector, double** for array
+   returns NULL if fix not found or does not produce per-grid data
+------------------------------------------------------------------------- */
+
+void *openedge_extract_fix(void *ptr, char *id, int style, int type)
+{
+  SPARTA *sparta = (SPARTA *) ptr;
+
+  int ifix = sparta->modify->find_fix(id);
+  if (ifix < 0) return NULL;
+  Fix *fix = sparta->modify->fix[ifix];
+
+  if (style == 2) {
+    if (!fix->per_grid_flag) return NULL;
+    if (type == 0) return (void *) fix->vector_grid;
+    return (void *) fix->array_grid;
+  }
+
+  return NULL;
+}
+
+/* ----------------------------------------------------------------------
+   return the number of owned grid cells on this processor
+------------------------------------------------------------------------- */
+
+int openedge_get_ngrid(void *ptr)
+{
+  SPARTA *sparta = (SPARTA *) ptr;
+  return sparta->grid->nlocal;
+}
+
+/* ----------------------------------------------------------------------
+   reload plasma background on a compute plasma/fields instance
+   compute_id = ID of the compute plasma/fields (e.g. "cnear")
+   new_path = path to new plasma HDF5 file, or NULL to re-read current file
+------------------------------------------------------------------------- */
+
+void openedge_reload_plasma(void *ptr, char *compute_id, char *new_path)
+{
+  SPARTA *sparta = (SPARTA *) ptr;
+
+  int icompute = sparta->modify->find_compute(compute_id);
+  if (icompute < 0) return;
+
+  ComputePlasmaFields *cp =
+    dynamic_cast<ComputePlasmaFields *>(sparta->modify->compute[icompute]);
+  if (!cp) return;
+
+  if (new_path && strlen(new_path) > 0)
+    cp->reload_plasma(std::string(new_path));
+  else
+    cp->reload_plasma();
 }

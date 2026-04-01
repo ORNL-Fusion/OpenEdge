@@ -33,6 +33,9 @@ struct PlasmaFileData{
   std::vector<std::vector<double>> parr_flow_r, parr_flow_t, parr_flow_z, parr_flow;
   std::vector<std::vector<double>> grad_temp_e_r, grad_temp_e_t, grad_temp_e_z;
   std::vector<std::vector<double>> grad_temp_i_r, grad_temp_i_t, grad_temp_i_z;
+  // Optional heat flux stored inside plasma.h5 (q_mag dataset).
+  bool has_qmag = false;
+  std::vector<std::vector<double>> q_mag;
   // Optional B-field stored inside plasma.h5 (br, bt, bz datasets).
   // When present these override the separate bfield.h5 for mag_arr.
   bool has_bfield = false;
@@ -72,6 +75,7 @@ struct PlasmaFileParams {
   double grad_temp_i_r;
   double grad_temp_i_t;
   double grad_temp_i_z;
+  double q_mag;   // surface heat flux [W/m^2], 0 if not in plasma.h5
 };
 
 // Equilibrium (ψ) data from .equ file for exact magnetic geometry
@@ -135,6 +139,10 @@ class ComputePlasmaFields : public Compute {
   // Point-query API: interpolate background data at arbitrary (x,y,z)
   PlasmaFileParams query_plasma_at_point(const double xyz[3]) const;
   MagneticFieldFileDataParams query_bfield_at_point(const double xyz[3]) const;
+
+  // Reload plasma background from file (for coupling: re-reads HDF5 and re-interpolates)
+  void reload_plasma();
+  void reload_plasma(const std::string &new_plasma_path);
 
 PlasmaFileParams *plasma_arr;   // size = grid->nlocal
 PlasmaFileData plasma_data;

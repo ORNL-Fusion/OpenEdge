@@ -82,7 +82,6 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
       error->all(FLERR,"compute plasma/fields file mode needs at least: plasma.h5");
     plasmaStatePath = std::string(arg[iarg++]);
     magneticFieldsPath.clear();
-    // Optional bfield.h5 path. If omitted, equilibrium must be provided.
     if (iarg < narg && strcmp(arg[iarg],"equilibrium") != 0 && strcmp(arg[iarg],"values") != 0)
       magneticFieldsPath = std::string(arg[iarg++]);
   } else if (strcmp(arg[iarg],"constant") == 0) {
@@ -369,6 +368,10 @@ void ComputePlasmaFields::init()
 
     // --- Equilibrium-based magnetic geometry ---
     if (has_equilibrium) {
+      if (me == 0) {
+        equ_data = readEquilibriumFile(equilibriumPath);
+      }
+      broadcastEquilibriumData(equ_data);
       memory->create(geom_arr, ncells, "plasma/fields:geom_arr");
       for (int icell = 0; icell < ncells; ++icell) {
         MagneticGeometry g{};
@@ -466,6 +469,101 @@ void ComputePlasmaFields::init()
   }
 }
 
+
+/* ----------------------------------------------------------------------
+   Reload plasma background from the current plasmaStatePath.
+   Re-reads HDF5, broadcasts, re-interpolates onto all grid cells.
+   Called by the coupling driver between time chunks to refresh the
+   background plasma without reinitializing the entire compute.
+------------------------------------------------------------------------- */
+
+void ComputePlasmaFields::reload_plasma()
+{
+  if (input_mode != MODE_FILE) return;
+
+  const int me     = comm->me;
+  const int ncells = grid->nlocal;
+  Grid::ChildCell *cells = grid->cells;
+  Grid::ChildInfo *cinfo = grid->cinfo;
+
+  // Re-read plasma file
+  if (me == 0) plasma_data = readPlasmaFileData(plasmaStatePath);
+  broadcastPlasmaData(plasma_data);
+
+  // Re-read magnetic field if provided separately
+  if (!magneticFieldsPath.empty()) {
+    if (me == 0) magnetic_data = readMagneticFieldFileData(magneticFieldsPath);
+    broadcastMagneticData(magnetic_data);
+  }
+
+  // Recompute stencils (grid may not have changed, but R/Z grids in file might)
+  precomputeStencils(plasma_data.r, plasma_data.z, plasma_stencil);
+  if (!magneticFieldsPath.empty())
+    precomputeStencils(magnetic_data.r, magnetic_data.z, magnetic_stencil);
+
+  // Re-interpolate onto grid cells
+  for (int icell = 0; icell < ncells; ++icell) {
+    if (!(cinfo[icell].mask & groupbit)) continue;
+    if (cells[icell].nsplit < 1)         continue;
+    plasma_arr[icell] = bilinearInterpolationPlasma(icell, plasma_data);
+
+    if (!magneticFieldsPath.empty())
+      mag_arr[icell] = bilinearInterpolationMagneticField(icell, magnetic_data);
+  }
+
+  // Update multi-ion species data
+  nion_species = plasma_data.ions_nspec;
+  ion_spec_index = plasma_data.ion_spec_index;
+  ion_charge_state_z = plasma_data.ion_charge_state_z;
+  ion_mass_amu = plasma_data.ion_mass_amu;
+  ion_names = plasma_data.ion_names;
+  if (nion_species > 0) {
+    const int nstore = ncells * nion_species;
+    ion_dens_grid.assign(nstore, 0.0);
+    ion_temp_grid.assign(nstore, 0.0);
+    ion_parr_flow_grid.assign(nstore, 0.0);
+    ion_parr_flow_r_grid.assign(nstore, 0.0);
+    ion_parr_flow_t_grid.assign(nstore, 0.0);
+    ion_parr_flow_z_grid.assign(nstore, 0.0);
+
+    for (int icell = 0; icell < ncells; ++icell) {
+      if (!(cinfo[icell].mask & groupbit)) continue;
+      if (cells[icell].nsplit < 1)         continue;
+      if (icell < 0 || icell >= static_cast<int>(plasma_stencil.size())) continue;
+      const BilinearStencil &s = plasma_stencil[icell];
+      if (!s.valid) continue;
+      const int base = icell * nion_species;
+      for (int is = 0; is < nion_species; ++is) {
+        ion_dens_grid[base + is] =
+          interpField3DFlat(plasma_data.ions_dens, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+        ion_temp_grid[base + is] =
+          interpField3DFlat(plasma_data.ions_temp, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+        ion_parr_flow_grid[base + is] =
+          interpField3DFlat(plasma_data.ions_parr_flow, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+        ion_parr_flow_r_grid[base + is] =
+          interpField3DFlat(plasma_data.ions_parr_flow_r, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+        ion_parr_flow_t_grid[base + is] =
+          interpField3DFlat(plasma_data.ions_parr_flow_t, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+        ion_parr_flow_z_grid[base + is] =
+          interpField3DFlat(plasma_data.ions_parr_flow_z, is, plasma_data.ions_nz, plasma_data.ions_nr, s);
+      }
+    }
+  }
+
+  if (me == 0)
+    printf("  Plasma background reloaded from %s (%d cells)\n",
+           plasmaStatePath.c_str(), ncells);
+}
+
+/* ----------------------------------------------------------------------
+   Reload from a new file path (updates plasmaStatePath before reloading)
+------------------------------------------------------------------------- */
+
+void ComputePlasmaFields::reload_plasma(const std::string &new_plasma_path)
+{
+  plasmaStatePath = new_plasma_path;
+  reload_plasma();
+}
 
 void ComputePlasmaFields::compute_per_grid()
 {
@@ -774,6 +872,13 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
         data.grad_temp_i_t = read2D("grad_ti_t");
         data.grad_temp_i_z = read2D("grad_ti_z");
 
+        // Optional heat flux
+        if (hasDataset("q_mag")) {
+          data.q_mag = read2D("q_mag");
+          data.has_qmag = true;
+          printf("  Loaded q_mag from %s\n", filePath.c_str());
+        }
+
         // Optional multi-ion extension
         if (hasDataset("ion_species/spec_index")) {
           data.ion_spec_index = read1DInt("ion_species/spec_index");
@@ -899,6 +1004,9 @@ void ComputePlasmaFields::broadcastPlasmaData(PlasmaFileData& data) {
     broadcast2DVector(data.grad_temp_i_t);
     broadcast2DVector(data.grad_temp_i_z);
 
+    MPI_Bcast(&data.has_qmag, 1, MPI_C_BOOL, 0, world);
+    if (data.has_qmag) broadcast2DVector(data.q_mag);
+
     auto broadcast1DInt = [&](std::vector<int>& vec) {
       int n = static_cast<int>(vec.size());
       MPI_Bcast(&n, 1, MPI_INT, 0, world);
@@ -1022,6 +1130,7 @@ PlasmaFileParams ComputePlasmaFields::bilinearInterpolationPlasma(
   P.parr_flow_t   = interpField2D(data.parr_flow_t, s);
   P.parr_flow_z   = interpField2D(data.parr_flow_z, s);
   P.parr_flow     = interpField2D(data.parr_flow, s);
+  P.q_mag = data.has_qmag ? interpField2D(data.q_mag, s) : 0.0;
 
   return P;
 }
@@ -1082,6 +1191,11 @@ double ComputePlasmaFields::interpField3DFlat(
   const double q22 = field[i22];
   return s.w11 * q11 + s.w21 * q21 + s.w12 * q12 + s.w22 * q22;
 }
+
+/*----------------------------------------------------------------------
+   Build a bilinear stencil at an arbitrary (x,y,z) position.
+   This is the factored-out core of precomputeStencils().
+------------------------------------------------------------------------- */
 
 ComputePlasmaFields::BilinearStencil
 ComputePlasmaFields::makeStencilAtPoint(
@@ -1150,6 +1264,10 @@ ComputePlasmaFields::makeStencilAtPoint(
   return s;
 }
 
+/*----------------------------------------------------------------------
+   Precompute stencils for all cell centers (delegates to makeStencilAtPoint)
+------------------------------------------------------------------------- */
+
 void ComputePlasmaFields::precomputeStencils(
     const std::vector<double> &r_vals,
     const std::vector<double> &z_vals,
@@ -1214,7 +1332,6 @@ void ComputePlasmaFields::gradField2D(
   grad_z = ((1.0 - s.t) * (q12 - q11) + s.t * (q22 - q21)) * s.inv_dZ;
 }
 
-
 /*----------------------------------------------------------------------
    Point-query: interpolate plasma fields at arbitrary (x,y,z)
 ------------------------------------------------------------------------- */
@@ -1259,6 +1376,7 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
     return P;
   }
 
+  // MODE_FILE: build stencil on-the-fly and interpolate
   BilinearStencil s = makeStencilAtPoint(xyz, plasma_data.r, plasma_data.z);
   if (!s.valid) return P;
 
@@ -1278,6 +1396,8 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
   P.parr_flow_t   = interpField2D(plasma_data.parr_flow_t, s);
   P.parr_flow_z   = interpField2D(plasma_data.parr_flow_z, s);
   P.parr_flow     = interpField2D(plasma_data.parr_flow, s);
+  P.q_mag = plasma_data.has_qmag ?
+            interpField2D(plasma_data.q_mag, s) : 0.0;
   return P;
 }
 
@@ -1309,7 +1429,6 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
     return B;
   }
 
-  // File-backed magnetic field (legacy bfield.h5 path).
   if (!magnetic_data.r.empty() && !magnetic_data.z.empty()) {
     BilinearStencil s = makeStencilAtPoint(xyz, magnetic_data.r, magnetic_data.z);
     if (!s.valid) return B;
@@ -1328,7 +1447,6 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
     return B;
   }
 
-  // Equilibrium-only magnetic field path (no bfield.h5).
   if (!has_equilibrium || equ_data.jm < 3 || equ_data.km < 3) return B;
 
   const int dim = domain->dimension;
@@ -1338,13 +1456,11 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
   double R, Z;
   if (dim == 2) { R = x; Z = y; }
   else { R = std::sqrt(x*x + y*y); Z = zc; }
-
   if (R < 1.0e-10) return B;
 
   const EquilibriumData &equ = equ_data;
   const int jm = equ.jm;
   const int km = equ.km;
-
   const double dr = equ.r[1] - equ.r[0];
   const double dz = equ.z[1] - equ.z[0];
   if (dr <= 0.0 || dz <= 0.0) return B;
@@ -1396,10 +1512,8 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
     B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr + B.bz*B.dBz_dr) / B.Bmag;
     B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz + B.bz*B.dBz_dz) / B.Bmag;
   }
-
   return B;
 }
-
 
 /* ----------------------------------------------------------------------
    read magnetic field data from file
@@ -1472,9 +1586,6 @@ EquilibriumData ComputePlasmaFields::readEquilibriumFile(const std::string &path
     error->one(FLERR, msg);
   }
 
-  // Helper: read all whitespace-separated doubles from the stream until
-  // we have collected 'count' values, skipping comment/header lines that
-  // start with non-numeric characters.
   auto readDoubles = [&](int count) -> std::vector<double> {
     std::vector<double> vals;
     vals.reserve(count);
@@ -1490,10 +1601,8 @@ EquilibriumData ComputePlasmaFields::readEquilibriumFile(const std::string &path
     return vals;
   };
 
-  // Parse header lines to extract jm, km, psib, btf, rtf
   std::string line;
   while (std::getline(fin, line)) {
-    // Look for "jm    =" pattern
     if (line.find("jm") != std::string::npos && line.find("=") != std::string::npos
         && line.find(":=") == std::string::npos) {
       std::istringstream iss(line.substr(line.find("=") + 1));
@@ -1501,7 +1610,6 @@ EquilibriumData ComputePlasmaFields::readEquilibriumFile(const std::string &path
     }
     if (line.find("km") != std::string::npos && line.find("=") != std::string::npos
         && line.find(":=") == std::string::npos) {
-      // Avoid re-reading if jm line also contains "km"
       if (line.find("km") < line.find("=")) {
         std::istringstream iss(line.substr(line.find("=") + 1));
         iss >> equ.km;
@@ -1522,42 +1630,33 @@ EquilibriumData ComputePlasmaFields::readEquilibriumFile(const std::string &path
       std::istringstream iss(line.substr(line.find("=") + 1));
       iss >> equ.rtf;
     }
-    // Stop at r(1:jm) marker
     if (line.find("r(1:jm)") != std::string::npos) break;
   }
 
   if (equ.jm <= 0 || equ.km <= 0)
     error->one(FLERR, "Equilibrium file: failed to parse jm/km");
 
-  // Read r coordinates
   equ.r = readDoubles(equ.jm);
   if (static_cast<int>(equ.r.size()) != equ.jm)
     error->one(FLERR, "Equilibrium file: incomplete r array");
 
-  // Skip to z(1:km) marker
   while (std::getline(fin, line)) {
     if (line.find("z(1:km)") != std::string::npos) break;
   }
 
-  // Read z coordinates
   equ.z = readDoubles(equ.km);
   if (static_cast<int>(equ.z.size()) != equ.km)
     error->one(FLERR, "Equilibrium file: incomplete z array");
 
-  // Skip to psi data marker
   while (std::getline(fin, line)) {
     if (line.find("psi(j,k)") != std::string::npos) break;
   }
 
-  // Read psi values: ((psi(j,k)-psib, j=1,jm), k=1,km)
-  // Layout: for each k (Z index), read jm values (R index)
-  // So psi[k][j] = psi(R_j, Z_k)
   int total = equ.jm * equ.km;
   std::vector<double> psi_flat = readDoubles(total);
   if (static_cast<int>(psi_flat.size()) != total)
     error->one(FLERR, "Equilibrium file: incomplete psi array");
 
-  // Add back psib and store as 2D array [km][jm]
   equ.psi.resize(equ.km, std::vector<double>(equ.jm));
   int idx = 0;
   for (int k = 0; k < equ.km; ++k)
@@ -1573,26 +1672,19 @@ EquilibriumData ComputePlasmaFields::readEquilibriumFile(const std::string &path
   return equ;
 }
 
-/* ----------------------------------------------------------------------
-   Broadcast equilibrium data from rank 0 to all ranks
-------------------------------------------------------------------------- */
-
 void ComputePlasmaFields::broadcastEquilibriumData(EquilibriumData &data) {
   int me = comm->me;
-
   MPI_Bcast(&data.jm, 1, MPI_INT, 0, world);
   MPI_Bcast(&data.km, 1, MPI_INT, 0, world);
   MPI_Bcast(&data.btf, 1, MPI_DOUBLE, 0, world);
   MPI_Bcast(&data.rtf, 1, MPI_DOUBLE, 0, world);
   MPI_Bcast(&data.psib, 1, MPI_DOUBLE, 0, world);
-
   if (me != 0) {
     data.r.resize(data.jm);
     data.z.resize(data.km);
   }
   MPI_Bcast(data.r.data(), data.jm, MPI_DOUBLE, 0, world);
   MPI_Bcast(data.z.data(), data.km, MPI_DOUBLE, 0, world);
-
   if (me != 0) {
     data.psi.resize(data.km, std::vector<double>(data.jm));
   }
@@ -1600,26 +1692,11 @@ void ComputePlasmaFields::broadcastEquilibriumData(EquilibriumData &data) {
     MPI_Bcast(data.psi[k].data(), data.jm, MPI_DOUBLE, 0, world);
 }
 
-/* ----------------------------------------------------------------------
-   Compute exact magnetic geometry at cell center from equilibrium ψ(R,Z)
-
-   Uses finite differences on the ψ grid for first and second derivatives,
-   then reconstructs B-field components and all derived quantities.
-
-   B_R   = -(1/R) ∂ψ/∂Z
-   B_Z   =  (1/R) ∂ψ/∂R
-   B_φ   =  btf * rtf / R
-
-   Output in cylindrical (R, φ, Z) coords.
-------------------------------------------------------------------------- */
-
 void ComputePlasmaFields::computeMagneticGeometry(
     int icell, const EquilibriumData &equ, MagneticGeometry &geom)
 {
   Grid::ChildCell *cells = grid->cells;
   const int dim = domain->dimension;
-
-  // Cell center in (R, Z)
   const double x = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
   const double y = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
   const double zc = (dim == 3) ? 0.5 * (cells[icell].lo[2] + cells[icell].hi[2])
@@ -1627,44 +1704,28 @@ void ComputePlasmaFields::computeMagneticGeometry(
   double R, Z;
   if (dim == 2) { R = x; Z = y; }
   else { R = std::sqrt(x*x + y*y); Z = zc; }
-
-  if (R < 1.0e-10) return;  // too close to axis
+  if (R < 1.0e-10) return;
 
   const int jm = equ.jm;
   const int km = equ.km;
   if (jm < 3 || km < 3) return;
 
-  // Find cell in equilibrium grid
   const double dr = equ.r[1] - equ.r[0];
   const double dz = equ.z[1] - equ.z[0];
   if (dr <= 0.0 || dz <= 0.0) return;
 
-  // Continuous indices
   double fj = (R - equ.r[0]) / dr;
   double fk = (Z - equ.z[0]) / dz;
-
-  // Clamp to interior (need ±1 for central differences)
-  int j = static_cast<int>(std::floor(fj));
-  int k = static_cast<int>(std::floor(fk));
-  j = std::max(1, std::min(j, jm - 3));
-  k = std::max(1, std::min(k, km - 3));
-
-  // Use the nearest grid point for finite differences (simplest approach)
-  // Round to nearest grid point
   int jc = static_cast<int>(std::round(fj));
   int kc = static_cast<int>(std::round(fk));
   jc = std::max(1, std::min(jc, jm - 2));
   kc = std::max(1, std::min(kc, km - 2));
 
-  // First derivatives: central differences on the ψ grid
-  // psi[k][j] = ψ(R_j, Z_k)
   const double dR = equ.r[jc+1] - equ.r[jc-1];
   const double dZ = equ.z[kc+1] - equ.z[kc-1];
-
   const double dpsi_dR = (equ.psi[kc][jc+1] - equ.psi[kc][jc-1]) / dR;
   const double dpsi_dZ = (equ.psi[kc+1][jc] - equ.psi[kc-1][jc]) / dZ;
 
-  // Second derivatives
   const double dR1 = equ.r[jc+1] - equ.r[jc];
   const double dR0 = equ.r[jc] - equ.r[jc-1];
   const double dZ1 = equ.z[kc+1] - equ.z[kc];
@@ -1673,15 +1734,12 @@ void ComputePlasmaFields::computeMagneticGeometry(
   const double d2psi_dR2 = 2.0 * (equ.psi[kc][jc+1] / (dR1*(dR1+dR0))
                                  - equ.psi[kc][jc] / (dR1*dR0)
                                  + equ.psi[kc][jc-1] / (dR0*(dR1+dR0)));
-
   const double d2psi_dZ2 = 2.0 * (equ.psi[kc+1][jc] / (dZ1*(dZ1+dZ0))
                                  - equ.psi[kc][jc] / (dZ1*dZ0)
                                  + equ.psi[kc-1][jc] / (dZ0*(dZ1+dZ0)));
-
   const double d2psi_dRdZ = (equ.psi[kc+1][jc+1] - equ.psi[kc+1][jc-1]
                             - equ.psi[kc-1][jc+1] + equ.psi[kc-1][jc-1]) / (dR * dZ);
 
-  // B-field components
   const double invR = 1.0 / R;
   const double BR = -dpsi_dZ * invR;
   const double BZ = dpsi_dR * invR;
@@ -1691,44 +1749,23 @@ void ComputePlasmaFields::computeMagneticGeometry(
   if (Bmag <= 0.0) return;
   geom.Bmag = Bmag;
 
-  // Unit vector b = B/|B|
   const double invBmag = 1.0 / Bmag;
   const double bR = BR * invBmag;
   const double bphi = Bphi * invBmag;
   const double bZ = BZ * invBmag;
 
-  // ∂B_R/∂R, ∂B_R/∂Z, ∂B_Z/∂R, ∂B_Z/∂Z, ∂B_φ/∂R, ∂B_φ/∂Z
   const double invR2 = invR * invR;
-  // B_R = -(1/R) ∂ψ/∂Z
-  // ∂B_R/∂R = +(1/R²) ∂ψ/∂Z - (1/R) ∂²ψ/∂R∂Z
   const double dBR_dR2 = dpsi_dZ * invR2 - d2psi_dRdZ * invR;
-  // ∂B_R/∂Z = -(1/R) ∂²ψ/∂Z²
   const double dBR_dZ2 = -d2psi_dZ2 * invR;
-
-  // B_Z = +(1/R) ∂ψ/∂R
-  // ∂B_Z/∂R = -(1/R²) ∂ψ/∂R + (1/R) ∂²ψ/∂R²
   const double dBZ_dR2 = -dpsi_dR * invR2 + d2psi_dR2 * invR;
-  // ∂B_Z/∂Z = +(1/R) ∂²ψ/∂R∂Z
   const double dBZ_dZ2 = d2psi_dRdZ * invR;
-
-  // B_φ = btf*rtf/R
-  // ∂B_φ/∂R = -btf*rtf/R²
   const double dBphi_dR = -equ.btf * equ.rtf * invR2;
-  // ∂B_φ/∂Z = 0
   const double dBphi_dZ = 0.0;
 
-  // grad(|B|) via chain rule: ∂|B|/∂x_i = (1/|B|) * (B_R ∂B_R/∂x_i + B_φ ∂B_φ/∂x_i + B_Z ∂B_Z/∂x_i)
-  geom.gradBmag[0] = (BR * dBR_dR2 + Bphi * dBphi_dR + BZ * dBZ_dR2) * invBmag;  // ∂|B|/∂R
-  geom.gradBmag[1] = 0.0;  // ∂|B|/∂φ = 0 (axisymmetric)
-  geom.gradBmag[2] = (BR * dBR_dZ2 + Bphi * dBphi_dZ + BZ * dBZ_dZ2) * invBmag;  // ∂|B|/∂Z
+  geom.gradBmag[0] = (BR * dBR_dR2 + Bphi * dBphi_dR + BZ * dBZ_dR2) * invBmag;
+  geom.gradBmag[1] = 0.0;
+  geom.gradBmag[2] = (BR * dBR_dZ2 + Bphi * dBphi_dZ + BZ * dBZ_dZ2) * invBmag;
 
-  // Curvature: κ = (b·∇)b  in cylindrical coordinates
-  // For axisymmetric (∂/∂φ = 0):
-  // κ_R = b_R ∂b_R/∂R + b_Z ∂b_R/∂Z - b_φ²/R
-  // κ_φ = b_R ∂b_φ/∂R + b_Z ∂b_φ/∂Z + b_R b_φ/R
-  // κ_Z = b_R ∂b_Z/∂R + b_Z ∂b_Z/∂Z
-
-  // Derivatives of b = B/|B|: ∂b_i/∂x = (1/|B|)(∂B_i/∂x - b_i ∂|B|/∂x)
   const double dbR_dR = invBmag * (dBR_dR2 - bR * geom.gradBmag[0]);
   const double dbR_dZ = invBmag * (dBR_dZ2 - bR * geom.gradBmag[2]);
   const double dbphi_dR = invBmag * (dBphi_dR - bphi * geom.gradBmag[0]);
@@ -1736,15 +1773,11 @@ void ComputePlasmaFields::computeMagneticGeometry(
   const double dbZ_dR = invBmag * (dBZ_dR2 - bZ * geom.gradBmag[0]);
   const double dbZ_dZ = invBmag * (dBZ_dZ2 - bZ * geom.gradBmag[2]);
 
-  geom.kappa[0] = bR * dbR_dR + bZ * dbR_dZ - bphi * bphi * invR;  // κ_R
-  geom.kappa[1] = bR * dbphi_dR + bZ * dbphi_dZ + bR * bphi * invR; // κ_φ
-  geom.kappa[2] = bR * dbZ_dR + bZ * dbZ_dZ;                        // κ_Z
+  geom.kappa[0] = bR * dbR_dR + bZ * dbR_dZ - bphi * bphi * invR;
+  geom.kappa[1] = bR * dbphi_dR + bZ * dbphi_dZ + bR * bphi * invR;
+  geom.kappa[2] = bR * dbZ_dR + bZ * dbZ_dZ;
 
-  // curl(b̂) in cylindrical (axisymmetric, ∂/∂φ = 0):
-  // curl(b)_R = -∂b_φ/∂Z
-  // curl(b)_φ = ∂b_R/∂Z - ∂b_Z/∂R
-  // curl(b)_Z = (1/R) ∂(R b_φ)/∂R = b_φ/R + ∂b_φ/∂R
-  geom.curl_b[0] = -dbphi_dZ;                     // curl(b)_R
-  geom.curl_b[1] = dbR_dZ - dbZ_dR;               // curl(b)_φ
-  geom.curl_b[2] = bphi * invR + dbphi_dR;        // curl(b)_Z
+  geom.curl_b[0] = -dbphi_dZ;
+  geom.curl_b[1] = dbR_dZ - dbZ_dR;
+  geom.curl_b[2] = bphi * invR + dbphi_dR;
 }

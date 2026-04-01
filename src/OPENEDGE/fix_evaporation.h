@@ -9,6 +9,7 @@ FixStyle(evaporation,FixEvap)
 
 #include <H5Cpp.h>
 #include "fix.h"
+#include "compute_plasma_fields.h"
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -16,25 +17,24 @@ FixStyle(evaporation,FixEvap)
 
 namespace SPARTA_NS {
 
-enum HeatfluxMode { HF_NONE=0, HF_FILE, HF_CONST };
+enum HeatfluxMode { HF_NONE=0, HF_FILE, HF_CONST, HF_COMPUTE };
 
     struct HeatFluxData{
-    std::vector<double> r;   
-    std::vector<double> z; 
+    std::vector<double> r;
+    std::vector<double> z;
     std::vector<std::vector<double>> q_mag;
+    std::vector<std::vector<double>> grad_te_r;
+    std::vector<std::vector<double>> grad_te_z;
     };
 
     struct HeatFluxParams {
     double r;
     double z;
     double q_mag;
+    double grad_te_r;
+    double grad_te_z;
     };
 
-
-// array_grid columns (0-based index; 1-based in SPARTA script references f_ID[N]):
-//   [0]  dm_kg:    mass lost per cell per full step [kg]      (sum: all droplets + both half-kicks)
-//   [1]  dn_atoms: atoms lost per cell per full step          (= dm_kg / AM,  AM=1.53e-26 kg)
-//   [2]  heat_J:   heat absorbed from plasma per cell [J]    (= Qs*4πR_new²*dt_half, summed)
 
 class FixEvap : public Fix {
 public:
@@ -48,17 +48,18 @@ public:
       HeatfluxMode heatflux_mode = HF_NONE;
       double      Qs_const = 0.0;     // when HF_CONST
       double      heatflux_scale = 3.0; // legacy multiplier, now user-configurable
+      double      rocket_eta = 0.0;    // asymmetry parameter for rocket force [0,1]
 
 protected:
-    int maxgrid;
     int imix;
     void end_of_step() override;
     void start_of_step() override;
 
     std::string heatfluxFilename;
+    std::string heatflux_compute_id;
+    class ComputePlasmaFields *cp_heatflux;
     void droplet_evaporation_model(Particle::OnePart *ip,
-                                        const double dt_half,
-                                        const int icell);
+                                        const double dt_half);
     double set_mass = -1.0;
     double set_temp = -1.0;
     double set_radius = -1.0;

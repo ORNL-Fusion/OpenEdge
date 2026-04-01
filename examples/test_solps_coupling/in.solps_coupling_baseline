@@ -8,7 +8,7 @@ variable time  equal 20
 variable N     equal floor(${time}/${dt})
 variable Ndump equal 100 # mass_loss dump every 1e-3 s with dt=1e-5
 
-variable heatflux_scale equal 1.
+variable heatflux_scale equal 5.50
 
 variable temp_droplet equal 773.15
 variable temp_emit    equal 1.e20
@@ -57,17 +57,18 @@ surf_modify         surfID2 collide wallColModel react wallReact
 
 # particle trajectory dump
 
-dump dtraj_drop1 particle all 1000 output/case.dump id type x y z vx vy vz v_pmass temp radius
+dump dtraj_drop1 particle all 10 output/case.dump id type x y z vx vy vz v_pmass temp radius
 # Keep trajectory dump much sparser than mass_loss.txt to avoid huge case.dump files.
 
 # plasma fields
 compute cnear plasma/fields all file ../test_evaporation/input/plasma.h5 &
-    ../test_evaporation/input/bfield.h5 &
+    equilibrium ../test_evaporation/input/g000001.00001_symm.X4.equ &
     bx by bz temp_e dens_e temp_i dens_i parrflow er et ez
 
 
 fix fevap_2 evaporation 1 DropletSource mass ${md2} radius ${rd2} temp ${temp_droplet} &
-    heatflux/file ../test_evaporation/input/heatflux.fix.h5 heatflux/scale ${heatflux_scale}
+    heatflux/compute cnear heatflux/scale ${heatflux_scale} &
+    rocket_eta 0.5
 
 
 fix fdrag2 drag 1 2.0 1 &
@@ -91,9 +92,6 @@ global efield grid eS 0
 global boris_subcycles 5
 
 
-fix fml_2 ave/grid all 1 ${Ndump} ${Ndump} f_fevap_2[1] f_fevap_2[2]
-
-dump d_ml grid all ${Ndump} output/mass_loss.txt id xc yc f_fml_2[1] f_fml_2[2]
 
 # ---------------------------------------------------------------------------
 
