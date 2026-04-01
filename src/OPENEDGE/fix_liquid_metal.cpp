@@ -12,7 +12,14 @@
      fix ID liquid_metal group Nevery hf_source \
          h0 VAL U0 VAL Bs VAL alpha VAL width VAL Tin VAL \
          [dp_flux SOURCE] [Yad VAL] [E_eff VAL] [A_arr VAL] \
-         [evap yes/no] [keywords ...]
+         [evap yes/no] [hf_scale VAL] [keywords ...]
+
+   hf_source can be:
+     - c_compute[col] : per-surf compute
+     - f_fix[col]     : per-surf fix
+     - CONSTANT       : uniform heat flux [W/m²]
+     - plasma ID      : point-query from compute plasma/fields
+                        (also provides D+ flux = ni * u_parallel)
 
    Per-surf output columns (via f_ID[i][1..4]):
      1: Tsurf [C]
@@ -38,6 +45,7 @@
 #include "update.h"
 #include "memory.h"
 #include "error.h"
+#include "compute_plasma_fields.h"
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -45,7 +53,7 @@
 using namespace SPARTA_NS;
 
 enum { INT, DOUBLE };
-enum { COMPUTE, FIX, CONSTANT };
+enum { COMPUTE, FIX, CONSTANT, PLASMA };
 
 /* ---------------------------------------------------------------------- */
 
@@ -125,6 +133,13 @@ FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
       error->all(FLERR,
         "Fix liquid_metal fix does not produce per-surf info");
 
+  } else if (strcmp(arg[4], "plasma") == 0) {
+    hf_source = PLASMA;
+    if (narg < 7)
+      error->all(FLERR, "Fix liquid_metal: 'plasma' requires compute ID");
+    int n = strlen(arg[5]) + 1;
+    id_plasma = new char[n];
+    strcpy(id_plasma, arg[5]);
   } else {
     hf_source = CONSTANT;
     hf_constant = input->numeric(FLERR, arg[4]);
@@ -135,6 +150,11 @@ FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
   id_custom_evap = NULL;
   id_custom_adatom = NULL;
   id_custom_h = NULL;
+
+  // plasma compute pointer (for PLASMA mode)
+  cp_plasma = NULL;
+  if (!id_plasma) id_plasma = NULL;
+  hf_scale = 1.0;
 
   // D+ flux source defaults
   id_dp = NULL;
@@ -151,8 +171,8 @@ FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
   A_arrhenius = 1e-7;
   E_eff_eV = 0.9;
 
-  // parse keyword/value pairs from arg[5] onward
-  int iarg = 5;
+  // parse keyword/value pairs (start after hf_source args)
+  int iarg = (hf_source == PLASMA) ? 6 : 5;
 
   while (iarg < narg) {
     if (strcmp(arg[iarg], "h0") == 0) {
@@ -278,6 +298,11 @@ FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
       A_arrhenius = input->numeric(FLERR, arg[iarg + 1]);
       iarg += 2;
 
+    } else if (strcmp(arg[iarg], "hf_scale") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "Missing value for hf_scale");
+      hf_scale = input->numeric(FLERR, arg[iarg + 1]);
+      iarg += 2;
+
     } else if (strcmp(arg[iarg], "custom") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "Missing value for custom");
       int n = strlen(arg[iarg + 1]) + 1;
@@ -325,6 +350,7 @@ FixLiquidMetal::~FixLiquidMetal()
 {
   delete[] id_hf;
   delete[] id_dp;
+  delete[] id_plasma;
   delete[] id_custom_t;
   delete[] id_custom_evap;
   delete[] id_custom_adatom;
@@ -348,6 +374,17 @@ int FixLiquidMetal::setmask()
 
 void FixLiquidMetal::init()
 {
+  // resolve plasma compute for point-query mode
+  if (hf_source == PLASMA && id_plasma) {
+    int ic = modify->find_compute(id_plasma);
+    if (ic < 0) error->all(FLERR, "Fix liquid_metal: plasma compute ID not found");
+    cp_plasma = dynamic_cast<ComputePlasmaFields*>(modify->compute[ic]);
+    if (!cp_plasma)
+      error->all(FLERR, "Fix liquid_metal: plasma source must be a plasma/fields compute");
+    // in PLASMA mode, D+ flux also comes from the plasma compute
+    dp_source = PLASMA;
+  }
+
   // resolve D+ flux source if specified by name
   if (dp_source == COMPUTE && id_dp) {
     int ic = modify->find_compute(id_dp);
@@ -383,19 +420,19 @@ void FixLiquidMetal::init()
     }
   }
 
-  // set heat flux on the strip for constant source
-  if (hf_source == CONSTANT) {
-    double Xlength = 0.0;
-    if (!surf_arc_len.empty())
-      Xlength = *std::max_element(surf_arc_len.begin(), surf_arc_len.end());
-    if (Xlength <= 0.0) Xlength = strip.h0 * 100.0;
+  // set up strip grid from wall arc length
+  double Xlength = 0.0;
+  if (!surf_arc_len.empty())
+    Xlength = *std::max_element(surf_arc_len.begin(), surf_arc_len.end());
+  if (Xlength <= 0.0) Xlength = strip.h0 * 100.0;
 
-    strip.Xl = Xlength / strip.h0;
-    strip.hx = strip.Xl / (strip.Nx - 1);
-    strip.Tscale = strip.qss * strip.h0 / strip.li.k_th;
+  strip.Xl = Xlength / strip.h0;
+  strip.hx = strip.Xl / (strip.Nx - 1);
+  strip.Tscale = strip.qss * strip.h0 / strip.li.k_th;
 
-    for (int n = 1; n <= strip.Nx; n++) {
-      strip.X[n] = (n - 1) * strip.hx;
+  for (int n = 1; n <= strip.Nx; n++) {
+    strip.X[n] = (n - 1) * strip.hx;
+    if (hf_source == CONSTANT) {
       strip.Qs0[n] = hf_constant / strip.qss;
       strip.Qs[n] = strip.Qs0[n];
     }
@@ -594,16 +631,6 @@ void FixLiquidMetal::end_of_step()
 {
   if (update->ntimestep % nevery) return;
 
-  // gather heat flux and solve strip MHD model
-  gather_heat_flux();
-  strip.solve_steady();
-
-
-  // gather D+ flux for ad-atom calculation
-  std::vector<double> dp_per_surf;
-  gather_dp_flux(dp_per_surf);
-
-  // map outputs to per-surf custom attributes
   int me = comm->me;
   int nprocs = comm->nprocs;
   int nsown = surf->nown;
@@ -620,6 +647,71 @@ void FixLiquidMetal::end_of_step()
     tris = surf->tris;
   }
 
+  // --- Gather heat flux and D+ flux ---
+  std::vector<double> dp_per_surf(nsown, dp_constant);
+
+  if (hf_source == PLASMA && cp_plasma) {
+    // Point-query plasma at each surface element midpoint
+    // Gets q_mag for heat flux and ni*u_parallel for D+ flux
+    for (int n = 1; n <= strip.Nx; n++)
+      strip.Qs0[n] = 0.0;
+    std::vector<int> count(strip.Nx + 2, 0);
+
+    for (int i = 0; i < nsown; i++) {
+      int m;
+      int mask;
+      if (!distributed) m = me + i * nprocs;
+      else m = i;
+
+      if (dimension == 2) mask = lines[m].mask;
+      else mask = tris[m].mask;
+      if (!(mask & groupbit)) continue;
+
+      // surface element midpoint
+      double xmid[3];
+      if (dimension == 2) {
+        xmid[0] = 0.5 * (lines[m].p1[0] + lines[m].p2[0]);
+        xmid[1] = 0.5 * (lines[m].p1[1] + lines[m].p2[1]);
+        xmid[2] = 0.0;
+      } else {
+        xmid[0] = (tris[m].p1[0] + tris[m].p2[0] + tris[m].p3[0]) / 3.0;
+        xmid[1] = (tris[m].p1[1] + tris[m].p2[1] + tris[m].p3[1]) / 3.0;
+        xmid[2] = (tris[m].p1[2] + tris[m].p2[2] + tris[m].p3[2]) / 3.0;
+      }
+
+      PlasmaFileParams pp = cp_plasma->query_plasma_at_point(xmid);
+
+      // heat flux from q_mag with optional scaling
+      double qw = pp.q_mag * hf_scale;
+      if (!std::isfinite(qw) || qw < 0.0) qw = 0.0;
+
+      int ix = surf_to_strip[i];
+      if (ix >= 1 && ix <= strip.Nx) {
+        strip.Qs0[ix] += qw / strip.qss;
+        count[ix]++;
+      }
+
+      // D+ flux = ni * |u_parallel|
+      double gamma_dp = pp.dens_i * std::fabs(pp.parr_flow);
+      if (!std::isfinite(gamma_dp)) gamma_dp = 0.0;
+      dp_per_surf[i] = gamma_dp;
+    }
+
+    for (int n = 1; n <= strip.Nx; n++) {
+      if (count[n] > 1) strip.Qs0[n] /= count[n];
+      strip.Qs[n] = strip.Qs0[n];
+    }
+
+  } else {
+    // COMPUTE/FIX/CONSTANT path
+    gather_heat_flux();
+    gather_dp_flux(dp_per_surf);
+  }
+
+  // solve strip MHD model to steady state
+  strip.solve_steady();
+
+  // map strip outputs to per-surf custom attributes
   double *tvec = surf->edvec[surf->ewhich[tindex]];
   double *evapvec = surf->edvec[surf->ewhich[evap_index]];
   double *adatomvec = surf->edvec[surf->ewhich[adatom_index]];

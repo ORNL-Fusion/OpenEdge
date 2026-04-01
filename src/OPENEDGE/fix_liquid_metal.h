@@ -33,6 +33,8 @@ FixStyle(liquid_metal,FixLiquidMetal)
 
 namespace SPARTA_NS {
 
+class ComputePlasmaFields;
+
 class FixLiquidMetal : public Fix {
  public:
   FixLiquidMetal(class SPARTA *, int, char **);
@@ -47,15 +49,20 @@ class FixLiquidMetal : public Fix {
   int firstflag;
 
   // heat flux source (compute or fix)
-  int hf_source;        // COMPUTE or FIX or CONSTANT
+  int hf_source;        // COMPUTE or FIX or CONSTANT or PLASMA
   char *id_hf;
   class Compute *chf;
   class Fix *fhf;
   int hf_index;         // column index for array source
   double hf_constant;   // constant heat flux [W/m^2] if source=CONSTANT
 
+  // plasma/fields compute for point-query mode (PLASMA)
+  ComputePlasmaFields *cp_plasma;
+  char *id_plasma;
+  double hf_scale;      // heat flux multiplier (default 1.0)
+
   // D+ flux source for ad-atom calculation
-  int dp_source;        // COMPUTE, FIX, or CONSTANT
+  int dp_source;        // COMPUTE, FIX, CONSTANT, or PLASMA
   char *id_dp;
   class Compute *cdp;
   class Fix *fdp;

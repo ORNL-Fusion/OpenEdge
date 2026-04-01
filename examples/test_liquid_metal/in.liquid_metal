@@ -37,14 +37,13 @@ compute cp plasma/fields all file ../test_evaporation/input/plasma.h5 &
     bx by bz temp_e dens_e temp_i dens_i parrflow er et ez
 
 # --- Liquid metal film model on the wall ---
-# Constant 5 MW/m² heat flux, evaporation enabled
-# D+ flux = 1e22 ions/m²/s for ad-atom calculation
+# Heat flux and D+ flux from plasma/fields point queries at surface positions
 # Per-surf outputs: Tsurf_lm, evap_lm, adatom_lm, h_lm
 
-fix flm liquid_metal wall 1 5.0e6 &
+fix flm liquid_metal wall 1 plasma cp &
     h0 0.005 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350.0 &
-    qss 1.0e6 Nx 201 Ny 51 evap yes &
-    dp_flux 1.0e22 Yad 1e-3 E_eff 0.9
+    qss 1.0e6 Nx 501 Ny 51 evap yes &
+    hf_scale 5.5 Yad 1e-3 E_eff 0.9
 
 # --- Create one dummy particle so OpenEdge actually steps ---
 create_particles all n 1
