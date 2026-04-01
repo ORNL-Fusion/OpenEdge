@@ -139,6 +139,26 @@ def main():
     plt.tight_layout()
     plt.savefig("liquid_metal_profiles.png", dpi=150, bbox_inches="tight")
     print("Saved: liquid_metal_profiles.png")
+
+    # --- Flux vs Tsurf plot ---
+    if "s_Tsurf_lm" in ci and "s_evap_lm" in ci and "s_adatom_lm" in ci:
+        Tsurf = data[order, ci["s_Tsurf_lm"]]
+        evap = data[order, ci["s_evap_lm"]]
+        adatom = data[order, ci["s_adatom_lm"]]
+
+        fig2, ax2 = plt.subplots(figsize=(8, 5))
+        ax2.semilogy(Tsurf, evap, "bo", ms=3, label="Evaporation (Antoine+HK)")
+        ax2.semilogy(Tsurf, adatom, "g^", ms=3, label="Ad-atoms (Arrhenius)")
+        ax2.semilogy(Tsurf, evap + adatom, "ks", ms=2, alpha=0.4, label="Total")
+        ax2.set_xlabel("Surface Temperature [°C]")
+        ax2.set_ylabel("Flux [atoms/m²/s]")
+        ax2.set_title("Li emission flux vs surface temperature")
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig("flux_vs_tsurf.png", dpi=150, bbox_inches="tight")
+        print("Saved: flux_vs_tsurf.png")
+
     plt.show()
 
 
