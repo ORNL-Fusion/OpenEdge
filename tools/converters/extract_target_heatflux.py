@@ -40,118 +40,120 @@ def extract_target_profiles(nc_path: str | Path):
 
     nx = len(ds.dimensions["nx_plus2"]) - 2
     ny = len(ds.dimensions["ny_plus2"]) - 2
+    print(f"  Grid: nx={nx}, ny={ny}")
 
-    # Cell corner coordinates: crx, cry shape (5, ny+2, nx+2)
+    # Cell corner coordinates: crx, cry
+    # Shape can be (4, ny+2, nx+2) or (5, ny+2, nx+2) depending on version
     crx = np.array(ds.variables["crx"])
     cry = np.array(ds.variables["cry"])
 
-    # Face areas: hy shape (ny+2, nx+2) — radial face area (target-normal)
+    # Face areas: hy shape (ny+2, nx+2) — radial face area
     hy = np.array(ds.variables["hy"])
 
     # --- Heat fluxes at faces ---
-    # Try fhe/fhi (electron/ion split) first, fall back to fht (total)
+    # Layout: (2, ny+2, nx+2) where dim 0 = face direction (0=x/poloidal, 1=y/radial)
+    # Or: (ny+2, nx+2, 2) in some versions
     have_split = "fhe" in ds.variables and "fhi" in ds.variables
     have_total = "fht" in ds.variables
+
+    def _read_hf(varname):
+        a = np.array(ds.variables[varname])
+        # Ensure shape is (2, ny+2, nx+2): dim 0 = face direction
+        if a.shape == (ny + 2, nx + 2, 2):
+            a = a.transpose(2, 0, 1)
+        return a
 
     def _sum_components(prefix):
         """Sum all heat flux components matching prefix (e.g. 'fhe_')."""
         acc = None
-        for vn in ds.variables:
+        for vn in sorted(ds.variables):
             if vn.startswith(prefix):
-                a = np.array(ds.variables[vn])
-                if a.ndim == 2:
-                    a = a.reshape(ny + 2, nx + 2, -1)
+                a = _read_hf(vn)
                 acc = a if acc is None else acc + a
         return acc
 
     if have_split:
-        fhe = np.array(ds.variables["fhe"])
-        fhi = np.array(ds.variables["fhi"])
-        if fhe.ndim == 2:
-            fhe = fhe.reshape(ny + 2, nx + 2, -1)
-        if fhi.ndim == 2:
-            fhi = fhi.reshape(ny + 2, nx + 2, -1)
-        fht_y_e = fhe[:, :, 1]
-        fht_y_i = fhi[:, :, 1]
+        fhe = _read_hf("fhe")
+        fhi = _read_hf("fhi")
+        fht_y_e = fhe[1]  # radial (y) face, electron [W]
+        fht_y_i = fhi[1]  # radial (y) face, ion [W]
     elif have_total:
-        fht = np.array(ds.variables["fht"])
-        if fht.ndim == 2:
-            fht = fht.reshape(ny + 2, nx + 2, -1)
-        fht_y_e = 0.5 * fht[:, :, 1]
-        fht_y_i = 0.5 * fht[:, :, 1]
-        print("  Using fht (total heat flux) — electron/ion split unavailable")
+        fht = _read_hf("fht")
+        fht_y_e = 0.5 * fht[1]
+        fht_y_i = 0.5 * fht[1]
+        print("  Using fht (total) — no electron/ion split")
     else:
-        # Try summing component variables (fhe_32, fhe_52, fhe_cond, etc.)
         fhe_sum = _sum_components("fhe_")
         fhi_sum = _sum_components("fhi_")
         if fhe_sum is not None and fhi_sum is not None:
-            fht_y_e = fhe_sum[:, :, 1]
-            fht_y_i = fhi_sum[:, :, 1]
+            fht_y_e = fhe_sum[1]  # y-face
+            fht_y_i = fhi_sum[1]
             n_e = sum(1 for v in ds.variables if v.startswith("fhe_"))
             n_i = sum(1 for v in ds.variables if v.startswith("fhi_"))
-            print(f"  Summed {n_e} fhe_* + {n_i} fhi_* component variables")
+            print(f"  Summed {n_e} fhe_* + {n_i} fhi_* components")
         else:
             hf_vars = [v for v in ds.variables if "fh" in v]
             ds.close()
-            raise KeyError(
-                f"No heat flux variables found. "
-                f"Available fh* variables: {hf_vars}"
-            )
+            raise KeyError(f"No heat flux variables found. fh* vars: {hf_vars}")
 
     # --- Particle flux at faces ---
-    # fna: particle flux through faces (ns, ny+2, nx+2, 2)
-    fna = np.array(ds.variables["fna"])
-    if fna.ndim == 3:
-        fna = fna.reshape(-1, ny + 2, nx + 2, 2)
-    # D+ is species index 1
-    fna_D_y = fna[1, :, :, 1]  # D+ flux through y-faces [particles/s]
+    # Try fna_tot first (total), then fna, then sum fna_* components
+    # Shape: (ns, 2, ny+2, nx+2) where dim 1 = face direction
+    fna_D_y = None
+    if "fna_tot" in ds.variables:
+        fna = np.array(ds.variables["fna_tot"])
+        # D+ is species index 1, y-face is dim 1 index 1
+        fna_D_y = fna[1, 1]  # (ny+2, nx+2)
+        print("  Using fna_tot for D+ particle flux")
+    elif "fna" in ds.variables:
+        fna = np.array(ds.variables["fna"])
+        if fna.ndim == 4:
+            fna_D_y = fna[1, 1]
+        elif fna.ndim == 3:
+            fna_D_y = fna[1, :, :]  # assume (ns, ny+2, nx+2) single face
+        print("  Using fna for D+ particle flux")
+    else:
+        # No particle flux — set to zero, adatom model won't work
+        fna_D_y = np.zeros((ny + 2, nx + 2))
+        print("  WARNING: no fna/fna_tot — D+ flux set to zero")
 
-    # Radial face areas at targets
-    # hy[iy, ix] is the face area for the radial face at (ix, iy)
+    # --- Extract target profiles ---
     s_interior = np.s_[1:-1]  # strip guard cells in x
 
     results = {}
 
     for target, iy_face in [("outer", 1), ("inner", ny)]:
-        # Target face: iy_face = 1 for outer (bottom boundary),
-        #              iy_face = ny for inner (top boundary)
         # Heat flux density = face flux [W] / face area [m²]
         area = hy[iy_face, s_interior]
         area = np.where(area > 1e-20, area, np.nan)
 
-        q_e = np.abs(fht_y_e[iy_face, s_interior]) / area  # W/m²
+        q_e = np.abs(fht_y_e[iy_face, s_interior]) / area
         q_i = np.abs(fht_y_i[iy_face, s_interior]) / area
         q_total = q_e + q_i
 
-        # Particle flux density
-        gamma_D = np.abs(fna_D_y[iy_face, s_interior]) / area  # m⁻²s⁻¹
+        gamma_D = np.abs(fna_D_y[iy_face, s_interior]) / area
 
-        # Target cell midpoints (R, Z) from corners
-        # Use corners 0,1 (bottom) for outer target, 2,3 (top) for inner
+        # Target cell midpoints from corners
+        # corners 0,1 = bottom face; corners 2,3 = top face
+        nc = crx.shape[0]  # 4 or 5
         if target == "outer":
             R_pts = 0.5 * (crx[0, iy_face, s_interior] + crx[1, iy_face, s_interior])
             Z_pts = 0.5 * (cry[0, iy_face, s_interior] + cry[1, iy_face, s_interior])
         else:
-            R_pts = 0.5 * (crx[2, iy_face, s_interior] + crx[3, iy_face, s_interior])
-            Z_pts = 0.5 * (cry[2, iy_face, s_interior] + cry[3, iy_face, s_interior])
+            R_pts = 0.5 * (crx[2, iy_face, s_interior] + crx[min(3, nc-1), iy_face, s_interior])
+            Z_pts = 0.5 * (cry[2, iy_face, s_interior] + cry[min(3, nc-1), iy_face, s_interior])
 
         # Arc length along target
         dR = np.diff(R_pts)
         dZ = np.diff(Z_pts)
-        ds = np.sqrt(dR**2 + dZ**2)
-        s = np.concatenate([[0.0], np.cumsum(ds)])
+        ds_arc = np.sqrt(dR**2 + dZ**2)
+        s = np.concatenate([[0.0], np.cumsum(ds_arc)])
 
-        # Clean NaNs
         mask = np.isfinite(q_total) & np.isfinite(gamma_D)
         results[target] = {
-            "s": s[mask],
-            "R": R_pts[mask],
-            "Z": Z_pts[mask],
-            "q_total": q_total[mask],
-            "q_electron": q_e[mask],
-            "q_ion": q_i[mask],
-            "gamma_D": gamma_D[mask],
-            "area": area[mask] if np.all(np.isfinite(area[mask])) else area[mask],
+            "s": s[mask], "R": R_pts[mask], "Z": Z_pts[mask],
+            "q_total": q_total[mask], "q_electron": q_e[mask],
+            "q_ion": q_i[mask], "gamma_D": gamma_D[mask],
         }
 
     ds.close()
