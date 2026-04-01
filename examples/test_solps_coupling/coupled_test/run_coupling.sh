@@ -13,6 +13,8 @@ echo "Cleaning previous run outputs..."
 rm -f openedge/in.chunk_* openedge/error_*.log
 rm -f openedge/output/particles.txt openedge/restart.dat
 rm -rf step_*
+# Clean stale SOLPS source files from previous coupling run
+rm -f solps/v0_1/source2d.* solps/v0_1/b2.sources.profile*
 
 echo "Launching coupling driver..."
 python3 "$DRIVER" config.json

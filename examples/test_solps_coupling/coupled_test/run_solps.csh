@@ -20,6 +20,13 @@ setenv SOLPSWORK `pwd`/solps
 # Now run from the v0_1 case directory
 cd solps/v0_1
 
+# Ensure source2d files and b2.sources.profile are in b2mn.exe.dir
+# (b2run doesn't automatically symlink these)
+if (! -d b2mn.exe.dir) mkdir -p b2mn.exe.dir
+foreach f (source2d.* b2.sources.profile*)
+    if (-f $f) cp -f $f b2mn.exe.dir/
+end
+
 if ($nprocs > 1) then
     setenv OMPI_FC /usr/bin/gfortran
     source $SOLPSTOP/SETUP/mpi
