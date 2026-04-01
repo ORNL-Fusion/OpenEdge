@@ -49,7 +49,7 @@ class FixLiquidMetal : public Fix {
   int firstflag;
 
   // heat flux source (compute or fix)
-  int hf_source;        // COMPUTE or FIX or CONSTANT or PLASMA
+  int hf_source;        // COMPUTE or FIX or CONSTANT or PLASMA or TARGET
   char *id_hf;
   class Compute *chf;
   class Fix *fhf;
@@ -60,6 +60,14 @@ class FixLiquidMetal : public Fix {
   ComputePlasmaFields *cp_plasma;
   char *id_plasma;
   double hf_scale;      // heat flux multiplier (default 1.0)
+
+  // target HDF5 file mode (TARGET)
+  char *target_file;    // path to target_heatflux.h5
+  char *target_leg;     // "outer" or "inner"
+  std::vector<double> tgt_s;       // arc length [m]
+  std::vector<double> tgt_q;       // heat flux [W/m²]
+  std::vector<double> tgt_gamma;   // D+ flux [m⁻²s⁻¹]
+  void load_target_heatflux();
 
   // D+ flux source for ad-atom calculation
   int dp_source;        // COMPUTE, FIX, CONSTANT, or PLASMA

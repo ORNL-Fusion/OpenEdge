@@ -49,11 +49,12 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <hdf5.h>
 
 using namespace SPARTA_NS;
 
 enum { INT, DOUBLE };
-enum { COMPUTE, FIX, CONSTANT, PLASMA };
+enum { COMPUTE, FIX, CONSTANT, PLASMA, TARGET };
 
 /* ---------------------------------------------------------------------- */
 
@@ -140,6 +141,16 @@ FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
     int n = strlen(arg[5]) + 1;
     id_plasma = new char[n];
     strcpy(id_plasma, arg[5]);
+  } else if (strcmp(arg[4], "target") == 0) {
+    hf_source = TARGET;
+    if (narg < 7)
+      error->all(FLERR, "Fix liquid_metal: 'target' requires FILE and LEG (outer/inner)");
+    int n = strlen(arg[5]) + 1;
+    target_file = new char[n];
+    strcpy(target_file, arg[5]);
+    n = strlen(arg[6]) + 1;
+    target_leg = new char[n];
+    strcpy(target_leg, arg[6]);
   } else {
     hf_source = CONSTANT;
     hf_constant = input->numeric(FLERR, arg[4]);
@@ -155,6 +166,10 @@ FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
   cp_plasma = NULL;
   if (!id_plasma) id_plasma = NULL;
   hf_scale = 1.0;
+
+  // target file defaults
+  if (!target_file) target_file = NULL;
+  if (!target_leg) target_leg = NULL;
 
   // D+ flux source defaults
   id_dp = NULL;
@@ -172,7 +187,9 @@ FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
   E_eff_eV = 0.9;
 
   // parse keyword/value pairs (start after hf_source args)
-  int iarg = (hf_source == PLASMA) ? 6 : 5;
+  int iarg = 5;
+  if (hf_source == PLASMA) iarg = 6;
+  if (hf_source == TARGET) iarg = 7;
 
   while (iarg < narg) {
     if (strcmp(arg[iarg], "h0") == 0) {
@@ -351,6 +368,8 @@ FixLiquidMetal::~FixLiquidMetal()
   delete[] id_hf;
   delete[] id_dp;
   delete[] id_plasma;
+  delete[] target_file;
+  delete[] target_leg;
   delete[] id_custom_t;
   delete[] id_custom_evap;
   delete[] id_custom_adatom;
@@ -374,6 +393,12 @@ int FixLiquidMetal::setmask()
 
 void FixLiquidMetal::init()
 {
+  // load target heat flux profiles from HDF5
+  if (hf_source == TARGET && target_file) {
+    load_target_heatflux();
+    dp_source = TARGET;  // D+ flux also from target file
+  }
+
   // resolve plasma compute for point-query mode
   if (hf_source == PLASMA && id_plasma) {
     int ic = modify->find_compute(id_plasma);
@@ -702,6 +727,55 @@ void FixLiquidMetal::end_of_step()
       strip.Qs[n] = strip.Qs0[n];
     }
 
+  } else if (hf_source == TARGET && !tgt_s.empty()) {
+    // Interpolate target heat flux and D+ flux profiles onto strip stations
+    int ntgt = (int)tgt_s.size();
+    double s_max = tgt_s[ntgt - 1];
+
+    for (int n = 1; n <= strip.Nx; n++) {
+      // map strip station to physical arc length
+      double s_phys = strip.X[n] * strip.h0;
+      // linear interpolation from target profile
+      double qw = 0.0, gd = 0.0;
+      if (s_phys <= tgt_s[0]) {
+        qw = tgt_q[0];
+        gd = tgt_gamma[0];
+      } else if (s_phys >= s_max) {
+        qw = tgt_q[ntgt - 1];
+        gd = tgt_gamma[ntgt - 1];
+      } else {
+        for (int k = 0; k < ntgt - 1; k++) {
+          if (s_phys >= tgt_s[k] && s_phys <= tgt_s[k + 1]) {
+            double frac = (s_phys - tgt_s[k]) / (tgt_s[k + 1] - tgt_s[k]);
+            qw = tgt_q[k] + frac * (tgt_q[k + 1] - tgt_q[k]);
+            gd = tgt_gamma[k] + frac * (tgt_gamma[k + 1] - tgt_gamma[k]);
+            break;
+          }
+        }
+      }
+      strip.Qs0[n] = qw * hf_scale / strip.qss;
+      strip.Qs[n] = strip.Qs0[n];
+    }
+
+    // map D+ flux to per-surface via arc length
+    for (int i = 0; i < nsown; i++) {
+      if (surf_to_strip[i] < 1) continue;
+      double s_phys = surf_arc_len[i];
+      double gd = 0.0;
+      if (s_phys <= tgt_s[0]) gd = tgt_gamma[0];
+      else if (s_phys >= s_max) gd = tgt_gamma[ntgt - 1];
+      else {
+        for (int k = 0; k < ntgt - 1; k++) {
+          if (s_phys >= tgt_s[k] && s_phys <= tgt_s[k + 1]) {
+            double frac = (s_phys - tgt_s[k]) / (tgt_s[k + 1] - tgt_s[k]);
+            gd = tgt_gamma[k] + frac * (tgt_gamma[k + 1] - tgt_gamma[k]);
+            break;
+          }
+        }
+      }
+      dp_per_surf[i] = gd;
+    }
+
   } else {
     // COMPUTE/FIX/CONSTANT path
     gather_heat_flux();
@@ -743,4 +817,76 @@ void FixLiquidMetal::end_of_step()
   surf->estatus[evap_index] = 0;
   surf->estatus[adatom_index] = 0;
   surf->estatus[hindex] = 0;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixLiquidMetal::load_target_heatflux()
+{
+  // Read target heat flux and D+ flux profiles from HDF5
+  // Format: group "outer" or "inner" containing datasets s, q_total, gamma_D
+
+  if (!target_file || !target_leg) return;
+
+  if (comm->me == 0) {
+    hid_t file_id = H5Fopen(target_file, H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (file_id < 0)
+      error->one(FLERR, "Fix liquid_metal: cannot open target file");
+
+    hid_t grp = H5Gopen2(file_id, target_leg, H5P_DEFAULT);
+    if (grp < 0) {
+      H5Fclose(file_id);
+      char msg[256];
+      snprintf(msg, 256, "Fix liquid_metal: group '%s' not found in %s",
+               target_leg, target_file);
+      error->one(FLERR, msg);
+    }
+
+    // read s dataset to get size
+    hid_t ds_s = H5Dopen2(grp, "s", H5P_DEFAULT);
+    hid_t space = H5Dget_space(ds_s);
+    hsize_t dims[1];
+    H5Sget_simple_extent_dims(space, dims, NULL);
+    int npts = (int)dims[0];
+    H5Sclose(space);
+
+    tgt_s.resize(npts);
+    tgt_q.resize(npts);
+    tgt_gamma.resize(npts);
+
+    H5Dread(ds_s, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, tgt_s.data());
+    H5Dclose(ds_s);
+
+    hid_t ds_q = H5Dopen2(grp, "q_total", H5P_DEFAULT);
+    H5Dread(ds_q, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, tgt_q.data());
+    H5Dclose(ds_q);
+
+    hid_t ds_g = H5Dopen2(grp, "gamma_D", H5P_DEFAULT);
+    H5Dread(ds_g, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, tgt_gamma.data());
+    H5Dclose(ds_g);
+
+    H5Gclose(grp);
+    H5Fclose(file_id);
+
+    printf("  fix liquid_metal: loaded %s target from %s (%d points)\n",
+           target_leg, target_file, npts);
+    printf("    q_total range: [%.2e, %.2e] W/m²\n",
+           *std::min_element(tgt_q.begin(), tgt_q.end()),
+           *std::max_element(tgt_q.begin(), tgt_q.end()));
+    printf("    gamma_D range: [%.2e, %.2e] m⁻²s⁻¹\n",
+           *std::min_element(tgt_gamma.begin(), tgt_gamma.end()),
+           *std::max_element(tgt_gamma.begin(), tgt_gamma.end()));
+  }
+
+  // broadcast to all procs
+  int npts = (int)tgt_s.size();
+  MPI_Bcast(&npts, 1, MPI_INT, 0, world);
+  if (comm->me != 0) {
+    tgt_s.resize(npts);
+    tgt_q.resize(npts);
+    tgt_gamma.resize(npts);
+  }
+  MPI_Bcast(tgt_s.data(), npts, MPI_DOUBLE, 0, world);
+  MPI_Bcast(tgt_q.data(), npts, MPI_DOUBLE, 0, world);
+  MPI_Bcast(tgt_gamma.data(), npts, MPI_DOUBLE, 0, world);
 }
