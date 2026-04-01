@@ -635,30 +635,22 @@ void ComputePlasmaFields::compute_per_grid()
       Vy = Vr*sphi + Vt*cphi;
       Vzz = Vzv;
     }
-    const double ne = std::max(P.dens_e, tiny);
-    // WEST/SOLPS convention used here:
-    //   Te in eV, ne in 1/m^3, grad(Te) in eV/m, grad(ne) in 1/m^4.
-    // Then electron pressure is:
-    //   pe [Pa] = e * ne * Te[eV]
-    // and
-    //   grad(pe) [Pa/m] = e * (Te*grad(ne) + ne*grad(Te)).
-    const double gradPe_r = eQ * (P.temp_e * P.grad_dens_e_r + ne * P.grad_temp_e_r);
-    const double gradPe_t = eQ * (P.temp_e * P.grad_dens_e_t + ne * P.grad_temp_e_t);
-    const double gradPe_z = eQ * (P.temp_e * P.grad_dens_e_z + ne * P.grad_temp_e_z);
     const double Bmag = std::sqrt(Br*Br + Bt*Bt + Bzv*Bzv);
     const double invBmag = (Bmag > tiny) ? 1.0 / Bmag : 0.0;
     const double bhat_r = Br * invBmag;
     const double bhat_t = Bt * invBmag;
     const double bhat_z = Bzv * invBmag;
-    const double epar =
-      (Bmag > tiny) ? (-(gradPe_r*bhat_r + gradPe_t*bhat_t + gradPe_z*bhat_z) / (ne * eQ)) : 0.0;
+    const double epar = P.epar;
 
-    // In FILE mode, decompose epar into cylindrical E-field vector
-    // so that er/et/ez output columns are usable with fix efield/grid.
-    if (input_mode == MODE_FILE && epar != 0.0) {
-      Er  = epar * bhat_r;
-      Et  = epar * bhat_t;
-      Ezv = epar * bhat_z;
+    // Background E comes only from plasma.h5 as E_parallel.
+    // If the dataset is absent, P.epar defaults to zero.
+    if (input_mode == MODE_FILE) {
+      Er = Et = Ezv = 0.0;
+      if (Bmag > tiny && epar != 0.0) {
+        Er  = epar * bhat_r;
+        Et  = epar * bhat_t;
+        Ezv = epar * bhat_z;
+      }
       // Recompute Cartesian aliases from updated cylindrical E
       if (dim == 2) {
         Ex = Er;   Ey = Ezv;  Ezz = Et;
@@ -872,6 +864,13 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
         data.grad_temp_i_t = read2D("grad_ti_t");
         data.grad_temp_i_z = read2D("grad_ti_z");
 
+        // Optional background parallel electric field [V/m]
+        if (hasDataset("epar")) {
+          data.epar = read2D("epar");
+          data.has_epar = true;
+          printf("  Loaded epar from %s\n", filePath.c_str());
+        }
+
         // Optional heat flux
         if (hasDataset("q_mag")) {
           data.q_mag = read2D("q_mag");
@@ -1004,6 +1003,9 @@ void ComputePlasmaFields::broadcastPlasmaData(PlasmaFileData& data) {
     broadcast2DVector(data.grad_temp_i_t);
     broadcast2DVector(data.grad_temp_i_z);
 
+    MPI_Bcast(&data.has_epar, 1, MPI_C_BOOL, 0, world);
+    if (data.has_epar) broadcast2DVector(data.epar);
+
     MPI_Bcast(&data.has_qmag, 1, MPI_C_BOOL, 0, world);
     if (data.has_qmag) broadcast2DVector(data.q_mag);
 
@@ -1130,6 +1132,7 @@ PlasmaFileParams ComputePlasmaFields::bilinearInterpolationPlasma(
   P.parr_flow_t   = interpField2D(data.parr_flow_t, s);
   P.parr_flow_z   = interpField2D(data.parr_flow_z, s);
   P.parr_flow     = interpField2D(data.parr_flow, s);
+  P.epar          = data.has_epar ? interpField2D(data.epar, s) : 0.0;
   P.q_mag = data.has_qmag ? interpField2D(data.q_mag, s) : 0.0;
 
   return P;
@@ -1396,6 +1399,8 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
   P.parr_flow_t   = interpField2D(plasma_data.parr_flow_t, s);
   P.parr_flow_z   = interpField2D(plasma_data.parr_flow_z, s);
   P.parr_flow     = interpField2D(plasma_data.parr_flow, s);
+  P.epar          = plasma_data.has_epar ?
+                    interpField2D(plasma_data.epar, s) : 0.0;
   P.q_mag = plasma_data.has_qmag ?
             interpField2D(plasma_data.q_mag, s) : 0.0;
   return P;

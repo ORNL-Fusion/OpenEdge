@@ -1,0 +1,103 @@
+# DIII-D carbon test
+# Files:
+# - input/plasma.h5
+# - input/204953_3000.x16.equ
+# - input/plasma.species
+# - input/surfaces/wall.txt
+
+# --- Grid
+seed                123423
+dimension           2
+global              gridcut 0.0  comm/sort no
+create_box          0.8 2.5 -1.5 1.5 -0.05 0.05  # xmin xmax ymin ymax zmin zmax
+create_grid         100 100 1
+balance_grid        rcb cell
+
+# --- Species
+species input/plasma.species C C+ C2+ C3+ C4+ C5+ C6+
+
+mixture             plasmaMixture C       frac 1.0
+mixture             plasmaMixture C+      frac 0.0
+mixture             plasmaMixture C2+     frac 0.0
+mixture             plasmaMixture C3+     frac 0.0
+mixture             plasmaMixture C4+     frac 0.0
+mixture             plasmaMixture C5+     frac 0.0
+mixture             plasmaMixture C6+     frac 0.0
+
+# --- Wall
+read_surf           input/surfaces/wall.txt group 1 particle check
+surf_collide        2 diffuse 11600 1
+surf_modify         1 collide 2 react none
+
+# --- Plasma
+compute             cwest plasma/fields all file input/plasma.h5 &
+                    equilibrium input/204953_3000.x16.equ &
+                    bx by bz epar temp_e dens_e temp_i dens_i parrflow &
+                    grad_te_r grad_te_z grad_ti_r grad_ti_z ex ey ez
+compute             cgeom sheath/geometry/grid all 1 dist surfid nx ny nz
+
+# --- Core
+fix                 fcore reflect/psi 1 equ input/204953_3000.x16.equ psi_norm 0.9410 action reflect
+
+# --- Fields
+global              bfield_compute cwest
+global              sheath geom_compute cgeom plasma_compute cwest &
+                    mD_amu 2.0 pot_mult 2.5 kick no
+
+variable            exbg particle p_pc_ex
+variable            eybg particle p_pc_ey
+variable            ezbg particle p_pc_ez
+fix                 fEbg efield/particle exbg eybg ezbg
+global              efield particle fEbg 0
+global              boris_subcycles 50
+
+# --- Chemistry
+fix                 fchem chem/adas 1 6 input/plasma.adas adas_dir /Users/42d/OpenEdge/database/adas
+
+# --- Collisions
+# Main background: D+, A=2.0, Z=1.0
+fix                 fnanbu coll/nanbu 1 plasma p_pc_te p_pc_ne &
+                    nobinary &
+                    background 2.0 1.0 &
+                    p_pc_ti p_pc_ni p_pc_vpar &
+                    p_pc_bx p_pc_by p_pc_bz
+
+# --- Forces
+fix                 ftf thermal_force 1 &
+                    bfield p_pc_bx p_pc_by p_pc_bz &
+                    ion_thermal p_pc_grad_ti_r p_pc_grad_ti_z coeff 2.6 &
+                    elec_thermal p_pc_grad_te_r p_pc_grad_te_z coeff 0.71
+
+fix                 fcd cross_diffusion 1 &
+                    bfield p_pc_bx p_pc_by p_pc_bz &
+                    D_perp 0.3
+
+# --- Source groups
+group               divertor_inner surf id <> 55 60
+group               divertor_outer surf id <> 5 5
+group               nose_edge      surf id <> 68 68
+group               crown          surf id <> 18 27
+
+# --- Sources
+fix                 femit emit/surf plasmaMixture divertor_inner normal yes n 1000 perspecies no
+fix                 bemit emit/surf plasmaMixture divertor_outer normal yes n 1000 perspecies no
+fix                 gemit emit/surf plasmaMixture nose_edge normal yes n 1000 perspecies no
+fix                 cemit emit/surf plasmaMixture crown normal yes n 1000 perspecies no
+
+# --- Output
+dump                dpart particle all 1000 output/state.d3d id type x y z vx vy vz
+
+# --- Run
+timestep            1.0e-08
+stats               1000
+stats_style         step cpu np
+
+run                 1
+
+# Stop new particles
+unfix               femit
+unfix               bemit
+unfix               gemit
+unfix               cemit
+
+run                 100000

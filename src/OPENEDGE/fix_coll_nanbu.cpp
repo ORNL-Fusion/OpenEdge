@@ -59,6 +59,7 @@ using namespace SPARTA_NS;
 
 #define INVOKED_PER_GRID 16
 #define DELTAPART 128
+enum { INT, DOUBLE };
 
 /* ---------------------------------------------------------------------- */
 
@@ -129,14 +130,22 @@ FixCollNanbu::~FixCollNanbu()
   rng_ = nullptr;
   memory->destroy(plist_);
   delete[] srcTe_.cid;
+  delete[] srcTe_.pname;
   delete[] srcNe_.cid;
+  delete[] srcNe_.pname;
   if (have_background_) {
     delete[] srcTi_bg_.cid;
+    delete[] srcTi_bg_.pname;
     delete[] srcNi_bg_.cid;
+    delete[] srcNi_bg_.pname;
     delete[] srcVpar_bg_.cid;
+    delete[] srcVpar_bg_.pname;
     delete[] srcBx_.cid;
+    delete[] srcBx_.pname;
     delete[] srcBy_.cid;
+    delete[] srcBy_.pname;
     delete[] srcBz_.cid;
+    delete[] srcBz_.pname;
   }
 }
 
@@ -165,25 +174,44 @@ void FixCollNanbu::init()
 
   // resolve compute sources
   auto bind_compute = [&](CollGridSrc &S, const char *label) {
-    if (S.kind != COLL_SRC_COMP) return;
-    S.icompute = modify->find_compute(S.cid);
-    if (S.icompute < 0) {
-      char msg[200];
-      snprintf(msg, sizeof(msg),
-               "fix coll/nanbu: compute '%s' for %s not found", S.cid, label);
-      error->all(FLERR, msg);
+    if (S.kind == COLL_SRC_COMP) {
+      S.icompute = modify->find_compute(S.cid);
+      if (S.icompute < 0) {
+        char msg[200];
+        snprintf(msg, sizeof(msg),
+                 "fix coll/nanbu: compute '%s' for %s not found", S.cid, label);
+        error->all(FLERR, msg);
+      }
+      Compute *c = modify->compute[S.icompute];
+      if (c->per_grid_flag == 0)
+        error->all(FLERR, "fix coll/nanbu: compute must be per-grid");
+      if (c->size_per_grid_cols == 0)
+        error->all(FLERR, "fix coll/nanbu: compute has no per-grid array");
+      if (S.col < 1 || S.col > c->size_per_grid_cols) {
+        char msg[200];
+        snprintf(msg, sizeof(msg),
+                 "fix coll/nanbu: column %d for compute '%s' (%s) out of range [1..%d]",
+                 S.col, S.cid, label, c->size_per_grid_cols);
+        error->all(FLERR, msg);
+      }
+      return;
     }
-    Compute *c = modify->compute[S.icompute];
-    if (c->per_grid_flag == 0)
-      error->all(FLERR, "fix coll/nanbu: compute must be per-grid");
-    if (c->size_per_grid_cols == 0)
-      error->all(FLERR, "fix coll/nanbu: compute has no per-grid array");
-    if (S.col < 1 || S.col > c->size_per_grid_cols) {
-      char msg[200];
-      snprintf(msg, sizeof(msg),
-               "fix coll/nanbu: column %d for compute '%s' (%s) out of range [1..%d]",
-               S.col, S.cid, label, c->size_per_grid_cols);
-      error->all(FLERR, msg);
+    if (S.kind == COLL_SRC_PCUSTOM) {
+      S.ipcustom = particle->find_custom(S.pname);
+      if (S.ipcustom < 0) {
+        char msg[200];
+        snprintf(msg, sizeof(msg),
+                 "fix coll/nanbu: particle custom '%s' for %s not found",
+                 S.pname, label);
+        error->all(FLERR, msg);
+      }
+      if (particle->etype[S.ipcustom] != DOUBLE)
+        error->all(FLERR,
+          "fix coll/nanbu: particle custom source must be floating point");
+      if (particle->esize[S.ipcustom] != 0)
+        error->all(FLERR,
+          "fix coll/nanbu: particle custom source must be a vector");
+      S.ipwhich = particle->ewhich[S.ipcustom];
     }
   };
 
@@ -287,11 +315,6 @@ void FixCollNanbu::nanbu_collisions_cell(int icell, int np)
   double volume = cinfo[icell].volume / cinfo[icell].weight;
   if (volume <= 0.0) return;
 
-  // plasma parameters for Coulomb logarithm
-  double Te_eV = std::max(read_cell_src(srcTe_, icell), 0.0);
-  double ne    = std::max(read_cell_src(srcNe_, icell), 0.0);
-  double lnLambda = compute_coulomb_log(ne, Te_eV);
-
   // physical constants from update
   const double echarge   = update->echarge;     // C
   const double epsilon_0 = update->epsilon_0;   // F/m
@@ -330,6 +353,13 @@ void FixCollNanbu::nanbu_collisions_cell(int icell, int np)
 
     double *vA = pA.v;
     double *vB = pB.v;
+    const double Te_eV = std::max(
+      0.5 * (read_src(srcTe_, idxA, icell) + read_src(srcTe_, idxB, icell)),
+      0.0);
+    const double ne = std::max(
+      0.5 * (read_src(srcNe_, idxA, icell) + read_src(srcNe_, idxB, icell)),
+      0.0);
+    const double lnLambda = compute_coulomb_log(ne, Te_eV);
 
     // masses (kg)
     double mA = species[ispA].mass;
@@ -447,54 +477,9 @@ void FixCollNanbu::nanbu_background_cell(int icell, int np)
   double volume = cinfo[icell].volume / cinfo[icell].weight;
   if (volume <= 0.0) return;
 
-  // read background plasma fields for this cell
-  double Te_eV   = std::max(read_cell_src(srcTe_, icell), 0.0);
-  double ne      = std::max(read_cell_src(srcNe_, icell), 0.0);
-  double Ti_eV   = std::max(read_cell_src(srcTi_bg_, icell), 0.0);
-  double Ni_bg   = std::max(read_cell_src(srcNi_bg_, icell), 0.0);
-  double Vpar_bg = read_cell_src(srcVpar_bg_, icell);
-  double Bx      = read_cell_src(srcBx_, icell);
-  double By      = read_cell_src(srcBy_, icell);
-  double Bz      = read_cell_src(srcBz_, icell);
-
-  if (Ni_bg <= 0.0 || Ti_eV <= 0.0) return;
-
-  double lnLambda = compute_coulomb_log(ne, Te_eV);
-
   const double echarge   = update->echarge;
   const double epsilon_0 = update->epsilon_0;
   const double dt        = update->dt * nevery;
-
-  // B-field unit vector and orthonormal frame
-  double Bmag = std::sqrt(Bx*Bx + By*By + Bz*Bz);
-  double bhat[3], e1[3], e2[3];
-
-  if (Bmag > 0.0) {
-    bhat[0] = Bx / Bmag;
-    bhat[1] = By / Bmag;
-    bhat[2] = Bz / Bmag;
-  } else {
-    // no B-field: default to z-direction
-    bhat[0] = 0.0; bhat[1] = 0.0; bhat[2] = 1.0;
-  }
-
-  // build e1 perpendicular to bhat (Gram-Schmidt with preferred axis)
-  double ax[3] = {1.0, 0.0, 0.0};
-  if (std::abs(bhat[0]) > 0.9) { ax[0] = 0.0; ax[1] = 1.0; }
-  // e1 = ax - (ax . bhat) * bhat, then normalize
-  double dot = ax[0]*bhat[0] + ax[1]*bhat[1] + ax[2]*bhat[2];
-  e1[0] = ax[0] - dot * bhat[0];
-  e1[1] = ax[1] - dot * bhat[1];
-  e1[2] = ax[2] - dot * bhat[2];
-  double e1mag = std::sqrt(e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2]);
-  e1[0] /= e1mag; e1[1] /= e1mag; e1[2] /= e1mag;
-  // e2 = bhat x e1
-  e2[0] = bhat[1]*e1[2] - bhat[2]*e1[1];
-  e2[1] = bhat[2]*e1[0] - bhat[0]*e1[2];
-  e2[2] = bhat[0]*e1[1] - bhat[1]*e1[0];
-
-  // thermal speed of background species: v_th = sqrt(T[eV]*e / m)
-  double v_thermal = std::sqrt(Ti_eV * echarge / m_bg_);
 
   // process each charged particle
   for (int i = 0; i < np; i++) {
@@ -502,6 +487,43 @@ void FixCollNanbu::nanbu_background_cell(int icell, int np)
     int isp = particles[idx].ispecies;
     if (species[isp].charge == 0.0) continue;
 
+    double Te_eV   = std::max(read_src(srcTe_, idx, icell), 0.0);
+    double ne      = std::max(read_src(srcNe_, idx, icell), 0.0);
+    double Ti_eV   = std::max(read_src(srcTi_bg_, idx, icell), 0.0);
+    double Ni_bg   = std::max(read_src(srcNi_bg_, idx, icell), 0.0);
+    double Vpar_bg = read_src(srcVpar_bg_, idx, icell);
+    double Bx      = read_src(srcBx_, idx, icell);
+    double By      = read_src(srcBy_, idx, icell);
+    double Bz      = read_src(srcBz_, idx, icell);
+
+    if (Ni_bg <= 0.0 || Ti_eV <= 0.0) continue;
+
+    double lnLambda = compute_coulomb_log(ne, Te_eV);
+    double Bmag = std::sqrt(Bx*Bx + By*By + Bz*Bz);
+    double bhat[3], e1[3], e2[3];
+
+    if (Bmag > 0.0) {
+      bhat[0] = Bx / Bmag;
+      bhat[1] = By / Bmag;
+      bhat[2] = Bz / Bmag;
+    } else {
+      bhat[0] = 0.0; bhat[1] = 0.0; bhat[2] = 1.0;
+    }
+
+    double ax[3] = {1.0, 0.0, 0.0};
+    if (std::abs(bhat[0]) > 0.9) { ax[0] = 0.0; ax[1] = 1.0; }
+    double dot = ax[0]*bhat[0] + ax[1]*bhat[1] + ax[2]*bhat[2];
+    e1[0] = ax[0] - dot * bhat[0];
+    e1[1] = ax[1] - dot * bhat[1];
+    e1[2] = ax[2] - dot * bhat[2];
+    double e1mag = std::sqrt(e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2]);
+    if (e1mag <= 0.0) continue;
+    e1[0] /= e1mag; e1[1] /= e1mag; e1[2] /= e1mag;
+    e2[0] = bhat[1]*e1[2] - bhat[2]*e1[1];
+    e2[1] = bhat[2]*e1[0] - bhat[0]*e1[2];
+    e2[2] = bhat[0]*e1[1] - bhat[1]*e1[0];
+
+    double v_thermal = std::sqrt(Ti_eV * echarge / m_bg_);
     double *v = particles[idx].v;
     double m_test = species[isp].mass;
     double q_test = species[isp].charge * echarge;
@@ -645,34 +667,54 @@ void FixCollNanbu::parse_compute_src(const char *tok, CollGridSrc &dst,
     error->all(FLERR, msg);
   }
 
-  if (strncmp(tok, "c_", 2) != 0)
-    error->all(FLERR,
-      "fix coll/nanbu: source must be a compute (c_ID[col])");
+  if (strncmp(tok, "c_", 2) == 0) {
+    dst.kind = COLL_SRC_COMP;
+    const char *name = tok + 2;
+    const char *lb   = strchr(name, '[');
+    const char *rb   = lb ? strrchr(name, ']') : nullptr;
 
-  dst.kind = COLL_SRC_COMP;
-  const char *name = tok + 2;
-  const char *lb   = strchr(name, '[');
-  const char *rb   = lb ? strrchr(name, ']') : nullptr;
+    if (!lb || !rb || rb <= lb + 1)
+      error->all(FLERR,
+        "fix coll/nanbu: use c_ID[col] syntax for compute sources");
 
-  if (!lb || !rb || rb <= lb + 1)
-    error->all(FLERR,
-      "fix coll/nanbu: use c_ID[col] syntax for compute sources");
+    int idlen = static_cast<int>(lb - name);
+    dst.cid = new char[idlen + 1];
+    strncpy(dst.cid, name, idlen);
+    dst.cid[idlen] = '\0';
+    dst.col = atoi(lb + 1);   // 1-based
 
-  int idlen = static_cast<int>(lb - name);
-  dst.cid = new char[idlen + 1];
-  strncpy(dst.cid, name, idlen);
-  dst.cid[idlen] = '\0';
-  dst.col = atoi(lb + 1);   // 1-based
+    if (dst.col <= 0)
+      error->all(FLERR,
+        "fix coll/nanbu: compute column must be >= 1");
+    return;
+  }
 
-  if (dst.col <= 0)
-    error->all(FLERR,
-      "fix coll/nanbu: compute column must be >= 1");
+  if (strncmp(tok, "p_", 2) == 0) {
+    dst.kind = COLL_SRC_PCUSTOM;
+    const char *name = tok + 2;
+    dst.pname = new char[strlen(name) + 1];
+    strcpy(dst.pname, name);
+    return;
+  }
+
+  error->all(FLERR,
+    "fix coll/nanbu: source must be c_ID[col] or p_name");
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixCollNanbu::refresh_compute_src(CollGridSrc &S)
 {
+  if (S.kind == COLL_SRC_PCUSTOM) {
+    if (S.cache_ts == update->ntimestep) return;
+    S.pvec_cache = nullptr;
+    if (S.ipcustom >= 0) {
+      S.ipwhich = particle->ewhich[S.ipcustom];
+      if (S.ipwhich >= 0) S.pvec_cache = particle->edvec[S.ipwhich];
+    }
+    S.cache_ts = update->ntimestep;
+    return;
+  }
   if (S.kind != COLL_SRC_COMP) return;
   if (S.cache_ts == update->ntimestep) return;
 
@@ -700,14 +742,19 @@ void FixCollNanbu::refresh_compute_src(CollGridSrc &S)
 
   // Source is empty for this step
   S.arr_cache = nullptr;
+  S.pvec_cache = nullptr;
   S.src_index = -1;
   S.cache_ts  = update->ntimestep;
 }
 
 /* ---------------------------------------------------------------------- */
 
-double FixCollNanbu::read_cell_src(const CollGridSrc &S, int icell)
+double FixCollNanbu::read_src(const CollGridSrc &S, int ip, int icell) const
 {
+  if (S.kind == COLL_SRC_PCUSTOM) {
+    if (!S.pvec_cache) return 0.0;
+    return S.pvec_cache[ip];
+  }
   if (S.kind != COLL_SRC_COMP) return 0.0;
   if (!S.arr_cache || S.src_index < 0) return 0.0;
   return S.arr_cache[icell][S.src_index];

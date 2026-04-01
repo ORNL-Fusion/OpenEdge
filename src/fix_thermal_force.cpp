@@ -38,6 +38,7 @@
 using namespace SPARTA_NS;
 
 #define INVOKED_PER_GRID 16
+enum { INT, DOUBLE };
 
 /* ---------------------------------------------------------------------- */
 
@@ -118,15 +119,22 @@ FixThermalForce::~FixThermalForce()
 {
   if (copymode) return;
   delete[] srcBx_.cid;
+  delete[] srcBx_.pname;
   delete[] srcBy_.cid;
+  delete[] srcBy_.pname;
   delete[] srcBz_.cid;
+  delete[] srcBz_.pname;
   if (have_ion_thermal_) {
     delete[] srcGradTiR_.cid;
+    delete[] srcGradTiR_.pname;
     delete[] srcGradTiZ_.cid;
+    delete[] srcGradTiZ_.pname;
   }
   if (have_elec_thermal_) {
     delete[] srcGradTeR_.cid;
+    delete[] srcGradTeR_.pname;
     delete[] srcGradTeZ_.cid;
+    delete[] srcGradTeZ_.pname;
   }
 }
 
@@ -146,27 +154,46 @@ void FixThermalForce::init()
 {
   // resolve compute sources
   auto bind = [&](CollGridSrc &S, const char *label) {
-    if (S.kind != COLL_SRC_COMP) return;
-    S.icompute = modify->find_compute(S.cid);
-    if (S.icompute < 0) {
-      char msg[200];
-      snprintf(msg, sizeof(msg),
-               "fix thermal_force: compute '%s' for %s not found",
-               S.cid, label);
-      error->all(FLERR, msg);
+    if (S.kind == COLL_SRC_COMP) {
+      S.icompute = modify->find_compute(S.cid);
+      if (S.icompute < 0) {
+        char msg[200];
+        snprintf(msg, sizeof(msg),
+                 "fix thermal_force: compute '%s' for %s not found",
+                 S.cid, label);
+        error->all(FLERR, msg);
+      }
+      Compute *c = modify->compute[S.icompute];
+      if (c->per_grid_flag == 0)
+        error->all(FLERR, "fix thermal_force: compute must be per-grid");
+      if (c->size_per_grid_cols == 0)
+        error->all(FLERR, "fix thermal_force: compute has no per-grid array");
+      if (S.col < 1 || S.col > c->size_per_grid_cols) {
+        char msg[200];
+        snprintf(msg, sizeof(msg),
+                 "fix thermal_force: column %d for compute '%s' (%s) "
+                 "out of range [1..%d]",
+                 S.col, S.cid, label, c->size_per_grid_cols);
+        error->all(FLERR, msg);
+      }
+      return;
     }
-    Compute *c = modify->compute[S.icompute];
-    if (c->per_grid_flag == 0)
-      error->all(FLERR, "fix thermal_force: compute must be per-grid");
-    if (c->size_per_grid_cols == 0)
-      error->all(FLERR, "fix thermal_force: compute has no per-grid array");
-    if (S.col < 1 || S.col > c->size_per_grid_cols) {
-      char msg[200];
-      snprintf(msg, sizeof(msg),
-               "fix thermal_force: column %d for compute '%s' (%s) "
-               "out of range [1..%d]",
-               S.col, S.cid, label, c->size_per_grid_cols);
-      error->all(FLERR, msg);
+    if (S.kind == COLL_SRC_PCUSTOM) {
+      S.ipcustom = particle->find_custom(S.pname);
+      if (S.ipcustom < 0) {
+        char msg[200];
+        snprintf(msg, sizeof(msg),
+                 "fix thermal_force: particle custom '%s' for %s not found",
+                 S.pname, label);
+        error->all(FLERR, msg);
+      }
+      if (particle->etype[S.ipcustom] != DOUBLE)
+        error->all(FLERR,
+          "fix thermal_force: particle custom source must be floating point");
+      if (particle->esize[S.ipcustom] != 0)
+        error->all(FLERR,
+          "fix thermal_force: particle custom source must be a vector");
+      S.ipwhich = particle->ewhich[S.ipcustom];
     }
   };
 
@@ -255,9 +282,9 @@ void FixThermalForce::kick_half(double dt_half)
     if (m_Z <= 0.0) continue;
 
     // read B in SPARTA coordinate order from per-grid compute
-    const double B0 = read_cell_src(srcBx_, icell);
-    const double B1 = read_cell_src(srcBy_, icell);
-    const double B2 = read_cell_src(srcBz_, icell);
+    const double B0 = read_src(srcBx_, ip, icell);
+    const double B1 = read_src(srcBy_, ip, icell);
+    const double B2 = read_src(srcBz_, ip, icell);
     const double Bmag = std::sqrt(B0*B0 + B1*B1 + B2*B2);
     if (Bmag < 1.0e-20) continue;
 
@@ -295,15 +322,15 @@ void FixThermalForce::kick_half(double dt_half)
     const double Z2 = Z * Z;
 
     if (have_ion_thermal_) {
-      const double gTiR = read_cell_src(srcGradTiR_, icell);  // eV/m
-      const double gTiZ = read_cell_src(srcGradTiZ_, icell);  // eV/m
+      const double gTiR = read_src(srcGradTiR_, ip, icell);  // eV/m
+      const double gTiZ = read_src(srcGradTiZ_, ip, icell);  // eV/m
       const double grad_par_Ti = gTiR * bhat_R_cyl + gTiZ * bhat_Z_cyl;
       a_par += beta_i_ * Z2 * QE * grad_par_Ti / m_Z;
     }
 
     if (have_elec_thermal_) {
-      const double gTeR = read_cell_src(srcGradTeR_, icell);  // eV/m
-      const double gTeZ = read_cell_src(srcGradTeZ_, icell);  // eV/m
+      const double gTeR = read_src(srcGradTeR_, ip, icell);  // eV/m
+      const double gTeZ = read_src(srcGradTeZ_, ip, icell);  // eV/m
       const double grad_par_Te = gTeR * bhat_R_cyl + gTeZ * bhat_Z_cyl;
       a_par += alpha_e_ * Z2 * QE * grad_par_Te / m_Z;
     }
@@ -329,34 +356,54 @@ void FixThermalForce::parse_compute_src(const char *tok, CollGridSrc &dst,
     error->all(FLERR, msg);
   }
 
-  if (strncmp(tok, "c_", 2) != 0)
-    error->all(FLERR,
-      "fix thermal_force: source must be a compute (c_ID[col])");
+  if (strncmp(tok, "c_", 2) == 0) {
+    dst.kind = COLL_SRC_COMP;
+    const char *name = tok + 2;
+    const char *lb   = strchr(name, '[');
+    const char *rb   = lb ? strrchr(name, ']') : nullptr;
 
-  dst.kind = COLL_SRC_COMP;
-  const char *name = tok + 2;
-  const char *lb   = strchr(name, '[');
-  const char *rb   = lb ? strrchr(name, ']') : nullptr;
+    if (!lb || !rb || rb <= lb + 1)
+      error->all(FLERR,
+        "fix thermal_force: use c_ID[col] syntax for compute sources");
 
-  if (!lb || !rb || rb <= lb + 1)
-    error->all(FLERR,
-      "fix thermal_force: use c_ID[col] syntax for compute sources");
+    int idlen = static_cast<int>(lb - name);
+    dst.cid = new char[idlen + 1];
+    strncpy(dst.cid, name, idlen);
+    dst.cid[idlen] = '\0';
+    dst.col = atoi(lb + 1);   // 1-based
 
-  int idlen = static_cast<int>(lb - name);
-  dst.cid = new char[idlen + 1];
-  strncpy(dst.cid, name, idlen);
-  dst.cid[idlen] = '\0';
-  dst.col = atoi(lb + 1);   // 1-based
+    if (dst.col <= 0)
+      error->all(FLERR,
+        "fix thermal_force: compute column must be >= 1");
+    return;
+  }
 
-  if (dst.col <= 0)
-    error->all(FLERR,
-      "fix thermal_force: compute column must be >= 1");
+  if (strncmp(tok, "p_", 2) == 0) {
+    dst.kind = COLL_SRC_PCUSTOM;
+    const char *name = tok + 2;
+    dst.pname = new char[strlen(name) + 1];
+    strcpy(dst.pname, name);
+    return;
+  }
+
+  error->all(FLERR,
+    "fix thermal_force: source must be c_ID[col] or p_name");
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixThermalForce::refresh_compute_src(CollGridSrc &S)
 {
+  if (S.kind == COLL_SRC_PCUSTOM) {
+    if (S.cache_ts == update->ntimestep) return;
+    S.pvec_cache = nullptr;
+    if (S.ipcustom >= 0) {
+      S.ipwhich = particle->ewhich[S.ipcustom];
+      if (S.ipwhich >= 0) S.pvec_cache = particle->edvec[S.ipwhich];
+    }
+    S.cache_ts = update->ntimestep;
+    return;
+  }
   if (S.kind != COLL_SRC_COMP) return;
   if (S.cache_ts == update->ntimestep) return;
 
@@ -383,14 +430,19 @@ void FixThermalForce::refresh_compute_src(CollGridSrc &S)
   }
 
   S.arr_cache = nullptr;
+  S.pvec_cache = nullptr;
   S.src_index = -1;
   S.cache_ts  = update->ntimestep;
 }
 
 /* ---------------------------------------------------------------------- */
 
-double FixThermalForce::read_cell_src(const CollGridSrc &S, int icell) const
+double FixThermalForce::read_src(const CollGridSrc &S, int ip, int icell) const
 {
+  if (S.kind == COLL_SRC_PCUSTOM) {
+    if (!S.pvec_cache) return 0.0;
+    return S.pvec_cache[ip];
+  }
   if (S.kind != COLL_SRC_COMP) return 0.0;
   if (!S.arr_cache || S.src_index < 0) return 0.0;
   return S.arr_cache[icell][S.src_index];

@@ -47,6 +47,7 @@
 using namespace SPARTA_NS;
 
 #define INVOKED_PER_GRID 16
+enum { INT, DOUBLE };
 
 enum { DIFF_NONE=0, DIFF_CONST, DIFF_BOHM };
 
@@ -146,14 +147,22 @@ FixCrossDiffusion::~FixCrossDiffusion()
   if (copymode) return;
   delete rng_;
   delete[] srcBx_.cid;
+  delete[] srcBx_.pname;
   delete[] srcBy_.cid;
+  delete[] srcBy_.pname;
   delete[] srcBz_.cid;
-  if (diff_model_ == DIFF_BOHM)
+  delete[] srcBz_.pname;
+  if (diff_model_ == DIFF_BOHM) {
     delete[] srcTe_.cid;
+    delete[] srcTe_.pname;
+  }
   if (have_grad_pinch_) {
     delete[] srcNe_.cid;
+    delete[] srcNe_.pname;
     delete[] srcGradNeR_.cid;
+    delete[] srcGradNeR_.pname;
     delete[] srcGradNeZ_.cid;
+    delete[] srcGradNeZ_.pname;
   }
 }
 
@@ -179,27 +188,46 @@ void FixCrossDiffusion::init()
 
   // resolve compute sources
   auto bind = [&](CollGridSrc &S, const char *label) {
-    if (S.kind != COLL_SRC_COMP) return;
-    S.icompute = modify->find_compute(S.cid);
-    if (S.icompute < 0) {
-      char msg[200];
-      snprintf(msg, sizeof(msg),
-               "fix cross_diffusion: compute '%s' for %s not found",
-               S.cid, label);
-      error->all(FLERR, msg);
+    if (S.kind == COLL_SRC_COMP) {
+      S.icompute = modify->find_compute(S.cid);
+      if (S.icompute < 0) {
+        char msg[200];
+        snprintf(msg, sizeof(msg),
+                 "fix cross_diffusion: compute '%s' for %s not found",
+                 S.cid, label);
+        error->all(FLERR, msg);
+      }
+      Compute *c = modify->compute[S.icompute];
+      if (c->per_grid_flag == 0)
+        error->all(FLERR, "fix cross_diffusion: compute must be per-grid");
+      if (c->size_per_grid_cols == 0)
+        error->all(FLERR, "fix cross_diffusion: compute has no per-grid array");
+      if (S.col < 1 || S.col > c->size_per_grid_cols) {
+        char msg[200];
+        snprintf(msg, sizeof(msg),
+                 "fix cross_diffusion: column %d for compute '%s' (%s) "
+                 "out of range [1..%d]",
+                 S.col, S.cid, label, c->size_per_grid_cols);
+        error->all(FLERR, msg);
+      }
+      return;
     }
-    Compute *c = modify->compute[S.icompute];
-    if (c->per_grid_flag == 0)
-      error->all(FLERR, "fix cross_diffusion: compute must be per-grid");
-    if (c->size_per_grid_cols == 0)
-      error->all(FLERR, "fix cross_diffusion: compute has no per-grid array");
-    if (S.col < 1 || S.col > c->size_per_grid_cols) {
-      char msg[200];
-      snprintf(msg, sizeof(msg),
-               "fix cross_diffusion: column %d for compute '%s' (%s) "
-               "out of range [1..%d]",
-               S.col, S.cid, label, c->size_per_grid_cols);
-      error->all(FLERR, msg);
+    if (S.kind == COLL_SRC_PCUSTOM) {
+      S.ipcustom = particle->find_custom(S.pname);
+      if (S.ipcustom < 0) {
+        char msg[200];
+        snprintf(msg, sizeof(msg),
+                 "fix cross_diffusion: particle custom '%s' for %s not found",
+                 S.pname, label);
+        error->all(FLERR, msg);
+      }
+      if (particle->etype[S.ipcustom] != DOUBLE)
+        error->all(FLERR,
+          "fix cross_diffusion: particle custom source must be floating point");
+      if (particle->esize[S.ipcustom] != 0)
+        error->all(FLERR,
+          "fix cross_diffusion: particle custom source must be a vector");
+      S.ipwhich = particle->ewhich[S.ipcustom];
     }
   };
 
@@ -261,9 +289,9 @@ void FixCrossDiffusion::start_of_step()
     const int icell = p.icell;
 
     // read B in SPARTA coordinate order
-    const double B0 = read_cell_src(srcBx_, icell);
-    const double B1 = read_cell_src(srcBy_, icell);
-    const double B2 = read_cell_src(srcBz_, icell);
+    const double B0 = read_src(srcBx_, ip, icell);
+    const double B1 = read_src(srcBy_, ip, icell);
+    const double B2 = read_src(srcBz_, ip, icell);
     const double Bmag = std::sqrt(B0*B0 + B1*B1 + B2*B2);
     if (Bmag < 1.0e-20) continue;
 
@@ -272,7 +300,7 @@ void FixCrossDiffusion::start_of_step()
     if (diff_model_ == DIFF_CONST) {
       D_local = D_perp_;
     } else if (diff_model_ == DIFF_BOHM) {
-      const double Te_eV = std::max(read_cell_src(srcTe_, icell), 0.0);
+      const double Te_eV = std::max(read_src(srcTe_, ip, icell), 0.0);
       D_local = bohm_scale_ * Te_eV / (16.0 * Bmag);
     }
 
@@ -339,9 +367,9 @@ void FixCrossDiffusion::start_of_step()
 
     // gradient-driven pinch
     if (have_grad_pinch_ && D_local > 0.0) {
-      const double ne_loc = std::max(read_cell_src(srcNe_, icell), 1.0e10);
-      const double gNeR = read_cell_src(srcGradNeR_, icell);
-      const double gNeZ = read_cell_src(srcGradNeZ_, icell);
+      const double ne_loc = std::max(read_src(srcNe_, ip, icell), 1.0e10);
+      const double gNeR = read_src(srcGradNeR_, ip, icell);
+      const double gNeZ = read_src(srcGradNeZ_, ip, icell);
 
       if (dim == 2) {
         const double Bpol = std::sqrt(B0*B0 + B1*B1);
@@ -395,34 +423,54 @@ void FixCrossDiffusion::parse_compute_src(const char *tok, CollGridSrc &dst,
     error->all(FLERR, msg);
   }
 
-  if (strncmp(tok, "c_", 2) != 0)
-    error->all(FLERR,
-      "fix cross_diffusion: source must be a compute (c_ID[col])");
+  if (strncmp(tok, "c_", 2) == 0) {
+    dst.kind = COLL_SRC_COMP;
+    const char *name = tok + 2;
+    const char *lb   = strchr(name, '[');
+    const char *rb   = lb ? strrchr(name, ']') : nullptr;
 
-  dst.kind = COLL_SRC_COMP;
-  const char *name = tok + 2;
-  const char *lb   = strchr(name, '[');
-  const char *rb   = lb ? strrchr(name, ']') : nullptr;
+    if (!lb || !rb || rb <= lb + 1)
+      error->all(FLERR,
+        "fix cross_diffusion: use c_ID[col] syntax for compute sources");
 
-  if (!lb || !rb || rb <= lb + 1)
-    error->all(FLERR,
-      "fix cross_diffusion: use c_ID[col] syntax for compute sources");
+    int idlen = static_cast<int>(lb - name);
+    dst.cid = new char[idlen + 1];
+    strncpy(dst.cid, name, idlen);
+    dst.cid[idlen] = '\0';
+    dst.col = atoi(lb + 1);   // 1-based
 
-  int idlen = static_cast<int>(lb - name);
-  dst.cid = new char[idlen + 1];
-  strncpy(dst.cid, name, idlen);
-  dst.cid[idlen] = '\0';
-  dst.col = atoi(lb + 1);   // 1-based
+    if (dst.col <= 0)
+      error->all(FLERR,
+        "fix cross_diffusion: compute column must be >= 1");
+    return;
+  }
 
-  if (dst.col <= 0)
-    error->all(FLERR,
-      "fix cross_diffusion: compute column must be >= 1");
+  if (strncmp(tok, "p_", 2) == 0) {
+    dst.kind = COLL_SRC_PCUSTOM;
+    const char *name = tok + 2;
+    dst.pname = new char[strlen(name) + 1];
+    strcpy(dst.pname, name);
+    return;
+  }
+
+  error->all(FLERR,
+    "fix cross_diffusion: source must be c_ID[col] or p_name");
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixCrossDiffusion::refresh_compute_src(CollGridSrc &S)
 {
+  if (S.kind == COLL_SRC_PCUSTOM) {
+    if (S.cache_ts == update->ntimestep) return;
+    S.pvec_cache = nullptr;
+    if (S.ipcustom >= 0) {
+      S.ipwhich = particle->ewhich[S.ipcustom];
+      if (S.ipwhich >= 0) S.pvec_cache = particle->edvec[S.ipwhich];
+    }
+    S.cache_ts = update->ntimestep;
+    return;
+  }
   if (S.kind != COLL_SRC_COMP) return;
   if (S.cache_ts == update->ntimestep) return;
 
@@ -449,14 +497,19 @@ void FixCrossDiffusion::refresh_compute_src(CollGridSrc &S)
   }
 
   S.arr_cache = nullptr;
+  S.pvec_cache = nullptr;
   S.src_index = -1;
   S.cache_ts  = update->ntimestep;
 }
 
 /* ---------------------------------------------------------------------- */
 
-double FixCrossDiffusion::read_cell_src(const CollGridSrc &S, int icell) const
+double FixCrossDiffusion::read_src(const CollGridSrc &S, int ip, int icell) const
 {
+  if (S.kind == COLL_SRC_PCUSTOM) {
+    if (!S.pvec_cache) return 0.0;
+    return S.pvec_cache[ip];
+  }
   if (S.kind != COLL_SRC_COMP) return 0.0;
   if (!S.arr_cache || S.src_index < 0) return 0.0;
   return S.arr_cache[icell][S.src_index];

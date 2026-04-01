@@ -185,6 +185,10 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   pc_te_custom = pc_ti_custom = pc_ne_custom = pc_ni_custom = -1;
   pc_vpar_custom = -1;
   pc_bx_custom = pc_by_custom = pc_bz_custom = -1;
+  pc_ex_custom = pc_ey_custom = pc_ez_custom = -1;
+  pc_grad_ne_r_custom = pc_grad_ne_z_custom = -1;
+  pc_grad_te_r_custom = pc_grad_te_z_custom = -1;
+  pc_grad_ti_r_custom = pc_grad_ti_z_custom = -1;
 
 }
 
@@ -443,11 +447,12 @@ void Update::init()
   }
 
   // Register per-particle plasma cache vectors.
-  // Active when any plasma compute is available (sheath or GCA).
+  // Active when any plasma compute is available (sheath, GCA, or Boris B query).
   {
     int plasma_cidx = -1;
     if (sheath_flag && sheath_plasma_cidx >= 0) plasma_cidx = sheath_plasma_cidx;
     else if (gca_flag && gca_plasma_cidx >= 0) plasma_cidx = gca_plasma_cidx;
+    else if (boris_plasma_cidx >= 0) plasma_cidx = boris_plasma_cidx;
 
     if (plasma_cidx >= 0) {
       const int custom_double = 1;
@@ -465,6 +470,15 @@ void Update::init()
       reg(pc_bx_custom,   "pc_bx");
       reg(pc_by_custom,   "pc_by");
       reg(pc_bz_custom,   "pc_bz");
+      reg(pc_ex_custom,   "pc_ex");
+      reg(pc_ey_custom,   "pc_ey");
+      reg(pc_ez_custom,   "pc_ez");
+      reg(pc_grad_ne_r_custom, "pc_grad_ne_r");
+      reg(pc_grad_ne_z_custom, "pc_grad_ne_z");
+      reg(pc_grad_te_r_custom, "pc_grad_te_r");
+      reg(pc_grad_te_z_custom, "pc_grad_te_z");
+      reg(pc_grad_ti_r_custom, "pc_grad_ti_r");
+      reg(pc_grad_ti_z_custom, "pc_grad_ti_z");
       plasma_cache_flag = 1;
     }
   }
@@ -645,10 +659,11 @@ void Update::run(int nsteps)
 
 void Update::cache_plasma_particles()
 {
-  // resolve the plasma compute (sheath or GCA — whichever is available)
+  // Resolve the plasma compute used for point-sampled particle caches.
   int plasma_cidx = -1;
   if (sheath_flag && sheath_plasma_cidx >= 0) plasma_cidx = sheath_plasma_cidx;
   else if (gca_flag && gca_plasma_cidx >= 0) plasma_cidx = gca_plasma_cidx;
+  else if (boris_plasma_cidx >= 0) plasma_cidx = boris_plasma_cidx;
   if (plasma_cidx < 0) return;
 
   Compute *c_base = modify->compute[plasma_cidx];
@@ -667,7 +682,11 @@ void Update::cache_plasma_particles()
   if (particle->nlocal == 0) return;
   if (pc_te_custom < 0 || pc_ti_custom < 0 || pc_ne_custom < 0 ||
       pc_ni_custom < 0 || pc_vpar_custom < 0 ||
-      pc_bx_custom < 0 || pc_by_custom < 0 || pc_bz_custom < 0) return;
+      pc_bx_custom < 0 || pc_by_custom < 0 || pc_bz_custom < 0 ||
+      pc_ex_custom < 0 || pc_ey_custom < 0 || pc_ez_custom < 0 ||
+      pc_grad_ne_r_custom < 0 || pc_grad_ne_z_custom < 0 ||
+      pc_grad_te_r_custom < 0 || pc_grad_te_z_custom < 0 ||
+      pc_grad_ti_r_custom < 0 || pc_grad_ti_z_custom < 0) return;
   if (particle->ewhich[pc_te_custom] < 0) return;
 
   double *te_vec   = particle->edvec[particle->ewhich[pc_te_custom]];
@@ -678,8 +697,20 @@ void Update::cache_plasma_particles()
   double *bx_vec   = particle->edvec[particle->ewhich[pc_bx_custom]];
   double *by_vec   = particle->edvec[particle->ewhich[pc_by_custom]];
   double *bz_vec   = particle->edvec[particle->ewhich[pc_bz_custom]];
+  double *ex_vec   = particle->edvec[particle->ewhich[pc_ex_custom]];
+  double *ey_vec   = particle->edvec[particle->ewhich[pc_ey_custom]];
+  double *ez_vec   = particle->edvec[particle->ewhich[pc_ez_custom]];
+  double *gne_r_vec = particle->edvec[particle->ewhich[pc_grad_ne_r_custom]];
+  double *gne_z_vec = particle->edvec[particle->ewhich[pc_grad_ne_z_custom]];
+  double *gte_r_vec = particle->edvec[particle->ewhich[pc_grad_te_r_custom]];
+  double *gte_z_vec = particle->edvec[particle->ewhich[pc_grad_te_z_custom]];
+  double *gti_r_vec = particle->edvec[particle->ewhich[pc_grad_ti_r_custom]];
+  double *gti_z_vec = particle->edvec[particle->ewhich[pc_grad_ti_z_custom]];
   if (!te_vec || !ti_vec || !ne_vec || !ni_vec ||
-      !vpar_vec || !bx_vec || !by_vec || !bz_vec) return;
+      !vpar_vec || !bx_vec || !by_vec || !bz_vec ||
+      !ex_vec || !ey_vec || !ez_vec ||
+      !gne_r_vec || !gne_z_vec || !gte_r_vec || !gte_z_vec ||
+      !gti_r_vec || !gti_z_vec) return;
 
   // Sheath geometry compute (for Boltzmann ne correction)
   ComputeSheathGeometryGrid *csg = nullptr;
@@ -702,24 +733,52 @@ void Update::cache_plasma_particles()
     ne_vec[i]   = pf.dens_e;
     ni_vec[i]   = pf.dens_i;
     vpar_vec[i] = pf.parr_flow;
+    gne_r_vec[i] = pf.grad_dens_e_r;
+    gne_z_vec[i] = pf.grad_dens_e_z;
+    gte_r_vec[i] = pf.grad_temp_e_r;
+    gte_z_vec[i] = pf.grad_temp_e_z;
+    gti_r_vec[i] = pf.grad_temp_i_r;
+    gti_z_vec[i] = pf.grad_temp_i_z;
 
     MagneticFieldFileDataParams bf = cp->query_bfield_at_point(x);
-    // store Cartesian B-field at particle position
+    // Store B and background E at particle position using the same component
+    // mapping as compute plasma/fields: 2D -> (Bx,By,Bz)=(Br,Bz,Bt).
     const double rx = x[0], ry = x[1];
     const double rmag = std::sqrt(rx*rx + ry*ry);
     double bx, by, bz;
+    double ex = 0.0, ey = 0.0, ez = 0.0;
+    const double Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
     if (rmag > 1.0e-20 && dim == 3) {
       const double cphi = rx / rmag, sphi = ry / rmag;
       bx = bf.br * cphi - bf.bt * sphi;
       by = bf.br * sphi + bf.bt * cphi;
+      if (Bmag > 1.0e-30 && pf.epar != 0.0) {
+        const double Er = pf.epar * bf.br / Bmag;
+        const double Et = pf.epar * bf.bt / Bmag;
+        const double Ezv = pf.epar * bf.bz / Bmag;
+        ex = Er * cphi - Et * sphi;
+        ey = Er * sphi + Et * cphi;
+        ez = Ezv;
+      }
     } else {
       bx = bf.br;
-      by = (dim == 3) ? 0.0 : bf.bt;
+      by = (dim == 3) ? 0.0 : bf.bz;
+      if (Bmag > 1.0e-30 && pf.epar != 0.0) {
+        const double Er = pf.epar * bf.br / Bmag;
+        const double Et = pf.epar * bf.bt / Bmag;
+        const double Ezv = pf.epar * bf.bz / Bmag;
+        ex = Er;
+        ey = (dim == 3) ? 0.0 : Ezv;
+        ez = (dim == 3) ? Ezv : Et;
+      }
     }
-    bz = bf.bz;
+    bz = (dim == 3) ? bf.bz : bf.bt;
     bx_vec[i] = bx;
     by_vec[i] = by;
     bz_vec[i] = bz;
+    ex_vec[i] = ex;
+    ey_vec[i] = ey;
+    ez_vec[i] = ez;
 
     // Boltzmann ne correction: ne_local = ne_upstream * exp(-phi/Te)
     // where phi = sheath potential drop at particle distance from wall
@@ -2118,16 +2177,38 @@ void Update::pusherBoris2D(int i, int icell, double dt,
   double E[3] = {0.0, 0.0, 0.0};
   double B[3] = {0.0, 0.0, 0.0};
 
-  // Field arrays are precomputed before particle motion. Cache them once per
-  // Boris call to avoid redundant per-subcycle reads.
+  // Cache the grid E-field once per Boris call. The point-query B-field path
+  // is evaluated inside the subcycle loop so it follows the particle position.
   if (eperturbflag)
     BorisGrid::read_field_from_fix(modify->fix[efieldfix], (efstyle == GFIELD),
                                    efield_active, i, icell, E);
-  if (bperturbflag)
-    BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
-                                   bfield_active, i, icell, B);
 
   for (int isub = 0; isub < nsub; isub++) {
+    B[0] = B[1] = B[2] = 0.0;
+
+    // Point-query B-field at particle position.
+    // In 2D (R,Z), the Boris components follow the existing compute aliases:
+    //   Bx = Br, By = Bz, Bz = Bt.
+    bool have_point_b = false;
+    if (boris_plasma_cidx >= 0) {
+      Compute *cp_base = modify->compute[boris_plasma_cidx];
+      ComputePlasmaFields *cp_bf = dynamic_cast<ComputePlasmaFields *>(cp_base);
+      if (cp_bf) {
+        const double xyz[3] = {xcur[0], xcur[1], 0.0};
+        MagneticFieldFileDataParams Bcyl = cp_bf->query_bfield_at_point(xyz);
+        if (Bcyl.Bmag > 0.0) {
+          have_point_b = true;
+          B[0] = Bcyl.br;
+          B[1] = Bcyl.bz;
+          B[2] = Bcyl.bt;
+        }
+      }
+    }
+
+    if (!have_point_b && bperturbflag)
+      BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
+                                     bfield_active, i, icell, B);
+
     if (boris_bad_dt_check && !boris_bad_dt_warned) {
       const double bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
       const double bad = std::fabs(qm) * bmag * dt_sub;

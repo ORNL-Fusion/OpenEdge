@@ -1,0 +1,10 @@
+.DS_Store
+-p/
+output/
+log.openedge
+input/.DS_Store
+input/Figs/
+input/bfield.h5
+input/surfaces/core_cleaned.surf
+__pycache__/
+*.pyc
