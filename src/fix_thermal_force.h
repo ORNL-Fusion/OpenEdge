@@ -80,7 +80,7 @@ class FixThermalForce : public Fix {
   // helper methods
   void parse_compute_src(const char *tok, CollGridSrc &dst, const char *label);
   void refresh_compute_src(CollGridSrc &S);
-  double read_cell_src(const CollGridSrc &S, int icell) const;
+  double read_src(const CollGridSrc &S, int ip, int icell) const;
   void kick_half(double dt_half);
 };
 

@@ -62,7 +62,7 @@ class FixCollNanbu : public Fix {
 
   // helper methods
   void refresh_compute_src(CollGridSrc &S);
-  double read_cell_src(const CollGridSrc &S, int icell);
+  double read_src(const CollGridSrc &S, int ip, int icell) const;
   void parse_compute_src(const char *tok, CollGridSrc &dst, const char *label);
 
   // core Nanbu algorithm

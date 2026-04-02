@@ -185,6 +185,10 @@ struct SurfHit2D {
   int pc_te_custom, pc_ti_custom, pc_ne_custom, pc_ni_custom;
   int pc_vpar_custom;
   int pc_bx_custom, pc_by_custom, pc_bz_custom;
+  int pc_ex_custom, pc_ey_custom, pc_ez_custom;
+  int pc_grad_ne_r_custom, pc_grad_ne_z_custom;
+  int pc_grad_te_r_custom, pc_grad_te_z_custom;
+  int pc_grad_ti_r_custom, pc_grad_ti_z_custom;
   void cache_plasma_particles();
 
   // Hybrid Boris/GCA pusher (ERO2.0-style)
