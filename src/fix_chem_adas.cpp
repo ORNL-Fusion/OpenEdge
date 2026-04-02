@@ -426,11 +426,21 @@ void FixChemAdas::end_of_step_no_average()
 
   deferred_particles.clear();
 
-  // Fast path: read Te/ne from per-particle plasma cache (populated by update)
+  // Fast path: read Te/ne/Ti/vpar/B from per-particle plasma cache
   if (update->plasma_cache_flag &&
       update->pc_te_custom >= 0 && update->pc_ne_custom >= 0) {
     double *te_vec = particle->edvec[particle->ewhich[update->pc_te_custom]];
     double *ne_vec = particle->edvec[particle->ewhich[update->pc_ne_custom]];
+    double *ti_vec = (update->pc_ti_custom >= 0 && particle->ewhich[update->pc_ti_custom] >= 0)
+                     ? particle->edvec[particle->ewhich[update->pc_ti_custom]] : nullptr;
+    double *vpar_vec = (update->pc_vpar_custom >= 0 && particle->ewhich[update->pc_vpar_custom] >= 0)
+                       ? particle->edvec[particle->ewhich[update->pc_vpar_custom]] : nullptr;
+    double *bx_vec = (update->pc_bx_custom >= 0 && particle->ewhich[update->pc_bx_custom] >= 0)
+                     ? particle->edvec[particle->ewhich[update->pc_bx_custom]] : nullptr;
+    double *by_vec = (update->pc_by_custom >= 0 && particle->ewhich[update->pc_by_custom] >= 0)
+                     ? particle->edvec[particle->ewhich[update->pc_by_custom]] : nullptr;
+    double *bz_vec = (update->pc_bz_custom >= 0 && particle->ewhich[update->pc_bz_custom] >= 0)
+                     ? particle->edvec[particle->ewhich[update->pc_bz_custom]] : nullptr;
 
     for (int icell = 0; icell < nglocal; icell++) {
       if (cinfo[icell].count == 0) continue;
@@ -438,7 +448,12 @@ void FixChemAdas::end_of_step_no_average()
       while (ip >= 0) {
         const double Te_eV = std::max(te_vec[ip], 1e-6);
         const double ne_m3 = std::max(ne_vec[ip], 0.0);
-        attempt(&particles[ip], Te_eV, ne_m3);
+        const double Ti_eV = ti_vec ? std::max(ti_vec[ip], 0.0) : 0.0;
+        const double vp = vpar_vec ? vpar_vec[ip] : 0.0;
+        const double Bx = bx_vec ? bx_vec[ip] : 0.0;
+        const double By = by_vec ? by_vec[ip] : 0.0;
+        const double Bz = bz_vec ? bz_vec[ip] : 0.0;
+        attempt(&particles[ip], Te_eV, ne_m3, Ti_eV, vp, Bx, By, Bz);
         ip = next[ip];
       }
     }
@@ -484,7 +499,8 @@ double FixChemAdas::memory_usage()
    attempt a reaction for a single particle
 ------------------------------------------------------------------------- */
 
-int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
+int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3,
+                         double Ti_eV, double vpar, double bx, double by, double bz)
 {
   Particle::Species *species = particle->species;
 
@@ -588,11 +604,74 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
   // Assign first product
   ip->ispecies = rchosen->products[0];
 
+  // Velocity re-sampling for CX and dissociation products:
+  // Sample from shifted Maxwellian at local Ti and bulk flow (EIRENE-like)
+  const bool resample = (rchosen->type == EXCHANGE || rchosen->type == DISSOCIATION)
+                        && Ti_eV > 0.0;
+  if (resample) {
+    const double kB = 1.380649e-23;
+    const double eV_to_J = 1.602176634e-19;
+    const double Ti_K = Ti_eV * eV_to_J / kB;
+    const double m_prod = particle->species[rchosen->products[0]].mass;
+
+    // thermal speed: v_th = sqrt(kB * Ti / m)
+    const double v_th = (m_prod > 0.0) ? std::sqrt(kB * Ti_K / m_prod) : 0.0;
+
+    // flow velocity vector: v_flow = vpar * b_hat
+    const double Bmag = std::sqrt(bx*bx + by*by + bz*bz);
+    double vfx = 0.0, vfy = 0.0, vfz = 0.0;
+    if (Bmag > 1e-30) {
+      const double invB = 1.0 / Bmag;
+      vfx = vpar * bx * invB;
+      vfy = vpar * by * invB;
+      vfz = vpar * bz * invB;
+    }
+
+    // Box-Muller Gaussian samples
+    const double u1 = std::max(rng_adas->uniform(), 1e-30);
+    const double u2 = rng_adas->uniform();
+    const double u3 = rng_adas->uniform();
+    const double u4 = std::max(rng_adas->uniform(), 1e-30);
+    const double g1 = std::sqrt(-2.0 * std::log(u1)) * std::cos(6.283185307 * u2);
+    const double g2 = std::sqrt(-2.0 * std::log(u1)) * std::sin(6.283185307 * u2);
+    const double g3 = std::sqrt(-2.0 * std::log(u4)) * std::cos(6.283185307 * u3);
+
+    ip->v[0] = vfx + v_th * g1;
+    ip->v[1] = vfy + v_th * g2;
+    ip->v[2] = vfz + v_th * g3;
+  }
+
   // For dissociation with 2 products: defer creation of second particle
   if (rchosen->nproduct == 2) {
     DeferredParticle dp;
     dp.x[0] = ip->x[0]; dp.x[1] = ip->x[1]; dp.x[2] = ip->x[2];
-    dp.v[0] = ip->v[0]; dp.v[1] = ip->v[1]; dp.v[2] = ip->v[2];
+
+    if (resample) {
+      // Second product also gets independent Maxwellian sample
+      const double kB = 1.380649e-23;
+      const double eV_to_J = 1.602176634e-19;
+      const double Ti_K = Ti_eV * eV_to_J / kB;
+      const double m_prod2 = particle->species[rchosen->products[1]].mass;
+      const double v_th2 = (m_prod2 > 0.0) ? std::sqrt(kB * Ti_K / m_prod2) : 0.0;
+      const double Bmag = std::sqrt(bx*bx + by*by + bz*bz);
+      double vfx = 0.0, vfy = 0.0, vfz = 0.0;
+      if (Bmag > 1e-30) {
+        const double invB = 1.0 / Bmag;
+        vfx = vpar * bx * invB;
+        vfy = vpar * by * invB;
+        vfz = vpar * bz * invB;
+      }
+      const double u1 = std::max(rng_adas->uniform(), 1e-30);
+      const double u2 = rng_adas->uniform();
+      const double u3 = rng_adas->uniform();
+      const double u4 = std::max(rng_adas->uniform(), 1e-30);
+      dp.v[0] = vfx + v_th2 * std::sqrt(-2.0*std::log(u1)) * std::cos(6.283185307*u2);
+      dp.v[1] = vfy + v_th2 * std::sqrt(-2.0*std::log(u1)) * std::sin(6.283185307*u2);
+      dp.v[2] = vfz + v_th2 * std::sqrt(-2.0*std::log(u4)) * std::cos(6.283185307*u3);
+    } else {
+      dp.v[0] = ip->v[0]; dp.v[1] = ip->v[1]; dp.v[2] = ip->v[2];
+    }
+
     dp.species = rchosen->products[1];
     dp.icell = ip->icell;
     deferred_particles.push_back(dp);

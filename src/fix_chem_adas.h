@@ -139,7 +139,9 @@ protected:
     ReactionIJ* reactions;
     int* list_ij;
 
-    int attempt(Particle::OnePart* ip, double Te_eV, double ne_m3);
+    int attempt(Particle::OnePart* ip, double Te_eV, double ne_m3,
+                double Ti_eV = 0.0, double vpar = 0.0,
+                double bx = 0.0, double by = 0.0, double bz = 0.0);
     void readfile(char*);
     int readone(char*, char*, int&, int&);
     void check_duplicate();
