@@ -147,6 +147,13 @@ protected:
     void print_reaction(OneReaction*);
     void refresh_compute_src(GridSrc &S);
 
+    // Deferred particle creation for dissociation (avoids invalidation during iteration)
+    struct DeferredParticle {
+      double x[3], v[3];
+      int species, icell;
+    };
+    std::vector<DeferredParticle> deferred_particles;
+
 };
 
 } // namespace SPARTA_NS

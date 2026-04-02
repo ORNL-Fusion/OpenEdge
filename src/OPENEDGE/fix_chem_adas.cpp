@@ -33,14 +33,14 @@
 
 namespace fs = std::filesystem;
 using namespace SPARTA_NS;
-enum{IONIZATION,RECOMBINATION,EXCHANGE};   // file-local: differs from react_bird ordering
-enum{IONIZATIONRATE, RECOMBINATIONRATE};   // other files
-enum{ADAS};                               // other react files
+enum{IONIZATION,RECOMBINATION,EXCHANGE,DISSOCIATION};  // file-local reaction types
+enum{IONIZATIONRATE, RECOMBINATIONRATE};               // other files
+enum{ADAS,JANEV};                                      // rate styles
 
 
 #define MAXREACTANT 2
 #define MAXPRODUCT 3
-#define MAXCOEFF 7               // 5 in file, extra for pre-computation
+#define MAXCOEFF 10              // Janev polynomials use up to 9 coeffs (b0..b8)
 #define INVOKED_PER_GRID 16
 #define MAXLINE 1024
 #define DELTALIST 16
@@ -397,16 +397,18 @@ void FixChemAdas::end_of_step()
 
   // periodic per-type reaction tally (every 10000 steps)
   if (comm->me == 0 && update->ntimestep % 10000 == 0 && nreact_running > 0) {
-    bigint nI = 0, nR = 0, nE = 0;
+    bigint nI = 0, nR = 0, nE = 0, nD = 0;
     for (int i = 0; i < nlist; i++) {
       if (rlist[i].type == IONIZATION) nI += tally_reactions[i];
       else if (rlist[i].type == RECOMBINATION) nR += tally_reactions[i];
       else if (rlist[i].type == EXCHANGE) nE += tally_reactions[i];
+      else if (rlist[i].type == DISSOCIATION) nD += tally_reactions[i];
     }
     if (screen) fprintf(screen,
-      "  chem/adas step " BIGINT_FORMAT ": ionization=" BIGINT_FORMAT
-      " recomb=" BIGINT_FORMAT " CX=" BIGINT_FORMAT "\n",
-      update->ntimestep, nI, nR, nE);
+      "  chem/adas step " BIGINT_FORMAT ": ioniz=" BIGINT_FORMAT
+      " recomb=" BIGINT_FORMAT " CX=" BIGINT_FORMAT
+      " dissoc=" BIGINT_FORMAT "\n",
+      update->ntimestep, nI, nR, nE, nD);
   }
 }
 
@@ -421,6 +423,8 @@ void FixChemAdas::end_of_step_no_average()
   int *next = particle->next;
   Grid::ChildInfo *cinfo = grid->cinfo;
   int nglocal = grid->nlocal;
+
+  deferred_particles.clear();
 
   // Fast path: read Te/ne from per-particle plasma cache (populated by update)
   if (update->plasma_cache_flag &&
@@ -438,23 +442,30 @@ void FixChemAdas::end_of_step_no_average()
         ip = next[ip];
       }
     }
-    return;
+  } else {
+    // Fallback: per-cell values from grid variable or compute
+    if (use_grid_plasma) compute_plasma_grid();
+    refresh_compute_src(srcTe);
+    refresh_compute_src(srcNe);
+
+    for (int icell = 0; icell < nglocal; icell++) {
+      if (cinfo[icell].count == 0) continue;
+      const double Te_eV = std::max(read_cell(srcTe, icell, 0), 1e-6);
+      const double ne_m3 = std::max(read_cell(srcNe, icell, 1), 0.0);
+      int ip = cinfo[icell].first;
+      while (ip >= 0) {
+        attempt(&particles[ip], Te_eV, ne_m3);
+        ip = next[ip];
+      }
+    }
   }
 
-  // Fallback: per-cell values from grid variable or compute
-  if (use_grid_plasma) compute_plasma_grid();
-  refresh_compute_src(srcTe);
-  refresh_compute_src(srcNe);
-
-  for (int icell = 0; icell < nglocal; icell++) {
-    if (cinfo[icell].count == 0) continue;
-    const double Te_eV = std::max(read_cell(srcTe, icell, 0), 1e-6);
-    const double ne_m3 = std::max(read_cell(srcNe, icell, 1), 0.0);
-    int ip = cinfo[icell].first;
-    while (ip >= 0) {
-      attempt(&particles[ip], Te_eV, ne_m3);
-      ip = next[ip];
-    }
+  // Create deferred particles from dissociation reactions
+  for (size_t i = 0; i < deferred_particles.size(); i++) {
+    DeferredParticle &dp = deferred_particles[i];
+    int id = MAXSMALLINT * rng_adas->uniform();
+    particle->add_particle(id, dp.species, dp.icell,
+                           dp.x, dp.v, 0.0, 0.0);
   }
 }
 
@@ -525,6 +536,17 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
       if (q == 0) continue;
       interpolateRateData(atomic_number, q-1, icell, logTe, logne_cm,
                           rate_log10_cm3s, ReactionType::ChargeExchange);
+    } else if (r->type == DISSOCIATION && r->style == JANEV) {
+      // Janev polynomial: ln<sv> = sum_n b_n (ln Te)^n, Te in eV
+      const double lnT = std::log(Te_eV);
+      double lnsv = r->coeff[0];
+      double lnTn = 1.0;
+      for (int k = 1; k < r->ncoeff; k++) {
+        lnTn *= lnT;
+        lnsv += r->coeff[k] * lnTn;
+      }
+      // Convert from ln(cm3/s) to log10(cm3/s)
+      rate_log10_cm3s = lnsv / 2.302585092994046;
     } else {
       continue;
     }
@@ -562,7 +584,20 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
   OneReaction *rchosen = &rlist[best_idx];
   tally_reactions[best_idx]++;
   nreact_one++;
+
+  // Assign first product
   ip->ispecies = rchosen->products[0];
+
+  // For dissociation with 2 products: defer creation of second particle
+  if (rchosen->nproduct == 2) {
+    DeferredParticle dp;
+    dp.x[0] = ip->x[0]; dp.x[1] = ip->x[1]; dp.x[2] = ip->x[2];
+    dp.v[0] = ip->v[0]; dp.v[1] = ip->v[1]; dp.v[2] = ip->v[2];
+    dp.species = rchosen->products[1];
+    dp.icell = ip->icell;
+    deferred_particles.push_back(dp);
+  }
+
   return 1;
 }
 
@@ -706,8 +741,8 @@ void FixChemAdas::readfile(char *fname)
       print_reaction(copy1,copy2);
       error->all(FLERR,"Invalid reaction type in file");
     }
-    // if (word[0] == 'D' || word[0] == 'd') r->type = DISSOCIATION;
-    if (word[0] == 'I' || word[0] == 'i') r->type = IONIZATION;
+    if (word[0] == 'D' || word[0] == 'd') r->type = DISSOCIATION;
+    else if (word[0] == 'I' || word[0] == 'i') r->type = IONIZATION;
     else if (word[0] == 'R' || word[0] == 'r') r->type = RECOMBINATION;
     else if (word[0] == 'E' || word[0] == 'e') r->type = EXCHANGE;
     else {
@@ -732,6 +767,11 @@ void FixChemAdas::readfile(char *fname)
         print_reaction(copy1,copy2);
         error->all(FLERR,"Invalid charge exchange reaction");
       }
+    } else if (r->type == DISSOCIATION) {
+      if (r->nreactant != 1 || (r->nproduct != 1 && r->nproduct != 2)) {
+        print_reaction(copy1,copy2);
+        error->all(FLERR,"Invalid dissociation reaction");
+      }
     }
 
     word = strtok(NULL," \t\n\r");
@@ -740,11 +780,13 @@ void FixChemAdas::readfile(char *fname)
       error->all(FLERR,"Invalid reaction style in file");
     }
     if (word[0] == 'A' || word[0] == 'a') r->style = ADAS;
+    else if (word[0] == 'J' || word[0] == 'j') r->style = JANEV;
     else {
       print_reaction(copy1,copy2);
       error->all(FLERR,"Invalid reaction style in file");
     }
     if (r->style == ADAS) r->ncoeff = 5;
+    else if (r->style == JANEV) r->ncoeff = 9;  // b0..b8
 
     for (int i = 0; i < r->ncoeff; i++) {
       word = strtok(NULL," \t\n\r");
@@ -792,10 +834,13 @@ void FixChemAdas::print_reaction(OneReaction *r)
   if (r->type == IONIZATION) type = 'I';
   else if (r->type == RECOMBINATION) type = 'R';
   else if (r->type == EXCHANGE) type = 'E';
+  else if (r->type == DISSOCIATION) type = 'D';
   else type = '?';
 
   char style;
   if (r->style == ADAS) style = 'A';
+  else if (r->style == JANEV) style = 'J';
+  else style = '?';
 
   if (r->nproduct == 1)
     printf("  %c %c: %s + %s --> %s\n",type,style,

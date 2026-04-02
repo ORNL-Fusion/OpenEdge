@@ -1,0 +1,56 @@
+################################################################################
+# Neutral transport test: D2 dissociation + D ionization + CX
+# Demonstrates EIRENE-replacement neutral reactions in OpenEdge
+################################################################################
+
+variable n            equal 1e19   # electron density [1/m^3]
+variable fnum         equal 1e15
+variable T            equal 20.0*11604.505     # 20 eV in K
+variable Tev          equal 20.0               # 20 eV
+variable time         equal 1e-3               # 1 ms
+variable dt           equal 1e-07              # 100 ns
+variable numStep      equal floor(${time}/${dt})
+variable dumpFreq     equal floor(${numStep}/100)
+
+############################################
+seed                1245
+dimension           2
+boundary            p p p
+global              gridcut 0 comm/sort no
+create_box          1.8 3.22 -1 1 -0.5 0.5
+create_grid         1 1 1
+balance_grid        rcb cell
+
+############################################
+global              nrho $n  fnum ${fnum} temp $T
+
+##################################--- Species ---######################################
+species             plasma.species D2 D D+
+mixture             species D2    frac 1.0    # start with all D2
+mixture             species D     frac 0.0
+mixture             species D+    frac 0.0
+
+##################################--- Particles ---######################################
+create_particles    species n 2000
+
+##################################--- Diagnostics ---######################################
+shell mkdir -p output
+compute 1 grid all species nrho
+fix 1 ave/grid all 1 1 1 c_1[*]
+dump 1 grid all ${dumpFreq} output/tmp.grid.neutral id xc yc f_1[*]
+
+##################################--- Chemistry ---######################################
+# Constant plasma background: Te=20 eV, ne=1e19 m-3
+compute cnear plasma/fields all constant temp_e ${Tev} dens_e $n values temp_e dens_e
+
+# ADAS rates for D (Z=1) + Janev for D2 dissociation
+fix 2 chem/adas 1 1 plasma.reactions adas_dir ../../database/adas plasma c_cnear[1] c_cnear[2]
+
+##################################--- Run ---######################################
+timestep            ${dt}
+stats               1000
+stats_style         step cpu np
+
+run         ${numStep}
+
+#EOF
