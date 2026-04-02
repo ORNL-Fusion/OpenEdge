@@ -25,7 +25,7 @@ FixStyle(chem/adas, FixChemAdas)
 
 namespace SPARTA_NS {
 
-enum class ReactionType { Ionization, Recombination };
+enum class ReactionType { Ionization, Recombination, ChargeExchange };
 enum SrcKind { SRC_NONE, SRC_VAR, SRC_COMP };
 struct GridSrc {
   SrcKind kind = SRC_NONE;
@@ -81,17 +81,22 @@ protected:
     struct RateData {
         std::vector<double> Atomic_Number;
         // Flat contiguous rate tables: data[q * nT * nD + iT * nD + iD]
-        std::vector<double> ion_coeff, rec_coeff;
+        std::vector<double> ion_coeff, rec_coeff, cx_coeff;
         int ion_nQ, ion_nT, ion_nD;
         int rec_nQ, rec_nT, rec_nD;
+        int cx_nQ, cx_nT, cx_nD;
         std::vector<double> gridT_ion, gridD_ion;
         std::vector<double> gridT_rec, gridD_rec;
+        std::vector<double> gridT_cx, gridD_cx;
 
         inline double ion_at(int q, int it, int id) const {
             return ion_coeff[q * ion_nT * ion_nD + it * ion_nD + id];
         }
         inline double rec_at(int q, int it, int id) const {
             return rec_coeff[q * rec_nT * rec_nD + it * rec_nD + id];
+        }
+        inline double cx_at(int q, int it, int id) const {
+            return cx_coeff[q * cx_nT * cx_nD + it * cx_nD + id];
         }
     };
 

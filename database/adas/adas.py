@@ -17,15 +17,16 @@ import h5py
 AMFilesDir = os.environ.get('ADAS_ADF11_DIR',
     os.path.join(os.path.dirname(__file__), 'adf11'))
 
-reactions = ['acd', 'scd']
+reactions = ['acd', 'scd', 'ccd']
 year = '89'#'89'#'96'
 elements = ['c']#['ar', 'b','kr','xe']#['be', 'c', 'he', 'li', 'n', 'ne', 'o']
 element_nuclear_charges = [6]
 
 AtomicZ = element_nuclear_charges[0]
-IonRate = RecRate = None
+IonRate = RecRate = CXRate = None
 logDens_acd = logTe_acd = iZmin_acd = iZmax_acd = None
 logDens_scd = logTe_scd = iZmin_scd = iZmax_scd = None
+logDens_ccd = logTe_ccd = iZmin_ccd = iZmax_ccd = None
 
 ##############################################################################
 
@@ -104,21 +105,29 @@ for iReac in range(Nreac):
             RecRate = logQ
             logDens_acd, logTe_acd = logDens, logTe
             iZmin_acd, iZmax_acd = iZmin, iZmax
+        elif reaction == 'ccd':  # charge exchange
+            CXRate = logQ
+            logDens_ccd, logTe_ccd = logDens, logTe
+            iZmin_ccd, iZmax_ccd = iZmin, iZmax
 
 # Now safe to print and write
 if IonRate is None or RecRate is None:
     raise RuntimeError("Missing IonRate or RecRate — check input files and reactions list order.")
+if CXRate is None:
+    print("WARNING: No CCD (charge exchange) data found — CX rates will not be written.")
 
 print(f"IonRate shape {IonRate.shape}")
 print(f"RecRate shape {RecRate.shape}")
+if CXRate is not None:
+    print(f"CXRate shape {CXRate.shape}")
 
-grid_charge_ion = np.array([np.arange(iZmin, iZmax), np.arange(iZmin+1, iZmax+1)])
-grid_charge_rec = np.array([np.arange(iZmin+1, iZmax+1), np.arange(iZmin, iZmax)])
+grid_charge_ion = np.array([np.arange(iZmin_scd, iZmax_scd), np.arange(iZmin_scd+1, iZmax_scd+1)])
+grid_charge_rec = np.array([np.arange(iZmin_acd+1, iZmax_acd+1), np.arange(iZmin_acd, iZmax_acd)])
 
 output_filename = f"ADAS_Rates_{AtomicZ}.h5"
 with h5py.File(output_filename, 'w') as f:
     f.create_dataset('Atomic_Number', data=np.array([AtomicZ]))
-    f.create_dataset('IonizationRateCoeff', data=IonRate.T)       # check transpose orientation as needed
+    f.create_dataset('IonizationRateCoeff', data=IonRate.T)
     f.create_dataset('RecombinationRateCoeff', data=RecRate.T)
     f.create_dataset('gridDensity_Ionization', data=logDens_scd)
     f.create_dataset('gridTemperature_Ionization', data=logTe_scd)
@@ -126,6 +135,12 @@ with h5py.File(output_filename, 'w') as f:
     f.create_dataset('gridTemperature_Recombination', data=logTe_acd)
     f.create_dataset('gridChargeState_Ionization', data=grid_charge_ion)
     f.create_dataset('gridChargeState_Recombination', data=grid_charge_rec)
+    if CXRate is not None:
+        grid_charge_cx = np.array([np.arange(iZmin_ccd+1, iZmax_ccd+1), np.arange(iZmin_ccd, iZmax_ccd)])
+        f.create_dataset('ChargeExchangeRateCoeff', data=CXRate.T)
+        f.create_dataset('gridDensity_ChargeExchange', data=logDens_ccd)
+        f.create_dataset('gridTemperature_ChargeExchange', data=logTe_ccd)
+        f.create_dataset('gridChargeState_ChargeExchange', data=grid_charge_cx)
 
 
 exit()

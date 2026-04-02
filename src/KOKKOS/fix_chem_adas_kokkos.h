@@ -42,10 +42,12 @@ class FixChemAdasKokkos : public FixChemAdas {
   typedef Kokkos::View<int*, DeviceType> t_int_1d_kk;
 
   // device views for rate tables
-  t_double_1d d_ion_coeff, d_rec_coeff;
+  t_double_1d d_ion_coeff, d_rec_coeff, d_cx_coeff;
   t_double_1d d_gridT_ion, d_gridD_ion, d_gridT_rec, d_gridD_rec;
+  t_double_1d d_gridT_cx, d_gridD_cx;
   int kk_ion_nQ, kk_ion_nT, kk_ion_nD;
   int kk_rec_nQ, kk_rec_nT, kk_rec_nD;
+  int kk_cx_nQ, kk_cx_nT, kk_cx_nD;
 
   // per-species reaction info on device
   t_int_1d_kk d_rxn_offset;    // start index in d_rxn_list per species
@@ -83,7 +85,7 @@ class FixChemAdasKokkos : public FixChemAdas {
   int kk_attempt(int idx, double Te_eV, double ne_m3, rand_type &rng) const;
 
   KOKKOS_INLINE_FUNCTION
-  double kk_interp_rate(int is_rec, int charge_idx,
+  double kk_interp_rate(int rate_type, int charge_idx,
                         double logTe, double logne_cm) const;
 
   KOKKOS_INLINE_FUNCTION

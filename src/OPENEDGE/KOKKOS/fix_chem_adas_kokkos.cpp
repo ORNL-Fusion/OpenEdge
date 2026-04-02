@@ -16,7 +16,7 @@
 
 using namespace SPARTA_NS;
 
-enum{IONIZATION,RECOMBINATION};
+enum{IONIZATION,RECOMBINATION,EXCHANGE};
 
 /* ---------------------------------------------------------------------- */
 
@@ -81,6 +81,11 @@ void FixChemAdasKokkos::init()
 
   kk_ion_nQ = rd.ion_nQ; kk_ion_nT = rd.ion_nT; kk_ion_nD = rd.ion_nD;
   kk_rec_nQ = rd.rec_nQ; kk_rec_nT = rd.rec_nT; kk_rec_nD = rd.rec_nD;
+
+  d_cx_coeff   = vec_to_dev(rd.cx_coeff, "adas:cx_coeff");
+  d_gridT_cx   = vec_to_dev(rd.gridT_cx, "adas:gridT_cx");
+  d_gridD_cx   = vec_to_dev(rd.gridD_cx, "adas:gridD_cx");
+  kk_cx_nQ = rd.cx_nQ; kk_cx_nT = rd.cx_nT; kk_cx_nD = rd.cx_nD;
 
   // build per-species reaction lookup for device
   int nspecies = particle->nspecies;
@@ -272,6 +277,9 @@ int FixChemAdasKokkos::kk_attempt(int idx, double Te_eV, double ne_m3,
     } else if (rtype == RECOMBINATION) {
       if (q == 0) continue;
       rate_log10 = kk_interp_rate(1, q - 1, logTe, logne_cm);
+    } else if (rtype == EXCHANGE) {
+      if (q == 0) continue;
+      rate_log10 = kk_interp_rate(2, q - 1, logTe, logne_cm);
     } else {
       continue;
     }
@@ -319,15 +327,16 @@ int FixChemAdasKokkos::kk_attempt(int idx, double Te_eV, double ne_m3,
 /* ---------------------------------------------------------------------- */
 
 KOKKOS_INLINE_FUNCTION
-double FixChemAdasKokkos::kk_interp_rate(int is_rec, int charge_idx,
+double FixChemAdasKokkos::kk_interp_rate(int rate_type, int charge_idx,
                                           double logTe, double logne_cm) const
 {
-  const t_double_1d &gridT = is_rec ? d_gridT_rec : d_gridT_ion;
-  const t_double_1d &gridD = is_rec ? d_gridD_rec : d_gridD_ion;
-  const t_double_1d &coeff = is_rec ? d_rec_coeff : d_ion_coeff;
-  int nT = is_rec ? kk_rec_nT : kk_ion_nT;
-  int nD = is_rec ? kk_rec_nD : kk_ion_nD;
-  int nQ = is_rec ? kk_rec_nQ : kk_ion_nQ;
+  // rate_type: 0=ionization, 1=recombination, 2=charge exchange
+  const t_double_1d &gridT = (rate_type == 2) ? d_gridT_cx : (rate_type == 1 ? d_gridT_rec : d_gridT_ion);
+  const t_double_1d &gridD = (rate_type == 2) ? d_gridD_cx : (rate_type == 1 ? d_gridD_rec : d_gridD_ion);
+  const t_double_1d &coeff = (rate_type == 2) ? d_cx_coeff : (rate_type == 1 ? d_rec_coeff : d_ion_coeff);
+  int nT = (rate_type == 2) ? kk_cx_nT : (rate_type == 1 ? kk_rec_nT : kk_ion_nT);
+  int nD = (rate_type == 2) ? kk_cx_nD : (rate_type == 1 ? kk_rec_nD : kk_ion_nD);
+  int nQ = (rate_type == 2) ? kk_cx_nQ : (rate_type == 1 ? kk_rec_nQ : kk_ion_nQ);
 
   if (charge_idx < 0 || charge_idx >= nQ) return -1e30;
 

@@ -1398,6 +1398,22 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
   P.parr_flow     = interpField2D(plasma_data.parr_flow, s);
   P.q_mag = plasma_data.has_qmag ?
             interpField2D(plasma_data.q_mag, s) : 0.0;
+
+  // Compute parallel ambipolar E-field: epar = -(grad_pe . bhat) / (ne * e)
+  if (has_equilibrium && P.dens_e > 1.0e-6) {
+    MagneticFieldFileDataParams bf = query_bfield_at_point(xyz);
+    const double Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
+    if (Bmag > 1.0e-30) {
+      const double eQ = 1.602176634e-19;
+      const double ne = P.dens_e;
+      const double gradPe_r = eQ * (P.temp_e * P.grad_dens_e_r + ne * P.grad_temp_e_r);
+      const double gradPe_t = eQ * (P.temp_e * P.grad_dens_e_t + ne * P.grad_temp_e_t);
+      const double gradPe_z = eQ * (P.temp_e * P.grad_dens_e_z + ne * P.grad_temp_e_z);
+      const double invB = 1.0 / Bmag;
+      P.epar = -(gradPe_r*bf.br + gradPe_t*bf.bt + gradPe_z*bf.bz) * invB / (ne * eQ);
+    }
+  }
+
   return P;
 }
 

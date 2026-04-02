@@ -33,7 +33,7 @@
 
 namespace fs = std::filesystem;
 using namespace SPARTA_NS;
-enum{IONIZATION,RECOMBINATION};   // other files
+enum{IONIZATION,RECOMBINATION,EXCHANGE};   // file-local: differs from react_bird ordering
 enum{IONIZATIONRATE, RECOMBINATIONRATE};   // other files
 enum{ADAS};                               // other react files
 
@@ -394,6 +394,20 @@ void FixChemAdas::end_of_step()
   if (!particle->sorted) particle->sort();
   end_of_step_no_average();
   nreact_running += nreact_one;
+
+  // periodic per-type reaction tally (every 10000 steps)
+  if (comm->me == 0 && update->ntimestep % 10000 == 0 && nreact_running > 0) {
+    bigint nI = 0, nR = 0, nE = 0;
+    for (int i = 0; i < nlist; i++) {
+      if (rlist[i].type == IONIZATION) nI += tally_reactions[i];
+      else if (rlist[i].type == RECOMBINATION) nR += tally_reactions[i];
+      else if (rlist[i].type == EXCHANGE) nE += tally_reactions[i];
+    }
+    if (screen) fprintf(screen,
+      "  chem/adas step " BIGINT_FORMAT ": ionization=" BIGINT_FORMAT
+      " recomb=" BIGINT_FORMAT " CX=" BIGINT_FORMAT "\n",
+      update->ntimestep, nI, nR, nE);
+  }
 }
 
 
@@ -507,6 +521,10 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3)
       if (q == 0) continue;
       interpolateRateData(atomic_number, q-1, icell, logTe, logne_cm,
                           rate_log10_cm3s, ReactionType::Recombination);
+    } else if (r->type == EXCHANGE) {
+      if (q == 0) continue;
+      interpolateRateData(atomic_number, q-1, icell, logTe, logne_cm,
+                          rate_log10_cm3s, ReactionType::ChargeExchange);
     } else {
       continue;
     }
@@ -689,9 +707,9 @@ void FixChemAdas::readfile(char *fname)
       error->all(FLERR,"Invalid reaction type in file");
     }
     // if (word[0] == 'D' || word[0] == 'd') r->type = DISSOCIATION;
-    // else if (word[0] == 'E' || word[0] == 'e') r->type = EXCHANGE;
     if (word[0] == 'I' || word[0] == 'i') r->type = IONIZATION;
     else if (word[0] == 'R' || word[0] == 'r') r->type = RECOMBINATION;
+    else if (word[0] == 'E' || word[0] == 'e') r->type = EXCHANGE;
     else {
       print_reaction(copy1,copy2);
       error->all(FLERR,"Invalid reaction type in file");
@@ -705,9 +723,14 @@ void FixChemAdas::readfile(char *fname)
         error->all(FLERR,"Invalid ionization reaction");
       }
     } else if (r->type == RECOMBINATION) {
-      if (r->nreactant != 1 || (r->nproduct != 1 && r->nproduct != 1)) {
+      if (r->nreactant != 1 || r->nproduct != 1) {
         print_reaction(copy1,copy2);
         error->all(FLERR,"Invalid recombination reaction");
+      }
+    } else if (r->type == EXCHANGE) {
+      if (r->nreactant != 1 || r->nproduct != 1) {
+        print_reaction(copy1,copy2);
+        error->all(FLERR,"Invalid charge exchange reaction");
       }
     }
 
@@ -768,6 +791,8 @@ void FixChemAdas::print_reaction(OneReaction *r)
   char type;
   if (r->type == IONIZATION) type = 'I';
   else if (r->type == RECOMBINATION) type = 'R';
+  else if (r->type == EXCHANGE) type = 'E';
+  else type = '?';
 
   char style;
   if (r->style == ADAS) style = 'A';
@@ -914,6 +939,15 @@ void FixChemAdas::readRateData(const std::string& filePath, RateData& rd) {
       rd.gridT_ion     = read1D("gridTemperature_Ionization");
       rd.gridT_rec     = read1D("gridTemperature_Recombination");
 
+      // CX data is optional (backward compat with old HDF5 files)
+      rd.cx_nQ = rd.cx_nT = rd.cx_nD = 0;
+      if (H5Lexists(file.getId(), "ChargeExchangeRateCoeff", H5P_DEFAULT) > 0) {
+        readFlat3D("ChargeExchangeRateCoeff", rd.cx_coeff,
+                   rd.cx_nQ, rd.cx_nT, rd.cx_nD);
+        rd.gridD_cx = read1D("gridDensity_ChargeExchange");
+        rd.gridT_cx = read1D("gridTemperature_ChargeExchange");
+      }
+
   } catch (const H5::Exception& e) {
       throw std::runtime_error("Error reading ADAS file " + filePath + ": " + std::string(e.getCDetailMsg()));
   }
@@ -973,6 +1007,19 @@ bool FixChemAdas::setupInterpolation(ReactionType reactionType, int atomic_numbe
       f01 = rd.rec_at(charge_idx, tlo, nhi);
       f10 = rd.rec_at(charge_idx, thi, nlo);
       f11 = rd.rec_at(charge_idx, thi, nhi);
+
+  } else if (reactionType == ReactionType::ChargeExchange) {
+      if (static_cast<int>(charge_idx) >= rd.cx_nQ) return false;
+      if (!bracket_index(rd.gridT_cx, te, tlo, thi)) return false;
+      if (!bracket_index(rd.gridD_cx, ne, nlo, nhi)) return false;
+
+      x0 = rd.gridT_cx[tlo];  x1 = rd.gridT_cx[thi];
+      y0 = rd.gridD_cx[nlo];  y1 = rd.gridD_cx[nhi];
+
+      f00 = rd.cx_at(charge_idx, tlo, nlo);
+      f01 = rd.cx_at(charge_idx, tlo, nhi);
+      f10 = rd.cx_at(charge_idx, thi, nlo);
+      f11 = rd.cx_at(charge_idx, thi, nhi);
 
   } else {
       if (static_cast<int>(charge_idx) >= rd.ion_nQ) return false;
@@ -1036,14 +1083,20 @@ void FixChemAdas::broadcastRateData(RateData& rd) {
   MPI_Bcast(&rd.rec_nQ, 1, MPI_INT, 0, world);
   MPI_Bcast(&rd.rec_nT, 1, MPI_INT, 0, world);
   MPI_Bcast(&rd.rec_nD, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.cx_nQ, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.cx_nT, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.cx_nD, 1, MPI_INT, 0, world);
 
   bcast1D(rd.ion_coeff);
   bcast1D(rd.rec_coeff);
+  bcast1D(rd.cx_coeff);
   bcast1D(rd.Atomic_Number);
   bcast1D(rd.gridD_ion);
   bcast1D(rd.gridD_rec);
+  bcast1D(rd.gridD_cx);
   bcast1D(rd.gridT_ion);
   bcast1D(rd.gridT_rec);
+  bcast1D(rd.gridT_cx);
 }
 
 

@@ -76,6 +76,7 @@ struct PlasmaFileParams {
   double grad_temp_i_t;
   double grad_temp_i_z;
   double q_mag;   // surface heat flux [W/m^2], 0 if not in plasma.h5
+  double epar;    // parallel ambipolar E-field [V/m], 0 if not computed
 };
 
 // Equilibrium (ψ) data from .equ file for exact magnetic geometry
