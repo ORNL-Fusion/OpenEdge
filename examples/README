@@ -36,6 +36,7 @@ test_west_timedep = WEST time-dependent plasma evolution
 
 To run a test case:
 
-cd test_gca
+cd /path/to/OpenEdge
 ./download_data.sh test_gca      # if data not yet downloaded
+cd examples/test_gca
 mpirun -np 4 /path/to/spa_mpi -in in.input

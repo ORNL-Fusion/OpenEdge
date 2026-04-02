@@ -46,26 +46,13 @@ src/STUBS/*.a
 *.sparta_orig
 
 # Large test data (downloaded via ./download_data.sh)
-examples/*/input/plasma.h5
-examples/*/input/bfield.h5
-examples/*/input/data/plasma.h5
-examples/*/input/data/bfield.h5
-examples/*/input/data/*.equ
-examples/*/input/data/*.h5
+examples/*/input/*.h5
 examples/*/input/*.equ
+examples/*/input/*.stl
+examples/*/input/data/*.h5
+examples/*/input/data/*.equ
 examples/*/input/geometry/*.stl
 examples/*/input/geometry/*.surf
 examples/*/input/geometry/*.obj
-examples/*/input/*.stl
 examples/*/*.equ
 openedge-testdata-*.tar.gz
-
-# SPARTA demo data (not used by OpenEdge)
-data/orion.stl
-data/apollo.stl
-data/gemini.stl
-data/sdata.orion
-data/sdata.apollo
-data/sdata.gemini
-data/sdata.shuttle
-data/sdata.sphere

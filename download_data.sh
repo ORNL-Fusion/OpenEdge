@@ -11,6 +11,7 @@
 #   ./download_data.sh --list          # list available datasets
 
 set -euo pipefail
+trap 'rm -f /tmp/openedge-testdata-*.tar.gz' EXIT
 
 REPO="diawabdou/OpenEdge"
 VERSION="latest"
@@ -48,19 +49,28 @@ list_datasets() {
     exit 0
 }
 
+if command -v gh &>/dev/null; then
+    TOOL=gh
+elif command -v curl &>/dev/null; then
+    TOOL=curl
+else
+    echo "Error: need 'gh' or 'curl' installed." >&2
+    exit 1
+fi
+
 download_one() {
     local name="$1"
     local tarball="openedge-testdata-${name}.tar.gz"
 
     echo ">> Downloading ${name} ..."
 
-    if command -v gh &>/dev/null; then
+    if [ "$TOOL" = "gh" ]; then
         if [ "$VERSION" = "latest" ]; then
             gh release download --repo "$REPO" --pattern "$tarball" --clobber --dir /tmp
         else
             gh release download "$VERSION" --repo "$REPO" --pattern "$tarball" --clobber --dir /tmp
         fi
-    elif command -v curl &>/dev/null; then
+    else
         local url
         if [ "$VERSION" = "latest" ]; then
             url="https://github.com/${REPO}/releases/latest/download/${tarball}"
@@ -68,9 +78,6 @@ download_one() {
             url="https://github.com/${REPO}/releases/download/${VERSION}/${tarball}"
         fi
         curl -fSL -o "/tmp/${tarball}" "$url"
-    else
-        echo "Error: need 'gh' or 'curl' installed." >&2
-        exit 1
     fi
 
     tar xzf "/tmp/${tarball}" -C "$SCRIPT_DIR"
