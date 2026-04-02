@@ -1,5 +1,7 @@
 # test_sheath
 
+**Data download required:** `./download_data.sh test_west_axi` (from repo root; uses plasma.h5 from test_west_axi)
+
 Standalone analytical sheath validation (Borodkina-style) before OpenEdge integration.
 
 ## Script

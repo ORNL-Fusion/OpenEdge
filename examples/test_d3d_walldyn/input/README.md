@@ -1,5 +1,7 @@
 # Input Layout
 
+**Data download required:** `./download_data.sh test_d3d_walldyn` (from repo root)
+
 This example keeps `input/` organized by role instead of file extension.
 
 - `data/`: physics inputs consumed directly by the run, such as `plasma.h5`, `bfield.h5`, `mesh.extra`, `c.species`, and `.equ` files

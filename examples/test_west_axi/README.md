@@ -1,5 +1,7 @@
 # WEST test case (OpenEdge)
 
+**Data download required:** `./download_data.sh test_west_axi` (from repo root)
+
 Primary input:
 - `in.west`
 

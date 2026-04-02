@@ -5,24 +5,37 @@ Each problem has an input script (in.*) and most include analysis
 or plotting scripts (Python). Some directories contain a README.md
 with additional details.
 
-test_boris_tokamak = Boris pusher with grid-interpolated tokamak B-field
+Some tests require large data files (plasma.h5, bfield.h5, .equ,
+.stl geometry) that are not stored in git. Download them first:
+
+  cd /path/to/OpenEdge
+  ./download_data.sh              # all datasets
+  ./download_data.sh test_gca     # single test
+
+Test cases:
+
 test_collide = collisional thermalization with Nanbu scattering
 test_cpc_gitr = CPC GITR benchmark for impurity transport with PMI
+test_d3d_mateja = DIII-D impurity transport case
+test_d3d_walldyn = DIII-D wall dynamics with toroidal wedge geometry
 test_droplet = droplet emission, transport, and surface-interaction workflows
-test_droplet_charging = OML (orbital motion limited) droplet charging with Boris E/B
-test_droplet_drag = drag-model comparison for droplet cases (Epstein, Stokes, etc.)
-test_droplet_viscous_3d = 3D viscous drag + gravity droplet transport
-test_droplet_viscous_axi = axisymmetric viscous + gravity droplet cases
-test_efield_polarization = polarization-drift validation for Boris pusher (particle and grid fields)
 test_evaporation = evaporation validation and coupled drag+evaporation cases
 test_gca = hybrid Boris/GCA pusher with equilibrium-based magnetic geometry
 test_gravity_3d = 3D gravity-driven droplet transport
+test_iead = ion energy-angle distribution validation (sheath kick + spatial)
 test_ionization_recombination = ionization and recombination with ADAS rates
+test_liquid_metal = MHD shallow-water liquid metal film solver validation
+test_particle_weight = particle weight (pweight) functionality
+test_polarization = polarization-drift validation for Boris pusher
+test_rocket_force = rocket force model validation
 test_sheath = sheath electric field with Boris pusher and IEAD diagnostics
 test_solps_coupling = OpenEdge-to-SOLPS coupling utilities and validation assets
+test_west_3d = WEST tokamak 3D wedge with SOLEDGE3X plasma inputs
 test_west_axi = WEST tokamak axisymmetric setup with plasma/material inputs
+test_west_timedep = WEST time-dependent plasma evolution
 
 To run a test case:
 
-cd test_efield_polarization
-mpirun -np 4 /path/to/spa_mpi -in in.input.grid
+cd test_gca
+./download_data.sh test_gca      # if data not yet downloaded
+mpirun -np 4 /path/to/spa_mpi -in in.input

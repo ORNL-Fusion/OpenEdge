@@ -2,6 +2,8 @@
 
 Small 2D carbon case for DIII-D.
 
+**Data download required:** `./download_data.sh test_d3d_mateja` (from repo root)
+
 Files:
 - `input/plasma.h5`
 - `input/204953_3000.x16.equ`

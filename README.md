@@ -1,7 +1,7 @@
 # OpenEdge
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
-![C++17](https://img.shields.io/badge/C%2B%2B-17-orange.svg)
+![C++11/17](https://img.shields.io/badge/C%2B%2B-11%2F17-orange.svg)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-green.svg)
 ![MPI](https://img.shields.io/badge/MPI-OpenMPI%20%7C%20MPICH-purple.svg)
 ![HDF5](https://img.shields.io/badge/HDF5-required-yellow.svg)
@@ -49,7 +49,7 @@ Primary focus is plasma-material interactions (PMI), including lithium droplet p
 ## System Requirements
 
 > - CMake ≥ **3.18**
-> - C++17 compiler (**GCC**, **Clang**, or **ICC**)
+> - C++11 compiler (**GCC**, **Clang**, or **ICC**); C++17 required for GPU/Kokkos builds
 > - **HDF5** (with C++ bindings; **+MPI** if running distributed)
 > - **MPI** (OpenMPI or MPICH)
 >
@@ -90,6 +90,18 @@ and set `-DHDF5_ROOT=$CRAY_HDF5_PREFIX`.
 - `-sf kk` — auto-select Kokkos-accelerated styles
 - `-k on t 4` — use 4 OpenMP threads (CPU-only Kokkos, no GPU)
 
+
+## Test Data
+
+Some test cases in `examples/` require large binary input files (plasma fields,
+B-field, equilibrium, geometry) that are not stored in the git repository.
+Download them with:
+
+```bash
+./download_data.sh                      # download all test data (~115 MB)
+./download_data.sh test_west_3d         # download data for one test
+./download_data.sh --list               # list available datasets
+```
 
 ## License
 OpenEdge is licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html) (GPL-3.0).
