@@ -60,7 +60,6 @@ ln -s /path/to/solps/modules/adas/adf11/ccd89 database/adas/adf11/ccd89
 cd database/adas
 # Edit adas.py to set element/Z, then:
 python adas.py        # generates ADAS_Rates_{Z}.h5 with ion/rec/CX
-python adas_ta.py     # generates tantalum (Z=73) from tungsten truncation
 ```
 
 ## Surface Data (`surface/`)
