@@ -12,25 +12,54 @@ database/
 
 ## ADAS Data (`adas/`)
 
-Pre-computed ionization and recombination rate coefficients from the
-[ADAS](https://www.adas.ac.uk/) database, stored as HDF5 files.
+Pre-computed rate coefficients from the [ADAS](https://www.adas.ac.uk/)
+database, stored as HDF5 files. Each file contains ionization (SCD),
+recombination (ACD), and charge exchange (CCD) rate tables as functions
+of electron temperature and density.
 
-| File | Element | Z |
-|------|---------|---|
-| `ADAS_Rates_8.h5` | Oxygen | 8 |
-| `ADAS_Rates_73.h5` | Tantalum | 73 |
-| `ADAS_Rates_74.h5` | Tungsten | 74 |
+| File | Element | Z | Rates |
+|------|---------|---|-------|
+| `ADAS_Rates_1.h5` | Hydrogen/Deuterium | 1 | ionization, recombination, CX |
+| `ADAS_Rates_6.h5` | Carbon | 6 | ionization, recombination, CX |
+| `ADAS_Rates_8.h5` | Oxygen | 8 | ionization, recombination, CX |
+| `ADAS_Rates_73.h5` | Tantalum | 73 | ionization, recombination |
+| `ADAS_Rates_74.h5` | Tungsten | 74 | ionization, recombination |
+
+**HDF5 datasets:**
+- `IonizationRateCoeff[nQ, nT, nD]` — ionization rates in log10(cm³/s)
+- `RecombinationRateCoeff[nQ, nT, nD]` — recombination rates
+- `ChargeExchangeRateCoeff[nQ, nT, nD]` — CX rates (optional, backward compatible)
+- `gridTemperature_*[nT]`, `gridDensity_*[nD]` — log10 grids
+- `gridChargeState_*[2, nQ]` — charge state pairs
+
+**Molecular dissociation** (D₂ → 2D) uses Janev polynomial fits from
+HYDHEL (not ADAS tables). Coefficients are specified directly in the
+reactions file with style `J`:
+```
+D2 --> D + D
+D J -2.787e+01 1.052e+01 -4.973e+00 1.451e+00 -3.063e-01 4.433e-02 -4.096e-03 2.160e-04 -4.929e-06
+```
 
 **Usage in input scripts:**
 ```
-fix chem chem/adas 1 74 plasma.adas adas_dir ../../database/adas
+# Impurity ionization/recombination/CX (Z=6 carbon)
+fix chem chem/adas 1 6 plasma.reactions adas_dir ../../database/adas plasma Te Ne
+
+# Neutral transport (Z=1 hydrogen with D2 dissociation)
+fix chem chem/adas 1 1 neutral.reactions adas_dir ../../database/adas plasma Te Ne
 ```
 
 **Regenerating from raw ADF11 data:**
 ```bash
-export ADAS_ADF11_DIR=/path/to/eirene-db/Database/AMdata/Adas_Eirene_2010/adf11
+# Symlink ADAS ADF11 source data
+ln -s /path/to/solps/modules/adas/adf11/acd89 database/adas/adf11/acd89
+ln -s /path/to/solps/modules/adas/adf11/scd89 database/adas/adf11/scd89
+ln -s /path/to/solps/modules/adas/adf11/ccd89 database/adas/adf11/ccd89
+
+# Generate HDF5 files
 cd database/adas
-python adas.py        # generates ADAS_Rates_{Z}.h5
+# Edit adas.py to set element/Z, then:
+python adas.py        # generates ADAS_Rates_{Z}.h5 with ion/rec/CX
 python adas_ta.py     # generates tantalum (Z=73) from tungsten truncation
 ```
 
