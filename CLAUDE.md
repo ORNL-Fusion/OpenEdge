@@ -163,6 +163,76 @@ Two approaches for sheath electric fields:
   global efield grid fE 0
   ```
 
+### Volumetric neutral reactions (EIRENE replacement)
+
+- **`fix chem/adas`** — ADAS-based volumetric chemistry with competing
+  Poisson channel selection. Supports ionization, recombination, charge
+  exchange (CX), and dissociation reactions.
+  ```
+  fix ID chem/adas Nevery Z reactions_file \
+      adas_dir PATH plasma TeSRC NeSRC
+  ```
+  - **Rate styles:**
+    - `A` (ADAS): bilinear interpolation on HDF5 rate tables
+      `⟨σv⟩(Te, ne)` from ADF11 data (SCD/ACD/CCD).
+    - `J` (Janev): 9-term polynomial `ln⟨σv⟩ = Σ bₙ (ln Te)ⁿ`
+      from HYDHEL/Janev 1987. Used for molecular dissociation.
+  - **Reaction types** in the reactions file:
+    - `I`: ionization (charge state +1)
+    - `R`: recombination (charge state −1)
+    - `E`: charge exchange (charge state −1, CX with background H)
+    - `D`: dissociation (1 reactant → 2 products, creates new particle)
+  - CX rate data from ADAS CCD files (`ccd89_*.dat`), same format as
+    ACD/SCD. Stored as `ChargeExchangeRateCoeff` in HDF5.
+  - Dissociation uses deferred particle creation to avoid array
+    invalidation during iteration.
+  - After CX or dissociation, product velocity is re-sampled from a
+    shifted Maxwellian at local Ti and bulk flow (EIRENE-like), when
+    the per-particle plasma cache provides Ti, vpar, and B-field.
+  - Per-type reaction tally printed every 10,000 steps.
+  - **Data pipeline:** `database/adas/adas.py` converts ADF11 ASCII
+    files to HDF5. Supports `acd` (recombination), `scd` (ionization),
+    `ccd` (charge exchange). Set `ADAS_ADF11_DIR` or symlink into
+    `database/adas/adf11/`.
+
+  Reactions file example:
+  ```
+  D --> D+
+  I A 1.0 0.0 0.0 0.0 0.0
+
+  D+ --> D
+  E A 1.0 0.0 0.0 0.0 0.0
+
+  D2 --> D + D
+  D J -2.787e+01 1.052e+01 -4.973e+00 1.451e+00 -3.063e-01 4.433e-02 -4.096e-03 2.160e-04 -4.929e-06
+  ```
+
+### Surface recycling
+
+- **`surf_react recycle`** — surface recycling model for neutral transport.
+  Incoming ions are neutralized and re-emitted with cosine angular
+  distribution at a specified energy.
+  ```
+  surf_react ID recycle reactions_file
+  ```
+  - Reaction types: `E` (exchange, 1→1), `D` (dissociation, 1→2),
+    `R` (recombination/absorption).
+  - Each product has a specified return energy [eV].
+  - Velocity sampled from cosine distribution relative to surface normal.
+
+  Reactions file example:
+  ```
+  D+ --> D
+  E 1.0 3.0
+
+  D --> D
+  E 1.0 0.025
+  ```
+  Format: `type probability energy1 [energy2]`
+  - `1.0` = recycling probability (100%)
+  - `3.0` = return energy in eV (Franck-Condon for D atoms)
+  - `0.025` = thermal energy (~300 K wall temperature)
+
 ### Synthetic diagnostics
 
 - **`compute photon_emissivity/grid`** — per-grid volumetric photon

@@ -17,7 +17,9 @@ Primary focus is plasma-material interactions (PMI), including lithium droplet p
 - **Particle Transport & Collisions**
   - Charged and neutral particle transport (trace-impurity friendly).
   - Coulomb/Nanbu collisions (charged); soft-sphere and hard-sphere/VSS (neutrals).
-  - ADAS-based ionization and recombination with HDF5 rate tables.
+  - ADAS-based ionization, recombination, and charge exchange with HDF5 rate tables.
+  - Molecular dissociation with Janev polynomial fits (HYDHEL).
+  - Surface recycling with configurable energy and cosine angular distribution.
 - **Droplet Physics**
   - OML charging with thermionic emission.
   - Epstein and Coulomb drag models.

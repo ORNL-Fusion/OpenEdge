@@ -31,6 +31,10 @@ dump.*
 *.vtu
 *.jpg
 
+# mkdir -p artifacts (shell creates literal -p dirs on some systems)
+-p
+*/-p/
+
 # Python/Jupyter cache artifacts
 **/__pycache__/
 **/.ipynb_checkpoints/
