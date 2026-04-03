@@ -62,3 +62,12 @@ examples/*/*.equ
 openedge-testdata-*.tar.gz
 database/adas/adf11/
 PSI2026/
+
+# WIP test cases (not ready for public repo)
+examples/test_reclycling/
+examples/test_d3d_mateja/
+examples/test_d3d_walldyn/
+examples/test_west_3d/
+examples/test_west_axi/
+examples/test_west_timedep/
+examples/test_solps_coupling/
