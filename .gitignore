@@ -61,3 +61,4 @@ examples/*/input/geometry/*.obj
 examples/*/*.equ
 openedge-testdata-*.tar.gz
 database/adas/adf11/
+PSI2026/
