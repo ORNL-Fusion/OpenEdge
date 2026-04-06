@@ -45,6 +45,7 @@ class ComputePMISurfData : public Compute {
   std::string plasma_path;
   std::string surface_path;
   std::string bfield_path;
+  std::string equ_path;
 
   // projectile slots for sputtering (inclusive, 1-based)
   int proj_slot_lo, proj_slot_hi;
@@ -91,6 +92,7 @@ class ComputePMISurfData : public Compute {
   void load_surface_data();
   void load_boundary();
   void load_mesh();
+  void load_bfield_from_equ();
 
   // Precomputed mapped-triangle centroids for nearest-neighbor fallback
   std::vector<double> mapped_cr, mapped_cz;  // centroids of mapped triangles

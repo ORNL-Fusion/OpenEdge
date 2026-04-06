@@ -9,12 +9,15 @@
 #include "domain.h"
 #include "comm.h"
 #include "update.h"
+#include "modify.h"
 #include "memory.h"
 #include "error.h"
+#include "fix_plasma_data.h"
 
 #include <H5Cpp.h>
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -25,24 +28,39 @@ using namespace SPARTA_NS;
 ComputePMISurfData::ComputePMISurfData(SPARTA *sparta, int narg, char **arg) :
   Compute(sparta, narg, arg)
 {
-  if (narg < 8) error->all(FLERR,"Illegal compute pmi/surf/data command");
+  if (narg < 6) error->all(FLERR,"Illegal compute pmi/surf/data command");
 
   int igroup = surf->find_group(arg[2]);
   if (igroup < 0) error->all(FLERR,"Compute pmi/surf/data surf group ID does not exist");
   groupbit = surf->bitmask[igroup];
 
-  if (strcmp(arg[3],"file") != 0)
-    error->all(FLERR,"compute pmi/surf/data syntax: compute ID pmi/surf/data surfgroup file plasma.h5 surface.h5 values ...");
-  plasma_path = std::string(arg[4]);
-  surface_path = std::string(arg[5]);
+  int iarg_start;
+  if (strcmp(arg[3],"file") == 0) {
+    if (narg < 8) error->all(FLERR,"compute pmi/surf/data: file needs plasma.h5 surface.h5");
+    plasma_path = std::string(arg[4]);
+    surface_path = std::string(arg[5]);
+    iarg_start = 6;
+  } else if (strcmp(arg[3],"plasma_data") == 0) {
+    if (narg < 7) error->all(FLERR,"compute pmi/surf/data: plasma_data needs fixID surface.h5");
+    plasma_data_fix_id = std::string(arg[4]);
+    surface_path = std::string(arg[5]);
+    iarg_start = 6;
+  } else {
+    error->all(FLERR,"compute pmi/surf/data: first keyword must be 'file' or 'plasma_data'");
+    iarg_start = 6;  // unreachable, suppress warning
+  }
 
   proj_slot_lo = 2;
   proj_slot_hi = std::numeric_limits<int>::max();
   mass_amu = 2.0;  // default: deuterium (used for Bohm sound speed)
+  has_impurity = 0;
+  imp_mass_amu = 0.0;
+  imp_frac = 0.0;
+  imp_Zmax = 0;
 
   std::vector<int> which_tmp;
   std::vector<int> which_species_tmp;
-  int iarg = 6;
+  int iarg = iarg_start;
   auto add_kind = [&](int kind, int slot) {
     which_tmp.push_back(kind);
     which_species_tmp.push_back(slot);
@@ -116,10 +134,44 @@ ComputePMISurfData::ComputePMISurfData(SPARTA *sparta, int narg, char **arg) :
       if (iarg+1 >= narg) error->all(FLERR,"bfield needs HDF5 file path");
       bfield_path = std::string(arg[iarg+1]);
       iarg += 2;
+    } else if (strcmp(arg[iarg],"equilibrium") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"equilibrium needs .equ file path");
+      equ_path = std::string(arg[iarg+1]);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"plasma_data") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"plasma_data needs fix ID");
+      plasma_data_fix_id = std::string(arg[iarg+1]);
+      iarg += 2;
     } else if (strcmp(arg[iarg],"boundary") == 0) {
       if (iarg+1 >= narg) error->all(FLERR,"boundary needs polygon file path");
       boundary_path = std::string(arg[iarg+1]);
       iarg += 2;
+    } else if (strcmp(arg[iarg],"impurity") == 0) {
+      // impurity mass_amu frac Zmax f1 f2 ... fZmax
+      // Synthesizes a virtual projectile species from background n_e.
+      // Example: impurity 10.81 0.03 5 0.05 0.15 0.30 0.30 0.20
+      //   → 3% boron (10.81 amu) with charge fractions for B+ through B5+
+      if (iarg+3 >= narg) error->all(FLERR,"impurity needs: mass_amu frac Zmax f1 f2 ... fZmax");
+      imp_mass_amu = atof(arg[iarg+1]);
+      imp_frac = atof(arg[iarg+2]);
+      imp_Zmax = atoi(arg[iarg+3]);
+      if (imp_mass_amu <= 0.0) error->all(FLERR,"impurity mass_amu must be > 0");
+      if (imp_frac <= 0.0 || imp_frac >= 1.0) error->all(FLERR,"impurity frac must be in (0,1)");
+      if (imp_Zmax <= 0) error->all(FLERR,"impurity Zmax must be > 0");
+      if (iarg+3+imp_Zmax >= narg)
+        error->all(FLERR,"impurity needs Zmax charge state fractions after Zmax");
+      imp_charge_fracs.resize(imp_Zmax);
+      double fsum = 0.0;
+      for (int iz = 0; iz < imp_Zmax; iz++) {
+        imp_charge_fracs[iz] = atof(arg[iarg+4+iz]);
+        if (imp_charge_fracs[iz] < 0.0)
+          error->all(FLERR,"impurity charge fraction must be >= 0");
+        fsum += imp_charge_fracs[iz];
+      }
+      if (std::fabs(fsum - 1.0) > 0.01)
+        error->all(FLERR,"impurity charge fractions should sum to ~1.0");
+      has_impurity = 1;
+      iarg += 4 + imp_Zmax;
     } else if (strcmp(arg[iarg],"debug_interp") == 0) {
       if (iarg+2 >= narg) error->all(FLERR,"debug_interp needs E(eV) angle(deg)");
       debug_interp = 1;
@@ -545,18 +597,67 @@ void ComputePMISurfData::init()
   if (surf->implicit)
     error->all(FLERR,"Cannot use compute pmi/surf/data with implicit surfs");
 
-  try {
-    load_plasma();
-  } catch (const std::exception& e) {
-    error->all(FLERR, e.what());
-  } catch (...) {
-    error->all(FLERR, "compute pmi/surf/data failed reading plasma file");
+  // If plasma_data fix is specified, pull all data from it
+  if (!plasma_data_fix_id.empty()) {
+    int ifix = modify->find_fix(plasma_data_fix_id.c_str());
+    if (ifix < 0) {
+      char msg[256];
+      snprintf(msg, sizeof(msg),
+               "compute pmi/surf/data: fix '%s' not found",
+               plasma_data_fix_id.c_str());
+      error->all(FLERR, msg);
+    }
+    auto *pd = dynamic_cast<FixPlasmaData*>(modify->fix[ifix]);
+    if (!pd)
+      error->all(FLERR,
+        "compute pmi/surf/data: plasma_data fix must be style plasma/data");
+
+    // Copy grid and fields from the shared fix
+    nr = pd->nr;
+    nz = pd->nz;
+    rvals = pd->rvals;
+    zvals = pd->zvals;
+    dens_i = pd->dens_i;
+    temp_e = pd->temp_e;
+    temp_i = pd->temp_i;
+    parr_flow = pd->parr_flow;
+    parr_flow_r = pd->parr_flow_r;
+    parr_flow_t = pd->parr_flow_t;
+    parr_flow_z = pd->parr_flow_z;
+    br = pd->br;
+    bz = pd->bz;
+    bt = pd->bt;
+    has_bfield = pd->has_bfield;
+    has_temp = (!temp_e.empty() && !temp_i.empty()) ? 1 : 0;
+
+    // Multi-ion data
+    if (pd->nion > 0) {
+      has_multi_ion = 1;
+      nspec = pd->nion;
+      ion_charge_state_z = pd->ion_charge_z;
+      ions_dens = pd->ions_dens;
+      ions_temp = pd->ions_temp;
+      ions_parr_flow = pd->ions_upar;
+    }
+
+    if (comm->me == 0 && screen)
+      fprintf(screen,
+        "compute pmi/surf/data: using plasma data from fix '%s' (gen=%d)\n",
+        plasma_data_fix_id.c_str(), pd->generation);
+  } else {
+    try {
+      load_plasma();
+    } catch (const std::exception& e) {
+      error->all(FLERR, e.what());
+    } catch (...) {
+      error->all(FLERR, "compute pmi/surf/data failed reading plasma file");
+    }
   }
 
-  // Load B-field from separate file if not already in plasma HDF5.
+  // Load B-field from separate file if not already available.
   // If no explicit bfield path given, try bfield.h5 in the same directory.
   int bfield_user_specified = !bfield_path.empty();
-  if (!has_bfield && bfield_path.empty()) {
+  if (!has_bfield && bfield_path.empty() && !plasma_path.empty()) {
     std::string dir = plasma_path;
     size_t slash = dir.find_last_of('/');
     if (slash != std::string::npos)
@@ -650,10 +751,19 @@ void ComputePMISurfData::init()
     }
   }
 
+  // Derive B-field from equilibrium file if still missing
+  if (!has_bfield && !equ_path.empty()) {
+    try {
+      load_bfield_from_equ();
+    } catch (const std::exception& e) {
+      error->all(FLERR, e.what());
+    }
+  }
+
   if (!has_bfield)
     error->all(FLERR,
-      "compute pmi/surf/data: plasma HDF5 must contain br and bz datasets "
-      "for Bohm flux model (Gamma = n * cs * sin(alpha_B))");
+      "compute pmi/surf/data: need B-field via plasma HDF5 (br/bz), "
+      "bfield HDF5, or equilibrium keyword");
 
   distributed = surf->distributed;
   if (!firstflag) return;
@@ -922,6 +1032,48 @@ void ComputePMISurfData::compute_per_surf()
       }
     }
 
+    // Virtual background impurity sputtering (not in plasma.h5)
+    // Uses n_e from the plasma to synthesize impurity density at each wall element.
+    if (has_impurity) {
+      // Get n_e and Te, Ti at this wall element
+      double ne_loc = 0.0;
+      if (mesh_cell >= 0) {
+        ne_loc = mesh_ne.empty() ? 0.0 : mesh_ne[mesh_cell];
+      } else {
+        ne_loc = interp2D(dens_i, r, z);  // n_e ≈ n_i (quasi-neutrality)
+      }
+      if (ne_loc > 0.0) {
+        for (int iz = 0; iz < imp_Zmax; iz++) {
+          const int Z = iz + 1;
+          const double fz = imp_charge_fracs[iz];
+          if (fz <= 0.0) continue;
+
+          // Impurity density for this charge state
+          const double n_imp = imp_frac * fz * ne_loc;
+
+          // Use Ti if available; fall back to Te
+          double ti_imp = te_loc;
+          if (mesh_cell >= 0 && !mesh_ti.empty()) ti_imp = mesh_ti[mesh_cell];
+          else if (!temp_i.empty()) ti_imp = interp2D(temp_i, r, z);
+
+          // Eckstein incident energy: E = 3*Te + 2*Z*Ti
+          const double E_eck = 3.0 * te_loc + 2.0 * static_cast<double>(Z) * ti_imp;
+
+          // Bohm speed with impurity mass
+          const double cs_arg = (te_loc + ti_imp) * QE / (2.0 * imp_mass_amu * AMU);
+          const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
+
+          // Bohm flux
+          const double g_imp = n_imp * cs * sin_alpha;
+
+          // Sputter yield from BCA table
+          const double a_deg = std::asin(std::min(1.0, sin_alpha)) * 180.0 / M_PI;
+          const double ys = interp_yield(E_eck, a_deg);
+          sput_total += g_imp * ys;
+        }
+      }
+    }
+
     if (nvalue == 1) {
       double out = 0.0;
       if (which[0] == SPUTTER_FLUX_TOTAL) out = sput_total;
@@ -955,6 +1107,143 @@ void ComputePMISurfData::compute_per_surf()
     }
   }
 }
+
+/* ---------------------------------------------------------------------- */
+
+void ComputePMISurfData::load_bfield_from_equ()
+{
+  // Read SOLPS/EQDSK-style equilibrium file and derive B-field on the
+  // plasma (R,Z) grid.
+  //
+  //   Br = -(1/R) dpsi/dZ
+  //   Bz =  (1/R) dpsi/dR
+  //   Bt =  btf * rtf / R
+
+  std::ifstream ifs(equ_path);
+  if (!ifs.good())
+    throw std::runtime_error(
+        std::string("compute pmi/surf/data: cannot open equilibrium '")
+        + equ_path + "'");
+  std::string text((std::istreambuf_iterator<char>(ifs)),
+                    std::istreambuf_iterator<char>());
+  ifs.close();
+
+  auto parse_int = [&](const char *name) -> int {
+    size_t pos = text.find(std::string(name));
+    while (pos != std::string::npos) {
+      size_t eq = text.find('=', pos);
+      if (eq != std::string::npos && eq - pos < 20) {
+        int val = atoi(text.c_str() + eq + 1);
+        if (val > 0) return val;
+      }
+      pos = text.find(std::string(name), pos + 1);
+    }
+    return 0;
+  };
+  auto parse_double = [&](const char *name) -> double {
+    size_t pos = text.find(std::string(name));
+    if (pos != std::string::npos) {
+      size_t eq = text.find('=', pos);
+      if (eq != std::string::npos) return atof(text.c_str() + eq + 1);
+    }
+    return 0.0;
+  };
+  auto read_floats_after = [&](const std::string &marker, int n,
+                               std::vector<double> &out) {
+    size_t pos = text.find(marker);
+    if (pos == std::string::npos)
+      throw std::runtime_error("cannot find '" + marker + "' in " + equ_path);
+    pos += marker.size();
+    out.clear();
+    out.reserve(n);
+    const char *c = text.c_str() + pos;
+    const char *end = text.c_str() + text.size();
+    while ((int)out.size() < n && c < end) {
+      while (c < end && !std::isdigit(*c) && *c!='+' && *c!='-' && *c!='.') c++;
+      if (c >= end) break;
+      char *endp;
+      double val = strtod(c, &endp);
+      if (endp > c) { out.push_back(val); c = endp; }
+      else c++;
+    }
+    if ((int)out.size() < n)
+      throw std::runtime_error("not enough values after '" + marker + "'");
+  };
+
+  int jm = parse_int("jm");
+  int km = parse_int("km");
+  if (jm < 2 || km < 2)
+    throw std::runtime_error("cannot parse jm/km from equilibrium");
+
+  double btf = parse_double("btf");
+  double rtf = parse_double("rtf");
+  double psib = parse_double("psib");
+
+  std::vector<double> r_eq, z_eq, psi_raw;
+  read_floats_after("r(1:jm);", jm, r_eq);
+  read_floats_after("z(1:km);", km, z_eq);
+  read_floats_after("((psi(j,k)-psib,j=1,jm),k=1,km)", jm * km, psi_raw);
+
+  std::vector<double> psi(jm * km);
+  for (int i = 0; i < jm * km; i++) psi[i] = psi_raw[i] + psib;
+
+  double dr_eq = r_eq[1] - r_eq[0];
+  double dz_eq = z_eq[1] - z_eq[0];
+
+  if (comm->me == 0) {
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+             "pmi/surf/data: deriving B-field from equilibrium %s "
+             "(jm=%d km=%d btf=%.3f rtf=%.3f)",
+             equ_path.c_str(), jm, km, btf, rtf);
+    if (screen) fprintf(screen, "%s\n", msg);
+    if (logfile) fprintf(logfile, "%s\n", msg);
+  }
+
+  // Bilinear interpolation on equilibrium grid
+  auto interp_psi = [&](double R, double Z) -> double {
+    double fi = (R - r_eq.front()) / dr_eq;
+    double fj = (Z - z_eq.front()) / dz_eq;
+    int i0 = std::max(0, std::min((int)fi, jm - 2));
+    int j0 = std::max(0, std::min((int)fj, km - 2));
+    double s = fi - i0, t = fj - j0;
+    s = std::max(0.0, std::min(1.0, s));
+    t = std::max(0.0, std::min(1.0, t));
+    return (1-s)*(1-t)*psi[j0*jm+i0] + s*(1-t)*psi[j0*jm+i0+1]
+         + (1-s)*t*psi[(j0+1)*jm+i0] + s*t*psi[(j0+1)*jm+i0+1];
+  };
+
+  // Compute Br, Bz, Bt on the plasma (nr x nz) grid
+  br.resize(static_cast<size_t>(nz) * nr);
+  bz.resize(static_cast<size_t>(nz) * nr);
+  bt.resize(static_cast<size_t>(nz) * nr);
+
+  double eps = 1e-4;  // finite-difference step (m)
+  for (int iz = 0; iz < nz; iz++) {
+    for (int ir = 0; ir < nr; ir++) {
+      double R = rvals[ir];
+      double Z = zvals[iz];
+      size_t idx = static_cast<size_t>(iz) * nr + ir;
+
+      if (R < 0.01) { br[idx] = bz[idx] = bt[idx] = 0.0; continue; }
+
+      // Br = -(1/R) dpsi/dZ
+      double dpsi_dz = (interp_psi(R, Z + eps) - interp_psi(R, Z - eps)) / (2.0 * eps);
+      br[idx] = -dpsi_dz / R;
+
+      // Bz = (1/R) dpsi/dR
+      double dpsi_dr = (interp_psi(R + eps, Z) - interp_psi(R - eps, Z)) / (2.0 * eps);
+      bz[idx] = dpsi_dr / R;
+
+      // Bt = btf * rtf / R
+      bt[idx] = btf * rtf / R;
+    }
+  }
+
+  has_bfield = 1;
+}
+
+/* ---------------------------------------------------------------------- */
 
 bigint ComputePMISurfData::memory_usage()
 {

@@ -15,6 +15,7 @@
 #include <H5Cpp.h>
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -115,6 +116,10 @@ ComputePMISurfData::ComputePMISurfData(SPARTA *sparta, int narg, char **arg) :
     } else if (strcmp(arg[iarg],"bfield") == 0) {
       if (iarg+1 >= narg) error->all(FLERR,"bfield needs HDF5 file path");
       bfield_path = std::string(arg[iarg+1]);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"equilibrium") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"equilibrium needs .equ file path");
+      equ_path = std::string(arg[iarg+1]);
       iarg += 2;
     } else if (strcmp(arg[iarg],"boundary") == 0) {
       if (iarg+1 >= narg) error->all(FLERR,"boundary needs polygon file path");
@@ -650,10 +655,19 @@ void ComputePMISurfData::init()
     }
   }
 
+  // Derive B-field from equilibrium file if still missing
+  if (!has_bfield && !equ_path.empty()) {
+    try {
+      load_bfield_from_equ();
+    } catch (const std::exception& e) {
+      error->all(FLERR, e.what());
+    }
+  }
+
   if (!has_bfield)
     error->all(FLERR,
-      "compute pmi/surf/data: plasma HDF5 must contain br and bz datasets "
-      "for Bohm flux model (Gamma = n * cs * sin(alpha_B))");
+      "compute pmi/surf/data: need B-field via plasma HDF5 (br/bz), "
+      "bfield HDF5, or equilibrium keyword");
 
   distributed = surf->distributed;
   if (!firstflag) return;
@@ -955,6 +969,145 @@ void ComputePMISurfData::compute_per_surf()
     }
   }
 }
+
+/* ---------------------------------------------------------------------- */
+
+void ComputePMISurfData::load_bfield_from_equ()
+{
+  // Read SOLPS/EQDSK-style equilibrium file and derive B-field on the
+  // plasma (R,Z) grid.  Uses the same parser as fix reflect/psi.
+  //
+  //   Br = -(1/R) dpsi/dZ
+  //   Bz =  (1/R) dpsi/dR
+  //   Bt =  btf * rtf / R
+
+  std::ifstream ifs(equ_path);
+  if (!ifs.good())
+    throw std::runtime_error(
+        std::string("compute pmi/surf/data: cannot open equilibrium '")
+        + equ_path + "'");
+  std::string text((std::istreambuf_iterator<char>(ifs)),
+                    std::istreambuf_iterator<char>());
+  ifs.close();
+
+  // --- helpers ---
+  auto parse_int = [&](const char *name) -> int {
+    size_t pos = text.find(std::string(name));
+    while (pos != std::string::npos) {
+      size_t eq = text.find('=', pos);
+      if (eq != std::string::npos && eq - pos < 20) {
+        int val = atoi(text.c_str() + eq + 1);
+        if (val > 0) return val;
+      }
+      pos = text.find(std::string(name), pos + 1);
+    }
+    return 0;
+  };
+  auto parse_double = [&](const char *name) -> double {
+    size_t pos = text.find(std::string(name));
+    if (pos != std::string::npos) {
+      size_t eq = text.find('=', pos);
+      if (eq != std::string::npos) return atof(text.c_str() + eq + 1);
+    }
+    return 0.0;
+  };
+  auto read_floats_after = [&](const std::string &marker, int n,
+                               std::vector<double> &out) {
+    size_t pos = text.find(marker);
+    if (pos == std::string::npos)
+      throw std::runtime_error("cannot find '" + marker + "' in " + equ_path);
+    pos += marker.size();
+    out.clear();
+    out.reserve(n);
+    const char *c = text.c_str() + pos;
+    const char *end = text.c_str() + text.size();
+    while ((int)out.size() < n && c < end) {
+      while (c < end && !std::isdigit(*c) && *c!='+' && *c!='-' && *c!='.') c++;
+      if (c >= end) break;
+      char *endp;
+      double val = strtod(c, &endp);
+      if (endp > c) { out.push_back(val); c = endp; }
+      else c++;
+    }
+    if ((int)out.size() < n)
+      throw std::runtime_error("not enough values after '" + marker + "'");
+  };
+
+  int jm = parse_int("jm");
+  int km = parse_int("km");
+  if (jm < 2 || km < 2)
+    throw std::runtime_error("cannot parse jm/km from equilibrium");
+
+  double btf = parse_double("btf");
+  double rtf = parse_double("rtf");
+  double psib = parse_double("psib");
+
+  std::vector<double> r_eq, z_eq, psi_raw;
+  read_floats_after("r(1:jm);", jm, r_eq);
+  read_floats_after("z(1:km);", km, z_eq);
+  read_floats_after("((psi(j,k)-psib,j=1,jm),k=1,km)", jm * km, psi_raw);
+
+  // psi = psi_raw + psib  (stored as psi-psib in file)
+  std::vector<double> psi(jm * km);
+  for (int i = 0; i < jm * km; i++) psi[i] = psi_raw[i] + psib;
+
+  double dr = r_eq[1] - r_eq[0];
+  double dz = z_eq[1] - z_eq[0];
+
+  if (comm->me == 0) {
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+             "pmi/surf/data: deriving B-field from equilibrium %s "
+             "(jm=%d km=%d btf=%.3f rtf=%.3f)",
+             equ_path.c_str(), jm, km, btf, rtf);
+    if (screen) fprintf(screen, "%s\n", msg);
+    if (logfile) fprintf(logfile, "%s\n", msg);
+  }
+
+  // Bilinear interpolation helper on the equilibrium grid
+  auto interp_psi = [&](double R, double Z) -> double {
+    double fi = (R - r_eq.front()) / dr;
+    double fj = (Z - z_eq.front()) / dz;
+    int i0 = std::max(0, std::min((int)fi, jm - 2));
+    int j0 = std::max(0, std::min((int)fj, km - 2));
+    double s = fi - i0, t = fj - j0;
+    s = std::max(0.0, std::min(1.0, s));
+    t = std::max(0.0, std::min(1.0, t));
+    return (1-s)*(1-t)*psi[j0*jm+i0] + s*(1-t)*psi[j0*jm+i0+1]
+         + (1-s)*t*psi[(j0+1)*jm+i0] + s*t*psi[(j0+1)*jm+i0+1];
+  };
+
+  // Compute Br, Bz, Bt on the plasma (nr x nz) grid
+  br.resize(static_cast<size_t>(nz) * nr);
+  bz.resize(static_cast<size_t>(nz) * nr);
+  bt.resize(static_cast<size_t>(nz) * nr);
+
+  double eps = 1e-4;  // finite-difference step (m)
+  for (int iz = 0; iz < nz; iz++) {
+    for (int ir = 0; ir < nr; ir++) {
+      double R = rvals[ir];
+      double Z = zvals[iz];
+      size_t idx = static_cast<size_t>(iz) * nr + ir;
+
+      if (R < 0.01) { br[idx] = bz[idx] = bt[idx] = 0.0; continue; }
+
+      // Br = -(1/R) dpsi/dZ   (central difference)
+      double dpsi_dz = (interp_psi(R, Z + eps) - interp_psi(R, Z - eps)) / (2.0 * eps);
+      br[idx] = -dpsi_dz / R;
+
+      // Bz = (1/R) dpsi/dR
+      double dpsi_dr = (interp_psi(R + eps, Z) - interp_psi(R - eps, Z)) / (2.0 * eps);
+      bz[idx] = dpsi_dr / R;
+
+      // Bt = btf * rtf / R
+      bt[idx] = btf * rtf / R;
+    }
+  }
+
+  has_bfield = 1;
+}
+
+/* ---------------------------------------------------------------------- */
 
 bigint ComputePMISurfData::memory_usage()
 {

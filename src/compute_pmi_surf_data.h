@@ -45,11 +45,23 @@ class ComputePMISurfData : public Compute {
   std::string plasma_path;
   std::string surface_path;
   std::string bfield_path;
+  std::string equ_path;
+  std::string plasma_data_fix_id;  // ID of fix plasma/data (if used)
 
   // projectile slots for sputtering (inclusive, 1-based)
   int proj_slot_lo, proj_slot_hi;
   // legacy option kept for input compatibility
   double mass_amu;
+
+  // Virtual background impurity (not in plasma.h5)
+  // Usage: impurity mass_amu frac Zmax f1 f2 ... fZmax
+  //   Synthesizes sputtering from an impurity at fixed fraction of n_e.
+  //   Charge state fractions f1..fZmax give the distribution over Z=1..Zmax.
+  int has_impurity;
+  double imp_mass_amu;     // impurity mass [amu]
+  double imp_frac;         // fraction of n_e (e.g. 0.03 for 3%)
+  int imp_Zmax;            // max charge state
+  std::vector<double> imp_charge_fracs;  // charge state fractions (Z=1..Zmax)
 
   // plasma data
   int nr,nz,nspec;
@@ -90,6 +102,7 @@ class ComputePMISurfData : public Compute {
   void load_plasma();
   void load_surface_data();
   void load_boundary();
+  void load_bfield_from_equ();
   void load_mesh();
 
   // Precomputed mapped-triangle centroids for nearest-neighbor fallback
