@@ -95,6 +95,10 @@ class ComputePMISurfData : public Compute {
   std::vector<double> mesh_ions_dens, mesh_ions_temp, mesh_ions_upar;
   // bounding boxes for triangle search acceleration
   std::vector<double> mesh_tri_rmin, mesh_tri_rmax, mesh_tri_zmin, mesh_tri_zmax;
+  // spatial hash for O(1) triangle lookup
+  int hash_nr, hash_nz;
+  double hash_rmin, hash_zmin, hash_dr, hash_dz;
+  std::vector<std::vector<int>> hash_grid;
 
   double interp2D(const std::vector<double> &f, double r, double z) const;
   double interp3D(const std::vector<double> &f, int ispec, double r, double z) const;

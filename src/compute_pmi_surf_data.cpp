@@ -522,6 +522,27 @@ void ComputePMISurfData::load_mesh()
 
     has_mesh = 1;
 
+    // Build spatial hash for O(1) triangle lookup
+    {
+      hash_rmin = *std::min_element(mesh_tri_rmin.begin(), mesh_tri_rmin.end());
+      double rmax = *std::max_element(mesh_tri_rmax.begin(), mesh_tri_rmax.end());
+      hash_zmin = *std::min_element(mesh_tri_zmin.begin(), mesh_tri_zmin.end());
+      double zmax = *std::max_element(mesh_tri_zmax.begin(), mesh_tri_zmax.end());
+      hash_nr = 100; hash_nz = 100;
+      hash_dr = (rmax - hash_rmin) / hash_nr + 1e-12;
+      hash_dz = (zmax - hash_zmin) / hash_nz + 1e-12;
+      hash_grid.assign(hash_nr * hash_nz, std::vector<int>());
+      for (int t = 0; t < mesh_ntri; t++) {
+        int ir0 = std::max(0, (int)((mesh_tri_rmin[t] - hash_rmin) / hash_dr));
+        int ir1 = std::min(hash_nr-1, (int)((mesh_tri_rmax[t] - hash_rmin) / hash_dr));
+        int iz0 = std::max(0, (int)((mesh_tri_zmin[t] - hash_zmin) / hash_dz));
+        int iz1 = std::min(hash_nz-1, (int)((mesh_tri_zmax[t] - hash_zmin) / hash_dz));
+        for (int iz = iz0; iz <= iz1; iz++)
+          for (int ir = ir0; ir <= ir1; ir++)
+            hash_grid[iz * hash_nr + ir].push_back(t);
+      }
+    }
+
     // Precompute centroids of mapped triangles for nearest-neighbor fallback.
     // Wall surface centroids often fall just outside the B2.5 domain boundary
     // (in the vacuum gap between plasma mesh and physical wall).
@@ -552,8 +573,26 @@ void ComputePMISurfData::load_mesh()
 
 int ComputePMISurfData::find_mesh_triangle(double r, double z) const
 {
-  // Brute-force with bounding-box prefilter.
-  // Returns triangle index or -1 if not found.
+  // Use spatial hash if available
+  if (hash_nr > 0 && !hash_grid.empty()) {
+    int ir = (int)((r - hash_rmin) / hash_dr);
+    int iz = (int)((z - hash_zmin) / hash_dz);
+    if (ir < 0 || ir >= hash_nr || iz < 0 || iz >= hash_nz) return -1;
+    for (int t : hash_grid[iz * hash_nr + ir]) {
+      const int v0 = mesh_tri[t*3+0], v1 = mesh_tri[t*3+1], v2 = mesh_tri[t*3+2];
+      const double r0 = mesh_vtx_r[v0], z0 = mesh_vtx_z[v0];
+      const double r1 = mesh_vtx_r[v1], z1 = mesh_vtx_z[v1];
+      const double r2 = mesh_vtx_r[v2], z2 = mesh_vtx_z[v2];
+      const double d = (r1-r0)*(z2-z0) - (r2-r0)*(z1-z0);
+      if (std::fabs(d) < 1e-30) continue;
+      const double u = ((r-r0)*(z2-z0) - (r2-r0)*(z-z0)) / d;
+      const double v = ((r1-r0)*(z-z0) - (r-r0)*(z1-z0)) / d;
+      if (u >= -1e-10 && v >= -1e-10 && (u+v) <= 1.0+1e-10) return t;
+    }
+    return -1;
+  }
+
+  // Fallback: brute force
   for (int t = 0; t < mesh_ntri; t++) {
     if (r < mesh_tri_rmin[t] || r > mesh_tri_rmax[t] ||
         z < mesh_tri_zmin[t] || z > mesh_tri_zmax[t]) continue;
@@ -561,7 +600,6 @@ int ComputePMISurfData::find_mesh_triangle(double r, double z) const
     const double r0 = mesh_vtx_r[v0], z0 = mesh_vtx_z[v0];
     const double r1 = mesh_vtx_r[v1], z1 = mesh_vtx_z[v1];
     const double r2 = mesh_vtx_r[v2], z2 = mesh_vtx_z[v2];
-    // Barycentric coordinate test
     const double d = (r1-r0)*(z2-z0) - (r2-r0)*(z1-z0);
     if (std::fabs(d) < 1e-30) continue;
     const double u = ((r-r0)*(z2-z0) - (r2-r0)*(z-z0)) / d;
@@ -639,6 +677,9 @@ void ComputePMISurfData::init()
       ions_temp = pd->ions_temp;
       ions_parr_flow = pd->ions_upar;
     }
+
+    // Set plasma_path so load_mesh() can read the mesh triangulation
+    plasma_path = pd->plasma_path;
 
     if (comm->me == 0 && screen)
       fprintf(screen,

@@ -40,6 +40,24 @@ struct PlasmaFileData{
   // When present these override the separate bfield.h5 for mag_arr.
   bool has_bfield = false;
   std::vector<std::vector<double>> br, bt, bz;
+  // Optional mesh triangulation from plasma.h5 (SOLPS cell data)
+  bool has_mesh = false;
+  int mesh_nvtx = 0, mesh_ntri = 0, mesh_ncell = 0;
+  std::vector<double> mesh_vtx_r, mesh_vtx_z;
+  std::vector<int> mesh_tri;       // (ntri*3) vertex indices
+  std::vector<int> mesh_cell_idx;  // (ntri) cell index per triangle
+  std::vector<double> mesh_ne, mesh_te, mesh_ti, mesh_ni, mesh_upar;
+  // Bounding boxes for triangle search
+  std::vector<double> mesh_tri_rmin, mesh_tri_rmax, mesh_tri_zmin, mesh_tri_zmax;
+  // Precomputed centroids for nearest-neighbor fallback
+  std::vector<double> mapped_cr, mapped_cz;
+  std::vector<int> mapped_idx;
+  // Spatial hash for O(1) triangle lookup
+  int hash_nr = 0, hash_nz = 0;
+  double hash_rmin = 0, hash_zmin = 0, hash_dr = 0, hash_dz = 0;
+  std::vector<std::vector<int>> hash_grid;  // hash_grid[iz*hash_nr+ir] = list of tri indices
+  void buildSpatialHash(int nr_bins = 100, int nz_bins = 100);
+
   // Optional multi-ion extension from plasma.h5
   std::vector<int> ion_spec_index;
   std::vector<int> ion_charge_state_z;
@@ -171,6 +189,9 @@ MagneticFieldFileDataParams bilinearInterpolationMagneticField(
     int icell, const MagneticFieldFileData &data);
 PlasmaFileParams bilinearInterpolationPlasma(
     int icell, const PlasmaFileData &data);
+int findMeshTriangle(const PlasmaFileData &data, double r, double z) const;
+int findNearestMappedTriangle(const PlasmaFileData &data, double r, double z, double max_dist) const;
+PlasmaFileParams meshLookupPlasma(int icell, const PlasmaFileData &data);
 
 // Equilibrium-based magnetic geometry (exact ψ derivatives)
 EquilibriumData equ_data;
@@ -184,12 +205,13 @@ void computeMagneticGeometry(int icell, const EquilibriumData &equ,
                              MagneticGeometry &geom);
 
 protected:
-  enum InputMode { MODE_FILE=0, MODE_CONSTANT, MODE_ANALYTIC };
+  enum InputMode { MODE_FILE=0, MODE_CONSTANT, MODE_ANALYTIC, MODE_PLASMA_DATA };
   InputMode input_mode = MODE_FILE;
 
 int nglocal,groupbit;
 std::string plasmaStatePath;
 std::string magneticFieldsPath;
+std::string plasma_data_fix_id;  // fix ID for plasma/data mode
 double bconst[3];
 double econst[3];
 double teconst;

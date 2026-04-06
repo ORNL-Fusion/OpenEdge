@@ -9,10 +9,12 @@ https://github.com/ORNL-Fusion/OpenEdge
 
 #include "string.h"
 #include "compute_plasma_fields.h"
+#include "fix_plasma_data.h"
 #include "update.h"
 #include "grid.h"
 #include "domain.h"
 #include "input.h"
+#include "modify.h"
 #include "memory.h"
 #include "error.h"
 #include "comm.h"
@@ -84,6 +86,12 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
     magneticFieldsPath.clear();
     if (iarg < narg && strcmp(arg[iarg],"equilibrium") != 0 && strcmp(arg[iarg],"values") != 0)
       magneticFieldsPath = std::string(arg[iarg++]);
+  } else if (strcmp(arg[iarg],"plasma_data") == 0) {
+    input_mode = MODE_PLASMA_DATA;
+    iarg++;
+    if (iarg >= narg)
+      error->all(FLERR,"compute plasma/fields plasma_data mode needs fix ID");
+    plasma_data_fix_id = std::string(arg[iarg++]);
   } else if (strcmp(arg[iarg],"constant") == 0) {
     input_mode = MODE_CONSTANT;
     iarg++;
@@ -288,7 +296,131 @@ void ComputePlasmaFields::init()
   memory->create(plasma_arr, ncells, "plasma/fields:plasma_arr");
   memory->create(mag_arr,    ncells, "plasma/fields:mag_arr");
 
-  if (input_mode == MODE_FILE) {
+  if (input_mode == MODE_PLASMA_DATA) {
+    // Pull plasma data from fix plasma/data — no file reads
+    int ifix = modify->find_fix(plasma_data_fix_id.c_str());
+    if (ifix < 0) {
+      char msg[256];
+      snprintf(msg, sizeof(msg),
+               "compute plasma/fields: fix '%s' not found",
+               plasma_data_fix_id.c_str());
+      error->all(FLERR, msg);
+    }
+    auto *pd = dynamic_cast<FixPlasmaData*>(modify->fix[ifix]);
+    if (!pd)
+      error->all(FLERR,
+        "compute plasma/fields: plasma_data fix must be style plasma/data");
+
+    // Build PlasmaFileData from the fix's flat arrays
+    // (convert flat vectors to vector<vector<double>> format)
+    plasma_data.r.assign(pd->rvals.begin(), pd->rvals.end());
+    plasma_data.z.assign(pd->zvals.begin(), pd->zvals.end());
+    int pnr = pd->nr, pnz = pd->nz;
+    auto flat2vv = [&](const std::vector<double> &flat) {
+      std::vector<std::vector<double>> vv(pnz, std::vector<double>(pnr, 0.0));
+      if (flat.empty()) return vv;
+      for (int iz = 0; iz < pnz; iz++)
+        for (int ir = 0; ir < pnr; ir++)
+          vv[iz][ir] = flat[iz * pnr + ir];
+      return vv;
+    };
+    plasma_data.dens_e = flat2vv(pd->dens_e);
+    plasma_data.temp_e = flat2vv(pd->temp_e);
+    plasma_data.dens_i = flat2vv(pd->dens_i);
+    plasma_data.temp_i = flat2vv(pd->temp_i);
+    plasma_data.parr_flow = flat2vv(pd->parr_flow);
+    plasma_data.parr_flow_r = flat2vv(pd->parr_flow_r);
+    plasma_data.parr_flow_t = flat2vv(pd->parr_flow_t);
+    plasma_data.parr_flow_z = flat2vv(pd->parr_flow_z);
+    plasma_data.grad_temp_e_r = flat2vv(pd->grad_te_r);
+    plasma_data.grad_temp_e_t = flat2vv(pd->grad_te_t);
+    plasma_data.grad_temp_e_z = flat2vv(pd->grad_te_z);
+    plasma_data.grad_temp_i_r = flat2vv(pd->grad_ti_r);
+    plasma_data.grad_temp_i_t = flat2vv(pd->grad_ti_t);
+    plasma_data.grad_temp_i_z = flat2vv(pd->grad_ti_z);
+
+    // B-field from fix
+    if (pd->has_bfield) {
+      plasma_data.br = flat2vv(pd->br);
+      plasma_data.bz = flat2vv(pd->bz);
+      plasma_data.bt = flat2vv(pd->bt);
+      plasma_data.has_bfield = true;
+    }
+
+    // Mesh data from fix
+    if (pd->has_mesh) {
+      plasma_data.has_mesh = true;
+      plasma_data.mesh_nvtx = pd->mesh_nvtx;
+      plasma_data.mesh_ntri = pd->mesh_ntri;
+      plasma_data.mesh_ncell = pd->mesh_ncell;
+      plasma_data.mesh_vtx_r = pd->mesh_vtx_r;
+      plasma_data.mesh_vtx_z = pd->mesh_vtx_z;
+      plasma_data.mesh_tri = pd->mesh_tri;
+      plasma_data.mesh_cell_idx = pd->mesh_cell_idx;
+      plasma_data.mesh_ne = pd->mesh_ne;
+      plasma_data.mesh_te = pd->mesh_te;
+      plasma_data.mesh_ti = pd->mesh_ti;
+      plasma_data.mesh_ni = pd->mesh_ni;
+      plasma_data.mesh_upar = pd->mesh_upar;
+      // Build bounding boxes, mapped centroids, and spatial hash
+      plasma_data.mesh_tri_rmin.resize(pd->mesh_ntri);
+      plasma_data.mesh_tri_rmax.resize(pd->mesh_ntri);
+      plasma_data.mesh_tri_zmin.resize(pd->mesh_ntri);
+      plasma_data.mesh_tri_zmax.resize(pd->mesh_ntri);
+      for (int t = 0; t < pd->mesh_ntri; t++) {
+        const int v0 = pd->mesh_tri[t*3], v1 = pd->mesh_tri[t*3+1], v2 = pd->mesh_tri[t*3+2];
+        const double r0 = pd->mesh_vtx_r[v0], r1 = pd->mesh_vtx_r[v1], r2 = pd->mesh_vtx_r[v2];
+        const double z0 = pd->mesh_vtx_z[v0], z1 = pd->mesh_vtx_z[v1], z2 = pd->mesh_vtx_z[v2];
+        plasma_data.mesh_tri_rmin[t] = std::min({r0,r1,r2});
+        plasma_data.mesh_tri_rmax[t] = std::max({r0,r1,r2});
+        plasma_data.mesh_tri_zmin[t] = std::min({z0,z1,z2});
+        plasma_data.mesh_tri_zmax[t] = std::max({z0,z1,z2});
+      }
+      for (int t = 0; t < pd->mesh_ntri; t++) {
+        if (pd->mesh_cell_idx[t] < 0) continue;
+        const int v0 = pd->mesh_tri[t*3], v1 = pd->mesh_tri[t*3+1], v2 = pd->mesh_tri[t*3+2];
+        plasma_data.mapped_cr.push_back((pd->mesh_vtx_r[v0]+pd->mesh_vtx_r[v1]+pd->mesh_vtx_r[v2])/3.0);
+        plasma_data.mapped_cz.push_back((pd->mesh_vtx_z[v0]+pd->mesh_vtx_z[v1]+pd->mesh_vtx_z[v2])/3.0);
+        plasma_data.mapped_idx.push_back(t);
+      }
+      plasma_data.buildSpatialHash();
+    }
+
+    // Multi-ion species
+    if (pd->nion > 0) {
+      plasma_data.ions_nspec = pd->nion;
+      plasma_data.ions_nz = pnz;
+      plasma_data.ions_nr = pnr;
+      plasma_data.ion_charge_state_z = pd->ion_charge_z;
+      plasma_data.ion_mass_amu = pd->ion_mass_amu;
+      plasma_data.ions_dens = pd->ions_dens;
+      plasma_data.ions_temp = pd->ions_temp;
+      plasma_data.ions_parr_flow = pd->ions_upar;
+    }
+
+    // Equilibrium from fix
+    if (pd->has_equ) {
+      has_equilibrium = 1;
+      equ_data.jm = pd->equ_jm;
+      equ_data.km = pd->equ_km;
+      equ_data.btf = pd->btf;
+      equ_data.rtf = pd->rtf;
+      equ_data.psib = pd->psib;
+      equ_data.r = pd->equ_r;
+      equ_data.z = pd->equ_z;
+      // Convert flat psirz to 2D
+      equ_data.psi.resize(pd->equ_km, std::vector<double>(pd->equ_jm));
+      for (int k = 0; k < pd->equ_km; k++)
+        for (int j = 0; j < pd->equ_jm; j++)
+          equ_data.psi[k][j] = pd->psirz[k * pd->equ_jm + j];
+    }
+
+    if (me == 0 && screen)
+      fprintf(screen,
+        "compute plasma/fields: using data from fix '%s' (gen=%d)\n",
+        plasma_data_fix_id.c_str(), pd->generation);
+
+  } else if (input_mode == MODE_FILE) {
     if (me == 0) {
       plasma_data = readPlasmaFileData(plasmaStatePath);
       if (!magneticFieldsPath.empty())
@@ -301,7 +433,11 @@ void ComputePlasmaFields::init()
       broadcastMagneticData(magnetic_data);
     if (has_equilibrium)
       broadcastEquilibriumData(equ_data);
+  }
 
+  // --- Stencil computation and per-cell interpolation ---
+  // (shared by MODE_FILE and MODE_PLASMA_DATA)
+  if (input_mode == MODE_FILE || input_mode == MODE_PLASMA_DATA) {
     precomputeStencils(plasma_data.r, plasma_data.z, plasma_stencil);
     if (!magneticFieldsPath.empty())
       precomputeStencils(magnetic_data.r, magnetic_data.z, magnetic_stencil);
@@ -368,10 +504,12 @@ void ComputePlasmaFields::init()
 
     // --- Equilibrium-based magnetic geometry ---
     if (has_equilibrium) {
-      if (me == 0) {
-        equ_data = readEquilibriumFile(equilibriumPath);
+      // Only re-read if in file mode and not already loaded
+      if (input_mode == MODE_FILE && !equilibriumPath.empty()) {
+        if (me == 0)
+          equ_data = readEquilibriumFile(equilibriumPath);
+        broadcastEquilibriumData(equ_data);
       }
-      broadcastEquilibriumData(equ_data);
       memory->create(geom_arr, ncells, "plasma/fields:geom_arr");
       for (int icell = 0; icell < ncells; ++icell) {
         MagneticGeometry g{};
@@ -933,6 +1071,70 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
           check3DShape(ns, nzf, nrf, "ions/parr_flow_z");
         }
 
+        // Optional mesh triangulation (SOLPS cell data)
+        if (hasDataset("mesh/triangles") && hasDataset("mesh/vtx_r")) {
+          data.mesh_vtx_r = read1D("mesh/vtx_r");
+          data.mesh_vtx_z = read1D("mesh/vtx_z");
+          data.mesh_nvtx = static_cast<int>(data.mesh_vtx_r.size());
+
+          {
+            H5::DataSet ds = file.openDataSet("mesh/triangles");
+            H5::DataSpace sp = ds.getSpace();
+            hsize_t dims[2]; sp.getSimpleExtentDims(dims);
+            data.mesh_ntri = static_cast<int>(dims[0]);
+            data.mesh_tri.resize(data.mesh_ntri * 3);
+            ds.read(data.mesh_tri.data(), H5::PredType::NATIVE_INT);
+          }
+          {
+            H5::DataSet ds = file.openDataSet("mesh/cell_index");
+            H5::DataSpace sp = ds.getSpace();
+            hsize_t dim; sp.getSimpleExtentDims(&dim);
+            data.mesh_cell_idx.resize(dim);
+            ds.read(data.mesh_cell_idx.data(), H5::PredType::NATIVE_INT);
+          }
+
+          auto read1D_mesh = [&](const std::string &name) -> std::vector<double> {
+            if (!hasDataset(name)) return {};
+            return read1D(name);
+          };
+          data.mesh_ne = read1D_mesh("mesh/dens_e");
+          data.mesh_te = read1D_mesh("mesh/temp_e");
+          data.mesh_ti = read1D_mesh("mesh/temp_i");
+          data.mesh_ni = read1D_mesh("mesh/dens_i");
+          data.mesh_upar = read1D_mesh("mesh/parr_flow");
+          data.mesh_ncell = data.mesh_ne.empty() ? 0 : static_cast<int>(data.mesh_ne.size());
+
+          // Build bounding boxes for triangle search
+          data.mesh_tri_rmin.resize(data.mesh_ntri);
+          data.mesh_tri_rmax.resize(data.mesh_ntri);
+          data.mesh_tri_zmin.resize(data.mesh_ntri);
+          data.mesh_tri_zmax.resize(data.mesh_ntri);
+          for (int t = 0; t < data.mesh_ntri; t++) {
+            const int v0 = data.mesh_tri[t*3+0], v1 = data.mesh_tri[t*3+1], v2 = data.mesh_tri[t*3+2];
+            const double r0 = data.mesh_vtx_r[v0], r1 = data.mesh_vtx_r[v1], r2 = data.mesh_vtx_r[v2];
+            const double z0 = data.mesh_vtx_z[v0], z1 = data.mesh_vtx_z[v1], z2 = data.mesh_vtx_z[v2];
+            data.mesh_tri_rmin[t] = std::min({r0,r1,r2});
+            data.mesh_tri_rmax[t] = std::max({r0,r1,r2});
+            data.mesh_tri_zmin[t] = std::min({z0,z1,z2});
+            data.mesh_tri_zmax[t] = std::max({z0,z1,z2});
+          }
+
+          // Precompute centroids for nearest-neighbor fallback
+          for (int t = 0; t < data.mesh_ntri; t++) {
+            if (data.mesh_cell_idx[t] < 0) continue;
+            const int v0 = data.mesh_tri[t*3+0], v1 = data.mesh_tri[t*3+1], v2 = data.mesh_tri[t*3+2];
+            data.mapped_cr.push_back((data.mesh_vtx_r[v0]+data.mesh_vtx_r[v1]+data.mesh_vtx_r[v2])/3.0);
+            data.mapped_cz.push_back((data.mesh_vtx_z[v0]+data.mesh_vtx_z[v1]+data.mesh_vtx_z[v2])/3.0);
+            data.mapped_idx.push_back(t);
+          }
+
+          data.has_mesh = true;
+          data.buildSpatialHash();
+          printf("  Loaded mesh: %d triangles, %d vertices, %d cells (%d mapped)\n",
+                 data.mesh_ntri, data.mesh_nvtx, data.mesh_ncell,
+                 static_cast<int>(data.mapped_idx.size()));
+        }
+
     } catch (const H5::Exception& e) {
         fprintf(stderr, "HDF5 error: %s\n", e.getCDetailMsg());
         throw;
@@ -944,6 +1146,34 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
     return data;
 }
 
+/* ---------------------------------------------------------------------- */
+
+void PlasmaFileData::buildSpatialHash(int nr_bins, int nz_bins)
+{
+  if (!has_mesh || mesh_ntri == 0) return;
+
+  hash_rmin = *std::min_element(mesh_tri_rmin.begin(), mesh_tri_rmin.end());
+  double rmax = *std::max_element(mesh_tri_rmax.begin(), mesh_tri_rmax.end());
+  hash_zmin = *std::min_element(mesh_tri_zmin.begin(), mesh_tri_zmin.end());
+  double zmax = *std::max_element(mesh_tri_zmax.begin(), mesh_tri_zmax.end());
+
+  hash_nr = nr_bins;
+  hash_nz = nz_bins;
+  hash_dr = (rmax - hash_rmin) / nr_bins + 1e-12;
+  hash_dz = (zmax - hash_zmin) / nz_bins + 1e-12;
+
+  hash_grid.assign(static_cast<size_t>(hash_nr) * hash_nz, std::vector<int>());
+
+  for (int t = 0; t < mesh_ntri; t++) {
+    int ir0 = std::max(0, (int)((mesh_tri_rmin[t] - hash_rmin) / hash_dr));
+    int ir1 = std::min(hash_nr - 1, (int)((mesh_tri_rmax[t] - hash_rmin) / hash_dr));
+    int iz0 = std::max(0, (int)((mesh_tri_zmin[t] - hash_zmin) / hash_dz));
+    int iz1 = std::min(hash_nz - 1, (int)((mesh_tri_zmax[t] - hash_zmin) / hash_dz));
+    for (int iz = iz0; iz <= iz1; iz++)
+      for (int ir = ir0; ir <= ir1; ir++)
+        hash_grid[iz * hash_nr + ir].push_back(t);
+  }
+}
 
 
 /*----------------------------------------------------------------------
@@ -1052,6 +1282,54 @@ void ComputePlasmaFields::broadcastPlasmaData(PlasmaFileData& data) {
       broadcast3DFlat(data.ions_parr_flow_t, ns, nz, nr);
       broadcast3DFlat(data.ions_parr_flow_z, ns, nz, nr);
     }
+
+    // Broadcast mesh data
+    int hm = data.has_mesh ? 1 : 0;
+    MPI_Bcast(&hm, 1, MPI_INT, 0, world);
+    data.has_mesh = (hm != 0);
+    if (data.has_mesh) {
+      MPI_Bcast(&data.mesh_nvtx, 1, MPI_INT, 0, world);
+      MPI_Bcast(&data.mesh_ntri, 1, MPI_INT, 0, world);
+      MPI_Bcast(&data.mesh_ncell, 1, MPI_INT, 0, world);
+      int nmapped = static_cast<int>(data.mapped_idx.size());
+      MPI_Bcast(&nmapped, 1, MPI_INT, 0, world);
+      if (me != 0) {
+        data.mesh_vtx_r.resize(data.mesh_nvtx);
+        data.mesh_vtx_z.resize(data.mesh_nvtx);
+        data.mesh_tri.resize(data.mesh_ntri * 3);
+        data.mesh_cell_idx.resize(data.mesh_ntri);
+        data.mesh_ne.resize(data.mesh_ncell);
+        data.mesh_te.resize(data.mesh_ncell);
+        data.mesh_ti.resize(data.mesh_ncell);
+        data.mesh_ni.resize(data.mesh_ncell);
+        data.mesh_upar.resize(data.mesh_ncell);
+        data.mesh_tri_rmin.resize(data.mesh_ntri);
+        data.mesh_tri_rmax.resize(data.mesh_ntri);
+        data.mesh_tri_zmin.resize(data.mesh_ntri);
+        data.mesh_tri_zmax.resize(data.mesh_ntri);
+        data.mapped_cr.resize(nmapped);
+        data.mapped_cz.resize(nmapped);
+        data.mapped_idx.resize(nmapped);
+      }
+      MPI_Bcast(data.mesh_vtx_r.data(), data.mesh_nvtx, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.mesh_vtx_z.data(), data.mesh_nvtx, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.mesh_tri.data(), data.mesh_ntri*3, MPI_INT, 0, world);
+      MPI_Bcast(data.mesh_cell_idx.data(), data.mesh_ntri, MPI_INT, 0, world);
+      MPI_Bcast(data.mesh_ne.data(), data.mesh_ncell, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.mesh_te.data(), data.mesh_ncell, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.mesh_ti.data(), data.mesh_ncell, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.mesh_ni.data(), data.mesh_ncell, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.mesh_upar.data(), data.mesh_ncell, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.mesh_tri_rmin.data(), data.mesh_ntri, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.mesh_tri_rmax.data(), data.mesh_ntri, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.mesh_tri_zmin.data(), data.mesh_ntri, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.mesh_tri_zmax.data(), data.mesh_ntri, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.mapped_cr.data(), nmapped, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.mapped_cz.data(), nmapped, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.mapped_idx.data(), nmapped, MPI_INT, 0, world);
+      // Rebuild spatial hash on non-root ranks
+      if (me != 0) data.buildSpatialHash();
+    }
 }
 
 
@@ -1118,6 +1396,12 @@ PlasmaFileParams ComputePlasmaFields::bilinearInterpolationPlasma(
   P.dens_e = interpField2D(data.dens_e, s);
   P.temp_i = interpField2D(data.temp_i, s);
   P.dens_i = interpField2D(data.dens_i, s);
+
+  // Fallback to mesh-based lookup if grid interpolation gives zero plasma
+  if (data.has_mesh && P.temp_e <= 0.0 && P.dens_e <= 0.0) {
+    return meshLookupPlasma(icell, data);
+  }
+
   gradField2D(data.dens_e, s, P.grad_dens_e_r, P.grad_dens_e_z);
   P.grad_dens_e_t = 0.0;
   P.grad_temp_e_r = interpField2D(data.grad_temp_e_r, s);
@@ -1131,6 +1415,105 @@ PlasmaFileParams ComputePlasmaFields::bilinearInterpolationPlasma(
   P.parr_flow_z   = interpField2D(data.parr_flow_z, s);
   P.parr_flow     = interpField2D(data.parr_flow, s);
   P.q_mag = data.has_qmag ? interpField2D(data.q_mag, s) : 0.0;
+
+  return P;
+}
+
+
+/* ---------------------------------------------------------------------- */
+
+int ComputePlasmaFields::findMeshTriangle(
+    const PlasmaFileData &data, double r, double z) const
+{
+  // Use spatial hash if available (O(1) instead of O(N))
+  if (data.hash_nr > 0 && !data.hash_grid.empty()) {
+    int ir = (int)((r - data.hash_rmin) / data.hash_dr);
+    int iz = (int)((z - data.hash_zmin) / data.hash_dz);
+    if (ir < 0 || ir >= data.hash_nr || iz < 0 || iz >= data.hash_nz)
+      return -1;
+    const auto &candidates = data.hash_grid[iz * data.hash_nr + ir];
+    for (int t : candidates) {
+      const int v0 = data.mesh_tri[t*3+0];
+      const int v1 = data.mesh_tri[t*3+1];
+      const int v2 = data.mesh_tri[t*3+2];
+      const double r0 = data.mesh_vtx_r[v0], z0 = data.mesh_vtx_z[v0];
+      const double r1 = data.mesh_vtx_r[v1], z1 = data.mesh_vtx_z[v1];
+      const double r2 = data.mesh_vtx_r[v2], z2 = data.mesh_vtx_z[v2];
+      const double d = (r1-r0)*(z2-z0) - (r2-r0)*(z1-z0);
+      if (std::fabs(d) < 1e-30) continue;
+      const double a = ((r-r0)*(z2-z0) - (r2-r0)*(z-z0)) / d;
+      const double b = ((r1-r0)*(z-z0) - (r-r0)*(z1-z0)) / d;
+      if (a >= -1e-10 && b >= -1e-10 && (a+b) <= 1.0+1e-10) return t;
+    }
+    return -1;
+  }
+
+  // Fallback: brute force scan
+  for (int t = 0; t < data.mesh_ntri; t++) {
+    if (r < data.mesh_tri_rmin[t] || r > data.mesh_tri_rmax[t]) continue;
+    if (z < data.mesh_tri_zmin[t] || z > data.mesh_tri_zmax[t]) continue;
+    const int v0 = data.mesh_tri[t*3+0];
+    const int v1 = data.mesh_tri[t*3+1];
+    const int v2 = data.mesh_tri[t*3+2];
+    const double r0 = data.mesh_vtx_r[v0], z0 = data.mesh_vtx_z[v0];
+    const double r1 = data.mesh_vtx_r[v1], z1 = data.mesh_vtx_z[v1];
+    const double r2 = data.mesh_vtx_r[v2], z2 = data.mesh_vtx_z[v2];
+    const double d = (r1-r0)*(z2-z0) - (r2-r0)*(z1-z0);
+    if (std::fabs(d) < 1e-30) continue;
+    const double a = ((r-r0)*(z2-z0) - (r2-r0)*(z-z0)) / d;
+    const double b = ((r1-r0)*(z-z0) - (r-r0)*(z1-z0)) / d;
+    if (a >= -1e-10 && b >= -1e-10 && (a+b) <= 1.0+1e-10) return t;
+  }
+  return -1;
+}
+
+int ComputePlasmaFields::findNearestMappedTriangle(
+    const PlasmaFileData &data, double r, double z, double max_dist) const
+{
+  double best_d2 = max_dist * max_dist;
+  int best = -1;
+  for (int i = 0; i < static_cast<int>(data.mapped_idx.size()); i++) {
+    double dr = data.mapped_cr[i] - r;
+    double dz = data.mapped_cz[i] - z;
+    double d2 = dr*dr + dz*dz;
+    if (d2 < best_d2) { best_d2 = d2; best = i; }
+  }
+  return (best >= 0) ? data.mapped_idx[best] : -1;
+}
+
+PlasmaFileParams ComputePlasmaFields::meshLookupPlasma(
+    int icell, const PlasmaFileData &data)
+{
+  PlasmaFileParams P{};
+
+  // Get cell center in cylindrical coordinates
+  Grid::ChildCell *cells = grid->cells;
+  const int dim = domain->dimension;
+  double r, z;
+  if (dim == 2) {
+    r = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
+    z = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
+  } else {
+    double x = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
+    double y = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
+    r = std::sqrt(x*x + y*y);
+    z = 0.5 * (cells[icell].lo[2] + cells[icell].hi[2]);
+  }
+
+  int tri_idx = findMeshTriangle(data, r, z);
+  if (tri_idx < 0 || data.mesh_cell_idx[tri_idx] < 0)
+    tri_idx = findNearestMappedTriangle(data, r, z, 0.05);
+  if (tri_idx < 0) return P;
+
+  int cell = data.mesh_cell_idx[tri_idx];
+  if (cell < 0 || cell >= data.mesh_ncell) return P;
+
+  P.temp_e = data.mesh_te[cell];
+  P.dens_e = data.mesh_ne[cell];
+  P.temp_i = data.mesh_ti[cell];
+  P.dens_i = data.mesh_ni[cell];
+  P.parr_flow = (!data.mesh_upar.empty()) ? data.mesh_upar[cell] : 0.0;
+  // Gradients not available from mesh — leave as zero
 
   return P;
 }
@@ -1384,6 +1767,30 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
   P.dens_e = interpField2D(plasma_data.dens_e, s);
   P.temp_i = interpField2D(plasma_data.temp_i, s);
   P.dens_i = interpField2D(plasma_data.dens_i, s);
+
+  // Fallback to mesh if grid gives zero plasma
+  if (plasma_data.has_mesh && P.temp_e <= 0.0 && P.dens_e <= 0.0) {
+    const int dim = domain->dimension;
+    double r, z;
+    if (dim == 2) { r = xyz[0]; z = xyz[1]; }
+    else { r = std::sqrt(xyz[0]*xyz[0]+xyz[1]*xyz[1]); z = xyz[2]; }
+    int tri = findMeshTriangle(plasma_data, r, z);
+    if (tri < 0 || plasma_data.mesh_cell_idx[tri] < 0)
+      tri = findNearestMappedTriangle(plasma_data, r, z, 0.05);
+    if (tri >= 0) {
+      int cell = plasma_data.mesh_cell_idx[tri];
+      if (cell >= 0 && cell < plasma_data.mesh_ncell) {
+        P.temp_e = plasma_data.mesh_te[cell];
+        P.dens_e = plasma_data.mesh_ne[cell];
+        P.temp_i = plasma_data.mesh_ti[cell];
+        P.dens_i = plasma_data.mesh_ni[cell];
+        P.parr_flow = (!plasma_data.mesh_upar.empty()) ? plasma_data.mesh_upar[cell] : 0.0;
+        return P;  // gradients not available from mesh
+      }
+    }
+    return P;
+  }
+
   gradField2D(plasma_data.dens_e, s, P.grad_dens_e_r, P.grad_dens_e_z);
   P.grad_dens_e_t = 0.0;
   P.grad_temp_e_r = interpField2D(plasma_data.grad_temp_e_r, s);
