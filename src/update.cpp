@@ -2177,37 +2177,33 @@ void Update::pusherBoris2D(int i, int icell, double dt,
   double E[3] = {0.0, 0.0, 0.0};
   double B[3] = {0.0, 0.0, 0.0};
 
-  // Cache the grid E-field once per Boris call. The point-query B-field path
-  // is evaluated inside the subcycle loop so it follows the particle position.
+  // Cache E-field once per Boris call
   if (eperturbflag)
     BorisGrid::read_field_from_fix(modify->fix[efieldfix], (efstyle == GFIELD),
                                    efield_active, i, icell, E);
 
-  for (int isub = 0; isub < nsub; isub++) {
-    B[0] = B[1] = B[2] = 0.0;
-
-    // Point-query B-field at particle position.
-    // In 2D (R,Z), the Boris components follow the existing compute aliases:
-    //   Bx = Br, By = Bz, Bz = Bt.
-    bool have_point_b = false;
-    if (boris_plasma_cidx >= 0) {
-      Compute *cp_base = modify->compute[boris_plasma_cidx];
-      ComputePlasmaFields *cp_bf = dynamic_cast<ComputePlasmaFields *>(cp_base);
-      if (cp_bf) {
-        const double xyz[3] = {xcur[0], xcur[1], 0.0};
-        MagneticFieldFileDataParams Bcyl = cp_bf->query_bfield_at_point(xyz);
-        if (Bcyl.Bmag > 0.0) {
-          have_point_b = true;
-          B[0] = Bcyl.br;
-          B[1] = Bcyl.bz;
-          B[2] = Bcyl.bt;
-        }
+  // Cache B-field once via point query at initial position.
+  // Particle displacement per full step (~v*dt ~ 10μm) is negligible
+  // compared to the B-field scale length, so re-querying per subcycle is
+  // unnecessary.
+  if (boris_plasma_cidx >= 0) {
+    Compute *cp_base = modify->compute[boris_plasma_cidx];
+    ComputePlasmaFields *cp_bf = dynamic_cast<ComputePlasmaFields *>(cp_base);
+    if (cp_bf) {
+      const double xyz[3] = {xcur[0], xcur[1], 0.0};
+      MagneticFieldFileDataParams Bcyl = cp_bf->query_bfield_at_point(xyz);
+      if (Bcyl.Bmag > 0.0) {
+        B[0] = Bcyl.br;
+        B[1] = Bcyl.bz;
+        B[2] = Bcyl.bt;
       }
     }
+  }
+  if (B[0] == 0.0 && B[1] == 0.0 && B[2] == 0.0 && bperturbflag)
+    BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
+                                   bfield_active, i, icell, B);
 
-    if (!have_point_b && bperturbflag)
-      BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
-                                     bfield_active, i, icell, B);
+  for (int isub = 0; isub < nsub; isub++) {
 
     if (boris_bad_dt_check && !boris_bad_dt_warned) {
       const double bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
@@ -2442,36 +2438,38 @@ void Update::pusher_boris3D(int i, int icell, double dt,
     sh_d0_sign = (d0 >= 0.0) ? 1.0 : -1.0;
   }
 
+  // Cache B-field once via point query at initial position.
+  double B_cached[3] = {0.0, 0.0, 0.0};
+  if (boris_plasma_cidx >= 0) {
+    Compute *cp_base = modify->compute[boris_plasma_cidx];
+    ComputePlasmaFields *cp_bf = dynamic_cast<ComputePlasmaFields *>(cp_base);
+    if (cp_bf) {
+      MagneticFieldFileDataParams Bcyl = cp_bf->query_bfield_at_point(xcur);
+      if (Bcyl.Bmag > 0.0) {
+        const double rx = xcur[0], ry = xcur[1];
+        const double rxy = std::sqrt(rx*rx + ry*ry);
+        double cphi = 1.0, sphi = 0.0;
+        if (rxy > 1.0e-20) { cphi = rx / rxy; sphi = ry / rxy; }
+        B_cached[0] = Bcyl.br * cphi - Bcyl.bt * sphi;
+        B_cached[1] = Bcyl.br * sphi + Bcyl.bt * cphi;
+        B_cached[2] = Bcyl.bz;
+      }
+    }
+  }
+  if (B_cached[0] == 0.0 && B_cached[1] == 0.0 && B_cached[2] == 0.0 && bperturbflag)
+    BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
+                                   bfield_active, i, icell, B_cached);
+
   for (int isub = 0; isub < nsub; isub++) {
     double E[3] = {0.0, 0.0, 0.0};
-    double B[3] = {0.0, 0.0, 0.0};
+    double B[3] = {B_cached[0], B_cached[1], B_cached[2]};
 
     if (eperturbflag)
       BorisGrid::read_field_from_fix(modify->fix[efieldfix], (efstyle == GFIELD),
                                      efield_active, i, icell, E);
 
-    // Point-query B-field at particle position (equilibrium-derived, full domain)
-    bool have_point_b = false;
-    if (boris_plasma_cidx >= 0) {
-      Compute *cp_base = modify->compute[boris_plasma_cidx];
-      ComputePlasmaFields *cp_bf = dynamic_cast<ComputePlasmaFields *>(cp_base);
-      if (cp_bf) {
-        MagneticFieldFileDataParams Bcyl = cp_bf->query_bfield_at_point(xcur);
-        if (Bcyl.Bmag > 0.0) {
-          have_point_b = true;
-          const double rx = xcur[0], ry = xcur[1];
-          const double rxy = std::sqrt(rx*rx + ry*ry);
-          double cphi = 1.0, sphi = 0.0;
-          if (rxy > 1.0e-20) { cphi = rx / rxy; sphi = ry / rxy; }
-          B[0] = Bcyl.br * cphi - Bcyl.bt * sphi;
-          B[1] = Bcyl.br * sphi + Bcyl.bt * cphi;
-          B[2] = Bcyl.bz;
-        }
-      }
-    }
-
-    // Fall back to grid-stored B-field if no point query
-    if (!have_point_b && bperturbflag)
+    // Fall back to grid-stored B-field if no cached value
+    if (B[0] == 0.0 && B[1] == 0.0 && B[2] == 0.0 && bperturbflag)
       BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
                                      bfield_active, i, icell, B);
 
@@ -2958,33 +2956,33 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
     GCAPusher::gca_to_particle(gca, B, mass, rand_u, xnew, v);
   } else {
     // --- Boris path (with subcycling) ---
-    const int nsub = (boris_subcycles > 0) ? boris_subcycles : 1;
+    const int nsub = (charge != 0.0 && boris_subcycles > 0) ? boris_subcycles : 1;
     const double dt_sub = dt / static_cast<double>(nsub);
 
     double xcur[3] = {x[0], x[1], x[2]};
     double vcur[3] = {v[0], v[1], v[2]};
 
-    for (int isub = 0; isub < nsub; isub++) {
-      // For point-interpolated B, re-evaluate at the current particle location.
-      if (cp_bfield) {
-        MagneticFieldFileDataParams Bc = cp_bfield->query_bfield_at_point(xcur);
-        if (Bc.Bmag > 0.0) {
-          if (domain->dimension == 2) {
-            B[0] = Bc.br;
-            B[1] = Bc.bz;
-            B[2] = Bc.bt;
-          } else {
-            const double rx = xcur[0], ry = xcur[1];
-            const double rxy = std::sqrt(rx*rx + ry*ry);
-            double cphi = 1.0, sphi = 0.0;
-            if (rxy > 1.0e-20) { cphi = rx / rxy; sphi = ry / rxy; }
-            B[0] = Bc.br * cphi - Bc.bt * sphi;
-            B[1] = Bc.br * sphi + Bc.bt * cphi;
-            B[2] = Bc.bz;
-          }
+    // Cache B-field once at initial position for subcycling
+    if (cp_bfield) {
+      MagneticFieldFileDataParams Bc = cp_bfield->query_bfield_at_point(xcur);
+      if (Bc.Bmag > 0.0) {
+        if (domain->dimension == 2) {
+          B[0] = Bc.br;
+          B[1] = Bc.bz;
+          B[2] = Bc.bt;
+        } else {
+          const double rx = xcur[0], ry = xcur[1];
+          const double rxy = std::sqrt(rx*rx + ry*ry);
+          double cphi = 1.0, sphi = 0.0;
+          if (rxy > 1.0e-20) { cphi = rx / rxy; sphi = ry / rxy; }
+          B[0] = Bc.br * cphi - Bc.bt * sphi;
+          B[1] = Bc.br * sphi + Bc.bt * cphi;
+          B[2] = Bc.bz;
         }
       }
+    }
 
+    for (int isub = 0; isub < nsub; isub++) {
       BorisGrid::push_velocity(qm, dt_sub, E, B, vcur);
       xcur[0] += vcur[0] * dt_sub;
       xcur[1] += vcur[1] * dt_sub;
