@@ -51,9 +51,14 @@ adas_dir ../../database/adas :pre
 
 {Plasma cache mode} (no {plasma} keyword): Te and ne are read from
 the per-particle plasma cache populated by {update.cpp} each timestep.
-This requires that a sheath or GCA plasma compute is active (i.e.
-{global sheath ...} or {global gca ...} is configured).  When a sheath
-model is active, the cached ne is Boltzmann-corrected:
+This requires an active particle-side plasma provider, e.g.:
+
+{global sheath geom_compute ... plasma_compute ID} :ulb,l
+{global sheath geom_compute ... plasma_fix ID} :l
+{global bfield_compute ID} :l
+{global gca plasma_compute ID} :l,ule
+
+When a sheath model is active, the cached ne is Boltzmann-corrected:
 
 ne_local = ne_upstream * exp(-phi_sheath / Te) :pre
 
@@ -99,4 +104,3 @@ Nevery = 1 is recommended for accuracy; larger values are handled correctly via 
 
 "compute plasma/fields"_compute_plasma_fields.html,
 "OpenEdge index"_index.html
-

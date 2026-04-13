@@ -5,6 +5,13 @@
 
    Usage:
      fix ID plasma/data file plasma.h5 [equilibrium file.equ] [static yes]
+     fix ID plasma/data constant [r_bounds rmin rmax] [z_bounds zmin zmax]
+                         [ne val] [te val] [ni val] [ti val]
+                         [parr_flow val] [parr_flow_r val] [parr_flow_t val]
+                         [parr_flow_z val] [grad_te_r val] [grad_te_t val]
+                         [grad_te_z val] [grad_ti_r val] [grad_ti_t val]
+                         [grad_ti_z val] [epar val] [br val] [bz val] [bt val]
+                         [equilibrium file.equ] [static yes]
 
    Other fixes/computes access this via:
      int ifix = modify->find_fix("ID");
@@ -15,7 +22,9 @@
 #include "string.h"
 #include "fix_plasma_data.h"
 #include "comm.h"
+#include "domain.h"
 #include "error.h"
+#include "input.h"
 #include "modify.h"
 
 #include <H5Cpp.h>
@@ -27,14 +36,19 @@
 
 using namespace SPARTA_NS;
 
+namespace {
+enum { PLASMA_SOURCE_FILE = 0, PLASMA_SOURCE_CONSTANT = 1 };
+}
+
 /* ---------------------------------------------------------------------- */
 
 FixPlasmaData::FixPlasmaData(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
   // fix ID plasma/data file PATH [equilibrium PATH] [static yes/no]
-  if (narg < 4)
-    error->all(FLERR, "Illegal fix plasma/data command: need at least 'file PATH'");
+  // fix ID plasma/data constant ...
+  if (narg < 3)
+    error->all(FLERR, "Illegal fix plasma/data command");
 
   nr = nz = 0;
   nion = 0;
@@ -42,17 +56,47 @@ FixPlasmaData::FixPlasmaData(SPARTA *sparta, int narg, char **arg) :
   has_equ = 0;
   has_mesh = 0;
   is_static = 0;
+  source_mode = -1;
   generation = 0;
   equ_jm = equ_km = 0;
   btf = rtf = psib = psi_axis = 0.0;
   mesh_nvtx = mesh_ntri = mesh_ncell = 0;
+  const_has_r_bounds = const_has_z_bounds = 0;
+  const_rmin = 0.0; const_rmax = 1.0;
+  const_zmin = 0.0; const_zmax = 1.0;
+  const_dens_e = const_temp_e = 0.0;
+  const_dens_i = const_temp_i = 0.0;
+  const_has_dens_i = const_has_temp_i = 0;
+  const_parr_flow = const_parr_flow_r = const_parr_flow_t = const_parr_flow_z = 0.0;
+  const_grad_te_r = const_grad_te_t = const_grad_te_z = 0.0;
+  const_grad_ti_r = const_grad_ti_t = const_grad_ti_z = 0.0;
+  const_epar = 0.0;
+  const_br = const_bz = const_bt = 0.0;
+  const_has_bfield = 0;
 
   int iarg = 2;
+  auto parse_scalar = [&](double &dst, const char *label) {
+    if (iarg + 1 >= narg) {
+      char msg[256];
+      snprintf(msg, sizeof(msg), "fix plasma/data: %s needs a numeric value", label);
+      error->all(FLERR, msg);
+    }
+    dst = input->numeric(FLERR, arg[iarg + 1]);
+    iarg += 2;
+  };
   while (iarg < narg) {
     if (strcmp(arg[iarg], "file") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "fix plasma/data: file needs path");
+      if (source_mode == PLASMA_SOURCE_CONSTANT)
+        error->all(FLERR, "fix plasma/data: choose either file or constant mode");
+      source_mode = PLASMA_SOURCE_FILE;
       plasma_path = std::string(arg[iarg + 1]);
       iarg += 2;
+    } else if (strcmp(arg[iarg], "constant") == 0) {
+      if (source_mode == PLASMA_SOURCE_FILE)
+        error->all(FLERR, "fix plasma/data: choose either file or constant mode");
+      source_mode = PLASMA_SOURCE_CONSTANT;
+      iarg += 1;
     } else if (strcmp(arg[iarg], "equilibrium") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "fix plasma/data: equilibrium needs path");
       equ_path = std::string(arg[iarg + 1]);
@@ -63,6 +107,59 @@ FixPlasmaData::FixPlasmaData(SPARTA *sparta, int narg, char **arg) :
       else if (strcmp(arg[iarg + 1], "no") == 0) is_static = 0;
       else error->all(FLERR, "fix plasma/data: static must be yes or no");
       iarg += 2;
+    } else if (strcmp(arg[iarg], "r_bounds") == 0) {
+      if (iarg + 2 >= narg) error->all(FLERR, "fix plasma/data: r_bounds needs rmin rmax");
+      const_rmin = input->numeric(FLERR, arg[iarg + 1]);
+      const_rmax = input->numeric(FLERR, arg[iarg + 2]);
+      const_has_r_bounds = 1;
+      iarg += 3;
+    } else if (strcmp(arg[iarg], "z_bounds") == 0) {
+      if (iarg + 2 >= narg) error->all(FLERR, "fix plasma/data: z_bounds needs zmin zmax");
+      const_zmin = input->numeric(FLERR, arg[iarg + 1]);
+      const_zmax = input->numeric(FLERR, arg[iarg + 2]);
+      const_has_z_bounds = 1;
+      iarg += 3;
+    } else if (strcmp(arg[iarg], "ne") == 0 || strcmp(arg[iarg], "dens_e") == 0) {
+      parse_scalar(const_dens_e, arg[iarg]);
+    } else if (strcmp(arg[iarg], "te") == 0 || strcmp(arg[iarg], "temp_e") == 0) {
+      parse_scalar(const_temp_e, arg[iarg]);
+    } else if (strcmp(arg[iarg], "ni") == 0 || strcmp(arg[iarg], "dens_i") == 0) {
+      parse_scalar(const_dens_i, arg[iarg]);
+      const_has_dens_i = 1;
+    } else if (strcmp(arg[iarg], "ti") == 0 || strcmp(arg[iarg], "temp_i") == 0) {
+      parse_scalar(const_temp_i, arg[iarg]);
+      const_has_temp_i = 1;
+    } else if (strcmp(arg[iarg], "parr_flow") == 0 || strcmp(arg[iarg], "upar") == 0) {
+      parse_scalar(const_parr_flow, arg[iarg]);
+    } else if (strcmp(arg[iarg], "parr_flow_r") == 0 || strcmp(arg[iarg], "upar_r") == 0) {
+      parse_scalar(const_parr_flow_r, arg[iarg]);
+    } else if (strcmp(arg[iarg], "parr_flow_t") == 0 || strcmp(arg[iarg], "upar_t") == 0) {
+      parse_scalar(const_parr_flow_t, arg[iarg]);
+    } else if (strcmp(arg[iarg], "parr_flow_z") == 0 || strcmp(arg[iarg], "upar_z") == 0) {
+      parse_scalar(const_parr_flow_z, arg[iarg]);
+    } else if (strcmp(arg[iarg], "grad_te_r") == 0) {
+      parse_scalar(const_grad_te_r, arg[iarg]);
+    } else if (strcmp(arg[iarg], "grad_te_t") == 0) {
+      parse_scalar(const_grad_te_t, arg[iarg]);
+    } else if (strcmp(arg[iarg], "grad_te_z") == 0) {
+      parse_scalar(const_grad_te_z, arg[iarg]);
+    } else if (strcmp(arg[iarg], "grad_ti_r") == 0) {
+      parse_scalar(const_grad_ti_r, arg[iarg]);
+    } else if (strcmp(arg[iarg], "grad_ti_t") == 0) {
+      parse_scalar(const_grad_ti_t, arg[iarg]);
+    } else if (strcmp(arg[iarg], "grad_ti_z") == 0) {
+      parse_scalar(const_grad_ti_z, arg[iarg]);
+    } else if (strcmp(arg[iarg], "epar") == 0) {
+      parse_scalar(const_epar, arg[iarg]);
+    } else if (strcmp(arg[iarg], "br") == 0) {
+      parse_scalar(const_br, arg[iarg]);
+      const_has_bfield = 1;
+    } else if (strcmp(arg[iarg], "bz") == 0) {
+      parse_scalar(const_bz, arg[iarg]);
+      const_has_bfield = 1;
+    } else if (strcmp(arg[iarg], "bt") == 0) {
+      parse_scalar(const_bt, arg[iarg]);
+      const_has_bfield = 1;
     } else {
       char msg[256];
       snprintf(msg, sizeof(msg),
@@ -71,8 +168,14 @@ FixPlasmaData::FixPlasmaData(SPARTA *sparta, int narg, char **arg) :
     }
   }
 
-  if (plasma_path.empty())
+  if (source_mode < 0)
+    error->all(FLERR, "fix plasma/data: must specify either 'file PATH' or 'constant'");
+  if (source_mode == PLASMA_SOURCE_FILE && plasma_path.empty())
     error->all(FLERR, "fix plasma/data: must specify 'file PATH'");
+  if (const_has_r_bounds && const_rmax <= const_rmin)
+    error->all(FLERR, "fix plasma/data: r_bounds requires rmax > rmin");
+  if (const_has_z_bounds && const_zmax <= const_zmin)
+    error->all(FLERR, "fix plasma/data: z_bounds requires zmax > zmin");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -100,8 +203,13 @@ void FixPlasmaData::init()
 
 void FixPlasmaData::reload()
 {
+  clear_loaded_data();
+
   try {
-    if (comm->me == 0) load_plasma_h5();
+    if (comm->me == 0) {
+      if (source_mode == PLASMA_SOURCE_FILE) load_plasma_h5();
+      else load_constant_profile();
+    }
   } catch (const std::exception &e) {
     error->one(FLERR, e.what());
   }
@@ -211,10 +319,132 @@ void FixPlasmaData::reload()
 
 /* ---------------------------------------------------------------------- */
 
+void FixPlasmaData::clear_loaded_data()
+{
+  nr = nz = 0;
+  nion = 0;
+  has_bfield = 0;
+  has_equ = 0;
+  has_mesh = 0;
+  equ_jm = equ_km = 0;
+  btf = rtf = psib = psi_axis = 0.0;
+  mesh_nvtx = mesh_ntri = mesh_ncell = 0;
+
+  rvals.clear();
+  zvals.clear();
+  dens_e.clear();
+  temp_e.clear();
+  dens_i.clear();
+  temp_i.clear();
+  parr_flow.clear();
+  parr_flow_r.clear();
+  parr_flow_t.clear();
+  parr_flow_z.clear();
+  grad_te_r.clear();
+  grad_te_t.clear();
+  grad_te_z.clear();
+  grad_ti_r.clear();
+  grad_ti_t.clear();
+  grad_ti_z.clear();
+  epar.clear();
+  br.clear();
+  bz.clear();
+  bt.clear();
+  ion_charge_z.clear();
+  ion_mass_amu.clear();
+  ion_names.clear();
+  ions_dens.clear();
+  ions_temp.clear();
+  ions_upar.clear();
+  equ_r.clear();
+  equ_z.clear();
+  psirz.clear();
+  mesh_vtx_r.clear();
+  mesh_vtx_z.clear();
+  mesh_tri.clear();
+  mesh_cell_idx.clear();
+  mesh_ne.clear();
+  mesh_te.clear();
+  mesh_ti.clear();
+  mesh_ni.clear();
+  mesh_upar.clear();
+  valid_mask.clear();
+}
+
+/* ---------------------------------------------------------------------- */
+
 void FixPlasmaData::reload_plasma(const std::string &path)
 {
   plasma_path = path;
+  source_mode = PLASMA_SOURCE_FILE;
   reload();
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixPlasmaData::load_constant_profile()
+{
+  double rmin = const_rmin, rmax = const_rmax;
+  double zmin = const_zmin, zmax = const_zmax;
+
+  if (!const_has_r_bounds || !const_has_z_bounds) {
+    if (domain->dimension == 2) {
+      if (!const_has_r_bounds) { rmin = domain->boxlo[0]; rmax = domain->boxhi[0]; }
+      if (!const_has_z_bounds) { zmin = domain->boxlo[1]; zmax = domain->boxhi[1]; }
+    } else {
+      const double r00 = std::hypot(domain->boxlo[0], domain->boxlo[1]);
+      const double r01 = std::hypot(domain->boxlo[0], domain->boxhi[1]);
+      const double r10 = std::hypot(domain->boxhi[0], domain->boxlo[1]);
+      const double r11 = std::hypot(domain->boxhi[0], domain->boxhi[1]);
+      if (!const_has_r_bounds) {
+        rmin = 0.0;
+        rmax = std::max(std::max(r00, r01), std::max(r10, r11));
+      }
+      if (!const_has_z_bounds) { zmin = domain->boxlo[2]; zmax = domain->boxhi[2]; }
+    }
+  }
+
+  if (rmax <= rmin) rmax = rmin + 1.0;
+  if (zmax <= zmin) zmax = zmin + 1.0;
+
+  nr = 2;
+  nz = 2;
+  rvals = {rmin, rmax};
+  zvals = {zmin, zmax};
+
+  const size_t n = 4;
+  const double ni_uniform = const_has_dens_i ? const_dens_i : const_dens_e;
+  const double ti_uniform = const_has_temp_i ? const_temp_i : const_temp_e;
+
+  dens_e.assign(n, const_dens_e);
+  temp_e.assign(n, const_temp_e);
+  dens_i.assign(n, ni_uniform);
+  temp_i.assign(n, ti_uniform);
+  parr_flow.assign(n, const_parr_flow);
+  parr_flow_r.assign(n, const_parr_flow_r);
+  parr_flow_t.assign(n, const_parr_flow_t);
+  parr_flow_z.assign(n, const_parr_flow_z);
+  grad_te_r.assign(n, const_grad_te_r);
+  grad_te_t.assign(n, const_grad_te_t);
+  grad_te_z.assign(n, const_grad_te_z);
+  grad_ti_r.assign(n, const_grad_ti_r);
+  grad_ti_t.assign(n, const_grad_ti_t);
+  grad_ti_z.assign(n, const_grad_ti_z);
+  epar.assign(n, const_epar);
+
+  has_bfield = const_has_bfield;
+  if (has_bfield) {
+    br.assign(n, const_br);
+    bz.assign(n, const_bz);
+    bt.assign(n, const_bt);
+  }
+
+  if (screen) {
+    fprintf(screen,
+            "[plasma/data] Using inline constant fields on synthetic %d x %d grid"
+            " (R:[%.6g,%.6g] Z:[%.6g,%.6g])\n",
+            nr, nz, rmin, rmax, zmin, zmax);
+  }
 }
 
 /* ---------------------------------------------------------------------- */

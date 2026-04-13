@@ -81,13 +81,28 @@ class FixPlasmaData : public Fix {
 
   // ---- Configuration ----
   int is_static;                   // 1 = never reload
+  int source_mode;                 // 0=file, 1=constant
   std::string plasma_path;
   std::string equ_path;
 
  private:
+  void clear_loaded_data();
   void load_plasma_h5();
+  void load_constant_profile();
   void load_equilibrium();
   void derive_bfield_from_equ();
+
+  // ---- Constant-mode configuration ----
+  int const_has_r_bounds, const_has_z_bounds;
+  double const_rmin, const_rmax, const_zmin, const_zmax;
+  double const_dens_e, const_temp_e, const_dens_i, const_temp_i;
+  int const_has_dens_i, const_has_temp_i;
+  double const_parr_flow, const_parr_flow_r, const_parr_flow_t, const_parr_flow_z;
+  double const_grad_te_r, const_grad_te_t, const_grad_te_z;
+  double const_grad_ti_r, const_grad_ti_t, const_grad_ti_z;
+  double const_epar;
+  double const_br, const_bz, const_bt;
+  int const_has_bfield;
 };
 
 }

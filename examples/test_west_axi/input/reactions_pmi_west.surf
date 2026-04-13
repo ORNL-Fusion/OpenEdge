@@ -1,0 +1,101 @@
+# PMI surface reactions for WEST wall impacts of tracked tungsten particles.
+# File-mode coefficients come from input/74_on_74_pmi.h5.
+
+W --> W
+R Simple 1.0
+
+W --> W
+S Simple 1.0
+
+W --> NULL
+A Simple 1.0
+
+W+ --> W
+R Simple 1.0
+
+W+ --> W
+S Simple 1.0
+
+W+ --> NULL
+A Simple 1.0
+
+W2+ --> W
+R Simple 1.0
+
+W2+ --> W
+S Simple 1.0
+
+W2+ --> NULL
+A Simple 1.0
+
+W3+ --> W
+R Simple 1.0
+
+W3+ --> W
+S Simple 1.0
+
+W3+ --> NULL
+A Simple 1.0
+
+W4+ --> W
+R Simple 1.0
+
+W4+ --> W
+S Simple 1.0
+
+W4+ --> NULL
+A Simple 1.0
+
+W5+ --> W
+R Simple 1.0
+
+W5+ --> W
+S Simple 1.0
+
+W5+ --> NULL
+A Simple 1.0
+
+W6+ --> W
+R Simple 1.0
+
+W6+ --> W
+S Simple 1.0
+
+W6+ --> NULL
+A Simple 1.0
+
+W7+ --> W
+R Simple 1.0
+
+W7+ --> W
+S Simple 1.0
+
+W7+ --> NULL
+A Simple 1.0
+
+W8+ --> W
+R Simple 1.0
+
+W8+ --> W
+S Simple 1.0
+
+W8+ --> NULL
+A Simple 1.0
+
+W9+ --> W
+R Simple 1.0
+
+W9+ --> W
+S Simple 1.0
+
+W9+ --> NULL
+A Simple 1.0
+
+W10+ --> W
+R Simple 1.0
+
+W10+ --> W
+S Simple 1.0
+
+W10+ --> NULL
+A Simple 1.0

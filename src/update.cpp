@@ -37,6 +37,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "sheath_models.h"
 #include "compute_sheath_geometry_grid.h"
 #include "compute_plasma_fields.h"
+#include "fix_plasma_data.h"
 #include "memory.h"
 #include "error.h"
 #include <algorithm>
@@ -55,6 +56,74 @@ enum{NCHILD,NPARENT,NUNKNOWN,NPBCHILD,NPBPARENT,NPBUNKNOWN,NBOUND};  // Grid
 enum{TALLYAUTO,TALLYREDUCE,TALLYRVOUS};         // same as Surf
 enum{PERAUTO,PERCELL,PERSURF};                  // several files
 enum{NOFIELD,CFIELD,PFIELD,GFIELD};             // several files
+
+namespace {
+
+inline void xyz_to_rz(const double xyz[3], int dim, double &R, double &Z)
+{
+  if (dim == 2) {
+    R = xyz[0];
+    Z = xyz[1];
+  } else {
+    R = std::sqrt(xyz[0] * xyz[0] + xyz[1] * xyz[1]);
+    Z = xyz[2];
+  }
+}
+
+inline void grad_from_fix(const FixPlasmaData *pd, const std::vector<double> &field,
+                          double R, double Z, double &d_dr, double &d_dz)
+{
+  d_dr = 0.0;
+  d_dz = 0.0;
+  if (!pd || field.empty() || pd->nr < 2 || pd->nz < 2) return;
+
+  const double dR = std::max(1.0e-9, 0.5 * std::fabs(pd->rvals[1] - pd->rvals[0]));
+  const double dZ = std::max(1.0e-9, 0.5 * std::fabs(pd->zvals[1] - pd->zvals[0]));
+  d_dr = (pd->interp2D(field, R + dR, Z) - pd->interp2D(field, R - dR, Z)) / (2.0 * dR);
+  d_dz = (pd->interp2D(field, R, Z + dZ) - pd->interp2D(field, R, Z - dZ)) / (2.0 * dZ);
+}
+
+inline PlasmaFileParams query_plasma_from_fix(const FixPlasmaData *pd, const double xyz[3], int dim)
+{
+  PlasmaFileParams P{};
+  if (!pd) return P;
+
+  double R, Z;
+  xyz_to_rz(xyz, dim, R, Z);
+
+  P.temp_e = pd->interp2D(pd->temp_e, R, Z);
+  P.dens_e = pd->interp2D(pd->dens_e, R, Z);
+  P.temp_i = pd->interp2D(pd->temp_i, R, Z);
+  P.dens_i = pd->interp2D(pd->dens_i, R, Z);
+  P.parr_flow = pd->interp2D(pd->parr_flow, R, Z);
+  P.parr_flow_r = pd->interp2D(pd->parr_flow_r, R, Z);
+  P.parr_flow_t = pd->interp2D(pd->parr_flow_t, R, Z);
+  P.parr_flow_z = pd->interp2D(pd->parr_flow_z, R, Z);
+  P.grad_temp_e_r = pd->interp2D(pd->grad_te_r, R, Z);
+  P.grad_temp_e_t = pd->interp2D(pd->grad_te_t, R, Z);
+  P.grad_temp_e_z = pd->interp2D(pd->grad_te_z, R, Z);
+  P.grad_temp_i_r = pd->interp2D(pd->grad_ti_r, R, Z);
+  P.grad_temp_i_t = pd->interp2D(pd->grad_ti_t, R, Z);
+  P.grad_temp_i_z = pd->interp2D(pd->grad_ti_z, R, Z);
+  P.epar = pd->interp2D(pd->epar, R, Z);
+  grad_from_fix(pd, pd->dens_e, R, Z, P.grad_dens_e_r, P.grad_dens_e_z);
+  P.grad_dens_e_t = 0.0;
+  return P;
+}
+
+inline MagneticFieldFileDataParams query_bfield_from_fix(const FixPlasmaData *pd,
+                                                         const double xyz[3], int dim)
+{
+  MagneticFieldFileDataParams B{};
+  if (!pd || !pd->has_bfield) return B;
+
+  xyz_to_rz(xyz, dim, B.r, B.z);
+  pd->bfield_at(B.r, B.z, B.br, B.bz, B.bt);
+  B.Bmag = std::sqrt(B.br * B.br + B.bt * B.bt + B.bz * B.bz);
+  return B;
+}
+
+}  // namespace
 
 
 #define MAXSTUCK 20
@@ -138,6 +207,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   thermal_gradient_forces_flag = 0;
   boris_plasma_cid = NULL;
   boris_plasma_cidx = -1;
+  boris_plasma_fidx = -1;
 
   boris_dump_flag = 0;
   boris_dump_every = 1;
@@ -175,6 +245,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   sheath_plasma_cid = NULL;
   sheath_geom_cidx = -1;
   sheath_plasma_cidx = -1;
+  sheath_plasma_fidx = -1;
   sheath_model = 0;             // 0=borodkina, 1=coulette_manfredi
   sheath_dmax = 0.02;
   sheath_pot_mult = 2.5;
@@ -376,7 +447,7 @@ void Update::init()
     ithermalflag = 1;
   }
 
-  // Resolve per-particle sheath compute IDs
+  // Resolve per-particle sheath geometry compute and plasma provider IDs
   if (sheath_flag) {
     sheath_geom_cidx = modify->find_compute(sheath_geom_cid);
     if (sheath_geom_cidx < 0)
@@ -385,19 +456,37 @@ void Update::init()
       error->all(FLERR,"global sheath: geometry compute must be per-grid");
 
     sheath_plasma_cidx = modify->find_compute(sheath_plasma_cid);
-    if (sheath_plasma_cidx < 0)
-      error->all(FLERR,"global sheath: plasma compute ID not found");
-    if (!modify->compute[sheath_plasma_cidx]->per_grid_flag)
-      error->all(FLERR,"global sheath: plasma compute must be per-grid");
+    sheath_plasma_fidx = -1;
+    if (sheath_plasma_cidx >= 0) {
+      if (!modify->compute[sheath_plasma_cidx]->per_grid_flag)
+        error->all(FLERR,"global sheath: plasma compute must be per-grid");
+    } else {
+      sheath_plasma_fidx = modify->find_fix(sheath_plasma_cid);
+      if (sheath_plasma_fidx < 0)
+        error->all(FLERR,"global sheath: plasma provider ID not found");
+      auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[sheath_plasma_fidx]);
+      if (!pd)
+        error->all(FLERR,
+                   "global sheath: plasma fix provider must be style plasma/data");
+    }
   }
 
   // Resolve Boris point-query B-field compute
   if (boris_plasma_cid) {
     boris_plasma_cidx = modify->find_compute(boris_plasma_cid);
-    if (boris_plasma_cidx < 0)
-      error->all(FLERR,"global bfield_compute: compute ID not found");
-    if (!modify->compute[boris_plasma_cidx]->per_grid_flag)
-      error->all(FLERR,"global bfield_compute: compute must be per-grid");
+    boris_plasma_fidx = -1;
+    if (boris_plasma_cidx >= 0) {
+      if (!modify->compute[boris_plasma_cidx]->per_grid_flag)
+        error->all(FLERR,"global bfield_compute: compute must be per-grid");
+    } else {
+      boris_plasma_fidx = modify->find_fix(boris_plasma_cid);
+      if (boris_plasma_fidx < 0)
+        error->all(FLERR,"global bfield_compute: provider ID not found");
+      auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[boris_plasma_fidx]);
+      if (!pd)
+        error->all(FLERR,
+                   "global bfield_compute: fix provider must be style plasma/data");
+    }
   }
 
   // Resolve GCA plasma/fields compute for grad(B)
@@ -447,14 +536,21 @@ void Update::init()
   }
 
   // Register per-particle plasma cache vectors.
-  // Active when any plasma compute is available (sheath, GCA, or Boris B query).
+  // Active when any plasma provider is available (sheath, GCA, or Boris B query).
   {
     int plasma_cidx = -1;
-    if (sheath_flag && sheath_plasma_cidx >= 0) plasma_cidx = sheath_plasma_cidx;
-    else if (gca_flag && gca_plasma_cidx >= 0) plasma_cidx = gca_plasma_cidx;
-    else if (boris_plasma_cidx >= 0) plasma_cidx = boris_plasma_cidx;
+    int plasma_fidx = -1;
+    if (sheath_flag && (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
+      plasma_cidx = sheath_plasma_cidx;
+      plasma_fidx = sheath_plasma_fidx;
+    } else if (gca_flag && gca_plasma_cidx >= 0) {
+      plasma_cidx = gca_plasma_cidx;
+    } else if (boris_plasma_cidx >= 0 || boris_plasma_fidx >= 0) {
+      plasma_cidx = boris_plasma_cidx;
+      plasma_fidx = boris_plasma_fidx;
+    }
 
-    if (plasma_cidx >= 0) {
+    if (plasma_cidx >= 0 || plasma_fidx >= 0) {
       const int custom_double = 1;
       auto reg = [&](int &idx, const char *name) {
         if (idx < 0) {
@@ -661,19 +757,31 @@ void Update::cache_plasma_particles()
 {
   // Resolve the plasma compute used for point-sampled particle caches.
   int plasma_cidx = -1;
-  if (sheath_flag && sheath_plasma_cidx >= 0) plasma_cidx = sheath_plasma_cidx;
-  else if (gca_flag && gca_plasma_cidx >= 0) plasma_cidx = gca_plasma_cidx;
-  else if (boris_plasma_cidx >= 0) plasma_cidx = boris_plasma_cidx;
-  if (plasma_cidx < 0) return;
+  int plasma_fidx = -1;
+  if (sheath_flag && (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
+    plasma_cidx = sheath_plasma_cidx;
+    plasma_fidx = sheath_plasma_fidx;
+  } else if (gca_flag && gca_plasma_cidx >= 0) {
+    plasma_cidx = gca_plasma_cidx;
+  } else if (boris_plasma_cidx >= 0 || boris_plasma_fidx >= 0) {
+    plasma_cidx = boris_plasma_cidx;
+    plasma_fidx = boris_plasma_fidx;
+  }
+  if (plasma_cidx < 0 && plasma_fidx < 0) return;
 
-  Compute *c_base = modify->compute[plasma_cidx];
-  auto *cp = dynamic_cast<ComputePlasmaFields *>(c_base);
-  if (!cp) return;
-
-  // ensure per-grid data is computed this timestep
-  if (!(c_base->invoked_flag & 16)) {  // INVOKED_PER_GRID = 16
-    c_base->compute_per_grid();
-    c_base->invoked_flag |= 16;
+  ComputePlasmaFields *cp = nullptr;
+  FixPlasmaData *pd = nullptr;
+  if (plasma_cidx >= 0) {
+    Compute *c_base = modify->compute[plasma_cidx];
+    cp = dynamic_cast<ComputePlasmaFields *>(c_base);
+    if (!cp) return;
+    if (!(c_base->invoked_flag & 16)) {  // INVOKED_PER_GRID = 16
+      c_base->compute_per_grid();
+      c_base->invoked_flag |= 16;
+    }
+  } else {
+    pd = dynamic_cast<FixPlasmaData *>(modify->fix[plasma_fidx]);
+    if (!pd) return;
   }
 
   // resolve per-particle custom vectors
@@ -726,7 +834,8 @@ void Update::cache_plasma_particles()
 
   for (int i = 0; i < nlocal; i++) {
     const double *x = particles[i].x;
-    PlasmaFileParams pf = cp->query_plasma_at_point(x);
+    PlasmaFileParams pf = cp ? cp->query_plasma_at_point(x)
+                             : query_plasma_from_fix(pd, x, dim);
 
     te_vec[i]   = pf.temp_e;
     ti_vec[i]   = pf.temp_i;
@@ -740,7 +849,8 @@ void Update::cache_plasma_particles()
     gti_r_vec[i] = pf.grad_temp_i_r;
     gti_z_vec[i] = pf.grad_temp_i_z;
 
-    MagneticFieldFileDataParams bf = cp->query_bfield_at_point(x);
+    MagneticFieldFileDataParams bf = cp ? cp->query_bfield_at_point(x)
+                                        : query_bfield_from_fix(pd, x, dim);
     // Store B and background E at particle position using the same component
     // mapping as compute plasma/fields: 2D -> (Bx,By,Bz)=(Br,Bz,Bt).
     const double rx = x[0], ry = x[1];
@@ -989,11 +1099,14 @@ template < int DIM, int SURF, int OPT > void Update::move()
   // Pre-compute sheath geometry and plasma BEFORE the particle loop.
   // Geometry is static (surfaces don't move) — compute once, reuse forever.
   // Plasma may update if coupled to a solver; for analytic profiles it's also static.
-  if (sheath_flag && sheath_geom_cidx >= 0 && sheath_plasma_cidx >= 0) {
+  if (sheath_flag && sheath_geom_cidx >= 0 &&
+      (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
     Compute *cg = modify->compute[sheath_geom_cidx];
     if (cg->invoked_per_grid < 0) cg->compute_per_grid();  // only first time
-    Compute *cp = modify->compute[sheath_plasma_cidx];
-    if (cp->invoked_per_grid < 0) cp->compute_per_grid();   // only first time
+    if (sheath_plasma_cidx >= 0) {
+      Compute *cp = modify->compute[sheath_plasma_cidx];
+      if (cp->invoked_per_grid < 0) cp->compute_per_grid();   // only first time
+    }
   }
 
   // one or more loops over particles
@@ -1602,15 +1715,23 @@ template < int DIM, int SURF, int OPT > void Update::move()
 
               // --- Sheath kick: apply sheath energy as velocity boost at wall ---
               if (sheath_kick && sheath_flag &&
-                  sheath_geom_cidx >= 0 && sheath_plasma_cidx >= 0) {
+                  sheath_geom_cidx >= 0 &&
+                  (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
                 // Get surface normal (outward, toward plasma)
                 const double *snorm = (DIM == 3) ? tri->norm : line->norm;
 
                 // Plasma conditions at particle position (point query)
-                Compute *cp_base = modify->compute[sheath_plasma_cidx];
-                auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
-                if (cp) {
-                  PlasmaFileParams sk_pf = cp->query_plasma_at_point(x);
+                ComputePlasmaFields *cp = nullptr;
+                FixPlasmaData *pd = nullptr;
+                if (sheath_plasma_cidx >= 0) {
+                  Compute *cp_base = modify->compute[sheath_plasma_cidx];
+                  cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
+                } else if (sheath_plasma_fidx >= 0) {
+                  pd = dynamic_cast<FixPlasmaData *>(modify->fix[sheath_plasma_fidx]);
+                }
+                if (cp || pd) {
+                  PlasmaFileParams sk_pf = cp ? cp->query_plasma_at_point(x)
+                                              : query_plasma_from_fix(pd, x, DIM == 2 ? 2 : 3);
                   const double sk_te = sk_pf.temp_e;
                   const double sk_ti = sk_pf.temp_i;
                   if (sk_te > 0.0) {
@@ -2173,6 +2294,9 @@ void Update::pusherBoris2D(int i, int icell, double dt,
 
   double xcur[2] = {x[0], x[1]};
   double zcur = x[2];
+  // 2D WEST-style runs store cylindrical components in SPARTA slots as
+  // (R,Z,phi). The Boris cross product assumes a right-handed basis, so
+  // rotate internally in (R,phi,Z) and map back to storage order.
   double vcur[3] = {v[0], v[1], v[2]};
   double E[3] = {0.0, 0.0, 0.0};
   double B[3] = {0.0, 0.0, 0.0};
@@ -2198,6 +2322,15 @@ void Update::pusherBoris2D(int i, int icell, double dt,
         B[2] = Bcyl.bt;
       }
     }
+  } else if (boris_plasma_fidx >= 0) {
+    auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[boris_plasma_fidx]);
+    if (pd && pd->has_bfield) {
+      double Br = 0.0, Bz = 0.0, Bt = 0.0;
+      pd->bfield_at(xcur[0], xcur[1], Br, Bz, Bt);
+      B[0] = Br;
+      B[1] = Bz;
+      B[2] = Bt;
+    }
   }
   if (B[0] == 0.0 && B[1] == 0.0 && B[2] == 0.0 && bperturbflag)
     BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
@@ -2217,7 +2350,15 @@ void Update::pusherBoris2D(int i, int icell, double dt,
 
     double xold[2] = {xcur[0], xcur[1]};
 
-    BorisGrid::push_velocity(qm, dt_sub, E, B, vcur);
+    double vrhs[3] = {vcur[0], vcur[2], vcur[1]};
+    const double Erhs[3] = {E[0], E[2], E[1]};
+    const double Brhs[3] = {B[0], B[2], B[1]};
+
+    BorisGrid::push_velocity(qm, dt_sub, Erhs, Brhs, vrhs);
+
+    vcur[0] = vrhs[0];
+    vcur[1] = vrhs[2];
+    vcur[2] = vrhs[1];
     xcur[0] += vcur[0] * dt_sub;
     xcur[1] += vcur[1] * dt_sub;
     zcur += vcur[2] * dt_sub;
@@ -2311,7 +2452,8 @@ void Update::pusher_boris3D(int i, int icell, double dt,
   double sh_bmag = 0.0, sh_alpha_deg = 90.0;
   int sh_active = 0;
 
-  if (sheath_flag && sheath_geom_cidx >= 0 && sheath_plasma_cidx >= 0) {
+  if (sheath_flag && sheath_geom_cidx >= 0 &&
+      (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
     Compute *cg = modify->compute[sheath_geom_cidx];
 
     // If particle is in a sub-cell (split cell), resolve to parent cell
@@ -2385,17 +2527,33 @@ void Update::pusher_boris3D(int i, int icell, double dt,
           sh_nx /= nmag;  sh_ny /= nmag;  sh_nz /= nmag;
         }
 
-        // Read pre-computed plasma arrays
-        Compute *cp_base = modify->compute[sheath_plasma_cidx];
-        auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
-        if (cp) {
-          sh_te = cp->plasma_arr[gcell].temp_e;
-          sh_ti = cp->plasma_arr[gcell].temp_i;
-          sh_ne = cp->plasma_arr[gcell].dens_e;
-          const double br = cp->mag_arr[gcell].br;
-          const double bt = cp->mag_arr[gcell].bt;
-          const double bz = cp->mag_arr[gcell].bz;
+        double br = 0.0, bt = 0.0, bz = 0.0;
+        if (sheath_plasma_cidx >= 0) {
+          Compute *cp_base = modify->compute[sheath_plasma_cidx];
+          auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
+          if (cp) {
+            sh_te = cp->plasma_arr[gcell].temp_e;
+            sh_ti = cp->plasma_arr[gcell].temp_i;
+            sh_ne = cp->plasma_arr[gcell].dens_e;
+            br = cp->mag_arr[gcell].br;
+            bt = cp->mag_arr[gcell].bt;
+            bz = cp->mag_arr[gcell].bz;
+          }
+        } else if (sheath_plasma_fidx >= 0) {
+          auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[sheath_plasma_fidx]);
+          if (pd) {
+            PlasmaFileParams sh_pf = query_plasma_from_fix(pd, x, 3);
+            MagneticFieldFileDataParams sh_bf = query_bfield_from_fix(pd, x, 3);
+            sh_te = sh_pf.temp_e;
+            sh_ti = sh_pf.temp_i;
+            sh_ne = sh_pf.dens_e;
+            br = sh_bf.br;
+            bt = sh_bf.bt;
+            bz = sh_bf.bz;
+          }
+        }
 
+        if (sh_te > 0.0 && sh_ne > 0.0) {
           // Convert cylindrical B to Cartesian at particle position
           const double rx = x[0], ry = x[1];
           const double rmag = std::sqrt(rx*rx + ry*ry);
@@ -2454,6 +2612,19 @@ void Update::pusher_boris3D(int i, int icell, double dt,
         B_cached[1] = Bcyl.br * sphi + Bcyl.bt * cphi;
         B_cached[2] = Bcyl.bz;
       }
+    }
+  } else if (boris_plasma_fidx >= 0) {
+    auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[boris_plasma_fidx]);
+    if (pd && pd->has_bfield) {
+      double Br = 0.0, Bz = 0.0, Bt = 0.0;
+      const double rx = xcur[0], ry = xcur[1];
+      const double rxy = std::sqrt(rx * rx + ry * ry);
+      double cphi = 1.0, sphi = 0.0;
+      if (rxy > 1.0e-20) { cphi = rx / rxy; sphi = ry / rxy; }
+      pd->bfield_at(rxy, xcur[2], Br, Bz, Bt);
+      B_cached[0] = Br * cphi - Bt * sphi;
+      B_cached[1] = Br * sphi + Bt * cphi;
+      B_cached[2] = Bz;
     }
   }
   if (B_cached[0] == 0.0 && B_cached[1] == 0.0 && B_cached[2] == 0.0 && bperturbflag)
@@ -2769,7 +2940,8 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
   }
 
   // --- Per-particle sheath E-field (same approach as boris3D) ---
-  if (sheath_flag && !sheath_kick && sheath_geom_cidx >= 0 && sheath_plasma_cidx >= 0) {
+  if (sheath_flag && !sheath_kick && sheath_geom_cidx >= 0 &&
+      (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
     Compute *cg = modify->compute[sheath_geom_cidx];
 
     // Resolve sub-cell to parent for geometry/plasma lookup
@@ -2836,11 +3008,18 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
         const double d_particle = std::fabs(d_raw);
 
         if (d_particle > 0.0 && d_particle < sheath_dmax) {
-          Compute *cp_base = modify->compute[sheath_plasma_cidx];
-          auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
-          if (cp) {
+          ComputePlasmaFields *cp = nullptr;
+          FixPlasmaData *pd = nullptr;
+          if (sheath_plasma_cidx >= 0) {
+            Compute *cp_base = modify->compute[sheath_plasma_cidx];
+            cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
+          } else if (sheath_plasma_fidx >= 0) {
+            pd = dynamic_cast<FixPlasmaData *>(modify->fix[sheath_plasma_fidx]);
+          }
+          if (cp || pd) {
             // Point-query plasma data at particle position
-            PlasmaFileParams sh_pf = cp->query_plasma_at_point(x);
+            PlasmaFileParams sh_pf = cp ? cp->query_plasma_at_point(x)
+                                        : query_plasma_from_fix(pd, x, 2);
             const double sh_te = sh_pf.temp_e;
             const double sh_ne = sh_pf.dens_e;
             const double sh_ti = sh_pf.temp_i;
@@ -3546,7 +3725,8 @@ void Update::global(int narg, char **arg)
       if (boris_bad_dt_limit <= 0.0) error->all(FLERR, "Illegal global boris_bad_dt_limit command");
       iarg += 2;
 
-    // Point-query B-field for Boris pusher from a compute plasma/fields.
+    // Point-query B-field for Boris pusher from a compute plasma/fields
+    // or fix plasma/data.
     // Usage: global bfield_compute <ID>
     } else if (strcmp(arg[iarg], "bfield_compute") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "Illegal global bfield_compute command");
@@ -3579,8 +3759,9 @@ void Update::global(int narg, char **arg)
       if (!gca_plasma_cid)
         error->all(FLERR, "global gca requires plasma_compute <ID>");
 
-    // Per-particle sheath E-field from grid-cached geometry + plasma computes.
+    // Per-particle sheath E-field from grid-cached geometry + plasma provider.
     // Usage: global sheath geom_compute <ID> plasma_compute <ID>
+    //          or global sheath geom_compute <ID> plasma_fix <ID>
     //          [model borodkina/coulette_manfredi] [dmax 0.02] [pot_mult 2.5]
     //          [mD_amu 2.014]
     } else if (strcmp(arg[iarg], "sheath") == 0) {
@@ -3594,7 +3775,8 @@ void Update::global(int narg, char **arg)
           sheath_geom_cid = new char[n];
           strcpy(sheath_geom_cid, arg[iarg+1]);
           iarg += 2;
-        } else if (strcmp(arg[iarg], "plasma_compute") == 0) {
+        } else if (strcmp(arg[iarg], "plasma_compute") == 0 ||
+                   strcmp(arg[iarg], "plasma_fix") == 0) {
           if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
           delete [] sheath_plasma_cid;
           int n = strlen(arg[iarg+1]) + 1;
@@ -3628,7 +3810,7 @@ void Update::global(int narg, char **arg)
         } else break;  // next keyword belongs to a different global option
       }
       if (!sheath_geom_cid || !sheath_plasma_cid)
-        error->all(FLERR, "global sheath requires geom_compute and plasma_compute");
+        error->all(FLERR, "global sheath requires geom_compute and plasma_compute/plasma_fix");
 
     } else if (strcmp(arg[iarg],"mem/limit") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal global command");

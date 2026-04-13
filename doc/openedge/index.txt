@@ -15,6 +15,7 @@ kept in this directory to keep SPARTA core docs separate and clean.
 [Pages:]
 
 "OpenEdge Quickstart"_quickstart.html
+"fix plasma/data"_fix_plasma_data.html
 "compute plasma/fields"_compute_plasma_fields.html
 "compute incident/flux"_compute_incident_flux.html
 "compute pmi/surf/data"_compute_pmi_surf_data.html

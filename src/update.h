@@ -156,9 +156,10 @@ struct SurfHit2D {
   bigint nscheck_running;
   bigint nscollide_running;
 
-  // Point-query B-field for Boris pusher (from compute plasma/fields)
-  char *boris_plasma_cid;      // compute ID string (set by global bfield_compute)
+  // Point-query B-field for Boris pusher (from compute plasma/fields or fix plasma/data)
+  char *boris_plasma_cid;      // provider ID string (set by global bfield_compute)
   int boris_plasma_cidx;       // resolved compute index (-1 = not set)
+  int boris_plasma_fidx;       // resolved fix index (-1 = not set)
 
   int boris_dump_flag;         // 1 enables Boris E/B debug prints
   int boris_dump_every;        // print cadence in timesteps
@@ -170,9 +171,10 @@ struct SurfHit2D {
   // Per-particle sheath E-field overlay (uses grid-cached geometry + plasma)
   int sheath_flag;             // 1 if per-particle sheath is active
   char *sheath_geom_cid;       // compute ID for sheath/geometry/grid
-  char *sheath_plasma_cid;     // compute ID for plasma/fields
+  char *sheath_plasma_cid;     // provider ID for plasma/fields or fix plasma/data
   int sheath_geom_cidx;        // resolved compute index for geometry
   int sheath_plasma_cidx;      // resolved compute index for plasma
+  int sheath_plasma_fidx;      // resolved fix index for plasma
   int sheath_model;            // 0=borodkina, 1=coulette_manfredi
   double sheath_dmax;          // max distance for sheath activation (m)
   double sheath_pot_mult;      // potential multiplier

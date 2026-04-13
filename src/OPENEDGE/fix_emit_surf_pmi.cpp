@@ -26,6 +26,7 @@
 #include "error.h"
 
 #include <cmath>
+#include <vector>
 
 using namespace SPARTA_NS;
 using namespace MathConst;
@@ -71,7 +72,10 @@ FixEmitSurfPmi::FixEmitSurfPmi(SPARTA *sparta, int narg, char **arg) :
   normalflag = 0;
   nlaunch_mode = 0;
   nlaunch_per_surf = 0;
+  nlaunch_total_mode = 0;
+  nlaunch_total = 0;
   flux_thresh = 0.0;
+  source_thresh = 0.0;
   pweight_index = -1;
   pweight_ewhich = -1;
 
@@ -83,6 +87,12 @@ FixEmitSurfPmi::FixEmitSurfPmi(SPARTA *sparta, int narg, char **arg) :
     error->all(FLERR,"Fix emit/surf/pmi not allowed for implicit surfaces");
   if (npmode == CONSTANT && perspecies)
     error->all(FLERR,"Cannot use fix emit/surf/pmi n > 0 with perspecies yes");
+  if (nlaunch_total_mode && perspecies)
+    error->all(FLERR,
+      "Cannot use fix emit/surf/pmi nlaunch_total with perspecies yes");
+  if (npmode == CONSTANT && nlaunch_total_mode)
+    error->all(FLERR,
+      "Cannot use fix emit/surf/pmi nlaunch_total with n > 0");
 
   tasks = NULL;
   ntask = ntaskmax = 0;
@@ -127,12 +137,12 @@ void FixEmitSurfPmi::init()
 
   fnum = update->fnum;
 
-  // look up pweight custom attribute if nlaunch mode is active
-  if (nlaunch_mode) {
+  // look up pweight custom attribute if any weighted launch mode is active
+  if (nlaunch_mode || nlaunch_total_mode) {
     pweight_index = particle->find_custom((char *) "pweight");
     if (pweight_index < 0)
       error->all(FLERR,
-        "Fix emit/surf/pmi nlaunch requires fix particle/weight");
+        "Fix emit/surf/pmi weighted launch modes require fix particle/weight");
     pweight_ewhich = particle->ewhich[pweight_index];
   }
 
@@ -380,7 +390,7 @@ void FixEmitSurfPmi::create_task(int icell)
 void FixEmitSurfPmi::perform_task()
 {
   int i,m,n,pcell,isurf,ninsert,nactual,isp,ispecies,ntri,id;
-  double indot,scosine,rn,ntarget,vr,alpha,beta,w_emit;
+  double indot,scosine,rn,ntarget,vr,alpha,beta,w_emit,source_strength;
   double beta_un,normalized_distbn_fn,theta,erot,evib;
   double vnmag,vamag,vbmag;
   double *normal,*p1,*p2,*p3,*atan,*btan,*vstream,*vscale;
@@ -400,11 +410,38 @@ void FixEmitSurfPmi::perform_task()
   int nsurf_tally = update->nsurf_tally;
   Compute **slist_active = update->slist_active;
   int nfix_update_custom = modify->n_update_custom;
+  const int weighted_launch_mode = nlaunch_mode || nlaunch_total_mode;
 
   // pweight pointer (may be reallocated each step)
   double *pweight_dvec = NULL;
-  if (nlaunch_mode && pweight_ewhich >= 0)
+  if (weighted_launch_mode && pweight_ewhich >= 0)
     pweight_dvec = particle->edvec[pweight_ewhich];
+
+  std::vector<double> task_source;
+  double source_total = 0.0;
+  if (npmode == FLOW && nlaunch_total_mode) {
+    task_source.assign(ntask,0.0);
+
+    double source_total_me = 0.0;
+    for (i = 0; i < ntask; i++) {
+      source_strength = 0.0;
+      isurf = tasks[i].isurf;
+
+      double flux = flux_for_surface(isurf);
+      if (!std::isfinite(flux) || flux <= 0.0) continue;
+      if (flux < flux_thresh) continue;
+
+      source_strength = flux * tasks[i].area * dt;
+      if (!std::isfinite(source_strength) || source_strength <= 0.0) continue;
+      if (source_strength < source_thresh) continue;
+
+      task_source[i] = source_strength;
+      source_total_me += source_strength;
+    }
+
+    MPI_Allreduce(&source_total_me,&source_total,1,MPI_DOUBLE,MPI_SUM,world);
+    if (source_total <= 0.0) return;
+  }
 
   for (i = 0; i < ntask; i++) {
     pcell = tasks[i].pcell;
@@ -427,17 +464,35 @@ void FixEmitSurfPmi::perform_task()
     else indot = vstream[0]*normal[0] + vstream[1]*normal[1] + vstream[2]*normal[2];
 
     w_emit = fnum;  // default weight = fnum (backward compatible)
+    source_strength = 0.0;
+    ninsert = -1;
 
     if (npmode == FLOW) {
-      double flux = flux_for_surface(isurf);
-      if (!std::isfinite(flux) || flux <= 0.0) continue;
-      if (flux < flux_thresh) continue;
-      if (nlaunch_mode) {
-        // per-particle weight mode: fixed number of particles per surface
-        w_emit = flux * tasks[i].area * dt / nlaunch_per_surf;
-        ntarget = static_cast<double>(nlaunch_per_surf);
+      if (nlaunch_total_mode) {
+        source_strength = task_source[i];
+        if (source_strength <= 0.0) continue;
+
+        ntarget = static_cast<double>(nlaunch_total) * source_strength / source_total;
+        ninsert = static_cast<int>(ntarget + random->uniform());
+        if (ninsert <= 0) continue;
+
+        w_emit = source_strength / ninsert;
       } else {
-        ntarget = flux * tasks[i].area * dt / fnum;
+        double flux = flux_for_surface(isurf);
+        if (!std::isfinite(flux) || flux <= 0.0) continue;
+        if (flux < flux_thresh) continue;
+
+        source_strength = flux * tasks[i].area * dt;
+        if (!std::isfinite(source_strength) || source_strength <= 0.0) continue;
+        if (source_strength < source_thresh) continue;
+
+        if (nlaunch_mode) {
+          // per-particle weight mode: fixed number of particles per task
+          w_emit = source_strength / nlaunch_per_surf;
+          ntarget = static_cast<double>(nlaunch_per_surf);
+        } else {
+          ntarget = source_strength / fnum;
+        }
       }
     } else {
       ntarget = np * tasks[i].ntarget;
@@ -538,8 +593,10 @@ void FixEmitSurfPmi::perform_task()
       }
 
     } else {
-      ninsert = static_cast<int>(ntarget + random->uniform());
-      if (ninsert <= 0) continue;
+      if (ninsert < 0) {
+        ninsert = static_cast<int>(ntarget + random->uniform());
+        if (ninsert <= 0) continue;
+      }
 
       nactual = 0;
       for (m = 0; m < ninsert; m++) {
@@ -616,7 +673,7 @@ void FixEmitSurfPmi::perform_task()
         p->flag = PSURF + 1 + isurf;
         p->dtremain = dt * random->uniform();
 
-        if (nlaunch_mode) {
+        if (weighted_launch_mode) {
           pweight_dvec = particle->edvec[pweight_ewhich];
           pweight_dvec[particle->nlocal-1] = w_emit;
         }
@@ -680,10 +737,25 @@ int FixEmitSurfPmi::option(int narg, char **arg)
 
   if (strcmp(arg[0],"nlaunch") == 0) {
     if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    if (nlaunch_total_mode)
+      error->all(FLERR,
+        "Cannot use fix emit/surf/pmi nlaunch with nlaunch_total");
     nlaunch_per_surf = atoi(arg[1]);
     if (nlaunch_per_surf <= 0)
       error->all(FLERR,"Fix emit/surf/pmi nlaunch must be > 0");
     nlaunch_mode = 1;
+    return 2;
+  }
+
+  if (strcmp(arg[0],"nlaunch_total") == 0) {
+    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    if (nlaunch_mode)
+      error->all(FLERR,
+        "Cannot use fix emit/surf/pmi nlaunch_total with nlaunch");
+    nlaunch_total = atoi(arg[1]);
+    if (nlaunch_total <= 0)
+      error->all(FLERR,"Fix emit/surf/pmi nlaunch_total must be > 0");
+    nlaunch_total_mode = 1;
     return 2;
   }
 
@@ -692,6 +764,14 @@ int FixEmitSurfPmi::option(int narg, char **arg)
     flux_thresh = atof(arg[1]);
     if (flux_thresh < 0.0)
       error->all(FLERR,"Fix emit/surf/pmi flux_thresh must be >= 0");
+    return 2;
+  }
+
+  if (strcmp(arg[0],"source_thresh") == 0) {
+    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    source_thresh = atof(arg[1]);
+    if (source_thresh < 0.0)
+      error->all(FLERR,"Fix emit/surf/pmi source_thresh must be >= 0");
     return 2;
   }
 

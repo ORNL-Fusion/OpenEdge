@@ -1,0 +1,15 @@
+# Species data
+#
+# Minimal charged test species for the 2D Boris basis regression.
+
+# ID
+# Molwt (amu)
+# Molmass (kg)
+# Rotational dof
+# RotRel
+# Vibrational dof
+# VibRel
+# VibTemp (K)
+# species wt
+# charge
+H       1.00784          1.67262192369e-27    0        0.0     0        0.0     0.0          1.0         1

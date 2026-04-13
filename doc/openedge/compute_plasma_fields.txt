@@ -15,7 +15,7 @@ compute ID plasma/fields group-ID mode args values ... :pre
 ID is documented in "compute"_../compute.html command
 plasma/fields = style name of this compute command
 group-ID = grid group ID
-mode = {file} or {constant}
+mode = {file} or {constant} or {plasma_data}
 args = mode-specific arguments
 values = one or more output fields :ul
 
@@ -26,6 +26,10 @@ compute ID plasma/fields group-ID file plasma.h5 bfield.h5 values ... :pre
 Constant mode:
 
 compute ID plasma/fields group-ID constant keyword values ... :pre
+
+Plasma-data mode:
+
+compute ID plasma/fields group-ID plasma_data fixID values ... :pre
 
 Constant keywords:
 
@@ -61,11 +65,19 @@ compute cplasma plasma/fields all file plasma.h5 bfield.h5 br bt bz temp_e dens_
 
 compute cconst plasma/fields all constant magnetic_field 0 0 2.5 electric_field 0 0 0 temp_e 10 temp_i 10 dens_e 1e19 dens_i 1e19 parrflow 0 br bt bz er et ez :pre
 
+fix pd plasma/data file plasma.h5 static yes
+compute cwest plasma/fields all plasma_data pd bx by bz temp_e dens_e :pre
+
 [Description:]
 
 This compute samples plasma and magnetic data from 2D {r,z} tables
-(HDF5 file mode) or from constant values (constant mode), and produces
+(HDF5 file mode), from constant values (constant mode), or directly from
+an existing {fix plasma/data} backend ({plasma_data} mode), and produces
 per-grid outputs.
+
+{plasma_data} mode does not read any files itself.  It is an adapter for
+grid diagnostics and post-processing when the canonical background is
+already stored in a {fix plasma/data} object.
 
 [File-mode data layout:]
 

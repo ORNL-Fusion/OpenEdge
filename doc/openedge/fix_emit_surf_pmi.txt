@@ -22,8 +22,10 @@ compute-ID = per-surf compute that provides flux (typically {compute pmi/surf/da
 {flux_index N} = use column N from per-surf array output (1-based)
 {n M} = constant multiplier mode; {n 0} uses direct flow mode
 {normal yes/no} = apply stream speed in surface-normal direction
-{nlaunch N} = per-particle weight mode: emit N particles per surface element per step
-{flux_thresh F} = skip surface elements with flux below F \[m^-2 s^-1\] (default 0) :ul
+{nlaunch N} = per-particle weight mode: emit N particles per emitting overlap task per step
+{nlaunch_total N} = global-budget weighted mode: emit an expected total of N particles per step
+{flux_thresh F} = skip surface elements with flux below F \[m^-2 s^-1\] (default 0)
+{source_thresh S} = skip overlap tasks with {flux * area * dt < S} real particles per step (default 0) :ul
 
 [Description:]
 
@@ -44,7 +46,7 @@ weight.  Each emitted particle represents {fnum} real particles.
 [Per-particle weight mode (nlaunch):]
 
 When {nlaunch N} is specified, a fixed number N of particles is emitted
-from each surface element at every timestep, regardless of the local
+from each emitting overlap task at every timestep, regardless of the local
 flux magnitude. Each particle carries a per-particle weight:
 
 {pweight = flux * area * dt / N}
@@ -62,6 +64,37 @@ from low-flux regions.
 The {flux_thresh} keyword filters out surfaces with negligible sputtering
 flux, preventing emission of near-zero-weight particles that waste CPU
 without contributing to the physical result.
+
+[Global-budget weighted mode (nlaunch_total):]
+
+When {nlaunch_total N} is specified, the fix computes a source strength
+for every emitting overlap task:
+
+{s_i = flux_i * area_i * dt}
+
+and distributes an expected total launch budget of N particles over all
+active tasks:
+
+{mu_i = N * s_i / sum_j s_j}
+
+Each task then emits
+
+{n_i = floor(mu_i) + Bernoulli(frac(mu_i))}
+
+particles, and every particle emitted from that task carries weight
+
+{pweight = s_i / n_i}
+
+for {n_i > 0}. This mode also requires
+"fix particle/weight"_fix_particle_weight.html to be active. This keeps
+the expected total number of launched
+macro-particles near N each timestep while concentrating samples where
+the physical source is strongest. This mode currently requires
+{perspecies no}.
+
+The {source_thresh} keyword filters on source contribution rather than
+raw flux, which is often a better proxy for both cost and importance
+when overlap task areas vary strongly.
 
 For a vector per-surf compute, flux is taken directly from that vector.
 For an array per-surf compute, use {flux_index N} to select the column.
@@ -81,6 +114,11 @@ fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes :pre
 fix pw particle/weight
 fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes \
 nlaunch 5 flux_thresh 1e10 :pre
+
+# Global-budget weighted mode
+fix pw particle/weight
+fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes \
+nlaunch_total 1000 source_thresh 1.0e-4 :pre
 
 [Notes:]
 
