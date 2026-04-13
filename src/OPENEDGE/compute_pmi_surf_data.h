@@ -17,6 +17,8 @@ ComputeStyle(pmi/surf/data,ComputePMISurfData)
 
 namespace SPARTA_NS {
 
+class FixPlasmaData;
+
 class ComputePMISurfData : public Compute {
  public:
   ComputePMISurfData(class SPARTA *, int, char **);
@@ -40,9 +42,13 @@ class ComputePMISurfData : public Compute {
   int firstflag;
   int debug_interp;
   int nsown;
+  int plasma_source_mode;
+  int static_cache;
+  int cache_valid;
   int *which;
   int *which_species;   // 1-based species slot for species-specific outputs
   std::string plasma_path;
+  std::string plasma_data_fix_id;
   std::string surface_path;
   std::string bfield_path;
   std::string equ_path;
@@ -89,6 +95,8 @@ class ComputePMISurfData : public Compute {
   double interp3D(const std::vector<double> &f, int ispec, double r, double z) const;
   double interp_yield(double e_eV, double a_deg) const;
   void load_plasma();
+  void load_plasma_from_fix(const FixPlasmaData *pd);
+  void rebuild_mesh_cache();
   void load_surface_data();
   void load_boundary();
   void load_mesh();

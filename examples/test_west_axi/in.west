@@ -34,10 +34,10 @@ variable            TbindW equal 4.*11600.
 variable            TwallK equal 773.15
 variable            Tcore equal 150*11600.
 variable            dt equal 5.0e-09
-variable            nlaunchTotalW equal 1
-variable            sourceThreshW equal 1.0e-4
+variable            nlaunchTotalW equal 10
+variable            sourceThreshW equal 0.1 #1.0e-4
 variable            Nwarm equal 1000
-variable            Nphase equal 1000000
+variable            Nphase equal 10000
 mixture             tungstenSource temp ${TbindW}
 
 # Surfaces vessel
@@ -47,7 +47,8 @@ read_surf input/wall_new_refined.txt group 1 particle check
 
 
 surf_collide        wallColModel diffuse ${TbindW} 1.0
-surf_react          wallPMI pmi file input/reactions_pmi_west.surf input/74_on_74_pmi.h5
+surf_react          wallPMI pmi file input/reactions_pmi_west.surf input/74_on_74_pmi.h5 #&
+                    # log no file output/pmi_impacts.csv
 surf_modify         1 collide wallColModel react wallPMI
 
 # Surfaces: core. set core as inner vanishing boundary
@@ -89,33 +90,33 @@ fix fchem chem/adas 1 74 input/plasma.adas adas_dir ../../database/adas
 # 1d) Braginskii thermal forces on impurity ions
 # Ion thermal force:  F = 2.6 * Z^2 * e * grad_par(Ti) (Neu 1974)
 # Elec thermal force: F = 0.71 * Z^2 * e * grad_par(Te) (Braginskii)
-fix ftf thermal_force 1 &
-                    bfield p_pc_bx p_pc_by p_pc_bz &
-                    ion_thermal p_pc_grad_ti_r p_pc_grad_ti_z coeff 2.6 &
-                    elec_thermal p_pc_grad_te_r p_pc_grad_te_z coeff 0.71
+#fix ftf thermal_force 1 &
+#                    bfield p_pc_bx p_pc_by p_pc_bz &
+#                    ion_thermal p_pc_grad_ti_r p_pc_grad_ti_z coeff 2.6 &
+#                    elec_thermal p_pc_grad_te_r p_pc_grad_te_z coeff 0.71
 
 # 1e) Nanbu Coulomb collisions with plasma background only
 # Background species is the main D+ plasma: A=2.0, Z=1.0
 # `nobinary` disables particle-particle self-collisions and keeps only
 # collisions against the prescribed background moments from the `pd` cache.
-fix fnanbu coll/nanbu 1 plasma p_pc_te p_pc_ne &
-                    nobinary &
-                    background 2.0 1.0 &
-                    p_pc_ti p_pc_ni p_pc_vpar &
-                    p_pc_bx p_pc_by p_pc_bz
+#fix fnanbu coll/nanbu 1 plasma p_pc_te p_pc_ne &
+#                    nobinary &
+#                    background 2.0 1.0 &
+#                    p_pc_ti p_pc_ni p_pc_vpar &
+#                    p_pc_bx p_pc_by p_pc_bz
 
 # 1f) Anomalous cross-field diffusion (D_perp = 1.0 m^2/s + gradient pinch)
 #fix fcd cross_diffusion 1 &
- #                   bfield p_pc_bx p_pc_by p_pc_bz &
- #                   D_perp 1.0 #&
+#                    bfield p_pc_bx p_pc_by p_pc_bz &
+#                    D_perp 1.0 #&
    #                gradient_pinch 0.0 p_pc_ne p_pc_grad_ne_r p_pc_grad_ne_z
 
 
 
 # 3) PMI surf data from incident plasma flux + BCA sputtering
-# slot mapping: 1=D, 2=O+, 3=O2+, ... 9=O8+ ; D excluded by projectile_slots 2..9
+# slot mapping: 1=D+, 2=O+, 3=O2+, ... 9=O8+ ; D+ excluded by projectile_slots 2..9
 compute cpmi pmi/surf/data 1 plasma_data pd ../../database/surface/O_on_W.h5 &
-                    projectile_slots 2 9 mass_amu 16.0 sputter_flux_total
+                    projectile_slots 2 9 mass_amu 16.0 static yes sputter_flux_total
 
 # 4) Per-particle weight infrastructure for weighted emission
 fix pw particle/weight
@@ -130,7 +131,7 @@ fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes &
 # 6) Dumps
 
 # Particle state dump (one snapshot per late-time window)
-dump dpart particle all ${Nwarm} output/state.west id type x y z vx vy vz
+dump dpart particle all ${Nphase} output/state.west id type x y z vx vy vz
 dump_modify dpart first yes
 
 # Weighted density (correct physical density with per-particle weights)
@@ -140,13 +141,15 @@ compute cwden grid/weighted all species nrho_w
 #compute cPE photon_emissivity/grid all species &
 #        pec_file ../../database/pec/w_4009_pec.h5 plasma_compute cwest
 
-# Warmup + two independent late-time windows.
-# Compare Phase A and Phase B densities/emissivities to judge stationarity and
-# whether nlaunch_total is large enough for the sampling noise level you want.
-
 timestep            ${dt}
 stats               100
 stats_style         step cpu np
+
+
+#fix balance 500 1.1 rcb time
+#fix mybal balance 500 1.1 rcb part
+fix fbal balance 500 1.1 rcb time
+
 run                 ${Nwarm}
 reset_timestep      0
 # Keep the PMI source active during the production window.

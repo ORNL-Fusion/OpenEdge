@@ -70,11 +70,12 @@ class FixPlasmaData : public Fix {
 
   // ---- Mesh triangulation (from plasma.h5/mesh group) ----
   int has_mesh;
-  int mesh_nvtx, mesh_ntri, mesh_ncell;
+  int mesh_nvtx, mesh_ntri, mesh_ncell, mesh_nion;
   std::vector<double> mesh_vtx_r, mesh_vtx_z;
   std::vector<int> mesh_tri;       // (ntri*3) vertex indices
   std::vector<int> mesh_cell_idx;  // (ntri) cell index per triangle
   std::vector<double> mesh_ne, mesh_te, mesh_ti, mesh_ni, mesh_upar;
+  std::vector<double> mesh_ions_dens, mesh_ions_temp, mesh_ions_upar;
 
   // ---- Valid mask ----
   std::vector<int> valid_mask;     // (nz * nr) or empty

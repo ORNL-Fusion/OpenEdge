@@ -209,6 +209,16 @@ void ComputeSheathGeometryGrid::reallocate()
   if (nvalue == 1) memory->create(vector_grid,nglocal,"sheath/geometry/grid:vector");
   else memory->create(array_grid,nglocal,nvalue,"sheath/geometry/grid:array");
   memory->create(midx_grid,nglocal,"sheath/geometry/grid:midx");
+  computed_once = 0;
+  if (nvalue == 1 && vector_grid) {
+    for (int i = 0; i < nglocal; i++) vector_grid[i] = 0.0;
+  } else if (array_grid) {
+    for (int i = 0; i < nglocal; i++)
+      for (int j = 0; j < nvalue; j++) array_grid[i][j] = 0.0;
+  }
+  if (midx_grid) {
+    for (int i = 0; i < nglocal; i++) midx_grid[i] = -1;
+  }
 }
 
 bigint ComputeSheathGeometryGrid::memory_usage()

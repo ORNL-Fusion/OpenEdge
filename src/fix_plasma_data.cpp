@@ -60,7 +60,7 @@ FixPlasmaData::FixPlasmaData(SPARTA *sparta, int narg, char **arg) :
   generation = 0;
   equ_jm = equ_km = 0;
   btf = rtf = psib = psi_axis = 0.0;
-  mesh_nvtx = mesh_ntri = mesh_ncell = 0;
+  mesh_nvtx = mesh_ntri = mesh_ncell = mesh_nion = 0;
   const_has_r_bounds = const_has_z_bounds = 0;
   const_rmin = 0.0; const_rmax = 1.0;
   const_zmin = 0.0; const_zmax = 1.0;
@@ -220,6 +220,10 @@ void FixPlasmaData::reload()
   MPI_Bcast(&has_bfield, 1, MPI_INT, 0, world);
   MPI_Bcast(&nion, 1, MPI_INT, 0, world);
   MPI_Bcast(&has_mesh, 1, MPI_INT, 0, world);
+  MPI_Bcast(&mesh_nvtx, 1, MPI_INT, 0, world);
+  MPI_Bcast(&mesh_ntri, 1, MPI_INT, 0, world);
+  MPI_Bcast(&mesh_ncell, 1, MPI_INT, 0, world);
+  MPI_Bcast(&mesh_nion, 1, MPI_INT, 0, world);
 
   size_t grid_n = static_cast<size_t>(nz) * nr;
 
@@ -255,6 +259,23 @@ void FixPlasmaData::reload()
       ions_temp.resize(ion_n);
       ions_upar.resize(ion_n);
     }
+    if (has_mesh) {
+      mesh_vtx_r.resize(mesh_nvtx);
+      mesh_vtx_z.resize(mesh_nvtx);
+      mesh_tri.resize(static_cast<size_t>(mesh_ntri) * 3);
+      mesh_cell_idx.resize(mesh_ntri);
+      mesh_ne.resize(mesh_ncell);
+      mesh_te.resize(mesh_ncell);
+      mesh_ti.resize(mesh_ncell);
+      mesh_ni.resize(mesh_ncell);
+      mesh_upar.resize(mesh_ncell);
+      if (mesh_nion > 0) {
+        const size_t mesh_ion_n = static_cast<size_t>(mesh_nion) * mesh_ncell;
+        mesh_ions_dens.resize(mesh_ion_n);
+        mesh_ions_temp.resize(mesh_ion_n);
+        mesh_ions_upar.resize(mesh_ion_n);
+      }
+    }
   }
 
   // Broadcast all arrays
@@ -289,6 +310,24 @@ void FixPlasmaData::reload()
     MPI_Bcast(ions_dens.data(), ion_n, MPI_DOUBLE, 0, world);
     MPI_Bcast(ions_temp.data(), ion_n, MPI_DOUBLE, 0, world);
     MPI_Bcast(ions_upar.data(), ion_n, MPI_DOUBLE, 0, world);
+  }
+
+  if (has_mesh) {
+    MPI_Bcast(mesh_vtx_r.data(), mesh_nvtx, MPI_DOUBLE, 0, world);
+    MPI_Bcast(mesh_vtx_z.data(), mesh_nvtx, MPI_DOUBLE, 0, world);
+    MPI_Bcast(mesh_tri.data(), mesh_ntri * 3, MPI_INT, 0, world);
+    MPI_Bcast(mesh_cell_idx.data(), mesh_ntri, MPI_INT, 0, world);
+    MPI_Bcast(mesh_ne.data(), mesh_ncell, MPI_DOUBLE, 0, world);
+    MPI_Bcast(mesh_te.data(), mesh_ncell, MPI_DOUBLE, 0, world);
+    MPI_Bcast(mesh_ti.data(), mesh_ncell, MPI_DOUBLE, 0, world);
+    MPI_Bcast(mesh_ni.data(), mesh_ncell, MPI_DOUBLE, 0, world);
+    MPI_Bcast(mesh_upar.data(), mesh_ncell, MPI_DOUBLE, 0, world);
+    if (mesh_nion > 0) {
+      const size_t mesh_ion_n = static_cast<size_t>(mesh_nion) * mesh_ncell;
+      MPI_Bcast(mesh_ions_dens.data(), mesh_ion_n, MPI_DOUBLE, 0, world);
+      MPI_Bcast(mesh_ions_temp.data(), mesh_ion_n, MPI_DOUBLE, 0, world);
+      MPI_Bcast(mesh_ions_upar.data(), mesh_ion_n, MPI_DOUBLE, 0, world);
+    }
   }
 
   // Load equilibrium (all ranks, text file is cheap)
@@ -328,7 +367,7 @@ void FixPlasmaData::clear_loaded_data()
   has_mesh = 0;
   equ_jm = equ_km = 0;
   btf = rtf = psib = psi_axis = 0.0;
-  mesh_nvtx = mesh_ntri = mesh_ncell = 0;
+  mesh_nvtx = mesh_ntri = mesh_ncell = mesh_nion = 0;
 
   rvals.clear();
   zvals.clear();
@@ -368,6 +407,9 @@ void FixPlasmaData::clear_loaded_data()
   mesh_ti.clear();
   mesh_ni.clear();
   mesh_upar.clear();
+  mesh_ions_dens.clear();
+  mesh_ions_temp.clear();
+  mesh_ions_upar.clear();
   valid_mask.clear();
 }
 
@@ -560,6 +602,7 @@ void FixPlasmaData::load_plasma_h5()
   has_mesh = 0;
   if (hasDataset("mesh/vtx_r")) {
     has_mesh = 1;
+    mesh_nion = 0;
     // Read mesh data
     auto read1Dint = [&](const std::string &name, std::vector<int> &out) {
       H5::DataSet ds = file.openDataSet(name);
@@ -601,6 +644,26 @@ void FixPlasmaData::load_plasma_h5()
     read1D_mesh("mesh/dens_i", mesh_ni);
     read1D_mesh("mesh/parr_flow", mesh_upar);
     mesh_ncell = mesh_ne.empty() ? 0 : static_cast<int>(mesh_ne.size());
+
+    if (hasDataset("mesh/ions/dens")) {
+      H5::DataSet ds = file.openDataSet("mesh/ions/dens");
+      H5::DataSpace sp = ds.getSpace();
+      hsize_t dims[2];
+      sp.getSimpleExtentDims(dims);
+      mesh_nion = static_cast<int>(dims[0]);
+      mesh_ions_dens.resize(static_cast<size_t>(mesh_nion) * mesh_ncell);
+      ds.read(mesh_ions_dens.data(), H5::PredType::NATIVE_DOUBLE);
+      if (hasDataset("mesh/ions/temp")) {
+        mesh_ions_temp.resize(static_cast<size_t>(mesh_nion) * mesh_ncell);
+        file.openDataSet("mesh/ions/temp").read(mesh_ions_temp.data(),
+                                                H5::PredType::NATIVE_DOUBLE);
+      }
+      if (hasDataset("mesh/ions/parr_flow")) {
+        mesh_ions_upar.resize(static_cast<size_t>(mesh_nion) * mesh_ncell);
+        file.openDataSet("mesh/ions/parr_flow").read(mesh_ions_upar.data(),
+                                                     H5::PredType::NATIVE_DOUBLE);
+      }
+    }
   }
 }
 

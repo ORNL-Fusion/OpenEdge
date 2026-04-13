@@ -86,7 +86,7 @@ fix fcd cross_diffusion 1 &
 
 # PMI sputtering source
 compute cpmi pmi/surf/data 1 plasma_data pd ../../database/surface/O_on_W.h5 &
-                    projectile_slots 2 9 mass_amu 16.0 sputter_flux_total
+                    projectile_slots 2 9 mass_amu 16.0 static yes sputter_flux_total
 fix pw particle/weight
 fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes &
                     nlaunch 5 flux_thresh 1e10

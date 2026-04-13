@@ -53,6 +53,8 @@ ComputePMISurfData::ComputePMISurfData(SPARTA *sparta, int narg, char **arg) :
   proj_slot_lo = 2;
   proj_slot_hi = std::numeric_limits<int>::max();
   mass_amu = 2.0;  // default: deuterium (used for Bohm sound speed)
+  static_cache = 0;
+  cache_valid = 0;
   has_impurity = 0;
   imp_mass_amu = 0.0;
   imp_frac = 0.0;
@@ -102,6 +104,12 @@ ComputePMISurfData::ComputePMISurfData(SPARTA *sparta, int narg, char **arg) :
       if (proj_slot_lo <= 0 || proj_slot_hi < proj_slot_lo)
         error->all(FLERR,"Invalid projectile_slots bounds");
       iarg += 3;
+    } else if (strcmp(arg[iarg],"static") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"static needs yes/no");
+      if (strcmp(arg[iarg+1],"yes") == 0) static_cache = 1;
+      else if (strcmp(arg[iarg+1],"no") == 0) static_cache = 0;
+      else error->all(FLERR,"static must be yes or no");
+      iarg += 2;
     } else if (strcmp(arg[iarg],"mass_amu") == 0) {
       if (iarg+1 >= narg) error->all(FLERR,"mass_amu needs value");
       mass_amu = atof(arg[iarg+1]);
@@ -224,6 +232,15 @@ ComputePMISurfData::~ComputePMISurfData()
 
 int ComputePMISurfData::peek_nspec_from_plasma() const
 {
+  if (!plasma_data_fix_id.empty()) {
+    int ifix = modify->find_fix(plasma_data_fix_id.c_str());
+    if (ifix >= 0) {
+      auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[ifix]);
+      if (pd) return (pd->nion > 0) ? pd->nion : 1;
+    }
+    return 1;
+  }
+
   try {
     H5::H5File file(plasma_path, H5F_ACC_RDONLY);
     if (H5Lexists(file.getId(), "ions/dens", H5P_DEFAULT) > 0) {
@@ -243,8 +260,130 @@ int ComputePMISurfData::in_projectile_slots(int slot1) const
   return (slot1 >= proj_slot_lo && slot1 <= proj_slot_hi);
 }
 
+void ComputePMISurfData::rebuild_mesh_cache()
+{
+  if (!has_mesh) return;
+
+  mesh_tri_rmin.resize(mesh_ntri);
+  mesh_tri_rmax.resize(mesh_ntri);
+  mesh_tri_zmin.resize(mesh_ntri);
+  mesh_tri_zmax.resize(mesh_ntri);
+  for (int t = 0; t < mesh_ntri; t++) {
+    const int v0 = mesh_tri[t*3+0], v1 = mesh_tri[t*3+1], v2 = mesh_tri[t*3+2];
+    const double r0 = mesh_vtx_r[v0], r1 = mesh_vtx_r[v1], r2 = mesh_vtx_r[v2];
+    const double z0 = mesh_vtx_z[v0], z1 = mesh_vtx_z[v1], z2 = mesh_vtx_z[v2];
+    mesh_tri_rmin[t] = std::min({r0,r1,r2});
+    mesh_tri_rmax[t] = std::max({r0,r1,r2});
+    mesh_tri_zmin[t] = std::min({z0,z1,z2});
+    mesh_tri_zmax[t] = std::max({z0,z1,z2});
+  }
+
+  if (!mesh_tri_rmin.empty()) {
+    hash_rmin = *std::min_element(mesh_tri_rmin.begin(), mesh_tri_rmin.end());
+    const double rmax = *std::max_element(mesh_tri_rmax.begin(), mesh_tri_rmax.end());
+    hash_zmin = *std::min_element(mesh_tri_zmin.begin(), mesh_tri_zmin.end());
+    const double zmax = *std::max_element(mesh_tri_zmax.begin(), mesh_tri_zmax.end());
+    hash_nr = 100;
+    hash_nz = 100;
+    hash_dr = (rmax - hash_rmin) / hash_nr + 1e-12;
+    hash_dz = (zmax - hash_zmin) / hash_nz + 1e-12;
+    hash_grid.assign(hash_nr * hash_nz, std::vector<int>());
+    for (int t = 0; t < mesh_ntri; t++) {
+      const int ir0 = std::max(0, static_cast<int>((mesh_tri_rmin[t] - hash_rmin) / hash_dr));
+      const int ir1 = std::min(hash_nr - 1, static_cast<int>((mesh_tri_rmax[t] - hash_rmin) / hash_dr));
+      const int iz0 = std::max(0, static_cast<int>((mesh_tri_zmin[t] - hash_zmin) / hash_dz));
+      const int iz1 = std::min(hash_nz - 1, static_cast<int>((mesh_tri_zmax[t] - hash_zmin) / hash_dz));
+      for (int iz = iz0; iz <= iz1; iz++)
+        for (int ir = ir0; ir <= ir1; ir++)
+          hash_grid[iz * hash_nr + ir].push_back(t);
+    }
+  } else {
+    hash_nr = hash_nz = 0;
+    hash_rmin = hash_zmin = hash_dr = hash_dz = 0.0;
+    hash_grid.clear();
+  }
+
+  mapped_cr.clear();
+  mapped_cz.clear();
+  mapped_idx.clear();
+  for (int t = 0; t < mesh_ntri; t++) {
+    if (mesh_cell_idx[t] < 0) continue;
+    const int v0 = mesh_tri[t*3+0], v1 = mesh_tri[t*3+1], v2 = mesh_tri[t*3+2];
+    mapped_cr.push_back((mesh_vtx_r[v0] + mesh_vtx_r[v1] + mesh_vtx_r[v2]) / 3.0);
+    mapped_cz.push_back((mesh_vtx_z[v0] + mesh_vtx_z[v1] + mesh_vtx_z[v2]) / 3.0);
+    mapped_idx.push_back(t);
+  }
+}
+
+void ComputePMISurfData::load_plasma_from_fix(const FixPlasmaData *pd)
+{
+  if (!pd)
+    error->all(FLERR, "compute pmi/surf/data: null plasma/data fix");
+
+  if (pd->generation == 0)
+    const_cast<FixPlasmaData *>(pd)->init();
+
+  nr = pd->nr;
+  nz = pd->nz;
+  rvals = pd->rvals;
+  zvals = pd->zvals;
+  dens_i = pd->dens_i;
+  temp_e = pd->temp_e;
+  temp_i = pd->temp_i;
+  parr_flow = pd->parr_flow;
+  parr_flow_r = pd->parr_flow_r;
+  parr_flow_t = pd->parr_flow_t;
+  parr_flow_z = pd->parr_flow_z;
+  br = pd->br;
+  bz = pd->bz;
+  bt = pd->bt;
+  has_bfield = pd->has_bfield;
+  has_temp = (!temp_e.empty() && !temp_i.empty()) ? 1 : 0;
+
+  if (pd->nion > 0) {
+    has_multi_ion = 1;
+    nspec = pd->nion;
+    ion_charge_state_z = pd->ion_charge_z;
+    ions_dens = pd->ions_dens;
+    ions_temp = pd->ions_temp;
+    ions_parr_flow = pd->ions_upar;
+  } else {
+    has_multi_ion = 0;
+  }
+
+  has_mesh = pd->has_mesh;
+  mesh_nvtx = pd->mesh_nvtx;
+  mesh_ntri = pd->mesh_ntri;
+  mesh_ncell = pd->mesh_ncell;
+  mesh_vtx_r = pd->mesh_vtx_r;
+  mesh_vtx_z = pd->mesh_vtx_z;
+  mesh_tri = pd->mesh_tri;
+  mesh_cell_idx = pd->mesh_cell_idx;
+  mesh_ne = pd->mesh_ne;
+  mesh_te = pd->mesh_te;
+  mesh_ti = pd->mesh_ti;
+  mesh_ni = pd->mesh_ni;
+  mesh_upar = pd->mesh_upar;
+  mesh_nion = pd->mesh_nion;
+  mesh_ions_dens = pd->mesh_ions_dens;
+  mesh_ions_temp = pd->mesh_ions_temp;
+  mesh_ions_upar = pd->mesh_ions_upar;
+  rebuild_mesh_cache();
+}
+
 void ComputePMISurfData::load_plasma()
 {
+  if (!plasma_data_fix_id.empty()) {
+    int ifix = modify->find_fix(plasma_data_fix_id.c_str());
+    if (ifix < 0)
+      error->all(FLERR, "compute pmi/surf/data: plasma_data fix ID not found");
+    auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[ifix]);
+    if (!pd)
+      error->all(FLERR, "compute pmi/surf/data: plasma_data fix must be style plasma/data");
+    load_plasma_from_fix(pd);
+    return;
+  }
+
   H5::H5File file(plasma_path, H5F_ACC_RDONLY);
 
   auto hasDataset = [&](const std::string& name) -> bool {
@@ -505,57 +644,8 @@ void ComputePMISurfData::load_mesh()
       }
     }
 
-    // Build bounding boxes for triangle search acceleration
-    mesh_tri_rmin.resize(mesh_ntri);
-    mesh_tri_rmax.resize(mesh_ntri);
-    mesh_tri_zmin.resize(mesh_ntri);
-    mesh_tri_zmax.resize(mesh_ntri);
-    for (int t = 0; t < mesh_ntri; t++) {
-      const int v0 = mesh_tri[t*3+0], v1 = mesh_tri[t*3+1], v2 = mesh_tri[t*3+2];
-      const double r0 = mesh_vtx_r[v0], r1 = mesh_vtx_r[v1], r2 = mesh_vtx_r[v2];
-      const double z0 = mesh_vtx_z[v0], z1 = mesh_vtx_z[v1], z2 = mesh_vtx_z[v2];
-      mesh_tri_rmin[t] = std::min({r0,r1,r2});
-      mesh_tri_rmax[t] = std::max({r0,r1,r2});
-      mesh_tri_zmin[t] = std::min({z0,z1,z2});
-      mesh_tri_zmax[t] = std::max({z0,z1,z2});
-    }
-
     has_mesh = 1;
-
-    // Build spatial hash for O(1) triangle lookup
-    {
-      hash_rmin = *std::min_element(mesh_tri_rmin.begin(), mesh_tri_rmin.end());
-      double rmax = *std::max_element(mesh_tri_rmax.begin(), mesh_tri_rmax.end());
-      hash_zmin = *std::min_element(mesh_tri_zmin.begin(), mesh_tri_zmin.end());
-      double zmax = *std::max_element(mesh_tri_zmax.begin(), mesh_tri_zmax.end());
-      hash_nr = 100; hash_nz = 100;
-      hash_dr = (rmax - hash_rmin) / hash_nr + 1e-12;
-      hash_dz = (zmax - hash_zmin) / hash_nz + 1e-12;
-      hash_grid.assign(hash_nr * hash_nz, std::vector<int>());
-      for (int t = 0; t < mesh_ntri; t++) {
-        int ir0 = std::max(0, (int)((mesh_tri_rmin[t] - hash_rmin) / hash_dr));
-        int ir1 = std::min(hash_nr-1, (int)((mesh_tri_rmax[t] - hash_rmin) / hash_dr));
-        int iz0 = std::max(0, (int)((mesh_tri_zmin[t] - hash_zmin) / hash_dz));
-        int iz1 = std::min(hash_nz-1, (int)((mesh_tri_zmax[t] - hash_zmin) / hash_dz));
-        for (int iz = iz0; iz <= iz1; iz++)
-          for (int ir = ir0; ir <= ir1; ir++)
-            hash_grid[iz * hash_nr + ir].push_back(t);
-      }
-    }
-
-    // Precompute centroids of mapped triangles for nearest-neighbor fallback.
-    // Wall surface centroids often fall just outside the B2.5 domain boundary
-    // (in the vacuum gap between plasma mesh and physical wall).
-    mapped_cr.clear();
-    mapped_cz.clear();
-    mapped_idx.clear();
-    for (int t = 0; t < mesh_ntri; t++) {
-      if (mesh_cell_idx[t] < 0) continue;
-      const int v0 = mesh_tri[t*3+0], v1 = mesh_tri[t*3+1], v2 = mesh_tri[t*3+2];
-      mapped_cr.push_back((mesh_vtx_r[v0] + mesh_vtx_r[v1] + mesh_vtx_r[v2]) / 3.0);
-      mapped_cz.push_back((mesh_vtx_z[v0] + mesh_vtx_z[v1] + mesh_vtx_z[v2]) / 3.0);
-      mapped_idx.push_back(t);
-    }
+    rebuild_mesh_cache();
 
   } catch (...) {
     has_mesh = 0;
@@ -635,70 +725,21 @@ void ComputePMISurfData::init()
   if (surf->implicit)
     error->all(FLERR,"Cannot use compute pmi/surf/data with implicit surfs");
 
-  // If plasma_data fix is specified, pull all data from it
-  if (!plasma_data_fix_id.empty()) {
-    int ifix = modify->find_fix(plasma_data_fix_id.c_str());
-    if (ifix < 0) {
-      char msg[256];
-      snprintf(msg, sizeof(msg),
-               "compute pmi/surf/data: fix '%s' not found",
-               plasma_data_fix_id.c_str());
-      error->all(FLERR, msg);
-    }
-    auto *pd = dynamic_cast<FixPlasmaData*>(modify->fix[ifix]);
-    if (!pd)
-      error->all(FLERR,
-        "compute pmi/surf/data: plasma_data fix must be style plasma/data");
+  cache_valid = 0;
 
-    // Copy grid and fields from the shared fix
-    nr = pd->nr;
-    nz = pd->nz;
-    rvals = pd->rvals;
-    zvals = pd->zvals;
-    dens_i = pd->dens_i;
-    temp_e = pd->temp_e;
-    temp_i = pd->temp_i;
-    parr_flow = pd->parr_flow;
-    parr_flow_r = pd->parr_flow_r;
-    parr_flow_t = pd->parr_flow_t;
-    parr_flow_z = pd->parr_flow_z;
-    br = pd->br;
-    bz = pd->bz;
-    bt = pd->bt;
-    has_bfield = pd->has_bfield;
-    has_temp = (!temp_e.empty() && !temp_i.empty()) ? 1 : 0;
-
-    // Multi-ion data
-    if (pd->nion > 0) {
-      has_multi_ion = 1;
-      nspec = pd->nion;
-      ion_charge_state_z = pd->ion_charge_z;
-      ions_dens = pd->ions_dens;
-      ions_temp = pd->ions_temp;
-      ions_parr_flow = pd->ions_upar;
-    }
-
-    // Set plasma_path so load_mesh() can read the mesh triangulation
-    plasma_path = pd->plasma_path;
-
-    if (comm->me == 0 && screen)
-      fprintf(screen,
-        "compute pmi/surf/data: using plasma data from fix '%s' (gen=%d)\n",
-        plasma_data_fix_id.c_str(), pd->generation);
-  } else {
-    try {
-      load_plasma();
-    } catch (const std::exception& e) {
-      error->all(FLERR, e.what());
-    } catch (...) {
-      error->all(FLERR, "compute pmi/surf/data failed reading plasma file");
-    }
+  try {
+    load_plasma();
+  } catch (const std::exception& e) {
+    error->all(FLERR, e.what());
+  } catch (...) {
+    error->all(FLERR, "compute pmi/surf/data failed reading plasma file");
   }
 
   // Load B-field from separate file if not already available.
-  // If no explicit bfield path given, try bfield.h5 in the same directory.
+  // In plasma_data mode we stay file-free unless the user explicitly
+  // supplies a bfield path override.
   int bfield_user_specified = !bfield_path.empty();
-  if (!has_bfield && bfield_path.empty() && !plasma_path.empty()) {
+  if (plasma_data_fix_id.empty() && !has_bfield && bfield_path.empty() && !plasma_path.empty()) {
     std::string dir = plasma_path;
     size_t slash = dir.find_last_of('/');
     if (slash != std::string::npos)
@@ -755,7 +796,7 @@ void ComputePMISurfData::init()
   }
 
   load_boundary();
-  load_mesh();
+  if (plasma_data_fix_id.empty()) load_mesh();
 
   if (debug_interp && comm->me == 0) {
     auto interp_yield_raw = [&](double e_eV, double a_deg)->double {
@@ -919,6 +960,7 @@ void ComputePMISurfData::compute_per_surf()
   const double AMU = 1.66053906660e-27;  // atomic mass unit [kg]
 
   invoked_per_surf = update->ntimestep;
+  if (static_cache && cache_valid) return;
   if (nvalue == 1) {
     for (int i = 0; i < nsown; i++) vector_surf[i] = 0.0;
   } else {
@@ -1147,6 +1189,8 @@ void ComputePMISurfData::compute_per_surf()
       }
     }
   }
+
+  if (static_cache) cache_valid = 1;
 }
 
 /* ---------------------------------------------------------------------- */
