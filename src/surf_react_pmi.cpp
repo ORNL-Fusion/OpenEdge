@@ -47,11 +47,11 @@ https://github.com/ORNL-Fusion/OpenEdge
 using namespace SPARTA_NS;
 
 enum{REFLECT,SPUTTER,ABSORB};
-enum{SIMPLE};
+enum{SIMPLE,ECKSTEIN,TRIM_STYLE};
 
 #define MAXREACTANT 1
 #define MAXPRODUCT 2
-#define MAXCOEFF 2
+#define MAXCOEFF 12  // bumped from 2 to fit Eckstein parameter pack
 
 #define MAXLINE 1024
 #define DELTALIST 16
@@ -86,6 +86,16 @@ SurfReactPMI::SurfReactPMI(SPARTA *sparta, int narg, char **arg) :
 
   int iarg_end;
 
+  // Pre-scan for trim_dir so Trim reactions parsed inside readfile()
+  // can resolve their table names.  trim_dir may appear anywhere in the
+  // argument list after the mode keyword; we pick it up here.
+  for (int k = 3; k + 1 < narg; k++) {
+    if (strcmp(arg[k],"trim_dir") == 0) {
+      trim_dir = std::string(arg[k+1]);
+      break;
+    }
+  }
+
   if (strcmp(arg[2],"constant") == 0) {
     mode = 0;
     if (narg < 8) error->all(FLERR,
@@ -112,12 +122,42 @@ SurfReactPMI::SurfReactPMI(SPARTA *sparta, int narg, char **arg) :
     readfile(arg[3]);
     h5_path = std::string(arg[4]);
     iarg_end = 5;
+  } else if (strcmp(arg[2],"eckstein") == 0) {
+    // analytic mode: no bulk HDF5 table.  Reflect and Sputter reactions
+    // must use Eckstein (analytic) or Trim (tabulated EIRENE reflection).
+    // Absorb reactions stay Simple.
+    mode = 2;
+    if (narg < 4) error->all(FLERR,
+      "surf_react pmi eckstein requires: reaction_file");
+    readfile(arg[3]);
+    for (int i = 0; i < nlist_prob; i++) {
+      if (rlist[i].type == ABSORB) continue;
+      if (rlist[i].style != ECKSTEIN && rlist[i].style != TRIM_STYLE) {
+        char str[256];
+        snprintf(str,sizeof(str),
+          "surf_react pmi eckstein: reflect/sputter reaction '%s' must be "
+          "Eckstein or Trim style",
+          rlist[i].id ? rlist[i].id : "(unknown)");
+        error->all(FLERR,str);
+      }
+    }
+    iarg_end = 4;
   } else {
-    error->all(FLERR,"surf_react pmi: mode must be 'constant' or 'file'");
+    error->all(FLERR,"surf_react pmi: mode must be 'constant', 'file', "
+                     "or 'eckstein'");
     iarg_end = narg;
   }
 
-  // parse optional trailing keywords: log yes/no, file <path>
+  // parse optional trailing keywords: log yes/no, file <path>, trim_dir <path>.
+  // trim_dir must be set BEFORE readfile() if reactions reference Trim
+  // tables.  The constructor handles this by delaying readfile() until
+  // after the keyword sweep - but we already called readfile() above in
+  // the eckstein path.  For ease of use we support trim_dir both before
+  // the reaction file (via an extended syntax) and after; if a Trim
+  // reaction was parsed before trim_dir was known, load_or_get_trim_table
+  // will already have errored.  The idiomatic ordering is:
+  //   surf_react ID pmi eckstein trim_dir <path> <reactions_file>
+  // but we also accept trailing trim_dir for backward compat.
 
   int iarg = iarg_end;
   while (iarg < narg) {
@@ -136,6 +176,11 @@ SurfReactPMI::SurfReactPMI(SPARTA *sparta, int narg, char **arg) :
       logfile_base = new char[n];
       strcpy(logfile_base, arg[iarg+1]);
       logflag = 1;
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"trim_dir") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR,"surf_react pmi: trim_dir requires a path");
+      trim_dir = std::string(arg[iarg+1]);
       iarg += 2;
     } else {
       error->all(FLERR,"surf_react pmi: unknown keyword");
@@ -254,19 +299,68 @@ int SurfReactPMI::react(Particle::OnePart *&ip, int isurf,
   }
 
   // --- Look up coefficients ---
+  //
+  // Per-reaction style: each reaction (reflect, sputter, absorb) can
+  // independently use SIMPLE (table or constant) or ECKSTEIN (analytic
+  // formula with parameters packed into coeff[]).
 
-  double RN, RE, Y, Eb;
+  double RN = 0.0, RE = 0.0, Y = 0.0, Eb = 0.0;
 
+  // Defaults from SIMPLE-mode path (table or constant).  In mode==2
+  // (pure Eckstein) there is no table, so leave these at zero - they
+  // won't be read because all reactions are ECKSTEIN style.
+  double RN_simple = 0.0, RE_simple = 0.0, Y_simple = 0.0, Eb_simple = 0.0;
   if (mode == 0) {
-    RN = const_RN;
-    RE = const_RE;
-    Y  = const_Y;
-    Eb = const_Ebind;
+    RN_simple = const_RN;
+    RE_simple = const_RE;
+    Y_simple  = const_Y;
+    Eb_simple = const_Ebind;
+  } else if (mode == 1) {
+    RN_simple = interp_table(RN_table, E_eV, theta_deg);
+    RE_simple = interp_table(RE_table, E_eV, theta_deg);
+    Y_simple  = interp_table(spyld_table, E_eV, theta_deg);
+    Eb_simple = Ebind;
+  }
+
+  // Reflect reaction -> RN, RE
+  if (sr.ireflect >= 0) {
+    OneReaction *rr = &rlist[sr.ireflect];
+    if (rr->style == ECKSTEIN) {
+      Eckstein::ReflectParams rp;
+      Eckstein::unpack_reflect(rr->coeff, rp);
+      RN = Eckstein::reflection_RN(E_eV, theta_deg, rp);
+      RE = rp.re_frac;  // <E_out>/<E_in> fraction
+    } else if (rr->style == TRIM_STYLE) {
+      int it = static_cast<int>(rr->coeff[0]);
+      if (it >= 0 && it < (int)trim_tables.size()) {
+        EireneTrim::TrimView tv = trim_tables[it].view();
+        RN = EireneTrim::R_N_interp(tv, E_eV, theta_deg);
+        // RE is not used on the Trim path - outgoing energy is sampled
+        // directly below in the reflect branch, not computed as RE*E.
+        RE = 0.0;
+      } else {
+        RN = 0.0; RE = 0.0;
+      }
+    } else {
+      RN = RN_simple;
+      RE = RE_simple;
+    }
+  }
+
+  // Sputter reaction -> Y (and Eb from the same params when Eckstein)
+  if (sr.isputter >= 0) {
+    OneReaction *rs = &rlist[sr.isputter];
+    if (rs->style == ECKSTEIN) {
+      Eckstein::SputterParams sp;
+      Eckstein::unpack_sputter(rs->coeff, sp);
+      Y  = Eckstein::sputter_yield(E_eV, theta_deg, sp);
+      Eb = sp.Es;
+    } else {
+      Y  = Y_simple;
+      Eb = Eb_simple;
+    }
   } else {
-    RN = interp_table(RN_table, E_eV, theta_deg);
-    RE = interp_table(RE_table, E_eV, theta_deg);
-    Y  = interp_table(spyld_table, E_eV, theta_deg);
-    Eb = Ebind;
+    Eb = Eb_simple;
   }
 
   // clamp to valid range
@@ -289,25 +383,83 @@ int SurfReactPMI::react(Particle::OnePart *&ip, int isurf,
   velreset = 1;  // we set outgoing velocities directly
 
   if (u < RN && sr.ireflect >= 0) {
-    // REFLECT: ip -> neutral product, cosine-law direction, energy from RE*E
+    // REFLECT: ip -> neutral product
+    //   SIMPLE/ECKSTEIN path: cosine-law direction + E_out = RE * E_in
+    //   TRIM path:            sample E_out, polar, azimuthal from tables
 
     int irxn = sr.ireflect;
     OneReaction *r = &rlist[irxn];
     ip->ispecies = r->products[0];
 
-    double E_out = RE * E_eV;
     double mass_out = particle->species[ip->ispecies].mass;
-    double E_out_J = E_out / update->joule2ev / update->mvv2e;
-    double vmag_out = sqrt(2.0 * E_out_J / mass_out);
+    double E_out = 0.0;
 
-    // cosine-law direction sampling into outward hemisphere
-    sample_cosine_direction(norm, ip->v, vmag_out);
+    if (r->style == TRIM_STYLE) {
+      int it = static_cast<int>(r->coeff[0]);
+      EireneTrim::TrimView tv = trim_tables[it].view();
+      double u1 = random->uniform();
+      double u2 = random->uniform();
+      double u3 = random->uniform();
+      double cos_polar = 1.0, cos_azim = 1.0;
+      EireneTrim::sample_reflection(tv, E_eV, theta_deg, u1, u2, u3,
+                                    &E_out, &cos_polar, &cos_azim);
+
+      double E_out_J = E_out / update->joule2ev / update->mvv2e;
+      double vmag = sqrt(2.0 * E_out_J / mass_out);
+
+      // Build an orthonormal basis (n_hat, t_in_hat, b_hat) where
+      //   n_hat is the outward surface normal,
+      //   t_in_hat is the tangential component of the incident velocity
+      //            (so the reflected particle's azimuthal direction is
+      //             measured relative to the incidence plane, matching
+      //             how EIRENE labels its azimuthal quantile tables).
+      double nlen = MathExtra::len3(norm);
+      double nh[3] = {norm[0]/nlen, norm[1]/nlen, norm[2]/nlen};
+      double vin[3] = {ip->v[0], ip->v[1], ip->v[2]};
+      double vn = MathExtra::dot3(vin, nh);
+      double tang[3] = {vin[0] - vn*nh[0],
+                        vin[1] - vn*nh[1],
+                        vin[2] - vn*nh[2]};
+      double tlen = sqrt(tang[0]*tang[0]+tang[1]*tang[1]+tang[2]*tang[2]);
+      if (tlen < 1e-12) {
+        // normal incidence: pick an arbitrary tangent
+        double arb[3] = {1.0, 0.0, 0.0};
+        if (fabs(nh[0]) > 0.9) { arb[0]=0.0; arb[1]=1.0; arb[2]=0.0; }
+        tang[0] = arb[0] - (arb[0]*nh[0]+arb[1]*nh[1]+arb[2]*nh[2])*nh[0];
+        tang[1] = arb[1] - (arb[0]*nh[0]+arb[1]*nh[1]+arb[2]*nh[2])*nh[1];
+        tang[2] = arb[2] - (arb[0]*nh[0]+arb[1]*nh[1]+arb[2]*nh[2])*nh[2];
+        tlen = sqrt(tang[0]*tang[0]+tang[1]*tang[1]+tang[2]*tang[2]);
+      }
+      // tin_hat: flip sign so reflected azimuth=0 points in forward
+      // scatter direction (away from the wall projection of incident v).
+      double tin_hat[3] = {-tang[0]/tlen, -tang[1]/tlen, -tang[2]/tlen};
+      double b_hat[3];
+      b_hat[0] = nh[1]*tin_hat[2] - nh[2]*tin_hat[1];
+      b_hat[1] = nh[2]*tin_hat[0] - nh[0]*tin_hat[2];
+      b_hat[2] = nh[0]*tin_hat[1] - nh[1]*tin_hat[0];
+
+      double sin_polar = sqrt(fmax(0.0, 1.0 - cos_polar*cos_polar));
+      double sin_azim  = sqrt(fmax(0.0, 1.0 - cos_azim*cos_azim));
+      // randomize the sign of the azimuthal out-of-plane component
+      if (random->uniform() < 0.5) sin_azim = -sin_azim;
+
+      for (int d = 0; d < 3; d++) {
+        ip->v[d] = vmag * (cos_polar * nh[d]
+                         + sin_polar * (cos_azim * tin_hat[d]
+                                      + sin_azim * b_hat[d]));
+      }
+    } else {
+      E_out = RE * E_eV;
+      double E_out_J = E_out / update->joule2ev / update->mvv2e;
+      double vmag_out = sqrt(2.0 * E_out_J / mass_out);
+      // cosine-law direction sampling into outward hemisphere
+      sample_cosine_direction(norm, ip->v, vmag_out);
+    }
 
     ip->erot = 0.0;
     ip->evib = 0.0;
 
-    double E_out_eV = RE * E_eV;
-    if (logflag) log_impact(ip, isurf, norm, E_eV, theta_deg, 1, E_out_eV);
+    if (logflag) log_impact(ip, isurf, norm, E_eV, theta_deg, 1, E_out);
 
     nsingle++;
     tally_single[irxn]++;
@@ -647,6 +799,106 @@ double SurfReactPMI::sample_thompson(double Eb, double Emax)
 }
 
 /* ----------------------------------------------------------------------
+   load an EIRENE TRIM reflection table on demand.
+   Returns index into trim_tables or -1 on failure.
+------------------------------------------------------------------------- */
+
+int SurfReactPMI::load_or_get_trim_table(const char *name)
+{
+  std::string sname(name);
+  auto it = trim_index.find(sname);
+  if (it != trim_index.end()) return it->second;
+
+  if (trim_dir.empty()) return -1;
+
+  std::string path = trim_dir + "/" + sname + ".h5";
+
+  try {
+    H5::H5File file(path, H5F_ACC_RDONLY);
+
+    auto read_1d = [&](const std::string &ds, std::vector<double> &out) {
+      H5::DataSet d = file.openDataSet(ds);
+      H5::DataSpace sp = d.getSpace();
+      hsize_t dim;
+      sp.getSimpleExtentDims(&dim);
+      out.resize(static_cast<size_t>(dim));
+      d.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+    };
+    auto read_flat = [&](const std::string &ds, std::vector<double> &out,
+                         size_t expected) {
+      H5::DataSet d = file.openDataSet(ds);
+      H5::DataSpace sp = d.getSpace();
+      int rank = sp.getSimpleExtentNdims();
+      std::vector<hsize_t> dims(rank);
+      sp.getSimpleExtentDims(dims.data());
+      size_t total = 1;
+      for (int r = 0; r < rank; r++) total *= dims[r];
+      if (total != expected) {
+        throw std::runtime_error(
+          "surf_react pmi TRIM: " + ds + " has " + std::to_string(total) +
+          " elements, expected " + std::to_string(expected));
+      }
+      out.resize(total);
+      d.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+    };
+
+    TrimTableData t;
+    t.name = sname;
+
+    read_1d("E",     t.E_grid);
+    read_1d("theta", t.theta_grid);
+    read_1d("raar",  t.raar);
+
+    const int nE = EireneTrim::TRIM_NE;
+    const int nW = EireneTrim::TRIM_NW;
+    const int nR = EireneTrim::TRIM_NR;
+
+    if ((int)t.E_grid.size() != nE || (int)t.theta_grid.size() != nW ||
+        (int)t.raar.size() != nR) {
+      throw std::runtime_error(
+        "surf_react pmi TRIM: axis shape mismatch in " + path);
+    }
+
+    read_flat("R_N",         t.R_N,         (size_t)nE * nW);
+    read_flat("Eout_q",      t.Eout_q,      (size_t)nE * nW * nR);
+    read_flat("Eout_min",    t.Eout_min,    (size_t)nE * nW);
+    read_flat("Eout_max",    t.Eout_max,    (size_t)nE * nW);
+    read_flat("cos_polar_q", t.cos_polar_q, (size_t)nE * nW * nR * nR);
+    read_flat("cos_azim_q",  t.cos_azim_q,  (size_t)nE * nW * nR * nR * nR);
+
+    // optional header attributes
+    t.Z1 = t.M1 = t.Z2 = t.M2 = 0.0;
+    auto read_attr = [&](const std::string &aname, double &val) {
+      if (file.attrExists(aname)) {
+        H5::Attribute a = file.openAttribute(aname);
+        a.read(H5::PredType::NATIVE_DOUBLE, &val);
+      }
+    };
+    read_attr("Z1", t.Z1); read_attr("M1", t.M1);
+    read_attr("Z2", t.Z2); read_attr("M2", t.M2);
+
+    int idx = static_cast<int>(trim_tables.size());
+    trim_tables.push_back(std::move(t));
+    trim_index[sname] = idx;
+
+    if (comm->me == 0) {
+      fprintf(screen ? screen : logfile,
+              "surf_react pmi: loaded TRIM table '%s' from %s\n",
+              sname.c_str(), path.c_str());
+    }
+    return idx;
+  } catch (const std::exception &e) {
+    if (comm->me == 0)
+      fprintf(screen ? screen : logfile,
+              "surf_react pmi TRIM load error for '%s' (%s): %s\n",
+              sname.c_str(), path.c_str(), e.what());
+    return -1;
+  } catch (...) {
+    return -1;
+  }
+}
+
+/* ----------------------------------------------------------------------
    cosine-law hemisphere direction sampling
    samples direction in outward hemisphere defined by norm
    sets dir[] to direction vector with magnitude vmag
@@ -866,26 +1118,95 @@ void SurfReactPMI::readfile(char *fname)
 
     word = strtok(NULL," \t\n");
     if (!word) error->all(FLERR,"Invalid reaction style in file");
-    if (word[0] == 'S' || word[0] == 's') r->style = SIMPLE;
-    else error->all(FLERR,"Invalid reaction style in file");
-
-    if (r->style == SIMPLE) r->ncoeff = 2;
-
-    for (int i = 0; i < r->ncoeff; i++) {
-      word = strtok(NULL," \t\n");
-
-      // second coeff is optional
-
-      if (!word) {
-        if (i == 0) error->all(FLERR,"Invalid reaction coefficients in file");
-        else r->coeff[i] = 0.0;
-      } else {
-        r->coeff[i] = input->numeric(FLERR,word);
-      }
+    // Accept "Simple ...", "Eckstein <shorthand>", or "Trim <shorthand>"
+    if (strcasecmp(word,"Eckstein") == 0) {
+      r->style = ECKSTEIN;
+    } else if (strcasecmp(word,"Trim") == 0) {
+      r->style = TRIM_STYLE;
+    } else if (strcasecmp(word,"Simple") == 0) {
+      r->style = SIMPLE;
+    } else {
+      error->all(FLERR,"Invalid reaction style in file "
+                       "(expected 'Simple', 'Eckstein', or 'Trim')");
     }
 
-    word = strtok(NULL," \t\n");
-    if (word) error->all(FLERR,"Too many coefficients in a reaction formula");
+    if (r->style == SIMPLE) {
+      r->ncoeff = 2;
+      for (int i = 0; i < r->ncoeff; i++) {
+        word = strtok(NULL," \t\n");
+        if (!word) {
+          if (i == 0) error->all(FLERR,"Invalid reaction coefficients in file");
+          else r->coeff[i] = 0.0;
+        } else {
+          r->coeff[i] = input->numeric(FLERR,word);
+        }
+      }
+      word = strtok(NULL," \t\n");
+      if (word) error->all(FLERR,"Too many coefficients in a reaction formula");
+
+    } else if (r->style == ECKSTEIN) {
+      // ECKSTEIN: next token is a shorthand name like "W_on_W"
+      word = strtok(NULL," \t\n");
+      if (!word)
+        error->all(FLERR,"Eckstein reaction requires a shorthand name "
+                         "(e.g. W_on_W)");
+      r->ncoeff = Eckstein::NCOEFF_ECKSTEIN;
+
+      if (r->type == SPUTTER) {
+        Eckstein::SputterParams sp;
+        if (!Eckstein::lookup_sputter(word,sp)) {
+          char str[256];
+          snprintf(str,sizeof(str),
+                   "Unknown Eckstein sputter shorthand '%s' in reactions file",
+                   word);
+          error->all(FLERR,str);
+        }
+        Eckstein::pack_sputter(sp,r->coeff);
+      } else if (r->type == REFLECT) {
+        Eckstein::ReflectParams rp;
+        if (!Eckstein::lookup_reflect(word,rp)) {
+          char str[256];
+          snprintf(str,sizeof(str),
+                   "Unknown Eckstein reflect shorthand '%s' in reactions file",
+                   word);
+          error->all(FLERR,str);
+        }
+        Eckstein::pack_reflect(rp,r->coeff);
+      } else {
+        error->all(FLERR,"Eckstein style only valid for Reflect or Sputter "
+                         "reactions");
+      }
+
+      word = strtok(NULL," \t\n");
+      if (word) error->all(FLERR,"Too many coefficients after Eckstein "
+                                 "shorthand");
+
+    } else {
+      // TRIM_STYLE: next token is an EIRENE TRIM combination name like
+      // "W_on_W"; reflection data is loaded lazily from trim_dir/<name>.h5.
+      // Only Reflect reactions may use Trim style.
+      if (r->type != REFLECT)
+        error->all(FLERR,"Trim style is only valid for Reflect reactions "
+                         "(use Eckstein for sputtering)");
+      word = strtok(NULL," \t\n");
+      if (!word)
+        error->all(FLERR,"Trim reaction requires a shorthand name "
+                         "(e.g. W_on_W)");
+      int idx = load_or_get_trim_table(word);
+      if (idx < 0) {
+        char str[256];
+        snprintf(str,sizeof(str),
+                 "Cannot load Trim table for '%s' from trim_dir='%s'. "
+                 "Check that the surf_react pmi command specified trim_dir, "
+                 "and that <name>.h5 exists there.",
+                 word, trim_dir.c_str());
+        error->all(FLERR,str);
+      }
+      r->ncoeff = 1;
+      r->coeff[0] = static_cast<double>(idx);
+      word = strtok(NULL," \t\n");
+      if (word) error->all(FLERR,"Too many arguments after Trim shorthand");
+    }
 
     // prepend type tag to reaction ID for unambiguous tally output
     {

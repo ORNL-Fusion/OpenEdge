@@ -166,14 +166,92 @@ def make_grid(xc, yc, val):
     x = np.unique(xc)
     y = np.unique(yc)
     if x.size < 2 or y.size < 2:
-        return None, None, None
+        return None, None, None, None
 
     ix = np.searchsorted(x, xc)
     iy = np.searchsorted(y, yc)
     grid = np.zeros((y.size, x.size), dtype=float)
+    counts = np.zeros((y.size, x.size), dtype=float)
     np.add.at(grid, (iy, ix), val)
-    xx, yy = np.meshgrid(x, y)
-    return xx, yy, grid
+    np.add.at(counts, (iy, ix), 1.0)
+    grid = np.divide(grid, counts, out=np.zeros_like(grid), where=counts > 0.0)
+    return x, y, grid, counts > 0.0
+
+
+def grid_fill_fraction(xc: np.ndarray, yc: np.ndarray) -> float:
+    x = np.unique(xc)
+    y = np.unique(yc)
+    if x.size == 0 or y.size == 0:
+        return 0.0
+    return float(len(xc)) / float(x.size * y.size)
+
+
+def centers_to_edges(v: np.ndarray) -> np.ndarray:
+    if v.size == 0:
+        return np.array([], dtype=float)
+    if v.size == 1:
+        return np.array([v[0] - 0.5, v[0] + 0.5], dtype=float)
+    mids = 0.5 * (v[:-1] + v[1:])
+    first = v[0] - 0.5 * (v[1] - v[0])
+    last = v[-1] + 0.5 * (v[-1] - v[-2])
+    return np.concatenate(([first], mids, [last]))
+
+
+def default_display_bins(
+    xmin: float,
+    xmax: float,
+    ymin: float,
+    ymax: float,
+    target: int,
+    npts: int,
+):
+    target = max(32, int(target))
+    dx = max(xmax - xmin, 1.0e-12)
+    dy = max(ymax - ymin, 1.0e-12)
+    total_bins = min(target * target, max(32 * 32, int(np.ceil(max(npts, 1) / 1.5))))
+    if dx >= dy:
+        nx = max(32, min(target, int(round(np.sqrt(total_bins * dx / dy)))))
+        ny = max(32, min(target, int(round(total_bins / nx))))
+    else:
+        ny = max(32, min(target, int(round(np.sqrt(total_bins * dy / dx)))))
+        nx = max(32, min(target, int(round(total_bins / ny))))
+    return nx, ny
+
+
+def make_binned_grid(
+    xc: np.ndarray,
+    yc: np.ndarray,
+    val: np.ndarray,
+    nx: int,
+    ny: int,
+    reducer: str,
+    bounds,
+):
+    xmin, xmax, ymin, ymax = bounds
+    x_edges = np.linspace(xmin, xmax, nx + 1)
+    y_edges = np.linspace(ymin, ymax, ny + 1)
+    x = 0.5 * (x_edges[:-1] + x_edges[1:])
+    y = 0.5 * (y_edges[:-1] + y_edges[1:])
+
+    if reducer == "max":
+        ix = np.searchsorted(x_edges, xc, side="right") - 1
+        iy = np.searchsorted(y_edges, yc, side="right") - 1
+        valid_pts = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny)
+        grid = np.full((ny, nx), -np.inf, dtype=float)
+        np.maximum.at(grid, (iy[valid_pts], ix[valid_pts]), val[valid_pts])
+        valid = np.isfinite(grid)
+        grid[~valid] = 0.0
+        return x, y, grid, valid
+
+    sum_grid = np.histogram2d(yc, xc, bins=[y_edges, x_edges], weights=val)[0]
+    count_grid = np.histogram2d(yc, xc, bins=[y_edges, x_edges])[0]
+    valid = count_grid > 0.0
+
+    if reducer == "sum":
+        return x, y, sum_grid, valid
+
+    grid = np.divide(sum_grid, count_grid, out=np.zeros_like(sum_grid), where=valid)
+    return x, y, grid, valid
 
 
 def gaussian_kernel1d(sigma: float) -> np.ndarray:
@@ -203,30 +281,93 @@ def smooth_grid(grid: np.ndarray, sigma: float) -> np.ndarray:
     return out
 
 
-def coarsen_grid(rs: np.ndarray, zs: np.ndarray, grid: np.ndarray, factor: int):
+def smooth_masked_grid(grid: np.ndarray, valid: np.ndarray, sigma: float):
+    if sigma <= 0.0:
+        return grid, valid
+    weights = valid.astype(float)
+    smoothed_num = smooth_grid(np.where(valid, grid, 0.0), sigma)
+    smoothed_den = smooth_grid(weights, sigma)
+    out = np.divide(
+        smoothed_num,
+        smoothed_den,
+        out=np.zeros_like(smoothed_num),
+        where=smoothed_den > 1.0e-12,
+    )
+    return out, smoothed_den > 1.0e-6
+
+
+def coarsen_grid(x: np.ndarray, y: np.ndarray, grid: np.ndarray, valid: np.ndarray, factor: int):
     if factor <= 1:
-        return rs, zs, grid
+        return x, y, grid, valid
     ny, nx = grid.shape
     ny2 = ny // factor
     nx2 = nx // factor
     if ny2 < 1 or nx2 < 1:
-        return rs, zs, grid
+        return x, y, grid, valid
 
     ny_trim = ny2 * factor
     nx_trim = nx2 * factor
-    rs2 = rs[:ny_trim, :nx_trim].reshape(ny2, factor, nx2, factor).mean(axis=(1, 3))
-    zs2 = zs[:ny_trim, :nx_trim].reshape(ny2, factor, nx2, factor).mean(axis=(1, 3))
-    grid2 = grid[:ny_trim, :nx_trim].reshape(ny2, factor, nx2, factor).mean(axis=(1, 3))
-    return rs2, zs2, grid2
+    x2 = x[:nx_trim].reshape(nx2, factor).mean(axis=1)
+    y2 = y[:ny_trim].reshape(ny2, factor).mean(axis=1)
+    valid_f = valid[:ny_trim, :nx_trim].astype(float)
+    weight2 = valid_f.reshape(ny2, factor, nx2, factor).sum(axis=(1, 3))
+    grid2 = np.divide(
+        (grid[:ny_trim, :nx_trim] * valid_f).reshape(ny2, factor, nx2, factor).sum(axis=(1, 3)),
+        weight2,
+        out=np.zeros((ny2, nx2), dtype=float),
+        where=weight2 > 0.0,
+    )
+    return x2, y2, grid2, weight2 > 0.0
 
 
-def mask_outside_wall(rs: np.ndarray, zs: np.ndarray, grid: np.ndarray, polygon: np.ndarray):
+def load_psi_map(path: Path):
+    """
+    Return (r, z, psi_norm) from an OpenEdge plasma.h5 file.
+    Tolerates files that only contain /psi + /psicore + /psisep
+    (recomputes psi_norm = (psi - psicore) / (psisep - psicore)).
+    Returns None if the file lacks psi information.
+    """
+    try:
+        import h5py  # lazy import so pure-density plots don't need h5py
+    except ImportError:
+        print(f"WARN: h5py not available, skipping psi overlay from {path}")
+        return None
+    try:
+        with h5py.File(str(path), "r") as f:
+            if "r" not in f or "z" not in f:
+                return None
+            r = np.asarray(f["r"][...], dtype=float)
+            z = np.asarray(f["z"][...], dtype=float)
+            if "psi_norm" in f:
+                psi_n = np.asarray(f["psi_norm"][...], dtype=float)
+            elif "psi" in f and "psicore" in f and "psisep" in f:
+                psi = np.asarray(f["psi"][...], dtype=float)
+                psicore = float(np.asarray(f["psicore"][...]).reshape(-1)[0])
+                psisep = float(np.asarray(f["psisep"][...]).reshape(-1)[0])
+                if psicore == psisep:
+                    return None
+                psi_n = (psi - psicore) / (psisep - psicore)
+            else:
+                return None
+    except (OSError, KeyError):
+        return None
+    return r, z, psi_n
+
+
+def mask_outside_wall(
+    x: np.ndarray,
+    y: np.ndarray,
+    grid: np.ndarray,
+    polygon: np.ndarray,
+    valid: np.ndarray,
+):
     if polygon.size == 0:
-        return np.ma.array(grid, copy=False)
+        return np.ma.masked_where(~valid, grid)
+    rs, zs = np.meshgrid(x, y)
     path = MplPath(polygon)
     pts = np.column_stack([rs.ravel(), zs.ravel()])
     inside = path.contains_points(pts, radius=1.0e-10).reshape(grid.shape)
-    return np.ma.masked_where(~inside, grid)
+    return np.ma.masked_where((~inside) | (~valid), grid)
 
 
 def main():
@@ -260,14 +401,40 @@ def main():
     ap.add_argument(
         "--smooth",
         type=float,
-        default=0.0,
-        help="Gaussian smoothing sigma in grid cells",
+        default=None,
+        help="Gaussian smoothing sigma in display cells (default: auto for sparse binned plots)",
     )
     ap.add_argument(
         "--coarsen",
         type=int,
         default=1,
-        help="block-average grid by this factor before plotting",
+        help="block-average the display grid by this factor before plotting",
+    )
+    ap.add_argument(
+        "--plot-mode",
+        choices=("auto", "mesh", "binned"),
+        default="auto",
+        help="auto-detect sparse adaptive grids and render them as a binned heatmap",
+    )
+    ap.add_argument(
+        "--bins",
+        nargs=2,
+        type=int,
+        metavar=("NX", "NY"),
+        default=None,
+        help="display-grid bins for binned mode (default: auto from aspect ratio)",
+    )
+    ap.add_argument(
+        "--target-bins",
+        type=int,
+        default=220,
+        help="target bin count on the longer axis when --bins is not set",
+    )
+    ap.add_argument(
+        "--bin-reduce",
+        choices=("mean", "sum", "max"),
+        default="mean",
+        help="reducer used to combine simulation cells inside each display bin",
     )
     ap.add_argument(
         "--min-density",
@@ -282,8 +449,31 @@ def main():
         action="store_true",
         help="plot log10(density) for positive values",
     )
+    ap.add_argument(
+        "--log-span",
+        type=float,
+        default=4.0,
+        help="limit log color range to this many decades below the panel maximum; <=0 uses full range",
+    )
+    ap.add_argument(
+        "--log-vmax-quantile",
+        type=float,
+        default=99.5,
+        help="in log mode, anchor the upper color limit to this percentile instead of the absolute max; >=100 uses max",
+    )
     ap.add_argument("--xlim", nargs=2, type=float, default=None)
     ap.add_argument("--ylim", nargs=2, type=float, default=None)
+    ap.add_argument(
+        "--plasma-h5",
+        default=None,
+        help="plasma.h5 with /psi_norm (+ /psicore/psisep); overlays psi_norm=0 (core) "
+        "and psi_norm=1 (separatrix) contours. Default: input/plasma.h5 next to --wall.",
+    )
+    ap.add_argument(
+        "--no-psi-overlay",
+        action="store_true",
+        help="disable psi contours even if plasma.h5 is found",
+    )
     args = ap.parse_args()
 
     blocks = parse_grid_dump(Path(args.dump))
@@ -328,8 +518,53 @@ def main():
 
     wall_r, wall_z, wall_poly = parse_surface(Path(args.wall))
 
+    # Resolve psi-overlay source
+    psi_overlay = None
+    if not args.no_psi_overlay:
+        if args.plasma_h5 is not None:
+            psi_overlay = load_psi_map(Path(args.plasma_h5))
+        else:
+            # Guess: input/plasma.h5 next to the wall file
+            guess = Path(args.wall).resolve().parent / "plasma.h5"
+            if guess.exists():
+                psi_overlay = load_psi_map(guess)
+        if psi_overlay is not None:
+            print(f"Overlaying psi_norm=0 (core) and psi_norm=1 (separatrix) contours")
+    fill_fraction = grid_fill_fraction(xc, yc)
+    render_mode = args.plot_mode
+    if render_mode == "auto":
+        render_mode = "binned" if fill_fraction < 0.25 else "mesh"
+
+    xmin = float(np.min(xc))
+    xmax = float(np.max(xc))
+    ymin = float(np.min(yc))
+    ymax = float(np.max(yc))
+    if wall_poly.size:
+        xmin = min(xmin, float(np.min(wall_poly[:, 0])))
+        xmax = max(xmax, float(np.max(wall_poly[:, 0])))
+        ymin = min(ymin, float(np.min(wall_poly[:, 1])))
+        ymax = max(ymax, float(np.max(wall_poly[:, 1])))
+    if args.bins:
+        bin_nx, bin_ny = args.bins
+    else:
+        bin_nx, bin_ny = default_display_bins(
+            xmin, xmax, ymin, ymax, args.target_bins, len(xc)
+        )
+    smooth_sigma = args.smooth
+    if smooth_sigma is None:
+        smooth_sigma = 0.25 if render_mode == "binned" else 0.0
+    print(
+        f"Render mode: {render_mode} "
+        f"(occupied mesh fraction={fill_fraction:.2%}"
+        + (
+            f", display bins={bin_nx}x{bin_ny}, smooth={smooth_sigma:g})"
+            if render_mode == "binned"
+            else ")"
+        )
+    )
+
     nsp = len(values)
-    fig, axs = plt.subplots(1, nsp, figsize=(5.8 * nsp, 5.0), constrained_layout=True)
+    fig, axs = plt.subplots(1, nsp, figsize=(5.8 * nsp, 5.6), constrained_layout=True)
     if nsp == 1:
         axs = [axs]
 
@@ -345,21 +580,43 @@ def main():
 
     for s, dens in enumerate(values):
         ax = axs[s]
-        mesh = make_grid(xc, yc, dens)
-        if mesh[0] is None:
+        vmin = None
+        vmax = None
+        if render_mode == "binned":
+            x, y, grid, valid = make_binned_grid(
+                xc,
+                yc,
+                dens,
+                bin_nx,
+                bin_ny,
+                args.bin_reduce,
+                (xmin, xmax, ymin, ymax),
+            )
+        else:
+            x, y, grid, valid = make_grid(xc, yc, dens)
+        if x is None:
             ax.set_title(f"{labels[s]} (insufficient grid)")
             continue
-        rs, zs, grid = mesh
         if args.coarsen > 1:
-            rs, zs, grid = coarsen_grid(rs, zs, grid, args.coarsen)
-        if args.smooth > 0.0:
-            grid = smooth_grid(grid, args.smooth)
+            x, y, grid, valid = coarsen_grid(x, y, grid, valid, args.coarsen)
+        if smooth_sigma > 0.0:
+            grid, valid = smooth_masked_grid(grid, valid, smooth_sigma)
 
-        grid_plot = mask_outside_wall(rs, zs, grid, wall_poly)
+        grid_plot = mask_outside_wall(x, y, grid, wall_poly, valid)
         mask_floor = max(args.min_density, 0.0)
         if args.log:
             grid_plot = np.ma.masked_less_equal(grid_plot, mask_floor)
             grid_plot = np.ma.log10(grid_plot)
+            log_vals = np.asarray(grid_plot.compressed(), dtype=float)
+            if log_vals.size > 0:
+                if args.log_vmax_quantile >= 100.0:
+                    vmax = float(np.max(log_vals))
+                else:
+                    vmax = float(np.percentile(log_vals, args.log_vmax_quantile))
+                vmin = float(np.min(log_vals))
+                if args.log_span > 0.0:
+                    vmin = max(vmin, vmax - args.log_span)
+                print(f"{labels[s]} log10 range: [{vmin:.2f}, {vmax:.2f}]")
             cbar_label = r"$\log_{10}$ Density [m$^{-3}$]"
         elif mask_floor > 0.0:
             grid_plot = np.ma.masked_less_equal(grid_plot, mask_floor)
@@ -367,12 +624,37 @@ def main():
         else:
             cbar_label = "Density [m$^{-3}$]"
 
-        m = ax.pcolormesh(rs, zs, grid_plot, shading="auto", cmap=cmap)
+        r_edges, z_edges = np.meshgrid(centers_to_edges(x), centers_to_edges(y))
+        m = ax.pcolormesh(
+            r_edges,
+            z_edges,
+            grid_plot,
+            shading="flat",
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+        )
 
         cbar = fig.colorbar(m, ax=ax, pad=0.01, fraction=0.04, shrink=0.85)
         cbar.set_label(cbar_label, rotation=270, labelpad=15)
 
         ax.plot(wall_r, wall_z, "k", lw=2.5)
+        if psi_overlay is not None:
+            pr, pz, psi_n = psi_overlay
+            RR, ZZ = np.meshgrid(pr, pz)
+            # Lightly hatch the absorb region (psi_norm < 0) so it's
+            # unambiguous what fix reflect/psi removes.
+            ax.contourf(
+                RR, ZZ, psi_n,
+                levels=[-1e6, 0.0],
+                colors="none",
+                hatches=["////"],
+                extend="min",
+            )
+            ax.contour(RR, ZZ, psi_n, levels=[0.0], colors="cyan",
+                       linewidths=1.6, linestyles="-")
+            ax.contour(RR, ZZ, psi_n, levels=[1.0], colors="magenta",
+                       linewidths=1.6, linestyles="--")
         ax.set_aspect("equal", adjustable="box")
         if args.xlim:
             ax.set_xlim(args.xlim[0], args.xlim[1])
@@ -383,7 +665,7 @@ def main():
         ax.set_ylabel("Z [m]", weight="semibold")
         ax.grid(alpha=0.3, linestyle="--")
 
-    fig.suptitle(f"WEST grid density, timestep={ts}", y=1.02, fontsize=18)
+    fig.suptitle(f"WEST grid density, timestep={ts}", fontsize=18)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=220, bbox_inches="tight")

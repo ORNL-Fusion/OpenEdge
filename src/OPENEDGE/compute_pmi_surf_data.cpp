@@ -13,6 +13,8 @@
 #include "memory.h"
 #include "error.h"
 #include "fix_plasma_data.h"
+#include "eckstein_sputter_data.h"
+#include "eckstein_sputter.h"
 
 #include <H5Cpp.h>
 #include <algorithm>
@@ -34,17 +36,53 @@ ComputePMISurfData::ComputePMISurfData(SPARTA *sparta, int narg, char **arg) :
   if (igroup < 0) error->all(FLERR,"Compute pmi/surf/data surf group ID does not exist");
   groupbit = surf->bitmask[igroup];
 
+  eckstein_mode = 0;
+  eck_Z1 = eck_M1 = eck_Z2 = eck_M2 = 0.0;
+  eck_Es = eck_Eth = eck_Q = eck_ETF = 0.0;
+
+  // Helper: if the 6th token is "eckstein <entry_name>", load
+  // analytic Eckstein sputter parameters and return the new iarg.
+  auto try_parse_eckstein = [&](int iarg_surf) -> int {
+    if (iarg_surf >= narg) return iarg_surf;
+    if (strcmp(arg[iarg_surf],"eckstein") != 0) return iarg_surf;
+    if (iarg_surf+1 >= narg)
+      error->all(FLERR,"compute pmi/surf/data: eckstein needs entry name (e.g. O_on_W)");
+    eckstein_name = std::string(arg[iarg_surf+1]);
+    Eckstein::SputterParams p;
+    if (!Eckstein::lookup_sputter(eckstein_name.c_str(), p)) {
+      std::string msg = "compute pmi/surf/data: unknown eckstein entry '" +
+                        eckstein_name + "' (check eckstein_sputter_data.h)";
+      error->all(FLERR, msg.c_str());
+    }
+    eckstein_mode = 1;
+    eck_Z1 = p.Z1; eck_M1 = p.M1; eck_Z2 = p.Z2; eck_M2 = p.M2;
+    eck_Es = p.Es; eck_Eth = p.Eth; eck_Q = p.Q; eck_ETF = p.ETF;
+    return iarg_surf + 2;
+  };
+
   int iarg_start;
   if (strcmp(arg[3],"file") == 0) {
-    if (narg < 8) error->all(FLERR,"compute pmi/surf/data: file needs plasma.h5 surface.h5");
+    if (narg < 7) error->all(FLERR,"compute pmi/surf/data: file needs plasma.h5 and surface.h5 or 'eckstein NAME'");
     plasma_path = std::string(arg[4]);
-    surface_path = std::string(arg[5]);
-    iarg_start = 6;
+    int after = try_parse_eckstein(5);
+    if (after == 5) {
+      if (narg < 8) error->all(FLERR,"compute pmi/surf/data: file needs plasma.h5 surface.h5");
+      surface_path = std::string(arg[5]);
+      iarg_start = 6;
+    } else {
+      iarg_start = after;
+    }
   } else if (strcmp(arg[3],"plasma_data") == 0) {
-    if (narg < 7) error->all(FLERR,"compute pmi/surf/data: plasma_data needs fixID surface.h5");
+    if (narg < 6) error->all(FLERR,"compute pmi/surf/data: plasma_data needs fixID and surface.h5 or 'eckstein NAME'");
     plasma_data_fix_id = std::string(arg[4]);
-    surface_path = std::string(arg[5]);
-    iarg_start = 6;
+    int after = try_parse_eckstein(5);
+    if (after == 5) {
+      if (narg < 7) error->all(FLERR,"compute pmi/surf/data: plasma_data needs fixID surface.h5");
+      surface_path = std::string(arg[5]);
+      iarg_start = 6;
+    } else {
+      iarg_start = after;
+    }
   } else {
     error->all(FLERR,"compute pmi/surf/data: first keyword must be 'file' or 'plasma_data'");
     iarg_start = 6;  // unreachable, suppress warning
@@ -787,18 +825,20 @@ void ComputePMISurfData::init()
     }
   }
 
-  try {
-    load_surface_data();
-  } catch (const std::exception& e) {
-    error->all(FLERR, e.what());
-  } catch (...) {
-    error->all(FLERR, "compute pmi/surf/data failed reading surface file");
+  if (!eckstein_mode) {
+    try {
+      load_surface_data();
+    } catch (const std::exception& e) {
+      error->all(FLERR, e.what());
+    } catch (...) {
+      error->all(FLERR, "compute pmi/surf/data failed reading surface file");
+    }
   }
 
   load_boundary();
   if (plasma_data_fix_id.empty()) load_mesh();
 
-  if (debug_interp && comm->me == 0) {
+  if (debug_interp && !eckstein_mode && comm->me == 0) {
     auto interp_yield_raw = [&](double e_eV, double a_deg)->double {
       const double ec = std::min(std::max(e_eV, E_axis.front()), E_axis.back());
       const double ac = std::min(std::max(a_deg, A_axis.front()), A_axis.back());
@@ -976,6 +1016,18 @@ void ComputePMISurfData::compute_per_surf()
   const int ns = has_multi_ion ? nspec : 1;
   std::vector<double> gamma_n(ns,0.0), angle_deg(ns,0.0), energy_eV(ns,0.0), yld(ns,0.0), sput_flux(ns,0.0);
 
+  // Yield dispatch: analytic Eckstein or HDF5 table.
+  Eckstein::SputterParams eck_p;
+  if (eckstein_mode) {
+    eck_p.Z1 = eck_Z1; eck_p.M1 = eck_M1; eck_p.Z2 = eck_Z2; eck_p.M2 = eck_M2;
+    eck_p.Es = eck_Es; eck_p.Eth = eck_Eth; eck_p.Q = eck_Q; eck_p.ETF = eck_ETF;
+  }
+  auto yield_lookup = [&](double E_eV, double a_deg) -> double {
+    if (eckstein_mode)
+      return Eckstein::sputter_yield(E_eV, a_deg, eck_p);
+    return interp_yield(E_eV, a_deg);
+  };
+
   auto clean = [](double x) {
     return (std::fabs(x) < 1.0e-200 || !std::isfinite(x)) ? 0.0 : x;
   };
@@ -1108,7 +1160,7 @@ void ComputePMISurfData::compute_per_surf()
       energy_eV[s] = E;
 
       if (in_projectile_slots(s+1)) {
-        const double ys = interp_yield(E, a_deg);
+        const double ys = yield_lookup(E, a_deg);
         yld[s] = ys;
         sput_flux[s] = g * ys;
         sput_total += sput_flux[s];
@@ -1149,9 +1201,9 @@ void ComputePMISurfData::compute_per_surf()
           // Bohm flux
           const double g_imp = n_imp * cs * sin_alpha;
 
-          // Sputter yield from BCA table
+          // Sputter yield: analytic Eckstein or HDF5 table
           const double a_deg = std::asin(std::min(1.0, sin_alpha)) * 180.0 / M_PI;
-          const double ys = interp_yield(E_eck, a_deg);
+          const double ys = yield_lookup(E_eck, a_deg);
           sput_total += g_imp * ys;
         }
       }

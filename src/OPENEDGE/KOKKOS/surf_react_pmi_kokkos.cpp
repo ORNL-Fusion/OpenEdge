@@ -82,6 +82,7 @@ void SurfReactPMIKokkos::init()
   kk_const_RE = const_RE;
   kk_const_Y = const_Y;
   kk_const_Ebind = const_Ebind;
+  kk_ntrim = 0;
 
   // allocate device tally: [0]=nsingle, [1..nlist]=tally_single
   int ntally = 1 + nlist;
@@ -131,6 +132,79 @@ void SurfReactPMIKokkos::init()
     k_rp.modify_host();
     k_rp.sync_device();
     d_react_product0 = k_rp.d_view;
+  }
+
+  // ---------- copy per-reaction style (SIMPLE / ECKSTEIN) ----------
+
+  {
+    DAT::tdual_int_1d k_st("pmi:react_style", nlist);
+    auto h_st = k_st.h_view;
+    for (int i = 0; i < nlist; i++)
+      h_st(i) = rlist[i].style;
+    k_st.modify_host();
+    k_st.sync_device();
+    d_react_style = k_st.d_view;
+  }
+
+  // ---------- copy per-reaction Eckstein parameter pack ----------
+  // Always allocated with NCOEFF_ECKSTEIN columns; unused slots are zero.
+  // TRIM reactions store only coeff[0] (table index); pack style handles
+  // both by writing up to rlist[i].ncoeff slots.
+
+  {
+    const int ncoeff = Eckstein::NCOEFF_ECKSTEIN;
+    t_double_1d tmp("pmi:react_coeff", (size_t)nlist * ncoeff);
+    auto h_tmp = Kokkos::create_mirror_view(tmp);
+    for (int i = 0; i < nlist; i++) {
+      for (int j = 0; j < ncoeff; j++) {
+        double v = 0.0;
+        if (j < rlist[i].ncoeff) v = rlist[i].coeff[j];
+        h_tmp(i * ncoeff + j) = v;
+      }
+    }
+    Kokkos::deep_copy(tmp, h_tmp);
+    d_react_coeff = tmp;
+  }
+
+  // ---------- copy EIRENE TRIM reflection tables to device ----------
+
+  kk_ntrim = (int)trim_tables.size();
+  if (kk_ntrim > 0) {
+    const int nE = EireneTrim::TRIM_NE;
+    const int nW = EireneTrim::TRIM_NW;
+    const int nR = EireneTrim::TRIM_NR;
+
+    auto alloc_and_fill = [&](t_double_1d &dst, const std::string &label,
+                              size_t per_combo,
+                              auto getter) {
+      dst = t_double_1d(Kokkos::view_alloc(label), (size_t)kk_ntrim * per_combo);
+      auto h = Kokkos::create_mirror_view(dst);
+      for (int it = 0; it < kk_ntrim; it++) {
+        const std::vector<double> &src = getter(trim_tables[it]);
+        for (size_t k = 0; k < per_combo; k++)
+          h(it * per_combo + k) = src[k];
+      }
+      Kokkos::deep_copy(dst, h);
+    };
+
+    alloc_and_fill(d_trim_E,          "pmi:trim_E",         (size_t)nE,
+                   [](const TrimTableData &t) -> const std::vector<double>& { return t.E_grid; });
+    alloc_and_fill(d_trim_theta,      "pmi:trim_theta",     (size_t)nW,
+                   [](const TrimTableData &t) -> const std::vector<double>& { return t.theta_grid; });
+    alloc_and_fill(d_trim_raar,       "pmi:trim_raar",      (size_t)nR,
+                   [](const TrimTableData &t) -> const std::vector<double>& { return t.raar; });
+    alloc_and_fill(d_trim_R_N,        "pmi:trim_R_N",       (size_t)nE * nW,
+                   [](const TrimTableData &t) -> const std::vector<double>& { return t.R_N; });
+    alloc_and_fill(d_trim_Eout_q,     "pmi:trim_Eout_q",    (size_t)nE * nW * nR,
+                   [](const TrimTableData &t) -> const std::vector<double>& { return t.Eout_q; });
+    alloc_and_fill(d_trim_Eout_min,   "pmi:trim_Eout_min",  (size_t)nE * nW,
+                   [](const TrimTableData &t) -> const std::vector<double>& { return t.Eout_min; });
+    alloc_and_fill(d_trim_Eout_max,   "pmi:trim_Eout_max",  (size_t)nE * nW,
+                   [](const TrimTableData &t) -> const std::vector<double>& { return t.Eout_max; });
+    alloc_and_fill(d_trim_cos_polar_q,"pmi:trim_cos_polar", (size_t)nE * nW * nR * nR,
+                   [](const TrimTableData &t) -> const std::vector<double>& { return t.cos_polar_q; });
+    alloc_and_fill(d_trim_cos_azim_q, "pmi:trim_cos_azim",  (size_t)nE * nW * nR * nR * nR,
+                   [](const TrimTableData &t) -> const std::vector<double>& { return t.cos_azim_q; });
   }
 
 #ifdef SPARTA_KOKKOS_EXACT

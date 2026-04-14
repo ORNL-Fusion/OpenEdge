@@ -51,6 +51,7 @@ public:
     int setmask();
     void init();
     void end_of_step();
+    void post_run();
     double memory_usage();
     bigint gas_react_one() const override { return nreact_one; }
     bigint gas_react_running() const override { return nreact_running; }

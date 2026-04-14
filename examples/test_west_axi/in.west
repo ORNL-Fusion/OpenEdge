@@ -15,8 +15,7 @@ balance_grid        rcb cell
 
 # Species + particles
 
-species input/plasma.species W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+
-
+species input/plasma.species W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+ W11+ W12+ W13+ W14+ W15+ W16+ W17+ W18+ W19+ W20+ W21+ W22+ W23+ W24+ W25+ W26+ W27+ W28+ W29+ W30+
 #
 mixture             tungstenSource  W    frac 1.
 mixture             tungstenSource  W+   frac 0.
@@ -29,14 +28,34 @@ mixture             tungstenSource  W7+  frac 0.
 mixture             tungstenSource  W8+  frac 0.
 mixture             tungstenSource  W9+  frac 0.
 mixture             tungstenSource  W10+ frac 0.
+mixture             tungstenSource  W11+ frac 0.
+mixture             tungstenSource  W12+ frac 0.
+mixture             tungstenSource  W13+ frac 0.
+mixture             tungstenSource  W14+ frac 0.
+mixture             tungstenSource  W15+ frac 0.
+mixture             tungstenSource  W16+ frac 0.
+mixture             tungstenSource  W17+ frac 0.
+mixture             tungstenSource  W18+ frac 0.
+mixture             tungstenSource  W19+ frac 0.
+mixture             tungstenSource  W20+ frac 0.
+mixture             tungstenSource  W21+ frac 0.
+mixture             tungstenSource  W22+ frac 0.
+mixture             tungstenSource  W23+ frac 0.
+mixture             tungstenSource  W24+ frac 0.
+mixture             tungstenSource  W25+ frac 0.
+mixture             tungstenSource  W26+ frac 0.
+mixture             tungstenSource  W27+ frac 0.
+mixture             tungstenSource  W28+ frac 0.
+mixture             tungstenSource  W29+ frac 0.
+mixture             tungstenSource  W30+ frac 0.
 
 variable            TbindW equal 4.*11600.
 variable            TwallK equal 773.15
 variable            Tcore equal 150*11600.
 variable            dt equal 5.0e-08
-variable            nlaunchTotalW equal 1000
+variable            nlaunchTotalW equal 1
 variable            sourceThreshW equal 0.1 #1.0e-4
-variable            Nwarm equal   100000
+variable            Nwarm equal   1000 #00
 variable            Nphase equal 300000
 mixture             tungstenSource temp ${TbindW}
 
@@ -46,8 +65,8 @@ mixture             tungstenSource temp ${TbindW}
 read_surf input/wall_new_refined.txt group 1 particle check
 
 surf_collide        wallColModel diffuse ${TbindW} 1.0
-surf_react          wallPMI pmi file input/reactions_pmi_west.surf input/74_on_74_pmi.h5 #&
-                    # log no file output/pmi_impacts.csv
+surf_react          wallPMI pmi eckstein input/reactions_pmi_west_eckstein.surf &
+                    trim_dir ../../database/surface/trim
 surf_modify         1 collide wallColModel react wallPMI
 
 # Local static refinement near the divertor / limiter regions
@@ -59,7 +78,10 @@ adapt_grid          all refine surf all 0.001 maxlevel 5 cells 2 2 1 region rdiv
 adapt_grid          all refine surf all 0.001 maxlevel 5 cells 2 2 1 region rdiv_up all iterate 5
 balance_grid        rcb cell
 
-# Surfaces: core. set core as inner vanishing boundary
+# Surfaces: core. Previously set via a geometric inner surface from core.surf;
+# now replaced by a psi-based inner boundary via fix reflect/psi (see below).
+# Keep the lines around for reference but leave them commented out — using
+# both at once produces redundant particle-removal paths.
 #read_surf           input/core.surf invert group 2 particle check
 #surf_collide        coreColModel diffuse ${Tcore} 1.0
 #surf_modify         2 collide coreColModel react none
@@ -92,8 +114,14 @@ global              sheath geom_compute cgeom plasma_fix pd &
 #global              efield particle fEpar 0
 global              boris_subcycles 5
 
+# Psi-based inner core boundary. Uses /psi, /psicore, /psisep from plasma.h5
+# (via fix plasma/data pd). Default threshold = 0 means "particle on the
+# core side of /psicore is absorbed". Replaces the old core.surf geometric
+# inner boundary.
+fix                 frpsi reflect/psi plasma_data pd action absorb
+
 # 1c) ADAS ionization/recombination (Te/ne from per-particle plasma cache)
-fix fchem chem/adas 1 74 input/plasma.adas adas_dir ../../database/adas
+#fix fchem chem/adas 1 74 input/plasma.adas adas_dir ../../database/adas
 
 # 1d) Braginskii thermal forces on impurity ions
 # Ion thermal force:  F = 2.6 * Z^2 * e * grad_par(Ti) (Neu 1974)
@@ -121,9 +149,10 @@ fix fcd cross_diffusion 1 &
 
 
 
-# 3) PMI surf data from incident plasma flux + BCA sputtering
+# 3) PMI surf data from incident plasma flux + analytic Eckstein sputtering
 # slot mapping: 1=D+, 2=O+, 3=O2+, ... 9=O8+ ; D+ excluded by projectile_slots 2..9
-compute cpmi pmi/surf/data 1 plasma_data pd ../../database/surface/O_on_W.h5 &
+# Uses EIRENE Bohdansky-1993 + Yamamura (IPP 9/82) coefficients for O_on_W.
+compute cpmi pmi/surf/data 1 plasma_data pd eckstein O_on_W &
                     projectile_slots 2 9 mass_amu 16.0 static yes sputter_flux_total
 
 # 4) Per-particle weight infrastructure for weighted emission
@@ -141,8 +170,8 @@ fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes &
 # 6) Dumps
 
 # Particle state dump (one snapshot per late-time window)
-#dump dpart particle all ${Nphase} output/state.west id type x y z vx vy vz
-#dump_modify dpart first yes
+dump dpart particle all ${Nphase} output/state.west id type x y z vx vy vz
+dump_modify dpart first yes
 
 # Weighted density (correct physical density with per-particle weights)
 compute cwden grid/weighted all species nrho_w
@@ -155,6 +184,8 @@ timestep            ${dt}
 stats               5000
 stats_style         step cpu np
 
+fix     fwdenA ave/grid all 1 ${Nphase} ${Nphase} c_cwden[*] ave one
+
 
 #fix balance 500 1.1 rcb time
 #fix mybal balance 500 1.1 rcb part
@@ -164,13 +195,13 @@ fix fadapt adapt 200 all refine particle 500 0 maxlevel 8 cells 2 2 1
 fix fbal balance 200 1.1 rcb time
 
 run                 ${Nwarm}
-reset_timestep      0
+#reset_timestep      0
 # Keep the PMI source active during the production window.
 # Uncomment the next line only if you want a pure source-free decay test.
 #unfix femit
 
 # Phase A
-fix     fwdenA ave/grid all 1 ${Nphase} ${Nphase} c_cwden[*] ave one
+#fix     fwdenA ave/grid all 1 ${Nphase} ${Nphase} c_cwden[*] ave one
 dump    dwdenA grid all ${Nphase} output/tmp.grid.density_weighted.phaseA.nlaunchTotal id xc yc f_fwdenA[*]
 
 run     ${Nphase}

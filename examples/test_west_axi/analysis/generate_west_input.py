@@ -16,8 +16,8 @@ import types
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parent
-CONVERTER_DIR = ROOT.parents[1] / "tools" / "converters"
+ROOT = Path(__file__).resolve().parent  # .../test_west_axi/analysis
+CONVERTER_DIR = ROOT.parents[2] / "tools" / "converters"  # .../OpenEdge/tools/converters
 sys.path.insert(0, str(CONVERTER_DIR))
 
 
@@ -139,6 +139,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--nR", type=int, default=200, help="R grid size for OpenEdge plasma.h5")
     p.add_argument("--nZ", type=int, default=200, help="Z grid size for OpenEdge plasma.h5")
     p.add_argument("--main-ion-spec", type=int, default=1, help="Main ion spec index in SOLEDGE3X output")
+    p.add_argument("--data-file", default=None, help="Plasma snapshot filename inside base-dir (default: plasmaFinal.h5 or latest plasma_*.h5)")
+    p.add_argument("--case", default=None, help="Tag appended to debug PNG filenames (default: data-file stem)")
     return p.parse_args()
 
 
@@ -150,19 +152,35 @@ def main() -> None:
 
     ref_file = base / "refParam_raptorX.h5"
     mesh_file = base / "meshEIRENE.h5"
-    data_file = base / "plasmaFinal.h5"
+    # Data snapshot: plasmaFinal.h5 if present, otherwise a user-supplied
+    # --data-file, otherwise the newest plasma_*.h5 in base.
+    if args.data_file:
+        data_file = base / args.data_file
+    elif (base / "plasmaFinal.h5").exists():
+        data_file = base / "plasmaFinal.h5"
+    else:
+        candidates = sorted(base.glob("plasma_*.h5"))
+        if not candidates:
+            raise SystemExit(f"No plasma snapshot found in {base}")
+        data_file = candidates[-1]
     bfield_file = base / "mesh_raptorX.h5"
-    missing = [p for p in [ref_file, mesh_file, data_file, bfield_file] if not p.exists()]
+    config_file = base / "mesh.h5"
+    required = [ref_file, mesh_file, data_file, bfield_file]
+    missing = [p for p in required if not p.exists()]
     if missing:
         raise SystemExit("Missing required SOLEDGE3X files:\n" + "\n".join(str(p) for p in missing))
 
-    input_dir = ROOT / "input"
+    input_dir = ROOT.parent / "input"  # .../test_west_axi/input
     input_dir.mkdir(parents=True, exist_ok=True)
 
     plasma_out = input_dir / "plasma.h5"
-    bfield_out = input_dir / "bfield.h5"
     wall_out = input_dir / "wall.txt"
     wall_flux_csv = input_dir / "vv_values.csv"
+    case_tag = args.case or data_file.stem
+    debug_plot = input_dir / f"soledge_fields_{case_tag}.png"
+    flux_total_plot = input_dir / f"soledge_flux_total_{case_tag}.png"
+    flux_species_plot = input_dir / f"soledge_flux_species_{case_tag}.png"
+    wall_flux_plot = input_dir / f"soledge_flux_wallcoord_{case_tag}.png"
 
     interpolate_and_save_plasma_field(
         str(ref_file),
@@ -171,13 +189,13 @@ def main() -> None:
         str(data_file),
         None,
         str(plasma_out),
-        str(bfield_out),
+        None,
         gfile=str(args.gfile.resolve()) if args.gfile else None,
         equ_file=str(args.equ_file.resolve()) if args.equ_file else None,
-        debug_plot_file=None,
-        flux_total_plot_file=None,
-        flux_species_plot_file=None,
-        wall_flux_plot_file=None,
+        debug_plot_file=str(debug_plot),
+        flux_total_plot_file=str(flux_total_plot),
+        flux_species_plot_file=str(flux_species_plot),
+        wall_flux_plot_file=str(wall_flux_plot),
         wall_flux_csv_file=str(wall_flux_csv),
         nR=args.nR,
         nZ=args.nZ,
@@ -186,11 +204,12 @@ def main() -> None:
         wall_sparta_file=str(wall_out),
         core_sparta_file=None,
         core_psi_level=None,
+        config_file=str(config_file) if config_file.exists() else None,
     )
 
     print(f"Wrote {plasma_out}")
-    print(f"Wrote {bfield_out}")
     print(f"Wrote {wall_out}")
+    print(f"Used data snapshot: {data_file}")
 
 
 if __name__ == "__main__":

@@ -11,7 +11,9 @@
 #include "comm.h"
 #include "domain.h"
 #include "error.h"
+#include "fix_plasma_data.h"
 #include "memory.h"
+#include "modify.h"
 #include "particle.h"
 #include "update.h"
 
@@ -32,32 +34,37 @@ enum{PKEEP,PINSERT,PDONE,PDISCARD,PENTRY,PEXIT,PSURF};  // several files
 FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
-  if (narg < 7)
+  if (narg < 4)
     error->all(FLERR, "Illegal fix reflect/psi command: "
-               "fix ID reflect/psi Nevery equ PATH psi_norm VALUE");
+               "fix ID reflect/psi {equ PATH | plasma_data FIXID} "
+               "[psi_norm VALUE] [action ...]");
 
-  nevery_ = atoi(arg[2]);
-  if (nevery_ <= 0)
-    error->all(FLERR, "fix reflect/psi: Nevery must be > 0");
-
-  psi_threshold_ = 0.926;
   action_ = PSI_ACTION_REFLECT;
   nw_ = nh_ = 0;
   psi_axis_ = psib_ = 0.0;
 
   std::string equ_path;
+  std::string plasma_fix_id;
+  int threshold_user_set = 0;
+  psi_threshold_ = 0.926;  // default for equ/geqdsk mode
 
-  int iarg = 3;
+  int iarg = 2;
   while (iarg < narg) {
     if (strcmp(arg[iarg], "equ") == 0 || strcmp(arg[iarg], "geqdsk") == 0) {
       if (iarg + 1 >= narg)
         error->all(FLERR, "fix reflect/psi: missing equ path");
       equ_path = arg[iarg + 1];
       iarg += 2;
+    } else if (strcmp(arg[iarg], "plasma_data") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix reflect/psi: missing plasma_data fix id");
+      plasma_fix_id = arg[iarg + 1];
+      iarg += 2;
     } else if (strcmp(arg[iarg], "psi_norm") == 0) {
       if (iarg + 1 >= narg)
         error->all(FLERR, "fix reflect/psi: missing psi_norm value");
       psi_threshold_ = atof(arg[iarg + 1]);
+      threshold_user_set = 1;
       iarg += 2;
     } else if (strcmp(arg[iarg], "action") == 0) {
       if (iarg + 1 >= narg)
@@ -77,13 +84,25 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
     }
   }
 
-  if (equ_path.empty())
-    error->all(FLERR, "fix reflect/psi: equ keyword is required");
+  if (equ_path.empty() && plasma_fix_id.empty())
+    error->all(FLERR, "fix reflect/psi: one of 'equ PATH' or 'plasma_data FIXID' is required");
+  if (!equ_path.empty() && !plasma_fix_id.empty())
+    error->all(FLERR, "fix reflect/psi: 'equ' and 'plasma_data' are mutually exclusive");
 
-  read_equ_file(equ_path);
+  if (!equ_path.empty()) {
+    read_equ_file(equ_path);
+  } else {
+    // Default threshold in plasma_data mode: 0.0 = SOLEDGE /psicore surface.
+    // Anything with psi_norm < 0 is on the core side of /psicore.
+    if (!threshold_user_set) psi_threshold_ = 0.0;
+    load_from_plasma_data(plasma_fix_id);
+  }
 
   if (comm->me == 0) {
-    printf("fix reflect/psi: equ %s\n", equ_path.c_str());
+    if (!equ_path.empty())
+      printf("fix reflect/psi: equ %s\n", equ_path.c_str());
+    else
+      printf("fix reflect/psi: plasma_data %s\n", plasma_fix_id.c_str());
     printf("  grid: %d x %d, R=[%.4f,%.4f], Z=[%.4f,%.4f]\n",
            nw_, nh_, r_grid_.front(), r_grid_.back(),
            z_grid_.front(), z_grid_.back());
@@ -91,6 +110,39 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
     printf("  psi_norm threshold = %.4f\n", psi_threshold_);
     printf("  action = %s\n", action_ == PSI_ACTION_ABSORB ? "absorb" : "reflect");
   }
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixReflectPsi::load_from_plasma_data(const std::string &fix_id)
+{
+  int ifix = modify->find_fix(fix_id.c_str());
+  if (ifix < 0) {
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+             "fix reflect/psi: cannot find fix plasma/data '%s'",
+             fix_id.c_str());
+    error->all(FLERR, msg);
+  }
+  FixPlasmaData *pd = dynamic_cast<FixPlasmaData *>(modify->fix[ifix]);
+  if (!pd)
+    error->all(FLERR, "fix reflect/psi: referenced fix is not plasma/data");
+
+  // Ensure the plasma fix has loaded its data (init() may not have fired yet).
+  if (!pd->has_equ) pd->init();
+
+  if (!pd->has_equ || pd->psirz.empty())
+    error->all(FLERR,
+      "fix reflect/psi: plasma/data fix does not expose psi. "
+      "Make sure plasma.h5 contains /psi + /psicore + /psisep");
+
+  nw_ = pd->equ_jm;
+  nh_ = pd->equ_km;
+  r_grid_ = pd->equ_r;
+  z_grid_ = pd->equ_z;
+  psirz_  = pd->psirz;
+  psi_axis_ = pd->psi_axis;
+  psib_     = pd->psib;
 }
 
 /* ---------------------------------------------------------------------- */

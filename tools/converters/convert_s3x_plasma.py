@@ -106,13 +106,15 @@ def _wall_and_config_from_mesh(mesh_file, ref_file):
             raise RuntimeError("Invalid wall arrays in mesh file")
 
         have_cfg = all(k in mesh for k in ["/config/r", "/config/z", "/config/psi"])
-        r2d = z2d = psi2d = psisep = None
+        r2d = z2d = psi2d = psisep = psicore = None
         if have_cfg:
             r2d = np.asarray(mesh["/config/r"][...], dtype=np.float64)
             z2d = np.asarray(mesh["/config/z"][...], dtype=np.float64)
             psi2d = np.asarray(mesh["/config/psi"][...], dtype=np.float64)
             if "/config/psisep1" in mesh:
                 psisep = float(np.asarray(mesh["/config/psisep1"][...]).reshape(-1)[0])
+            if "/config/psicore" in mesh:
+                psicore = float(np.asarray(mesh["/config/psicore"][...]).reshape(-1)[0])
 
         if not wall_is_absolute_coords:
             r0_init = _read_scalar(mesh, "/R0", 0.0)
@@ -132,7 +134,7 @@ def _wall_and_config_from_mesh(mesh_file, ref_file):
             rwall = np.concatenate([rwall, rwall[:1]])
             zwall = np.concatenate([zwall, zwall[:1]])
 
-        return rwall, zwall, r2d, z2d, psi2d, psisep
+        return rwall, zwall, r2d, z2d, psi2d, psisep, psicore
 
 
 def _extract_core_contour(r2d, z2d, psi2d, psi_level):
@@ -471,6 +473,7 @@ def interpolate_and_save_plasma_field(
     core_psi_level=None,
     equ_file=None,
     gfile=None,
+    config_file=None,
 ):
     """
     Convert SOLEDGE3X plasma/mesh data to OpenEdge-style HDF5.
@@ -488,8 +491,8 @@ def interpolate_and_save_plasma_field(
     """
 
     # Reference scalings
-    if plasma_out_file is None or bfield_out_file is None:
-        raise ValueError("plasma_out_file and bfield_out_file must be provided")
+    if plasma_out_file is None:
+        raise ValueError("plasma_out_file must be provided")
 
     with h5py.File(ref_file, 'r') as ref:
         n0 = float(ref['/n0'][...])
@@ -501,12 +504,17 @@ def interpolate_and_save_plasma_field(
     # Optional fallback to wall_file only if explicitly provided.
     Rwall = Zwall = None
     r2d_cfg = z2d_cfg = psi2d_cfg = None
-    psisep_cfg = None
+    psisep_cfg = psicore_cfg = None
     if use_mesh_wall:
-        # Try bfield/config mesh first (often contains /config/*), then mesh_file.
-        for candidate in [bfield_file, mesh_file, data_file]:
+        # Try mesh.h5 (carries /config/psi in SOLEDGE3X layouts) first, then
+        # the usual knot/bfield files, then the plasma snapshot as last resort.
+        candidates = []
+        if config_file:
+            candidates.append(config_file)
+        candidates.extend([bfield_file, mesh_file, data_file])
+        for candidate in candidates:
             try:
-                Rwall, Zwall, r2d_cfg, z2d_cfg, psi2d_cfg, psisep_cfg = _wall_and_config_from_mesh(candidate, ref_file)
+                Rwall, Zwall, r2d_cfg, z2d_cfg, psi2d_cfg, psisep_cfg, psicore_cfg = _wall_and_config_from_mesh(candidate, ref_file)
                 print(f"Using wall/config geometry from mesh file: {candidate}")
                 break
             except Exception:
@@ -569,6 +577,31 @@ def interpolate_and_save_plasma_field(
 
     b_mag = np.sqrt(b_r_grid * b_r_grid + b_z_grid * b_z_grid + b_t_grid * b_t_grid)
     eps = 1.0e-12
+
+    # Psi on the target (R,Z) grid, interpolated from /config/psi via griddata.
+    # Written alongside the plasma fields so fix plasma/data consumers can
+    # read psi directly without a second equilibrium file.
+    psi_grid = None
+    psi_norm_grid = None
+    if psi2d_cfg is not None and r2d_cfg is not None and z2d_cfg is not None:
+        if r2d_cfg.ndim == 1 and z2d_cfg.ndim == 1:
+            rr_cfg, zz_cfg = np.meshgrid(r2d_cfg, z2d_cfg)
+        else:
+            rr_cfg, zz_cfg = r2d_cfg, z2d_cfg
+        psi_pts = np.column_stack((rr_cfg.reshape(-1), zz_cfg.reshape(-1)))
+        psi_vals = np.asarray(psi2d_cfg, dtype=np.float64).reshape(-1)
+        finite = np.isfinite(psi_vals)
+        if np.any(finite):
+            psi_grid = _interpolate_field(
+                psi_pts[finite], grid_points, nZ, nR, psi_vals[finite]
+            )
+            if (psisep_cfg is not None and psicore_cfg is not None
+                    and np.isfinite(psisep_cfg) and np.isfinite(psicore_cfg)
+                    and psisep_cfg != psicore_cfg):
+                # Normalized flux: 0 at core, 1 at primary separatrix.
+                # Uses SOLEDGE psicore (axis) and psisep1 (separatrix).
+                psi_norm_grid = (psi_grid - float(psicore_cfg)) / (float(psisep_cfg) - float(psicore_cfg))
+            print("Interpolated /config/psi onto plasma grid")
 
     # Optional SPARTA geometry exports from mesh-derived contours.
     if wall_sparta_file:
@@ -736,6 +769,24 @@ def interpolate_and_save_plasma_field(
             f.create_dataset('grad_ti_t', data=np.zeros_like(grad_ti_r))
             f.create_dataset('grad_ti_z', data=grad_ti_z)
 
+            # Magnetic field on the plasma grid (was previously a separate
+            # bfield.h5). Downstream consumers (fix plasma/data, Boris pusher,
+            # compute plasma/fields) pick these up by dataset name.
+            f.create_dataset('br', data=b_r_grid)
+            f.create_dataset('bt', data=b_t_grid)
+            f.create_dataset('bz', data=b_z_grid)
+
+            # Psi (and normalized psi) from SOLEDGE /config/psi, interpolated
+            # onto the plasma grid. Optional — absent if mesh lacks /config.
+            if psi_grid is not None:
+                f.create_dataset('psi', data=psi_grid)
+                if psi_norm_grid is not None:
+                    f.create_dataset('psi_norm', data=psi_norm_grid)
+                if psisep_cfg is not None and np.isfinite(psisep_cfg):
+                    f.create_dataset('psisep', data=np.float64(psisep_cfg))
+                if psicore_cfg is not None and np.isfinite(psicore_cfg):
+                    f.create_dataset('psicore', data=np.float64(psicore_cfg))
+
             # Multi-ion extension
             sdt = h5py.string_dtype(encoding='utf-8')
             f.create_dataset('ion_species/names', data=np.array(ion_names, dtype=object), dtype=sdt)
@@ -759,16 +810,19 @@ def interpolate_and_save_plasma_field(
             f.create_dataset('n_i/dens', data=dens_i_grid)
             f.create_dataset('n_i/parr_flow', data=parr_flow_i_grid)
 
-        # bfield.h5
-        with h5py.File(bfield_out_file, 'w') as f:
-            f.create_dataset('r', data=r)
-            f.create_dataset('z', data=z)
-            f.create_dataset('br', data=b_r_grid)
-            f.create_dataset('bt', data=b_t_grid)
-            f.create_dataset('bz', data=b_z_grid)
+        # Legacy standalone bfield.h5 — only written if the caller asks for
+        # it. The default flow now keeps B on the plasma.h5 grid.
+        if bfield_out_file:
+            with h5py.File(bfield_out_file, 'w') as f:
+                f.create_dataset('r', data=r)
+                f.create_dataset('z', data=z)
+                f.create_dataset('br', data=b_r_grid)
+                f.create_dataset('bt', data=b_t_grid)
+                f.create_dataset('bz', data=b_z_grid)
 
         print(f"Wrote OpenEdge plasma file: {plasma_out_file}")
-        print(f"Wrote OpenEdge bfield file: {bfield_out_file}")
+        if bfield_out_file:
+            print(f"Wrote OpenEdge bfield file: {bfield_out_file}")
         print(f"Detected species: electron=spec0, ions={ion_inds} (Nion={len(ion_inds)}), main ion=spec{ion_inds[main_k]}")
         if debug_plot_file:
             _plot_debug_fields(
@@ -811,19 +865,20 @@ def interpolate_and_save_plasma_field(
 
 # Example batch
 if __name__ == '__main__':
-    cases = ['1p5MW']
-    for case in cases:
-        base_dir = f'/path/to/soledge/{case}/run_dir'  # UPDATE: set your SOLEDGE3X output path
+    # Default: 3MW dataset in /home/cloud/3MW, plasma_00010.h5 as the
+    # final plasma snapshot. Override base_dir/data_name per case.
+    cases = [('3MW', '/home/cloud/3MW', 'plasma_00010.h5')]
+    for case, base_dir, data_name in cases:
         _here = os.path.dirname(os.path.abspath(__file__))
         out_dir = os.path.join(_here, '..', '..', 'examples', 'test_west_axi', 'input')
 
         ref_file = os.path.join(base_dir, 'refParam_raptorX.h5')
         mesh_file = os.path.join(base_dir, 'meshEIRENE.h5')
-        data_file = os.path.join(base_dir, 'plasmaFinal.h5')
+        data_file = os.path.join(base_dir, data_name)
         bfield_file = os.path.join(base_dir, 'mesh_raptorX.h5')
+        config_file = os.path.join(base_dir, 'mesh.h5')
         wall_file = os.path.join(out_dir, 'wall.txt')
         plasma_out_file = os.path.join(out_dir, 'plasma.h5')
-        bfield_out_file = os.path.join(out_dir, 'bfield.h5')
         debug_plot_file = os.path.join(out_dir, f'soledge_fields_{case}.png')
         flux_total_plot_file = os.path.join(out_dir, f'soledge_flux_total_{case}.png')
         flux_species_plot_file = os.path.join(out_dir, f'soledge_flux_species_{case}.png')
@@ -832,7 +887,7 @@ if __name__ == '__main__':
 
         interpolate_and_save_plasma_field(
             ref_file, mesh_file, bfield_file, data_file, None,
-            plasma_out_file, bfield_out_file,
+            plasma_out_file, None,
             debug_plot_file=debug_plot_file,
             flux_total_plot_file=flux_total_plot_file,
             flux_species_plot_file=flux_species_plot_file,
@@ -842,5 +897,6 @@ if __name__ == '__main__':
             use_mesh_wall=True,
             wall_sparta_file=wall_file,
             core_sparta_file=None,
-            core_psi_level=None
+            core_psi_level=None,
+            config_file=config_file,
         )

@@ -1,8 +1,15 @@
 
 # Generated test artifacts and example outputs
 examples/*/output/
+examples/*/output_*/
 examples/*/log.openedge
 examples/*/source
+examples/*/nohup.out
+examples/*/run.log
+examples/*/*.bak
+examples/*/*.bak.*
+examples/**/*.bak
+examples/**/*.bak.*
 examples/**/dump.*
 examples/**/*.png
 
@@ -39,6 +46,10 @@ dump.*
 **/__pycache__/
 **/.ipynb_checkpoints/
 
+# Local dev tool config
+.claude/
+**/.claude/
+
 # Build artifacts
 src/Obj_mpi/
 src/Obj_mac_mpi/
@@ -71,3 +82,4 @@ examples/test_west_3d/
 examples/test_west_timedep/
 examples/test_solps_coupling/
 examples/test_liquid_metal/
+examples/test_eirene/

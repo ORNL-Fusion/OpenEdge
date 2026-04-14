@@ -24,6 +24,7 @@
 #include "random_knuth.h"
 #include "math_const.h"
 #include <filesystem>
+#include <vector>
 #include "math_extra.h"
 #include "random_mars.h"
 #include "random_knuth.h"
@@ -394,22 +395,45 @@ void FixChemAdas::end_of_step()
   if (!particle->sorted) particle->sort();
   end_of_step_no_average();
   nreact_running += nreact_one;
+}
 
-  // periodic per-type reaction tally (every 10000 steps)
-  if (comm->me == 0 && update->ntimestep % 10000 == 0 && nreact_running > 0) {
-    bigint nI = 0, nR = 0, nE = 0, nD = 0;
-    for (int i = 0; i < nlist; i++) {
-      if (rlist[i].type == IONIZATION) nI += tally_reactions[i];
-      else if (rlist[i].type == RECOMBINATION) nR += tally_reactions[i];
-      else if (rlist[i].type == EXCHANGE) nE += tally_reactions[i];
-      else if (rlist[i].type == DISSOCIATION) nD += tally_reactions[i];
-    }
-    if (screen) fprintf(screen,
-      "  chem/adas step " BIGINT_FORMAT ": ioniz=" BIGINT_FORMAT
-      " recomb=" BIGINT_FORMAT " CX=" BIGINT_FORMAT
-      " dissoc=" BIGINT_FORMAT "\n",
-      update->ntimestep, nI, nR, nE, nD);
+/* ----------------------------------------------------------------------
+   end-of-run summary: cumulative per-type reaction tally, mirrors the
+   surf_react tally block printed at the end of each `run`.
+---------------------------------------------------------------------- */
+
+void FixChemAdas::post_run()
+{
+  std::vector<bigint> local_tally(nlist, 0), global_tally(nlist, 0);
+  for (int i = 0; i < nlist; i++) local_tally[i] = tally_reactions[i];
+  MPI_Allreduce(local_tally.data(), global_tally.data(), nlist,
+                MPI_SPARTA_BIGINT, MPI_SUM, world);
+
+  if (comm->me != 0) return;
+
+  bigint nI = 0, nR = 0, nE = 0, nD = 0, nall = 0;
+  for (int i = 0; i < nlist; i++) {
+    nall += global_tally[i];
+    if (rlist[i].type == IONIZATION) nI += global_tally[i];
+    else if (rlist[i].type == RECOMBINATION) nR += global_tally[i];
+    else if (rlist[i].type == EXCHANGE) nE += global_tally[i];
+    else if (rlist[i].type == DISSOCIATION) nD += global_tally[i];
   }
+
+  auto print_block = [&](FILE *fp) {
+    if (!fp) return;
+    fprintf(fp,
+      "Chem/ADAS reaction tallies:\n"
+      "  id %s Z=%d #-of-reactions %d\n"
+      "    reaction all: " BIGINT_FORMAT "\n"
+      "    ioniz: " BIGINT_FORMAT "\n"
+      "    recomb: " BIGINT_FORMAT "\n"
+      "    CX: " BIGINT_FORMAT "\n"
+      "    dissoc: " BIGINT_FORMAT "\n",
+      id, atomic_number, nlist, nall, nI, nR, nE, nD);
+  };
+  print_block(screen);
+  print_block(logfile);
 }
 
 

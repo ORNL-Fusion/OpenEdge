@@ -224,6 +224,9 @@ void FixPlasmaData::reload()
   MPI_Bcast(&mesh_ntri, 1, MPI_INT, 0, world);
   MPI_Bcast(&mesh_ncell, 1, MPI_INT, 0, world);
   MPI_Bcast(&mesh_nion, 1, MPI_INT, 0, world);
+  // Psi map broadcast flag (0 = not loaded from plasma.h5)
+  int has_psi_map = (has_equ && !psirz.empty()) ? 1 : 0;
+  MPI_Bcast(&has_psi_map, 1, MPI_INT, 0, world);
 
   size_t grid_n = static_cast<size_t>(nz) * nr;
 
@@ -275,6 +278,13 @@ void FixPlasmaData::reload()
         mesh_ions_temp.resize(mesh_ion_n);
         mesh_ions_upar.resize(mesh_ion_n);
       }
+    }
+    if (has_psi_map) {
+      equ_jm = nr;
+      equ_km = nz;
+      equ_r.resize(nr);
+      equ_z.resize(nz);
+      psirz.resize(grid_n);
     }
   }
 
@@ -328,6 +338,17 @@ void FixPlasmaData::reload()
       MPI_Bcast(mesh_ions_temp.data(), mesh_ion_n, MPI_DOUBLE, 0, world);
       MPI_Bcast(mesh_ions_upar.data(), mesh_ion_n, MPI_DOUBLE, 0, world);
     }
+  }
+
+  // Psi map (from plasma.h5) broadcast to all ranks and light up has_equ
+  // so downstream consumers (fix reflect/psi, psi_norm_at) can query psi.
+  if (has_psi_map) {
+    MPI_Bcast(equ_r.data(), nr, MPI_DOUBLE, 0, world);
+    MPI_Bcast(equ_z.data(), nz, MPI_DOUBLE, 0, world);
+    MPI_Bcast(psirz.data(), grid_n, MPI_DOUBLE, 0, world);
+    MPI_Bcast(&psi_axis, 1, MPI_DOUBLE, 0, world);
+    MPI_Bcast(&psib, 1, MPI_DOUBLE, 0, world);
+    has_equ = 1;
   }
 
   // Load equilibrium (all ranks, text file is cheap)
@@ -562,6 +583,41 @@ void FixPlasmaData::load_plasma_h5()
     if (hasDataset("bt")) read2D("bt", bt);
     else bt.assign(n, 0.0);
     has_bfield = 1;
+  }
+
+  // Optional psi map for psi-based inner boundary (fix reflect/psi).
+  // Stored under the same /psi, /psicore, /psisep layout written by
+  // tools/converters/convert_s3x_plasma.py. Reuses the equ_* buffers
+  // so downstream psi_norm_at() just works.
+  if (hasDataset("psi")) {
+    read2D("psi", psirz);
+    equ_jm = nr;
+    equ_km = nz;
+    equ_r  = rvals;
+    equ_z  = zvals;
+    auto read_scalar = [&](const std::string &name, double &out) -> bool {
+      if (!hasDataset(name)) return false;
+      H5::DataSet ds = file.openDataSet(name);
+      double tmp = 0.0;
+      ds.read(&tmp, H5::PredType::NATIVE_DOUBLE);
+      out = tmp;
+      return true;
+    };
+    double psicore_val = 0.0, psisep_val = 0.0;
+    bool have_core = read_scalar("psicore", psicore_val);
+    bool have_sep  = read_scalar("psisep",  psisep_val);
+    if (have_core && have_sep && psicore_val != psisep_val) {
+      // psi_axis is the reference flux surface against which psi_norm is
+      // measured (0 at psi_axis, 1 at psib). For a SOLEDGE plasma.h5 the
+      // natural "inner BC" surface is /psicore, so use that as psi_axis.
+      psi_axis = psicore_val;
+      psib     = psisep_val;
+      has_equ  = 1;
+      if (screen)
+        fprintf(screen,
+                "[plasma/data] loaded psi map (psicore=%.6e psisep=%.6e)\n",
+                psicore_val, psisep_val);
+    }
   }
 
   // Multi-ion species

@@ -15,6 +15,8 @@ SurfReactStyle(pmi/kk,SurfReactPMIKokkos)
 #define SPARTA_SURF_REACT_PMI_KOKKOS_H
 
 #include "surf_react_pmi.h"
+#include "eckstein_sputter.h"
+#include "eirene_trim.h"
 #include "kokkos_type.h"
 #include "rand_pool_wrap.h"
 #include "Kokkos_Random.hpp"
@@ -92,6 +94,25 @@ class SurfReactPMIKokkos : public SurfReactPMI {
   // first product species index for each reaction
   DAT::t_int_1d d_react_product0;
 
+  // per-reaction style (0=SIMPLE, 1=ECKSTEIN, 2=TRIM_STYLE)
+  DAT::t_int_1d d_react_style;
+
+  // per-reaction packed parameter array, length = nlist * NCOEFF_ECKSTEIN
+  // (stored flat; access as d_react_coeff(i*NCOEFF_ECKSTEIN + j))
+  t_double_1d d_react_coeff;
+
+  // ---- EIRENE TRIM reflection tables on device ----
+  int kk_ntrim;                    // number of loaded trim combinations
+  t_double_1d d_trim_E;            // [ntrim * nE]
+  t_double_1d d_trim_theta;        // [ntrim * nW]
+  t_double_1d d_trim_raar;         // [ntrim * nR]
+  t_double_1d d_trim_R_N;          // [ntrim * nE*nW]
+  t_double_1d d_trim_Eout_q;       // [ntrim * nE*nW*nR]
+  t_double_1d d_trim_Eout_min;     // [ntrim * nE*nW]
+  t_double_1d d_trim_Eout_max;     // [ntrim * nE*nW]
+  t_double_1d d_trim_cos_polar_q;  // [ntrim * nE*nW*nR*nR]
+  t_double_1d d_trim_cos_azim_q;   // [ntrim * nE*nW*nR*nR*nR]
+
  public:
 
   /* ---------------------------------------------------------------------- */
@@ -133,19 +154,60 @@ class SurfReactPMIKokkos : public SurfReactPMI {
     }
 
     // look up coefficients
+    //
+    // Per-reaction style: each of {reflect, sputter, absorb} may independently
+    // be SIMPLE (0) or ECKSTEIN (1). Compute each slot from its own style.
 
-    double RN, RE, Y, Eb;
+    double RN = 0.0, RE = 0.0, Y = 0.0, Eb = 0.0;
 
+    // SIMPLE-mode fallback values (unused if all reactions are ECKSTEIN)
+    double RN_simple = 0.0, RE_simple = 0.0, Y_simple = 0.0, Eb_simple = 0.0;
     if (kk_mode == 0) {
-      RN = kk_const_RN;
-      RE = kk_const_RE;
-      Y  = kk_const_Y;
-      Eb = kk_const_Ebind;
+      RN_simple = kk_const_RN;
+      RE_simple = kk_const_RE;
+      Y_simple  = kk_const_Y;
+      Eb_simple = kk_const_Ebind;
+    } else if (kk_mode == 1) {
+      RN_simple = kk_interp_table(d_RN_table, E_eV, theta_deg);
+      RE_simple = kk_interp_table(d_RE_table, E_eV, theta_deg);
+      Y_simple  = kk_interp_table(d_spyld_table, E_eV, theta_deg);
+      Eb_simple = kk_Ebind;
+    }
+
+    const int ncoeff = Eckstein::NCOEFF_ECKSTEIN;
+
+    if (sr.ireflect >= 0) {
+      int style = d_react_style(sr.ireflect);
+      if (style == 1 /*ECKSTEIN*/) {
+        Eckstein::ReflectParams rp;
+        Eckstein::unpack_reflect(&d_react_coeff(sr.ireflect * ncoeff), rp);
+        RN = Eckstein::reflection_RN(E_eV, theta_deg, rp);
+        RE = rp.re_frac;
+      } else if (style == 2 /*TRIM_STYLE*/) {
+        int it = (int)d_react_coeff(sr.ireflect * ncoeff);
+        if (it >= 0 && it < kk_ntrim) {
+          EireneTrim::TrimView tv = kk_trim_view(it);
+          RN = EireneTrim::R_N_interp(tv, E_eV, theta_deg);
+          RE = 0.0;  // unused; E_out sampled in reflect branch below
+        }
+      } else {
+        RN = RN_simple;
+        RE = RE_simple;
+      }
+    }
+    if (sr.isputter >= 0) {
+      int style = d_react_style(sr.isputter);
+      if (style == 1 /*ECKSTEIN*/) {
+        Eckstein::SputterParams sp;
+        Eckstein::unpack_sputter(&d_react_coeff(sr.isputter * ncoeff), sp);
+        Y  = Eckstein::sputter_yield(E_eV, theta_deg, sp);
+        Eb = sp.Es;
+      } else {
+        Y  = Y_simple;
+        Eb = Eb_simple;
+      }
     } else {
-      RN = kk_interp_table(d_RN_table, E_eV, theta_deg);
-      RE = kk_interp_table(d_RE_table, E_eV, theta_deg);
-      Y  = kk_interp_table(d_spyld_table, E_eV, theta_deg);
-      Eb = kk_Ebind;
+      Eb = Eb_simple;
     }
 
     if (RN < 0.0) RN = 0.0;
@@ -169,12 +231,61 @@ class SurfReactPMIKokkos : public SurfReactPMI {
       int irxn = sr.ireflect;
       ip->ispecies = d_react_product0(irxn);
 
-      double E_out = RE * E_eV;
       double mass_out = d_species[ip->ispecies].mass;
-      double E_out_J = E_out / kk_joule2ev / kk_mvv2e;
-      double vmag_out = sqrt(2.0 * E_out_J / mass_out);
+      int rstyle = d_react_style(irxn);
+      double E_out = 0.0;
 
-      kk_sample_cosine(norm, ip->v, vmag_out, rand_gen);
+      if (rstyle == 2 /*TRIM_STYLE*/) {
+        int it = (int)d_react_coeff(irxn * ncoeff);
+        EireneTrim::TrimView tv = kk_trim_view(it);
+        double u1 = rand_gen.drand();
+        double u2 = rand_gen.drand();
+        double u3 = rand_gen.drand();
+        double cos_polar = 1.0, cos_azim = 1.0;
+        EireneTrim::sample_reflection(tv, E_eV, theta_deg, u1, u2, u3,
+                                      &E_out, &cos_polar, &cos_azim);
+        double E_out_J = E_out / kk_joule2ev / kk_mvv2e;
+        double vmag = sqrt(2.0 * E_out_J / mass_out);
+
+        // Build (n_hat, t_in_hat, b_hat) basis like CPU path
+        double nlen = sqrt(norm[0]*norm[0]+norm[1]*norm[1]+norm[2]*norm[2]);
+        double nh[3] = {norm[0]/nlen, norm[1]/nlen, norm[2]/nlen};
+        double vin[3] = {ip->v[0], ip->v[1], ip->v[2]};
+        double vn = vin[0]*nh[0]+vin[1]*nh[1]+vin[2]*nh[2];
+        double tang[3] = {vin[0]-vn*nh[0], vin[1]-vn*nh[1], vin[2]-vn*nh[2]};
+        double tlen = sqrt(tang[0]*tang[0]+tang[1]*tang[1]+tang[2]*tang[2]);
+        if (tlen < 1e-12) {
+          double arb[3] = {1.0, 0.0, 0.0};
+          if (fabs(nh[0]) > 0.9) { arb[0]=0.0; arb[1]=1.0; arb[2]=0.0; }
+          double an = arb[0]*nh[0]+arb[1]*nh[1]+arb[2]*nh[2];
+          tang[0] = arb[0]-an*nh[0];
+          tang[1] = arb[1]-an*nh[1];
+          tang[2] = arb[2]-an*nh[2];
+          tlen = sqrt(tang[0]*tang[0]+tang[1]*tang[1]+tang[2]*tang[2]);
+        }
+        double tin_hat[3] = {-tang[0]/tlen, -tang[1]/tlen, -tang[2]/tlen};
+        double b_hat[3];
+        b_hat[0] = nh[1]*tin_hat[2] - nh[2]*tin_hat[1];
+        b_hat[1] = nh[2]*tin_hat[0] - nh[0]*tin_hat[2];
+        b_hat[2] = nh[0]*tin_hat[1] - nh[1]*tin_hat[0];
+
+        double sp2 = 1.0 - cos_polar*cos_polar; if (sp2 < 0.0) sp2 = 0.0;
+        double sin_polar = sqrt(sp2);
+        double sa2 = 1.0 - cos_azim*cos_azim;  if (sa2 < 0.0) sa2 = 0.0;
+        double sin_azim = sqrt(sa2);
+        if (rand_gen.drand() < 0.5) sin_azim = -sin_azim;
+
+        for (int d = 0; d < 3; d++) {
+          ip->v[d] = vmag * (cos_polar * nh[d]
+                           + sin_polar * (cos_azim * tin_hat[d]
+                                        + sin_azim * b_hat[d]));
+        }
+      } else {
+        E_out = RE * E_eV;
+        double E_out_J = E_out / kk_joule2ev / kk_mvv2e;
+        double vmag_out = sqrt(2.0 * E_out_J / mass_out);
+        kk_sample_cosine(norm, ip->v, vmag_out, rand_gen);
+      }
 
       ip->erot = 0.0;
       ip->evib = 0.0;
@@ -275,6 +386,31 @@ class SurfReactPMIKokkos : public SurfReactPMI {
 
     rand_pool.free_state(rand_gen);
     return 0;
+  }
+
+ public:
+  /* ---------------------------------------------------------------------- */
+  // Build a TrimView pointing into the concatenated device views for the
+  // i-th loaded TRIM combination.  Shapes are fixed by EIRENE's format so
+  // each combination occupies a contiguous slab of the same size.
+
+  KOKKOS_INLINE_FUNCTION
+  EireneTrim::TrimView kk_trim_view(int itrim) const
+  {
+    const int nE = EireneTrim::TRIM_NE;
+    const int nW = EireneTrim::TRIM_NW;
+    const int nR = EireneTrim::TRIM_NR;
+    EireneTrim::TrimView tv;
+    tv.E           = &d_trim_E(itrim * nE);
+    tv.theta_deg   = &d_trim_theta(itrim * nW);
+    tv.raar        = &d_trim_raar(itrim * nR);
+    tv.R_N         = &d_trim_R_N(itrim * nE * nW);
+    tv.Eout_q      = &d_trim_Eout_q(itrim * nE * nW * nR);
+    tv.Eout_min    = &d_trim_Eout_min(itrim * nE * nW);
+    tv.Eout_max    = &d_trim_Eout_max(itrim * nE * nW);
+    tv.cos_polar_q = &d_trim_cos_polar_q(itrim * nE * nW * nR * nR);
+    tv.cos_azim_q  = &d_trim_cos_azim_q(itrim * nE * nW * nR * nR * nR);
+    return tv;
   }
 
  private:

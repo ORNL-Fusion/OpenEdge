@@ -56,6 +56,15 @@ class ComputePMISurfData : public Compute {
   std::string equ_path;
   std::string plasma_data_fix_id;  // ID of fix plasma/data (if used)
 
+  // Eckstein analytic sputter mode (no surface HDF5 table).
+  // When eckstein_mode != 0, sputter yields are computed from the
+  // EIRENE Bohdansky-1993 + Yamamura formulas with the coefficient
+  // table in eckstein_sputter_data.h.
+  int eckstein_mode;
+  std::string eckstein_name;        // e.g. "O_on_W"
+  double eck_Z1, eck_M1, eck_Z2, eck_M2;
+  double eck_Es, eck_Eth, eck_Q, eck_ETF;
+
   // projectile slots for sputtering (inclusive, 1-based)
   int proj_slot_lo, proj_slot_hi;
   // legacy option kept for input compatibility
