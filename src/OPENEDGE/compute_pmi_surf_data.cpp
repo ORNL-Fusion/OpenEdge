@@ -998,6 +998,7 @@ void ComputePMISurfData::compute_per_surf()
   // Physical constants
   const double QE  = 1.602176634e-19;   // elementary charge [C]
   const double AMU = 1.66053906660e-27;  // atomic mass unit [kg]
+  const double ME  = 9.1093837015e-31;   // electron mass [kg]
 
   invoked_per_surf = update->ntimestep;
   if (static_cache && cache_valid) return;
@@ -1151,16 +1152,31 @@ void ComputePMISurfData::compute_per_surf()
       const double g = ni * cs * sin_alpha;
       gamma_n[s] = g;
 
-      // Incidence angle for sputter yield = alpha_B
+      // alpha_B = grazing angle from surface plane (diagnostic output).
+      // sin_alpha = |B.n|/|B| = cos(theta_from_normal) = sin(alpha_B).
       const double a_deg = std::asin(std::min(1.0, sin_alpha)) * 180.0 / M_PI;
       angle_deg[s] = a_deg;
+      // Yamamura (EIRENE COSIN convention) expects theta measured from the
+      // surface normal: cos(theta_deg) must go to 1 at normal incidence.
+      // theta_from_normal = 90 - alpha_B.
+      const double theta_deg = 90.0 - a_deg;
 
-      // Eckstein incident energy: E = 3*Te + 2*Z*Ti
-      double E = 3.0 * te_eV + 2.0 * static_cast<double>(z_inc) * ti_eV;
+      // Chankin 2014 eq. (4): mean ion impact energy on divertor target.
+      //   <E> = 2*Ti + Z * |e*dpsi|, with
+      //   |e*dpsi|/Te = 0.5 * ln( (mi_bg / (2*pi*me)) / (1 + Ti/Te) )
+      // mi_bg is the *background* ion mass (sets the sheath); uses mass_amu
+      // (default D = 2.014 amu). Do NOT use the impurity mass here.
+      // For D+, Ti=Te this reduces to |e*dpsi| = 2.84*Te.
+      const double mi_over_me_bg = (mass_amu * AMU) / ME;
+      const double ti_ratio = ti_eV / std::max(te_eV, 1.0e-30);
+      const double psi_over_Te = 0.5 *
+        std::log(mi_over_me_bg / (2.0 * M_PI * (1.0 + ti_ratio)));
+      double E = 2.0 * ti_eV +
+                 static_cast<double>(z_inc) * psi_over_Te * te_eV;
       energy_eV[s] = E;
 
       if (in_projectile_slots(s+1)) {
-        const double ys = yield_lookup(E, a_deg);
+        const double ys = yield_lookup(E, theta_deg);
         yld[s] = ys;
         sput_flux[s] = g * ys;
         sput_total += sput_flux[s];
@@ -1191,8 +1207,14 @@ void ComputePMISurfData::compute_per_surf()
           if (mesh_cell >= 0 && !mesh_ti.empty()) ti_imp = mesh_ti[mesh_cell];
           else if (!temp_i.empty()) ti_imp = interp2D(temp_i, r, z);
 
-          // Eckstein incident energy: E = 3*Te + 2*Z*Ti
-          const double E_eck = 3.0 * te_loc + 2.0 * static_cast<double>(Z) * ti_imp;
+          // Chankin 2014 eq. (4): see main loop above for derivation.
+          // mi_bg = mass_amu (background D+), NOT imp_mass_amu.
+          const double mi_over_me_bg = (mass_amu * AMU) / ME;
+          const double ti_ratio = ti_imp / std::max(te_loc, 1.0e-30);
+          const double psi_over_Te = 0.5 *
+            std::log(mi_over_me_bg / (2.0 * M_PI * (1.0 + ti_ratio)));
+          const double E_eck = 2.0 * ti_imp +
+                               static_cast<double>(Z) * psi_over_Te * te_loc;
 
           // Bohm speed with impurity mass
           const double cs_arg = (te_loc + ti_imp) * QE / (2.0 * imp_mass_amu * AMU);
@@ -1201,9 +1223,11 @@ void ComputePMISurfData::compute_per_surf()
           // Bohm flux
           const double g_imp = n_imp * cs * sin_alpha;
 
-          // Sputter yield: analytic Eckstein or HDF5 table
-          const double a_deg = std::asin(std::min(1.0, sin_alpha)) * 180.0 / M_PI;
-          const double ys = yield_lookup(E_eck, a_deg);
+          // Sputter yield: analytic Eckstein or HDF5 table.
+          // Yamamura theta measured from the surface normal (see main loop).
+          const double cos_theta = std::min(1.0, std::max(0.0, sin_alpha));
+          const double theta_imp_deg = std::acos(cos_theta) * 180.0 / M_PI;
+          const double ys = yield_lookup(E_eck, theta_imp_deg);
           sput_total += g_imp * ys;
         }
       }
