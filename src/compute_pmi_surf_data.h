@@ -27,6 +27,10 @@ class ComputePMISurfData : public Compute {
   void compute_per_surf();
   bigint memory_usage();
 
+  // True when the per-surf output is frozen (static mode + already built).
+  // Consumers can use this to skip re-deriving downstream quantities.
+  bool is_static_cached() const { return static_cache && cache_valid; }
+
  protected:
   enum {
     NFLUX_SPECIES,

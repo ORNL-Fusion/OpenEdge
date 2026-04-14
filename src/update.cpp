@@ -123,6 +123,55 @@ inline MagneticFieldFileDataParams query_bfield_from_fix(const FixPlasmaData *pd
   return B;
 }
 
+// ---- Fused bilinear stencil for FixPlasmaData ----
+// Build once per particle (R,Z); reuse across every field interp.
+// Replaces ~21 redundant clamp/index/weight computations with 1.
+struct PdStencil2D {
+  int c00;        // base flat index = iz0*nr + ir0
+  int row;        // row stride = nr
+  double w00, w01, w10, w11;
+  bool valid;
+};
+
+inline PdStencil2D make_pd_stencil(const FixPlasmaData *pd, double R, double Z)
+{
+  PdStencil2D st{};
+  if (!pd || pd->nr < 2 || pd->nz < 2) return st;
+  const int nr = pd->nr;
+  const int nz = pd->nz;
+
+  const double Rc = std::min(std::max(R, pd->rvals.front()), pd->rvals.back());
+  const double Zc = std::min(std::max(Z, pd->zvals.front()), pd->zvals.back());
+  const double dr = pd->rvals[1] - pd->rvals[0];
+  const double dz = pd->zvals[1] - pd->zvals[0];
+  const double fi = (Rc - pd->rvals.front()) / dr;
+  const double fj = (Zc - pd->zvals.front()) / dz;
+  const int ir0 = std::max(0, std::min((int)fi, nr - 2));
+  const int iz0 = std::max(0, std::min((int)fj, nz - 2));
+  const double s = std::max(0.0, std::min(1.0, fi - ir0));
+  const double t = std::max(0.0, std::min(1.0, fj - iz0));
+
+  st.c00 = iz0 * nr + ir0;
+  st.row = nr;
+  st.w00 = (1.0 - s) * (1.0 - t);
+  st.w01 = s * (1.0 - t);
+  st.w10 = (1.0 - s) * t;
+  st.w11 = s * t;
+  st.valid = true;
+  return st;
+}
+
+inline double interp_pd_stencil(const std::vector<double> &field,
+                                const PdStencil2D &st)
+{
+  if (!st.valid || field.empty()) return 0.0;
+  const double *f = field.data();
+  const int c00 = st.c00;
+  const int c10 = c00 + st.row;
+  return st.w00 * f[c00]     + st.w01 * f[c00 + 1]
+       + st.w10 * f[c10]     + st.w11 * f[c10 + 1];
+}
+
 }  // namespace
 
 
@@ -253,6 +302,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   sheath_kick = 0;
 
   plasma_cache_flag = 0;
+  pcache_need_mask = 0;
   pc_te_custom = pc_ti_custom = pc_ne_custom = pc_ni_custom = -1;
   pc_vpar_custom = -1;
   pc_bx_custom = pc_by_custom = pc_bz_custom = -1;
@@ -579,6 +629,46 @@ void Update::init()
     }
   }
 
+  // Resolve which cache slots are actually consumed this run by scanning
+  // active fix styles. Any consumer not on this list will fall back to the
+  // full cache below (set in the unrecognized-style branch).
+  pcache_need_mask = 0;
+  if (plasma_cache_flag) {
+    int recognized = 0;
+    for (int ifix = 0; ifix < modify->nfix; ifix++) {
+      const char *s = modify->fix[ifix]->style;
+      if (strcmp(s,"chem/adas") == 0 || strcmp(s,"chem/adas/kk") == 0) {
+        // fix_chem_adas reads te+ne always; ti/vpar/bx/by/bz used by CX channel
+        pcache_need_mask |= PCACHE_TE | PCACHE_NE | PCACHE_TI |
+                            PCACHE_VPAR | PCACHE_BFIELD;
+        recognized = 1;
+      } else if (strcmp(s,"thermal_force") == 0) {
+        pcache_need_mask |= PCACHE_BFIELD | PCACHE_GRAD_TE | PCACHE_GRAD_TI;
+        recognized = 1;
+      } else if (strcmp(s,"coll/nanbu") == 0 || strcmp(s,"coll/nanbu/kk") == 0) {
+        pcache_need_mask |= PCACHE_TE | PCACHE_NE | PCACHE_TI | PCACHE_NI |
+                            PCACHE_VPAR | PCACHE_BFIELD;
+        recognized = 1;
+      } else if (strcmp(s,"cross_diffusion") == 0) {
+        pcache_need_mask |= PCACHE_BFIELD | PCACHE_NE | PCACHE_GRAD_NE;
+        recognized = 1;
+      } else if (strcmp(s,"efield/particle") == 0) {
+        pcache_need_mask |= PCACHE_EFIELD;
+        recognized = 1;
+      }
+    }
+    // Sheath Boltzmann ne correction (inside cache_plasma_particles) reads
+    // te, ti, ne locally and needs Bmag; B is queried locally so does not
+    // require the PCACHE_BFIELD write slot.
+    if (sheath_flag && sheath_geom_cidx >= 0) {
+      pcache_need_mask |= PCACHE_TE | PCACHE_NE | PCACHE_TI;
+    }
+    // Backward compat: if no recognized consumer was found but the cache
+    // is enabled (some user-defined fix may read pc_* via particle vars),
+    // fall back to filling everything to avoid silently starving a reader.
+    if (!recognized) pcache_need_mask = PCACHE_ALL;
+  }
+
   // moveperturb method is set if external field perturbs particle motion
   moveperturb = NULL;
 
@@ -688,7 +778,10 @@ void Update::run(int nsteps)
     }
 
     // cache plasma fields at particle positions (one query per particle)
-    if (plasma_cache_flag) cache_plasma_particles();
+    if (plasma_cache_flag) {
+      cache_plasma_particles();
+      timer->stamp(TIME_PCACHE);
+    }
 
     // move particles (skip when global move no)
 
@@ -832,63 +925,140 @@ void Update::cache_plasma_particles()
   const int nlocal = particle->nlocal;
   const int dim = domain->dimension;
 
+  const int mask = pcache_need_mask;
+  const bool need_plasma =
+      (mask & (PCACHE_TE | PCACHE_NE | PCACHE_TI | PCACHE_NI | PCACHE_VPAR |
+               PCACHE_GRAD_NE | PCACHE_GRAD_TE | PCACHE_GRAD_TI |
+               PCACHE_EFIELD)) ||
+      (csg != nullptr);
+  const bool need_bfield =
+      (mask & (PCACHE_BFIELD | PCACHE_EFIELD)) || (csg != nullptr);
+  const bool write_b = (mask & PCACHE_BFIELD) != 0;
+  const bool write_e = (mask & PCACHE_EFIELD) != 0;
+
+  // Pre-compute grad_ne finite-difference offsets for the pd path
+  // (used only when PCACHE_GRAD_NE is set and we are on the fix path).
+  double pd_dR = 0.0, pd_dZ = 0.0;
+  if (pd && pd->nr >= 2 && pd->nz >= 2) {
+    pd_dR = std::max(1.0e-9, 0.5 * std::fabs(pd->rvals[1] - pd->rvals[0]));
+    pd_dZ = std::max(1.0e-9, 0.5 * std::fabs(pd->zvals[1] - pd->zvals[0]));
+  }
+
   for (int i = 0; i < nlocal; i++) {
     const double *x = particles[i].x;
-    PlasmaFileParams pf = cp ? cp->query_plasma_at_point(x)
-                             : query_plasma_from_fix(pd, x, dim);
 
-    te_vec[i]   = pf.temp_e;
-    ti_vec[i]   = pf.temp_i;
-    ne_vec[i]   = pf.dens_e;
-    ni_vec[i]   = pf.dens_i;
-    vpar_vec[i] = pf.parr_flow;
-    gne_r_vec[i] = pf.grad_dens_e_r;
-    gne_z_vec[i] = pf.grad_dens_e_z;
-    gte_r_vec[i] = pf.grad_temp_e_r;
-    gte_z_vec[i] = pf.grad_temp_e_z;
-    gti_r_vec[i] = pf.grad_temp_i_r;
-    gti_z_vec[i] = pf.grad_temp_i_z;
+    PlasmaFileParams pf{};
+    MagneticFieldFileDataParams bf{};
 
-    MagneticFieldFileDataParams bf = cp ? cp->query_bfield_at_point(x)
-                                        : query_bfield_from_fix(pd, x, dim);
-    // Store B and background E at particle position using the same component
-    // mapping as compute plasma/fields: 2D -> (Bx,By,Bz)=(Br,Bz,Bt).
-    const double rx = x[0], ry = x[1];
-    const double rmag = std::sqrt(rx*rx + ry*ry);
-    double bx, by, bz;
-    double ex = 0.0, ey = 0.0, ez = 0.0;
-    const double Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
-    if (rmag > 1.0e-20 && dim == 3) {
-      const double cphi = rx / rmag, sphi = ry / rmag;
-      bx = bf.br * cphi - bf.bt * sphi;
-      by = bf.br * sphi + bf.bt * cphi;
-      if (Bmag > 1.0e-30 && pf.epar != 0.0) {
-        const double Er = pf.epar * bf.br / Bmag;
-        const double Et = pf.epar * bf.bt / Bmag;
-        const double Ezv = pf.epar * bf.bz / Bmag;
-        ex = Er * cphi - Et * sphi;
-        ey = Er * sphi + Et * cphi;
-        ez = Ezv;
+    if (cp) {
+      // ---- compute plasma/fields path: existing point queries ----
+      if (need_plasma) pf = cp->query_plasma_at_point(x);
+      if (need_bfield) bf = cp->query_bfield_at_point(x);
+    } else if (pd) {
+      // ---- fix plasma/data path: shared bilinear stencil ----
+      double R, Z;
+      xyz_to_rz(x, dim, R, Z);
+      const PdStencil2D st = make_pd_stencil(pd, R, Z);
+      if (need_plasma) {
+        if (mask & PCACHE_TE)   pf.temp_e   = interp_pd_stencil(pd->temp_e, st);
+        if (mask & PCACHE_NE)   pf.dens_e   = interp_pd_stencil(pd->dens_e, st);
+        if (mask & PCACHE_TI)   pf.temp_i   = interp_pd_stencil(pd->temp_i, st);
+        if (mask & PCACHE_NI)   pf.dens_i   = interp_pd_stencil(pd->dens_i, st);
+        if (mask & PCACHE_VPAR) pf.parr_flow = interp_pd_stencil(pd->parr_flow, st);
+        if (mask & PCACHE_GRAD_TE) {
+          pf.grad_temp_e_r = interp_pd_stencil(pd->grad_te_r, st);
+          pf.grad_temp_e_z = interp_pd_stencil(pd->grad_te_z, st);
+        }
+        if (mask & PCACHE_GRAD_TI) {
+          pf.grad_temp_i_r = interp_pd_stencil(pd->grad_ti_r, st);
+          pf.grad_temp_i_z = interp_pd_stencil(pd->grad_ti_z, st);
+        }
+        if (mask & PCACHE_GRAD_NE) {
+          // finite-difference grad_ne via 4 shifted stencils on dens_e
+          const double fR_p = interp_pd_stencil(pd->dens_e, make_pd_stencil(pd, R + pd_dR, Z));
+          const double fR_m = interp_pd_stencil(pd->dens_e, make_pd_stencil(pd, R - pd_dR, Z));
+          const double fZ_p = interp_pd_stencil(pd->dens_e, make_pd_stencil(pd, R, Z + pd_dZ));
+          const double fZ_m = interp_pd_stencil(pd->dens_e, make_pd_stencil(pd, R, Z - pd_dZ));
+          pf.grad_dens_e_r = (fR_p - fR_m) / (2.0 * pd_dR);
+          pf.grad_dens_e_z = (fZ_p - fZ_m) / (2.0 * pd_dZ);
+        }
+        if (write_e && !pd->epar.empty()) {
+          pf.epar = interp_pd_stencil(pd->epar, st);
+        }
       }
-    } else {
-      bx = bf.br;
-      by = (dim == 3) ? 0.0 : bf.bz;
-      if (Bmag > 1.0e-30 && pf.epar != 0.0) {
-        const double Er = pf.epar * bf.br / Bmag;
-        const double Et = pf.epar * bf.bt / Bmag;
-        const double Ezv = pf.epar * bf.bz / Bmag;
-        ex = Er;
-        ey = (dim == 3) ? 0.0 : Ezv;
-        ez = (dim == 3) ? Ezv : Et;
+      if (need_bfield && pd->has_bfield) {
+        bf.br = interp_pd_stencil(pd->br, st);
+        bf.bz = interp_pd_stencil(pd->bz, st);
+        bf.bt = interp_pd_stencil(pd->bt, st);
+        bf.Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
       }
     }
-    bz = (dim == 3) ? bf.bz : bf.bt;
-    bx_vec[i] = bx;
-    by_vec[i] = by;
-    bz_vec[i] = bz;
-    ex_vec[i] = ex;
-    ey_vec[i] = ey;
-    ez_vec[i] = ez;
+
+    if (mask & PCACHE_TE)   te_vec[i]   = pf.temp_e;
+    if (mask & PCACHE_TI)   ti_vec[i]   = pf.temp_i;
+    if (mask & PCACHE_NE)   ne_vec[i]   = pf.dens_e;
+    if (mask & PCACHE_NI)   ni_vec[i]   = pf.dens_i;
+    if (mask & PCACHE_VPAR) vpar_vec[i] = pf.parr_flow;
+    if (mask & PCACHE_GRAD_NE) {
+      gne_r_vec[i] = pf.grad_dens_e_r;
+      gne_z_vec[i] = pf.grad_dens_e_z;
+    }
+    if (mask & PCACHE_GRAD_TE) {
+      gte_r_vec[i] = pf.grad_temp_e_r;
+      gte_z_vec[i] = pf.grad_temp_e_z;
+    }
+    if (mask & PCACHE_GRAD_TI) {
+      gti_r_vec[i] = pf.grad_temp_i_r;
+      gti_z_vec[i] = pf.grad_temp_i_z;
+    }
+
+    // B-field decomposition into Cartesian-or-axisymmetric components.
+    // bf was sampled above (cp or pd path); only enter this block when a
+    // consumer needs B (cached B/E slots, sheath Boltzmann correction).
+    double bx = 0.0, by = 0.0, bz = 0.0;
+    if (need_bfield) {
+      // Store B and background E at particle position using the same component
+      // mapping as compute plasma/fields: 2D -> (Bx,By,Bz)=(Br,Bz,Bt).
+      const double rx = x[0], ry = x[1];
+      const double rmag = std::sqrt(rx*rx + ry*ry);
+      double ex = 0.0, ey = 0.0, ez = 0.0;
+      const double Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
+      if (rmag > 1.0e-20 && dim == 3) {
+        const double cphi = rx / rmag, sphi = ry / rmag;
+        bx = bf.br * cphi - bf.bt * sphi;
+        by = bf.br * sphi + bf.bt * cphi;
+        if (write_e && Bmag > 1.0e-30 && pf.epar != 0.0) {
+          const double Er = pf.epar * bf.br / Bmag;
+          const double Et = pf.epar * bf.bt / Bmag;
+          const double Ezv = pf.epar * bf.bz / Bmag;
+          ex = Er * cphi - Et * sphi;
+          ey = Er * sphi + Et * cphi;
+          ez = Ezv;
+        }
+      } else {
+        bx = bf.br;
+        by = (dim == 3) ? 0.0 : bf.bz;
+        if (write_e && Bmag > 1.0e-30 && pf.epar != 0.0) {
+          const double Er = pf.epar * bf.br / Bmag;
+          const double Et = pf.epar * bf.bt / Bmag;
+          const double Ezv = pf.epar * bf.bz / Bmag;
+          ex = Er;
+          ey = (dim == 3) ? 0.0 : Ezv;
+          ez = (dim == 3) ? Ezv : Et;
+        }
+      }
+      bz = (dim == 3) ? bf.bz : bf.bt;
+      if (write_b) {
+        bx_vec[i] = bx;
+        by_vec[i] = by;
+        bz_vec[i] = bz;
+      }
+      if (write_e) {
+        ex_vec[i] = ex;
+        ey_vec[i] = ey;
+        ez_vec[i] = ez;
+      }
+    }
 
     // Boltzmann ne correction: ne_local = ne_upstream * exp(-phi/Te)
     // where phi = sheath potential drop at particle distance from wall

@@ -156,9 +156,10 @@ struct SurfHit2D {
   bigint nscheck_running;
   bigint nscollide_running;
 
-  // Point-query B-field for Boris pusher (from compute plasma/fields)
-  char *boris_plasma_cid;      // compute ID string (set by global bfield_compute)
+  // Point-query B-field for Boris pusher (from compute plasma/fields or fix plasma/data)
+  char *boris_plasma_cid;      // provider ID string (set by global bfield_compute)
   int boris_plasma_cidx;       // resolved compute index (-1 = not set)
+  int boris_plasma_fidx;       // resolved fix index (-1 = not set)
 
   int boris_dump_flag;         // 1 enables Boris E/B debug prints
   int boris_dump_every;        // print cadence in timesteps
@@ -170,9 +171,10 @@ struct SurfHit2D {
   // Per-particle sheath E-field overlay (uses grid-cached geometry + plasma)
   int sheath_flag;             // 1 if per-particle sheath is active
   char *sheath_geom_cid;       // compute ID for sheath/geometry/grid
-  char *sheath_plasma_cid;     // compute ID for plasma/fields
+  char *sheath_plasma_cid;     // provider ID for plasma/fields or fix plasma/data
   int sheath_geom_cidx;        // resolved compute index for geometry
   int sheath_plasma_cidx;      // resolved compute index for plasma
+  int sheath_plasma_fidx;      // resolved fix index for plasma
   int sheath_model;            // 0=borodkina, 1=coulette_manfredi
   double sheath_dmax;          // max distance for sheath activation (m)
   double sheath_pot_mult;      // potential multiplier
@@ -189,6 +191,22 @@ struct SurfHit2D {
   int pc_grad_ne_r_custom, pc_grad_ne_z_custom;
   int pc_grad_te_r_custom, pc_grad_te_z_custom;
   int pc_grad_ti_r_custom, pc_grad_ti_z_custom;
+  // Bit flags for which cache slots are actually consumed this run.
+  // Set in init() by scanning modify->fix; read by cache_plasma_particles().
+  enum {
+    PCACHE_TE      = 1 << 0,
+    PCACHE_NE      = 1 << 1,
+    PCACHE_TI      = 1 << 2,
+    PCACHE_NI      = 1 << 3,
+    PCACHE_VPAR    = 1 << 4,
+    PCACHE_BFIELD  = 1 << 5,
+    PCACHE_EFIELD  = 1 << 6,
+    PCACHE_GRAD_NE = 1 << 7,
+    PCACHE_GRAD_TE = 1 << 8,
+    PCACHE_GRAD_TI = 1 << 9,
+    PCACHE_ALL     = (1 << 10) - 1
+  };
+  int pcache_need_mask;
   void cache_plasma_particles();
 
   // Hybrid Boris/GCA pusher (ERO2.0-style)

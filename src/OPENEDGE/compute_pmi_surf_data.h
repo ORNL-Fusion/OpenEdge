@@ -27,6 +27,10 @@ class ComputePMISurfData : public Compute {
   void compute_per_surf();
   bigint memory_usage();
 
+  // True when the per-surf output is frozen (static mode + already built).
+  // Consumers can use this to skip re-deriving downstream quantities.
+  bool is_static_cached() const { return static_cache && cache_valid; }
+
  protected:
   enum {
     NFLUX_SPECIES,
@@ -42,21 +46,30 @@ class ComputePMISurfData : public Compute {
   int firstflag;
   int debug_interp;
   int nsown;
-  int plasma_source_mode;
   int static_cache;
   int cache_valid;
   int *which;
   int *which_species;   // 1-based species slot for species-specific outputs
   std::string plasma_path;
-  std::string plasma_data_fix_id;
   std::string surface_path;
   std::string bfield_path;
   std::string equ_path;
+  std::string plasma_data_fix_id;  // ID of fix plasma/data (if used)
 
   // projectile slots for sputtering (inclusive, 1-based)
   int proj_slot_lo, proj_slot_hi;
   // legacy option kept for input compatibility
   double mass_amu;
+
+  // Virtual background impurity (not in plasma.h5)
+  // Usage: impurity mass_amu frac Zmax f1 f2 ... fZmax
+  //   Synthesizes sputtering from an impurity at fixed fraction of n_e.
+  //   Charge state fractions f1..fZmax give the distribution over Z=1..Zmax.
+  int has_impurity;
+  double imp_mass_amu;     // impurity mass [amu]
+  double imp_frac;         // fraction of n_e (e.g. 0.03 for 3%)
+  int imp_Zmax;            // max charge state
+  std::vector<double> imp_charge_fracs;  // charge state fractions (Z=1..Zmax)
 
   // plasma data
   int nr,nz,nspec;
@@ -90,6 +103,10 @@ class ComputePMISurfData : public Compute {
   std::vector<double> mesh_ions_dens, mesh_ions_temp, mesh_ions_upar;
   // bounding boxes for triangle search acceleration
   std::vector<double> mesh_tri_rmin, mesh_tri_rmax, mesh_tri_zmin, mesh_tri_zmax;
+  // spatial hash for O(1) triangle lookup
+  int hash_nr, hash_nz;
+  double hash_rmin, hash_zmin, hash_dr, hash_dz;
+  std::vector<std::vector<int>> hash_grid;
 
   double interp2D(const std::vector<double> &f, double r, double z) const;
   double interp3D(const std::vector<double> &f, int ispec, double r, double z) const;
@@ -99,8 +116,8 @@ class ComputePMISurfData : public Compute {
   void rebuild_mesh_cache();
   void load_surface_data();
   void load_boundary();
-  void load_mesh();
   void load_bfield_from_equ();
+  void load_mesh();
 
   // Precomputed mapped-triangle centroids for nearest-neighbor fallback
   std::vector<double> mapped_cr, mapped_cz;  // centroids of mapped triangles

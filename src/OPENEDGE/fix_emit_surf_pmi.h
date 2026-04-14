@@ -19,6 +19,7 @@ FixStyle(emit/surf/pmi,FixEmitSurfPmi)
 #include "fix_emit.h"
 #include "surf.h"
 #include "grid.h"
+#include <vector>
 
 namespace SPARTA_NS {
 
@@ -90,6 +91,14 @@ class FixEmitSurfPmi : public FixEmit {
 
   double magvstream;       // magnitude of mixture vstream
   double norm_vstream[3];  // direction of mixture vstream
+
+  // Cached per-task source strengths for nlaunch_total mode.
+  // When the upstream pmi/surf/data compute is in static_cache mode,
+  // task_source[] and source_total never change, so we build them once
+  // and reuse them across timesteps.
+  std::vector<double> cached_task_source;
+  double cached_source_total;
+  int task_source_cached;        // 0 = stale, 1 = valid
 
   // custom options for per-surf emission properties
 

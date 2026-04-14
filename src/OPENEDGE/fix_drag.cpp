@@ -42,7 +42,6 @@
 #include "input.h"
 #include "modify.h"
 #include "compute.h"
-#include "compute_plasma_fields.h"
 #include "variable.h"
 #include "math_const.h"
 
@@ -180,6 +179,20 @@ FixDrag::~FixDrag()
   if (copymode) return;
   memory->destroy(plasma_grid);
   memory->destroy(b_grid);
+  if (srcTe.vname)   delete [] srcTe.vname;
+  if (srcTi.vname)   delete [] srcTi.vname;
+  if (srcNi.vname)   delete [] srcNi.vname;
+  if (srcVpar.vname) delete [] srcVpar.vname;
+  if (srcBr.vname)   delete [] srcBr.vname;
+  if (srcBt.vname)   delete [] srcBt.vname;
+  if (srcBz.vname)   delete [] srcBz.vname;
+  if (srcTe.cid)     delete [] srcTe.cid;
+  if (srcTi.cid)     delete [] srcTi.cid;
+  if (srcNi.cid)     delete [] srcNi.cid;
+  if (srcVpar.cid)   delete [] srcVpar.cid;
+  if (srcBr.cid)     delete [] srcBr.cid;
+  if (srcBt.cid)     delete [] srcBt.cid;
+  if (srcBz.cid)     delete [] srcBz.cid;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -420,17 +433,6 @@ void FixDrag::kick_half(double dt_half, bool do_diag)
   const bool   coulomb  = (drag_model == DRAG_COULOMB);
   const double chi_over_delta = chi_coulomb / std::max(delta_ite, 1.0e-12);
 
-  // Try to resolve a ComputePlasmaFields pointer for per-particle interpolation
-  ComputePlasmaFields *cp_plasma = nullptr;
-  if (srcTi.kind == COLL_SRC_COMP) {
-    Compute *c = modify->compute[srcTi.icompute];
-    cp_plasma = dynamic_cast<ComputePlasmaFields *>(c);
-  }
-  if (!cp_plasma && srcNi.kind == COLL_SRC_COMP) {
-    Compute *c = modify->compute[srcNi.icompute];
-    cp_plasma = dynamic_cast<ComputePlasmaFields *>(c);
-  }
-
   // KOKKOS_NOTE: begin Kokkos::parallel_for here (with TeamPolicy + reducers
   // for the diagnostic accumulators).
   for (int ip = 0; ip < nlocal; ++ip) {
@@ -442,27 +444,14 @@ void FixDrag::kick_half(double dt_half, bool do_diag)
     if (seed_radius > 0.0 && p.radius <= 0.0) p.radius = seed_radius;
     if (seed_temp   > 0.0 && p.temp   <= 0.0) p.temp   = seed_temp;
 
-    // --- Read plasma/bfield: per-particle interpolation when available,
-    //     otherwise per-cell array dereference (arr_cache resolved once
-    //     in refresh_sources()).
-    double Ti_eV, Ni, Vpar, Br, Bt, Bz;
-    if (cp_plasma) {
-      PlasmaFileParams pp = cp_plasma->query_plasma_at_point(p.x);
-      MagneticFieldFileDataParams bb = cp_plasma->query_bfield_at_point(p.x);
-      Ti_eV = std::max(pp.temp_i, 0.0);
-      Ni    = std::max(pp.dens_i, 0.0);
-      Vpar  = pp.parr_flow;
-      Br    = bb.br;
-      Bt    = bb.bt;
-      Bz    = bb.bz;
-    } else {
-      Ti_eV = std::max(read_cell(srcTi,   icell, plasma_grid, 1), 0.0);
-      Ni    = std::max(read_cell(srcNi,   icell, plasma_grid, 2), 0.0);
-      Vpar  =          read_cell(srcVpar, icell, plasma_grid, 3);
-      Br    =          read_cell(srcBr,   icell, b_grid, 0);
-      Bt    =          read_cell(srcBt,   icell, b_grid, 1);
-      Bz    =          read_cell(srcBz,   icell, b_grid, 2);
-    }
+    // --- Read plasma/bfield for this cell: direct array dereference, no
+    //     virtual call (arr_cache was resolved once in refresh_sources()).
+    const double Ti_eV = std::max(read_cell(srcTi,   icell, plasma_grid, 1), 0.0);
+    const double Ni    = std::max(read_cell(srcNi,   icell, plasma_grid, 2), 0.0);
+    const double Vpar  =          read_cell(srcVpar, icell, plasma_grid, 3);
+    const double Br    =          read_cell(srcBr,   icell, b_grid, 0);
+    const double Bt    =          read_cell(srcBt,   icell, b_grid, 1);
+    const double Bz    =          read_cell(srcBz,   icell, b_grid, 2);
     const double rd    = p.radius;
 
     // --- Epstein drag frequency (zero if any input is non-physical)

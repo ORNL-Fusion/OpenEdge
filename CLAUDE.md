@@ -321,6 +321,146 @@ Two approaches for sheath electric fields:
   dump dsurf surf all 1000 surf.*.dat id f_flm[1] f_flm[2] f_flm[3] f_flm[4]
   ```
 
+## Performance: grid refinement near surface sources
+
+For wall-source cases (PMI sputtering, divertor emission, evaporation), particles
+spawn at the wall and cluster in a small set of cells near the strike point.
+The two performance bottlenecks this creates:
+
+1. **SurfColl checks dominate Move time** — each particle move tests against
+   every surface element in its current cell. Coarse cells contain dozens of
+   surface elements → dozens of intersection tests per particle per step.
+2. **MPI load imbalance** — RCB partitions cells (atoms), so all particles in
+   one cell go to one rank. With particles concentrated in a few cells, one
+   rank does all the work and the rest sit in MPI barriers (`Other` bucket
+   becomes 80–90% of loop time).
+
+Both are solved by `adapt_grid` near the wall, which (a) reduces the number
+of surface elements per cell and (b) gives RCB more granularity to subdivide
+the dense region.
+
+**Standard recipe** (place after `read_surf` and `surf_modify`, before any
+`fix` commands):
+
+```
+# define refinement region(s) covering the wall area where particles cluster
+region   rdiv_lo block 1.82 3.2 -0.94 -0.40 -INF INF   # lower divertor
+region   rdiv_up block 1.82 3.2  0.40  0.80 -INF INF   # limiter / upper
+
+# refine cells that overlap surfaces inside the region
+# - thresh 0.001: refine if longest surf segment in cell > 1mm
+# - cells 2 2 1: each parent splits into 2x2x1 children (2D)
+# - maxlevel 5 + iterate 5: actually drives 5 levels of refinement
+#   (iterate is the cap, NOT maxlevel — they must match or iterate must
+#    be >= maxlevel)
+adapt_grid all refine surf all 0.001 maxlevel 5 cells 2 2 1 region rdiv_lo all iterate 5
+adapt_grid all refine surf all 0.001 maxlevel 5 cells 2 2 1 region rdiv_up all iterate 5
+balance_grid rcb cell
+```
+
+**Critical ordering** for MPI runs with `gridcut 0.0`:
+
+```
+create_grid 100 100 1
+balance_grid rcb cell        # FIRST balance — needed for adapt_grid in MPI
+read_surf ...
+surf_collide / surf_react / surf_modify ...
+region ... ; adapt_grid ...  # refinement after surfaces have collision models
+balance_grid rcb cell        # SECOND balance — distribute refined cells
+```
+
+If you skip the first `balance_grid`, MPI runs error out with
+*"Cannot mark grid cells as inside/outside surfs because ghost cells do not
+exist"*. If you run `adapt_grid` before `surf_modify`, you get
+*"surface elements not assigned to a collision model"*.
+
+**Measured impact (test_west_axi, 100×100 base grid, ~13K particles):**
+
+| config | wall (1 rank) | wall (32 ranks) | SurfColl checks |
+|---|---|---|---|
+| no refinement | 8.72s | n/a (load imbalance) | 83.8M |
+| ml=5 it=5 refine | 5.03s | **0.95s** | 8.5M (10× fewer) |
+
+Total speedup: ~9× on a single rank (Move halved by fewer surface checks),
+~13× on 32 ranks (refinement also makes RCB partitioning effective).
+
+**Tuning notes:**
+
+- `thresh` (third arg to `refine surf`) is the surf-element length below
+  which refinement stops. Default `0.001` (1mm) works for typical fusion
+  meshes; lower it only if your wall mesh has sub-mm features.
+- `iterate N` is the cap on refinement depth, NOT `maxlevel`. Set
+  `iterate >= maxlevel` or refinement stops early. Common mistake.
+- **Wider regions outperform tight regions** even though they use more
+  cells: the surface-check reduction across the *whole wall* is a bigger
+  win than concentrated refinement at the strike. Prefer broad geometric
+  bands over narrowly-tuned ones.
+- `fix balance ... rcb time` (every 500 steps) outperforms `rcb part`
+  for impurity transport — `time` weights cells by measured CPU cost,
+  capturing per-particle work intensity (Boris subcycles, surf checks).
+
+### Runtime adaptive refinement: `fix adapt`
+
+Static `adapt_grid` only sets up the grid once. For source-driven cases
+where the cluster grows over time (more particles emitted than removed),
+add `fix adapt` to refine cells whose particle count exceeds a threshold
+*during* the run. Combined with `fix balance ... rcb time`, this gives an
+extra **2–4× speedup** on top of the static refinement at moderate rank
+counts (np=4–16).
+
+**Recipe** (place in the fixes section of `in.case`):
+
+```
+# Runtime adaptive refinement: split any cell holding > 500 particles.
+# Refines monotonically (no coarsen) so the grid never loses granularity.
+# Capped by maxlevel + setup adapt_grid.
+fix fadapt adapt 200 all refine particle 500 0 maxlevel 8 cells 2 2 1
+fix fbal   balance 200 1.1 rcb time
+```
+
+- The `0` is the coarsen threshold (always required by the parser, even
+  with `refine` only — leave at 0 for monotonic refinement).
+- `200` (Nevery for fadapt and fbal) is the sweet spot. **More aggressive
+  settings (every 100, threshold 200) actively hurt** — refine + balance
+  overhead overwhelms the gain.
+- `fix balance` alone every 200 steps does **not** help; the win requires
+  fadapt + balance working together. Don't drop balance frequency without
+  also enabling fadapt.
+
+**Measured impact (test_west_axi, ~130K particles, nlaunch=100):**
+
+| ranks | static refine only | + fix adapt | speedup from fadapt |
+|-------|--------------------|-------------|---------------------|
+| 4     | 36.8s              | 19.6s       | 1.88×               |
+| 8     | 30.0s              | **9.7s**    | **3.09×**           |
+| 16    | 21.2s              | 5.6s        | 3.78×               |
+| 32    | 14.3s              | ~7.0s       | 2.0× (variance)     |
+
+Total speedup vs single rank with no refinement: **~20× at np=16** for
+this case. np=8 is the practical sweet spot for divertor-source cases at
+this resolution — beyond that, refinement granularity becomes the new
+bottleneck.
+
+## MPI launch on mora
+
+The OpenEdge binary is linked against Intel MPI. The system PATH points to
+linuxbrew's `mpirun` by default, which is a different MPI ABI — launching
+with the wrong `mpirun` produces N independent singleton processes
+(`Running on 1 MPI task(s)` printed N times) instead of one N-rank job.
+
+**Always source Intel oneAPI before running:**
+
+```bash
+source /opt/intel/oneapi/setvars.sh --force
+mpirun -np 8 ~/buildOpenEdge/src/spa_mpi -in in.case
+```
+
+To verify:
+```bash
+which mpirun           # should be /opt/intel/oneapi/mpi/.../bin/mpirun
+echo $I_MPI_ROOT       # should be non-empty
+```
+
 ## Testing
 
 Test cases live in `examples/test_*/`. Each has a README with run instructions.

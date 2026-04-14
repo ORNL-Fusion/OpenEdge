@@ -239,6 +239,23 @@ void FixThermalForce::start_of_step()
 void FixThermalForce::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
+
+  // Per-particle custom vectors (S.pvec_cache) can be reallocated when
+  // particles are created during Update::move() between start_of_step and
+  // end_of_step (e.g. by fix emit/surf/pmi). Re-fetch the pointers before
+  // the second kick or read_src() will deref freed memory.
+  refresh_compute_src(srcBx_);
+  refresh_compute_src(srcBy_);
+  refresh_compute_src(srcBz_);
+  if (have_ion_thermal_) {
+    refresh_compute_src(srcGradTiR_);
+    refresh_compute_src(srcGradTiZ_);
+  }
+  if (have_elec_thermal_) {
+    refresh_compute_src(srcGradTeR_);
+    refresh_compute_src(srcGradTeZ_);
+  }
+
   kick_half(0.5 * update->dt);
 }
 
@@ -395,7 +412,9 @@ void FixThermalForce::parse_compute_src(const char *tok, CollGridSrc &dst,
 void FixThermalForce::refresh_compute_src(CollGridSrc &S)
 {
   if (S.kind == COLL_SRC_PCUSTOM) {
-    if (S.cache_ts == update->ntimestep) return;
+    // Always re-fetch: particle->edvec[] is reallocated by particle->grow()
+    // when new particles are created mid-step, which can happen between two
+    // calls to refresh in the same timestep.
     S.pvec_cache = nullptr;
     if (S.ipcustom >= 0) {
       S.ipwhich = particle->ewhich[S.ipcustom];

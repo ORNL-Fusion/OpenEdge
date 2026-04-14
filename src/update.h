@@ -191,6 +191,22 @@ struct SurfHit2D {
   int pc_grad_ne_r_custom, pc_grad_ne_z_custom;
   int pc_grad_te_r_custom, pc_grad_te_z_custom;
   int pc_grad_ti_r_custom, pc_grad_ti_z_custom;
+  // Bit flags for which cache slots are actually consumed this run.
+  // Set in init() by scanning modify->fix; read by cache_plasma_particles().
+  enum {
+    PCACHE_TE      = 1 << 0,
+    PCACHE_NE      = 1 << 1,
+    PCACHE_TI      = 1 << 2,
+    PCACHE_NI      = 1 << 3,
+    PCACHE_VPAR    = 1 << 4,
+    PCACHE_BFIELD  = 1 << 5,
+    PCACHE_EFIELD  = 1 << 6,
+    PCACHE_GRAD_NE = 1 << 7,
+    PCACHE_GRAD_TE = 1 << 8,
+    PCACHE_GRAD_TI = 1 << 9,
+    PCACHE_ALL     = (1 << 10) - 1
+  };
+  int pcache_need_mask;
   void cache_plasma_particles();
 
   // Hybrid Boris/GCA pusher (ERO2.0-style)

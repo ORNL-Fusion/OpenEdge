@@ -24,6 +24,7 @@
 #include "math_const.h"
 #include "memory.h"
 #include "error.h"
+#include "compute_pmi_surf_data.h"
 
 #include <cmath>
 #include <vector>
@@ -96,6 +97,9 @@ FixEmitSurfPmi::FixEmitSurfPmi(SPARTA *sparta, int narg, char **arg) :
 
   tasks = NULL;
   ntask = ntaskmax = 0;
+
+  cached_source_total = 0.0;
+  task_source_cached = 0;
 
   dimension = domain->dimension;
   if (dimension == 3) cut3d = new Cut3d(sparta);
@@ -212,6 +216,11 @@ double FixEmitSurfPmi::flux_for_surface(surfint isurf)
 void FixEmitSurfPmi::grid_changed()
 {
   create_tasks();
+
+  // task layout changed: invalidate cached source strengths
+  task_source_cached = 0;
+  cached_task_source.clear();
+  cached_source_total = 0.0;
 
   // for mode CONSTANT, set per-task ntarget to area fraction
   if (npmode != FLOW) {
@@ -418,29 +427,52 @@ void FixEmitSurfPmi::perform_task()
     pweight_dvec = particle->edvec[pweight_ewhich];
 
   std::vector<double> task_source;
+  const double *task_source_ptr = NULL;   // points to active source array
   double source_total = 0.0;
   if (npmode == FLOW && nlaunch_total_mode) {
-    task_source.assign(ntask,0.0);
+    // Fast path: when the upstream compute reports a frozen static cache,
+    // reuse cached_task_source / cached_source_total instead of rebuilding.
+    // The cached size must match ntask (grid_changed() invalidates).
+    auto *cpmi = dynamic_cast<ComputePMISurfData *>(c);
+    const bool upstream_static = (cpmi && cpmi->is_static_cached());
 
-    double source_total_me = 0.0;
-    for (i = 0; i < ntask; i++) {
-      source_strength = 0.0;
-      isurf = tasks[i].isurf;
+    if (upstream_static && task_source_cached &&
+        static_cast<int>(cached_task_source.size()) == ntask) {
+      // reuse — flux and dt are constant for static sources
+      if (cached_source_total <= 0.0) return;
+      source_total = cached_source_total;
+      task_source_ptr = cached_task_source.data();
+    } else {
+      task_source.assign(ntask,0.0);
 
-      double flux = flux_for_surface(isurf);
-      if (!std::isfinite(flux) || flux <= 0.0) continue;
-      if (flux < flux_thresh) continue;
+      double source_total_me = 0.0;
+      for (i = 0; i < ntask; i++) {
+        source_strength = 0.0;
+        isurf = tasks[i].isurf;
 
-      source_strength = flux * tasks[i].area * dt;
-      if (!std::isfinite(source_strength) || source_strength <= 0.0) continue;
-      if (source_strength < source_thresh) continue;
+        double flux = flux_for_surface(isurf);
+        if (!std::isfinite(flux) || flux <= 0.0) continue;
+        if (flux < flux_thresh) continue;
 
-      task_source[i] = source_strength;
-      source_total_me += source_strength;
+        source_strength = flux * tasks[i].area * dt;
+        if (!std::isfinite(source_strength) || source_strength <= 0.0) continue;
+        if (source_strength < source_thresh) continue;
+
+        task_source[i] = source_strength;
+        source_total_me += source_strength;
+      }
+
+      MPI_Allreduce(&source_total_me,&source_total,1,MPI_DOUBLE,MPI_SUM,world);
+
+      if (upstream_static) {
+        cached_task_source = task_source;
+        cached_source_total = source_total;
+        task_source_cached = 1;
+      }
+
+      if (source_total <= 0.0) return;
+      task_source_ptr = task_source.data();
     }
-
-    MPI_Allreduce(&source_total_me,&source_total,1,MPI_DOUBLE,MPI_SUM,world);
-    if (source_total <= 0.0) return;
   }
 
   for (i = 0; i < ntask; i++) {
@@ -469,7 +501,7 @@ void FixEmitSurfPmi::perform_task()
 
     if (npmode == FLOW) {
       if (nlaunch_total_mode) {
-        source_strength = task_source[i];
+        source_strength = task_source_ptr[i];
         if (source_strength <= 0.0) continue;
 
         ntarget = static_cast<double>(nlaunch_total) * source_strength / source_total;
