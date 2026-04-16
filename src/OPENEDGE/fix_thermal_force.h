@@ -25,19 +25,25 @@
 
     Syntax:
       fix ID thermal_force Nevery \
-          bfield BxSRC BySRC BzSRC \
-          [ion_thermal gradTiR_SRC gradTiZ_SRC [coeff VAL]] \
-          [elec_thermal gradTeR_SRC gradTeZ_SRC [coeff VAL]]
+          {bfield BxSRC BySRC BzSRC | plasma_data FIXID} \
+          [ion_thermal yes|no [gradTiR_SRC gradTiZ_SRC in source-token mode]] \
+          [elec_thermal yes|no [gradTeR_SRC gradTeZ_SRC in source-token mode]]
 
-    Example (2D WEST):
+    Example (2D WEST, direct plasma/data path):
+      fix ftf thermal_force 1 \
+          plasma_data pd \
+          ion_thermal yes \
+          elec_thermal yes
+
+    Example (legacy explicit-source path):
       fix ftf thermal_force 1 \
           bfield c_cwest[1] c_cwest[2] c_cwest[3] \
-          ion_thermal c_cwest[12] c_cwest[13] coeff 2.6 \
-          elec_thermal c_cwest[10] c_cwest[11] coeff 0.71
+          ion_thermal yes c_cwest[12] c_cwest[13] \
+          elec_thermal yes c_cwest[10] c_cwest[11]
 
     Default coefficients:
-      beta_i  = 2.6  (Neu 1974 heavy-impurity limit)
-      alpha_e = 0.71 (Braginskii Z_eff=1 limit)
+      beta_i  = 2.6  (Neu 1974 heavy-impurity limit, hard-coded)
+      alpha_e = 0.71 (Braginskii Z_eff=1 limit, hard-coded)
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -51,8 +57,12 @@ FixStyle(thermal_force,FixThermalForce)
 
 #include "fix.h"
 #include "grid_src.h"
+#include <string>
+#include <vector>
 
 namespace SPARTA_NS {
+
+class FixPlasmaData;
 
 class FixThermalForce : public Fix {
  public:
@@ -64,6 +74,10 @@ class FixThermalForce : public Fix {
   void end_of_step();
 
  protected:
+  int use_plasma_data_;
+  std::string plasma_fix_id_;
+  FixPlasmaData *pd_;
+
   // B-field sources in SPARTA coordinate order (bx, by, bz)
   CollGridSrc srcBx_, srcBy_, srcBz_;
 
@@ -81,6 +95,11 @@ class FixThermalForce : public Fix {
   void parse_compute_src(const char *tok, CollGridSrc &dst, const char *label);
   void refresh_compute_src(CollGridSrc &S);
   double read_src(const CollGridSrc &S, int ip, int icell) const;
+  void particle_rz(const class Particle::OnePart &p, double &R, double &Z) const;
+  void pd_bfield_sparta(const class Particle::OnePart &p,
+                        double &B0, double &B1, double &B2) const;
+  double pd_interp(const std::vector<double> &field,
+                   const class Particle::OnePart &p) const;
   void kick_half(double dt_half);
 };
 

@@ -43,6 +43,7 @@
 #include "random_knuth.h"
 #include "random_mars.h"
 #include "update.h"
+#include "fix_plasma_data.h"
 
 using namespace SPARTA_NS;
 
@@ -56,6 +57,9 @@ enum { DIFF_NONE=0, DIFF_CONST, DIFF_BOHM };
 FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   rng_(nullptr),
+  use_plasma_data_(0),
+  plasma_fix_id_(),
+  pd_(nullptr),
   diff_model_(DIFF_NONE),
   D_perp_(0.0),
   bohm_scale_(1.0),
@@ -65,22 +69,34 @@ FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
   have_grad_pinch_(0),
   C_p_(0.0)
 {
-  // fix ID cross_diffusion Nevery bfield BxSRC BySRC BzSRC [keywords...]
+  // fix ID cross_diffusion Nevery
+  //     {bfield BxSRC BySRC BzSRC | plasma_data FIXID} [keywords...]
 
-  if (narg < 7)
+  if (narg < 5)
     error->all(FLERR,
       "Illegal fix cross_diffusion command "
-      "(need: Nevery bfield BxSRC BySRC BzSRC)");
+      "(need: Nevery {bfield BxSRC BySRC BzSRC | plasma_data FIXID})");
 
   int iarg = 2;
   nevery = input->inumeric(FLERR, arg[iarg++]);
 
-  if (strcmp(arg[iarg++], "bfield") != 0)
-    error->all(FLERR, "fix cross_diffusion: missing 'bfield' keyword");
-
-  parse_compute_src(arg[iarg++], srcBx_, "Bx");
-  parse_compute_src(arg[iarg++], srcBy_, "By");
-  parse_compute_src(arg[iarg++], srcBz_, "Bz");
+  if (strcmp(arg[iarg], "plasma_data") == 0) {
+    iarg++;
+    if (iarg >= narg)
+      error->all(FLERR, "fix cross_diffusion: plasma_data needs a fix ID");
+    use_plasma_data_ = 1;
+    plasma_fix_id_ = arg[iarg++];
+  } else {
+    if (strcmp(arg[iarg++], "bfield") != 0)
+      error->all(FLERR, "fix cross_diffusion: missing 'bfield' keyword");
+    if (iarg + 3 > narg)
+      error->all(FLERR,
+        "Illegal fix cross_diffusion command "
+        "(need: Nevery bfield BxSRC BySRC BzSRC)");
+    parse_compute_src(arg[iarg++], srcBx_, "Bx");
+    parse_compute_src(arg[iarg++], srcBy_, "By");
+    parse_compute_src(arg[iarg++], srcBz_, "Bz");
+  }
 
   // optional keywords
   while (iarg < narg) {
@@ -96,9 +112,18 @@ FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
 
     } else if (strcmp(arg[iarg], "bohm") == 0) {
       iarg++;
-      if (iarg >= narg)
-        error->all(FLERR, "fix cross_diffusion bohm: need TeSRC");
-      parse_compute_src(arg[iarg++], srcTe_, "Te");
+      if (!use_plasma_data_) {
+        if (iarg >= narg)
+          error->all(FLERR, "fix cross_diffusion bohm: need TeSRC");
+        parse_compute_src(arg[iarg++], srcTe_, "Te");
+      } else if (iarg < narg && strcmp(arg[iarg], "scale") != 0 &&
+                 strcmp(arg[iarg], "D_perp") != 0 &&
+                 strcmp(arg[iarg], "bohm") != 0 &&
+                 strcmp(arg[iarg], "pinch") != 0 &&
+                 strcmp(arg[iarg], "gradient_pinch") != 0) {
+        error->all(FLERR,
+          "fix cross_diffusion bohm: in plasma_data mode only 'scale VAL' is allowed");
+      }
       diff_model_ = DIFF_BOHM;
 
       // optional scale keyword
@@ -117,13 +142,24 @@ FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
 
     } else if (strcmp(arg[iarg], "gradient_pinch") == 0) {
       iarg++;
-      if (iarg + 4 > narg)
-        error->all(FLERR,
-          "fix cross_diffusion gradient_pinch: need Cp neSRC gradNeR_SRC gradNeZ_SRC");
+      if (iarg >= narg)
+        error->all(FLERR, "fix cross_diffusion gradient_pinch: need Cp");
       C_p_ = input->numeric(FLERR, arg[iarg++]);
-      parse_compute_src(arg[iarg++], srcNe_, "Ne");
-      parse_compute_src(arg[iarg++], srcGradNeR_, "gradNeR");
-      parse_compute_src(arg[iarg++], srcGradNeZ_, "gradNeZ");
+      if (!use_plasma_data_) {
+        if (iarg + 3 > narg)
+          error->all(FLERR,
+            "fix cross_diffusion gradient_pinch: need Cp neSRC gradNeR_SRC gradNeZ_SRC");
+        parse_compute_src(arg[iarg++], srcNe_, "Ne");
+        parse_compute_src(arg[iarg++], srcGradNeR_, "gradNeR");
+        parse_compute_src(arg[iarg++], srcGradNeZ_, "gradNeZ");
+      } else if (iarg < narg &&
+                 strcmp(arg[iarg], "D_perp") != 0 &&
+                 strcmp(arg[iarg], "bohm") != 0 &&
+                 strcmp(arg[iarg], "pinch") != 0 &&
+                 strcmp(arg[iarg], "gradient_pinch") != 0) {
+        error->all(FLERR,
+          "fix cross_diffusion gradient_pinch: in plasma_data mode only Cp is required");
+      }
       have_grad_pinch_ = 1;
 
     } else {
@@ -231,12 +267,28 @@ void FixCrossDiffusion::init()
     }
   };
 
-  bind(srcBx_, "Bx");
-  bind(srcBy_, "By");
-  bind(srcBz_, "Bz");
-  if (diff_model_ == DIFF_BOHM)
+  if (use_plasma_data_) {
+    const int ifix = modify->find_fix(plasma_fix_id_.c_str());
+    if (ifix < 0) {
+      char msg[200];
+      snprintf(msg, sizeof(msg),
+               "fix cross_diffusion: plasma_data fix '%s' not found",
+               plasma_fix_id_.c_str());
+      error->all(FLERR, msg);
+    }
+    pd_ = dynamic_cast<FixPlasmaData *>(modify->fix[ifix]);
+    if (!pd_)
+      error->all(FLERR,
+        "fix cross_diffusion: plasma_data fix must be style plasma/data");
+    pd_->init();
+  } else {
+    bind(srcBx_, "Bx");
+    bind(srcBy_, "By");
+    bind(srcBz_, "Bz");
+  }
+  if (diff_model_ == DIFF_BOHM && !use_plasma_data_)
     bind(srcTe_, "Te");
-  if (have_grad_pinch_) {
+  if (have_grad_pinch_ && !use_plasma_data_) {
     bind(srcNe_, "Ne");
     bind(srcGradNeR_, "gradNeR");
     bind(srcGradNeZ_, "gradNeZ");
@@ -247,15 +299,20 @@ void FixCrossDiffusion::init()
 
 void FixCrossDiffusion::start_of_step()
 {
-  if ((update->ntimestep % nevery) != 0) return;
+  if ((update->ntimestep % nevery) != 0) {
+    update->cd_flag = 0;
+    return;
+  }
 
   // refresh caches
-  refresh_compute_src(srcBx_);
-  refresh_compute_src(srcBy_);
-  refresh_compute_src(srcBz_);
-  if (diff_model_ == DIFF_BOHM)
+  if (!use_plasma_data_) {
+    refresh_compute_src(srcBx_);
+    refresh_compute_src(srcBy_);
+    refresh_compute_src(srcBz_);
+  }
+  if (diff_model_ == DIFF_BOHM && !use_plasma_data_)
     refresh_compute_src(srcTe_);
-  if (have_grad_pinch_) {
+  if (have_grad_pinch_ && !use_plasma_data_) {
     refresh_compute_src(srcNe_);
     refresh_compute_src(srcGradNeR_);
     refresh_compute_src(srcGradNeZ_);
@@ -266,6 +323,14 @@ void FixCrossDiffusion::start_of_step()
   const int nlocal = particle->nlocal;
   const int dim    = domain->dimension;
   const double dt  = update->dt * nevery;
+
+  // No particles to displace on this rank this step. Leave cross-diffusion
+  // inactive so Update::move() will not touch a stale/null dx_cd buffer if
+  // particles are inserted later in the step.
+  if (nlocal == 0) {
+    update->cd_flag = 0;
+    return;
+  }
 
   // (re)allocate displacement buffer if needed
   if (nlocal > update->cd_nmax) {
@@ -287,11 +352,13 @@ void FixCrossDiffusion::start_of_step()
     if (species[isp].charge == 0.0) continue;  // skip neutrals
 
     const int icell = p.icell;
-
-    // read B in SPARTA coordinate order
-    const double B0 = read_src(srcBx_, ip, icell);
-    const double B1 = read_src(srcBy_, ip, icell);
-    const double B2 = read_src(srcBz_, ip, icell);
+    double B0, B1, B2;
+    if (use_plasma_data_) pd_bfield_sparta(p, B0, B1, B2);
+    else {
+      B0 = read_src(srcBx_, ip, icell);
+      B1 = read_src(srcBy_, ip, icell);
+      B2 = read_src(srcBz_, ip, icell);
+    }
     const double Bmag = std::sqrt(B0*B0 + B1*B1 + B2*B2);
     if (Bmag < 1.0e-20) continue;
 
@@ -300,7 +367,8 @@ void FixCrossDiffusion::start_of_step()
     if (diff_model_ == DIFF_CONST) {
       D_local = D_perp_;
     } else if (diff_model_ == DIFF_BOHM) {
-      const double Te_eV = std::max(read_src(srcTe_, ip, icell), 0.0);
+      const double Te_eV = use_plasma_data_ ? std::max(pd_interp(pd_->temp_e, p), 0.0)
+                                            : std::max(read_src(srcTe_, ip, icell), 0.0);
       D_local = bohm_scale_ * Te_eV / (16.0 * Bmag);
     }
 
@@ -367,9 +435,22 @@ void FixCrossDiffusion::start_of_step()
 
     // gradient-driven pinch
     if (have_grad_pinch_ && D_local > 0.0) {
-      const double ne_loc = std::max(read_src(srcNe_, ip, icell), 1.0e10);
-      const double gNeR = read_src(srcGradNeR_, ip, icell);
-      const double gNeZ = read_src(srcGradNeZ_, ip, icell);
+      const double ne_loc = use_plasma_data_ ? std::max(pd_interp(pd_->dens_e, p), 1.0e10)
+                                             : std::max(read_src(srcNe_, ip, icell), 1.0e10);
+      double gNeR, gNeZ;
+      if (use_plasma_data_) {
+        const double R = (dim == 2) ? p.x[0] : std::sqrt(p.x[0]*p.x[0] + p.x[1]*p.x[1]);
+        const double Z = (dim == 2) ? p.x[1] : p.x[2];
+        const double dR = std::max(1.0e-9, 0.5 * std::fabs(pd_->rvals[1] - pd_->rvals[0]));
+        const double dZ = std::max(1.0e-9, 0.5 * std::fabs(pd_->zvals[1] - pd_->zvals[0]));
+        gNeR = (pd_->interp2D(pd_->dens_e, R + dR, Z) -
+                pd_->interp2D(pd_->dens_e, R - dR, Z)) / (2.0 * dR);
+        gNeZ = (pd_->interp2D(pd_->dens_e, R, Z + dZ) -
+                pd_->interp2D(pd_->dens_e, R, Z - dZ)) / (2.0 * dZ);
+      } else {
+        gNeR = read_src(srcGradNeR_, ip, icell);
+        gNeZ = read_src(srcGradNeZ_, ip, icell);
+      }
 
       if (dim == 2) {
         const double Bpol = std::sqrt(B0*B0 + B1*B1);
@@ -513,4 +594,65 @@ double FixCrossDiffusion::read_src(const CollGridSrc &S, int ip, int icell) cons
   if (S.kind != COLL_SRC_COMP) return 0.0;
   if (!S.arr_cache || S.src_index < 0) return 0.0;
   return S.arr_cache[icell][S.src_index];
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixCrossDiffusion::particle_rz(const Particle::OnePart &p,
+                                    double &R, double &Z) const
+{
+  if (domain->dimension == 2) {
+    R = p.x[0];
+    Z = p.x[1];
+  } else {
+    R = std::sqrt(p.x[0] * p.x[0] + p.x[1] * p.x[1]);
+    Z = p.x[2];
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
+double FixCrossDiffusion::pd_interp(const std::vector<double> &field,
+                                    const Particle::OnePart &p) const
+{
+  if (!pd_) return 0.0;
+  double R, Z;
+  particle_rz(p, R, Z);
+  return pd_->interp2D(field, R, Z);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixCrossDiffusion::pd_bfield_sparta(const Particle::OnePart &p,
+                                         double &B0, double &B1, double &B2) const
+{
+  B0 = B1 = B2 = 0.0;
+  if (!pd_ || !pd_->has_bfield) return;
+
+  double R, Z;
+  particle_rz(p, R, Z);
+
+  double Br = 0.0, Bz = 0.0, Bt = 0.0;
+  pd_->bfield_at(R, Z, Br, Bz, Bt);
+
+  if (domain->dimension == 2) {
+    B0 = Br;
+    B1 = Bz;
+    B2 = Bt;
+    return;
+  }
+
+  const double rx = p.x[0];
+  const double ry = p.x[1];
+  const double rmag = std::sqrt(rx * rx + ry * ry);
+  if (rmag > 1.0e-20) {
+    const double cphi = rx / rmag;
+    const double sphi = ry / rmag;
+    B0 = Br * cphi - Bt * sphi;
+    B1 = Br * sphi + Bt * cphi;
+  } else {
+    B0 = Br;
+    B1 = 0.0;
+  }
+  B2 = Bz;
 }

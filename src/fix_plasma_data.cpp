@@ -61,6 +61,8 @@ FixPlasmaData::FixPlasmaData(SPARTA *sparta, int narg, char **arg) :
   equ_jm = equ_km = 0;
   btf = rtf = psib = psi_axis = 0.0;
   mesh_nvtx = mesh_ntri = mesh_ncell = mesh_nion = 0;
+  hash_nr = hash_nz = 0;
+  hash_rmin = hash_zmin = hash_dr = hash_dz = 0.0;
   const_has_r_bounds = const_has_z_bounds = 0;
   const_rmin = 0.0; const_rmax = 1.0;
   const_zmin = 0.0; const_zmax = 1.0;
@@ -364,6 +366,8 @@ void FixPlasmaData::reload()
     }
   }
 
+  if (has_mesh) build_mesh_index();
+
   generation++;
 
   if (comm->me == 0) {
@@ -389,6 +393,8 @@ void FixPlasmaData::clear_loaded_data()
   equ_jm = equ_km = 0;
   btf = rtf = psib = psi_axis = 0.0;
   mesh_nvtx = mesh_ntri = mesh_ncell = mesh_nion = 0;
+  hash_nr = hash_nz = 0;
+  hash_rmin = hash_zmin = hash_dr = hash_dz = 0.0;
 
   rvals.clear();
   zvals.clear();
@@ -431,6 +437,14 @@ void FixPlasmaData::clear_loaded_data()
   mesh_ions_dens.clear();
   mesh_ions_temp.clear();
   mesh_ions_upar.clear();
+  mesh_tri_rmin.clear();
+  mesh_tri_rmax.clear();
+  mesh_tri_zmin.clear();
+  mesh_tri_zmax.clear();
+  mapped_cr.clear();
+  mapped_cz.clear();
+  mapped_idx.clear();
+  hash_grid.clear();
   valid_mask.clear();
 }
 
@@ -883,9 +897,176 @@ void FixPlasmaData::derive_bfield_from_equ()
 
 /* ---------------------------------------------------------------------- */
 
+void FixPlasmaData::build_mesh_index()
+{
+  mesh_tri_rmin.clear();
+  mesh_tri_rmax.clear();
+  mesh_tri_zmin.clear();
+  mesh_tri_zmax.clear();
+  mapped_cr.clear();
+  mapped_cz.clear();
+  mapped_idx.clear();
+  hash_grid.clear();
+  hash_nr = hash_nz = 0;
+  hash_rmin = hash_zmin = hash_dr = hash_dz = 0.0;
+
+  if (!has_mesh || mesh_ntri <= 0 || mesh_tri.size() != static_cast<size_t>(mesh_ntri) * 3 ||
+      mesh_vtx_r.empty() || mesh_vtx_z.empty()) {
+    return;
+  }
+
+  mesh_tri_rmin.resize(mesh_ntri);
+  mesh_tri_rmax.resize(mesh_ntri);
+  mesh_tri_zmin.resize(mesh_ntri);
+  mesh_tri_zmax.resize(mesh_ntri);
+
+  for (int t = 0; t < mesh_ntri; t++) {
+    const int v0 = mesh_tri[t*3+0];
+    const int v1 = mesh_tri[t*3+1];
+    const int v2 = mesh_tri[t*3+2];
+    const double r0 = mesh_vtx_r[v0], r1 = mesh_vtx_r[v1], r2 = mesh_vtx_r[v2];
+    const double z0 = mesh_vtx_z[v0], z1 = mesh_vtx_z[v1], z2 = mesh_vtx_z[v2];
+    mesh_tri_rmin[t] = std::min({r0,r1,r2});
+    mesh_tri_rmax[t] = std::max({r0,r1,r2});
+    mesh_tri_zmin[t] = std::min({z0,z1,z2});
+    mesh_tri_zmax[t] = std::max({z0,z1,z2});
+    if (t < static_cast<int>(mesh_cell_idx.size()) && mesh_cell_idx[t] >= 0) {
+      mapped_cr.push_back((r0 + r1 + r2) / 3.0);
+      mapped_cz.push_back((z0 + z1 + z2) / 3.0);
+      mapped_idx.push_back(t);
+    }
+  }
+
+  if (mesh_tri_rmin.empty()) return;
+
+  hash_rmin = *std::min_element(mesh_tri_rmin.begin(), mesh_tri_rmin.end());
+  const double rmax = *std::max_element(mesh_tri_rmax.begin(), mesh_tri_rmax.end());
+  hash_zmin = *std::min_element(mesh_tri_zmin.begin(), mesh_tri_zmin.end());
+  const double zmax = *std::max_element(mesh_tri_zmax.begin(), mesh_tri_zmax.end());
+
+  hash_nr = 100;
+  hash_nz = 100;
+  hash_dr = (rmax - hash_rmin) / hash_nr + 1.0e-12;
+  hash_dz = (zmax - hash_zmin) / hash_nz + 1.0e-12;
+  hash_grid.assign(static_cast<size_t>(hash_nr) * hash_nz, std::vector<int>());
+
+  for (int t = 0; t < mesh_ntri; t++) {
+    const int ir0 = std::max(0, static_cast<int>((mesh_tri_rmin[t] - hash_rmin) / hash_dr));
+    const int ir1 = std::min(hash_nr - 1, static_cast<int>((mesh_tri_rmax[t] - hash_rmin) / hash_dr));
+    const int iz0 = std::max(0, static_cast<int>((mesh_tri_zmin[t] - hash_zmin) / hash_dz));
+    const int iz1 = std::min(hash_nz - 1, static_cast<int>((mesh_tri_zmax[t] - hash_zmin) / hash_dz));
+    for (int iz = iz0; iz <= iz1; iz++) {
+      for (int ir = ir0; ir <= ir1; ir++) {
+        hash_grid[iz * hash_nr + ir].push_back(t);
+      }
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
+int FixPlasmaData::find_mesh_triangle(double R, double Z) const
+{
+  if (!has_mesh || mesh_ntri <= 0 || mesh_tri.empty()) return -1;
+
+  if (hash_nr > 0 && hash_nz > 0 && !hash_grid.empty()) {
+    const int ir = static_cast<int>((R - hash_rmin) / hash_dr);
+    const int iz = static_cast<int>((Z - hash_zmin) / hash_dz);
+    if (ir >= 0 && ir < hash_nr && iz >= 0 && iz < hash_nz) {
+      const auto &candidates = hash_grid[iz * hash_nr + ir];
+      for (int t : candidates) {
+        const int v0 = mesh_tri[t*3+0];
+        const int v1 = mesh_tri[t*3+1];
+        const int v2 = mesh_tri[t*3+2];
+        const double r0 = mesh_vtx_r[v0], z0 = mesh_vtx_z[v0];
+        const double r1 = mesh_vtx_r[v1], z1 = mesh_vtx_z[v1];
+        const double r2 = mesh_vtx_r[v2], z2 = mesh_vtx_z[v2];
+        const double d = (r1-r0)*(z2-z0) - (r2-r0)*(z1-z0);
+        if (std::fabs(d) < 1.0e-30) continue;
+        const double a = ((R-r0)*(z2-z0) - (r2-r0)*(Z-z0)) / d;
+        const double b = ((r1-r0)*(Z-z0) - (R-r0)*(z1-z0)) / d;
+        if (a >= -1.0e-10 && b >= -1.0e-10 && (a+b) <= 1.0+1.0e-10) return t;
+      }
+      return -1;
+    }
+  }
+
+  for (int t = 0; t < mesh_ntri; t++) {
+    if (t < static_cast<int>(mesh_tri_rmin.size()) &&
+        (R < mesh_tri_rmin[t] || R > mesh_tri_rmax[t] ||
+         Z < mesh_tri_zmin[t] || Z > mesh_tri_zmax[t])) continue;
+    const int v0 = mesh_tri[t*3+0];
+    const int v1 = mesh_tri[t*3+1];
+    const int v2 = mesh_tri[t*3+2];
+    const double r0 = mesh_vtx_r[v0], z0 = mesh_vtx_z[v0];
+    const double r1 = mesh_vtx_r[v1], z1 = mesh_vtx_z[v1];
+    const double r2 = mesh_vtx_r[v2], z2 = mesh_vtx_z[v2];
+    const double d = (r1-r0)*(z2-z0) - (r2-r0)*(z1-z0);
+    if (std::fabs(d) < 1.0e-30) continue;
+    const double a = ((R-r0)*(z2-z0) - (r2-r0)*(Z-z0)) / d;
+    const double b = ((r1-r0)*(Z-z0) - (R-r0)*(z1-z0)) / d;
+    if (a >= -1.0e-10 && b >= -1.0e-10 && (a+b) <= 1.0+1.0e-10) return t;
+  }
+  return -1;
+}
+
+/* ---------------------------------------------------------------------- */
+
+int FixPlasmaData::find_nearest_mapped_triangle(double R, double Z, double max_dist) const
+{
+  const double max_d2 = max_dist * max_dist;
+  double best_d2 = max_d2;
+  int best = -1;
+  for (int i = 0; i < static_cast<int>(mapped_idx.size()); i++) {
+    const double dr = mapped_cr[i] - R;
+    const double dz = mapped_cz[i] - Z;
+    const double d2 = dr*dr + dz*dz;
+    if (d2 < best_d2) {
+      best_d2 = d2;
+      best = mapped_idx[i];
+    }
+  }
+  return best;
+}
+
+/* ---------------------------------------------------------------------- */
+
+int FixPlasmaData::mesh_cell_at(double R, double Z, double max_dist) const
+{
+  if (!has_mesh || mesh_ncell <= 0 || mesh_cell_idx.empty()) return -1;
+  int tri = find_mesh_triangle(R, Z);
+  if (tri < 0 || tri >= static_cast<int>(mesh_cell_idx.size()) || mesh_cell_idx[tri] < 0)
+    tri = find_nearest_mapped_triangle(R, Z, max_dist);
+  if (tri < 0 || tri >= static_cast<int>(mesh_cell_idx.size())) return -1;
+  const int cell = mesh_cell_idx[tri];
+  if (cell < 0 || cell >= mesh_ncell) return -1;
+  return cell;
+}
+
+/* ---------------------------------------------------------------------- */
+
+const std::vector<double> *FixPlasmaData::mesh_field_for(const std::vector<double> &field) const
+{
+  if (!has_mesh) return nullptr;
+  if (&field == &dens_e) return &mesh_ne;
+  if (&field == &temp_e) return &mesh_te;
+  if (&field == &dens_i) return &mesh_ni;
+  if (&field == &temp_i) return &mesh_ti;
+  if (&field == &parr_flow) return &mesh_upar;
+  return nullptr;
+}
+
+/* ---------------------------------------------------------------------- */
+
 double FixPlasmaData::interp2D(const std::vector<double> &field,
                                 double R, double Z) const
 {
+  if (const std::vector<double> *mesh_field = mesh_field_for(field)) {
+    const int cell = mesh_cell_at(R, Z);
+    if (cell >= 0 && cell < static_cast<int>(mesh_field->size()))
+      return (*mesh_field)[cell];
+  }
+
   if (field.empty() || nr < 2 || nz < 2) return 0.0;
 
   double Rc = std::min(std::max(R, rvals.front()), rvals.back());

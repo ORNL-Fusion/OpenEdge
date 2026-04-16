@@ -959,12 +959,26 @@ void Update::cache_plasma_particles()
       double R, Z;
       xyz_to_rz(x, dim, R, Z);
       const PdStencil2D st = make_pd_stencil(pd, R, Z);
+      const int mesh_cell = (pd->has_mesh && need_plasma) ? pd->mesh_cell_at(R, Z) : -1;
       if (need_plasma) {
-        if (mask & PCACHE_TE)   pf.temp_e   = interp_pd_stencil(pd->temp_e, st);
-        if (mask & PCACHE_NE)   pf.dens_e   = interp_pd_stencil(pd->dens_e, st);
-        if (mask & PCACHE_TI)   pf.temp_i   = interp_pd_stencil(pd->temp_i, st);
-        if (mask & PCACHE_NI)   pf.dens_i   = interp_pd_stencil(pd->dens_i, st);
-        if (mask & PCACHE_VPAR) pf.parr_flow = interp_pd_stencil(pd->parr_flow, st);
+        if (mesh_cell >= 0) {
+          if ((mask & PCACHE_TE) && mesh_cell < static_cast<int>(pd->mesh_te.size()))
+            pf.temp_e = pd->mesh_te[mesh_cell];
+          if ((mask & PCACHE_NE) && mesh_cell < static_cast<int>(pd->mesh_ne.size()))
+            pf.dens_e = pd->mesh_ne[mesh_cell];
+          if ((mask & PCACHE_TI) && mesh_cell < static_cast<int>(pd->mesh_ti.size()))
+            pf.temp_i = pd->mesh_ti[mesh_cell];
+          if ((mask & PCACHE_NI) && mesh_cell < static_cast<int>(pd->mesh_ni.size()))
+            pf.dens_i = pd->mesh_ni[mesh_cell];
+          if ((mask & PCACHE_VPAR) && mesh_cell < static_cast<int>(pd->mesh_upar.size()))
+            pf.parr_flow = pd->mesh_upar[mesh_cell];
+        } else {
+          if (mask & PCACHE_TE)   pf.temp_e   = interp_pd_stencil(pd->temp_e, st);
+          if (mask & PCACHE_NE)   pf.dens_e   = interp_pd_stencil(pd->dens_e, st);
+          if (mask & PCACHE_TI)   pf.temp_i   = interp_pd_stencil(pd->temp_i, st);
+          if (mask & PCACHE_NI)   pf.dens_i   = interp_pd_stencil(pd->dens_i, st);
+          if (mask & PCACHE_VPAR) pf.parr_flow = interp_pd_stencil(pd->parr_flow, st);
+        }
         if (mask & PCACHE_GRAD_TE) {
           pf.grad_temp_e_r = interp_pd_stencil(pd->grad_te_r, st);
           pf.grad_temp_e_z = interp_pd_stencil(pd->grad_te_z, st);
@@ -974,11 +988,20 @@ void Update::cache_plasma_particles()
           pf.grad_temp_i_z = interp_pd_stencil(pd->grad_ti_z, st);
         }
         if (mask & PCACHE_GRAD_NE) {
-          // finite-difference grad_ne via 4 shifted stencils on dens_e
-          const double fR_p = interp_pd_stencil(pd->dens_e, make_pd_stencil(pd, R + pd_dR, Z));
-          const double fR_m = interp_pd_stencil(pd->dens_e, make_pd_stencil(pd, R - pd_dR, Z));
-          const double fZ_p = interp_pd_stencil(pd->dens_e, make_pd_stencil(pd, R, Z + pd_dZ));
-          const double fZ_m = interp_pd_stencil(pd->dens_e, make_pd_stencil(pd, R, Z - pd_dZ));
+          // finite-difference grad_ne. In mesh mode this reuses the
+          // mesh-first interp2D() path; in grid mode it keeps the stencil fast path.
+          const double fR_p = (mesh_cell >= 0)
+            ? pd->interp2D(pd->dens_e, R + pd_dR, Z)
+            : interp_pd_stencil(pd->dens_e, make_pd_stencil(pd, R + pd_dR, Z));
+          const double fR_m = (mesh_cell >= 0)
+            ? pd->interp2D(pd->dens_e, R - pd_dR, Z)
+            : interp_pd_stencil(pd->dens_e, make_pd_stencil(pd, R - pd_dR, Z));
+          const double fZ_p = (mesh_cell >= 0)
+            ? pd->interp2D(pd->dens_e, R, Z + pd_dZ)
+            : interp_pd_stencil(pd->dens_e, make_pd_stencil(pd, R, Z + pd_dZ));
+          const double fZ_m = (mesh_cell >= 0)
+            ? pd->interp2D(pd->dens_e, R, Z - pd_dZ)
+            : interp_pd_stencil(pd->dens_e, make_pd_stencil(pd, R, Z - pd_dZ));
           pf.grad_dens_e_r = (fR_p - fR_m) / (2.0 * pd_dR);
           pf.grad_dens_e_z = (fZ_p - fZ_m) / (2.0 * pd_dZ);
         }

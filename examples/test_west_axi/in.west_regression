@@ -66,23 +66,19 @@ global              boris_subcycles 5
 fix fchem chem/adas 1 74 input/plasma.adas adas_dir ../../database/adas
 
 # Nanbu collisions (background D+ only)
-fix fnanbu coll/nanbu 1 plasma p_pc_te p_pc_ne &
+fix fnanbu coll/nanbu 1 plasma_data pd &
                     nobinary &
-                    background 2.0 1.0 &
-                    p_pc_ti p_pc_ni p_pc_vpar &
-                    p_pc_bx p_pc_by p_pc_bz
+                    background 2.0 1.0
 
 # Thermal forces
-fix ftf thermal_force 1 &
-                    bfield p_pc_bx p_pc_by p_pc_bz &
-                    ion_thermal p_pc_grad_ti_r p_pc_grad_ti_z coeff 2.6 &
-                    elec_thermal p_pc_grad_te_r p_pc_grad_te_z coeff 0.71
+fix ftf thermal_force 1 plasma_data pd &
+                    ion_thermal yes &
+                    elec_thermal yes
 
 # Cross-field diffusion + gradient pinch
-fix fcd cross_diffusion 1 &
-                    bfield p_pc_bx p_pc_by p_pc_bz &
+fix fcd cross_diffusion 1 plasma_data pd &
                     D_perp 1.0 &
-                    gradient_pinch 2.0 p_pc_ne p_pc_grad_ne_r p_pc_grad_ne_z
+                    gradient_pinch 2.0
 
 # PMI sputtering source
 compute cpmi pmi/surf/data 1 plasma_data pd ../../database/surface/O_on_W.h5 &

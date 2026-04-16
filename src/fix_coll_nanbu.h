@@ -26,10 +26,13 @@ FixStyle(coll/nanbu,FixCollNanbu)
 #include "fix.h"
 #include "grid_src.h"
 #include "nanbu_scatter_table.h"
+#include <string>
+#include <vector>
 
 namespace SPARTA_NS {
 
 class RanKnuth;
+class FixPlasmaData;
 
 class FixCollNanbu : public Fix {
  public:
@@ -43,6 +46,9 @@ class FixCollNanbu : public Fix {
  protected:
   NanbuScatterTable scatter_table_;
   RanKnuth *rng_;
+  int use_plasma_data_;
+  std::string plasma_fix_id_;
+  FixPlasmaData *pd_;
 
   // binary particle-particle collisions (0 = off via nobinary keyword)
   int do_binary_;
@@ -64,6 +70,11 @@ class FixCollNanbu : public Fix {
   void refresh_compute_src(CollGridSrc &S);
   double read_src(const CollGridSrc &S, int ip, int icell) const;
   void parse_compute_src(const char *tok, CollGridSrc &dst, const char *label);
+  void particle_rz(const class Particle::OnePart &p, double &R, double &Z) const;
+  void pd_bfield_sparta(const class Particle::OnePart &p,
+                        double &Bx, double &By, double &Bz) const;
+  double pd_interp(const std::vector<double> &field,
+                   const class Particle::OnePart &p) const;
 
   // core Nanbu algorithm
   void nanbu_collisions_cell(int icell, int np);

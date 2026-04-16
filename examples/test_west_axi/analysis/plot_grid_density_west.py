@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.path import Path as MplPath
+from matplotlib.lines import Line2D
 
 
 def parse_surface(path: Path):
@@ -320,38 +321,110 @@ def coarsen_grid(x: np.ndarray, y: np.ndarray, grid: np.ndarray, valid: np.ndarr
     return x2, y2, grid2, weight2 > 0.0
 
 
-def load_psi_map(path: Path):
+def _read_h5_scalar(f, *keys):
+    for key in keys:
+        if key in f:
+            return float(np.asarray(f[key][...]).reshape(-1)[0])
+    raise KeyError(keys[0])
+
+
+def _read_h5_array(f, *keys):
+    for key in keys:
+        if key in f:
+            return np.asarray(f[key][...], dtype=float), key
+    raise KeyError(keys[0])
+
+
+def load_psi_map(path: Path, warn: bool = False):
     """
-    Return (r, z, psi_norm) from an OpenEdge plasma.h5 file.
-    Tolerates files that only contain /psi + /psicore + /psisep
-    (recomputes psi_norm = (psi - psicore) / (psisep - psicore)).
-    Returns None if the file lacks psi information.
+    Return psi-overlay data from an OpenEdge plasma.h5 file.
+
+    Supports both top-level /r,/z,/psi and SOLEDGE-style /config/r,/config/z,
+    /config/psi layouts. If only the /config/* mesh exists and /R0 + /a0 are
+    present, coordinates are rescaled into OpenEdge physical meters.
+
+    Returns (r, z, psi, psicore, psisep) where psi is the raw poloidal flux
+    field and psicore/psisep are the raw contour levels. Returns None if the
+    file lacks enough psi information to draw contours.
     """
+    path = path.expanduser()
+    if not path.exists():
+        if warn:
+            print(f"WARN: psi overlay file not found: {path}")
+        return None
     try:
         import h5py  # lazy import so pure-density plots don't need h5py
     except ImportError:
-        print(f"WARN: h5py not available, skipping psi overlay from {path}")
+        if warn:
+            print(f"WARN: h5py not available, skipping psi overlay from {path}")
         return None
     try:
         with h5py.File(str(path), "r") as f:
-            if "r" not in f or "z" not in f:
+            try:
+                r, r_key = _read_h5_array(f, "r", "config/r")
+                z, z_key = _read_h5_array(f, "z", "config/z")
+                psi, psi_key = _read_h5_array(f, "psi", "config/psi")
+            except KeyError:
+                if warn:
+                    print(
+                        f"WARN: {path} is missing psi coordinates/field; "
+                        "expected /r,/z,/psi or /config/r,/config/z,/config/psi"
+                    )
                 return None
-            r = np.asarray(f["r"][...], dtype=float)
-            z = np.asarray(f["z"][...], dtype=float)
-            if "psi_norm" in f:
-                psi_n = np.asarray(f["psi_norm"][...], dtype=float)
-            elif "psi" in f and "psicore" in f and "psisep" in f:
-                psi = np.asarray(f["psi"][...], dtype=float)
-                psicore = float(np.asarray(f["psicore"][...]).reshape(-1)[0])
-                psisep = float(np.asarray(f["psisep"][...]).reshape(-1)[0])
-                if psicore == psisep:
-                    return None
-                psi_n = (psi - psicore) / (psisep - psicore)
-            else:
+
+            try:
+                psicore = _read_h5_scalar(f, "psicore", "config/psicore")
+                psisep = _read_h5_scalar(f, "psisep", "config/psisep1", "config/psisep")
+            except KeyError:
+                if warn:
+                    print(
+                        f"WARN: {path} is missing /psicore or /psisep; cannot draw raw psi contours"
+                    )
                 return None
+
+            if r_key.startswith("config/") and z_key.startswith("config/"):
+                if "R0" in f and "a0" in f:
+                    r0_init = float(np.asarray(f["R0"][...]).reshape(-1)[0])
+                    a0_init = float(np.asarray(f["a0"][...]).reshape(-1)[0])
+                    if a0_init != 0.0:
+                        r = (r - r0_init) / a0_init
+                        z = z / a0_init
+                if r.ndim == 2 and z.ndim == 2:
+                    r = np.asarray(r[:, 0], dtype=float)
+                    z = np.asarray(z[0, :], dtype=float)
+
+            if psicore == psisep:
+                if warn:
+                    print(f"WARN: {path} has psicore == psisep; cannot draw distinct psi contours")
+                return None
+
+            if warn:
+                print(
+                    f"Using {psi_key} with /psicore={psicore:.6e} "
+                    f"and /psisep={psisep:.6e}"
+                )
     except (OSError, KeyError):
+        if warn:
+            print(f"WARN: failed reading psi overlay from {path}")
         return None
-    return r, z, psi_n
+
+    r = np.asarray(r, dtype=float).squeeze()
+    z = np.asarray(z, dtype=float).squeeze()
+    if r.ndim != 1 or z.ndim != 1:
+        if warn:
+            print(f"WARN: psi coordinates in {path} are not 1-D after loading")
+        return None
+
+    if psi.shape == (r.size, z.size):
+        psi = psi.T
+    elif psi.shape != (z.size, r.size):
+        if warn:
+            print(
+                f"WARN: psi array shape {psi.shape} is incompatible with "
+                f"r/z sizes {(r.size, z.size)} in {path}"
+            )
+        return None
+    return r, z, psi, psicore, psisep
 
 
 def mask_outside_wall(
@@ -466,8 +539,13 @@ def main():
     ap.add_argument(
         "--plasma-h5",
         default=None,
-        help="plasma.h5 with /psi_norm (+ /psicore/psisep); overlays psi_norm=0 (core) "
-        "and psi_norm=1 (separatrix) contours. Default: input/plasma.h5 next to --wall.",
+        help="plasma.h5 with /psi + /psicore + /psisep (or /config/* equivalents); "
+        "overlays psi=psicore and psi=psisep. Default: input/plasma.h5 next to --wall.",
+    )
+    ap.add_argument(
+        "--hide-psi-separatrix",
+        action="store_true",
+        help="hide the /psisep separatrix contour overlay",
     )
     ap.add_argument(
         "--no-psi-overlay",
@@ -520,16 +598,24 @@ def main():
 
     # Resolve psi-overlay source
     psi_overlay = None
+    psi_overlay_src = None
     if not args.no_psi_overlay:
         if args.plasma_h5 is not None:
-            psi_overlay = load_psi_map(Path(args.plasma_h5))
+            psi_overlay_src = Path(args.plasma_h5).expanduser()
+            psi_overlay = load_psi_map(psi_overlay_src, warn=True)
         else:
             # Guess: input/plasma.h5 next to the wall file
             guess = Path(args.wall).resolve().parent / "plasma.h5"
             if guess.exists():
-                psi_overlay = load_psi_map(guess)
+                psi_overlay_src = guess
+                psi_overlay = load_psi_map(guess, warn=True)
         if psi_overlay is not None:
-            print(f"Overlaying psi_norm=0 (core) and psi_norm=1 (separatrix) contours")
+            print(
+                "Overlaying psi=psicore core cutoff and psi=psisep "
+                f"separatrix contours from {psi_overlay_src}"
+            )
+            if args.hide_psi_separatrix:
+                print("Separatrix overlay disabled by --hide-psi-separatrix")
     fill_fraction = grid_fill_fraction(xc, yc)
     render_mode = args.plot_mode
     if render_mode == "auto":
@@ -640,21 +726,58 @@ def main():
 
         ax.plot(wall_r, wall_z, "k", lw=2.5)
         if psi_overlay is not None:
-            pr, pz, psi_n = psi_overlay
+            pr, pz, psi_raw, psicore, psisep = psi_overlay
             RR, ZZ = np.meshgrid(pr, pz)
-            # Lightly hatch the absorb region (psi_norm < 0) so it's
-            # unambiguous what fix reflect/psi removes.
+            psi_core_side = np.sign(psisep - psicore) * (psi_raw - psicore)
+            # Lightly hatch the absorbed core-side region so it's unambiguous
+            # what fix reflect/psi removes.
             ax.contourf(
-                RR, ZZ, psi_n,
+                RR, ZZ, psi_core_side,
                 levels=[-1e6, 0.0],
                 colors="none",
                 hatches=["////"],
                 extend="min",
             )
-            ax.contour(RR, ZZ, psi_n, levels=[0.0], colors="cyan",
-                       linewidths=1.6, linestyles="-")
-            ax.contour(RR, ZZ, psi_n, levels=[1.0], colors="magenta",
-                       linewidths=1.6, linestyles="--")
+            ax.contour(
+                RR,
+                ZZ,
+                psi_raw,
+                levels=[psicore],
+                colors="cyan",
+                linewidths=1.6,
+                linestyles="-",
+            )
+            legend_handles = [
+                Line2D(
+                    [0],
+                    [0],
+                    color="cyan",
+                    lw=1.8,
+                    linestyle="-",
+                    label=r"$\psi=\psi_{\mathrm{core}}$",
+                ),
+            ]
+            if not args.hide_psi_separatrix:
+                ax.contour(
+                    RR,
+                    ZZ,
+                    psi_raw,
+                    levels=[psisep],
+                    colors="magenta",
+                    linewidths=1.6,
+                    linestyles="--",
+                )
+                legend_handles.append(
+                    Line2D(
+                        [0],
+                        [0],
+                        color="magenta",
+                        lw=1.8,
+                        linestyle="--",
+                        label=r"$\psi=\psi_{\mathrm{sep}}$",
+                    )
+                )
+            ax.legend(handles=legend_handles, loc="upper right", framealpha=0.85, fontsize=10)
         ax.set_aspect("equal", adjustable="box")
         if args.xlim:
             ax.set_xlim(args.xlim[0], args.xlim[1])

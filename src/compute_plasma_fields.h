@@ -191,7 +191,9 @@ PlasmaFileParams bilinearInterpolationPlasma(
     int icell, const PlasmaFileData &data);
 int findMeshTriangle(const PlasmaFileData &data, double r, double z) const;
 int findNearestMappedTriangle(const PlasmaFileData &data, double r, double z, double max_dist) const;
-PlasmaFileParams meshLookupPlasma(int icell, const PlasmaFileData &data);
+bool meshLookupPlasma(int icell, const PlasmaFileData &data, PlasmaFileParams &out) const;
+bool meshLookupPlasmaAtPoint(const PlasmaFileData &data, double r, double z,
+                             PlasmaFileParams &out) const;
 
 // Equilibrium-based magnetic geometry (exact ψ derivatives)
 EquilibriumData equ_data;

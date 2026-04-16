@@ -25,7 +25,7 @@ mpirun -np 4 ../../src/spa_mpi < in.west
 
 ## Main outputs
 - `output/gamma.only` (incident plasma flux by species on wall)
-- `output/state.west` (particle state)
+- `output/state.west.o_sputter` (particle state)
 - `output/tmp.grid.density` (time-averaged per-species grid density from tracked sputtered particles)
 
 ## Plot helpers

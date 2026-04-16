@@ -20,10 +20,16 @@
 
     Syntax:
       fix ID cross_diffusion Nevery \
-          bfield BxSRC BySRC BzSRC \
-          [D_perp VAL | bohm TeSRC [scale VAL]] \
+          {bfield BxSRC BySRC BzSRC | plasma_data FIXID} \
+          [D_perp VAL | bohm [TeSRC in source-token mode] [scale VAL]] \
           [pinch Vr Vz] \
-          [gradient_pinch Cp neSRC gradNeR_SRC gradNeZ_SRC]
+          [gradient_pinch Cp [neSRC gradNeR_SRC gradNeZ_SRC in source-token mode]]
+
+    Example (direct plasma/data path):
+      fix fcd cross_diffusion 100 \
+          plasma_data pd \
+          D_perp 0.1 \
+          gradient_pinch 2.0
 
     Example (constant D + constant pinch):
       fix fcd cross_diffusion 1 \
@@ -36,6 +42,9 @@
           bfield c_cwest[1] c_cwest[2] c_cwest[3] \
           D_perp 1.0 \
           gradient_pinch 2.0 c_cwest[6] c_cwest[18] c_cwest[19]
+
+    For Nevery > 1, skipped timesteps leave cross-diffusion inactive and
+    do not reuse stale displacement buffers.
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -49,10 +58,13 @@ FixStyle(cross_diffusion,FixCrossDiffusion)
 
 #include "fix.h"
 #include "grid_src.h"
+#include <string>
+#include <vector>
 
 namespace SPARTA_NS {
 
 class RanKnuth;
+class FixPlasmaData;
 
 class FixCrossDiffusion : public Fix {
  public:
@@ -64,6 +76,9 @@ class FixCrossDiffusion : public Fix {
 
  protected:
   RanKnuth *rng_;
+  int use_plasma_data_;
+  std::string plasma_fix_id_;
+  FixPlasmaData *pd_;
 
   // B-field sources in SPARTA coordinate order
   CollGridSrc srcBx_, srcBy_, srcBz_;
@@ -89,6 +104,11 @@ class FixCrossDiffusion : public Fix {
   void parse_compute_src(const char *tok, CollGridSrc &dst, const char *label);
   void refresh_compute_src(CollGridSrc &S);
   double read_src(const CollGridSrc &S, int ip, int icell) const;
+  void particle_rz(const class Particle::OnePart &p, double &R, double &Z) const;
+  void pd_bfield_sparta(const class Particle::OnePart &p,
+                        double &B0, double &B1, double &B2) const;
+  double pd_interp(const std::vector<double> &field,
+                   const class Particle::OnePart &p) const;
 };
 
 }  // namespace SPARTA_NS

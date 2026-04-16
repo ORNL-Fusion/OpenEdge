@@ -48,6 +48,12 @@ compute cwest plasma/fields all plasma_data pd bx by bz temp_e dens_e
 global bfield_compute pd
 global sheath geom_compute cgeom plasma_fix pd :pre
 
+# Drive impurity transport fixes directly from the same shared background:
+fix pd plasma/data file input/plasma.h5 static yes
+fix ftf thermal_force 1 plasma_data pd ion_thermal yes elec_thermal yes
+fix fnanbu coll/nanbu 100 plasma_data pd nobinary background 2.0 1.0
+fix fcd cross_diffusion 10 plasma_data pd D_perp 0.1 gradient_pinch 2.0 :pre
+
 [Description:]
 
 {fix plasma/data} is the canonical OpenEdge background-data store for
@@ -59,6 +65,11 @@ The intended usage is:
 Particle transport queries the fix directly:
 {global bfield_compute pd}
 {global sheath geom_compute cgeom plasma_fix pd} :ulb,l
+
+Impurity transport fixes can also query the same backend directly:
+{fix ... thermal_force ... plasma_data pd}
+{fix ... coll/nanbu ... plasma_data pd}
+{fix ... cross_diffusion ... plasma_data pd} :l
 
 Optional grid diagnostics wrap the same data through:
 {compute ... plasma/fields ... plasma_data pd} :l,ule
@@ -99,7 +110,8 @@ ADAS/Nanbu transport debugging with controlled inputs :l,ule
 
 "compute plasma/fields"_compute_plasma_fields.html,
 "Boris pusher sheath overlay"_pusher_sheath.html,
-"fix chem/adas"_fix_chem_adas.html
+"fix chem/adas"_fix_chem_adas.html,
+"fix coll/nanbu"_fix_coll_nanbu.html
 
 [Default:]
 

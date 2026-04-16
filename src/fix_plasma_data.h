@@ -76,6 +76,13 @@ class FixPlasmaData : public Fix {
   std::vector<int> mesh_cell_idx;  // (ntri) cell index per triangle
   std::vector<double> mesh_ne, mesh_te, mesh_ti, mesh_ni, mesh_upar;
   std::vector<double> mesh_ions_dens, mesh_ions_temp, mesh_ions_upar;
+  std::vector<double> mesh_tri_rmin, mesh_tri_rmax, mesh_tri_zmin, mesh_tri_zmax;
+  std::vector<double> mapped_cr, mapped_cz;
+  std::vector<int> mapped_idx;
+  int hash_nr, hash_nz;
+  double hash_rmin, hash_zmin, hash_dr, hash_dz;
+  std::vector<std::vector<int>> hash_grid;
+  int mesh_cell_at(double R, double Z, double max_dist=0.05) const;
 
   // ---- Valid mask ----
   std::vector<int> valid_mask;     // (nz * nr) or empty
@@ -92,6 +99,10 @@ class FixPlasmaData : public Fix {
   void load_constant_profile();
   void load_equilibrium();
   void derive_bfield_from_equ();
+  void build_mesh_index();
+  int find_mesh_triangle(double R, double Z) const;
+  int find_nearest_mapped_triangle(double R, double Z, double max_dist) const;
+  const std::vector<double> *mesh_field_for(const std::vector<double> &field) const;
 
   // ---- Constant-mode configuration ----
   int const_has_r_bounds, const_has_z_bounds;

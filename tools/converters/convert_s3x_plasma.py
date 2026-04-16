@@ -8,6 +8,12 @@ from matplotlib.path import Path
 import matplotlib.pyplot as plt
 from utilities import surface
 
+
+QE = 1.602176634e-19
+AMU = 1.66053906660e-27
+DEFAULT_SHEATH_MASS_AMU = 2.01410177811
+
+
 def _find_species_indices(data_h5):
     """Return sorted species indices from /triangles/spec* groups."""
     tri = data_h5['/triangles']
@@ -176,6 +182,19 @@ def _write_sparta_surface_polyline(path, rvals, zvals, title="surface geometry")
         r = r[:-1]
         z = z[:-1]
 
+    # Remove consecutive duplicate vertices that would otherwise create
+    # zero-length segments and fail SPARTA's watertight checks.
+    keep = np.ones(r.size, dtype=bool)
+    keep[1:] = ~(np.isclose(r[1:], r[:-1]) & np.isclose(z[1:], z[:-1]))
+    r = r[keep]
+    z = z[keep]
+
+    # Re-check closure after deduplication and drop the repeated endpoint if
+    # the cleaned polyline still ends where it begins.
+    if r.size >= 2 and np.isclose(r[0], r[-1]) and np.isclose(z[0], z[-1]):
+        r = r[:-1]
+        z = z[:-1]
+
     n = int(r.size)
     if n < 3:
         return
@@ -233,6 +252,128 @@ def _build_ion_metadata(ion_inds, ion_metadata=None):
         masses_amu[k] = float(meta["mass_amu"])
         charge_state_z[k] = zval
     return names, masses_amu, charge_state_z
+
+
+def _segment_normals(rvals, zvals):
+    """Return segment midpoints and unit normals for a closed wall polyline."""
+    r = np.asarray(rvals, dtype=np.float64).reshape(-1)
+    z = np.asarray(zvals, dtype=np.float64).reshape(-1)
+    if r.size < 2:
+        raise ValueError("Wall polyline needs at least 2 points")
+    if not (np.isclose(r[0], r[-1]) and np.isclose(z[0], z[-1])):
+        r = np.concatenate([r, r[:1]])
+        z = np.concatenate([z, z[:1]])
+    dr = np.diff(r)
+    dz = np.diff(z)
+    seglen = np.hypot(dr, dz)
+    good = seglen > 1.0e-14
+    if not np.any(good):
+        raise ValueError("Wall polyline has no non-zero segments")
+    mid_r = 0.5 * (r[:-1] + r[1:])
+    mid_z = 0.5 * (z[:-1] + z[1:])
+    nr = dz.copy()
+    nz = -dr.copy()
+    nr[good] /= seglen[good]
+    nz[good] /= seglen[good]
+    return mid_r[good], mid_z[good], nr[good], nz[good]
+
+
+def _nearest_wall_normals(sample_r, sample_z, wall_r, wall_z):
+    """Assign each sample point the normal of the nearest wall segment midpoint."""
+    mid_r, mid_z, nr_seg, nz_seg = _segment_normals(wall_r, wall_z)
+    sr = np.asarray(sample_r, dtype=np.float64).reshape(-1)
+    sz = np.asarray(sample_z, dtype=np.float64).reshape(-1)
+    best_d2 = np.full(sr.size, np.inf, dtype=np.float64)
+    best_idx = np.zeros(sr.size, dtype=np.int32)
+    for i in range(mid_r.size):
+        d2 = (sr - mid_r[i]) ** 2 + (sz - mid_z[i]) ** 2
+        mask = d2 < best_d2
+        best_d2[mask] = d2[mask]
+        best_idx[mask] = i
+    return nr_seg[best_idx], nz_seg[best_idx]
+
+
+def _bfield_incidence_sinalpha(br, bz, bt, nr, nz):
+    bmag = np.sqrt(br * br + bz * bz + bt * bt)
+    bp_dot_n = br * nr + bz * nz
+    out = np.zeros_like(bmag, dtype=np.float64)
+    mask = bmag > 1.0e-30
+    out[mask] = np.abs(bp_dot_n[mask]) / bmag[mask]
+    return np.clip(out, 0.0, 1.0)
+
+
+def _compute_bohm_flux_maps(
+    r,
+    z,
+    wall_r,
+    wall_z,
+    dens_i_all,
+    temp_i_all,
+    temp_e,
+    br,
+    bt,
+    bz,
+    sheath_mass_amu=DEFAULT_SHEATH_MASS_AMU,
+):
+    rr, zz = np.meshgrid(r, z)
+    nr_wall, nz_wall = _nearest_wall_normals(rr.ravel(), zz.ravel(), wall_r, wall_z)
+    nr_wall = nr_wall.reshape(rr.shape)
+    nz_wall = nz_wall.reshape(rr.shape)
+    sin_alpha = _bfield_incidence_sinalpha(br, bz, bt, nr_wall, nz_wall)
+    cs_arg = (np.maximum(temp_e, 0.0)[None, :, :] + np.maximum(temp_i_all, 0.0))
+    cs_arg = cs_arg * QE / (2.0 * sheath_mass_amu * AMU)
+    cs = np.sqrt(np.maximum(cs_arg, 0.0))
+    gamma = np.maximum(dens_i_all, 0.0) * cs * sin_alpha[None, :, :]
+    return gamma, sin_alpha
+
+
+def _compute_bohm_flux_on_wall(
+    vv_r,
+    vv_z,
+    ion_names,
+    r,
+    z,
+    dens_i_all,
+    temp_i_all,
+    temp_e,
+    br,
+    bt,
+    bz,
+    sheath_mass_amu=DEFAULT_SHEATH_MASS_AMU,
+):
+    sample_pts = np.column_stack((vv_z, vv_r))
+    nr_wall, nz_wall = _nearest_wall_normals(vv_r, vv_z, vv_r, vv_z)
+    interp_te = RegularGridInterpolator((z, r), temp_e, method='linear', bounds_error=False, fill_value=0.0)
+    interp_br = RegularGridInterpolator((z, r), br, method='linear', bounds_error=False, fill_value=0.0)
+    interp_bt = RegularGridInterpolator((z, r), bt, method='linear', bounds_error=False, fill_value=0.0)
+    interp_bz = RegularGridInterpolator((z, r), bz, method='linear', bounds_error=False, fill_value=0.0)
+    te_w = np.maximum(interp_te(sample_pts), 0.0)
+    br_w = interp_br(sample_pts)
+    bt_w = interp_bt(sample_pts)
+    bz_w = interp_bz(sample_pts)
+    sin_alpha = _bfield_incidence_sinalpha(br_w, bz_w, bt_w, nr_wall, nz_wall)
+    gamma_all = np.zeros((dens_i_all.shape[0], vv_r.size), dtype=np.float64)
+    for k in range(dens_i_all.shape[0]):
+        interp_n = RegularGridInterpolator((z, r), dens_i_all[k], method='linear', bounds_error=False, fill_value=0.0)
+        interp_ti = RegularGridInterpolator((z, r), temp_i_all[k], method='linear', bounds_error=False, fill_value=0.0)
+        n_w = np.maximum(interp_n(sample_pts), 0.0)
+        ti_w = np.maximum(interp_ti(sample_pts), 0.0)
+        cs = np.sqrt(np.maximum((te_w + ti_w) * QE / (2.0 * sheath_mass_amu * AMU), 0.0))
+        gamma_all[k] = n_w * cs * sin_alpha
+
+    if gamma_all.shape[0] > 1:
+        other = np.sum(gamma_all[1:], axis=0)
+        dom_idx = 1 + np.argmax(gamma_all[1:], axis=0)
+        peak_idx = np.argsort(other)[-5:][::-1]
+        print("Top non-D Bohm-flux wall peaks:")
+        for idx in peak_idx:
+            name = ion_names[dom_idx[idx]] if dom_idx[idx] < len(ion_names) else f"ion{dom_idx[idx]}"
+            print(
+                f"  s={idx:4d} R={vv_r[idx]:.4f} Z={vv_z[idx]:.4f} "
+                f"Gamma_Osum={other[idx]:.3e} dominant={name} "
+                f"Gamma_dom={gamma_all[dom_idx[idx], idx]:.3e} sin(alpha_B)={sin_alpha[idx]:.3e}"
+            )
+    return gamma_all, sin_alpha
 
 
 def _plot_debug_fields(
@@ -299,42 +440,41 @@ def _plot_flux_fields(
     Zwall,
     ion_names,
     dens_i_all,
-    flow_i_par_all,
+    temp_i_all,
+    temp_e,
+    br,
+    bt,
+    bz,
 ):
     """
-    Plot ion parallel particle flux diagnostics.
-    Flux definition used here:
-      Gamma_s = n_s * v_par_s   [m^-2 s^-1] (signed)
+    Plot cpmi-like Bohm wall-flux diagnostics:
+      Gamma_s = n_s * c_s * sin(alpha_B)
     """
     extent = [r.min(), r.max(), z.min(), z.max()]
-    gamma_all = dens_i_all * flow_i_par_all  # (Nion, Nz, Nr)
+    gamma_all, sin_alpha = _compute_bohm_flux_maps(
+        r, z, Rwall, Zwall, dens_i_all, temp_i_all, temp_e, br, bt, bz
+    )
     gamma_sum = np.sum(gamma_all, axis=0)
-    gamma_abs_sum = np.sum(np.abs(gamma_all), axis=0)
+    log_sum = np.full_like(gamma_sum, np.nan, dtype=np.float64)
+    m = gamma_sum > 0.0
+    log_sum[m] = np.log10(gamma_sum[m])
 
-    # Total flux panel (signed + abs-sum)
+    # Total Bohm-flux proxy + incidence factor.
     fig, axes = plt.subplots(1, 2, figsize=(13, 5.2), constrained_layout=True)
-    vmax = np.nanmax(np.abs(gamma_sum))
-    if not np.isfinite(vmax) or vmax == 0.0:
-        vmax = 1.0
     im0 = axes[0].imshow(
-        gamma_sum, origin='lower', extent=extent, aspect='auto',
-        cmap='RdBu_r', vmin=-vmax, vmax=vmax
+        log_sum, origin='lower', extent=extent, aspect='auto', cmap='inferno'
     )
     axes[0].plot(Rwall, Zwall, 'k-', lw=1.0)
-    axes[0].set_title("Gamma_total = sum(n_i v_par) [m^-2 s^-1]")
+    axes[0].set_title("log10(sum Bohm flux) [m^-2 s^-1]")
     axes[0].set_xlabel("R [m]")
     axes[0].set_ylabel("Z [m]")
     fig.colorbar(im0, ax=axes[0], shrink=0.9)
 
-    # log10 of absolute summed flux
-    log_abs = np.full_like(gamma_abs_sum, np.nan, dtype=np.float64)
-    m = gamma_abs_sum > 0.0
-    log_abs[m] = np.log10(gamma_abs_sum[m])
     im1 = axes[1].imshow(
-        log_abs, origin='lower', extent=extent, aspect='auto', cmap='inferno'
+        sin_alpha, origin='lower', extent=extent, aspect='auto', cmap='viridis'
     )
     axes[1].plot(Rwall, Zwall, 'k-', lw=1.0)
-    axes[1].set_title("log10(sum|n_i v_par|) [m^-2 s^-1]")
+    axes[1].set_title(r"$\sin(\alpha_B)$ from nearest wall normal")
     axes[1].set_xlabel("R [m]")
     axes[1].set_ylabel("Z [m]")
     fig.colorbar(im1, ax=axes[1], shrink=0.9)
@@ -353,15 +493,14 @@ def _plot_flux_fields(
             ax.axis('off')
             continue
         gk = gamma_all[k]
-        vk = np.nanmax(np.abs(gk))
-        if not np.isfinite(vk) or vk == 0.0:
-            vk = 1.0
+        log_gk = np.full_like(gk, np.nan, dtype=np.float64)
+        mask = gk > 0.0
+        log_gk[mask] = np.log10(gk[mask])
         im = ax.imshow(
-            gk, origin='lower', extent=extent, aspect='auto',
-            cmap='RdBu_r', vmin=-vk, vmax=vk
+            log_gk, origin='lower', extent=extent, aspect='auto', cmap='inferno'
         )
         ax.plot(Rwall, Zwall, 'k-', lw=0.9)
-        ax.set_title(f"{ion_names[k]}: n v_par [m^-2 s^-1]")
+        ax.set_title(f"{ion_names[k]}: log10(Bohm flux) [m^-2 s^-1]")
         ax.set_xlabel("R [m]")
         ax.set_ylabel("Z [m]")
         fig.colorbar(im, ax=ax, shrink=0.86)
@@ -376,10 +515,14 @@ def _plot_wall_flux_vs_coord(
     r,
     z,
     dens_i_all,
-    flow_i_par_all,
+    temp_i_all,
+    temp_e,
+    br,
+    bt,
+    bz,
 ):
     """
-    Plot species ion flux sampled along wall coordinates from vv_values.csv.
+    Plot cpmi-like Bohm flux sampled along wall coordinates from vv_values.csv.
     CSV expected columns: R, Z (at least first two columns).
     """
     if not vv_csv_file or not os.path.exists(vv_csv_file):
@@ -405,44 +548,47 @@ def _plot_wall_flux_vs_coord(
         d_z = vv_z[i] - vv_z[i - 1]
         wall_coord[i] = wall_coord[i - 1] + np.sqrt(d_r * d_r + d_z * d_z)
 
-    # Flux per species on grid
-    gamma_all = dens_i_all * flow_i_par_all  # (Nion, Nz, Nr)
-    sample_pts = np.column_stack((vv_z, vv_r))  # interpolator axes are (z, r)
-
-    # Two-panel wall-coordinate plot:
-    # panel 1 = main ion (D), panel 2 = all other ions.
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5.5), constrained_layout=True)
-
-    # Panel 1: main ion only (positive flux magnitude on linear scale)
-    interp_d = RegularGridInterpolator(
-        (z, r), gamma_all[0], method='linear', bounds_error=False, fill_value=0.0
+    gamma_all, sin_alpha = _compute_bohm_flux_on_wall(
+        vv_r, vv_z, ion_names, r, z, dens_i_all, temp_i_all, temp_e, br, bt, bz
     )
-    gamma_d = np.abs(interp_d(sample_pts))
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5.5), constrained_layout=True)
+
+    # Panel 1: main ion versus impurity sum.
+    gamma_d = gamma_all[0]
+    gamma_o = np.sum(gamma_all[1:], axis=0) if gamma_all.shape[0] > 1 else np.zeros_like(gamma_d)
     d_name = ion_names[0] if ion_names else "main_ion"
     axes[0].plot(wall_coord, gamma_d, lw=2.0, color='tab:blue', label=d_name)
-    axes[0].set_title("Wall Flux: Main Ion (D)")
+    axes[0].plot(wall_coord, gamma_o, lw=2.0, color='tab:red', label='sum(other ions)')
+    axes[0].set_title("Wall Bohm Flux: D vs impurities")
     axes[0].set_xlabel("Wall coordinate [m]")
-    axes[0].set_ylabel("|Gamma| [m^-2 s^-1]")
+    axes[0].set_ylabel(r"$\Gamma_B$ [m^-2 s^-1]")
     axes[0].grid(True, alpha=0.3)
     axes[0].legend(fontsize=10)
 
-    # Panel 2: all other ions on same axes
+    # Panel 2: individual impurity species.
     if gamma_all.shape[0] > 1:
         for k in range(1, gamma_all.shape[0]):
-            interp_k = RegularGridInterpolator(
-                (z, r), gamma_all[k], method='linear', bounds_error=False, fill_value=0.0
-            )
-            gamma_k = np.abs(interp_k(sample_pts))
             label = ion_names[k] if k < len(ion_names) else f"ion{k}"
-            axes[1].plot(wall_coord, gamma_k, lw=1.6, label=label)
+            axes[1].plot(wall_coord, gamma_all[k], lw=1.6, label=label)
         axes[1].legend(fontsize=9, ncol=2)
     else:
         axes[1].text(0.5, 0.5, "No other ion species", ha='center', va='center')
 
-    axes[1].set_title("Wall Flux: Other Ions")
+    axes[1].set_title("Wall Bohm Flux: Other Ions")
     axes[1].set_xlabel("Wall coordinate [m]")
-    axes[1].set_ylabel("|Gamma| [m^-2 s^-1]")
+    axes[1].set_ylabel(r"$\Gamma_B$ [m^-2 s^-1]")
     axes[1].grid(True, alpha=0.3)
+
+    # Panel 3: incidence and D share.
+    d_frac = np.divide(gamma_d, gamma_d + gamma_o, out=np.zeros_like(gamma_d), where=(gamma_d + gamma_o) > 0.0)
+    axes[2].plot(wall_coord, sin_alpha, lw=1.8, color='tab:green', label=r'$\sin(\alpha_B)$')
+    axes[2].plot(wall_coord, d_frac, lw=1.8, color='tab:purple', label='D fraction of total Bohm flux')
+    axes[2].set_title("Limiter Diagnostic")
+    axes[2].set_xlabel("Wall coordinate [m]")
+    axes[2].set_ylabel("dimensionless")
+    axes[2].grid(True, alpha=0.3)
+    axes[2].legend(fontsize=9)
 
     fig.savefig(out_png, dpi=180)
     plt.close(fig)
@@ -488,6 +634,9 @@ def interpolate_and_save_plasma_field(
 
     New multi-ion fields are written under:
       ion_species/* and ions/*
+
+    Native SOLEDGE triangle-mesh fields are also written under:
+      mesh/*
     """
 
     # Reference scalings
@@ -645,6 +794,12 @@ def interpolate_and_save_plasma_field(
         if temp_e_tri is None or dens_e_tri is None:
             raise RuntimeError("Missing electron fields /triangles/spec0/{T,n}")
 
+        ntri_mesh = centroids.shape[0]
+        if temp_e_tri.size != ntri_mesh or dens_e_tri.size != ntri_mesh:
+            raise RuntimeError(
+                "SOLEDGE triangle field size does not match meshEIRENE triangulation"
+            )
+
         temp_e_grid = _interpolate_field(centroids, grid_points, nZ, nR, temp_e_tri)
         dens_e_grid = _interpolate_field(centroids, grid_points, nZ, nR, dens_e_tri)
 
@@ -656,6 +811,9 @@ def interpolate_and_save_plasma_field(
         flow_i_r_all = np.zeros((nion, nZ, nR), dtype=np.float64)
         flow_i_t_all = np.zeros((nion, nZ, nR), dtype=np.float64)
         flow_i_z_all = np.zeros((nion, nZ, nR), dtype=np.float64)
+        mesh_dens_i_all = np.zeros((nion, ntri_mesh), dtype=np.float64)
+        mesh_temp_i_all = np.zeros((nion, ntri_mesh), dtype=np.float64)
+        mesh_flow_i_par_all = np.zeros((nion, ntri_mesh), dtype=np.float64)
         ion_names, ion_mass_amu, ion_charge_state_z = _build_ion_metadata(
             ion_inds, ion_metadata=ion_metadata
         )
@@ -686,6 +844,11 @@ def interpolate_and_save_plasma_field(
             else:
                 upar_tri = c0 * G_tri_norm
 
+            if n_tri.size != ntri_mesh or T_tri.size != ntri_mesh or upar_tri.size != ntri_mesh:
+                raise RuntimeError(
+                    f"SOLEDGE triangle field size mismatch for spec{sidx}"
+                )
+
             n_grid = _interpolate_field(centroids, grid_points, nZ, nR, n_tri)
             T_grid = _interpolate_field(centroids, grid_points, nZ, nR, T_tri)
             G_grid = _interpolate_field(centroids, grid_points, nZ, nR, upar_tri)
@@ -705,6 +868,9 @@ def interpolate_and_save_plasma_field(
             flow_i_r_all[k] = vr_grid
             flow_i_t_all[k] = vt_grid
             flow_i_z_all[k] = vz_grid
+            mesh_dens_i_all[k] = np.nan_to_num(np.asarray(n_tri, dtype=np.float64), nan=0.0)
+            mesh_temp_i_all[k] = np.nan_to_num(np.asarray(T_tri, dtype=np.float64), nan=0.0)
+            mesh_flow_i_par_all[k] = np.nan_to_num(np.asarray(upar_tri, dtype=np.float64), nan=0.0)
 
     # Legacy main-ion choice
     if main_ion_spec in ion_inds:
@@ -718,6 +884,17 @@ def interpolate_and_save_plasma_field(
     parr_flow_i_r_grid = flow_i_r_all[main_k]
     parr_flow_i_t_grid = flow_i_t_all[main_k]
     parr_flow_i_z_grid = flow_i_z_all[main_k]
+    mesh_vtx_r = np.asarray(Rk, dtype=np.float64)
+    mesh_vtx_z = np.asarray(Zk, dtype=np.float64)
+    mesh_tri = np.asarray(tri_knots.T, dtype=np.int32)
+    mesh_cell_idx = np.arange(mesh_tri.shape[0], dtype=np.int32)
+    mesh_dens_e = np.nan_to_num(np.asarray(dens_e_tri, dtype=np.float64), nan=0.0)
+    mesh_temp_e = np.nan_to_num(np.asarray(temp_e_tri, dtype=np.float64), nan=0.0)
+    mesh_dens_i = mesh_dens_i_all[main_k]
+    mesh_temp_i = mesh_temp_i_all[main_k]
+    mesh_parr_flow = mesh_flow_i_par_all[main_k]
+    if mesh_tri.shape[0] != mesh_dens_e.size:
+        raise RuntimeError("mesh/triangles count does not match SOLEDGE plasma triangle count")
     mpar = np.isfinite(parr_flow_i_grid)
     if np.any(mpar):
         print(
@@ -810,6 +987,22 @@ def interpolate_and_save_plasma_field(
             f.create_dataset('n_i/dens', data=dens_i_grid)
             f.create_dataset('n_i/parr_flow', data=parr_flow_i_grid)
 
+            # Native SOLEDGE triangle mesh for direct point-in-cell lookup.
+            # For SOLEDGE3X the plasma fields are already triangle-centered,
+            # so the cell mapping is the identity.
+            f.create_dataset('mesh/vtx_r', data=mesh_vtx_r)
+            f.create_dataset('mesh/vtx_z', data=mesh_vtx_z)
+            f.create_dataset('mesh/triangles', data=mesh_tri)
+            f.create_dataset('mesh/cell_index', data=mesh_cell_idx)
+            f.create_dataset('mesh/dens_e', data=mesh_dens_e)
+            f.create_dataset('mesh/temp_e', data=mesh_temp_e)
+            f.create_dataset('mesh/dens_i', data=mesh_dens_i)
+            f.create_dataset('mesh/temp_i', data=mesh_temp_i)
+            f.create_dataset('mesh/parr_flow', data=mesh_parr_flow)
+            f.create_dataset('mesh/ions/dens', data=mesh_dens_i_all)
+            f.create_dataset('mesh/ions/temp', data=mesh_temp_i_all)
+            f.create_dataset('mesh/ions/parr_flow', data=mesh_flow_i_par_all)
+
         # Legacy standalone bfield.h5 — only written if the caller asks for
         # it. The default flow now keeps B on the plasma.h5 grid.
         if bfield_out_file:
@@ -842,7 +1035,11 @@ def interpolate_and_save_plasma_field(
                 r, z, Rwall, Zwall,
                 ion_names,
                 dens_i_all,
-                flow_i_par_all,
+                temp_i_all,
+                temp_e_grid,
+                b_r_grid,
+                b_t_grid,
+                b_z_grid,
             )
             print(f"Wrote flux plot (total): {flux_total_plot_file}")
             print(f"Wrote flux plot (species): {flux_species_plot_file}")
@@ -854,7 +1051,11 @@ def interpolate_and_save_plasma_field(
                 r,
                 z,
                 dens_i_all,
-                flow_i_par_all,
+                temp_i_all,
+                temp_e_grid,
+                b_r_grid,
+                b_t_grid,
+                b_z_grid,
             )
             print(f"Wrote wall-flux plot: {wall_flux_plot_file}")
 
@@ -867,7 +1068,7 @@ def interpolate_and_save_plasma_field(
 if __name__ == '__main__':
     # Default: 3MW dataset in /home/cloud/3MW, plasma_00010.h5 as the
     # final plasma snapshot. Override base_dir/data_name per case.
-    cases = [('3MW', '/home/cloud/3MW', 'plasma_00010.h5')]
+    cases = [('1p5MW', '/Users/42d/Downloads/1p5MW', 'plasma_00060.h5')]
     for case, base_dir, data_name in cases:
         _here = os.path.dirname(os.path.abspath(__file__))
         out_dir = os.path.join(_here, '..', '..', 'examples', 'test_west_axi', 'input')
@@ -877,7 +1078,7 @@ if __name__ == '__main__':
         data_file = os.path.join(base_dir, data_name)
         bfield_file = os.path.join(base_dir, 'mesh_raptorX.h5')
         config_file = os.path.join(base_dir, 'mesh.h5')
-        wall_file = os.path.join(out_dir, 'wall.txt')
+        wall_file = os.path.join(out_dir, 'wall.surf')
         plasma_out_file = os.path.join(out_dir, 'plasma.h5')
         debug_plot_file = os.path.join(out_dir, f'soledge_fields_{case}.png')
         flux_total_plot_file = os.path.join(out_dir, f'soledge_flux_total_{case}.png')

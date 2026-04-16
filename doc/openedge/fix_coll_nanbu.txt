@@ -12,6 +12,12 @@ fix coll/nanbu command :h3
 
 :pre
 fix ID coll/nanbu Nevery plasma TeSrc NeSrc
+fix ID coll/nanbu Nevery plasma_data FIXID
+
+  optional suffixes:
+    nobinary
+    background A_bg Z_bg
+    background A_bg Z_bg TiSrc NiSrc VparSrc BxSrc BySrc BzSrc
 
   ID = user-chosen fix identifier
   coll/nanbu = style name
@@ -19,6 +25,8 @@ fix ID coll/nanbu Nevery plasma TeSrc NeSrc
   plasma = required keyword
   TeSrc = source token for electron temperature: c_ID\[col\] or p_name (eV)
   NeSrc = source token for electron density: c_ID\[col\] or p_name (m^{-3})
+  plasma_data = required keyword for direct queries to an existing {fix plasma/data}
+  FIXID = ID of an existing {fix plasma/data}
 :pre
 
 [Examples:]
@@ -28,6 +36,7 @@ fix nanbu coll/nanbu 1 plasma c_cplasma\[7\] c_cplasma\[10\]
 fix colcoul coll/nanbu 10 plasma c_cnear\[4\] c_cnear\[6\]
 fix fnanbu coll/nanbu 1 plasma p_pc_te p_pc_ne nobinary &
     background 2.0 1.0 p_pc_ti p_pc_ni p_pc_vpar p_pc_bx p_pc_by p_pc_bz
+fix fnanbu coll/nanbu 100 plasma_data pd nobinary background 2.0 1.0
 :pre
 
 [Description:]
@@ -137,10 +146,13 @@ floor of 2 prevents unphysical values when the coupling parameter
 approaches unity.
 
 The electron temperature and density may be read either from per-grid
-computes using {c_ID\[col\]} syntax or from per-particle custom vectors
-using {p_name}.  In WEST/OpenEdge transport setups the recommended
-particle-side form is to use the {p_pc_*} plasma cache populated from
-{fix plasma/data}.  All values must be in SI units (eV and m^{-3}).
+computes using {c_ID\[col\]} syntax, from per-particle custom vectors
+using {p_name}, or directly from an existing {fix plasma/data} via
+{plasma_data FIXID}.  In the {plasma_data} form, the fix point-samples
+{temp_e} and {dens_e} itself and, when {background} is enabled, also
+uses {temp_i}, {dens_i}, {parr_flow}, and the local magnetic-field
+direction from the same background provider.  All values are expected in
+OpenEdge SI units (eV, m^{-3}, m/s, T).
 
 [Scatter table:]
 
@@ -213,8 +225,12 @@ Never combine both approaches for the same interaction. :ule
 
 [Restrictions:]
 
-Source tokens must be either {c_ID\[col\]} or {p_name}.  Grid-style
-variables are not accepted.
+In source-token mode, source tokens must be either {c_ID\[col\]} or
+{p_name}.  Grid-style variables are not accepted.
+
+In {plasma_data} mode, the {background} keyword takes only
+{A_bg Z_bg}; the remaining background moments and magnetic field are
+resolved directly from the referenced {fix plasma/data}.
 
 All charged particles in a cell are paired together regardless
 of species.  This handles ion-ion Coulomb scattering between

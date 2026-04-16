@@ -1390,16 +1390,17 @@ PlasmaFileParams ComputePlasmaFields::bilinearInterpolationPlasma(
   PlasmaFileParams P{};  // default all zeros
   if (icell < 0 || icell >= static_cast<int>(plasma_stencil.size())) return P;
   const BilinearStencil &s = plasma_stencil[icell];
-  if (!s.valid) return P;
+  bool used_mesh = false;
+  if (data.has_mesh) used_mesh = meshLookupPlasma(icell, data, P);
 
-  P.temp_e = interpField2D(data.temp_e, s);
-  P.dens_e = interpField2D(data.dens_e, s);
-  P.temp_i = interpField2D(data.temp_i, s);
-  P.dens_i = interpField2D(data.dens_i, s);
-
-  // Fallback to mesh-based lookup if grid interpolation gives zero plasma
-  if (data.has_mesh && P.temp_e <= 0.0 && P.dens_e <= 0.0) {
-    return meshLookupPlasma(icell, data);
+  if (!used_mesh) {
+    if (!s.valid) return P;
+    P.temp_e = interpField2D(data.temp_e, s);
+    P.dens_e = interpField2D(data.dens_e, s);
+    P.temp_i = interpField2D(data.temp_i, s);
+    P.dens_i = interpField2D(data.dens_i, s);
+  } else if (!s.valid) {
+    return P;
   }
 
   gradField2D(data.dens_e, s, P.grad_dens_e_r, P.grad_dens_e_z);
@@ -1481,12 +1482,28 @@ int ComputePlasmaFields::findNearestMappedTriangle(
   return (best >= 0) ? data.mapped_idx[best] : -1;
 }
 
-PlasmaFileParams ComputePlasmaFields::meshLookupPlasma(
-    int icell, const PlasmaFileData &data)
+bool ComputePlasmaFields::meshLookupPlasmaAtPoint(
+    const PlasmaFileData &data, double r, double z, PlasmaFileParams &P) const
 {
-  PlasmaFileParams P{};
+  int tri_idx = findMeshTriangle(data, r, z);
+  if (tri_idx < 0 || data.mesh_cell_idx[tri_idx] < 0)
+    tri_idx = findNearestMappedTriangle(data, r, z, 0.05);
+  if (tri_idx < 0) return false;
 
-  // Get cell center in cylindrical coordinates
+  int cell = data.mesh_cell_idx[tri_idx];
+  if (cell < 0 || cell >= data.mesh_ncell) return false;
+
+  P.temp_e = data.mesh_te[cell];
+  P.dens_e = data.mesh_ne[cell];
+  P.temp_i = data.mesh_ti[cell];
+  P.dens_i = data.mesh_ni[cell];
+  P.parr_flow = (!data.mesh_upar.empty()) ? data.mesh_upar[cell] : 0.0;
+  return true;
+}
+
+bool ComputePlasmaFields::meshLookupPlasma(
+    int icell, const PlasmaFileData &data, PlasmaFileParams &P) const
+{
   Grid::ChildCell *cells = grid->cells;
   const int dim = domain->dimension;
   double r, z;
@@ -1494,28 +1511,12 @@ PlasmaFileParams ComputePlasmaFields::meshLookupPlasma(
     r = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
     z = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
   } else {
-    double x = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
-    double y = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
+    const double x = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
+    const double y = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
     r = std::sqrt(x*x + y*y);
     z = 0.5 * (cells[icell].lo[2] + cells[icell].hi[2]);
   }
-
-  int tri_idx = findMeshTriangle(data, r, z);
-  if (tri_idx < 0 || data.mesh_cell_idx[tri_idx] < 0)
-    tri_idx = findNearestMappedTriangle(data, r, z, 0.05);
-  if (tri_idx < 0) return P;
-
-  int cell = data.mesh_cell_idx[tri_idx];
-  if (cell < 0 || cell >= data.mesh_ncell) return P;
-
-  P.temp_e = data.mesh_te[cell];
-  P.dens_e = data.mesh_ne[cell];
-  P.temp_i = data.mesh_ti[cell];
-  P.dens_i = data.mesh_ni[cell];
-  P.parr_flow = (!data.mesh_upar.empty()) ? data.mesh_upar[cell] : 0.0;
-  // Gradients not available from mesh — leave as zero
-
-  return P;
+  return meshLookupPlasmaAtPoint(data, r, z, P);
 }
 
 
@@ -1759,35 +1760,24 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
     return P;
   }
 
+  const int dim = domain->dimension;
+  double r, z;
+  if (dim == 2) { r = xyz[0]; z = xyz[1]; }
+  else { r = std::sqrt(xyz[0]*xyz[0]+xyz[1]*xyz[1]); z = xyz[2]; }
+
+  bool used_mesh = false;
+  if (plasma_data.has_mesh)
+    used_mesh = meshLookupPlasmaAtPoint(plasma_data, r, z, P);
+
   // MODE_FILE: build stencil on-the-fly and interpolate
   BilinearStencil s = makeStencilAtPoint(xyz, plasma_data.r, plasma_data.z);
-  if (!s.valid) return P;
-
-  P.temp_e = interpField2D(plasma_data.temp_e, s);
-  P.dens_e = interpField2D(plasma_data.dens_e, s);
-  P.temp_i = interpField2D(plasma_data.temp_i, s);
-  P.dens_i = interpField2D(plasma_data.dens_i, s);
-
-  // Fallback to mesh if grid gives zero plasma
-  if (plasma_data.has_mesh && P.temp_e <= 0.0 && P.dens_e <= 0.0) {
-    const int dim = domain->dimension;
-    double r, z;
-    if (dim == 2) { r = xyz[0]; z = xyz[1]; }
-    else { r = std::sqrt(xyz[0]*xyz[0]+xyz[1]*xyz[1]); z = xyz[2]; }
-    int tri = findMeshTriangle(plasma_data, r, z);
-    if (tri < 0 || plasma_data.mesh_cell_idx[tri] < 0)
-      tri = findNearestMappedTriangle(plasma_data, r, z, 0.05);
-    if (tri >= 0) {
-      int cell = plasma_data.mesh_cell_idx[tri];
-      if (cell >= 0 && cell < plasma_data.mesh_ncell) {
-        P.temp_e = plasma_data.mesh_te[cell];
-        P.dens_e = plasma_data.mesh_ne[cell];
-        P.temp_i = plasma_data.mesh_ti[cell];
-        P.dens_i = plasma_data.mesh_ni[cell];
-        P.parr_flow = (!plasma_data.mesh_upar.empty()) ? plasma_data.mesh_upar[cell] : 0.0;
-        return P;  // gradients not available from mesh
-      }
-    }
+  if (!used_mesh) {
+    if (!s.valid) return P;
+    P.temp_e = interpField2D(plasma_data.temp_e, s);
+    P.dens_e = interpField2D(plasma_data.dens_e, s);
+    P.temp_i = interpField2D(plasma_data.temp_i, s);
+    P.dens_i = interpField2D(plasma_data.dens_i, s);
+  } else if (!s.valid) {
     return P;
   }
 

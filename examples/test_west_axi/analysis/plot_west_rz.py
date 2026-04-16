@@ -212,7 +212,7 @@ def plot_many_tracks(ax, tracks, bounds):
 def main():
     parser = argparse.ArgumentParser(description="Plot WEST particle trajectories in the R-Z plane.")
     case_dir = Path(__file__).resolve().parents[1]
-    parser.add_argument("--dump", type=Path, default=case_dir / "output" / "state.west",
+    parser.add_argument("--dump", type=Path, default=case_dir / "output" / "state.west.o_sputter",
                         help="Particle dump file to read.")
     parser.add_argument("--input", type=Path, default=case_dir / "in.test",
                         help="Input file used to auto-detect read_surf geometry.")

@@ -45,6 +45,7 @@
 
 #include "comm.h"
 #include "compute.h"
+#include "domain.h"
 #include "error.h"
 #include "grid.h"
 #include "input.h"
@@ -54,6 +55,7 @@
 #include "random_knuth.h"
 #include "random_mars.h"
 #include "update.h"
+#include "fix_plasma_data.h"
 
 using namespace SPARTA_NS;
 
@@ -66,28 +68,42 @@ enum { INT, DOUBLE };
 FixCollNanbu::FixCollNanbu(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   rng_(nullptr),
+  use_plasma_data_(0),
+  plasma_fix_id_(),
+  pd_(nullptr),
   do_binary_(1),
   have_background_(0),
   A_bg_(0.0), Z_bg_(0.0), m_bg_(0.0), q_bg_(0.0),
   npmax_(0),
   plist_(nullptr)
 {
-  // Syntax: fix ID coll/nanbu Nevery plasma TeSrc NeSrc
+  // Syntax: fix ID coll/nanbu Nevery {plasma TeSrc NeSrc | plasma_data FIXID}
   //         [nobinary]
-  //         [background A_bg Z_bg TiSrc NiSrc VparSrc BxSrc BySrc BzSrc]
+  //         [background A_bg Z_bg [TiSrc NiSrc VparSrc BxSrc BySrc BzSrc]]
 
-  if (narg < 6)
+  if (narg < 5)
     error->all(FLERR,
-      "Illegal fix coll/nanbu command (need: nevery plasma TeSrc NeSrc)");
+      "Illegal fix coll/nanbu command "
+      "(need: nevery {plasma TeSrc NeSrc | plasma_data FIXID})");
 
   int iarg = 2;
   nevery = input->inumeric(FLERR, arg[iarg++]);
 
-  if (strcmp(arg[iarg++], "plasma") != 0)
-    error->all(FLERR, "fix coll/nanbu: missing 'plasma' keyword");
-
-  parse_compute_src(arg[iarg++], srcTe_, "Te");
-  parse_compute_src(arg[iarg++], srcNe_, "Ne");
+  if (strcmp(arg[iarg], "plasma_data") == 0) {
+    iarg++;
+    if (iarg >= narg)
+      error->all(FLERR, "fix coll/nanbu: plasma_data needs a fix ID");
+    use_plasma_data_ = 1;
+    plasma_fix_id_ = arg[iarg++];
+  } else {
+    if (strcmp(arg[iarg++], "plasma") != 0)
+      error->all(FLERR, "fix coll/nanbu: missing 'plasma' keyword");
+    if (iarg + 2 > narg)
+      error->all(FLERR,
+        "Illegal fix coll/nanbu command (need: nevery plasma TeSrc NeSrc)");
+    parse_compute_src(arg[iarg++], srcTe_, "Te");
+    parse_compute_src(arg[iarg++], srcNe_, "Ne");
+  }
 
   // optional nobinary keyword
   if (iarg < narg && strcmp(arg[iarg], "nobinary") == 0) {
@@ -98,19 +114,23 @@ FixCollNanbu::FixCollNanbu(SPARTA *sparta, int narg, char **arg) :
   // optional background keyword
   if (iarg < narg && strcmp(arg[iarg], "background") == 0) {
     iarg++;
-    if (iarg + 8 > narg)
-      error->all(FLERR,
-        "fix coll/nanbu background: need A_bg Z_bg TiSrc NiSrc VparSrc BxSrc BySrc BzSrc");
+    if (iarg + 2 > narg)
+      error->all(FLERR, "fix coll/nanbu background: need A_bg Z_bg");
 
     A_bg_ = input->numeric(FLERR, arg[iarg++]);
     Z_bg_ = input->numeric(FLERR, arg[iarg++]);
 
-    parse_compute_src(arg[iarg++], srcTi_bg_,  "Ti_bg");
-    parse_compute_src(arg[iarg++], srcNi_bg_,  "Ni_bg");
-    parse_compute_src(arg[iarg++], srcVpar_bg_, "Vpar_bg");
-    parse_compute_src(arg[iarg++], srcBx_,     "Bx");
-    parse_compute_src(arg[iarg++], srcBy_,     "By");
-    parse_compute_src(arg[iarg++], srcBz_,     "Bz");
+    if (!use_plasma_data_) {
+      if (iarg + 6 > narg)
+        error->all(FLERR,
+          "fix coll/nanbu background: need A_bg Z_bg TiSrc NiSrc VparSrc BxSrc BySrc BzSrc");
+      parse_compute_src(arg[iarg++], srcTi_bg_,  "Ti_bg");
+      parse_compute_src(arg[iarg++], srcNi_bg_,  "Ni_bg");
+      parse_compute_src(arg[iarg++], srcVpar_bg_, "Vpar_bg");
+      parse_compute_src(arg[iarg++], srcBx_,     "Bx");
+      parse_compute_src(arg[iarg++], srcBy_,     "By");
+      parse_compute_src(arg[iarg++], srcBz_,     "Bz");
+    }
 
     // precompute background mass and charge
     const double amu = 1.66053906660e-27;  // kg
@@ -215,10 +235,26 @@ void FixCollNanbu::init()
     }
   };
 
-  bind_compute(srcTe_, "Te");
-  bind_compute(srcNe_, "Ne");
+  if (use_plasma_data_) {
+    const int ifix = modify->find_fix(plasma_fix_id_.c_str());
+    if (ifix < 0) {
+      char msg[200];
+      snprintf(msg, sizeof(msg),
+               "fix coll/nanbu: plasma_data fix '%s' not found",
+               plasma_fix_id_.c_str());
+      error->all(FLERR, msg);
+    }
+    pd_ = dynamic_cast<FixPlasmaData *>(modify->fix[ifix]);
+    if (!pd_)
+      error->all(FLERR,
+        "fix coll/nanbu: plasma_data fix must be style plasma/data");
+    pd_->init();
+  } else {
+    bind_compute(srcTe_, "Te");
+    bind_compute(srcNe_, "Ne");
+  }
 
-  if (have_background_) {
+  if (have_background_ && !use_plasma_data_) {
     bind_compute(srcTi_bg_,  "Ti_bg");
     bind_compute(srcNi_bg_,  "Ni_bg");
     bind_compute(srcVpar_bg_, "Vpar_bg");
@@ -236,10 +272,12 @@ void FixCollNanbu::end_of_step()
   if (!particle->sorted) particle->sort();
 
   // refresh compute caches for this timestep
-  refresh_compute_src(srcTe_);
-  refresh_compute_src(srcNe_);
+  if (!use_plasma_data_) {
+    refresh_compute_src(srcTe_);
+    refresh_compute_src(srcNe_);
+  }
 
-  if (have_background_) {
+  if (have_background_ && !use_plasma_data_) {
     refresh_compute_src(srcTi_bg_);
     refresh_compute_src(srcNi_bg_);
     refresh_compute_src(srcVpar_bg_);
@@ -354,10 +392,14 @@ void FixCollNanbu::nanbu_collisions_cell(int icell, int np)
     double *vA = pA.v;
     double *vB = pB.v;
     const double Te_eV = std::max(
-      0.5 * (read_src(srcTe_, idxA, icell) + read_src(srcTe_, idxB, icell)),
+      use_plasma_data_
+        ? 0.5 * (pd_interp(pd_->temp_e, pA) + pd_interp(pd_->temp_e, pB))
+        : 0.5 * (read_src(srcTe_, idxA, icell) + read_src(srcTe_, idxB, icell)),
       0.0);
     const double ne = std::max(
-      0.5 * (read_src(srcNe_, idxA, icell) + read_src(srcNe_, idxB, icell)),
+      use_plasma_data_
+        ? 0.5 * (pd_interp(pd_->dens_e, pA) + pd_interp(pd_->dens_e, pB))
+        : 0.5 * (read_src(srcNe_, idxA, icell) + read_src(srcNe_, idxB, icell)),
       0.0);
     const double lnLambda = compute_coulomb_log(ne, Te_eV);
 
@@ -487,14 +529,24 @@ void FixCollNanbu::nanbu_background_cell(int icell, int np)
     int isp = particles[idx].ispecies;
     if (species[isp].charge == 0.0) continue;
 
-    double Te_eV   = std::max(read_src(srcTe_, idx, icell), 0.0);
-    double ne      = std::max(read_src(srcNe_, idx, icell), 0.0);
-    double Ti_eV   = std::max(read_src(srcTi_bg_, idx, icell), 0.0);
-    double Ni_bg   = std::max(read_src(srcNi_bg_, idx, icell), 0.0);
-    double Vpar_bg = read_src(srcVpar_bg_, idx, icell);
-    double Bx      = read_src(srcBx_, idx, icell);
-    double By      = read_src(srcBy_, idx, icell);
-    double Bz      = read_src(srcBz_, idx, icell);
+    const Particle::OnePart &part = particles[idx];
+    double Te_eV   = use_plasma_data_ ? std::max(pd_interp(pd_->temp_e, part), 0.0)
+                                      : std::max(read_src(srcTe_, idx, icell), 0.0);
+    double ne      = use_plasma_data_ ? std::max(pd_interp(pd_->dens_e, part), 0.0)
+                                      : std::max(read_src(srcNe_, idx, icell), 0.0);
+    double Ti_eV   = use_plasma_data_ ? std::max(pd_interp(pd_->temp_i, part), 0.0)
+                                      : std::max(read_src(srcTi_bg_, idx, icell), 0.0);
+    double Ni_bg   = use_plasma_data_ ? std::max(pd_interp(pd_->dens_i, part), 0.0)
+                                      : std::max(read_src(srcNi_bg_, idx, icell), 0.0);
+    double Vpar_bg = use_plasma_data_ ? pd_interp(pd_->parr_flow, part)
+                                      : read_src(srcVpar_bg_, idx, icell);
+    double Bx = 0.0, By = 0.0, Bz = 0.0;
+    if (use_plasma_data_) pd_bfield_sparta(part, Bx, By, Bz);
+    else {
+      Bx = read_src(srcBx_, idx, icell);
+      By = read_src(srcBy_, idx, icell);
+      Bz = read_src(srcBz_, idx, icell);
+    }
 
     if (Ni_bg <= 0.0 || Ti_eV <= 0.0) continue;
 
@@ -758,4 +810,65 @@ double FixCollNanbu::read_src(const CollGridSrc &S, int ip, int icell) const
   if (S.kind != COLL_SRC_COMP) return 0.0;
   if (!S.arr_cache || S.src_index < 0) return 0.0;
   return S.arr_cache[icell][S.src_index];
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixCollNanbu::particle_rz(const Particle::OnePart &p,
+                               double &R, double &Z) const
+{
+  if (domain->dimension == 2) {
+    R = p.x[0];
+    Z = p.x[1];
+  } else {
+    R = std::sqrt(p.x[0] * p.x[0] + p.x[1] * p.x[1]);
+    Z = p.x[2];
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
+double FixCollNanbu::pd_interp(const std::vector<double> &field,
+                               const Particle::OnePart &p) const
+{
+  if (!pd_) return 0.0;
+  double R, Z;
+  particle_rz(p, R, Z);
+  return pd_->interp2D(field, R, Z);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixCollNanbu::pd_bfield_sparta(const Particle::OnePart &p,
+                                    double &Bx, double &By, double &Bz) const
+{
+  Bx = By = Bz = 0.0;
+  if (!pd_ || !pd_->has_bfield) return;
+
+  double R, Z;
+  particle_rz(p, R, Z);
+
+  double Br = 0.0, Bz_cyl = 0.0, Bt = 0.0;
+  pd_->bfield_at(R, Z, Br, Bz_cyl, Bt);
+
+  if (domain->dimension == 2) {
+    Bx = Br;
+    By = Bz_cyl;
+    Bz = Bt;
+    return;
+  }
+
+  const double rx = p.x[0];
+  const double ry = p.x[1];
+  const double rmag = std::sqrt(rx * rx + ry * ry);
+  if (rmag > 1.0e-20) {
+    const double cphi = rx / rmag;
+    const double sphi = ry / rmag;
+    Bx = Br * cphi - Bt * sphi;
+    By = Br * sphi + Bt * cphi;
+  } else {
+    Bx = Br;
+    By = 0.0;
+  }
+  Bz = Bz_cyl;
 }
