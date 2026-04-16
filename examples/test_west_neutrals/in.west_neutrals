@@ -51,9 +51,13 @@ global              boris_subcycles 5
 # Uses per-particle plasma cache (Te/ne/Ti/vpar) from fix plasma/data
 fix fchem chem/adas 1 1 input/neutral.reactions adas_dir ../../database/adas
 
-# ---- Initial particles: D2 uniformly distributed (seed the volume) ----
+# ---- Initial particles: D2 puff at S3XE/WEST_MULTISPEC source location ----
+# S3X-EIRENE puff: triangle 22252, side 2 -> R = 2.1887 m, Z = -0.6925 m
+# (inner lower divertor, corresponds to wall.surf segment 405).
+# Seed 10,000 D2 in a small region just above that wall segment (inside vessel).
 global              nrho 1e18 temp 300
-create_particles    neutrals n 10000
+region              puff_s3x block 2.16 2.22 -0.68 -0.64 -INF INF
+create_particles    neutrals n 10000 region puff_s3x
 
 # ---- Diagnostics ----
 # Per-species number density (legacy):
