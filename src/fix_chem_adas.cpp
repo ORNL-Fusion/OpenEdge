@@ -148,11 +148,21 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
   maxgrid_plasma = 0;
   plasma_cache_2d = NULL;
 
-  // Expose 4-column per-grid source tally as Fix output (Gkeyll handoff).
-  // Columns: [0]=ionization, [1]=recombination, [2]=CX, [3]=dissociation.
+  // Expose 20-column per-grid source tally as Fix output (Gkeyll handoff).
+  // Layout is quantity-major, so columns 1-4 = ionization/recomb/CX/dissoc
+  // event COUNTS (same semantics as the original 4-column version).
+  //
+  //   cols  1 -  4 : count per cell per reaction type
+  //   cols  5 -  8 : sum of m*vx at each reaction event [kg m/s]
+  //   cols  9 - 12 : sum of m*vy
+  //   cols 13 - 16 : sum of m*vz
+  //   cols 17 - 20 : sum of 0.5*m*(vx^2+vy^2+vz^2)  [J]
+  //
+  // Dividing by a coupling time window t gives {particle, momentum, energy}
+  // source *rates* ready for a Gkeyll collision-operator coefficient.
   // Stored in the inherited base-class array_grid.
   per_grid_flag      = 1;
-  size_per_grid_cols = 4;
+  size_per_grid_cols = 20;
   per_grid_freq      = 1;     // tally is updated every step; dump_grid
                               //   does  (nevery % per_grid_freq)  so this
                               //   MUST be non-zero (SIGFPE otherwise).
@@ -330,14 +340,14 @@ if ((srcTe.kind == SRC_VAR) || (srcNe.kind == SRC_VAR)) {
     memset(&plasma_cache_2d[0][0], 0, sizeof(double)*grid->nlocal*2);
 }
 
-// Allocate per-cell source-tally output (array_grid, 4 cols) up front so
+// Allocate per-cell source-tally output (array_grid, 20 cols) up front so
 // dumps that fire at step 0 (dump_modify ... first yes) see a valid buffer.
 if (grid->maxlocal > maxgrid_src) {
   maxgrid_src = grid->maxlocal;
-  memory->grow(array_grid, maxgrid_src, 4, "chem/adas:array_grid(src)");
+  memory->grow(array_grid, maxgrid_src, 20, "chem/adas:array_grid(src)");
 }
 if (maxgrid_src > 0) {
-  memset(&array_grid[0][0], 0, sizeof(double) * maxgrid_src * 4);
+  memset(&array_grid[0][0], 0, sizeof(double) * maxgrid_src * 20);
 }
 
 // --- resolve COMPUTE sources (new path) ---
@@ -472,17 +482,17 @@ void FixChemAdas::end_of_step_no_average()
 
   deferred_particles.clear();
 
-  // Ensure per-cell source-tally array (4 columns) tracks current grid size.
+  // Ensure per-cell source-tally array (20 columns) tracks current grid size.
   // Persistent (cumulative) across steps -- we grow but do not zero here so
   // dumps can read the running total. Reset is via reset_timestep in input.
   if (grid->maxlocal > maxgrid_src) {
     const int oldmax = maxgrid_src;
     maxgrid_src = grid->maxlocal;
-    memory->grow(array_grid, maxgrid_src, 4, "chem/adas:array_grid(src)");
+    memory->grow(array_grid, maxgrid_src, 20, "chem/adas:array_grid(src)");
     // zero the freshly-added rows
     if (maxgrid_src > oldmax) {
       memset(&array_grid[oldmax][0], 0,
-             sizeof(double) * (maxgrid_src - oldmax) * 4);
+             sizeof(double) * (maxgrid_src - oldmax) * 20);
     }
   }
 
@@ -662,17 +672,37 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3,
   nreact_one++;
 
   // Per-cell source-term tally for Gkeyll / external coupling.
-  // Column index matches ReactionType order: IONIZ=0, RECOMB=1, CX=2, DISS=3.
-  // array_grid is guaranteed sized to grid->nlocal (see end_of_step_no_average).
+  // Quantity-major layout:
+  //   col  0.. 3 = count  (ioniz, recomb, CX, dissoc)
+  //   col  4.. 7 = sum(m*vx)
+  //   col  8..11 = sum(m*vy)
+  //   col 12..15 = sum(m*vz)
+  //   col 16..19 = sum(0.5*m*|v|^2)   [energy in Joules]
+  // Use REACTANT species mass and pre-reaction velocity -- this represents the
+  // sink of the neutral phase-space density at the event. Gkeyll applies its
+  // own <sigma v> times n_e to the neutral moments, so this output is most
+  // useful as a cross-check / direct coupling fallback.
   if (array_grid && icell >= 0 && icell < maxgrid_src) {
-    int src_col = -1;
+    int rtype_off = -1;
     switch (rchosen->type) {
-      case IONIZATION:     src_col = 0; break;
-      case RECOMBINATION:  src_col = 1; break;
-      case EXCHANGE:       src_col = 2; break;
-      case DISSOCIATION:   src_col = 3; break;
+      case IONIZATION:     rtype_off = 0; break;
+      case RECOMBINATION:  rtype_off = 1; break;
+      case EXCHANGE:       rtype_off = 2; break;
+      case DISSOCIATION:   rtype_off = 3; break;
     }
-    if (src_col >= 0) array_grid[icell][src_col] += 1.0;
+    if (rtype_off >= 0) {
+      const double m = particle->species[isp0].mass;       // kg
+      const double vx0 = ip->v[0];
+      const double vy0 = ip->v[1];
+      const double vz0 = ip->v[2];
+      const double ke  = 0.5 * m * (vx0*vx0 + vy0*vy0 + vz0*vz0);
+      double *row = array_grid[icell];
+      row[rtype_off]         += 1.0;
+      row[4  + rtype_off]    += m * vx0;
+      row[8  + rtype_off]    += m * vy0;
+      row[12 + rtype_off]    += m * vz0;
+      row[16 + rtype_off]    += ke;
+    }
   }
 
   // Assign first product

@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
-"""Plot per-cell source terms (ionization, recombination, CX, dissociation)
-from test_west_neutrals at the final dump timestep."""
+"""Plot per-cell source terms (counts + energy deposition) on WEST geometry.
+
+2 rows x 4 columns:
+  Row 1: event counts (ionization / recomb / CX / dissociation)
+  Row 2: energy deposited per cell [J] from the same reactions
+
+Energy is the sum of 0.5 * m * |v|^2 over all reactant particles that
+fired that reaction inside the cell. Divide by a coupling window dt to
+get volumetric power density [W/m^3] -- the input Gkeyll's C^rad or a
+plasma energy-balance coupling needs.
+"""
 
 import os, numpy as np
 import matplotlib
@@ -15,15 +24,14 @@ OUT  = 'output/west_source_terms.png'
 
 
 def parse_last_snapshot(path):
-    """Columns in dump: id xc yc f_fden[1..3] f_fchem[1..4]  (9 columns)"""
     timesteps = []
     current = None
+    state = None
     with open(path) as f:
         for line in f:
             if line.startswith('ITEM: TIMESTEP'):
                 current = {'time': None, 'cells': []}
-                timesteps.append(current)
-                state = 'time'; continue
+                timesteps.append(current); state = 'time'; continue
             if line.startswith('ITEM: NUMBER OF CELLS'):
                 state = 'ncells'; continue
             if line.startswith('ITEM: BOX BOUNDS'):
@@ -36,18 +44,18 @@ def parse_last_snapshot(path):
                 current['time'] = int(parts[0]); state = None
             elif state == 'ncells':
                 state = None
-            elif state == 'cells' and len(parts) >= 9:
+            elif state == 'cells' and len(parts) >= 26:
                 try:
                     current['cells'].append([float(x) for x in parts])
                 except ValueError:
                     pass
     last = timesteps[-1]
-    arr = np.array(last['cells'])
-    return last['time'], arr
+    return last['time'], np.array(last['cells'])
 
 
 def parse_surf(path):
     pts = []; lines = []; mode = None
+    if not os.path.exists(path): return pts, lines
     with open(path) as f:
         for line in f:
             s = line.strip()
@@ -64,8 +72,7 @@ def parse_surf(path):
     return pts, lines
 
 
-def overlay_surf(ax, path, color='k', lw=1.2):
-    if not os.path.exists(path): return
+def overlay(ax, path, color='k', lw=1.0):
     pts, ls = parse_surf(path)
     for a, b in ls:
         if 0 < a <= len(pts) and 0 < b <= len(pts):
@@ -76,15 +83,15 @@ def overlay_surf(ax, path, color='k', lw=1.2):
 t, arr = parse_last_snapshot(DUMP)
 print(f'Final dump step {t}, cells = {len(arr)}')
 
-x = arr[:, 1]
-y = arr[:, 2]
-# f_fden: D2=3, D=4, D+=5  (3-column species density)
-# f_fchem: ioniz=6, recomb=7, CX=8, diss=9
-nIon   = arr[:, 6]
-nRec   = arr[:, 7]
-nCx    = arr[:, 8]
-nDiss  = arr[:, 9]
-print(f'Totals - Ion:{nIon.sum():.0f}  Rec:{nRec.sum():.0f}  CX:{nCx.sum():.0f}  Diss:{nDiss.sum():.0f}')
+x = arr[:, 1]; y = arr[:, 2]
+
+# Column layout per save_snapshots.py
+counts = arr[:, 6:10]    # ion, rec, cx, dis
+energy = arr[:, 22:26]   # ion, rec, cx, dis
+print(f'Total counts - Ion:{counts[:,0].sum():.0f}  Rec:{counts[:,1].sum():.0f}  '
+      f'CX:{counts[:,2].sum():.0f}  Diss:{counts[:,3].sum():.0f}')
+print(f'Total energy [J] - Ion:{energy[:,0].sum():.3e}  CX:{energy[:,2].sum():.3e}  '
+      f'Diss:{energy[:,3].sum():.3e}')
 
 nx, ny = 120, 160
 xg = np.linspace(x.min(), x.max(), nx + 1)
@@ -94,38 +101,44 @@ def bin2d(vals):
     H, _, _ = np.histogram2d(x, y, bins=[xg, yg], weights=vals)
     return H.T
 
-def plot_panel(ax, grid, title, cmap):
+def panel(ax, grid, title, cmap, unit):
     finite = grid[grid > 0]
     if finite.size == 0:
         ax.text(0.5, 0.5, 'no events', transform=ax.transAxes,
                 ha='center', va='center', color='gray')
         vmin, vmax = 1, 10
     else:
-        vmin = max(1.0, finite.max() * 1e-3)
+        vmin = max(finite.max() * 1e-3, np.finfo(float).tiny)
         vmax = finite.max()
     grid_plot = np.where(grid > 0, grid, np.nan)
     im = ax.imshow(grid_plot, origin='lower',
                    extent=[xg[0], xg[-1], yg[0], yg[-1]],
                    aspect='equal', cmap=cmap,
                    norm=LogNorm(vmin=vmin, vmax=vmax))
-    overlay_surf(ax, WALL, color='k',    lw=0.9)
-    overlay_surf(ax, CORE, color='cyan', lw=0.8)
-    ax.set_xlabel('R [m]')
-    ax.set_title(title, fontsize=11)
-    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04,
-                 label='events per cell')
+    overlay(ax, WALL, color='k',    lw=0.8)
+    overlay(ax, CORE, color='cyan', lw=0.7)
+    ax.set_title(title, fontsize=10)
+    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label=unit)
 
-fig, axes = plt.subplots(1, 4, figsize=(18, 6), sharey=True)
-plot_panel(axes[0], bin2d(nIon),  r'Ionization: $D \rightarrow D^+$',     'Reds')
-plot_panel(axes[1], bin2d(nRec),  r'Recombination: $D^+ \rightarrow D$',  'Purples')
-plot_panel(axes[2], bin2d(nCx),   r'Charge exchange: $D^+ + D$',          'Blues')
-plot_panel(axes[3], bin2d(nDiss), r'Dissociation: $D_2 \rightarrow 2D$',  'Greens')
-axes[0].set_ylabel('Z [m]')
+titles = ['Ionization', 'Recombination', 'Charge exchange', 'Dissociation']
+cmaps_cnt = ['Reds', 'Purples', 'Blues', 'Greens']
+cmaps_E   = ['OrRd', 'BuPu',    'PuBu',  'YlGn']
+
+fig, axes = plt.subplots(2, 4, figsize=(18, 10), sharey=True)
+for j in range(4):
+    panel(axes[0, j], bin2d(counts[:, j]),
+          f'Count -- {titles[j]}', cmaps_cnt[j], 'events/cell')
+    panel(axes[1, j], bin2d(energy[:, j]),
+          f'Energy source -- {titles[j]}', cmaps_E[j], 'J/cell (cumulative)')
+for ax in axes.flat:
+    ax.set_xlabel('R [m]')
+for ax in axes[:, 0]:
+    ax.set_ylabel('Z [m]')
 
 fig.suptitle(f'OpenEdge per-cell source tallies on WEST  (t = {t*1e-7*1e3:.2f} ms)\n'
-             f'Cumulative events per cell -- Gkeyll-ready output from new '
-             f'fix chem/adas source-tally channel',
-             fontsize=12)
+             f'Top row: particle source count.  Bottom row: kinetic energy deposited.\n'
+             f'Gkeyll handoff: divide by coupling window dt -> source rate / power density.',
+             fontsize=11)
 plt.tight_layout()
 plt.savefig(OUT, dpi=140, bbox_inches='tight')
 print(f'Saved {OUT}')
