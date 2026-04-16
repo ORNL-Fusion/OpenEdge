@@ -1,140 +1,255 @@
 #!/usr/bin/env python3
-"""Plot per-species moments (density, bulk speed, temperature) on WEST.
+"""Plot per-species moments (n, u_R, u_Z, u_phi, T in eV) on WEST using the
+smoothed binning / wall-masking approach. Each velocity component shown
+separately with a diverging colormap (sign matters -- u/v/w are signed
+Cartesian components, not magnitudes).
 
-3 rows x 3 columns (one column per species D2 / D / D+).
-  Row 1: density n [m^-3]      (log scale)
-  Row 2: bulk speed |u| [m/s]  (linear)
-  Row 3: temperature T [K]     (linear, masked where n == 0)
-
-These are exactly the moments of f_n that Gkeyll's C^iz / C^cx operators
-consume (together with ADAS/Janev rate coefficients applied on the Gkeyll
-side). Produced by SPARTA's compute grid ... species n u v w temp --
-no OpenEdge-specific code needed.
+Layout per figure:  species in columns,  {n, u_R, u_Z, T_eV} in rows.
+By default plots D2, D, D+ (3 columns, 4 rows = 12 panels).
 """
 
-import os, numpy as np
-import matplotlib
-matplotlib.use('Agg')
+import argparse
+from pathlib import Path
+import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm, Normalize
+from matplotlib.path import Path as MplPath
+from matplotlib.colors import LogNorm, TwoSlopeNorm
 
-NPZ  = 'output/snapshots.npz'
-WALL = 'input/wall.surf'
-CORE = 'input/core.surf'
-OUT  = 'output/west_neutral_moments.png'
+# Reuse helpers from the smoother reference script
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from plot_grid_density_west import (
+    parse_surface, parse_grid_dump, make_binned_grid, smooth_masked_grid,
+    mask_outside_wall, centers_to_edges, default_display_bins,
+)
 
-d = np.load(NPZ)
-k = -1  # last snapshot
-x, y = d['x'], d['y']
-xg, yg = d['xg'], d['yg']
+K_PER_EV = 11604.505  # K per 1 eV
 
-
-def bin2d_mean(vals, weights=None):
-    """Average cell-center samples into a regular grid. If weights is given,
-    compute a weighted mean (vals assumed to be already cell-averaged)."""
-    H, _, _ = np.histogram2d(x, y, bins=[xg, yg], weights=vals)
-    C, _, _ = np.histogram2d(x, y, bins=[xg, yg])
-    out = np.where(C > 0, H / np.maximum(C, 1), np.nan)
-    return out.T
-
-
-def parse_surf(path):
-    pts = []; lines = []; mode = None
-    if not os.path.exists(path): return pts, lines
-    with open(path) as f:
-        for line in f:
-            s = line.strip()
-            if not s or s.startswith('#'): continue
-            if 'Points' in s: mode = 'pts'; continue
-            if 'Lines'  in s: mode = 'lines'; continue
-            parts = s.split()
-            if mode == 'pts' and len(parts) >= 3:
-                try: pts.append((float(parts[1]), float(parts[2])))
-                except ValueError: pass
-            elif mode == 'lines' and len(parts) >= 3:
-                try: lines.append((int(parts[1]), int(parts[2])))
-                except ValueError: pass
-    return pts, lines
-
-
-def overlay(ax, path, color='k', lw=0.8):
-    pts, ls = parse_surf(path)
-    for a, b in ls:
-        if 0 < a <= len(pts) and 0 < b <= len(pts):
-            x0, y0 = pts[a - 1]; x1, y1 = pts[b - 1]
-            ax.plot([x0, x1], [y0, y1], color=color, lw=lw, alpha=0.9)
-
-
-def panel(ax, grid, title, cmap, norm, unit):
-    im = ax.imshow(grid, origin='lower',
-                   extent=[xg[0], xg[-1], yg[0], yg[-1]],
-                   aspect='equal', cmap=cmap, norm=norm)
-    overlay(ax, WALL, color='k', lw=0.7)
-    overlay(ax, CORE, color='cyan', lw=0.6)
-    ax.set_title(title, fontsize=10)
-    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label=unit)
-
-
-species = ['D$_2$', 'D', 'D$^+$']
-n_arrs = [d['n_D2'][k],  d['n_D'][k],  d['n_Dp'][k]]
-u_arrs = [d['u_D2'][k],  d['u_D'][k],  d['u_Dp'][k]]
-v_arrs = [d['v_D2'][k],  d['v_D'][k],  d['v_Dp'][k]]
-w_arrs = [d['w_D2'][k],  d['w_D'][k],  d['w_Dp'][k]]
-T_arrs = [d['T_D2'][k],  d['T_D'][k],  d['T_Dp'][k]]
-
-fig, axes = plt.subplots(3, 3, figsize=(13.5, 12.5), sharey=True, sharex=True)
-cmaps_n = ['Blues', 'Reds', 'Greens']
-
-for j, sp in enumerate(species):
-    n_raw = n_arrs[j]
-    nbin = bin2d_mean(n_raw)
-    # Bulk speed magnitude
-    speed = np.sqrt(u_arrs[j]**2 + v_arrs[j]**2 + w_arrs[j]**2)
-    # Mask speed and T where n=0 (else 'T' is a meaningless stat from 0 samples)
-    mask = n_raw > 0
-    speed_masked = np.where(mask, speed, np.nan)
-    T_masked     = np.where(mask, T_arrs[j], np.nan)
-    sbin = bin2d_mean(speed_masked)
-    Tbin = bin2d_mean(T_masked)
-
-    # density (log)
-    finite = nbin[np.isfinite(nbin) & (nbin > 0)]
-    if finite.size:
-        nmax = finite.max(); nmin = max(finite.min(), nmax * 1e-4)
-        norm_n = LogNorm(vmin=nmin, vmax=nmax)
+def plot_moment_fixed(ax, x, y, grid, valid, wall_poly, title, cmap, mode,
+                      vmin, vmax, puff_point=None):
+    """Version of plot_moment with externally specified vmin/vmax (for shared
+    row-wise color scales)."""
+    from matplotlib.colors import LogNorm, Normalize, TwoSlopeNorm
+    masked = mask_outside_wall(x, y, grid, wall_poly, valid)
+    norm = None
+    if mode == 'log':
+        masked = np.ma.masked_less_equal(masked, 0.0)
+        norm = LogNorm(vmin=max(vmin, 1e-30), vmax=max(vmax, vmin * 10))
+    elif mode == 'divergent':
+        amp = max(abs(vmin), abs(vmax), 1e-30)
+        norm = TwoSlopeNorm(vmin=-amp, vcenter=0.0, vmax=amp)
     else:
-        norm_n = LogNorm(vmin=1, vmax=10)
-    panel(axes[0, j], nbin, f'n({sp}) [m$^{{-3}}$]', cmaps_n[j], norm_n, '')
+        norm = Normalize(vmin=vmin, vmax=vmax)
+    r_edges, z_edges = np.meshgrid(centers_to_edges(x), centers_to_edges(y))
+    m = ax.pcolormesh(r_edges, z_edges, masked, shading='flat',
+                      cmap=cmap, norm=norm)
+    if wall_poly.size:
+        ax.plot(wall_poly[:, 0], wall_poly[:, 1], 'k', lw=1.0)
+    if puff_point is not None:
+        ax.plot(puff_point[0], puff_point[1], marker='*', markersize=14,
+                color='yellow', markeredgecolor='k', markeredgewidth=0.8)
+    plt.colorbar(m, ax=ax, pad=0.01, fraction=0.04, shrink=0.85)
+    ax.set_title(title, fontsize=11)
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_xlabel('R [m]'); ax.set_ylabel('Z [m]')
+    ax.grid(alpha=0.2, linestyle='--')
 
-    # bulk speed (linear)
-    if np.isfinite(sbin).any():
-        smax = np.nanmax(sbin)
-        norm_s = Normalize(vmin=0, vmax=max(smax, 1.0))
-    else:
-        norm_s = Normalize(vmin=0, vmax=1)
-    panel(axes[1, j], sbin, f'|u|({sp}) [m/s]', 'magma', norm_s, '')
 
-    # temperature (linear, but clamp to reasonable bounds)
-    finiteT = Tbin[np.isfinite(Tbin) & (Tbin > 0)]
-    if finiteT.size:
-        # clip to 1st..99th percentile to keep color scale informative
-        lo = np.percentile(finiteT, 2)
-        hi = np.percentile(finiteT, 98)
-        norm_T = Normalize(vmin=lo, vmax=hi)
-    else:
-        norm_T = Normalize(vmin=0, vmax=1)
-    panel(axes[2, j], Tbin, f'T({sp}) [K]', 'plasma', norm_T, '')
+def plot_moment(ax, x, y, grid, valid, wall_poly, title, cmap,
+                norm_mode='log', puff_point=None, sym=False,
+                log_vmax_quantile=99.5, log_span=4.0):
+    """norm_mode in {'log', 'linear', 'divergent'}. Temperature uses 'linear',
+    signed velocities use 'divergent', density uses 'log'."""
+    masked = mask_outside_wall(x, y, grid, wall_poly, valid)
+    vmin = vmax = None
 
-for ax in axes[:, 0]:
-    ax.set_ylabel('Z [m]')
-for ax in axes[-1, :]:
-    ax.set_xlabel('R [m]')
+    if norm_mode == 'log':
+        masked = np.ma.masked_less_equal(masked, 0.0)
+        masked = np.ma.log10(masked)
+        vals = np.asarray(masked.compressed(), dtype=float)
+        if vals.size:
+            vmax = (float(vals.max()) if log_vmax_quantile >= 100
+                    else float(np.percentile(vals, log_vmax_quantile)))
+            vmin = float(vals.min())
+            if log_span > 0: vmin = max(vmin, vmax - log_span)
+        norm = None
+    elif norm_mode == 'divergent':
+        vals = np.asarray(masked.compressed(), dtype=float)
+        if vals.size:
+            amp = max(abs(np.percentile(vals, 2)),
+                      abs(np.percentile(vals, 98)))
+            if amp == 0: amp = 1.0
+            norm = TwoSlopeNorm(vmin=-amp, vcenter=0.0, vmax=amp)
+        else:
+            norm = TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1)
+    else:  # 'linear'
+        vals = np.asarray(masked.compressed(), dtype=float)
+        if vals.size:
+            vmin = float(np.percentile(vals, 2))
+            vmax = float(np.percentile(vals, 98))
+        norm = None
 
-fig.suptitle(f'OpenEdge per-species moments on WEST  (t = {d["times_ms"][k]:.2f} ms)\n'
-             f'Rows: density / bulk speed / temperature. '
-             f'Columns: D$_2$ / D / D$^+$.\n'
-             f'Exact inputs that Gkeyll\'s C$^{{iz}}$ / C$^{{cx}}$ collision operators consume.',
-             fontsize=11)
-plt.tight_layout()
-plt.savefig(OUT, dpi=140, bbox_inches='tight')
-print(f'Saved {OUT}')
+    r_edges, z_edges = np.meshgrid(centers_to_edges(x), centers_to_edges(y))
+    m = ax.pcolormesh(r_edges, z_edges, masked, shading='flat',
+                      cmap=cmap, vmin=vmin, vmax=vmax, norm=norm)
+    # Wall polygon outline
+    if wall_poly.size:
+        ax.plot(wall_poly[:, 0], wall_poly[:, 1], 'k', lw=1.0)
+    if puff_point is not None:
+        ax.plot(puff_point[0], puff_point[1], marker='*', markersize=14,
+                color='yellow', markeredgecolor='k', markeredgewidth=0.8)
+    plt.colorbar(m, ax=ax, pad=0.01, fraction=0.04, shrink=0.85)
+    ax.set_title(title, fontsize=11)
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_xlabel('R [m]'); ax.set_ylabel('Z [m]')
+    ax.grid(alpha=0.2, linestyle='--')
+
+
+def main():
+    here = Path(__file__).resolve().parent
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--dump', default=str(here / 'output' / 'grid.west'))
+    ap.add_argument('--wall', default=str(here / 'input' / 'wall.surf'))
+    ap.add_argument('--timestep', default='last')
+    ap.add_argument('--species', nargs='+', default=['D2', 'D', 'D+'],
+                    help='species labels (same order as in dump f_fmom grouping)')
+    ap.add_argument('--target-bins', type=int, default=160)
+    ap.add_argument('--smooth', type=float, default=0.8)
+    ap.add_argument('--puff', nargs=2, type=float, default=[2.1887, -0.6925])
+    ap.add_argument('--out', default=str(here / 'output' / 'west_moments_smooth.png'))
+    ap.add_argument('--title', default='WEST per-species moments of f_n  (smoothed)')
+    args = ap.parse_args()
+
+    blocks = parse_grid_dump(Path(args.dump))
+    ts = max(blocks.keys()) if args.timestep == 'last' else int(args.timestep)
+    header, cols = blocks[ts]
+    hmap = {h: i for i, h in enumerate(header)}
+
+    xc = cols[hmap['xc']]; yc = cols[hmap['yc']]
+
+    # f_fmom layout (SPARTA compute grid ... species <quantities>,
+    # 3 species, 5 quantities = 15 cols). Species-MAJOR ordering:
+    #   [1]..[5]   = nrho, u, v, w, T  for D2
+    #   [6]..[10]  = nrho, u, v, w, T  for D
+    #  [11]..[15]  = nrho, u, v, w, T  for D+
+    idx_n = [hmap[f'f_fmom[{1 + 5*j}]'] for j in range(3)]
+    idx_u = [hmap[f'f_fmom[{2 + 5*j}]'] for j in range(3)]
+    idx_v = [hmap[f'f_fmom[{3 + 5*j}]'] for j in range(3)]
+    idx_w = [hmap[f'f_fmom[{4 + 5*j}]'] for j in range(3)]
+    idx_T = [hmap[f'f_fmom[{5 + 5*j}]'] for j in range(3)]
+
+    wall_r, wall_z, wall_poly = parse_surface(Path(args.wall))
+
+    xmin = float(xc.min()); xmax = float(xc.max())
+    ymin = float(yc.min()); ymax = float(yc.max())
+    if wall_poly.size:
+        xmin = min(xmin, float(wall_poly[:, 0].min())); xmax = max(xmax, float(wall_poly[:, 0].max()))
+        ymin = min(ymin, float(wall_poly[:, 1].min())); ymax = max(ymax, float(wall_poly[:, 1].max()))
+
+    nbx, nby = default_display_bins(xmin, xmax, ymin, ymax,
+                                    args.target_bins, len(xc))
+
+    def bin_smooth(vals, valid_pts=None):
+        """Bin vals over cells; if valid_pts is given, use only those cells
+        (avoids polluting moments with zeros from empty cells)."""
+        if valid_pts is not None:
+            use_xc = xc[valid_pts]; use_yc = yc[valid_pts]
+            use_v  = vals[valid_pts]
+        else:
+            use_xc = xc; use_yc = yc; use_v = vals
+        x, y, g, v = make_binned_grid(use_xc, use_yc, use_v, nbx, nby, 'mean',
+                                      (xmin, xmax, ymin, ymax))
+        g, v = smooth_masked_grid(g, v, args.smooth)
+        return x, y, g, v
+
+    sps = args.species
+    ncol = len(sps); nrow = 5   # n, u, v, w, T
+    fig, axes = plt.subplots(nrow, ncol, figsize=(5.2 * ncol, 4.8 * nrow),
+                             squeeze=False, constrained_layout=True)
+
+    # First pass: bin all data so we can compute shared color limits per row.
+    panel_data = []   # list of (x, y, gn, gu, gv, gw, gT, vn) per species
+    for j, sp in enumerate(sps):
+        n_raw = cols[idx_n[j]]
+        u_raw = cols[idx_u[j]]
+        v_raw = cols[idx_v[j]]
+        w_raw = cols[idx_w[j]]
+        T_raw = cols[idx_T[j]]
+        nz = n_raw > 0
+        x, y, gn, vn = bin_smooth(n_raw, valid_pts=nz)
+        _, _, gu, _  = bin_smooth(u_raw, valid_pts=nz)
+        _, _, gv, _  = bin_smooth(v_raw, valid_pts=nz)
+        _, _, gw, _  = bin_smooth(w_raw, valid_pts=nz)
+        _, _, gT, _  = bin_smooth(T_raw / K_PER_EV, valid_pts=nz)
+        panel_data.append((x, y, gn, gu, gv, gw, gT, vn))
+
+    def row_bounds(arrs, valids, mode):
+        """Compute shared (vmin, vmax) using only cells inside the valid mask.
+        mode: 'log', 'linear', or 'divergent'."""
+        vals_all = []
+        for a, v in zip(arrs, valids):
+            m = np.asarray(a)
+            ok = v & np.isfinite(m)
+            vals_all.append(m[ok].ravel())
+        vals = np.concatenate(vals_all) if vals_all else np.array([])
+        if vals.size == 0:
+            return (0.0, 1.0)
+        if mode == 'log':
+            positive = vals[vals > 0]
+            if positive.size == 0: return (1e-30, 1.0)
+            lo = np.percentile(positive, 2); hi = np.percentile(positive, 99.5)
+            lo = max(lo, hi * 1e-4)
+            return (lo, hi)
+        if mode == 'divergent':
+            # ignore zeros (empty cells); only use nonzero entries
+            nonzero = vals[np.abs(vals) > 0]
+            if nonzero.size == 0: return (-1.0, 1.0)
+            amp = max(abs(np.percentile(nonzero, 2)),
+                      abs(np.percentile(nonzero, 98)))
+            return (-amp, amp) if amp > 0 else (-1.0, 1.0)
+        # linear
+        nonzero = vals[np.abs(vals) > 0]
+        if nonzero.size == 0: return (0.0, 1.0)
+        return (float(np.percentile(nonzero, 2)),
+                float(np.percentile(nonzero, 98)))
+
+    # Shared color limits per row (use density-based valid mask)
+    valids = [pd[7] for pd in panel_data]
+    n_vmin, n_vmax = row_bounds([pd[2] for pd in panel_data], valids, 'log')
+    u_vmin, u_vmax = row_bounds([pd[3] for pd in panel_data], valids, 'divergent')
+    v_vmin, v_vmax = row_bounds([pd[4] for pd in panel_data], valids, 'divergent')
+    w_vmin, w_vmax = row_bounds([pd[5] for pd in panel_data], valids, 'divergent')
+    T_vmin, T_vmax = row_bounds([pd[6] for pd in panel_data], valids, 'linear')
+    print(f'Shared limits -- n: [{n_vmin:.2e}, {n_vmax:.2e}]')
+    print(f'  u: [{u_vmin:.2f}, {u_vmax:.2f}] m/s')
+    print(f'  v: [{v_vmin:.2f}, {v_vmax:.2f}] m/s')
+    print(f'  w: [{w_vmin:.2f}, {w_vmax:.2f}] m/s')
+    print(f'  T: [{T_vmin:.3f}, {T_vmax:.3f}] eV')
+
+    # Render with fixed row-wise limits
+    for j, sp in enumerate(sps):
+        x, y, gn, gu, gv, gw, gT, vn = panel_data[j]
+        plot_moment_fixed(axes[0, j], x, y, gn, vn, wall_poly,
+                          f'n({sp}) [m$^{{-3}}$]', 'plasma', 'log',
+                          n_vmin, n_vmax, args.puff)
+        plot_moment_fixed(axes[1, j], x, y, gu, vn, wall_poly,
+                          f'u({sp}) [m/s]  (x)', 'RdBu_r', 'divergent',
+                          u_vmin, u_vmax, args.puff)
+        plot_moment_fixed(axes[2, j], x, y, gv, vn, wall_poly,
+                          f'v({sp}) [m/s]  (y)', 'RdBu_r', 'divergent',
+                          v_vmin, v_vmax, args.puff)
+        plot_moment_fixed(axes[3, j], x, y, gw, vn, wall_poly,
+                          f'w({sp}) [m/s]  (z)', 'RdBu_r', 'divergent',
+                          w_vmin, w_vmax, args.puff)
+        plot_moment_fixed(axes[4, j], x, y, gT, vn, wall_poly,
+                          f'T({sp}) [eV]', 'inferno', 'linear',
+                          T_vmin, T_vmax, args.puff)
+
+    fig.suptitle(f'{args.title}  (t = {ts*1e-7*1e3:.2f} ms)', fontsize=13)
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(args.out, dpi=160, bbox_inches='tight')
+    print(f'Wrote {args.out}')
+
+
+if __name__ == '__main__':
+    main()

@@ -69,7 +69,7 @@ fix    fden ave/grid all 1 100 1000 c_cden[*] ave running
 # Three species (D2, D, D+) => 15 columns total.  (D+ moments included
 # even though Gkeyll would consume only the neutral species; useful for
 # diagnostic.)
-compute cmom grid all species n u v w temp
+compute cmom grid all species nrho u v w temp
 fix    fmom ave/grid all 1 100 1000 c_cmom[*] ave running
 
 timestep            1e-07
