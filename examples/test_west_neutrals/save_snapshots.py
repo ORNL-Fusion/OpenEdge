@@ -56,7 +56,7 @@ def parse_all(path):
                 current['step'] = int(parts[0]); state = None
             elif state == 'ncells':
                 state = None
-            elif state == 'cells' and len(parts) >= 26:
+            elif state == 'cells' and len(parts) >= 41:
                 try:
                     current['rows'].append([float(x) for x in parts])
                 except ValueError:
@@ -110,6 +110,14 @@ src_mz_ion = slot(18); src_mz_rec = slot(19); src_mz_cx = slot(20); src_mz_dis =
 # Energy per reaction
 src_E_ion  = slot(22); src_E_rec  = slot(23); src_E_cx  = slot(24); src_E_dis  = slot(25)
 
+# f_fmom layout: per species {n, u, v, w, T} with 3 species (D2, D, D+)
+# Columns 26..40 (0-indexed): 26-28 n, 29-31 u, 32-34 v, 35-37 w, 38-40 T
+n_D2   = slot(26); n_D   = slot(27); n_Dp   = slot(28)
+u_D2   = slot(29); u_D   = slot(30); u_Dp   = slot(31)
+v_D2   = slot(32); v_D   = slot(33); v_Dp   = slot(34)
+w_D2   = slot(35); w_D   = slot(36); w_Dp   = slot(37)
+T_D2   = slot(38); T_D   = slot(39); T_Dp   = slot(40)
+
 # Bin edges for default heatmap plots
 nx, ny = 120, 160
 xg = np.linspace(x.min(), x.max(), nx + 1)
@@ -129,6 +137,12 @@ np.savez_compressed(
     src_mz_ion=src_mz_ion, src_mz_rec=src_mz_rec, src_mz_cx=src_mz_cx, src_mz_dis=src_mz_dis,
     # energy
     src_E_ion=src_E_ion, src_E_rec=src_E_rec, src_E_cx=src_E_cx, src_E_dis=src_E_dis,
+    # per-species moments (Gkeyll-ready)
+    n_D2=n_D2, n_D=n_D, n_Dp=n_Dp,
+    u_D2=u_D2, u_D=u_D, u_Dp=u_Dp,
+    v_D2=v_D2, v_D=v_D, v_Dp=v_Dp,
+    w_D2=w_D2, w_D=w_D, w_Dp=w_Dp,
+    T_D2=T_D2, T_D=T_D, T_Dp=T_Dp,
     xg=xg, yg=yg,
 )
 print(f'Saved {OUT}  ({os.path.getsize(OUT)/1e6:.2f} MB)')

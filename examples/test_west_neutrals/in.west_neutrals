@@ -56,8 +56,17 @@ global              nrho 1e18 temp 300
 create_particles    neutrals n 10000
 
 # ---- Diagnostics ----
+# Per-species number density (legacy):
 compute cden grid all species nrho
 fix    fden ave/grid all 1 100 1000 c_cden[*] ave running
+
+# Per-species MOMENTS of f_n (Gkeyll coupling handoff).
+# Columns per species: n [m^-3], u [m/s], v [m/s], w [m/s], T [K].
+# Three species (D2, D, D+) => 15 columns total.  (D+ moments included
+# even though Gkeyll would consume only the neutral species; useful for
+# diagnostic.)
+compute cmom grid all species n u v w temp
+fix    fmom ave/grid all 1 100 1000 c_cmom[*] ave running
 
 timestep            1e-07
 stats               500
@@ -66,11 +75,21 @@ stats_style         step cpu np
 # Phase A: warmup run (let particles transport & reactions equilibrate)
 run                 2000
 
-# Phase B: production + dump density maps AND per-cell source terms.
-# f_fden[*]  = D2, D, D+ number densities (3 cols)
-# f_fchem[*] = ionization, recombination, CX, dissociation source tallies (4 cols)
-#              (cumulative event counts per cell; Gkeyll-ready source map)
-dump    dgrid grid all 1000 output/grid.west id xc yc f_fden[*] f_fchem[*]
+# Phase B: production + dump grid fields.
+# Dump layout:
+#   cols 1-3:   id xc yc
+#   cols 4-6:   f_fden[*]   = D2, D, D+ number densities (3 cols)
+#   cols 7-26:  f_fchem[*]  = 20-col source tally:
+#                 7-10   counts (ion, rec, CX, dis)
+#                 11-14  sum(m*vx) per reaction  [kg m/s]
+#                 15-18  sum(m*vy)
+#                 19-22  sum(m*vz)
+#                 23-26  sum(0.5 m |v|^2)         [J]
+#   cols 27-41: f_fmom[*]   = per-species moments {n, u, v, w, T}
+#                 5 quantities x 3 species = 15 cols
+#                 27-29 n(D2), n(D), n(D+)
+#                 30-32 u(D2), u(D), u(D+)     ... and so on
+dump    dgrid grid all 1000 output/grid.west id xc yc f_fden[*] f_fchem[*] f_fmom[*]
 dump_modify dgrid first yes
 run                 5000
 
