@@ -60,10 +60,20 @@ public:
 int    use_grid_plasma = 0;
 char  *tstr = NULL, *nstr = NULL;
 int    tvar = -1,   nvar = -1;
-double **array_grid = NULL;
 GridSrc srcTe, srcNe;
     inline void compute_plasma_grid();
 double read_cell(const GridSrc &S, int icell, int var_col /*0=Te,1=ne*/);
+
+// Per-cell source-term output for Gkeyll / external coupling.
+// Columns: 0=ionization, 1=recombination, 2=charge exchange, 3=dissociation.
+// Units: cumulative event count per cell since fix start (stored as double).
+// Exposed via the inherited base-class array_grid with size_per_grid_cols = 4.
+// Allocated lazily when grid->nlocal changes (see ensure_src_alloc).
+int maxgrid_src = 0;
+
+// Internal 2-column buffer used to cache Te/ne from variables/computes during
+// attempt() when use_grid_plasma is set. Distinct from the output array_grid.
+double **plasma_cache_2d = NULL;
 
 
 

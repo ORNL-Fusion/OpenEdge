@@ -146,7 +146,18 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
 
   tvar = nvar = -1;
   maxgrid_plasma = 0;
-  array_grid = NULL;
+  plasma_cache_2d = NULL;
+
+  // Expose 4-column per-grid source tally as Fix output (Gkeyll handoff).
+  // Columns: [0]=ionization, [1]=recombination, [2]=CX, [3]=dissociation.
+  // Stored in the inherited base-class array_grid.
+  per_grid_flag      = 1;
+  size_per_grid_cols = 4;
+  per_grid_freq      = 1;     // tally is updated every step; dump_grid
+                              //   does  (nevery % per_grid_freq)  so this
+                              //   MUST be non-zero (SIGFPE otherwise).
+  array_grid         = NULL;
+  maxgrid_src        = 0;
 
 }
 
@@ -180,6 +191,7 @@ FixChemAdas::~FixChemAdas()
   memory->destroy(list_ij);
 
 delete [] tstr; delete [] nstr;
+memory->destroy(plasma_cache_2d);
 memory->destroy(array_grid);
 delete rng_adas;
 
@@ -311,11 +323,21 @@ if (srcNe.kind == SRC_VAR) {
 if ((srcTe.kind == SRC_VAR) || (srcNe.kind == SRC_VAR)) {
   if (grid->nlocal > maxgrid_plasma) {
     maxgrid_plasma = grid->maxlocal;
-    memory->destroy(array_grid);
-    memory->create(array_grid, maxgrid_plasma, 2, "chem/adas:array_grid");
+    memory->destroy(plasma_cache_2d);
+    memory->create(plasma_cache_2d, maxgrid_plasma, 2, "chem/adas:plasma_cache_2d");
   }
   if (grid->nlocal)
-    memset(&array_grid[0][0], 0, sizeof(double)*grid->nlocal*2);
+    memset(&plasma_cache_2d[0][0], 0, sizeof(double)*grid->nlocal*2);
+}
+
+// Allocate per-cell source-tally output (array_grid, 4 cols) up front so
+// dumps that fire at step 0 (dump_modify ... first yes) see a valid buffer.
+if (grid->maxlocal > maxgrid_src) {
+  maxgrid_src = grid->maxlocal;
+  memory->grow(array_grid, maxgrid_src, 4, "chem/adas:array_grid(src)");
+}
+if (maxgrid_src > 0) {
+  memset(&array_grid[0][0], 0, sizeof(double) * maxgrid_src * 4);
 }
 
 // --- resolve COMPUTE sources (new path) ---
@@ -449,6 +471,20 @@ void FixChemAdas::end_of_step_no_average()
   int nglocal = grid->nlocal;
 
   deferred_particles.clear();
+
+  // Ensure per-cell source-tally array (4 columns) tracks current grid size.
+  // Persistent (cumulative) across steps -- we grow but do not zero here so
+  // dumps can read the running total. Reset is via reset_timestep in input.
+  if (grid->maxlocal > maxgrid_src) {
+    const int oldmax = maxgrid_src;
+    maxgrid_src = grid->maxlocal;
+    memory->grow(array_grid, maxgrid_src, 4, "chem/adas:array_grid(src)");
+    // zero the freshly-added rows
+    if (maxgrid_src > oldmax) {
+      memset(&array_grid[oldmax][0], 0,
+             sizeof(double) * (maxgrid_src - oldmax) * 4);
+    }
+  }
 
   // Fast path: read Te/ne/Ti/vpar/B from per-particle plasma cache
   if (update->plasma_cache_flag &&
@@ -625,6 +661,20 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3,
   tally_reactions[best_idx]++;
   nreact_one++;
 
+  // Per-cell source-term tally for Gkeyll / external coupling.
+  // Column index matches ReactionType order: IONIZ=0, RECOMB=1, CX=2, DISS=3.
+  // array_grid is guaranteed sized to grid->nlocal (see end_of_step_no_average).
+  if (array_grid && icell >= 0 && icell < maxgrid_src) {
+    int src_col = -1;
+    switch (rchosen->type) {
+      case IONIZATION:     src_col = 0; break;
+      case RECOMBINATION:  src_col = 1; break;
+      case EXCHANGE:       src_col = 2; break;
+      case DISSOCIATION:   src_col = 3; break;
+    }
+    if (src_col >= 0) array_grid[icell][src_col] += 1.0;
+  }
+
   // Assign first product
   ip->ispecies = rchosen->products[0];
 
@@ -714,16 +764,16 @@ inline void FixChemAdas::compute_plasma_grid() {
 
   if (grid->maxlocal > maxgrid_plasma) {
     maxgrid_plasma = grid->maxlocal;
-    memory->destroy(array_grid);
-    memory->create(array_grid, maxgrid_plasma, 2, "chem/adas:array_grid");
+    memory->destroy(plasma_cache_2d);
+    memory->create(plasma_cache_2d, maxgrid_plasma, 2, "chem/adas:plasma_cache_2d");
   }
 
-  // array_grid[icell][0]=Te ; [icell][1]=ne
-  if (grid->nlocal) memset(&array_grid[0][0], 0, sizeof(double)*grid->nlocal*2);
+  // plasma_cache_2d[icell][0]=Te ; [icell][1]=ne
+  if (grid->nlocal) memset(&plasma_cache_2d[0][0], 0, sizeof(double)*grid->nlocal*2);
 
   const int stride = 2;
-  if (need_Te) input->variable->compute_grid(tvar, &array_grid[0][0], stride, 0);
-  if (need_ne) input->variable->compute_grid(nvar, &array_grid[0][1], stride, 0);
+  if (need_Te) input->variable->compute_grid(tvar, &plasma_cache_2d[0][0], stride, 0);
+  if (need_ne) input->variable->compute_grid(nvar, &plasma_cache_2d[0][1], stride, 0);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1258,7 +1308,7 @@ double FixChemAdas::read_cell(const GridSrc &S, int icell, int var_col)
     return S.arr_cache[icell][S.src_index];
   }
   // VAR path
-  return array_grid ? array_grid[icell][var_col] : 0.0;
+  return plasma_cache_2d ? plasma_cache_2d[icell][var_col] : 0.0;
 }
 
 void FixChemAdas::refresh_compute_src(GridSrc &S) {

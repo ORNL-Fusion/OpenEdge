@@ -1,0 +1,77 @@
+################################################################################
+# test_west_neutrals: D/D2/D+ neutral transport on real WEST axi geometry
+# Plasma: SOLEDGE3X 3 MW (same file used by S3XE/WEST_MULTISPEC reference)
+# Purpose: OpenEdge equivalent of the S3X-EIRENE vacuum-cleaner benchmark
+################################################################################
+
+seed                12345
+dimension           2
+boundary            p p p
+global              gridcut 0.0 comm/sort no
+global              fnum 1e12
+
+# WEST R-Z domain
+create_box          1.82 3.2 -1.0 1.0 -0.05 0.05
+create_grid         100 100 1
+balance_grid        rcb cell
+
+# ---- Species ----
+species             input/neutral.species D2 D D+
+mixture             neutrals D2  frac 1.0
+mixture             neutrals D   frac 0.0
+mixture             neutrals D+  frac 0.0
+
+# ---- Surfaces (WEST vessel + core) ----
+read_surf           input/wall.surf group wall particle check
+surf_collide        wallColl diffuse 500.0 1.0
+surf_react          wallRecycle recycle input/wall.recycle
+surf_modify         wall collide wallColl react wallRecycle
+
+read_surf           input/core.surf invert group core particle check
+surf_collide        coreColl vanish
+surf_modify         core collide coreColl react none
+
+# Static refinement near wall regions (strike points & limiter)
+region              rdiv_lo block 1.82 3.2 -0.94 -0.40 -INF INF
+region              rdiv_up block 1.82 3.2  0.40  0.80 -INF INF
+adapt_grid          all refine surf all 0.001 maxlevel 3 cells 2 2 1 region rdiv_lo all iterate 3
+adapt_grid          all refine surf all 0.001 maxlevel 3 cells 2 2 1 region rdiv_up all iterate 3
+balance_grid        rcb cell
+
+# ---- Plasma background (WEST SOLEDGE3X 3 MW) ----
+fix                 pd plasma/data file input/plasma.h5 static yes
+
+# B-field from per-particle plasma cache
+global              bfield_compute pd
+
+# ---- Boris pusher for D+ ions ----
+global              boris_subcycles 5
+
+# ---- Chemistry: ionization + recombination + CX + D2 dissociation ----
+# Uses per-particle plasma cache (Te/ne/Ti/vpar) from fix plasma/data
+fix fchem chem/adas 1 1 input/neutral.reactions adas_dir ../../database/adas
+
+# ---- Initial particles: D2 uniformly distributed (seed the volume) ----
+global              nrho 1e18 temp 300
+create_particles    neutrals n 10000
+
+# ---- Diagnostics ----
+compute cden grid all species nrho
+fix    fden ave/grid all 1 100 1000 c_cden[*] ave running
+
+timestep            1e-07
+stats               500
+stats_style         step cpu np
+
+# Phase A: warmup run (let particles transport & reactions equilibrate)
+run                 2000
+
+# Phase B: production + dump density maps AND per-cell source terms.
+# f_fden[*]  = D2, D, D+ number densities (3 cols)
+# f_fchem[*] = ionization, recombination, CX, dissociation source tallies (4 cols)
+#              (cumulative event counts per cell; Gkeyll-ready source map)
+dump    dgrid grid all 1000 output/grid.west id xc yc f_fden[*] f_fchem[*]
+dump_modify dgrid first yes
+run                 5000
+
+#EOF
