@@ -232,6 +232,12 @@ struct SurfHit2D {
   int cd_nmax;               // allocated size of dx_cd array
   double **dx_cd;            // dx_cd[i][0..2] = displacement for particle i
 
+  // Early-exit request flag. Any fix can set this to 1 during end_of_step
+  // to have the run loop break cleanly on the NEXT iteration. Used by
+  // fix chem/adas Mode A when `stop_on_exhaust yes` detects the source
+  // neutral population has gone to zero.
+  int early_exit_requested;
+
   // Psi-based core boundary (set by fix reflect/psi)
   int psi_reflect_flag;        // 1 if psi-reflect is active
   int psi_reflect_action;      // 0=reflect, 1=absorb (matches FixReflectPsi enum)

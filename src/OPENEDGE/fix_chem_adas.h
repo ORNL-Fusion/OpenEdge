@@ -83,7 +83,65 @@ int maxgrid_src = 0;
 // attempt() when use_grid_plasma is set. Distinct from the output array_grid.
 double **plasma_cache_2d = NULL;
 
+// Output units for the 20-column per-cell source tally (array_grid):
+//   TALLY_COUNTS: raw cumulative event totals since the fix was created.
+//                 count col = events, m*v col = [kg m/s], 0.5 m v^2 col = [J].
+//   TALLY_RATE:   instantaneous rate over the last `nevery` window, in SI.
+//                 count col = particle source [m^-3 s^-1],
+//                 m*v col   = momentum source [kg m^-2 s^-2] = [N/m^3],
+//                 0.5 m v^2 col = energy source [W/m^3].
+// In RATE mode the tally is zeroed at the start of every end_of_step and the
+// accumulated totals are normalized by (vol * window_s / fnum) at the end,
+// so the array_grid always holds a window-average and not a running total.
+// This plays nicely with `fix ave/grid ... f_fchem[*] ave running` for
+// smoothed rates ready to hand to Gkeyll / SOLPS.
+// TALLY_BATCH: batch-weighted rate (EIRENE-style Monte Carlo). A one-shot
+// puff launches N_batch trajectories representing a physical emission rate
+// R_puff [atoms/s]. Each event carries a weight w = R_puff / N_batch
+// (physical events/s per trajectory); per-cell contributions are divided by
+// cell volume so array_grid stores the steady-state source rate directly.
+// Tally is cumulative across the run and *does not* reset per window -- the
+// final value after all trajectories have terminated is the steady-state
+// Gkeyll/SOLPS source (what EIRENE returns to S3X/SOLPS each coupling call).
+//
+// TALLY_BATCH_FIX: same semantics but N_batch is pulled at tally time from
+// the cumulative emit count of a paired emit fix (e.g. fix emit/surf/puff).
+// Useful when you don't want to hand-match the N in `units batch` with the
+// `stop_at_np` cap on the emit fix -- the chem fix reads it directly. Value
+// is cached at the start of every chem nevery step, so scaling tracks the
+// ramp-up phase. Post-ramp (latched), N is constant and the scaling is exact.
+enum { TALLY_COUNTS, TALLY_RATE, TALLY_BATCH, TALLY_BATCH_FIX };
+int    tally_units   = TALLY_COUNTS;
+double batch_R_puff  = 0.0;    // [atoms/s] physical emission rate
+int    batch_N       = 0;      // fixed batch N (TALLY_BATCH)
+char  *batch_fix_id  = nullptr;// emit fix ID (TALLY_BATCH_FIX)
+int    batch_fix_idx = -1;     // resolved index in modify->fix[]
+bigint batch_N_cached = 0;     // cached N from emit fix this chem step
 
+// Mode A (EIRENE-semantics) state.
+//   eirene_mode     = 1 -> delete particle on IONIZATION instead of relabeling
+//   stop_on_exhaust = 1 -> stop the run when source_species population hits 0
+//                          (redundant with SPARTA's built-in nglobal==0 check
+//                          for pure-neutral runs, but needed when kinetic
+//                          impurities remain alongside vanishing neutrals).
+//   source_species  = resolved species indices matching src_species_names.
+int    eirene_mode     = 0;
+int    stop_on_exhaust = 0;
+// Allow early termination when only a small fat-tail population remains.
+// stop_on_exhaust triggers when alive_global <= exhaust_threshold (default 0,
+// i.e. wait for the population to literally hit zero). Setting a nonzero
+// threshold (e.g. 10% of batch) skips the slow-converging tail where per-step
+// cost stays high but source-moment contributions are negligible. Closer to
+// what EIRENE gets for free by tracing trajectories independently.
+// exhaust_armed is set to 1 the first time alive_global > exhaust_threshold
+// (batch ramp-up is detectable -- prevents spurious exit at step 1 when
+// population is still empty before the puff has loaded).
+bigint exhaust_threshold = 0;
+int    exhaust_armed     = 0;
+int    nsrc_species    = 0;
+char **src_species_names = nullptr;
+std::vector<int> source_species;
+std::vector<int> dellist;
 
 protected:
     FILE* fp;
@@ -158,7 +216,8 @@ protected:
     ReactionIJ* reactions;
     int* list_ij;
 
-    int attempt(Particle::OnePart* ip, double Te_eV, double ne_m3,
+    int attempt(Particle::OnePart* ip, int ip_index,
+                double Te_eV, double ne_m3,
                 double Ti_eV = 0.0, double vpar = 0.0,
                 double bx = 0.0, double by = 0.0, double bz = 0.0);
     void readfile(char*);

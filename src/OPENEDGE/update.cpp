@@ -284,6 +284,8 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   cd_nmax = 0;
   dx_cd = NULL;
 
+  early_exit_requested = 0;
+
   psi_reflect_flag = 0;
   psi_reflect_action = 0;
   psi_reflect_threshold = 1.0;
@@ -828,16 +830,18 @@ void Update::run(int nsteps)
       timer->stamp(TIME_COMM);
     }
 
-    // halt early if all particles have been absorbed/lost
+    // halt early if all particles have been absorbed/lost, or if any fix
+    // explicitly requested an early exit (fix chem/adas Mode A exhaustion).
     {
       bigint nlocal = particle->nlocal;
       bigint nglobal;
       MPI_Allreduce(&nlocal, &nglobal, 1, MPI_SPARTA_BIGINT, MPI_SUM, world);
-      if (nglobal == 0) {
+      if (nglobal == 0 || early_exit_requested) {
         // force final output before breaking
         output->next = ntimestep;
         output->write(ntimestep);
         update->nsteps = i;
+        early_exit_requested = 0;  // reset so a follow-up run isn't pre-halted
         break;
       }
     }

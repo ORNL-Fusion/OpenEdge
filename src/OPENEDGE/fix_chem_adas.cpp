@@ -142,6 +142,94 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
     parse_src(arg[iarg+1], srcTe, "Te");
     parse_src(arg[iarg+2], srcNe, "ne");
     use_grid_plasma = (srcTe.kind == SRC_VAR) || (srcNe.kind == SRC_VAR);
+    iarg += 3;
+  }
+
+  // --- Optional Mode A (EIRENE-semantics) keywords ---
+  //   mode neutral                         -> delete particle on ionization
+  //   source_species <sp1> [sp2] ...       -> species to count for exhaustion
+  //   stop_on_exhaust yes|no               -> halt run when source species = 0
+  while (iarg < narg) {
+    if (strcmp(arg[iarg], "mode") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix chem/adas: mode requires a value (kinetic|neutral)");
+      if (strcmp(arg[iarg+1], "neutral") == 0) eirene_mode = 1;
+      else if (strcmp(arg[iarg+1], "kinetic") == 0) eirene_mode = 0;
+      else error->all(FLERR, "fix chem/adas: unknown mode (use kinetic|neutral)");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "source_species") == 0) {
+      // consume species names until the next keyword or end of args
+      int j = iarg + 1;
+      while (j < narg &&
+             strcmp(arg[j], "mode") != 0 &&
+             strcmp(arg[j], "stop_on_exhaust") != 0 &&
+             strcmp(arg[j], "source_species") != 0 &&
+             strcmp(arg[j], "units") != 0 &&
+             strcmp(arg[j], "exhaust_threshold") != 0) j++;
+      nsrc_species = j - (iarg + 1);
+      if (nsrc_species <= 0)
+        error->all(FLERR, "fix chem/adas: source_species needs >=1 species name");
+      src_species_names = new char*[nsrc_species];
+      for (int k = 0; k < nsrc_species; k++) {
+        int n = strlen(arg[iarg + 1 + k]) + 1;
+        src_species_names[k] = new char[n];
+        strcpy(src_species_names[k], arg[iarg + 1 + k]);
+      }
+      iarg = j;
+    } else if (strcmp(arg[iarg], "stop_on_exhaust") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix chem/adas: stop_on_exhaust requires yes|no");
+      if (strcmp(arg[iarg+1], "yes") == 0) stop_on_exhaust = 1;
+      else if (strcmp(arg[iarg+1], "no") == 0) stop_on_exhaust = 0;
+      else error->all(FLERR, "fix chem/adas: stop_on_exhaust must be yes|no");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "exhaust_threshold") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix chem/adas: exhaust_threshold requires <N>");
+      exhaust_threshold = ATOBIGINT(arg[iarg+1]);
+      if (exhaust_threshold < 0)
+        error->all(FLERR, "fix chem/adas: exhaust_threshold must be >= 0");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "units") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix chem/adas: units requires counts|rate|eirene");
+      if (strcmp(arg[iarg+1], "counts") == 0) {
+        tally_units = TALLY_COUNTS;
+        iarg += 2;
+      } else if (strcmp(arg[iarg+1], "rate") == 0) {
+        tally_units = TALLY_RATE;
+        iarg += 2;
+      } else if (strcmp(arg[iarg+1], "batch") == 0) {
+        // Batch (EIRENE-style MC): `units batch <N_trajectories> <R_puff>`
+        if (iarg + 3 >= narg)
+          error->all(FLERR, "fix chem/adas: units batch requires N R_puff");
+        batch_N      = atoi(arg[iarg+2]);
+        batch_R_puff = atof(arg[iarg+3]);
+        if (batch_N <= 0 || batch_R_puff <= 0.0)
+          error->all(FLERR, "fix chem/adas: units batch needs N>0 and R_puff>0");
+        tally_units = TALLY_BATCH;
+        iarg += 4;
+      } else if (strcmp(arg[iarg+1], "batch_fix") == 0) {
+        // EIRENE-batch auto-scaled from a paired emit fix:
+        //   `units batch_fix <emit_fix_id> <R_puff>`
+        if (iarg + 3 >= narg)
+          error->all(FLERR, "fix chem/adas: units batch_fix requires <fix_id> R_puff");
+        int n = strlen(arg[iarg+2]) + 1;
+        batch_fix_id = new char[n];
+        strcpy(batch_fix_id, arg[iarg+2]);
+        batch_R_puff = atof(arg[iarg+3]);
+        if (batch_R_puff <= 0.0)
+          error->all(FLERR, "fix chem/adas: units batch_fix needs R_puff > 0");
+        tally_units = TALLY_BATCH_FIX;
+        iarg += 4;
+      } else {
+        error->all(FLERR, "fix chem/adas: units must be counts|rate|batch|batch_fix");
+      }
+    } else {
+      char msg[160];
+      snprintf(msg, sizeof(msg), "fix chem/adas: unknown keyword '%s'", arg[iarg]);
+      error->all(FLERR, msg);
+    }
   }
 
   tvar = nvar = -1;
@@ -204,6 +292,13 @@ delete [] tstr; delete [] nstr;
 memory->destroy(plasma_cache_2d);
 memory->destroy(array_grid);
 delete rng_adas;
+
+if (src_species_names) {
+  for (int k = 0; k < nsrc_species; k++) delete [] src_species_names[k];
+  delete [] src_species_names;
+}
+
+delete [] batch_fix_id;
 
 
 
@@ -396,6 +491,42 @@ if (!rng_adas) {
   rng_adas->reset(seed, comm->me, 100);
 }
 
+// TALLY_BATCH_FIX: resolve the emit-fix ID to a modify->fix index so we can
+// query its cumulative ntotal at tally time. We only need the index; the fix
+// pointer is looked up per-step via modify->fix[idx] (the index is stable
+// for the lifetime of the run once both fixes are defined).
+if (tally_units == TALLY_BATCH_FIX) {
+  batch_fix_idx = modify->find_fix(batch_fix_id);
+  if (batch_fix_idx < 0) {
+    char msg[160];
+    snprintf(msg, sizeof(msg),
+             "fix chem/adas: units batch_fix source fix '%s' not found",
+             batch_fix_id);
+    error->all(FLERR, msg);
+  }
+}
+
+// Mode A: resolve source_species names to species indices.
+// Runs here (not ctor) because `species` commands are parsed before `fix`
+// in the usual input deck but find_species must be callable either way.
+source_species.clear();
+for (int k = 0; k < nsrc_species; k++) {
+  int sp = particle->find_species(src_species_names[k]);
+  if (sp < 0) {
+    char msg[160];
+    snprintf(msg, sizeof(msg),
+             "fix chem/adas: source_species '%s' not found",
+             src_species_names[k]);
+    error->all(FLERR, msg);
+  }
+  source_species.push_back(sp);
+}
+if (stop_on_exhaust && source_species.empty() && eirene_mode && comm->me == 0) {
+  error->warning(FLERR,
+    "fix chem/adas: stop_on_exhaust requested without source_species; "
+    "run will rely on SPARTA's built-in nglobal==0 termination");
+}
+
 // cache dynamic_cast for per-particle plasma interpolation
 cp_plasma_cached_ = nullptr;
 if (srcTe.kind == SRC_COMP && srcTe.icompute >= 0) {
@@ -482,18 +613,33 @@ void FixChemAdas::end_of_step_no_average()
 
   deferred_particles.clear();
 
+  // TALLY_BATCH_FIX: pull current cumulative N from the paired emit fix.
+  // One allreduce per chem nevery step (compute_vector does the reduce
+  // internally). Cached N_batch stays constant within this call so every
+  // event tallied in attempt() uses the same weight.
+  if (tally_units == TALLY_BATCH_FIX && batch_fix_idx >= 0) {
+    Fix *fe = modify->fix[batch_fix_idx];
+    double n_global = fe->compute_vector(1);   // FixEmit ntotal (global sum)
+    batch_N_cached = static_cast<bigint>(n_global);
+  }
+
   // Ensure per-cell source-tally array (20 columns) tracks current grid size.
-  // Persistent (cumulative) across steps -- we grow but do not zero here so
-  // dumps can read the running total. Reset is via reset_timestep in input.
+  // In TALLY_COUNTS mode this grows but never zeros across steps (cumulative).
+  // In TALLY_RATE mode we additionally zero the whole buffer each call so the
+  // subsequent accumulate + normalize yields an instantaneous rate over the
+  // current `nevery` window.
   if (grid->maxlocal > maxgrid_src) {
     const int oldmax = maxgrid_src;
     maxgrid_src = grid->maxlocal;
     memory->grow(array_grid, maxgrid_src, 20, "chem/adas:array_grid(src)");
-    // zero the freshly-added rows
+    // zero the freshly-added rows (count mode relies on this for fresh cells)
     if (maxgrid_src > oldmax) {
       memset(&array_grid[oldmax][0], 0,
              sizeof(double) * (maxgrid_src - oldmax) * 20);
     }
+  }
+  if (tally_units == TALLY_RATE && maxgrid_src > 0) {
+    memset(&array_grid[0][0], 0, sizeof(double) * maxgrid_src * 20);
   }
 
   // Fast path: read Te/ne/Ti/vpar/B from per-particle plasma cache
@@ -523,7 +669,7 @@ void FixChemAdas::end_of_step_no_average()
         const double Bx = bx_vec ? bx_vec[ip] : 0.0;
         const double By = by_vec ? by_vec[ip] : 0.0;
         const double Bz = bz_vec ? bz_vec[ip] : 0.0;
-        attempt(&particles[ip], Te_eV, ne_m3, Ti_eV, vp, Bx, By, Bz);
+        attempt(&particles[ip], ip, Te_eV, ne_m3, Ti_eV, vp, Bx, By, Bz);
         ip = next[ip];
       }
     }
@@ -539,10 +685,47 @@ void FixChemAdas::end_of_step_no_average()
       const double ne_m3 = std::max(read_cell(srcNe, icell, 1), 0.0);
       int ip = cinfo[icell].first;
       while (ip >= 0) {
-        attempt(&particles[ip], Te_eV, ne_m3);
+        attempt(&particles[ip], ip, Te_eV, ne_m3);
         ip = next[ip];
       }
     }
+  }
+
+  // Rate-mode normalization. Tally was zeroed at the start of this call and
+  // just accumulated raw {count, m*v, 0.5 m v^2} over `nevery` steps. Convert
+  // each column to a volumetric rate in SI units:
+  //    S_n [m^-3 s^-1]    = count * fnum / (vol * window)
+  //    S_m [kg m^-2 s^-2] = sum(m v) * fnum / (vol * window)
+  //    S_E [W m^-3]       = sum(0.5 m v^2) * fnum / (vol * window)
+  // Cells with zero flow volume (outside the domain / fully covered by solid)
+  // are set to 0 to avoid divide-by-zero rather than NaN so downstream
+  // `fix ave/grid` can aggregate without masking.
+  if (tally_units == TALLY_RATE && maxgrid_src > 0) {
+    const double window_s = nevery * update->dt;
+    const double fnum     = update->fnum;
+    if (window_s > 0.0 && fnum > 0.0) {
+      const double num = fnum / window_s;
+      for (int icell = 0; icell < nglocal; icell++) {
+        const double vol = cinfo[icell].volume;
+        if (vol <= 0.0) {
+          double *row = array_grid[icell];
+          for (int c = 0; c < 20; c++) row[c] = 0.0;
+          continue;
+        }
+        const double scale = num / vol;
+        double *row = array_grid[icell];
+        for (int c = 0; c < 20; c++) row[c] *= scale;
+      }
+    }
+  }
+
+  // Mode A: remove particles flagged for deletion on ionization.
+  // Do this BEFORE spawning deferred (dissociation) products so the new
+  // particles get stable indices at the end of the array.
+  if (!dellist.empty()) {
+    particle->compress_reactions(static_cast<int>(dellist.size()), dellist.data());
+    particle->sorted = 0;   // linked list is now stale; next use will re-sort
+    dellist.clear();
   }
 
   // Create deferred particles from dissociation reactions
@@ -551,6 +734,37 @@ void FixChemAdas::end_of_step_no_average()
     int id = MAXSMALLINT * rng_adas->uniform();
     particle->add_particle(id, dp.species, dp.icell,
                            dp.x, dp.v, 0.0, 0.0);
+  }
+
+  // Mode A: optional stop-when-exhausted across the global source-species pool.
+  // Only required when non-source-species particles remain (e.g. impurities);
+  // the pure-neutral case is already handled by Update::run's nglobal==0 break.
+  if (eirene_mode && stop_on_exhaust && !source_species.empty()) {
+    bigint alive_local = 0;
+    Particle::OnePart *pp = particle->particles;
+    const int np = particle->nlocal;
+    for (int i = 0; i < np; i++) {
+      const int sp = pp[i].ispecies;
+      for (size_t k = 0; k < source_species.size(); k++) {
+        if (sp == source_species[k]) { alive_local++; break; }
+      }
+    }
+    bigint alive_global = 0;
+    MPI_Allreduce(&alive_local, &alive_global, 1, MPI_SPARTA_BIGINT,
+                  MPI_SUM, world);
+    // Arm the check only after the batch has ramped above the threshold --
+    // otherwise we'd trigger early-exit at step 1 while the emit fix is
+    // still filling the initial population.
+    if (!exhaust_armed && alive_global > exhaust_threshold) exhaust_armed = 1;
+
+    if (exhaust_armed && alive_global <= exhaust_threshold) {
+      // Flag picked up by Update::run on the next iteration; triggers a
+      // clean break after final output is written. See update.cpp.
+      // Default threshold 0 = wait until population is fully drained.
+      // Nonzero threshold = skip the slow fat tail for large speedups with
+      // <1% impact on rate moments.
+      update->early_exit_requested = 1;
+    }
   }
 }
 
@@ -569,7 +783,8 @@ double FixChemAdas::memory_usage()
    attempt a reaction for a single particle
 ------------------------------------------------------------------------- */
 
-int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3,
+int FixChemAdas::attempt(Particle::OnePart *ip, int ip_index,
+                         double Te_eV, double ne_m3,
                          double Ti_eV, double vpar, double bx, double by, double bz)
 {
   Particle::Species *species = particle->species;
@@ -697,12 +912,39 @@ int FixChemAdas::attempt(Particle::OnePart *ip, double Te_eV, double ne_m3,
       const double vz0 = ip->v[2];
       const double ke  = 0.5 * m * (vx0*vx0 + vy0*vy0 + vz0*vz0);
       double *row = array_grid[icell];
-      row[rtype_off]         += 1.0;
-      row[4  + rtype_off]    += m * vx0;
-      row[8  + rtype_off]    += m * vy0;
-      row[12 + rtype_off]    += m * vz0;
-      row[16 + rtype_off]    += ke;
+
+      // Per-event weight. COUNTS and RATE modes accumulate raw totals; RATE
+      // divides by (vol * window / fnum) at the end of end_of_step_no_average.
+      // BATCH mode folds the trajectory weight and cell volume in here so
+      // each event contributes its steady-state source-rate increment directly.
+      double scale = 1.0;
+      if (tally_units == TALLY_BATCH) {
+        const double vol = grid->cinfo[icell].volume;
+        const double w   = batch_R_puff / static_cast<double>(batch_N);
+        scale = (vol > 0.0) ? (w / vol) : 0.0;
+      } else if (tally_units == TALLY_BATCH_FIX && batch_N_cached > 0) {
+        const double vol = grid->cinfo[icell].volume;
+        const double w   = batch_R_puff / static_cast<double>(batch_N_cached);
+        scale = (vol > 0.0) ? (w / vol) : 0.0;
+      }
+
+      row[rtype_off]         += scale;
+      row[4  + rtype_off]    += m * vx0 * scale;
+      row[8  + rtype_off]    += m * vy0 * scale;
+      row[12 + rtype_off]    += m * vz0 * scale;
+      row[16 + rtype_off]    += ke        * scale;
     }
+  }
+
+  // Mode A (EIRENE semantics): neutral is consumed on ionization.
+  // Defer deletion -- we are iterating the cell's linked list via Particle::next,
+  // so actually removing ip now would invalidate that traversal. The caller
+  // compresses the particle array after the cell loop completes.
+  // NB: only IONIZATION terminates; CX/DISSOCIATION still run their species
+  // swap + velocity re-sampling below so neutral-neutral chains keep working.
+  if (eirene_mode && rchosen->type == IONIZATION) {
+    dellist.push_back(ip_index);
+    return 1;
   }
 
   // Assign first product
