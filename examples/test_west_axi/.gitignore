@@ -7,3 +7,5 @@ log.openedge
 regression.log
 dump.*
 *.dump
+bench_logs/
+bench_results.csv
