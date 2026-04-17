@@ -306,6 +306,14 @@ delete [] batch_fix_id;
 
 /* ---------------------------------------------------------------------- */
 
+void FixChemAdas::reset_tally()
+{
+  if (array_grid && maxgrid_src > 0)
+    memset(&array_grid[0][0], 0, sizeof(double) * maxgrid_src * 20);
+}
+
+/* ---------------------------------------------------------------------- */
+
 int FixChemAdas::setmask()
 {
   int mask = 0;

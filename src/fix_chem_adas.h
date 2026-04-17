@@ -65,6 +65,13 @@ public:
       return false;
     }
 
+    // Zero the 20-column per-cell source tally (array_grid). Called between
+    // outer coupling iterations so each Gkeyll/SOLPS handoff sees a fresh
+    // accumulation from the new puff, not a sum over previous iterations.
+    // Leaves per-type reaction counters and exhaust state untouched: those
+    // are diagnostics, not coupled state.
+    void reset_tally();
+
 int    use_grid_plasma = 0;
 char  *tstr = NULL, *nstr = NULL;
 int    tvar = -1,   nvar = -1;
