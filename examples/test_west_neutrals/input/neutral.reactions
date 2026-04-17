@@ -7,8 +7,16 @@ I A 1.0 0.0 0.0 0.0 0.0
 D+ --> D
 R A 1.0 0.0 0.0 0.0 0.0
 
-# D+ charge exchange (ADAS CCD, Z=1)
+# Ion-side CX: kinetic D+ loses charge to background D (EIRENE-style
+# ion-to-neutral conversion). Inactive in Mode A since kinetic D+ is
+# deleted on ionization.
 D+ --> D
+E A 1.0 0.0 0.0 0.0 0.0
+
+# Neutral-side CX: kinetic D exchanges with background D+ plasma.
+# Species unchanged; velocity resampled at local Ti. This is the
+# EIRENE-dominant CX channel for puff neutrals in Mode A.
+D --> D
 E A 1.0 0.0 0.0 0.0 0.0
 
 # D2 electron-impact dissociation (Janev/HYDHEL H.2 2.2.5)

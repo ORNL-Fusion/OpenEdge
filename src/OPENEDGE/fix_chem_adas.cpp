@@ -842,8 +842,15 @@ int FixChemAdas::attempt(Particle::OnePart *ip, int ip_index,
       interpolateRateData(atomic_number, q-1, icell, logTe, logne_cm,
                           rate_log10_cm3s, ReactionType::Recombination);
     } else if (r->type == EXCHANGE) {
-      if (q == 0) continue;
-      interpolateRateData(atomic_number, q-1, icell, logTe, logne_cm,
+      // Two branches share the CCD rate row for the Z=1 → 0 transition:
+      //   q > 0  : ion-side CX (kinetic D+ → kinetic D). Table row = q-1.
+      //   q == 0 : neutral-side CX (kinetic D + background D+ → kinetic D,
+      //            velocity resampled at Ti). Rule in the reactions file is
+      //            `D --> D`. Partner is the background plasma, not a
+      //            kinetic ion, so this fires even in Mode A where kinetic
+      //            D+ is suppressed.
+      const size_t cx_row = (q > 0) ? (q - 1) : 0;
+      interpolateRateData(atomic_number, cx_row, icell, logTe, logne_cm,
                           rate_log10_cm3s, ReactionType::ChargeExchange);
     } else if (r->type == DISSOCIATION && r->style == JANEV) {
       // Janev polynomial: ln<sv> = sum_n b_n (ln Te)^n, Te in eV
