@@ -184,6 +184,10 @@ struct SurfHit2D {
 
   // Per-particle plasma cache (populated once per step, read by Boris/ADAS/Nanbu)
   int plasma_cache_flag;       // 1 if plasma cache custom vectors are registered
+
+  // Reuse mesh_cell_at() result across particles in the same SPARTA cell.
+  // Default 1 (faster); set to 0 for per-particle lookups when validating.
+  int pcache_per_cell_mesh;
   int pc_te_custom, pc_ti_custom, pc_ne_custom, pc_ni_custom;
   int pc_vpar_custom;
   int pc_bx_custom, pc_by_custom, pc_bz_custom;

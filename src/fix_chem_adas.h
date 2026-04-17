@@ -56,6 +56,15 @@ public:
     bigint gas_react_one() const override { return nreact_one; }
     bigint gas_react_running() const override { return nreact_running; }
 
+    // True iff any reaction is charge-exchange (type 2 = EXCHANGE in the
+    // file-local enum). Used by Update::init() to skip PCACHE_TI/VPAR/BFIELD
+    // cache writes when no CX channel is loaded — those fields are only
+    // consumed by attempt() when a CX reaction fires.
+    bool needs_cx_fields() const {
+      for (int i = 0; i < nlist; i++) if (rlist[i].type == 2) return true;
+      return false;
+    }
+
 
 int    use_grid_plasma = 0;
 char  *tstr = NULL, *nstr = NULL;

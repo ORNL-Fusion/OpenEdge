@@ -38,6 +38,10 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "compute_sheath_geometry_grid.h"
 #include "compute_plasma_fields.h"
 #include "fix_plasma_data.h"
+#include "fix_cross_diffusion.h"
+#include "fix_thermal_force.h"
+#include "fix_coll_nanbu.h"
+#include "fix_chem_adas.h"
 #include "memory.h"
 #include "error.h"
 #include <algorithm>
@@ -302,6 +306,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   sheath_kick = 0;
 
   plasma_cache_flag = 0;
+  pcache_per_cell_mesh = 1;
   pcache_need_mask = 0;
   pc_te_custom = pc_ti_custom = pc_ne_custom = pc_ni_custom = -1;
   pc_vpar_custom = -1;
@@ -638,19 +643,45 @@ void Update::init()
     for (int ifix = 0; ifix < modify->nfix; ifix++) {
       const char *s = modify->fix[ifix]->style;
       if (strcmp(s,"chem/adas") == 0 || strcmp(s,"chem/adas/kk") == 0) {
-        // fix_chem_adas reads te+ne always; ti/vpar/bx/by/bz used by CX channel
-        pcache_need_mask |= PCACHE_TE | PCACHE_NE | PCACHE_TI |
-                            PCACHE_VPAR | PCACHE_BFIELD;
+        // chem/adas always reads Te+Ne; Ti/Vpar/Bfield only matter for the
+        // charge-exchange (EXCHANGE) channel. Skip those bits when the
+        // reactions file has no CX entry — common for pure ionization runs.
+        pcache_need_mask |= PCACHE_TE | PCACHE_NE;
+        FixChemAdas *fchem =
+            dynamic_cast<FixChemAdas *>(modify->fix[ifix]);
+        if (fchem && fchem->needs_cx_fields()) {
+          pcache_need_mask |= PCACHE_TI | PCACHE_VPAR | PCACHE_BFIELD;
+        }
         recognized = 1;
       } else if (strcmp(s,"thermal_force") == 0) {
-        pcache_need_mask |= PCACHE_BFIELD | PCACHE_GRAD_TE | PCACHE_GRAD_TI;
+        // In plasma_data mode the fix interpolates from FixPlasmaData
+        // directly and does not read pcache; skip the writes entirely.
+        FixThermalForce *ftf =
+            dynamic_cast<FixThermalForce *>(modify->fix[ifix]);
+        if (!ftf || ftf->needs_pcache()) {
+          pcache_need_mask |= PCACHE_BFIELD | PCACHE_GRAD_TE | PCACHE_GRAD_TI;
+        }
         recognized = 1;
       } else if (strcmp(s,"coll/nanbu") == 0 || strcmp(s,"coll/nanbu/kk") == 0) {
-        pcache_need_mask |= PCACHE_TE | PCACHE_NE | PCACHE_TI | PCACHE_NI |
-                            PCACHE_VPAR | PCACHE_BFIELD;
+        // Same plasma_data-bypass pattern as thermal_force.
+        FixCollNanbu *fnan =
+            dynamic_cast<FixCollNanbu *>(modify->fix[ifix]);
+        if (!fnan || fnan->needs_pcache()) {
+          pcache_need_mask |= PCACHE_TE | PCACHE_NE | PCACHE_TI | PCACHE_NI |
+                              PCACHE_VPAR | PCACHE_BFIELD;
+        }
         recognized = 1;
       } else if (strcmp(s,"cross_diffusion") == 0) {
-        pcache_need_mask |= PCACHE_BFIELD | PCACHE_NE | PCACHE_GRAD_NE;
+        // Same plasma_data-bypass pattern. NE/GRAD_NE only matter when
+        // gradient_pinch is configured (needs_grad_ne()).
+        FixCrossDiffusion *fcd =
+            dynamic_cast<FixCrossDiffusion *>(modify->fix[ifix]);
+        if (!fcd || fcd->needs_pcache()) {
+          pcache_need_mask |= PCACHE_BFIELD;
+          if (fcd && fcd->needs_grad_ne()) {
+            pcache_need_mask |= PCACHE_NE | PCACHE_GRAD_NE;
+          }
+        }
         recognized = 1;
       } else if (strcmp(s,"efield/particle") == 0) {
         pcache_need_mask |= PCACHE_EFIELD;
@@ -944,8 +975,16 @@ void Update::cache_plasma_particles()
     pd_dZ = std::max(1.0e-9, 0.5 * std::fabs(pd->zvals[1] - pd->zvals[0]));
   }
 
+  // Particles are sorted by SPARTA cell — cache the unstructured-mesh
+  // triangle lookup across all particles in the same cell. mesh_cell_at()
+  // is a triangle spatial search; reusing it across a cell is the dominant
+  // pcache-loop saving when the mesh is loaded.
+  int prev_icell = -1;
+  int prev_mesh_cell = -1;
+
   for (int i = 0; i < nlocal; i++) {
     const double *x = particles[i].x;
+    const int icell_p = particles[i].icell;
 
     PlasmaFileParams pf{};
     MagneticFieldFileDataParams bf{};
@@ -959,7 +998,18 @@ void Update::cache_plasma_particles()
       double R, Z;
       xyz_to_rz(x, dim, R, Z);
       const PdStencil2D st = make_pd_stencil(pd, R, Z);
-      const int mesh_cell = (pd->has_mesh && need_plasma) ? pd->mesh_cell_at(R, Z) : -1;
+      int mesh_cell;
+      if (pd->has_mesh && need_plasma) {
+        if (pcache_per_cell_mesh && icell_p == prev_icell) {
+          mesh_cell = prev_mesh_cell;
+        } else {
+          mesh_cell = pd->mesh_cell_at(R, Z);
+          prev_mesh_cell = mesh_cell;
+          prev_icell = icell_p;
+        }
+      } else {
+        mesh_cell = -1;
+      }
       if (need_plasma) {
         if (mesh_cell >= 0) {
           if ((mask & PCACHE_TE) && mesh_cell < static_cast<int>(pd->mesh_te.size()))
@@ -3916,6 +3966,16 @@ void Update::global(int narg, char **arg)
       if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_bad_dt_limit command");
       boris_bad_dt_limit = input->numeric(FLERR, arg[iarg + 1]);
       if (boris_bad_dt_limit <= 0.0) error->all(FLERR, "Illegal global boris_bad_dt_limit command");
+      iarg += 2;
+
+    // Reuse the unstructured-mesh triangle lookup across all particles in the
+    // same SPARTA cell. Default yes; set no for validation runs that need
+    // every particle to do its own mesh_cell_at() lookup.
+    } else if (strcmp(arg[iarg], "pcache_per_cell_mesh") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pcache_per_cell_mesh command");
+      if (strcmp(arg[iarg + 1], "yes") == 0) pcache_per_cell_mesh = 1;
+      else if (strcmp(arg[iarg + 1], "no") == 0) pcache_per_cell_mesh = 0;
+      else error->all(FLERR, "Illegal global pcache_per_cell_mesh command");
       iarg += 2;
 
     // Point-query B-field for Boris pusher from a compute plasma/fields

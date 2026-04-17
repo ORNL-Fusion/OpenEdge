@@ -74,6 +74,17 @@ class FixCrossDiffusion : public Fix {
   void init();
   void start_of_step();
 
+  // True iff this fix actually consumes grad(ne) at runtime (gradient_pinch).
+  // Used by Update::init() to keep PCACHE_GRAD_NE off when not needed,
+  // which avoids 4 extra bilinear-interp queries per particle per step.
+  bool needs_grad_ne() const { return have_grad_pinch_ != 0; }
+
+  // True only if this fix reads from the per-particle plasma cache. In
+  // plasma_data mode the fix interpolates directly from FixPlasmaData and
+  // does not touch the cache, so Update::init() can drop the corresponding
+  // mask bits and skip the writes.
+  bool needs_pcache() const { return !use_plasma_data_; }
+
  protected:
   RanKnuth *rng_;
   int use_plasma_data_;

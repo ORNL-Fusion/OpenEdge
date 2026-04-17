@@ -73,6 +73,12 @@ class FixThermalForce : public Fix {
   void start_of_step();
   void end_of_step();
 
+  // True only if this fix reads from the per-particle plasma cache. In
+  // plasma_data mode the fix interpolates directly from FixPlasmaData and
+  // does not touch the cache, so Update::init() can drop the corresponding
+  // mask bits and skip the writes.
+  bool needs_pcache() const { return !use_plasma_data_; }
+
  protected:
   int use_plasma_data_;
   std::string plasma_fix_id_;

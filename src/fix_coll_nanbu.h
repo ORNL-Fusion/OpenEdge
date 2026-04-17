@@ -43,6 +43,12 @@ class FixCollNanbu : public Fix {
   void end_of_step();
   double memory_usage();
 
+  // True only if this fix reads from the per-particle plasma cache. In
+  // plasma_data mode the fix interpolates directly from FixPlasmaData and
+  // does not touch the cache, so Update::init() can drop the corresponding
+  // mask bits and skip the writes.
+  bool needs_pcache() const { return !use_plasma_data_; }
+
  protected:
   NanbuScatterTable scatter_table_;
   RanKnuth *rng_;
