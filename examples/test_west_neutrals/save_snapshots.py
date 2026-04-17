@@ -26,6 +26,8 @@ Dump columns (dump_grid f_fden[*] f_fchem[*]):
   14..17: my_{ion,rec,cx,dis}
   18..21: mz_{ion,rec,cx,dis}
   22..25: E_{ion,rec,cx,dis}
+  26:     cell volume [m^3]
+  27..41: per-species moments {n, u, v, w, T} x {D2, D, D+}
 """
 
 import os, numpy as np
@@ -56,7 +58,7 @@ def parse_all(path):
                 current['step'] = int(parts[0]); state = None
             elif state == 'ncells':
                 state = None
-            elif state == 'cells' and len(parts) >= 41:
+            elif state == 'cells' and len(parts) >= 42:
                 try:
                     current['rows'].append([float(x) for x in parts])
                 except ValueError:
@@ -110,13 +112,16 @@ src_mz_ion = slot(18); src_mz_rec = slot(19); src_mz_cx = slot(20); src_mz_dis =
 # Energy per reaction
 src_E_ion  = slot(22); src_E_rec  = slot(23); src_E_cx  = slot(24); src_E_dis  = slot(25)
 
+# Cell volume [m^3] (axisym: 2*pi*R*dR*dZ)
+vol    = slot(26)
+
 # f_fmom layout: per species {n, u, v, w, T} with 3 species (D2, D, D+)
-# Columns 26..40 (0-indexed): 26-28 n, 29-31 u, 32-34 v, 35-37 w, 38-40 T
-n_D2   = slot(26); n_D   = slot(27); n_Dp   = slot(28)
-u_D2   = slot(29); u_D   = slot(30); u_Dp   = slot(31)
-v_D2   = slot(32); v_D   = slot(33); v_Dp   = slot(34)
-w_D2   = slot(35); w_D   = slot(36); w_Dp   = slot(37)
-T_D2   = slot(38); T_D   = slot(39); T_Dp   = slot(40)
+# Columns 27..41 (0-indexed): 27-29 n, 30-32 u, 33-35 v, 36-38 w, 39-41 T
+n_D2   = slot(27); n_D   = slot(28); n_Dp   = slot(29)
+u_D2   = slot(30); u_D   = slot(31); u_Dp   = slot(32)
+v_D2   = slot(33); v_D   = slot(34); v_Dp   = slot(35)
+w_D2   = slot(36); w_D   = slot(37); w_Dp   = slot(38)
+T_D2   = slot(39); T_D   = slot(40); T_Dp   = slot(41)
 
 # Bin edges for default heatmap plots
 nx, ny = 120, 160
@@ -126,7 +131,7 @@ yg = np.linspace(y.min(), y.max(), ny + 1)
 np.savez_compressed(
     OUT,
     steps=steps, times_ms=times_ms,
-    x=x, y=y,
+    x=x, y=y, vol=vol,
     nD2=nD2, nD=nD, nDp=nDp,
     # counts (backward-compatible names kept)
     src_ion=src_n_ion, src_rec=src_n_rec, src_cx=src_n_cx, src_dis=src_n_dis,
