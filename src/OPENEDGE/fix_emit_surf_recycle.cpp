@@ -430,10 +430,18 @@ void FixEmitSurfRecycle::create_task(int icell)
     //      applied (no wall_face_area).
     tasks[ntask].plasma_cell = -1;
     if (plasma && plasma->has_mesh_wall_surf_cell &&
+        isurf >= 0 &&
         isurf < static_cast<int>(plasma->mesh_wall_surf_cell.size())) {
-      // (1) topological map from wall_b2.surf
+      // (1) topological map from wall.surf. Only accept cells with a
+      // positive face_area — otherwise the segment is on a non-emitting
+      // boundary (e.g. core-side) and should NOT be mapped.
       const int c = plasma->mesh_wall_surf_cell[isurf];
-      if (c >= 0 && c < plasma->mesh_ncell) tasks[ntask].plasma_cell = c;
+      if (c >= 0 && c < plasma->mesh_ncell &&
+          plasma->has_mesh_wall_face_area &&
+          c < static_cast<int>(plasma->mesh_wall_face_area.size()) &&
+          plasma->mesh_wall_face_area[c] > 0.0) {
+        tasks[ntask].plasma_cell = c;
+      }
     }
     else if (plasma && plasma->has_mesh && plasma->has_mesh_wall_face_area &&
         plasma->mesh_ntri > 0) {
