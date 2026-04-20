@@ -333,8 +333,8 @@ int SurfReactPMI::react(Particle::OnePart *&ip, int isurf,
     } else if (rr->style == TRIM_STYLE) {
       int it = static_cast<int>(rr->coeff[0]);
       if (it >= 0 && it < (int)trim_tables.size()) {
-        EireneTrim::TrimView tv = trim_tables[it].view();
-        RN = EireneTrim::R_N_interp(tv, E_eV, theta_deg);
+        Reflection::View tv = trim_tables[it].view();
+        RN = Reflection::R_N_interp(tv, E_eV, theta_deg);
         // RE is not used on the Trim path - outgoing energy is sampled
         // directly below in the reflect branch, not computed as RE*E.
         RE = 0.0;
@@ -396,12 +396,12 @@ int SurfReactPMI::react(Particle::OnePart *&ip, int isurf,
 
     if (r->style == TRIM_STYLE) {
       int it = static_cast<int>(r->coeff[0]);
-      EireneTrim::TrimView tv = trim_tables[it].view();
+      Reflection::View tv = trim_tables[it].view();
       double u1 = random->uniform();
       double u2 = random->uniform();
       double u3 = random->uniform();
       double cos_polar = 1.0, cos_azim = 1.0;
-      EireneTrim::sample_reflection(tv, E_eV, theta_deg, u1, u2, u3,
+      Reflection::sample_reflection(tv, E_eV, theta_deg, u1, u2, u3,
                                     &E_out, &cos_polar, &cos_azim);
 
       double E_out_J = E_out / update->joule2ev / update->mvv2e;
@@ -842,16 +842,16 @@ int SurfReactPMI::load_or_get_trim_table(const char *name)
       d.read(out.data(), H5::PredType::NATIVE_DOUBLE);
     };
 
-    TrimTableData t;
+    Reflection::Table t;
     t.name = sname;
 
     read_1d("E",     t.E_grid);
     read_1d("theta", t.theta_grid);
     read_1d("raar",  t.raar);
 
-    const int nE = EireneTrim::TRIM_NE;
-    const int nW = EireneTrim::TRIM_NW;
-    const int nR = EireneTrim::TRIM_NR;
+    const int nE = Reflection::NE;
+    const int nW = Reflection::NTHETA;
+    const int nR = Reflection::NQ;
 
     if ((int)t.E_grid.size() != nE || (int)t.theta_grid.size() != nW ||
         (int)t.raar.size() != nR) {

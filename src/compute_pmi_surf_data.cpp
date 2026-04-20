@@ -176,6 +176,13 @@ ComputePMISurfData::ComputePMISurfData(SPARTA *sparta, int narg, char **arg) :
     } else if (strcmp(arg[iarg],"sputter_flux_total") == 0) {
       add_kind(SPUTTER_FLUX_TOTAL,0);
       iarg++;
+    } else if (strcmp(arg[iarg],"sputter_rate_total") == 0) {
+      // total sputter rate [particles/s] = flux [part/m^2/s] x ring area [m^2]
+      // where ring area = 2*pi*R_mid*segment_length (2D) or tri area (3D).
+      // Lets the user do `compute reduce sum c_ID` directly with no
+      // property/surf + variable gymnastics.
+      add_kind(SPUTTER_RATE_TOTAL,0);
+      iarg++;
     } else if (strcmp(arg[iarg],"bfield") == 0) {
       if (iarg+1 >= narg) error->all(FLERR,"bfield needs HDF5 file path");
       bfield_path = std::string(arg[iarg+1]);
@@ -1233,9 +1240,33 @@ void ComputePMISurfData::compute_per_surf()
       }
     }
 
+    // Axisymmetric ring area of this surface element [m^2].
+    // 2D line: 2*pi*R_mid * segment_length  (truncated cone lateral area)
+    // 3D tri : physical triangle area (0.5 |e1 x e2|)
+    double ring_area = 0.0;
+    if (dimension == 2) {
+      const double x1 = lines[m].p1[0], y1 = lines[m].p1[1];
+      const double x2 = lines[m].p2[0], y2 = lines[m].p2[1];
+      const double seg = std::sqrt((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1));
+      const double R_mid = 0.5 * (x1 + x2);
+      ring_area = 2.0 * M_PI * R_mid * seg;
+    } else {
+      const double *p1 = tris[m].p1;
+      const double *p2 = tris[m].p2;
+      const double *p3 = tris[m].p3;
+      const double e1x = p2[0]-p1[0], e1y = p2[1]-p1[1], e1z = p2[2]-p1[2];
+      const double e2x = p3[0]-p1[0], e2y = p3[1]-p1[1], e2z = p3[2]-p1[2];
+      const double cx = e1y*e2z - e1z*e2y;
+      const double cy = e1z*e2x - e1x*e2z;
+      const double cz = e1x*e2y - e1y*e2x;
+      ring_area = 0.5 * std::sqrt(cx*cx + cy*cy + cz*cz);
+    }
+    const double sput_rate = sput_total * ring_area;
+
     if (nvalue == 1) {
       double out = 0.0;
       if (which[0] == SPUTTER_FLUX_TOTAL) out = sput_total;
+      else if (which[0] == SPUTTER_RATE_TOTAL) out = sput_rate;
       else {
         const int slot = which_species[0] - 1;
         if (slot >= 0 && slot < ns) {
@@ -1251,6 +1282,7 @@ void ComputePMISurfData::compute_per_surf()
       for (int j = 0; j < nvalue; j++) {
         double out = 0.0;
         if (which[j] == SPUTTER_FLUX_TOTAL) out = sput_total;
+        else if (which[j] == SPUTTER_RATE_TOTAL) out = sput_rate;
         else {
           const int slot = which_species[j] - 1;
           if (slot >= 0 && slot < ns) {

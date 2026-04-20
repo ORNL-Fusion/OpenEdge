@@ -18,7 +18,7 @@ SurfReactStyle(pmi,SurfReactPMI)
 
 #include "surf_react.h"
 #include "eckstein_sputter.h"
-#include "eirene_trim.h"
+#include "reflection_tables.h"
 #include <cstdio>
 #include <map>
 #include <vector>
@@ -26,35 +26,7 @@ SurfReactStyle(pmi,SurfReactPMI)
 
 namespace SPARTA_NS {
 
-// Raw storage for one EIRENE TRIM reflection table.  Owns the memory;
-// pointer snapshots (TrimView) live in eirene_trim.h.
-struct TrimTableData {
-  std::string name;
-  double Z1, M1, Z2, M2;
-  std::vector<double> E_grid;        // [nE]
-  std::vector<double> theta_grid;    // [nW]
-  std::vector<double> raar;          // [nR]
-  std::vector<double> R_N;           // [nE*nW]
-  std::vector<double> Eout_q;        // [nE*nW*nR]
-  std::vector<double> Eout_min;      // [nE*nW]
-  std::vector<double> Eout_max;      // [nE*nW]
-  std::vector<double> cos_polar_q;   // [nE*nW*nR*nR]
-  std::vector<double> cos_azim_q;    // [nE*nW*nR*nR*nR]
-
-  EireneTrim::TrimView view() const {
-    EireneTrim::TrimView v;
-    v.E           = E_grid.data();
-    v.theta_deg   = theta_grid.data();
-    v.raar        = raar.data();
-    v.R_N         = R_N.data();
-    v.Eout_q      = Eout_q.data();
-    v.Eout_min    = Eout_min.data();
-    v.Eout_max    = Eout_max.data();
-    v.cos_polar_q = cos_polar_q.data();
-    v.cos_azim_q  = cos_azim_q.data();
-    return v;
-  }
-};
+// Reflection::Table is defined in reflection_tables.h.
 
 class SurfReactPMI : public SurfReact {
  public:
@@ -118,10 +90,10 @@ class SurfReactPMI : public SurfReact {
 
   std::string h5_path;
 
-  // EIRENE TRIM reflection table storage (name-indexed).  Populated at
-  // parse time when a reaction is declared with style ECKSTEIN_TRIM.
+  // Reflection-table storage (name-indexed).  Populated at
+  // parse time when a reaction is declared with style TRIM_STYLE.
   std::string trim_dir;
-  std::vector<TrimTableData> trim_tables;
+  std::vector<Reflection::Table> trim_tables;
   std::map<std::string,int> trim_index;
 
   // load trim table from trim_dir/<name>.h5 if not already cached.

@@ -38,7 +38,8 @@ class ComputePMISurfData : public Compute {
     INCIDENT_ENERGY_SPECIES,
     SPUTTER_YIELD_SPECIES,
     SPUTTER_FLUX_SPECIES,
-    SPUTTER_FLUX_TOTAL
+    SPUTTER_FLUX_TOTAL,
+    SPUTTER_RATE_TOTAL   // flux x axisymmetric ring area [particles/s]
   };
 
   int groupbit,nvalue;

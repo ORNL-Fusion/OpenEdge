@@ -170,9 +170,9 @@ void SurfReactPMIKokkos::init()
 
   kk_ntrim = (int)trim_tables.size();
   if (kk_ntrim > 0) {
-    const int nE = EireneTrim::TRIM_NE;
-    const int nW = EireneTrim::TRIM_NW;
-    const int nR = EireneTrim::TRIM_NR;
+    const int nE = Reflection::NE;
+    const int nW = Reflection::NTHETA;
+    const int nR = Reflection::NQ;
 
     auto alloc_and_fill = [&](t_double_1d &dst, const std::string &label,
                               size_t per_combo,
@@ -188,23 +188,23 @@ void SurfReactPMIKokkos::init()
     };
 
     alloc_and_fill(d_trim_E,          "pmi:trim_E",         (size_t)nE,
-                   [](const TrimTableData &t) -> const std::vector<double>& { return t.E_grid; });
+                   [](const Reflection::Table &t) -> const std::vector<double>& { return t.E_grid; });
     alloc_and_fill(d_trim_theta,      "pmi:trim_theta",     (size_t)nW,
-                   [](const TrimTableData &t) -> const std::vector<double>& { return t.theta_grid; });
+                   [](const Reflection::Table &t) -> const std::vector<double>& { return t.theta_grid; });
     alloc_and_fill(d_trim_raar,       "pmi:trim_raar",      (size_t)nR,
-                   [](const TrimTableData &t) -> const std::vector<double>& { return t.raar; });
+                   [](const Reflection::Table &t) -> const std::vector<double>& { return t.raar; });
     alloc_and_fill(d_trim_R_N,        "pmi:trim_R_N",       (size_t)nE * nW,
-                   [](const TrimTableData &t) -> const std::vector<double>& { return t.R_N; });
+                   [](const Reflection::Table &t) -> const std::vector<double>& { return t.R_N; });
     alloc_and_fill(d_trim_Eout_q,     "pmi:trim_Eout_q",    (size_t)nE * nW * nR,
-                   [](const TrimTableData &t) -> const std::vector<double>& { return t.Eout_q; });
+                   [](const Reflection::Table &t) -> const std::vector<double>& { return t.Eout_q; });
     alloc_and_fill(d_trim_Eout_min,   "pmi:trim_Eout_min",  (size_t)nE * nW,
-                   [](const TrimTableData &t) -> const std::vector<double>& { return t.Eout_min; });
+                   [](const Reflection::Table &t) -> const std::vector<double>& { return t.Eout_min; });
     alloc_and_fill(d_trim_Eout_max,   "pmi:trim_Eout_max",  (size_t)nE * nW,
-                   [](const TrimTableData &t) -> const std::vector<double>& { return t.Eout_max; });
+                   [](const Reflection::Table &t) -> const std::vector<double>& { return t.Eout_max; });
     alloc_and_fill(d_trim_cos_polar_q,"pmi:trim_cos_polar", (size_t)nE * nW * nR * nR,
-                   [](const TrimTableData &t) -> const std::vector<double>& { return t.cos_polar_q; });
+                   [](const Reflection::Table &t) -> const std::vector<double>& { return t.cos_polar_q; });
     alloc_and_fill(d_trim_cos_azim_q, "pmi:trim_cos_azim",  (size_t)nE * nW * nR * nR * nR,
-                   [](const TrimTableData &t) -> const std::vector<double>& { return t.cos_azim_q; });
+                   [](const Reflection::Table &t) -> const std::vector<double>& { return t.cos_azim_q; });
   }
 
 #ifdef SPARTA_KOKKOS_EXACT

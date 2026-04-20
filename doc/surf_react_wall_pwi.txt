@@ -1,0 +1,438 @@
+"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+
+:link(sws,https://sparta.github.io)
+:link(sd,Manual.html)
+:link(sc,Section_commands.html#comm)
+
+:line
+
+surf_react wall_pwi command :h3
+
+Alias: {recycle} (legacy style name, retained for back-compat).
+
+[Syntax:]
+
+surf_react ID wall_pwi infile \
+  [twall Twall | twall_surf attr_name] \
+  [trim_dir path] \
+  [R_surf attr_name] :pre
+
+ID = user-assigned name for the surface reaction model :ulb,l
+infile = file listing per-channel surface reactions :l
+zero or more keyword/value pairs may be appended :l
+  {twall} Twall = scalar wall temperature in Kelvin (for re-emission Maxwellians and rovib)
+  {twall_surf} attr_name = name of a per-surf custom attribute (SPARTA custom surf) carrying per-element wall temperature
+  {trim_dir} path = directory containing BCA reflection tables as HDF5 (required if any T-type reaction is used)
+  {R_surf} attr_name = name of a per-surf custom attribute carrying per-element recycling coefficient R (overrides the R value in A-type reactions) :pre
+
+:ule
+
+[Examples:]
+
+surf_react wallPWI wall_pwi input/wall.recycle :pre
+
+surf_react wallPWI wall_pwi input/wall.recycle.trim &
+           trim_dir ../../database/surface/trim &
+           twall 400.0 :pre
+
+surf_react wallPWI wall_pwi input/wall.recycle.trim &
+           trim_dir ../../database/surface/trim &
+           R_surf R_rec :pre
+
+surf_react wallPWI wall_pwi input/wall.recycle.trim &
+           trim_dir ../../database/surface/trim &
+           twall_surf Twall_pfc :pre
+
+[Description:]
+
+Define an EIRENE-style plasma-material recycling model for surfaces. An
+incoming particle hits the wall; a list of per-species reaction channels
+is probed in order; one of the channels fires and sets the outgoing
+particle's species, velocity, and internal energy (or deletes it).
+
+The {recycle} style is designed to reproduce the physics options EIRENE
+offers for wall interactions: TRIM-database particle reflection for the
+prompt scattering fraction, and an absorb-and-re-emit model with
+configurable recycling coefficient and molecular fraction for the
+remainder.  It is also a direct fit for simpler prescriptions
+(Franck-Condon atomic reflection, cold-wall thermal reflection,
+perfect absorption) via the elementary channel types described below.
+
+Designed to be species- and material-agnostic: the same reactions-file
+grammar and the same C++ code run D-on-W, H-on-Li (LTX), T-on-W,
+He-on-Be, and so on.  Species are chosen by the user via the {species}
+command; materials are chosen via the {trim_dir} + reaction-line
+table name, and via per-surface custom attributes (e.g. Twall).
+
+:line
+
+[Reaction file grammar:]
+
+One reaction per two-line block.  Blank lines and lines beginning with
+{#} are ignored.
+
+Line 1 : {reactant --> product1 [+ product2]} :pre
+
+Reactant and products are species IDs as declared by the {species}
+command.  Products list is 0 (absorption), 1 (reflection / exchange), or
+2 (dissociation).
+
+Line 2 : {TYPE} coeff1 [coeff2 ...] :pre
+
+{TYPE} is one of the single-letter codes in the table below.  The
+meaning and number of trailing coefficients depends on the type.
+
+:c,table(c=3),label(,),tw(*,10%,40%),tb(s=&,ea=c),tp(c=l),
+{code},{name},{coefficients and semantics}
+{E},Exchange,{prob energy_eV} -- 1 reactant -> 1 product; re-emit with fixed KE sampled from a cosine angular distribution
+{D},Dissociation,{prob energy1_eV energy2_eV} -- 1 reactant -> 2 products; re-emit both at their respective fixed KEs with cosine directions
+{R},Recombination,{prob} -- 1 reactant -> 0 products; particle is absorbed (deleted) with the stated probability
+{T},TRIM reflect,{table_name} -- 1 reactant -> 1 product; reflection probability and outgoing energy+angle sampled from HDF5 BCA tables (R_N, quantile distributions)
+{A},Absorb/re-emit,{R [f_mol]} -- 1 reactant -> 1 product; catch-all after TRIM; stochastic branching into atomic re-emission / molecular re-emission / pumped at wall temperature :tb
+
+:line
+
+[Channel-ordering semantics:]
+
+Channels listed for the same reactant species are probed in file order
+using cumulative-probability accumulation.  For each surface hit:
+
+draw u ~ U[0,1)
+accum = 0
+for each channel i:
+    p_i = probability of channel i for this event
+    accum += p_i
+    if accum > u: fire channel i, return
+no channel fired: fall through to surf_collide :pre
+
+Each channel's {p_i} may be fixed (as stated by its coefficients) or
+dynamic (recomputed per hit).  In particular, the {T}-type reflection
+probability is {R_N(E_in, theta_in)} interpolated from the table, so it
+varies hit-by-hit.  The {A}-type catch-all always reports {p = 1.0} so
+any particle that reaches it is guaranteed to be processed (branching
+into atomic/molecular/pumped happens internally, see below).
+
+Because probabilities accumulate, a natural priority is to list TRIM
+first and Absorb/re-emit second: anything TRIM does not reflect is
+caught by {A}, which does the EIRENE-faithful stochastic recycling.
+
+:line
+
+[E -- Exchange (simple reflection):]
+
+reactant --> product
+E prob energy_eV :pre
+
+One particle goes in, one comes out.  Speed is set from the stated
+kinetic energy {energy_eV}; direction is drawn from a cosine-law
+distribution relative to the outward surface normal.  Typical uses:
+
+ion-to-atom neutralization at Franck-Condon energy:
+  {D+ --> D} / {E 1.0 3.0}
+cold thermal reflection:
+  {D --> D}  / {E 1.0 0.025} :pre
+
+Internal rovib energy of the product is controlled by the optional
+{twall} / {twall_surf} keywords (see below).
+
+:line
+
+[D -- Dissociation at the wall:]
+
+reactant --> product1 + product2
+D prob energy1_eV energy2_eV :pre
+
+Incoming particle is destroyed; two products are emitted, each with its
+own fixed kinetic energy and an independent cosine-law direction.  A
+second particle is allocated in the particle array.  Example:
+
+{D+ --> D + D} / {D 1.0 3.0 0.025} :pre
+
+dissociates a molecular ion into a fast atom (Franck-Condon 3 eV) and a
+thermal atom (~0.025 eV).
+
+:line
+
+[R -- Recombination (absorption):]
+
+reactant --> NULL
+R prob :pre
+
+Incoming particle is deleted with the stated probability.  Use for
+perfect pumps, full-recycling-off walls, and tests where particles
+should exit the simulation via the wall.
+
+:line
+
+[T -- TRIM-based reflection:]
+
+reactant --> product
+T table_name :pre
+
+Probability of firing is dynamic, set per-hit by bilinear interpolation
+of the reflection coefficient {R_N(E_in, theta_in)} from an HDF5 table.
+If the channel fires, the outgoing kinetic energy, polar angle, and
+azimuthal angle are sampled from the same table using the quantile
+inversion implemented in {reflection_tables.h}.
+
+The {table_name} is resolved against {trim_dir} as
+{trim_dir/table_name.h5}; for example,
+
+surf_react ID recycle file trim_dir /path/to/trim :pre
+
+with a reaction line {T D_on_W} loads {/path/to/trim/D_on_W.h5}.
+
+The HDF5 schema (see {reflection_tables.h}):
+
+E           [nE]   incident energy grid [eV]
+theta       [nW]   incident polar-angle grid [deg]
+raar        [nQ]   quantile bin midpoints, e.g. [0.1, 0.3, 0.5, 0.7, 0.9]
+R_N         [nE, nW]            particle reflection probability
+Eout_q      [nE, nW, nQ]        quantile grid for reflected energy
+Eout_min    [nE, nW]            min reflected energy per bin
+Eout_max    [nE, nW]            max reflected energy per bin
+cos_polar_q [nE, nW, nQ, nQ]    quantile grid for cos(polar_out)
+cos_azim_q  [nE, nW, nQ, nQ, nQ] quantile grid for cos(azim_out) :pre
+
+Tables shipped in {database/surface/trim/} were generated from EIRENE's
+TRIM database ({source} attribute: "EIRENE TRIM database (rdtrim.f
+format)") and cover the standard fusion projectile-target set:
+D/H/T/He on W, Be, C, Li, Mo, Fe; C/Be/W self-sputter; etc.  Any other
+BCA code (SDTrimSP, RustBCA, FTridyn, SRIM) that emits tables on the
+same quantile grid layout plugs in unchanged.
+
+The C++ sampler {Reflection::sample_reflection()} ports EIRENE's
+{eirmod_reflec.f} subroutine {EIRENE_REFLEC} and produces identical
+distributions when handed identical tables.
+
+The product species in a {T} line is the neutral species the reactant
+becomes upon reflection (e.g. {D+ --> D} for incoming ions; {D --> D}
+for neutrals).
+
+:line
+
+[A -- Absorb and stochastically re-emit (EIRENE-faithful):]
+
+reactant --> product
+A R [f_mol] :pre
+
+The catch-all "what EIRENE does with everything TRIM did not reflect"
+channel.  Probability of firing is always 1.0, so anything reaching
+this channel is absorbed into the wall.  Once absorbed, the behavior is:
+
+{simple return rule} (reactant == product species):
+   P(re-emit same species) = R
+   P(retained / pumped)    = 1 - R :pre
+
+{atom-to-molecule rule} (reactant != product species, e.g. D --> D2):
+   P(re-emit as atom, same species)    = R * (1 - f_mol)
+   P(re-emit as molecule, product spec) = R * f_mol / 2
+   P(retained / pumped)                 = 1 - R + R*f_mol/2 :pre
+
+The factor of 2 in the molecular branch is mass conservation: 2 incoming
+atoms form 1 molecule, so on average half of the "molecular emission"
+events at the per-event level produce an actual outgoing molecule.
+Total atoms conserved on ensemble average:
+  {1 * R*(1-f_mol)} + {2 * R*f_mol/2} = R   (the recycling coefficient) :pre
+
+{R} is the recycling coefficient (0 to 1).  {f_mol} is the molecular
+fraction of returning atoms (0 to 1); it is not physically meaningful
+when reactant == product (a molecule absorbed coming back as a molecule
+does not go through atom->molecule conversion), so it is not required
+and is ignored in that case.
+
+Re-emission velocity: half-Maxwellian flux sampler at the effective
+wall temperature {twall_eff} (see next section).  Normal component is
+flux-biased (proportional to {v_n * exp(-v_n^2 / vrm^2)}, peaked at
+{vrm = sqrt(2 kB T / m)}); tangentials are Gaussian(0, {sqrt(kB T / m)}).
+This is Bird 1994 diffuse-reflection formula.
+
+Internal rovib: sampled from Maxwell at {twall_eff}.  For monatomic
+products this is zero; for diatomics it populates the erot/evib slots
+per the species DOF declared in the {species} file.
+
+{Default EIRENE WTD values for W:} R = 0.99, f_mol = 0.95.  For LTX
+(H/Li), R ~ 1.0 typical (high recycling), f_mol ~ 0.95.  For pumped
+divertors, R may be set below 1 to model localized pumping.
+
+:line
+
+[Wall temperature handling:]
+
+The {twall} scalar keyword sets a single wall temperature in Kelvin,
+used for:
+
+the half-Maxwellian flux sampler of the {A} channel;
+internal rovib of non-zero-DOF products on {E}, {D}, {A} channels. :ul
+
+The {twall_surf} keyword replaces the scalar with a per-surface lookup
+into a SPARTA custom surf attribute.  The attribute must be of type
+{float} with size 0 (scalar per-surf).  It can be populated by:
+
+the {custom surf} command with a variable or constant;
+an extra column in the {read_surf} input file (via the {custom}
+  keyword of read_surf);
+a fix that updates surface temperature in place (e.g. {fix surf/temp},
+  or a user fix tracking wall heat balance). :ul
+
+Example of a static per-surface temperature map:
+
+variable vhot  equal 800.0
+custom   surf  Twall_pfc set v_vhot divertor_group NULL
+surf_react r wall_pwi f twall_surf Twall_pfc :pre
+
+If neither {twall} nor {twall_surf} is given, erot/evib of products are
+either (a) pass-through (preserved from the incoming particle) when
+reactant species matches product species, or (b) reset to zero when the
+reaction changes species.  This matches the conservative "no thermal
+accommodation" limit.  {A} reactions fall back to 300 K in the
+thermal-flux sampler if no wall temperature is set, so re-emission is
+never at zero kinetic energy.
+
+:line
+
+[Pumping and per-surface recycling coefficient:]
+
+In EIRENE's wall model, pumping is represented implicitly: a surface
+element with recycling coefficient R < 1 retains a fraction (1-R) of
+absorbed particles in its bulk (or vents them to a pump).  OpenEdge
+matches this convention in the {A} channel: R is the top-line
+coefficient on the reaction file line, and (1-R) is the fraction of
+absorbed particles deleted on the spot.
+
+For uniform pumping, the scalar R on the A line is sufficient:
+
+{D --> D2
+ A 0.5 0.95     # 50% returned, 50% pumped; 95% of returned as D2} :pre
+
+For non-uniform pumping (e.g. pumped baffle plate + full-recycling
+main wall), set the {R_surf} keyword to a per-surf custom attribute.
+Any A-type reaction on this surf_react instance uses the per-surface
+value instead of the scalar R on the A line:
+
+region   rdome block 2.5 3.2 -0.95 -0.80 -INF INF
+variable vRmain equal 1.0
+variable vRdome equal 0.10
+custom   surf R_rec set v_vRmain wall NULL
+custom   surf R_rec set v_vRdome wall rdome
+
+surf_react w wall_pwi wall.eirene &
+           trim_dir ../../database/surface/trim &
+           R_surf R_rec &
+           twall_surf Twall_pfc :pre
+
+In this example the main vessel runs with full recycling, while the
+pump dome (region {rdome}) retains 90% of absorbed particles.  Because
+SPARTA's {custom surf ... set} command zeros non-selected surfs on each
+call, per-surf attributes can also be populated via an extra column in
+the surf file ({read_surf wall.surf custom R_rec float 0}) for complex
+spatial maps.
+
+The {R_surf} attribute must be DOUBLE, size 0 (scalar per-surf).
+If specified but any value is out of [0,1], it is clamped silently.
+
+{Note on scope:}  R_surf applies to {all} A-type reactions in this
+surf_react instance.  If you need per-channel-per-surface R (different
+R for D+ and D on the same surface), create separate surf_react_wall_pwi
+instances and assign to different surface groups.
+
+:line
+
+[Examples:]
+
+Minimal: ion neutralization at FC, atomic and molecular thermal reflection:
+
+{surf_react wall recycle wall.simple twall 500.0} :pre
+
+wall.simple:
+{D+ --> D
+ E 1.0 3.0
+
+ D --> D
+ E 1.0 0.025
+
+ D2 --> D2
+ E 1.0 0.025} :pre
+
+EIRENE-equivalent with TRIM + stochastic recycling:
+
+{surf_react wall recycle wall.eirene &
+            trim_dir ../../database/surface/trim &
+            twall 400.0} :pre
+
+wall.eirene:
+{D+ --> D
+ T D_on_W
+
+ D+ --> D2
+ A 0.99 0.95
+
+ D --> D
+ T D_on_W
+
+ D --> D2
+ A 0.99 0.95
+
+ D2 --> D2
+ A 0.99} :pre
+
+LTX (H/Li):
+
+wall.ltx:
+{H+ --> H
+ T H_on_Li
+
+ H+ --> H2
+ A 0.99 0.95
+
+ H --> H
+ T H_on_Li
+
+ H --> H2
+ A 0.99 0.95
+
+ H2 --> H2
+ A 0.99} :pre
+
+Per-surface wall temperature (hot divertor, cool main chamber):
+
+{region   rdiv block 1.8 3.2 -0.94 -0.4 -INF INF
+ variable vdiv equal 800.0
+ variable vmc  equal 400.0
+ custom   surf Twall set v_vmc  wall NULL
+ custom   surf Twall set v_vdiv wall rdiv
+ surf_react w recycle wall.eirene &
+            trim_dir ../../database/surface/trim &
+            twall_surf Twall} :pre
+
+:line
+
+[Output info:]
+
+Per-reaction tallies are printed in stats output and via {stats_style}.
+Each channel (including multiple channels for the same species) is
+tallied separately.
+
+The {A}-type channel combines multiple internal outcomes (atomic,
+molecular, pump) into a single tally count -- every hit that reaches an
+A channel increments the counter, regardless of which internal branch
+fired.  Particle-count balance in the simulation directly reflects the
+pump fraction: retained particles are deleted on the spot.
+
+:line
+
+[Related:]
+
+"surf_react"_surf_react.html, "surf_react_adsorb"_surf_react_adsorb.html,
+"surf_collide"_surf_collide.html, "read_surf"_read_surf.html,
+"custom"_custom.html, "fix surf/temp"_fix_surf_temp.html
+
+:line
+
+[Notes:]
+
+Data files in {database/surface/trim/} carry a provenance attribute
+({source}) identifying their origin.  Those shipped with OpenEdge were
+regenerated from EIRENE's TRIM database; replacements produced by
+SDTrimSP / RustBCA / FTridyn / SRIM can be substituted in the same
+directory without any code change as long as the HDF5 schema matches.

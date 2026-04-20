@@ -34,6 +34,7 @@
 
 namespace fs = std::filesystem;
 using namespace SPARTA_NS;
+using MathConst::MY_2PI;
 enum{IONIZATION,RECOMBINATION,EXCHANGE,DISSOCIATION};  // file-local reaction types
 enum{IONIZATIONRATE, RECOMBINATIONRATE};               // other files
 enum{ADAS,JANEV};                                      // rate styles
@@ -965,20 +966,26 @@ int FixChemAdas::attempt(Particle::OnePart *ip, int ip_index,
   // Assign first product
   ip->ispecies = rchosen->products[0];
 
-  // Velocity re-sampling for CX and dissociation products:
-  // Sample from shifted Maxwellian at local Ti and bulk flow (EIRENE-like)
-  const bool resample = (rchosen->type == EXCHANGE || rchosen->type == DISSOCIATION)
-                        && Ti_eV > 0.0;
-  if (resample) {
+  // CX products: shifted Maxwellian at local Ti + bulk flow (EIRENE-like).
+  // Dissociation products: isotropic Franck-Condon kick in the parent CM
+  // frame. The molecular potential releases ~3 eV/atom for D2 -> 2D,
+  // independent of plasma Ti; resampling dissociation at Ti would give
+  // products 3-10x too energetic in a hot SOL.
+  const double vpx_parent = ip->v[0];
+  const double vpy_parent = ip->v[1];
+  const double vpz_parent = ip->v[2];
+
+  double fc_kick_x = 0.0, fc_kick_y = 0.0, fc_kick_z = 0.0;
+  const bool do_cx     = (rchosen->type == EXCHANGE) && Ti_eV > 0.0;
+  const bool do_dissoc = (rchosen->type == DISSOCIATION);
+
+  if (do_cx) {
     const double kB = 1.380649e-23;
     const double eV_to_J = 1.602176634e-19;
     const double Ti_K = Ti_eV * eV_to_J / kB;
     const double m_prod = particle->species[rchosen->products[0]].mass;
-
-    // thermal speed: v_th = sqrt(kB * Ti / m)
     const double v_th = (m_prod > 0.0) ? std::sqrt(kB * Ti_K / m_prod) : 0.0;
 
-    // flow velocity vector: v_flow = vpar * b_hat
     const double Bmag = std::sqrt(bx*bx + by*by + bz*bz);
     double vfx = 0.0, vfy = 0.0, vfz = 0.0;
     if (Bmag > 1e-30) {
@@ -988,47 +995,49 @@ int FixChemAdas::attempt(Particle::OnePart *ip, int ip_index,
       vfz = vpar * bz * invB;
     }
 
-    // Box-Muller Gaussian samples
     const double u1 = std::max(rng_adas->uniform(), 1e-30);
     const double u2 = rng_adas->uniform();
     const double u3 = rng_adas->uniform();
     const double u4 = std::max(rng_adas->uniform(), 1e-30);
-    const double g1 = std::sqrt(-2.0 * std::log(u1)) * std::cos(6.283185307 * u2);
-    const double g2 = std::sqrt(-2.0 * std::log(u1)) * std::sin(6.283185307 * u2);
-    const double g3 = std::sqrt(-2.0 * std::log(u4)) * std::cos(6.283185307 * u3);
+    const double g1 = std::sqrt(-2.0 * std::log(u1)) * std::cos(MY_2PI * u2);
+    const double g2 = std::sqrt(-2.0 * std::log(u1)) * std::sin(MY_2PI * u2);
+    const double g3 = std::sqrt(-2.0 * std::log(u4)) * std::cos(MY_2PI * u3);
 
     ip->v[0] = vfx + v_th * g1;
     ip->v[1] = vfy + v_th * g2;
     ip->v[2] = vfz + v_th * g3;
   }
+  else if (do_dissoc) {
+    const double E_FC_eV = 3.0;
+    const double eV_to_J = 1.602176634e-19;
+    const double m_prod = particle->species[rchosen->products[0]].mass;
+    const double v_FC = (m_prod > 0.0)
+                        ? std::sqrt(2.0 * E_FC_eV * eV_to_J / m_prod) : 0.0;
 
-  // For dissociation with 2 products: defer creation of second particle
+    const double u1 = rng_adas->uniform();
+    const double u2 = rng_adas->uniform();
+    const double costh = 1.0 - 2.0 * u1;
+    const double sinth = std::sqrt(std::max(0.0, 1.0 - costh*costh));
+    const double phi   = MY_2PI * u2;
+    fc_kick_x = v_FC * sinth * std::cos(phi);
+    fc_kick_y = v_FC * sinth * std::sin(phi);
+    fc_kick_z = v_FC * costh;
+
+    ip->v[0] = vpx_parent + fc_kick_x;
+    ip->v[1] = vpy_parent + fc_kick_y;
+    ip->v[2] = vpz_parent + fc_kick_z;
+  }
+
+  // For dissociation with 2 products: defer creation of second particle.
+  // Back-to-back kick in the CM frame keeps p1+p2 = m_parent * v_parent.
   if (rchosen->nproduct == 2) {
     DeferredParticle dp;
     dp.x[0] = ip->x[0]; dp.x[1] = ip->x[1]; dp.x[2] = ip->x[2];
 
-    if (resample) {
-      // Second product also gets independent Maxwellian sample
-      const double kB = 1.380649e-23;
-      const double eV_to_J = 1.602176634e-19;
-      const double Ti_K = Ti_eV * eV_to_J / kB;
-      const double m_prod2 = particle->species[rchosen->products[1]].mass;
-      const double v_th2 = (m_prod2 > 0.0) ? std::sqrt(kB * Ti_K / m_prod2) : 0.0;
-      const double Bmag = std::sqrt(bx*bx + by*by + bz*bz);
-      double vfx = 0.0, vfy = 0.0, vfz = 0.0;
-      if (Bmag > 1e-30) {
-        const double invB = 1.0 / Bmag;
-        vfx = vpar * bx * invB;
-        vfy = vpar * by * invB;
-        vfz = vpar * bz * invB;
-      }
-      const double u1 = std::max(rng_adas->uniform(), 1e-30);
-      const double u2 = rng_adas->uniform();
-      const double u3 = rng_adas->uniform();
-      const double u4 = std::max(rng_adas->uniform(), 1e-30);
-      dp.v[0] = vfx + v_th2 * std::sqrt(-2.0*std::log(u1)) * std::cos(6.283185307*u2);
-      dp.v[1] = vfy + v_th2 * std::sqrt(-2.0*std::log(u1)) * std::sin(6.283185307*u2);
-      dp.v[2] = vfz + v_th2 * std::sqrt(-2.0*std::log(u4)) * std::cos(6.283185307*u3);
+    if (do_dissoc) {
+      dp.v[0] = vpx_parent - fc_kick_x;
+      dp.v[1] = vpy_parent - fc_kick_y;
+      dp.v[2] = vpz_parent - fc_kick_z;
     } else {
       dp.v[0] = ip->v[0]; dp.v[1] = ip->v[1]; dp.v[2] = ip->v[2];
     }

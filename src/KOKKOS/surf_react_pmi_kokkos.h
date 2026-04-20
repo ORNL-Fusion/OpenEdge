@@ -16,7 +16,7 @@ SurfReactStyle(pmi/kk,SurfReactPMIKokkos)
 
 #include "surf_react_pmi.h"
 #include "eckstein_sputter.h"
-#include "eirene_trim.h"
+#include "reflection_tables.h"
 #include "kokkos_type.h"
 #include "rand_pool_wrap.h"
 #include "Kokkos_Random.hpp"
@@ -186,8 +186,8 @@ class SurfReactPMIKokkos : public SurfReactPMI {
       } else if (style == 2 /*TRIM_STYLE*/) {
         int it = (int)d_react_coeff(sr.ireflect * ncoeff);
         if (it >= 0 && it < kk_ntrim) {
-          EireneTrim::TrimView tv = kk_trim_view(it);
-          RN = EireneTrim::R_N_interp(tv, E_eV, theta_deg);
+          Reflection::View tv = kk_trim_view(it);
+          RN = Reflection::R_N_interp(tv, E_eV, theta_deg);
           RE = 0.0;  // unused; E_out sampled in reflect branch below
         }
       } else {
@@ -237,12 +237,12 @@ class SurfReactPMIKokkos : public SurfReactPMI {
 
       if (rstyle == 2 /*TRIM_STYLE*/) {
         int it = (int)d_react_coeff(irxn * ncoeff);
-        EireneTrim::TrimView tv = kk_trim_view(it);
+        Reflection::View tv = kk_trim_view(it);
         double u1 = rand_gen.drand();
         double u2 = rand_gen.drand();
         double u3 = rand_gen.drand();
         double cos_polar = 1.0, cos_azim = 1.0;
-        EireneTrim::sample_reflection(tv, E_eV, theta_deg, u1, u2, u3,
+        Reflection::sample_reflection(tv, E_eV, theta_deg, u1, u2, u3,
                                       &E_out, &cos_polar, &cos_azim);
         double E_out_J = E_out / kk_joule2ev / kk_mvv2e;
         double vmag = sqrt(2.0 * E_out_J / mass_out);
@@ -390,17 +390,17 @@ class SurfReactPMIKokkos : public SurfReactPMI {
 
  public:
   /* ---------------------------------------------------------------------- */
-  // Build a TrimView pointing into the concatenated device views for the
+  // Build a Reflection::View pointing into the concatenated device views for the
   // i-th loaded TRIM combination.  Shapes are fixed by EIRENE's format so
   // each combination occupies a contiguous slab of the same size.
 
   KOKKOS_INLINE_FUNCTION
-  EireneTrim::TrimView kk_trim_view(int itrim) const
+  Reflection::View kk_trim_view(int itrim) const
   {
-    const int nE = EireneTrim::TRIM_NE;
-    const int nW = EireneTrim::TRIM_NW;
-    const int nR = EireneTrim::TRIM_NR;
-    EireneTrim::TrimView tv;
+    const int nE = Reflection::NE;
+    const int nW = Reflection::NTHETA;
+    const int nR = Reflection::NQ;
+    Reflection::View tv;
     tv.E           = &d_trim_E(itrim * nE);
     tv.theta_deg   = &d_trim_theta(itrim * nW);
     tv.raar        = &d_trim_raar(itrim * nR);
