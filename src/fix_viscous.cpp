@@ -535,22 +535,16 @@ void FixViscous::kick_half(double dt_half, int diag_phase)
         }
       }
 
-      // Gravity in local velocity basis:
-      // - Cartesian (2D/3D): (gx,gy,gz) -> (v0,v1,v2)
-      // - Axisymmetric:      (gx,gy,gz) -> (gr,gz,gphi)
+      // Gravity is interpreted in SPARTA slot order in every mode.
+      // (See fix_gravity.cpp for the convention rationale.) The
+      // pre-existing axisymmetric branch read p.x[2] as the particle's
+      // azimuth, but in SPARTA's native axi mode particles are remapped
+      // to the symmetry plane (x[2]=0), so that math was incorrect.
       double g0 = 0.0, g1 = 0.0, g2 = 0.0;
       if (use_gravity) {
-        if (!domain->axisymmetric) {
-          g0 = g_input_[0];
-          g1 = g_input_[1];
-          g2 = g_input_[2];
-        } else {
-          const double c = std::cos(p.x[2]);
-          const double s = std::sin(p.x[2]);
-          g0 =  g_input_[0]*c + g_input_[1]*s;   // gr
-          g1 =  g_input_[2];                     // gz
-          g2 = -g_input_[0]*s + g_input_[1]*c;   // gphi
-        }
+        g0 = g_input_[0];
+        g1 = g_input_[1];
+        g2 = g_input_[2];
       }
 
       if (nuE > 0.0 && std::isfinite(nuE)) {

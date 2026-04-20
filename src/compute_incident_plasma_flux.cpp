@@ -8,6 +8,7 @@
 #include "surf.h"
 #include "domain.h"
 #include "comm.h"
+#include "openedge_geom.h"
 #include "update.h"
 #include "input.h"
 #include "memory.h"
@@ -321,21 +322,23 @@ void ComputeIncidentPlasmaFlux::compute_per_surf()
 
     double r = 0.0, z = 0.0;
     if (dimension == 2) {
-      r = 0.5*(lines[m].p1[0] + lines[m].p2[0]);
-      z = 0.5*(lines[m].p1[1] + lines[m].p2[1]);
+      const double mid[3] = {0.5*(lines[m].p1[0] + lines[m].p2[0]),
+                             0.5*(lines[m].p1[1] + lines[m].p2[1]), 0.0};
+      OpenEdge::sparta_to_RZ(mid, dimension, domain->axisymmetric, r, z);
     } else {
-      const double xc = (tris[m].p1[0] + tris[m].p2[0] + tris[m].p3[0]) / 3.0;
-      const double yc = (tris[m].p1[1] + tris[m].p2[1] + tris[m].p3[1]) / 3.0;
-      const double zc = (tris[m].p1[2] + tris[m].p2[2] + tris[m].p3[2]) / 3.0;
-      r = std::sqrt(xc*xc + yc*yc);
-      z = zc;
+      const double mid[3] = {(tris[m].p1[0] + tris[m].p2[0] + tris[m].p3[0]) / 3.0,
+                             (tris[m].p1[1] + tris[m].p2[1] + tris[m].p3[1]) / 3.0,
+                             (tris[m].p1[2] + tris[m].p2[2] + tris[m].p3[2]) / 3.0};
+      OpenEdge::sparta_to_RZ(mid, dimension, domain->axisymmetric, r, z);
     }
 
     // Surface normal in (R,Z) plane for 2D.
     double nr_surf = 0.0, nz_surf = 0.0;
     if (dimension == 2) {
-      nr_surf = lines[m].norm[0];
-      nz_surf = lines[m].norm[1];
+      double nphi_unused;
+      OpenEdge::sparta_v_to_RZphi(lines[m].norm, dimension,
+                                   domain->axisymmetric, 0.0,
+                                   nr_surf, nz_surf, nphi_unused);
     } else {
       // For 3D Cartesian tri normals, project to local cylindrical R/Z.
       const double xc = (tris[m].p1[0] + tris[m].p2[0] + tris[m].p3[0]) / 3.0;

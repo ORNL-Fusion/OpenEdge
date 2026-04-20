@@ -737,43 +737,25 @@ void ComputePlasmaFields::compute_per_grid()
     const double Vzv = P.parr_flow_z;
 
     // Cylindrical -> Cartesian transform in 3D Cartesian geometry.
-    // In 2D (r,z), cartesian aliases map directly to cylindrical components.
-    double cphi = 1.0, sphi = 0.0;
+    // Project cylindrical (r, z, t) field components onto SPARTA's
+    // (x, y, z) slot order. The helper handles all three modes:
+    //   2D Cart (legacy):  x=R, y=Z, z=phi  -> Bx=Br, By=Bz, Bz=Bt
+    //   2D axi (native):   x=Z, y=R, z=phi  -> Bx=Bz, By=Br, Bz=Bt
+    //   3D Cartesian:      Br/Bt rotated by phi at this cell's centroid
+    double phi = 0.0;
     if (dim == 3) {
       const Grid::ChildCell &cell = cells[icell];
       const double x = 0.5 * (cell.lo[0] + cell.hi[0]);
       const double y = 0.5 * (cell.lo[1] + cell.hi[1]);
-      const double rxy = std::sqrt(x*x + y*y);
-      if (rxy > 0.0) {
-        cphi = x / rxy;
-        sphi = y / rxy;
-      }
+      phi = std::atan2(y, x);
     }
-
-    // Component mapping:
-    // - 3D Cartesian: convert (r,t,z) -> (x,y,z) using local phi.
-    // - 2D R-Z SPARTA plane (x=R, y=Z, z=out-of-plane toroidal):
-    //     bx=Br, by=Bz, bz=Bt
-    //     ex=Er, ey=Ez, ez=Et
-    //     vx=Vr, vy=Vz, vz=Vt
-    double Bx, By, Bzz;
-    double Ex, Ey, Ezz;
-    double Vx, Vy, Vzz;
-    if (dim == 2) {
-      Bx = Br;   By = Bzv;  Bzz = Bt;
-      Ex = Er;   Ey = Ezv;  Ezz = Et;
-      Vx = Vr;   Vy = Vzv;  Vzz = Vt;
-    } else {
-      Bx = Br*cphi - Bt*sphi;
-      By = Br*sphi + Bt*cphi;
-      Bzz = Bzv;
-      Ex = Er*cphi - Et*sphi;
-      Ey = Er*sphi + Et*cphi;
-      Ezz = Ezv;
-      Vx = Vr*cphi - Vt*sphi;
-      Vy = Vr*sphi + Vt*cphi;
-      Vzz = Vzv;
-    }
+    double Bx, By, Bzz, Ex, Ey, Ezz, Vx, Vy, Vzz;
+    OpenEdge::RZphi_force_to_sparta(Br, Bzv, Bt, dim, domain->axisymmetric,
+                                     phi, Bx, By, Bzz);
+    OpenEdge::RZphi_force_to_sparta(Er, Ezv, Et, dim, domain->axisymmetric,
+                                     phi, Ex, Ey, Ezz);
+    OpenEdge::RZphi_force_to_sparta(Vr, Vzv, Vt, dim, domain->axisymmetric,
+                                     phi, Vx, Vy, Vzz);
     const double ne = std::max(P.dens_e, tiny);
     // WEST/SOLPS convention used here:
     //   Te in eV, ne in 1/m^3, grad(Te) in eV/m, grad(ne) in 1/m^4.
@@ -798,14 +780,8 @@ void ComputePlasmaFields::compute_per_grid()
       Er  = epar * bhat_r;
       Et  = epar * bhat_t;
       Ezv = epar * bhat_z;
-      // Recompute Cartesian aliases from updated cylindrical E
-      if (dim == 2) {
-        Ex = Er;   Ey = Ezv;  Ezz = Et;
-      } else {
-        Ex = Er*cphi - Et*sphi;
-        Ey = Er*sphi + Et*cphi;
-        Ezz = Ezv;
-      }
+      OpenEdge::RZphi_force_to_sparta(Er, Ezv, Et, dim, domain->axisymmetric,
+                                       phi, Ex, Ey, Ezz);
     }
 
     for (int iv = 0; iv < nvalue; ++iv) {

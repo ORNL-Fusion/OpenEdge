@@ -13,6 +13,7 @@
 #include "memory.h"
 #include "error.h"
 #include "fix_plasma_data.h"
+#include "openedge_geom.h"
 #include "eckstein_sputter_data.h"
 #include "eckstein_sputter.h"
 
@@ -1045,17 +1046,18 @@ void ComputePMISurfData::compute_per_surf()
     const int in_group = (dimension == 2) ? (lines[m].mask & groupbit) : (tris[m].mask & groupbit);
     if (!in_group) continue;
 
-    // Surface element centroid in cylindrical (R,Z)
+    // Surface element centroid in cylindrical (R,Z). Helper picks the
+    // SPARTA slot mapping (Cart 2D x=R, axi 2D x=Z, 3D Cartesian).
     double r = 0.0, z = 0.0;
     if (dimension == 2) {
-      r = 0.5*(lines[m].p1[0] + lines[m].p2[0]);
-      z = 0.5*(lines[m].p1[1] + lines[m].p2[1]);
+      const double mid[3] = {0.5*(lines[m].p1[0] + lines[m].p2[0]),
+                             0.5*(lines[m].p1[1] + lines[m].p2[1]), 0.0};
+      OpenEdge::sparta_to_RZ(mid, dimension, domain->axisymmetric, r, z);
     } else {
-      const double xc = (tris[m].p1[0] + tris[m].p2[0] + tris[m].p3[0]) / 3.0;
-      const double yc = (tris[m].p1[1] + tris[m].p2[1] + tris[m].p3[1]) / 3.0;
-      const double zc = (tris[m].p1[2] + tris[m].p2[2] + tris[m].p3[2]) / 3.0;
-      r = std::sqrt(xc*xc + yc*yc);
-      z = zc;
+      const double mid[3] = {(tris[m].p1[0] + tris[m].p2[0] + tris[m].p3[0]) / 3.0,
+                             (tris[m].p1[1] + tris[m].p2[1] + tris[m].p3[1]) / 3.0,
+                             (tris[m].p1[2] + tris[m].p2[2] + tris[m].p3[2]) / 3.0};
+      OpenEdge::sparta_to_RZ(mid, dimension, domain->axisymmetric, r, z);
     }
 
     // Skip surface elements outside SOLPS domain.
@@ -1064,11 +1066,14 @@ void ComputePMISurfData::compute_per_surf()
     // a fallback for rectangular-grid mode.
     if (!has_mesh && !point_in_boundary(r, z)) continue;
 
-    // Surface normal in cylindrical (R, phi, Z)
+    // Surface normal in cylindrical (R, phi, Z). Use helper to invert
+    // the SPARTA slot layout: in axi mode SPARTA's normal[0] is the
+    // axial component, normal[1] the radial.
     double nr_surf = 0.0, nt_surf = 0.0, nz_surf = 0.0;
     if (dimension == 2) {
-      nr_surf = lines[m].norm[0];
-      nz_surf = lines[m].norm[1];
+      OpenEdge::sparta_v_to_RZphi(lines[m].norm, dimension,
+                                   domain->axisymmetric, 0.0,
+                                   nr_surf, nz_surf, nt_surf);
     } else {
       const double xc = (tris[m].p1[0] + tris[m].p2[0] + tris[m].p3[0]) / 3.0;
       const double yc = (tris[m].p1[1] + tris[m].p2[1] + tris[m].p3[1]) / 3.0;
@@ -1248,10 +1253,13 @@ void ComputePMISurfData::compute_per_surf()
     // 3D tri : physical triangle area (0.5 |e1 x e2|)
     double ring_area = 0.0;
     if (dimension == 2) {
-      const double x1 = lines[m].p1[0], y1 = lines[m].p1[1];
-      const double x2 = lines[m].p2[0], y2 = lines[m].p2[1];
-      const double seg = std::sqrt((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1));
-      const double R_mid = 0.5 * (x1 + x2);
+      double R1, Z1, R2, Z2;
+      OpenEdge::sparta_to_RZ(lines[m].p1, dimension, domain->axisymmetric,
+                              R1, Z1);
+      OpenEdge::sparta_to_RZ(lines[m].p2, dimension, domain->axisymmetric,
+                              R2, Z2);
+      const double seg = std::sqrt((R2-R1)*(R2-R1) + (Z2-Z1)*(Z2-Z1));
+      const double R_mid = 0.5 * (R1 + R2);
       ring_area = 2.0 * M_PI * R_mid * seg;
     } else {
       const double *p1 = tris[m].p1;

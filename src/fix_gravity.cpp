@@ -87,24 +87,20 @@ void FixGravity::half_kick(double dt_half)
 
   const double gx = g_[0], gy = g_[1], gz = g_[2];
 
+  // (gx, gy, gz) is interpreted in SPARTA slot order in every mode:
+  //   2D Cartesian (legacy): x=R, y=Z, z=phi  -> set gx=g_R, gy=g_Z, gz=g_phi
+  //   2D axisymmetric:       x=Z, y=R, z=phi  -> set gx=g_Z, gy=g_R, gz=g_phi
+  //   3D Cartesian:          gx, gy, gz are Cartesian components
+  // The user is responsible for picking the right slot. This matches the
+  // bx/by/bz convention used everywhere else (CLAUDE.md "B-field sources
+  // must be in SPARTA coordinate order"). The pre-existing axisymmetric
+  // branch mixed slot conventions and was incorrect under SPARTA's true
+  // axi mode (which keeps particles in the symmetry plane, so x[2]==0).
   for (int i = 0; i < nlocal; ++i) {
     double *v = parts[i].v;
-    if (!domain->axisymmetric) {
-      // Cartesian storage: v = (vx, vy, vz)
-      v[0] += gx * dt_half;
-      v[1] += gy * dt_half;
-      v[2] += gz * dt_half;
-    } else {
-      // Axisymmetric storage: v = (vr, vz, vphi)
-      const double phi = parts[i].x[2];
-      const double c = std::cos(phi), s = std::sin(phi);
-      const double gr   =  gx*c + gy*s;
-      const double gphi = -gx*s + gy*c;
-
-      v[0] += gr   * dt_half;   // vr
-      v[1] += gz   * dt_half;   // vz
-      v[2] += gphi * dt_half;   // vphi
-    }
+    v[0] += gx * dt_half;
+    v[1] += gy * dt_half;
+    v[2] += gz * dt_half;
   }
 }
 
