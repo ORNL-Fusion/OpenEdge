@@ -729,22 +729,17 @@ def convert_solps_to_openedge(
     print(f"Eirene mesh -> B2.5 mapping: {has_cell_native.sum()} triangles "
           f"with plasma, {(~has_cell_native).sum()} vacuum/PFR (native)")
 
+    # Centroid bookkeeping for the projections below.
+    centroid_r = mesh_vtx_r[mesh_tri].mean(axis=1)
+    centroid_z = mesh_vtx_z[mesh_tri].mean(axis=1)
+
     # Project sheath-edge plasma outward onto vacuum/PFR triangles.
-    # For each triangle without a native B2 mapping, find the nearest
-    # triangle whose B2 cell sits on the SHEATH EDGE ring (outermost real
-    # plasma cells: ix=1 or ix=nx, iy=1 or iy=ny — the cells that
-    # physically drive EIRENE's recycling strata). Restricting the
-    # projection target to the sheath-edge ring (vs. any nearest B2 cell)
-    # puts the SOLPS boundary-layer density / temperature at the wall,
-    # instead of the volume-averaged SOL.
+    # Sheath-edge cells: outermost ring of B2 REAL cells (ix=1/nx, iy=1/ny),
+    # which physically drive EIRENE's recycling strata. Restricting the
+    # projection target to this ring (vs. any nearest B2 cell) puts the
+    # SOLPS boundary-layer plasma at the wall, not the volume-averaged SOL.
     if (~has_cell_native).any() and has_cell_native.any():
         from scipy.spatial import cKDTree
-        centroid_r = mesh_vtx_r[mesh_tri].mean(axis=1)
-        centroid_z = mesh_vtx_z[mesh_tri].mean(axis=1)
-
-        # Identify native-mapped triangles whose B2 cell is on the
-        # sheath-edge ring of the B2 (nx+2, ny+2) mesh. Unflattened
-        # indices are (iy, ix) with order=F -> c = iy*(nx+2) + ix.
         native_idx = np.where(has_cell_native)[0]
         c_flat = mesh_cell_idx[native_idx]
         iy = c_flat // (nx + 2)
@@ -765,6 +760,43 @@ def convert_solps_to_openedge(
               f"({sheath_src.size} sheath-edge cells available)")
 
     has_cell = mesh_cell_idx >= 0
+
+    # ------------------------------------------------------------------
+    # Per-cell wall face area for B2 boundary cells.
+    # ------------------------------------------------------------------
+    # SOLPS corner ordering (inferred from _cell_polygons_from_corners):
+    #   c=0 lower-left  (-x, -y), c=1 lower-right (+x, -y),
+    #   c=3 upper-right (+x, +y), c=2 upper-left  (-x, +y)
+    # External face for each boundary row of real cells:
+    #   iy=1  (lower target): face = edge 0-1   (-y side)
+    #   iy=ny (upper target): face = edge 2-3   (+y side)
+    #   ix=1  (inner radial): face = edge 0-2   (-x side)
+    #   ix=nx (outer radial): face = edge 1-3   (+x side)
+    # Face area (axisymmetric) = 2*pi * R_mid * poloidal_length.
+    # Interior cells get 0. Units: m^2.
+    crx4 = crx.reshape(nx + 2, ny + 2, 4, order="F")
+    cry4 = cry.reshape(nx + 2, ny + 2, 4, order="F")
+    mesh_wall_face_area = np.zeros(ncell_flat, dtype=np.float64)
+
+    def _edge_area(ix_c, iy_c, ca, cb):
+        Ra, Rb = crx4[ix_c, iy_c, ca], crx4[ix_c, iy_c, cb]
+        Za, Zb = cry4[ix_c, iy_c, ca], cry4[ix_c, iy_c, cb]
+        Lp = np.sqrt((Rb - Ra) ** 2 + (Zb - Za) ** 2)
+        return 2.0 * np.pi * 0.5 * (Ra + Rb) * Lp
+
+    for ix_c in range(nx + 2):
+        for iy_c in range(ny + 2):
+            area = 0.0
+            if iy_c == 1:     area += _edge_area(ix_c, iy_c, 0, 1)
+            if iy_c == ny:    area += _edge_area(ix_c, iy_c, 2, 3)
+            if ix_c == 1:     area += _edge_area(ix_c, iy_c, 0, 2)
+            if ix_c == nx:    area += _edge_area(ix_c, iy_c, 1, 3)
+            if area > 0.0:
+                c_flat = iy_c * (nx + 2) + ix_c
+                mesh_wall_face_area[c_flat] = area
+    n_bc = int((mesh_wall_face_area > 0).sum())
+    print(f"B2 wall face areas computed: {n_bc} boundary cells, "
+          f"total area = {mesh_wall_face_area.sum():.3e} m^2")
 
     # Per-cell plasma arrays (shared across all triangles referencing the same cell)
     mesh_ne = ne_flat.copy()
@@ -851,6 +883,12 @@ def convert_solps_to_openedge(
         f.create_dataset("mesh/ions/dens", data=mesh_ions_dens)
         f.create_dataset("mesh/ions/temp", data=mesh_ions_temp)
         f.create_dataset("mesh/ions/parr_flow", data=mesh_ions_upar)
+
+        # Per-cell wall face area (m^2, toroidally integrated). Nonzero for
+        # B2 boundary cells only. Downstream consumers (emit/surf/recycle)
+        # multiply by ne*cs*sin(alpha_B) to get the same Bohm wall flux
+        # EIRENE's strata use (FLSTEP in eirmod_samsrf.F).
+        f.create_dataset("mesh/wall_face_area", data=mesh_wall_face_area)
 
     # -- Write bfield.h5 --
     with h5py.File(bfield_out, "w") as f:
