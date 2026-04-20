@@ -86,6 +86,7 @@ FixEmitSurfRecycle::FixEmitSurfRecycle(SPARTA *sparta, int narg, char **arg) :
 
   tasks = NULL;
   ntask = ntaskmax = 0;
+  diag_printed = 0;
 
   dimension = domain->dimension;
   if (dimension == 3) cut3d = new Cut3d(sparta);
@@ -224,7 +225,8 @@ void FixEmitSurfRecycle::grid_changed()
                   plasma->mesh_ncell, MPI_DOUBLE, MPI_SUM, world);
   }
 
-  if (comm->me == 0) {
+  if (comm->me == 0 && !diag_printed) {
+    diag_printed = 1;
     printf("[emit/surf/recycle] tasks=%d, mapped=%d (%.1f%%)\n",
            n_total, n_ok, 100.0 * n_ok / std::max(1, n_total));
     printf("[emit/surf/recycle] Bohm-flux rate (raw SPARTA segment area, "

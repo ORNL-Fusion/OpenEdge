@@ -82,6 +82,8 @@ class FixEmitSurfRecycle : public FixEmit {
 
   Task *tasks;
   int ntaskmax;
+  int diag_printed;          // 1 once init diagnostic has been printed,
+                             // suppresses re-print on every rebalance.
 
  protected:
   virtual void perform_task();
