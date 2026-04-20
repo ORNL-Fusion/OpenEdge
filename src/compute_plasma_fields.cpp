@@ -18,6 +18,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "memory.h"
 #include "error.h"
 #include "comm.h"
+#include "openedge_geom.h"
 
 #include <tuple>
 #include <string>
@@ -1863,12 +1864,8 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
   if (!has_equilibrium || equ_data.jm < 3 || equ_data.km < 3) return B;
 
   const int dim = domain->dimension;
-  const double x = xyz[0];
-  const double y = xyz[1];
-  const double zc = (dim == 3) ? xyz[2] : xyz[1];
   double R, Z;
-  if (dim == 2) { R = x; Z = y; }
-  else { R = std::sqrt(x*x + y*y); Z = zc; }
+  OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, R, Z);
   if (R < 1.0e-10) return B;
 
   const EquilibriumData &equ = equ_data;
@@ -2110,13 +2107,13 @@ void ComputePlasmaFields::computeMagneticGeometry(
 {
   Grid::ChildCell *cells = grid->cells;
   const int dim = domain->dimension;
-  const double x = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
-  const double y = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
-  const double zc = (dim == 3) ? 0.5 * (cells[icell].lo[2] + cells[icell].hi[2])
-                                : 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
+  const double xyz[3] = {
+    0.5 * (cells[icell].lo[0] + cells[icell].hi[0]),
+    0.5 * (cells[icell].lo[1] + cells[icell].hi[1]),
+    (dim == 3) ? 0.5 * (cells[icell].lo[2] + cells[icell].hi[2]) : 0.0
+  };
   double R, Z;
-  if (dim == 2) { R = x; Z = y; }
-  else { R = std::sqrt(x*x + y*y); Z = zc; }
+  OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, R, Z);
   if (R < 1.0e-10) return;
 
   const int jm = equ.jm;

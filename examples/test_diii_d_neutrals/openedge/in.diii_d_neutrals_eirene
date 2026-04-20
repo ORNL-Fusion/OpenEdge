@@ -19,16 +19,18 @@
 
 seed                12345
 dimension           2
-boundary            o o p
+# True SPARTA axisymmetric: x = Z (axial), y = R (radial, must start at 0),
+# z = toroidal (periodic dummy). With this layout, surf areas / cell volumes
+# / nrho / surf flux are all true-3D quantities. No 2*pi*R post-correction.
+boundary            o ao p
 global              gridcut 0.0 comm/sort no
-# With B2-face-area based Bohm flux, total rate ~5.5e24/s at
-# sin(alpha)=1; effective ~5.5e23/s after the sin_alpha geometric factor.
-# Target ~50 particles/step, ~50k at steady state (tau ~ 10 us):
-#   fnum = rate * dt / n_per_step = 5.5e23 * 1e-8 / 50 ~ 1e14
-global              fnum 1e14
+# Total Bohm rate ~4.27e26/s (full toroidal revolution, axi-mode native).
+# fnum = rate * dt / n_per_step = 4.27e26 * 1e-8 / 1000 ~ 4e15.
+global              fnum 4e15
 
-create_box          0.95 2.4 -1.4 1.4 -0.05 0.05
-create_grid         100 200 1
+# x range = Z (machine axial coord), y range = R (radial, axis at y=0)
+create_box          -1.4 1.4 0.0 2.4 -0.05 0.05
+create_grid         200 100 1
 balance_grid        rcb cell
 
 species             ../input/neutral.species D2 D D+
@@ -56,8 +58,9 @@ surf_modify         wall collide wallColl react wallPWI
 # maxlevel 5 + iterate 5: drive 5 levels of cell refinement around wall
 # segments. This reduces surf-element count per cell and gives RCB enough
 # granularity to subdivide the dense wall region across ranks.
-region              rdiv_lo block 1.0 2.4 -1.4 -0.8 -INF INF
-region              rdiv_up block 1.0 2.4  0.7  1.4 -INF INF
+# In axi mode: x = Z (lower divertor at Z<0), y = R.
+region              rdiv_lo block -1.4 -0.8 1.0 2.4 -INF INF
+region              rdiv_up block  0.7  1.4 1.0 2.4 -INF INF
 adapt_grid          all refine surf all 0.001 maxlevel 5 cells 2 2 1 &
                     region rdiv_lo all iterate 5
 adapt_grid          all refine surf all 0.001 maxlevel 5 cells 2 2 1 &

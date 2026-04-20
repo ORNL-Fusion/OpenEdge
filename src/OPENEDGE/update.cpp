@@ -33,6 +33,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "math_extra.h"
 #include "boris_grid.h"
 #include "gca_pusher.h"
+#include "openedge_geom.h"
 #include "random_mars.h"
 #include "sheath_models.h"
 #include "compute_sheath_geometry_grid.h"
@@ -3108,10 +3109,17 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
   if (Bmag > 0.0) {
     if (have_point_b) {
       if (domain->dimension == 2) {
-        // 2D slots: [0]=R, [1]=Z, [2]=toroidal (=0 for axisymmetric)
-        gradBmag_cart[0] = Bcyl.dBmag_dr;
-        gradBmag_cart[1] = Bcyl.dBmag_dz;
-        gradBmag_cart[2] = 0.0;
+        if (domain->axisymmetric) {
+          // 2D axi slots: x=Z, y=R, z=toroidal
+          gradBmag_cart[0] = Bcyl.dBmag_dz;
+          gradBmag_cart[1] = Bcyl.dBmag_dr;
+          gradBmag_cart[2] = 0.0;
+        } else {
+          // 2D Cartesian (legacy): x=R, y=Z, z=toroidal
+          gradBmag_cart[0] = Bcyl.dBmag_dr;
+          gradBmag_cart[1] = Bcyl.dBmag_dz;
+          gradBmag_cart[2] = 0.0;
+        }
       } else {
         const double rx = x[0], ry = x[1];
         const double rxy = std::sqrt(rx*rx + ry*ry);
@@ -3148,9 +3156,9 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
       const double dbZ_dR = invBm * (Bcyl.dBz_dr - bZ * Bcyl.dBmag_dr);
       const double dbZ_dZ = invBm * (Bcyl.dBz_dz - bZ * Bcyl.dBmag_dz);
 
-      double R_pt;
-      if (domain->dimension == 2) R_pt = x[0];
-      else R_pt = std::sqrt(x[0]*x[0] + x[1]*x[1]);
+      double R_pt, Z_pt_unused;
+      OpenEdge::sparta_to_RZ(x, domain->dimension, domain->axisymmetric,
+                              R_pt, Z_pt_unused);
       if (R_pt < 1.0e-10) R_pt = 1.0e-10;
       const double invR_pt = 1.0 / R_pt;
 
@@ -3165,9 +3173,15 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
       const double cZ = bphi * invR_pt + dbphi_dR;
 
       if (domain->dimension == 2) {
-        // 2D slots: [0]=R, [1]=Z, [2]=toroidal
-        kappa_cart[0] = kR;   kappa_cart[1] = kZ;   kappa_cart[2] = kphi;
-        curlb_cart[0] = cR;   curlb_cart[1] = cZ;   curlb_cart[2] = cphi_c;
+        if (domain->axisymmetric) {
+          // 2D axi slots: x=Z, y=R, z=toroidal
+          kappa_cart[0] = kZ;   kappa_cart[1] = kR;   kappa_cart[2] = kphi;
+          curlb_cart[0] = cZ;   curlb_cart[1] = cR;   curlb_cart[2] = cphi_c;
+        } else {
+          // 2D Cartesian (legacy): x=R, y=Z, z=toroidal
+          kappa_cart[0] = kR;   kappa_cart[1] = kZ;   kappa_cart[2] = kphi;
+          curlb_cart[0] = cR;   curlb_cart[1] = cZ;   curlb_cart[2] = cphi_c;
+        }
       } else {
         const double rx = x[0], ry = x[1];
         const double rxy = std::sqrt(rx*rx + ry*ry);

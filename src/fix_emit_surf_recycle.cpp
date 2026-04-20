@@ -24,6 +24,7 @@
 #include "math_extra.h"
 #include "math_const.h"
 #include "memory.h"
+#include "openedge_geom.h"
 #include "error.h"
 
 #include <algorithm>
@@ -353,8 +354,14 @@ void FixEmitSurfRecycle::create_task(int icell)
       tasks[ntask].tan2[1] =  0.0;
       tasks[ntask].tan2[2] =  1.0;
 
-      tasks[ntask].rmid = 0.5 * (path[0] + path[3]);
-      tasks[ntask].zmid = 0.5 * (path[1] + path[4]);
+      // Segment midpoint in SPARTA coords -> physical (R, Z) for plasma
+      // lookup and B2-cell mapping. SPARTA axi mode stores x=Z, y=R; legacy
+      // 2D Cartesian stores x=R, y=Z. Helper picks the right slot mapping.
+      const double xyz_mid[3] = { 0.5 * (path[0] + path[3]),
+                                  0.5 * (path[1] + path[4]),
+                                  0.0 };
+      OpenEdge::sparta_to_RZ(xyz_mid, dimension, domain->axisymmetric,
+                              tasks[ntask].rmid, tasks[ntask].zmid);
 
       tasks[ntask].inward[0] = -normal[0];
       tasks[ntask].inward[1] = -normal[1];

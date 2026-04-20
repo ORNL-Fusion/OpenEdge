@@ -624,6 +624,7 @@ def convert_solps_to_openedge(
     mesh_extra: Path | None = None,
     b2fgmtry_path: Path | None = None,
     wall_source: str = "auto",
+    coords: str = "axi",
 ) -> None:
     """
     Convert SOLPS run directory to OpenEdge plasma.h5 + bfield.h5.
@@ -954,17 +955,23 @@ def convert_solps_to_openedge(
                 f"wall_source=mesh-extra requested but {mesh_extra_path} missing")
         me_pts, me_segs, me_cells, me_areas = _wall_from_mesh_extra(
             mesh_extra_path, nx, ny, crx4, cry4, mesh_wall_face_area)
-        # Write SPARTA wall.surf
+        # Write SPARTA wall.surf. coords=axi swaps the in-file ordering to
+        # (Z, R) so SPARTA's slot mapping (x=Z, y=R, boundary o a p) reads
+        # the right physical quantities. coords=cart writes (R, Z) for the
+        # legacy 2D Cartesian setup.
         wall_out.parent.mkdir(parents=True, exist_ok=True)
         with wall_out.open("w", encoding="utf-8") as f:
             f.write("surface geometry\n\n")
             f.write(f"{len(me_pts)} points\n{len(me_segs)} lines\n\nPoints\n\n")
             for i, (rv, zv) in enumerate(me_pts):
-                f.write(f"{i+1} {rv:.12g} {zv:.12g}\n")
+                if coords == "axi":
+                    f.write(f"{i+1} {zv:.12g} {rv:.12g}\n")
+                else:
+                    f.write(f"{i+1} {rv:.12g} {zv:.12g}\n")
             f.write("\nLines\n\n")
             for i, (a, b) in enumerate(me_segs):
                 f.write(f"{i+1} {a+1} {b+1}\n")
-        print(f"Wrote wall.surf from mesh.extra: {wall_out}")
+        print(f"Wrote wall.surf from mesh.extra (coords={coords}): {wall_out}")
         mesh_wall_surf_cell = me_cells
         mesh_wall_surf_area = me_areas
 
@@ -1068,11 +1075,14 @@ def convert_solps_to_openedge(
             f.write(f"{len(unique_rz)} points\n{len(wall_edges)} lines"
                     f"\n\nPoints\n\n")
             for i, (rv, zv) in enumerate(unique_rz):
-                f.write(f"{i+1} {rv:.12g} {zv:.12g}\n")
+                if coords == "axi":
+                    f.write(f"{i+1} {zv:.12g} {rv:.12g}\n")
+                else:
+                    f.write(f"{i+1} {rv:.12g} {zv:.12g}\n")
             f.write("\nLines\n\n")
             for i, (va, vb) in enumerate(wall_edges):
                 f.write(f"{i+1} {vmap[va]} {vmap[vb]}\n")
-        print(f"Wrote EIRENE-consistent wall: {wall_out} "
+        print(f"Wrote EIRENE-consistent wall (coords={coords}): {wall_out} "
               f"({len(wall_edges)} segments, {len(unique_rz)} unique pts "
               f"after snap)")
         mesh_wall_surf_cell = np.asarray(wall_edge_cells, dtype=np.int32)
@@ -1409,6 +1419,13 @@ def _build_parser():
                          "mesh-extra if available, else eirene, else b2. "
                          "'mesh-extra' + 'b2' are SOLPS-native and do NOT "
                          "depend on EIRENE fort.33/34/35 files."))
+    p.add_argument("--coords", type=str, default="axi",
+                   choices=["axi", "cart"],
+                   help=("SPARTA coord layout for wall.surf line endpoints. "
+                         "'axi' = SPARTA axisymmetric: x=Z (axis), y=R, "
+                         "boundary o a p. 'cart' = legacy 2D Cartesian: "
+                         "x=R, y=Z, boundary o o p (per-radian-wedge — "
+                         "diagnostics need a 2*pi*R correction). Default: axi."))
     return p
 
 
@@ -1429,6 +1446,7 @@ def main():
         mesh_extra=args.mesh_extra,
         b2fgmtry_path=args.b2fgmtry,
         wall_source=args.wall_source,
+        coords=args.coords,
     )
 
 

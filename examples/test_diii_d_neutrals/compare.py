@@ -70,9 +70,9 @@ def main():
     # tally was divided by vol when we wrote S_iz etc. -> sum over cells
     # equals volume-weighted, but we didn't store vol. Skip for now.
 
-    print(f'OpenEdge:  peak S_iz = {S_iz_oe.max():.2e}  peak S_diss = {S_diss_oe.max():.2e}')
-    print(f'EIRENE:    peak S_iz = {S_iz_ei.max():.2e}  peak S_diss = {S_diss_ei.max():.2e}')
-    print(f'           (EIRENE S_iz is ~{S_iz_ei.max()/max(S_iz_oe.max(),1):.1e}x OE puff-only)')
+    print(f'OpenEdge:        peak S_iz = {S_iz_oe.max():.2e}  peak S_diss = {S_diss_oe.max():.2e}')
+    print(f'SOLPS-EIRENE:    peak S_iz = {S_iz_ei.max():.2e}  peak S_diss = {S_diss_ei.max():.2e}')
+    print(f'                 (SOLPS-EIRENE/OpenEdge peak ratio = {S_iz_ei.max()/max(S_iz_oe.max(),1):.1e})')
     print(f'Total OpenEdge reaction count (dump rate x vol x run time):')
     print(f'  iz   ~= {tot_iz_oe:.2e} /s  (per-step rate-mode, ~1 window snapshot)')
     print(f'  diss ~= {tot_diss_oe:.2e} /s')
@@ -90,7 +90,7 @@ def main():
     sc = ax.scatter(xc[posmask], yc[posmask], c=np.maximum(n_D2[posmask], 1e10), s=1,
                     norm=LogNorm(vmin=max(1e10, n_D2[posmask].min()), vmax=n_D2.max()),
                     cmap='plasma')
-    plt.colorbar(sc, ax=ax); ax.set_title('OE $n_{D_2}$ [m$^{-3}$]')
+    plt.colorbar(sc, ax=ax); ax.set_title('OpenEdge $n_{D_2}$ [m$^{-3}$]')
 
     ax = axes[0,1]
     posmask = S_iz_oe > 0
@@ -105,14 +105,14 @@ def main():
     im = ax.pcolormesh(R, Z, np.maximum(S_iz_ei, vmin_iz),
                        norm=LogNorm(vmin=vmin_iz, vmax=vmax_iz), cmap='viridis',
                        shading='nearest')
-    plt.colorbar(im, ax=ax); ax.set_title('EIRENE $S_{iz}$ [m$^{-3}$s$^{-1}$]')
+    plt.colorbar(im, ax=ax); ax.set_title('SOLPS-EIRENE $S_{iz}$ [m$^{-3}$s$^{-1}$]')
 
     ax = axes[1,0]
     posmask = n_D > 0
     sc = ax.scatter(xc[posmask], yc[posmask], c=np.maximum(n_D[posmask], 1e10), s=1,
                     norm=LogNorm(vmin=max(1e10, n_D[posmask].min()), vmax=n_D.max()),
                     cmap='plasma')
-    plt.colorbar(sc, ax=ax); ax.set_title('OE $n_D$ [m$^{-3}$]')
+    plt.colorbar(sc, ax=ax); ax.set_title('OpenEdge $n_D$ [m$^{-3}$]')
 
     ax = axes[1,1]
     posmask = S_diss_oe > 0
@@ -126,7 +126,7 @@ def main():
     im = ax.pcolormesh(R, Z, np.maximum(S_diss_ei, vmin_di),
                        norm=LogNorm(vmin=vmin_di, vmax=vmax_di), cmap='magma',
                        shading='nearest')
-    plt.colorbar(im, ax=ax); ax.set_title('EIRENE $S_{diss}$ [m$^{-3}$s$^{-1}$]')
+    plt.colorbar(im, ax=ax); ax.set_title('SOLPS-EIRENE $S_{diss}$ [m$^{-3}$s$^{-1}$]')
 
     for row in axes:
         for ax in row:
@@ -137,9 +137,14 @@ def main():
     for ax in axes[:,0]:
         ax.set_ylabel('Z [m]')
 
-    title_src = 'recycle-proxy (div_lo)' if 'recycle' in os.path.basename(dump) else 'single-puff'
-    plt.suptitle(f'DIII-D: OpenEdge ({title_src}, absorbing walls) vs SOLPS-EIRENE (full recycling)',
-                 y=0.99)
+    if 'eirene' in os.path.basename(dump):
+        title_src = 'wall recycling, R=0.99'
+    elif 'recycle' in os.path.basename(dump):
+        title_src = 'recycle-proxy (div_lo)'
+    else:
+        title_src = 'single-puff'
+    plt.suptitle(f'DIII-D neutrals: OpenEdge Mode A ({title_src}) vs SOLPS-EIRENE coupled '
+                 f'(reference, NOT standalone EIRENE)', y=0.99)
     plt.tight_layout()
     out = os.path.join(THIS, 'output', 'compare_to_eirene.png')
     plt.savefig(out, dpi=120, bbox_inches='tight')
