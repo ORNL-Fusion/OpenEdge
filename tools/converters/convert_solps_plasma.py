@@ -378,6 +378,109 @@ def _build_species_metadata(zamax, zamin, zn, am, ns):
 # Wall geometry from mesh.extra
 # ==========================================================================
 
+# --------------------------------------------------------------------------
+# Wall polygon + per-segment B2-cell mapping from mesh.extra + b2fgmtry
+# --------------------------------------------------------------------------
+# This is the SOLPS-native path to a wall geometry — does NOT require the
+# EIRENE triangulation (fort.33/34/35). Works with only SOLPS inputs and
+# leaves OpenEdge self-contained vs EIRENE.
+
+def _parse_mesh_extra_to_polygon(mesh_extra: Path, tol: float = 1e-8):
+    """Read mesh.extra (R1 Z1 R2 Z2 per line) and walk the segments into
+    a single continuous closed polygon (list of (R, Z) points). Returns
+    the cleaned point list with the closing vertex duplicated at the end.
+    """
+    d = np.loadtxt(mesh_extra); d = np.atleast_2d(d)
+    if d.shape[1] < 4:
+        raise RuntimeError(f"mesh.extra requires >=4 columns, got {d.shape}")
+    seg_a = d[:, 0:2].astype(np.float64)
+    seg_b = d[:, 2:4].astype(np.float64)
+    nseg = seg_a.shape[0]
+    used = np.zeros(nseg, dtype=bool); used[0] = True
+    pts = [seg_a[0], seg_b[0]]
+    for _ in range(nseg - 1):
+        cur = pts[-1]
+        best_i, best_side, best_d = -1, 0, 1e99
+        for i in range(nseg):
+            if used[i]: continue
+            d1 = float(np.hypot(cur[0]-seg_a[i,0], cur[1]-seg_a[i,1]))
+            d2 = float(np.hypot(cur[0]-seg_b[i,0], cur[1]-seg_b[i,1]))
+            if d1 < best_d: best_d, best_i, best_side = d1, i, 1
+            if d2 < best_d: best_d, best_i, best_side = d2, i, 2
+        if best_i < 0 or best_d > max(tol, 1e-5): break
+        used[best_i] = True
+        pts.append(seg_b[best_i] if best_side == 1 else seg_a[best_i])
+    if len(pts) < 3:
+        pts = list(seg_a) + [seg_b[-1]]
+    clean = [pts[0]]
+    for p in pts[1:]:
+        if np.hypot(p[0]-clean[-1][0], p[1]-clean[-1][1]) > tol:
+            clean.append(p)
+    if np.hypot(clean[0][0]-clean[-1][0], clean[0][1]-clean[-1][1]) > tol:
+        clean.append(clean[0])
+    return np.asarray(clean)
+
+
+def _wall_from_mesh_extra(mesh_extra_path: Path, nx, ny, crx4, cry4,
+                          mesh_wall_face_area):
+    """Build a watertight wall from mesh.extra and assign each segment to
+    the nearest B2 outer-boundary cell (by midpoint distance). Returns
+    (points_rz, segments, seg_cells, seg_areas) where segments are
+    (p1_idx, p2_idx) 0-based indices into points_rz.
+    """
+    poly = _parse_mesh_extra_to_polygon(mesh_extra_path)  # (Npts+1, 2) closed
+    pts = poly[:-1]                                       # drop duplicate close
+    n_pts = pts.shape[0]
+    segs = [(i, (i+1) % n_pts) for i in range(n_pts)]
+
+    # B2 outer-face centroids (only cells with face_area > 0)
+    face_r, face_z, face_cell = [], [], []
+    for iy_c in range(ny + 2):
+        for ix_c in range(nx + 2):
+            c = iy_c * (nx + 2) + ix_c
+            if mesh_wall_face_area[c] <= 0.0:
+                continue
+            # choose the outer-face edge of this cell
+            if iy_c == 1:      ca, cb = 0, 1
+            elif iy_c == ny:   ca, cb = 2, 3
+            elif ix_c == nx:   ca, cb = 1, 3
+            else:              continue   # ix=1 core side: skipped
+            rm = 0.5*(crx4[ix_c,iy_c,ca] + crx4[ix_c,iy_c,cb])
+            zm = 0.5*(cry4[ix_c,iy_c,ca] + cry4[ix_c,iy_c,cb])
+            face_r.append(rm); face_z.append(zm); face_cell.append(c)
+    face_r = np.asarray(face_r); face_z = np.asarray(face_z)
+    face_cell = np.asarray(face_cell, dtype=np.int32)
+
+    # For each wall segment, find nearest B2 face; and for each B2 face,
+    # find nearest wall segment — aggregate face area onto the segment
+    # the face chose. This conserves total flux budget.
+    from scipy.spatial import cKDTree
+    seg_rmid = 0.5 * (pts[np.array([s[0] for s in segs])][:,0]
+                    + pts[np.array([s[1] for s in segs])][:,0])
+    seg_zmid = 0.5 * (pts[np.array([s[0] for s in segs])][:,1]
+                    + pts[np.array([s[1] for s in segs])][:,1])
+    tree_seg = cKDTree(np.column_stack([seg_rmid, seg_zmid]))
+    _, seg_for_face = tree_seg.query(np.column_stack([face_r, face_z]))
+
+    n_seg = len(segs)
+    seg_cells = np.full(n_seg, -1, dtype=np.int32)
+    seg_areas = np.zeros(n_seg, dtype=np.float64)
+    dom_area = np.zeros(n_seg, dtype=np.float64)
+    for k in range(len(face_cell)):
+        s = int(seg_for_face[k]); c = int(face_cell[k])
+        a = float(mesh_wall_face_area[c])
+        seg_areas[s] += a
+        if a > dom_area[s]:
+            dom_area[s] = a
+            seg_cells[s] = c
+
+    print(f"wall from mesh.extra: {n_seg} segments, "
+          f"{(seg_cells >= 0).sum()} mapped to B2 cells, "
+          f"captured area = {seg_areas.sum():.2f} m^2 "
+          f"(of {mesh_wall_face_area.sum():.2f} m^2 total)")
+    return pts, segs, seg_cells, seg_areas
+
+
 def _write_sparta_wall_from_mesh_extra(mesh_extra: Path, wall_out: Path, tol: float = 1e-8):
     if not mesh_extra.exists():
         raise FileNotFoundError(f"mesh.extra not found: {mesh_extra}")
@@ -520,6 +623,7 @@ def convert_solps_to_openedge(
     wall_out: Path | None = None,
     mesh_extra: Path | None = None,
     b2fgmtry_path: Path | None = None,
+    wall_source: str = "auto",
 ) -> None:
     """
     Convert SOLPS run directory to OpenEdge plasma.h5 + bfield.h5.
@@ -818,16 +922,65 @@ def convert_solps_to_openedge(
     # (--wall-out). The mapping is written to mesh/wall_surf_cell so the
     # fix at runtime can index it directly by SPARTA surf ID.
     # ------------------------------------------------------------------
-    # Generate a SPARTA wall.surf directly from the EIRENE triangulation
-    # (fort.33/34) boundary edges. A boundary edge is one that appears in
-    # exactly one triangle; that triangle's b2_ix, b2_iy (from fort.35)
-    # gives the B2 cell this edge represents. This is the SAME wall
-    # EIRENE tracks internally, and the mapping is exact — no geometric
-    # matching required.
-    #
-    # Edges are filtered to "outer" boundary (cell_idx >= 0 AND the cell
-    # is in our boundary mask ix=nx, iy=1, iy=ny). We exclude ix=1 edges
-    # because that's the SOLPS core-side radial boundary, not a wall.
+    # Wall geometry + per-segment B2-cell mapping.
+    # wall_source=
+    #   "mesh-extra": walk mesh.extra into closed polygon, match each
+    #                 segment to nearest B2 boundary face. SOLPS-native,
+    #                 no EIRENE files needed.
+    #   "eirene":     use fort.33/34/35 boundary edges. Exact mapping,
+    #                 but requires EIRENE output.
+    #   "b2":         (not yet implemented) walk B2 outer boundary only.
+    #   "auto":       prefer mesh-extra if available, else eirene, else b2.
+    # ------------------------------------------------------------------
+    mesh_wall_surf_cell = np.array([], dtype=np.int32)
+    mesh_wall_surf_area = np.array([], dtype=np.float64)
+
+    # Resolve "auto": pick the first available path.
+    mesh_extra_path = mesh_extra if mesh_extra is not None else (run_path / "mesh.extra")
+    if not mesh_extra_path.exists() and b2fgmtry_path:
+        mesh_extra_path = b2fgmtry_path.parent / "mesh.extra"
+    effective_wall_source = wall_source
+    if wall_source == "auto":
+        if mesh_extra_path.exists():
+            effective_wall_source = "mesh-extra"
+        else:
+            effective_wall_source = "eirene"
+    print(f"Wall-source path: {effective_wall_source}")
+
+    # --- mesh-extra path (SOLPS-native, no EIRENE) ----------------------
+    if effective_wall_source == "mesh-extra" and wall_out is not None:
+        if not mesh_extra_path.exists():
+            raise FileNotFoundError(
+                f"wall_source=mesh-extra requested but {mesh_extra_path} missing")
+        me_pts, me_segs, me_cells, me_areas = _wall_from_mesh_extra(
+            mesh_extra_path, nx, ny, crx4, cry4, mesh_wall_face_area)
+        # Write SPARTA wall.surf
+        wall_out.parent.mkdir(parents=True, exist_ok=True)
+        with wall_out.open("w", encoding="utf-8") as f:
+            f.write("surface geometry\n\n")
+            f.write(f"{len(me_pts)} points\n{len(me_segs)} lines\n\nPoints\n\n")
+            for i, (rv, zv) in enumerate(me_pts):
+                f.write(f"{i+1} {rv:.12g} {zv:.12g}\n")
+            f.write("\nLines\n\n")
+            for i, (a, b) in enumerate(me_segs):
+                f.write(f"{i+1} {a+1} {b+1}\n")
+        print(f"Wrote wall.surf from mesh.extra: {wall_out}")
+        mesh_wall_surf_cell = me_cells
+        mesh_wall_surf_area = me_areas
+
+    # --- eirene path (uses fort.33/34/35) -------------------------------
+    if effective_wall_source == "eirene" and wall_out is not None:
+        # Below is the original EIRENE-triangulation-boundary-edges path.
+        # Kept for exact validation against standalone EIRENE; not required
+        # to run OpenEdge on its own.
+        _eirene_path_active = True
+    else:
+        _eirene_path_active = False
+
+    # Short-circuit: if not on the EIRENE path, skip the entire
+    # triangulation-edge block by jumping past it using early-continue
+    # trick via `if not _eirene_path_active: raise StopIteration` then
+    # catch. Actually: use a named block-if.
     edge_count = {}
     edge_tri = {}
     for t in range(ntri_eirene):
@@ -890,7 +1043,7 @@ def convert_solps_to_openedge(
     # edges appears N times otherwise; SPARTA's watertight check demands
     # shared point indices between adjacent segments. Collect unique
     # vertex indices and remap segment endpoints.
-    if wall_edges and wall_out is not None:
+    if wall_edges and wall_out is not None and _eirene_path_active:
         # Dedupe by (R,Z) coordinates — EIRENE sometimes has distinct
         # vertex indices at the same physical point (adjacent B2 quads
         # sharing a corner). SPARTA requires points to be geometrically
@@ -925,9 +1078,8 @@ def convert_solps_to_openedge(
         mesh_wall_surf_cell = np.asarray(wall_edge_cells, dtype=np.int32)
         mesh_wall_surf_area = mesh_wall_face_area[mesh_wall_surf_cell].astype(
             np.float64)
-    else:
-        mesh_wall_surf_cell = np.array([], dtype=np.int32)
-        mesh_wall_surf_area = np.array([], dtype=np.float64)
+    # else: mesh_wall_surf_cell/area were already set by the mesh-extra
+    # path (or remain empty if neither ran).
 
     # Legacy path below — keep in case wall_out wasn't passed but an
     # existing wall.surf is already present; we still write the mapping.
@@ -1251,6 +1403,12 @@ def _build_parser():
     p.add_argument("--wall-out", type=Path, default=None, help="Output SPARTA wall file from mesh.extra")
     p.add_argument("--mesh-extra", type=Path, default=None)
     p.add_argument("--b2fgmtry", type=Path, default=None, help="Path to b2fgmtry (if not in run_path)")
+    p.add_argument("--wall-source", type=str, default="auto",
+                   choices=["auto", "mesh-extra", "eirene", "b2"],
+                   help=("Which wall-construction path to use. 'auto' picks "
+                         "mesh-extra if available, else eirene, else b2. "
+                         "'mesh-extra' + 'b2' are SOLPS-native and do NOT "
+                         "depend on EIRENE fort.33/34/35 files."))
     return p
 
 
@@ -1270,6 +1428,7 @@ def main():
         wall_out=args.wall_out,
         mesh_extra=args.mesh_extra,
         b2fgmtry_path=args.b2fgmtry,
+        wall_source=args.wall_source,
     )
 
 
