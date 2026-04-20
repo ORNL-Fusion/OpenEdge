@@ -1,0 +1,11 @@
+# A3: ionization + charge exchange for the CX-thermalization slab test.
+
+# D + e -> D+ + 2e   (ADAS SCD, Z=1). Mode A: deletes the neutral.
+D --> D+
+I A 1.0 0.0 0.0 0.0 0.0
+
+# Neutral-side CX: D + D+_bulk -> D_thermal + D+_fast. Rate from ADAS CCD.
+# The neutral product's velocity is resampled from a shifted Maxwellian
+# at local Ti + bulk flow (here Ti=50 eV, vpar=0).
+D --> D
+E A 1.0 0.0 0.0 0.0 0.0

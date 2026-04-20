@@ -1,0 +1,79 @@
+################################################################################
+# 1-D neutral ionization slab -- Stangeby (2000) analytic verification.
+#
+# Reference:
+#   P. C. Stangeby, "The Plasma Boundary of Magnetic Fusion Devices",
+#   IoP Publishing (2000). Chapter 3 (neutral penetration / ionization
+#   length). Textbook steady-state result for monoenergetic neutrals
+#   streaming into a uniform ionizing plasma:
+#       n(x) = (Gamma_0 / v_n) * exp(-x / lambda_iz)
+#       lambda_iz = v_n / (n_e * <sigma v>_iz(T_e))
+#   (TODO: fill exact eq. number / page from your copy of Stangeby.)
+#
+# Setup:
+#   - Uniform plasma: T_e = 20 eV, n_e = 1e19 m^-3
+#   - Monoenergetic D beam injected from x=0 at E_n = 3 eV (Franck-Condon)
+#     along +x_hat. v_n = sqrt(2 E_n / m_D) = 1.695e4 m/s.
+#   - <sigma v>_iz(20 eV) from ADAS SCD (H, Z=1) ~ 1.33e-14 m^3/s
+#   - Expected lambda_iz ~ 128 mm
+#   - Mode A (EIRENE semantics): ionization DELETES the D atom.
+#     Deleted particles are counted as ionization source in f_fchem, and
+#     the steady-state n_D(x) in f_fden column 1 should match the analytic
+#     exp(-x / lambda_iz) to within MC statistics.
+#
+# Geometry: 2-D slab, 0 <= x <= 0.6 m, |y| <= 0.01 m, thin z. x-outflow
+# (atoms exit when ionized; any that survive exit through xhi), y periodic.
+################################################################################
+
+seed                12345
+dimension           2
+boundary            o p p
+global              gridcut 0.0 comm/sort no
+global              fnum 1e11
+timestep            5e-8
+
+create_box          0.0 0.6 -0.01 0.01 -0.05 0.05
+create_grid         600 1 1
+balance_grid        rcb cell
+
+# --- Species: D (neutral) and D+ (declared, never created in Mode A) ---
+species             input/neutral.species D D+
+mixture             puff D frac 1.0 nrho 1e18 temp 350.0 &
+                    vstream 1.695e4 0.0 0.0
+
+# --- Uniform plasma background (constant-mode compute) ---
+# Note values in order: [1]=temp_e, [2]=dens_e
+compute             pfields plasma/fields all constant &
+                    temp_e 20.0 dens_e 1.0e19 &
+                    temp_i 20.0 dens_i 1.0e19 &
+                    values temp_e dens_e
+
+# --- Ionization chemistry, Mode A (delete on ionization) ---
+# units rate: per-step SI source rates [m^-3 s^-1], zeroed each Nevery.
+fix fchem chem/adas 1 1 input/neutral.reactions &
+    adas_dir ../../database/adas &
+    plasma c_pfields[1] c_pfields[2] &
+    mode neutral source_species D &
+    units rate
+
+# --- Puff: inject monoenergetic D from the xlo face ---
+fix fpuff emit/face puff xlo
+
+# --- Diagnostics ---
+# Per-species number density (column 1 = n_D).
+compute cden grid all species nrho
+fix    fden ave/grid all 1 2000 2000 c_cden[*] ave one
+
+# Ionization source rate (fchem col 1 = count/rate).
+fix    frate ave/grid all 1 2000 2000 f_fchem[*] ave one
+
+stats               500
+stats_style         step cpu np nscoll nattempt ncoll
+run                 10000
+
+# --- Dump steady-state snapshot at end of run ---
+# cols: id xc yc n_D[m^-3] (+19 other chem cols, keep col 4 for n_D)
+dump d1 grid all 10000 output/slab.grid id xc yc &
+     f_fden[1] f_frate[1] f_frate[2] f_frate[3] f_frate[4]
+dump_modify d1 pad 6
+run                 0

@@ -1,0 +1,66 @@
+################################################################################
+# A4: 1-D slab, D2 dissociation only.
+#
+# Pure electron-impact dissociation D2 + e -> D + D (Janev/HYDHEL H.2 2.2.5).
+# No ionization, no CX. The D2 density should follow the same textbook decay
+# as A1:
+#     n_D2(x) = (Gamma_0 / v_D2) * exp(-x / lambda_diss)
+#     lambda_diss = v_D2 / (n_e * <sigma v>_diss(T_e))
+# and the per-cell source tally (f_frate col 4 = dissociation rate) should
+# self-consistently equal nu_diss * n_D2(x) at every point.
+#
+# Conditions: Te = 15 eV, ne = 1e19 m^-3, monoenergetic D2 beam at 3 eV
+# (v_D2 = 1.2e4 m/s). Expected lambda_diss ~ 122 mm.
+#
+# Reference: Stangeby 2000 Ch. 3 (same exponential-decay geometry as A1;
+# here applied to the molecular reactant instead of atomic).
+################################################################################
+
+seed                12345
+dimension           2
+boundary            o p p
+global              gridcut 0.0 comm/sort no
+global              fnum 1e11
+timestep            5e-8
+
+create_box          0.0 0.6 -0.01 0.01 -0.05 0.05
+create_grid         600 1 1
+balance_grid        rcb cell
+
+species             input/neutral_diss.species D2 D D+
+# Puff: D2 monoenergetic at 3 eV. v_D2 = sqrt(2*3eV/m_D2) = 1.2e4 m/s.
+mixture             puff D2 frac 1.0 nrho 1e18 temp 350.0 &
+                    vstream 1.2e4 0.0 0.0
+
+# --- Uniform plasma via compute plasma/fields constant ---
+# Dissociation rate depends on Te and ne (via nu = ne * <sv>_diss).
+# Janev polynomial uses Te; ne multiplied into lambda at runtime.
+compute             pfields plasma/fields all constant &
+                    temp_e 15.0 dens_e 1.0e19 &
+                    temp_i 15.0 dens_i 1.0e19 &
+                    values temp_e dens_e
+
+# --- Dissociation only (fix chem/adas) ---
+fix fchem chem/adas 1 1 input/neutral_diss.reactions &
+    adas_dir ../../database/adas &
+    plasma c_pfields[1] c_pfields[2] &
+    mode neutral source_species D2 &
+    units rate
+
+fix fpuff emit/face puff xlo
+
+# --- Diagnostics: per-species density + dissociation source rate ---
+compute cden grid all species nrho
+fix    fden ave/grid all 1 2000 2000 c_cden[*] ave one
+fix    frate ave/grid all 1 2000 2000 f_fchem[*] ave one
+
+stats               500
+stats_style         step cpu np nscoll nattempt ncoll
+run                 20000
+
+# Dump: id, xc, yc, n_D2, n_D, n_Dp, ionize_rate, rec_rate, CX_rate, diss_rate
+dump d1 grid all 20000 output/slab_diss.grid id xc yc &
+     f_fden[1] f_fden[2] f_fden[3] &
+     f_frate[1] f_frate[2] f_frate[3] f_frate[4]
+dump_modify d1 pad 6
+run                 0

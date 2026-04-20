@@ -1,0 +1,5 @@
+# A4: D2 electron-impact dissociation only.
+# Janev/HYDHEL H.2 2.2.5 polynomial fit: ln<sv>_diss = Sum_n b_n (ln Te)^n
+# (same coefficients used in test_west_neutrals).
+D2 --> D + D
+D J -2.787217511174e+01 1.052252660075e+01 -4.973212347860e+00 1.451198183114e+00 -3.062790554644e-01 4.433379509258e-02 -4.096344172875e-03 2.159670289222e-04 -4.928545325189e-06

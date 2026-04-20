@@ -1,0 +1,4 @@
+# Pure EXCHANGE (cosine-reflect at fixed energy) channel for A2 verification.
+# Every D incoming is reflected as D at 3 eV, cosine angular distribution.
+D --> D
+E 1.0 3.0

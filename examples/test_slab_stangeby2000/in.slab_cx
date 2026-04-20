@@ -1,0 +1,61 @@
+################################################################################
+# A3: 1-D slab with CX thermalization.
+#
+# Tests fix chem/adas EXCHANGE (CX) channel. A monoenergetic 3 eV D beam is
+# injected at x=0 into a plasma with hot bulk ions (Ti = 50 eV). Each CX
+# event resamples the neutral's velocity from a Maxwellian at Ti, so the
+# neutral temperature profile T_D(x) should climb from ~3 eV at the source
+# toward (3/2) Ti = 75 eV (in the sense of <E> = 3 T / 2) asymptotically.
+# Ionization (at Te=5 eV) competes in parallel and sets a finite depletion
+# length.
+#
+# Reference: Stangeby 2000 Ch. 3 (Franck-Condon thermalization regime).
+# No closed-form for the competing-channel problem; we compare T_D(x)
+# against a 1-D Python Monte Carlo with identical physics.
+################################################################################
+
+seed                12345
+dimension           2
+boundary            o p p
+global              gridcut 0.0 comm/sort no
+global              fnum 1e11
+timestep            2e-8
+
+create_box          0.0 0.6 -0.01 0.01 -0.05 0.05
+create_grid         600 1 1
+balance_grid        rcb cell
+
+species             input/neutral.species D D+
+mixture             puff D frac 1.0 nrho 1e18 temp 350.0 &
+                    vstream 1.695e4 0.0 0.0
+
+# --- Uniform plasma background via fix plasma/data (populates pcache Ti) ---
+# Need Ti in the per-particle plasma cache so fix chem/adas CX resampler
+# can draw product velocities from a Maxwellian at local Ti.
+fix pd plasma/data file input/plasma_cx.h5 static yes
+global              bfield_compute pd
+
+# --- Ionization + CX, Mode A (ionization deletes; CX resamples v) ---
+# No `plasma` keyword -> Te/ne/Ti pulled from the per-particle pcache.
+fix fchem chem/adas 1 1 input/neutral_cx.reactions &
+    adas_dir ../../database/adas &
+    mode neutral source_species D &
+    units rate
+
+# --- Puff from xlo face ---
+fix fpuff emit/face puff xlo
+
+# --- Diagnostics: per-species n and T on the 1D grid ---
+compute cmom grid all species nrho temp
+fix    fmom ave/grid all 1 4000 4000 c_cmom[*] ave one
+fix    frate ave/grid all 1 4000 4000 f_fchem[*] ave one
+
+stats               500
+stats_style         step cpu np nscoll nattempt ncoll
+run                 20000
+
+# Dump: id xc yc n_D T_D ion-source-rate CX-source-rate
+dump d1 grid all 20000 output/slab_cx.grid id xc yc &
+     f_fmom[1] f_fmom[2] f_frate[1] f_frate[3]
+dump_modify d1 pad 6
+run                 0

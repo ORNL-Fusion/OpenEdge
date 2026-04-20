@@ -1,0 +1,4 @@
+# Species for 1-D ionization slab (Stangeby 2000, Ch. 3)
+# ID  Molwt  Molmass  rotDOF  RotRel  vibDOF  VibRel  VibTemp  specwt  charge
+D     2.014   3.345e-27  0  0.0  0  0.0  0.0     1.0  0.0
+D+    2.014   3.344e-27  0  0.0  0  0.0  0.0     1.0  1.0

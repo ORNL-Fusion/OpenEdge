@@ -1,0 +1,69 @@
+################################################################################
+# A2: 1-D slab with reflecting wall at xhi.
+#
+# Identical setup to in.slab_iz (A1), but the outflow boundary at xhi=0.6 is
+# replaced by a surface at x=0.599 with `surf_react wall_pwi` EXCHANGE channel:
+#   D  --> D   E 1.0 3.0     (100% reflection at 3 eV, cosine angular dist.)
+#
+# Expected profile (qualitative): forward decay exp(-x/lambda_iz) as in A1,
+# plus a returning cosine-distributed reflected component that piles up near
+# the wall before being ionized. No closed-form for cosine reflection -- we
+# compare against a 1-D Monte Carlo reference computed in compare_recycle.py
+# using the exact same physics (monoenergetic emission, exp ionization, cosine
+# reflection at fixed energy).
+#
+# Reference: Stangeby 2000 Ch. 3 gives the analytic for monoenergetic-specular
+# reflection (n(x) = (Gamma_0/v_n)*[exp(-x/lam) + exp(-(2L-x)/lam)]); the
+# cosine case here is the realistic extension used by EIRENE.
+################################################################################
+
+seed                12345
+dimension           2
+boundary            o p p
+global              gridcut 0.0 comm/sort no
+global              fnum 1e11
+timestep            5e-8
+
+create_box          0.0 0.6 -0.01 0.01 -0.05 0.05
+create_grid         600 1 1
+balance_grid        rcb cell
+
+species             input/neutral.species D D+
+mixture             puff D frac 1.0 nrho 1e18 temp 350.0 &
+                    vstream 1.695e4 0.0 0.0
+
+# --- Reflecting wall at xhi ---
+read_surf           input/slab.surf group wall particle check
+surf_collide        wallColl diffuse 400.0 1.0
+surf_react          wallPWI wall_pwi input/wall.exchange twall 400.0
+surf_modify         wall collide wallColl react wallPWI
+
+# --- Uniform plasma (same as A1) ---
+compute             pfields plasma/fields all constant &
+                    temp_e 20.0 dens_e 1.0e19 &
+                    temp_i 20.0 dens_i 1.0e19 &
+                    values temp_e dens_e
+
+# --- Mode A ionization (same as A1) ---
+fix fchem chem/adas 1 1 input/neutral.reactions &
+    adas_dir ../../database/adas &
+    plasma c_pfields[1] c_pfields[2] &
+    mode neutral source_species D &
+    units rate
+
+# --- Puff from xlo face ---
+fix fpuff emit/face puff xlo
+
+# --- Diagnostics ---
+compute cden grid all species nrho
+fix    fden ave/grid all 1 2000 2000 c_cden[*] ave one
+fix    frate ave/grid all 1 2000 2000 f_fchem[*] ave one
+
+stats               500
+stats_style         step cpu np nscoll nattempt ncoll
+run                 10000
+
+dump d1 grid all 10000 output/slab_recycle.grid id xc yc &
+     f_fden[1] f_frate[1] f_frate[2] f_frate[3] f_frate[4]
+dump_modify d1 pad 6
+run                 0
