@@ -1151,11 +1151,14 @@ void ComputePMISurfData::compute_per_surf()
       const double te_eV = (std::isfinite(te_loc) && te_loc > 0.0) ? te_loc : 0.0;
       const double ti_eV = (std::isfinite(ti) && ti > 0.0) ? ti : 0.0;
 
-      // Bohm sound speed: cs = sqrt((Te + Ti) * e / (2 * m_ion * AMU))
-      const double cs_arg = (te_eV + ti_eV) * QE / (2.0 * mass_amu * AMU);
+      // Isothermal ion sound speed: cs = sqrt((Te + Ti) * e / (m_ion * AMU))
+      // Matches EIRENE eirmod_samsrf.F:485: CS = CVEL2A * sqrt((Ti+Te)/RMASSP).
+      const double cs_arg = (te_eV + ti_eV) * QE / (mass_amu * AMU);
       const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
 
-      // Bohm flux: Gamma = n_i * c_s * sin(alpha_B)
+      // Bohm flux: Gamma = n_i * c_s * sin(alpha_B), with n_i at the
+      // sheath edge (SOLPS/B2.5 convention: n_t = n_u/2 is already applied
+      // upstream, so no extra 1/2 here).
       const double g = ni * cs * sin_alpha;
       gamma_n[s] = g;
 
@@ -1223,8 +1226,8 @@ void ComputePMISurfData::compute_per_surf()
           const double E_eck = 2.0 * ti_imp +
                                static_cast<double>(Z) * psi_over_Te * te_loc;
 
-          // Bohm speed with impurity mass
-          const double cs_arg = (te_loc + ti_imp) * QE / (2.0 * imp_mass_amu * AMU);
+          // Isothermal ion sound speed with impurity mass.
+          const double cs_arg = (te_loc + ti_imp) * QE / (imp_mass_amu * AMU);
           const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
 
           // Bohm flux
