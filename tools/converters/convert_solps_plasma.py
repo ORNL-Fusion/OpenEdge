@@ -886,8 +886,8 @@ def convert_solps_to_openedge(
 
         # Per-cell wall face area (m^2, toroidally integrated). Nonzero for
         # B2 boundary cells only. Downstream consumers (emit/surf/recycle)
-        # multiply by ne*cs*sin(alpha_B) to get the same Bohm wall flux
-        # EIRENE's strata use (FLSTEP in eirmod_samsrf.F).
+        # multiply by ne*cs*sin(alpha_B) to get the Bohm wall flux that
+        # drives wall recycling at each boundary cell.
         f.create_dataset("mesh/wall_face_area", data=mesh_wall_face_area)
 
     # -- Write bfield.h5 --

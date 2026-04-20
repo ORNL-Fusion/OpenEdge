@@ -1151,8 +1151,8 @@ void ComputePMISurfData::compute_per_surf()
       const double te_eV = (std::isfinite(te_loc) && te_loc > 0.0) ? te_loc : 0.0;
       const double ti_eV = (std::isfinite(ti) && ti > 0.0) ? ti : 0.0;
 
-      // Isothermal ion sound speed: cs = sqrt((Te + Ti) * e / (m_ion * AMU))
-      // Matches EIRENE eirmod_samsrf.F:485: CS = CVEL2A * sqrt((Ti+Te)/RMASSP).
+      // Isothermal ion sound speed: cs = sqrt((Te + Ti) / mi)
+      // Standard Bohm-criterion form; Stangeby 2000, ch. 2.
       const double cs_arg = (te_eV + ti_eV) * QE / (mass_amu * AMU);
       const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
 

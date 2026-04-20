@@ -1,6 +1,6 @@
 /* ----------------------------------------------------------------------
     OpenEdge: fix emit/surf/recycle
-    EIRENE-faithful wall recycling driven by local plasma Bohm flux.
+    Wall-recycling neutral source driven by the local plasma Bohm flux.
     See header for algorithm summary.
 ------------------------------------------------------------------------- */
 
@@ -69,7 +69,7 @@ FixEmitSurfRecycle::FixEmitSurfRecycle(SPARTA *sparta, int narg, char **arg) :
 
   // defaults
   mass_amu   = 2.0;     // D+ (main ion)
-  R_recycle  = 0.99;    // EIRENE PRFCT default
+  R_recycle  = 0.99;    // total recycling coefficient; 1% pumped
   twall      = 400.0;   // K
 
   int iarg = 5;
@@ -406,14 +406,15 @@ double FixEmitSurfRecycle::emission_rate_per_surface(int itask)
   const int cell = tasks[itask].plasma_cell;
   if (cell < 0) return 0.0;
 
-  // Compute Bohm flux from the B2 plasma state (ne, Te, Ti at the
-  // cached sheath-edge cell) and the B2 cell's toroidally-integrated
-  // wall face area, then distribute to this SPARTA surface by area
-  // share within the cell. Formula matches EIRENE eirmod_samsrf.F:485:
-  //   FLSTEP = cs * ne * TORL
-  // with cs = sqrt((Te+Ti)/mi) and TORL = 2*pi*R_face. No EIRENE output
-  // is used — this is an independent OpenEdge computation from the same
-  // plasma the parent code passes to EIRENE.
+  // Compute the Bohm wall flux from the B2 plasma state (ne, Te, Ti at
+  // the cached sheath-edge cell) and the B2 cell's toroidally-integrated
+  // wall face area, then distribute to this SPARTA surface by area share
+  // within the cell:
+  //     Gamma_wall = ne * cs * sin(alpha_B)    cs = sqrt((Te+Ti)/mi)
+  //     dot_N_cell = 0.5 * R * Gamma_wall * face_area_2pi_R
+  // (Bohm criterion; see Stangeby 2000, ch. 2). sin(alpha_B) is the
+  // geometric projection of B onto the wall inward normal. face area
+  // is 2*pi*R_face * poloidal_edge_length (axisymmetric).
 
   // Pull plasma quantities directly from the mesh arrays
   const double ne = plasma->mesh_ne[cell];

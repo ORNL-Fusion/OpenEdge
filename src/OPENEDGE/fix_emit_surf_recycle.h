@@ -1,13 +1,14 @@
 /* ----------------------------------------------------------------------
-    OpenEdge:
-    EIRENE-faithful wall recycling as a surface-source emitter.
+    OpenEdge: fix emit/surf/recycle
+    Wall-recycling neutral source emitter.
 
-    Per wall segment, queries (ne, Te, Ti) at the plasma-side midpoint from
-    a fix plasma/data, computes the Bohm ion flux
+    Per wall segment, queries (ne, Te, Ti) at the adjacent SOLPS sheath-edge
+    plasma cell (cached at init) via a fix plasma/data, computes the Bohm
+    wall flux
        Gamma = n_i * c_s * sin(alpha_B)         c_s = sqrt((Te+Ti)/m_ion)
     and emits the mixture at rate
        dot{N} = 0.5 * R * Gamma * area
-    where R is the total recycling coefficient (EIRENE PRFCT, default 0.99).
+    where R is the total recycling coefficient (1 - pumping fraction).
     The factor 1/2 mass-balances D+ -> D2 recombination at the wall.
     Mixture fractions control the atom/molecule split.
 
@@ -48,7 +49,7 @@ class FixEmitSurfRecycle : public FixEmit {
 
   // recycling parameters
   double mass_amu;       // main ion mass [amu], for c_s
-  double R_recycle;      // total recycling coefficient (EIRENE PRFCT)
+  double R_recycle;      // total recycling coefficient (1 - pumping frac)
   double twall;          // wall temperature [K]
 
   // copies of data from other classes
