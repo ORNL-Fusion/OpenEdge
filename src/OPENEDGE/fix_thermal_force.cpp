@@ -35,6 +35,7 @@
 #include "particle.h"
 #include "update.h"
 #include "fix_plasma_data.h"
+#include "openedge_geom.h"
 
 using namespace SPARTA_NS;
 
@@ -367,27 +368,15 @@ void FixThermalForce::kick_half(double dt_half)
     const double bhat1 = B1 * inv_Bmag;
     const double bhat2 = B2 * inv_Bmag;
 
-    // bhat in cylindrical frame (for gradient dot product)
-    // gradients are always (grad_T_R, grad_T_Z) with no toroidal component
-    double bhat_R_cyl, bhat_Z_cyl;
-    if (dim == 2) {
-      // 2D: B[0]=B_R, B[1]=B_Z directly
-      bhat_R_cyl = bhat0;
-      bhat_Z_cyl = bhat1;
-    } else {
-      // 3D: convert Cartesian bhat to cylindrical components
-      const double rx = p.x[0];
-      const double ry = p.x[1];
-      const double R = std::sqrt(rx*rx + ry*ry);
-      if (R > 1.0e-20) {
-        const double cphi = rx / R;
-        const double sphi = ry / R;
-        bhat_R_cyl = bhat0 * cphi + bhat1 * sphi;
-      } else {
-        bhat_R_cyl = bhat0;
-      }
-      bhat_Z_cyl = bhat2;
-    }
+    // bhat in cylindrical frame (for gradient dot product). Gradients
+    // are always (grad_T_R, grad_T_Z); no toroidal component.
+    const double bhat_sparta[3] = {bhat0, bhat1, bhat2};
+    const double phi_p = (dim == 3)
+                          ? std::atan2(p.x[1], p.x[0]) : 0.0;
+    double bhat_R_cyl, bhat_Z_cyl, bhat_phi_unused;
+    OpenEdge::sparta_v_to_RZphi(bhat_sparta, dim, domain->axisymmetric,
+                                 phi_p, bhat_R_cyl, bhat_Z_cyl,
+                                 bhat_phi_unused);
 
     // accumulate parallel acceleration
     double a_par = 0.0;
@@ -531,13 +520,7 @@ double FixThermalForce::read_src(const CollGridSrc &S, int ip, int icell) const
 void FixThermalForce::particle_rz(const Particle::OnePart &p,
                                   double &R, double &Z) const
 {
-  if (domain->dimension == 2) {
-    R = p.x[0];
-    Z = p.x[1];
-  } else {
-    R = std::sqrt(p.x[0] * p.x[0] + p.x[1] * p.x[1]);
-    Z = p.x[2];
-  }
+  OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -565,24 +548,15 @@ void FixThermalForce::pd_bfield_sparta(const Particle::OnePart &p,
   double Br = 0.0, Bz = 0.0, Bt = 0.0;
   pd_->bfield_at(R, Z, Br, Bz, Bt);
 
-  if (domain->dimension == 2) {
-    B0 = Br;
-    B1 = Bz;
-    B2 = Bt;
-    return;
+  // Decompose physical (Br, Bz, Bt) onto SPARTA's (B0, B1, B2) slot layout
+  // using the same convention as the helper:
+  //   2D Cart  : x=R, y=Z, z=phi  -> B0=Br, B1=Bz, B2=Bt
+  //   2D axi   : x=Z, y=R, z=phi  -> B0=Bz, B1=Br, B2=Bt
+  //   3D       : (x,y) Cartesian rotation by phi
+  double phi = 0.0;
+  if (domain->dimension == 3) {
+    phi = std::atan2(p.x[1], p.x[0]);
   }
-
-  const double rx = p.x[0];
-  const double ry = p.x[1];
-  const double rmag = std::sqrt(rx * rx + ry * ry);
-  if (rmag > 1.0e-20) {
-    const double cphi = rx / rmag;
-    const double sphi = ry / rmag;
-    B0 = Br * cphi - Bt * sphi;
-    B1 = Br * sphi + Bt * cphi;
-  } else {
-    B0 = Br;
-    B1 = 0.0;
-  }
-  B2 = Bz;
+  OpenEdge::RZphi_force_to_sparta(Br, Bz, Bt, domain->dimension,
+                                   domain->axisymmetric, phi, B0, B1, B2);
 }

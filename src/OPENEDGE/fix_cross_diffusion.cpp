@@ -44,6 +44,7 @@
 #include "random_mars.h"
 #include "update.h"
 #include "fix_plasma_data.h"
+#include "openedge_geom.h"
 
 using namespace SPARTA_NS;
 
@@ -417,8 +418,12 @@ void FixCrossDiffusion::start_of_step()
     // deterministic pinch displacement (cylindrical R, Z)
     if (have_pinch_) {
       if (dim == 2) {
-        dx[ip][0] += v_pinch_R_ * dt;
-        dx[ip][1] += v_pinch_Z_ * dt;
+        double dxs0, dxs1, dxs2_unused;
+        OpenEdge::RZphi_force_to_sparta(v_pinch_R_, v_pinch_Z_, 0.0,
+                                         dim, domain->axisymmetric, 0.0,
+                                         dxs0, dxs1, dxs2_unused);
+        dx[ip][0] += dxs0 * dt;
+        dx[ip][1] += dxs1 * dt;
       } else {
         const double rx = p.x[0];
         const double ry = p.x[1];
@@ -439,8 +444,8 @@ void FixCrossDiffusion::start_of_step()
                                              : std::max(read_src(srcNe_, ip, icell), 1.0e10);
       double gNeR, gNeZ;
       if (use_plasma_data_) {
-        const double R = (dim == 2) ? p.x[0] : std::sqrt(p.x[0]*p.x[0] + p.x[1]*p.x[1]);
-        const double Z = (dim == 2) ? p.x[1] : p.x[2];
+        double R, Z;
+        OpenEdge::sparta_to_RZ(p.x, dim, domain->axisymmetric, R, Z);
         const double dR = std::max(1.0e-9, 0.5 * std::fabs(pd_->rvals[1] - pd_->rvals[0]));
         const double dZ = std::max(1.0e-9, 0.5 * std::fabs(pd_->zvals[1] - pd_->zvals[0]));
         gNeR = (pd_->interp2D(pd_->dens_e, R + dR, Z) -
@@ -453,15 +458,27 @@ void FixCrossDiffusion::start_of_step()
       }
 
       if (dim == 2) {
-        const double Bpol = std::sqrt(B0*B0 + B1*B1);
+        // Work in physical (R,Z) so the math doesn't depend on the SPARTA
+        // slot layout (Cart vs axi). Convert B from SPARTA slots to (BR,BZ),
+        // build perpendicular unit vector in (R,Z), dot with grad_ne, then
+        // convert displacement back to SPARTA slots.
+        const double Bvec[3] = {B0, B1, B2};
+        double BR_phys, BZ_phys, Bphi_unused;
+        OpenEdge::sparta_v_to_RZphi(Bvec, dim, domain->axisymmetric, 0.0,
+                                     BR_phys, BZ_phys, Bphi_unused);
+        const double Bpol = std::sqrt(BR_phys*BR_phys + BZ_phys*BZ_phys);
         if (Bpol > 1.0e-20) {
           const double inv_Bpol = 1.0 / Bpol;
-          const double eperp0 = -B1 * inv_Bpol;
-          const double eperp1 =  B0 * inv_Bpol;
-          const double grad_ne_perp = gNeR * eperp0 + gNeZ * eperp1;
+          const double eperp_R = -BZ_phys * inv_Bpol;
+          const double eperp_Z =  BR_phys * inv_Bpol;
+          const double grad_ne_perp = gNeR * eperp_R + gNeZ * eperp_Z;
           const double V_gp = C_p_ * D_local * grad_ne_perp / ne_loc;
-          dx[ip][0] += V_gp * eperp0 * dt;
-          dx[ip][1] += V_gp * eperp1 * dt;
+          double dxs0, dxs1, dxs2_unused;
+          OpenEdge::RZphi_force_to_sparta(V_gp * eperp_R, V_gp * eperp_Z, 0.0,
+                                           dim, domain->axisymmetric, 0.0,
+                                           dxs0, dxs1, dxs2_unused);
+          dx[ip][0] += dxs0 * dt;
+          dx[ip][1] += dxs1 * dt;
         }
       } else {
         const double inv_Bmag = 1.0 / Bmag;
@@ -601,13 +618,7 @@ double FixCrossDiffusion::read_src(const CollGridSrc &S, int ip, int icell) cons
 void FixCrossDiffusion::particle_rz(const Particle::OnePart &p,
                                     double &R, double &Z) const
 {
-  if (domain->dimension == 2) {
-    R = p.x[0];
-    Z = p.x[1];
-  } else {
-    R = std::sqrt(p.x[0] * p.x[0] + p.x[1] * p.x[1]);
-    Z = p.x[2];
-  }
+  OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -635,24 +646,9 @@ void FixCrossDiffusion::pd_bfield_sparta(const Particle::OnePart &p,
   double Br = 0.0, Bz = 0.0, Bt = 0.0;
   pd_->bfield_at(R, Z, Br, Bz, Bt);
 
-  if (domain->dimension == 2) {
-    B0 = Br;
-    B1 = Bz;
-    B2 = Bt;
-    return;
-  }
-
-  const double rx = p.x[0];
-  const double ry = p.x[1];
-  const double rmag = std::sqrt(rx * rx + ry * ry);
-  if (rmag > 1.0e-20) {
-    const double cphi = rx / rmag;
-    const double sphi = ry / rmag;
-    B0 = Br * cphi - Bt * sphi;
-    B1 = Br * sphi + Bt * cphi;
-  } else {
-    B0 = Br;
-    B1 = 0.0;
-  }
-  B2 = Bz;
+  // Decompose physical (Br, Bz, Bt) onto SPARTA's (B0, B1, B2) slot layout.
+  double phi = 0.0;
+  if (domain->dimension == 3) phi = std::atan2(p.x[1], p.x[0]);
+  OpenEdge::RZphi_force_to_sparta(Br, Bz, Bt, domain->dimension,
+                                   domain->axisymmetric, phi, B0, B1, B2);
 }

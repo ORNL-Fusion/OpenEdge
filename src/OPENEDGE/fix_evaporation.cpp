@@ -25,6 +25,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "math_extra.h"
 #include <cmath>
 #include "domain.h"
+#include "openedge_geom.h"
 #include "random_knuth.h"
 #include "mixture.h"
 #include <stdexcept>
@@ -332,21 +333,19 @@ void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
       const double nz_hat = -gtz / grad_mag;
 
       // Apply velocity kick: dv = a * dt_half
-      // In 2D axisymmetric: v[0] = v_r, v[1] = v_z
-      if (domain->axisymmetric || domain->dimension == 2) {
-        ip->v[0] += a_mag * nr_hat * DT;
-        ip->v[1] += a_mag * nz_hat * DT;
-      } else {
-        // 3D: project r-direction onto x,y
-        const double r_pos = std::sqrt(ip->x[0]*ip->x[0] + ip->x[1]*ip->x[1]);
-        if (r_pos > 1.0e-20) {
-          const double cos_phi = ip->x[0] / r_pos;
-          const double sin_phi = ip->x[1] / r_pos;
-          ip->v[0] += a_mag * nr_hat * cos_phi * DT;
-          ip->v[1] += a_mag * nr_hat * sin_phi * DT;
-          ip->v[2] += a_mag * nz_hat * DT;
-        }
-      }
+      // Cylindrical (R, Z, phi) acceleration -> SPARTA velocity slots.
+      // Helper handles the legacy 2D Cartesian (x=R), true axi (x=Z, y=R),
+      // and 3D Cartesian projections in one place.
+      double phi = 0.0;
+      if (domain->dimension == 3)
+        phi = std::atan2(ip->x[1], ip->x[0]);
+      double dvx, dvy, dvz;
+      OpenEdge::RZphi_force_to_sparta(a_mag * nr_hat, a_mag * nz_hat, 0.0,
+                                       domain->dimension, domain->axisymmetric,
+                                       phi, dvx, dvy, dvz);
+      ip->v[0] += dvx * DT;
+      ip->v[1] += dvy * DT;
+      ip->v[2] += dvz * DT;
     }
   }
 

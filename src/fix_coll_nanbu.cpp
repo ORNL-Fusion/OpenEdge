@@ -56,6 +56,7 @@
 #include "random_mars.h"
 #include "update.h"
 #include "fix_plasma_data.h"
+#include "openedge_geom.h"
 
 using namespace SPARTA_NS;
 
@@ -817,13 +818,7 @@ double FixCollNanbu::read_src(const CollGridSrc &S, int ip, int icell) const
 void FixCollNanbu::particle_rz(const Particle::OnePart &p,
                                double &R, double &Z) const
 {
-  if (domain->dimension == 2) {
-    R = p.x[0];
-    Z = p.x[1];
-  } else {
-    R = std::sqrt(p.x[0] * p.x[0] + p.x[1] * p.x[1]);
-    Z = p.x[2];
-  }
+  OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -851,24 +846,8 @@ void FixCollNanbu::pd_bfield_sparta(const Particle::OnePart &p,
   double Br = 0.0, Bz_cyl = 0.0, Bt = 0.0;
   pd_->bfield_at(R, Z, Br, Bz_cyl, Bt);
 
-  if (domain->dimension == 2) {
-    Bx = Br;
-    By = Bz_cyl;
-    Bz = Bt;
-    return;
-  }
-
-  const double rx = p.x[0];
-  const double ry = p.x[1];
-  const double rmag = std::sqrt(rx * rx + ry * ry);
-  if (rmag > 1.0e-20) {
-    const double cphi = rx / rmag;
-    const double sphi = ry / rmag;
-    Bx = Br * cphi - Bt * sphi;
-    By = Br * sphi + Bt * cphi;
-  } else {
-    Bx = Br;
-    By = 0.0;
-  }
-  Bz = Bz_cyl;
+  double phi = 0.0;
+  if (domain->dimension == 3) phi = std::atan2(p.x[1], p.x[0]);
+  OpenEdge::RZphi_force_to_sparta(Br, Bz_cyl, Bt, domain->dimension,
+                                   domain->axisymmetric, phi, Bx, By, Bz);
 }
