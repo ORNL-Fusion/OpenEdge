@@ -54,12 +54,17 @@ python3 ../../tools/converters/convert_solps_plasma.py \
     --plasma-out input/plasma.h5 \
     --bfield-out input/bfield.h5 \
     --wall-out input/wall.surf \
-    --wall-source mesh-extra
+    --wall-source mesh-extra \
+    --coords axi
 ```
 
-`--wall-source mesh-extra` is the SOLPS-native path (recommended for
-production). Alternatives: `eirene` (exact EIRENE wall, requires
-fort.33/34/35), or `auto` (default — picks mesh-extra if available).
+- `--wall-source mesh-extra` is the SOLPS-native path (recommended for
+  production). Alternatives: `eirene` (exact EIRENE wall, requires
+  fort.33/34/35), or `auto` (default — picks mesh-extra if available).
+- `--coords axi` (default) writes wall.surf line endpoints as `(Z, R)` to
+  match SPARTA's true axisymmetric slot mapping (`x = Z`, `y = R`).
+  Use `--coords cart` for the legacy 2D-Cartesian layout (`x = R`, `y = Z`,
+  per-radian-wedge convention).
 
 **Run the EIRENE-recycling case:**
 
@@ -73,6 +78,19 @@ mpirun -np 16 ~/buildOpenEdge/src/spa_mpi \
 Run length: 30000 steps (≈ 10–30 min on 16 ranks depending on cluster
 load). `fnum=4e15` targets ~100 sim-particles per step and ~50k
 steady-state population.
+
+## Coordinate convention
+
+The case runs in **SPARTA-native axisymmetric mode** (`boundary o ao p`,
+`x = Z (axial)`, `y = R (radial, ≥ 0)`). All per-volume / per-area
+diagnostics (`compute grid nrho`, `compute surf flux`, `fix emit/surf/recycle`
+rates) are full-3D quantities — no `2*pi*R` post-multiply needed when
+comparing against EIRENE / SOLPS / Gkeyll.
+
+Pre-2026-04-20 versions of this case used a 2D Cartesian layout that
+required a `2*pi*R̄ ≈ 10` post-multiply on every flux / density. See
+`CLAUDE.md` § "Coordinate convention" for the migration story and the
+`openedge_geom` helper that handles slot mapping.
 
 ## Physics pieces in `in.diii_d_neutrals_eirene`
 
@@ -114,6 +132,15 @@ Reads the latest `output/diii_d_eirene.grid` (OpenEdge) and
 the same (R, Z) grid.
 
 ## Current status (2026-04-20)
+
+Migrated to SPARTA-native axisymmetric mode today. Diagnostics now
+report full-3D quantities directly (no per-radian-wedge correction).
+The `[emit/surf/recycle]` per-step diagnostic prints both a
+**raw-SPARTA-segment-area** Bohm rate (from `surf->axi_line_size`)
+and a **B2-aggregated-surf_area** Bohm rate (from the converter's
+per-segment area aggregation); the second is what the runtime emit
+code uses, and the two should agree to within geometric mismatch
+between the SPARTA wall and the B2 boundary.
 
 OpenEdge Mode A recycling infrastructure is in place and produces
 peak S_iz within ~30 % of SOLPS-EIRENE on the DIII-D case. Remaining

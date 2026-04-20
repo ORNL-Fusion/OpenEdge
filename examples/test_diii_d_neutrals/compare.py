@@ -35,7 +35,17 @@ def main():
         dump = cand if os.path.exists(cand) else os.path.join(THIS, 'output', 'diii_d.grid')
     print(f'reading {dump}')
     d = read_grid_dump(dump)
-    xc = d['xc']; yc = d['yc']
+    # OpenEdge dumps xc/yc in SPARTA slot order. Detect axi vs cart by the
+    # range of the y column: axi has y >= 0 (radial); cart 2D has y in [-1.4, 1.4].
+    xc_raw = d['xc']; yc_raw = d['yc']
+    axi = (yc_raw.min() >= -1e-6)
+    if axi:
+        # SPARTA axi: x = Z (axial), y = R (radial). Plot in physical (R, Z).
+        Z_oe = xc_raw
+        R_oe = yc_raw
+    else:
+        R_oe = xc_raw
+        Z_oe = yc_raw
     n_D2  = d['f_fden[1]']
     n_D   = d['f_fden[2]']
     S_iz_oe   = d['f_frate[1]']    # ionization rate [m^-3 s^-1]
@@ -51,16 +61,20 @@ def main():
         ne = f['ne'][:]
 
     # ---- summary metrics
-    # domain-integrated rates (approximate; OE dump has single-cell volumes
-    # encoded via xc/yc spacing)
-    def oe_cell_vol(xc, yc):
-        # uniform base grid 200x400; adapted cells are smaller. For a first
-        # pass estimate, use nominal cell volume (dx * dy * 1m for 2D SPARTA).
-        # Accurate accounting would require dumping cell volumes from SPARTA.
-        dx = (2.4 - 0.95) / 200
-        dy = (1.4 - (-1.4)) / 400
-        return dx * dy * 1.0   # m^3 per base cell
-    vol_oe = oe_cell_vol(xc, yc)
+    # In SPARTA axi mode the per-cell volume is the true cylindrical
+    # volume that f_frate is normalized by — so summing rate * (true cell
+    # volume) gives the full-3D total source. Here we approximate the cell
+    # volume from the base-grid spacing and the radial position.
+    def oe_cell_vol(R_arr):
+        dx_axial = (1.4 - (-1.4)) / 200    # base grid 200 in x = Z
+        dy_radial = (2.4 - 0.0) / 100       # base grid 100 in y = R
+        if axi:
+            # 2*pi*R*dR*dZ — full toroidal revolution
+            return 2.0 * np.pi * np.maximum(R_arr, 1e-6) * dx_axial * dy_radial
+        else:
+            # 2D Cartesian: dx*dy*dz_box (per-radian-wedge convention)
+            return dx_axial * dy_radial * 1.0
+    vol_oe = oe_cell_vol(R_oe)
 
     tot_iz_oe   = float(np.sum(S_iz_oe)   * vol_oe)
     tot_diss_oe = float(np.sum(S_diss_oe) * vol_oe)
@@ -84,10 +98,10 @@ def main():
     vmin_di = 1e19
     vmax_di = max(S_diss_oe.max(), S_diss_ei.max()) * 1.1
 
-    # OE density panels
+    # OE density panels — always plot in physical (R, Z)
     ax = axes[0,0]
     posmask = n_D2 > 0
-    sc = ax.scatter(xc[posmask], yc[posmask], c=np.maximum(n_D2[posmask], 1e10), s=1,
+    sc = ax.scatter(R_oe[posmask], Z_oe[posmask], c=np.maximum(n_D2[posmask], 1e10), s=1,
                     norm=LogNorm(vmin=max(1e10, n_D2[posmask].min()), vmax=n_D2.max()),
                     cmap='plasma')
     plt.colorbar(sc, ax=ax); ax.set_title('OpenEdge $n_{D_2}$ [m$^{-3}$]')
@@ -95,7 +109,7 @@ def main():
     ax = axes[0,1]
     posmask = S_iz_oe > 0
     if posmask.any():
-        sc = ax.scatter(xc[posmask], yc[posmask], c=np.maximum(S_iz_oe[posmask], vmin_iz),
+        sc = ax.scatter(R_oe[posmask], Z_oe[posmask], c=np.maximum(S_iz_oe[posmask], vmin_iz),
                         s=1, norm=LogNorm(vmin=vmin_iz, vmax=vmax_iz), cmap='viridis')
         plt.colorbar(sc, ax=ax)
     ax.set_title('OpenEdge $S_{iz}$ [m$^{-3}$s$^{-1}$]')
@@ -109,7 +123,7 @@ def main():
 
     ax = axes[1,0]
     posmask = n_D > 0
-    sc = ax.scatter(xc[posmask], yc[posmask], c=np.maximum(n_D[posmask], 1e10), s=1,
+    sc = ax.scatter(R_oe[posmask], Z_oe[posmask], c=np.maximum(n_D[posmask], 1e10), s=1,
                     norm=LogNorm(vmin=max(1e10, n_D[posmask].min()), vmax=n_D.max()),
                     cmap='plasma')
     plt.colorbar(sc, ax=ax); ax.set_title('OpenEdge $n_D$ [m$^{-3}$]')
@@ -117,7 +131,7 @@ def main():
     ax = axes[1,1]
     posmask = S_diss_oe > 0
     if posmask.any():
-        sc = ax.scatter(xc[posmask], yc[posmask], c=np.maximum(S_diss_oe[posmask], vmin_di),
+        sc = ax.scatter(R_oe[posmask], Z_oe[posmask], c=np.maximum(S_diss_oe[posmask], vmin_di),
                         s=1, norm=LogNorm(vmin=vmin_di, vmax=vmax_di), cmap='magma')
         plt.colorbar(sc, ax=ax)
     ax.set_title('OpenEdge $S_{diss}$ [m$^{-3}$s$^{-1}$]')

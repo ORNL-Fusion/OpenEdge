@@ -67,6 +67,72 @@ all `.cpp` and `.h` files that have copies in both locations (e.g.,
 New OpenEdge-only files only need to exist in `src/OPENEDGE/` (they get copied
 to `src/` on install, and the cmake build handles this automatically).
 
+### Coordinate convention: 2D Cartesian vs SPARTA-native axisymmetric
+
+For tokamak / device geometries, OpenEdge supports two SPARTA-level layouts:
+
+- **2D Cartesian (legacy)** — `boundary o o p`, `dimension 2`, with `x = R`,
+  `y = Z`. SPARTA treats the box as a Cartesian slab of thickness `dz_box`
+  (typically 0.1 m, periodic). All `compute grid nrho`, `compute surf flux`,
+  `compute boundary` quantities are per-radian-of-toroidal-wedge — they need
+  a `2*pi*R̄` post-multiply to compare against full-3D codes (EIRENE, SOLPS,
+  Gkeyll). This was the historical convention in `test_west_axi`,
+  `test_diii_d_neutrals`, etc., despite the misleading name.
+
+- **SPARTA native axisymmetric (preferred)** — `boundary o ao p`,
+  `dimension 2`, with `x = Z (axial)`, `y = R (radial, must start at 0)`,
+  `z = phi`. SPARTA internally uses true cylindrical cell volumes and
+  `surf->axi_line_size()` (= `2*pi*R*L`) for surface area, so all per-volume
+  and per-area diagnostics are full-3D quantities out of the box. No
+  post-multiply.
+
+  - `boundary` syntax: the `a` token must sit at `ylo`, and `boxlo[1]` must
+    be 0 (`domain.cpp:174–182`, `create_box.cpp:55`). Use the 2-char
+    `ao` for the y-arg so SPARTA reads ylo='a' (axis) and yhi='o' (outflow).
+  - `create_box -1.4 1.4 0 2.4 -0.05 0.05` (xlo,xhi,ylo,yhi,zlo,zhi).
+
+**Helper for slot mapping** — `src/OPENEDGE/openedge_geom.h`:
+
+```cpp
+namespace OpenEdge {
+  void sparta_to_RZ(const double *xyz, int dim, bool axi,
+                     double &R, double &Z);
+  void RZphi_force_to_sparta(double FR, double FZ, double Fphi,
+                              int dim, bool axi, double phi,
+                              double &fx, double &fy, double &fz);
+  void sparta_v_to_RZphi(const double *v, int dim, bool axi,
+                          double phi, double &vR, double &vZ, double &vphi);
+}
+```
+
+All OpenEdge consumers that read particle (R, Z) or decompose cylindrical
+fields onto SPARTA slots route through these helpers, so they work in any
+of the three modes (2D Cart, 2D axi, 3D Cart) without per-fix conditionals.
+The fallback (`axi == false`) preserves the legacy 2D Cartesian layout, so
+existing tests keep working.
+
+**B-field / E-field / V-field source convention**: when the user passes
+`bx by bz` (or `ex ey ez`, `vx vy vz`) sources to a fix or compute, the
+values must be in **SPARTA slot order** (matching the velocity slots). The
+helper `RZphi_force_to_sparta()` does this projection consistently in
+`compute plasma/fields` output, so feeding `c_cplasma[bx_col]` etc. into
+`fix thermal_force` or `fix efield/grid` works in either coord layout
+without further user intervention.
+
+**SOLPS converter** — `convert_solps_plasma.py --coords {axi,cart}`
+(default `axi`). Controls whether `wall.surf` line endpoints are written
+as `(Z, R)` (axi) or `(R, Z)` (cart) so they line up with SPARTA's
+slot mapping.
+
+**Tests using each layout** (as of 2026-04-20):
+- Axi: `test_diii_d_neutrals` (pilot)
+- Cart 2D (legacy, awaiting migration): `test_west_axi`, `test_west_neutrals`,
+  `test_west_timedep`, `test_d3d_walldyn`, `test_d3d_mateja`,
+  `test_evaporation`, `test_solps_coupling`, `test_gca`,
+  `test_neutral_transport`
+- 3D Cart (unaffected): `test_west_3d`, etc.
+- True 1D slab (unaffected): `test_slab_stangeby2000`
+
 ### Particle properties
 
 - `particles[i].mass` is **zero** for gas-phase particles — it is only used
