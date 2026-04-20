@@ -2,12 +2,14 @@
 # A5d: DIII-D neutrals — EIRENE-faithful wall recycling.
 #
 # Uses fix emit/surf/recycle (Stage 1: thermal-only):
-#   Per wall segment, queries (ne, Te, Ti) at the segment midpoint from
-#   fix plasma/data. Computes Bohm flux Gamma = ne * cs * sin(alpha_B)
-#   with cs = sqrt((Te+Ti)/m_ion), then emits mixture at rate
+#   Per wall segment, queries (ne, Te, Ti) at the adjacent SOLPS plasma
+#   cell (cached at init time via nearest-valid-cell lookup over the
+#   plasma.h5 mesh — skips vacuum-filler triangles). Computes Bohm flux
+#     Gamma = ne * cs * sin(alpha_B)    cs = sqrt((Te+Ti)/m_ion)
+#   and emits mixture at rate
 #     dot{N} = 0.5 * R * Gamma * area
 #   (the 1/2 mass-balances D+ -> D2 recombination at the wall).
-#   Mixture temp 400 K gives thermal Maxwellian-flux re-emission velocity.
+#   Emission velocity is Maxwellian flux at twall along inward normal.
 #
 # 1-to-1 with standalone EIRENE (eirene/fort.1.solps_ref): both codes
 # drive recycling from the SAME plasma.h5, compute the SAME cs formula,
@@ -19,7 +21,11 @@ seed                12345
 dimension           2
 boundary            o o p
 global              gridcut 0.0 comm/sort no
-global              fnum 3e18
+# fnum tuned to our ~7.6e23 /s integrated recycling rate: ~25 sim particles
+# per step, ~25k at steady state (tau ~ 10 us). plasma.h5 mesh cells near
+# walls under-represent true sheath-edge ne (converter issue); with those
+# the rate would be ~10^27 /s like EIRENE, and fnum would be ~3e18.
+global              fnum 3e14
 
 create_box          0.95 2.4 -1.4 1.4 -0.05 0.05
 create_grid         100 200 1

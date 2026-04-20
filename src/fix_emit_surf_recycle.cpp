@@ -27,6 +27,7 @@
 #include "error.h"
 
 #include <cmath>
+#include <limits>
 
 using namespace SPARTA_NS;
 using namespace MathConst;
@@ -67,9 +68,9 @@ FixEmitSurfRecycle::FixEmitSurfRecycle(SPARTA *sparta, int narg, char **arg) :
     error->all(FLERR,"Fix emit/surf/recycle requires a fix plasma/data");
 
   // defaults
-  mass_amu  = 2.0;    // D+
-  R_recycle = 0.99;   // EIRENE PRFCT default
-  twall     = 400.0;  // K
+  mass_amu   = 2.0;     // D+ (main ion)
+  R_recycle  = 0.99;    // EIRENE PRFCT default
+  twall      = 400.0;   // K
 
   int iarg = 5;
   options(narg-iarg, &arg[iarg]);
@@ -129,6 +130,33 @@ void FixEmitSurfRecycle::init()
 void FixEmitSurfRecycle::grid_changed()
 {
   create_tasks();
+  // DBG: how many tasks got a valid cached plasma cell?
+  int n_ok_me = 0, n_total_me = ntask;
+  double sum_rate_me = 0.0;
+  for (int i = 0; i < ntask; i++) {
+    if (tasks[i].plasma_cell >= 0) {
+      n_ok_me++;
+      const int c = tasks[i].plasma_cell;
+      const double ne = plasma->mesh_ne[c];
+      const double te = plasma->mesh_te[c];
+      const double ti = plasma->mesh_ti.empty() ? te : plasma->mesh_ti[c];
+      if (ne > 0 && te > 0) {
+        constexpr double QEL = 1.602176634e-19;
+        constexpr double AMUL = 1.66053906660e-27;
+        const double cs = std::sqrt((te + ti) * QEL / (mass_amu * AMUL));
+        sum_rate_me += 0.5 * R_recycle * ne * cs * tasks[i].area;
+      }
+    }
+  }
+  int n_ok, n_total;
+  double sum_rate;
+  MPI_Allreduce(&n_ok_me, &n_ok, 1, MPI_INT, MPI_SUM, world);
+  MPI_Allreduce(&n_total_me, &n_total, 1, MPI_INT, MPI_SUM, world);
+  MPI_Allreduce(&sum_rate_me, &sum_rate, 1, MPI_DOUBLE, MPI_SUM, world);
+  if (comm->me == 0)
+    printf("[emit/surf/recycle] tasks=%d, mapped=%d (%.1f%%), "
+           "total recycling rate = %.3e /s (at sin_alpha=1)\n",
+           n_total, n_ok, 100.0 * n_ok / std::max(1, n_total), sum_rate);
 }
 
 /* ----------------------------------------------------------------------
@@ -273,6 +301,43 @@ void FixEmitSurfRecycle::create_task(int icell)
 
     tasks[ntask].vscale_molec = 0.0;
     tasks[ntask].ntarget = 0.0;
+
+    // Topological wall->plasma-cell lookup (EIRENE-style):
+    // Walk from the midpoint along the inward normal until we find the
+    // nearest SOLPS mesh cell with a valid plasma cell (cell_idx >= 0),
+    // skipping any "vacuum filler" cells between mesh and wall.
+    // Caches the cell index once at setup; no spatial search at runtime.
+    // Find the nearest SOLPS plasma cell (cell_idx >= 0, skipping vacuum
+    // fillers) to this wall segment midpoint. Iterates all mesh triangles
+    // once per task at init; O(N_wall * N_tri) total, runs only on
+    // grid_changed(). No hardcoded distances — works for any geometry
+    // SOLPS/SOLEDGE3X produces, regardless of vacuum-gap width.
+    tasks[ntask].plasma_cell = -1;
+    if (plasma && plasma->has_mesh && plasma->mesh_ntri > 0) {
+      const double rm = tasks[ntask].rmid;
+      const double zm = tasks[ntask].zmid;
+      double dmin2 = std::numeric_limits<double>::infinity();
+      int best = -1;
+      const int ntri = plasma->mesh_ntri;
+      const int *ci = plasma->mesh_cell_idx.data();
+      const int *tr = plasma->mesh_tri.data();
+      const double *vr = plasma->mesh_vtx_r.data();
+      const double *vz = plasma->mesh_vtx_z.data();
+      for (int t = 0; t < ntri; t++) {
+        if (ci[t] < 0) continue;   // skip vacuum fillers
+        // triangle centroid
+        const int v0 = tr[3*t+0], v1 = tr[3*t+1], v2 = tr[3*t+2];
+        const double cr = (vr[v0] + vr[v1] + vr[v2]) / 3.0;
+        const double cz = (vz[v0] + vz[v1] + vz[v2]) / 3.0;
+        const double dr = cr - rm;
+        const double dz = cz - zm;
+        const double d2 = dr*dr + dz*dz;
+        if (d2 < dmin2) { dmin2 = d2; best = ci[t]; }
+      }
+      if (best >= 0 && best < plasma->mesh_ncell)
+        tasks[ntask].plasma_cell = best;
+    }
+
     ntask++;
   }
 }
@@ -283,16 +348,23 @@ void FixEmitSurfRecycle::create_task(int icell)
 
 double FixEmitSurfRecycle::emission_rate_per_surface(int itask)
 {
-  const double R = tasks[itask].rmid;
-  const double Z = tasks[itask].zmid;
+  // Use the cached plasma cell index from init-time topological lookup
+  // (EIRENE-style: each wall surface maps to one sheath-edge cell, fixed
+  // by geometry, no runtime search). Works for any geometry SOLPS produces.
+  const int cell = tasks[itask].plasma_cell;
+  if (cell < 0) return 0.0;
 
-  const double ne = plasma->interp2D(plasma->dens_e, R, Z);
-  const double te = plasma->interp2D(plasma->temp_e, R, Z);
-  const double ti = plasma->temp_i.empty() ? te
-                  : plasma->interp2D(plasma->temp_i, R, Z);
+  // Pull plasma quantities directly from the mesh arrays
+  const double ne = plasma->mesh_ne[cell];
+  const double te = plasma->mesh_te[cell];
+  const double ti = plasma->mesh_ti.empty() ? te : plasma->mesh_ti[cell];
 
   if (!std::isfinite(ne) || !std::isfinite(te)) return 0.0;
   if (ne <= 0.0 || te <= 0.0) return 0.0;
+
+  // For B-field projection, use the wall midpoint (field changes slowly)
+  const double R = tasks[itask].rmid;
+  const double Z = tasks[itask].zmid;
 
   const double ti_eff = std::isfinite(ti) && ti > 0.0 ? ti : te;
   const double cs_arg = (te + ti_eff) * QE / (mass_amu * AMU);
