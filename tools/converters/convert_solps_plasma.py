@@ -653,7 +653,19 @@ def convert_solps_to_openedge(
         flow_i_t_all[k] = u_grid * bhat_t
         flow_i_z_all[k] = u_grid * bhat_z
 
-        ion_names.append(species_names[sidx])
+        # SOLPS labels all hydrogen isotopes generically as "H"; the actual
+        # isotope is set by atomic mass in b2fparam. Promote the label to
+        # "D" (mass ≈ 2) or "T" (mass ≈ 3) so downstream consumers see the
+        # correct isotope name.
+        raw_name = species_names[sidx]
+        m = masses_amu[sidx]
+        if raw_name.startswith("H") and 1.8 < m < 2.3:
+            fixed_name = "D" + raw_name[1:]
+        elif raw_name.startswith("H") and 2.8 < m < 3.3:
+            fixed_name = "T" + raw_name[1:]
+        else:
+            fixed_name = raw_name
+        ion_names.append(fixed_name)
         ion_masses[k] = masses_amu[sidx]
         ion_charges[k] = charge_states[sidx]
 
@@ -713,9 +725,33 @@ def convert_solps_to_openedge(
         if ix >= 0 and iy >= 0 and ix < nx + 2 and iy < ny + 2:
             mesh_cell_idx[t] = iy * (nx + 2) + ix
 
+    has_cell_native = mesh_cell_idx >= 0
+    print(f"Eirene mesh -> B2.5 mapping: {has_cell_native.sum()} triangles "
+          f"with plasma, {(~has_cell_native).sum()} vacuum/PFR (native)")
+
+    # Project sheath-edge plasma outward onto vacuum/PFR triangles.
+    # For each triangle without a native B2 mapping, find the nearest
+    # triangle that DOES have one and inherit its cell_idx. This makes
+    # wall-adjacent vacuum triangles carry the plasma values of the B2
+    # sheath-edge cell that physically drives them, matching EIRENE's
+    # strata-flux behavior. Any consumer that does a nearest-triangle
+    # lookup at a wall midpoint will then get real plasma, regardless of
+    # how wide the SOLPS-mesh-to-wall vacuum gap is.
+    if (~has_cell_native).any() and has_cell_native.any():
+        from scipy.spatial import cKDTree
+        centroid_r = mesh_vtx_r[mesh_tri].mean(axis=1)
+        centroid_z = mesh_vtx_z[mesh_tri].mean(axis=1)
+        src_idx = np.where(has_cell_native)[0]
+        dst_idx = np.where(~has_cell_native)[0]
+        tree = cKDTree(np.column_stack([centroid_r[src_idx],
+                                        centroid_z[src_idx]]))
+        _, j = tree.query(np.column_stack([centroid_r[dst_idx],
+                                           centroid_z[dst_idx]]))
+        mesh_cell_idx[dst_idx] = mesh_cell_idx[src_idx[j]]
+        print(f"Eirene mesh -> B2.5 mapping: {len(dst_idx)} vacuum/PFR "
+              f"triangles projected to nearest B2 cell")
+
     has_cell = mesh_cell_idx >= 0
-    print(f"Eirene mesh -> B2.5 mapping: {has_cell.sum()} triangles with plasma, "
-          f"{(~has_cell).sum()} vacuum/PFR")
 
     # Per-cell plasma arrays (shared across all triangles referencing the same cell)
     mesh_ne = ne_flat.copy()
@@ -760,6 +796,13 @@ def convert_solps_to_openedge(
         f.create_dataset("grad_ti_r", data=gti_r)
         f.create_dataset("grad_ti_t", data=np.zeros_like(gti_r))
         f.create_dataset("grad_ti_z", data=gti_z)
+
+        # B-field on the same (R,Z) grid as plasma fields. Makes plasma.h5
+        # self-contained so fix plasma/data (and downstream fixes relying on
+        # sin(alpha_B) at wall) don't need a separate bfield.h5 handle.
+        f.create_dataset("br", data=np.nan_to_num(br_grid))
+        f.create_dataset("bt", data=np.nan_to_num(bt_grid))
+        f.create_dataset("bz", data=np.nan_to_num(bz_grid))
 
         # Multi-ion species extension
         sdt = h5py.string_dtype(encoding="utf-8")
