@@ -289,6 +289,64 @@ Two approaches for sheath electric fields:
   - `3.0` = return energy in eV (Franck-Condon for D atoms)
   - `0.025` = thermal energy (~300 K wall temperature)
 
+### Wall-recycling neutral source: `fix emit/surf/recycle`
+
+Launches neutrals from SPARTA wall surfaces at a rate equal to the
+local plasma Bohm wall flux × a total recycling coefficient. Mirrors
+the physics of EIRENE strata 1–5 (SOLPS recycling strata) but driven
+purely from the B2 plasma state (ne, Te, Ti) and geometry; no EIRENE
+output is consumed.
+
+```
+fix <ID> emit/surf/recycle <mixture> <group> <plasma_fix_ID> \
+    [mass <amu>] [R <0..1>] [twall <K>]
+```
+
+- **Bohm flux formula** (Stangeby 2000 ch. 2):
+  `Γ = n_i · c_s · sin(α_B)` with `c_s = sqrt((Te+Ti)/m_ion)`
+  and `sin(α_B)` the geometric projection of B onto the wall inward
+  normal.
+- **Emission rate per wall segment:**
+  `dot{N}_seg = 0.5 · R · Γ · face_area_seg`
+  The 1/2 balances D⁺ → D₂ recombination at the wall; the mixture
+  fractions control the atom/molecule split.
+- **Re-emission velocity:** half-Maxwellian flux at `twall` along the
+  inward normal. (TRIM-fast-reflection channel not yet implemented.)
+
+**Wall → B2-cell mapping** — the fix needs to know, for each wall
+surface, which SOLPS B2 boundary cell owns it. Three paths, tried in
+order:
+
+1. **Topological** (preferred) — `fix_plasma_data` reads
+   `mesh/wall_surf_cell[iseg]` from plasma.h5 (written by the
+   converter; see Wall geometry below). Direct index lookup.
+2. **Geographic fallback** — nearest B2 boundary cell by centroid
+   distance, restricted to cells with `wall_face_area > 0`.
+3. **Raw SPARTA area** — last-resort emission using the SPARTA surface
+   area instead of the B2 face area. Only correct when SPARTA wall and
+   B2 boundary coincide exactly.
+
+### Wall geometry from SOLPS: `convert_solps_plasma.py --wall-source`
+
+Three ways to build wall.surf and the per-segment → B2-cell mapping:
+
+- **`mesh-extra`** (default when available) — parse SOLPS's mesh.extra
+  user-defined wall segments into a watertight polygon and, for each
+  segment, aggregate the area of all B2 boundary faces that chose it
+  as nearest. **SOLPS-native, no EIRENE files required.** Suitable for
+  production.
+- **`b2`** (not yet implemented) — build wall from B2 outer boundary
+  cell faces only; 1:1 segment→cell mapping. For codes without
+  mesh.extra (OEDGE, SOLEDGE3X).
+- **`eirene`** — use fort.33/34/35 triangulation boundary edges.
+  Matches EIRENE's wall exactly. Only useful for direct standalone
+  EIRENE cross-validation; requires EIRENE output files.
+
+The converter writes `mesh/wall_face_area[ncell]`, `mesh/wall_surf_cell[nseg]`,
+and `mesh/wall_surf_area[nseg]` into plasma.h5. The fix uses these to
+emit the correct Bohm flux at each wall segment without any runtime
+geometric search.
+
 ### Synthetic diagnostics
 
 - **`compute photon_emissivity/grid`** — per-grid volumetric photon
