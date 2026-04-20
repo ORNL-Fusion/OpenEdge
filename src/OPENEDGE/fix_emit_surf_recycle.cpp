@@ -130,6 +130,30 @@ void FixEmitSurfRecycle::init()
 void FixEmitSurfRecycle::grid_changed()
 {
   create_tasks();
+
+  // Compute per-task area share within its plasma cell: each task gets a
+  // fraction = area_task / (sum of task areas mapped to same cell),
+  // summed globally so MPI ranks agree. Used to distribute the per-cell
+  // B2 wall face area across SPARTA wall surfaces mapped to that cell.
+  const bool need_area_share = plasma && plasma->has_mesh_wall_face_area;
+  if (need_area_share) {
+    const int ncell = plasma->mesh_ncell;
+    std::vector<double> area_sum_me(ncell, 0.0);
+    for (int i = 0; i < ntask; i++) {
+      const int c = tasks[i].plasma_cell;
+      if (c >= 0 && c < ncell) area_sum_me[c] += tasks[i].area;
+    }
+    std::vector<double> area_sum(ncell, 0.0);
+    MPI_Allreduce(area_sum_me.data(), area_sum.data(), ncell,
+                  MPI_DOUBLE, MPI_SUM, world);
+    for (int i = 0; i < ntask; i++) {
+      const int c = tasks[i].plasma_cell;
+      tasks[i].area_share = (c >= 0 && area_sum[c] > 0.0) ?
+                            tasks[i].area / area_sum[c] : 0.0;
+    }
+  } else {
+    for (int i = 0; i < ntask; i++) tasks[i].area_share = 0.0;
+  }
   // DBG: how many tasks got a valid cached plasma cell?
   int n_ok_me = 0, n_total_me = ntask;
   double sum_rate_me = 0.0;
@@ -153,10 +177,41 @@ void FixEmitSurfRecycle::grid_changed()
   MPI_Allreduce(&n_ok_me, &n_ok, 1, MPI_INT, MPI_SUM, world);
   MPI_Allreduce(&n_total_me, &n_total, 1, MPI_INT, MPI_SUM, world);
   MPI_Allreduce(&sum_rate_me, &sum_rate, 1, MPI_DOUBLE, MPI_SUM, world);
-  if (comm->me == 0)
-    printf("[emit/surf/recycle] tasks=%d, mapped=%d (%.1f%%), "
-           "total recycling rate = %.3e /s (at sin_alpha=1)\n",
-           n_total, n_ok, 100.0 * n_ok / std::max(1, n_total), sum_rate);
+
+  // The B2-face-area Bohm-flux diagnostic needs its own MPI_Allreduce so
+  // every rank participates — otherwise rank 0 calls it alone and hangs
+  // the other ranks on the subsequent implicit barriers of setup/run.
+  double bohm_b2_global = 0.0;
+  if (plasma->has_mesh_wall_face_area) {
+    double bohm_b2 = 0.0;
+    for (int i = 0; i < ntask; i++) {
+      const int c = tasks[i].plasma_cell;
+      if (c < 0 || c >= plasma->mesh_ncell) continue;
+      const double ne = plasma->mesh_ne[c];
+      const double te = plasma->mesh_te[c];
+      const double ti = plasma->mesh_ti.empty() ? te : plasma->mesh_ti[c];
+      const double ti_eff = std::isfinite(ti) && ti > 0.0 ? ti : te;
+      const double cs_a = (te + ti_eff) * QE / (mass_amu * AMU);
+      if (ne > 0.0 && cs_a > 0.0) {
+        bohm_b2 += 0.5 * R_recycle * ne * std::sqrt(cs_a) *
+                   plasma->mesh_wall_face_area[c] * tasks[i].area_share;
+      }
+    }
+    MPI_Allreduce(&bohm_b2, &bohm_b2_global, 1, MPI_DOUBLE, MPI_SUM, world);
+  }
+
+  if (comm->me == 0) {
+    printf("[emit/surf/recycle] tasks=%d, mapped=%d (%.1f%%)\n",
+           n_total, n_ok, 100.0 * n_ok / std::max(1, n_total));
+    printf("[emit/surf/recycle] Bohm-flux rate (ne*cs, sin_alpha=1, "
+           "SPARTA surface area) = %.3e /s\n", sum_rate);
+    if (plasma->has_mesh_wall_face_area) {
+      printf("[emit/surf/recycle] Bohm-flux rate (B2 face area, sin_alpha=1) "
+             "= %.3e /s  [USING THIS]\n", bohm_b2_global);
+    } else
+      printf("[emit/surf/recycle] (mesh/wall_face_area absent — using raw "
+             "SPARTA-surface-area Bohm-flux)\n");
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -348,11 +403,17 @@ void FixEmitSurfRecycle::create_task(int icell)
 
 double FixEmitSurfRecycle::emission_rate_per_surface(int itask)
 {
-  // Use the cached plasma cell index from init-time topological lookup
-  // (EIRENE-style: each wall surface maps to one sheath-edge cell, fixed
-  // by geometry, no runtime search). Works for any geometry SOLPS produces.
   const int cell = tasks[itask].plasma_cell;
   if (cell < 0) return 0.0;
+
+  // Compute Bohm flux from the B2 plasma state (ne, Te, Ti at the
+  // cached sheath-edge cell) and the B2 cell's toroidally-integrated
+  // wall face area, then distribute to this SPARTA surface by area
+  // share within the cell. Formula matches EIRENE eirmod_samsrf.F:485:
+  //   FLSTEP = cs * ne * TORL
+  // with cs = sqrt((Te+Ti)/mi) and TORL = 2*pi*R_face. No EIRENE output
+  // is used — this is an independent OpenEdge computation from the same
+  // plasma the parent code passes to EIRENE.
 
   // Pull plasma quantities directly from the mesh arrays
   const double ne = plasma->mesh_ne[cell];
@@ -384,8 +445,23 @@ double FixEmitSurfRecycle::emission_rate_per_surface(int itask)
     }
   }
 
+  // Surface area used in the flux calculation:
+  //  - If the converter wrote per-cell B2 face areas, use that cell's
+  //    area (toroidally integrated) scaled by the SPARTA surface's share.
+  //    This reproduces EIRENE's FLSTEP exactly.
+  //  - Else fall back to the raw SPARTA surface area (approximate: correct
+  //    only when the SPARTA mesh and the B2 wall are close to coincident).
+  double gamma_area;
+  if (plasma->has_mesh_wall_face_area &&
+      cell < static_cast<int>(plasma->mesh_wall_face_area.size()) &&
+      plasma->mesh_wall_face_area[cell] > 0.0) {
+    gamma_area = plasma->mesh_wall_face_area[cell] * tasks[itask].area_share;
+  } else {
+    gamma_area = tasks[itask].area;
+  }
+
   const double gamma = ne * cs * sin_alpha;
-  const double dot_N = 0.5 * R_recycle * gamma * tasks[itask].area;
+  const double dot_N = 0.5 * R_recycle * gamma * gamma_area;
   return dot_N * update->dt / fnum;
 }
 
@@ -426,6 +502,12 @@ void FixEmitSurfRecycle::perform_task()
     if (ntarget <= 0.0) continue;
 
     ninsert = static_cast<int>(ntarget + random->uniform());
+    // Bootstrap: at step 1 the halt-on-zero-particles check in update.cpp
+    // fires if no rank emitted, which happens when stochastic rounding
+    // rolls 0 for every task (typical for small per-task ntarget spread
+    // over many MPI ranks). Force at least one particle per active task
+    // on step 1 so the simulation can start.
+    if (update->ntimestep == 1 && ninsert == 0) ninsert = 1;
     if (ninsert <= 0) continue;
 
     nactual = 0;

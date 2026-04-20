@@ -73,6 +73,10 @@ class FixEmitSurfRecycle : public FixEmit {
     double rmid, zmid;          // segment midpoint (for plasma query)
     double inward[3];           // unit inward normal (flip of outward)
     int    plasma_cell;         // cached SOLPS cell index (-1 if none)
+    double area_share;           // task area / (sum of task areas mapped
+                                 // to the same plasma_cell), for
+                                 // area-weighted distribution of the
+                                 // per-cell B2 wall face area budget.
   };
 
   Task *tasks;

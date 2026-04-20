@@ -76,6 +76,11 @@ class FixPlasmaData : public Fix {
   std::vector<int> mesh_cell_idx;  // (ntri) cell index per triangle
   std::vector<double> mesh_ne, mesh_te, mesh_ti, mesh_ni, mesh_upar;
   std::vector<double> mesh_ions_dens, mesh_ions_temp, mesh_ions_upar;
+  int has_mesh_wall_face_area;                // 1 if the converter wrote
+                                              // mesh/wall_face_area
+  std::vector<double> mesh_wall_face_area;    // per-cell wall face area [m^2],
+                                              // toroidally integrated. Zero
+                                              // for non-boundary cells.
   std::vector<double> mesh_tri_rmin, mesh_tri_rmax, mesh_tri_zmin, mesh_tri_zmax;
   std::vector<double> mapped_cr, mapped_cz;
   std::vector<int> mapped_idx;
