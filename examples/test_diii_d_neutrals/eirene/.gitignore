@@ -1,7 +1,10 @@
+# Everything generated at runtime or symlinked from outside
 Database
-fort.1
-fort.13
-fort.15
-fort.*.out
+modules/
+fort.*
 run.log
+output.*
+user_data.input
 *.h5
+# Keep the SOLPS reference deck committed
+!fort.1.solps_ref
