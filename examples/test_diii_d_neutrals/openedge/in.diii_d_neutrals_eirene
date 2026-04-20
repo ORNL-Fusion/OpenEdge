@@ -27,8 +27,11 @@ balance_grid        rcb cell
 
 species             ../input/neutral.species D2 D D+
 # Recycling mixture: 95% D2 (molecular channel) + 5% D (atomic channel).
-# Placeholder energy-averaged TRIM split (Stage 2 will make this dynamic).
-mixture             recmix D2 frac 0.95 D frac 0.05 temp 400.0
+# SPARTA's `frac` applies to the single preceding species, so we set it in
+# two separate mixture lines. Placeholder energy-averaged TRIM split
+# (Stage 2 will make this dynamic from TRIM tables).
+mixture             recmix D2 frac 0.95 temp 400.0
+mixture             recmix D  frac 0.05
 
 # ---- Wall: TRIM-backed return-path recycling ----
 read_surf           ../input/wall.surf group wall particle check
