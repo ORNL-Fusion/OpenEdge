@@ -44,10 +44,17 @@ variable            TbindW equal 4.*11600.
 variable            TwallK equal 773.15
 variable            Tcore equal 150*11600.
 variable            dt equal 5.0e-09
-variable            nlaunchTotalW equal 10
+# index-style variables so the CLI -var can override them:
+#   mpirun ... spa_mpi -var nlaunchTotalW 100 -var Nphase 200000 -var tag B -in in.west
+variable            nlaunchTotalW index 10
 variable            sourceThreshW equal 0. #1.0e-4
-variable            Nwarm equal   10000
-variable            Nphase equal  30000
+variable            Nwarm  index 10000
+variable            Nphase index 30000
+# Ndump = dump + ave/grid window length. Nphase should be an integer
+# multiple so the run ends exactly on a dump.
+variable            Ndump  index 10000
+# tag used in output filenames to separate scan runs
+variable            tag    index A
 mixture             tungstenSource temp ${TbindW}
 
 # Surfaces vessel
@@ -132,7 +139,18 @@ fix fcd cross_diffusion 100 plasma_data pd &
 # 3) PMI surf data from incident plasma flux + analytic Eckstein sputtering.
 # In this WEST case, D_on_W is negligible; keep the physical background/sheath
 # mass at D but drive sputtering only from oxygen charge states.
+#
+# Emission uses cpmiO column 1 as the flux source (`fix emit/surf/pmi`
+# default flux_index=0). So col 1 MUST be the W sputter flux -- expose
+# only sputter_flux_total here to make that unambiguous.
 compute cpmiO pmi/surf/data 1 plasma_data pd eckstein O_on_W &
+                    projectile_slots 2 9 mass_amu 2.01410177811 static yes &
+                    sputter_flux_total
+
+# Diagnostic-only copy that exposes the richer per-species breakdown
+# (D+ Bohm flux, angle, energy, per-charge-state sputter fluxes) for the
+# pmi_diag.west_o.surf dump.
+compute cpmiO_diag pmi/surf/data 1 plasma_data pd eckstein O_on_W &
                     projectile_slots 2 9 mass_amu 2.01410177811 static yes &
                     nflux_species all incident_angle_species all incident_energy_species all &
                     sputter_flux_species all sputter_flux_total
@@ -141,30 +159,50 @@ compute cpmiO pmi/surf/data 1 plasma_data pd eckstein O_on_W &
 fix pw particle/weight
 
 # 5) Emit sputtered W from the oxygen-driven PMI source.
+# cpmiO is stripped to a single column (sputter_flux_total), so the emit
+# fix reads the correct W source rate and not the D+ Bohm flux.
 fix femit emit/surf/pmi tungstenSource 1 cpmiO perspecies no normal yes &
                     nlaunch_total ${nlaunchTotalW} source_thresh ${sourceThreshW}
 
 # 6) Dumps
 
-# Particle state dump (one snapshot per warmup window)
-dump dpart particle all ${Nwarm} output/state.west.o_sputter id type x y z vx vy vz
+# Particle state dump: commented -- not needed for density/source investigation,
+# keeps the 64-rank run fast.
+# dump dpart particle all ${Nwarm} output/state.west.o_sputter id type x y z vx vy vz
+# dump_modify dpart first yes
 
-dump_modify dpart first yes
-
-# Surface-level PMI diagnostics for the active oxygen-driven source.
-# cpmiO columns = [all-species Bohm flux, all-species angle, all-species energy,
-#                  O+..O8+ sputter flux, O sputter total]
-dump dpmi surf all ${Nphase} output/pmi_diag.west_o.surf id c_cpmiO[*]
+# Surface-level PMI diagnostics -- from the richer cpmiO_diag compute.
+# `all` is expanded at construction when fix plasma/data has not yet
+# loaded its HDF5 (nion=0 fallback), so cpmiO_diag collapses to 4 cols:
+#   col 1 : nflux   (slot 1 = D+)           [part/m^2/s]
+#   col 2 : incident angle (slot 1)         [deg]
+#   col 3 : incident energy (slot 1)        [eV]
+#   col 4 : sputter_flux_total              [part/m^2/s]
+dump dpmi surf all ${Nphase} output/pmi_diag.west_o.surf id c_cpmiO_diag[*]
 dump_modify dpmi first yes
 
 # Weighted density (correct physical density with per-particle weights)
 compute cwden grid/weighted all species nrho_w
 
+# --- Source / loss balance diagnostics -------------------------------------
+# Per-surf sputter RATE [particles/s] in axisymmetric ring form
+# (flux x 2*pi*R_mid*length). Emit uses cpmiO (sputter_flux_total);
+# cpmiO_rate is a parallel compute that pre-multiplies by the ring area
+# so we can reduce-sum it directly, no property/surf / variable needed.
+compute cpmiO_rate pmi/surf/data 1 plasma_data pd eckstein O_on_W &
+                    projectile_slots 2 9 mass_amu 2.01410177811 static yes &
+                    sputter_rate_total
+compute csrc   reduce sum c_cpmiO_rate
+
+# Mean / max volume-weighted W0 density -- lets us watch convergence live.
+compute cwmax  reduce max c_cwden[1]
+compute cwmean reduce ave c_cwden[1]
+
 timestep            ${dt}
 stats               100
-stats_style         step cpu np
+stats_style         step cpu np c_csrc c_cwmean c_cwmax
 
-fix     fwdenA ave/grid all 1 ${Nphase} ${Nphase} c_cwden[*] ave one
+fix     fwdenA ave/grid all 1 ${Ndump} ${Ndump} c_cwden[*] ave one
 
 
 #fix balance 500 1.1 rcb time
@@ -180,7 +218,14 @@ run                ${Nwarm}
 # Uncomment the next line only if you want a pure source-free decay test.
 #unfix femit
 
-# Phase A
-dump    dwdenA grid all ${Nphase} output/tmp.grid.density_weighted.phaseA.west_o id xc yc f_fwdenA[*]
+# Phase A grid dump: per-cell n(W0..W20+) PLUS the per-cell physical volume,
+# dumped every Ndump steps so time-series snapshots stack in one file.
+dump    dwdenA grid all ${Ndump} output/grid.dens.${tag}.west id xc yc vol f_fwdenA[*]
+
+# One-shot particle dump at the end of the run, including pweight. Used to
+# verify the per-macro weight distribution (hot-surface weighting artifacts
+# would show up as a long tail at very large pweight).
+dump    dpartW particle all ${Nphase} output/state.${tag}.west.final id type x y z vx vy vz p_pweight
+dump_modify dpartW first no
 
 run     ${Nphase}
