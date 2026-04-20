@@ -1,12 +1,28 @@
-# Simple thermal absorb-and-reemit (A-channel) for A5 DIII-D.
-# D+ incoming returns as D atom at wall temp (99% recycling, 1% pump).
+# TRIM-backed recycling + EIRENE absorb-and-re-emit for D on a C wall (DIII-D).
+#
+# Channels evaluated in order; first to cross U~U[0,1] fires.
+#  1) T ...  probability = R_N from TRIM table (reflected as same species)
+#  2) A R f  absorb-and-re-emit; R = wall recycling fraction,
+#            f = atom->molecule partition (fraction of returned atoms that
+#            come back as D2; default EIRENE/WTD = 0.95).
+#
+# Wall material: C (graphite targets + stainless chamber, approximated as C).
+
+# D+ recycling: neutralize + TRIM reflect as D, else absorb-and-re-emit as
+# 95% D2 / 5% D.
 D+ --> D
-A 0.99 0.0
+T D_on_C
 
-# D neutral: 99% thermal reflection as D, 1% pump.
+D+ --> D2
+A 0.99 0.95
+
+# D recycling: identical pipeline for atomic D.
 D --> D
-A 0.99 0.0
+T D_on_C
 
-# D2 neutral: 99% thermal re-emission, 1% pump.
+D --> D2
+A 0.99 0.95
+
+# D2 recycling: no molecular-reflection table; simple absorb-and-return.
 D2 --> D2
-A 0.99 0.0
+A 0.99

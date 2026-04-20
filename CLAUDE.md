@@ -484,6 +484,12 @@ Total speedup: ~9× on a single rank (Move halved by fewer surface checks),
 - `fix balance ... rcb time` (every 500 steps) outperforms `rcb part`
   for impurity transport — `time` weights cells by measured CPU cost,
   capturing per-particle work intensity (Boris subcycles, surf checks).
+- **Exception for wall-sourced cases (emit/surf/pmi, emit/surf/recycle):**
+  use `rcb part`, not `rcb time`. When the first balance fires, several
+  ranks have zero particle work-time (no tasks emitted yet) and the RCB
+  recursion in `rcb time` mode segfaults on NaN weights. `rcb part`
+  partitions by particle count instead — stable with idle ranks.
+  See `memory/feedback_rcb_time_segfault.md`.
 
 ### Runtime adaptive refinement: `fix adapt`
 
@@ -526,6 +532,67 @@ Total speedup vs single rank with no refinement: **~20× at np=16** for
 this case. np=8 is the practical sweet spot for divertor-source cases at
 this resolution — beyond that, refinement granularity becomes the new
 bottleneck.
+
+### Critical ordering for `fix adapt`
+
+```
+# ---- Diagnostics FIRST ----
+compute cden grid all species nrho
+fix    fden ave/grid all 1 1000 1000 c_cden[*] ave one
+fix    frate ave/grid all 1 1000 1000 f_fchem[*] ave one
+
+# ---- Runtime refinement + balance AFTER all fix ave/grid ----
+fix fadapt adapt 200 all refine particle 500 0 maxlevel 5 cells 2 2 1
+fix fbal   balance 500 1.1 rcb part
+```
+
+SPARTA errors out with *"Fix adapt must come after fix ave/grid"* if the
+ordering is wrong. `fix adapt` invalidates any cell-to-value mapping
+every time it refines, so the `ave/grid` fixes must already be set up
+to hear about it.
+
+### Measured impact: wall-recycling case (test_diii_d_neutrals)
+
+With `fix emit/surf/recycle` driving wall emission:
+
+| config (np=16) | ms/step @ ~50k particles |
+|---|---|
+| static adapt_grid maxlevel 3, no fbal/fadapt | ~110 ms |
+| maxlevel 5 static + fadapt 200 + fbal rcb part | **~15 ms** |
+
+**~7–8× speedup**, moves bottleneck off MPI load imbalance onto actual
+particle work. Per-rank particle counts become balanced (min/max ratio
+~1.5 instead of ~10).
+
+### MPI traps in fix init code
+
+When writing a new fix whose `init()` prints a diagnostic, **every
+MPI_Allreduce must be called on every rank, not inside `if (comm->me == 0)`**.
+A common mistake:
+
+```cpp
+// BUG: only rank 0 calls Allreduce -> other ranks deadlock
+// at the next collective (run setup, fix chem init, etc.)
+if (comm->me == 0) {
+  double local = ...;
+  MPI_Allreduce(&local, &global, 1, MPI_DOUBLE, MPI_SUM, world);
+  printf("diagnostic = %.3e\n", global);
+}
+```
+
+Correct: run the Allreduce unconditionally, then gate only the `printf`:
+
+```cpp
+double local = compute_something();
+double global;
+MPI_Allreduce(&local, &global, 1, MPI_DOUBLE, MPI_SUM, world);
+if (comm->me == 0) printf("diagnostic = %.3e\n", global);
+```
+
+The symptom is a hang with no stats line ever printed — the run log
+stops right after the fix's init prints. Single-rank runs are fine, so
+the bug only shows up under MPI. Cost us a good chunk of a debug
+session on `fix emit/surf/recycle`.
 
 ## MPI launch on mora
 

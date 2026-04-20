@@ -21,11 +21,11 @@ seed                12345
 dimension           2
 boundary            o o p
 global              gridcut 0.0 comm/sort no
-# fnum tuned to our ~7.6e23 /s integrated recycling rate: ~25 sim particles
-# per step, ~25k at steady state (tau ~ 10 us). plasma.h5 mesh cells near
-# walls under-represent true sheath-edge ne (converter issue); with those
-# the rate would be ~10^27 /s like EIRENE, and fnum would be ~3e18.
-global              fnum 3e14
+# With B2-face-area based Bohm flux, total rate ~5.5e24/s at
+# sin(alpha)=1; effective ~5.5e23/s after the sin_alpha geometric factor.
+# Target ~50 particles/step, ~50k at steady state (tau ~ 10 us):
+#   fnum = rate * dt / n_per_step = 5.5e23 * 1e-8 / 50 ~ 1e14
+global              fnum 1e14
 
 create_box          0.95 2.4 -1.4 1.4 -0.05 0.05
 create_grid         100 200 1
@@ -47,18 +47,29 @@ surf_react          wallPWI wall_pwi ../input/wall.recycle &
                     twall 400.0
 surf_modify         wall collide wallColl react wallPWI
 
-# ---- Static refinement near both divertors ----
+# ---- Static refinement near both divertors (CLAUDE.md perf recipe) ----
+# maxlevel 5 + iterate 5: drive 5 levels of cell refinement around wall
+# segments. This reduces surf-element count per cell and gives RCB enough
+# granularity to subdivide the dense wall region across ranks.
 region              rdiv_lo block 1.0 2.4 -1.4 -0.8 -INF INF
 region              rdiv_up block 1.0 2.4  0.7  1.4 -INF INF
-adapt_grid          all refine surf all 0.005 maxlevel 3 cells 2 2 1 &
-                    region rdiv_lo all iterate 3
-adapt_grid          all refine surf all 0.005 maxlevel 3 cells 2 2 1 &
-                    region rdiv_up all iterate 3
+adapt_grid          all refine surf all 0.001 maxlevel 5 cells 2 2 1 &
+                    region rdiv_lo all iterate 5
+adapt_grid          all refine surf all 0.001 maxlevel 5 cells 2 2 1 &
+                    region rdiv_up all iterate 5
 balance_grid        rcb cell
 
 # ---- Plasma background (same file EIRENE reads from via fort.13) ----
-fix                 pd plasma/data file ../input/plasma.h5 static yes
+# Load the SOLPS equilibrium (.equ) so psi is available to fix reflect/psi.
+fix                 pd plasma/data file ../input/plasma.h5 &
+                    equilibrium ../input/dg.equ static yes
 global              bfield_compute pd
+
+# ---- EIRENE-style inner boundary: absorb neutrals crossing psi_norm<0.95 ----
+# EIRENE's SOLPS-coupled inner radial surface acts as a core sink — neutrals
+# crossing it are pumped (no core-side tracking). Apply the same BC here so
+# OpenEdge's effective computational domain matches EIRENE's.
+fix fcore reflect/psi plasma_data pd psi_norm 0.95 action absorb
 
 # ---- Volumetric chemistry (Mode A) ----
 fix fchem chem/adas 1 1 ../input/neutral.reactions adas_dir ../../../database/adas &
@@ -73,6 +84,12 @@ compute cden grid all species nrho
 fix    fden ave/grid all 1 1000 1000 c_cden[*] ave one
 fix    frate ave/grid all 1 1000 1000 f_fchem[*] ave one
 
+# ---- Runtime adaptive refinement + load balance (CLAUDE.md perf recipe) ----
+# MUST come after fix ave/grid (SPARTA ordering requirement).
+# Refine cells that collect >500 particles to give RCB more granularity;
+# run rcb-part balance every 500 steps. Together: 2-4x speedup on MPI.
+# (rcb-time is avoided because it segfaults with idle ranks -- see memory.)
+fix fadapt adapt 200 all refine particle 500 0 maxlevel 5 cells 2 2 1
 fix fbal   balance 500 1.1 rcb part
 
 timestep            1e-8
@@ -84,4 +101,4 @@ dump d1 grid all 2000 ../output/diii_d_eirene.grid id xc yc &
      f_frate[1] f_frate[2] f_frate[3] f_frate[4]
 dump_modify d1 pad 6
 
-run                 10000
+run                 30000
