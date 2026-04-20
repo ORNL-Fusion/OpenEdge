@@ -731,25 +731,38 @@ def convert_solps_to_openedge(
 
     # Project sheath-edge plasma outward onto vacuum/PFR triangles.
     # For each triangle without a native B2 mapping, find the nearest
-    # triangle that DOES have one and inherit its cell_idx. This makes
-    # wall-adjacent vacuum triangles carry the plasma values of the B2
-    # sheath-edge cell that physically drives them, matching EIRENE's
-    # strata-flux behavior. Any consumer that does a nearest-triangle
-    # lookup at a wall midpoint will then get real plasma, regardless of
-    # how wide the SOLPS-mesh-to-wall vacuum gap is.
+    # triangle whose B2 cell sits on the SHEATH EDGE ring (outermost real
+    # plasma cells: ix=1 or ix=nx, iy=1 or iy=ny — the cells that
+    # physically drive EIRENE's recycling strata). Restricting the
+    # projection target to the sheath-edge ring (vs. any nearest B2 cell)
+    # puts the SOLPS boundary-layer density / temperature at the wall,
+    # instead of the volume-averaged SOL.
     if (~has_cell_native).any() and has_cell_native.any():
         from scipy.spatial import cKDTree
         centroid_r = mesh_vtx_r[mesh_tri].mean(axis=1)
         centroid_z = mesh_vtx_z[mesh_tri].mean(axis=1)
-        src_idx = np.where(has_cell_native)[0]
+
+        # Identify native-mapped triangles whose B2 cell is on the
+        # sheath-edge ring of the B2 (nx+2, ny+2) mesh. Unflattened
+        # indices are (iy, ix) with order=F -> c = iy*(nx+2) + ix.
+        native_idx = np.where(has_cell_native)[0]
+        c_flat = mesh_cell_idx[native_idx]
+        iy = c_flat // (nx + 2)
+        ix = c_flat - iy * (nx + 2)
+        is_sheath = ((ix == 1) | (ix == nx) | (iy == 1) | (iy == ny))
+        sheath_src = native_idx[is_sheath]
+        if sheath_src.size == 0:
+            sheath_src = native_idx   # fallback: any native cell
+
         dst_idx = np.where(~has_cell_native)[0]
-        tree = cKDTree(np.column_stack([centroid_r[src_idx],
-                                        centroid_z[src_idx]]))
+        tree = cKDTree(np.column_stack([centroid_r[sheath_src],
+                                        centroid_z[sheath_src]]))
         _, j = tree.query(np.column_stack([centroid_r[dst_idx],
                                            centroid_z[dst_idx]]))
-        mesh_cell_idx[dst_idx] = mesh_cell_idx[src_idx[j]]
+        mesh_cell_idx[dst_idx] = mesh_cell_idx[sheath_src[j]]
         print(f"Eirene mesh -> B2.5 mapping: {len(dst_idx)} vacuum/PFR "
-              f"triangles projected to nearest B2 cell")
+              f"triangles projected to nearest sheath-edge B2 cell "
+              f"({sheath_src.size} sheath-edge cells available)")
 
     has_cell = mesh_cell_idx >= 0
 
