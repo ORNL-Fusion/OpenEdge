@@ -1,0 +1,28 @@
+# TRIM reflection + EIRENE-faithful absorb-and-re-emit for D on a W wall.
+#
+# Channels are evaluated in order; cumulative probability accumulates per
+# species; first channel to cross U~U[0,1] fires. Recommended ordering:
+#     1) T ... (variable prob = R_N from TRIM table)
+#     2) A ... (catch-all; prob=1; internally splits atom/molecule/pump)
+#
+# Species-agnostic: swap D->H, D2->H2, D_on_W->H_on_Li etc. for LTX.
+
+# --- D+ recycling: neutralize + TRIM reflect as D, else EIRENE absorb-and-re-emit.
+#     Returned fraction R=0.99; of those, 95% as D2, 5% as atomic D (EIRENE WTD defaults).
+D+ --> D
+T D_on_W
+
+D+ --> D2
+A 0.99 0.95
+
+# --- D recycling: identical pipeline, incident species is atomic D.
+D --> D
+T D_on_W
+
+D --> D2
+A 0.99 0.95
+
+# --- D2 recycling: no TRIM (molecules dissociate / don't reflect); simple absorb-and-return.
+#     R=0.99, no f_mol needed because reactant == product.
+D2 --> D2
+A 0.99

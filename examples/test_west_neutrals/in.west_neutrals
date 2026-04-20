@@ -46,10 +46,29 @@ mixture             neutrals D+  frac 0.0
 mixture             puff_mix D2  frac 1.0 nrho 1e18 temp 300.0
 
 # ---- Surfaces (WEST vessel + core) ----
+#
+# EIRENE-faithful wall recycling model (surf_react wall_pwi):
+#   1) TRIM reflection channel  (T D_on_W): incoming D / D+ first gets a
+#      prompt-reflection coin flip using the EIRENE TRIM tables. Fraction
+#      R_N(E_in, theta_in) is reflected per the full quantile-resolved
+#      energy + angular distribution in database/surface/trim/D_on_W.h5.
+#   2) Absorb-and-re-emit channel (A R f_mol): whatever TRIM didn't reflect
+#      is absorbed into the wall, then stochastically re-emitted. Default
+#      EIRENE WTD values: R = 0.99 (1% pumped), f_mol = 0.95 (95% of
+#      returned atoms come back as D2). Re-emission velocity is a half-
+#      Maxwellian flux at twall; internal rovib is thermal at twall.
+#   3) D2 incoming: no molecular-reflection table (molecules dissociate);
+#      simple absorb-and-return with R = 0.99.
+#
+# In Mode A there are no kinetic D+ (ionization deletes them), so the
+# D+ channels in wall.recycle.trim are declared for completeness but
+# never fire at runtime.
 read_surf           input/wall.surf group wall particle check
-surf_collide        wallColl diffuse 500.0 1.0
-surf_react          wallRecycle recycle input/wall.recycle
-surf_modify         wall collide wallColl react wallRecycle
+surf_collide        wallColl diffuse 400.0 1.0
+surf_react          wallPWI wall_pwi input/wall.recycle.trim &
+                    trim_dir ../../database/surface/trim &
+                    twall 400.0
+surf_modify         wall collide wallColl react wallPWI
 
 # Puff surface = single wall element (id=405). Matches the S3X-EIRENE source
 # location (tri 22252 side 2 in the SOLEDGE3X mesh, R=2.189, Z=-0.693).
@@ -98,7 +117,7 @@ global              bfield_compute pd
 fix fchem chem/adas 1 1 input/neutral.reactions adas_dir ../../database/adas &
     mode neutral source_species D D2 &
     stop_on_exhaust yes exhaust_threshold 5000 &
-    units batch_fix fpuff 4.84e20
+    units rate
 
 # ---- D2 puff at S3XE location ----
 # Ramp: n=200 particles/step until Np >= 100k. Latches after first trip --
@@ -130,6 +149,14 @@ compute ccore_n_tot reduce sum c_ccore[1]
 compute cmom grid all species nrho u v w temp
 fix    fmom ave/grid all 1 100 1000 c_cmom[*] ave one
 
+# Smooth source rate for plotting (analogue of fden). With `units rate`,
+# f_fchem holds the per-step SI rate (m^-3 s^-1, kg m^-2 s^-2, W/m^3) and
+# is zeroed every Nevery. Use `ave one` over a wide (1000-step) window for
+# good per-cell statistics -- `ave running` is disallowed here because
+# fix fadapt adapts the grid at runtime and would invalidate a running
+# accumulation.
+fix    frate ave/grid all 1 1000 1000 f_fchem[*] ave one
+
 # ---- Load balance for the puff cluster (must come AFTER all fix ave/grid) ----
 # Runtime adaptive refinement + particle-count rebalancing follows the
 # test_west_axi recipe (commit 55b8830): keeps the emitter and its dense
@@ -139,14 +166,14 @@ fix    fmom ave/grid all 1 100 1000 c_cmom[*] ave one
 fix fadapt adapt 200 all refine particle 500 0 maxlevel 5 cells 2 2 1
 fix fbal   balance 100 1.05 rcb part
 
-timestep            1e-07
+timestep            1e-08
 stats               10
 stats_style         step cpu np c_ccore_n_tot
 
 # ---- Dump layout for output/grid.west ----
 #   cols 1-3    : id xc yc
 #   cols 4-6    : f_fden[*]  = D2, D, D+ number densities [m^-3]
-#   cols 7-26   : f_fchem[*] = 20-col source RATE tally (EIRENE-style,
+#   cols 7-26   : f_frate[*] = 20-col source RATE tally (EIRENE-style,
 #                               `units batch`): 4 reactions x 5 quantities:
 #                  7-10    particle source (ion, rec, CX, dis)     [m^-3 s^-1]
 #                  11-14   momentum source x                       [kg m^-2 s^-2]
@@ -155,8 +182,11 @@ stats_style         step cpu np c_ccore_n_tot
 #                  23-26   energy source                           [W/m^3]
 #   col  27     : vol                                              [m^3]  (axisym: 2*pi*R*dA)
 #   cols 28-42  : f_fmom[*] = per-species {n, u, v, w, T} x {D2, D, D+}  (15 cols)
-dump    dgrid grid all 1000 output/grid.west id xc yc f_fden[*] f_fchem[*] vol f_fmom[*]
+dump    dgrid grid all 1000 output/grid.west id xc yc f_fden[*] f_frate[*] vol f_fmom[*]
 dump_modify dgrid first yes
+
+dump dpart particle all 10 output/state.west id type x y z vx vy vz
+dump_modify dpart first yes
 
 # Single-phase run: puff ramps up, latches at 100k, then the batch ionizes /
 # recycles / leaks away until stop_on_exhaust fires. Safety cap is set high
