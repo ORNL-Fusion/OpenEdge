@@ -26,8 +26,14 @@ sys.path.insert(0, os.path.join(THIS, '..', 'test_slab_stangeby2000'))
 from compare_iz import read_grid_dump     # reuse the SPARTA-dump parser
 
 def main():
-    # ---- load OpenEdge dump (last snapshot)
-    dump = os.path.join(THIS, 'output', 'diii_d.grid')
+    # ---- load OpenEdge dump (last snapshot). Default to recycle; fall back
+    # to puff-only if recycle dump missing. Override via argv[1].
+    if len(sys.argv) > 1:
+        dump = sys.argv[1]
+    else:
+        cand = os.path.join(THIS, 'output', 'diii_d_recycle.grid')
+        dump = cand if os.path.exists(cand) else os.path.join(THIS, 'output', 'diii_d.grid')
+    print(f'reading {dump}')
     d = read_grid_dump(dump)
     xc = d['xc']; yc = d['yc']
     n_D2  = d['f_fden[1]']
@@ -131,7 +137,8 @@ def main():
     for ax in axes[:,0]:
         ax.set_ylabel('Z [m]')
 
-    plt.suptitle('DIII-D: OpenEdge (puff-only, absorbing walls) vs SOLPS-EIRENE (full recycling)',
+    title_src = 'recycle-proxy (div_lo)' if 'recycle' in os.path.basename(dump) else 'single-puff'
+    plt.suptitle(f'DIII-D: OpenEdge ({title_src}, absorbing walls) vs SOLPS-EIRENE (full recycling)',
                  y=0.99)
     plt.tight_layout()
     out = os.path.join(THIS, 'output', 'compare_to_eirene.png')

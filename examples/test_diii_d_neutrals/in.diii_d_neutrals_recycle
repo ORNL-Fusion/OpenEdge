@@ -1,31 +1,35 @@
 ################################################################################
-# A5c v3: DIII-D neutrals with divertor-distributed D2 puff.
+# A5c v4: DIII-D neutrals with divertor-distributed D2 puff, steady state.
 #
-# Simpler recycling proxy than v2 (which tried flux-weighted emit/surf/pmi
-# and hit MPI issues). Here we puff D2 uniformly from the 17 lower-divertor
-# wall lines (targets + baffles). Total puff rate set to qualitatively
-# match SOLPS total ionization rate 4.66e27 /s (divided by 2 since each D2
-# gives 2 D atoms upon dissociation).
+# Puff D2 uniformly from the 17 lower-divertor wall lines. Total emission
+# rate matched to SOLPS-EIRENE total dissociation source 3.14e27 D2/s
+# (which equals ~half the total ionization 4.66e27 D/s, since each D2 gives
+# 2 D). This is the closest continuous puff proxy to full recycling.
 #
-# Expected result: the OpenEdge S_iz map should now show widespread
-# ionization near the lower divertor and extending up the SOL -- closer to
-# the EIRENE structure than the single-point-puff v1.
+# Sizing (see NOTES_fnum.md):
+#   fnum = 3e18        (targets ~30k sim particles alive at steady state,
+#                       given divertor-geometry residence time ~1e-5 s)
+#   n    = 10 D2/step  (total, distributed across div_lo group)
+#   rate = n * fnum / dt = 10 * 3e18 / 1e-8 = 3e27 D2/s  (matches SOLPS)
 #
-# Limitations still present:
-#   - No spatial flux weighting (all 17 divertor lines emit at the same rate)
-#   - No upper/inner wall emission
-#   - No neutral-wall recycling via surf_react (absorbing walls again, so
-#     D atoms that reach wall are lost -- simplification)
+# Grid: 100x200 base (20k cells) + runtime fadapt; coarser than v3 because
+# with fnum=1e18 we only need ~30k sim particles and surf-check reduction
+# matters more than cell resolution inside the plasma.
+#
+# Expected result (vs compare_to_eirene.png):
+#   OpenEdge S_iz should now show widespread ionization near the lower
+#   divertor + extending up into SOL, qualitatively matching EIRENE. Upper
+#   and inner walls still dark (no emission there — still a limitation).
 ################################################################################
 
 seed                12345
 dimension           2
 boundary            o o p
 global              gridcut 0.0 comm/sort no
-global              fnum 1e13
+global              fnum 3e18
 
 create_box          0.95 2.4 -1.4 1.4 -0.05 0.05
-create_grid         200 400 1
+create_grid         100 200 1
 balance_grid        rcb cell
 
 species             input/neutral.species D2 D D+
@@ -40,6 +44,12 @@ surf_modify         wall collide wallColl react none
 group div_lo surf id <= 7
 group div_lo surf id >= 59
 
+# ---- Static refinement near the lower divertor (performance) ----
+region              rdiv_lo block 1.0 2.4 -1.4 -0.8 -INF INF
+adapt_grid          all refine surf all 0.005 maxlevel 3 cells 2 2 1 &
+                    region rdiv_lo all iterate 3
+balance_grid        rcb cell
+
 # ---- Plasma background ----
 fix                 pd plasma/data file input/plasma.h5 static yes
 global              bfield_compute pd
@@ -50,25 +60,26 @@ fix fchem chem/adas 1 1 input/neutral.reactions adas_dir ../../database/adas &
     units rate
 
 # ---- D2 puff from divertor (continuous, no exhaust) ----
-# n=500 sim particles/step  x  17 div lines  =  8500 per step distributed
-# across the group. Physical rate = 8500 * fnum / dt = 8500*1e13/1e-8
-# = 8.5e24 D2/s (~ 1.7e25 D/s) ~ a fair fraction of SOLPS ionization
-# total 4.66e27. Not matching exactly but gets the plume to be visible
-# everywhere along the divertor.
-fix fpuff emit/surf puff_mix div_lo n 100 normal yes perspecies no
+fix fpuff emit/surf puff_mix div_lo n 10 normal yes perspecies no
 
-# ---- Diagnostics ----
+# ---- Diagnostics (window-averaged over last 1000 steps) ----
 compute cden grid all species nrho
-fix    fden ave/grid all 1 100 1000 c_cden[*] ave one
+fix    fden ave/grid all 1 1000 1000 c_cden[*] ave one
 fix    frate ave/grid all 1 1000 1000 f_fchem[*] ave one
 
+# ---- Runtime load balance ----
+# (fadapt + rcb-time removed: caused rank-2 segfault at first balance step
+#  when several ranks had zero particle work-time. Static adapt_grid at
+#  setup + rcb-part every 500 steps is enough at this particle count.)
+fix fbal   balance 500 1.1 rcb part
+
 timestep            1e-8
-stats               500
+stats               200
 stats_style         step cpu np
 
-dump d1 grid all 5000 output/diii_d_recycle.grid id xc yc &
+dump d1 grid all 2000 output/diii_d_recycle.grid id xc yc &
      f_fden[1] f_fden[2] &
      f_frate[1] f_frate[2] f_frate[3] f_frate[4]
 dump_modify d1 pad 6
 
-run                 3000
+run                 10000
