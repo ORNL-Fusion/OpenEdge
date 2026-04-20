@@ -784,19 +784,235 @@ def convert_solps_to_openedge(
         Lp = np.sqrt((Rb - Ra) ** 2 + (Zb - Za) ** 2)
         return 2.0 * np.pi * 0.5 * (Ra + Rb) * Lp
 
+    # Face areas are populated only for OUTER-wall boundary cells:
+    # ix=nx (main chamber), iy=1 and iy=ny (divertor targets). The
+    # ix=1 radial boundary is the core-side flux surface, not a wall,
+    # so it gets face_area=0 and no recycling emission.
     for ix_c in range(nx + 2):
         for iy_c in range(ny + 2):
             area = 0.0
             if iy_c == 1:     area += _edge_area(ix_c, iy_c, 0, 1)
             if iy_c == ny:    area += _edge_area(ix_c, iy_c, 2, 3)
-            if ix_c == 1:     area += _edge_area(ix_c, iy_c, 0, 2)
             if ix_c == nx:    area += _edge_area(ix_c, iy_c, 1, 3)
             if area > 0.0:
                 c_flat = iy_c * (nx + 2) + ix_c
                 mesh_wall_face_area[c_flat] = area
     n_bc = int((mesh_wall_face_area > 0).sum())
-    print(f"B2 wall face areas computed: {n_bc} boundary cells, "
-          f"total area = {mesh_wall_face_area.sum():.3e} m^2")
+    print(f"B2 wall face areas (outer walls only, skipping ix=1 core): "
+          f"{n_bc} boundary cells, total area = "
+          f"{mesh_wall_face_area.sum():.3e} m^2")
+
+    # ------------------------------------------------------------------
+    # Build per-wall-segment -> B2-cell mapping for the existing
+    # (watertight) wall.surf. For each wall.surf segment midpoint, find
+    # the B2 boundary cell whose outer-face midpoint is closest — the
+    # segment is assigned that cell's flat index (iy*(nx+2)+ix).
+    #
+    # Boundary face edges, by the corner convention used here:
+    #   iy=1  (lower row): edge 0-1
+    #   iy=ny (upper row): edge 2-3
+    #   ix=1  (inner col): edge 0-2
+    #   ix=nx (outer col): edge 1-3
+    #
+    # Only done if the caller also asked for wall.surf generation
+    # (--wall-out). The mapping is written to mesh/wall_surf_cell so the
+    # fix at runtime can index it directly by SPARTA surf ID.
+    # ------------------------------------------------------------------
+    # Generate a SPARTA wall.surf directly from the EIRENE triangulation
+    # (fort.33/34) boundary edges. A boundary edge is one that appears in
+    # exactly one triangle; that triangle's b2_ix, b2_iy (from fort.35)
+    # gives the B2 cell this edge represents. This is the SAME wall
+    # EIRENE tracks internally, and the mapping is exact — no geometric
+    # matching required.
+    #
+    # Edges are filtered to "outer" boundary (cell_idx >= 0 AND the cell
+    # is in our boundary mask ix=nx, iy=1, iy=ny). We exclude ix=1 edges
+    # because that's the SOLPS core-side radial boundary, not a wall.
+    edge_count = {}
+    edge_tri = {}
+    for t in range(ntri_eirene):
+        tri = mesh_tri[t]
+        for a, b in [(0,1), (1,2), (2,0)]:
+            e = (int(min(tri[a], tri[b])), int(max(tri[a], tri[b])))
+            edge_count[e] = edge_count.get(e, 0) + 1
+            edge_tri[e] = t   # last-seen triangle; for boundary edges it's the unique one
+
+    boundary_edges = [e for e, n in edge_count.items() if n == 1]
+    print(f"EIRENE boundary edges: {len(boundary_edges)} "
+          f"(from {ntri_eirene} triangles)")
+
+    # Include ALL boundary edges (to keep the wall watertight), but
+    # ORIENT them into traversal sequences so each vertex is p2 of one
+    # segment and p1 of the next. SPARTA's watertight check requires
+    # this orientation. Handles multiple disjoint loops (the outer wall
+    # and the core-side inner boundary form separate closed loops).
+    from collections import defaultdict
+    adj = defaultdict(list)   # vertex -> list of (other_vertex, edge_id)
+    for k, (a, b) in enumerate(boundary_edges):
+        adj[a].append((b, k))
+        adj[b].append((a, k))
+
+    wall_edges = []         # ordered (va, vb) with va = prev, vb = next
+    wall_edge_cells = []
+    used = [False] * len(boundary_edges)
+    for start_k in range(len(boundary_edges)):
+        if used[start_k]: continue
+        a0, b0 = boundary_edges[start_k]
+        used[start_k] = True
+        t0 = edge_tri[(a0, b0)]
+        wall_edges.append((a0, b0))
+        wall_edge_cells.append(int(mesh_cell_idx[t0]))
+        cur = b0
+        while True:
+            nxt = None
+            for (other, eid) in adj[cur]:
+                if not used[eid]:
+                    nxt = (other, eid); break
+            if nxt is None: break
+            other, eid = nxt
+            used[eid] = True
+            t = edge_tri[boundary_edges[eid]]
+            wall_edges.append((cur, other))
+            wall_edge_cells.append(int(mesh_cell_idx[t]))
+            cur = other
+            if cur == a0: break   # closed loop
+
+    n_emitting = sum(1 for c in wall_edge_cells
+                     if c >= 0 and mesh_wall_face_area[c] > 0.0)
+    print(f"EIRENE wall edges (oriented traversal): "
+          f"{len(wall_edges)} total ({n_emitting} on outer wall, rest "
+          f"are inner/non-emitting)")
+
+    # Write SPARTA wall.surf from these EIRENE boundary edges. Segment i
+    # in wall.surf corresponds to B2 cell wall_edge_cells[i].
+    #
+    # Dedupe vertices: each EIRENE vertex participating in N boundary
+    # edges appears N times otherwise; SPARTA's watertight check demands
+    # shared point indices between adjacent segments. Collect unique
+    # vertex indices and remap segment endpoints.
+    if wall_edges and wall_out is not None:
+        # Dedupe by (R,Z) coordinates — EIRENE sometimes has distinct
+        # vertex indices at the same physical point (adjacent B2 quads
+        # sharing a corner). SPARTA requires points to be geometrically
+        # unique. Use a spatial tolerance (1e-8 m) to snap together
+        # coincident vertices before writing.
+        used_verts = sorted(set(v for e in wall_edges for v in e))
+        # Snap to grid with 10 nm tolerance
+        TOL = 1e-8
+        point_map = {}     # (rx, zy) rounded -> SPARTA point index (1-based)
+        vmap = {}          # eirene-vertex-index -> SPARTA point index
+        unique_rz = []
+        for v in used_verts:
+            key = (round(mesh_vtx_r[v] / TOL), round(mesh_vtx_z[v] / TOL))
+            if key not in point_map:
+                point_map[key] = len(unique_rz) + 1   # 1-based
+                unique_rz.append((mesh_vtx_r[v], mesh_vtx_z[v]))
+            vmap[v] = point_map[key]
+
+        wall_out.parent.mkdir(parents=True, exist_ok=True)
+        with wall_out.open("w", encoding="utf-8") as f:
+            f.write("surface geometry\n\n")
+            f.write(f"{len(unique_rz)} points\n{len(wall_edges)} lines"
+                    f"\n\nPoints\n\n")
+            for i, (rv, zv) in enumerate(unique_rz):
+                f.write(f"{i+1} {rv:.12g} {zv:.12g}\n")
+            f.write("\nLines\n\n")
+            for i, (va, vb) in enumerate(wall_edges):
+                f.write(f"{i+1} {vmap[va]} {vmap[vb]}\n")
+        print(f"Wrote EIRENE-consistent wall: {wall_out} "
+              f"({len(wall_edges)} segments, {len(unique_rz)} unique pts "
+              f"after snap)")
+        mesh_wall_surf_cell = np.asarray(wall_edge_cells, dtype=np.int32)
+        mesh_wall_surf_area = mesh_wall_face_area[mesh_wall_surf_cell].astype(
+            np.float64)
+    else:
+        mesh_wall_surf_cell = np.array([], dtype=np.int32)
+        mesh_wall_surf_area = np.array([], dtype=np.float64)
+
+    # Legacy path below — keep in case wall_out wasn't passed but an
+    # existing wall.surf is already present; we still write the mapping.
+    wall_path_for_map = wall_out if (wall_out and wall_out.exists()) else \
+                        (plasma_out.parent / "wall.surf")
+    if wall_path_for_map.exists() and mesh_wall_surf_cell.size == 0:
+        wall_out = wall_path_for_map   # rebind for the block below
+        def _edge_mid(ix_c, iy_c, ca, cb):
+            Ra, Za = crx4[ix_c, iy_c, ca], cry4[ix_c, iy_c, ca]
+            Rb, Zb = crx4[ix_c, iy_c, cb], cry4[ix_c, iy_c, cb]
+            return 0.5*(Ra+Rb), 0.5*(Za+Zb)
+
+        face_rc, face_zc, face_cell = [], [], []
+        for ix_c in range(nx + 2):
+            if 1 <= ix_c <= nx:
+                for (iy_c, ca, cb) in [(1, 0, 1), (ny, 2, 3)]:
+                    rmid, zmid = _edge_mid(ix_c, iy_c, ca, cb)
+                    face_rc.append(rmid); face_zc.append(zmid)
+                    face_cell.append(iy_c*(nx+2) + ix_c)
+        for iy_c in range(ny + 2):
+            if 1 <= iy_c <= ny:
+                for (ix_c, ca, cb) in [(1, 0, 2), (nx, 1, 3)]:
+                    rmid, zmid = _edge_mid(ix_c, iy_c, ca, cb)
+                    face_rc.append(rmid); face_zc.append(zmid)
+                    face_cell.append(iy_c*(nx+2) + ix_c)
+        face_rc = np.asarray(face_rc); face_zc = np.asarray(face_zc)
+        face_cell = np.asarray(face_cell, dtype=np.int32)
+
+        # Parse wall.surf back in to get segment midpoints in the exact
+        # order SPARTA will read them.
+        import re as _re
+        pts, segs = [], []
+        mode = None
+        with wall_out.open() as _f:
+            for L in _f:
+                s = L.strip()
+                if not s or s.startswith("#"): continue
+                if s.lower().startswith("points"): mode = "P"; continue
+                if s.lower().startswith("lines"):  mode = "L"; continue
+                if not _re.match(r"^\d", s): continue
+                parts = s.split()
+                if mode == "P": pts.append((float(parts[1]), float(parts[2])))
+                if mode == "L": segs.append((int(parts[1]), int(parts[2])))
+        if pts and segs:
+            P = np.array(pts)
+            S = np.array(segs)
+            seg_rmid = 0.5 * (P[S[:,0]-1, 0] + P[S[:,1]-1, 0])
+            seg_zmid = 0.5 * (P[S[:,0]-1, 1] + P[S[:,1]-1, 1])
+
+            # Each B2 boundary face chooses its closest wall segment.
+            # Wall segments accumulate flux by summing the face areas of
+            # every B2 face that picked them. This conserves the total
+            # Bohm-flux budget from the B2 boundary onto the SPARTA wall.
+            from scipy.spatial import cKDTree
+            tree = cKDTree(np.column_stack([seg_rmid, seg_zmid]))
+            _, seg_for_face = tree.query(np.column_stack([face_rc, face_zc]))
+
+            # Aggregate face area onto each wall segment, and assign the
+            # DOMINANT cell (largest-area contributor) as the segment's
+            # owner in mesh_wall_surf_cell[i].
+            nseg_wall = len(S)
+            seg_dominant_cell = np.full(nseg_wall, -1, dtype=np.int32)
+            seg_dominant_area = np.zeros(nseg_wall, dtype=np.float64)
+            seg_total_area = np.zeros(nseg_wall, dtype=np.float64)
+            face_area = mesh_wall_face_area[face_cell]
+            for k in range(len(face_cell)):
+                s = int(seg_for_face[k])
+                c = int(face_cell[k])
+                a = float(face_area[k])
+                seg_total_area[s] += a
+                if a > seg_dominant_area[s]:
+                    seg_dominant_area[s] = a
+                    seg_dominant_cell[s] = c
+            mesh_wall_surf_cell = seg_dominant_cell
+            print(f"wall.surf <- B2 face mapping: {len(face_cell)} B2 faces "
+                  f"distributed onto {nseg_wall} wall segments "
+                  f"({(seg_dominant_cell >= 0).sum()} segments own a cell), "
+                  f"captured area = {seg_total_area.sum():.2f} / "
+                  f"{mesh_wall_face_area.sum():.2f} m^2 "
+                  f"({100.0*seg_total_area.sum()/mesh_wall_face_area.sum():.1f}%)")
+            # Per-segment captured face area is also written, so the fix
+            # can use it instead of face_area at the dominant-cell's index
+            # (which would otherwise under-weight segments that own many
+            # B2 faces but got the smallest face's area).
+            mesh_wall_surf_area = seg_total_area
 
     # Per-cell plasma arrays (shared across all triangles referencing the same cell)
     mesh_ne = ne_flat.copy()
@@ -890,6 +1106,16 @@ def convert_solps_to_openedge(
         # drives wall recycling at each boundary cell.
         f.create_dataset("mesh/wall_face_area", data=mesh_wall_face_area)
 
+        # Per-wall-segment topological mapping to B2 boundary cells:
+        #   mesh_wall_surf_cell[iseg]: flat index of the B2 boundary cell
+        #       that dominantly owns SPARTA wall segment iseg (the B2 cell
+        #       contributing the largest face-area into this segment).
+        #   mesh_wall_surf_area[iseg]: summed B2 boundary face area from
+        #       all faces that chose this segment. Conserves the Bohm
+        #       flux budget across a coarser SPARTA wall.
+        f.create_dataset("mesh/wall_surf_cell", data=mesh_wall_surf_cell)
+        f.create_dataset("mesh/wall_surf_area", data=mesh_wall_surf_area)
+
     # -- Write bfield.h5 --
     with h5py.File(bfield_out, "w") as f:
         f.create_dataset("r", data=r)
@@ -899,10 +1125,14 @@ def convert_solps_to_openedge(
         f.create_dataset("bz", data=np.nan_to_num(bz_grid))
 
     # -- Optional wall geometry --
-    if wall_out is not None:
+    # Preferred path: wall.surf built from EIRENE triangulation boundary
+    # edges (already written above when mesh_wall_surf_cell was populated).
+    # Fallback: legacy simplified walk of mesh.extra. Only used when the
+    # EIRENE-based path couldn't produce edges (e.g. no fort.33/34/35).
+    if wall_out is not None and mesh_wall_surf_cell.size == 0:
         mesh_path = mesh_extra if mesh_extra is not None else (run_path / "mesh.extra")
         _write_sparta_wall_from_mesh_extra(mesh_path, wall_out)
-        print(f"Wrote wall: {wall_out}")
+        print(f"Wrote wall (legacy mesh.extra walk): {wall_out}")
 
     print(f"Wrote plasma: {plasma_out}")
     print(f"Wrote bfield: {bfield_out}")

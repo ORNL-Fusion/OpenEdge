@@ -41,7 +41,10 @@ species             ../input/neutral.species D2 D D+
 mixture             recmix D2 frac 0.95 temp 23210.0
 mixture             recmix D  frac 0.05
 
-# ---- Wall: TRIM-backed return-path recycling ----
+# ---- Wall: machine first-wall (watertight) ----
+# The converter computes a per-segment -> B2-cell mapping when it runs
+# (stored in plasma.h5 as mesh/wall_surf_cell). fix emit/surf/recycle
+# uses that direct mapping instead of a geographic lookup.
 read_surf           ../input/wall.surf group wall particle check
 surf_collide        wallColl diffuse 23210.0 1.0
 surf_react          wallPWI wall_pwi ../input/wall.recycle &

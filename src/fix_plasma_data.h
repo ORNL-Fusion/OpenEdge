@@ -81,6 +81,16 @@ class FixPlasmaData : public Fix {
   std::vector<double> mesh_wall_face_area;    // per-cell wall face area [m^2],
                                               // toroidally integrated. Zero
                                               // for non-boundary cells.
+
+  // ---- SPARTA wall-segment -> B2 cell map ----
+  // mesh/wall_surf_cell[isurf] = flat cell index of the B2 cell whose
+  // outer face is wall_b2.surf segment isurf. Enables direct (not
+  // geographic) lookup in fix emit/surf/recycle. Empty if the converter
+  // did not write it, or if a non-matching wall.surf is in use.
+  int has_mesh_wall_surf_cell;
+  std::vector<int>    mesh_wall_surf_cell;
+  std::vector<double> mesh_wall_surf_area;   // captured B2 face area per
+                                             // wall segment [m^2]
   std::vector<double> mesh_tri_rmin, mesh_tri_rmax, mesh_tri_zmin, mesh_tri_zmax;
   std::vector<double> mapped_cr, mapped_cz;
   std::vector<int> mapped_idx;

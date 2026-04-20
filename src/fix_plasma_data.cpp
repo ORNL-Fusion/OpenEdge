@@ -56,6 +56,7 @@ FixPlasmaData::FixPlasmaData(SPARTA *sparta, int narg, char **arg) :
   has_equ = 0;
   has_mesh = 0;
   has_mesh_wall_face_area = 0;
+  has_mesh_wall_surf_cell = 0;
   is_static = 0;
   source_mode = -1;
   generation = 0;
@@ -341,6 +342,19 @@ void FixPlasmaData::reload()
         mesh_wall_face_area.resize(mesh_ncell, 0.0);
       MPI_Bcast(mesh_wall_face_area.data(), mesh_ncell, MPI_DOUBLE, 0, world);
     }
+    MPI_Bcast(&has_mesh_wall_surf_cell, 1, MPI_INT, 0, world);
+    int n_wall_surf = has_mesh_wall_surf_cell
+                    ? static_cast<int>(mesh_wall_surf_cell.size()) : 0;
+    MPI_Bcast(&n_wall_surf, 1, MPI_INT, 0, world);
+    if (has_mesh_wall_surf_cell) {
+      if (static_cast<int>(mesh_wall_surf_cell.size()) != n_wall_surf)
+        mesh_wall_surf_cell.resize(n_wall_surf, -1);
+      MPI_Bcast(mesh_wall_surf_cell.data(), n_wall_surf, MPI_INT, 0, world);
+      if (static_cast<int>(mesh_wall_surf_area.size()) != n_wall_surf)
+        mesh_wall_surf_area.resize(n_wall_surf, 0.0);
+      MPI_Bcast(mesh_wall_surf_area.data(), n_wall_surf,
+                MPI_DOUBLE, 0, world);
+    }
     if (mesh_nion > 0) {
       const size_t mesh_ion_n = static_cast<size_t>(mesh_nion) * mesh_ncell;
       MPI_Bcast(mesh_ions_dens.data(), mesh_ion_n, MPI_DOUBLE, 0, world);
@@ -439,6 +453,8 @@ void FixPlasmaData::clear_loaded_data()
   mesh_ne.clear();
   mesh_wall_face_area.clear();
   has_mesh_wall_face_area = 0;
+  mesh_wall_surf_cell.clear();
+  has_mesh_wall_surf_cell = 0;
   mesh_te.clear();
   mesh_ti.clear();
   mesh_ni.clear();
@@ -728,6 +744,24 @@ void FixPlasmaData::load_plasma_h5()
     } else {
       has_mesh_wall_face_area = 0;
       mesh_wall_face_area.clear();
+    }
+    if (hasDataset("mesh/wall_surf_cell")) {
+      H5::DataSet ds = file.openDataSet("mesh/wall_surf_cell");
+      H5::DataSpace sp = ds.getSpace();
+      hsize_t dim;
+      sp.getSimpleExtentDims(&dim);
+      mesh_wall_surf_cell.resize(dim);
+      ds.read(mesh_wall_surf_cell.data(), H5::PredType::NATIVE_INT);
+      has_mesh_wall_surf_cell = 1;
+      if (hasDataset("mesh/wall_surf_area")) {
+        mesh_wall_surf_area.resize(dim);
+        file.openDataSet("mesh/wall_surf_area").read(
+            mesh_wall_surf_area.data(), H5::PredType::NATIVE_DOUBLE);
+      }
+    } else {
+      has_mesh_wall_surf_cell = 0;
+      mesh_wall_surf_cell.clear();
+      mesh_wall_surf_area.clear();
     }
     mesh_ncell = mesh_ne.empty() ? 0 : static_cast<int>(mesh_ne.size());
 

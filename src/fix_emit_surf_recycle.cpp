@@ -26,8 +26,11 @@
 #include "memory.h"
 #include "error.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
+#include <utility>
+#include <vector>
 
 using namespace SPARTA_NS;
 using namespace MathConst;
@@ -211,6 +214,64 @@ void FixEmitSurfRecycle::grid_changed()
     } else
       printf("[emit/surf/recycle] (mesh/wall_face_area absent — using raw "
              "SPARTA-surface-area Bohm-flux)\n");
+
+    // Summarize task-to-cell mapping: how many unique cells, what
+    // fraction of the wall-face budget is picked up, regional bucketing.
+    if (plasma->has_mesh_wall_face_area) {
+      const int nx = 96; const int nxp = nx + 2;   // SOLPS nx+2 stride
+      double budget_all = 0.0;
+      for (size_t k = 0; k < plasma->mesh_wall_face_area.size(); k++)
+        budget_all += plasma->mesh_wall_face_area[k];
+
+      std::vector<double> cell_area(plasma->mesh_ncell, 0.0);
+      for (int i = 0; i < ntask; i++) {
+        const int c = tasks[i].plasma_cell;
+        if (c >= 0 && c < plasma->mesh_ncell) cell_area[c] += tasks[i].area;
+      }
+      int mapped_cells = 0;
+      double budget_mapped = 0.0;
+      int n_iy1=0, n_iyny=0, n_ix1=0, n_ixnx=0;
+      for (int c = 0; c < plasma->mesh_ncell; c++) {
+        if (cell_area[c] <= 0.0) continue;
+        mapped_cells++;
+        budget_mapped += plasma->mesh_wall_face_area[c];
+        const int iy = c / nxp;
+        const int ix = c - iy * nxp;
+        if (iy == 1)    n_iy1++;
+        if (iy == 36)   n_iyny++;
+        if (ix == 1)    n_ix1++;
+        if (ix == nx)   n_ixnx++;
+      }
+      printf("[emit/surf/recycle] wall mapping: %d unique B2 cells, "
+             "%.2f m^2 of %.2f total face area (%.1f%%)\n",
+             mapped_cells, budget_mapped, budget_all,
+             100.0 * budget_mapped / std::max(1e-30, budget_all));
+      printf("[emit/surf/recycle] regional breakdown: iy=1 (lower target) "
+             "%d cells, iy=ny (upper target) %d cells, ix=1 (inner) %d "
+             "cells, ix=nx (outer) %d cells\n",
+             n_iy1, n_iyny, n_ix1, n_ixnx);
+
+      // top 10 by summed task area
+      std::vector<std::pair<double,int>> cell_rank;
+      for (int c = 0; c < plasma->mesh_ncell; c++)
+        if (cell_area[c] > 0.0) cell_rank.emplace_back(cell_area[c], c);
+      std::sort(cell_rank.begin(), cell_rank.end(),
+                std::greater<std::pair<double,int>>());
+      const int ntop = std::min<int>(10, cell_rank.size());
+      printf("[emit/surf/recycle] top %d mapped cells "
+             "(iy,ix ne[m^-3] Te[eV] Ti[eV] face[m^2]):\n", ntop);
+      for (int k = 0; k < ntop; k++) {
+        const int c = cell_rank[k].second;
+        const int iy = c / nxp;
+        const int ix = c - iy * nxp;
+        const double ne = plasma->mesh_ne[c];
+        const double te = plasma->mesh_te[c];
+        const double ti = plasma->mesh_ti.empty() ? te : plasma->mesh_ti[c];
+        const double fa = plasma->mesh_wall_face_area[c];
+        printf("[emit/surf/recycle]   (iy=%2d,ix=%2d)  ne=%.2e  Te=%5.2f  "
+               "Ti=%5.2f  face=%.3e\n", iy, ix, ne, te, ti, fa);
+      }
+    }
   }
 }
 
@@ -358,39 +419,71 @@ void FixEmitSurfRecycle::create_task(int icell)
     tasks[ntask].ntarget = 0.0;
 
     // Topological wall->plasma-cell lookup (EIRENE-style):
-    // Walk from the midpoint along the inward normal until we find the
-    // nearest SOLPS mesh cell with a valid plasma cell (cell_idx >= 0),
-    // skipping any "vacuum filler" cells between mesh and wall.
-    // Caches the cell index once at setup; no spatial search at runtime.
-    // Find the nearest SOLPS plasma cell (cell_idx >= 0, skipping vacuum
-    // fillers) to this wall segment midpoint. Iterates all mesh triangles
-    // once per task at init; O(N_wall * N_tri) total, runs only on
-    // grid_changed(). No hardcoded distances — works for any geometry
-    // SOLPS/SOLEDGE3X produces, regardless of vacuum-gap width.
+    // Owning B2 cell for this SPARTA wall surface. Three strategies,
+    // tried in order:
+    //  (1) Topological: plasma.h5 has an explicit mesh/wall_surf_cell
+    //      mapping (written by the SOLPS converter when wall_b2.surf is
+    //      generated from B2 boundary faces). Direct index lookup.
+    //  (2) Nearest B2 cell centroid (restricted to boundary cells with
+    //      wall_face_area > 0). Used when (1) is absent.
+    //  (3) Nearest B2 cell centroid (all cells). Used when (2) can't be
+    //      applied (no wall_face_area).
     tasks[ntask].plasma_cell = -1;
-    if (plasma && plasma->has_mesh && plasma->mesh_ntri > 0) {
+    if (plasma && plasma->has_mesh_wall_surf_cell &&
+        isurf < static_cast<int>(plasma->mesh_wall_surf_cell.size())) {
+      // (1) topological map from wall_b2.surf
+      const int c = plasma->mesh_wall_surf_cell[isurf];
+      if (c >= 0 && c < plasma->mesh_ncell) tasks[ntask].plasma_cell = c;
+    }
+    else if (plasma && plasma->has_mesh && plasma->has_mesh_wall_face_area &&
+        plasma->mesh_ntri > 0) {
       const double rm = tasks[ntask].rmid;
       const double zm = tasks[ntask].zmid;
-      double dmin2 = std::numeric_limits<double>::infinity();
-      int best = -1;
+      const int ncell = plasma->mesh_ncell;
       const int ntri = plasma->mesh_ntri;
       const int *ci = plasma->mesh_cell_idx.data();
       const int *tr = plasma->mesh_tri.data();
       const double *vr = plasma->mesh_vtx_r.data();
       const double *vz = plasma->mesh_vtx_z.data();
-      for (int t = 0; t < ntri; t++) {
-        if (ci[t] < 0) continue;   // skip vacuum fillers
-        // triangle centroid
-        const int v0 = tr[3*t+0], v1 = tr[3*t+1], v2 = tr[3*t+2];
-        const double cr = (vr[v0] + vr[v1] + vr[v2]) / 3.0;
-        const double cz = (vz[v0] + vz[v1] + vz[v2]) / 3.0;
-        const double dr = cr - rm;
-        const double dz = cz - zm;
-        const double d2 = dr*dr + dz*dz;
-        if (d2 < dmin2) { dmin2 = d2; best = ci[t]; }
+      const double *fa = plasma->mesh_wall_face_area.data();
+
+      // Compute per-cell centroid as mean of its (native B2) triangle
+      // centroids. This is built once; cached across tasks via static
+      // locals keyed by the plasma generation pointer.
+      static std::vector<double> cell_r, cell_z;
+      static const FixPlasmaData *cached_plasma = nullptr;
+      if (cached_plasma != plasma ||
+          static_cast<int>(cell_r.size()) != ncell) {
+        cell_r.assign(ncell, 0.0);
+        cell_z.assign(ncell, 0.0);
+        std::vector<int> ncount(ncell, 0);
+        for (int t = 0; t < ntri; t++) {
+          const int c = ci[t];
+          if (c < 0 || fa[c] <= 0.0) continue;
+          const int v0 = tr[3*t+0], v1 = tr[3*t+1], v2 = tr[3*t+2];
+          cell_r[c] += (vr[v0] + vr[v1] + vr[v2]) / 3.0;
+          cell_z[c] += (vz[v0] + vz[v1] + vz[v2]) / 3.0;
+          ncount[c]++;
+        }
+        for (int c = 0; c < ncell; c++) {
+          if (ncount[c] > 0) {
+            cell_r[c] /= ncount[c];
+            cell_z[c] /= ncount[c];
+          }
+        }
+        cached_plasma = plasma;
       }
-      if (best >= 0 && best < plasma->mesh_ncell)
-        tasks[ntask].plasma_cell = best;
+
+      double dmin2 = std::numeric_limits<double>::infinity();
+      int best = -1;
+      for (int c = 0; c < ncell; c++) {
+        if (fa[c] <= 0.0) continue;
+        const double dr = cell_r[c] - rm;
+        const double dz = cell_z[c] - zm;
+        const double d2 = dr*dr + dz*dz;
+        if (d2 < dmin2) { dmin2 = d2; best = c; }
+      }
+      if (best >= 0) tasks[ntask].plasma_cell = best;
     }
 
     ntask++;
@@ -446,16 +539,22 @@ double FixEmitSurfRecycle::emission_rate_per_surface(int itask)
     }
   }
 
-  // Surface area used in the flux calculation:
-  //  - If the converter wrote per-cell B2 face areas, use that cell's
-  //    area (toroidally integrated) scaled by the SPARTA surface's share.
-  //    This reproduces EIRENE's FLSTEP exactly.
-  //  - Else fall back to the raw SPARTA surface area (approximate: correct
-  //    only when the SPARTA mesh and the B2 wall are close to coincident).
+  // Surface area used in the flux calculation, in preference order:
+  //  (1) Per-wall-segment area from plasma.h5 mesh/wall_surf_area —
+  //      summed B2 face area of every SOLPS boundary face that chose
+  //      this wall segment as its nearest. Preserves total budget.
+  //  (2) Per-cell B2 face area (pre-SOLPS-converter mapping era).
+  //  (3) Raw SPARTA surface area (approximate).
   double gamma_area;
-  if (plasma->has_mesh_wall_face_area &&
-      cell < static_cast<int>(plasma->mesh_wall_face_area.size()) &&
-      plasma->mesh_wall_face_area[cell] > 0.0) {
+  const int isurf_i = static_cast<int>(tasks[itask].isurf);
+  if (plasma->has_mesh_wall_surf_cell &&
+      isurf_i >= 0 &&
+      isurf_i < static_cast<int>(plasma->mesh_wall_surf_area.size()) &&
+      plasma->mesh_wall_surf_area[isurf_i] > 0.0) {
+    gamma_area = plasma->mesh_wall_surf_area[isurf_i];
+  } else if (plasma->has_mesh_wall_face_area &&
+             cell < static_cast<int>(plasma->mesh_wall_face_area.size()) &&
+             plasma->mesh_wall_face_area[cell] > 0.0) {
     gamma_area = plasma->mesh_wall_face_area[cell] * tasks[itask].area_share;
   } else {
     gamma_area = tasks[itask].area;
