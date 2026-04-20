@@ -1,0 +1,12 @@
+# Simple thermal absorb-and-reemit (A-channel) for A5 DIII-D.
+# D+ incoming returns as D atom at wall temp (99% recycling, 1% pump).
+D+ --> D
+A 0.99 0.0
+
+# D neutral: 99% thermal reflection as D, 1% pump.
+D --> D
+A 0.99 0.0
+
+# D2 neutral: 99% thermal re-emission, 1% pump.
+D2 --> D2
+A 0.99 0.0
