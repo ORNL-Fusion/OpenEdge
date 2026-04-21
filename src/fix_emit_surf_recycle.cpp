@@ -604,7 +604,16 @@ double FixEmitSurfRecycle::emission_rate_per_surface(int itask)
 
   const double gamma = ne * cs * sin_alpha;
   const double dot_N = 0.5 * R_recycle * gamma * gamma_area;
-  return dot_N * update->dt / fnum;
+
+  // Per-cell particle weighting (stock fix_emit_surf does the same —
+  // line 573 of src/fix_emit_surf.cpp). With `global weight cell` in
+  // axisymmetric mode or any user-imposed variable cell weight, a cell
+  // with weight w represents w physical particles per sim particle, so
+  // sim-particle injection rate must divide by w.
+  const int icell = tasks[itask].icell;
+  const double wcell = (icell >= 0) ? grid->cinfo[icell].weight : 1.0;
+  const double inv_wcell = (wcell > 0.0) ? 1.0 / wcell : 1.0;
+  return dot_N * update->dt * inv_wcell / fnum;
 }
 
 /* ----------------------------------------------------------------------
