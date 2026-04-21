@@ -24,9 +24,11 @@ dimension           2
 # / nrho / surf flux are all true-3D quantities. No 2*pi*R post-correction.
 boundary            o ao p
 global              gridcut 0.0 comm/sort no
-# Total Bohm rate ~4.27e26/s (full toroidal revolution, axi-mode native).
-# fnum = rate * dt / n_per_step = 4.27e26 * 1e-8 / 1000 ~ 4e15.
-global              fnum 4e15
+# Total Bohm rate ~3.18e26/s (full toroidal revolution, axi-mode native;
+# B2-aggregated surf_area path with per-isurf area_share). With
+# fnum=2e16 we target ~160 sim particles/step injected and ~50-80k
+# steady-state population (tau ~ 25 us at this fnum).
+global              fnum 2e16
 
 # x range = Z (machine axial coord), y range = R (radial, axis at y=0)
 create_box          -1.4 1.4 0.0 2.4 -0.05 0.05
@@ -47,7 +49,13 @@ mixture             recmix D  frac 0.05
 # The converter computes a per-segment -> B2-cell mapping when it runs
 # (stored in plasma.h5 as mesh/wall_surf_cell). fix emit/surf/recycle
 # uses that direct mapping instead of a geographic lookup.
-read_surf           ../input/wall.surf group wall particle check
+# `invert`: flip line endpoints so normals point OUTWARD from the wall
+# polygon (away from the wall surface = toward the plasma interior).
+# The mesh.extra-derived wall in wall.surf is CW-wound, which under
+# SPARTA's (dy, -dx) normal convention gives inward-pointing normals.
+# fix emit/surf/recycle uses `inward = -normal`, so without `invert`
+# emission would go OUT of the vessel instead of into the plasma.
+read_surf           ../input/wall.surf group wall particle check invert
 surf_collide        wallColl diffuse 23210.0 1.0
 surf_react          wallPWI wall_pwi ../input/wall.recycle &
                     trim_dir ../../../database/surface/trim &

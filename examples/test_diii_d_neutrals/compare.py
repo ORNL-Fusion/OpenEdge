@@ -74,10 +74,10 @@ def main():
         else:
             # 2D Cartesian: dx*dy*dz_box (per-radian-wedge convention)
             return dx_axial * dy_radial * 1.0
-    vol_oe = oe_cell_vol(R_oe)
+    vol_oe = oe_cell_vol(R_oe)   # array in axi mode, scalar in cart
 
-    tot_iz_oe   = float(np.sum(S_iz_oe)   * vol_oe)
-    tot_diss_oe = float(np.sum(S_diss_oe) * vol_oe)
+    tot_iz_oe   = float(np.sum(S_iz_oe   * vol_oe))
+    tot_diss_oe = float(np.sum(S_diss_oe * vol_oe))
     # EIRENE: we stored per-volume rates, need to re-integrate with vol
     # (which was part of eirene_truth.h5? no -- we stored S as per-vol)
     # Just report domain-integrated via cell-vol proxy: assume balance.nc
@@ -101,10 +101,14 @@ def main():
     # OE density panels — always plot in physical (R, Z)
     ax = axes[0,0]
     posmask = n_D2 > 0
-    sc = ax.scatter(R_oe[posmask], Z_oe[posmask], c=np.maximum(n_D2[posmask], 1e10), s=1,
-                    norm=LogNorm(vmin=max(1e10, n_D2[posmask].min()), vmax=n_D2.max()),
-                    cmap='plasma')
-    plt.colorbar(sc, ax=ax); ax.set_title('OpenEdge $n_{D_2}$ [m$^{-3}$]')
+    if posmask.any():
+        vmin_D2 = max(1e10, n_D2[posmask].min())
+        sc = ax.scatter(R_oe[posmask], Z_oe[posmask],
+                        c=np.maximum(n_D2[posmask], 1e10), s=1,
+                        norm=LogNorm(vmin=vmin_D2, vmax=max(n_D2.max(), vmin_D2*10)),
+                        cmap='plasma')
+        plt.colorbar(sc, ax=ax)
+    ax.set_title('OpenEdge $n_{D_2}$ [m$^{-3}$]')
 
     ax = axes[0,1]
     posmask = S_iz_oe > 0
@@ -123,10 +127,14 @@ def main():
 
     ax = axes[1,0]
     posmask = n_D > 0
-    sc = ax.scatter(R_oe[posmask], Z_oe[posmask], c=np.maximum(n_D[posmask], 1e10), s=1,
-                    norm=LogNorm(vmin=max(1e10, n_D[posmask].min()), vmax=n_D.max()),
-                    cmap='plasma')
-    plt.colorbar(sc, ax=ax); ax.set_title('OpenEdge $n_D$ [m$^{-3}$]')
+    if posmask.any():
+        vmin_D = max(1e10, n_D[posmask].min())
+        sc = ax.scatter(R_oe[posmask], Z_oe[posmask],
+                        c=np.maximum(n_D[posmask], 1e10), s=1,
+                        norm=LogNorm(vmin=vmin_D, vmax=max(n_D.max(), vmin_D*10)),
+                        cmap='plasma')
+        plt.colorbar(sc, ax=ax)
+    ax.set_title('OpenEdge $n_D$ [m$^{-3}$]')
 
     ax = axes[1,1]
     posmask = S_diss_oe > 0
