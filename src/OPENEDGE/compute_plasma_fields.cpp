@@ -445,9 +445,24 @@ void ComputePlasmaFields::init()
       plasma_data = readPlasmaFileData(plasmaStatePath);
       if (!magneticFieldsPath.empty())
         magnetic_data = readMagneticFieldFileData(magneticFieldsPath);
-      if (has_equilibrium)
+      if (has_equilibrium) {
         equ_data = readEquilibriumFile(equilibriumPath);
+      } else {
+        // No explicit equilibrium <file> keyword — try to pick up an
+        // embedded /equilibrium group from plasma.h5.
+        if (readEquilibriumFromPlasmaH5(plasmaStatePath, equ_data)) {
+          has_equilibrium = 1;
+          if (screen)
+            fprintf(screen,
+              "compute plasma/fields: loaded embedded equilibrium "
+              "from %s (%d x %d psi grid)\n",
+              plasmaStatePath.c_str(), equ_data.jm, equ_data.km);
+        }
+      }
     }
+    // Broadcast has_equilibrium so other ranks know whether to expect
+    // broadcastEquilibriumData below.
+    MPI_Bcast(&has_equilibrium, 1, MPI_INT, 0, world);
     broadcastPlasmaData(plasma_data);
     if (!magneticFieldsPath.empty())
       broadcastMagneticData(magnetic_data);
@@ -2115,6 +2130,73 @@ EquilibriumData ComputePlasmaFields::readEquilibriumFile(const std::string &path
 
   fin.close();
   return equ;
+}
+
+bool ComputePlasmaFields::readEquilibriumFromPlasmaH5(
+    const std::string &plasma_h5_path, EquilibriumData &data)
+{
+  try {
+    H5::Exception::dontPrint();
+    H5::H5File file(plasma_h5_path, H5F_ACC_RDONLY);
+
+    auto hasGroup = [&](const std::string &name) -> bool {
+      htri_t exists = 0;
+      H5E_BEGIN_TRY {
+        exists = H5Oexists_by_name(file.getId(), name.c_str(), H5P_DEFAULT);
+      } H5E_END_TRY;
+      return exists > 0;
+    };
+    if (!hasGroup("equilibrium") || !hasGroup("equilibrium/psi"))
+      return false;
+
+    auto read1D = [&](const std::string &name) -> std::vector<double> {
+      H5::DataSet ds = file.openDataSet(name);
+      H5::DataSpace sp = ds.getSpace();
+      hsize_t dim = 0;
+      sp.getSimpleExtentDims(&dim);
+      std::vector<double> vec(dim);
+      ds.read(vec.data(), H5::PredType::NATIVE_DOUBLE);
+      return vec;
+    };
+    auto readScalar = [&](const std::string &name) -> double {
+      if (!hasGroup(name)) return 0.0;
+      H5::DataSet ds = file.openDataSet(name);
+      double v = 0.0;
+      ds.read(&v, H5::PredType::NATIVE_DOUBLE);
+      return v;
+    };
+
+    data.r = read1D("equilibrium/r");
+    data.z = read1D("equilibrium/z");
+    data.jm = static_cast<int>(data.r.size());
+    data.km = static_cast<int>(data.z.size());
+
+    H5::DataSet dspsi = file.openDataSet("equilibrium/psi");
+    H5::DataSpace sp = dspsi.getSpace();
+    hsize_t dims[2] = {0, 0};
+    sp.getSimpleExtentDims(dims);
+    if (static_cast<int>(dims[0]) != data.km ||
+        static_cast<int>(dims[1]) != data.jm) {
+      fprintf(stderr,
+        "readEquilibriumFromPlasmaH5: psi shape (%lu,%lu) does not match "
+        "(km=%d, jm=%d) from equilibrium/r,z — ignoring embedded equilibrium\n",
+        (unsigned long)dims[0], (unsigned long)dims[1], data.km, data.jm);
+      return false;
+    }
+    std::vector<double> flat(dims[0] * dims[1]);
+    dspsi.read(flat.data(), H5::PredType::NATIVE_DOUBLE);
+    data.psi.assign(data.km, std::vector<double>(data.jm, 0.0));
+    for (int k = 0; k < data.km; ++k)
+      for (int j = 0; j < data.jm; ++j)
+        data.psi[k][j] = flat[k * data.jm + j];
+
+    data.btf  = readScalar("equilibrium/btf");
+    data.rtf  = readScalar("equilibrium/rtf");
+    data.psib = readScalar("equilibrium/psib");
+    return true;
+  } catch (H5::Exception &) {
+    return false;
+  }
 }
 
 void ComputePlasmaFields::broadcastEquilibriumData(EquilibriumData &data) {

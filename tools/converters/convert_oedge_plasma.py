@@ -35,12 +35,13 @@ def read_equilibrium(equ_file: Path):
     Read .equ equilibrium file and reconstruct (Br, Bt, Bz) on its own
     regular (R,Z) grid from the poloidal flux function psi(R,Z).
 
-    Returns
-    -------
-    r_eq, z_eq : 1-D arrays (jm,), (km,)
-    br, bt, bz : 2-D arrays (km, jm) — B-field components [T]
+    Returns a dict with:
+      r, z, br, bt, bz    — regular-grid fields for interpolation
+      equ_r, equ_z, equ_psi — raw .equ arrays (same as r, z, psi here)
+      btf, rtf, psib      — toroidal-field params + boundary psi
     """
-    jm = km = btf = rtf = psib = None
+    jm = km = btf = rtf = None
+    psib = 0.0
     read_r = read_z = read_psi = False
     r_vals, z_vals, psi_vals = [], [], []
 
@@ -101,7 +102,11 @@ def read_equilibrium(equ_file: Path):
     bz = grad_r / safe_r
     bt = (btf * rtf) / safe_r
 
-    return r_eq, z_eq, br, bt, bz
+    return {
+        "r": r_eq, "z": z_eq, "br": br, "bt": bt, "bz": bz,
+        "equ_r": r_eq.copy(), "equ_z": z_eq.copy(), "equ_psi": psi,
+        "btf": btf, "rtf": rtf, "psib": psib,
+    }
 
 
 # ======================================================================
@@ -306,7 +311,12 @@ def convert_oedge_to_openedge(
           f"Z=[{oedge['z'].min():.3f}, {oedge['z'].max():.3f}]")
 
     print(f"Reading equilibrium: {equ_file}")
-    r_eq, z_eq, br_eq, bt_eq, bz_eq = read_equilibrium(equ_file)
+    equ_dict = read_equilibrium(equ_file)
+    r_eq  = equ_dict["r"]
+    z_eq  = equ_dict["z"]
+    br_eq = equ_dict["br"]
+    bt_eq = equ_dict["bt"]
+    bz_eq = equ_dict["bz"]
     print(f"  Equilibrium grid: {len(r_eq)}x{len(z_eq)}, "
           f"R=[{r_eq[0]:.3f}, {r_eq[-1]:.3f}], Z=[{z_eq[0]:.3f}, {z_eq[-1]:.3f}]")
 
@@ -406,6 +416,16 @@ def convert_oedge_to_openedge(
         f.create_dataset("br", data=np.nan_to_num(br_grid))
         f.create_dataset("bt", data=np.nan_to_num(bt_grid))
         f.create_dataset("bz", data=np.nan_to_num(bz_grid))
+
+        # Embedded equilibrium (psi map + btf/rtf/psib). Downstream
+        # consumers (compute plasma/fields, fix plasma/data) read this
+        # group directly so the .equ file isn't needed at run time.
+        f.create_dataset("equilibrium/r",    data=np.asarray(equ_dict["equ_r"], dtype=np.float64))
+        f.create_dataset("equilibrium/z",    data=np.asarray(equ_dict["equ_z"], dtype=np.float64))
+        f.create_dataset("equilibrium/psi",  data=np.asarray(equ_dict["equ_psi"], dtype=np.float64))
+        f.create_dataset("equilibrium/btf",  data=float(equ_dict["btf"]))
+        f.create_dataset("equilibrium/rtf",  data=float(equ_dict["rtf"]))
+        f.create_dataset("equilibrium/psib", data=float(equ_dict["psib"]))
 
         # Source metadata
         f.attrs["source"] = f"OEDGE: {nc_file.name}"

@@ -624,11 +624,75 @@ void FixPlasmaData::load_plasma_h5()
     has_bfield = 1;
   }
 
-  // Optional psi map for psi-based inner boundary (fix reflect/psi).
-  // Stored under the same /psi, /psicore, /psisep layout written by
-  // tools/converters/convert_s3x_plasma.py. Reuses the equ_* buffers
-  // so downstream psi_norm_at() just works.
-  if (hasDataset("psi")) {
+  // Unified /equilibrium group written by convert_solps_plasma.py,
+  // convert_oedge_plasma.py, and convert_s3x_plasma.py. Populates the
+  // equ_* buffers directly from plasma.h5 so no external .equ file is
+  // needed. Takes precedence over the SOLEDGE-legacy /psi layout
+  // handled below.
+  //
+  // When this group is present, fix plasma/data behaves as if the
+  // caller had passed `equilibrium <file>`; psi_norm_at() and
+  // fix reflect/psi just work.
+  if (hasDataset("equilibrium/psi") && hasDataset("equilibrium/r") &&
+      hasDataset("equilibrium/z")) {
+    auto read1D = [&](const std::string &name) -> std::vector<double> {
+      H5::DataSet ds = file.openDataSet(name);
+      H5::DataSpace sp = ds.getSpace();
+      hsize_t dim = 0;
+      sp.getSimpleExtentDims(&dim);
+      std::vector<double> vec(dim);
+      ds.read(vec.data(), H5::PredType::NATIVE_DOUBLE);
+      return vec;
+    };
+    auto read_scalar = [&](const std::string &name, double &out) -> bool {
+      if (!hasDataset(name)) return false;
+      H5::DataSet ds = file.openDataSet(name);
+      double tmp = 0.0;
+      ds.read(&tmp, H5::PredType::NATIVE_DOUBLE);
+      out = tmp;
+      return true;
+    };
+    equ_r = read1D("equilibrium/r");
+    equ_z = read1D("equilibrium/z");
+    equ_jm = static_cast<int>(equ_r.size());
+    equ_km = static_cast<int>(equ_z.size());
+
+    H5::DataSet dspsi = file.openDataSet("equilibrium/psi");
+    H5::DataSpace sp = dspsi.getSpace();
+    hsize_t dims[2] = {0, 0};
+    sp.getSimpleExtentDims(dims);
+    if (static_cast<int>(dims[0]) == equ_km &&
+        static_cast<int>(dims[1]) == equ_jm) {
+      psirz.assign(static_cast<size_t>(equ_jm) * equ_km, 0.0);
+      dspsi.read(psirz.data(), H5::PredType::NATIVE_DOUBLE);
+
+      double btf_val = 0.0, rtf_val = 0.0, psib_val = 0.0;
+      read_scalar("equilibrium/btf",  btf_val);
+      read_scalar("equilibrium/rtf",  rtf_val);
+      read_scalar("equilibrium/psib", psib_val);
+      btf = btf_val;
+      rtf = rtf_val;
+      psib = psib_val;
+
+      // psi_axis: take the min of psirz inside the grid (the on-axis
+      // flux value used as reference). SOLPS .equ convention.
+      double psi_min = psirz[0];
+      for (size_t k = 0; k < psirz.size(); ++k)
+        if (psirz[k] < psi_min) psi_min = psirz[k];
+      psi_axis = psi_min;
+      has_equ = 1;
+      if (screen)
+        fprintf(screen,
+                "[plasma/data] loaded embedded equilibrium "
+                "(jm=%d km=%d psi_axis=%.6e psib=%.6e)\n",
+                equ_jm, equ_km, psi_axis, psib);
+    }
+  }
+
+  // SOLEDGE-legacy /psi, /psicore, /psisep layout (still used by
+  // convert_s3x_plasma.py for backward compatibility; takes effect
+  // only if the unified /equilibrium group above wasn't found).
+  else if (hasDataset("psi")) {
     read2D("psi", psirz);
     equ_jm = nr;
     equ_km = nz;

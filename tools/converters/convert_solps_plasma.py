@@ -189,11 +189,21 @@ def _interp_field(src_rz, values, tgt_rz, nz, nr):
 # ==========================================================================
 
 def _read_equilibrium_bfield(equ_file: Path):
-    """Read .equ file and reconstruct (Br, Bt, Bz) from psi."""
+    """Read .equ file and reconstruct (Br, Bt, Bz) from psi.
+
+    Returns a dict with:
+      r, z, br, bt, bz         — regular-grid fields for interpolation
+      equ_r, equ_z, equ_psi    — raw .equ arrays
+      btf, rtf, psib           — toroidal-field params + boundary psi
+    Everything in equ_* is what gets embedded into plasma.h5 under
+    /equilibrium so downstream consumers don't need the .equ file at
+    run time.
+    """
     if not equ_file.exists():
         raise FileNotFoundError(f"Equilibrium file not found: {equ_file}")
 
     jm = km = btf = rtf = None
+    psib = 0.0
     read_r = read_z = read_psi = False
     r_vals, z_vals, psi_vals = [], [], []
 
@@ -210,6 +220,8 @@ def _read_equilibrium_bfield(equ_file: Path):
                 btf = float(tok[2]); continue
             if len(tok) >= 3 and tok[0] == "rtf" and tok[1] == "=":
                 rtf = float(tok[2]); continue
+            if len(tok) >= 3 and tok[0] == "psib" and tok[1] == "=":
+                psib = float(tok[2]); continue
             if tok[0] == "r(1:jm);":
                 read_r, read_z, read_psi = True, False, False; continue
             if tok[0] == "z(1:km);":
@@ -242,7 +254,11 @@ def _read_equilibrium_bfield(equ_file: Path):
     br = -grad_z / safe_r
     bz = grad_r / safe_r
     bt = (btf * rtf) / safe_r
-    return r, z, br, bt, bz
+    return {
+        "r": r, "z": z, "br": br, "bt": bt, "bz": bz,
+        "equ_r": r.copy(), "equ_z": z.copy(), "equ_psi": psi,
+        "btf": btf, "rtf": rtf, "psib": psib,
+    }
 
 
 def _read_geqdsk_bfield(gfile: Path):
@@ -284,7 +300,14 @@ def _read_geqdsk_bfield(gfile: Path):
     br = dpsidZ / safe_r
     bz = -dpsidR / safe_r
     bt = (float(data["bcentr"]) * float(data["rcentr"])) / safe_r
-    return rs, zs, br, bt, bz
+    psib = float(data.get("sibdry", data.get("ssibry", 0.0)))
+    return {
+        "r": rs, "z": zs, "br": br, "bt": bt, "bz": bz,
+        "equ_r": rs.copy(), "equ_z": zs.copy(), "equ_psi": flux2d,
+        "btf": float(data["bcentr"]),
+        "rtf": float(data["rcentr"]),
+        "psib": psib,
+    }
 
 
 # ==========================================================================
@@ -700,15 +723,23 @@ def convert_solps_to_openedge(
         main_upar_raw = np.zeros_like(main_dens_raw)
 
     # B-field from equilibrium file only — the only trustworthy source.
+    # The returned dict also carries the raw equilibrium (r, z, psi,
+    # btf, rtf, psib) that we embed into plasma.h5 /equilibrium so
+    # downstream consumers don't need the .equ file at run time.
     if gfile is not None:
-        rg, zg, br_eq, bt_eq, bz_eq = _read_geqdsk_bfield(gfile)
+        equ_dict = _read_geqdsk_bfield(gfile)
     elif equ_file is not None:
-        rg, zg, br_eq, bt_eq, bz_eq = _read_equilibrium_bfield(equ_file)
+        equ_dict = _read_equilibrium_bfield(equ_file)
     else:
         raise RuntimeError(
             "Equilibrium file required for B-field reconstruction.\n"
             "Provide --gfile (GEQDSK) or --equ-file (.equ)."
         )
+    rg     = equ_dict["r"]
+    zg     = equ_dict["z"]
+    br_eq  = equ_dict["br"]
+    bt_eq  = equ_dict["bt"]
+    bz_eq  = equ_dict["bz"]
 
     rr_eq, zz_eq = np.meshgrid(rg, zg)
     b_pts = np.column_stack((rr_eq.reshape(-1), zz_eq.reshape(-1)))
@@ -1220,6 +1251,19 @@ def convert_solps_to_openedge(
         f.create_dataset("br", data=np.nan_to_num(br_grid))
         f.create_dataset("bt", data=np.nan_to_num(bt_grid))
         f.create_dataset("bz", data=np.nan_to_num(bz_grid))
+
+        # Embedded equilibrium. Raw .equ (or GEQDSK-derived) psi map on
+        # its native grid, plus the toroidal-field parameters needed to
+        # reconstruct the full B-field or to evaluate psi_norm at any
+        # (R, Z). fix plasma/data and compute plasma/fields read this
+        # group directly, so no `equilibrium <file>` keyword is needed
+        # in the input deck when plasma.h5 carries this.
+        f.create_dataset("equilibrium/r",    data=np.asarray(equ_dict["equ_r"], dtype=np.float64))
+        f.create_dataset("equilibrium/z",    data=np.asarray(equ_dict["equ_z"], dtype=np.float64))
+        f.create_dataset("equilibrium/psi",  data=np.asarray(equ_dict["equ_psi"], dtype=np.float64))
+        f.create_dataset("equilibrium/btf",  data=float(equ_dict["btf"]))
+        f.create_dataset("equilibrium/rtf",  data=float(equ_dict["rtf"]))
+        f.create_dataset("equilibrium/psib", data=float(equ_dict["psib"]))
 
         # Multi-ion species extension
         sdt = h5py.string_dtype(encoding="utf-8")

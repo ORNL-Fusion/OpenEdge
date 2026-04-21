@@ -202,6 +202,8 @@ int has_equilibrium;           // 1 if equilibrium file was loaded
 std::string equilibriumPath;
 
 EquilibriumData readEquilibriumFile(const std::string &path);
+bool readEquilibriumFromPlasmaH5(const std::string &plasma_h5_path,
+                                  EquilibriumData &data);
 void broadcastEquilibriumData(EquilibriumData &data);
 void computeMagneticGeometry(int icell, const EquilibriumData &equ,
                              MagneticGeometry &geom);
