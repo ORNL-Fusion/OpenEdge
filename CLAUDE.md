@@ -1,31 +1,31 @@
 # CLAUDE.md — OpenEdge development guide
 
-## Project overview
+OpenEdge is a plasma-edge particle transport code built as a package on top
+of [SPARTA](https://sparta.github.io/) (DSMC framework). It simulates
+impurity ion transport, plasma–material interactions, and dust/droplet
+dynamics in magnetic fusion devices using Boris and GCA particle pushers
+with background plasma and magnetic field inputs.
 
-OpenEdge is a plasma-edge particle transport code built as a package on top of
-[SPARTA](https://sparta.github.io/) (DSMC framework). It simulates impurity
-ion transport, plasma-material interactions, and dust/droplet dynamics in
-magnetic fusion devices using Boris and GCA particle pushers with background
-plasma and magnetic field inputs.
+- **Language:** C++11, with Python scripts for pre/post-processing.
+- **Build system:** CMake (out-of-source required).
+- **Parallelism:** MPI (Intel MPI on the primary cluster); Kokkos CUDA for GPU.
 
-**Language:** C++ (C++11), with Python scripts for pre/post-processing.
-**Build system:** CMake (out-of-source build required).
-**Parallelism:** MPI (Intel MPI on the primary cluster).
-
-## Repository structure
+## Repository layout
 
 ```
 OpenEdge/
   cmake/presets/       CMake preset files (mpi.cmake, kokkos_cuda.cmake, ...)
   src/                 Compiled source (SPARTA base + OpenEdge overrides)
-  src/OPENEDGE/        OpenEdge package reference copies (authoritative source)
+  src/OPENEDGE/        OpenEdge package reference copies (authoritative)
   src/KOKKOS/          Kokkos GPU variants
   database/            External data (ADAS rates, PEC tables, surface models)
+  docs/                OpenEdge-specific reference docs (see index below)
+  tools/               Converters and coupling drivers
   examples/            Test cases and validation examples
   lib/                 External libraries (Kokkos, etc.)
 ```
 
-## Build instructions
+## Build
 
 **Always build out-of-source.** Never build inside `src/`.
 
@@ -43,817 +43,104 @@ LD_LIBRARY_PATH= HDF5_ROOT=/usr/lib/x86_64-linux-gnu/hdf5/serial cmake \
 LD_LIBRARY_PATH= make -j$(nproc)
 ```
 
-Binary: `~/buildOpenEdge/src/spa_mpi`
+Binary: `~/buildOpenEdge/src/spa_mpi`.
 
-## Key architecture patterns
+## Architecture gotchas
 
-### Three copies of override files
+### Three-copy rule for override files
 
 OpenEdge overrides some SPARTA base files. These exist in three places:
 
 | Location | Role |
 |----------|------|
-| `src/update.cpp` (and .h) | **COMPILED** — what actually builds and runs |
+| `src/update.cpp` (`.h`) | **COMPILED** — what actually builds and runs |
 | `src/OPENEDGE/update.cpp` | **Reference** — authoritative OpenEdge version |
 | `src/src/include/update.h` | **NOT compiled** — SPARTA's original header |
 
-**CRITICAL: When modifying ANY file that exists in both `src/` and
-`src/OPENEDGE/`, ALWAYS update BOTH copies.** The build compiles from `src/`,
-but `src/OPENEDGE/` is the package reference. If you only edit one, the other
-goes stale and the build will silently use the old version. This applies to
-all `.cpp` and `.h` files that have copies in both locations (e.g.,
-`fix_chem_adas.cpp`, `update.cpp`, `sheath_models.cpp`, etc.).
+**When modifying ANY file that exists in both `src/` and `src/OPENEDGE/`,
+ALWAYS update BOTH copies.** The build compiles from `src/`, but
+`src/OPENEDGE/` is the package reference. If you only edit one, the build
+silently uses the old version. Applies to all `.cpp` and `.h` that exist
+in both places (`fix_chem_adas.cpp`, `update.cpp`, `sheath_models.cpp`, …).
 
-New OpenEdge-only files only need to exist in `src/OPENEDGE/` (they get copied
-to `src/` on install, and the cmake build handles this automatically).
+New OpenEdge-only files only need to exist in `src/OPENEDGE/` — they get
+copied to `src/` on install automatically.
 
-### Coordinate convention: 2D Cartesian vs SPARTA-native axisymmetric
+### Coordinate convention
 
-For tokamak / device geometries, OpenEdge supports two SPARTA-level layouts:
+Two SPARTA-level layouts are supported for tokamak / device geometries:
 
-- **2D Cartesian (legacy)** — `boundary o o p`, `dimension 2`, with `x = R`,
-  `y = Z`. SPARTA treats the box as a Cartesian slab of thickness `dz_box`
-  (typically 0.1 m, periodic). All `compute grid nrho`, `compute surf flux`,
-  `compute boundary` quantities are per-radian-of-toroidal-wedge — they need
-  a `2*pi*R̄` post-multiply to compare against full-3D codes (EIRENE, SOLPS,
-  Gkeyll). This was the historical convention in `test_west_axi`,
-  `test_diii_d_neutrals`, etc., despite the misleading name.
+- **2D Cartesian (legacy)** — `boundary o o p`, `dimension 2`, `x = R`,
+  `y = Z`. SPARTA treats the box as a Cartesian slab of thickness
+  `dz_box` (typically 0.1 m, periodic). All `compute grid nrho`,
+  `compute surf flux`, `compute boundary` quantities are per-radian-of-
+  toroidal-wedge — **they need a `2π·R̄` post-multiply** to compare
+  against full-3D codes (EIRENE, SOLPS, Gkeyll).
 
-- **SPARTA native axisymmetric (preferred)** — `boundary o ao p`,
-  `dimension 2`, with `x = Z (axial)`, `y = R (radial, must start at 0)`,
-  `z = phi`. SPARTA internally uses true cylindrical cell volumes and
-  `surf->axi_line_size()` (= `2*pi*R*L`) for surface area, so all per-volume
-  and per-area diagnostics are full-3D quantities out of the box. No
+- **SPARTA-native axisymmetric (preferred)** — `boundary o ao p`,
+  `dimension 2`, `x = Z` (axial), `y = R` (radial, must start at 0),
+  `z = phi`. SPARTA uses true cylindrical cell volumes and
+  `surf->axi_line_size()` (= `2π·R·L`) for surface area, so all
+  per-volume and per-area diagnostics are full-3D out of the box. No
   post-multiply.
-
-  - `boundary` syntax: the `a` token must sit at `ylo`, and `boxlo[1]` must
+  - `boundary`: the `a` token must sit at `ylo`, and `boxlo[1]` must
     be 0 (`domain.cpp:174–182`, `create_box.cpp:55`). Use the 2-char
-    `ao` for the y-arg so SPARTA reads ylo='a' (axis) and yhi='o' (outflow).
+    `ao` for the y-arg so SPARTA reads `ylo='a'` (axis) and
+    `yhi='o'` (outflow).
   - `create_box -1.4 1.4 0 2.4 -0.05 0.05` (xlo,xhi,ylo,yhi,zlo,zhi).
 
-**Helper for slot mapping** — `src/OPENEDGE/openedge_geom.h`:
+**Slot-mapping helper** — `src/OPENEDGE/openedge_geom.h` provides
+`sparta_to_RZ()`, `RZphi_force_to_sparta()`, `sparta_v_to_RZphi()`. All
+OpenEdge consumers that read particle `(R,Z)` or decompose cylindrical
+fields onto SPARTA slots route through these, so they work in any of
+2D Cart / 2D axi / 3D Cart without per-fix conditionals.
 
-```cpp
-namespace OpenEdge {
-  void sparta_to_RZ(const double *xyz, int dim, bool axi,
-                     double &R, double &Z);
-  void RZphi_force_to_sparta(double FR, double FZ, double Fphi,
-                              int dim, bool axi, double phi,
-                              double &fx, double &fy, double &fz);
-  void sparta_v_to_RZphi(const double *v, int dim, bool axi,
-                          double phi, double &vR, double &vZ, double &vphi);
-}
-```
-
-All OpenEdge consumers that read particle (R, Z) or decompose cylindrical
-fields onto SPARTA slots route through these helpers, so they work in any
-of the three modes (2D Cart, 2D axi, 3D Cart) without per-fix conditionals.
-The fallback (`axi == false`) preserves the legacy 2D Cartesian layout, so
-existing tests keep working.
-
-**B-field / E-field / V-field source convention**: when the user passes
-`bx by bz` (or `ex ey ez`, `vx vy vz`) sources to a fix or compute, the
-values must be in **SPARTA slot order** (matching the velocity slots). The
-helper `RZphi_force_to_sparta()` does this projection consistently in
-`compute plasma/fields` output, so feeding `c_cplasma[bx_col]` etc. into
-`fix thermal_force` or `fix efield/grid` works in either coord layout
-without further user intervention.
+**B/E/V-field source convention**: when users pass `bx by bz` (or
+`ex ey ez`, `vx vy vz`) sources to a fix or compute, the values must be
+in **SPARTA slot order** (matching the velocity slots).
+`compute plasma/fields` does the projection automatically — feeding
+`c_cplasma[bx_col]` etc. into `fix thermal_force` or `fix efield/grid`
+works in either coord layout without further user intervention.
 
 **Edge-code converters always emit axi** — SOLPS / SOLEDGE3X / OEDGE
 are axisymmetric edge codes, so `convert_solps_plasma.py`,
 `convert_s3x_plasma.py`, and `create_surf_from_solps.py` unconditionally
-write `wall.surf` line endpoints as `(Z, R)` (column 1 = Z, column 2 =
-R) to line up with SPARTA's true axisymmetric slot mapping. There is no
-Cartesian-output toggle. If a downstream test still uses the legacy
-2D Cartesian layout in its input deck, the deck has to be flipped to
-true axi first (see "Migration cookbook" below).
+write `wall.surf` line endpoints as `(Z, R)` to line up with SPARTA's
+true axisymmetric slot mapping. There is no Cartesian-output toggle.
+Legacy 2D Cartesian decks must be migrated to true axi first — see
+[`docs/migration/axi_cookbook.md`](docs/migration/axi_cookbook.md).
 
-**Tests using each layout** (as of 2026-04-20):
+**Tests by layout (as of 2026-04-20):**
 - Axi: `test_diii_d_neutrals` (pilot)
-- Cart 2D (legacy, awaiting migration): `test_west_axi`, `test_west_neutrals`,
-  `test_west_timedep`, `test_d3d_walldyn`, `test_d3d_mateja`,
-  `test_evaporation`, `test_solps_coupling`, `test_gca`,
-  `test_neutral_transport`
+- Cart 2D (legacy, awaiting migration): `test_west_axi`,
+  `test_west_neutrals`, `test_west_timedep`, `test_d3d_walldyn`,
+  `test_d3d_mateja`, `test_evaporation`, `test_solps_coupling`,
+  `test_gca`, `test_neutral_transport`
 - 3D Cart (unaffected): `test_west_3d`, etc.
 - True 1D slab (unaffected): `test_slab_stangeby2000`
 
-**Migration cookbook** — moving a 2D-Cart-mis-named-axi test to true axi
-(pilot was `test_diii_d_neutrals`):
-
-1. **Regenerate plasma + wall** with the SOLPS converter. Produces a
-   single mesh-only `plasma.h5` (no `bfield.h5`, no `--equ-file` at run
-   time — equilibrium is embedded in `/equilibrium/*`):
-   ```bash
-   python3 tools/converters/convert_solps_plasma.py <SOLPS_RUN> \
-       --b2fgmtry <baserun>/b2fgmtry --equ-file <baserun>/dg.equ \
-       --mesh-extra <baserun>/mesh.extra \
-       --plasma-out input/plasma.h5 \
-       --wall-out input/wall.surf \
-       --wall-source mesh-extra
-   ```
-2. **Flip the input deck**:
-   - `boundary o o p` → `boundary o ao p` (yhi 'o' is required to keep
-     the boundary as outflow; ylo 'a' marks the axis).
-   - `create_box X1 X2 Y1 Y2 Z1 Z2` → `create_box Z1_phys Z2_phys 0 R_max Z1 Z2`.
-     Note `ylo = 0` is mandatory (`create_box.cpp:55`).
-   - `create_grid Nx Ny Nz`: swap the first two arguments so x stays the
-     longer axial dimension and y is the radial dimension. Often double
-     the original Nx (now along Z) since the axial range is wider.
-   - All `region block xlo xhi ylo yhi zlo zhi`: swap to the new layout
-     (xlo,xhi are now Z range, ylo,yhi are now R range). Lower divertor
-     region: `Z` is negative; upper divertor: `Z` is positive.
-   - `compute plasma/fields`: drop any `file plasma.h5 …` syntax (now
-     rejected). Declare `fix pd plasma/data file input/plasma.h5` first,
-     then reference it: `compute cp plasma/fields all plasma_data pd …`.
-     Drop any `equilibrium <file>` keyword and any `bfield.h5` arg — the
-     mesh-only `plasma.h5` carries everything.
-   - All B-field / E-field source columns from `compute plasma/fields`
-     stay named `bx by bz` — the compute projects to the right SPARTA
-     slots automatically (commit dd6a746).
-3. **Re-tune `fnum`** — the wall-segment cone-frustum area in axi mode is
-   `2π·R·L` (full revolution) instead of just `L` (per-radian). This
-   bumps the per-step physical emission rate by a factor `2π·R̄ ≈ 10`.
-   Multiply `fnum` by ~5 to keep similar sim-particle counts. Watch the
-   first 1000 steps; if Np climbs too fast, kill and bump `fnum` further.
-4. **Update any post-processing** that reads dump xc/yc as (R, Z) — in
-   axi mode xc is now `Z`, yc is `R`. The example `compare.py` in
-   `test_diii_d_neutrals` auto-detects the layout from the yc range.
-5. **Re-run, verify** the `[emit/surf/recycle]` diagnostic prints a
-   single sensible Bohm rate (~SOLPS-EIRENE ionization total / 5–15×
-   amplification factor).
-
 ### Particle properties
 
-- `particles[i].mass` is **zero** for gas-phase particles — it is only used
-  for droplets. Always use `particle->species[isp].mass` for molecular mass
-  and `particle->species[isp].charge` for charge state.
-- Species are defined in `.species` files and loaded via the `species` command.
+- `particles[i].mass` is **zero** for gas-phase particles — it is only
+  used for droplets. Always use `particle->species[isp].mass` for
+  molecular mass and `particle->species[isp].charge` for charge state.
+- Species are defined in `.species` files and loaded via the `species`
+  command.
 
 ### Field lookups
 
-- All field lookups (B, plasma, gradients) should use **point queries** at
-  particle position: `cp->query_plasma_at_point(x)`,
+- All field lookups (B, plasma, gradients) should use **point queries**
+  at particle position: `cp->query_plasma_at_point(x)`,
   `cp->query_bfield_at_point(x)`.
 - Do not fall back to cell-center arrays for per-particle computations.
-- Cylindrical-to-Cartesian conversion for B-field: use particle (x,y) to
-  compute cos(phi), sin(phi) for the rotation.
+- Cylindrical → Cartesian B-field: use particle `(x,y)` to compute
+  `cos(phi)`, `sin(phi)` for the rotation.
 
-### Sheath models
-
-Two approaches for sheath electric fields:
-
-- **Kick mode** (`global sheath ... kick yes`): applies sheath energy as
-  velocity boost at wall collision. Recommended for IEADs. No per-subcycle
-  E-field computation.
-- **Spatial mode** (`global sheath ... model <name>`): spatially-resolved
-  E-field evaluated each Boris subcycle. Models: `borodkina`,
-  `coulette_manfredi`. Has overshoot guard to prevent reverse-field energy
-  loss when particles cross the wall during subcycling.
-
-### Surface collision models
-
-- `surf_collide vanish` — absorb particle (with optional CSV logging)
-- `surf_collide diffuse` — thermal re-emission
-- `surf_collide toroidal` — phi-periodic boundary rotation for toroidal wedges
-
-### Boris / GCA hybrid pusher
-
-- Boris pusher with configurable subcycles (`global boris_subcycles N`)
-- GCA (Guiding Center Approximation) pusher with RK4 integration, activated
-  via `global gca ...` with Littlejohn corrections
-- Automatic switching between Boris and GCA based on `gca_switch_factor`
-
-### Thermal forces
-
-- **`fix thermal_force`** — Braginskii ion and electron thermal forces on
-  impurity ions, applied as leapfrog half-kicks (START_OF_STEP + END_OF_STEP).
-  ```
-  fix ID thermal_force Nevery \
-      bfield BxSRC BySRC BzSRC \
-      [ion_thermal gradTiR_SRC gradTiZ_SRC [coeff VAL]] \
-      [elec_thermal gradTeR_SRC gradTeZ_SRC [coeff VAL]]
-  ```
-  - Ion thermal force: `F = beta_i * Z^2 * e * grad_par(Ti)` (default
-    `beta_i = 2.6`, Neu 1974 heavy-impurity limit).
-  - Electron thermal force: `F = alpha_e * Z^2 * e * grad_par(Te)` (default
-    `alpha_e = 0.71`, Braginskii Z_eff=1 limit).
-  - B-field sources must be in SPARTA coordinate order (`bx`, `by`, `bz`),
-    matching the velocity slot mapping. Temperature gradient sources are
-    always cylindrical (`grad_ti_r`, `grad_ti_z`).
-  - Both forces push impurities toward higher temperature (toward the core).
-
-### Cross-field diffusion
-
-- **`fix cross_diffusion`** — anomalous perpendicular diffusion and
-  convective pinch for impurity ions, applied as position displacements
-  at END_OF_STEP.
-  ```
-  fix ID cross_diffusion Nevery \
-      bfield BxSRC BySRC BzSRC \
-      [D_perp VAL | bohm TeSRC [scale VAL]] \
-      [pinch Vr Vz]
-  ```
-  - Constant diffusion: `D_perp 1.0` gives D_⊥ = 1.0 m²/s.
-  - Bohm diffusion: `bohm c_cplasma[Te_col] scale 0.1` gives
-    D = scale × Te/(16eB). Default scale = 1.0.
-  - Constant pinch: `pinch -50.0 0.0` adds a constant velocity in (R, Z).
-  - Gradient-driven pinch: `gradient_pinch Cp neSRC gradNeR gradNeZ`
-    gives V = Cp × D_⊥ × ∇_⊥(ne)/ne. Typical Cp = 1–3 (ITG turbulence).
-  - 2D: displacement in poloidal perpendicular direction only.
-    3D: two perpendicular directions via Gram-Schmidt.
-  - Particles that diffuse outside the domain are reverted (no loss).
-  - `compute plasma/fields` output columns `grad_ne_r`, `grad_ne_z` provide
-    the electron density gradient (computed via finite differences).
-
-### Electric field (plasma-native, not pressure-balance)
-
-- `compute plasma/fields` reads the E-field directly from the plasma
-  code's native potential at converter time (SOLPS `po`, SOLEDGE3X
-  `zone*/PHI`, OEDGE `osmns_efpara`). The converter computes
-  `E = −∇ϕ` on the B2 / SOLEDGE3X triangulation mesh and writes
-  `/mesh/e_r, /mesh/e_z, /mesh/e_t`. `compute plasma/fields` then
-  reads those per-cell values at a SPARTA cell centroid (via
-  `findNearestMappedTriangle`) and emits `er`, `et`, `ez`, `ex`,
-  `ey` output columns.
-- `epar` output column = `E · b̂` (dot product of the mesh-stored E
-  vector with b̂ from equilibrium ψ). **No runtime `−∇pe/(ne·e)`
-  approximation** — the pressure-balance code path has been removed
-  from both `compute_per_grid` and `query_plasma_at_point`.
-- **Converter status**:
-  - SOLPS: fully implemented (reads `balance.nc:po`, Jacobian FD on
-    the B2 (ix, iy) grid).
-  - SOLEDGE3X: writes `mesh/e_{r,z,t} = 0` placeholders. Zone-based
-    `/zone*/PHI` resampling onto EIRENE triangle centroids is TODO.
-    Print a WARNING at converter time.
-  - OEDGE: has no `/mesh/*` output; legacy regular-grid path (now
-    deprecated) returned zero E via default-initialized fields. The
-    proper fix comes with a future OEDGE → mesh migration.
-- To feed into the Boris pusher:
-  ```
-  fix pd plasma/data file plasma.h5
-  compute cplasma plasma/fields all plasma_data pd ex ey ez
-  fix fE efield/grid c_cplasma[ex_col] c_cplasma[ey_col] c_cplasma[ez_col]
-  global efield grid fE 0
-  ```
-
-### Volumetric neutral reactions (EIRENE replacement)
-
-- **`fix chem/adas`** — ADAS-based volumetric chemistry with competing
-  Poisson channel selection. Supports ionization, recombination, charge
-  exchange (CX), and dissociation reactions.
-  ```
-  fix ID chem/adas Nevery Z reactions_file \
-      adas_dir PATH plasma TeSRC NeSRC \
-      [mode kinetic|neutral] \
-      [source_species <sp1> [sp2] ...] \
-      [stop_on_exhaust yes|no] [exhaust_threshold <N>] \
-      [units counts|rate|batch <N> <R_puff>|batch_fix <emit_id> <R_puff>]
-  ```
-  - **Rate styles:**
-    - `A` (ADAS): bilinear interpolation on HDF5 rate tables
-      `⟨σv⟩(Te, ne)` from ADF11 data (SCD/ACD/CCD).
-    - `J` (Janev): 9-term polynomial `ln⟨σv⟩ = Σ bₙ (ln Te)ⁿ`
-      from HYDHEL/Janev 1987. Used for molecular dissociation.
-  - **Reaction types** in the reactions file:
-    - `I`: ionization (charge state +1)
-    - `R`: recombination (charge state −1)
-    - `E`: charge exchange (charge state −1, CX with background H)
-    - `D`: dissociation (1 reactant → 2 products, creates new particle)
-  - CX rate data from ADAS CCD files (`ccd89_*.dat`), same format as
-    ACD/SCD. Stored as `ChargeExchangeRateCoeff` in HDF5.
-  - Dissociation uses deferred particle creation to avoid array
-    invalidation during iteration.
-  - After CX or dissociation, product velocity is re-sampled from a
-    shifted Maxwellian at local Ti and bulk flow (EIRENE-like), when
-    the per-particle plasma cache provides Ti, vpar, and B-field.
-  - Per-type reaction tally printed every 10,000 steps.
-
-  **Mode A (EIRENE semantics):** `mode neutral` deletes the neutral on
-  ionization instead of relabeling it as an ion, and compresses the
-  particle array via `dellist` at end_of_step. Combined with
-  `source_species D D2 stop_on_exhaust yes [exhaust_threshold N]`, the
-  run halts cleanly when the alive source population drops to `N`
-  (default 0). `exhaust_threshold` skips the slow-converging fat tail.
-  `exhaust_armed` guards against spurious exit during batch ramp-up.
-
-  **20-column per-cell source tally (`array_grid`):** exposed as
-  `f_ID[*][col]` for `dump grid` / `fix ave/grid` / library API. Layout
-  is quantity-major across 4 reaction types (ion, rec, CX, dissoc):
-  - cols  1– 4 : count per cell per reaction type
-  - cols  5– 8 : sum of m·vx at reaction events [kg·m/s]
-  - cols  9–12 : sum of m·vy
-  - cols 13–16 : sum of m·vz
-  - cols 17–20 : sum of ½·m·|v|² [J]
-
-  **Tally units** (`units` keyword):
-  - `counts` (default): raw cumulative totals since fix start.
-  - `rate`: window-averaged SI rate (m⁻³s⁻¹, N/m³, W/m³); zeroed each
-    Nevery window — use with `fix ave/grid ... ave running` for smooth
-    SOLPS/Gkeyll input.
-  - `batch N R_puff`: EIRENE-style MC. Each of the `N` trajectories
-    carries weight `w = R_puff / N` [events/s] (divided by cell volume
-    for source density). Cumulative across the run — the final value is
-    the steady-state source for one puff.
-  - `batch_fix <emit_id> R_puff`: same as `batch`, but `N` is pulled
-    from the paired emit fix's cumulative emit count each step. Tracks
-    ramp-up automatically so you don't hand-match `N` with the emit
-    fix's `stop_at_np`.
-
-  - **Data pipeline:** `database/adas/adas.py` converts ADF11 ASCII
-    files to HDF5. Supports `acd` (recombination), `scd` (ionization),
-    `ccd` (charge exchange). Set `ADAS_ADF11_DIR` or symlink into
-    `database/adas/adf11/`.
-
-  Reactions file example:
-  ```
-  D --> D+
-  I A 1.0 0.0 0.0 0.0 0.0
-
-  D+ --> D
-  E A 1.0 0.0 0.0 0.0 0.0
-
-  D2 --> D + D
-  D J -2.787e+01 1.052e+01 -4.973e+00 1.451e+00 -3.063e-01 4.433e-02 -4.096e-03 2.160e-04 -4.929e-06
-  ```
-
-### Surface-source neutral puff
-
-- **`fix emit/surf/puff`** — surface emission for Mode A puff launches.
-  Like `fix emit/surf` but with a hard cap on total emitted particles so
-  a one-shot EIRENE-style batch can terminate cleanly.
-  ```
-  fix ID emit/surf/puff mixture group \
-      [n <N_per_step>] [normal yes|no] [stop_at_np <N_total>] \
-      [perspecies yes|no] [region <rID>]
-  ```
-  - `n 200`: emit 200 particles per step (CONSTANT mode). `n 0` reverts
-    to flow-based emission using the mixture vstream.
-  - `normal yes`: inject along the surface normal (vs. mixture vstream).
-  - `stop_at_np N`: latch emission off once `N` total particles have
-    been emitted. Once latched, no further injection; combined with
-    `fix chem/adas ... stop_on_exhaust yes` this gives a clean
-    "puff once, track to completion, exit" cycle.
-  - Pair with `units batch_fix ID R_puff` on `fix chem/adas` so the
-    tally scales from the paired emit fix's actual cumulative count.
-
-### Surface recycling
-
-- **`surf_react recycle`** — surface recycling model for neutral transport.
-  Incoming ions are neutralized and re-emitted with cosine angular
-  distribution at a specified energy.
-  ```
-  surf_react ID recycle reactions_file
-  ```
-  - Reaction types: `E` (exchange, 1→1), `D` (dissociation, 1→2),
-    `R` (recombination/absorption).
-  - Each product has a specified return energy [eV].
-  - Velocity sampled from cosine distribution relative to surface normal.
-
-  Reactions file example:
-  ```
-  D+ --> D
-  E 1.0 3.0
-
-  D --> D
-  E 1.0 0.025
-  ```
-  Format: `type probability energy1 [energy2]`
-  - `1.0` = recycling probability (100%)
-  - `3.0` = return energy in eV (Franck-Condon for D atoms)
-  - `0.025` = thermal energy (~300 K wall temperature)
-
-### Wall-recycling neutral source: `fix emit/surf/recycle`
-
-Launches neutrals from SPARTA wall surfaces at a rate equal to the
-local plasma Bohm wall flux × a total recycling coefficient. Mirrors
-the physics of EIRENE strata 1–5 (SOLPS recycling strata) but driven
-purely from the B2 plasma state (ne, Te, Ti) and geometry; no EIRENE
-output is consumed.
-
-```
-fix <ID> emit/surf/recycle <mixture> <group> <plasma_fix_ID> \
-    [mass <amu>] [R <0..1>] [twall <K>]
-```
-
-- **Bohm flux formula** (Stangeby 2000 ch. 2):
-  `Γ = n_i · c_s · sin(α_B)` with `c_s = sqrt((Te+Ti)/m_ion)`
-  and `sin(α_B)` the geometric projection of B onto the wall inward
-  normal.
-- **Emission rate per SPARTA task** (the unit of work — one wall
-  surface in one cell after `adapt_grid` refinement):
-  `dot{N}_task = 0.5 · R · Γ_dom · A_seg[isurf] · area_share[itask]`
-  - `A_seg[isurf]` is `mesh/wall_surf_area[isurf]` from plasma.h5 — the
-    converter aggregates the B2 face area of every B2 boundary cell that
-    chose this segment as its nearest, so it is the full SOLPS flux
-    budget claimed by segment `isurf` regardless of whether one or many
-    B2 cells map to it.
-  - `area_share[itask] = task.area / Σ_{tasks with same isurf} task.area`,
-    computed at init time with an MPI_Allreduce so every rank sees the
-    global denominator. Σ over all tasks of an isurf equals 1, so the
-    per-isurf total is exactly `0.5 · R · Γ · A_seg`, independent of how
-    `adapt_grid` splits the segment.
-  - `Γ_dom` uses the dominant B2 cell's `(ne, Te, Ti)` for the segment
-    (the cell that contributed the largest face area). Sub-1.5× error
-    when neighboring cells differ in plasma; refinable later by writing
-    a per-segment plasma-weighted average.
-  - The 1/2 balances D⁺ → D₂ recombination at the wall; the mixture
-    fractions control the atom/molecule split.
-- **Re-emission velocity:** half-Maxwellian flux at `twall` along the
-  inward normal. (TRIM-fast-reflection channel not yet implemented.)
-
-**Init diagnostic** (printed once per init at rank 0):
-```
-[emit/surf/recycle] tasks=N, mapped=M (P%)
-[emit/surf/recycle] Bohm-flux rate (raw SPARTA segment area, sin_alpha=1) = X /s
-[emit/surf/recycle] Bohm-flux rate (B2-aggregated surf_area, sin_alpha=1) = Y /s [USING THIS]
-[emit/surf/recycle] wall mapping (global): K unique B2 cells, A m^2 of T total face area (P%)
-```
-- Both rates are MPI-global. The "raw SPARTA segment area" line uses
-  `tasks[i].area` (which is the cone-frustum `2π·R·L` in SPARTA axi
-  mode and the per-radian poloidal length in 2D Cart). The
-  "B2-aggregated surf_area" is the actual emission formula above and
-  what the runtime uses. They should agree to within the geometric
-  mismatch between the SPARTA wall mesh and the B2 boundary cells.
-- "wall mapping" sums `mesh_wall_face_area[c]` over **dominant** cells
-  only — under-reports when many B2 cells per segment, since
-  `mesh_wall_surf_area[isurf]` (the actually-used quantity) carries the
-  full aggregation.
-
-**Wall → B2-cell mapping** — the fix needs to know, for each wall
-surface, which SOLPS B2 boundary cell owns it. Three paths, tried in
-order:
-
-1. **Topological** (preferred) — `fix_plasma_data` reads
-   `mesh/wall_surf_cell[iseg]` from plasma.h5 (written by the
-   converter; see Wall geometry below). Direct index lookup. Falls
-   through if the chosen cell has `wall_face_area == 0`.
-2. **Geographic fallback** — nearest B2 boundary cell by centroid
-   distance, restricted to cells with `wall_face_area > 0`. Triggered
-   when (1) is unavailable.
-3. **Raw SPARTA area** — last-resort emission using `tasks[i].area`
-   (with no `area_share`) when neither (1) nor (2) is available. Only
-   correct when SPARTA wall and B2 boundary coincide exactly.
-
-### Wall geometry from SOLPS: `convert_solps_plasma.py --wall-source`
-
-Three ways to build wall.surf and the per-segment → B2-cell mapping:
-
-- **`mesh-extra`** (default when available) — parse SOLPS's mesh.extra
-  user-defined wall segments into a watertight polygon and, for each
-  segment, aggregate the area of all B2 boundary faces that chose it
-  as nearest. **SOLPS-native, no EIRENE files required.** Suitable for
-  production.
-- **`b2`** (not yet implemented) — build wall from B2 outer boundary
-  cell faces only; 1:1 segment→cell mapping. For codes without
-  mesh.extra (OEDGE, SOLEDGE3X).
-- **`eirene`** — use fort.33/34/35 triangulation boundary edges.
-  Matches EIRENE's wall exactly. Only useful for direct standalone
-  EIRENE cross-validation; requires EIRENE output files.
-
-The converter writes `mesh/wall_face_area[ncell]`, `mesh/wall_surf_cell[nseg]`,
-and `mesh/wall_surf_area[nseg]` into plasma.h5. The fix uses these to
-emit the correct Bohm flux at each wall segment without any runtime
-geometric search.
-
-**Triangulation extension to the wall** — the EIRENE triangulation
-from fort.33/34/35 stops at its "neighbour polygon" that is typically
-a few mm to a few cm shy of the mesh.extra wall. The converter re-
-triangulates the annulus between the EIRENE outer boundary and the
-wall polygon using `scipy.spatial.Delaunay` on combined vertices,
-keeping only triangles whose centroid sits inside the wall and
-outside the EIRENE mesh. Each new triangle is projected to the
-nearest B2 sheath cell (same cKDTree path used for vacuum/PFR tris).
-Result: the mesh covers the full wall polygon, `mesh_cell_at()` never
-has to fall back to the 5 cm `max_dist` nearest-triangle search.
-
-### Plasma.h5 schema (mesh-only, post-2026-04-20)
-
-`convert_solps_plasma.py`, `convert_s3x_plasma.py`, and
-`convert_oedge_plasma.py` now emit a single mesh-only HDF5 with three
-top-level groups and nothing else:
-
-| group | purpose | typical shape |
-|---|---|---|
-| `/equilibrium/{r, z, psi, btf, rtf, psib}` | ψ map + toroidal axis params | ψ: `(km, jm)` ≈ `(257, 257)` |
-| `/ion_species/{names, spec_index, main_ion_spec_index, mass_amu, charge_state_z}` | per-species metadata | 1D |
-| `/mesh/{vtx_r, vtx_z, triangles, cell_index, dens_e, temp_e, dens_i, temp_i, parr_flow, ions/{dens, temp, parr_flow}, wall_face_area, wall_surf_cell, wall_surf_area}` | EIRENE triangulation + per-B2-cell plasma + wall geometry | `vtx*, tri*`: ~5–10k; `dens_e` etc.: ~3k (ncell) |
-
-No top-level regular-grid datasets (`r`, `z`, `dens_e`, `temp_e`, `br`,
-`bt`, `bz`, `grad_*`, `ions/*`, `n_e/*`, `n_i/*`). File size for the
-DIII-D `run_lore2023` case drops from ~21 MB (with the regular grid)
-to ~1.1 MB (mesh-only).
-
-All plasma queries route through `fix plasma/data`:
-```
-fix pd plasma/data file input/plasma.h5
-# Per-particle ne/Te/Ti/B via pd->query_plasma_at_point(x)
-# Per-cell via pd->mesh_ne[cell], mesh_te[cell], ...
-```
-
-The `compute plasma/fields` `file <plasma.h5>` mode has been removed
-and hard-errors on use. Declare `fix plasma/data` then use
-`compute … plasma/fields all plasma_data <fix_id> …` to read through
-the single-source-of-truth fix.
-
-**GCA requires equilibrium.** The GCA pusher uses analytic B-field
-derivatives from ψ (`B_R = −(1/R) ∂ψ/∂Z` etc.), not numerical
-finite differences on a grid. If `plasma.h5` does not carry
-`/equilibrium/{r,z,psi,btf,rtf,psib}` and no `equilibrium <file>`
-keyword is provided on the compute line, `global gca` init aborts
-with a clear error. SOLEDGE3X cases must supply the `.equ`
-separately since `mesh.h5` does not expose `btf`/`rtf` (the
-converter writes `psi_axis = psicore` so `fix reflect/psi` still
-works without `btf/rtf`, but GCA itself needs the full equilibrium).
-
-**Gradient fields on mesh-only plasma.h5** — `compute plasma/fields`
-currently returns zero for `grad_te_{r,z}`, `grad_ti_{r,z}`,
-`grad_ne_{r,z}` when the plasma is mesh-only (no regular grid).
-Consumers that need gradients (`fix thermal_force`,
-`fix cross_diffusion`) should migrate to per-particle finite-
-difference queries against `fix plasma/data` (e.g. call
-`pd->query_plasma_at_point(R ± dR, Z)` and subtract). This is a
-known gap in the mesh-only transition.
-
-### Synthetic diagnostics
-
-- **`compute photon_emissivity/grid`** — per-grid volumetric photon
-  emissivity: `ε = ne * nz * PEC(Te, ne)` [photons/m³/s/sr].
-  Uses per-particle `pweight` for weighted density (`nz`), Te/ne from a
-  `compute plasma/fields`, and a PEC table from an HDF5 file.
-  ```
-  compute ID photon_emissivity/grid group mix \
-          pec_file PATH plasma_compute CID [pec_units cm3s|m3s]
-  ```
-  - PEC HDF5 layout: `te` or `te_grid` (1D), `ne` or `ne_grid` (1D),
-    plus any 2D dataset (auto-detected as PEC values).
-  - Default `pec_units cm3s` (ADAS convention); use `m3s` if already SI.
-  - PEC files live in `database/pec/` (generated by
-    [ColRadPy](https://github.com/johnson-c/ColRadPy)).
-  - Output: one column per species group in the mixture. Use with
-    `fix ave/grid` + `dump grid` for time-averaged emissivity maps.
-
-### Liquid metal film model
-
-- **`fix liquid_metal`** — MHD shallow-water liquid metal film solver for
-  divertor surfaces. Computes surface temperature, Li evaporation flux
-  (Antoine + Hertz-Knudsen), ad-atom flux (Arrhenius desorption), and
-  film thickness as per-surface custom attributes.
-  ```
-  fix ID liquid_metal group Nevery hf_source \
-      h0 VAL U0 VAL Bs VAL alpha VAL width VAL Tin VAL \
-      [dp_flux SOURCE] [Yad VAL] [Yad_Yps VAL] \
-      [E_eff VAL] [A_arr VAL] \
-      [Bw VAL] [sigma_w VAL] [tw VAL] [qss VAL] \
-      [Nx VAL] [Ny VAL] [ncase VAL] \
-      [max_iter VAL] [eps VAL] [relax VAL] [dt VAL] \
-      [evap yes|no]
-  ```
-  - **Heat flux source** (`hf_source`): `c_compute[col]`, `f_fix[col]`,
-    or a constant value [W/m²].
-  - **Strip solver** (from Smolentsev): solves coupled momentum, continuity,
-    free surface, and heat transfer on a 1D strip. MHD drag via Hartmann
-    braking. Pseudo-time iteration to steady state.
-  - **Evaporation model** (Antoine + Hertz-Knudsen):
-    `P_vapor = 10^(A - B/T_K) * 101325` Pa (Antoine fit to Li vapor
-    pressure data, 298–1600 K). Flux via Hertz-Knudsen:
-    `Γ_evap = α * P / sqrt(2π m_Li kB T)` [atoms/m²/s].
-    Evaporative cooling feedback: `Q_vapor = H_vap * Γ_evap / N_A`.
-  - **Ad-atom model** (Arrhenius desorption driven by D+ flux):
-    `Γ_ad = f_ad * (Yad/Yps) / (1 + A_arr * exp(E_eff / kB*T)) * Yad * Γ_D+`
-    Requires D+ ion flux via `dp_flux` keyword (`c_compute[col]`,
-    `f_fix[col]`, or constant). If `dp_flux` is not specified, ad-atom
-    flux is zero (evaporation-only mode).
-  - **Ad-atom parameters**:
-    - `Yad`: ad-atom yield for D on Li (default 1e-3)
-    - `Yad_Yps`: ratio Yad/Yps (default 1.0)
-    - `E_eff`: effective binding energy [eV] (default 0.9)
-    - `A_arr`: Arrhenius pre-factor (default 1e-7)
-  - **Per-surface output columns** (accessible as `f_ID[i][col]`):
-    1. `Tsurf_lm` — surface temperature [°C]
-    2. `evap_lm` — evaporation flux [atoms/m²/s]
-    3. `adatom_lm` — ad-atom flux [atoms/m²/s]
-    4. `h_lm` — film thickness [m]
-  - **Key strip parameters**:
-    - `h0`: initial film thickness [m] (default 0.005)
-    - `U0`: inlet velocity [m/s] (default 8.0)
-    - `Bs`: streamwise magnetic field [T] (default 5.0)
-    - `Bw`: wall-normal magnetic field [T] (default 0.0)
-    - `alpha`: inclination angle [degrees] (default 43)
-    - `width`: channel half-width [m] (default 1.67)
-    - `Tin`: inlet temperature [°C] (default 350)
-    - `qss`: heat flux scale [W/m²] (default 1e6)
-    - `ncase`: 1 = sidewall (Hartmann via Bs), 2 = axisymmetric (via Bw)
-  - **Files**: `liquid_metal_strip.h` (standalone solver, no SPARTA
-    dependency), `fix_liquid_metal.{h,cpp}` (SPARTA fix wrapper).
-  - Based on Fortran code by Sergey Smolentsev (UCLA).
-
-  Example:
-  ```
-  # constant 2 MW/m² heat flux, no ad-atoms
-  fix flm liquid_metal wall 100 2.0e6 \
-      h0 0.005 U0 8.0 Bs 5.0 alpha 43 width 1.67 Tin 350
-
-  # with D+ flux from compute for ad-atom calculation
-  fix flm liquid_metal wall 100 c_hflux[2] \
-      h0 0.005 U0 8.0 Bs 5.0 alpha 43 width 1.67 Tin 350 \
-      dp_flux c_pflux[3] Yad 1e-3 E_eff 0.9
-
-  # access outputs for dump
-  dump dsurf surf all 1000 surf.*.dat id f_flm[1] f_flm[2] f_flm[3] f_flm[4]
-  ```
-
-## External coupling (library API)
-
-C-callable entry points for driving OpenEdge from an outer loop (Python,
-Gkeyll, SOLPS). Declared in `src/library.h`, implemented in
-`src/library.cpp`. Standard SPARTA calls (`sparta_open`, `sparta_file`,
-`sparta_command`, `sparta_extract_compute`, ...) are preserved; the
-OpenEdge extensions are:
-
-| Call | Purpose |
-|------|---------|
-| `openedge_extract_fix(ptr, id, 2, type)` | Return `double*` (`type=0`, vector_grid) or `double**` (`type≥1`, array_grid) for a per-grid fix. Used to pull source tallies from `fix chem/adas`. |
-| `openedge_get_ngrid(ptr)` | Number of owned grid cells on this rank. |
-| `openedge_reload_plasma(ptr, cid, path)` | Reload plasma HDF5 on a `compute plasma/fields`. `path=NULL` re-reads the existing file; otherwise swap to `path`. Used between Gkeyll/SOLPS iterations. |
-| `openedge_reset_fix_tally(ptr, id)` | Zero the 20-col source tally on a `fix chem/adas`. Called between coupling iterations so each handoff sees a fresh accumulation. Leaves per-type counters and exhaust state intact. Silent no-op if the ID is wrong or not a `FixChemAdas`. |
-
-**Coupling loop skeleton:**
-```python
-for k in range(n_outer):
-    openedge_command(ptr, f"run {n_steps}")
-    Sn_Smom_Se = ctypes_cast(openedge_extract_fix(ptr, b"fchem", 2, 1),
-                             ngrid, 20)
-    plasma = outer_solver.step(Sn_Smom_Se)
-    plasma.write_hdf5("plasma_k+1.h5")
-    openedge_reload_plasma(ptr, b"cplasma", b"plasma_k+1.h5")
-    openedge_reset_fix_tally(ptr, b"fchem")
-```
-
-Existing driver: `tools/coupling/openedge_solps_driver.py` (subprocess
-model); `solps_interface.py` handles SOLPS file IO.
-
-## Performance: grid refinement near surface sources
-
-For wall-source cases (PMI sputtering, divertor emission, evaporation), particles
-spawn at the wall and cluster in a small set of cells near the strike point.
-The two performance bottlenecks this creates:
-
-1. **SurfColl checks dominate Move time** — each particle move tests against
-   every surface element in its current cell. Coarse cells contain dozens of
-   surface elements → dozens of intersection tests per particle per step.
-2. **MPI load imbalance** — RCB partitions cells (atoms), so all particles in
-   one cell go to one rank. With particles concentrated in a few cells, one
-   rank does all the work and the rest sit in MPI barriers (`Other` bucket
-   becomes 80–90% of loop time).
-
-Both are solved by `adapt_grid` near the wall, which (a) reduces the number
-of surface elements per cell and (b) gives RCB more granularity to subdivide
-the dense region.
-
-**Standard recipe** (place after `read_surf` and `surf_modify`, before any
-`fix` commands):
-
-```
-# define refinement region(s) covering the wall area where particles cluster
-region   rdiv_lo block 1.82 3.2 -0.94 -0.40 -INF INF   # lower divertor
-region   rdiv_up block 1.82 3.2  0.40  0.80 -INF INF   # limiter / upper
-
-# refine cells that overlap surfaces inside the region
-# - thresh 0.001: refine if longest surf segment in cell > 1mm
-# - cells 2 2 1: each parent splits into 2x2x1 children (2D)
-# - maxlevel 5 + iterate 5: actually drives 5 levels of refinement
-#   (iterate is the cap, NOT maxlevel — they must match or iterate must
-#    be >= maxlevel)
-adapt_grid all refine surf all 0.001 maxlevel 5 cells 2 2 1 region rdiv_lo all iterate 5
-adapt_grid all refine surf all 0.001 maxlevel 5 cells 2 2 1 region rdiv_up all iterate 5
-balance_grid rcb cell
-```
-
-**Critical ordering** for MPI runs with `gridcut 0.0`:
-
-```
-create_grid 100 100 1
-balance_grid rcb cell        # FIRST balance — needed for adapt_grid in MPI
-read_surf ...
-surf_collide / surf_react / surf_modify ...
-region ... ; adapt_grid ...  # refinement after surfaces have collision models
-balance_grid rcb cell        # SECOND balance — distribute refined cells
-```
-
-If you skip the first `balance_grid`, MPI runs error out with
-*"Cannot mark grid cells as inside/outside surfs because ghost cells do not
-exist"*. If you run `adapt_grid` before `surf_modify`, you get
-*"surface elements not assigned to a collision model"*.
-
-**Measured impact (test_west_axi, 100×100 base grid, ~13K particles):**
-
-| config | wall (1 rank) | wall (32 ranks) | SurfColl checks |
-|---|---|---|---|
-| no refinement | 8.72s | n/a (load imbalance) | 83.8M |
-| ml=5 it=5 refine | 5.03s | **0.95s** | 8.5M (10× fewer) |
-
-Total speedup: ~9× on a single rank (Move halved by fewer surface checks),
-~13× on 32 ranks (refinement also makes RCB partitioning effective).
-
-**Tuning notes:**
-
-- `thresh` (third arg to `refine surf`) is the surf-element length below
-  which refinement stops. Default `0.001` (1mm) works for typical fusion
-  meshes; lower it only if your wall mesh has sub-mm features.
-- `iterate N` is the cap on refinement depth, NOT `maxlevel`. Set
-  `iterate >= maxlevel` or refinement stops early. Common mistake.
-- **Wider regions outperform tight regions** even though they use more
-  cells: the surface-check reduction across the *whole wall* is a bigger
-  win than concentrated refinement at the strike. Prefer broad geometric
-  bands over narrowly-tuned ones.
-- `fix balance ... rcb time` (every 500 steps) outperforms `rcb part`
-  for impurity transport — `time` weights cells by measured CPU cost,
-  capturing per-particle work intensity (Boris subcycles, surf checks).
-- **Exception for wall-sourced cases (emit/surf/pmi, emit/surf/recycle):**
-  use `rcb part`, not `rcb time`. When the first balance fires, several
-  ranks have zero particle work-time (no tasks emitted yet) and the RCB
-  recursion in `rcb time` mode segfaults on NaN weights. `rcb part`
-  partitions by particle count instead — stable with idle ranks.
-  See `memory/feedback_rcb_time_segfault.md`.
-
-### Runtime adaptive refinement: `fix adapt`
-
-Static `adapt_grid` only sets up the grid once. For source-driven cases
-where the cluster grows over time (more particles emitted than removed),
-add `fix adapt` to refine cells whose particle count exceeds a threshold
-*during* the run. Combined with `fix balance ... rcb time`, this gives an
-extra **2–4× speedup** on top of the static refinement at moderate rank
-counts (np=4–16).
-
-**Recipe** (place in the fixes section of `in.case`):
-
-```
-# Runtime adaptive refinement: split any cell holding > 500 particles.
-# Refines monotonically (no coarsen) so the grid never loses granularity.
-# Capped by maxlevel + setup adapt_grid.
-fix fadapt adapt 200 all refine particle 500 0 maxlevel 8 cells 2 2 1
-fix fbal   balance 200 1.1 rcb time
-```
-
-- The `0` is the coarsen threshold (always required by the parser, even
-  with `refine` only — leave at 0 for monotonic refinement).
-- `200` (Nevery for fadapt and fbal) is the sweet spot. **More aggressive
-  settings (every 100, threshold 200) actively hurt** — refine + balance
-  overhead overwhelms the gain.
-- `fix balance` alone every 200 steps does **not** help; the win requires
-  fadapt + balance working together. Don't drop balance frequency without
-  also enabling fadapt.
-
-**Measured impact (test_west_axi, ~130K particles, nlaunch=100):**
-
-| ranks | static refine only | + fix adapt | speedup from fadapt |
-|-------|--------------------|-------------|---------------------|
-| 4     | 36.8s              | 19.6s       | 1.88×               |
-| 8     | 30.0s              | **9.7s**    | **3.09×**           |
-| 16    | 21.2s              | 5.6s        | 3.78×               |
-| 32    | 14.3s              | ~7.0s       | 2.0× (variance)     |
-
-Total speedup vs single rank with no refinement: **~20× at np=16** for
-this case. np=8 is the practical sweet spot for divertor-source cases at
-this resolution — beyond that, refinement granularity becomes the new
-bottleneck.
-
-### Critical ordering for `fix adapt`
-
-```
-# ---- Diagnostics FIRST ----
-compute cden grid all species nrho
-fix    fden ave/grid all 1 1000 1000 c_cden[*] ave one
-fix    frate ave/grid all 1 1000 1000 f_fchem[*] ave one
-
-# ---- Runtime refinement + balance AFTER all fix ave/grid ----
-fix fadapt adapt 200 all refine particle 500 0 maxlevel 5 cells 2 2 1
-fix fbal   balance 500 1.1 rcb part
-```
-
-SPARTA errors out with *"Fix adapt must come after fix ave/grid"* if the
-ordering is wrong. `fix adapt` invalidates any cell-to-value mapping
-every time it refines, so the `ave/grid` fixes must already be set up
-to hear about it.
-
-### Measured impact: wall-recycling case (test_diii_d_neutrals)
-
-With `fix emit/surf/recycle` driving wall emission:
-
-| config (np=16) | ms/step @ ~50k particles |
-|---|---|
-| static adapt_grid maxlevel 3, no fbal/fadapt | ~110 ms |
-| maxlevel 5 static + fadapt 200 + fbal rcb part | **~15 ms** |
-
-**~7–8× speedup**, moves bottleneck off MPI load imbalance onto actual
-particle work. Per-rank particle counts become balanced (min/max ratio
-~1.5 instead of ~10).
-
-### MPI traps in fix init code
+### MPI trap: Allreduce in fix init
 
 When writing a new fix whose `init()` prints a diagnostic, **every
-MPI_Allreduce must be called on every rank, not inside `if (comm->me == 0)`**.
-A common mistake:
+`MPI_Allreduce` must be called on every rank**, not inside
+`if (comm->me == 0)`.
 
 ```cpp
 // BUG: only rank 0 calls Allreduce -> other ranks deadlock
@@ -865,7 +152,7 @@ if (comm->me == 0) {
 }
 ```
 
-Correct: run the Allreduce unconditionally, then gate only the `printf`:
+Correct — run the Allreduce unconditionally, gate only the `printf`:
 
 ```cpp
 double local = compute_something();
@@ -874,19 +161,17 @@ MPI_Allreduce(&local, &global, 1, MPI_DOUBLE, MPI_SUM, world);
 if (comm->me == 0) printf("diagnostic = %.3e\n", global);
 ```
 
-The symptom is a hang with no stats line ever printed — the run log
-stops right after the fix's init prints. Single-rank runs are fine, so
-the bug only shows up under MPI. Cost us a good chunk of a debug
-session on `fix emit/surf/recycle`.
+Symptom: run hangs with no stats line ever printed, log stops right
+after the fix's init prints. Single-rank runs are fine; only shows up
+under MPI.
 
 ## MPI launch on mora
 
-The OpenEdge binary is linked against Intel MPI. The system PATH points to
-linuxbrew's `mpirun` by default, which is a different MPI ABI — launching
-with the wrong `mpirun` produces N independent singleton processes
-(`Running on 1 MPI task(s)` printed N times) instead of one N-rank job.
-
-**Always source Intel oneAPI before running:**
+The OpenEdge binary is linked against Intel MPI. The system `PATH` points
+to linuxbrew's `mpirun` by default, which is a different MPI ABI —
+launching with the wrong `mpirun` produces N independent singleton
+processes (`Running on 1 MPI task(s)` printed N times) instead of one
+N-rank job.
 
 ```bash
 source /opt/intel/oneapi/setvars.sh --force
@@ -899,17 +184,87 @@ which mpirun           # should be /opt/intel/oneapi/mpi/.../bin/mpirun
 echo $I_MPI_ROOT       # should be non-empty
 ```
 
+## Features overview
+
+Pointers to detailed per-feature docs. Each doc covers syntax, physics,
+and usage patterns.
+
+### Pushers / sheaths
+
+- **Boris / GCA hybrid pusher.** Boris with `global boris_subcycles N`;
+  GCA (Guiding Center Approximation) RK4 with Littlejohn corrections via
+  `global gca …`. Automatic switching via `gca_switch_factor`.
+- **Sheath models.** Kick (`global sheath ... kick yes`) — velocity boost
+  at wall collision, recommended for IEADs, no per-subcycle E-field.
+  Spatial (`global sheath ... model <name>`) — per-subcycle E-field,
+  models: `borodkina`, `coulette_manfredi`, with overshoot guard.
+- **Surface collision.** `surf_collide vanish`, `diffuse`, `toroidal`
+  (phi-periodic wedge rotation).
+
+### Plasma I/O
+
+- **Plasma.h5 schema (mesh-only)** — [`docs/converters/plasma_h5_schema.md`](docs/converters/plasma_h5_schema.md).
+  Three top-level groups: `/equilibrium`, `/ion_species`, `/mesh`.
+  Query via `fix plasma/data`.
+- **Wall geometry from SOLPS** — [`docs/converters/wall_geometry.md`](docs/converters/wall_geometry.md).
+  `--wall-source` options: `mesh-extra` (default), `b2`, `eirene`.
+- **Axi migration cookbook** — [`docs/migration/axi_cookbook.md`](docs/migration/axi_cookbook.md).
+
+### Transport fixes
+
+- **`fix thermal_force`** — Braginskii ion + electron thermal forces on
+  impurity ions. [`docs/fixes/thermal_force.md`](docs/fixes/thermal_force.md).
+- **`fix cross_diffusion`** — anomalous perpendicular diffusion + pinch.
+  [`docs/fixes/cross_diffusion.md`](docs/fixes/cross_diffusion.md).
+- **Plasma-native E-field** — `compute plasma/fields` reads `E = −∇ϕ`
+  from converter. [`docs/fixes/efield_plasma.md`](docs/fixes/efield_plasma.md).
+
+### Neutral transport (EIRENE replacement)
+
+- **`fix chem/adas`** — volumetric ionization / recombination / CX /
+  dissociation with ADAS + Janev rates. 20-col per-cell source tally.
+  [`docs/fixes/chem_adas.md`](docs/fixes/chem_adas.md).
+- **`fix emit/surf/puff`** — hard-capped surface emission for Mode A
+  puffs. [`docs/fixes/emit_surf_puff.md`](docs/fixes/emit_surf_puff.md).
+- **`fix emit/surf/recycle`** — wall-recycling neutral source, Bohm
+  flux × recycling coeff. [`docs/fixes/emit_surf_recycle.md`](docs/fixes/emit_surf_recycle.md).
+- **`surf_react recycle`** — surface recycling with cosine re-emission.
+  [`docs/fixes/surf_react_recycle.md`](docs/fixes/surf_react_recycle.md).
+
+### Diagnostics
+
+- **`compute photon_emissivity/grid`** — synthetic line emission
+  `ε = ne · nz · PEC(Te, ne)` using ColRadPy PEC tables.
+  [`docs/fixes/photon_emissivity.md`](docs/fixes/photon_emissivity.md).
+
+### Surface / liquid-metal models
+
+- **`fix liquid_metal`** — MHD shallow-water Li film with evaporation
+  (Antoine + Hertz-Knudsen) and ad-atom (Arrhenius desorption).
+  [`docs/fixes/liquid_metal.md`](docs/fixes/liquid_metal.md).
+
+### External coupling
+
+- Library API for Python/Gkeyll/SOLPS outer loops — see
+  [`docs/coupling/library_api.md`](docs/coupling/library_api.md).
+
+### Performance
+
+- **Grid refinement near surface sources** — `adapt_grid` + `fix adapt` +
+  `fix balance rcb part`. [`docs/performance/grid_refinement.md`](docs/performance/grid_refinement.md).
+
 ## Testing
 
-Test cases live in `examples/test_*/`. Each has a README with run instructions.
-Key validated tests:
+Test cases live in `examples/test_*/`. Each has a README with run
+instructions. Key validated tests:
 
-- `test_iead` — IEAD validation (sheath kick + spatial, vs Fortran reference)
-- `test_sheath` — Analytical sheath profile validation (Borodkina model)
-- `test_gca` — GCA pusher vs Boris, mu conservation
-- `test_droplet` — Droplet transport (drag, charging, viscous forces)
+- `test_iead` — IEAD validation (sheath kick + spatial vs. Fortran ref)
+- `test_sheath` — analytical sheath profile (Borodkina model)
+- `test_gca` — GCA pusher vs. Boris, mu conservation
+- `test_droplet` — droplet drag, charging, viscous forces
 - `test_collide` — Nanbu collision operator
-- `test_gravity_3d` — Gravity force validation
+- `test_gravity_3d` — gravity force validation
+- `test_diii_d_neutrals` — axi pilot, EIRENE neutral-transport benchmark
 
 Run a test:
 ```bash
@@ -921,20 +276,21 @@ python3 compare_iead.py
 
 ## Coding conventions
 
-- C++11 standard, no newer features
-- SPARTA naming: classes use CamelCase, files use snake_case with
-  prefix (`fix_`, `compute_`, `surf_collide_`, `surf_react_`)
-- New commands registered via style macros (e.g., `FixStyle`, `ComputeStyle`,
-  `SurfCollideStyle`) in the header file's `#ifdef` block
-- Physical constants: define locally in anonymous namespace (QE, AMU, EPS0, ME)
-  rather than using a global header
-- Error handling: use `error->all(FLERR, "message")` for fatal errors,
-  `error->warning(FLERR, "message")` for warnings
-- MPI: never alias input/output buffers in MPI_Allreduce (use MPI_IN_PLACE
-  or separate buffers)
+- C++11 standard, no newer features.
+- SPARTA naming: classes `CamelCase`, files `snake_case` with prefix
+  (`fix_`, `compute_`, `surf_collide_`, `surf_react_`).
+- Register new commands via style macros (`FixStyle`, `ComputeStyle`,
+  `SurfCollideStyle`) inside the header's `#ifdef` block.
+- Physical constants: define locally in an anonymous namespace
+  (`QE, AMU, EPS0, ME`) rather than using a global header.
+- Error handling: `error->all(FLERR, "message")` for fatal errors,
+  `error->warning(FLERR, "message")` for warnings.
+- MPI: never alias input/output buffers in `MPI_Allreduce` — use
+  `MPI_IN_PLACE` or separate buffers.
 
 ## Git conventions
 
-- Commit messages: imperative mood, concise first line, details in body
-- Main branch: `main`
-- Feature branches: descriptive names (e.g., `seed-timedep-multilayer`)
+- Commit messages: imperative mood, concise first line, details in body.
+- Main branch: `main`.
+- Feature branches: descriptive names (e.g. `seed-timedep-multilayer`,
+  `neutral`).

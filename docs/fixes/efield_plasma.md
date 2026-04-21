@@ -1,0 +1,32 @@
+# Plasma-native electric field
+
+`compute plasma/fields` reads the E-field directly from the plasma code's
+native potential at converter time (SOLPS `po`, SOLEDGE3X `zone*/PHI`,
+OEDGE `osmns_efpara`). The converter computes `E = −∇ϕ` on the
+B2 / SOLEDGE3X triangulation mesh and writes `/mesh/e_r, /mesh/e_z, /mesh/e_t`.
+
+`compute plasma/fields` then reads those per-cell values at the SPARTA cell
+centroid (via `findNearestMappedTriangle`) and emits `er`, `et`, `ez`, `ex`,
+`ey` output columns.
+
+- **`epar` output** = `E · b̂` (dot product of the mesh-stored E vector with
+  `b̂` from equilibrium ψ).
+- **No runtime `−∇pe/(ne·e)` approximation** — the pressure-balance code
+  path was removed from both `compute_per_grid` and `query_plasma_at_point`.
+
+## Converter status
+
+| code | status |
+|---|---|
+| SOLPS | fully implemented (reads `balance.nc:po`, Jacobian FD on the B2 `(ix, iy)` grid) |
+| SOLEDGE3X | writes `mesh/e_{r,z,t} = 0` placeholders. Zone-based `/zone*/PHI` resampling onto EIRENE triangle centroids is TODO. Prints WARNING at converter time. |
+| OEDGE | no `/mesh/*` output; legacy regular-grid path (deprecated) returned zero E via default-initialized fields. Proper fix comes with a future OEDGE → mesh migration. |
+
+## Feeding into the Boris pusher
+
+```
+fix pd plasma/data file plasma.h5
+compute cplasma plasma/fields all plasma_data pd ex ey ez
+fix fE efield/grid c_cplasma[ex_col] c_cplasma[ey_col] c_cplasma[ez_col]
+global efield grid fE 0
+```
