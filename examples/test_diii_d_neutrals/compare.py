@@ -35,63 +35,64 @@ def main():
         dump = cand if os.path.exists(cand) else os.path.join(THIS, 'output', 'diii_d.grid')
     print(f'reading {dump}')
     d = read_grid_dump(dump)
-    # OpenEdge dumps xc/yc in SPARTA slot order. Detect axi vs cart by the
-    # range of the y column: axi has y >= 0 (radial); cart 2D has y in [-1.4, 1.4].
+    # OpenEdge dumps xc/yc in SPARTA slot order. Detect axi vs cart by
+    # the range of the y column: axi has y >= 0 (radial); cart has y
+    # in [-1.4, 1.4].
     xc_raw = d['xc']; yc_raw = d['yc']
     axi = (yc_raw.min() >= -1e-6)
     if axi:
         # SPARTA axi: x = Z (axial), y = R (radial). Plot in physical (R, Z).
-        Z_oe = xc_raw
-        R_oe = yc_raw
+        R_openedge = yc_raw
+        Z_openedge = xc_raw
     else:
-        R_oe = xc_raw
-        Z_oe = yc_raw
-    n_D2  = d['f_fden[1]']
-    n_D   = d['f_fden[2]']
-    S_iz_oe   = d['f_frate[1]']    # ionization rate [m^-3 s^-1]
-    S_diss_oe = d['f_frate[4]']    # dissociation rate
+        R_openedge = xc_raw
+        Z_openedge = yc_raw
+    n_D2              = d['f_fden[1]']
+    n_D               = d['f_fden[2]']
+    S_iz_openedge     = d['f_frate[1]']  # ionization rate [m^-3 s^-1]
+    S_diss_openedge   = d['f_frate[4]']  # dissociation rate
 
-    # ---- load EIRENE truth
+    # ---- load SOLPS-EIRENE truth
     with h5py.File(os.path.join(THIS, 'input', 'eirene_truth.h5'), 'r') as f:
-        R   = f['R'][:]
-        Z   = f['Z'][:]
-        S_iz_ei   = f['S_iz'][:]
-        S_diss_ei = f['S_diss'][:]
-        te = f['te_eV'][:]
-        ne = f['ne'][:]
+        R_solps_eirene      = f['R'][:]
+        Z_solps_eirene      = f['Z'][:]
+        S_iz_solps_eirene   = f['S_iz'][:]
+        S_diss_solps_eirene = f['S_diss'][:]
 
     # ---- summary metrics
     # In SPARTA axi mode the per-cell volume is the true cylindrical
-    # volume that f_frate is normalized by — so summing rate * (true cell
-    # volume) gives the full-3D total source. Here we approximate the cell
-    # volume from the base-grid spacing and the radial position.
-    def oe_cell_vol(R_arr):
-        dx_axial = (1.4 - (-1.4)) / 200    # base grid 200 in x = Z
-        dy_radial = (2.4 - 0.0) / 100       # base grid 100 in y = R
+    # volume that f_frate is normalized by — so summing rate * (true
+    # cell volume) gives the full-3D total source. Here we approximate
+    # the cell volume from the base-grid spacing and the radial position.
+    def cell_volume(R_arr):
+        dx_axial  = (1.4 - (-1.4)) / 200  # base grid 200 along x = Z
+        dy_radial = (2.4 - 0.0)    / 100  # base grid 100 along y = R
         if axi:
-            # 2*pi*R*dR*dZ — full toroidal revolution
             return 2.0 * np.pi * np.maximum(R_arr, 1e-6) * dx_axial * dy_radial
-        else:
-            # 2D Cartesian: dx*dy*dz_box (per-radian-wedge convention)
-            return dx_axial * dy_radial * 1.0
-    vol_oe = oe_cell_vol(R_oe)   # array in axi mode, scalar in cart
+        return dx_axial * dy_radial * 1.0
+    vol = cell_volume(R_openedge)
+    tot_iz_openedge   = float(np.sum(S_iz_openedge   * vol))
+    tot_diss_openedge = float(np.sum(S_diss_openedge * vol))
 
-    tot_iz_oe   = float(np.sum(S_iz_oe   * vol_oe))
-    tot_diss_oe = float(np.sum(S_diss_oe * vol_oe))
-    # EIRENE: we stored per-volume rates, need to re-integrate with vol
-    # (which was part of eirene_truth.h5? no -- we stored S as per-vol)
-    # Just report domain-integrated via cell-vol proxy: assume balance.nc
-    # tally was divided by vol when we wrote S_iz etc. -> sum over cells
-    # equals volume-weighted, but we didn't store vol. Skip for now.
+    print(f'OpenEdge:       peak S_iz = {S_iz_openedge.max():.2e}  '
+          f'peak S_diss = {S_diss_openedge.max():.2e}')
+    print(f'SOLPS-EIRENE:   peak S_iz = {S_iz_solps_eirene.max():.2e}  '
+          f'peak S_diss = {S_diss_solps_eirene.max():.2e}')
+    peak_ratio = (S_iz_solps_eirene.max() /
+                  max(S_iz_openedge.max(), 1.0))
+    print(f'                SOLPS-EIRENE / OpenEdge peak S_iz ratio = {peak_ratio:.1e}')
+    print(f'OpenEdge domain-integrated reaction totals:')
+    print(f'  S_iz    ~= {tot_iz_openedge:.2e}  /s')
+    print(f'  S_diss  ~= {tot_diss_openedge:.2e}  /s')
 
-    print(f'OpenEdge:        peak S_iz = {S_iz_oe.max():.2e}  peak S_diss = {S_diss_oe.max():.2e}')
-    print(f'SOLPS-EIRENE:    peak S_iz = {S_iz_ei.max():.2e}  peak S_diss = {S_diss_ei.max():.2e}')
-    print(f'                 (SOLPS-EIRENE/OpenEdge peak ratio = {S_iz_ei.max()/max(S_iz_oe.max(),1):.1e})')
-    print(f'Total OpenEdge reaction count (dump rate x vol x run time):')
-    print(f'  iz   ~= {tot_iz_oe:.2e} /s  (per-step rate-mode, ~1 window snapshot)')
-    print(f'  diss ~= {tot_diss_oe:.2e} /s')
-
-    # ---- 2x3 plot: OE density, OE S_iz, EI S_iz, OE S_diss, EI S_diss, plasma ctx
+    # ---- 2x3 plot: OpenEdge n_D2/n_D + S_iz/S_diss vs SOLPS-EIRENE
+    # Aliases so the plotting code below stays readable.
+    R_ei     = R_solps_eirene
+    Z_ei     = Z_solps_eirene
+    S_iz_ei  = S_iz_solps_eirene
+    S_diss_ei = S_diss_solps_eirene
+    R_oe, Z_oe         = R_openedge, Z_openedge
+    S_iz_oe, S_diss_oe = S_iz_openedge, S_diss_openedge
     fig, axes = plt.subplots(2, 3, figsize=(15, 10), sharex=True, sharey=True)
     vmin_iz = 1e20
     vmax_iz = max(S_iz_oe.max(), S_iz_ei.max()) * 1.1
@@ -120,7 +121,7 @@ def main():
 
     ax = axes[0,2]
     posmask = S_iz_ei > 0
-    im = ax.pcolormesh(R, Z, np.maximum(S_iz_ei, vmin_iz),
+    im = ax.pcolormesh(R_ei, Z_ei, np.maximum(S_iz_ei, vmin_iz),
                        norm=LogNorm(vmin=vmin_iz, vmax=vmax_iz), cmap='viridis',
                        shading='nearest')
     plt.colorbar(im, ax=ax); ax.set_title('SOLPS-EIRENE $S_{iz}$ [m$^{-3}$s$^{-1}$]')
@@ -145,7 +146,7 @@ def main():
     ax.set_title('OpenEdge $S_{diss}$ [m$^{-3}$s$^{-1}$]')
 
     ax = axes[1,2]
-    im = ax.pcolormesh(R, Z, np.maximum(S_diss_ei, vmin_di),
+    im = ax.pcolormesh(R_ei, Z_ei, np.maximum(S_diss_ei, vmin_di),
                        norm=LogNorm(vmin=vmin_di, vmax=vmax_di), cmap='magma',
                        shading='nearest')
     plt.colorbar(im, ax=ax); ax.set_title('SOLPS-EIRENE $S_{diss}$ [m$^{-3}$s$^{-1}$]')
@@ -159,14 +160,7 @@ def main():
     for ax in axes[:,0]:
         ax.set_ylabel('Z [m]')
 
-    if 'eirene' in os.path.basename(dump):
-        title_src = 'wall recycling, R=0.99'
-    elif 'recycle' in os.path.basename(dump):
-        title_src = 'recycle-proxy (div_lo)'
-    else:
-        title_src = 'single-puff'
-    plt.suptitle(f'DIII-D neutrals: OpenEdge Mode A ({title_src}) vs SOLPS-EIRENE coupled '
-                 f'(reference, NOT standalone EIRENE)', y=0.99)
+    plt.suptitle('DIII-D neutrals: OpenEdge vs SOLPS-EIRENE', y=0.99)
     plt.tight_layout()
     out = os.path.join(THIS, 'output', 'compare_to_eirene.png')
     plt.savefig(out, dpi=120, bbox_inches='tight')
