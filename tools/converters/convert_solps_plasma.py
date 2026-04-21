@@ -681,6 +681,33 @@ def convert_solps_to_openedge(
     te = b2f_extract("te", b2fstate_file)  # (nx+2, ny+2)
     ti = b2f_extract("ti", b2fstate_file)  # (nx+2, ny+2)
 
+    # Electric potential po [V] from balance.nc (not b2fstate). SOLPS
+    # solves a current-continuity equation and writes po — OpenEdge
+    # reads this directly so we never have to reconstruct an ambipolar
+    # approximation from electron pressure balance.
+    po_data = None
+    try:
+        import netCDF4 as _nc
+        balance_path = run_path / "balance.nc"
+        if balance_path.exists():
+            _bds = _nc.Dataset(str(balance_path))
+            if "po" in _bds.variables:
+                po_raw = np.asarray(_bds["po"][:], dtype=np.float64)
+                # balance.nc is (ny+2, nx+2); b2fstate is (nx+2, ny+2).
+                # Transpose to match the rest of the converter.
+                if po_raw.shape == (ny + 2, nx + 2):
+                    po_data = po_raw.T
+                elif po_raw.shape == (nx + 2, ny + 2):
+                    po_data = po_raw
+                else:
+                    print(f"WARNING: unexpected po shape {po_raw.shape}; skipping E-field")
+            _bds.close()
+    except Exception as _e:
+        print(f"WARNING: could not read po from balance.nc: {_e}")
+    if po_data is None:
+        print("WARNING: no electric potential po found — E = 0 in plasma.h5")
+        po_data = np.zeros_like(ne)
+
     # SOLPS stores temperatures in Joules; convert to eV
     eV = 1.602176634e-19
     te_eV = te / eV
@@ -1344,12 +1371,24 @@ def convert_solps_to_openedge(
     grad_te_r_g, grad_te_z_g = _grad_rz(Te_g)
     grad_ti_r_g, grad_ti_z_g = _grad_rz(Ti_g)
 
+    # Electric field E = -grad(phi) on the B2 mesh (same Jacobian path).
+    # E_toroidal = 0 in axisymmetric SOLPS. No pressure-balance
+    # fallback — consumers read E directly.
+    po_g = _grid(po_data.reshape(ncell_flat, order='F'))
+    grad_po_r_g, grad_po_z_g = _grad_rz(po_g)
+    e_r_g = -grad_po_r_g
+    e_z_g = -grad_po_z_g
+
     mesh_grad_te_r = grad_te_r_g.reshape(ncell_flat, order='F')
     mesh_grad_te_z = grad_te_z_g.reshape(ncell_flat, order='F')
     mesh_grad_ti_r = grad_ti_r_g.reshape(ncell_flat, order='F')
     mesh_grad_ti_z = grad_ti_z_g.reshape(ncell_flat, order='F')
+    mesh_e_r = e_r_g.reshape(ncell_flat, order='F')
+    mesh_e_z = e_z_g.reshape(ncell_flat, order='F')
+    mesh_e_t = np.zeros_like(mesh_e_r)
     for arr in [mesh_grad_te_r, mesh_grad_te_z,
-                mesh_grad_ti_r, mesh_grad_ti_z]:
+                mesh_grad_ti_r, mesh_grad_ti_z,
+                mesh_e_r, mesh_e_z, mesh_e_t]:
         arr[~np.isfinite(arr)] = 0.0
 
     # -- Write plasma.h5 --
@@ -1389,6 +1428,9 @@ def convert_solps_to_openedge(
         f.create_dataset("mesh/grad_te_z", data=mesh_grad_te_z)
         f.create_dataset("mesh/grad_ti_r", data=mesh_grad_ti_r)
         f.create_dataset("mesh/grad_ti_z", data=mesh_grad_ti_z)
+        f.create_dataset("mesh/e_r", data=mesh_e_r)
+        f.create_dataset("mesh/e_z", data=mesh_e_z)
+        f.create_dataset("mesh/e_t", data=mesh_e_t)
         f.create_dataset("mesh/ions/dens", data=mesh_ions_dens)
         f.create_dataset("mesh/ions/temp", data=mesh_ions_temp)
         f.create_dataset("mesh/ions/parr_flow", data=mesh_ions_upar)

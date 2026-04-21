@@ -350,6 +350,9 @@ void FixPlasmaData::reload()
     bcast_grad(mesh_grad_te_z);
     bcast_grad(mesh_grad_ti_r);
     bcast_grad(mesh_grad_ti_z);
+    bcast_grad(mesh_e_r);
+    bcast_grad(mesh_e_z);
+    bcast_grad(mesh_e_t);
     MPI_Bcast(&has_mesh_wall_face_area, 1, MPI_INT, 0, world);
     if (has_mesh_wall_face_area) {
       if (static_cast<int>(mesh_wall_face_area.size()) != mesh_ncell)
@@ -847,6 +850,9 @@ void FixPlasmaData::load_plasma_h5()
     read1D_mesh_opt("mesh/grad_te_z", mesh_grad_te_z);
     read1D_mesh_opt("mesh/grad_ti_r", mesh_grad_ti_r);
     read1D_mesh_opt("mesh/grad_ti_z", mesh_grad_ti_z);
+    read1D_mesh_opt("mesh/e_r", mesh_e_r);
+    read1D_mesh_opt("mesh/e_z", mesh_e_z);
+    read1D_mesh_opt("mesh/e_t", mesh_e_t);
     if (hasDataset("mesh/wall_face_area")) {
       read1D_mesh("mesh/wall_face_area", mesh_wall_face_area);
       has_mesh_wall_face_area = 1;

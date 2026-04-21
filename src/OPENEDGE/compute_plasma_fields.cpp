@@ -375,6 +375,9 @@ void ComputePlasmaFields::init()
       plasma_data.mesh_ti = pd->mesh_ti;
       plasma_data.mesh_ni = pd->mesh_ni;
       plasma_data.mesh_upar = pd->mesh_upar;
+      plasma_data.mesh_e_r = pd->mesh_e_r;
+      plasma_data.mesh_e_z = pd->mesh_e_z;
+      plasma_data.mesh_e_t = pd->mesh_e_t;
       // Build bounding boxes, mapped centroids, and spatial hash
       plasma_data.mesh_tri_rmin.resize(pd->mesh_ntri);
       plasma_data.mesh_tri_rmax.resize(pd->mesh_ntri);
@@ -796,9 +799,39 @@ void ComputePlasmaFields::compute_per_grid()
     const double Br = B.br;
     const double Bt = B.bt;
     const double Bzv = B.bz;
-    double Er = (input_mode != MODE_FILE) ? econst[0] : 0.0;
-    double Et = (input_mode != MODE_FILE) ? econst[1] : 0.0;
-    double Ezv = (input_mode != MODE_FILE) ? econst[2] : 0.0;
+    // Electric field: sourced from the plasma code (SOLPS po, SOLEDGE3X
+    // phi, OEDGE epara) at converter time and embedded in plasma.h5
+    // /mesh/e_{r,z,t}. For file-mode input the MODE_FILE path is gone;
+    // for constant/analytic modes we use the econst[] vector.
+    double Er  = (input_mode == MODE_CONSTANT || input_mode == MODE_ANALYTIC)
+                  ? econst[0] : 0.0;
+    double Et  = (input_mode == MODE_CONSTANT || input_mode == MODE_ANALYTIC)
+                  ? econst[1] : 0.0;
+    double Ezv = (input_mode == MODE_CONSTANT || input_mode == MODE_ANALYTIC)
+                  ? econst[2] : 0.0;
+    if (input_mode == MODE_PLASMA_DATA && plasma_data.has_mesh &&
+        !plasma_data.mesh_e_r.empty()) {
+      // Look up the mesh cell for this SPARTA cell centroid and read
+      // stored E components directly.
+      const Grid::ChildCell &cell = cells[icell];
+      const double xyz_c[3] = {
+        0.5 * (cell.lo[0] + cell.hi[0]),
+        0.5 * (cell.lo[1] + cell.hi[1]),
+        (dim == 3) ? 0.5 * (cell.lo[2] + cell.hi[2]) : 0.0
+      };
+      double Rc, Zc;
+      OpenEdge::sparta_to_RZ(xyz_c, dim, domain->axisymmetric, Rc, Zc);
+      const int tri = findNearestMappedTriangle(plasma_data, Rc, Zc, 0.1);
+      int mcell = -1;
+      if (tri >= 0 && tri < static_cast<int>(plasma_data.mesh_cell_idx.size()))
+        mcell = plasma_data.mesh_cell_idx[tri];
+      if (mcell >= 0 &&
+          mcell < static_cast<int>(plasma_data.mesh_e_r.size())) {
+        Er  = plasma_data.mesh_e_r[mcell];
+        Ezv = plasma_data.mesh_e_z[mcell];
+        Et  = plasma_data.mesh_e_t[mcell];
+      }
+    }
     const double Vr = P.parr_flow_r;
     const double Vt = P.parr_flow_t;
     const double Vzv = P.parr_flow_z;
@@ -823,33 +856,19 @@ void ComputePlasmaFields::compute_per_grid()
                                      phi, Ex, Ey, Ezz);
     OpenEdge::RZphi_force_to_sparta(Vr, Vzv, Vt, dim, domain->axisymmetric,
                                      phi, Vx, Vy, Vzz);
-    const double ne = std::max(P.dens_e, tiny);
-    // WEST/SOLPS convention used here:
-    //   Te in eV, ne in 1/m^3, grad(Te) in eV/m, grad(ne) in 1/m^4.
-    // Then electron pressure is:
-    //   pe [Pa] = e * ne * Te[eV]
-    // and
-    //   grad(pe) [Pa/m] = e * (Te*grad(ne) + ne*grad(Te)).
-    const double gradPe_r = eQ * (P.temp_e * P.grad_dens_e_r + ne * P.grad_temp_e_r);
-    const double gradPe_t = eQ * (P.temp_e * P.grad_dens_e_t + ne * P.grad_temp_e_t);
-    const double gradPe_z = eQ * (P.temp_e * P.grad_dens_e_z + ne * P.grad_temp_e_z);
+    // Parallel E for diagnostic output: just the dot product of the
+    // mesh-stored E vector with b-hat. No pressure-balance approximation.
     const double Bmag = std::sqrt(Br*Br + Bt*Bt + Bzv*Bzv);
     const double invBmag = (Bmag > tiny) ? 1.0 / Bmag : 0.0;
     const double bhat_r = Br * invBmag;
     const double bhat_t = Bt * invBmag;
     const double bhat_z = Bzv * invBmag;
-    const double epar =
-      (Bmag > tiny) ? (-(gradPe_r*bhat_r + gradPe_t*bhat_t + gradPe_z*bhat_z) / (ne * eQ)) : 0.0;
+    const double epar = (Bmag > tiny)
+      ? (Er * bhat_r + Et * bhat_t + Ezv * bhat_z) : 0.0;
 
-    // In FILE mode, decompose epar into cylindrical E-field vector
-    // so that er/et/ez output columns are usable with fix efield/grid.
-    if (input_mode == MODE_FILE && epar != 0.0) {
-      Er  = epar * bhat_r;
-      Et  = epar * bhat_t;
-      Ezv = epar * bhat_z;
-      OpenEdge::RZphi_force_to_sparta(Er, Ezv, Et, dim, domain->axisymmetric,
-                                       phi, Ex, Ey, Ezz);
-    }
+    // Refresh SPARTA-slot E in case mesh E overrode the zero defaults.
+    OpenEdge::RZphi_force_to_sparta(Er, Ezv, Et, dim, domain->axisymmetric,
+                                     phi, Ex, Ey, Ezz);
 
     for (int iv = 0; iv < nvalue; ++iv) {
       double vout = 0.0;
@@ -1870,18 +1889,25 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
   P.q_mag = plasma_data.has_qmag ?
             interpField2D(plasma_data.q_mag, s) : 0.0;
 
-  // Compute parallel ambipolar E-field: epar = -(grad_pe . bhat) / (ne * e)
-  if (has_equilibrium && P.dens_e > 1.0e-6) {
-    MagneticFieldFileDataParams bf = query_bfield_at_point(xyz);
-    const double Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
-    if (Bmag > 1.0e-30) {
-      const double eQ = 1.602176634e-19;
-      const double ne = P.dens_e;
-      const double gradPe_r = eQ * (P.temp_e * P.grad_dens_e_r + ne * P.grad_temp_e_r);
-      const double gradPe_t = eQ * (P.temp_e * P.grad_dens_e_t + ne * P.grad_temp_e_t);
-      const double gradPe_z = eQ * (P.temp_e * P.grad_dens_e_z + ne * P.grad_temp_e_z);
-      const double invB = 1.0 / Bmag;
-      P.epar = -(gradPe_r*bf.br + gradPe_t*bf.bt + gradPe_z*bf.bz) * invB / (ne * eQ);
+  // Parallel E for per-particle query: use mesh-stored E vector if
+  // available. No pressure-balance approximation.
+  if (plasma_data.has_mesh && !plasma_data.mesh_e_r.empty()) {
+    double R, Z;
+    OpenEdge::sparta_to_RZ(xyz, domain->dimension, domain->axisymmetric, R, Z);
+    const int tri = findNearestMappedTriangle(plasma_data, R, Z, 0.1);
+    int mcell = -1;
+    if (tri >= 0 && tri < static_cast<int>(plasma_data.mesh_cell_idx.size()))
+      mcell = plasma_data.mesh_cell_idx[tri];
+    if (mcell >= 0 &&
+        mcell < static_cast<int>(plasma_data.mesh_e_r.size())) {
+      MagneticFieldFileDataParams bf = query_bfield_at_point(xyz);
+      const double Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
+      if (Bmag > 1.0e-30) {
+        const double invB = 1.0 / Bmag;
+        P.epar = (plasma_data.mesh_e_r[mcell] * bf.br +
+                  plasma_data.mesh_e_t[mcell] * bf.bt +
+                  plasma_data.mesh_e_z[mcell] * bf.bz) * invB;
+      }
     }
   }
 

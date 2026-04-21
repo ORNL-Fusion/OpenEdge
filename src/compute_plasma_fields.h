@@ -47,6 +47,10 @@ struct PlasmaFileData{
   std::vector<int> mesh_tri;       // (ntri*3) vertex indices
   std::vector<int> mesh_cell_idx;  // (ntri) cell index per triangle
   std::vector<double> mesh_ne, mesh_te, mesh_ti, mesh_ni, mesh_upar;
+  // Electric field on the mesh (from plasma code's native potential,
+  // not an internal -grad(pe)/(ne*e) approximation). Empty vector means
+  // "no E-field stored"; consumers return zero.
+  std::vector<double> mesh_e_r, mesh_e_z, mesh_e_t;
   // Bounding boxes for triangle search
   std::vector<double> mesh_tri_rmin, mesh_tri_rmax, mesh_tri_zmin, mesh_tri_zmax;
   // Precomputed centroids for nearest-neighbor fallback

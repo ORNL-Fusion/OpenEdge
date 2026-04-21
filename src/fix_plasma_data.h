@@ -79,6 +79,11 @@ class FixPlasmaData : public Fix {
   // Consumers query via mesh_cell_at(R, Z) + mesh_grad_*_{r,z}[cell].
   std::vector<double> mesh_grad_te_r, mesh_grad_te_z;
   std::vector<double> mesh_grad_ti_r, mesh_grad_ti_z;
+  // Electric field E = -grad(phi) precomputed on the B2 mesh. Converter
+  // reads the plasma code's native potential (SOLPS /balance.nc po,
+  // SOLEDGE3X phi, OEDGE osmns_efpara) and writes E components. No
+  // runtime -grad(pe)/(ne*e) approximation.
+  std::vector<double> mesh_e_r, mesh_e_z, mesh_e_t;
   std::vector<double> mesh_ions_dens, mesh_ions_temp, mesh_ions_upar;
   int has_mesh_wall_face_area;                // 1 if the converter wrote
                                               // mesh/wall_face_area
