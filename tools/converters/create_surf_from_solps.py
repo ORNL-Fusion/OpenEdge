@@ -4,6 +4,11 @@ from collections import Counter, defaultdict
 from matplotlib import pyplot as plt
 
 data_path = os.environ.get('SOLPS_CASE_DIR', '.')  # UPDATE: set your SOLPS case directory
+# Coord layout: 'axi' writes columns (Z, R) for SPARTA's true axisymmetric mode
+# (boundary o ao p, x=Z, y=R); 'cart' writes (R, Z) for legacy 2D Cartesian.
+coords_layout = os.environ.get('SPARTA_COORDS', 'axi')
+assert coords_layout in ('axi', 'cart'), \
+    f"SPARTA_COORDS must be 'axi' or 'cart', got {coords_layout!r}"
 
 fname = os.path.join(data_path, "mesh.extra")
 
@@ -59,7 +64,10 @@ with open(out, "w") as f:
     f.write(f"{n} points\n{n} lines\n\nPoints\n\n")
     for i, vidx in enumerate(path, start=1):
         R, Z = coords[vidx]
-        f.write(f"{i} {R:.8f} {Z:.8f}\n")
+        if coords_layout == 'axi':
+            f.write(f"{i} {Z:.8f} {R:.8f}\n")
+        else:
+            f.write(f"{i} {R:.8f} {Z:.8f}\n")
     f.write("\n")
     f.write("\nLines\n")
     f.write("\n")

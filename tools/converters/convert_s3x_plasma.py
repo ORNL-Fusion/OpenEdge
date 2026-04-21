@@ -168,8 +168,17 @@ def _extract_core_contour(r2d, z2d, psi2d, psi_level):
         plt.close(fig)
 
 
-def _write_sparta_surface_polyline(path, rvals, zvals, title="surface geometry"):
-    """Write a closed polyline into SPARTA 2D surface text format."""
+def _write_sparta_surface_polyline(path, rvals, zvals, title="surface geometry",
+                                    coords="axi"):
+    """Write a closed polyline into SPARTA 2D surface text format.
+
+    coords:
+      "axi"  -> SPARTA-native axisymmetric layout: write columns (Z, R)
+                so the file lines up with SPARTA's x=Z, y=R slot mapping
+                (boundary o ao p, boxlo[1]=0). Default.
+      "cart" -> Legacy 2D Cartesian layout: write columns (R, Z) for
+                boundary o o p with x=R, y=Z. Per-radian-wedge convention.
+    """
     if rvals is None or zvals is None:
         return
     r = np.asarray(rvals, dtype=np.float64).reshape(-1)
@@ -205,7 +214,10 @@ def _write_sparta_surface_polyline(path, rvals, zvals, title="surface geometry")
         f.write(f"{n} lines\n\n")
         f.write("Points\n\n")
         for i in range(n):
-            f.write(f"{i+1} {r[i]:.12g} {z[i]:.12g}\n")
+            if coords == "axi":
+                f.write(f"{i+1} {z[i]:.12g} {r[i]:.12g}\n")
+            else:
+                f.write(f"{i+1} {r[i]:.12g} {z[i]:.12g}\n")
         f.write("\nLines\n\n")
         for i in range(n):
             j = i + 1
@@ -616,6 +628,7 @@ def interpolate_and_save_plasma_field(
     use_mesh_wall=True,
     wall_sparta_file=None,
     core_sparta_file=None,
+    coords="axi",
     core_psi_level=None,
     equ_file=None,
     gfile=None,
@@ -754,15 +767,17 @@ def interpolate_and_save_plasma_field(
 
     # Optional SPARTA geometry exports from mesh-derived contours.
     if wall_sparta_file:
-        _write_sparta_surface_polyline(wall_sparta_file, Rwall, Zwall, title="surface geometry")
-        print(f"Wrote SPARTA wall surface: {wall_sparta_file}")
+        _write_sparta_surface_polyline(wall_sparta_file, Rwall, Zwall,
+                                        title="surface geometry", coords=coords)
+        print(f"Wrote SPARTA wall surface (coords={coords}): {wall_sparta_file}")
 
     if core_sparta_file:
         psi_level = psisep_cfg if core_psi_level is None else float(core_psi_level)
         rc, zc = _extract_core_contour(r2d_cfg, z2d_cfg, psi2d_cfg, psi_level)
         if rc is not None:
-            _write_sparta_surface_polyline(core_sparta_file, rc, zc, title="surface geometry")
-            print(f"Wrote SPARTA core surface: {core_sparta_file} (psi={psi_level})")
+            _write_sparta_surface_polyline(core_sparta_file, rc, zc,
+                                            title="surface geometry", coords=coords)
+            print(f"Wrote SPARTA core surface (coords={coords}): {core_sparta_file} (psi={psi_level})")
         else:
             print("WARNING: could not extract core contour from config/psi; core surface not written.")
 
