@@ -140,13 +140,14 @@ true axi first (see "Migration cookbook" below).
 **Migration cookbook** — moving a 2D-Cart-mis-named-axi test to true axi
 (pilot was `test_diii_d_neutrals`):
 
-1. **Regenerate plasma + wall** with the SOLPS converter (always emits
-   axi-mode wall.surf since SOLPS is an axisymmetric code):
+1. **Regenerate plasma + wall** with the SOLPS converter. Produces a
+   single mesh-only `plasma.h5` (no `bfield.h5`, no `--equ-file` at run
+   time — equilibrium is embedded in `/equilibrium/*`):
    ```bash
    python3 tools/converters/convert_solps_plasma.py <SOLPS_RUN> \
        --b2fgmtry <baserun>/b2fgmtry --equ-file <baserun>/dg.equ \
        --mesh-extra <baserun>/mesh.extra \
-       --plasma-out input/plasma.h5 --bfield-out input/bfield.h5 \
+       --plasma-out input/plasma.h5 \
        --wall-out input/wall.surf \
        --wall-source mesh-extra
    ```
@@ -161,8 +162,13 @@ true axi first (see "Migration cookbook" below).
    - All `region block xlo xhi ylo yhi zlo zhi`: swap to the new layout
      (xlo,xhi are now Z range, ylo,yhi are now R range). Lower divertor
      region: `Z` is negative; upper divertor: `Z` is positive.
+   - `compute plasma/fields`: drop any `file plasma.h5 …` syntax (now
+     rejected). Declare `fix pd plasma/data file input/plasma.h5` first,
+     then reference it: `compute cp plasma/fields all plasma_data pd …`.
+     Drop any `equilibrium <file>` keyword and any `bfield.h5` arg — the
+     mesh-only `plasma.h5` carries everything.
    - All B-field / E-field source columns from `compute plasma/fields`
-     stay named `bx by bz` — the compute now projects to the right SPARTA
+     stay named `bx by bz` — the compute projects to the right SPARTA
      slots automatically (commit dd6a746).
 3. **Re-tune `fnum`** — the wall-segment cone-frustum area in axi mode is
    `2π·R·L` (full revolution) instead of just `L` (per-radian). This
@@ -490,6 +496,65 @@ The converter writes `mesh/wall_face_area[ncell]`, `mesh/wall_surf_cell[nseg]`,
 and `mesh/wall_surf_area[nseg]` into plasma.h5. The fix uses these to
 emit the correct Bohm flux at each wall segment without any runtime
 geometric search.
+
+**Triangulation extension to the wall** — the EIRENE triangulation
+from fort.33/34/35 stops at its "neighbour polygon" that is typically
+a few mm to a few cm shy of the mesh.extra wall. The converter re-
+triangulates the annulus between the EIRENE outer boundary and the
+wall polygon using `scipy.spatial.Delaunay` on combined vertices,
+keeping only triangles whose centroid sits inside the wall and
+outside the EIRENE mesh. Each new triangle is projected to the
+nearest B2 sheath cell (same cKDTree path used for vacuum/PFR tris).
+Result: the mesh covers the full wall polygon, `mesh_cell_at()` never
+has to fall back to the 5 cm `max_dist` nearest-triangle search.
+
+### Plasma.h5 schema (mesh-only, post-2026-04-20)
+
+`convert_solps_plasma.py`, `convert_s3x_plasma.py`, and
+`convert_oedge_plasma.py` now emit a single mesh-only HDF5 with three
+top-level groups and nothing else:
+
+| group | purpose | typical shape |
+|---|---|---|
+| `/equilibrium/{r, z, psi, btf, rtf, psib}` | ψ map + toroidal axis params | ψ: `(km, jm)` ≈ `(257, 257)` |
+| `/ion_species/{names, spec_index, main_ion_spec_index, mass_amu, charge_state_z}` | per-species metadata | 1D |
+| `/mesh/{vtx_r, vtx_z, triangles, cell_index, dens_e, temp_e, dens_i, temp_i, parr_flow, ions/{dens, temp, parr_flow}, wall_face_area, wall_surf_cell, wall_surf_area}` | EIRENE triangulation + per-B2-cell plasma + wall geometry | `vtx*, tri*`: ~5–10k; `dens_e` etc.: ~3k (ncell) |
+
+No top-level regular-grid datasets (`r`, `z`, `dens_e`, `temp_e`, `br`,
+`bt`, `bz`, `grad_*`, `ions/*`, `n_e/*`, `n_i/*`). File size for the
+DIII-D `run_lore2023` case drops from ~21 MB (with the regular grid)
+to ~1.1 MB (mesh-only).
+
+All plasma queries route through `fix plasma/data`:
+```
+fix pd plasma/data file input/plasma.h5
+# Per-particle ne/Te/Ti/B via pd->query_plasma_at_point(x)
+# Per-cell via pd->mesh_ne[cell], mesh_te[cell], ...
+```
+
+The `compute plasma/fields` `file <plasma.h5>` mode has been removed
+and hard-errors on use. Declare `fix plasma/data` then use
+`compute … plasma/fields all plasma_data <fix_id> …` to read through
+the single-source-of-truth fix.
+
+**GCA requires equilibrium.** The GCA pusher uses analytic B-field
+derivatives from ψ (`B_R = −(1/R) ∂ψ/∂Z` etc.), not numerical
+finite differences on a grid. If `plasma.h5` does not carry
+`/equilibrium/{r,z,psi,btf,rtf,psib}` and no `equilibrium <file>`
+keyword is provided on the compute line, `global gca` init aborts
+with a clear error. SOLEDGE3X cases must supply the `.equ`
+separately since `mesh.h5` does not expose `btf`/`rtf` (the
+converter writes `psi_axis = psicore` so `fix reflect/psi` still
+works without `btf/rtf`, but GCA itself needs the full equilibrium).
+
+**Gradient fields on mesh-only plasma.h5** — `compute plasma/fields`
+currently returns zero for `grad_te_{r,z}`, `grad_ti_{r,z}`,
+`grad_ne_{r,z}` when the plasma is mesh-only (no regular grid).
+Consumers that need gradients (`fix thermal_force`,
+`fix cross_diffusion`) should migrate to per-particle finite-
+difference queries against `fix plasma/data` (e.g. call
+`pd->query_plasma_at_point(R ± dR, Z)` and subtract). This is a
+known gap in the mesh-only transition.
 
 ### Synthetic diagnostics
 

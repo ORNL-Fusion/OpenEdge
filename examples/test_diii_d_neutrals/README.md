@@ -52,7 +52,6 @@ python3 ../../tools/converters/convert_solps_plasma.py \
     --equ-file /home/cloud/solps-runs/diii-d/runners_d2/baserun/dg.equ \
     --mesh-extra /home/cloud/solps-runs/diii-d/runners_d2/baserun/mesh.extra \
     --plasma-out input/plasma.h5 \
-    --bfield-out input/bfield.h5 \
     --wall-out input/wall.surf \
     --wall-source mesh-extra
 ```
@@ -64,6 +63,11 @@ python3 ../../tools/converters/convert_solps_plasma.py \
   layout (column 1 = Z, column 2 = R) since SOLPS is an axisymmetric
   code. Pair with `boundary o ao p`, `create_box ... 0 R_max ...` in the
   input deck.
+- `plasma.h5` is **mesh-only**: carries `/mesh/*` (EIRENE triangulation
+  + per-B2-cell plasma), `/equilibrium/{r, z, psi, btf, rtf, psib}`
+  (raw .equ map), and `/ion_species/*` metadata. No top-level regular
+  (R, Z) grid, no separate `bfield.h5`. File size on this case drops
+  from ~21 MB to ~1.1 MB. See `CLAUDE.md` § "Plasma.h5 schema".
 
 **Run the EIRENE-recycling case:**
 
@@ -132,14 +136,28 @@ the same (R, Z) grid.
 
 ## Current status (2026-04-20)
 
-Migrated to SPARTA-native axisymmetric mode today. Diagnostics now
-report full-3D quantities directly (no per-radian-wedge correction).
+Major infrastructure refactor landed today:
+1. **Migrated to SPARTA-native axisymmetric** (`boundary o ao p`,
+   `x = Z`, `y = R`). Diagnostics now report full-3D quantities
+   directly — no per-radian-wedge correction.
+2. **Mesh-only plasma.h5** — no top-level regular-grid datasets, no
+   separate `bfield.h5`, no `--equ-file` keyword at run time.
+   Everything lives under `/mesh/*`, `/equilibrium/*`,
+   `/ion_species/*`. File drops from ~21 MB to ~1.1 MB.
+3. **Triangulation extended to wall polygon** — the EIRENE mesh from
+   `fort.33/34/35` is augmented with new triangles bridging its outer
+   boundary to `mesh.extra`; each new triangle projected to the
+   nearest B2 sheath cell. `mesh_cell_at()` covers the full wall
+   without any `max_dist` fallback.
+4. **`compute plasma/fields` file-mode deprecated** — all plasma
+   queries route through `fix plasma/data`, which owns the single-
+   source-of-truth mesh + equilibrium.
+
 The `[emit/surf/recycle]` per-step diagnostic prints both a
 **raw-SPARTA-segment-area** Bohm rate (from `surf->axi_line_size`)
-and a **B2-aggregated-surf_area** Bohm rate (from the converter's
-per-segment area aggregation); the second is what the runtime emit
-code uses, and the two should agree to within geometric mismatch
-between the SPARTA wall and the B2 boundary.
+and a **B2-aggregated-surf_area** Bohm rate (the latter is what the
+runtime emit code uses). They should agree to within the geometric
+mismatch between the SPARTA wall and the B2 boundary.
 
 OpenEdge Mode A recycling infrastructure is in place and produces
 peak S_iz within ~30 % of SOLPS-EIRENE on the DIII-D case. Remaining
