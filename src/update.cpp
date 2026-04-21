@@ -557,6 +557,22 @@ void Update::init()
     if (!modify->compute[gca_plasma_cidx]->per_grid_flag)
       error->all(FLERR,"global gca: plasma compute must be per-grid");
 
+    // GCA needs smooth B-field derivatives (grad|B|, curvature, curl(b̂))
+    // which OpenEdge gets from an equilibrium psi map:
+    //   B_R = -(1/R) ∂ψ/∂Z,  B_Z = (1/R) ∂ψ/∂R,  B_φ = btf·rtf/R
+    // If no equilibrium is loaded (neither embedded /equilibrium/* in
+    // plasma.h5, nor an explicit `equilibrium <file>` keyword), abort
+    // cleanly so the user knows what's missing.
+    auto *gca_cp = dynamic_cast<ComputePlasmaFields*>(
+                     modify->compute[gca_plasma_cidx]);
+    if (gca_cp && !gca_cp->has_equilibrium) {
+      error->all(FLERR,
+        "global gca: equilibrium data is required but missing. "
+        "Either regenerate plasma.h5 with an .equ / .geqdsk so the "
+        "converter embeds /equilibrium/{r, z, psi, btf, rtf, psib}, "
+        "or add `equilibrium <file>` to the plasma/fields compute line.");
+    }
+
     // ERO2.0-style persistent guiding-center state per particle.
     // Keep this state across timesteps to avoid re-initializing from
     // instantaneous gyromotion every step.

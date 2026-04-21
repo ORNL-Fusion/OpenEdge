@@ -973,21 +973,22 @@ def interpolate_and_save_plasma_field(
                     f.create_dataset('psicore', data=np.float64(psicore_cfg))
 
                 # Unified /equilibrium group that compute plasma/fields
-                # and fix plasma/data read. Same psi values as /psi, but
-                # on their own (equilibrium-native) r, z grid, plus the
-                # toroidal-field params (btf, rtf, psib). For SOLEDGE3X
-                # we embed the interpolated psi on the plasma (r, z)
-                # grid; btf/rtf are not exposed by the SOLEDGE mesh, so
-                # set to zero (callers that need exact B should use
-                # plasma.h5 br/bt/bz directly).
+                # and fix plasma/data read. SOLEDGE3X does not expose the
+                # toroidal-field axis params (btf, rtf) in mesh.h5 — we
+                # only have psi on the (r, z) grid plus psisep and
+                # psicore. Omit btf/rtf; OpenEdge consumers read them as
+                # optional via read_scalar(). psicore (when available) is
+                # stored as an explicit psi_axis reference so
+                # fix plasma/data's psi_norm_at() picks it up instead of
+                # falling back to min(psirz).
                 f.create_dataset('equilibrium/r',    data=np.asarray(r, dtype=np.float64))
                 f.create_dataset('equilibrium/z',    data=np.asarray(z, dtype=np.float64))
                 f.create_dataset('equilibrium/psi',  data=np.asarray(psi_grid, dtype=np.float64))
-                f.create_dataset('equilibrium/btf',  data=np.float64(0.0))
-                f.create_dataset('equilibrium/rtf',  data=np.float64(0.0))
-                f.create_dataset('equilibrium/psib',
-                                  data=(np.float64(psisep_cfg) if (psisep_cfg is not None and np.isfinite(psisep_cfg))
-                                        else np.float64(0.0)))
+                if psisep_cfg is not None and np.isfinite(psisep_cfg):
+                    f.create_dataset('equilibrium/psib', data=np.float64(psisep_cfg))
+                if psicore_cfg is not None and np.isfinite(psicore_cfg):
+                    f.create_dataset('equilibrium/psi_axis',
+                                      data=np.float64(psicore_cfg))
 
             # Multi-ion extension
             sdt = h5py.string_dtype(encoding='utf-8')

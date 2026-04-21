@@ -72,39 +72,31 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
   analytic_use_y0 = 0;
 
   // parse:
-  // compute ... plasma/fields ggroup file plasma.h5 [equilibrium <file>] ...
+  // compute ... plasma/fields ggroup plasma_data <fix_id> ...
   // compute ... plasma/fields ggroup constant [const args] ...
   // compute ... plasma/fields ggroup analytic [analytic args] ...
   //
-  // plasma.h5 MUST embed the B-field as br/bt/bz datasets (the SOLPS /
-  // SOLEDGE3X / OEDGE converters write these by default). Optionally,
-  // pass `equilibrium <.equ>` to override the embedded B-field with an
-  // exact ψ-derived field. If neither is available, init() errors out.
+  // File-based plasma input is now routed through fix plasma/data
+  // (which owns the single-source-of-truth plasma.h5 + mesh/equilibrium
+  // data). `compute plasma/fields ... file plasma.h5 ...` is DEPRECATED
+  // and rejected below with a pointer to the migration. Declare
+  //   fix pd plasma/data file plasma.h5
+  //   compute cplasma plasma/fields all plasma_data pd ...
+  // instead.
   int iarg = 3;
   if (iarg >= narg)
-    error->all(FLERR,"compute plasma/fields requires mode: file, constant, or analytic");
+    error->all(FLERR,
+      "compute plasma/fields requires mode: plasma_data, constant, or analytic");
   if (strcmp(arg[iarg],"file") == 0) {
-    input_mode = MODE_FILE;
-    iarg++;
-    if (iarg >= narg)
-      error->all(FLERR,"compute plasma/fields file mode needs at least: plasma.h5");
-    plasmaStatePath = std::string(arg[iarg++]);
-    magneticFieldsPath.clear();
-    // Reject the legacy 2nd-positional bfield.h5 path: B-field is read
-    // from plasma.h5 (br/bt/bz) or computed from equilibrium.
-    if (iarg < narg && strcmp(arg[iarg],"equilibrium") != 0 &&
-        strcmp(arg[iarg],"values") != 0) {
-      char msg[512];
-      snprintf(msg, sizeof(msg),
-        "compute plasma/fields: unexpected positional argument '%s'. "
-        "The legacy `file plasma.h5 bfield.h5 ...` syntax has been "
-        "removed; plasma.h5 must embed br/bt/bz, and an optional "
-        "equilibrium <file> may be provided. Regenerate plasma.h5 with "
-        "the current SOLPS / SOLEDGE3X / OEDGE converter and drop the "
-        "bfield.h5 argument from your input deck.",
-        arg[iarg]);
-      error->all(FLERR, msg);
-    }
+    error->all(FLERR,
+      "compute plasma/fields: the 'file' mode has been removed. "
+      "Declare a `fix plasma/data file plasma.h5` instance and use "
+      "`compute plasma/fields ... plasma_data <fix_id> ...` instead. "
+      "This routes per-cell / per-particle plasma lookups through the "
+      "EIRENE triangulation owned by fix plasma/data (single source of "
+      "truth, no duplicate file reads, no regular-grid interpolation).");
+    // keep compiler happy — MODE_FILE code paths are unreachable now
+    input_mode = MODE_PLASMA_DATA;
   } else if (strcmp(arg[iarg],"plasma_data") == 0) {
     input_mode = MODE_PLASMA_DATA;
     iarg++;
@@ -118,7 +110,8 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
     input_mode = MODE_ANALYTIC;
     iarg++;
   } else {
-    error->all(FLERR,"compute plasma/fields mode must be 'file', 'constant', or 'analytic'");
+    error->all(FLERR,
+      "compute plasma/fields mode must be 'plasma_data', 'constant', or 'analytic'");
   }
 
   // constant/analytic mode options
@@ -955,12 +948,6 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
             return vec;
         };
 
-        // First read coordinates
-        data.r = read1D("r");
-        data.z = read1D("z");
-        size_t nr = data.r.size();
-        size_t nz = data.z.size();
-
         // Utility to test whether dataset/path exists
         auto hasDataset = [&](const std::string& name) -> bool {
             htri_t exists = 0;
@@ -969,6 +956,20 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
             } H5E_END_TRY;
             return exists > 0;
         };
+
+        // Optional regular (R, Z) grid. Current SOLPS/SOLEDGE3X/OEDGE
+        // converters emit mesh-only plasma.h5 — the regular grid at top
+        // level is absent. Keep this path alive for older plasma.h5
+        // files; consumers that need per-cell plasma (compute grid
+        // nrho, fix chem/adas) route through mesh_cell lookup instead.
+        size_t nr = 0;
+        size_t nz = 0;
+        if (hasDataset("r") && hasDataset("z")) {
+            data.r = read1D("r");
+            data.z = read1D("z");
+            nr = data.r.size();
+            nz = data.z.size();
+        }
 
         // Utility to read 2D dataset with shape validation
         auto read2D = [&](const std::string& name) -> std::vector<std::vector<double>> {
@@ -1042,30 +1043,39 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
             return raw;
         };
 
-        // Load 2D fields with strict shape check
-        data.dens_e        = read2D("dens_e");
-        data.temp_e        = read2D("temp_e");
-        data.dens_i        = read2D("dens_i");
-        data.temp_i        = read2D("temp_i");
+        // Legacy regular-grid plasma fields. Loaded only if the file
+        // still ships them (older plasma.h5 without mesh-only layout).
+        // New-style plasma.h5 from convert_solps_plasma.py et al. skips
+        // this block entirely; per-cell plasma is read from /mesh/*.
+        auto read2D_optional = [&](const std::string &name) {
+          return hasDataset(name) ? read2D(name)
+                                   : std::vector<std::vector<double>>();
+        };
+        if (nr > 0 && nz > 0) {
+            data.dens_e        = read2D_optional("dens_e");
+            data.temp_e        = read2D_optional("temp_e");
+            data.dens_i        = read2D_optional("dens_i");
+            data.temp_i        = read2D_optional("temp_i");
 
-        data.parr_flow     = read2D("parr_flow");
-        data.parr_flow_r   = read2D("parr_flow_r");
-        data.parr_flow_t   = read2D("parr_flow_t");
-        data.parr_flow_z   = read2D("parr_flow_z");
+            data.parr_flow     = read2D_optional("parr_flow");
+            data.parr_flow_r   = read2D_optional("parr_flow_r");
+            data.parr_flow_t   = read2D_optional("parr_flow_t");
+            data.parr_flow_z   = read2D_optional("parr_flow_z");
 
-        data.grad_temp_e_r = read2D("grad_te_r");
-        data.grad_temp_e_t = read2D("grad_te_t");
-        data.grad_temp_e_z = read2D("grad_te_z");
+            data.grad_temp_e_r = read2D_optional("grad_te_r");
+            data.grad_temp_e_t = read2D_optional("grad_te_t");
+            data.grad_temp_e_z = read2D_optional("grad_te_z");
 
-        data.grad_temp_i_r = read2D("grad_ti_r");
-        data.grad_temp_i_t = read2D("grad_ti_t");
-        data.grad_temp_i_z = read2D("grad_ti_z");
+            data.grad_temp_i_r = read2D_optional("grad_ti_r");
+            data.grad_temp_i_t = read2D_optional("grad_ti_t");
+            data.grad_temp_i_z = read2D_optional("grad_ti_z");
 
-        // Optional heat flux
-        if (hasDataset("q_mag")) {
-          data.q_mag = read2D("q_mag");
-          data.has_qmag = true;
-          printf("  Loaded q_mag from %s\n", filePath.c_str());
+            // Optional heat flux
+            if (hasDataset("q_mag")) {
+              data.q_mag = read2D("q_mag");
+              data.has_qmag = true;
+              printf("  Loaded q_mag from %s\n", filePath.c_str());
+            }
         }
 
         // Optional multi-ion extension
@@ -1082,44 +1092,49 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
           data.ion_names = read1DString("ion_species/names");
         }
 
-        if (hasDataset("ions/dens")) {
-          data.ions_dens = read3D("ions/dens", data.ions_nspec, data.ions_nz, data.ions_nr);
-        }
-        auto check3DShape = [&](int ns, int nzf, int nrf, const std::string &name) {
-          if (data.ions_nspec == 0) {
-            data.ions_nspec = ns;
-            data.ions_nz = nzf;
-            data.ions_nr = nrf;
-            return;
+        // Legacy per-species 3D regular-grid arrays. Only load when the
+        // file carries the regular grid (older plasma.h5). Mesh-only
+        // files store per-species plasma under /mesh/ions/.
+        if (nr > 0 && nz > 0) {
+          if (hasDataset("ions/dens")) {
+            data.ions_dens = read3D("ions/dens", data.ions_nspec, data.ions_nz, data.ions_nr);
           }
-          if (ns != data.ions_nspec || nzf != data.ions_nz || nrf != data.ions_nr) {
-            throw std::runtime_error("Dataset '" + name + "' 3D shape mismatch with ions/dens");
+          auto check3DShape = [&](int ns, int nzf, int nrf, const std::string &name) {
+            if (data.ions_nspec == 0) {
+              data.ions_nspec = ns;
+              data.ions_nz = nzf;
+              data.ions_nr = nrf;
+              return;
+            }
+            if (ns != data.ions_nspec || nzf != data.ions_nz || nrf != data.ions_nr) {
+              throw std::runtime_error("Dataset '" + name + "' 3D shape mismatch with ions/dens");
+            }
+          };
+          if (hasDataset("ions/temp")) {
+            int ns = 0, nzf = 0, nrf = 0;
+            data.ions_temp = read3D("ions/temp", ns, nzf, nrf);
+            check3DShape(ns, nzf, nrf, "ions/temp");
           }
-        };
-        if (hasDataset("ions/temp")) {
-          int ns = 0, nzf = 0, nrf = 0;
-          data.ions_temp = read3D("ions/temp", ns, nzf, nrf);
-          check3DShape(ns, nzf, nrf, "ions/temp");
-        }
-        if (hasDataset("ions/parr_flow")) {
-          int ns = 0, nzf = 0, nrf = 0;
-          data.ions_parr_flow = read3D("ions/parr_flow", ns, nzf, nrf);
-          check3DShape(ns, nzf, nrf, "ions/parr_flow");
-        }
-        if (hasDataset("ions/parr_flow_r")) {
-          int ns = 0, nzf = 0, nrf = 0;
-          data.ions_parr_flow_r = read3D("ions/parr_flow_r", ns, nzf, nrf);
-          check3DShape(ns, nzf, nrf, "ions/parr_flow_r");
-        }
-        if (hasDataset("ions/parr_flow_t")) {
-          int ns = 0, nzf = 0, nrf = 0;
-          data.ions_parr_flow_t = read3D("ions/parr_flow_t", ns, nzf, nrf);
-          check3DShape(ns, nzf, nrf, "ions/parr_flow_t");
-        }
-        if (hasDataset("ions/parr_flow_z")) {
-          int ns = 0, nzf = 0, nrf = 0;
-          data.ions_parr_flow_z = read3D("ions/parr_flow_z", ns, nzf, nrf);
-          check3DShape(ns, nzf, nrf, "ions/parr_flow_z");
+          if (hasDataset("ions/parr_flow")) {
+            int ns = 0, nzf = 0, nrf = 0;
+            data.ions_parr_flow = read3D("ions/parr_flow", ns, nzf, nrf);
+            check3DShape(ns, nzf, nrf, "ions/parr_flow");
+          }
+          if (hasDataset("ions/parr_flow_r")) {
+            int ns = 0, nzf = 0, nrf = 0;
+            data.ions_parr_flow_r = read3D("ions/parr_flow_r", ns, nzf, nrf);
+            check3DShape(ns, nzf, nrf, "ions/parr_flow_r");
+          }
+          if (hasDataset("ions/parr_flow_t")) {
+            int ns = 0, nzf = 0, nrf = 0;
+            data.ions_parr_flow_t = read3D("ions/parr_flow_t", ns, nzf, nrf);
+            check3DShape(ns, nzf, nrf, "ions/parr_flow_t");
+          }
+          if (hasDataset("ions/parr_flow_z")) {
+            int ns = 0, nzf = 0, nrf = 0;
+            data.ions_parr_flow_z = read3D("ions/parr_flow_z", ns, nzf, nrf);
+            check3DShape(ns, nzf, nrf, "ions/parr_flow_z");
+          }
         }
 
         // Optional mesh triangulation (SOLPS cell data)
@@ -1439,20 +1454,28 @@ PlasmaFileParams ComputePlasmaFields::bilinearInterpolationPlasma(
     int icell, const PlasmaFileData &data)
 {
   PlasmaFileParams P{};  // default all zeros
-  if (icell < 0 || icell >= static_cast<int>(plasma_stencil.size())) return P;
-  const BilinearStencil &s = plasma_stencil[icell];
-  bool used_mesh = false;
-  if (data.has_mesh) used_mesh = meshLookupPlasma(icell, data, P);
 
-  if (!used_mesh) {
-    if (!s.valid) return P;
-    P.temp_e = interpField2D(data.temp_e, s);
-    P.dens_e = interpField2D(data.dens_e, s);
-    P.temp_i = interpField2D(data.temp_i, s);
-    P.dens_i = interpField2D(data.dens_i, s);
-  } else if (!s.valid) {
+  // Mesh-first: for mesh-only plasma.h5 (the current converter output),
+  // the EIRENE triangulation provides per-cell plasma directly.
+  if (data.has_mesh) {
+    meshLookupPlasma(icell, data, P);
+    // Gradients (grad_te_{r,z}, grad_ne_{r,z}, etc.) on the mesh are
+    // not yet implemented; leave them zero. Consumers that need them
+    // (fix thermal_force, fix cross_diffusion) should migrate to a
+    // per-particle finite-difference scheme.
     return P;
   }
+
+  // Legacy regular-grid fallback — used only if plasma.h5 still ships
+  // the top-level r/z + dens_e/temp_e/etc. arrays. Will go away once
+  // the last test migrates.
+  if (icell < 0 || icell >= static_cast<int>(plasma_stencil.size())) return P;
+  const BilinearStencil &s = plasma_stencil[icell];
+  if (!s.valid) return P;
+  P.temp_e = interpField2D(data.temp_e, s);
+  P.dens_e = interpField2D(data.dens_e, s);
+  P.temp_i = interpField2D(data.temp_i, s);
+  P.dens_i = interpField2D(data.dens_i, s);
 
   gradField2D(data.dens_e, s, P.grad_dens_e_r, P.grad_dens_e_z);
   P.grad_dens_e_t = 0.0;

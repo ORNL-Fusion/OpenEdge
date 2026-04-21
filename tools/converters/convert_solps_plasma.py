@@ -686,9 +686,6 @@ def convert_solps_to_openedge(
     te_eV = te / eV
     ti_eV = ti / eV
 
-    ne_grid = _interp_field(src_pts, ne, tgt_pts, nz, nr)
-    te_grid = _interp_field(src_pts, te_eV, tgt_pts, nz, nr)
-
     # -- Per-species ion data --
     na = b2f_extract("na", b2fstate_file)  # (nx+2, ny+2, ns)
     ua_raw = b2f_extract("ua", b2fstate_file)  # (nx+2, ny+2) or (nx+2, ny+2, ns)
@@ -735,62 +732,17 @@ def convert_solps_to_openedge(
             "Equilibrium file required for B-field reconstruction.\n"
             "Provide --gfile (GEQDSK) or --equ-file (.equ)."
         )
-    rg     = equ_dict["r"]
-    zg     = equ_dict["z"]
-    br_eq  = equ_dict["br"]
-    bt_eq  = equ_dict["bt"]
-    bz_eq  = equ_dict["bz"]
-
-    rr_eq, zz_eq = np.meshgrid(rg, zg)
-    b_pts = np.column_stack((rr_eq.reshape(-1), zz_eq.reshape(-1)))
-    br_grid = _interp_field(b_pts, br_eq, tgt_pts, nz, nr)
-    bt_grid = _interp_field(b_pts, bt_eq, tgt_pts, nz, nr)
-    bz_grid = _interp_field(b_pts, bz_eq, tgt_pts, nz, nr)
-    br_cells = _interp_field_points(b_pts, br_eq, src_pts).reshape(nx + 2, ny + 2)
-
-    bmag_grid = np.sqrt(br_grid**2 + bt_grid**2 + bz_grid**2)
-    eps = 1e-12
-    bhat_r = np.where(bmag_grid > eps, br_grid / bmag_grid, 0.0)
-    bhat_t = np.where(bmag_grid > eps, bt_grid / bmag_grid, 0.0)
-    bhat_z = np.where(bmag_grid > eps, bz_grid / bmag_grid, 0.0)
-
-    # -- Interpolate per-species ion fields --
-    dens_i_all = np.zeros((nion, nz, nr), dtype=np.float64)
-    temp_i_all = np.zeros((nion, nz, nr), dtype=np.float64)
-    flow_i_par_all = np.zeros((nion, nz, nr), dtype=np.float64)
-    flow_i_r_all = np.zeros((nion, nz, nr), dtype=np.float64)
-    flow_i_t_all = np.zeros((nion, nz, nr), dtype=np.float64)
-    flow_i_z_all = np.zeros((nion, nz, nr), dtype=np.float64)
-
+    # -- Per-ion metadata (names, masses, charges) --
+    # Per-species plasma fields are written as flat B2 cell arrays in
+    # plasma.h5 /mesh/ions/*. No regular-grid interpolation.
     ion_names = []
     ion_masses = np.zeros(nion, dtype=np.float64)
     ion_charges = np.zeros(nion, dtype=np.int32)
 
     for k, sidx in enumerate(ion_indices):
-        n_s = na[:, :, sidx] if na.ndim == 3 else na
-        # ua may be scalar (single species) or per-species
-        if ua_raw.ndim == 3 and ua_raw.shape[2] > sidx:
-            u_s = ua_raw[:, :, sidx]
-        elif ua_raw.ndim == 2:
-            u_s = ua_raw
-        else:
-            u_s = np.zeros_like(n_s)
-
-        n_grid = _interp_field(src_pts, n_s, tgt_pts, nz, nr)
-        # ti is shared across all ion species in SOLPS
-        t_grid = _interp_field(src_pts, ti_eV, tgt_pts, nz, nr)
-        u_grid = _interp_field(src_pts, u_s, tgt_pts, nz, nr)
-
-        dens_i_all[k] = n_grid
-        temp_i_all[k] = t_grid
-        flow_i_par_all[k] = u_grid
-        flow_i_r_all[k] = u_grid * bhat_r
-        flow_i_t_all[k] = u_grid * bhat_t
-        flow_i_z_all[k] = u_grid * bhat_z
-
-        # SOLPS labels all hydrogen isotopes generically as "H"; the actual
-        # isotope is set by atomic mass in b2fparam. Promote the label to
-        # "D" (mass ≈ 2) or "T" (mass ≈ 3) so downstream consumers see the
+        # SOLPS labels all hydrogen isotopes generically as "H"; the
+        # actual isotope is set by atomic mass in b2fparam. Promote to
+        # "D" (mass ≈ 2) or "T" (mass ≈ 3) so downstream sees the
         # correct isotope name.
         raw_name = species_names[sidx]
         m = masses_amu[sidx]
@@ -803,26 +755,7 @@ def convert_solps_to_openedge(
         ion_names.append(fixed_name)
         ion_masses[k] = masses_amu[sidx]
         ion_charges[k] = charge_states[sidx]
-
-    # -- Main ion (first charged species, typically D+) for legacy fields --
     main_k = 0
-    dens_i_grid = dens_i_all[main_k]
-    temp_i_grid = temp_i_all[main_k]
-
-    # -- Temperature gradients --
-    dz = z[1] - z[0]
-    dr = r[1] - r[0]
-    gte_z, gte_r = np.gradient(te_grid, dz, dr)
-    gti_z, gti_r = np.gradient(temp_i_grid, dz, dr)
-
-    # -- NaN cleanup --
-    for arr in [ne_grid, te_grid, dens_i_grid, temp_i_grid,
-                br_grid, bt_grid, bz_grid, gte_r, gte_z, gti_r, gti_z]:
-        arr[~np.isfinite(arr)] = 0.0
-
-    for arr3 in [dens_i_all, temp_i_all, flow_i_par_all,
-                 flow_i_r_all, flow_i_t_all, flow_i_z_all]:
-        arr3[~np.isfinite(arr3)] = 0.0
 
     # -- Build Eirene mesh with B2.5 plasma data --
     # Read the Eirene triangulation (fort.33/34/35) which covers the full
@@ -1364,36 +1297,11 @@ def convert_solps_to_openedge(
 
     # -- Write plasma.h5 --
     with h5py.File(plasma_out, "w") as f:
-        f.create_dataset("r", data=r)
-        f.create_dataset("z", data=z)
-        f.create_dataset("dens_e", data=ne_grid)
-        f.create_dataset("temp_e", data=te_grid)
-        f.create_dataset("dens_i", data=dens_i_grid)
-        f.create_dataset("temp_i", data=temp_i_grid)
-        f.create_dataset("parr_flow", data=flow_i_par_all[main_k])
-        f.create_dataset("parr_flow_r", data=flow_i_r_all[main_k])
-        f.create_dataset("parr_flow_t", data=flow_i_t_all[main_k])
-        f.create_dataset("parr_flow_z", data=flow_i_z_all[main_k])
-        f.create_dataset("grad_te_r", data=gte_r)
-        f.create_dataset("grad_te_t", data=np.zeros_like(gte_r))
-        f.create_dataset("grad_te_z", data=gte_z)
-        f.create_dataset("grad_ti_r", data=gti_r)
-        f.create_dataset("grad_ti_t", data=np.zeros_like(gti_r))
-        f.create_dataset("grad_ti_z", data=gti_z)
-
-        # B-field on the same (R,Z) grid as plasma fields. Makes plasma.h5
-        # self-contained so fix plasma/data (and downstream fixes relying on
-        # sin(alpha_B) at wall) don't need a separate bfield.h5 handle.
-        f.create_dataset("br", data=np.nan_to_num(br_grid))
-        f.create_dataset("bt", data=np.nan_to_num(bt_grid))
-        f.create_dataset("bz", data=np.nan_to_num(bz_grid))
-
-        # Embedded equilibrium. Raw .equ (or GEQDSK-derived) psi map on
-        # its native grid, plus the toroidal-field parameters needed to
-        # reconstruct the full B-field or to evaluate psi_norm at any
-        # (R, Z). fix plasma/data and compute plasma/fields read this
-        # group directly, so no `equilibrium <file>` keyword is needed
-        # in the input deck when plasma.h5 carries this.
+        # Embedded equilibrium: raw .equ / GEQDSK-derived psi map on its
+        # native jm×km grid, plus btf/rtf/psib. compute plasma/fields and
+        # fix plasma/data use this to evaluate B at any (R, Z) and
+        # psi_norm for the core-sink boundary; no separate .equ file is
+        # needed at run time.
         f.create_dataset("equilibrium/r",    data=np.asarray(equ_dict["equ_r"], dtype=np.float64))
         f.create_dataset("equilibrium/z",    data=np.asarray(equ_dict["equ_z"], dtype=np.float64))
         f.create_dataset("equilibrium/psi",  data=np.asarray(equ_dict["equ_psi"], dtype=np.float64))
@@ -1401,26 +1309,14 @@ def convert_solps_to_openedge(
         f.create_dataset("equilibrium/rtf",  data=float(equ_dict["rtf"]))
         f.create_dataset("equilibrium/psib", data=float(equ_dict["psib"]))
 
-        # Multi-ion species extension
+        # Multi-ion species metadata. Per-species plasma fields live on
+        # the EIRENE triangulation under /mesh/ions/.
         sdt = h5py.string_dtype(encoding="utf-8")
         f.create_dataset("ion_species/names", data=np.array(ion_names, dtype=object), dtype=sdt)
         f.create_dataset("ion_species/spec_index", data=ion_indices.astype(np.int32))
         f.create_dataset("ion_species/main_ion_spec_index", data=np.array([int(ion_indices[main_k])], dtype=np.int32))
         f.create_dataset("ion_species/mass_amu", data=ion_masses)
         f.create_dataset("ion_species/charge_state_z", data=ion_charges)
-        f.create_dataset("ions/dens", data=dens_i_all)
-        f.create_dataset("ions/temp", data=temp_i_all)
-        f.create_dataset("ions/parr_flow", data=flow_i_par_all)
-        f.create_dataset("ions/parr_flow_r", data=flow_i_r_all)
-        f.create_dataset("ions/parr_flow_t", data=flow_i_t_all)
-        f.create_dataset("ions/parr_flow_z", data=flow_i_z_all)
-
-        # Legacy compatibility
-        f.create_dataset("n_e/dens", data=ne_grid)
-        f.create_dataset("n_e/temp", data=te_grid)
-        f.create_dataset("n_i/dens", data=dens_i_grid)
-        f.create_dataset("n_i/temp", data=temp_i_grid)
-        f.create_dataset("n_i/parr_flow", data=flow_i_par_all[main_k])
 
         # SOLPS mesh triangulation for direct point-in-cell interpolation
         f.create_dataset("mesh/vtx_r", data=mesh_vtx_r)
@@ -1473,6 +1369,10 @@ def convert_solps_to_openedge(
 
     # -- Optional plots --
     if plot:
+        # B-field is no longer interpolated onto B2 cell centroids here
+        # (converter writes only the equilibrium psi/btf/rtf, not a
+        # per-cell br). Pass zeros for the br panel — diagnostic plots
+        # should be rebuilt to read from /equilibrium/ directly.
         _save_plots(
             cell_polys,
             ne,
@@ -1480,7 +1380,7 @@ def convert_solps_to_openedge(
             main_dens_raw,
             ti_eV,
             main_upar_raw,
-            br_cells,
+            np.zeros_like(ne),
             plot_prefix or Path("convert_solps_plasma"),
         )
 

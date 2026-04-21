@@ -575,53 +575,61 @@ void FixPlasmaData::load_plasma_h5()
     return exists > 0;
   };
 
-  // Grid coordinates
-  read1D("r", rvals);
-  read1D("z", zvals);
-  nr = static_cast<int>(rvals.size());
-  nz = static_cast<int>(zvals.size());
-  size_t n = static_cast<size_t>(nz) * nr;
+  // Optional regular (R, Z) grid. Current SOLPS/SOLEDGE3X/OEDGE
+  // converters write plasma fields ONLY on the EIRENE triangulation
+  // (see /mesh/*). The regular-grid path below is kept alive only to
+  // read older plasma.h5 files that still carry top-level r/z +
+  // dens_e/temp_e etc. New files have mesh-only data and skip this
+  // entire block.
+  nr = nz = 0;
+  size_t n = 0;
+  const bool has_regular_grid = hasDataset("r") && hasDataset("z");
+  if (has_regular_grid) {
+    read1D("r", rvals);
+    read1D("z", zvals);
+    nr = static_cast<int>(rvals.size());
+    nz = static_cast<int>(zvals.size());
+    n = static_cast<size_t>(nz) * nr;
 
-  // Read 2D field into flat vector [iz * nr + ir]
-  auto read2D = [&](const std::string &name, std::vector<double> &out) {
-    H5::DataSet ds = file.openDataSet(name);
-    H5::DataSpace sp = ds.getSpace();
-    hsize_t dims[2];
-    sp.getSimpleExtentDims(dims);
-    if (static_cast<int>(dims[0]) != nz || static_cast<int>(dims[1]) != nr)
-      throw std::runtime_error("Shape mismatch in " + name);
-    out.resize(n);
-    ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
-  };
+    // Read 2D field into flat vector [iz * nr + ir]
+    auto read2D = [&](const std::string &name, std::vector<double> &out) {
+      H5::DataSet ds = file.openDataSet(name);
+      H5::DataSpace sp = ds.getSpace();
+      hsize_t dims[2];
+      sp.getSimpleExtentDims(dims);
+      if (static_cast<int>(dims[0]) != nz || static_cast<int>(dims[1]) != nr)
+        throw std::runtime_error("Shape mismatch in " + name);
+      out.resize(n);
+      ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+    };
+    auto read2D_optional = [&](const std::string &name, std::vector<double> &out) {
+      if (hasDataset(name)) read2D(name, out);
+      else { out.assign(n, 0.0); }
+    };
 
-  auto read2D_optional = [&](const std::string &name, std::vector<double> &out) {
-    if (hasDataset(name)) read2D(name, out);
-    else { out.assign(n, 0.0); }
-  };
+    if (hasDataset("dens_e")) read2D("dens_e", dens_e);
+    if (hasDataset("temp_e")) read2D("temp_e", temp_e);
+    if (hasDataset("dens_i")) read2D("dens_i", dens_i);
+    if (hasDataset("temp_i")) read2D("temp_i", temp_i);
+    read2D_optional("parr_flow", parr_flow);
+    read2D_optional("parr_flow_r", parr_flow_r);
+    read2D_optional("parr_flow_t", parr_flow_t);
+    read2D_optional("parr_flow_z", parr_flow_z);
+    read2D_optional("grad_te_r", grad_te_r);
+    read2D_optional("grad_te_t", grad_te_t);
+    read2D_optional("grad_te_z", grad_te_z);
+    read2D_optional("grad_ti_r", grad_ti_r);
+    read2D_optional("grad_ti_t", grad_ti_t);
+    read2D_optional("grad_ti_z", grad_ti_z);
+    read2D_optional("epar", epar);
 
-  read2D("dens_e", dens_e);
-  read2D("temp_e", temp_e);
-  read2D("dens_i", dens_i);
-  read2D("temp_i", temp_i);
-  read2D_optional("parr_flow", parr_flow);
-  read2D_optional("parr_flow_r", parr_flow_r);
-  read2D_optional("parr_flow_t", parr_flow_t);
-  read2D_optional("parr_flow_z", parr_flow_z);
-  read2D_optional("grad_te_r", grad_te_r);
-  read2D_optional("grad_te_t", grad_te_t);
-  read2D_optional("grad_te_z", grad_te_z);
-  read2D_optional("grad_ti_r", grad_ti_r);
-  read2D_optional("grad_ti_t", grad_ti_t);
-  read2D_optional("grad_ti_z", grad_ti_z);
-  read2D_optional("epar", epar);
-
-  // Optional B-field in plasma HDF5
-  if (hasDataset("br") && hasDataset("bz")) {
-    read2D("br", br);
-    read2D("bz", bz);
-    if (hasDataset("bt")) read2D("bt", bt);
-    else bt.assign(n, 0.0);
-    has_bfield = 1;
+    if (hasDataset("br") && hasDataset("bz")) {
+      read2D("br", br);
+      read2D("bz", bz);
+      if (hasDataset("bt")) read2D("bt", bt);
+      else bt.assign(n, 0.0);
+      has_bfield = 1;
+    }
   }
 
   // Unified /equilibrium group written by convert_solps_plasma.py,
@@ -674,12 +682,19 @@ void FixPlasmaData::load_plasma_h5()
       rtf = rtf_val;
       psib = psib_val;
 
-      // psi_axis: take the min of psirz inside the grid (the on-axis
-      // flux value used as reference). SOLPS .equ convention.
-      double psi_min = psirz[0];
-      for (size_t k = 0; k < psirz.size(); ++k)
-        if (psirz[k] < psi_min) psi_min = psirz[k];
-      psi_axis = psi_min;
+      // psi_axis: prefer an explicit equilibrium/psi_axis dataset when
+      // available (SOLEDGE3X writes psicore there, since mesh.h5 exposes
+      // psicore/psisep but no jm/km-style toroidal axis). Fall back to
+      // min(psirz), the SOLPS .equ convention for on-axis flux.
+      double psi_axis_explicit = 0.0;
+      if (read_scalar("equilibrium/psi_axis", psi_axis_explicit)) {
+        psi_axis = psi_axis_explicit;
+      } else {
+        double psi_min = psirz[0];
+        for (size_t k = 0; k < psirz.size(); ++k)
+          if (psirz[k] < psi_min) psi_min = psirz[k];
+        psi_axis = psi_min;
+      }
       has_equ = 1;
       if (screen)
         fprintf(screen,
@@ -689,37 +704,41 @@ void FixPlasmaData::load_plasma_h5()
     }
   }
 
-  // SOLEDGE-legacy /psi, /psicore, /psisep layout (still used by
-  // convert_s3x_plasma.py for backward compatibility; takes effect
-  // only if the unified /equilibrium group above wasn't found).
-  else if (hasDataset("psi")) {
-    read2D("psi", psirz);
-    equ_jm = nr;
-    equ_km = nz;
-    equ_r  = rvals;
-    equ_z  = zvals;
-    auto read_scalar = [&](const std::string &name, double &out) -> bool {
-      if (!hasDataset(name)) return false;
-      H5::DataSet ds = file.openDataSet(name);
-      double tmp = 0.0;
-      ds.read(&tmp, H5::PredType::NATIVE_DOUBLE);
-      out = tmp;
-      return true;
-    };
-    double psicore_val = 0.0, psisep_val = 0.0;
-    bool have_core = read_scalar("psicore", psicore_val);
-    bool have_sep  = read_scalar("psisep",  psisep_val);
-    if (have_core && have_sep && psicore_val != psisep_val) {
-      // psi_axis is the reference flux surface against which psi_norm is
-      // measured (0 at psi_axis, 1 at psib). For a SOLEDGE plasma.h5 the
-      // natural "inner BC" surface is /psicore, so use that as psi_axis.
-      psi_axis = psicore_val;
-      psib     = psisep_val;
-      has_equ  = 1;
-      if (screen)
-        fprintf(screen,
-                "[plasma/data] loaded psi map (psicore=%.6e psisep=%.6e)\n",
-                psicore_val, psisep_val);
+  // SOLEDGE-legacy /psi, /psicore, /psisep layout — only meaningful
+  // when the regular (R, Z) grid exists (psi is 2D on r/z). Skipped
+  // for mesh-only plasma.h5 files.
+  else if (has_regular_grid && hasDataset("psi")) {
+    H5::DataSet ds = file.openDataSet("psi");
+    H5::DataSpace sp = ds.getSpace();
+    hsize_t dims[2];
+    sp.getSimpleExtentDims(dims);
+    if (static_cast<int>(dims[0]) == nz && static_cast<int>(dims[1]) == nr) {
+      psirz.resize(static_cast<size_t>(nz) * nr);
+      ds.read(psirz.data(), H5::PredType::NATIVE_DOUBLE);
+      equ_jm = nr;
+      equ_km = nz;
+      equ_r  = rvals;
+      equ_z  = zvals;
+      auto read_scalar = [&](const std::string &name, double &out) -> bool {
+        if (!hasDataset(name)) return false;
+        H5::DataSet ds2 = file.openDataSet(name);
+        double tmp = 0.0;
+        ds2.read(&tmp, H5::PredType::NATIVE_DOUBLE);
+        out = tmp;
+        return true;
+      };
+      double psicore_val = 0.0, psisep_val = 0.0;
+      bool have_core = read_scalar("psicore", psicore_val);
+      bool have_sep  = read_scalar("psisep",  psisep_val);
+      if (have_core && have_sep && psicore_val != psisep_val) {
+        psi_axis = psicore_val;
+        psib     = psisep_val;
+        has_equ  = 1;
+        if (screen)
+          fprintf(screen,
+                  "[plasma/data] loaded psi map (psicore=%.6e psisep=%.6e)\n",
+                  psicore_val, psisep_val);
+      }
     }
   }
 
