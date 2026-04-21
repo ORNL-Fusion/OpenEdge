@@ -897,6 +897,142 @@ def convert_solps_to_openedge(
     has_cell = mesh_cell_idx >= 0
 
     # ------------------------------------------------------------------
+    # Extend the EIRENE triangulation out to the mesh.extra wall polygon.
+    # ------------------------------------------------------------------
+    # fort.33/34/35 triangulation typically stops a few cm shy of the
+    # real wall (EIRENE's "neighbour polygon"). Without an explicit
+    # extension, particles in the ~5 cm gap fall back to a regular-grid
+    # interpolation that is zero outside the convex hull — ionization
+    # silently switches off there. Extend by combining the EIRENE
+    # outer-boundary vertices with the wall polygon and re-triangulating,
+    # then assign each new triangle to the nearest B2 sheath cell so the
+    # SOLPS sheath plasma is propagated all the way to the wall. This is
+    # the same trick SOLPS-ITER's coupled mode does internally (vacuum
+    # triangles with nearest-sheath plasma assignment).
+    mesh_extra_path_local = mesh_extra if mesh_extra is not None else (run_path / "mesh.extra")
+    if mesh_extra_path_local.exists() and has_cell.any():
+        try:
+            from scipy.spatial import Delaunay, cKDTree
+            from matplotlib.path import Path as MplPath
+
+            wall_poly = _parse_mesh_extra_to_polygon(mesh_extra_path_local)
+            wall_r_poly = wall_poly[:-1, 0]
+            wall_z_poly = wall_poly[:-1, 1]
+
+            # Densify the wall polygon a bit so Delaunay produces
+            # reasonably-sized triangles near the wall.
+            dens_r, dens_z = [], []
+            npts = len(wall_r_poly)
+            for i in range(npts):
+                j = (i + 1) % npts
+                dens_r.append(wall_r_poly[i]); dens_z.append(wall_z_poly[i])
+                dr = wall_r_poly[j] - wall_r_poly[i]
+                dz = wall_z_poly[j] - wall_z_poly[i]
+                seg = float(np.hypot(dr, dz))
+                # target ~2 cm spacing between wall samples
+                n_ins = max(1, int(seg / 0.02)) - 1
+                for k in range(n_ins):
+                    t = (k + 1) / (n_ins + 1)
+                    dens_r.append(wall_r_poly[i] + t * dr)
+                    dens_z.append(wall_z_poly[i] + t * dz)
+            wall_r_dense = np.asarray(dens_r, dtype=np.float64)
+            wall_z_dense = np.asarray(dens_z, dtype=np.float64)
+
+            # Find boundary vertices of the existing triangulation
+            # (edges that appear in exactly one triangle).
+            edge_count = {}
+            for tri_row in mesh_tri:
+                for a, b in [(tri_row[0], tri_row[1]),
+                             (tri_row[1], tri_row[2]),
+                             (tri_row[2], tri_row[0])]:
+                    e = (int(min(a, b)), int(max(a, b)))
+                    edge_count[e] = edge_count.get(e, 0) + 1
+            boundary_verts = sorted({v for (a, b), c in edge_count.items()
+                                       if c == 1 for v in (a, b)})
+            bv_r = mesh_vtx_r[boundary_verts]
+            bv_z = mesh_vtx_z[boundary_verts]
+
+            # Delaunay on (EIRENE boundary vertices + densified wall).
+            n_boundary = len(boundary_verts)
+            combined_r = np.concatenate([bv_r, wall_r_dense])
+            combined_z = np.concatenate([bv_z, wall_z_dense])
+            pts2d = np.column_stack([combined_r, combined_z])
+            dtri = Delaunay(pts2d)
+
+            # Keep only triangles whose centroid is inside the wall
+            # polygon (filters out Delaunay's big outer triangles) AND
+            # outside the existing mesh (only near-wall triangles).
+            wall_path = MplPath(wall_poly)
+            centroids = pts2d[dtri.simplices].mean(axis=1)
+            inside_wall = wall_path.contains_points(centroids)
+
+            # "Outside existing mesh" check: use the EIRENE boundary as
+            # a polygon. Nearest-boundary-point distance is a decent
+            # proxy — centroids far enough from the existing mesh
+            # belong in the new annulus region.
+            tree_boundary = cKDTree(np.column_stack([bv_r, bv_z]))
+            d_to_bdry, _ = tree_boundary.query(centroids)
+            min_gap = 0.005   # 5 mm from EIRENE boundary -> new region
+
+            # Additionally reject triangles that straddle the existing
+            # mesh (all 3 vertices from EIRENE boundary): Delaunay can
+            # fill the inner void if boundaries are concave.
+            new_mask = (inside_wall) & (d_to_bdry > min_gap)
+            # require at least one wall vertex in each kept triangle
+            uses_wall = np.any(dtri.simplices >= n_boundary, axis=1)
+            new_mask &= uses_wall
+
+            new_simplices = dtri.simplices[new_mask]
+
+            if len(new_simplices) > 0:
+                # Remap Delaunay indices back to mesh_vtx_r/z + wall
+                # arrays, after appending the new vertices.
+                n_mesh_old = len(mesh_vtx_r)
+                mesh_vtx_r = np.concatenate([mesh_vtx_r, wall_r_dense])
+                mesh_vtx_z = np.concatenate([mesh_vtx_z, wall_z_dense])
+
+                remap = np.empty(len(pts2d), dtype=np.int64)
+                # first n_boundary entries are EIRENE boundary vertices
+                remap[:n_boundary] = np.asarray(boundary_verts, dtype=np.int64)
+                # remaining entries are the new wall-polygon vertices,
+                # which we just appended starting at n_mesh_old
+                remap[n_boundary:] = n_mesh_old + np.arange(len(wall_r_dense))
+                new_tri_remapped = remap[new_simplices]
+
+                # Map each new triangle to nearest B2 sheath cell.
+                native_idx = np.where(has_cell_native)[0]
+                c_flat = mesh_cell_idx[native_idx]
+                iy_ = c_flat // (nx + 2)
+                ix_ = c_flat - iy_ * (nx + 2)
+                is_sheath_ = ((ix_ == 1) | (ix_ == nx) | (iy_ == 1) | (iy_ == ny))
+                sheath_src_ = native_idx[is_sheath_]
+                if sheath_src_.size == 0:
+                    sheath_src_ = native_idx
+                tree_sh = cKDTree(np.column_stack([centroid_r[sheath_src_],
+                                                    centroid_z[sheath_src_]]))
+                new_centroids_r = mesh_vtx_r[new_tri_remapped].mean(axis=1)
+                new_centroids_z = mesh_vtx_z[new_tri_remapped].mean(axis=1)
+                _, j_s = tree_sh.query(np.column_stack([new_centroids_r,
+                                                        new_centroids_z]))
+                new_cell_idx = mesh_cell_idx[sheath_src_[j_s]]
+
+                mesh_tri = np.vstack([mesh_tri, new_tri_remapped.astype(mesh_tri.dtype)])
+                mesh_cell_idx = np.concatenate([mesh_cell_idx,
+                                                 new_cell_idx.astype(mesh_cell_idx.dtype)])
+                centroid_r = np.concatenate([centroid_r, new_centroids_r])
+                centroid_z = np.concatenate([centroid_z, new_centroids_z])
+                has_cell = mesh_cell_idx >= 0
+                ntri_eirene = len(mesh_tri)
+                print(f"Mesh extension: added {len(new_simplices)} triangles "
+                      f"to close the EIRENE -> wall gap "
+                      f"({n_boundary} boundary + {len(wall_r_dense)} wall vertices)")
+            else:
+                print("Mesh extension: no triangles needed "
+                      "(EIRENE boundary already reaches wall).")
+        except Exception as e:
+            print(f"WARNING: mesh extension to wall failed: {e}")
+
+    # ------------------------------------------------------------------
     # Per-cell wall face area for B2 boundary cells.
     # ------------------------------------------------------------------
     # SOLPS corner ordering (inferred from _cell_polygons_from_corners):
