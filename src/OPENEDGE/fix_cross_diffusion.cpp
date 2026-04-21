@@ -444,32 +444,22 @@ void FixCrossDiffusion::start_of_step()
                                              : std::max(read_src(srcNe_, ip, icell), 1.0e10);
       double gNeR, gNeZ;
       if (use_plasma_data_) {
+        // grad(ne) is not precomputed on mesh plasma.h5. Falls back
+        // to per-particle FD on the regular (R, Z) grid if present;
+        // returns zero on mesh-only data (flagged as a known gap —
+        // gradient-pinch cross-diffusion is disabled for mesh-only
+        // plasma.h5 cases).
         double R, Z;
         OpenEdge::sparta_to_RZ(p.x, dim, domain->axisymmetric, R, Z);
-        // Prefer precomputed mesh gradients (converter writes them in
-        // /mesh/grad_ne_{r,z}). Fall back to per-particle FD on the
-        // regular (R, Z) grid only if the mesh path is unavailable.
-        bool used_mesh_grad = false;
-        if (!pd_->mesh_grad_ne_r.empty() && pd_->has_mesh) {
-          const int cell = pd_->mesh_cell_at(R, Z);
-          if (cell >= 0 &&
-              cell < static_cast<int>(pd_->mesh_grad_ne_r.size())) {
-            gNeR = pd_->mesh_grad_ne_r[cell];
-            gNeZ = pd_->mesh_grad_ne_z[cell];
-            used_mesh_grad = true;
-          }
-        }
-        if (!used_mesh_grad) {
-          if (pd_->rvals.size() < 2 || pd_->zvals.size() < 2) {
-            gNeR = 0.0; gNeZ = 0.0;
-          } else {
-            const double dR = std::max(1.0e-9, 0.5 * std::fabs(pd_->rvals[1] - pd_->rvals[0]));
-            const double dZ = std::max(1.0e-9, 0.5 * std::fabs(pd_->zvals[1] - pd_->zvals[0]));
-            gNeR = (pd_->interp2D(pd_->dens_e, R + dR, Z) -
-                    pd_->interp2D(pd_->dens_e, R - dR, Z)) / (2.0 * dR);
-            gNeZ = (pd_->interp2D(pd_->dens_e, R, Z + dZ) -
-                    pd_->interp2D(pd_->dens_e, R, Z - dZ)) / (2.0 * dZ);
-          }
+        if (pd_->rvals.size() < 2 || pd_->zvals.size() < 2) {
+          gNeR = 0.0; gNeZ = 0.0;
+        } else {
+          const double dR = std::max(1.0e-9, 0.5 * std::fabs(pd_->rvals[1] - pd_->rvals[0]));
+          const double dZ = std::max(1.0e-9, 0.5 * std::fabs(pd_->zvals[1] - pd_->zvals[0]));
+          gNeR = (pd_->interp2D(pd_->dens_e, R + dR, Z) -
+                  pd_->interp2D(pd_->dens_e, R - dR, Z)) / (2.0 * dR);
+          gNeZ = (pd_->interp2D(pd_->dens_e, R, Z + dZ) -
+                  pd_->interp2D(pd_->dens_e, R, Z - dZ)) / (2.0 * dZ);
         }
       } else {
         gNeR = read_src(srcGradNeR_, ip, icell);

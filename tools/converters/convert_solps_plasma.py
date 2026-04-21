@@ -1310,7 +1310,6 @@ def convert_solps_to_openedge(
         return flat.reshape(nxp, nyp, order='F')
     Te_g = _grid(te_flat)
     Ti_g = _grid(ti_flat)
-    ne_g = _grid(ne_flat)
     Rc = rc   # (nxp, nyp) cell-center R
     Zc = zc   # (nxp, nyp) cell-center Z
 
@@ -1344,17 +1343,13 @@ def convert_solps_to_openedge(
 
     grad_te_r_g, grad_te_z_g = _grad_rz(Te_g)
     grad_ti_r_g, grad_ti_z_g = _grad_rz(Ti_g)
-    grad_ne_r_g, grad_ne_z_g = _grad_rz(ne_g)
 
     mesh_grad_te_r = grad_te_r_g.reshape(ncell_flat, order='F')
     mesh_grad_te_z = grad_te_z_g.reshape(ncell_flat, order='F')
     mesh_grad_ti_r = grad_ti_r_g.reshape(ncell_flat, order='F')
     mesh_grad_ti_z = grad_ti_z_g.reshape(ncell_flat, order='F')
-    mesh_grad_ne_r = grad_ne_r_g.reshape(ncell_flat, order='F')
-    mesh_grad_ne_z = grad_ne_z_g.reshape(ncell_flat, order='F')
     for arr in [mesh_grad_te_r, mesh_grad_te_z,
-                mesh_grad_ti_r, mesh_grad_ti_z,
-                mesh_grad_ne_r, mesh_grad_ne_z]:
+                mesh_grad_ti_r, mesh_grad_ti_z]:
         arr[~np.isfinite(arr)] = 0.0
 
     # -- Write plasma.h5 --
@@ -1394,8 +1389,6 @@ def convert_solps_to_openedge(
         f.create_dataset("mesh/grad_te_z", data=mesh_grad_te_z)
         f.create_dataset("mesh/grad_ti_r", data=mesh_grad_ti_r)
         f.create_dataset("mesh/grad_ti_z", data=mesh_grad_ti_z)
-        f.create_dataset("mesh/grad_ne_r", data=mesh_grad_ne_r)
-        f.create_dataset("mesh/grad_ne_z", data=mesh_grad_ne_z)
         f.create_dataset("mesh/ions/dens", data=mesh_ions_dens)
         f.create_dataset("mesh/ions/temp", data=mesh_ions_temp)
         f.create_dataset("mesh/ions/parr_flow", data=mesh_ions_upar)

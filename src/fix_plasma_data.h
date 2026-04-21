@@ -79,7 +79,6 @@ class FixPlasmaData : public Fix {
   // Consumers query via mesh_cell_at(R, Z) + mesh_grad_*_{r,z}[cell].
   std::vector<double> mesh_grad_te_r, mesh_grad_te_z;
   std::vector<double> mesh_grad_ti_r, mesh_grad_ti_z;
-  std::vector<double> mesh_grad_ne_r, mesh_grad_ne_z;
   std::vector<double> mesh_ions_dens, mesh_ions_temp, mesh_ions_upar;
   int has_mesh_wall_face_area;                // 1 if the converter wrote
                                               // mesh/wall_face_area

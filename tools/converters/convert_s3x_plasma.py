@@ -920,21 +920,12 @@ def interpolate_and_save_plasma_field(
         mesh_grad_te_z = _resample(grad_te_z)
         mesh_grad_ti_r = _resample(grad_ti_r)
         mesh_grad_ti_z = _resample(grad_ti_z)
-        # S3X doesn't compute grad_ne on the regular grid; compute here
-        # via np.gradient on dens_e_grid then resample.
-        dz_axial = z[1] - z[0] if z.size > 1 else 1.0
-        dr_radial = r[1] - r[0] if r.size > 1 else 1.0
-        _gne_z, _gne_r = np.gradient(dens_e_grid, dz_axial, dr_radial)
-        mesh_grad_ne_r = _resample(_gne_r)
-        mesh_grad_ne_z = _resample(_gne_z)
     except Exception as _e:
         print(f"WARNING: mesh gradient resampling failed: {_e}")
         mesh_grad_te_r = np.zeros(mesh_tri.shape[0])
         mesh_grad_te_z = np.zeros(mesh_tri.shape[0])
         mesh_grad_ti_r = np.zeros(mesh_tri.shape[0])
         mesh_grad_ti_z = np.zeros(mesh_tri.shape[0])
-        mesh_grad_ne_r = np.zeros(mesh_tri.shape[0])
-        mesh_grad_ne_z = np.zeros(mesh_tri.shape[0])
     if mesh_tri.shape[0] != mesh_dens_e.size:
         raise RuntimeError("mesh/triangles count does not match SOLEDGE plasma triangle count")
     mpar = np.isfinite(parr_flow_i_grid)
@@ -1063,8 +1054,6 @@ def interpolate_and_save_plasma_field(
             f.create_dataset('mesh/grad_te_z', data=mesh_grad_te_z)
             f.create_dataset('mesh/grad_ti_r', data=mesh_grad_ti_r)
             f.create_dataset('mesh/grad_ti_z', data=mesh_grad_ti_z)
-            f.create_dataset('mesh/grad_ne_r', data=mesh_grad_ne_r)
-            f.create_dataset('mesh/grad_ne_z', data=mesh_grad_ne_z)
             f.create_dataset('mesh/ions/dens', data=mesh_dens_i_all)
             f.create_dataset('mesh/ions/temp', data=mesh_temp_i_all)
             f.create_dataset('mesh/ions/parr_flow', data=mesh_flow_i_par_all)
