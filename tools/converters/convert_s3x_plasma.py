@@ -926,6 +926,20 @@ def interpolate_and_save_plasma_field(
         mesh_grad_te_z = np.zeros(mesh_tri.shape[0])
         mesh_grad_ti_r = np.zeros(mesh_tri.shape[0])
         mesh_grad_ti_z = np.zeros(mesh_tri.shape[0])
+
+    # Electric field on the mesh. SOLEDGE3X stores per-zone PHI under
+    # /zone{N}/PHI in the plasma snapshot, but resampling that onto the
+    # EIRENE triangle mesh + differentiating is a bigger refactor.
+    # For now write zeros as a placeholder so plasma.h5 carries the
+    # dataset (fix_plasma_data then knows "mesh E is present but zero"
+    # — which is equivalent to the old Boltzmann-scaled-ne path from
+    # a zero potential). A proper implementation reads zone*/PHI,
+    # resamples onto centroids, computes grad, negates. TODO.
+    mesh_e_r = np.zeros(mesh_tri.shape[0], dtype=np.float64)
+    mesh_e_z = np.zeros(mesh_tri.shape[0], dtype=np.float64)
+    mesh_e_t = np.zeros(mesh_tri.shape[0], dtype=np.float64)
+    print("WARNING: SOLEDGE3X converter writes E=0 on the mesh "
+          "(zone/PHI resampling not yet implemented).")
     if mesh_tri.shape[0] != mesh_dens_e.size:
         raise RuntimeError("mesh/triangles count does not match SOLEDGE plasma triangle count")
     mpar = np.isfinite(parr_flow_i_grid)
@@ -1054,6 +1068,9 @@ def interpolate_and_save_plasma_field(
             f.create_dataset('mesh/grad_te_z', data=mesh_grad_te_z)
             f.create_dataset('mesh/grad_ti_r', data=mesh_grad_ti_r)
             f.create_dataset('mesh/grad_ti_z', data=mesh_grad_ti_z)
+            f.create_dataset('mesh/e_r', data=mesh_e_r)
+            f.create_dataset('mesh/e_z', data=mesh_e_z)
+            f.create_dataset('mesh/e_t', data=mesh_e_t)
             f.create_dataset('mesh/ions/dens', data=mesh_dens_i_all)
             f.create_dataset('mesh/ions/temp', data=mesh_temp_i_all)
             f.create_dataset('mesh/ions/parr_flow', data=mesh_flow_i_par_all)
