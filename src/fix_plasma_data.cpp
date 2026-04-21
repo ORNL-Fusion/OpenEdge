@@ -336,6 +336,22 @@ void FixPlasmaData::reload()
     MPI_Bcast(mesh_ti.data(), mesh_ncell, MPI_DOUBLE, 0, world);
     MPI_Bcast(mesh_ni.data(), mesh_ncell, MPI_DOUBLE, 0, world);
     MPI_Bcast(mesh_upar.data(), mesh_ncell, MPI_DOUBLE, 0, world);
+    // Precomputed gradients — broadcast presence flags then payload.
+    // A vector of size 0 means "not written in plasma.h5"; size
+    // mesh_ncell means available.
+    auto bcast_grad = [&](std::vector<double> &v) {
+      int has = (static_cast<int>(v.size()) == mesh_ncell) ? 1 : 0;
+      MPI_Bcast(&has, 1, MPI_INT, 0, world);
+      if (!has) { v.clear(); return; }
+      if (static_cast<int>(v.size()) != mesh_ncell) v.assign(mesh_ncell, 0.0);
+      MPI_Bcast(v.data(), mesh_ncell, MPI_DOUBLE, 0, world);
+    };
+    bcast_grad(mesh_grad_te_r);
+    bcast_grad(mesh_grad_te_z);
+    bcast_grad(mesh_grad_ti_r);
+    bcast_grad(mesh_grad_ti_z);
+    bcast_grad(mesh_grad_ne_r);
+    bcast_grad(mesh_grad_ne_z);
     MPI_Bcast(&has_mesh_wall_face_area, 1, MPI_INT, 0, world);
     if (has_mesh_wall_face_area) {
       if (static_cast<int>(mesh_wall_face_area.size()) != mesh_ncell)
@@ -821,6 +837,20 @@ void FixPlasmaData::load_plasma_h5()
     read1D_mesh("mesh/temp_i", mesh_ti);
     read1D_mesh("mesh/dens_i", mesh_ni);
     read1D_mesh("mesh/parr_flow", mesh_upar);
+    // Optional precomputed gradients. Missing → leave vectors empty;
+    // consumers treat empty as "no mesh gradient available" and fall
+    // back (to per-particle FD or zero).
+    auto read1D_mesh_opt = [&](const std::string &name,
+                                std::vector<double> &out) {
+      if (hasDataset(name)) read1D_mesh(name, out);
+      else out.clear();
+    };
+    read1D_mesh_opt("mesh/grad_te_r", mesh_grad_te_r);
+    read1D_mesh_opt("mesh/grad_te_z", mesh_grad_te_z);
+    read1D_mesh_opt("mesh/grad_ti_r", mesh_grad_ti_r);
+    read1D_mesh_opt("mesh/grad_ti_z", mesh_grad_ti_z);
+    read1D_mesh_opt("mesh/grad_ne_r", mesh_grad_ne_r);
+    read1D_mesh_opt("mesh/grad_ne_z", mesh_grad_ne_z);
     if (hasDataset("mesh/wall_face_area")) {
       read1D_mesh("mesh/wall_face_area", mesh_wall_face_area);
       has_mesh_wall_face_area = 1;

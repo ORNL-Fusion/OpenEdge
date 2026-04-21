@@ -106,6 +106,9 @@ class FixThermalForce : public Fix {
                         double &B0, double &B1, double &B2) const;
   double pd_interp(const std::vector<double> &field,
                    const class Particle::OnePart &p) const;
+  double pd_grad(const std::vector<double> &mesh_grad,
+                 const std::vector<double> &regular_grad,
+                 const class Particle::OnePart &p) const;
   void kick_half(double dt_half);
 };
 

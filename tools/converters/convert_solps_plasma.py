@@ -1295,6 +1295,68 @@ def convert_solps_to_openedge(
                 mesh_ions_dens, mesh_ions_temp, mesh_ions_upar]:
         arr[~np.isfinite(arr)] = 0.0
 
+    # -- Per-cell gradients (grad Te, grad Ti, grad ne) on the B2 mesh --
+    # Compute central differences in structured (ix, iy) index space, then
+    # convert to (R, Z) via the cell-center Jacobian J = [[∂R/∂ix, ∂R/∂iy],
+    # [∂Z/∂ix, ∂Z/∂iy]]. fix_plasma_data reads these flat arrays directly
+    # via mesh_cell_at() + mesh_grad_*_r/z[cell] — no regular-grid
+    # interpolation or runtime FD needed.
+    nxp = nx + 2
+    nyp = ny + 2
+    # 2D views on the (nxp, nyp) B2 grid. Use C-order here because
+    # ne_flat was built with order='F' from a (nxp, nyp) array, so
+    # reshape(nxp, nyp, order='F') gives back the original (ix, iy) layout.
+    def _grid(flat):
+        return flat.reshape(nxp, nyp, order='F')
+    Te_g = _grid(te_flat)
+    Ti_g = _grid(ti_flat)
+    ne_g = _grid(ne_flat)
+    Rc = rc   # (nxp, nyp) cell-center R
+    Zc = zc   # (nxp, nyp) cell-center Z
+
+    # Central-difference operator (clamped at boundaries via one-sided)
+    def _grad2d(field):
+        dix = np.zeros_like(field)
+        diy = np.zeros_like(field)
+        dix[1:-1, :] = 0.5 * (field[2:, :] - field[:-2, :])
+        dix[0, :]    = field[1, :]  - field[0, :]
+        dix[-1, :]   = field[-1, :] - field[-2, :]
+        diy[:, 1:-1] = 0.5 * (field[:, 2:] - field[:, :-2])
+        diy[:, 0]    = field[:, 1]  - field[:, 0]
+        diy[:, -1]   = field[:, -1] - field[:, -2]
+        return dix, diy
+
+    dR_dix, dR_diy = _grad2d(Rc)
+    dZ_dix, dZ_diy = _grad2d(Zc)
+    det_J = dR_dix * dZ_diy - dR_diy * dZ_dix
+    # Avoid divide-by-zero at degenerate cells (ix=0/nxp-1 guard rows).
+    det_J_safe = np.where(np.abs(det_J) > 1e-30, det_J, 1.0)
+
+    def _grad_rz(field_g):
+        dfdi, dfdj = _grad2d(field_g)
+        # [d/dR, d/dZ] = J^{-1} [d/dix, d/diy]
+        # J^{-1} = (1/det) [[dZ_diy, -dR_diy], [-dZ_dix, dR_dix]]
+        g_r = ( dZ_diy * dfdi - dR_diy * dfdj) / det_J_safe
+        g_z = (-dZ_dix * dfdi + dR_dix * dfdj) / det_J_safe
+        g_r[np.abs(det_J) <= 1e-30] = 0.0
+        g_z[np.abs(det_J) <= 1e-30] = 0.0
+        return g_r, g_z
+
+    grad_te_r_g, grad_te_z_g = _grad_rz(Te_g)
+    grad_ti_r_g, grad_ti_z_g = _grad_rz(Ti_g)
+    grad_ne_r_g, grad_ne_z_g = _grad_rz(ne_g)
+
+    mesh_grad_te_r = grad_te_r_g.reshape(ncell_flat, order='F')
+    mesh_grad_te_z = grad_te_z_g.reshape(ncell_flat, order='F')
+    mesh_grad_ti_r = grad_ti_r_g.reshape(ncell_flat, order='F')
+    mesh_grad_ti_z = grad_ti_z_g.reshape(ncell_flat, order='F')
+    mesh_grad_ne_r = grad_ne_r_g.reshape(ncell_flat, order='F')
+    mesh_grad_ne_z = grad_ne_z_g.reshape(ncell_flat, order='F')
+    for arr in [mesh_grad_te_r, mesh_grad_te_z,
+                mesh_grad_ti_r, mesh_grad_ti_z,
+                mesh_grad_ne_r, mesh_grad_ne_z]:
+        arr[~np.isfinite(arr)] = 0.0
+
     # -- Write plasma.h5 --
     with h5py.File(plasma_out, "w") as f:
         # Embedded equilibrium: raw .equ / GEQDSK-derived psi map on its
@@ -1328,6 +1390,12 @@ def convert_solps_to_openedge(
         f.create_dataset("mesh/dens_i", data=mesh_ni)
         f.create_dataset("mesh/temp_i", data=mesh_ti)
         f.create_dataset("mesh/parr_flow", data=mesh_upar)
+        f.create_dataset("mesh/grad_te_r", data=mesh_grad_te_r)
+        f.create_dataset("mesh/grad_te_z", data=mesh_grad_te_z)
+        f.create_dataset("mesh/grad_ti_r", data=mesh_grad_ti_r)
+        f.create_dataset("mesh/grad_ti_z", data=mesh_grad_ti_z)
+        f.create_dataset("mesh/grad_ne_r", data=mesh_grad_ne_r)
+        f.create_dataset("mesh/grad_ne_z", data=mesh_grad_ne_z)
         f.create_dataset("mesh/ions/dens", data=mesh_ions_dens)
         f.create_dataset("mesh/ions/temp", data=mesh_ions_temp)
         f.create_dataset("mesh/ions/parr_flow", data=mesh_ions_upar)

@@ -383,19 +383,23 @@ void FixThermalForce::kick_half(double dt_half)
     const double Z2 = Z * Z;
 
     if (have_ion_thermal_) {
-      const double gTiR = use_plasma_data_ ? pd_interp(pd_->grad_ti_r, p)
-                                           : read_src(srcGradTiR_, ip, icell);
-      const double gTiZ = use_plasma_data_ ? pd_interp(pd_->grad_ti_z, p)
-                                           : read_src(srcGradTiZ_, ip, icell);
+      const double gTiR = use_plasma_data_
+        ? pd_grad(pd_->mesh_grad_ti_r, pd_->grad_ti_r, p)
+        : read_src(srcGradTiR_, ip, icell);
+      const double gTiZ = use_plasma_data_
+        ? pd_grad(pd_->mesh_grad_ti_z, pd_->grad_ti_z, p)
+        : read_src(srcGradTiZ_, ip, icell);
       const double grad_par_Ti = gTiR * bhat_R_cyl + gTiZ * bhat_Z_cyl;
       a_par += beta_i_ * Z2 * QE * grad_par_Ti / m_Z;
     }
 
     if (have_elec_thermal_) {
-      const double gTeR = use_plasma_data_ ? pd_interp(pd_->grad_te_r, p)
-                                           : read_src(srcGradTeR_, ip, icell);
-      const double gTeZ = use_plasma_data_ ? pd_interp(pd_->grad_te_z, p)
-                                           : read_src(srcGradTeZ_, ip, icell);
+      const double gTeR = use_plasma_data_
+        ? pd_grad(pd_->mesh_grad_te_r, pd_->grad_te_r, p)
+        : read_src(srcGradTeR_, ip, icell);
+      const double gTeZ = use_plasma_data_
+        ? pd_grad(pd_->mesh_grad_te_z, pd_->grad_te_z, p)
+        : read_src(srcGradTeZ_, ip, icell);
       const double grad_par_Te = gTeR * bhat_R_cyl + gTeZ * bhat_Z_cyl;
       a_par += alpha_e_ * Z2 * QE * grad_par_Te / m_Z;
     }
@@ -532,6 +536,29 @@ double FixThermalForce::pd_interp(const std::vector<double> &field,
   double R, Z;
   particle_rz(p, R, Z);
   return pd_->interp2D(field, R, Z);
+}
+
+/* ---------------------------------------------------------------------- */
+
+double FixThermalForce::pd_grad(const std::vector<double> &mesh_grad,
+                                const std::vector<double> &regular_grad,
+                                const Particle::OnePart &p) const
+{
+  if (!pd_) return 0.0;
+  double R, Z;
+  particle_rz(p, R, Z);
+  // Prefer mesh-based gradient (precomputed by the converter on the B2
+  // (ix, iy) grid with Jacobian projection to physical (R, Z)). Falls
+  // back to bilinear interp on the regular (R, Z) grid when mesh
+  // gradients are absent (old plasma.h5 without mesh/grad_*_r/z).
+  if (!mesh_grad.empty() && pd_->has_mesh) {
+    const int cell = pd_->mesh_cell_at(R, Z);
+    if (cell >= 0 && cell < static_cast<int>(mesh_grad.size()))
+      return mesh_grad[cell];
+  }
+  if (!regular_grad.empty())
+    return pd_->interp2D(regular_grad, R, Z);
+  return 0.0;
 }
 
 /* ---------------------------------------------------------------------- */

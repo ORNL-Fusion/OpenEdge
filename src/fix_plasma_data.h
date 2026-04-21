@@ -75,6 +75,11 @@ class FixPlasmaData : public Fix {
   std::vector<int> mesh_tri;       // (ntri*3) vertex indices
   std::vector<int> mesh_cell_idx;  // (ntri) cell index per triangle
   std::vector<double> mesh_ne, mesh_te, mesh_ti, mesh_ni, mesh_upar;
+  // Precomputed gradients on the B2 mesh (converter writes these).
+  // Consumers query via mesh_cell_at(R, Z) + mesh_grad_*_{r,z}[cell].
+  std::vector<double> mesh_grad_te_r, mesh_grad_te_z;
+  std::vector<double> mesh_grad_ti_r, mesh_grad_ti_z;
+  std::vector<double> mesh_grad_ne_r, mesh_grad_ne_z;
   std::vector<double> mesh_ions_dens, mesh_ions_temp, mesh_ions_upar;
   int has_mesh_wall_face_area;                // 1 if the converter wrote
                                               // mesh/wall_face_area
