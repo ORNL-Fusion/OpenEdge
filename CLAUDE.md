@@ -133,6 +133,45 @@ slot mapping.
 - 3D Cart (unaffected): `test_west_3d`, etc.
 - True 1D slab (unaffected): `test_slab_stangeby2000`
 
+**Migration cookbook** — moving a 2D-Cart-mis-named-axi test to true axi
+(pilot was `test_diii_d_neutrals`):
+
+1. **Regenerate plasma + wall** with the SOLPS converter using the new
+   default coord layout:
+   ```bash
+   python3 tools/converters/convert_solps_plasma.py <SOLPS_RUN> \
+       --b2fgmtry <baserun>/b2fgmtry --equ-file <baserun>/dg.equ \
+       --mesh-extra <baserun>/mesh.extra \
+       --plasma-out input/plasma.h5 --bfield-out input/bfield.h5 \
+       --wall-out input/wall.surf \
+       --wall-source mesh-extra --coords axi
+   ```
+2. **Flip the input deck**:
+   - `boundary o o p` → `boundary o ao p` (yhi 'o' is required to keep
+     the boundary as outflow; ylo 'a' marks the axis).
+   - `create_box X1 X2 Y1 Y2 Z1 Z2` → `create_box Z1_phys Z2_phys 0 R_max Z1 Z2`.
+     Note `ylo = 0` is mandatory (`create_box.cpp:55`).
+   - `create_grid Nx Ny Nz`: swap the first two arguments so x stays the
+     longer axial dimension and y is the radial dimension. Often double
+     the original Nx (now along Z) since the axial range is wider.
+   - All `region block xlo xhi ylo yhi zlo zhi`: swap to the new layout
+     (xlo,xhi are now Z range, ylo,yhi are now R range). Lower divertor
+     region: `Z` is negative; upper divertor: `Z` is positive.
+   - All B-field / E-field source columns from `compute plasma/fields`
+     stay named `bx by bz` — the compute now projects to the right SPARTA
+     slots automatically (commit dd6a746).
+3. **Re-tune `fnum`** — the wall-segment cone-frustum area in axi mode is
+   `2π·R·L` (full revolution) instead of just `L` (per-radian). This
+   bumps the per-step physical emission rate by a factor `2π·R̄ ≈ 10`.
+   Multiply `fnum` by ~5 to keep similar sim-particle counts. Watch the
+   first 1000 steps; if Np climbs too fast, kill and bump `fnum` further.
+4. **Update any post-processing** that reads dump xc/yc as (R, Z) — in
+   axi mode xc is now `Z`, yc is `R`. The example `compare.py` in
+   `test_diii_d_neutrals` auto-detects the layout from the yc range.
+5. **Re-run, verify** the `[emit/surf/recycle]` diagnostic prints a
+   single sensible Bohm rate (~SOLPS-EIRENE ionization total / 5–15×
+   amplification factor).
+
 ### Particle properties
 
 - `particles[i].mass` is **zero** for gas-phase particles — it is only used
@@ -372,12 +411,45 @@ fix <ID> emit/surf/recycle <mixture> <group> <plasma_fix_ID> \
   `Γ = n_i · c_s · sin(α_B)` with `c_s = sqrt((Te+Ti)/m_ion)`
   and `sin(α_B)` the geometric projection of B onto the wall inward
   normal.
-- **Emission rate per wall segment:**
-  `dot{N}_seg = 0.5 · R · Γ · face_area_seg`
-  The 1/2 balances D⁺ → D₂ recombination at the wall; the mixture
-  fractions control the atom/molecule split.
+- **Emission rate per SPARTA task** (the unit of work — one wall
+  surface in one cell after `adapt_grid` refinement):
+  `dot{N}_task = 0.5 · R · Γ_dom · A_seg[isurf] · area_share[itask]`
+  - `A_seg[isurf]` is `mesh/wall_surf_area[isurf]` from plasma.h5 — the
+    converter aggregates the B2 face area of every B2 boundary cell that
+    chose this segment as its nearest, so it is the full SOLPS flux
+    budget claimed by segment `isurf` regardless of whether one or many
+    B2 cells map to it.
+  - `area_share[itask] = task.area / Σ_{tasks with same isurf} task.area`,
+    computed at init time with an MPI_Allreduce so every rank sees the
+    global denominator. Σ over all tasks of an isurf equals 1, so the
+    per-isurf total is exactly `0.5 · R · Γ · A_seg`, independent of how
+    `adapt_grid` splits the segment.
+  - `Γ_dom` uses the dominant B2 cell's `(ne, Te, Ti)` for the segment
+    (the cell that contributed the largest face area). Sub-1.5× error
+    when neighboring cells differ in plasma; refinable later by writing
+    a per-segment plasma-weighted average.
+  - The 1/2 balances D⁺ → D₂ recombination at the wall; the mixture
+    fractions control the atom/molecule split.
 - **Re-emission velocity:** half-Maxwellian flux at `twall` along the
   inward normal. (TRIM-fast-reflection channel not yet implemented.)
+
+**Init diagnostic** (printed once per init at rank 0):
+```
+[emit/surf/recycle] tasks=N, mapped=M (P%)
+[emit/surf/recycle] Bohm-flux rate (raw SPARTA segment area, sin_alpha=1) = X /s
+[emit/surf/recycle] Bohm-flux rate (B2-aggregated surf_area, sin_alpha=1) = Y /s [USING THIS]
+[emit/surf/recycle] wall mapping (global): K unique B2 cells, A m^2 of T total face area (P%)
+```
+- Both rates are MPI-global. The "raw SPARTA segment area" line uses
+  `tasks[i].area` (which is the cone-frustum `2π·R·L` in SPARTA axi
+  mode and the per-radian poloidal length in 2D Cart). The
+  "B2-aggregated surf_area" is the actual emission formula above and
+  what the runtime uses. They should agree to within the geometric
+  mismatch between the SPARTA wall mesh and the B2 boundary cells.
+- "wall mapping" sums `mesh_wall_face_area[c]` over **dominant** cells
+  only — under-reports when many B2 cells per segment, since
+  `mesh_wall_surf_area[isurf]` (the actually-used quantity) carries the
+  full aggregation.
 
 **Wall → B2-cell mapping** — the fix needs to know, for each wall
 surface, which SOLPS B2 boundary cell owns it. Three paths, tried in
@@ -385,12 +457,14 @@ order:
 
 1. **Topological** (preferred) — `fix_plasma_data` reads
    `mesh/wall_surf_cell[iseg]` from plasma.h5 (written by the
-   converter; see Wall geometry below). Direct index lookup.
+   converter; see Wall geometry below). Direct index lookup. Falls
+   through if the chosen cell has `wall_face_area == 0`.
 2. **Geographic fallback** — nearest B2 boundary cell by centroid
-   distance, restricted to cells with `wall_face_area > 0`.
-3. **Raw SPARTA area** — last-resort emission using the SPARTA surface
-   area instead of the B2 face area. Only correct when SPARTA wall and
-   B2 boundary coincide exactly.
+   distance, restricted to cells with `wall_face_area > 0`. Triggered
+   when (1) is unavailable.
+3. **Raw SPARTA area** — last-resort emission using `tasks[i].area`
+   (with no `area_share`) when neither (1) nor (2) is available. Only
+   correct when SPARTA wall and B2 boundary coincide exactly.
 
 ### Wall geometry from SOLPS: `convert_solps_plasma.py --wall-source`
 

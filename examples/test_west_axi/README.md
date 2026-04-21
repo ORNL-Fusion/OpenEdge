@@ -1,5 +1,15 @@
 # WEST test case (OpenEdge)
 
+> **Note (2026-04-20):** Despite the `_axi` name, this test currently runs
+> in 2D Cartesian mode (`boundary p p p`, `x=R`, `y=Z`) with a per-radian
+> wedge convention — every `compute grid nrho` and `compute surf flux`
+> needs a `2*pi*R̄` post-multiply for full-3D values. Migration to true
+> SPARTA-native axisymmetric (`boundary o ao p`, `x=Z`, `y=R`) is queued
+> as the next step after `test_diii_d_neutrals` (the pilot). Underlying
+> physics fixes (`thermal_force`, `cross_diffusion`, etc.) are already
+> axi-aware via `openedge_geom`; only the converter rerun + input deck
+> flip + `fnum` re-tune are pending. See `CLAUDE.md` § "Migration cookbook".
+
 Input data for this example is included under `input/`.
 
 Primary input:
