@@ -608,7 +608,6 @@ def interpolate_and_save_plasma_field(
     data_file,
     wall_file=None,
     plasma_out_file=None,
-    bfield_out_file=None,
     debug_plot_file=None,
     flux_total_plot_file=None,
     flux_species_plot_file=None,
@@ -1012,19 +1011,10 @@ def interpolate_and_save_plasma_field(
             f.create_dataset('mesh/ions/temp', data=mesh_temp_i_all)
             f.create_dataset('mesh/ions/parr_flow', data=mesh_flow_i_par_all)
 
-        # Legacy standalone bfield.h5 — only written if the caller asks for
-        # it. The default flow now keeps B on the plasma.h5 grid.
-        if bfield_out_file:
-            with h5py.File(bfield_out_file, 'w') as f:
-                f.create_dataset('r', data=r)
-                f.create_dataset('z', data=z)
-                f.create_dataset('br', data=b_r_grid)
-                f.create_dataset('bt', data=b_t_grid)
-                f.create_dataset('bz', data=b_z_grid)
+        # B-field is embedded in plasma.h5 above (br/bt/bz datasets); no
+        # separate bfield.h5 is produced.
 
         print(f"Wrote OpenEdge plasma file: {plasma_out_file}")
-        if bfield_out_file:
-            print(f"Wrote OpenEdge bfield file: {bfield_out_file}")
         print(f"Detected species: electron=spec0, ions={ion_inds} (Nion={len(ion_inds)}), main ion=spec{ion_inds[main_k]}")
         if debug_plot_file:
             _plot_debug_fields(

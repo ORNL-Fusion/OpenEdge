@@ -45,7 +45,7 @@ adapt_grid all refine surf all 0.001 maxlevel 5 cells 2 2 1 region rlim   all it
 balance_grid rcb cell
 
 # Plasma/B-field compute
-compute cwest plasma/fields all file ../test_west_axi/input/plasma.h5 ../test_west_axi/input/bfield.h5 &
+compute cwest plasma/fields all file ../test_west_axi/input/plasma.h5 &
                     bx by bz epar temp_e dens_e temp_i dens_i parrflow grad_te_r grad_te_z
 
 # PMI compute — sputter_flux_total

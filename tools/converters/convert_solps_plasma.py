@@ -6,13 +6,14 @@ Reads SOLPS binary text files (b2fgmtry, b2fstate) directly using the
 *cf: header format, following Jeremy Lore / Jae-Sun Park's SOLPS routines.
 
 Outputs:
-  plasma.h5  - regular (R,Z) grid with all plasma fields + multi-ion species
-  bfield.h5  - regular (R,Z) grid with Br, Bt, Bz
+  plasma.h5  - regular (R,Z) grid with all plasma fields + multi-ion
+               species + B-field (br/bt/bz) embedded. compute
+               plasma/fields reads everything from this single file.
 
 Usage:
     python convert_solps_plasma.py /path/to/solps_run \\
         --equ-file equilibrium.equ \\
-        --plasma-out plasma.h5 --bfield-out bfield.h5 \\
+        --plasma-out plasma.h5 \\
         --nr 300 --nz 300 --plot
 """
 
@@ -609,7 +610,6 @@ def read_eirene_mesh(run_path: Path):
 def convert_solps_to_openedge(
     run_path: Path,
     plasma_out: Path,
-    bfield_out: Path,
     nr: int = 300,
     nz: int = 300,
     rmin: float | None = None,
@@ -626,7 +626,7 @@ def convert_solps_to_openedge(
     wall_source: str = "auto",
 ) -> None:
     """
-    Convert SOLPS run directory to OpenEdge plasma.h5 + bfield.h5.
+    Convert SOLPS run directory to OpenEdge plasma.h5 (B-field embedded).
 
     Reads b2fgmtry (geometry) and b2fstate (plasma state) directly —
     no quixote dependency.
@@ -1272,13 +1272,9 @@ def convert_solps_to_openedge(
         f.create_dataset("mesh/wall_surf_cell", data=mesh_wall_surf_cell)
         f.create_dataset("mesh/wall_surf_area", data=mesh_wall_surf_area)
 
-    # -- Write bfield.h5 --
-    with h5py.File(bfield_out, "w") as f:
-        f.create_dataset("r", data=r)
-        f.create_dataset("z", data=z)
-        f.create_dataset("br", data=np.nan_to_num(br_grid))
-        f.create_dataset("bt", data=np.nan_to_num(bt_grid))
-        f.create_dataset("bz", data=np.nan_to_num(bz_grid))
+    # B-field is embedded in plasma.h5 above (br/bt/bz datasets), so no
+    # separate bfield.h5 is needed. compute plasma/fields reads B from
+    # plasma.h5 directly.
 
     # -- Optional wall geometry --
     # Preferred path: wall.surf built from EIRENE triangulation boundary
@@ -1291,7 +1287,6 @@ def convert_solps_to_openedge(
         print(f"Wrote wall (legacy mesh.extra walk): {wall_out}")
 
     print(f"Wrote plasma: {plasma_out}")
-    print(f"Wrote bfield: {bfield_out}")
     print(f"Grid: nr={nr}, nz={nz}, R=[{r[0]:.4f},{r[-1]:.4f}], Z=[{z[0]:.4f},{z[-1]:.4f}]")
     print(f"Ion species ({nion}): {ion_names}")
     print(f"Charge states: {ion_charges.tolist()}")
@@ -1389,11 +1384,10 @@ def _save_plots(cell_polys, ne, te, ni, ti, upar, br, prefix):
 
 def _build_parser():
     p = argparse.ArgumentParser(
-        description="Convert SOLPS run to OpenEdge plasma.h5 + bfield.h5 (no quixote)"
+        description="Convert SOLPS run to OpenEdge plasma.h5 (no quixote, B-field embedded)"
     )
     p.add_argument("run_path", type=Path, help="SOLPS run directory (contains b2fgmtry, b2fstate)")
     p.add_argument("--plasma-out", type=Path, default=Path("plasma.h5"))
-    p.add_argument("--bfield-out", type=Path, default=Path("bfield.h5"))
     p.add_argument("--nr", type=int, default=300)
     p.add_argument("--nz", type=int, default=300)
     p.add_argument("--rmin", type=float, default=None)
@@ -1421,7 +1415,6 @@ def main():
     convert_solps_to_openedge(
         run_path=args.run_path,
         plasma_out=args.plasma_out,
-        bfield_out=args.bfield_out,
         nr=args.nr, nz=args.nz,
         rmin=args.rmin, rmax=args.rmax,
         zmin=args.zmin, zmax=args.zmax,

@@ -72,9 +72,14 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
   analytic_use_y0 = 0;
 
   // parse:
-  // compute ... plasma/fields ggroup file plasma.h5 bfield.h5 ...
+  // compute ... plasma/fields ggroup file plasma.h5 [equilibrium <file>] ...
   // compute ... plasma/fields ggroup constant [const args] ...
   // compute ... plasma/fields ggroup analytic [analytic args] ...
+  //
+  // plasma.h5 MUST embed the B-field as br/bt/bz datasets (the SOLPS /
+  // SOLEDGE3X / OEDGE converters write these by default). Optionally,
+  // pass `equilibrium <.equ>` to override the embedded B-field with an
+  // exact ψ-derived field. If neither is available, init() errors out.
   int iarg = 3;
   if (iarg >= narg)
     error->all(FLERR,"compute plasma/fields requires mode: file, constant, or analytic");
@@ -85,8 +90,21 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
       error->all(FLERR,"compute plasma/fields file mode needs at least: plasma.h5");
     plasmaStatePath = std::string(arg[iarg++]);
     magneticFieldsPath.clear();
-    if (iarg < narg && strcmp(arg[iarg],"equilibrium") != 0 && strcmp(arg[iarg],"values") != 0)
-      magneticFieldsPath = std::string(arg[iarg++]);
+    // Reject the legacy 2nd-positional bfield.h5 path: B-field is read
+    // from plasma.h5 (br/bt/bz) or computed from equilibrium.
+    if (iarg < narg && strcmp(arg[iarg],"equilibrium") != 0 &&
+        strcmp(arg[iarg],"values") != 0) {
+      char msg[512];
+      snprintf(msg, sizeof(msg),
+        "compute plasma/fields: unexpected positional argument '%s'. "
+        "The legacy `file plasma.h5 bfield.h5 ...` syntax has been "
+        "removed; plasma.h5 must embed br/bt/bz, and an optional "
+        "equilibrium <file> may be provided. Regenerate plasma.h5 with "
+        "the current SOLPS / SOLEDGE3X / OEDGE converter and drop the "
+        "bfield.h5 argument from your input deck.",
+        arg[iarg]);
+      error->all(FLERR, msg);
+    }
   } else if (strcmp(arg[iarg],"plasma_data") == 0) {
     input_mode = MODE_PLASMA_DATA;
     iarg++;
@@ -175,8 +193,9 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
     } else break;
   }
 
-  if (input_mode == MODE_FILE && magneticFieldsPath.empty() && !has_equilibrium)
-    error->all(FLERR,"compute plasma/fields file mode without bfield.h5 requires equilibrium <file>");
+  // Note: when no bfield.h5 and no equilibrium file are passed, we will
+  // try to read B from the plasma.h5 (br/bt/bz datasets) at init time.
+  // The error here is deferred until after plasma.h5 is read.
 
   if (iarg >= narg)
     error->all(FLERR,"plasma/fields needs values (br/bt/bz, er/et/ez, vr/vt/vz, ...)");
@@ -434,13 +453,45 @@ void ComputePlasmaFields::init()
       broadcastMagneticData(magnetic_data);
     if (has_equilibrium)
       broadcastEquilibriumData(equ_data);
+
+    // Populate magnetic_data from the B-field embedded in plasma.h5
+    // (br/bt/bz datasets the SOLPS / SOLEDGE3X / OEDGE converters write
+    // directly into plasma.h5). Same r/z grid as plasma_data, so the
+    // bilinear stencils line up.
+    const bool plasma_has_B =
+      !plasma_data.br.empty() && !plasma_data.bt.empty() &&
+      !plasma_data.bz.empty();
+    if (plasma_has_B) {
+      magnetic_data.r = plasma_data.r;
+      magnetic_data.z = plasma_data.z;
+      magnetic_data.br = plasma_data.br;
+      magnetic_data.bt = plasma_data.bt;
+      magnetic_data.bz = plasma_data.bz;
+    } else if (!has_equilibrium) {
+      // No B-field source available — hard error so we don't run with
+      // a silently-zero B field. Typical fix: regenerate plasma.h5 with
+      // the current converter (which embeds br/bt/bz), or pass
+      // `equilibrium <file.equ>` on the compute plasma/fields line.
+      char msg[512];
+      snprintf(msg, sizeof(msg),
+        "compute plasma/fields: %s has no br/bt/bz datasets and no "
+        "equilibrium file was provided. Re-run the converter to embed "
+        "the B-field, or add `equilibrium <file>` to the compute line.",
+        plasmaStatePath.c_str());
+      error->all(FLERR, msg);
+    } else if (comm->me == 0) {
+      error->warning(FLERR,
+        "compute plasma/fields: plasma.h5 has no embedded B-field; "
+        "falling back to equilibrium-derived B. For best accuracy, "
+        "regenerate plasma.h5 with a converter that writes br/bt/bz.");
+    }
   }
 
   // --- Stencil computation and per-cell interpolation ---
   // (shared by MODE_FILE and MODE_PLASMA_DATA)
   if (input_mode == MODE_FILE || input_mode == MODE_PLASMA_DATA) {
     precomputeStencils(plasma_data.r, plasma_data.z, plasma_stencil);
-    if (!magneticFieldsPath.empty())
+    if (!magnetic_data.r.empty())
       precomputeStencils(magnetic_data.r, magnetic_data.z, magnetic_stencil);
     else
       magnetic_stencil.clear();
@@ -450,7 +501,7 @@ void ComputePlasmaFields::init()
       if (cells[icell].nsplit < 1)         continue;
       plasma_arr[icell] = bilinearInterpolationPlasma(icell, plasma_data);
 
-      if (!magneticFieldsPath.empty()) {
+      if (!magnetic_data.r.empty()) {
         mag_arr[icell] = bilinearInterpolationMagneticField(icell, magnetic_data);
       } else if (has_equilibrium) {
         double xyz[3] = {
@@ -629,15 +680,23 @@ void ComputePlasmaFields::reload_plasma()
   if (me == 0) plasma_data = readPlasmaFileData(plasmaStatePath);
   broadcastPlasmaData(plasma_data);
 
-  // Re-read magnetic field if provided separately
+  // Re-read magnetic field if provided separately (legacy bfield.h5 path).
   if (!magneticFieldsPath.empty()) {
     if (me == 0) magnetic_data = readMagneticFieldFileData(magneticFieldsPath);
     broadcastMagneticData(magnetic_data);
+  } else if (!plasma_data.br.empty() && !plasma_data.bt.empty() &&
+             !plasma_data.bz.empty()) {
+    // Refresh embedded B-field from the (possibly new) plasma.h5.
+    magnetic_data.r = plasma_data.r;
+    magnetic_data.z = plasma_data.z;
+    magnetic_data.br = plasma_data.br;
+    magnetic_data.bt = plasma_data.bt;
+    magnetic_data.bz = plasma_data.bz;
   }
 
   // Recompute stencils (grid may not have changed, but R/Z grids in file might)
   precomputeStencils(plasma_data.r, plasma_data.z, plasma_stencil);
-  if (!magneticFieldsPath.empty())
+  if (!magnetic_data.r.empty())
     precomputeStencils(magnetic_data.r, magnetic_data.z, magnetic_stencil);
 
   // Re-interpolate onto grid cells
@@ -646,7 +705,7 @@ void ComputePlasmaFields::reload_plasma()
     if (cells[icell].nsplit < 1)         continue;
     plasma_arr[icell] = bilinearInterpolationPlasma(icell, plasma_data);
 
-    if (!magneticFieldsPath.empty())
+    if (!magnetic_data.r.empty())
       mag_arr[icell] = bilinearInterpolationMagneticField(icell, magnetic_data);
   }
 

@@ -17,7 +17,7 @@ mixture              species H+ frac 1.0
 global               fnum 1
 read_particles       input/source.single 0
 
-# Plasma/fields compute: plasma.h5 + equilibrium (no bfield.h5)
+# Plasma/fields compute: plasma.h5 (B embedded) + equilibrium
 compute pfields plasma/fields all file input/plasma.h5 &
         equilibrium g000001.00001_symm.X4.equ &
         bx by bz temp_e dens_e temp_i dens_i parrflow

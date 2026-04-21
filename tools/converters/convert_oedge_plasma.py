@@ -3,13 +3,14 @@
 OEDGE/DIVIMP NetCDF -> OpenEdge converter.
 
 Reads an OEDGE .nc background file and an equilibrium (.equ) file,
-interpolates onto a regular (R,Z) grid, and writes plasma.h5 + bfield.h5
-in the format expected by OpenEdge's ``compute plasma/fields file`` command.
+interpolates onto a regular (R,Z) grid, and writes plasma.h5 (with
+B-field embedded as br/bt/bz) in the format expected by OpenEdge's
+``compute plasma/fields file`` command.
 
 Usage:
     python convert_oedge_plasma.py d3d-204953-bkg-v25.nc \
         --equ-file 204953_3000.x16.equ \
-        --plasma-out plasma.h5 --bfield-out bfield.h5 \
+        --plasma-out plasma.h5 \
         --nr 300 --nz 300 --plot
 """
 
@@ -289,7 +290,6 @@ def convert_oedge_to_openedge(
     nc_file: Path,
     equ_file: Path,
     plasma_out: Path = Path("plasma.h5"),
-    bfield_out: Path = Path("bfield.h5"),
     nr: int = 300,
     nz: int = 300,
     rmin: float = None,
@@ -401,19 +401,16 @@ def convert_oedge_to_openedge(
         f.create_dataset("ions/parr_flow_z",
                          data=parr_flow_z[np.newaxis, :, :])
 
+        # B-field embedded in plasma.h5 — no separate bfield.h5 needed.
+        # compute plasma/fields reads br/bt/bz directly from this file.
+        f.create_dataset("br", data=np.nan_to_num(br_grid))
+        f.create_dataset("bt", data=np.nan_to_num(bt_grid))
+        f.create_dataset("bz", data=np.nan_to_num(bz_grid))
+
         # Source metadata
         f.attrs["source"] = f"OEDGE: {nc_file.name}"
         f.attrs["r0"] = oedge["r0"]
         f.attrs["z0"] = oedge["z0"]
-
-    # ---- Write bfield.h5 ----
-    print(f"Writing {bfield_out} ...")
-    with h5py.File(str(bfield_out), "w") as f:
-        f.create_dataset("r", data=grid_r)
-        f.create_dataset("z", data=grid_z)
-        f.create_dataset("br", data=np.nan_to_num(br_grid))
-        f.create_dataset("bt", data=np.nan_to_num(bt_grid))
-        f.create_dataset("bz", data=np.nan_to_num(bz_grid))
 
     print("Done.")
 
@@ -508,14 +505,13 @@ def _plot_results(grid_r, grid_z, ne, te, ti, vpar,
 
 def _build_parser():
     p = argparse.ArgumentParser(
-        description="Convert OEDGE/DIVIMP .nc to OpenEdge plasma.h5 + bfield.h5"
+        description="Convert OEDGE/DIVIMP .nc to OpenEdge plasma.h5 (B-field embedded)"
     )
     p.add_argument("nc_file", type=Path,
                    help="OEDGE NetCDF background file (.nc)")
     p.add_argument("--equ-file", type=Path, required=True,
                    help="Equilibrium .equ file for B-field reconstruction")
     p.add_argument("--plasma-out", type=Path, default=Path("plasma.h5"))
-    p.add_argument("--bfield-out", type=Path, default=Path("bfield.h5"))
     p.add_argument("--nr", type=int, default=300,
                    help="Number of R grid points (default: 300)")
     p.add_argument("--nz", type=int, default=300,
@@ -537,7 +533,6 @@ def main():
         nc_file=args.nc_file,
         equ_file=args.equ_file,
         plasma_out=args.plasma_out,
-        bfield_out=args.bfield_out,
         nr=args.nr,
         nz=args.nz,
         rmin=args.rmin,
