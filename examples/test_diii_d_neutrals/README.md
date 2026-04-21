@@ -54,17 +54,16 @@ python3 ../../tools/converters/convert_solps_plasma.py \
     --plasma-out input/plasma.h5 \
     --bfield-out input/bfield.h5 \
     --wall-out input/wall.surf \
-    --wall-source mesh-extra \
-    --coords axi
+    --wall-source mesh-extra
 ```
 
 - `--wall-source mesh-extra` is the SOLPS-native path (recommended for
   production). Alternatives: `eirene` (exact EIRENE wall, requires
   fort.33/34/35), or `auto` (default — picks mesh-extra if available).
-- `--coords axi` (default) writes wall.surf line endpoints as `(Z, R)` to
-  match SPARTA's true axisymmetric slot mapping (`x = Z`, `y = R`).
-  Use `--coords cart` for the legacy 2D-Cartesian layout (`x = R`, `y = Z`,
-  per-radian-wedge convention).
+- The converter always writes `wall.surf` in SPARTA's true axisymmetric
+  layout (column 1 = Z, column 2 = R) since SOLPS is an axisymmetric
+  code. Pair with `boundary o ao p`, `create_box ... 0 R_max ...` in the
+  input deck.
 
 **Run the EIRENE-recycling case:**
 

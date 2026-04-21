@@ -119,10 +119,14 @@ helper `RZphi_force_to_sparta()` does this projection consistently in
 `fix thermal_force` or `fix efield/grid` works in either coord layout
 without further user intervention.
 
-**SOLPS converter** — `convert_solps_plasma.py --coords {axi,cart}`
-(default `axi`). Controls whether `wall.surf` line endpoints are written
-as `(Z, R)` (axi) or `(R, Z)` (cart) so they line up with SPARTA's
-slot mapping.
+**Edge-code converters always emit axi** — SOLPS / SOLEDGE3X / OEDGE
+are axisymmetric edge codes, so `convert_solps_plasma.py`,
+`convert_s3x_plasma.py`, and `create_surf_from_solps.py` unconditionally
+write `wall.surf` line endpoints as `(Z, R)` (column 1 = Z, column 2 =
+R) to line up with SPARTA's true axisymmetric slot mapping. There is no
+Cartesian-output toggle. If a downstream test still uses the legacy
+2D Cartesian layout in its input deck, the deck has to be flipped to
+true axi first (see "Migration cookbook" below).
 
 **Tests using each layout** (as of 2026-04-20):
 - Axi: `test_diii_d_neutrals` (pilot)
@@ -136,15 +140,15 @@ slot mapping.
 **Migration cookbook** — moving a 2D-Cart-mis-named-axi test to true axi
 (pilot was `test_diii_d_neutrals`):
 
-1. **Regenerate plasma + wall** with the SOLPS converter using the new
-   default coord layout:
+1. **Regenerate plasma + wall** with the SOLPS converter (always emits
+   axi-mode wall.surf since SOLPS is an axisymmetric code):
    ```bash
    python3 tools/converters/convert_solps_plasma.py <SOLPS_RUN> \
        --b2fgmtry <baserun>/b2fgmtry --equ-file <baserun>/dg.equ \
        --mesh-extra <baserun>/mesh.extra \
        --plasma-out input/plasma.h5 --bfield-out input/bfield.h5 \
        --wall-out input/wall.surf \
-       --wall-source mesh-extra --coords axi
+       --wall-source mesh-extra
    ```
 2. **Flip the input deck**:
    - `boundary o o p` → `boundary o ao p` (yhi 'o' is required to keep
