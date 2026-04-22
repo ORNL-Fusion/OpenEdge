@@ -31,6 +31,7 @@
 #include "variable.h"
 #include "compute.h"
 #include "compute_plasma_fields.h"
+#include "database_paths.h"
 
 namespace fs = std::filesystem;
 using namespace SPARTA_NS;
@@ -51,23 +52,61 @@ enum{ADAS,JANEV};                                      // rate styles
 FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
-    // fix ID chem/adas <nevery> <Z> <reactions_file> [adas_dir <path>] [plasma <TeVar> <NeVar>]
+    // fix ID chem/adas <nevery> <species|Z> <reactions_file> [adas_dir <path>] [plasma <TeVar> <NeVar>]
+    //   <species|Z>  element symbol (e.g. "C", "W") OR numeric atomic number.
+    //                When given as a symbol, the ADAS file is auto-located
+    //                under ${OPENEDGE_ROOT}/database/adas/ADAS_Rates_<Z>.h5.
 
-  if (narg < 5)     error->all(FLERR,"Illegal fix chem/adas command (need: nevery Z reactions_file [adas_dir path] [plasma TeVar NeVar])");
+  if (narg < 5)     error->all(FLERR,"Illegal fix chem/adas command (need: nevery <species|Z> reactions_file [adas_dir path] [plasma TeVar NeVar])");
     nevery = atoi(arg[2]);
-    atomic_number = atoi(arg[3]);
+
+    // Accept arg[3] as either a numeric Z or an element symbol.
+    {
+      const std::string tok(arg[3]);
+      bool numeric = !tok.empty();
+      for (char c : tok) if (c < '0' || c > '9') { numeric = false; break; }
+      if (numeric) {
+        atomic_number = atoi(arg[3]);
+      } else {
+        atomic_number = element_to_z(tok);
+        if (atomic_number < 0) {
+          std::string msg = "fix chem/adas: unknown element '" + tok + "'";
+          error->all(FLERR, msg.c_str());
+        }
+      }
+    }
 
     // per-cell array for aveflag = 1 case
 
     nlist = maxlist = 0;
     rlist = NULL;
-    readfile(arg[4]);
+
+    // Reactions-file argument can be:
+    //   * literal path (contains '/' or ends in .reactions) -> used as-is
+    //   * element symbol (e.g. "D", "C") -> resolved to
+    //     ${OPENEDGE_ROOT}/database/adas/reactions/<elem>.reactions
+    //   * "auto" sentinel -> same as passing the arg[3] element here
+    std::string reactions_path;
+    {
+      const std::string tok4(arg[4]);
+      if (tok4 == "auto") {
+        reactions_path = resolve_reactions_file(std::string(arg[3]), error);
+      } else {
+        reactions_path = resolve_reactions_file(tok4, error);
+      }
+    }
+    {
+      std::vector<char> buf(reactions_path.begin(), reactions_path.end());
+      buf.push_back('\0');
+      readfile(buf.data());
+    }
     check_duplicate();
 
-    // --- Optional adas_dir keyword (default: "adas") ---
+    // --- Optional adas_dir keyword ---
+    // If omitted, auto-resolve via OPENEDGE_ROOT / compile-time default.
     // Scan remaining args for adas_dir before consuming plasma keyword.
 
-    std::string adas_base_dir = "adas";
+    std::string adas_base_dir;
     int iarg = 5;
     if (iarg < narg && strcmp(arg[iarg], "adas_dir") == 0) {
       if (iarg + 1 >= narg)
@@ -79,12 +118,17 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
     // read ADAS rate data
 
     {
-      fs::path fullPath = fs::path(adas_base_dir) /
-          ("ADAS_Rates_" + std::to_string(atomic_number) + ".h5");
+      std::string full;
+      if (adas_base_dir.empty()) {
+        full = resolve_adas_file(std::to_string(atomic_number), error);
+      } else {
+        full = (fs::path(adas_base_dir) /
+                ("ADAS_Rates_" + std::to_string(atomic_number) + ".h5")).string();
+      }
       if (comm->me == 0)
         printf("Reading ADAS data for Z=%d from %s\n",
-               atomic_number, fullPath.string().c_str());
-      readRateDataParallel(fullPath.string(), materials_rate_data[atomic_number]);
+               atomic_number, full.c_str());
+      readRateDataParallel(full, materials_rate_data[atomic_number]);
     }
 
     // //
@@ -166,7 +210,12 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
              strcmp(arg[j], "stop_on_exhaust") != 0 &&
              strcmp(arg[j], "source_species") != 0 &&
              strcmp(arg[j], "units") != 0 &&
-             strcmp(arg[j], "exhaust_threshold") != 0) j++;
+             strcmp(arg[j], "output") != 0 &&
+             strcmp(arg[j], "exhaust_threshold") != 0 &&
+             strcmp(arg[j], "ionization") != 0 &&
+             strcmp(arg[j], "recombination") != 0 &&
+             strcmp(arg[j], "cx") != 0 &&
+             strcmp(arg[j], "dissociation") != 0) j++;
       nsrc_species = j - (iarg + 1);
       if (nsrc_species <= 0)
         error->all(FLERR, "fix chem/adas: source_species needs >=1 species name");
@@ -226,6 +275,37 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
       } else {
         error->all(FLERR, "fix chem/adas: units must be counts|rate|batch|batch_fix");
       }
+    } else if (strcmp(arg[iarg], "output") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix chem/adas: output requires summary|detailed");
+      if (strcmp(arg[iarg+1], "summary") == 0) output_mode = OUT_SUMMARY;
+      else if (strcmp(arg[iarg+1], "detailed") == 0) output_mode = OUT_DETAILED;
+      else error->all(FLERR, "fix chem/adas: output must be summary|detailed");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "ionization") == 0 ||
+               strcmp(arg[iarg], "recombination") == 0 ||
+               strcmp(arg[iarg], "cx") == 0 ||
+               strcmp(arg[iarg], "dissociation") == 0) {
+      if (iarg + 1 >= narg) {
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+                 "fix chem/adas: %s requires yes|no", arg[iarg]);
+        error->all(FLERR, msg);
+      }
+      int v;
+      if (strcmp(arg[iarg+1], "yes") == 0) v = 1;
+      else if (strcmp(arg[iarg+1], "no") == 0) v = 0;
+      else {
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+                 "fix chem/adas: %s must be yes|no", arg[iarg]);
+        error->all(FLERR, msg);
+      }
+      if (strcmp(arg[iarg], "ionization") == 0)        chan_ionization = v;
+      else if (strcmp(arg[iarg], "recombination") == 0) chan_recombination = v;
+      else if (strcmp(arg[iarg], "cx") == 0)           chan_cx = v;
+      else                                              chan_dissociation = v;
+      iarg += 2;
     } else {
       char msg[160];
       snprintf(msg, sizeof(msg), "fix chem/adas: unknown keyword '%s'", arg[iarg]);
@@ -237,21 +317,15 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
   maxgrid_plasma = 0;
   plasma_cache_2d = NULL;
 
-  // Expose 20-column per-grid source tally as Fix output (Gkeyll handoff).
-  // Layout is quantity-major, so columns 1-4 = ionization/recomb/CX/dissoc
-  // event COUNTS (same semantics as the original 4-column version).
-  //
-  //   cols  1 -  4 : count per cell per reaction type
-  //   cols  5 -  8 : sum of m*vx at each reaction event [kg m/s]
-  //   cols  9 - 12 : sum of m*vy
-  //   cols 13 - 16 : sum of m*vz
-  //   cols 17 - 20 : sum of 0.5*m*(vx^2+vy^2+vz^2)  [J]
-  //
-  // Dividing by a coupling time window t gives {particle, momentum, energy}
-  // source *rates* ready for a Gkeyll collision-operator coefficient.
-  // Stored in the inherited base-class array_grid.
+  // Per-grid source tally layout depends on `output` keyword:
+  //   OUT_SUMMARY  (default): 6 cols {Sp, Sm_x, Sm_y, Sm_z, Qe, Qi},
+  //                 signed plasma-frame moments, ready for fluid coupling.
+  //   OUT_DETAILED (diagnostic): 20 cols = {count, m vx, m vy, m vz, 0.5 m v^2}
+  //                 x {ioniz, recomb, CX, dissoc}, unsigned raw event tally
+  //                 (legacy layout for per-reaction debugging).
+  // See docs/neutral_plasma_coupling/main.tex for per-reaction formulas.
   per_grid_flag      = 1;
-  size_per_grid_cols = 20;
+  size_per_grid_cols = (output_mode == OUT_SUMMARY) ? 6 : 20;
   per_grid_freq      = 1;     // tally is updated every step; dump_grid
                               //   does  (nevery % per_grid_freq)  so this
                               //   MUST be non-zero (SIGFPE otherwise).
@@ -310,7 +384,8 @@ delete [] batch_fix_id;
 void FixChemAdas::reset_tally()
 {
   if (array_grid && maxgrid_src > 0)
-    memset(&array_grid[0][0], 0, sizeof(double) * maxgrid_src * 20);
+    memset(&array_grid[0][0], 0,
+           sizeof(double) * maxgrid_src * size_per_grid_cols);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -335,6 +410,21 @@ void FixChemAdas::init()
   // flag reactions as active/inactive depending on whether all species exist
   // mark recombination reactions inactive if recombflag_user = 0
 
+  // Per-channel tally so the init printout shows exactly which reactions
+  // survived species-matching + channel-toggle filtering.
+  int nI_active = 0, nI_total = 0;
+  int nR_active = 0, nR_total = 0;
+  int nE_active = 0, nE_total = 0;
+  int nD_active = 0, nD_total = 0;
+  // Up to 8 "missing species" tags kept for the diagnostic print.
+  std::vector<std::string> missing_species_samples;
+  missing_species_samples.reserve(8);
+  auto note_missing = [&](const char *name) {
+    if (missing_species_samples.size() >= 8) return;
+    for (const auto &s : missing_species_samples) if (s == name) return;
+    missing_species_samples.emplace_back(name);
+  };
+
   for (int m = 0; m < nlist; m++) {
     OneReaction *r = &rlist[m];
     r->active = 1;
@@ -343,7 +433,7 @@ void FixChemAdas::init()
       r->reactants[i] = particle->find_species(r->id_reactants[i]);
       if (r->reactants[i] < 0) {
         r->active = 0;
-        break;
+        note_missing(r->id_reactants[i]);
       }
     }
 
@@ -351,9 +441,62 @@ void FixChemAdas::init()
       r->products[i] = particle->find_species(r->id_products[i]);
       if (r->products[i] < 0) {
         r->active = 0;
-        break;
+        note_missing(r->id_products[i]);
       }
     }
+
+    // Channel-toggle filter: disable otherwise-valid reactions whose type
+    // the user turned off via `cx no`, `recombination no`, etc.
+    if (r->active) {
+      if      (r->type == IONIZATION    && !chan_ionization)    r->active = 0;
+      else if (r->type == RECOMBINATION && !chan_recombination) r->active = 0;
+      else if (r->type == EXCHANGE      && !chan_cx)            r->active = 0;
+      else if (r->type == DISSOCIATION  && !chan_dissociation)  r->active = 0;
+    }
+
+    switch (r->type) {
+      case IONIZATION:    nI_total++; if (r->active) nI_active++; break;
+      case RECOMBINATION: nR_total++; if (r->active) nR_active++; break;
+      case EXCHANGE:      nE_total++; if (r->active) nE_active++; break;
+      case DISSOCIATION:  nD_total++; if (r->active) nD_active++; break;
+      default: break;
+    }
+  }
+
+  if (comm->me == 0) {
+    auto report = [&](const char *label, int active, int total, int enabled) {
+      if (total == 0) return;
+      const int skipped = total - active;
+      if (!enabled)
+        printf("[chem/adas] %-14s: disabled by toggle (%d in file)\n",
+               label, total);
+      else
+        printf("[chem/adas] %-14s: %d active, %d skipped (of %d)\n",
+               label, active, skipped, total);
+    };
+    report("ionization",    nI_active, nI_total, chan_ionization);
+    report("recombination", nR_active, nR_total, chan_recombination);
+    report("cx",            nE_active, nE_total, chan_cx);
+    report("dissociation",  nD_active, nD_total, chan_dissociation);
+    if (!missing_species_samples.empty()) {
+      printf("[chem/adas] missing species (first %zu): ",
+             missing_species_samples.size());
+      for (size_t k = 0; k < missing_species_samples.size(); k++)
+        printf("%s%s", k ? "," : "", missing_species_samples[k].c_str());
+      printf("\n");
+    }
+    auto it = materials_rate_data.find(atomic_number);
+    const bool have = (it != materials_rate_data.end());
+    printf("[chem/adas] output %-8s (%d cols)  "
+           "ADAS tables: %s %s %s %s %s %s\n",
+           output_mode == OUT_SUMMARY ? "summary" : "detailed",
+           size_per_grid_cols,
+           (have && it->second.ion_nQ > 0) ? "SCD" : "-",
+           (have && it->second.rec_nQ > 0) ? "ACD" : "-",
+           (have && it->second.cx_nQ  > 0) ? "CCD" : "-",
+           (have && it->second.plt_nQ > 0) ? "PLT" : "-",
+           (have && it->second.prb_nQ > 0) ? "PRB" : "-",
+           (have && !it->second.ion_potential.empty()) ? "IP" : "-");
   }
 
   // count possible active reactions for each species pair
@@ -444,14 +587,17 @@ if ((srcTe.kind == SRC_VAR) || (srcNe.kind == SRC_VAR)) {
     memset(&plasma_cache_2d[0][0], 0, sizeof(double)*grid->nlocal*2);
 }
 
-// Allocate per-cell source-tally output (array_grid, 20 cols) up front so
-// dumps that fire at step 0 (dump_modify ... first yes) see a valid buffer.
+// Allocate per-cell source-tally output (array_grid, 6 or 20 cols depending
+// on output_mode) up front so dumps that fire at step 0
+// (dump_modify ... first yes) see a valid buffer.
 if (grid->maxlocal > maxgrid_src) {
   maxgrid_src = grid->maxlocal;
-  memory->grow(array_grid, maxgrid_src, 20, "chem/adas:array_grid(src)");
+  memory->grow(array_grid, maxgrid_src, size_per_grid_cols,
+               "chem/adas:array_grid(src)");
 }
 if (maxgrid_src > 0) {
-  memset(&array_grid[0][0], 0, sizeof(double) * maxgrid_src * 20);
+  memset(&array_grid[0][0], 0,
+         sizeof(double) * maxgrid_src * size_per_grid_cols);
 }
 
 // --- resolve COMPUTE sources (new path) ---
@@ -637,18 +783,19 @@ void FixChemAdas::end_of_step_no_average()
   // In TALLY_RATE mode we additionally zero the whole buffer each call so the
   // subsequent accumulate + normalize yields an instantaneous rate over the
   // current `nevery` window.
+  const int ncols = size_per_grid_cols;  // 6 (summary) or 20 (detailed)
   if (grid->maxlocal > maxgrid_src) {
     const int oldmax = maxgrid_src;
     maxgrid_src = grid->maxlocal;
-    memory->grow(array_grid, maxgrid_src, 20, "chem/adas:array_grid(src)");
+    memory->grow(array_grid, maxgrid_src, ncols, "chem/adas:array_grid(src)");
     // zero the freshly-added rows (count mode relies on this for fresh cells)
     if (maxgrid_src > oldmax) {
       memset(&array_grid[oldmax][0], 0,
-             sizeof(double) * (maxgrid_src - oldmax) * 20);
+             sizeof(double) * (maxgrid_src - oldmax) * ncols);
     }
   }
   if (tally_units == TALLY_RATE && maxgrid_src > 0) {
-    memset(&array_grid[0][0], 0, sizeof(double) * maxgrid_src * 20);
+    memset(&array_grid[0][0], 0, sizeof(double) * maxgrid_src * ncols);
   }
 
   // Fast path: read Te/ne/Ti/vpar/B from per-particle plasma cache
@@ -718,12 +865,12 @@ void FixChemAdas::end_of_step_no_average()
         const double vol = cinfo[icell].volume;
         if (vol <= 0.0) {
           double *row = array_grid[icell];
-          for (int c = 0; c < 20; c++) row[c] = 0.0;
+          for (int c = 0; c < ncols; c++) row[c] = 0.0;
           continue;
         }
         const double scale = num / vol;
         double *row = array_grid[icell];
-        for (int c = 0; c < 20; c++) row[c] *= scale;
+        for (int c = 0; c < ncols; c++) row[c] *= scale;
       }
     }
   }
@@ -902,53 +1049,180 @@ int FixChemAdas::attempt(Particle::OnePart *ip, int ip_index,
   tally_reactions[best_idx]++;
   nreact_one++;
 
-  // Per-cell source-term tally for Gkeyll / external coupling.
-  // Quantity-major layout:
-  //   col  0.. 3 = count  (ioniz, recomb, CX, dissoc)
-  //   col  4.. 7 = sum(m*vx)
-  //   col  8..11 = sum(m*vy)
-  //   col 12..15 = sum(m*vz)
-  //   col 16..19 = sum(0.5*m*|v|^2)   [energy in Joules]
-  // Use REACTANT species mass and pre-reaction velocity -- this represents the
-  // sink of the neutral phase-space density at the event. Gkeyll applies its
-  // own <sigma v> times n_e to the neutral moments, so this output is most
-  // useful as a cross-check / direct coupling fallback.
+  // Per-cell source-term tally. Layout depends on output_mode; see
+  // docs/neutral_plasma_coupling/main.tex for the full physics.
+  //
+  //   OUT_SUMMARY  (6 cols, signed plasma-frame moments):
+  //     col 0 : Sp   (particle source,     +1 ioniz, -1 recomb, 0 CX/diss)
+  //     col 1 : Sm_x (momentum source, kg*m/s)
+  //     col 2 : Sm_y
+  //     col 3 : Sm_z
+  //     col 4 : Qe   (electron energy source, J)
+  //     col 5 : Qi   (ion energy source, J)
+  //
+  //   OUT_DETAILED (20 cols, unsigned per-reaction raw tally):
+  //     col  0.. 3 = count  (ioniz, recomb, CX, dissoc)
+  //     col  4.. 7 = sum(m*vx)
+  //     col  8..11 = sum(m*vy)
+  //     col 12..15 = sum(m*vz)
+  //     col 16..19 = sum(0.5*m*|v|^2) [J]
+  //
+  // Weight `scale` is shared by both modes and implements
+  // COUNTS / RATE / BATCH / BATCH_FIX unit conventions (see `units` keyword).
   if (array_grid && icell >= 0 && icell < maxgrid_src) {
-    int rtype_off = -1;
-    switch (rchosen->type) {
-      case IONIZATION:     rtype_off = 0; break;
-      case RECOMBINATION:  rtype_off = 1; break;
-      case EXCHANGE:       rtype_off = 2; break;
-      case DISSOCIATION:   rtype_off = 3; break;
+    double scale = 1.0;
+    if (tally_units == TALLY_BATCH) {
+      const double vol = grid->cinfo[icell].volume;
+      const double w   = batch_R_puff / static_cast<double>(batch_N);
+      scale = (vol > 0.0) ? (w / vol) : 0.0;
+    } else if (tally_units == TALLY_BATCH_FIX && batch_N_cached > 0) {
+      const double vol = grid->cinfo[icell].volume;
+      const double w   = batch_R_puff / static_cast<double>(batch_N_cached);
+      scale = (vol > 0.0) ? (w / vol) : 0.0;
     }
-    if (rtype_off >= 0) {
-      const double m = particle->species[isp0].mass;       // kg
-      const double vx0 = ip->v[0];
-      const double vy0 = ip->v[1];
-      const double vz0 = ip->v[2];
-      const double ke  = 0.5 * m * (vx0*vx0 + vy0*vy0 + vz0*vz0);
-      double *row = array_grid[icell];
 
-      // Per-event weight. COUNTS and RATE modes accumulate raw totals; RATE
-      // divides by (vol * window / fnum) at the end of end_of_step_no_average.
-      // BATCH mode folds the trajectory weight and cell volume in here so
-      // each event contributes its steady-state source-rate increment directly.
-      double scale = 1.0;
-      if (tally_units == TALLY_BATCH) {
-        const double vol = grid->cinfo[icell].volume;
-        const double w   = batch_R_puff / static_cast<double>(batch_N);
-        scale = (vol > 0.0) ? (w / vol) : 0.0;
-      } else if (tally_units == TALLY_BATCH_FIX && batch_N_cached > 0) {
-        const double vol = grid->cinfo[icell].volume;
-        const double w   = batch_R_puff / static_cast<double>(batch_N_cached);
-        scale = (vol > 0.0) ? (w / vol) : 0.0;
+    const double m   = particle->species[isp0].mass;
+    const double vx0 = ip->v[0];
+    const double vy0 = ip->v[1];
+    const double vz0 = ip->v[2];
+
+    if (output_mode == OUT_DETAILED) {
+      int rtype_off = -1;
+      switch (rchosen->type) {
+        case IONIZATION:     rtype_off = 0; break;
+        case RECOMBINATION:  rtype_off = 1; break;
+        case EXCHANGE:       rtype_off = 2; break;
+        case DISSOCIATION:   rtype_off = 3; break;
+      }
+      if (rtype_off >= 0) {
+        const double ke  = 0.5 * m * (vx0*vx0 + vy0*vy0 + vz0*vz0);
+        double *row = array_grid[icell];
+        row[rtype_off]         += scale;
+        row[4  + rtype_off]    += m * vx0 * scale;
+        row[8  + rtype_off]    += m * vy0 * scale;
+        row[12 + rtype_off]    += m * vz0 * scale;
+        row[16 + rtype_off]    += ke        * scale;
+      }
+    } else {
+      // OUT_SUMMARY: signed plasma-frame moments.
+      constexpr double eV_to_J = 1.602176634e-19;
+      constexpr double E_diss_D2_eV = 4.478;    // bond energy, D2 -> 2D
+
+      // Ion velocity approximation: fluid parallel flow v_par * b_hat.
+      const double Bmag = std::sqrt(bx*bx + by*by + bz*bz);
+      double vix = 0.0, viy = 0.0, viz = 0.0;
+      if (Bmag > 1e-30) {
+        const double invB = 1.0 / Bmag;
+        vix = vpar * bx * invB;
+        viy = vpar * by * invB;
+        viz = vpar * bz * invB;
+      }
+      const double v2  = vx0*vx0 + vy0*vy0 + vz0*vz0;
+      const double vi2 = vix*vix + viy*viy + viz*viz;
+
+      // Reactant charge state (neutral=0 for ionization, q=charge for recomb).
+      const size_t q = static_cast<size_t>(
+                         std::max(0.0, particle->species[isp0].charge));
+      const double Ti_J = Ti_eV * eV_to_J;
+
+      // Rate tables live in materials_rate_data[atomic_number], not the
+      // unused default `rate_data` member.  The loader writes there (see
+      // readRateDataParallel() call at constructor time), and
+      // interpolateRateData() internally reads from there too -- use the
+      // same struct for the presence guards so we don't silently skip
+      // PLT/PRB/IP contributions.
+      auto mit = materials_rate_data.find(atomic_number);
+      const bool have_tables = (mit != materials_rate_data.end());
+      const RateData *rd = have_tables ? &mit->second : nullptr;
+
+      double dSp = 0.0;
+      double dSmx = 0.0, dSmy = 0.0, dSmz = 0.0;
+      double dQe = 0.0, dQi = 0.0;
+
+      switch (rchosen->type) {
+      case IONIZATION: {
+        // Effective cost per ionization: E_eff = E_ion + PLT/SCD [eV].
+        // Falls back to E_ion only when PLT table absent, and to 0 when IP
+        // table is also absent.
+        double E_eff_eV = 0.0;
+        if (rd && !rd->ion_potential.empty() &&
+            q < rd->ion_potential.size()) {
+          E_eff_eV = rd->ion_potential[q];
+        }
+        if (rd && rd->plt_nQ > 0 && rd->ion_nQ > 0) {
+          double plt_log10 = -INFINITY, scd_log10 = -INFINITY;
+          interpolateRateData(atomic_number, q, icell, logTe, logne_cm,
+                              plt_log10, ReactionType::LineRadiation);
+          interpolateRateData(atomic_number, q, icell, logTe, logne_cm,
+                              scd_log10, ReactionType::Ionization);
+          if (std::isfinite(plt_log10) && std::isfinite(scd_log10)) {
+            // PLT [log10 W cm^3] - SCD [log10 cm^3/s] = log10 (W s) = log10 J
+            const double J_per_event = std::pow(10.0, plt_log10 - scd_log10);
+            E_eff_eV += J_per_event / eV_to_J;
+          }
+        }
+        dSp  = +1.0;
+        dSmx = +m * vx0;
+        dSmy = +m * vy0;
+        dSmz = +m * vz0;
+        dQe  = -E_eff_eV * eV_to_J;
+        dQi  = +0.5 * m * v2;            // thermal 1.5*Ti baked in via MC sampling
+        break;
+      }
+      case RECOMBINATION: {
+        // Qe: use PRB/ACD as the total radiated power per recombination event.
+        // Falls back to 0 when either table is absent (no electron cooling
+        // contribution), keeping Qi correct regardless.
+        double E_rec_loss_eV = 0.0;
+        if (rd && rd->prb_nQ > 0 && rd->rec_nQ > 0 && q > 0) {
+          const size_t qrow = q - 1;    // ACD/PRB row indexed by q_ion - 1
+          double prb_log10 = -INFINITY, acd_log10 = -INFINITY;
+          interpolateRateData(atomic_number, qrow, icell, logTe, logne_cm,
+                              prb_log10, ReactionType::RecombRadiation);
+          interpolateRateData(atomic_number, qrow, icell, logTe, logne_cm,
+                              acd_log10, ReactionType::Recombination);
+          if (std::isfinite(prb_log10) && std::isfinite(acd_log10)) {
+            const double J_per_event = std::pow(10.0, prb_log10 - acd_log10);
+            E_rec_loss_eV = J_per_event / eV_to_J;
+          }
+        }
+        dSp  = -1.0;
+        dSmx = -m * vix;
+        dSmy = -m * viy;
+        dSmz = -m * viz;
+        dQe  = -E_rec_loss_eV * eV_to_J;
+        dQi  = -(0.5 * m * vi2 + 1.5 * Ti_J);   // drift KE + thermal (3/2 kB Ti)
+        break;
+      }
+      case EXCHANGE: {
+        dSp  = 0.0;
+        dSmx = +m * (vx0 - vix);
+        dSmy = +m * (vy0 - viy);
+        dSmz = +m * (vz0 - viz);
+        dQe  = 0.0;
+        dQi  = +0.5 * m * (v2 - vi2);
+        break;
+      }
+      case DISSOCIATION: {
+        // Only D2 / H2 / T2 currently supported (4.478 eV).  Other molecular
+        // species would need a species-specific bond energy; for now use this
+        // single constant and accept that any future addition requires a
+        // local edit here.  See LaTeX doc Sec. 4.4 for discussion.
+        dSp  = 0.0;
+        dSmx = dSmy = dSmz = 0.0;
+        dQe  = -E_diss_D2_eV * eV_to_J;
+        dQi  = 0.0;
+        break;
+      }
       }
 
-      row[rtype_off]         += scale;
-      row[4  + rtype_off]    += m * vx0 * scale;
-      row[8  + rtype_off]    += m * vy0 * scale;
-      row[12 + rtype_off]    += m * vz0 * scale;
-      row[16 + rtype_off]    += ke        * scale;
+      double *row = array_grid[icell];
+      row[0] += dSp  * scale;
+      row[1] += dSmx * scale;
+      row[2] += dSmy * scale;
+      row[3] += dSmz * scale;
+      row[4] += dQe  * scale;
+      row[5] += dQi  * scale;
     }
   }
 
@@ -1442,6 +1716,29 @@ void FixChemAdas::readRateData(const std::string& filePath, RateData& rd) {
         rd.gridT_cx = read1D("gridTemperature_ChargeExchange");
       }
 
+      // PLT (line radiation power) — optional; enables effective ionization cost
+      rd.plt_nQ = rd.plt_nT = rd.plt_nD = 0;
+      if (H5Lexists(file.getId(), "LineRadiationPowerCoeff", H5P_DEFAULT) > 0) {
+        readFlat3D("LineRadiationPowerCoeff", rd.plt_coeff,
+                   rd.plt_nQ, rd.plt_nT, rd.plt_nD);
+        rd.gridD_plt = read1D("gridDensity_LineRadiation");
+        rd.gridT_plt = read1D("gridTemperature_LineRadiation");
+      }
+
+      // PRB (recombination + bremsstrahlung power) — optional; enables Qe on recomb
+      rd.prb_nQ = rd.prb_nT = rd.prb_nD = 0;
+      if (H5Lexists(file.getId(), "RecombRadiationPowerCoeff", H5P_DEFAULT) > 0) {
+        readFlat3D("RecombRadiationPowerCoeff", rd.prb_coeff,
+                   rd.prb_nQ, rd.prb_nT, rd.prb_nD);
+        rd.gridD_prb = read1D("gridDensity_RecombRadiation");
+        rd.gridT_prb = read1D("gridTemperature_RecombRadiation");
+      }
+
+      // Ionization potential per charge state (eV) — optional
+      if (H5Lexists(file.getId(), "IonizationPotential", H5P_DEFAULT) > 0) {
+        rd.ion_potential = read1D("IonizationPotential");
+      }
+
   } catch (const H5::Exception& e) {
       throw std::runtime_error("Error reading ADAS file " + filePath + ": " + std::string(e.getCDetailMsg()));
   }
@@ -1515,6 +1812,32 @@ bool FixChemAdas::setupInterpolation(ReactionType reactionType, int atomic_numbe
       f10 = rd.cx_at(charge_idx, thi, nlo);
       f11 = rd.cx_at(charge_idx, thi, nhi);
 
+  } else if (reactionType == ReactionType::LineRadiation) {
+      if (static_cast<int>(charge_idx) >= rd.plt_nQ) return false;
+      if (!bracket_index(rd.gridT_plt, te, tlo, thi)) return false;
+      if (!bracket_index(rd.gridD_plt, ne, nlo, nhi)) return false;
+
+      x0 = rd.gridT_plt[tlo];  x1 = rd.gridT_plt[thi];
+      y0 = rd.gridD_plt[nlo];  y1 = rd.gridD_plt[nhi];
+
+      f00 = rd.plt_at(charge_idx, tlo, nlo);
+      f01 = rd.plt_at(charge_idx, tlo, nhi);
+      f10 = rd.plt_at(charge_idx, thi, nlo);
+      f11 = rd.plt_at(charge_idx, thi, nhi);
+
+  } else if (reactionType == ReactionType::RecombRadiation) {
+      if (static_cast<int>(charge_idx) >= rd.prb_nQ) return false;
+      if (!bracket_index(rd.gridT_prb, te, tlo, thi)) return false;
+      if (!bracket_index(rd.gridD_prb, ne, nlo, nhi)) return false;
+
+      x0 = rd.gridT_prb[tlo];  x1 = rd.gridT_prb[thi];
+      y0 = rd.gridD_prb[nlo];  y1 = rd.gridD_prb[nhi];
+
+      f00 = rd.prb_at(charge_idx, tlo, nlo);
+      f01 = rd.prb_at(charge_idx, tlo, nhi);
+      f10 = rd.prb_at(charge_idx, thi, nlo);
+      f11 = rd.prb_at(charge_idx, thi, nhi);
+
   } else {
       if (static_cast<int>(charge_idx) >= rd.ion_nQ) return false;
       if (!bracket_index(rd.gridT_ion, te, tlo, thi)) return false;
@@ -1577,20 +1900,33 @@ void FixChemAdas::broadcastRateData(RateData& rd) {
   MPI_Bcast(&rd.rec_nQ, 1, MPI_INT, 0, world);
   MPI_Bcast(&rd.rec_nT, 1, MPI_INT, 0, world);
   MPI_Bcast(&rd.rec_nD, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.cx_nQ, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.cx_nT, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.cx_nD, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.cx_nQ,  1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.cx_nT,  1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.cx_nD,  1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.plt_nQ, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.plt_nT, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.plt_nD, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.prb_nQ, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.prb_nT, 1, MPI_INT, 0, world);
+  MPI_Bcast(&rd.prb_nD, 1, MPI_INT, 0, world);
 
   bcast1D(rd.ion_coeff);
   bcast1D(rd.rec_coeff);
   bcast1D(rd.cx_coeff);
+  bcast1D(rd.plt_coeff);
+  bcast1D(rd.prb_coeff);
   bcast1D(rd.Atomic_Number);
   bcast1D(rd.gridD_ion);
   bcast1D(rd.gridD_rec);
   bcast1D(rd.gridD_cx);
+  bcast1D(rd.gridD_plt);
+  bcast1D(rd.gridD_prb);
   bcast1D(rd.gridT_ion);
   bcast1D(rd.gridT_rec);
   bcast1D(rd.gridT_cx);
+  bcast1D(rd.gridT_plt);
+  bcast1D(rd.gridT_prb);
+  bcast1D(rd.ion_potential);
 }
 
 

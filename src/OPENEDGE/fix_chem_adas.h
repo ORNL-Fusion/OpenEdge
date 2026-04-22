@@ -25,7 +25,8 @@ FixStyle(chem/adas, FixChemAdas)
 
 namespace SPARTA_NS {
 
-enum class ReactionType { Ionization, Recombination, ChargeExchange };
+enum class ReactionType { Ionization, Recombination, ChargeExchange,
+                          LineRadiation, RecombRadiation };
 enum SrcKind { SRC_NONE, SRC_VAR, SRC_COMP };
 struct GridSrc {
   SrcKind kind = SRC_NONE;
@@ -119,6 +120,19 @@ double **plasma_cache_2d = NULL;
 // ramp-up phase. Post-ramp (latched), N is constant and the scaling is exact.
 enum { TALLY_COUNTS, TALLY_RATE, TALLY_BATCH, TALLY_BATCH_FIX };
 int    tally_units   = TALLY_COUNTS;
+
+// Output layout of the per-cell tally (array_grid):
+//   OUT_SUMMARY  (default): 6 cols = {Sp, Sm_x, Sm_y, Sm_z, Qe, Qi}, signs per
+//                 Sec.4 of docs/neutral_plasma_coupling/main.tex -- signed
+//                 plasma-frame source moments, ready to feed a fluid solver.
+//   OUT_DETAILED (diagnostic): 20 cols = quantity x reaction cross-product
+//                 {count, m vx, m vy, m vz, 0.5 m v^2} x
+//                 {ioniz, recomb, CX, dissoc}, unsigned raw tally (legacy
+//                 layout, kept for per-reaction debugging). No Eeff folding,
+//                 no Qe/Qi split; each cell is just summed events.
+enum { OUT_SUMMARY = 0, OUT_DETAILED = 1 };
+int    output_mode = OUT_SUMMARY;
+
 double batch_R_puff  = 0.0;    // [atoms/s] physical emission rate
 int    batch_N       = 0;      // fixed batch N (TALLY_BATCH)
 char  *batch_fix_id  = nullptr;// emit fix ID (TALLY_BATCH_FIX)
@@ -134,6 +148,15 @@ bigint batch_N_cached = 0;     // cached N from emit fix this chem step
 //   source_species  = resolved species indices matching src_species_names.
 int    eirene_mode     = 0;
 int    stop_on_exhaust = 0;
+// Channel toggles (default: all on). Each reaction's type is matched
+// against these flags at init; disabled reactions are flagged inactive
+// the same way as when a reactant/product species is missing, so the
+// runtime doesn't need per-tick gating. Useful for ablation studies
+// (e.g. `cx no` to isolate ionization-only physics).
+int    chan_ionization  = 1;
+int    chan_recombination = 1;
+int    chan_cx          = 1;
+int    chan_dissociation = 1;
 // Allow early termination when only a small fat-tail population remains.
 // stop_on_exhaust triggers when alive_global <= exhaust_threshold (default 0,
 // i.e. wait for the population to literally hit zero). Setting a nonzero
@@ -164,14 +187,24 @@ protected:
 
     struct RateData {
         std::vector<double> Atomic_Number;
-        // Flat contiguous rate tables: data[q * nT * nD + iT * nD + iD]
+        // Flat contiguous rate tables: data[q * nT * nD + iT * nD + iD].
+        // Rate coefficients stored as log10(sigma_v [cm^3/s]); radiation power
+        // coefficients as log10(P [W cm^3]).  Consumers convert to SI at lookup.
         std::vector<double> ion_coeff, rec_coeff, cx_coeff;
-        int ion_nQ, ion_nT, ion_nD;
-        int rec_nQ, rec_nT, rec_nD;
-        int cx_nQ, cx_nT, cx_nD;
+        std::vector<double> plt_coeff, prb_coeff;         // line rad, recomb+brems
+        int ion_nQ = 0, ion_nT = 0, ion_nD = 0;
+        int rec_nQ = 0, rec_nT = 0, rec_nD = 0;
+        int cx_nQ  = 0, cx_nT  = 0, cx_nD  = 0;
+        int plt_nQ = 0, plt_nT = 0, plt_nD = 0;
+        int prb_nQ = 0, prb_nT = 0, prb_nD = 0;
         std::vector<double> gridT_ion, gridD_ion;
         std::vector<double> gridT_rec, gridD_rec;
-        std::vector<double> gridT_cx, gridD_cx;
+        std::vector<double> gridT_cx,  gridD_cx;
+        std::vector<double> gridT_plt, gridD_plt;
+        std::vector<double> gridT_prb, gridD_prb;
+        // Ionization potential per charge state q (q=0 -> neutral -> 1+, etc.), eV.
+        // Empty if the ADAS rate file didn't ship one.
+        std::vector<double> ion_potential;
 
         inline double ion_at(int q, int it, int id) const {
             return ion_coeff[q * ion_nT * ion_nD + it * ion_nD + id];
@@ -181,6 +214,12 @@ protected:
         }
         inline double cx_at(int q, int it, int id) const {
             return cx_coeff[q * cx_nT * cx_nD + it * cx_nD + id];
+        }
+        inline double plt_at(int q, int it, int id) const {
+            return plt_coeff[q * plt_nT * plt_nD + it * plt_nD + id];
+        }
+        inline double prb_at(int q, int it, int id) const {
+            return prb_coeff[q * prb_nT * prb_nD + it * prb_nD + id];
         }
     };
 
