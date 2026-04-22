@@ -1,181 +1,108 @@
 # test_diii_d_neutrals
 
-OpenEdge-vs-EIRENE benchmark for neutral transport on the DIII-D
-geometry using SOLPS-ITER case `run_lore2023_reference` (converged
-D-only B2.5-EIRENE). Both codes drive wall recycling on the SAME
-frozen SOLPS plasma; we compare the neutral densities and source
-maps they produce.
+OpenEdge **plasma–neutral interaction** demonstration on a DIII-D
+axisymmetric geometry with a fixed SOLPS plasma background. Drives
+wall recycling + volumetric chemistry (ionisation, recombination, CX,
+dissociation) and writes per-cell source dumps so the user can see
+where each reaction channel fires across the poloidal plane.
+
+Short 10,000-step run. Extend `run` in the deck for longer statistics.
 
 ## Layout
 
 ```
 test_diii_d_neutrals/
   input/
-    plasma.h5                # SOLPS plasma (ne, Te, Ti, B) + mesh +
-                             #   wall_face_area + wall_surf_cell map
-    bfield.h5                # B-field on regular (R,Z) grid (legacy; B
-                             #   is also embedded in plasma.h5)
-    wall.surf                # SPARTA wall segments (from mesh.extra)
-    wall.recycle             # TRIM + thermal absorb-and-reemit spec
-    dg.equ                   # DIII-D equilibrium for psi (fix reflect/psi)
-    neutral.species          # SPARTA species file (D2, D, D+)
-    neutral.reactions        # Mode-A reaction set (diss + iz + CX)
-    eirene_truth.h5          # SOLPS-EIRENE balance.nc extract (ref truth)
-  eirene/                    # standalone EIRENE driver
-    fort.1.solps_ref         # baseline SOLPS-ITER-generated input deck
-    Database -> ...          # symlink to EIRENE databases (AMJUEL/HYDHEL)
-    run_eirene.sh
-    parse_fort44.py          # extract S_iz, S_diss etc. from fort.44
+    plasma.h5         SOLPS plasma (ne, Te, Ti, upar) on the EIRENE mesh
+                      + per-cell wall_face_area + wall_surf_cell map
+                      + embedded /equilibrium/* (psi, r, z, btf, rtf)
+    wall.surf         SPARTA wall segments (axi: x = Z, y = R)
+    wall.recycle      TRIM + thermal absorb-and-reemit spec
+    dg.equ            DIII-D equilibrium (psi) for fix reflect/psi
+    neutral.species   Species: D2, D, D+
+    neutral.reactions ADAS / Janev reaction set (iz, recomb, CX, dissoc)
   openedge/
-    in.diii_d_neutrals_eirene       # Mode-A recycling run (main one)
-    in.diii_d_neutrals_recycle      # legacy distributed-puff case
-    in.diii_d_neutrals              # legacy single-puff case
-    run_openedge.sh
+    in.diii_d_neutrals  the deck
+    run_openedge.sh     launcher (source oneapi + mpirun)
   scripts/
-    extract_eirene_sources.py       # rebuild eirene_truth.h5 from balance.nc
-    NOTES_fnum.md                   # fnum sizing recipe
-    NOTES_A5c_historical.md         # first-pass notes, kept for history
-  output/                           # run outputs (logs, .grid, plots)
-  compare.py                        # per-cell S_iz, S_diss comparison plot
+    NOTES_fnum.md       fnum sizing recipe
+  output/               run outputs (.grid dumps)
 ```
 
-## Running OpenEdge
-
-**Regenerate plasma + wall inputs** (once, after any change to the
-converter or SOLPS case):
+## Running
 
 ```bash
-cd /home/cloud/OpenEdge/examples/test_diii_d_neutrals
+cd openedge
+source /opt/intel/oneapi/setvars.sh --force
+mpirun -np 16 ~/buildOpenEdge/src/spa_mpi -in in.diii_d_neutrals \
+    > ../output/run.log 2>&1
+```
+
+`NP=64 ./run_openedge.sh` for 64 ranks on one node.
+
+Wall-clock on 64 ranks (mora) for the 10,000-step default: ~2–3 s.
+Linearly scale to see 100k / 500k / 1M by editing the final `run N`.
+
+## Coordinate convention
+
+True SPARTA axisymmetric (`boundary o ao p`, `x = Z` axial,
+`y = R` radial). All per-volume / per-area diagnostics are full-3D
+quantities — no `2π · R̄` post-multiply. See `CLAUDE.md` §
+"Coordinate convention" for the slot-mapping details.
+
+## Physics pieces in the deck
+
+- **`fix plasma/data`** — loads `plasma.h5` (mesh + plasma + equilibrium).
+  Provides ne, Te, Ti, B-field, psi to every consumer.
+- **`surf_react wall_pwi`** — incoming D+/D/D2 recycle via TRIM fast
+  reflection (hot) + thermal absorb-and-reemit at 2 eV.
+- **`fix emit/surf/recycle`** — primary neutral source. Reads ne/Te/Ti at
+  each wall segment's adjacent B2 cell (via `mesh/wall_surf_cell`),
+  computes Bohm flux `Γ = ne · cs · sin(α) · face_area`, emits
+  `0.5 · R · Γ` of the recycling mixture per step (`R = 0.99`).
+- **`fix chem/adas`** — volumetric D ionisation, D+ recombination, CX,
+  and D2 dissociation rates from ADAS/Janev tables. 20-column per-cell
+  source tally exposed as `f_fchem[*]`.
+- **`fix reflect/psi ... action absorb`** — inner core boundary at
+  `psi_norm = 0.95`. Neutrals that wander core-side are removed.
+
+## What gets dumped
+
+`output/diii_d_neutrals.grid.XXXXXX` (every 1000 steps) — per-cell:
+
+| col | quantity                   | units        |
+|-----|----------------------------|--------------|
+|  1  | cell id                    |              |
+|  2  | xc (= Z, axial)            | m            |
+|  3  | yc (= R, radial)           | m            |
+|  4  | D2 density                 | m⁻³          |
+|  5  | D density                  | m⁻³          |
+|  6  | ionisation rate            | 1 / m³ s     |
+|  7  | recombination rate         | 1 / m³ s     |
+|  8  | charge-exchange rate       | 1 / m³ s     |
+|  9  | dissociation rate          | 1 / m³ s     |
+| 10  | ionisation energy source   | W / m³       |
+| 11  | recombination energy src   | W / m³       |
+| 12  | charge-exchange energy src | W / m³       |
+| 13  | dissociation energy src    | W / m³       |
+
+`f_fchem[5..16]` (momentum source per reaction) is still computed by
+`fix chem/adas` — add the columns to the `dump d1` line if you need
+them for Gkeyll coupling.
+
+## Regenerating input files (one-time)
+
+```bash
 python3 ../../tools/converters/convert_solps_plasma.py \
-    /home/cloud/solps-runs/diii-d/runners_d2/run_lore2023_reference \
-    --b2fgmtry /home/cloud/solps-runs/diii-d/runners_d2/baserun/b2fgmtry \
-    --equ-file /home/cloud/solps-runs/diii-d/runners_d2/baserun/dg.equ \
-    --mesh-extra /home/cloud/solps-runs/diii-d/runners_d2/baserun/mesh.extra \
+    <SOLPS case dir> \
+    --b2fgmtry <SOLPS baserun b2fgmtry> \
+    --equ-file <SOLPS baserun dg.equ> \
+    --mesh-extra <SOLPS baserun mesh.extra> \
     --plasma-out input/plasma.h5 \
     --wall-out input/wall.surf \
     --wall-source mesh-extra
 ```
 
-- `--wall-source mesh-extra` is the SOLPS-native path (recommended for
-  production). Alternatives: `eirene` (exact EIRENE wall, requires
-  fort.33/34/35), or `auto` (default — picks mesh-extra if available).
-- The converter always writes `wall.surf` in SPARTA's true axisymmetric
-  layout (column 1 = Z, column 2 = R) since SOLPS is an axisymmetric
-  code. Pair with `boundary o ao p`, `create_box ... 0 R_max ...` in the
-  input deck.
-- `plasma.h5` is **mesh-only**: carries `/mesh/*` (EIRENE triangulation
-  + per-B2-cell plasma), `/equilibrium/{r, z, psi, btf, rtf, psib}`
-  (raw .equ map), and `/ion_species/*` metadata. No top-level regular
-  (R, Z) grid, no separate `bfield.h5`. File size on this case drops
-  from ~21 MB to ~1.1 MB. See `CLAUDE.md` § "Plasma.h5 schema".
-
-**Run the EIRENE-recycling case:**
-
-```bash
-cd openedge
-source /opt/intel/oneapi/setvars.sh --force
-mpirun -np 16 ~/buildOpenEdge/src/spa_mpi \
-    -in in.diii_d_neutrals_eirene > ../output/run_eirene.log 2>&1
-```
-
-Run length: 30000 steps (≈ 10–30 min on 16 ranks depending on cluster
-load). `fnum=4e15` targets ~100 sim-particles per step and ~50k
-steady-state population.
-
-## Coordinate convention
-
-The case runs in **SPARTA-native axisymmetric mode** (`boundary o ao p`,
-`x = Z (axial)`, `y = R (radial, ≥ 0)`). All per-volume / per-area
-diagnostics (`compute grid nrho`, `compute surf flux`, `fix emit/surf/recycle`
-rates) are full-3D quantities — no `2*pi*R` post-multiply needed when
-comparing against EIRENE / SOLPS / Gkeyll.
-
-Pre-2026-04-20 versions of this case used a 2D Cartesian layout that
-required a `2*pi*R̄ ≈ 10` post-multiply on every flux / density. See
-`CLAUDE.md` § "Coordinate convention" for the migration story and the
-`openedge_geom` helper that handles slot mapping.
-
-## Physics pieces in `in.diii_d_neutrals_eirene`
-
-- **`fix plasma/data`** loads `plasma.h5` + `dg.equ`. Provides ne, Te,
-  Ti at each cell + B-field + psi map.
-- **`surf_react wall_pwi`** with `D_on_C.h5` TRIM tables — incoming
-  D+/D/D2 recycle via TRIM fast reflection (hot atoms) + thermal
-  absorb-and-reemit at 2 eV (Franck-Condon).
-- **`fix emit/surf/recycle`** — primary neutral source. Looks up the
-  per-segment B2 cell via `mesh/wall_surf_cell`, reads ne/Te/Ti,
-  computes Bohm flux `Γ = ne·cs·sin(α)·face_area`, emits
-  `0.5 · R · Γ` D2 molecules + D atoms per step. `R = 0.99` (1% pumped).
-- **`fix chem/adas`** — volumetric D ionization, D+ recombination (no
-  kinetic D+ in Mode A), CX, and D2 dissociation rates from ADAS/Janev
-  tables.
-- **`fix fcore reflect/psi … action absorb`** at psi_norm=0.95 mimics
-  EIRENE's implicit "core sink" on the innermost B2 flux surface.
-
-## Running standalone EIRENE (for reference)
-
-```bash
-cd eirene
-./run_eirene.sh fort.1.solps_ref   # ~60 s on 1 rank
-python3 parse_fort44.py            # extract + plot atom/molecule densities
-```
-
-This writes `fort.44` with per-cell neutral densities, used as a
-second-source of truth alongside `input/eirene_truth.h5`.
-
-## Comparison
-
-```bash
-python3 compare.py
-```
-
-Reads the latest `output/diii_d_eirene.grid` (OpenEdge) and
-`input/eirene_truth.h5` (SOLPS-EIRENE converged). Produces
-`output/compare_to_eirene.png`: OE and EIRENE S_iz / S_diss maps on
-the same (R, Z) grid.
-
-## Current status (2026-04-20)
-
-Major infrastructure refactor landed today:
-1. **Migrated to SPARTA-native axisymmetric** (`boundary o ao p`,
-   `x = Z`, `y = R`). Diagnostics now report full-3D quantities
-   directly — no per-radian-wedge correction.
-2. **Mesh-only plasma.h5** — no top-level regular-grid datasets, no
-   separate `bfield.h5`, no `--equ-file` keyword at run time.
-   Everything lives under `/mesh/*`, `/equilibrium/*`,
-   `/ion_species/*`. File drops from ~21 MB to ~1.1 MB.
-3. **Triangulation extended to wall polygon** — the EIRENE mesh from
-   `fort.33/34/35` is augmented with new triangles bridging its outer
-   boundary to `mesh.extra`; each new triangle projected to the
-   nearest B2 sheath cell. `mesh_cell_at()` covers the full wall
-   without any `max_dist` fallback.
-4. **`compute plasma/fields` file-mode deprecated** — all plasma
-   queries route through `fix plasma/data`, which owns the single-
-   source-of-truth mesh + equilibrium.
-
-The `[emit/surf/recycle]` per-step diagnostic prints both a
-**raw-SPARTA-segment-area** Bohm rate (from `surf->axi_line_size`)
-and a **B2-aggregated-surf_area** Bohm rate (the latter is what the
-runtime emit code uses). They should agree to within the geometric
-mismatch between the SPARTA wall and the B2 boundary.
-
-OpenEdge Mode A recycling infrastructure is in place and produces
-peak S_iz within ~30 % of SOLPS-EIRENE on the DIII-D case. Remaining
-open items:
-
-1. **Kinetic-ion recycling (Mode B)** — Mode A doesn't reproduce the
-   multi-cycle amplification that B2.5-EIRENE achieves through
-   plasma-side iteration. With kinetic D+ via `fix chem/adas mode
-   kinetic`, D+ particles would transport via the Boris pusher, hit
-   walls, and recycle through `surf_react wall_pwi` — giving OE the
-   same amplification EIRENE gets from B2 coupling.
-2. **Standalone-EIRENE-on-same-plasma comparison.** Current reference
-   is the SOLPS-EIRENE COUPLED converged state. A cleaner apples-to-
-   apples target is standalone EIRENE run on the same frozen plasma
-   (the binary and runner are ready in `eirene/`).
-3. **b2-only wall path.** `--wall-source b2` not yet implemented;
-   needed for non-SOLPS codes (OEDGE, SOLEDGE3X).
-4. **Proper Bohm flux near strike points.** Some SOLPS cells at the
-   sheath edge appear to hold upstream Te values (~2 keV) rather than
-   target (~10 eV); investigate how `convert_solps_plasma.py` picks
-   up b2fstate temperatures.
+`plasma.h5` is mesh-only (~1 MB for DIII-D). All the plasma, the
+equilibrium, and the wall-to-B2-cell map live in it; no separate
+`bfield.h5` or `.equ` at run time.

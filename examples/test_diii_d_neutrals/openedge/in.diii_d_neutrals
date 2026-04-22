@@ -1,96 +1,135 @@
 ################################################################################
-# A5c: DIII-D neutrals test case for OpenEdge vs SOLPS-EIRENE comparison.
+# DIII-D plasma-neutral interaction test
 #
-# Plasma: DIII-D case run_lore2023_reference (converged SOLPS D-only).
-#         Converted to OpenEdge via tools/converters/convert_solps_plasma.py.
-# Wall:   68-line boundary extracted from SOLPS mesh.extra
-#         (tools/converters/create_surf_from_solps.py).
+# Demonstrates OpenEdge neutral-transport physics on a DIII-D axisymmetric
+# geometry with a fixed SOLPS plasma background:
 #
-# Scope (first pass -- puff-only, no recycling):
-#   - Mode A (EIRENE semantics) volumetric physics:
-#       * D2 dissociation (Janev/HYDHEL H.2 2.2.5)
-#       * D ionization (ADAS SCD, deletes)
-#       * D + D+ charge exchange (ADAS CCD)
-#   - D2 puff from single wall element (line id 2, near lower-outer divertor
-#     strike, R=1.46, Z=-1.25). Puff rate matched qualitatively to SOLPS
-#     user-puff 2.5e21/s. Actual location of SOLPS stratum-6 is not yet
-#     resolved from the b2ag.dat indexing; using this divertor location is a
-#     reasonable proxy for recycling-dominated neutral source.
-#   - Absorbing walls (surf_collide vanish). NO wall recycling in this
-#     first pass -- the broader SOLPS recycling-driven ionization map is
-#     follow-up work (requires either Mode B kinetic D+ or emission tied to
-#     background ion flux).
+#   wall recycling (D+ -> D2 + 2 * atomic D, at Bohm flux)
+#     +
+#   volumetric chemistry (D2 dissociation, D ionisation, D charge-exchange)
+#     +
+#   wall surface reactions (TRIM + thermal absorb-and-reemit)
 #
-# Comparison (compare_to_eirene.py):
-#   OpenEdge f_frate[1] (ionization-source rate, m^-3 s^-1) vs
-#   EIRENE S_iz extracted from balance.nc (eirene_truth.h5). Expect match in
-#   shape near the puff, divergence elsewhere (EIRENE includes recycling
-#   from all 7 strata).
+# Primary outputs are per-cell source dumps — ionisation / recombination /
+# CX / dissociation rates and D and D2 density — so the user can see
+# where each reaction channel fires across the poloidal plane.
+#
+# Short 10,000-step run. The physics reaches a recognisable steady-state
+# footprint in that window; extend `run` for statistics if needed.
 ################################################################################
 
 seed                12345
 dimension           2
-boundary            o o p
+# True SPARTA axisymmetric: x = Z (axial), y = R (radial, must start at 0),
+# z = toroidal (periodic dummy). Cell volumes and surface areas are
+# native 2*pi*R, so nrho / surf flux come out as full-3D quantities.
+boundary            o ao p
 global              gridcut 0.0 comm/sort no
-global              fnum 1e13
+global              fnum 2e16
 
-create_box          0.95 2.4 -1.4 1.4 -0.05 0.05
-create_grid         200 400 1
+# x range = Z (machine axial coord), y range = R (radial, axis at y=0)
+create_box          -1.4 1.4 0.0 2.4 -0.05 0.05
+create_grid         200 100 1
 balance_grid        rcb cell
 
-# ---- Species (D2, D, D+). D+ only declared (never spawned in Mode A) ----
 species             ../input/neutral.species D2 D D+
-mixture             puff_mix D2 frac 1.0 nrho 1e18 temp 300.0
+# Recycling mixture: 95% D2 (molecular channel) + 5% D (atomic channel).
+# SPARTA's `frac` applies to the single preceding species, so we set it in
+# two separate mixture lines.
+# Per-species emission temperatures are set on `fix emit/surf/recycle`
+# (`twall_species D 23210.0 D2 1500.0`), so no mixture-level `temp` is
+# needed here.
+mixture             recmix D2 frac 0.95
+mixture             recmix D  frac 0.05
 
-# ---- Wall: absorbing. Puff source = single wall element. ----
-read_surf           ../input/wall.surf group wall particle check
-surf_collide        wallColl vanish
-surf_modify         wall collide wallColl react none
-# Tag one wall line (id=2, R=1.46 Z=-1.25, lower-outer divertor) as puff source
-group               gpuff surf id == 2
+# ---- Wall: machine first-wall (watertight) ----
+# Converter wrote mesh/wall_surf_cell → direct B2-cell mapping per wall
+# segment (no geographic search at runtime). wall.surf normals point INTO
+# the plasma (SPARTA canonical).
+read_surf           ../input/wall.surf invert group wall particle check
+surf_collide        wallColl diffuse 23210.0 1.0
+surf_react          wallPWI wall_pwi ../input/wall.recycle &
+                    trim_dir ../../../database/surface/trim &
+                    twall 23210.0
+surf_modify         wall collide wallColl react wallPWI
 
-# ---- Plasma background (static; EIRENE-equivalent frozen plasma) ----
+# ---- Static refinement near both divertors ----
+# 5 levels of refinement drive the cell count up in the strike-point
+# regions so RCB can distribute the dense wall load across ranks.
+region              rdiv_lo block -1.4 -0.8 1.0 2.4 -INF INF
+region              rdiv_up block  0.7  1.4 1.0 2.4 -INF INF
+adapt_grid          all refine surf all 0.001 maxlevel 5 cells 2 2 1 &
+                    region rdiv_lo all iterate 5
+adapt_grid          all refine surf all 0.001 maxlevel 5 cells 2 2 1 &
+                    region rdiv_up all iterate 5
+balance_grid        rcb cell
+
+# ---- Plasma background ----
+# plasma.h5 carries the B2.5 mesh (ne, Te, Ti, upar) plus an embedded
+# /equilibrium/{psi, r, z, btf, rtf, psib} for B-field and psi_norm.
 fix                 pd plasma/data file ../input/plasma.h5 static yes
 global              bfield_compute pd
+# Populate the per-particle plasma cache every 100 steps (chem/adas is the
+# only consumer and fires every 10 steps — cache survives across calls
+# since the plasma field is `static yes`).
+global              pcache_nevery 100
 
-# ---- Grid refinement near the wall (helps partition + surf checks) ----
-region              rdiv_lo block 1.0 2.4 -1.4 -0.8 -INF INF
-region              rdiv_up block 1.0 2.4  0.7  1.4 -INF INF
-adapt_grid          all refine surf all 0.005 maxlevel 3 cells 2 2 1 region rdiv_lo all iterate 3
-adapt_grid          all refine surf all 0.005 maxlevel 3 cells 2 2 1 region rdiv_up all iterate 3
-balance_grid        rcb cell
+# ---- Inner boundary: absorb neutrals crossing psi_norm<0.95 ----
+# The SOLPS-coupled inner radial surface is a core sink. Applying the
+# same BC here so neutrals that wander core-side are removed (no
+# core-side tracking or reflection).
+fix fcore reflect/psi plasma_data pd psi_norm 0.95 action absorb
 
-# ---- Volumetric chemistry: Mode A (EIRENE-style) ----
-# Reactions: D->D+ (I), D+->D (R, ineffective in Mode A), CX (E), D2 diss (D)
-fix fchem chem/adas 1 1 ../input/neutral.reactions adas_dir ../../../database/adas &
+# ---- Volumetric chemistry (Mode A) ----
+# chem/adas auto-resolves its inputs:
+#   arg[3] 'D'    -> ADAS_Rates_1.h5 (element symbol or numeric Z)
+#   arg[4] 'auto' -> database/adas/reactions/D.reactions
+# nevery=10: reactions are rare relative to advection, so sample every
+# 10 steps. `units rate` normalises by the window length so the
+# time-averaged source is unchanged.
+fix fchem chem/adas 10 D auto &
     mode neutral source_species D D2 &
-    stop_on_exhaust yes exhaust_threshold 2000 &
     units rate
 
-# ---- D2 puff at chosen wall element ----
-# n=200 per step until Np >= 50000 particles, then latches off. Puff rate
-# in physical units: n * fnum / dt = 200 * 1e13 / 1e-8 = 2e23 /s
-# (intentionally high vs SOLPS 2.5e21 to get good MC statistics before
-#  exhaustion; the shape of the ionization map is what we compare).
-fix fpuff emit/surf/puff puff_mix gpuff n 200 normal yes perspecies no &
-    stop_at_np 50000
-
-timestep            1e-8
-stats               200
-stats_style         step cpu np
+# ---- Wall recycling source ----
+# Per-species emission temperature:
+#   D   -> 23,210 K (2 eV, Franck-Condon from D2 dissociation)
+#   D2  -> 1,500 K (wall-thermalised molecule on graphite)
+fix frec emit/surf/recycle recmix wall pd mass 2.0 R 0.99 &
+    twall 23210.0 twall_species D 23210.0 D2 1500.0
 
 # ---- Diagnostics ----
+# Per-species neutral density and per-cell reaction tallies.
+# fchem output columns (20-col per-grid array, units=rate):
+#   cols  1- 4 : count rate per cell per reaction      [1/(m^3 s)]
+#                (1=ioniz, 2=recomb, 3=CX, 4=dissoc)
+#   cols  5-16 : momentum source rate (mvx, mvy, mvz)  [kg/(m^2 s^2)]
+#   cols 17-20 : energy source rate per reaction       [W/m^3]
 compute cden grid all species nrho
-fix    fden ave/grid all 1 100 1000 c_cden[*] ave one
+fix    fden ave/grid all 1 1000 1000 c_cden[*] ave one
 fix    frate ave/grid all 1 1000 1000 f_fchem[*] ave one
 
-# ---- Runtime load balance + adaptive refinement (after ave/grid fixes) ----
+# ---- Runtime adaptive refinement + load balance ----
+# fix adapt must come after fix ave/grid (SPARTA ordering). Refine cells
+# that collect >500 particles; rebalance with a tight 1.02 threshold.
+# (2026-04-22 trial: relaxing to 1.10 made this run 16% slower — delayed
+# balance events migrate more cells at once. 1.02 is optimal here.)
 fix fadapt adapt 200 all refine particle 500 0 maxlevel 5 cells 2 2 1
-fix fbal   balance 100 1.05 rcb part
+fix fbal   balance 50 1.02 rcb part
 
-dump d1 grid all 5000 ../output/diii_d.grid id xc yc &
+# dt=5e-9: CX-hot D atoms (Ti up to a few 100 eV) travel ~1-3 mm per
+# 1e-8-second step, larger than the maxlevel-5 adapted cells (~0.44 mm).
+# 5e-9 keeps the fastest tail at < 1 cell per step.
+timestep            5e-09
+stats               500
+stats_style         step cpu np
+
+dump d1 grid all 1000 ../output/diii_d_neutrals.grid id xc yc &
      f_fden[1] f_fden[2] &
-     f_frate[1] f_frate[2] f_frate[3] f_frate[4]
+     f_frate[1] f_frate[2] f_frate[3] f_frate[4] &
+     f_frate[17] f_frate[18] f_frate[19] f_frate[20]
 dump_modify d1 pad 6
 
-run                 30000
+# 10,000 steps @ 5e-9 = 50 us ≈ 2 tau (tau ~ 25 us). Enough to see the
+# source footprint develop; extend `run` for longer statistics.
+run                 10000
