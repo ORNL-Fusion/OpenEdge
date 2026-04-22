@@ -10,13 +10,13 @@
 # (~9 us with these parameters).
 #
 # Binary particle-particle collisions are negligible (fnum=1, very low
-# simulation density) — only background collisions matter.
+# simulation density) -- only background collisions matter.
 #
 # Usage:
 #     mpirun -np 4 spa_mpi -in in.nanbu_slowdown
 ################################################################################
 
-# ---- Physical parameters ----
+# ---- Physical parameters (constant uniform plasma in eV / m^-3 / m/s) ----
 variable        Te_bg   equal 10.0          # background electron temperature [eV]
 variable        Ti_bg   equal 2.0           # background ion temperature [eV]
 variable        ne_bg   equal 1.0e17        # background electron density [m^-3]
@@ -32,6 +32,8 @@ global          gridcut 0.0 comm/sort yes
 global          fnum 1
 global          move no
 
+shell           mkdir -p output
+
 # Domain: 1 cm^3 cube
 create_box      0.0 0.01 0.0 0.01 0.0 0.01
 create_grid     5 5 5
@@ -42,24 +44,22 @@ species         plasma.species C3+
 mixture         impurity C3+ frac 1.0
 mixture         impurity temp 116045         # 10 eV
 
-# ---- Plasma fields (constant, uniform) ----
-# Column mapping: bx=1, by=2, bz=3, ex=4, ey=5, ez=6,
-#                 temp_e=7, temp_i=8, dens_i=9, dens_e=10, parrflow=11
-compute         cplasma plasma/fields all constant &
-                magnetic_field 0 0 1.0 &
-                electric_field 0 0 0 &
-                temp_e ${Te_bg} temp_i ${Ti_bg} &
-                dens_e ${ne_bg} dens_i ${ni_bg} &
-                parrflow ${vpar_bg} &
-                bx by bz ex ey ez temp_e temp_i dens_i dens_e parrflow
+# ---- Plasma data (constant uniform background) ----
+# fix plasma/data constant holds Te/ne for the Coulomb log and
+# Ti/Ni/Vpar/B for the virtual background partner used by fix coll/nanbu.
+# Temperatures in eV, densities in m^-3, flow in m/s, B in T.
+fix             pd plasma/data constant &
+                te ${Te_bg} ne ${ne_bg} &
+                ti ${Ti_bg} ni ${ni_bg} &
+                upar ${vpar_bg} &
+                bz 1.0 &
+                static yes
 
 # ---- Nanbu Coulomb collisions with background ----
-# Background species: D+ (A=2.014, Z=1)
-# Sources: Ti=col8, Ni=col9, Vpar=col11, Bx=col1, By=col2, Bz=col3
-fix             nanbu coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10] &
-                background 2.014 1.0 &
-                c_cplasma[8] c_cplasma[9] c_cplasma[11] &
-                c_cplasma[1] c_cplasma[2] c_cplasma[3]
+# Background species: D+ (A=2.014, Z=1). When plasma_data is used, Ti/Ni/Vpar
+# and the magnetic-field direction are queried directly from fix pd.
+fix             nanbu coll/nanbu 1 plasma_data pd &
+                background 2.014 1.0
 
 # ---- Create impurity particles ----
 create_particles impurity n 5000
