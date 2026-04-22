@@ -76,6 +76,8 @@ action compute_incident_plasma_flux.cpp
 action compute_incident_plasma_flux.h
 action compute_bfield_timedep.cpp
 action compute_bfield_timedep.h
+action database_paths.cpp
+action database_paths.h
 action compute_plasma_fields.cpp
 action compute_plasma_fields.h
 action compute_pmi_surf_data.cpp

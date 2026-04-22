@@ -204,7 +204,10 @@ endif()
 if(PKG_OPENEDGE)
   set(TARGET_SPARTA_PKG_OPENEDGE pkg_openedge)
   list(APPEND TARGET_SPARTA_PKGS ${TARGET_SPARTA_PKG_OPENEDGE})
+  get_filename_component(OPENEDGE_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.."
+                         ABSOLUTE)
   set(SPARTA_DEFAULT_CXX_COMPILE_FLAGS -DSPARTA_OPENEDGE
+                                       "-DOPENEDGE_DATABASE_DIR=\"${OPENEDGE_REPO_ROOT}/database\""
                                        ${SPARTA_DEFAULT_CXX_COMPILE_FLAGS})
 endif()
 # ################### END PROCESS PKGS ####################
