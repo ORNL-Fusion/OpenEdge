@@ -1,20 +1,13 @@
 ################################################################################
-# A4: 1-D slab, D2 dissociation only.
+# 1-D neutral slab — D2 dissociation only (Janev/HYDHEL H.2 2.2.5).
 #
-# Pure electron-impact dissociation D2 + e -> D + D (Janev/HYDHEL H.2 2.2.5).
-# No ionization, no CX. The D2 density should follow the same textbook decay
-# as A1:
-#     n_D2(x) = (Gamma_0 / v_D2) * exp(-x / lambda_diss)
-#     lambda_diss = v_D2 / (n_e * <sigma v>_diss(T_e))
-# and the per-cell source tally (f_frate col 4 = dissociation rate) should
-# self-consistently equal nu_diss * n_D2(x) at every point.
-#
-# Conditions: Te = 15 eV, ne = 1e19 m^-3, monoenergetic D2 beam at 3 eV
-# (v_D2 = 1.2e4 m/s). Expected lambda_diss ~ 122 mm.
-#
-# Reference: Stangeby 2000 Ch. 3 (same exponential-decay geometry as A1;
-# here applied to the molecular reactant instead of atomic).
+# Monoenergetic 3 eV D2 beam into a uniform plasma (Te = 15 eV,
+# ne = 1e19 m^-3). No ionization, no CX. Expected: n_D2(x) decays
+# exponentially with λ_diss ≈ 122 mm, and the per-cell dissociation
+# source rate tracks ν_diss · n_D2(x).
 ################################################################################
+
+shell               mkdir output
 
 seed                12345
 dimension           2

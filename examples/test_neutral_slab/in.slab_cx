@@ -1,18 +1,14 @@
 ################################################################################
-# A3: 1-D slab with CX thermalization.
+# 1-D neutral slab — CX thermalization (with competing ionization).
 #
-# Tests fix chem/adas EXCHANGE (CX) channel. A monoenergetic 3 eV D beam is
-# injected at x=0 into a plasma with hot bulk ions (Ti = 50 eV). Each CX
-# event resamples the neutral's velocity from a Maxwellian at Ti, so the
-# neutral temperature profile T_D(x) should climb from ~3 eV at the source
-# toward (3/2) Ti = 75 eV (in the sense of <E> = 3 T / 2) asymptotically.
-# Ionization (at Te=5 eV) competes in parallel and sets a finite depletion
-# length.
-#
-# Reference: Stangeby 2000 Ch. 3 (Franck-Condon thermalization regime).
-# No closed-form for the competing-channel problem; we compare T_D(x)
-# against a 1-D Python Monte Carlo with identical physics.
+# Monoenergetic 3 eV D beam enters a plasma with Te = 5 eV (ionization)
+# and Ti = 50 eV (CX partner temperature). Each CX event resamples the
+# neutral's velocity from a Maxwellian at Ti, so T_D(x) climbs from ~3 eV
+# at the source toward Ti further in, while ionization provides a finite
+# depletion length.
 ################################################################################
+
+shell               mkdir output
 
 seed                12345
 dimension           2

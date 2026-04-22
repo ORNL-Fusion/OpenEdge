@@ -1,21 +1,13 @@
 ################################################################################
-# A2: 1-D slab with reflecting wall at xhi.
+# 1-D neutral slab — ionization + recycling at the wall at xhi=0.6.
 #
-# Identical setup to in.slab_iz (A1), but the outflow boundary at xhi=0.6 is
-# replaced by a surface at x=0.599 with `surf_react wall_pwi` EXCHANGE channel:
-#   D  --> D   E 1.0 3.0     (100% reflection at 3 eV, cosine angular dist.)
-#
-# Expected profile (qualitative): forward decay exp(-x/lambda_iz) as in A1,
-# plus a returning cosine-distributed reflected component that piles up near
-# the wall before being ionized. No closed-form for cosine reflection -- we
-# compare against a 1-D Monte Carlo reference computed in compare_recycle.py
-# using the exact same physics (monoenergetic emission, exp ionization, cosine
-# reflection at fixed energy).
-#
-# Reference: Stangeby 2000 Ch. 3 gives the analytic for monoenergetic-specular
-# reflection (n(x) = (Gamma_0/v_n)*[exp(-x/lam) + exp(-(2L-x)/lam)]); the
-# cosine case here is the realistic extension used by EIRENE.
+# Same puff + plasma as in.slab_iz, but the xhi outflow is replaced by
+# a reflecting surface (`surf_react wall_pwi` 100% reflection, Franck-
+# Condon 3 eV, cosine angular). Profile shows the forward exp decay
+# plus a reflected component piling up near the wall.
 ################################################################################
+
+shell               mkdir output
 
 seed                12345
 dimension           2

@@ -1,29 +1,15 @@
 ################################################################################
-# 1-D neutral ionization slab -- Stangeby (2000) analytic verification.
+# 1-D neutral slab — ionization channel only (Mode A: delete on ionization).
 #
-# Reference:
-#   P. C. Stangeby, "The Plasma Boundary of Magnetic Fusion Devices",
-#   IoP Publishing (2000). Chapter 3 (neutral penetration / ionization
-#   length). Textbook steady-state result for monoenergetic neutrals
-#   streaming into a uniform ionizing plasma:
-#       n(x) = (Gamma_0 / v_n) * exp(-x / lambda_iz)
-#       lambda_iz = v_n / (n_e * <sigma v>_iz(T_e))
-#   (TODO: fill exact eq. number / page from your copy of Stangeby.)
+# Monoenergetic 3 eV D beam injected at x=0 into a uniform ionizing
+# plasma (Te = 20 eV, ne = 1e19 m^-3). Expected: n_D(x) decays exponen-
+# tially with λ_iz ≈ 128 mm.
 #
-# Setup:
-#   - Uniform plasma: T_e = 20 eV, n_e = 1e19 m^-3
-#   - Monoenergetic D beam injected from x=0 at E_n = 3 eV (Franck-Condon)
-#     along +x_hat. v_n = sqrt(2 E_n / m_D) = 1.695e4 m/s.
-#   - <sigma v>_iz(20 eV) from ADAS SCD (H, Z=1) ~ 1.33e-14 m^3/s
-#   - Expected lambda_iz ~ 128 mm
-#   - Mode A (EIRENE semantics): ionization DELETES the D atom.
-#     Deleted particles are counted as ionization source in f_fchem, and
-#     the steady-state n_D(x) in f_fden column 1 should match the analytic
-#     exp(-x / lambda_iz) to within MC statistics.
-#
-# Geometry: 2-D slab, 0 <= x <= 0.6 m, |y| <= 0.01 m, thin z. x-outflow
-# (atoms exit when ionized; any that survive exit through xhi), y periodic.
+# Geometry: 2-D slab, 0 <= x <= 0.6 m, |y| <= 0.01 m, thin z. x-outflow,
+# y-periodic.
 ################################################################################
+
+shell               mkdir output
 
 seed                12345
 dimension           2
@@ -73,7 +59,7 @@ run                 10000
 
 # --- Dump steady-state snapshot at end of run ---
 # cols: id xc yc n_D[m^-3] (+19 other chem cols, keep col 4 for n_D)
-dump d1 grid all 10000 output/slab.grid id xc yc &
+dump d1 grid all 10000 output/slab_iz.grid id xc yc &
      f_fden[1] f_frate[1] f_frate[2] f_frate[3] f_frate[4]
 dump_modify d1 pad 6
 run                 0
