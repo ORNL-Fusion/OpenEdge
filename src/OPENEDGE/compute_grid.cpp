@@ -237,6 +237,15 @@ void ComputeGrid::compute_per_grid()
     igroup = s2g[ispecies];
     if (igroup < 0) continue;
     icell = particles[i].icell;
+    // Guard against stale icell after fix balance / fix adapt: a particle
+    // whose icell indexes past the (just-resized) tally/cinfo arrays must
+    // be skipped this step. Without this check the deref below (and the
+    // cinfo mask check) both read past the allocation; ASan catches it as
+    // heap-use-after-free when the OOB location happens to fall in a
+    // recently-freed region (e.g. DumpGrid::reset_grid_count's cpart
+    // buffer). The particle will be re-sorted into a valid cell on the
+    // next sort/move; skipping it for one step is a small, safe loss.
+    if (icell < 0 || icell >= nglocal) continue;
     if (!(cinfo[icell].mask & groupbit)) continue;
 
     mass = species[ispecies].mass;
