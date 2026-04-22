@@ -26,6 +26,11 @@ class FixPlasmaData : public Fix {
   int  setmask();
   void init();
 
+  // Invalidate cell_mesh_cell when SPARTA re-migrates cells (adapt/balance).
+  // Matches the SPARTA pattern used by FixEmit (gridmigrate=1 + full rebuild
+  // in grid_changed, no per-cell pack/unpack).
+  void grid_changed() override;
+
   // ---- Reload interface (for future coupling) ----
   void reload();                          // re-read from current file paths
   void reload_plasma(const std::string &path);
@@ -57,7 +62,8 @@ class FixPlasmaData : public Fix {
   int nion;
   std::vector<int> ion_charge_z;
   std::vector<double> ion_mass_amu;
-  std::vector<std::string> ion_names;
+  std::vector<std::string> ion_names;      // e.g. "D+", "O2+", "W5+"
+  std::vector<std::string> ion_elements;   // e.g. "D",  "O",   "W"
   // Flat layout: [ispec * nz * nr + iz * nr + ir]
   std::vector<double> ions_dens, ions_temp, ions_upar;
 
@@ -84,6 +90,10 @@ class FixPlasmaData : public Fix {
   // SOLEDGE3X phi, OEDGE osmns_efpara) and writes E components. No
   // runtime -grad(pe)/(ne*e) approximation.
   std::vector<double> mesh_e_r, mesh_e_z, mesh_e_t;
+  // Per-vertex B-field (mesh/vtx_b{r,z,t} from the new converters) and
+  // the simple vertex-average per triangle. Consumers pick either form.
+  std::vector<double> mesh_vtx_br, mesh_vtx_bz, mesh_vtx_bt;
+  std::vector<double> mesh_tri_br, mesh_tri_bz, mesh_tri_bt;
   std::vector<double> mesh_ions_dens, mesh_ions_temp, mesh_ions_upar;
   int has_mesh_wall_face_area;                // 1 if the converter wrote
                                               // mesh/wall_face_area
@@ -107,6 +117,17 @@ class FixPlasmaData : public Fix {
   double hash_rmin, hash_zmin, hash_dr, hash_dz;
   std::vector<std::vector<int>> hash_grid;
   int mesh_cell_at(double R, double Z, double max_dist=0.05) const;
+
+  // ---- Cell-indexed mesh-cell cache ----
+  // cell_mesh_cell[icell] = unstructured-mesh cell index at the centroid of
+  // SPARTA local cell icell (or -1 if outside mesh). Built lazily from
+  // build_cell_mesh_index(). Cleared by grid_changed() (SPARTA's migration
+  // hook) and by reload(). Stamp fields (cell_mesh_stamp_n / _id) provide
+  // a belt-and-suspenders check in cache_plasma_particles.
+  std::vector<int> cell_mesh_cell;
+  void build_cell_mesh_index();
+  bigint cell_mesh_stamp_id;   // grid->cells[0].id when cache was built
+  int    cell_mesh_stamp_n;    // grid->nlocal when cache was built
 
   // ---- Valid mask ----
   std::vector<int> valid_mask;     // (nz * nr) or empty

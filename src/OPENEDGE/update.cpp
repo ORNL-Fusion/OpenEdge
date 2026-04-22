@@ -64,12 +64,15 @@ enum{NOFIELD,CFIELD,PFIELD,GFIELD};             // several files
 
 namespace {
 
-inline void xyz_to_rz(const double xyz[3], int dim, double &R, double &Z)
+inline void xyz_to_rz(const double xyz[3], int dim, int axi, double &R, double &Z)
 {
-  if (dim == 2) {
+  if (axi) {          // 2D true axi: SPARTA x = Z-axis, y = R-radial
+    Z = xyz[0];
+    R = xyz[1];
+  } else if (dim == 2) {  // 2D Cartesian (legacy)
     R = xyz[0];
     Z = xyz[1];
-  } else {
+  } else {            // 3D Cartesian
     R = std::sqrt(xyz[0] * xyz[0] + xyz[1] * xyz[1]);
     Z = xyz[2];
   }
@@ -88,13 +91,13 @@ inline void grad_from_fix(const FixPlasmaData *pd, const std::vector<double> &fi
   d_dz = (pd->interp2D(field, R, Z + dZ) - pd->interp2D(field, R, Z - dZ)) / (2.0 * dZ);
 }
 
-inline PlasmaFileParams query_plasma_from_fix(const FixPlasmaData *pd, const double xyz[3], int dim)
+inline PlasmaFileParams query_plasma_from_fix(const FixPlasmaData *pd, const double xyz[3], int dim, int axi)
 {
   PlasmaFileParams P{};
   if (!pd) return P;
 
   double R, Z;
-  xyz_to_rz(xyz, dim, R, Z);
+  xyz_to_rz(xyz, dim, axi, R, Z);
 
   P.temp_e = pd->interp2D(pd->temp_e, R, Z);
   P.dens_e = pd->interp2D(pd->dens_e, R, Z);
@@ -117,12 +120,12 @@ inline PlasmaFileParams query_plasma_from_fix(const FixPlasmaData *pd, const dou
 }
 
 inline MagneticFieldFileDataParams query_bfield_from_fix(const FixPlasmaData *pd,
-                                                         const double xyz[3], int dim)
+                                                         const double xyz[3], int dim, int axi)
 {
   MagneticFieldFileDataParams B{};
   if (!pd || !pd->has_bfield) return B;
 
-  xyz_to_rz(xyz, dim, B.r, B.z);
+  xyz_to_rz(xyz, dim, axi, B.r, B.z);
   pd->bfield_at(B.r, B.z, B.br, B.bz, B.bt);
   B.Bmag = std::sqrt(B.br * B.br + B.bt * B.bt + B.bz * B.bz);
   return B;
@@ -311,6 +314,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   plasma_cache_flag = 0;
   pcache_per_cell_mesh = 1;
   pcache_need_mask = 0;
+  pcache_nevery = 1;
   pc_te_custom = pc_ti_custom = pc_ne_custom = pc_ni_custom = -1;
   pc_vpar_custom = -1;
   pc_bx_custom = pc_by_custom = pc_bz_custom = -1;
@@ -827,8 +831,15 @@ void Update::run(int nsteps)
       timer->stamp(TIME_MODIFY);
     }
 
-    // cache plasma fields at particle positions (one query per particle)
-    if (plasma_cache_flag) {
+    // cache plasma fields at particle positions (one query per particle).
+    // Gated by pcache_nevery so decks whose only consumer (e.g. fix
+    // chem/adas at nevery=10) doesn't need it every step can skip the
+    // population on the off steps. When pcache_nevery > 1, consumers
+    // read stale values between refreshes; tradeoff is fine for plasma
+    // quantities whose spatial scale (~mm) exceeds particle displacement
+    // over N steps (~10s of um at typical dt).
+    if (plasma_cache_flag &&
+        (pcache_nevery <= 1 || ntimestep % pcache_nevery == 0)) {
       cache_plasma_particles();
       timer->stamp(TIME_PCACHE);
     }
@@ -996,12 +1007,31 @@ void Update::cache_plasma_particles()
     pd_dZ = std::max(1.0e-9, 0.5 * std::fabs(pd->zvals[1] - pd->zvals[0]));
   }
 
-  // Particles are sorted by SPARTA cell — cache the unstructured-mesh
-  // triangle lookup across all particles in the same cell. mesh_cell_at()
-  // is a triangle spatial search; reusing it across a cell is the dominant
-  // pcache-loop saving when the mesh is loaded.
-  int prev_icell = -1;
-  int prev_mesh_cell = -1;
+  // Cell-indexed mesh cache: build once per (grid_changed | reload) and
+  // share across all particles on this rank. Dominant pcache-loop saving
+  // when the mesh is loaded — replaces a per-particle triangle spatial
+  // search with an O(1) array load by particles[i].icell. Fallback to the
+  // per-particle mesh_cell_at() path stays in place for the
+  // `pcache_per_cell_mesh no` validation mode.
+  const bool use_cell_mesh_cache =
+      (pd && pd->has_mesh && pcache_per_cell_mesh);
+  if (use_cell_mesh_cache) {
+    // Invalidate when the grid changes. Two stamps catch the common cases:
+    //  - nlocal differs → adapt added/removed cells
+    //  - cells[0].id differs at same nlocal → RCB reshuffle
+    const int nloc = grid->nlocal;
+    const bigint first_id =
+        (nloc > 0 && grid->cells) ? grid->cells[0].id : -1;
+    if (static_cast<int>(pd->cell_mesh_cell.size()) != nloc ||
+        pd->cell_mesh_stamp_n != nloc ||
+        pd->cell_mesh_stamp_id != first_id) {
+      pd->build_cell_mesh_index();
+    }
+  }
+  const int cmc_size =
+      use_cell_mesh_cache ? static_cast<int>(pd->cell_mesh_cell.size()) : 0;
+  const int *cmc =
+      use_cell_mesh_cache && cmc_size > 0 ? pd->cell_mesh_cell.data() : nullptr;
 
   for (int i = 0; i < nlocal; i++) {
     const double *x = particles[i].x;
@@ -1017,16 +1047,14 @@ void Update::cache_plasma_particles()
     } else if (pd) {
       // ---- fix plasma/data path: shared bilinear stencil ----
       double R, Z;
-      xyz_to_rz(x, dim, R, Z);
+      xyz_to_rz(x, dim, domain->axisymmetric, R, Z);
       const PdStencil2D st = make_pd_stencil(pd, R, Z);
       int mesh_cell;
       if (pd->has_mesh && need_plasma) {
-        if (pcache_per_cell_mesh && icell_p == prev_icell) {
-          mesh_cell = prev_mesh_cell;
+        if (cmc && icell_p >= 0 && icell_p < cmc_size) {
+          mesh_cell = cmc[icell_p];
         } else {
           mesh_cell = pd->mesh_cell_at(R, Z);
-          prev_mesh_cell = mesh_cell;
-          prev_icell = icell_p;
         }
       } else {
         mesh_cell = -1;
@@ -1487,13 +1515,8 @@ template < int DIM, int SURF, int OPT > void Update::move()
       // so that the reflected trajectory goes through proper surface checks.
       if (psi_reflect_flag && (pflag == PKEEP || pflag == PINSERT)) {
         double Rnew, Znew;
-        if (DIM == 3) {
-          Rnew = sqrt(xnew[0]*xnew[0] + xnew[1]*xnew[1]);
-          Znew = xnew[2];
-        } else {
-          Rnew = xnew[0];
-          Znew = xnew[1];
-        }
+        OpenEdge::sparta_to_RZ(xnew, domain->dimension, domain->axisymmetric,
+                                Rnew, Znew);
 
         // Bilinear interpolation of psi_norm at xnew
         double psi_n = 1.0;
@@ -1548,7 +1571,11 @@ template < int DIM, int SURF, int OPT > void Update::move()
           xnew[1] = x[1];
           if (DIM == 3) xnew[2] = x[2];
 
-          // Reverse radial velocity so particle moves outward next step
+          // Reverse radial velocity so particle moves outward next step.
+          // Slot for v_R depends on domain layout:
+          //   2D Cart (legacy):  x=R,y=Z  -> v_R = v[0]
+          //   2D axi:            x=Z,y=R  -> v_R = v[1]
+          //   3D Cart:           R = sqrt(x^2+y^2) -> project v[0..1] onto R
           if (DIM == 3) {
             double R0 = sqrt(x[0]*x[0] + x[1]*x[1]);
             if (R0 > 1e-10) {
@@ -1560,6 +1587,8 @@ template < int DIM, int SURF, int OPT > void Update::move()
               particles[i].v[0] = vr*cphi - vp*sphi;
               particles[i].v[1] = vr*sphi + vp*cphi;
             }
+          } else if (domain->axisymmetric) {
+            particles[i].v[1] = -particles[i].v[1];
           } else {
             particles[i].v[0] = -particles[i].v[0];
           }
@@ -1995,7 +2024,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 }
                 if (cp || pd) {
                   PlasmaFileParams sk_pf = cp ? cp->query_plasma_at_point(x)
-                                              : query_plasma_from_fix(pd, x, DIM == 2 ? 2 : 3);
+                                              : query_plasma_from_fix(pd, x, DIM == 2 ? 2 : 3, domain->axisymmetric);
                   const double sk_te = sk_pf.temp_e;
                   const double sk_ti = sk_pf.temp_i;
                   if (sk_te > 0.0) {
@@ -2806,8 +2835,8 @@ void Update::pusher_boris3D(int i, int icell, double dt,
         } else if (sheath_plasma_fidx >= 0) {
           auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[sheath_plasma_fidx]);
           if (pd) {
-            PlasmaFileParams sh_pf = query_plasma_from_fix(pd, x, 3);
-            MagneticFieldFileDataParams sh_bf = query_bfield_from_fix(pd, x, 3);
+            PlasmaFileParams sh_pf = query_plasma_from_fix(pd, x, 3, domain->axisymmetric);
+            MagneticFieldFileDataParams sh_bf = query_bfield_from_fix(pd, x, 3, domain->axisymmetric);
             sh_te = sh_pf.temp_e;
             sh_ti = sh_pf.temp_i;
             sh_ne = sh_pf.dens_e;
@@ -3296,7 +3325,7 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
           if (cp || pd) {
             // Point-query plasma data at particle position
             PlasmaFileParams sh_pf = cp ? cp->query_plasma_at_point(x)
-                                        : query_plasma_from_fix(pd, x, 2);
+                                        : query_plasma_from_fix(pd, x, 2, domain->axisymmetric);
             const double sh_te = sh_pf.temp_e;
             const double sh_ne = sh_pf.dens_e;
             const double sh_ti = sh_pf.temp_i;
@@ -3989,6 +4018,13 @@ void Update::global(int narg, char **arg)
       if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_subcycles command");
       boris_subcycles = input->inumeric(FLERR, arg[iarg + 1]);
       if (boris_subcycles <= 0) error->all(FLERR, "Illegal global boris_subcycles command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "pcache_nevery") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "Illegal global pcache_nevery command");
+      pcache_nevery = input->inumeric(FLERR, arg[iarg + 1]);
+      if (pcache_nevery <= 0)
+        error->all(FLERR, "Illegal global pcache_nevery command");
       iarg += 2;
     } else if (strcmp(arg[iarg], "boris_bad_dt_check") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_bad_dt_check command");

@@ -24,6 +24,7 @@
 #include "comm.h"
 #include "domain.h"
 #include "error.h"
+#include "grid.h"
 #include "input.h"
 #include "modify.h"
 
@@ -49,6 +50,13 @@ FixPlasmaData::FixPlasmaData(SPARTA *sparta, int narg, char **arg) :
   // fix ID plasma/data constant ...
   if (narg < 3)
     error->all(FLERR, "Illegal fix plasma/data command");
+
+  // gridmigrate=1: SPARTA drives grid_changed() on adapt/balance (same
+  // pattern as FixEmit). cell_mesh_cell is rebuilt from current grid
+  // state after migration — no per-cell pack/unpack needed.
+  gridmigrate = 1;
+  cell_mesh_stamp_id = -1;
+  cell_mesh_stamp_n  = -1;
 
   nr = nz = 0;
   nion = 0;
@@ -232,6 +240,13 @@ void FixPlasmaData::reload()
   int has_psi_map = (has_equ && !psirz.empty()) ? 1 : 0;
   MPI_Bcast(&has_psi_map, 1, MPI_INT, 0, world);
 
+  // Equilibrium grid dims (independent of the regular-grid nr/nz — for
+  // mesh-only plasma.h5 the regular grid is absent but the equilibrium
+  // still carries a 257x257 psi map). Broadcast so non-root sizes equ_r,
+  // equ_z, psirz to the right shape.
+  MPI_Bcast(&equ_jm, 1, MPI_INT, 0, world);
+  MPI_Bcast(&equ_km, 1, MPI_INT, 0, world);
+
   size_t grid_n = static_cast<size_t>(nz) * nr;
 
   // Resize on non-root
@@ -284,11 +299,12 @@ void FixPlasmaData::reload()
       }
     }
     if (has_psi_map) {
-      equ_jm = nr;
-      equ_km = nz;
-      equ_r.resize(nr);
-      equ_z.resize(nz);
-      psirz.resize(grid_n);
+      // equ_jm / equ_km already broadcast from rank 0 above — they may
+      // differ from nr/nz when plasma.h5 is mesh-only (nr=nz=0 but the
+      // equilibrium is still a full 257x257).
+      equ_r.resize(equ_jm);
+      equ_z.resize(equ_km);
+      psirz.resize(static_cast<size_t>(equ_jm) * equ_km);
     }
   }
 
@@ -324,6 +340,24 @@ void FixPlasmaData::reload()
     MPI_Bcast(ions_dens.data(), ion_n, MPI_DOUBLE, 0, world);
     MPI_Bcast(ions_temp.data(), ion_n, MPI_DOUBLE, 0, world);
     MPI_Bcast(ions_upar.data(), ion_n, MPI_DOUBLE, 0, world);
+    // String vectors: ion_names and ion_elements (added 2026-04-21).
+    // Read on rank 0 only; without this broadcast, non-root ranks see
+    // empty vectors, which breaks downstream consumers that rely on
+    // element-based slot routing (e.g. compute pmi/surf/data with
+    // `target W projectiles O`).
+    auto bcast_strings = [&](std::vector<std::string> &vec) {
+      int n = static_cast<int>(vec.size());
+      MPI_Bcast(&n, 1, MPI_INT, 0, world);
+      if (comm->me != 0) vec.assign(n, std::string());
+      for (int i = 0; i < n; i++) {
+        int len = (comm->me == 0) ? static_cast<int>(vec[i].size()) : 0;
+        MPI_Bcast(&len, 1, MPI_INT, 0, world);
+        if (comm->me != 0) vec[i].assign(len, '\0');
+        if (len > 0) MPI_Bcast(&vec[i][0], len, MPI_CHAR, 0, world);
+      }
+    };
+    bcast_strings(ion_names);
+    bcast_strings(ion_elements);
   }
 
   if (has_mesh) {
@@ -353,6 +387,38 @@ void FixPlasmaData::reload()
     bcast_grad(mesh_e_r);
     bcast_grad(mesh_e_z);
     bcast_grad(mesh_e_t);
+    // Per-vertex B (nvtx-long). Broadcast as nvtx, not ncell.
+    auto bcast_vtx = [&](std::vector<double> &v) {
+      int has = (static_cast<int>(v.size()) == mesh_nvtx) ? 1 : 0;
+      MPI_Bcast(&has, 1, MPI_INT, 0, world);
+      if (!has) { v.clear(); return; }
+      if (static_cast<int>(v.size()) != mesh_nvtx) v.assign(mesh_nvtx, 0.0);
+      MPI_Bcast(v.data(), mesh_nvtx, MPI_DOUBLE, 0, world);
+    };
+    bcast_vtx(mesh_vtx_br);
+    bcast_vtx(mesh_vtx_bz);
+    bcast_vtx(mesh_vtx_bt);
+    // Derive per-triangle B on all ranks (simple mean of 3 vertex values).
+    const bool have_vtx_b = !mesh_vtx_br.empty()
+                         && !mesh_vtx_bz.empty()
+                         && !mesh_vtx_bt.empty();
+    if (have_vtx_b) {
+      mesh_tri_br.assign(mesh_ntri, 0.0);
+      mesh_tri_bz.assign(mesh_ntri, 0.0);
+      mesh_tri_bt.assign(mesh_ntri, 0.0);
+      for (int t = 0; t < mesh_ntri; t++) {
+        const int v0 = mesh_tri[3*t+0];
+        const int v1 = mesh_tri[3*t+1];
+        const int v2 = mesh_tri[3*t+2];
+        mesh_tri_br[t] = (mesh_vtx_br[v0] + mesh_vtx_br[v1] + mesh_vtx_br[v2]) / 3.0;
+        mesh_tri_bz[t] = (mesh_vtx_bz[v0] + mesh_vtx_bz[v1] + mesh_vtx_bz[v2]) / 3.0;
+        mesh_tri_bt[t] = (mesh_vtx_bt[v0] + mesh_vtx_bt[v1] + mesh_vtx_bt[v2]) / 3.0;
+      }
+    } else {
+      mesh_tri_br.clear();
+      mesh_tri_bz.clear();
+      mesh_tri_bt.clear();
+    }
     MPI_Bcast(&has_mesh_wall_face_area, 1, MPI_INT, 0, world);
     if (has_mesh_wall_face_area) {
       if (static_cast<int>(mesh_wall_face_area.size()) != mesh_ncell)
@@ -383,9 +449,10 @@ void FixPlasmaData::reload()
   // Psi map (from plasma.h5) broadcast to all ranks and light up has_equ
   // so downstream consumers (fix reflect/psi, psi_norm_at) can query psi.
   if (has_psi_map) {
-    MPI_Bcast(equ_r.data(), nr, MPI_DOUBLE, 0, world);
-    MPI_Bcast(equ_z.data(), nz, MPI_DOUBLE, 0, world);
-    MPI_Bcast(psirz.data(), grid_n, MPI_DOUBLE, 0, world);
+    const size_t equ_n = static_cast<size_t>(equ_jm) * equ_km;
+    MPI_Bcast(equ_r.data(), equ_jm, MPI_DOUBLE, 0, world);
+    MPI_Bcast(equ_z.data(), equ_km, MPI_DOUBLE, 0, world);
+    MPI_Bcast(psirz.data(), equ_n, MPI_DOUBLE, 0, world);
     MPI_Bcast(&psi_axis, 1, MPI_DOUBLE, 0, world);
     MPI_Bcast(&psib, 1, MPI_DOUBLE, 0, world);
     has_equ = 1;
@@ -406,14 +473,35 @@ void FixPlasmaData::reload()
 
   if (has_mesh) build_mesh_index();
 
+  // Mesh triangles may have changed — drop any cell-indexed cache so the
+  // next cache_plasma_particles call rebuilds from the new hash grid.
+  cell_mesh_cell.clear();
+
   generation++;
 
   if (comm->me == 0) {
     if (screen) {
+      // Separate reports for regular-grid vs mesh carriers, so a
+      // mesh-only plasma.h5 (nr=nz=0 is expected) doesn't read as
+      // "0 x 0 grid".
+      if (nr > 0 && nz > 0) {
+        fprintf(screen,
+          "[plasma/data] Loaded: %d x %d regular grid, ", nr, nz);
+      } else {
+        fprintf(screen, "[plasma/data] Loaded: ");
+      }
+      if (has_mesh) {
+        fprintf(screen, "mesh %d tri / %d cell / %d vtx, ",
+                mesh_ntri, mesh_ncell, mesh_nvtx);
+      }
+      // bfield source: "grid" = legacy regular-grid br/bz datasets;
+      // "mesh" = per-vertex mesh/vtx_b* from the new converters; "no" = neither.
+      const char *bf_src =
+          has_bfield ? "grid"
+          : (!mesh_tri_br.empty() ? "mesh" : "no");
       fprintf(screen,
-        "[plasma/data] Loaded: %d x %d grid, %d ion species, "
-        "bfield=%s, equ=%s, gen=%d\n",
-        nr, nz, nion, has_bfield ? "yes" : "no",
+        "%d ion species, bfield=%s, equ=%s, gen=%d\n",
+        nion, bf_src,
         has_equ ? "yes" : "no", generation);
     }
   }
@@ -457,6 +545,7 @@ void FixPlasmaData::clear_loaded_data()
   ion_charge_z.clear();
   ion_mass_amu.clear();
   ion_names.clear();
+  ion_elements.clear();
   ions_dens.clear();
   ions_temp.clear();
   ions_upar.clear();
@@ -775,6 +864,55 @@ void FixPlasmaData::load_plasma_h5()
     ion_mass_amu.resize(nion);
     ds.read(ion_mass_amu.data(), H5::PredType::NATIVE_DOUBLE);
   }
+  // Variable-length string datasets for /ion_species/names and /elements.
+  // Falls back to element parsing from the name if /elements is absent
+  // (converters older than 2026-04-21 do not write it).
+  auto read_strings = [&](const std::string &dset,
+                          std::vector<std::string> &out) {
+    if (!hasDataset(dset)) return false;
+    H5::DataSet ds = file.openDataSet(dset);
+    H5::DataSpace sp = ds.getSpace();
+    hsize_t dim = 0;
+    sp.getSimpleExtentDims(&dim);
+    H5::StrType stype = ds.getStrType();
+    const bool variable = H5Tis_variable_str(stype.getId()) > 0;
+    out.clear();
+    out.reserve(dim);
+    if (variable) {
+      std::vector<char *> ptrs(dim, nullptr);
+      ds.read(ptrs.data(), stype);
+      for (hsize_t i = 0; i < dim; i++) {
+        out.push_back(ptrs[i] ? std::string(ptrs[i]) : std::string());
+      }
+      H5Dvlen_reclaim(stype.getId(), sp.getId(), H5P_DEFAULT, ptrs.data());
+    } else {
+      const size_t slen = stype.getSize();
+      std::vector<char> buf(dim * slen, 0);
+      ds.read(buf.data(), stype);
+      for (hsize_t i = 0; i < dim; i++) {
+        const char *base = buf.data() + i * slen;
+        size_t n_used = 0;
+        while (n_used < slen && base[n_used] != '\0') ++n_used;
+        out.emplace_back(base, n_used);
+      }
+    }
+    return true;
+  };
+  read_strings("ion_species/names", ion_names);
+  if (!read_strings("ion_species/elements", ion_elements)) {
+    // Strip trailing charge-state suffix (e.g. "O2+" -> "O")
+    ion_elements.clear();
+    ion_elements.reserve(ion_names.size());
+    for (const auto &name : ion_names) {
+      size_t k = name.size();
+      while (k > 0) {
+        char c = name[k-1];
+        if (c == '+' || c == '-' || (c >= '0' && c <= '9')) --k;
+        else break;
+      }
+      ion_elements.push_back(name.substr(0, k));
+    }
+  }
 
   // 3D ion fields: (nion, nz, nr) -> flat
   auto read3D = [&](const std::string &name, std::vector<double> &out) {
@@ -853,6 +991,10 @@ void FixPlasmaData::load_plasma_h5()
     read1D_mesh_opt("mesh/e_r", mesh_e_r);
     read1D_mesh_opt("mesh/e_z", mesh_e_z);
     read1D_mesh_opt("mesh/e_t", mesh_e_t);
+    // Per-vertex B-field (optional; written by convert_{solps,s3x,oedge})
+    read1D_mesh_opt("mesh/vtx_br", mesh_vtx_br);
+    read1D_mesh_opt("mesh/vtx_bz", mesh_vtx_bz);
+    read1D_mesh_opt("mesh/vtx_bt", mesh_vtx_bt);
     if (hasDataset("mesh/wall_face_area")) {
       read1D_mesh("mesh/wall_face_area", mesh_wall_face_area);
       has_mesh_wall_face_area = 1;
@@ -1133,33 +1275,18 @@ void FixPlasmaData::build_mesh_index()
 int FixPlasmaData::find_mesh_triangle(double R, double Z) const
 {
   if (!has_mesh || mesh_ntri <= 0 || mesh_tri.empty()) return -1;
+  if (hash_nr <= 0 || hash_nz <= 0 || hash_grid.empty()) return -1;
 
-  if (hash_nr > 0 && hash_nz > 0 && !hash_grid.empty()) {
-    const int ir = static_cast<int>((R - hash_rmin) / hash_dr);
-    const int iz = static_cast<int>((Z - hash_zmin) / hash_dz);
-    if (ir >= 0 && ir < hash_nr && iz >= 0 && iz < hash_nz) {
-      const auto &candidates = hash_grid[iz * hash_nr + ir];
-      for (int t : candidates) {
-        const int v0 = mesh_tri[t*3+0];
-        const int v1 = mesh_tri[t*3+1];
-        const int v2 = mesh_tri[t*3+2];
-        const double r0 = mesh_vtx_r[v0], z0 = mesh_vtx_z[v0];
-        const double r1 = mesh_vtx_r[v1], z1 = mesh_vtx_z[v1];
-        const double r2 = mesh_vtx_r[v2], z2 = mesh_vtx_z[v2];
-        const double d = (r1-r0)*(z2-z0) - (r2-r0)*(z1-z0);
-        if (std::fabs(d) < 1.0e-30) continue;
-        const double a = ((R-r0)*(z2-z0) - (r2-r0)*(Z-z0)) / d;
-        const double b = ((r1-r0)*(Z-z0) - (R-r0)*(z1-z0)) / d;
-        if (a >= -1.0e-10 && b >= -1.0e-10 && (a+b) <= 1.0+1.0e-10) return t;
-      }
-      return -1;
-    }
-  }
+  // Query outside the hash-grid bbox: no triangle can match there anyway
+  // (all triangle bboxes are inside the hash grid by construction), so
+  // return -1 directly instead of falling through to an O(N_triangles)
+  // linear scan that always returns -1.
+  const int ir = static_cast<int>((R - hash_rmin) / hash_dr);
+  const int iz = static_cast<int>((Z - hash_zmin) / hash_dz);
+  if (ir < 0 || ir >= hash_nr || iz < 0 || iz >= hash_nz) return -1;
 
-  for (int t = 0; t < mesh_ntri; t++) {
-    if (t < static_cast<int>(mesh_tri_rmin.size()) &&
-        (R < mesh_tri_rmin[t] || R > mesh_tri_rmax[t] ||
-         Z < mesh_tri_zmin[t] || Z > mesh_tri_zmax[t])) continue;
+  const auto &candidates = hash_grid[iz * hash_nr + ir];
+  for (int t : candidates) {
     const int v0 = mesh_tri[t*3+0];
     const int v1 = mesh_tri[t*3+1];
     const int v2 = mesh_tri[t*3+2];
@@ -1206,6 +1333,75 @@ int FixPlasmaData::mesh_cell_at(double R, double Z, double max_dist) const
   const int cell = mesh_cell_idx[tri];
   if (cell < 0 || cell >= mesh_ncell) return -1;
   return cell;
+}
+
+/* ----------------------------------------------------------------------
+   Build per-SPARTA-cell mesh-cell index at cell centroids. Populates
+   cell_mesh_cell[icell] for icell in [0, grid->nlocal). For split
+   sub-cells, uses the parent cell's bbox since sub-cells share a parent
+   bbox and the plasma data only varies on mesh-cell scale anyway.
+
+   Coordinate mapping matches update.cpp's per-particle xyz_to_rz(), so
+   the cached lookup is byte-exact with the per-particle fallback path.
+------------------------------------------------------------------------- */
+
+void FixPlasmaData::build_cell_mesh_index()
+{
+  const int nglocal = grid->nlocal;
+  cell_mesh_cell.assign(nglocal, -1);
+  cell_mesh_stamp_n = nglocal;
+  cell_mesh_stamp_id = (nglocal > 0 && grid->cells) ? grid->cells[0].id : -1;
+  if (!has_mesh || nglocal == 0 || mesh_cell_idx.empty()) return;
+
+  Grid::ChildCell *cells = grid->cells;
+  Grid::SplitInfo *sinfo = grid->sinfo;
+  if (!cells) return;
+  const int dim = domain->dimension;
+  const int axi = domain->axisymmetric;
+
+  const int ncell_idx = static_cast<int>(mesh_cell_idx.size());
+
+  for (int icell = 0; icell < nglocal; icell++) {
+    int pcell = icell;
+    // Sub-cells share the parent cell's bbox. sinfo may be NULL on ranks
+    // that have no split cells; guard before dereferencing.
+    if (sinfo && cells[icell].nsplit <= 0 && cells[icell].isplit >= 0)
+      pcell = sinfo[cells[icell].isplit].icell;
+    const double *lo = cells[pcell].lo;
+    const double *hi = cells[pcell].hi;
+    double xc[3] = {0.5 * (lo[0] + hi[0]),
+                    0.5 * (lo[1] + hi[1]),
+                    0.5 * (lo[2] + hi[2])};
+
+    // Physical (R, Z) — matches OpenEdge::sparta_to_RZ convention used by
+    // all other pd consumers (fix thermal_force, cross_diffusion, emit/surf/
+    // recycle). In axi: SPARTA x = Z_axis, y = R_radial.
+    double R, Z;
+    if (axi)          { Z = xc[0]; R = xc[1]; }
+    else if (dim == 2) { R = xc[0]; Z = xc[1]; }
+    else              { R = std::sqrt(xc[0]*xc[0] + xc[1]*xc[1]); Z = xc[2]; }
+
+    // Fast hash-grid lookup only — do NOT run find_nearest_mapped_triangle.
+    // Cells outside the plasma mesh (wall shadow, vacuum) correctly get -1;
+    // the pcache loop's fallback path then returns 0 for those particles,
+    // which is what we want physically (no plasma → no reactions). The
+    // O(N_triangles) linear-scan fallback would dominate the rebuild cost
+    // when adapt/balance fires frequently.
+    const int tri = find_mesh_triangle(R, Z);
+    if (tri >= 0 && tri < ncell_idx) {
+      const int cell = mesh_cell_idx[tri];
+      if (cell >= 0 && cell < mesh_ncell) cell_mesh_cell[icell] = cell;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixPlasmaData::grid_changed()
+{
+  cell_mesh_cell.clear();
+  cell_mesh_stamp_n  = -1;
+  cell_mesh_stamp_id = -1;
 }
 
 /* ---------------------------------------------------------------------- */
