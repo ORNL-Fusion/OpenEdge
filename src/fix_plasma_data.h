@@ -60,6 +60,17 @@ class FixPlasmaData : public Fix {
   std::vector<double> grad_te_r, grad_te_t, grad_te_z;
   std::vector<double> grad_ti_r, grad_ti_t, grad_ti_z;
   std::vector<double> epar;
+  // Heat-flux vector (plasma -> wall) on the regular (R,Z) grid. Written
+  // by the converter from the SOLPS / SOLEDGE3X surface heat-flux fields
+  // (parallel + perpendicular). Consumers (fix evaporation, …) read via
+  // interp2D(q_par, R, Z) / interp2D(q_perp, R, Z). has_qheatflux=1 when
+  // either component is present in plasma.h5; if neither, consumers fall
+  // back to default_q_par / default_q_perp (below) and a one-time warning
+  // prints at init.
+  int has_qheatflux;
+  std::vector<double> q_par, q_perp;
+  double default_q_par;   // W/m^2 fallback when has_qheatflux=0 (50e6)
+  double default_q_perp;  // W/m^2 fallback when has_qheatflux=0 (0)
 
   // ---- Magnetic field on plasma grid ----
   int has_bfield;
@@ -92,6 +103,11 @@ class FixPlasmaData : public Fix {
   // Consumers query via mesh_cell_at(R, Z) + mesh_grad_*_{r,z}[cell].
   std::vector<double> mesh_grad_te_r, mesh_grad_te_z;
   std::vector<double> mesh_grad_ti_r, mesh_grad_ti_z;
+  // Per-cell heat-flux components on the EIRENE mesh. Same semantics as
+  // q_par/q_perp above. Consumers query via mesh_cell_at(R,Z) then
+  // mesh_q_par[cell] / mesh_q_perp[cell]. Empty => regular-grid fallback
+  // (q_par / q_perp), then default_q_{par,perp}.
+  std::vector<double> mesh_q_par, mesh_q_perp;
   // Electric field E = -grad(phi) precomputed on the B2 mesh. Converter
   // reads the plasma code's native potential (SOLPS /balance.nc po,
   // SOLEDGE3X phi, OEDGE osmns_efpara) and writes E components. No

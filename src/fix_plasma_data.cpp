@@ -65,6 +65,9 @@ FixPlasmaData::FixPlasmaData(SPARTA *sparta, int narg, char **arg) :
   has_mesh = 0;
   has_mesh_wall_face_area = 0;
   has_mesh_wall_surf_cell = 0;
+  has_qheatflux = 0;
+  default_q_par  = 50.0e6;
+  default_q_perp = 0.0;
   is_static = 0;
   source_mode = -1;
   generation = 0;
@@ -230,6 +233,7 @@ void FixPlasmaData::reload()
   MPI_Bcast(&nr, 1, MPI_INT, 0, world);
   MPI_Bcast(&nz, 1, MPI_INT, 0, world);
   MPI_Bcast(&has_bfield, 1, MPI_INT, 0, world);
+  MPI_Bcast(&has_qheatflux, 1, MPI_INT, 0, world);
   MPI_Bcast(&nion, 1, MPI_INT, 0, world);
   MPI_Bcast(&has_mesh, 1, MPI_INT, 0, world);
   MPI_Bcast(&mesh_nvtx, 1, MPI_INT, 0, world);
@@ -327,6 +331,24 @@ void FixPlasmaData::reload()
   MPI_Bcast(grad_ti_z.data(), grid_n, MPI_DOUBLE, 0, world);
   MPI_Bcast(epar.data(), grid_n, MPI_DOUBLE, 0, world);
 
+  // q_par / q_perp may be absent on either the regular grid or the mesh
+  // (or both). Broadcast a per-component flag so non-root ranks know
+  // whether to expect the payload.
+  {
+    int have_qpar_reg  = (comm->me == 0 && static_cast<int>(q_par.size())  == grid_n) ? 1 : 0;
+    int have_qperp_reg = (comm->me == 0 && static_cast<int>(q_perp.size()) == grid_n) ? 1 : 0;
+    MPI_Bcast(&have_qpar_reg,  1, MPI_INT, 0, world);
+    MPI_Bcast(&have_qperp_reg, 1, MPI_INT, 0, world);
+    if (have_qpar_reg) {
+      if (static_cast<int>(q_par.size()) != grid_n) q_par.assign(grid_n, 0.0);
+      MPI_Bcast(q_par.data(), grid_n, MPI_DOUBLE, 0, world);
+    } else q_par.clear();
+    if (have_qperp_reg) {
+      if (static_cast<int>(q_perp.size()) != grid_n) q_perp.assign(grid_n, 0.0);
+      MPI_Bcast(q_perp.data(), grid_n, MPI_DOUBLE, 0, world);
+    } else q_perp.clear();
+  }
+
   if (has_bfield) {
     MPI_Bcast(br.data(), grid_n, MPI_DOUBLE, 0, world);
     MPI_Bcast(bz.data(), grid_n, MPI_DOUBLE, 0, world);
@@ -384,6 +406,8 @@ void FixPlasmaData::reload()
     bcast_grad(mesh_grad_te_z);
     bcast_grad(mesh_grad_ti_r);
     bcast_grad(mesh_grad_ti_z);
+    bcast_grad(mesh_q_par);
+    bcast_grad(mesh_q_perp);
     bcast_grad(mesh_e_r);
     bcast_grad(mesh_e_z);
     bcast_grad(mesh_e_t);
@@ -504,6 +528,14 @@ void FixPlasmaData::reload()
         nion, bf_src,
         has_equ ? "yes" : "no", generation);
     }
+    if (!has_qheatflux && generation == 1) {
+      char msg[200];
+      snprintf(msg, sizeof(msg),
+        "[plasma/data] no q_par/q_perp in %s — defaulting to "
+        "q_par=%.2e W/m^2, q_perp=%.2e W/m^2 for evaporation queries",
+        plasma_path.c_str(), default_q_par, default_q_perp);
+      error->warning(FLERR, msg);
+    }
   }
 }
 
@@ -539,6 +571,9 @@ void FixPlasmaData::clear_loaded_data()
   grad_ti_t.clear();
   grad_ti_z.clear();
   epar.clear();
+  q_par.clear();
+  q_perp.clear();
+  has_qheatflux = 0;
   br.clear();
   bz.clear();
   bt.clear();
@@ -568,6 +603,8 @@ void FixPlasmaData::clear_loaded_data()
   mesh_ions_dens.clear();
   mesh_ions_temp.clear();
   mesh_ions_upar.clear();
+  mesh_q_par.clear();
+  mesh_q_perp.clear();
   mesh_tri_rmin.clear();
   mesh_tri_rmax.clear();
   mesh_tri_zmin.clear();
@@ -728,6 +765,8 @@ void FixPlasmaData::load_plasma_h5()
     read2D_optional("grad_ti_t", grad_ti_t);
     read2D_optional("grad_ti_z", grad_ti_z);
     read2D_optional("epar", epar);
+    if (hasDataset("q_par"))  { read2D("q_par",  q_par);  has_qheatflux = 1; }
+    if (hasDataset("q_perp")) { read2D("q_perp", q_perp); has_qheatflux = 1; }
 
     if (hasDataset("br") && hasDataset("bz")) {
       read2D("br", br);
@@ -988,6 +1027,8 @@ void FixPlasmaData::load_plasma_h5()
     read1D_mesh_opt("mesh/grad_te_z", mesh_grad_te_z);
     read1D_mesh_opt("mesh/grad_ti_r", mesh_grad_ti_r);
     read1D_mesh_opt("mesh/grad_ti_z", mesh_grad_ti_z);
+    if (hasDataset("mesh/q_par"))  { read1D_mesh("mesh/q_par",  mesh_q_par);  has_qheatflux = 1; }
+    if (hasDataset("mesh/q_perp")) { read1D_mesh("mesh/q_perp", mesh_q_perp); has_qheatflux = 1; }
     read1D_mesh_opt("mesh/e_r", mesh_e_r);
     read1D_mesh_opt("mesh/e_z", mesh_e_z);
     read1D_mesh_opt("mesh/e_t", mesh_e_t);

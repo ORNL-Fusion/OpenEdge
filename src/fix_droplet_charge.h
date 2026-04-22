@@ -1,3 +1,18 @@
+/* ----------------------------------------------------------------------
+   OpenEdge: fix droplet/charge — OML charging of droplets against a
+   plasma background carried by fix plasma/data.
+
+   Syntax:
+     fix ID droplet/charge Nevery plasma_data PD \
+         [ion_mass_amu M] [thermionic yes|no] \
+         [richardson_A V] [work_function_eV V] \
+         [radius R] [mass M] [temp T]
+
+   The fix solves the OML potential equation at each droplet position and
+   stamps the resulting charge (in e-units) onto particle->species[is].charge
+   as a per-species mean (all particles of a given species share a charge).
+------------------------------------------------------------------------- */
+
 #ifdef FIX_CLASS
 
 FixStyle(droplet/charge,FixDropletCharge)
@@ -9,53 +24,41 @@ FixStyle(droplet_charge,FixDropletCharge)
 #define SPARTA_FIX_DROPLET_CHARGE_H
 
 #include "fix.h"
-#include "grid_src.h"
+#include <string>
 
 namespace SPARTA_NS {
 
-class ComputePlasmaFields;
+class FixPlasmaData;
 
 class FixDropletCharge : public Fix {
  public:
-  FixDropletCharge(class SPARTA*, int, char**);
+  FixDropletCharge(class SPARTA *, int, char **);
   ~FixDropletCharge() override;
 
-  int setmask() override;
+  int  setmask() override;
   void init() override;
   void start_of_step() override;
   void end_of_step() override;
   double memory_usage() override;
 
  protected:
-  int use_grid_plasma = 0;
-  int use_point_plasma = 0;
-  CollGridSrc srcTe, srcTi, srcNe, srcNi;
-  ComputePlasmaFields *point_plasma_compute = nullptr;
+  std::string plasma_fix_id_;
+  FixPlasmaData *pd_ = nullptr;
 
-  double **plasma_grid = nullptr;  // [nlocal][4] : Te,Ti,Ne,Ni
-  int maxgrid_plasma = 0;
-
-  double seed_radius = -1.0;       // optional fallback droplet radius [m]
-  double seed_mass = -1.0;         // optional fallback droplet mass [kg]
-  double ion_mass_amu = 2.0;       // background ion mass for OML [amu]
-  int thermionic_on = 0;           // include Richardson thermionic term
-  double richardson_A = 1.2e6;     // A/(m^2 K^2)
-  double work_function_eV = 2.9;   // eV
-  double seed_temp = -1.0;         // optional fallback droplet temperature [K]
-  int diag_flag = 0;
-  int diag_every = 100;
+  double seed_radius      = -1.0;
+  double seed_mass        = -1.0;
+  double seed_temp        = -1.0;
+  double ion_mass_amu     =  2.0;
+  int    thermionic_on    =  0;
+  double richardson_A     =  1.2e6;
+  double work_function_eV =  2.9;
 
   void apply_charge_update();
   bool solve_phi_oml(double Te_eV, double Ti_eV, double ne_m3, double ni_m3,
                      double Td_K, double rd_m, double &phi_V) const;
-  void compute_plasma_grid();
-  inline void refresh_compute_src(CollGridSrc &S);
-  bool point_plasma_ready() const;
-
-  inline double read_cell_src(const CollGridSrc& S, int icell, int col_plasma) const;
 };
 
-}  // namespace SPARTA_NS
+}
 
 #endif
 #endif

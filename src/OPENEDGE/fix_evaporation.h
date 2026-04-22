@@ -1,3 +1,19 @@
+/* ----------------------------------------------------------------------
+    OpenEdge:
+    fix evaporation — droplet evaporation driven by the plasma heat-flux
+    vector (q_par, q_perp) carried by fix plasma/data.
+
+    Syntax:
+      fix ID evaporation Nevery MIXTURE plasma_data PD \
+          [mass M] [radius R] [temp T] [heatflux/scale S] [rocket_eta E]
+
+    plasma_data PD is required: the fix pulls q_par / q_perp and
+    grad_Te_{R,Z} from that fix plasma/data at the droplet position.
+    If the plasma.h5 does not carry q_par/q_perp, fix plasma/data prints
+    a one-time warning at init and this fix reads back the built-in
+    defaults (default_q_par / default_q_perp on pd).
+------------------------------------------------------------------------- */
+
 #ifdef FIX_CLASS
 
 FixStyle(evaporation,FixEvap)
@@ -7,72 +23,41 @@ FixStyle(evaporation,FixEvap)
 #ifndef SPARTA_FIX_EVAP_H
 #define SPARTA_FIX_EVAP_H
 
-#include <H5Cpp.h>
 #include "fix.h"
-#include "compute_plasma_fields.h"
 #include <string>
-#include <vector>
-#include <algorithm>
-
 
 namespace SPARTA_NS {
 
-enum HeatfluxMode { HF_NONE=0, HF_FILE, HF_CONST, HF_COMPUTE };
-
-    struct HeatFluxData{
-    std::vector<double> r;
-    std::vector<double> z;
-    std::vector<std::vector<double>> q_mag;
-    std::vector<std::vector<double>> grad_te_r;
-    std::vector<std::vector<double>> grad_te_z;
-    };
-
-    struct HeatFluxParams {
-    double r;
-    double z;
-    double q_mag;
-    double grad_te_r;
-    double grad_te_z;
-    };
-
+class FixPlasmaData;
 
 class FixEvap : public Fix {
-public:
-    FixEvap(class SPARTA*, int, char**);
-    ~FixEvap() override;
-    int setmask() override;
-    void init() override;
-    double memory_usage() override;
+ public:
+  FixEvap(class SPARTA*, int, char**);
+  ~FixEvap() override;
+  int setmask() override;
+  void init() override;
+  double memory_usage() override;
 
-      HeatFluxData heat_flux_data;
-      HeatfluxMode heatflux_mode = HF_NONE;
-      double      Qs_const = 0.0;     // when HF_CONST
-      double      heatflux_scale = 3.0; // legacy multiplier, now user-configurable
-      double      rocket_eta = 0.0;    // asymmetry parameter for rocket force [0,1]
+  double heatflux_scale;  // multiplier on |q| (default 1.0)
+  double rocket_eta;      // asymmetry parameter for rocket force [0,1]
 
-protected:
-    int imix;
-    void end_of_step() override;
-    void start_of_step() override;
+ protected:
+  int imix;
+  void end_of_step() override;
+  void start_of_step() override;
 
-    std::string heatfluxFilename;
-    std::string heatflux_compute_id;
-    class ComputePlasmaFields *cp_heatflux;
-    void droplet_evaporation_model(Particle::OnePart *ip,
-                                        const double dt_half);
-    double set_mass = -1.0;
-    double set_temp = -1.0;
-    double set_radius = -1.0;
+  std::string plasma_fix_id_;
+  FixPlasmaData *pd_;
 
-    void broadcastHeatFluxData(HeatFluxData& );
-    HeatFluxParams interpHeatFluxAtPos(double r, double z, const HeatFluxData& data) const;
-    HeatFluxData readHeatFlux(const std::string& filePath);
-    void initializeHeatFluxData();
-    void evap_half(double dt_half);
+  void droplet_evaporation_model(Particle::OnePart *ip, double dt_half);
+  double set_mass   = -1.0;
+  double set_temp   = -1.0;
+  double set_radius = -1.0;
 
+  void evap_half(double dt_half);
 };
 
-} // namespace SPARTA_NS
+}
 
 #endif
 #endif
