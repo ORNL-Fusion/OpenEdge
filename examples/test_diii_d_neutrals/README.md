@@ -1,108 +1,142 @@
 # test_diii_d_neutrals
 
-OpenEdge **plasma–neutral interaction** demonstration on a DIII-D
-axisymmetric geometry with a fixed SOLPS plasma background. Drives
-wall recycling + volumetric chemistry (ionisation, recombination, CX,
-dissociation) and writes per-cell source dumps so the user can see
-where each reaction channel fires across the poloidal plane.
+OpenEdge **plasma-neutral interaction** benchmark on a DIII-D
+axisymmetric geometry with a fixed SOLPS plasma background.  Drives
+wall recycling plus volumetric chemistry (ionisation, CX, dissociation;
+recombination is latent since ions are fluid-only in this mode) and
+dumps per-cell source moments so the reaction footprint is visible
+across the poloidal plane.
 
-Short 10,000-step run. Extend `run` in the deck for longer statistics.
+Default: 50,000 steps at 5 ns (≈10 τ) — reaches steady state.
+~24 s wall time on 8 MPI ranks.
 
 ## Layout
 
 ```
 test_diii_d_neutrals/
-  input/
-    plasma.h5         SOLPS plasma (ne, Te, Ti, upar) on the EIRENE mesh
-                      + per-cell wall_face_area + wall_surf_cell map
-                      + embedded /equilibrium/* (psi, r, z, btf, rtf)
-    wall.surf         SPARTA wall segments (axi: x = Z, y = R)
-    wall.recycle      TRIM + thermal absorb-and-reemit spec
-    dg.equ            DIII-D equilibrium (psi) for fix reflect/psi
-    neutral.species   Species: D2, D, D+
-    neutral.reactions ADAS / Janev reaction set (iz, recomb, CX, dissoc)
-  openedge/
-    in.diii_d_neutrals  the deck
-    run_openedge.sh     launcher (source oneapi + mpirun)
-  scripts/
-    NOTES_fnum.md       fnum sizing recipe
-  output/               run outputs (.grid dumps)
+  in.diii_d_neutrals         the deck
+  plasma.h5                  SOLPS ne, Te, Ti, upar on the EIRENE mesh
+                             + embedded /equilibrium/* (psi, r, z, btf, rtf)
+  wall.surf                  SPARTA wall segments (axi: x = Z, y = R)
+  core.surf                  psi_norm = 0.95 absorb contour
+                             (regen via tools/extract_psi_contour.py)
+  wall.recycle               TRIM + thermal absorb-and-reemit spec
+  neutral.species            D2, D, D+ species table
+  scripts/NOTES_fnum.md      fnum-sizing notes
+  plots/                     post-processing figures (gitignored)
+  diii_d_neutrals.grid       dump output (gitignored)
+  log.openedge               SPARTA log (gitignored)
 ```
 
 ## Running
 
 ```bash
-cd openedge
+cd examples/test_diii_d_neutrals
 source /opt/intel/oneapi/setvars.sh --force
-mpirun -np 16 ~/buildOpenEdge/src/spa_mpi -in in.diii_d_neutrals \
-    > ../output/run.log 2>&1
+mpirun -np 8 ~/buildOpenEdge/src/spa_mpi -in in.diii_d_neutrals
 ```
 
-`NP=64 ./run_openedge.sh` for 64 ranks on one node.
-
-Wall-clock on 64 ranks (mora) for the 10,000-step default: ~2–3 s.
-Linearly scale to see 100k / 500k / 1M by editing the final `run N`.
+`NP = 8..32` is fine; 64 ranks trip an upstream SPARTA ghost-cell
+clumping warning on this geometry and are not recommended.
 
 ## Coordinate convention
 
-True SPARTA axisymmetric (`boundary o ao p`, `x = Z` axial,
-`y = R` radial). All per-volume / per-area diagnostics are full-3D
-quantities — no `2π · R̄` post-multiply. See `CLAUDE.md` §
-"Coordinate convention" for the slot-mapping details.
+True SPARTA axisymmetric: `boundary o ao p`, `x = Z` (axial), `y = R`
+(radial, axis at `y = 0`).  All per-volume / per-area diagnostics are
+full-3D quantities — no `2π · R̄` post-multiply.  See
+[`../../CLAUDE.md`](../../CLAUDE.md) for the slot-mapping details.
 
-## Physics pieces in the deck
+## Physics pieces
 
-- **`fix plasma/data`** — loads `plasma.h5` (mesh + plasma + equilibrium).
-  Provides ne, Te, Ti, B-field, psi to every consumer.
-- **`surf_react wall_pwi`** — incoming D+/D/D2 recycle via TRIM fast
-  reflection (hot) + thermal absorb-and-reemit at 2 eV.
-- **`fix emit/surf/recycle`** — primary neutral source. Reads ne/Te/Ti at
-  each wall segment's adjacent B2 cell (via `mesh/wall_surf_cell`),
-  computes Bohm flux `Γ = ne · cs · sin(α) · face_area`, emits
-  `0.5 · R · Γ` of the recycling mixture per step (`R = 0.99`).
-- **`fix chem/adas`** — volumetric D ionisation, D+ recombination, CX,
-  and D2 dissociation rates from ADAS/Janev tables. 20-column per-cell
-  source tally exposed as `f_fchem[*]`.
-- **`fix reflect/psi ... action absorb`** — inner core boundary at
-  `psi_norm = 0.95`. Neutrals that wander core-side are removed.
+| fix / read\_surf                 | role                                                  |
+|----------------------------------|-------------------------------------------------------|
+| `fix pd plasma/data`             | loads `plasma.h5` (mesh + plasma + equilibrium)       |
+| `read_surf wall.surf`            | outer vessel; diffuse reflection                      |
+| `surf_react wallPWI wall_pwi`    | TRIM + thermal re-emission of incoming D / D2 / D⁺    |
+| `read_surf core.surf ... vanish` | psi\_norm = 0.95 inner absorb surface                 |
+| `fix frec emit/surf/recycle`     | Bohm-flux wall source, `R = 0.99`                     |
+| `fix fchem chem/adas`            | volumetric D ionisation + CX + D₂ dissociation        |
 
-## What gets dumped
+## Dump schema
 
-`output/diii_d_neutrals.grid.XXXXXX` (every 1000 steps) — per-cell:
+`diii_d_neutrals.grid` (every 1000 steps) — 15 cols per cell:
 
-| col | quantity                   | units        |
-|-----|----------------------------|--------------|
-|  1  | cell id                    |              |
-|  2  | xc (= Z, axial)            | m            |
-|  3  | yc (= R, radial)           | m            |
-|  4  | D2 density                 | m⁻³          |
-|  5  | D density                  | m⁻³          |
-|  6  | ionisation rate            | 1 / m³ s     |
-|  7  | recombination rate         | 1 / m³ s     |
-|  8  | charge-exchange rate       | 1 / m³ s     |
-|  9  | dissociation rate          | 1 / m³ s     |
-| 10  | ionisation energy source   | W / m³       |
-| 11  | recombination energy src   | W / m³       |
-| 12  | charge-exchange energy src | W / m³       |
-| 13  | dissociation energy src    | W / m³       |
+| col | field          | units         |
+|-----|----------------|---------------|
+| 1   | cell id        |               |
+| 2   | xc = Z         | m             |
+| 3   | yc = R         | m             |
+| 4–7 | xlo ylo xhi yhi (cell bounds, for grid overlays) | m |
+| 8   | nD             | m⁻³           |
+| 9   | nD2            | m⁻³           |
+| 10  | Sp             | m⁻³ s⁻¹       |
+| 11  | Sm\_x          | kg m⁻² s⁻²    |
+| 12  | Sm\_y          | kg m⁻² s⁻²    |
+| 13  | Sm\_z          | kg m⁻² s⁻²    |
+| 14  | Qe             | W m⁻³         |
+| 15  | Qi             | W m⁻³         |
 
-`f_fchem[5..16]` (momentum source per reaction) is still computed by
-`fix chem/adas` — add the columns to the `dump d1` line if you need
-them for Gkeyll coupling.
+Summary mode (Sp, Sm vector, Qe, Qi) is the plasma-frame source-moment
+layout from [`../../docs/neutral_plasma_coupling/main.tex`] §4.  For
+per-reaction breakdown (20 cols, unsigned raw tally), swap
+`output summary → output detailed` on the `fix fchem` line.
 
-## Regenerating input files (one-time)
+## Post-processing
+
+Three plotters in `tools/` (all optional):
+
+```bash
+# field maps: densities + 2x2 source panels + optional radiation
+python3 ../../tools/make_neutral_plots.py \
+    --dump diii_d_neutrals.grid \
+    --wall wall.surf --core core.surf \
+    --plasma-h5 plasma.h5 \
+    --adas-rates ../../database/adas/ADAS_Rates_1.h5 \
+    --out-dir plots
+
+# domain-integrated convergence (SI units; steady-state sanity check)
+python3 ../../tools/plot_convergence.py \
+    --dump diii_d_neutrals.grid \
+    --out  plots/convergence.png \
+    --dt   5e-9
+
+# psi-contour regeneration if the equilibrium in plasma.h5 changes
+python3 ../../tools/extract_psi_contour.py \
+    --plasma-h5 plasma.h5 \
+    --out       core.surf \
+    --psi-norm  0.95 \
+    --preview   plots/core_contour_preview.png
+```
+
+## Choosing `global fnum`
+
+`fnum` is the statistical weight — each sim particle represents `fnum`
+real particles.  Pick it so the steady-state sim-particle count lands in
+the 10k–100k range:
+
+```
+fnum ≈ total_emission_rate [real/s] · mean_lifetime [s] / N_sim_target
+```
+
+For DIII-D with SOLPS-matched recycling (~5e27 real ions/s), τ_ioniz ≈
+10⁻⁵ s (hot-SOL mix), and `N_sim_target = 5e4`, this gives `fnum ≈ 1e18`.
+The current deck uses a smaller `fnum = 5e15` because only part of the
+divertor footprint is emitting; scale up once the full SOLPS rate is
+active.  Sanity check at runtime: if `Np` in the stats block grows
+unbounded `fnum` is too low; if it hovers near zero `fnum` is too high.
+
+## Regenerating `plasma.h5` / `wall.surf` from a SOLPS run (one-time)
 
 ```bash
 python3 ../../tools/converters/convert_solps_plasma.py \
     <SOLPS case dir> \
-    --b2fgmtry <SOLPS baserun b2fgmtry> \
-    --equ-file <SOLPS baserun dg.equ> \
+    --b2fgmtry   <SOLPS baserun b2fgmtry> \
+    --equ-file   <SOLPS baserun dg.equ> \
     --mesh-extra <SOLPS baserun mesh.extra> \
-    --plasma-out input/plasma.h5 \
-    --wall-out input/wall.surf \
+    --plasma-out plasma.h5 \
+    --wall-out   wall.surf \
     --wall-source mesh-extra
 ```
 
-`plasma.h5` is mesh-only (~1 MB for DIII-D). All the plasma, the
-equilibrium, and the wall-to-B2-cell map live in it; no separate
-`bfield.h5` or `.equ` at run time.
+`plasma.h5` is mesh-only (~2 MB for DIII-D).  Plasma, equilibrium, and
+the wall-to-B2-cell map all live in it — no separate files at run time.
