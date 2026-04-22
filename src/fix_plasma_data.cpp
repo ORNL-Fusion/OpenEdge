@@ -1420,12 +1420,24 @@ const std::vector<double> *FixPlasmaData::mesh_field_for(const std::vector<doubl
 /* ---------------------------------------------------------------------- */
 
 double FixPlasmaData::interp2D(const std::vector<double> &field,
-                                double R, double Z) const
+                                double R, double Z, int icell) const
 {
   if (const std::vector<double> *mesh_field = mesh_field_for(field)) {
-    const int cell = mesh_cell_at(R, Z);
-    if (cell >= 0 && cell < static_cast<int>(mesh_field->size()))
-      return (*mesh_field)[cell];
+    // Fast path: O(1) lookup when the caller knows the SPARTA cell and
+    // the cell-indexed cache is built. Skips the hash-grid triangle
+    // search entirely. Used by fix thermal_force / cross_diffusion /
+    // coll_nanbu per-particle loops.
+    if (icell >= 0 && icell < static_cast<int>(cell_mesh_cell.size())) {
+      const int mc = cell_mesh_cell[icell];
+      if (mc >= 0 && mc < static_cast<int>(mesh_field->size()))
+        return (*mesh_field)[mc];
+      // icell maps to no-mesh-cell (-1): fall through to stencil. Same
+      // behaviour as the R,Z path when mesh_cell_at returns -1.
+    } else {
+      const int cell = mesh_cell_at(R, Z);
+      if (cell >= 0 && cell < static_cast<int>(mesh_field->size()))
+        return (*mesh_field)[cell];
+    }
   }
 
   if (field.empty() || nr < 2 || nz < 2) return 0.0;
@@ -1451,11 +1463,16 @@ double FixPlasmaData::interp2D(const std::vector<double> &field,
 
 void FixPlasmaData::bfield_at(double R, double Z,
                                double &Br_out, double &Bz_out,
-                               double &Bt_out) const
+                               double &Bt_out, int icell) const
 {
-  Br_out = interp2D(br, R, Z);
-  Bz_out = interp2D(bz, R, Z);
-  Bt_out = interp2D(bt, R, Z);
+  // Regular-grid (br,bz,bt) path. The icell hint is forwarded so any
+  // mesh-mapped B field the converter may populate in the future takes
+  // the cached-cell fast path; today br/bz/bt are regular-grid only
+  // (mesh_field_for() returns null for them), so interp2D falls back to
+  // the R,Z stencil regardless of icell.
+  Br_out = interp2D(br, R, Z, icell);
+  Bz_out = interp2D(bz, R, Z, icell);
+  Bt_out = interp2D(bt, R, Z, icell);
 }
 
 /* ---------------------------------------------------------------------- */

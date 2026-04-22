@@ -535,7 +535,7 @@ double FixThermalForce::pd_interp(const std::vector<double> &field,
   if (!pd_) return 0.0;
   double R, Z;
   particle_rz(p, R, Z);
-  return pd_->interp2D(field, R, Z);
+  return pd_->interp2D(field, R, Z, p.icell);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -552,12 +552,18 @@ double FixThermalForce::pd_grad(const std::vector<double> &mesh_grad,
   // back to bilinear interp on the regular (R, Z) grid when mesh
   // gradients are absent (old plasma.h5 without mesh/grad_*_r/z).
   if (!mesh_grad.empty() && pd_->has_mesh) {
-    const int cell = pd_->mesh_cell_at(R, Z);
+    // O(1) cell-indexed lookup when the cache is built; otherwise the
+    // hash-grid triangle search.
+    int cell = -1;
+    if (p.icell >= 0 && p.icell < static_cast<int>(pd_->cell_mesh_cell.size()))
+      cell = pd_->cell_mesh_cell[p.icell];
+    else
+      cell = pd_->mesh_cell_at(R, Z);
     if (cell >= 0 && cell < static_cast<int>(mesh_grad.size()))
       return mesh_grad[cell];
   }
   if (!regular_grad.empty())
-    return pd_->interp2D(regular_grad, R, Z);
+    return pd_->interp2D(regular_grad, R, Z, p.icell);
   return 0.0;
 }
 
@@ -573,7 +579,7 @@ void FixThermalForce::pd_bfield_sparta(const Particle::OnePart &p,
   particle_rz(p, R, Z);
 
   double Br = 0.0, Bz = 0.0, Bt = 0.0;
-  pd_->bfield_at(R, Z, Br, Bz, Bt);
+  pd_->bfield_at(R, Z, Br, Bz, Bt, p.icell);
 
   // Decompose physical (Br, Bz, Bt) onto SPARTA's (B0, B1, B2) slot layout
   // using the same convention as the helper:

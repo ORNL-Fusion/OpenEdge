@@ -829,7 +829,7 @@ double FixCollNanbu::pd_interp(const std::vector<double> &field,
   if (!pd_) return 0.0;
   double R, Z;
   particle_rz(p, R, Z);
-  return pd_->interp2D(field, R, Z);
+  return pd_->interp2D(field, R, Z, p.icell);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -844,7 +844,7 @@ void FixCollNanbu::pd_bfield_sparta(const Particle::OnePart &p,
   particle_rz(p, R, Z);
 
   double Br = 0.0, Bz_cyl = 0.0, Bt = 0.0;
-  pd_->bfield_at(R, Z, Br, Bz_cyl, Bt);
+  pd_->bfield_at(R, Z, Br, Bz_cyl, Bt, p.icell);
 
   double phi = 0.0;
   if (domain->dimension == 3) phi = std::atan2(p.x[1], p.x[0]);

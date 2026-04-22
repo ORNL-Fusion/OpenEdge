@@ -37,8 +37,15 @@ class FixPlasmaData : public Fix {
   int  generation;                        // bumped on every reload
 
   // ---- Point-query API ----
-  double interp2D(const std::vector<double> &field, double R, double Z) const;
-  void   bfield_at(double R, double Z, double &Br, double &Bz, double &Bt) const;
+  // interp2D: when icell >= 0 and the cell-indexed mesh cache is built
+  // (cell_mesh_cell.size() == grid->nlocal, via build_cell_mesh_index),
+  // looks up the per-cell mesh value in O(1). Falls back to the R,Z
+  // stencil/mesh path for legacy callers (icell = -1) and for fields that
+  // live only on the regular (rvals,zvals) grid.
+  double interp2D(const std::vector<double> &field, double R, double Z,
+                  int icell = -1) const;
+  void   bfield_at(double R, double Z, double &Br, double &Bz, double &Bt,
+                   int icell = -1) const;
   double psi_norm_at(double R, double Z) const;
 
   // ---- Plasma grid ----

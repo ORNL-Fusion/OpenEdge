@@ -127,6 +127,31 @@ void FixEmitSurfRecycle::init()
   if (!plasma)
     error->all(FLERR,"Fix emit/surf/recycle requires a fix plasma/data");
 
+  // Resolve per-species temperature overrides into a mixture-local table.
+  // Unmatched mixture species fall back to the scalar twall. A name listed
+  // in twall_species_names that is not present in this mixture is an error
+  // (fail loudly rather than silently ignoring).
+  twall_by_species.assign(nspecies, twall);
+  const int *mix_species = particle->mixture[imix]->species;
+  for (size_t k = 0; k < twall_species_names.size(); k++) {
+    int global_sp = particle->find_species(
+                      const_cast<char *>(twall_species_names[k].c_str()));
+    if (global_sp < 0) {
+      std::string msg = "fix emit/surf/recycle twall_species: unknown species '"
+                        + twall_species_names[k] + "'";
+      error->all(FLERR, msg.c_str());
+    }
+    int slot = -1;
+    for (int isp = 0; isp < nspecies; isp++)
+      if (mix_species[isp] == global_sp) { slot = isp; break; }
+    if (slot < 0) {
+      std::string msg = "fix emit/surf/recycle twall_species: species '"
+                        + twall_species_names[k] + "' is not in mixture";
+      error->all(FLERR, msg.c_str());
+    }
+    twall_by_species[slot] = twall_species_values[k];
+  }
+
   grid_changed();
 }
 
@@ -386,9 +411,10 @@ void FixEmitSurfRecycle::create_task(int icell)
       OpenEdge::sparta_to_RZ(xyz_mid, dimension, domain->axisymmetric,
                               tasks[ntask].rmid, tasks[ntask].zmid);
 
-      tasks[ntask].inward[0] = -normal[0];
-      tasks[ntask].inward[1] = -normal[1];
-      tasks[ntask].inward[2] =  0.0;
+      // normal[] points INTO the fluid (SPARTA canonical).
+      tasks[ntask].inward[0] = normal[0];
+      tasks[ntask].inward[1] = normal[1];
+      tasks[ntask].inward[2] = 0.0;
 
     } else {
       normal = tris[isurf].norm;
@@ -440,9 +466,9 @@ void FixEmitSurfRecycle::create_task(int icell)
       tasks[ntask].rmid = sqrt(cx*cx + cy*cy);
       tasks[ntask].zmid = cz;
 
-      tasks[ntask].inward[0] = -normal[0];
-      tasks[ntask].inward[1] = -normal[1];
-      tasks[ntask].inward[2] = -normal[2];
+      tasks[ntask].inward[0] = normal[0];
+      tasks[ntask].inward[1] = normal[1];
+      tasks[ntask].inward[2] = normal[2];
     }
 
     tasks[ntask].vscale_molec = 0.0;
@@ -567,7 +593,7 @@ double FixEmitSurfRecycle::emission_rate_per_surface(int itask)
   double sin_alpha = 1.0;
   if (plasma->has_bfield) {
     double Br, Bz, Bt;
-    plasma->bfield_at(R, Z, Br, Bz, Bt);
+    plasma->bfield_at(R, Z, Br, Bz, Bt, tasks[itask].icell);
     const double Bmag = std::sqrt(Br*Br + Bz*Bz + Bt*Bt);
     if (Bmag > 0.0) {
       const double proj = Br * tasks[itask].inward[0]
@@ -695,11 +721,12 @@ void FixEmitSurfRecycle::perform_task()
 
       if (region && !region->match(x)) continue;
 
-      // Maxwellian flux velocity at twall, inward along normal.
+      // Maxwellian flux velocity at per-species twall, inward along normal.
       // v_perp ~ Rayleigh ~ sqrt(-ln U) * vscale
       // v_parallel ~ two independent Gaussians (tangential)
       const double mspec = particle->species[ispecies].mass;
-      const double vscale_twall = std::sqrt(2.0 * KB * twall / mspec);
+      const double t_emit = twall_by_species[isp];
+      const double vscale_twall = std::sqrt(2.0 * KB * t_emit / mspec);
 
       vnmag = vscale_twall * std::sqrt(-std::log(random->uniform()));
 
@@ -709,13 +736,15 @@ void FixEmitSurfRecycle::perform_task()
       vamag = vr * std::sin(theta);
       vbmag = vr * std::cos(theta);
 
-      // normal[] points out of the fluid, so emission = -vnmag * normal
-      v[0] = -vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
-      v[1] = -vnmag*normal[1] + vamag*atan[1] + vbmag*btan[1];
-      v[2] = -vnmag*normal[2] + vamag*atan[2] + vbmag*btan[2];
+      // SPARTA canonical: normal[] points INTO the fluid (matches
+      // stock fix_emit_surf, surf_collide_diffuse, surf_react wall_pwi).
+      // Emission into the fluid = +vnmag * normal.
+      v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
+      v[1] = vnmag*normal[1] + vamag*atan[1] + vbmag*btan[1];
+      v[2] = vnmag*normal[2] + vamag*atan[2] + vbmag*btan[2];
 
-      erot = particle->erot(ispecies, twall, random);
-      evib = particle->evib(ispecies, twall, random);
+      erot = particle->erot(ispecies, t_emit, random);
+      evib = particle->evib(ispecies, t_emit, random);
       id = MAXSMALLINT * random->uniform();
 
       particle->add_particle(id, ispecies, pcell, x, v, erot, evib);
@@ -730,7 +759,7 @@ void FixEmitSurfRecycle::perform_task()
           slist_active[k]->surf_tally(p->dtremain, isurf, pcell, 0, NULL, p, NULL);
 
       if (nfix_update_custom)
-        modify->update_custom(particle->nlocal-1, twall, twall, twall, v);
+        modify->update_custom(particle->nlocal-1, t_emit, t_emit, t_emit, v);
     }
     nsingle += nactual;
   }
@@ -780,6 +809,29 @@ int FixEmitSurfRecycle::option(int narg, char **arg)
     if (twall <= 0.0)
       error->all(FLERR,"fix emit/surf/recycle twall must be > 0");
     return 2;
+  }
+  if (strcmp(arg[0], "twall_species") == 0) {
+    // twall_species <sp1> <T1> [<sp2> <T2> ...]
+    // Consume pairs until end of args or a non-pair (next keyword) shows up.
+    // Each Ti replaces the scalar twall for species name spi in the emission
+    // sampler. Unnamed species fall back to the scalar twall.
+    int consumed = 1;
+    while (consumed + 1 < narg) {
+      const char *name = arg[consumed];
+      // stop if name is actually a keyword this fix would recognise next
+      if (strcmp(name, "mass") == 0 || strcmp(name, "R") == 0 ||
+          strcmp(name, "twall") == 0 || strcmp(name, "twall_species") == 0)
+        break;
+      const double t = atof(arg[consumed + 1]);
+      if (t <= 0.0)
+        error->all(FLERR,"fix emit/surf/recycle twall_species T must be > 0");
+      twall_species_names.push_back(std::string(name));
+      twall_species_values.push_back(t);
+      consumed += 2;
+    }
+    if (consumed == 1)
+      error->all(FLERR,"fix emit/surf/recycle twall_species needs at least one <sp> <T> pair");
+    return consumed;
   }
 
   error->all(FLERR,"Illegal fix emit/surf/recycle command");

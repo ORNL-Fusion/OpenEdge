@@ -638,7 +638,7 @@ double FixCrossDiffusion::pd_interp(const std::vector<double> &field,
   if (!pd_) return 0.0;
   double R, Z;
   particle_rz(p, R, Z);
-  return pd_->interp2D(field, R, Z);
+  return pd_->interp2D(field, R, Z, p.icell);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -653,7 +653,7 @@ void FixCrossDiffusion::pd_bfield_sparta(const Particle::OnePart &p,
   particle_rz(p, R, Z);
 
   double Br = 0.0, Bz = 0.0, Bt = 0.0;
-  pd_->bfield_at(R, Z, Br, Bz, Bt);
+  pd_->bfield_at(R, Z, Br, Bz, Bt, p.icell);
 
   // Decompose physical (Br, Bz, Bt) onto SPARTA's (B0, B1, B2) slot layout.
   double phi = 0.0;
