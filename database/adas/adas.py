@@ -1,248 +1,265 @@
 #!/usr/bin/env python3
+"""Build OpenEdge ADAS rate tables from open-ADAS adf11 text files.
 
-# File written by from Patrick Tamin
-# Modified by Abdou Diaw
+Ingests per element, writing a single ADAS_Rates_<Z>.h5 per element:
 
+  scd - ionization      sigma_v    [log10, cm^3/s]   (required)
+  acd - recombination   sigma_v    [log10, cm^3/s]   (required)
+  ccd - charge-exchange sigma_v    [log10, cm^3/s]   (optional)
+  plt - line radiation  power      [log10, W cm^3]   (optional)
+  prb - recomb+brems    power      [log10, W cm^3]   (optional)
+
+plus ionization potentials (eV, one per charge state) when an
+open-ADAS ionization_potentials file is available.
+
+Usage (defaults process every element in DEFAULT_ELEMENTS):
+
+  python3 adas.py
+  python3 adas.py --elements h c w
+  python3 adas.py --year 96 --elements h
+
+The script looks for adf11 text files under
+  ${ADAS_ADF11_DIR:-./adf11}/{scd,acd,ccd,plt,prb}<year>/<class><year>_<elt>.dat
+and ionization-potential files under ./ionization_potentials/ADAS_ionization_potentials_<Elt>.
+
+Any class whose file is missing is skipped (with a warning); only scd + acd
+are required.  The charge-state grids are 0-based (neutral = 0) and use
+convention [before_state, after_state] for ionization/recombination/CX and
+[radiating_state, radiating_state] for plt, so the 2xN layout is uniform.
+"""
+from __future__ import annotations
+
+import argparse
 import os
-import numpy as np
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from scipy import interpolate
-from math import floor
+import re
+import sys
+from pathlib import Path
+
 import h5py
-
-################################### Inputs ###################################
-
-# Set ADAS_ADF11_DIR env var or update this path to your local ADAS ADF11 data
-AMFilesDir = os.environ.get('ADAS_ADF11_DIR',
-    os.path.join(os.path.dirname(__file__), 'adf11'))
-
-reactions = ['acd', 'scd', 'ccd']
-year = '89'#'89'#'96'
-elements = ['c']#['ar', 'b','kr','xe']#['be', 'c', 'he', 'li', 'n', 'ne', 'o']
-element_nuclear_charges = [6]
-
-AtomicZ = element_nuclear_charges[0]
-IonRate = RecRate = CXRate = None
-logDens_acd = logTe_acd = iZmin_acd = iZmax_acd = None
-logDens_scd = logTe_scd = iZmin_scd = iZmax_scd = None
-logDens_ccd = logTe_ccd = iZmin_ccd = iZmax_ccd = None
-
-##############################################################################
-
-# Number of elements / reactions / files to treat
-Nelts = len(elements)
-Nreac = len(reactions)
-Nfiles = Nelts*Nreac
+import numpy as np
 
 
-for iReac in range(Nreac):
-    for iElt in range(Nelts):
-        reaction = reactions[iReac]   # 'acd' (recomb), 'scd' (ionization)
-        element = elements[iElt]
-        element_nuclear_charge = element_nuclear_charges[iElt]
-        AMFile = f"{reaction}{year}_{element}.dat"
-        AMFileFull = f"{AMFilesDir}/{reaction}{year}/{AMFile}"
-        FitFile = f"{reaction}_{element_nuclear_charge}.h5"  # not used below
+# Element symbol -> nuclear charge.  Hydrogen isotopes all use the adf11 'h' file.
+DEFAULT_ELEMENTS: dict[str, int] = {
+    "h": 1, "he": 2, "li": 3, "be": 4, "b": 5, "c": 6, "n": 7, "o": 8,
+    "ne": 10, "ar": 18, "fe": 26, "kr": 36, "mo": 42, "xe": 54, "w": 74,
+}
+
+# (class, dataset_base, coeff_name, required, units)
+CLASSES = [
+    ("scd", "Ionization",      "RateCoeff",  True,  "log10(sigma_v) [cm^3/s]"),
+    ("acd", "Recombination",   "RateCoeff",  True,  "log10(sigma_v) [cm^3/s]"),
+    ("ccd", "ChargeExchange",  "RateCoeff",  False, "log10(sigma_v) [cm^3/s]"),
+    ("plt", "LineRadiation",   "PowerCoeff", False, "log10(power) [W cm^3]"),
+    ("prb", "RecombRadiation", "PowerCoeff", False, "log10(power) [W cm^3]"),
+]
 
 
-        print(f'Processing file {AMFile}...')
+def parse_adf11(path: Path):
+    """Parse an adf11 text file.
 
-        with open(AMFileFull) as f:
-            contents = f.readlines()
+    Returns (logQ[nDens, nTe, nZ], logDens, logTe, iZmin, iZmax).
+    The adf11 header reads: izmax_file  nDens  nTe  iZmin  iZmax  /ELEMENT/ source
+    """
+    text = path.read_text().splitlines()
+    nums = [int(s) for s in text[0].split() if s.lstrip("-").isdigit()]
+    if len(nums) < 5:
+        raise ValueError(f"{path}: cannot parse header '{text[0]}'")
+    _izmax_file, nDens, nTe, iZmin, iZmax = nums[:5]
+    nZ = iZmax - iZmin + 1
+    nData = nDens * nTe
 
-        HeaderComment = contents[0]
-        nums = [int(s) for s in HeaderComment.split() if s.isdigit()]
-        izmax, nDens, nTe, iZmin, iZmax = nums[0], nums[1], nums[2], nums[3], nums[4]
-        nZ = iZmax - iZmin + 1
-        nData = nDens * nTe
+    logQ = np.zeros((nDens, nTe, nZ))
+    logDens = np.zeros(nDens)
+    logTe = np.zeros(nTe)
 
-        logQ = np.zeros([nDens, nTe, nZ])
-        logDens = np.zeros(nDens)
-        logTe = np.zeros(nTe)
+    # Read logDens then logTe (both on continuation lines, starting line 2 after the dashes)
+    iline = 2
+    iDens = iTe = 0
+    while iTe < nTe:
+        flist = [float(s) for s in text[iline].split()]
+        imin = 0
+        if iDens < nDens:
+            take = min(nDens - iDens, len(flist))
+            logDens[iDens:iDens + take] = flist[:take]
+            iDens += take
+            imin = take
+        if iDens == nDens and iTe < nTe and imin < len(flist):
+            take = min(nTe - iTe, len(flist) - imin)
+            logTe[iTe:iTe + take] = flist[imin:imin + take]
+            iTe += take
+        iline += 1
 
-        iline = 2
-        iDens = 0
-        iTe = 0
-        while iTe < nTe:
-            flist = [float(s) for s in contents[iline].split()]
-            nflist = len(flist)
-            imax = 0
-
-            if iDens < nDens:
-                imax = min(nDens - iDens, nflist)
-                logDens[iDens:iDens+imax] = flist[0:imax]
-                iDens += imax
-
-            imin = imax
-            if (iDens == nDens) and (iTe < nTe) and (imin < nflist):
-                imax = min(nTe - iTe, nflist - imin)
-                # FIXED slice here:
-                logTe[iTe:iTe+imax] = flist[imin:imin+imax]
-                iTe += imax
-
+    # Per-charge-state blocks: one header line, then nData values in row-major (fortran order).
+    for iZ in range(nZ):
+        iline += 1  # skip per-Z header
+        data = np.zeros(nData)
+        pos = 0
+        while pos < nData:
+            flist = [float(s) for s in text[iline].split()]
+            take = min(nData - pos, len(flist))
+            data[pos:pos + take] = flist[:take]
+            pos += take
             iline += 1
+        logQ[:, :, iZ] = data.reshape((nDens, nTe), order="F")
 
-        for iZ in range(nZ):
-            iline += 1  # skip header
-            Data1D = np.zeros(nData)
-            iData = 0
-            while iData < nData:
-                flist = [float(s) for s in contents[iline].split()]
-                nflist = len(flist)
-                imax = min(nData - iData, nflist)
-                Data1D[iData:iData+imax] = flist[0:imax]
-                iData += imax
-                iline += 1
-            logQ[:, :, iZ] = np.reshape(Data1D, (nDens, nTe), order='F')
-
-        # Map to the correct physical meaning (recommended mapping)
-        if reaction == 'scd':  # ionization
-            IonRate = logQ
-            logDens_scd, logTe_scd = logDens, logTe
-            iZmin_scd, iZmax_scd = iZmin, iZmax
-        elif reaction == 'acd':  # recombination
-            RecRate = logQ
-            logDens_acd, logTe_acd = logDens, logTe
-            iZmin_acd, iZmax_acd = iZmin, iZmax
-        elif reaction == 'ccd':  # charge exchange
-            CXRate = logQ
-            logDens_ccd, logTe_ccd = logDens, logTe
-            iZmin_ccd, iZmax_ccd = iZmin, iZmax
-
-# Now safe to print and write
-if IonRate is None or RecRate is None:
-    raise RuntimeError("Missing IonRate or RecRate — check input files and reactions list order.")
-if CXRate is None:
-    print("WARNING: No CCD (charge exchange) data found — CX rates will not be written.")
-
-print(f"IonRate shape {IonRate.shape}")
-print(f"RecRate shape {RecRate.shape}")
-if CXRate is not None:
-    print(f"CXRate shape {CXRate.shape}")
-
-grid_charge_ion = np.array([np.arange(iZmin_scd, iZmax_scd), np.arange(iZmin_scd+1, iZmax_scd+1)])
-grid_charge_rec = np.array([np.arange(iZmin_acd+1, iZmax_acd+1), np.arange(iZmin_acd, iZmax_acd)])
-
-output_filename = f"ADAS_Rates_{AtomicZ}.h5"
-with h5py.File(output_filename, 'w') as f:
-    f.create_dataset('Atomic_Number', data=np.array([AtomicZ]))
-    f.create_dataset('IonizationRateCoeff', data=IonRate.T)
-    f.create_dataset('RecombinationRateCoeff', data=RecRate.T)
-    f.create_dataset('gridDensity_Ionization', data=logDens_scd)
-    f.create_dataset('gridTemperature_Ionization', data=logTe_scd)
-    f.create_dataset('gridDensity_Recombination', data=logDens_acd)
-    f.create_dataset('gridTemperature_Recombination', data=logTe_acd)
-    f.create_dataset('gridChargeState_Ionization', data=grid_charge_ion)
-    f.create_dataset('gridChargeState_Recombination', data=grid_charge_rec)
-    if CXRate is not None:
-        grid_charge_cx = np.array([np.arange(iZmin_ccd+1, iZmax_ccd+1), np.arange(iZmin_ccd, iZmax_ccd)])
-        f.create_dataset('ChargeExchangeRateCoeff', data=CXRate.T)
-        f.create_dataset('gridDensity_ChargeExchange', data=logDens_ccd)
-        f.create_dataset('gridTemperature_ChargeExchange', data=logTe_ccd)
-        f.create_dataset('gridChargeState_ChargeExchange', data=grid_charge_cx)
+    return logQ, logDens, logTe, iZmin, iZmax
 
 
-exit()
-# Loop on reactions
-for iReac in range(0,Nreac):
-    for iElt in range(0,Nelts):
+def charge_state_grid(class_name: str, iZmin: int, iZmax: int) -> np.ndarray:
+    """Build a (2, nZ) 0-based charge-state grid matching the tabulated stages.
 
-        reaction = reactions[iReac]
-        element = elements[iElt]
-        element_nuclear_charge= element_nuclear_charges[iElt]
-        AMFile = reaction + year + '_' + element + '.dat'
-        AMFileFull = AMFilesDir + '/' + reaction + year + '/' + AMFile
-#        FitFile = reaction + '_' + element.capitalize() + '.h5'
-        FitFile = reaction + '_' + str(element_nuclear_charge) + '.h5'
+    adf11 indexes charge states 1..Zmax where iZ=1 is the neutral atom.  We
+    convert to 0-based (neutral=0) and pair [before, after] by reaction:
 
-        print('Processing file ' + AMFile + ' to produce file ' + FitFile + '...')
-
-        #################
-        # 1- Read AM file
-        #################
-
-        with open(AMFileFull) as f:
-            contents = f.readlines()
-
-        HeaderComment = contents[0]
-        elementFull = HeaderComment.split("/")[1].rstrip()
-
-        nums = [int(s) for s in HeaderComment.split() if s.isdigit()]
-        izmax = nums[0]
-        nDens = nums[1]
-        nTe = nums[2]
-        nData = nDens*nTe
-        iZmin = nums[3]
-        iZmax = nums[4]
-        nZ = iZmax - iZmin + 1
-
-        logQ = np.zeros([nDens,nTe,nZ])
-        logDens = np.zeros(nDens)
-        logTe = np.zeros(nTe)
-
-        iline = 2
-        iDens = 0
-        iTe = 0
-        while (iTe < nTe):
-            flist = [float(s) for s in contents[iline].split()]
-            nflist = len(flist)
-            imax = 0
-            if (iDens < nDens):
-                imax = min(nDens - iDens, nflist)
-                logDens[iDens:iDens+imax] = flist[0:imax]
-                iDens = iDens + imax
-            imin = imax
-            if (iDens == nDens) and (iTe < nTe) and (imin != nflist):
-                imax = min(nTe - iTe, nflist - imin)
-                logTe[iTe:iTe+imax-imin] = flist[imin:imax]
-                iTe  = iTe + imax - imin
-            iline = iline + 1
-            
-        for iZ in range(0,nZ):
-            iline = iline + 1 # skip header line of ionization level
-            Data1D = np.zeros(nData)
-            iData = 0
-            while (iData < nData):
-                flist = [float(s) for s in contents[iline].split()]
-                nflist = len(flist)
-                imax = min(nData - iData, nflist)
-                Data1D[iData:iData+imax] = flist[0:imax]
-                iData = iData + imax
-                iline = iline + 1
-            logQ[:,:,iZ] = np.reshape(Data1D[:],(nDens,nTe),order='F')
-
-        if reaction == 'acd':
-            IonRate = logQ
-            logDens_acd = logDens
-            logTe_acd = logTe
-            iZmin_acd = iZmin
-            iZmax_acd = iZmax
-        elif reaction == 'scd':
-            RecRate = logQ
-            logDens_scd = logDens
-            logTe_scd = logTe
-            iZmin_scd = iZmin
-            iZmax_scd = iZmax
+      scd (X^q -> X^{q+1}): before = q,   after = q+1
+      acd (X^q -> X^{q-1}): before = q,   after = q-1
+      ccd (X^q -> X^{q-1}): before = q,   after = q-1   (CX with neutral H)
+      plt (line rad in state q):         before = after = q
+      prb (brems+recomb from q -> q-1):  before = q,   after = q-1
+    """
+    nZ = iZmax - iZmin + 1
+    if class_name == "scd":
+        before = np.arange(iZmin - 1, iZmax)
+        after  = np.arange(iZmin,     iZmax + 1)
+    elif class_name in ("acd", "ccd", "prb"):
+        before = np.arange(iZmin,     iZmax + 1)
+        after  = np.arange(iZmin - 1, iZmax)
+    elif class_name == "plt":
+        before = np.arange(iZmin - 1, iZmax)
+        after  = before.copy()
+    else:
+        raise ValueError(class_name)
+    grid = np.vstack([before, after])
+    assert grid.shape == (2, nZ), (grid.shape, nZ)
+    return grid
 
 
-        if reaction == 'acd':
-            IonRate = logQ
-        elif reaction == 'scd':
-            RecRate = logQ
+def load_ionization_potentials(path: Path, Z: int) -> np.ndarray:
+    """Parse an open-ADAS ionization_potentials text file.
 
-        print(f"IonRate shape {IonRate.shape}")
-        print(f"RecRate shape {RecRate.shape}")
-        
-        # Now write to HDF5
-        output_filename = f"ADAS_Rates_{AtomicZ}.h5"
-        with h5py.File(output_filename, 'w') as f:
-            f.create_dataset('Atomic_Number', data=np.array([AtomicZ]))
-            f.create_dataset('IonizationRateCoeff', data=IonRate.T)
-            f.create_dataset('RecombinationRateCoeff', data=RecRate.T)
-#
-            f.create_dataset('gridDensity_Ionization', data=logDens_acd)
-            f.create_dataset('gridTemperature_Ionization', data=logTe_acd)
-            f.create_dataset('gridDensity_Recombination', data=logDens_scd)
-            f.create_dataset('gridTemperature_Recombination', data=logTe_scd)
-#EOF
+    Format (S3X convention):
+        ----- header comment -----
+        Element = <symbol>
+        Z       = <Z>
+
+        <IP_0>
+        <IP_1>
+        ...
+        <IP_{Z-1}>
+        <footer text>
+
+    Returns an array of Z floats (eV), one per charge state (0..Z-1).
+    """
+    text = path.read_text()
+    vals = [float(s) for s in re.findall(r"[-+]?\d+\.\d+[eE][-+]?\d+", text)]
+    if len(vals) < Z:
+        raise RuntimeError(f"{path}: expected >={Z} IP values, got {len(vals)}")
+    return np.asarray(vals[:Z], dtype=np.float64)
+
+
+def ip_filename(symbol: str) -> str:
+    """Open-ADAS uses 'D' for hydrogen; everything else uses capitalized symbol."""
+    if symbol == "h":
+        return "ADAS_ionization_potentials_D"
+    return f"ADAS_ionization_potentials_{symbol[0].upper() + symbol[1:].lower()}"
+
+
+def build_element(symbol: str, Z: int, adf11_dir: Path, ip_dir: Path,
+                  year: str, out_dir: Path, verbose: bool = True) -> Path:
+    out_path = out_dir / f"ADAS_Rates_{Z}.h5"
+    loaded: dict[str, dict] = {}
+
+    for class_name, base, coeff_name, required, units in CLASSES:
+        path = adf11_dir / f"{class_name}{year}" / f"{class_name}{year}_{symbol}.dat"
+        if not path.exists():
+            if required:
+                raise FileNotFoundError(path)
+            if verbose:
+                print(f"  [skip] {class_name}: {path} not found")
+            continue
+        logQ, logDens, logTe, iZmin, iZmax = parse_adf11(path)
+        if verbose:
+            print(f"  [ok]   {class_name}: {path.name} "
+                  f"(nDens={len(logDens)}, nTe={len(logTe)}, nZ={iZmax-iZmin+1})")
+        loaded[class_name] = dict(
+            logQ=logQ, logDens=logDens, logTe=logTe,
+            iZmin=iZmin, iZmax=iZmax,
+            base=base, coeff=coeff_name, units=units,
+        )
+
+    # Ionization potentials (optional)
+    ip_vals = None
+    if ip_dir is not None:
+        ip_path = ip_dir / ip_filename(symbol)
+        if ip_path.exists():
+            ip_vals = load_ionization_potentials(ip_path, Z)
+            if verbose:
+                print(f"  [ok]   IP  : {ip_path.name} -> {ip_vals.tolist()}")
+        elif verbose:
+            print(f"  [skip] IP  : {ip_path.name} not found")
+
+    with h5py.File(out_path, "w") as f:
+        f.create_dataset("Atomic_Number", data=np.array([Z], dtype=np.int64))
+        for class_name, d in loaded.items():
+            base = d["base"]
+            dset = f.create_dataset(f"{base}{d['coeff']}", data=d["logQ"].T)
+            dset.attrs["units"] = d["units"]
+            f.create_dataset(f"gridDensity_{base}",     data=d["logDens"])
+            f.create_dataset(f"gridTemperature_{base}", data=d["logTe"])
+            f.create_dataset(
+                f"gridChargeState_{base}",
+                data=charge_state_grid(class_name, d["iZmin"], d["iZmax"]),
+            )
+        if ip_vals is not None:
+            ip = f.create_dataset("IonizationPotential", data=ip_vals)
+            ip.attrs["units"] = "eV"
+
+    if verbose:
+        print(f"  wrote {out_path}")
+    return out_path
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    here = Path(__file__).resolve().parent
+    p.add_argument("--adf11-dir", type=Path,
+                   default=Path(os.environ.get("ADAS_ADF11_DIR", here / "adf11")),
+                   help="Directory with {scd,acd,ccd,plt,prb}<year>/ subdirs")
+    p.add_argument("--ip-dir", type=Path,
+                   default=here / "ionization_potentials",
+                   help="Directory with ADAS_ionization_potentials_<Elt> files")
+    p.add_argument("--year", default="89",
+                   help="adf11 year suffix (default 89)")
+    p.add_argument("--out-dir", type=Path, default=here,
+                   help="Output directory for ADAS_Rates_<Z>.h5 files")
+    p.add_argument("--elements", nargs="+", default=None,
+                   help=f"Element symbols to process (default: {list(DEFAULT_ELEMENTS)})")
+    args = p.parse_args(argv)
+
+    if args.elements:
+        elements = {}
+        for sym in args.elements:
+            s = sym.lower()
+            if s not in DEFAULT_ELEMENTS:
+                print(f"Unknown element {sym!r}; known: {list(DEFAULT_ELEMENTS)}", file=sys.stderr)
+                return 2
+            elements[s] = DEFAULT_ELEMENTS[s]
+    else:
+        elements = dict(DEFAULT_ELEMENTS)
+
+    for symbol, Z in elements.items():
+        print(f"\n=== {symbol.upper()} (Z={Z}) ===")
+        try:
+            build_element(symbol, Z, args.adf11_dir, args.ip_dir,
+                          args.year, args.out_dir)
+        except FileNotFoundError as e:
+            print(f"  [FAIL] required file missing: {e}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
