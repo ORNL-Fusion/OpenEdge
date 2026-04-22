@@ -28,6 +28,8 @@ FixStyle(emit/surf/recycle,FixEmitSurfRecycle)
 #include "fix_emit.h"
 #include "surf.h"
 #include "grid.h"
+#include <string>
+#include <vector>
 
 namespace SPARTA_NS {
 
@@ -50,7 +52,14 @@ class FixEmitSurfRecycle : public FixEmit {
   // recycling parameters
   double mass_amu;       // main ion mass [amu], for c_s
   double R_recycle;      // total recycling coefficient (1 - pumping frac)
-  double twall;          // wall temperature [K]
+  double twall;          // default emission temperature [K]
+  // Optional per-species overrides. Parsed from `twall_species <sp> <T> ...`
+  // in options(); resolved to mixture-local species indices in init() and
+  // materialised as twall_by_species (size = mixture nspecies, falling back
+  // to the scalar twall for any species not explicitly named).
+  std::vector<std::string> twall_species_names;
+  std::vector<double>      twall_species_values;
+  std::vector<double>      twall_by_species;
 
   // copies of data from other classes
   int dimension, nspecies;
@@ -84,6 +93,19 @@ class FixEmitSurfRecycle : public FixEmit {
   int ntaskmax;
   int diag_printed;          // 1 once init diagnostic has been printed,
                              // suppresses re-print on every rebalance.
+
+  // Track pd->generation so tasks[].plasma_cell and the cell-centroid
+  // cache below are rebuilt when plasma.h5 reloads (dynamic plasma, SOLPS
+  // coupling). -1 means "no cache built yet".
+  int plasma_generation_;
+
+  // Instance-scoped cache for the B2-cell centroid fallback search in
+  // create_task. Replaces the old static locals so (a) a reload bumps
+  // plasma_generation_ and forces a rebuild, and (b) multiple fix
+  // emit/surf/recycle instances can coexist without sharing state.
+  std::vector<double> plasma_cell_r_;
+  std::vector<double> plasma_cell_z_;
+  int plasma_cell_centroid_gen_;  // pd generation when cell_r/z was built
 
  protected:
   virtual void perform_task();

@@ -88,6 +88,12 @@ FixEmitSurfRecycle::FixEmitSurfRecycle(SPARTA *sparta, int narg, char **arg) :
   ntask = ntaskmax = 0;
   diag_printed = 0;
 
+  // Plasma-generation tracking for dynamic reloads. Bumped every time
+  // FixPlasmaData::reload() runs; we compare here and rebuild tasks +
+  // centroid cache if it changed.
+  plasma_generation_ = -1;
+  plasma_cell_centroid_gen_ = -1;
+
   dimension = domain->dimension;
   if (dimension == 3) cut3d = new Cut3d(sparta);
   else cut2d = new Cut2d(sparta, domain->axisymmetric);
@@ -511,39 +517,39 @@ void FixEmitSurfRecycle::create_task(int icell)
       const double *vz = plasma->mesh_vtx_z.data();
       const double *fa = plasma->mesh_wall_face_area.data();
 
-      // Compute per-cell centroid as mean of its (native B2) triangle
-      // centroids. This is built once; cached across tasks via static
-      // locals keyed by the plasma generation pointer.
-      static std::vector<double> cell_r, cell_z;
-      static const FixPlasmaData *cached_plasma = nullptr;
-      if (cached_plasma != plasma ||
-          static_cast<int>(cell_r.size()) != ncell) {
-        cell_r.assign(ncell, 0.0);
-        cell_z.assign(ncell, 0.0);
+      // Per-cell centroid cache (mean of the cell's B2 triangles). Keyed
+      // on pd generation + ncell so a plasma reload forces a rebuild, and
+      // per-instance (no static locals) so multiple fix emit/surf/recycle
+      // instances don't clobber each other.
+      const int pd_gen = plasma ? plasma->generation : -1;
+      if (plasma_cell_centroid_gen_ != pd_gen ||
+          static_cast<int>(plasma_cell_r_.size()) != ncell) {
+        plasma_cell_r_.assign(ncell, 0.0);
+        plasma_cell_z_.assign(ncell, 0.0);
         std::vector<int> ncount(ncell, 0);
         for (int t = 0; t < ntri; t++) {
           const int c = ci[t];
           if (c < 0 || fa[c] <= 0.0) continue;
           const int v0 = tr[3*t+0], v1 = tr[3*t+1], v2 = tr[3*t+2];
-          cell_r[c] += (vr[v0] + vr[v1] + vr[v2]) / 3.0;
-          cell_z[c] += (vz[v0] + vz[v1] + vz[v2]) / 3.0;
+          plasma_cell_r_[c] += (vr[v0] + vr[v1] + vr[v2]) / 3.0;
+          plasma_cell_z_[c] += (vz[v0] + vz[v1] + vz[v2]) / 3.0;
           ncount[c]++;
         }
         for (int c = 0; c < ncell; c++) {
           if (ncount[c] > 0) {
-            cell_r[c] /= ncount[c];
-            cell_z[c] /= ncount[c];
+            plasma_cell_r_[c] /= ncount[c];
+            plasma_cell_z_[c] /= ncount[c];
           }
         }
-        cached_plasma = plasma;
+        plasma_cell_centroid_gen_ = pd_gen;
       }
 
       double dmin2 = std::numeric_limits<double>::infinity();
       int best = -1;
       for (int c = 0; c < ncell; c++) {
         if (fa[c] <= 0.0) continue;
-        const double dr = cell_r[c] - rm;
-        const double dz = cell_z[c] - zm;
+        const double dr = plasma_cell_r_[c] - rm;
+        const double dz = plasma_cell_z_[c] - zm;
         const double d2 = dr*dr + dz*dz;
         if (d2 < dmin2) { dmin2 = d2; best = c; }
       }
@@ -562,6 +568,11 @@ double FixEmitSurfRecycle::emission_rate_per_surface(int itask)
 {
   const int cell = tasks[itask].plasma_cell;
   if (cell < 0) return 0.0;
+  // Defensive bounds check: a plasma reload with a smaller mesh between
+  // grid-triggered task rebuilds could leave cell >= mesh_ncell here.
+  // perform_task's generation check should normally have already rebuilt
+  // tasks by now, but this guard makes the read OOB-safe regardless.
+  if (cell >= plasma->mesh_ncell) return 0.0;
 
   // Compute the Bohm wall flux from the B2 plasma state (ne, Te, Ti at
   // the cached sheath-edge cell) and the B2 cell's toroidally-integrated
@@ -648,6 +659,16 @@ double FixEmitSurfRecycle::emission_rate_per_surface(int itask)
 
 void FixEmitSurfRecycle::perform_task()
 {
+  // Rebuild tasks if the plasma mesh reloaded since we built them
+  // (pd->generation bumps on every FixPlasmaData::reload). For DIII-D
+  // with `static yes` this check is a single int compare per step and
+  // never triggers a rebuild. For dynamic plasma (SOLPS coupling) it's
+  // what keeps tasks[].plasma_cell valid across reloads.
+  if (plasma && plasma->generation != plasma_generation_) {
+    grid_changed();
+    plasma_generation_ = plasma->generation;
+  }
+
   int i, m, n, pcell, isurf, ninsert, nactual, isp, ispecies, ntri, id;
   double rn, ntarget, vr, alpha, beta, theta, erot, evib;
   double vnmag, vamag, vbmag;
