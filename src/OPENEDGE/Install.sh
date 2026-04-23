@@ -78,6 +78,8 @@ action compute_bfield_timedep.cpp
 action compute_bfield_timedep.h
 action database_paths.cpp
 action database_paths.h
+action process_library.cpp
+action process_library.h
 action compute_plasma_fields.cpp
 action compute_plasma_fields.h
 action compute_pmi_surf_data.cpp

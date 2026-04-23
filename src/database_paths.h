@@ -48,6 +48,12 @@ std::string resolve_adas_file(const std::string &element_or_z, Error *error);
 std::string resolve_reactions_file(const std::string &element_or_path,
                                    Error *error);
 
+// Resolve database/processes.h5 (the consolidated volume + surface
+// process data). Returns the absolute path if the file exists, or an
+// empty string if not. Non-fatal: consumers can fall back to legacy
+// per-element files when processes.h5 is not shipped.
+std::string resolve_processes_file();
+
 }
 
 #endif

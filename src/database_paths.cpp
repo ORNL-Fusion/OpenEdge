@@ -156,4 +156,10 @@ std::string resolve_adas_file(const std::string &element_or_z, Error *error)
   return p;
 }
 
+std::string resolve_processes_file()
+{
+  std::string p = openedge_database_dir() + "/processes.h5";
+  return file_exists(p) ? p : std::string();
+}
+
 }

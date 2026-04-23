@@ -32,6 +32,7 @@
 #include "compute.h"
 #include "compute_plasma_fields.h"
 #include "database_paths.h"
+#include "process_library.h"
 
 namespace fs = std::filesystem;
 using namespace SPARTA_NS;
@@ -115,20 +116,79 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
       iarg += 2;
     }
 
-    // read ADAS rate data
-
+    // Read ADAS rate data.  Prefer the consolidated database/processes.h5
+    // under /volume/rates/<cls>/<elem>/ if it exists (Phase 2 path);
+    // otherwise fall back to the legacy ADAS_Rates_<Z>.h5 per-element
+    // file.  The fallback is kept for one release; see database_paths.h
+    // resolve_processes_file() and src/OPENEDGE/process_library.h.
     {
-      std::string full;
-      if (adas_base_dir.empty()) {
-        full = resolve_adas_file(std::to_string(atomic_number), error);
-      } else {
-        full = (fs::path(adas_base_dir) /
-                ("ADAS_Rates_" + std::to_string(atomic_number) + ".h5")).string();
+      // Derive the canonical lowercase element symbol for processes.h5
+      // group lookup by going through Z (element_to_z already normalizes
+      // D/T -> 1, so we reuse its output unconditionally).  This avoids
+      // the isotope/element mismatch between deck input ("D") and the
+      // processes.h5 key ("h").
+      std::string elem_sym;
+      {
+        static const std::map<int, std::string> z_to_sym = {
+          {1,"h"}, {2,"he"}, {3,"li"}, {4,"be"}, {5,"b"}, {6,"c"},
+          {7,"n"}, {8,"o"}, {10,"ne"}, {18,"ar"}, {26,"fe"}, {36,"kr"},
+          {42,"mo"}, {54,"xe"}, {73,"ta"}, {74,"w"},
+        };
+        auto it = z_to_sym.find(atomic_number);
+        if (it != z_to_sym.end()) elem_sym = it->second;
       }
-      if (comm->me == 0)
-        printf("Reading ADAS data for Z=%d from %s\n",
-               atomic_number, full.c_str());
-      readRateDataParallel(full, materials_rate_data[atomic_number]);
+
+      bool loaded_from_processes = false;
+      std::string processes_path = resolve_processes_file();
+      if (!elem_sym.empty() && !processes_path.empty()) {
+        ProcessLibrary lib;
+        lib.open(processes_path, world, error);
+        if (lib.is_open()) {
+          RateData &rd = materials_rate_data[atomic_number];
+          auto try_cls = [&](const char *cls,
+                             std::vector<double> &coef,
+                             std::vector<double> &gT,
+                             std::vector<double> &gD,
+                             int &nQ, int &nT, int &nD) -> bool {
+            return lib.load_rate(cls, elem_sym, coef, gT, gD, nQ, nT, nD);
+          };
+          bool scd = try_cls("scd", rd.ion_coeff, rd.gridT_ion, rd.gridD_ion,
+                             rd.ion_nQ, rd.ion_nT, rd.ion_nD);
+          bool acd = try_cls("acd", rd.rec_coeff, rd.gridT_rec, rd.gridD_rec,
+                             rd.rec_nQ, rd.rec_nT, rd.rec_nD);
+          try_cls("ccd", rd.cx_coeff, rd.gridT_cx, rd.gridD_cx,
+                  rd.cx_nQ, rd.cx_nT, rd.cx_nD);
+          try_cls("plt", rd.plt_coeff, rd.gridT_plt, rd.gridD_plt,
+                  rd.plt_nQ, rd.plt_nT, rd.plt_nD);
+          try_cls("prb", rd.prb_coeff, rd.gridT_prb, rd.gridD_prb,
+                  rd.prb_nQ, rd.prb_nT, rd.prb_nD);
+          lib.load_ionization_potential(elem_sym, rd.ion_potential);
+          loaded_from_processes = scd && acd;
+          if (loaded_from_processes) {
+            rd.Atomic_Number = std::vector<double>(1, (double)atomic_number);
+            if (comm->me == 0)
+              printf("Reading ADAS data for %s (Z=%d) from %s "
+                     "(/volume/rates/)\n",
+                     elem_sym.c_str(), atomic_number,
+                     processes_path.c_str());
+          }
+        }
+      }
+
+      if (!loaded_from_processes) {
+        std::string full;
+        if (adas_base_dir.empty()) {
+          full = resolve_adas_file(std::to_string(atomic_number), error);
+        } else {
+          full = (fs::path(adas_base_dir) /
+                  ("ADAS_Rates_" + std::to_string(atomic_number) + ".h5"))
+                  .string();
+        }
+        if (comm->me == 0)
+          printf("Reading ADAS data for Z=%d from %s (legacy fallback)\n",
+                 atomic_number, full.c_str());
+        readRateDataParallel(full, materials_rate_data[atomic_number]);
+      }
     }
 
     // //
