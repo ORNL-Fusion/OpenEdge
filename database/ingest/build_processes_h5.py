@@ -39,6 +39,16 @@ OUT  = DB / "processes.h5"
 
 SCHEMA_VERSION = "1.0"
 
+# Pull the adf11 text-file parser + element / class tables from adas.py.
+# Phase 2 removes the per-element ADAS_Rates_<Z>.h5 intermediate, so
+# this ingest now reads adf11 text directly (via parse_adf11) and
+# writes straight into the canonical /volume/ schema.
+sys.path.insert(0, str(DB / "adas"))
+from adas import (                                          # noqa: E402
+    parse_adf11, load_ionization_potentials, ip_filename,
+    DEFAULT_ELEMENTS, CLASSES,
+)
+
 
 def git_sha() -> str:
     try:
@@ -71,72 +81,90 @@ def copy_dataset(src: h5py.Dataset, dst_group: h5py.Group, name: str,
 
 
 def ingest_volume_adas(fout: h5py.File) -> dict:
-    """Copy scd / acd / ccd / plt / prb / ionization_potentials for every
-    ADAS_Rates_<Z>.h5 under /volume/rates, /volume/radiation,
-    /volume/thresholds."""
-    rates_root     = fout.require_group("volume/rates")
-    radiation_root = fout.require_group("volume/radiation")
-    thresh_root    = fout.require_group("volume/thresholds")
+    """Parse open-ADAS adf11 text files directly (via parse_adf11) and
+    write them under the canonical /volume/rates, /volume/radiation,
+    /volume/thresholds schema.  No intermediate per-element HDF5.
 
-    rate_sources = [
-        ("IonizationRateCoeff",       "Ionization",      "rates", "scd",
-         "log10(sigma_v) [cm^3/s]"),
-        ("RecombinationRateCoeff",    "Recombination",   "rates", "acd",
-         "log10(sigma_v) [cm^3/s]"),
-        ("ChargeExchangeRateCoeff",   "ChargeExchange",  "rates", "ccd",
-         "log10(sigma_v) [cm^3/s]"),
-        ("LineRadiationPowerCoeff",   "LineRadiation",   "radiation", "plt",
-         "log10(power) [W cm^3]"),
-        ("RecombRadiationPowerCoeff", "RecombRadiation", "radiation", "prb",
-         "log10(power) [W cm^3]"),
-    ]
+    For each element in adas.DEFAULT_ELEMENTS and each class in
+    adas.CLASSES (scd, acd, ccd, plt, prb), read
+    ${DB}/adas/adf11/<cls>89/<cls>89_<sym>.dat if present.  Required
+    classes (scd, acd) missing from an element skip that element.
+
+    Ionization potentials come from
+    ${DB}/adas/ionization_potentials/ADAS_ionization_potentials_<Elt>
+    when the file exists (hydrogenic isotopes resolve to 'D').
+    """
+    adf11_dir = DB / "adas" / "adf11"
+    ip_dir    = DB / "adas" / "ionization_potentials"
+
+    # class short name -> (top-group "rates" or "radiation", units, year)
+    CLASS_META = {
+        "scd": ("rates",     "log10(sigma_v) [cm^3/s]",  "89"),
+        "acd": ("rates",     "log10(sigma_v) [cm^3/s]",  "89"),
+        "ccd": ("rates",     "log10(sigma_v) [cm^3/s]",  "89"),
+        "plt": ("radiation", "log10(power) [W cm^3]",    "89"),
+        "prb": ("radiation", "log10(power) [W cm^3]",    "89"),
+    }
 
     stats = {"elements": [], "rate_tables": 0, "radiation_tables": 0,
              "ip_vectors": 0}
-    for path in sorted(DB.glob("adas/ADAS_Rates_*.h5")):
-        Z = z_from_filename(path.name)
-        sym = ELEMENT_SYMBOLS.get(Z)
-        if sym is None:
-            print(f"[skip] Z={Z} not in ELEMENT_SYMBOLS map", file=sys.stderr)
-            continue
-        stats["elements"].append((sym, Z))
 
-        with h5py.File(path, "r") as fin:
-            for ds_name, grid_tag, top_group, short, units in rate_sources:
-                if ds_name not in fin:
-                    continue
-                # target group: /volume/<top_group>/<short>/<sym>/
-                grp = fout.require_group(f"volume/{top_group}/{short}/{sym}")
-                copy_dataset(fin[ds_name], grp, "coefficient",
-                             units=units,
-                             source=f"open-ADAS adf11 {short}89",
-                             method="log10 values on "
-                                    "(log10 Te [eV], log10 ne [cm^-3])")
-                # companion grid axes
-                for axis in ("Temperature", "Density", "ChargeState"):
-                    key = f"grid{axis}_{grid_tag}"
-                    if key in fin:
-                        ax_name = axis.lower()
-                        if ax_name in grp:
-                            del grp[ax_name]
-                        grp.create_dataset(ax_name, data=fin[key][...])
-                if top_group == "rates":
-                    stats["rate_tables"] += 1
-                else:
-                    stats["radiation_tables"] += 1
+    for sym, Z in DEFAULT_ELEMENTS.items():
+        elem_loaded_any = False
+        for class_name, base, coeff_name, required, units in CLASSES:
+            top, units_str, year = CLASS_META[class_name]
+            adf11_path = adf11_dir / f"{class_name}{year}" / \
+                         f"{class_name}{year}_{sym}.dat"
+            if not adf11_path.exists():
+                if required and not elem_loaded_any:
+                    # non-fatal: element is simply not shipped here
+                    pass
+                continue
+            logQ, logDens, logTe, iZmin, iZmax = parse_adf11(adf11_path)
+            # adf11 layout: logQ.shape = (nDens, nTe, nZ).  Canonical
+            # storage for downstream consumers is (nZ, nTe, nDens) so
+            # dims[0] is the charge-state axis.
+            coef = np.transpose(logQ, (2, 1, 0))  # -> (nZ, nTe, nDens)
+            grp = fout.require_group(f"volume/{top}/{class_name}/{sym}")
+            if "coefficient" in grp:
+                del grp["coefficient"]
+            ds = grp.create_dataset("coefficient", data=coef,
+                                    compression="gzip", compression_opts=6)
+            ds.attrs["units"]  = units_str
+            ds.attrs["source"] = f"open-ADAS adf11 {class_name}{year}"
+            ds.attrs["method"] = ("log10 values on "
+                                  "(log10 Te [eV], log10 ne [cm^-3])")
+            for ax_name, ax_data in (("temperature", logTe),
+                                     ("density", logDens)):
+                if ax_name in grp:
+                    del grp[ax_name]
+                grp.create_dataset(ax_name, data=ax_data)
+            if top == "rates":
+                stats["rate_tables"] += 1
+            else:
+                stats["radiation_tables"] += 1
+            elem_loaded_any = True
+        if elem_loaded_any:
+            stats["elements"].append((sym, Z))
 
-            # Ionization potentials -> /volume/thresholds/ionization/<sym>
-            if "IonizationPotential" in fin:
-                tg = fout.require_group(f"volume/thresholds/ionization/{sym}")
-                copy_dataset(fin["IonizationPotential"], tg, "energy",
-                             units="eV",
-                             source="open-ADAS ionization-potential file",
-                             method="scalar per charge state "
-                                    "(index = pre-ionization charge)")
-                stats["ip_vectors"] += 1
+        # Ionization potentials (optional per element)
+        ip_path = ip_dir / ip_filename(sym)
+        if ip_path.exists():
+            ip_vals = load_ionization_potentials(ip_path, Z)
+            tg = fout.require_group(f"volume/thresholds/ionization/{sym}")
+            if "energy" in tg:
+                del tg["energy"]
+            dsi = tg.create_dataset("energy", data=ip_vals)
+            dsi.attrs["units"]  = "eV"
+            dsi.attrs["source"] = f"open-ADAS ionization_potentials ({ip_path.name})"
+            dsi.attrs["method"] = ("scalar per charge state "
+                                   "(index = pre-ionization charge q=0,1,...,Z-1)")
+            stats["ip_vectors"] += 1
 
     # Molecular bond energies (currently just D2, hand-curated)
     mol = fout.require_group("volume/thresholds/dissociation")
+    if "d2" in mol:
+        del mol["d2"]
     d2 = mol.create_dataset("d2", data=np.array([4.478]))
     d2.attrs["units"]  = "eV"
     d2.attrs["source"] = "Huber & Herzberg 1979, molecular-spectra tables"
