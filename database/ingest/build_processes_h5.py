@@ -165,6 +165,46 @@ def ingest_reactions(fout: h5py.File) -> dict:
     return stats
 
 
+def ingest_volume_pec(fout: h5py.File) -> dict:
+    """Copy per-line photon-emission coefficients (PEC) from
+    database/pec/*.h5 into /volume/pec/<element>/<line_id>.
+
+    Input file naming: ``<element>_<pec_id>_pec.h5``.  Inside, the
+    dataset keyed as ``<ion_stage>_<wavelength>_pec`` holds PEC
+    values (photons m^3 s^-1) on a (Te, ne) grid.  We store each
+    line's coefficient as its own leaf so synthetic-emission computes
+    can request them by (element, line_id) directly.
+    """
+    grp_root = fout.require_group("volume/pec")
+    stats = {"lines": 0}
+    for path in sorted((DB / "pec").glob("*_pec.h5")):
+        parts = path.stem.split("_")          # e.g. ["w", "4009", "pec"]
+        if len(parts) < 3:
+            continue
+        element = parts[0].lower()
+        pec_id  = parts[1]
+        with h5py.File(path, "r") as fin:
+            te = fin["te"][...] if "te" in fin else None
+            ne = fin["ne"][...] if "ne" in fin else None
+            for key in fin:
+                if not key.endswith("_pec"):
+                    continue
+                stats["lines"] += 1
+                g = grp_root.require_group(f"{element}/{pec_id}/{key}")
+                ds = g.create_dataset("coefficient", data=fin[key][...],
+                                      compression="gzip", compression_opts=6)
+                ds.attrs["units"]  = "photons m^3 s^-1"
+                ds.attrs["source"] = f"open-ADAS adf15 (EIRENE distribution) {path.name}"
+                ds.attrs["method"] = ("bilinear in log10(Te) x log10(ne); "
+                                      "multiply by n_e * n_ion to get "
+                                      "photons m^-3 s^-1")
+                if te is not None and "temperature" not in g:
+                    g.create_dataset("temperature", data=te)
+                if ne is not None and "density" not in g:
+                    g.create_dataset("density", data=ne)
+    return stats
+
+
 def ingest_surface_trim(fout: h5py.File) -> dict:
     """Copy every TRIM sputter / reflection table into /surface/sputter/ and
     /surface/reflection/, keyed by <projectile>_on_<target>.
@@ -228,6 +268,7 @@ def main(argv=None) -> int:
 
         stats_vol_adas = ingest_volume_adas(f)
         stats_vol_rxn  = ingest_reactions(f)
+        stats_vol_pec  = ingest_volume_pec(f)
         stats_surf     = ingest_surface_trim(f)
 
     print(f"\nwrote {OUT} "
@@ -236,6 +277,7 @@ def main(argv=None) -> int:
     print(f"  volume.radiation tables  : {stats_vol_adas['radiation_tables']}")
     print(f"  volume.thresholds vectors: {stats_vol_adas['ip_vectors']}")
     print(f"  volume.reactions files   : {stats_vol_rxn['reaction_files']}")
+    print(f"  volume.pec lines         : {stats_vol_pec['lines']}")
     print(f"  surface.{{sputter,reflection}} pairs: {stats_surf['pairs']}")
     return 0
 

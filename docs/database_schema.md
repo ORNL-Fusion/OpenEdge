@@ -36,6 +36,7 @@ and OpenFOAM combustion (homogeneous vs. heterogeneous reactions).
 |-------------------------|---------------------------------------------|---------------|
 | `/volume/rates/`        | σv reaction-rate coefficients               | open-ADAS adf11: scd / acd / ccd |
 | `/volume/radiation/`    | power coefficients (electron cooling)       | open-ADAS adf11: plt / prb |
+| `/volume/pec/`          | per-line photon-emission coefficients       | open-ADAS adf15 (EIRENE distribution) |
 | `/volume/thresholds/`   | scalar constants: E\_ion[q], E\_diss, bond energies | NIST, ADAS ionization potentials, literature |
 | `/volume/reactions/`    | per-element reaction catalogs (YAML or JSON serialized strings) | authored in-repo |
 
