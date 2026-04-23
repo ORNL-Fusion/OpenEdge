@@ -116,11 +116,11 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
       iarg += 2;
     }
 
-    // Read ADAS rate data.  Prefer the consolidated database/processes.h5
-    // under /volume/rates/<cls>/<elem>/ if it exists (Phase 2 path);
-    // otherwise fall back to the legacy ADAS_Rates_<Z>.h5 per-element
-    // file.  The fallback is kept for one release; see database_paths.h
-    // resolve_processes_file() and src/OPENEDGE/process_library.h.
+    // Read ADAS rate data from the consolidated database/processes.h5
+    // under /volume/rates/<cls>/<elem>/ + /volume/thresholds/.  The
+    // legacy ADAS_Rates_<Z>.h5 fallback was removed in Phase 2b; if
+    // processes.h5 is missing or doesn't contain the requested element,
+    // chem/adas errors out at init.
     {
       // Derive the canonical lowercase element symbol for processes.h5
       // group lookup by going through Z (element_to_z already normalizes
@@ -176,18 +176,16 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
       }
 
       if (!loaded_from_processes) {
-        std::string full;
-        if (adas_base_dir.empty()) {
-          full = resolve_adas_file(std::to_string(atomic_number), error);
+        std::string msg;
+        if (processes_path.empty()) {
+          msg = "fix chem/adas: database/processes.h5 not found. "
+                "Build it with database/ingest/build_processes_h5.py.";
         } else {
-          full = (fs::path(adas_base_dir) /
-                  ("ADAS_Rates_" + std::to_string(atomic_number) + ".h5"))
-                  .string();
+          msg = "fix chem/adas: element '" + elem_sym +
+                "' (Z=" + std::to_string(atomic_number) + ") not found in "
+                + processes_path + " under /volume/rates/";
         }
-        if (comm->me == 0)
-          printf("Reading ADAS data for Z=%d from %s (legacy fallback)\n",
-                 atomic_number, full.c_str());
-        readRateDataParallel(full, materials_rate_data[atomic_number]);
+        error->all(FLERR, msg.c_str());
       }
     }
 
