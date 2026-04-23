@@ -2,7 +2,7 @@
 # 1-D neutral slab — ionization + recycling at the wall at xhi=0.6.
 #
 # Same puff + plasma as in.slab_iz, but the xhi outflow is replaced by
-# a reflecting surface (`surf_react wall_pwi` 100% reflection, Franck-
+# a reflecting surface (`surf_react surface/pwi` 100% reflection, Franck-
 # Condon 3 eV, cosine angular). Profile shows the forward exp decay
 # plus a reflected component piling up near the wall.
 ################################################################################
@@ -27,7 +27,7 @@ mixture             puff D frac 1.0 nrho 1e18 temp 350.0 &
 # --- Reflecting wall at xhi ---
 read_surf           input/slab.surf group wall particle check
 surf_collide        wallColl diffuse 400.0 1.0
-surf_react          wallPWI wall_pwi input/wall.exchange twall 400.0
+surf_react          wallPWI surface/pwi input/wall.exchange twall 400.0
 surf_modify         wall collide wallColl react wallPWI
 
 # --- Uniform plasma (same as A1) ---

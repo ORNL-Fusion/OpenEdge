@@ -110,8 +110,8 @@ action fix_emit_droplet.cpp
 action fix_emit_droplet.h
 action fix_emit_surf_file.cpp
 action fix_emit_surf_file.h
-action fix_emit_surf_pmi.cpp
-action fix_emit_surf_pmi.h
+action fix_surface_emit_sputter.cpp
+action fix_surface_emit_sputter.h
 action fix_evaporation.cpp
 action fix_evaporation.h
 action fix_gravity.cpp

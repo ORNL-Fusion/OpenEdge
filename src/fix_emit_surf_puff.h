@@ -6,11 +6,11 @@
     area, using a cosine-law angular distribution from the surface normal
     and Maxwellian velocity at the mixture thermal temperature.
 
-    Derived from fix_emit_surf_pmi but stripped of:
+    Derived from fix_surface_emit_sputter but stripped of:
       iflux / flux_index / flux_thresh / source_thresh
       nlaunch / nlaunch_total modes (pweight-weighted launches)
       ComputePMISurfData dependency
-    Use fix_emit_surf_pmi when your emission is driven by a per-surf PMI
+    Use fix_surface_emit_sputter when your emission is driven by a per-surf PMI
     flux compute; use this fix when you want a fixed puff rate (in particles
     per step) from a predefined puff surface.
 ------------------------------------------------------------------------- */

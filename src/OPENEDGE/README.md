@@ -24,7 +24,7 @@ The package has two categories of files:
     fix_bfield_grid.cpp/h  fix_bfield_particle.cpp/h
     fix_chem_adas.cpp/h  fix_coll_background.cpp/h  fix_coll_nanbu.cpp/h
     fix_drag.cpp/h  fix_efield_grid.cpp/h  fix_efield_particle.cpp/h
-    fix_emit_droplet.cpp/h  fix_emit_surf_file.cpp/h  fix_emit_surf_pmi.cpp/h
+    fix_emit_droplet.cpp/h  fix_emit_surf_file.cpp/h  fix_surface_emit_sputter.cpp/h
     fix_evaporation.cpp/h  fix_gravity.cpp/h
     fix_thermal_force.cpp/h  fix_thermal_force_e.cpp/h  fix_thermal_force_i.cpp/h
     fix_cross_diffusion.cpp/h  fix_reflect_psi.cpp/h  fix_viscous.cpp/h

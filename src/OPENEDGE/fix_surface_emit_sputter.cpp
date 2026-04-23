@@ -6,7 +6,7 @@
 
 #include "stdlib.h"
 #include "string.h"
-#include "fix_emit_surf_pmi.h"
+#include "fix_surface_emit_sputter.h"
 #include "update.h"
 #include "compute.h"
 #include "domain.h"
@@ -39,31 +39,31 @@ enum{FLOW,CONSTANT};
 
 /* ---------------------------------------------------------------------- */
 
-FixEmitSurfPmi::FixEmitSurfPmi(SPARTA *sparta, int narg, char **arg) :
+FixSurfaceEmitSputter::FixSurfaceEmitSputter(SPARTA *sparta, int narg, char **arg) :
   FixEmit(sparta, narg, arg)
 {
-  if (narg < 6) error->all(FLERR,"Illegal fix emit/surf/pmi command");
+  if (narg < 6) error->all(FLERR,"Illegal fix surface/emit/sputter command");
 
   imix = particle->find_mixture(arg[2]);
   if (imix < 0)
-    error->all(FLERR,"Fix emit/surf/pmi mixture ID does not exist");
+    error->all(FLERR,"Fix surface/emit/sputter mixture ID does not exist");
 
   int igroup = surf->find_group(arg[3]);
   if (igroup < 0)
-    error->all(FLERR,"Fix emit/surf/pmi group ID does not exist");
+    error->all(FLERR,"Fix surface/emit/sputter group ID does not exist");
   groupbit = surf->bitmask[igroup];
 
   iflux = modify->find_compute(arg[4]);
   if (iflux < 0)
-    error->all(FLERR,"Fix emit/surf/pmi compute ID does not exist");
+    error->all(FLERR,"Fix surface/emit/sputter compute ID does not exist");
 
   flux_index = 0;
   int iarg = 5;
   if (strcmp(arg[iarg],"flux_index") == 0) {
-    if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix surface/emit/sputter command");
     flux_index = atoi(arg[iarg+1]);
     if (flux_index <= 0)
-      error->all(FLERR,"Fix emit/surf/pmi flux_index must be >= 1");
+      error->all(FLERR,"Fix surface/emit/sputter flux_index must be >= 1");
     iarg += 2;
   }
 
@@ -83,17 +83,17 @@ FixEmitSurfPmi::FixEmitSurfPmi(SPARTA *sparta, int narg, char **arg) :
   options(narg-iarg,&arg[iarg]);
 
   if (!surf->exist)
-    error->all(FLERR,"Fix emit/surf/pmi requires surface elements");
+    error->all(FLERR,"Fix surface/emit/sputter requires surface elements");
   if (surf->implicit)
-    error->all(FLERR,"Fix emit/surf/pmi not allowed for implicit surfaces");
+    error->all(FLERR,"Fix surface/emit/sputter not allowed for implicit surfaces");
   if (npmode == CONSTANT && perspecies)
-    error->all(FLERR,"Cannot use fix emit/surf/pmi n > 0 with perspecies yes");
+    error->all(FLERR,"Cannot use fix surface/emit/sputter n > 0 with perspecies yes");
   if (nlaunch_total_mode && perspecies)
     error->all(FLERR,
-      "Cannot use fix emit/surf/pmi nlaunch_total with perspecies yes");
+      "Cannot use fix surface/emit/sputter nlaunch_total with perspecies yes");
   if (npmode == CONSTANT && nlaunch_total_mode)
     error->all(FLERR,
-      "Cannot use fix emit/surf/pmi nlaunch_total with n > 0");
+      "Cannot use fix surface/emit/sputter nlaunch_total with n > 0");
 
   tasks = NULL;
   ntask = ntaskmax = 0;
@@ -108,7 +108,7 @@ FixEmitSurfPmi::FixEmitSurfPmi(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixEmitSurfPmi::~FixEmitSurfPmi()
+FixSurfaceEmitSputter::~FixSurfaceEmitSputter()
 {
   if (copymode) return;
 
@@ -128,16 +128,16 @@ FixEmitSurfPmi::~FixEmitSurfPmi()
 
 /* ---------------------------------------------------------------------- */
 
-void FixEmitSurfPmi::init()
+void FixSurfaceEmitSputter::init()
 {
   FixEmit::init();
 
   if (iflux < 0 || iflux >= modify->ncompute)
-    error->all(FLERR,"Fix emit/surf/pmi compute ID no longer exists");
+    error->all(FLERR,"Fix surface/emit/sputter compute ID no longer exists");
 
   Compute *c = modify->compute[iflux];
   if (!c->per_surf_flag)
-    error->all(FLERR,"Fix emit/surf/pmi compute must provide per-surf values");
+    error->all(FLERR,"Fix surface/emit/sputter compute must provide per-surf values");
 
   fnum = update->fnum;
 
@@ -146,7 +146,7 @@ void FixEmitSurfPmi::init()
     pweight_index = particle->find_custom((char *) "pweight");
     if (pweight_index < 0)
       error->all(FLERR,
-        "Fix emit/surf/pmi weighted launch modes require fix particle/weight");
+        "Fix surface/emit/sputter weighted launch modes require fix particle/weight");
     pweight_ewhich = particle->ewhich[pweight_index];
   }
 
@@ -176,7 +176,7 @@ void FixEmitSurfPmi::init()
 
 /* ---------------------------------------------------------------------- */
 
-int FixEmitSurfPmi::local_isurf_index(surfint isurf) const
+int FixSurfaceEmitSputter::local_isurf_index(surfint isurf) const
 {
   if (surf->distributed) {
     if (isurf < 0 || isurf >= surf->nown) return -1;
@@ -193,7 +193,7 @@ int FixEmitSurfPmi::local_isurf_index(surfint isurf) const
 
 /* ---------------------------------------------------------------------- */
 
-double FixEmitSurfPmi::flux_for_surface(surfint isurf)
+double FixSurfaceEmitSputter::flux_for_surface(surfint isurf)
 {
   Compute *c = modify->compute[iflux];
 
@@ -213,7 +213,7 @@ double FixEmitSurfPmi::flux_for_surface(surfint isurf)
 
 /* ---------------------------------------------------------------------- */
 
-void FixEmitSurfPmi::grid_changed()
+void FixSurfaceEmitSputter::grid_changed()
 {
   create_tasks();
 
@@ -245,7 +245,7 @@ void FixEmitSurfPmi::grid_changed()
    add them to tasks list and increment ntasks
 ------------------------------------------------------------------------- */
 
-void FixEmitSurfPmi::create_task(int icell)
+void FixSurfaceEmitSputter::create_task(int icell)
 {
   int i,m,isurf,npoint,isplit,subcell;
   double indot,area,areaone;
@@ -396,7 +396,7 @@ void FixEmitSurfPmi::create_task(int icell)
    insert particles in grid cells with emitting surface elements
 ------------------------------------------------------------------------- */
 
-void FixEmitSurfPmi::perform_task()
+void FixSurfaceEmitSputter::perform_task()
 {
   int i,m,n,pcell,isurf,ninsert,nactual,isp,ispecies,ntri,id;
   double indot,scosine,rn,ntarget,vr,alpha,beta,w_emit,source_strength;
@@ -727,12 +727,12 @@ void FixEmitSurfPmi::perform_task()
    grow task list
 ------------------------------------------------------------------------- */
 
-void FixEmitSurfPmi::grow_task()
+void FixSurfaceEmitSputter::grow_task()
 {
   int oldmax = ntaskmax;
   ntaskmax += DELTATASK;
   tasks = (Task *) memory->srealloc(tasks,ntaskmax*sizeof(Task),
-                                    "emit/surf/pmi:tasks");
+                                    "surface/emit/sputter:tasks");
 
   memset(&tasks[oldmax],0,(ntaskmax-oldmax)*sizeof(Task));
 
@@ -749,10 +749,10 @@ void FixEmitSurfPmi::grow_task()
    process keywords specific to this class
 ------------------------------------------------------------------------- */
 
-int FixEmitSurfPmi::option(int narg, char **arg)
+int FixSurfaceEmitSputter::option(int narg, char **arg)
 {
   if (strcmp(arg[0],"n") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/sputter command");
     np = atoi(arg[1]);
     if (np <= 0) npmode = FLOW;
     else npmode = CONSTANT;
@@ -760,53 +760,53 @@ int FixEmitSurfPmi::option(int narg, char **arg)
   }
 
   if (strcmp(arg[0],"normal") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/sputter command");
     if (strcmp(arg[1],"yes") == 0) normalflag = 1;
     else if (strcmp(arg[1],"no") == 0) normalflag = 0;
-    else error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    else error->all(FLERR,"Illegal fix surface/emit/sputter command");
     return 2;
   }
 
   if (strcmp(arg[0],"nlaunch") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/sputter command");
     if (nlaunch_total_mode)
       error->all(FLERR,
-        "Cannot use fix emit/surf/pmi nlaunch with nlaunch_total");
+        "Cannot use fix surface/emit/sputter nlaunch with nlaunch_total");
     nlaunch_per_surf = atoi(arg[1]);
     if (nlaunch_per_surf <= 0)
-      error->all(FLERR,"Fix emit/surf/pmi nlaunch must be > 0");
+      error->all(FLERR,"Fix surface/emit/sputter nlaunch must be > 0");
     nlaunch_mode = 1;
     return 2;
   }
 
   if (strcmp(arg[0],"nlaunch_total") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/sputter command");
     if (nlaunch_mode)
       error->all(FLERR,
-        "Cannot use fix emit/surf/pmi nlaunch_total with nlaunch");
+        "Cannot use fix surface/emit/sputter nlaunch_total with nlaunch");
     nlaunch_total = atoi(arg[1]);
     if (nlaunch_total <= 0)
-      error->all(FLERR,"Fix emit/surf/pmi nlaunch_total must be > 0");
+      error->all(FLERR,"Fix surface/emit/sputter nlaunch_total must be > 0");
     nlaunch_total_mode = 1;
     return 2;
   }
 
   if (strcmp(arg[0],"flux_thresh") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/sputter command");
     flux_thresh = atof(arg[1]);
     if (flux_thresh < 0.0)
-      error->all(FLERR,"Fix emit/surf/pmi flux_thresh must be >= 0");
+      error->all(FLERR,"Fix surface/emit/sputter flux_thresh must be >= 0");
     return 2;
   }
 
   if (strcmp(arg[0],"source_thresh") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/pmi command");
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/sputter command");
     source_thresh = atof(arg[1]);
     if (source_thresh < 0.0)
-      error->all(FLERR,"Fix emit/surf/pmi source_thresh must be >= 0");
+      error->all(FLERR,"Fix surface/emit/sputter source_thresh must be >= 0");
     return 2;
   }
 
-  error->all(FLERR,"Illegal fix emit/surf/pmi command");
+  error->all(FLERR,"Illegal fix surface/emit/sputter command");
   return 0;
 }

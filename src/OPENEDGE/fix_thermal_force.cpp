@@ -293,7 +293,7 @@ void FixThermalForce::end_of_step()
 
   // Per-particle custom vectors (S.pvec_cache) can be reallocated when
   // particles are created during Update::move() between start_of_step and
-  // end_of_step (e.g. by fix emit/surf/pmi). Re-fetch the pointers before
+  // end_of_step (e.g. by fix surface/emit/sputter). Re-fetch the pointers before
   // the second kick or read_src() will deref freed memory.
   if (!use_plasma_data_) {
     refresh_compute_src(srcBx_);

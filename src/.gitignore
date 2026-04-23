@@ -70,8 +70,8 @@
 /fix_emit_droplet.h
 /fix_emit_surf_file.cpp
 /fix_emit_surf_file.h
-/fix_emit_surf_pmi.cpp
-/fix_emit_surf_pmi.h
+/fix_surface_emit_sputter.cpp
+/fix_surface_emit_sputter.h
 /fix_evaporation.cpp
 /fix_evaporation.h
 /fix_gravity.cpp

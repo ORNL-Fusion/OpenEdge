@@ -9,12 +9,12 @@ https://github.com/ORNL-Fusion/OpenEdge
 
 #ifdef FIX_CLASS
 
-FixStyle(emit/surf/pmi,FixEmitSurfPmi)
+FixStyle(surface/emit/sputter,FixSurfaceEmitSputter)
 
 #else
 
-#ifndef SPARTA_FIX_EMIT_SURF_PMI_H
-#define SPARTA_FIX_EMIT_SURF_PMI_H
+#ifndef SPARTA_FIX_SURFACE_EMIT_SPUTTER_H
+#define SPARTA_FIX_SURFACE_EMIT_SPUTTER_H
 
 #include "fix_emit.h"
 #include "surf.h"
@@ -23,10 +23,10 @@ FixStyle(emit/surf/pmi,FixEmitSurfPmi)
 
 namespace SPARTA_NS {
 
-class FixEmitSurfPmi : public FixEmit {
+class FixSurfaceEmitSputter : public FixEmit {
  public:
-  FixEmitSurfPmi(class SPARTA *, int, char **);
-  ~FixEmitSurfPmi();
+  FixSurfaceEmitSputter(class SPARTA *, int, char **);
+  ~FixSurfaceEmitSputter();
   void init();
 
   void grid_changed();
