@@ -6,7 +6,7 @@
 
 #include "stdlib.h"
 #include "string.h"
-#include "fix_emit_surf_puff.h"
+#include "fix_surface_emit_puff.h"
 #include "update.h"
 #include "compute.h"
 #include "domain.h"
@@ -38,11 +38,11 @@ enum{FLOW,CONSTANT};
 
 /* ---------------------------------------------------------------------- */
 
-FixEmitSurfPuff::FixEmitSurfPuff(SPARTA *sparta, int narg, char **arg) :
+FixSurfaceEmitPuff::FixSurfaceEmitPuff(SPARTA *sparta, int narg, char **arg) :
   FixEmit(sparta, narg, arg)
 {
   // Usage: fix ID emit/surf/puff mixture group [keyword args]
-  if (narg < 4) error->all(FLERR,"Illegal fix emit/surf/puff command");
+  if (narg < 4) error->all(FLERR,"Illegal fix surface/emit/puff command");
 
   imix = particle->find_mixture(arg[2]);
   if (imix < 0)
@@ -68,7 +68,7 @@ FixEmitSurfPuff::FixEmitSurfPuff(SPARTA *sparta, int narg, char **arg) :
   if (surf->implicit)
     error->all(FLERR,"Fix emit/surf/puff not allowed for implicit surfaces");
   if (npmode == CONSTANT && perspecies)
-    error->all(FLERR,"Cannot use fix emit/surf/puff n > 0 with perspecies yes");
+    error->all(FLERR,"Cannot use fix surface/emit/puff n > 0 with perspecies yes");
 
   tasks = NULL;
   ntask = ntaskmax = 0;
@@ -80,7 +80,7 @@ FixEmitSurfPuff::FixEmitSurfPuff(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixEmitSurfPuff::~FixEmitSurfPuff()
+FixSurfaceEmitPuff::~FixSurfaceEmitPuff()
 {
   if (copymode) return;
 
@@ -100,7 +100,7 @@ FixEmitSurfPuff::~FixEmitSurfPuff()
 
 /* ---------------------------------------------------------------------- */
 
-void FixEmitSurfPuff::init()
+void FixSurfaceEmitPuff::init()
 {
   FixEmit::init();
 
@@ -132,7 +132,7 @@ void FixEmitSurfPuff::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixEmitSurfPuff::grid_changed()
+void FixSurfaceEmitPuff::grid_changed()
 {
   create_tasks();
 
@@ -159,7 +159,7 @@ void FixEmitSurfPuff::grid_changed()
    add them to tasks list and increment ntasks
 ------------------------------------------------------------------------- */
 
-void FixEmitSurfPuff::create_task(int icell)
+void FixSurfaceEmitPuff::create_task(int icell)
 {
   int i,m,isurf,npoint,isplit,subcell;
   double indot,area,areaone;
@@ -310,7 +310,7 @@ void FixEmitSurfPuff::create_task(int icell)
    insert particles in grid cells with emitting surface elements
 ------------------------------------------------------------------------- */
 
-void FixEmitSurfPuff::perform_task()
+void FixSurfaceEmitPuff::perform_task()
 {
   // Emit-count cap: use FixEmit::ntotal (cumulative emitted) rather than
   // live particle count, so byproducts from chem/adas dissociation don't
@@ -587,12 +587,12 @@ void FixEmitSurfPuff::perform_task()
    grow task list
 ------------------------------------------------------------------------- */
 
-void FixEmitSurfPuff::grow_task()
+void FixSurfaceEmitPuff::grow_task()
 {
   int oldmax = ntaskmax;
   ntaskmax += DELTATASK;
   tasks = (Task *) memory->srealloc(tasks,ntaskmax*sizeof(Task),
-                                    "emit/surf/puff:tasks");
+                                    "surface/emit/puff:tasks");
 
   memset(&tasks[oldmax],0,(ntaskmax-oldmax)*sizeof(Task));
 
@@ -609,10 +609,10 @@ void FixEmitSurfPuff::grow_task()
    process keywords specific to this class
 ------------------------------------------------------------------------- */
 
-int FixEmitSurfPuff::option(int narg, char **arg)
+int FixSurfaceEmitPuff::option(int narg, char **arg)
 {
   if (strcmp(arg[0],"n") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/puff command");
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/puff command");
     np = atoi(arg[1]);
     if (np <= 0) npmode = FLOW;
     else npmode = CONSTANT;
@@ -620,21 +620,21 @@ int FixEmitSurfPuff::option(int narg, char **arg)
   }
 
   if (strcmp(arg[0],"normal") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/puff command");
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/puff command");
     if (strcmp(arg[1],"yes") == 0) normalflag = 1;
     else if (strcmp(arg[1],"no") == 0) normalflag = 0;
-    else error->all(FLERR,"Illegal fix emit/surf/puff command");
+    else error->all(FLERR,"Illegal fix surface/emit/puff command");
     return 2;
   }
 
   if (strcmp(arg[0],"stop_at_np") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/puff command");
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/puff command");
     stop_at_np = ATOBIGINT(arg[1]);
     if (stop_at_np < 0)
-      error->all(FLERR,"fix emit/surf/puff stop_at_np must be >= 0");
+      error->all(FLERR,"fix surface/emit/puff stop_at_np must be >= 0");
     return 2;
   }
 
-  error->all(FLERR,"Illegal fix emit/surf/puff command");
+  error->all(FLERR,"Illegal fix surface/emit/puff command");
   return 0;
 }

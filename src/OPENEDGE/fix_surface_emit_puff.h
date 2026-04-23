@@ -1,5 +1,5 @@
 /* ----------------------------------------------------------------------
-    OpenEdge: fix emit/surf/puff
+    OpenEdge: fix surface/emit/puff
     Cold-gas puff emission from a surface group (EIRENE-style injection).
     No PMI compute is required; each timestep injects `n` particles per
     rank distributed across active surf-cell tasks proportional to surf
@@ -17,12 +17,12 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(emit/surf/puff,FixEmitSurfPuff)
+FixStyle(surface/emit/puff,FixSurfaceEmitPuff)
 
 #else
 
-#ifndef SPARTA_FIX_EMIT_SURF_PUFF_H
-#define SPARTA_FIX_EMIT_SURF_PUFF_H
+#ifndef SPARTA_FIX_SURFACE_EMIT_PUFF_H
+#define SPARTA_FIX_SURFACE_EMIT_PUFF_H
 
 #include "fix_emit.h"
 #include "surf.h"
@@ -30,10 +30,10 @@ FixStyle(emit/surf/puff,FixEmitSurfPuff)
 
 namespace SPARTA_NS {
 
-class FixEmitSurfPuff : public FixEmit {
+class FixSurfaceEmitPuff : public FixEmit {
  public:
-  FixEmitSurfPuff(class SPARTA *, int, char **);
-  ~FixEmitSurfPuff();
+  FixSurfaceEmitPuff(class SPARTA *, int, char **);
+  ~FixSurfaceEmitPuff();
   void init();
 
   void grid_changed();

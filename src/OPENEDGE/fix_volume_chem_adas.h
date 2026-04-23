@@ -113,7 +113,7 @@ double **plasma_cache_2d = NULL;
 // Gkeyll/SOLPS source (what EIRENE returns to S3X/SOLPS each coupling call).
 //
 // TALLY_BATCH_FIX: same semantics but N_batch is pulled at tally time from
-// the cumulative emit count of a paired emit fix (e.g. fix emit/surf/puff).
+// the cumulative emit count of a paired emit fix (e.g. fix surface/emit/puff).
 // Useful when you don't want to hand-match the N in `units batch` with the
 // `stop_at_np` cap on the emit fix -- the chem fix reads it directly. Value
 // is cached at the start of every chem nevery step, so scaling tracks the

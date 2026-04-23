@@ -1,5 +1,5 @@
 /* ----------------------------------------------------------------------
-    OpenEdge: fix emit/surf/recycle
+    OpenEdge: fix surface/emit/recycle
     Wall-recycling neutral source emitter.
 
     Per wall segment, queries (ne, Te, Ti) at the adjacent SOLPS sheath-edge
@@ -18,12 +18,12 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(emit/surf/recycle,FixEmitSurfRecycle)
+FixStyle(surface/emit/recycle,FixSurfaceEmitRecycle)
 
 #else
 
-#ifndef SPARTA_FIX_EMIT_SURF_RECYCLE_H
-#define SPARTA_FIX_EMIT_SURF_RECYCLE_H
+#ifndef SPARTA_FIX_SURFACE_EMIT_RECYCLE_H
+#define SPARTA_FIX_SURFACE_EMIT_RECYCLE_H
 
 #include "fix_emit.h"
 #include "surf.h"
@@ -33,10 +33,10 @@ FixStyle(emit/surf/recycle,FixEmitSurfRecycle)
 
 namespace SPARTA_NS {
 
-class FixEmitSurfRecycle : public FixEmit {
+class FixSurfaceEmitRecycle : public FixEmit {
  public:
-  FixEmitSurfRecycle(class SPARTA *, int, char **);
-  ~FixEmitSurfRecycle();
+  FixSurfaceEmitRecycle(class SPARTA *, int, char **);
+  ~FixSurfaceEmitRecycle();
   void init();
 
   void grid_changed();

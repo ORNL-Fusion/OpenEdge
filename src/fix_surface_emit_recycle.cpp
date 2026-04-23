@@ -1,12 +1,12 @@
 /* ----------------------------------------------------------------------
-    OpenEdge: fix emit/surf/recycle
+    OpenEdge: fix surface/emit/recycle
     Wall-recycling neutral source driven by the local plasma Bohm flux.
     See header for algorithm summary.
 ------------------------------------------------------------------------- */
 
 #include "stdlib.h"
 #include "string.h"
-#include "fix_emit_surf_recycle.h"
+#include "fix_surface_emit_recycle.h"
 #include "fix_plasma_data.h"
 #include "update.h"
 #include "compute.h"
@@ -48,12 +48,12 @@ namespace {
 
 /* ---------------------------------------------------------------------- */
 
-FixEmitSurfRecycle::FixEmitSurfRecycle(SPARTA *sparta, int narg, char **arg) :
+FixSurfaceEmitRecycle::FixSurfaceEmitRecycle(SPARTA *sparta, int narg, char **arg) :
   FixEmit(sparta, narg, arg)
 {
   // Usage: fix ID emit/surf/recycle mix group plasma_fix_ID
   //              [mass <amu>] [R <val>] [twall <K>]
-  if (narg < 5) error->all(FLERR,"Illegal fix emit/surf/recycle command");
+  if (narg < 5) error->all(FLERR,"Illegal fix surface/emit/recycle command");
 
   imix = particle->find_mixture(arg[2]);
   if (imix < 0)
@@ -101,7 +101,7 @@ FixEmitSurfRecycle::FixEmitSurfRecycle(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixEmitSurfRecycle::~FixEmitSurfRecycle()
+FixSurfaceEmitRecycle::~FixSurfaceEmitRecycle()
 {
   if (copymode) return;
 
@@ -117,7 +117,7 @@ FixEmitSurfRecycle::~FixEmitSurfRecycle()
 
 /* ---------------------------------------------------------------------- */
 
-void FixEmitSurfRecycle::init()
+void FixSurfaceEmitRecycle::init()
 {
   FixEmit::init();
 
@@ -143,7 +143,7 @@ void FixEmitSurfRecycle::init()
     int global_sp = particle->find_species(
                       const_cast<char *>(twall_species_names[k].c_str()));
     if (global_sp < 0) {
-      std::string msg = "fix emit/surf/recycle twall_species: unknown species '"
+      std::string msg = "fix surface/emit/recycle twall_species: unknown species '"
                         + twall_species_names[k] + "'";
       error->all(FLERR, msg.c_str());
     }
@@ -151,7 +151,7 @@ void FixEmitSurfRecycle::init()
     for (int isp = 0; isp < nspecies; isp++)
       if (mix_species[isp] == global_sp) { slot = isp; break; }
     if (slot < 0) {
-      std::string msg = "fix emit/surf/recycle twall_species: species '"
+      std::string msg = "fix surface/emit/recycle twall_species: species '"
                         + twall_species_names[k] + "' is not in mixture";
       error->all(FLERR, msg.c_str());
     }
@@ -163,7 +163,7 @@ void FixEmitSurfRecycle::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixEmitSurfRecycle::grid_changed()
+void FixSurfaceEmitRecycle::grid_changed()
 {
   create_tasks();
 
@@ -334,7 +334,7 @@ void FixEmitSurfRecycle::grid_changed()
    create task for one grid cell (called by FixEmit::create_tasks)
 ------------------------------------------------------------------------- */
 
-void FixEmitSurfRecycle::create_task(int icell)
+void FixSurfaceEmitRecycle::create_task(int icell)
 {
   int i, m, isurf, npoint, isplit, subcell;
   double area, areaone;
@@ -519,7 +519,7 @@ void FixEmitSurfRecycle::create_task(int icell)
 
       // Per-cell centroid cache (mean of the cell's B2 triangles). Keyed
       // on pd generation + ncell so a plasma reload forces a rebuild, and
-      // per-instance (no static locals) so multiple fix emit/surf/recycle
+      // per-instance (no static locals) so multiple fix surface/emit/recycle
       // instances don't clobber each other.
       const int pd_gen = plasma ? plasma->generation : -1;
       if (plasma_cell_centroid_gen_ != pd_gen ||
@@ -564,7 +564,7 @@ void FixEmitSurfRecycle::create_task(int icell)
    per-surface emission rate (particles / step) from local Bohm flux
 ------------------------------------------------------------------------- */
 
-double FixEmitSurfRecycle::emission_rate_per_surface(int itask)
+double FixSurfaceEmitRecycle::emission_rate_per_surface(int itask)
 {
   const int cell = tasks[itask].plasma_cell;
   if (cell < 0) return 0.0;
@@ -657,7 +657,7 @@ double FixEmitSurfRecycle::emission_rate_per_surface(int itask)
    perform one step's insertion for every task
 ------------------------------------------------------------------------- */
 
-void FixEmitSurfRecycle::perform_task()
+void FixSurfaceEmitRecycle::perform_task()
 {
   // Rebuild tasks if the plasma mesh reloaded since we built them
   // (pd->generation bumps on every FixPlasmaData::reload). For DIII-D
@@ -790,12 +790,12 @@ void FixEmitSurfRecycle::perform_task()
    grow task list
 ------------------------------------------------------------------------- */
 
-void FixEmitSurfRecycle::grow_task()
+void FixSurfaceEmitRecycle::grow_task()
 {
   int oldmax = ntaskmax;
   ntaskmax += DELTATASK;
   tasks = (Task *) memory->srealloc(tasks, ntaskmax*sizeof(Task),
-                                    "emit/surf/recycle:tasks");
+                                    "surface/emit/recycle:tasks");
   memset(&tasks[oldmax], 0, (ntaskmax-oldmax)*sizeof(Task));
 
   for (int i = oldmax; i < ntaskmax; i++) {
@@ -808,27 +808,27 @@ void FixEmitSurfRecycle::grow_task()
    keyword options
 ------------------------------------------------------------------------- */
 
-int FixEmitSurfRecycle::option(int narg, char **arg)
+int FixSurfaceEmitRecycle::option(int narg, char **arg)
 {
   if (strcmp(arg[0], "mass") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/recycle command");
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/recycle command");
     mass_amu = atof(arg[1]);
     if (mass_amu <= 0.0)
-      error->all(FLERR,"fix emit/surf/recycle mass must be > 0");
+      error->all(FLERR,"fix surface/emit/recycle mass must be > 0");
     return 2;
   }
   if (strcmp(arg[0], "R") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/recycle command");
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/recycle command");
     R_recycle = atof(arg[1]);
     if (R_recycle < 0.0 || R_recycle > 1.0)
-      error->all(FLERR,"fix emit/surf/recycle R must be in [0,1]");
+      error->all(FLERR,"fix surface/emit/recycle R must be in [0,1]");
     return 2;
   }
   if (strcmp(arg[0], "twall") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/surf/recycle command");
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/recycle command");
     twall = atof(arg[1]);
     if (twall <= 0.0)
-      error->all(FLERR,"fix emit/surf/recycle twall must be > 0");
+      error->all(FLERR,"fix surface/emit/recycle twall must be > 0");
     return 2;
   }
   if (strcmp(arg[0], "twall_species") == 0) {
@@ -845,16 +845,16 @@ int FixEmitSurfRecycle::option(int narg, char **arg)
         break;
       const double t = atof(arg[consumed + 1]);
       if (t <= 0.0)
-        error->all(FLERR,"fix emit/surf/recycle twall_species T must be > 0");
+        error->all(FLERR,"fix surface/emit/recycle twall_species T must be > 0");
       twall_species_names.push_back(std::string(name));
       twall_species_values.push_back(t);
       consumed += 2;
     }
     if (consumed == 1)
-      error->all(FLERR,"fix emit/surf/recycle twall_species needs at least one <sp> <T> pair");
+      error->all(FLERR,"fix surface/emit/recycle twall_species needs at least one <sp> <T> pair");
     return consumed;
   }
 
-  error->all(FLERR,"Illegal fix emit/surf/recycle command");
+  error->all(FLERR,"Illegal fix surface/emit/recycle command");
   return 0;
 }

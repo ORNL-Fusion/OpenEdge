@@ -124,3 +124,7 @@ action fix_viscous.cpp
 action fix_viscous.h
 action surf_react_surface_pwi.cpp
 action surf_react_surface_pwi.h
+action fix_surface_emit_recycle.cpp
+action fix_surface_emit_recycle.h
+action fix_surface_emit_puff.cpp
+action fix_surface_emit_puff.h

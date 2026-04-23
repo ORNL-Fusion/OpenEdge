@@ -659,18 +659,16 @@ void SurfReactSurfacePWI::readfile(char *fname)
       // TRIM reaction: parse `T <table_name>`.
       // prob is evaluated per-event from R_N(E,theta); the fixed prob slot
       // is set to 0 here so cumulative-prob iteration in react() skips to
-      // the dynamic probe.
+      // the dynamic probe.  Table is resolved via ProcessLibrary from
+      // database/processes.h5 (/surface/reflection/<pair>/).
       word = strtok(NULL, " \t\n");
       if (!word) error->all(FLERR, "Missing TRIM table name in recycle reaction");
-      if (trim_dir.empty())
-        error->all(FLERR, "surf_react surface/pwi: TRIM reaction used but "
-                          "trim_dir keyword not set");
       int it = load_or_get_trim_table(word);
       if (it < 0) {
         char str[256];
         snprintf(str, sizeof(str),
                  "surf_react surface/pwi: failed to load TRIM table '%s' "
-                 "from %s", word, trim_dir.c_str());
+                 "from database/processes.h5", word);
         error->all(FLERR, str);
       }
       r->trim_table = it;
