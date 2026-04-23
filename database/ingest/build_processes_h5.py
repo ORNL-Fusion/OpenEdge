@@ -264,7 +264,10 @@ def ingest_surface_trim(fout: h5py.File) -> dict:
                       "polar_max", "polar_min", "raar", "E", "theta"):
                 if k in fin and k not in r:
                     r.create_dataset(k, data=fin[k][...])
-            # Tag metadata at the pair-level group
+            # Tag metadata at the pair-level group + preserve the TRIM
+            # root attributes (Z1, M1, Z2, M2 -- projectile and target
+            # nuclear-charge + mass numbers, needed by surf_react
+            # surface/pwi for species matching).
             for tgt in (s, r):
                 tgt.attrs["source"] = f"TRIM table {path.name}"
                 tgt.attrs["method"] = ("binned in (E, theta); outgoing "
@@ -272,6 +275,9 @@ def ingest_surface_trim(fout: h5py.File) -> dict:
                                        "quantiles")
                 if "units" not in tgt.attrs:
                     tgt.attrs["units"] = "E [eV], theta [rad], R_N [-]"
+                for attr_name in ("Z1", "M1", "Z2", "M2"):
+                    if attr_name in fin.attrs:
+                        tgt.attrs[attr_name] = fin.attrs[attr_name][()]
     return stats
 
 

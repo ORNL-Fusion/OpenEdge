@@ -83,28 +83,6 @@ bool path_looks_literal(const std::string &s)
   return false;
 }
 
-std::string resolve_surface_file(const std::string &proj,
-                                 const std::string &target,
-                                 Error *error)
-{
-  std::string p;
-  if (path_looks_literal(proj)) {
-    p = proj;
-  } else {
-    if (target.empty())
-      error->all(FLERR,
-                 "resolve_surface_file: target element required when proj "
-                 "is a short name");
-    p = openedge_database_dir() + "/surface/" + proj + "_on_" + target + ".h5";
-  }
-  if (!file_exists(p)) {
-    std::string msg = "Surface data file not found: " + p +
-                      " (OPENEDGE_ROOT or OPENEDGE_DATABASE_DIR)";
-    error->all(FLERR, msg.c_str());
-  }
-  return p;
-}
-
 std::string resolve_reactions_file(const std::string &spec, Error *error)
 {
   std::string p;

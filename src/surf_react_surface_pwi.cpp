@@ -34,6 +34,8 @@
 #include "surf.h"
 #include "random_mars.h"
 #include "random_knuth.h"
+#include "database_paths.h"
+#include "process_library.h"
 #include "math_extra.h"
 #include "memory.h"
 #include "error.h"
@@ -744,115 +746,58 @@ int SurfReactSurfacePWI::load_or_get_trim_table(const char *name)
   auto it = trim_index.find(sname);
   if (it != trim_index.end()) return it->second;
 
-  if (trim_dir.empty()) return -1;
-
-  std::string path = trim_dir + "/" + sname + ".h5";
-
   Reflection::Table t;
   t.name = sname;
   t.Z1 = t.M1 = t.Z2 = t.M2 = 0.0;
 
-  const int nE = Reflection::NE;
-  const int nW = Reflection::NTHETA;
-  const int nR = Reflection::NQ;
+  // Prefer database/processes.h5 /surface/reflection/<pair>/ via
+  // ProcessLibrary.  Pair keys in processes.h5 are lowercase
+  // (e.g. "d_on_w"); legacy per-pair files use original casing
+  // ("D_on_W.h5").  Try both.
+  std::string pair_lower = sname;
+  for (auto &c : pair_lower)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-  // Rank 0 reads the HDF5 TRIM table; other ranks receive via Bcast
-  // below. SPARTA idiom: rank 0 calls error->one on failure (MPI_Abort
-  // kills the whole job immediately, no status handshake needed).
-  if (comm->me == 0) {
-    try {
-      H5::H5File file(path, H5F_ACC_RDONLY);
-
-      auto read_1d = [&](const std::string &ds, std::vector<double> &out) {
-        H5::DataSet d = file.openDataSet(ds);
-        H5::DataSpace sp = d.getSpace();
-        hsize_t dim;
-        sp.getSimpleExtentDims(&dim);
-        out.resize(static_cast<size_t>(dim));
-        d.read(out.data(), H5::PredType::NATIVE_DOUBLE);
-      };
-      auto read_flat = [&](const std::string &ds, std::vector<double> &out,
-                           size_t expected) {
-        H5::DataSet d = file.openDataSet(ds);
-        H5::DataSpace sp = d.getSpace();
-        int rnk = sp.getSimpleExtentNdims();
-        std::vector<hsize_t> dims(rnk);
-        sp.getSimpleExtentDims(dims.data());
-        size_t total = 1;
-        for (int r = 0; r < rnk; r++) total *= dims[r];
-        if (total != expected)
-          throw std::runtime_error(ds + " has wrong element count in " + path);
-        out.resize(total);
-        d.read(out.data(), H5::PredType::NATIVE_DOUBLE);
-      };
-
-      read_1d("E",     t.E_grid);
-      read_1d("theta", t.theta_grid);
-      read_1d("raar",  t.raar);
-
-      if ((int)t.E_grid.size() != nE || (int)t.theta_grid.size() != nW ||
-          (int)t.raar.size() != nR)
-        throw std::runtime_error("TRIM axis shape mismatch");
-
-      read_flat("R_N",         t.R_N,         (size_t)nE * nW);
-      read_flat("Eout_q",      t.Eout_q,      (size_t)nE * nW * nR);
-      read_flat("Eout_min",    t.Eout_min,    (size_t)nE * nW);
-      read_flat("Eout_max",    t.Eout_max,    (size_t)nE * nW);
-      read_flat("cos_polar_q", t.cos_polar_q, (size_t)nE * nW * nR * nR);
-      read_flat("cos_azim_q",  t.cos_azim_q,  (size_t)nE * nW * nR * nR * nR);
-
-      auto read_attr = [&](const std::string &aname, double &val) {
-        if (file.attrExists(aname)) {
-          H5::Attribute a = file.openAttribute(aname);
-          a.read(H5::PredType::NATIVE_DOUBLE, &val);
-        }
-      };
-      read_attr("Z1", t.Z1); read_attr("M1", t.M1);
-      read_attr("Z2", t.Z2); read_attr("M2", t.M2);
-
-      fprintf(screen ? screen : logfile,
-              "surf_react surface/pwi: loaded TRIM table '%s' from %s\n",
-              sname.c_str(), path.c_str());
-    } catch (const std::exception &e) {
-      std::string msg = "surf_react surface/pwi: TRIM load of '" + sname +
-                        "' (" + path + ") failed: " + e.what();
-      error->one(FLERR, msg.c_str());  // MPI_Abort — does not return
+  bool loaded = false;
+  std::string processes_path = resolve_processes_file();
+  if (!processes_path.empty()) {
+    ProcessLibrary lib;
+    lib.open(processes_path, world, error);
+    if (lib.is_open()) {
+      ProcessLibrary::TrimReflectionTable pt;
+      if (lib.load_trim_reflection(pair_lower, pt) &&
+          pt.NE == Reflection::NE &&
+          pt.NTHETA == Reflection::NTHETA &&
+          pt.NQ == Reflection::NQ) {
+        t.E_grid      = pt.E;
+        t.theta_grid  = pt.theta;
+        t.raar        = pt.raar;
+        t.R_N         = pt.R_N;
+        t.Eout_q      = pt.Eout_q;
+        t.Eout_min    = pt.Eout_min;
+        t.Eout_max    = pt.Eout_max;
+        t.cos_polar_q = pt.cos_polar_q;
+        t.cos_azim_q  = pt.cos_azim_q;
+        t.Z1 = pt.Z1; t.M1 = pt.M1; t.Z2 = pt.Z2; t.M2 = pt.M2;
+        loaded = true;
+        if (comm->me == 0)
+          fprintf(screen ? screen : logfile,
+                  "surf_react surface/pwi: loaded TRIM table '%s' from "
+                  "%s (/surface/reflection/%s/)\n",
+                  sname.c_str(), processes_path.c_str(),
+                  pair_lower.c_str());
+      }
     }
   }
 
-  // We only reach here if the rank-0 read succeeded. Broadcast the
-  // fixed-dimension table payload. Axis dims (NE, NTHETA, NQ) are
-  // compile-time constants, so no dim Bcast needed.
-  MPI_Bcast(&t.Z1, 1, MPI_DOUBLE, 0, world);
-  MPI_Bcast(&t.M1, 1, MPI_DOUBLE, 0, world);
-  MPI_Bcast(&t.Z2, 1, MPI_DOUBLE, 0, world);
-  MPI_Bcast(&t.M2, 1, MPI_DOUBLE, 0, world);
-
-  const int n_RN          = nE * nW;
-  const int n_Eout_q      = nE * nW * nR;
-  const int n_cos_polar_q = nE * nW * nR * nR;
-  const int n_cos_azim_q  = nE * nW * nR * nR * nR;
-
-  if (comm->me != 0) {
-    t.E_grid.resize(nE);
-    t.theta_grid.resize(nW);
-    t.raar.resize(nR);
-    t.R_N.resize(n_RN);
-    t.Eout_q.resize(n_Eout_q);
-    t.Eout_min.resize(n_RN);
-    t.Eout_max.resize(n_RN);
-    t.cos_polar_q.resize(n_cos_polar_q);
-    t.cos_azim_q.resize(n_cos_azim_q);
+  if (!loaded) {
+    std::string msg = "surf_react surface/pwi: TRIM table '" + sname +
+                      "' not found in " +
+                      (processes_path.empty() ? "database/processes.h5 (file missing)"
+                                              : processes_path + " at /surface/reflection/" + pair_lower);
+    error->all(FLERR, msg.c_str());
+    return -1;  // not reached
   }
-  MPI_Bcast(t.E_grid.data(),      nE,              MPI_DOUBLE, 0, world);
-  MPI_Bcast(t.theta_grid.data(),  nW,              MPI_DOUBLE, 0, world);
-  MPI_Bcast(t.raar.data(),        nR,              MPI_DOUBLE, 0, world);
-  MPI_Bcast(t.R_N.data(),         n_RN,            MPI_DOUBLE, 0, world);
-  MPI_Bcast(t.Eout_q.data(),      n_Eout_q,        MPI_DOUBLE, 0, world);
-  MPI_Bcast(t.Eout_min.data(),    n_RN,            MPI_DOUBLE, 0, world);
-  MPI_Bcast(t.Eout_max.data(),    n_RN,            MPI_DOUBLE, 0, world);
-  MPI_Bcast(t.cos_polar_q.data(), n_cos_polar_q,   MPI_DOUBLE, 0, world);
-  MPI_Bcast(t.cos_azim_q.data(),  n_cos_azim_q,    MPI_DOUBLE, 0, world);
 
   int idx = static_cast<int>(trim_tables.size());
   trim_tables.push_back(std::move(t));

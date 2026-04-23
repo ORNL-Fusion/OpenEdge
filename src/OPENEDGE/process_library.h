@@ -81,6 +81,41 @@ class ProcessLibrary {
   bool load_ionization_potential(const std::string &elem,
                                  std::vector<double> &ip_eV);
 
+  // TRIM reflection table: every dataset under /surface/reflection/<pair>/
+  // plus the Z1/M1/Z2/M2 projectile/target identifiers as attributes.
+  // Dims come from the file (NE, NTHETA, NQ) -- caller does NOT assume
+  // compile-time constants.  `pair` is e.g. "d_on_w", "c_on_c".
+  struct TrimReflectionTable {
+    std::vector<double> E;              // [NE]        log(E_in) grid, eV
+    std::vector<double> theta;          // [NTHETA]    incidence-angle grid, rad
+    std::vector<double> raar;           // [NQ]        quantile axis
+    std::vector<double> R_N;            // [NE*NTHETA]
+    std::vector<double> Eout_min;       // [NE*NTHETA]
+    std::vector<double> Eout_max;       // [NE*NTHETA]
+    std::vector<double> Eout_q;         // [NE*NTHETA*NQ]
+    std::vector<double> polar_min;      // [NE*NTHETA*NQ]
+    std::vector<double> polar_max;      // [NE*NTHETA*NQ]
+    std::vector<double> cos_polar_q;    // [NE*NTHETA*NQ*NQ]
+    std::vector<double> cos_azim_q;     // [NE*NTHETA*NQ*NQ*NQ]
+    int NE = 0, NTHETA = 0, NQ = 0;
+    double Z1 = 0.0, M1 = 0.0, Z2 = 0.0, M2 = 0.0;
+  };
+  bool load_trim_reflection(const std::string &pair,
+                            TrimReflectionTable &out);
+
+  // Per-line photon-emission coefficient from /volume/pec/<elem>/<id>/<line>/
+  // (coefficient = 2D log10 table, temperature + density = log10 grids).
+  struct PecTable {
+    std::vector<double> coef;    // [nT*nNe]
+    std::vector<double> logT;    // [nT]
+    std::vector<double> logN;    // [nNe]
+    int nT = 0, nNe = 0;
+  };
+  bool load_pec_line(const std::string &elem,
+                     const std::string &pec_id,
+                     const std::string &line_key,
+                     PecTable &out);
+
  private:
   bool         opened_ = false;
   std::string  path_;

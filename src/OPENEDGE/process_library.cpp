@@ -138,6 +138,172 @@ bool ProcessLibrary::load_ionization_potential(const std::string &elem,
 }
 
 // ------------------------------------------------------------------------
+// load_trim_reflection()
+// ------------------------------------------------------------------------
+bool ProcessLibrary::load_trim_reflection(const std::string &pair,
+                                          TrimReflectionTable &out)
+{
+  if (!opened_) return false;
+
+  out = TrimReflectionTable{};  // reset
+
+  int present = 0;
+  const std::string grp = "/surface/reflection/" + pair;
+
+  if (me_ == 0) {
+    try {
+      H5::H5File f(path_, H5F_ACC_RDONLY);
+      if (H5Lexists(f.getId(), grp.c_str(), H5P_DEFAULT) > 0) {
+        auto read1 = [&](const std::string &p, std::vector<double> &v,
+                         int &dim_out) {
+          H5::DataSet d = f.openDataSet(p);
+          hsize_t dim[1] = {0};
+          d.getSpace().getSimpleExtentDims(dim, nullptr);
+          dim_out = static_cast<int>(dim[0]);
+          v.resize(dim[0]);
+          d.read(v.data(), H5::PredType::NATIVE_DOUBLE);
+        };
+        auto readN = [&](const std::string &p, std::vector<double> &v) {
+          H5::DataSet d = f.openDataSet(p);
+          H5::DataSpace sp = d.getSpace();
+          int rnk = sp.getSimpleExtentNdims();
+          std::vector<hsize_t> dims(rnk);
+          sp.getSimpleExtentDims(dims.data());
+          size_t total = 1;
+          for (int r = 0; r < rnk; r++) total *= dims[r];
+          v.resize(total);
+          d.read(v.data(), H5::PredType::NATIVE_DOUBLE);
+        };
+        read1(grp + "/E",     out.E,     out.NE);
+        read1(grp + "/theta", out.theta, out.NTHETA);
+        read1(grp + "/raar",  out.raar,  out.NQ);
+        readN(grp + "/R_N",          out.R_N);
+        readN(grp + "/Eout_min",     out.Eout_min);
+        readN(grp + "/Eout_max",     out.Eout_max);
+        readN(grp + "/Eout_q",       out.Eout_q);
+        readN(grp + "/polar_min",    out.polar_min);
+        readN(grp + "/polar_max",    out.polar_max);
+        readN(grp + "/cos_polar_q",  out.cos_polar_q);
+        readN(grp + "/cos_azim_q",   out.cos_azim_q);
+
+        H5::Group g = f.openGroup(grp);
+        auto readAttrDouble = [&](const std::string &a, double &v) {
+          if (g.attrExists(a)) {
+            H5::Attribute att = g.openAttribute(a);
+            att.read(H5::PredType::NATIVE_DOUBLE, &v);
+          }
+        };
+        readAttrDouble("Z1", out.Z1);
+        readAttrDouble("M1", out.M1);
+        readAttrDouble("Z2", out.Z2);
+        readAttrDouble("M2", out.M2);
+
+        present = 1;
+      }
+    } catch (const H5::Exception &) {
+      present = 0;
+    }
+  }
+
+  MPI_Bcast(&present, 1, MPI_INT, 0, comm_);
+  if (!present) return false;
+
+  // Broadcast scalars then arrays.
+  int dims3[3] = {out.NE, out.NTHETA, out.NQ};
+  MPI_Bcast(dims3, 3, MPI_INT, 0, comm_);
+  out.NE = dims3[0]; out.NTHETA = dims3[1]; out.NQ = dims3[2];
+  double four[4] = {out.Z1, out.M1, out.Z2, out.M2};
+  MPI_Bcast(four, 4, MPI_DOUBLE, 0, comm_);
+  out.Z1 = four[0]; out.M1 = four[1]; out.Z2 = four[2]; out.M2 = four[3];
+
+  auto bcast_vec = [&](std::vector<double> &v) {
+    int n = static_cast<int>(v.size());
+    MPI_Bcast(&n, 1, MPI_INT, 0, comm_);
+    if (me_ != 0) v.resize(n);
+    if (n > 0) MPI_Bcast(v.data(), n, MPI_DOUBLE, 0, comm_);
+  };
+  bcast_vec(out.E);
+  bcast_vec(out.theta);
+  bcast_vec(out.raar);
+  bcast_vec(out.R_N);
+  bcast_vec(out.Eout_min);
+  bcast_vec(out.Eout_max);
+  bcast_vec(out.Eout_q);
+  bcast_vec(out.polar_min);
+  bcast_vec(out.polar_max);
+  bcast_vec(out.cos_polar_q);
+  bcast_vec(out.cos_azim_q);
+  return true;
+}
+
+// ------------------------------------------------------------------------
+// load_pec_line()
+// ------------------------------------------------------------------------
+bool ProcessLibrary::load_pec_line(const std::string &elem,
+                                   const std::string &pec_id,
+                                   const std::string &line_key,
+                                   PecTable &out)
+{
+  if (!opened_) return false;
+  out = PecTable{};
+
+  const std::string grp = "/volume/pec/" + elem + "/" + pec_id +
+                          "/" + line_key;
+  int present = 0;
+  if (me_ == 0) {
+    try {
+      H5::H5File f(path_, H5F_ACC_RDONLY);
+      if (H5Lexists(f.getId(), grp.c_str(), H5P_DEFAULT) > 0) {
+        H5::DataSet dc = f.openDataSet(grp + "/coefficient");
+        H5::DataSpace spc = dc.getSpace();
+        hsize_t dims2[2] = {0, 0};
+        spc.getSimpleExtentDims(dims2, nullptr);
+        out.nT  = static_cast<int>(dims2[0]);
+        out.nNe = static_cast<int>(dims2[1]);
+        out.coef.resize(dims2[0] * dims2[1]);
+        dc.read(out.coef.data(), H5::PredType::NATIVE_DOUBLE);
+
+        H5::DataSet dt = f.openDataSet(grp + "/temperature");
+        hsize_t dim1[1] = {0};
+        dt.getSpace().getSimpleExtentDims(dim1, nullptr);
+        out.logT.resize(dim1[0]);
+        dt.read(out.logT.data(), H5::PredType::NATIVE_DOUBLE);
+
+        H5::DataSet dn = f.openDataSet(grp + "/density");
+        dn.getSpace().getSimpleExtentDims(dim1, nullptr);
+        out.logN.resize(dim1[0]);
+        dn.read(out.logN.data(), H5::PredType::NATIVE_DOUBLE);
+
+        present = 1;
+      }
+    } catch (const H5::Exception &) {
+      present = 0;
+    }
+  }
+
+  MPI_Bcast(&present, 1, MPI_INT, 0, comm_);
+  if (!present) return false;
+
+  int dims2[2] = {out.nT, out.nNe};
+  MPI_Bcast(dims2, 2, MPI_INT, 0, comm_);
+  out.nT = dims2[0]; out.nNe = dims2[1];
+  const size_t n = static_cast<size_t>(out.nT) * out.nNe;
+  if (me_ != 0) out.coef.resize(n);
+  if (n > 0) MPI_Bcast(out.coef.data(), n, MPI_DOUBLE, 0, comm_);
+
+  int nt = static_cast<int>(out.logT.size());
+  MPI_Bcast(&nt, 1, MPI_INT, 0, comm_);
+  if (me_ != 0) out.logT.resize(nt);
+  if (nt > 0) MPI_Bcast(out.logT.data(), nt, MPI_DOUBLE, 0, comm_);
+
+  int nn = static_cast<int>(out.logN.size());
+  MPI_Bcast(&nn, 1, MPI_INT, 0, comm_);
+  if (me_ != 0) out.logN.resize(nn);
+  if (nn > 0) MPI_Bcast(out.logN.data(), nn, MPI_DOUBLE, 0, comm_);
+  return true;
+}
+
+// ------------------------------------------------------------------------
 // fetch_rate(): rank-0 reads /<group>/coefficient + temperature +
 // density, broadcasts to all ranks.
 // ------------------------------------------------------------------------

@@ -30,13 +30,6 @@ std::string element_of_ion_name(const std::string &ion_name);
 // explicitly (contains '/', starts with '.', or ends in '.h5').
 bool path_looks_literal(const std::string &s);
 
-// Resolve database/surface/<proj>_on_<target>.h5. If `proj` already looks
-// like a literal path, it is returned unchanged (target ignored). Fatal
-// error via `error` if the file does not exist.
-std::string resolve_surface_file(const std::string &proj,
-                                 const std::string &target,
-                                 Error *error);
-
 // Resolve database/adas/reactions/<element>.reactions from an element
 // name. Literal paths (contain '/' or end in .reactions) pass through.
 // Fatal error if unresolved or missing.
