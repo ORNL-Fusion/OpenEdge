@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-"""Consolidate all OpenEdge atomic / surface data into database/openedge.h5.
+"""Consolidate all OpenEdge atomic / surface data into database/processes.h5.
 
 Reads existing per-element / per-pair files and re-packs them under the
 canonical /volume/ + /surface/ schema (see docs/database_schema.md).
 Idempotent: overwrites the target each run.  Preserves the legacy
 per-element files for now (consumers read them as fallback).
 
+Named after what it contains (elementary volume + surface PROCESSES)
+rather than after the consumer code, because the data originates from
+external sources (open-ADAS, TRIM, literature) -- we curate, we do not
+author.
+
 Usage:
-  python3 database/ingest/build_openedge_h5.py
+  python3 database/ingest/build_processes_h5.py
 
 Output:
-  database/openedge.h5
+  database/processes.h5
 
 Attributes required on every leaf dataset are `units`, `source`,
 `method`.  The root carries `schema_version`, `generated`, `sources`.
@@ -30,7 +35,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 DB   = ROOT / "database"
-OUT  = DB / "openedge.h5"
+OUT  = DB / "processes.h5"
 
 SCHEMA_VERSION = "1.0"
 
@@ -161,20 +166,29 @@ def ingest_reactions(fout: h5py.File) -> dict:
 
 
 def ingest_surface_trim(fout: h5py.File) -> dict:
-    """Copy every TRIM yield / reflection table into /surface/yields/ and
-    /surface/reflection/ keyed by <projectile>_on_<target>."""
-    grp_yields = fout.require_group("surface/yields")
-    grp_refl   = fout.require_group("surface/reflection")
+    """Copy every TRIM sputter / reflection table into /surface/sputter/ and
+    /surface/reflection/, keyed by <projectile>_on_<target>.
+
+    Schema-group names reflect the physical process (sputter, reflection),
+    not the data source (TRIM) or the data type (yields).  Fix names
+    follow the same convention: fix surface/emit/sputter reads /sputter/,
+    surf_collide reflect-style consumers read /reflection/, etc.
+    """
+    grp_sputter = fout.require_group("surface/sputter")
+    grp_refl    = fout.require_group("surface/reflection")
     stats = {"pairs": 0}
     for path in sorted((DB / "surface" / "trim").glob("*.h5")):
         pair = path.stem.lower()  # e.g. "d_on_w"
         stats["pairs"] += 1
         with h5py.File(path, "r") as fin:
-            # Yields: E, theta, sputter-related
-            y = grp_yields.require_group(pair)
+            # Sputter-side: E, theta (yields themselves are implicit in
+            # the outgoing distribution -- consumers compute Y from the
+            # moments).  Kept here so a single pair-group has the (E,
+            # theta) binning.
+            s = grp_sputter.require_group(pair)
             for k in ("E", "theta"):
-                if k in fin and k not in y:
-                    y.create_dataset(k, data=fin[k][...])
+                if k in fin and k not in s:
+                    s.create_dataset(k, data=fin[k][...])
             # Reflection: R_N, Eout_*, cos_polar_q, cos_azim_q, polar_*
             r = grp_refl.require_group(pair)
             for k in ("R_N", "Eout_max", "Eout_min", "Eout_q",
@@ -183,11 +197,11 @@ def ingest_surface_trim(fout: h5py.File) -> dict:
                 if k in fin and k not in r:
                     r.create_dataset(k, data=fin[k][...])
             # Tag metadata at the pair-level group
-            for tgt in (y, r):
+            for tgt in (s, r):
                 tgt.attrs["source"] = f"TRIM table {path.name}"
-                tgt.attrs["method"] = "binned in (E, theta); outgoing "\
-                                      "distribution moments stored as 'q' " \
-                                      "quantiles"
+                tgt.attrs["method"] = ("binned in (E, theta); outgoing "
+                                       "distribution moments stored as 'q' "
+                                       "quantiles")
                 if "units" not in tgt.attrs:
                     tgt.attrs["units"] = "E [eV], theta [rad], R_N [-]"
     return stats
@@ -222,7 +236,7 @@ def main(argv=None) -> int:
     print(f"  volume.radiation tables  : {stats_vol_adas['radiation_tables']}")
     print(f"  volume.thresholds vectors: {stats_vol_adas['ip_vectors']}")
     print(f"  volume.reactions files   : {stats_vol_rxn['reaction_files']}")
-    print(f"  surface.{{yields,reflection}} pairs: {stats_surf['pairs']}")
+    print(f"  surface.{{sputter,reflection}} pairs: {stats_surf['pairs']}")
     return 0
 
 

@@ -1,12 +1,16 @@
-# OpenEdge consolidated atomic-data schema
+# OpenEdge consolidated process-data schema
 
-All atomic, molecular, and surface data consumed by OpenEdge fixes and
-computes lives in a single HDF5 file, `database/openedge.h5`, organized
-into two top-level groups that match the physical partition of the
-problem:
+All volume-process (atomic, molecular, radiation) and surface-process
+(sputter, reflection, recycling, evaporation, desorption) data consumed
+by OpenEdge fixes and computes lives in a single HDF5 file,
+`database/processes.h5`.  The filename reflects *what the data
+describes* — elementary physical processes — not the consumer code;
+the data itself is curated from open-ADAS, TRIM, literature, and other
+external sources.  Two top-level groups match the physical partition
+of the problem:
 
 ```
-openedge.h5
+processes.h5
 ├── /volume/       ← homogeneous processes in the plasma bulk
 └── /surface/      ← heterogeneous processes at a wall / solid interface
 ```
@@ -43,11 +47,17 @@ log-Te × log-ne × 0-based charge-state grid.  Grid axes come as sibling
 
 | subgroup                 | contents                                        | source                 |
 |--------------------------|-------------------------------------------------|------------------------|
-| `/surface/yields/`       | sputtering yields `Y(E, θ)` per projectile×target | TRIM / SRIM runs     |
-| `/surface/reflection/`   | reflection coefficients, energy/angle distributions | TRIM                |
+| `/surface/sputter/`      | sputter yields `Y(E, θ)` per projectile×target  | TRIM / SRIM runs       |
+| `/surface/reflection/`   | reflection coefficients, energy/angle dists     | TRIM                   |
 | `/surface/recycling/`    | recycling model parameters per wall material    | empirical + JET/DIII-D |
-| `/surface/thermal/`      | desorption rates, outgassing spectra            | literature            |
-| `/surface/evaporation/`  | Antoine coefficients, Hertz-Knudsen models      | literature            |
+| `/surface/evaporation/`  | Antoine coefficients, Hertz-Knudsen models      | literature             |
+| `/surface/desorption/`   | thermal desorption rates, outgassing spectra    | literature             |
+
+Sub-group names reflect the physical process, which matches the fix
+naming convention (`fix surface/emit/sputter` reads from
+`/surface/sputter/`, `fix surface/emit/recycle` reads from
+`/surface/recycling/`, etc.) — consumers can derive the HDF5 path
+directly from the fix style string.
 
 Datasets are binned on `(E, θ)` grids with arbitrary moments of the
 outgoing distribution (`cos_polar_q`, `Eout_q`, etc.) as used by the
@@ -96,7 +106,7 @@ f.attrs["sources"]         = [list of upstream databases, versions]
 
 ## Schema version and compatibility
 
-Every `openedge.h5` carries `/@schema_version` as `MAJOR.MINOR`:
+Every `processes.h5` carries `/@schema_version` as `MAJOR.MINOR`:
 
 - **MINOR** bumps are additive only: new datasets, new attributes, new
   subgroups.  Existing consumers read old MINOR files transparently.
@@ -108,7 +118,7 @@ Every `openedge.h5` carries `/@schema_version` as `MAJOR.MINOR`:
 
 The single source of truth is `database/ingest/build_openedge_h5.py`,
 which consolidates all raw inputs (adf11 text files, TRIM output, hand-
-curated reaction catalogs) into `database/openedge.h5`.  Run it after
+curated reaction catalogs) into `database/processes.h5`.  Run it after
 any upstream update:
 
 ```bash
@@ -117,12 +127,12 @@ python3 build_openedge_h5.py
 ```
 
 Raw inputs live under `database/raw/` (gitignored; regenerable from
-public sources).  The consolidated `openedge.h5` is committed.
+public sources).  The consolidated `processes.h5` is committed.
 
 ## Legacy per-element files
 
 For a transition period, OpenEdge also ships the older per-element
 files (`ADAS_Rates_<Z>.h5`, `database/surface/trim/*_on_*.h5`).
-Consumers prefer `openedge.h5` if present and fall back otherwise.
+Consumers prefer `processes.h5` if present and fall back otherwise.
 These legacy files will be removed when all C++ consumers have been
 migrated.
