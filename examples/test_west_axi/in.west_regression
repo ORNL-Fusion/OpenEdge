@@ -63,7 +63,7 @@ global              efield particle fEpar 0
 global              boris_subcycles 5
 
 # ADAS ionization/recombination (Te/ne from per-particle plasma cache)
-fix fchem chem/adas 1 74 input/plasma.adas adas_dir ../../database/adas
+fix fchem chem/adas 1 W auto
 
 # Nanbu collisions (background D+ only)
 fix fnanbu coll/nanbu 1 plasma_data pd &
@@ -84,7 +84,7 @@ fix fcd cross_diffusion 1 plasma_data pd &
 compute cpmi pmi/surf/data 1 plasma_data pd ../../database/surface/O_on_W.h5 &
                     projectile_slots 2 9 mass_amu 16.0 static yes sputter_flux_total
 fix pw particle/weight
-fix femit emit/surf/pmi tungstenSource 1 cpmi perspecies no normal yes &
+fix femit surface/emit/sputter tungstenSource 1 cpmi perspecies no normal yes &
                     nlaunch 5 flux_thresh 1e10
 
 # No dumps, no emissivity — regression only checks run-to-completion

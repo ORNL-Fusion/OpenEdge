@@ -24,7 +24,7 @@ Current workflow in `in.west`:
 6. Compute ADAS chemistry with sheath-corrected electron density (`fix chem/adas`).
 7. Compute incident plasma flux with `compute incident/plasma/flux`.
 8. Compute sputter source with `compute pmi/surf/data` (`sputter_flux_total`).
-9. Emit sputtered particles with `fix emit/surf/pmi`.
+9. Emit sputtered particles with `fix surface/emit/sputter`.
 10. Diagnose wall flux and grid density (`compute grid ... species nrho` + `fix ave/grid`).
 
 ## Run
