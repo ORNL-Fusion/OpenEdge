@@ -53,12 +53,12 @@ enum{ADAS,JANEV};                                      // rate styles
 FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
-    // fix ID volume/chem/adas <nevery> <species|Z> <reactions_file> [adas_dir <path>] [plasma <TeVar> <NeVar>]
+    // fix ID volume/chem/adas <nevery> <species|Z> <reactions_file> [plasma <TeVar> <NeVar>]
     //   <species|Z>  element symbol (e.g. "C", "W") OR numeric atomic number.
     //                When given as a symbol, the ADAS file is auto-located
     //                under ${OPENEDGE_ROOT}/database/adas/ADAS_Rates_<Z>.h5.
 
-  if (narg < 5)     error->all(FLERR,"Illegal fix volume/chem/adas command (need: nevery <species|Z> reactions_file [adas_dir path] [plasma TeVar NeVar])");
+  if (narg < 5)     error->all(FLERR,"Illegal fix volume/chem/adas command (need: nevery <species|Z> reactions_file [plasma TeVar NeVar])");
     nevery = atoi(arg[2]);
 
     // Accept arg[3] as either a numeric Z or an element symbol.
@@ -103,24 +103,12 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
     }
     check_duplicate();
 
-    // --- Optional adas_dir keyword ---
-    // If omitted, auto-resolve via OPENEDGE_ROOT / compile-time default.
-    // Scan remaining args for adas_dir before consuming plasma keyword.
-
-    std::string adas_base_dir;
-    int iarg = 5;
-    if (iarg < narg && strcmp(arg[iarg], "adas_dir") == 0) {
-      if (iarg + 1 >= narg)
-        error->all(FLERR,"fix volume/chem/adas: adas_dir requires a path argument");
-      adas_base_dir = arg[iarg + 1];
-      iarg += 2;
-    }
-
     // Read ADAS rate data from the consolidated database/processes.h5
     // under /volume/rates/<cls>/<elem>/ + /volume/thresholds/.  The
     // legacy ADAS_Rates_<Z>.h5 fallback was removed in Phase 2b; if
     // processes.h5 is missing or doesn't contain the requested element,
     // volume/chem/adas errors out at init.
+    int iarg = 5;
     {
       // Derive the canonical lowercase element symbol for processes.h5
       // group lookup by going through Z (element_to_z already normalizes
@@ -1720,89 +1708,18 @@ double FixVolumeChemAdas::computeReactionLambda(double rate_log10_cm3s, // log10
 }
 
 
-
-/*----------------------------------------------------------------------
-   Read ADAS data from HDF5 file
--------------------------------------------------------------------------*/
-void FixVolumeChemAdas::readRateData(const std::string& filePath, RateData& rd) {
-  try {
-      H5::H5File file(filePath, H5F_ACC_RDONLY);
-
-      // Read 1D dataset
-      auto read1D = [&file](const std::string& name) {
-          H5::DataSet ds = file.openDataSet(name);
-          H5::DataSpace space = ds.getSpace();
-          hsize_t dims[1];
-          space.getSimpleExtentDims(dims, nullptr);
-          std::vector<double> data(dims[0]);
-          ds.read(data.data(), H5::PredType::NATIVE_DOUBLE);
-          return data;
-      };
-
-      // Read 3D dataset as flat contiguous array
-      auto readFlat3D = [&file](const std::string& name,
-                                std::vector<double>& out,
-                                int &d0, int &d1, int &d2) {
-          H5::DataSet ds = file.openDataSet(name);
-          H5::DataSpace space = ds.getSpace();
-          hsize_t dims[3];
-          space.getSimpleExtentDims(dims, nullptr);
-          d0 = static_cast<int>(dims[0]);
-          d1 = static_cast<int>(dims[1]);
-          d2 = static_cast<int>(dims[2]);
-          out.resize(d0 * d1 * d2);
-          ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
-      };
-
-      readFlat3D("IonizationRateCoeff", rd.ion_coeff,
-                 rd.ion_nQ, rd.ion_nT, rd.ion_nD);
-      readFlat3D("RecombinationRateCoeff", rd.rec_coeff,
-                 rd.rec_nQ, rd.rec_nT, rd.rec_nD);
-
-      rd.Atomic_Number = read1D("Atomic_Number");
-      rd.gridD_ion     = read1D("gridDensity_Ionization");
-      rd.gridD_rec     = read1D("gridDensity_Recombination");
-      rd.gridT_ion     = read1D("gridTemperature_Ionization");
-      rd.gridT_rec     = read1D("gridTemperature_Recombination");
-
-      // CX data is optional (backward compat with old HDF5 files)
-      rd.cx_nQ = rd.cx_nT = rd.cx_nD = 0;
-      if (H5Lexists(file.getId(), "ChargeExchangeRateCoeff", H5P_DEFAULT) > 0) {
-        readFlat3D("ChargeExchangeRateCoeff", rd.cx_coeff,
-                   rd.cx_nQ, rd.cx_nT, rd.cx_nD);
-        rd.gridD_cx = read1D("gridDensity_ChargeExchange");
-        rd.gridT_cx = read1D("gridTemperature_ChargeExchange");
-      }
-
-      // PLT (line radiation power) — optional; enables effective ionization cost
-      rd.plt_nQ = rd.plt_nT = rd.plt_nD = 0;
-      if (H5Lexists(file.getId(), "LineRadiationPowerCoeff", H5P_DEFAULT) > 0) {
-        readFlat3D("LineRadiationPowerCoeff", rd.plt_coeff,
-                   rd.plt_nQ, rd.plt_nT, rd.plt_nD);
-        rd.gridD_plt = read1D("gridDensity_LineRadiation");
-        rd.gridT_plt = read1D("gridTemperature_LineRadiation");
-      }
-
-      // PRB (recombination + bremsstrahlung power) — optional; enables Qe on recomb
-      rd.prb_nQ = rd.prb_nT = rd.prb_nD = 0;
-      if (H5Lexists(file.getId(), "RecombRadiationPowerCoeff", H5P_DEFAULT) > 0) {
-        readFlat3D("RecombRadiationPowerCoeff", rd.prb_coeff,
-                   rd.prb_nQ, rd.prb_nT, rd.prb_nD);
-        rd.gridD_prb = read1D("gridDensity_RecombRadiation");
-        rd.gridT_prb = read1D("gridTemperature_RecombRadiation");
-      }
-
-      // Ionization potential per charge state (eV) — optional
-      if (H5Lexists(file.getId(), "IonizationPotential", H5P_DEFAULT) > 0) {
-        rd.ion_potential = read1D("IonizationPotential");
-      }
-
-  } catch (const H5::Exception& e) {
-      throw std::runtime_error("Error reading ADAS file " + filePath + ": " + std::string(e.getCDetailMsg()));
+double FixVolumeChemAdas::read_cell(const GridSrc &S, int icell, int var_col)
+{
+  if (S.kind == SRC_COMP) {
+    if (S.src_index < 0) {
+      return S.vec_cache ? S.vec_cache[icell] : 0.0;
+    }
+    if (!S.arr_cache) return 0.0;
+    return S.arr_cache[icell][S.src_index];
   }
+  // VAR path
+  return plasma_cache_2d ? plasma_cache_2d[icell][var_col] : 0.0;
 }
-
-
 
 void FixVolumeChemAdas::interpolateRateData(int atomic_number, double charge, int /*icell*/, double te, double ne, double& rate_final, ReactionType reactionType) {
 
@@ -1914,92 +1831,6 @@ bool FixVolumeChemAdas::setupInterpolation(ReactionType reactionType, int atomic
 }
 
 
-void FixVolumeChemAdas::readRateDataParallel(const std::string& filePath, RateData& rateData) {
-  int me = comm->me;
-
-  std::vector<char> filePathBuffer;
-
-  if (me == 0) {
-      filePathBuffer.assign(filePath.begin(), filePath.end());
-  }
-
-  // First broadcast the file path length and string
-  size_t pathLength = filePathBuffer.size();
-  MPI_Bcast(&pathLength, 1, MPI_UNSIGNED_LONG_LONG, 0, world);
-  if (me != 0) filePathBuffer.resize(pathLength);
-  MPI_Bcast(filePathBuffer.data(), pathLength, MPI_CHAR, 0, world);
-
-  // Convert back to string
-  std::string broadcastedPath(filePathBuffer.begin(), filePathBuffer.end());
-
-  // Only rank 0 reads HDF5 file
-  if (me == 0) {
-      readRateData(broadcastedPath, rateData);
-  }
-
-  // Now broadcast all datasets
-  broadcastRateData(rateData);
-}
-
-void FixVolumeChemAdas::broadcastRateData(RateData& rd) {
-
-  // Helper: broadcast a flat vector (single MPI_Bcast for the whole buffer)
-  auto bcast1D = [this](std::vector<double>& vec) {
-      size_t n = vec.size();
-      MPI_Bcast(&n, 1, MPI_UNSIGNED_LONG_LONG, 0, world);
-      if (comm->me != 0) vec.resize(n);
-      if (n > 0) MPI_Bcast(vec.data(), n, MPI_DOUBLE, 0, world);
-  };
-
-  // Broadcast dimensions then flat data (one bcast per table, not per row)
-  MPI_Bcast(&rd.ion_nQ, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.ion_nT, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.ion_nD, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.rec_nQ, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.rec_nT, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.rec_nD, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.cx_nQ,  1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.cx_nT,  1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.cx_nD,  1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.plt_nQ, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.plt_nT, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.plt_nD, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.prb_nQ, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.prb_nT, 1, MPI_INT, 0, world);
-  MPI_Bcast(&rd.prb_nD, 1, MPI_INT, 0, world);
-
-  bcast1D(rd.ion_coeff);
-  bcast1D(rd.rec_coeff);
-  bcast1D(rd.cx_coeff);
-  bcast1D(rd.plt_coeff);
-  bcast1D(rd.prb_coeff);
-  bcast1D(rd.Atomic_Number);
-  bcast1D(rd.gridD_ion);
-  bcast1D(rd.gridD_rec);
-  bcast1D(rd.gridD_cx);
-  bcast1D(rd.gridD_plt);
-  bcast1D(rd.gridD_prb);
-  bcast1D(rd.gridT_ion);
-  bcast1D(rd.gridT_rec);
-  bcast1D(rd.gridT_cx);
-  bcast1D(rd.gridT_plt);
-  bcast1D(rd.gridT_prb);
-  bcast1D(rd.ion_potential);
-}
-
-
-double FixVolumeChemAdas::read_cell(const GridSrc &S, int icell, int var_col)
-{
-  if (S.kind == SRC_COMP) {
-    if (S.src_index < 0) {
-      return S.vec_cache ? S.vec_cache[icell] : 0.0;
-    }
-    if (!S.arr_cache) return 0.0;
-    return S.arr_cache[icell][S.src_index];
-  }
-  // VAR path
-  return plasma_cache_2d ? plasma_cache_2d[icell][var_col] : 0.0;
-}
 
 void FixVolumeChemAdas::refresh_compute_src(GridSrc &S) {
   if (S.kind != SRC_COMP) return;

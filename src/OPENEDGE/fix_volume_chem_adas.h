@@ -228,15 +228,12 @@ protected:
     RateData rate_data;
     RanKnuth *rng_adas;
     ComputePlasmaFields *cp_plasma_cached_;
-    void readRateData(const std::string& filePath, RateData& data);
     double computeReactionLambda(double rate_log10_cm3s, double dt, double ne_m3);
     bool setupInterpolation(ReactionType reactionType, int atomic_number, size_t charge_idx,
                     double te, double ne, double& x0, double& x1, double& y0, double& y1,
                     double& f00, double& f01, double& f10, double& f11);
     void interpolateRateData(int atomic_number, double charge, int icell, double te, double ne,
                         double& rate_final, ReactionType reactionType);
-    void readRateDataParallel(const std::string& filePath, RateData& rateData);
-    void broadcastRateData(RateData& rateData);
 
     struct OneReaction {
         int active;

@@ -123,39 +123,6 @@ std::string resolve_reactions_file(const std::string &spec, Error *error)
   return p;
 }
 
-std::string resolve_adas_file(const std::string &element_or_z, Error *error)
-{
-  if (path_looks_literal(element_or_z)) {
-    if (!file_exists(element_or_z)) {
-      std::string msg = "ADAS rate file not found: " + element_or_z;
-      error->all(FLERR, msg.c_str());
-    }
-    return element_or_z;
-  }
-
-  int z = -1;
-  // numeric?
-  if (!element_or_z.empty() &&
-      std::all_of(element_or_z.begin(), element_or_z.end(),
-                  [](unsigned char c){ return std::isdigit(c); })) {
-    z = std::atoi(element_or_z.c_str());
-  } else {
-    z = element_to_z(element_or_z);
-    if (z < 0) {
-      std::string msg = "Unknown element '" + element_or_z +
-                        "' for ADAS file resolution";
-      error->all(FLERR, msg.c_str());
-    }
-  }
-  std::string p = openedge_database_dir() + "/adas/ADAS_Rates_" +
-                  std::to_string(z) + ".h5";
-  if (!file_exists(p)) {
-    std::string msg = "ADAS rate file not found: " + p;
-    error->all(FLERR, msg.c_str());
-  }
-  return p;
-}
-
 std::string resolve_processes_file()
 {
   std::string p = openedge_database_dir() + "/processes.h5";

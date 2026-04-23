@@ -37,11 +37,6 @@ std::string resolve_surface_file(const std::string &proj,
                                  const std::string &target,
                                  Error *error);
 
-// Resolve database/adas/ADAS_Rates_<Z>.h5 from an element name or a
-// numeric Z (both accepted). Literal paths pass through unchanged. Fatal
-// error via `error` if unresolved or missing.
-std::string resolve_adas_file(const std::string &element_or_z, Error *error);
-
 // Resolve database/adas/reactions/<element>.reactions from an element
 // name. Literal paths (contain '/' or end in .reactions) pass through.
 // Fatal error if unresolved or missing.
