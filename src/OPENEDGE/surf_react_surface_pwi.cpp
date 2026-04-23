@@ -26,7 +26,7 @@
 
 #include "math.h"
 #include "string.h"
-#include "surf_react_wall_pwi.h"
+#include "surf_react_surface_pwi.h"
 #include "input.h"
 #include "update.h"
 #include "comm.h"
@@ -54,10 +54,10 @@ enum{INT,DOUBLE};                        // match surf.cpp custom-attribute type
 
 /* ---------------------------------------------------------------------- */
 
-SurfReactWallPWI::SurfReactWallPWI(SPARTA *sparta, int narg, char **arg) :
+SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   SurfReact(sparta, narg, arg)
 {
-  if (narg < 3) error->all(FLERR,"Illegal surf_react wall_pwi command");
+  if (narg < 3) error->all(FLERR,"Illegal surf_react surface/pwi command");
 
   nlist_recycle = maxlist_recycle = 0;
   rlist = NULL;
@@ -76,33 +76,33 @@ SurfReactWallPWI::SurfReactWallPWI(SPARTA *sparta, int narg, char **arg) :
   int iarg = 3;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"twall") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react wall_pwi command");
+      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       twall = input->numeric(FLERR,arg[iarg+1]);
       if (twall <= 0.0) error->all(FLERR,"surf_react recycle twall must be > 0");
       iarg += 2;
     } else if (strcmp(arg[iarg],"twall_surf") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react wall_pwi command");
+      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       int n = strlen(arg[iarg+1]) + 1;
       twall_attr = new char[n];
       strcpy(twall_attr, arg[iarg+1]);
       iarg += 2;
     } else if (strcmp(arg[iarg],"trim_dir") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react wall_pwi command");
+      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       trim_dir = arg[iarg+1];
       iarg += 2;
     } else if (strcmp(arg[iarg],"R_surf") == 0) {
       // per-surface recycling coefficient. When set, the R value of any
       // A-type reaction is overridden by the per-surf attribute lookup.
-      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react wall_pwi command");
+      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       int n = strlen(arg[iarg+1]) + 1;
       R_attr = new char[n];
       strcpy(R_attr, arg[iarg+1]);
       iarg += 2;
-    } else error->all(FLERR,"Illegal surf_react wall_pwi command");
+    } else error->all(FLERR,"Illegal surf_react surface/pwi command");
   }
 
   if (twall > 0.0 && twall_attr)
-    error->all(FLERR,"surf_react wall_pwi: cannot set both twall and twall_surf");
+    error->all(FLERR,"surf_react surface/pwi: cannot set both twall and twall_surf");
 
   readfile(arg[2]);
 
@@ -118,7 +118,7 @@ SurfReactWallPWI::SurfReactWallPWI(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-SurfReactWallPWI::~SurfReactWallPWI()
+SurfReactSurfacePWI::~SurfReactSurfacePWI()
 {
   if (rlist) {
     for (int i = 0; i < maxlist_recycle; i++) {
@@ -143,7 +143,7 @@ SurfReactWallPWI::~SurfReactWallPWI()
 
 /* ---------------------------------------------------------------------- */
 
-void SurfReactWallPWI::init()
+void SurfReactSurfacePWI::init()
 {
   SurfReact::init();
   init_reactions();
@@ -155,13 +155,13 @@ void SurfReactWallPWI::init()
     tindex_custom = surf->find_custom(twall_attr);
     if (tindex_custom < 0) {
       char str[256];
-      sprintf(str, "surf_react wall_pwi twall_surf: custom attribute '%s' not found", twall_attr);
+      sprintf(str, "surf_react surface/pwi twall_surf: custom attribute '%s' not found", twall_attr);
       error->all(FLERR, str);
     }
     if (surf->etype[tindex_custom] != DOUBLE)
-      error->all(FLERR,"surf_react wall_pwi twall_surf attribute must be DOUBLE");
+      error->all(FLERR,"surf_react surface/pwi twall_surf attribute must be DOUBLE");
     if (surf->esize[tindex_custom] != 0)
-      error->all(FLERR,"surf_react wall_pwi twall_surf attribute must be scalar per-surf");
+      error->all(FLERR,"surf_react surface/pwi twall_surf attribute must be scalar per-surf");
     // ensure local+ghost copy is in sync; safe in serial, needed when distributed
     surf->spread_custom(tindex_custom);
   }
@@ -171,20 +171,20 @@ void SurfReactWallPWI::init()
     rindex_custom = surf->find_custom(R_attr);
     if (rindex_custom < 0) {
       char str[256];
-      sprintf(str, "surf_react wall_pwi R_surf: custom attribute '%s' not found", R_attr);
+      sprintf(str, "surf_react surface/pwi R_surf: custom attribute '%s' not found", R_attr);
       error->all(FLERR, str);
     }
     if (surf->etype[rindex_custom] != DOUBLE)
-      error->all(FLERR,"surf_react wall_pwi R_surf attribute must be DOUBLE");
+      error->all(FLERR,"surf_react surface/pwi R_surf attribute must be DOUBLE");
     if (surf->esize[rindex_custom] != 0)
-      error->all(FLERR,"surf_react wall_pwi R_surf attribute must be scalar per-surf");
+      error->all(FLERR,"surf_react surface/pwi R_surf attribute must be scalar per-surf");
     surf->spread_custom(rindex_custom);
   }
 }
 
 /* ---------------------------------------------------------------------- */
 
-int SurfReactWallPWI::react(Particle::OnePart *&ip, int isurf, double *norm,
+int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
                             Particle::OnePart *&jp, int &)
 {
   int n = reactions[ip->ispecies].n;
@@ -410,7 +410,7 @@ int SurfReactWallPWI::react(Particle::OnePart *&ip, int isurf, double *norm,
 
 /* ---------------------------------------------------------------------- */
 
-void SurfReactWallPWI::sample_cosine_velocity(double *v, double *norm,
+void SurfReactSurfacePWI::sample_cosine_velocity(double *v, double *norm,
                                                double energy_eV, double mass)
 {
   // speed from kinetic energy: E = 0.5 * m * v^2
@@ -446,24 +446,24 @@ void SurfReactWallPWI::sample_cosine_velocity(double *v, double *norm,
 
 /* ---------------------------------------------------------------------- */
 
-char *SurfReactWallPWI::reactionID(int m)
+char *SurfReactSurfacePWI::reactionID(int m)
 {
   return rlist[m].id;
 }
 
-double SurfReactWallPWI::reaction_coeff(int m)
+double SurfReactSurfacePWI::reaction_coeff(int m)
 {
   return rlist[m].prob;
 }
 
-int SurfReactWallPWI::match_reactant(char *species, int m)
+int SurfReactSurfacePWI::match_reactant(char *species, int m)
 {
   for (int i = 0; i < rlist[m].nreactant; i++)
     if (strcmp(species, rlist[m].id_reactants[i]) == 0) return 1;
   return 0;
 }
 
-int SurfReactWallPWI::match_product(char *species, int m)
+int SurfReactSurfacePWI::match_product(char *species, int m)
 {
   for (int i = 0; i < rlist[m].nproduct; i++)
     if (strcmp(species, rlist[m].id_products[i]) == 0) return 1;
@@ -472,7 +472,7 @@ int SurfReactWallPWI::match_product(char *species, int m)
 
 /* ---------------------------------------------------------------------- */
 
-void SurfReactWallPWI::init_reactions()
+void SurfReactSurfacePWI::init_reactions()
 {
   for (int m = 0; m < nlist_recycle; m++) {
     OneReaction *r = &rlist[m];
@@ -489,7 +489,7 @@ void SurfReactWallPWI::init_reactions()
 
   memory->destroy(reactions);
   int nspecies = particle->nspecies;
-  reactions = memory->create(reactions, nspecies, "surf_react_wall_pwi:reactions");
+  reactions = memory->create(reactions, nspecies, "surf_react_surface_pwi:reactions");
 
   for (int i = 0; i < nspecies; i++) reactions[i].n = 0;
 
@@ -502,7 +502,7 @@ void SurfReactWallPWI::init_reactions()
   }
 
   memory->destroy(indices);
-  memory->create(indices, ntot > 0 ? ntot : 1, "surf_react_wall_pwi:indices");
+  memory->create(indices, ntot > 0 ? ntot : 1, "surf_react_surface_pwi:indices");
 
   int offset = 0;
   for (int i = 0; i < nspecies; i++) {
@@ -521,7 +521,7 @@ void SurfReactWallPWI::init_reactions()
 
 /* ---------------------------------------------------------------------- */
 
-void SurfReactWallPWI::readfile(char *fname)
+void SurfReactSurfacePWI::readfile(char *fname)
 {
   int n, n1, n2, eof;
   char line1[MAXLINE], line2[MAXLINE];
@@ -551,7 +551,7 @@ void SurfReactWallPWI::readfile(char *fname)
       maxlist_recycle += DELTALIST;
       rlist = (OneReaction *)
         memory->srealloc(rlist, maxlist_recycle*sizeof(OneReaction),
-                         "surf_react_wall_pwi:rlist");
+                         "surf_react_surface_pwi:rlist");
       for (int i = nlist_recycle; i < maxlist_recycle; i++) {
         r = &rlist[i];
         r->nreactant = r->nproduct = 0;
@@ -661,13 +661,13 @@ void SurfReactWallPWI::readfile(char *fname)
       word = strtok(NULL, " \t\n");
       if (!word) error->all(FLERR, "Missing TRIM table name in recycle reaction");
       if (trim_dir.empty())
-        error->all(FLERR, "surf_react wall_pwi: TRIM reaction used but "
+        error->all(FLERR, "surf_react surface/pwi: TRIM reaction used but "
                           "trim_dir keyword not set");
       int it = load_or_get_trim_table(word);
       if (it < 0) {
         char str[256];
         snprintf(str, sizeof(str),
-                 "surf_react wall_pwi: failed to load TRIM table '%s' "
+                 "surf_react surface/pwi: failed to load TRIM table '%s' "
                  "from %s", word, trim_dir.c_str());
         error->all(FLERR, str);
       }
@@ -738,7 +738,7 @@ void SurfReactWallPWI::readfile(char *fname)
    Returns index into trim_tables, or -1 on failure.
 ------------------------------------------------------------------------- */
 
-int SurfReactWallPWI::load_or_get_trim_table(const char *name)
+int SurfReactSurfacePWI::load_or_get_trim_table(const char *name)
 {
   std::string sname(name);
   auto it = trim_index.find(sname);
@@ -748,88 +748,116 @@ int SurfReactWallPWI::load_or_get_trim_table(const char *name)
 
   std::string path = trim_dir + "/" + sname + ".h5";
 
-  try {
-    H5::H5File file(path, H5F_ACC_RDONLY);
+  Reflection::Table t;
+  t.name = sname;
+  t.Z1 = t.M1 = t.Z2 = t.M2 = 0.0;
 
-    auto read_1d = [&](const std::string &ds, std::vector<double> &out) {
-      H5::DataSet d = file.openDataSet(ds);
-      H5::DataSpace sp = d.getSpace();
-      hsize_t dim;
-      sp.getSimpleExtentDims(&dim);
-      out.resize(static_cast<size_t>(dim));
-      d.read(out.data(), H5::PredType::NATIVE_DOUBLE);
-    };
-    auto read_flat = [&](const std::string &ds, std::vector<double> &out,
-                         size_t expected) {
-      H5::DataSet d = file.openDataSet(ds);
-      H5::DataSpace sp = d.getSpace();
-      int rank = sp.getSimpleExtentNdims();
-      std::vector<hsize_t> dims(rank);
-      sp.getSimpleExtentDims(dims.data());
-      size_t total = 1;
-      for (int r = 0; r < rank; r++) total *= dims[r];
-      if (total != expected) {
-        throw std::runtime_error(
-          "surf_react recycle TRIM: " + ds + " has " + std::to_string(total)
-          + " elements, expected " + std::to_string(expected));
-      }
-      out.resize(total);
-      d.read(out.data(), H5::PredType::NATIVE_DOUBLE);
-    };
+  const int nE = Reflection::NE;
+  const int nW = Reflection::NTHETA;
+  const int nR = Reflection::NQ;
 
-    Reflection::Table t;
-    t.name = sname;
+  // Rank 0 reads the HDF5 TRIM table; other ranks receive via Bcast
+  // below. SPARTA idiom: rank 0 calls error->one on failure (MPI_Abort
+  // kills the whole job immediately, no status handshake needed).
+  if (comm->me == 0) {
+    try {
+      H5::H5File file(path, H5F_ACC_RDONLY);
 
-    read_1d("E",     t.E_grid);
-    read_1d("theta", t.theta_grid);
-    read_1d("raar",  t.raar);
+      auto read_1d = [&](const std::string &ds, std::vector<double> &out) {
+        H5::DataSet d = file.openDataSet(ds);
+        H5::DataSpace sp = d.getSpace();
+        hsize_t dim;
+        sp.getSimpleExtentDims(&dim);
+        out.resize(static_cast<size_t>(dim));
+        d.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+      };
+      auto read_flat = [&](const std::string &ds, std::vector<double> &out,
+                           size_t expected) {
+        H5::DataSet d = file.openDataSet(ds);
+        H5::DataSpace sp = d.getSpace();
+        int rnk = sp.getSimpleExtentNdims();
+        std::vector<hsize_t> dims(rnk);
+        sp.getSimpleExtentDims(dims.data());
+        size_t total = 1;
+        for (int r = 0; r < rnk; r++) total *= dims[r];
+        if (total != expected)
+          throw std::runtime_error(ds + " has wrong element count in " + path);
+        out.resize(total);
+        d.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+      };
 
-    const int nE = Reflection::NE;
-    const int nW = Reflection::NTHETA;
-    const int nR = Reflection::NQ;
+      read_1d("E",     t.E_grid);
+      read_1d("theta", t.theta_grid);
+      read_1d("raar",  t.raar);
 
-    if ((int)t.E_grid.size() != nE || (int)t.theta_grid.size() != nW ||
-        (int)t.raar.size() != nR) {
-      throw std::runtime_error(
-        "surf_react recycle TRIM: axis shape mismatch in " + path);
-    }
+      if ((int)t.E_grid.size() != nE || (int)t.theta_grid.size() != nW ||
+          (int)t.raar.size() != nR)
+        throw std::runtime_error("TRIM axis shape mismatch");
 
-    read_flat("R_N",         t.R_N,         (size_t)nE * nW);
-    read_flat("Eout_q",      t.Eout_q,      (size_t)nE * nW * nR);
-    read_flat("Eout_min",    t.Eout_min,    (size_t)nE * nW);
-    read_flat("Eout_max",    t.Eout_max,    (size_t)nE * nW);
-    read_flat("cos_polar_q", t.cos_polar_q, (size_t)nE * nW * nR * nR);
-    read_flat("cos_azim_q",  t.cos_azim_q,  (size_t)nE * nW * nR * nR * nR);
+      read_flat("R_N",         t.R_N,         (size_t)nE * nW);
+      read_flat("Eout_q",      t.Eout_q,      (size_t)nE * nW * nR);
+      read_flat("Eout_min",    t.Eout_min,    (size_t)nE * nW);
+      read_flat("Eout_max",    t.Eout_max,    (size_t)nE * nW);
+      read_flat("cos_polar_q", t.cos_polar_q, (size_t)nE * nW * nR * nR);
+      read_flat("cos_azim_q",  t.cos_azim_q,  (size_t)nE * nW * nR * nR * nR);
 
-    t.Z1 = t.M1 = t.Z2 = t.M2 = 0.0;
-    auto read_attr = [&](const std::string &aname, double &val) {
-      if (file.attrExists(aname)) {
-        H5::Attribute a = file.openAttribute(aname);
-        a.read(H5::PredType::NATIVE_DOUBLE, &val);
-      }
-    };
-    read_attr("Z1", t.Z1); read_attr("M1", t.M1);
-    read_attr("Z2", t.Z2); read_attr("M2", t.M2);
+      auto read_attr = [&](const std::string &aname, double &val) {
+        if (file.attrExists(aname)) {
+          H5::Attribute a = file.openAttribute(aname);
+          a.read(H5::PredType::NATIVE_DOUBLE, &val);
+        }
+      };
+      read_attr("Z1", t.Z1); read_attr("M1", t.M1);
+      read_attr("Z2", t.Z2); read_attr("M2", t.M2);
 
-    int idx = static_cast<int>(trim_tables.size());
-    trim_tables.push_back(std::move(t));
-    trim_index[sname] = idx;
-
-    if (comm->me == 0) {
       fprintf(screen ? screen : logfile,
-              "surf_react wall_pwi: loaded TRIM table '%s' from %s\n",
+              "surf_react surface/pwi: loaded TRIM table '%s' from %s\n",
               sname.c_str(), path.c_str());
+    } catch (const std::exception &e) {
+      std::string msg = "surf_react surface/pwi: TRIM load of '" + sname +
+                        "' (" + path + ") failed: " + e.what();
+      error->one(FLERR, msg.c_str());  // MPI_Abort — does not return
     }
-    return idx;
-  } catch (const std::exception &e) {
-    if (comm->me == 0)
-      fprintf(screen ? screen : logfile,
-              "surf_react recycle TRIM load error for '%s' (%s): %s\n",
-              sname.c_str(), path.c_str(), e.what());
-    return -1;
-  } catch (...) {
-    return -1;
   }
+
+  // We only reach here if the rank-0 read succeeded. Broadcast the
+  // fixed-dimension table payload. Axis dims (NE, NTHETA, NQ) are
+  // compile-time constants, so no dim Bcast needed.
+  MPI_Bcast(&t.Z1, 1, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&t.M1, 1, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&t.Z2, 1, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&t.M2, 1, MPI_DOUBLE, 0, world);
+
+  const int n_RN          = nE * nW;
+  const int n_Eout_q      = nE * nW * nR;
+  const int n_cos_polar_q = nE * nW * nR * nR;
+  const int n_cos_azim_q  = nE * nW * nR * nR * nR;
+
+  if (comm->me != 0) {
+    t.E_grid.resize(nE);
+    t.theta_grid.resize(nW);
+    t.raar.resize(nR);
+    t.R_N.resize(n_RN);
+    t.Eout_q.resize(n_Eout_q);
+    t.Eout_min.resize(n_RN);
+    t.Eout_max.resize(n_RN);
+    t.cos_polar_q.resize(n_cos_polar_q);
+    t.cos_azim_q.resize(n_cos_azim_q);
+  }
+  MPI_Bcast(t.E_grid.data(),      nE,              MPI_DOUBLE, 0, world);
+  MPI_Bcast(t.theta_grid.data(),  nW,              MPI_DOUBLE, 0, world);
+  MPI_Bcast(t.raar.data(),        nR,              MPI_DOUBLE, 0, world);
+  MPI_Bcast(t.R_N.data(),         n_RN,            MPI_DOUBLE, 0, world);
+  MPI_Bcast(t.Eout_q.data(),      n_Eout_q,        MPI_DOUBLE, 0, world);
+  MPI_Bcast(t.Eout_min.data(),    n_RN,            MPI_DOUBLE, 0, world);
+  MPI_Bcast(t.Eout_max.data(),    n_RN,            MPI_DOUBLE, 0, world);
+  MPI_Bcast(t.cos_polar_q.data(), n_cos_polar_q,   MPI_DOUBLE, 0, world);
+  MPI_Bcast(t.cos_azim_q.data(),  n_cos_azim_q,    MPI_DOUBLE, 0, world);
+
+  int idx = static_cast<int>(trim_tables.size());
+  trim_tables.push_back(std::move(t));
+  trim_index[sname] = idx;
+  return idx;
 }
 
 /* ----------------------------------------------------------------------
@@ -856,7 +884,7 @@ int SurfReactWallPWI::load_or_get_trim_table(const char *name)
    particle->species. Mass is taken from that table.
 ------------------------------------------------------------------------- */
 
-void SurfReactWallPWI::sample_thermal_flux_velocity(double *v,
+void SurfReactSurfacePWI::sample_thermal_flux_velocity(double *v,
                                                      const double *norm,
                                                      double T_K, double mass)
 {
@@ -910,7 +938,7 @@ void SurfReactWallPWI::sample_thermal_flux_velocity(double *v,
    plane containing (norm, v_in) -- this is EIRENE's convention.
 ------------------------------------------------------------------------- */
 
-void SurfReactWallPWI::sample_reflected_velocity(double *v_out,
+void SurfReactSurfacePWI::sample_reflected_velocity(double *v_out,
                                                   const double *v_in,
                                                   const double *norm,
                                                   double E_out_eV,
@@ -967,7 +995,7 @@ void SurfReactWallPWI::sample_reflected_velocity(double *v_out,
 
 /* ---------------------------------------------------------------------- */
 
-int SurfReactWallPWI::readone(char *line1, char *line2, int &n1, int &n2)
+int SurfReactSurfacePWI::readone(char *line1, char *line2, int &n1, int &n2)
 {
   char *ptr;
   while ((ptr = fgets(line1, MAXLINE, fp))) {

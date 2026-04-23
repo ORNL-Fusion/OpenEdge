@@ -758,7 +758,7 @@ void FixEmitSurfRecycle::perform_task()
       vbmag = vr * std::cos(theta);
 
       // SPARTA canonical: normal[] points INTO the fluid (matches
-      // stock fix_emit_surf, surf_collide_diffuse, surf_react wall_pwi).
+      // stock fix_emit_surf, surf_collide_diffuse, surf_react surface/pwi).
       // Emission into the fluid = +vnmag * normal.
       v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
       v[1] = vnmag*normal[1] + vamag*atan[1] + vbmag*btan[1];

@@ -122,7 +122,5 @@ action fix_thermal_force_i.cpp
 action fix_thermal_force_i.h
 action fix_viscous.cpp
 action fix_viscous.h
-action surf_react_mpex.cpp
-action surf_react_mpex.h
-action surf_react_pmi.cpp
-action surf_react_pmi.h
+action surf_react_surface_pwi.cpp
+action surf_react_surface_pwi.h

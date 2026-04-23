@@ -7,7 +7,7 @@
     Franck-Condon / thermal exchange channels. Species- and material-
     agnostic (works for D/W, H/Li, T/Be, etc.).
 
-    See doc/surf_react_wall_pwi.txt for the reactions file grammar and
+    See doc/surf_react_surface_pwi.txt for the reactions file grammar and
     the physics of each channel type.
 
     Contributors:
@@ -17,13 +17,12 @@
 
 #ifdef SURF_REACT_CLASS
 
-SurfReactStyle(wall_pwi,SurfReactWallPWI)
-SurfReactStyle(recycle,SurfReactWallPWI)   // legacy alias; prefer wall_pwi
+SurfReactStyle(surface/pwi,SurfReactSurfacePWI)
 
 #else
 
-#ifndef SPARTA_SURF_REACT_WALL_PWI_H
-#define SPARTA_SURF_REACT_WALL_PWI_H
+#ifndef SPARTA_SURF_REACT_SURFACE_PWI_H
+#define SPARTA_SURF_REACT_SURFACE_PWI_H
 
 #include "surf_react.h"
 #include "reflection_tables.h"
@@ -33,10 +32,10 @@ SurfReactStyle(recycle,SurfReactWallPWI)   // legacy alias; prefer wall_pwi
 
 namespace SPARTA_NS {
 
-class SurfReactWallPWI : public SurfReact {
+class SurfReactSurfacePWI : public SurfReact {
  public:
-  SurfReactWallPWI(class SPARTA *, int, char **);
-  ~SurfReactWallPWI();
+  SurfReactSurfacePWI(class SPARTA *, int, char **);
+  ~SurfReactSurfacePWI();
   void init();
   int react(Particle::OnePart *&, int, double *, Particle::OnePart *&, int &);
   char *reactionID(int);
