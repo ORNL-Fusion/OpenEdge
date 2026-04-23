@@ -9,12 +9,12 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(chem/adas, FixChemAdas)
+FixStyle(volume/chem/adas, FixVolumeChemAdas)
 
 #else
 
-#ifndef SPARTA_FIX_CHEM_ADAS_H
-#define SPARTA_FIX_CHEM_ADAS_H
+#ifndef SPARTA_FIX_VOLUME_CHEM_ADAS_H
+#define SPARTA_FIX_VOLUME_CHEM_ADAS_H
 
 #include <string>
 #include <H5Cpp.h>
@@ -45,10 +45,10 @@ class RanKnuth;
 class ComputePlasmaFields;
 
 
-class FixChemAdas : public Fix {
+class FixVolumeChemAdas : public Fix {
 public:
-    FixChemAdas(class SPARTA*, int, char**);
-    virtual ~FixChemAdas();
+    FixVolumeChemAdas(class SPARTA*, int, char**);
+    virtual ~FixVolumeChemAdas();
     int setmask();
     void init();
     void end_of_step();

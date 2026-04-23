@@ -3,7 +3,7 @@
    Rate table lookups, Poisson draws, and species changes all on device.
 ------------------------------------------------------------------------- */
 
-#include "fix_chem_adas_kokkos.h"
+#include "fix_volume_chem_adas_kokkos.h"
 #include "particle_kokkos.h"
 #include "grid_kokkos.h"
 #include "compute.h"
@@ -33,8 +33,8 @@ vec_to_dev(const std::vector<double> &v, const std::string &label)
 
 /* ---------------------------------------------------------------------- */
 
-FixChemAdasKokkos::FixChemAdasKokkos(SPARTA *sparta, int narg, char **arg) :
-  FixChemAdas(sparta, narg, arg),
+FixVolumeChemAdasKokkos::FixVolumeChemAdasKokkos(SPARTA *sparta, int narg, char **arg) :
+  FixVolumeChemAdas(sparta, narg, arg),
   rand_pool(12345 + comm->me
 #ifdef SPARTA_KOKKOS_EXACT
             , sparta
@@ -47,7 +47,7 @@ FixChemAdasKokkos::FixChemAdasKokkos(SPARTA *sparta, int narg, char **arg) :
   datamask_modify = PARTICLE_MASK;
 }
 
-FixChemAdasKokkos::~FixChemAdasKokkos()
+FixVolumeChemAdasKokkos::~FixVolumeChemAdasKokkos()
 {
   if (copymode) return;
 #ifdef SPARTA_KOKKOS_EXACT
@@ -57,7 +57,7 @@ FixChemAdasKokkos::~FixChemAdasKokkos()
 
 /* ---------------------------------------------------------------------- */
 
-int FixChemAdasKokkos::resolve_column(const GridSrc &S)
+int FixVolumeChemAdasKokkos::resolve_column(const GridSrc &S)
 {
   if (S.kind != SRC_COMP) return -1;
   return S.col - 1;
@@ -65,9 +65,9 @@ int FixChemAdasKokkos::resolve_column(const GridSrc &S)
 
 /* ---------------------------------------------------------------------- */
 
-void FixChemAdasKokkos::init()
+void FixVolumeChemAdasKokkos::init()
 {
-  FixChemAdas::init();
+  FixVolumeChemAdas::init();
 
   // copy rate tables to device
   RateData &rd = materials_rate_data[atomic_number];
@@ -149,7 +149,7 @@ void FixChemAdasKokkos::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixChemAdasKokkos::end_of_step()
+void FixVolumeChemAdasKokkos::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
 
@@ -226,7 +226,7 @@ void FixChemAdasKokkos::end_of_step()
 /* ---------------------------------------------------------------------- */
 
 KOKKOS_INLINE_FUNCTION
-void FixChemAdasKokkos::operator()(int i) const
+void FixVolumeChemAdasKokkos::operator()(int i) const
 {
   int icell = d_particles(i).icell;
 
@@ -243,7 +243,7 @@ void FixChemAdasKokkos::operator()(int i) const
 /* ---------------------------------------------------------------------- */
 
 KOKKOS_INLINE_FUNCTION
-int FixChemAdasKokkos::kk_attempt(int idx, double Te_eV, double ne_m3,
+int FixVolumeChemAdasKokkos::kk_attempt(int idx, double Te_eV, double ne_m3,
                                    rand_type &rng) const
 {
   int isp = d_particles(idx).ispecies;
@@ -327,7 +327,7 @@ int FixChemAdasKokkos::kk_attempt(int idx, double Te_eV, double ne_m3,
 /* ---------------------------------------------------------------------- */
 
 KOKKOS_INLINE_FUNCTION
-double FixChemAdasKokkos::kk_interp_rate(int rate_type, int charge_idx,
+double FixVolumeChemAdasKokkos::kk_interp_rate(int rate_type, int charge_idx,
                                           double logTe, double logne_cm) const
 {
   // rate_type: 0=ionization, 1=recombination, 2=charge exchange
@@ -360,7 +360,7 @@ double FixChemAdasKokkos::kk_interp_rate(int rate_type, int charge_idx,
 /* ---------------------------------------------------------------------- */
 
 KOKKOS_INLINE_FUNCTION
-double FixChemAdasKokkos::kk_bilinear(
+double FixVolumeChemAdasKokkos::kk_bilinear(
   double x0, double x1, double y0, double y1,
   double f00, double f01, double f10, double f11,
   double x, double y) const
@@ -376,7 +376,7 @@ double FixChemAdasKokkos::kk_bilinear(
 /* ---------------------------------------------------------------------- */
 
 KOKKOS_INLINE_FUNCTION
-int FixChemAdasKokkos::kk_bracket(const t_double_1d &grid, int n, double x,
+int FixVolumeChemAdasKokkos::kk_bracket(const t_double_1d &grid, int n, double x,
                                    int &ilo, int &ihi) const
 {
   if (n < 2) return 0;

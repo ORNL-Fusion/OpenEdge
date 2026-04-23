@@ -30,7 +30,7 @@
 #include "variable.h"
 #include "grid.h"
 #include "OPENEDGE/compute_plasma_fields.h"
-#include "OPENEDGE/fix_chem_adas.h"
+#include "OPENEDGE/fix_volume_chem_adas.h"
 
 using namespace SPARTA_NS;
 
@@ -363,7 +363,7 @@ void openedge_reload_plasma(void *ptr, char *compute_id, char *new_path)
    zero the per-cell source tally on a fix chem/adas instance between
    outer coupling iterations (Mode A / Gkeyll / SOLPS handoff).
    id = fix ID (e.g. "fchem")
-   silently returns if fix is missing or not a FixChemAdas.
+   silently returns if fix is missing or not a FixVolumeChemAdas.
 ------------------------------------------------------------------------- */
 
 void openedge_reset_fix_tally(void *ptr, char *id)
@@ -373,8 +373,8 @@ void openedge_reset_fix_tally(void *ptr, char *id)
   int ifix = sparta->modify->find_fix(id);
   if (ifix < 0) return;
 
-  FixChemAdas *fca =
-    dynamic_cast<FixChemAdas *>(sparta->modify->fix[ifix]);
+  FixVolumeChemAdas *fca =
+    dynamic_cast<FixVolumeChemAdas *>(sparta->modify->fix[ifix]);
   if (!fca) return;
 
   fca->reset_tally();

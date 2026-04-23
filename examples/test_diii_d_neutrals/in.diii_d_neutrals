@@ -48,9 +48,10 @@ global              bfield_compute pd
 global              pcache_nevery 100
 
 # ---- Volumetric chemistry (Mode A neutral transport) ----
-# chem/adas auto-resolves ADAS_Rates_1.h5 + database/adas/reactions/D.reactions.
+# volume/chem/adas reads rates from database/processes.h5 (/volume/rates/)
+# and the reaction list from database/adas/reactions/D.reactions.
 # `output summary` emits 6 cols {Sp, Sm_xyz, Qe, Qi}.
-fix fchem chem/adas 10 D auto &
+fix fchem volume/chem/adas 10 D auto &
     mode neutral source_species D D2 &
     units rate &
     output summary

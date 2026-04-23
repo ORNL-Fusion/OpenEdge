@@ -42,7 +42,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "fix_cross_diffusion.h"
 #include "fix_thermal_force.h"
 #include "fix_coll_nanbu.h"
-#include "fix_chem_adas.h"
+#include "fix_volume_chem_adas.h"
 #include "memory.h"
 #include "error.h"
 #include <algorithm>
@@ -670,8 +670,8 @@ void Update::init()
         // charge-exchange (EXCHANGE) channel. Skip those bits when the
         // reactions file has no CX entry — common for pure ionization runs.
         pcache_need_mask |= PCACHE_TE | PCACHE_NE;
-        FixChemAdas *fchem =
-            dynamic_cast<FixChemAdas *>(modify->fix[ifix]);
+        FixVolumeChemAdas *fchem =
+            dynamic_cast<FixVolumeChemAdas *>(modify->fix[ifix]);
         if (fchem && fchem->needs_cx_fields()) {
           pcache_need_mask |= PCACHE_TI | PCACHE_VPAR | PCACHE_BFIELD;
         }

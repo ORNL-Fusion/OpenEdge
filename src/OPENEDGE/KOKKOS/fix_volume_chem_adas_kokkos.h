@@ -5,14 +5,14 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(chem/adas/kk,FixChemAdasKokkos)
+FixStyle(volume/volume/chem/adas/kk,FixVolumeChemAdasKokkos)
 
 #else
 
-#ifndef SPARTA_FIX_CHEM_ADAS_KOKKOS_H
-#define SPARTA_FIX_CHEM_ADAS_KOKKOS_H
+#ifndef SPARTA_FIX_VOLUME_CHEM_ADAS_KOKKOS_H
+#define SPARTA_FIX_VOLUME_CHEM_ADAS_KOKKOS_H
 
-#include "fix_chem_adas.h"
+#include "fix_volume_chem_adas.h"
 #include "kokkos_type.h"
 #include "Kokkos_Random.hpp"
 #include "rand_pool_wrap.h"
@@ -21,10 +21,10 @@ FixStyle(chem/adas/kk,FixChemAdasKokkos)
 
 namespace SPARTA_NS {
 
-class FixChemAdasKokkos : public FixChemAdas {
+class FixVolumeChemAdasKokkos : public FixVolumeChemAdas {
  public:
-  FixChemAdasKokkos(class SPARTA *, int, char **);
-  ~FixChemAdasKokkos();
+  FixVolumeChemAdasKokkos(class SPARTA *, int, char **);
+  ~FixVolumeChemAdasKokkos();
   void init();
   void end_of_step();
 

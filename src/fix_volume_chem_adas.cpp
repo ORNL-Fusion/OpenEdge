@@ -8,7 +8,7 @@
 
 #include "stdlib.h"
 #include "string.h"
-#include "fix_chem_adas.h"
+#include "fix_volume_chem_adas.h"
 #include "update.h"
 #include "grid.h"
 #include "particle.h"
@@ -50,15 +50,15 @@ enum{ADAS,JANEV};                                      // rate styles
 #define DELTALIST 16
 /* ---------------------------------------------------------------------- */
 
-FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
+FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
-    // fix ID chem/adas <nevery> <species|Z> <reactions_file> [adas_dir <path>] [plasma <TeVar> <NeVar>]
+    // fix ID volume/chem/adas <nevery> <species|Z> <reactions_file> [adas_dir <path>] [plasma <TeVar> <NeVar>]
     //   <species|Z>  element symbol (e.g. "C", "W") OR numeric atomic number.
     //                When given as a symbol, the ADAS file is auto-located
     //                under ${OPENEDGE_ROOT}/database/adas/ADAS_Rates_<Z>.h5.
 
-  if (narg < 5)     error->all(FLERR,"Illegal fix chem/adas command (need: nevery <species|Z> reactions_file [adas_dir path] [plasma TeVar NeVar])");
+  if (narg < 5)     error->all(FLERR,"Illegal fix volume/chem/adas command (need: nevery <species|Z> reactions_file [adas_dir path] [plasma TeVar NeVar])");
     nevery = atoi(arg[2]);
 
     // Accept arg[3] as either a numeric Z or an element symbol.
@@ -71,7 +71,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
       } else {
         atomic_number = element_to_z(tok);
         if (atomic_number < 0) {
-          std::string msg = "fix chem/adas: unknown element '" + tok + "'";
+          std::string msg = "fix volume/chem/adas: unknown element '" + tok + "'";
           error->all(FLERR, msg.c_str());
         }
       }
@@ -111,7 +111,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
     int iarg = 5;
     if (iarg < narg && strcmp(arg[iarg], "adas_dir") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR,"fix chem/adas: adas_dir requires a path argument");
+        error->all(FLERR,"fix volume/chem/adas: adas_dir requires a path argument");
       adas_base_dir = arg[iarg + 1];
       iarg += 2;
     }
@@ -120,7 +120,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
     // under /volume/rates/<cls>/<elem>/ + /volume/thresholds/.  The
     // legacy ADAS_Rates_<Z>.h5 fallback was removed in Phase 2b; if
     // processes.h5 is missing or doesn't contain the requested element,
-    // chem/adas errors out at init.
+    // volume/chem/adas errors out at init.
     {
       // Derive the canonical lowercase element symbol for processes.h5
       // group lookup by going through Z (element_to_z already normalizes
@@ -178,10 +178,10 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
       if (!loaded_from_processes) {
         std::string msg;
         if (processes_path.empty()) {
-          msg = "fix chem/adas: database/processes.h5 not found. "
+          msg = "fix volume/chem/adas: database/processes.h5 not found. "
                 "Build it with database/ingest/build_processes_h5.py.";
         } else {
-          msg = "fix chem/adas: element '" + elem_sym +
+          msg = "fix volume/chem/adas: element '" + elem_sym +
                 "' (Z=" + std::to_string(atomic_number) + ") not found in "
                 + processes_path + " under /volume/rates/";
         }
@@ -207,7 +207,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
    // populated by update.cpp (requires sheath or GCA plasma compute).
   if (iarg < narg && strcmp(arg[iarg], "plasma") == 0) {
     if (narg < iarg + 3)
-      error->all(FLERR,"fix chem/adas plasma requires: plasma <TeSrc> <NeSrc>");
+      error->all(FLERR,"fix volume/chem/adas plasma requires: plasma <TeSrc> <NeSrc>");
 
     use_grid_plasma = 1;
 
@@ -219,7 +219,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
         if (!lb || tok[strlen(tok)-1] != ']') {
           char msg[160];
           snprintf(msg, sizeof(msg),
-                  "fix chem/adas: bad %s token (use c_id[idx])", label);
+                  "fix volume/chem/adas: bad %s token (use c_id[idx])", label);
           error->all(FLERR, msg);
         }
         const int idlen = lb - name;
@@ -230,7 +230,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
         if (dst.col <= 0) {
           char msg[160];
           snprintf(msg, sizeof(msg),
-                  "fix chem/adas: %s column must be >=1", label);
+                  "fix volume/chem/adas: %s column must be >=1", label);
           error->all(FLERR, msg);
         }
       } else {
@@ -255,10 +255,10 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
   while (iarg < narg) {
     if (strcmp(arg[iarg], "mode") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR, "fix chem/adas: mode requires a value (kinetic|neutral)");
+        error->all(FLERR, "fix volume/chem/adas: mode requires a value (kinetic|neutral)");
       if (strcmp(arg[iarg+1], "neutral") == 0) eirene_mode = 1;
       else if (strcmp(arg[iarg+1], "kinetic") == 0) eirene_mode = 0;
-      else error->all(FLERR, "fix chem/adas: unknown mode (use kinetic|neutral)");
+      else error->all(FLERR, "fix volume/chem/adas: unknown mode (use kinetic|neutral)");
       iarg += 2;
     } else if (strcmp(arg[iarg], "source_species") == 0) {
       // consume species names until the next keyword or end of args
@@ -276,7 +276,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
              strcmp(arg[j], "dissociation") != 0) j++;
       nsrc_species = j - (iarg + 1);
       if (nsrc_species <= 0)
-        error->all(FLERR, "fix chem/adas: source_species needs >=1 species name");
+        error->all(FLERR, "fix volume/chem/adas: source_species needs >=1 species name");
       src_species_names = new char*[nsrc_species];
       for (int k = 0; k < nsrc_species; k++) {
         int n = strlen(arg[iarg + 1 + k]) + 1;
@@ -286,21 +286,21 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
       iarg = j;
     } else if (strcmp(arg[iarg], "stop_on_exhaust") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR, "fix chem/adas: stop_on_exhaust requires yes|no");
+        error->all(FLERR, "fix volume/chem/adas: stop_on_exhaust requires yes|no");
       if (strcmp(arg[iarg+1], "yes") == 0) stop_on_exhaust = 1;
       else if (strcmp(arg[iarg+1], "no") == 0) stop_on_exhaust = 0;
-      else error->all(FLERR, "fix chem/adas: stop_on_exhaust must be yes|no");
+      else error->all(FLERR, "fix volume/chem/adas: stop_on_exhaust must be yes|no");
       iarg += 2;
     } else if (strcmp(arg[iarg], "exhaust_threshold") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR, "fix chem/adas: exhaust_threshold requires <N>");
+        error->all(FLERR, "fix volume/chem/adas: exhaust_threshold requires <N>");
       exhaust_threshold = ATOBIGINT(arg[iarg+1]);
       if (exhaust_threshold < 0)
-        error->all(FLERR, "fix chem/adas: exhaust_threshold must be >= 0");
+        error->all(FLERR, "fix volume/chem/adas: exhaust_threshold must be >= 0");
       iarg += 2;
     } else if (strcmp(arg[iarg], "units") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR, "fix chem/adas: units requires counts|rate|eirene");
+        error->all(FLERR, "fix volume/chem/adas: units requires counts|rate|eirene");
       if (strcmp(arg[iarg+1], "counts") == 0) {
         tally_units = TALLY_COUNTS;
         iarg += 2;
@@ -310,35 +310,35 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
       } else if (strcmp(arg[iarg+1], "batch") == 0) {
         // Batch (EIRENE-style MC): `units batch <N_trajectories> <R_puff>`
         if (iarg + 3 >= narg)
-          error->all(FLERR, "fix chem/adas: units batch requires N R_puff");
+          error->all(FLERR, "fix volume/chem/adas: units batch requires N R_puff");
         batch_N      = atoi(arg[iarg+2]);
         batch_R_puff = atof(arg[iarg+3]);
         if (batch_N <= 0 || batch_R_puff <= 0.0)
-          error->all(FLERR, "fix chem/adas: units batch needs N>0 and R_puff>0");
+          error->all(FLERR, "fix volume/chem/adas: units batch needs N>0 and R_puff>0");
         tally_units = TALLY_BATCH;
         iarg += 4;
       } else if (strcmp(arg[iarg+1], "batch_fix") == 0) {
         // EIRENE-batch auto-scaled from a paired emit fix:
         //   `units batch_fix <emit_fix_id> <R_puff>`
         if (iarg + 3 >= narg)
-          error->all(FLERR, "fix chem/adas: units batch_fix requires <fix_id> R_puff");
+          error->all(FLERR, "fix volume/chem/adas: units batch_fix requires <fix_id> R_puff");
         int n = strlen(arg[iarg+2]) + 1;
         batch_fix_id = new char[n];
         strcpy(batch_fix_id, arg[iarg+2]);
         batch_R_puff = atof(arg[iarg+3]);
         if (batch_R_puff <= 0.0)
-          error->all(FLERR, "fix chem/adas: units batch_fix needs R_puff > 0");
+          error->all(FLERR, "fix volume/chem/adas: units batch_fix needs R_puff > 0");
         tally_units = TALLY_BATCH_FIX;
         iarg += 4;
       } else {
-        error->all(FLERR, "fix chem/adas: units must be counts|rate|batch|batch_fix");
+        error->all(FLERR, "fix volume/chem/adas: units must be counts|rate|batch|batch_fix");
       }
     } else if (strcmp(arg[iarg], "output") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR, "fix chem/adas: output requires summary|detailed");
+        error->all(FLERR, "fix volume/chem/adas: output requires summary|detailed");
       if (strcmp(arg[iarg+1], "summary") == 0) output_mode = OUT_SUMMARY;
       else if (strcmp(arg[iarg+1], "detailed") == 0) output_mode = OUT_DETAILED;
-      else error->all(FLERR, "fix chem/adas: output must be summary|detailed");
+      else error->all(FLERR, "fix volume/chem/adas: output must be summary|detailed");
       iarg += 2;
     } else if (strcmp(arg[iarg], "ionization") == 0 ||
                strcmp(arg[iarg], "recombination") == 0 ||
@@ -347,7 +347,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
       if (iarg + 1 >= narg) {
         char msg[160];
         snprintf(msg, sizeof(msg),
-                 "fix chem/adas: %s requires yes|no", arg[iarg]);
+                 "fix volume/chem/adas: %s requires yes|no", arg[iarg]);
         error->all(FLERR, msg);
       }
       int v;
@@ -356,7 +356,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
       else {
         char msg[160];
         snprintf(msg, sizeof(msg),
-                 "fix chem/adas: %s must be yes|no", arg[iarg]);
+                 "fix volume/chem/adas: %s must be yes|no", arg[iarg]);
         error->all(FLERR, msg);
       }
       if (strcmp(arg[iarg], "ionization") == 0)        chan_ionization = v;
@@ -366,7 +366,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
       iarg += 2;
     } else {
       char msg[160];
-      snprintf(msg, sizeof(msg), "fix chem/adas: unknown keyword '%s'", arg[iarg]);
+      snprintf(msg, sizeof(msg), "fix volume/chem/adas: unknown keyword '%s'", arg[iarg]);
       error->all(FLERR, msg);
     }
   }
@@ -394,7 +394,7 @@ FixChemAdas::FixChemAdas(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixChemAdas::~FixChemAdas()
+FixVolumeChemAdas::~FixVolumeChemAdas()
 {
   if (copymode) return;
 
@@ -439,7 +439,7 @@ delete [] batch_fix_id;
 
 /* ---------------------------------------------------------------------- */
 
-void FixChemAdas::reset_tally()
+void FixVolumeChemAdas::reset_tally()
 {
   if (array_grid && maxgrid_src > 0)
     memset(&array_grid[0][0], 0,
@@ -448,7 +448,7 @@ void FixChemAdas::reset_tally()
 
 /* ---------------------------------------------------------------------- */
 
-int FixChemAdas::setmask()
+int FixVolumeChemAdas::setmask()
 {
   int mask = 0;
   mask |= END_OF_STEP;
@@ -457,7 +457,7 @@ int FixChemAdas::setmask()
 
 /* ---------------------------------------------------------------------- */
 
-void FixChemAdas::init()
+void FixVolumeChemAdas::init()
 {
 
   tally_flag = 0;
@@ -526,10 +526,10 @@ void FixChemAdas::init()
       if (total == 0) return;
       const int skipped = total - active;
       if (!enabled)
-        printf("[chem/adas] %-14s: disabled by toggle (%d in file)\n",
+        printf("[volume/chem/adas] %-14s: disabled by toggle (%d in file)\n",
                label, total);
       else
-        printf("[chem/adas] %-14s: %d active, %d skipped (of %d)\n",
+        printf("[volume/chem/adas] %-14s: %d active, %d skipped (of %d)\n",
                label, active, skipped, total);
     };
     report("ionization",    nI_active, nI_total, chan_ionization);
@@ -537,7 +537,7 @@ void FixChemAdas::init()
     report("cx",            nE_active, nE_total, chan_cx);
     report("dissociation",  nD_active, nD_total, chan_dissociation);
     if (!missing_species_samples.empty()) {
-      printf("[chem/adas] missing species (first %zu): ",
+      printf("[volume/chem/adas] missing species (first %zu): ",
              missing_species_samples.size());
       for (size_t k = 0; k < missing_species_samples.size(); k++)
         printf("%s%s", k ? "," : "", missing_species_samples[k].c_str());
@@ -545,7 +545,7 @@ void FixChemAdas::init()
     }
     auto it = materials_rate_data.find(atomic_number);
     const bool have = (it != materials_rate_data.end());
-    printf("[chem/adas] output %-8s (%d cols)  "
+    printf("[volume/chem/adas] output %-8s (%d cols)  "
            "ADAS tables: %s %s %s %s %s %s\n",
            output_mode == OUT_SUMMARY ? "summary" : "detailed",
            size_per_grid_cols,
@@ -628,18 +628,18 @@ void FixChemAdas::init()
 if (srcTe.kind == SRC_VAR) {
   tvar = input->variable->find(tstr);
   if (tvar < 0 || !input->variable->grid_style(tvar))
-    error->all(FLERR,"Temperature variable for chem/adas must be grid-style");
+    error->all(FLERR,"Temperature variable for volume/chem/adas must be grid-style");
 }
 if (srcNe.kind == SRC_VAR) {
   nvar = input->variable->find(nstr);
   if (nvar < 0 || !input->variable->grid_style(nvar))
-    error->all(FLERR,"Density variable for chem/adas must be grid-style");
+    error->all(FLERR,"Density variable for volume/chem/adas must be grid-style");
 }
 if ((srcTe.kind == SRC_VAR) || (srcNe.kind == SRC_VAR)) {
   if (grid->nlocal > maxgrid_plasma) {
     maxgrid_plasma = grid->maxlocal;
     memory->destroy(plasma_cache_2d);
-    memory->create(plasma_cache_2d, maxgrid_plasma, 2, "chem/adas:plasma_cache_2d");
+    memory->create(plasma_cache_2d, maxgrid_plasma, 2, "volume/chem/adas:plasma_cache_2d");
   }
   if (grid->nlocal)
     memset(&plasma_cache_2d[0][0], 0, sizeof(double)*grid->nlocal*2);
@@ -651,7 +651,7 @@ if ((srcTe.kind == SRC_VAR) || (srcNe.kind == SRC_VAR)) {
 if (grid->maxlocal > maxgrid_src) {
   maxgrid_src = grid->maxlocal;
   memory->grow(array_grid, maxgrid_src, size_per_grid_cols,
-               "chem/adas:array_grid(src)");
+               "volume/chem/adas:array_grid(src)");
 }
 if (maxgrid_src > 0) {
   memset(&array_grid[0][0], 0,
@@ -666,7 +666,7 @@ auto bind_compute = [&](GridSrc &S, const char *label){
   if (S.icompute < 0) {
     char msg[160];
     snprintf(msg, sizeof(msg),
-            "fix chem/adas: compute ID for %s not found", label);
+            "fix volume/chem/adas: compute ID for %s not found", label);
     error->all(FLERR, msg);
   }
 
@@ -674,20 +674,20 @@ auto bind_compute = [&](GridSrc &S, const char *label){
     if (c->per_grid_flag == 0) {
       char msg[160];
       snprintf(msg, sizeof(msg),
-              "fix chem/adas: compute for %s is not per-grid", label);
+              "fix volume/chem/adas: compute for %s is not per-grid", label);
       error->all(FLERR, msg);
     };
 if (c->size_per_grid_cols == 0) {
   if (S.col != 1) {
     char msg[160];
     snprintf(msg, sizeof(msg),
-             "fix chem/adas: compute column for %s must be 1 for vector source", label);
+             "fix volume/chem/adas: compute column for %s must be 1 for vector source", label);
     error->all(FLERR, msg);
   }
 } else if (S.col < 1 || S.col > c->size_per_grid_cols) {
   char msg[160];
   snprintf(msg, sizeof(msg),
-           "fix chem/adas: compute column for %s out of range", label);
+           "fix volume/chem/adas: compute column for %s out of range", label);
   error->all(FLERR, msg);
 }
 };
@@ -713,7 +713,7 @@ if (tally_units == TALLY_BATCH_FIX) {
   if (batch_fix_idx < 0) {
     char msg[160];
     snprintf(msg, sizeof(msg),
-             "fix chem/adas: units batch_fix source fix '%s' not found",
+             "fix volume/chem/adas: units batch_fix source fix '%s' not found",
              batch_fix_id);
     error->all(FLERR, msg);
   }
@@ -728,7 +728,7 @@ for (int k = 0; k < nsrc_species; k++) {
   if (sp < 0) {
     char msg[160];
     snprintf(msg, sizeof(msg),
-             "fix chem/adas: source_species '%s' not found",
+             "fix volume/chem/adas: source_species '%s' not found",
              src_species_names[k]);
     error->all(FLERR, msg);
   }
@@ -736,7 +736,7 @@ for (int k = 0; k < nsrc_species; k++) {
 }
 if (stop_on_exhaust && source_species.empty() && eirene_mode && comm->me == 0) {
   error->warning(FLERR,
-    "fix chem/adas: stop_on_exhaust requested without source_species; "
+    "fix volume/chem/adas: stop_on_exhaust requested without source_species; "
     "run will rely on SPARTA's built-in nglobal==0 termination");
 }
 
@@ -755,7 +755,7 @@ if (!cp_plasma_cached_ && srcNe.kind == SRC_COMP && srcNe.icompute >= 0) {
 
 /* ---------------------------------------------------------------------- */
 
-void FixChemAdas::end_of_step()
+void FixVolumeChemAdas::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
 
@@ -763,7 +763,7 @@ void FixChemAdas::end_of_step()
   if (srcTe.kind == SRC_NONE && srcNe.kind == SRC_NONE &&
       !update->plasma_cache_flag) {
     error->all(FLERR,
-      "fix chem/adas: no plasma source — either pass 'plasma <Te> <Ne>' "
+      "fix volume/chem/adas: no plasma source — either pass 'plasma <Te> <Ne>' "
       "or configure sheath/GCA so the per-particle plasma cache is active");
   }
 
@@ -778,7 +778,7 @@ void FixChemAdas::end_of_step()
    surf_react tally block printed at the end of each `run`.
 ---------------------------------------------------------------------- */
 
-void FixChemAdas::post_run()
+void FixVolumeChemAdas::post_run()
 {
   std::vector<bigint> local_tally(nlist, 0), global_tally(nlist, 0);
   for (int i = 0; i < nlist; i++) local_tally[i] = tally_reactions[i];
@@ -817,7 +817,7 @@ void FixChemAdas::post_run()
    current thermal temperature is calculated on a per-cell basis
 ---------------------------------------------------------------------- */
 
-void FixChemAdas::end_of_step_no_average()
+void FixVolumeChemAdas::end_of_step_no_average()
 {
   Particle::OnePart *particles = particle->particles;
   int *next = particle->next;
@@ -845,7 +845,7 @@ void FixChemAdas::end_of_step_no_average()
   if (grid->maxlocal > maxgrid_src) {
     const int oldmax = maxgrid_src;
     maxgrid_src = grid->maxlocal;
-    memory->grow(array_grid, maxgrid_src, ncols, "chem/adas:array_grid(src)");
+    memory->grow(array_grid, maxgrid_src, ncols, "volume/chem/adas:array_grid(src)");
     // zero the freshly-added rows (count mode relies on this for fresh cells)
     if (maxgrid_src > oldmax) {
       memset(&array_grid[oldmax][0], 0,
@@ -986,7 +986,7 @@ void FixChemAdas::end_of_step_no_average()
    memory usage
 ------------------------------------------------------------------------- */
 
-double FixChemAdas::memory_usage()
+double FixVolumeChemAdas::memory_usage()
 {
   double bytes = 0.0;
   bytes += maxgrid*3 * sizeof(double);    // vcom
@@ -997,7 +997,7 @@ double FixChemAdas::memory_usage()
    attempt a reaction for a single particle
 ------------------------------------------------------------------------- */
 
-int FixChemAdas::attempt(Particle::OnePart *ip, int ip_index,
+int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
                          double Te_eV, double ne_m3,
                          double Ti_eV, double vpar, double bx, double by, double bz)
 {
@@ -1382,7 +1382,7 @@ int FixChemAdas::attempt(Particle::OnePart *ip, int ip_index,
   return 1;
 }
 
-inline void FixChemAdas::compute_plasma_grid() {
+inline void FixVolumeChemAdas::compute_plasma_grid() {
   if (!use_grid_plasma) return;
   if (!grid->nlocal)    return;
 
@@ -1393,7 +1393,7 @@ inline void FixChemAdas::compute_plasma_grid() {
   if (grid->maxlocal > maxgrid_plasma) {
     maxgrid_plasma = grid->maxlocal;
     memory->destroy(plasma_cache_2d);
-    memory->create(plasma_cache_2d, maxgrid_plasma, 2, "chem/adas:plasma_cache_2d");
+    memory->create(plasma_cache_2d, maxgrid_plasma, 2, "volume/chem/adas:plasma_cache_2d");
   }
 
   // plasma_cache_2d[icell][0]=Te ; [icell][1]=ne
@@ -1406,7 +1406,7 @@ inline void FixChemAdas::compute_plasma_grid() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixChemAdas::readfile(char *fname)
+void FixVolumeChemAdas::readfile(char *fname)
 {
   int n,n1,n2,eof;
   char line1[MAXLINE],line2[MAXLINE];
@@ -1595,7 +1595,7 @@ void FixChemAdas::readfile(char *fname)
    only proc 0 performs output
 ------------------------------------------------------------------------- */
 
-void FixChemAdas::print_reaction(char *line1, char *line2)
+void FixVolumeChemAdas::print_reaction(char *line1, char *line2)
 {
   if (comm->me) return;
   printf("Bad reaction format:\n");
@@ -1607,7 +1607,7 @@ void FixChemAdas::print_reaction(char *line1, char *line2)
    only proc 0 performs output
 ------------------------------------------------------------------------- */
 
-void FixChemAdas::print_reaction(OneReaction *r)
+void FixVolumeChemAdas::print_reaction(OneReaction *r)
 {
   if (comm->me) return;
   printf("Bad reaction:\n");
@@ -1635,7 +1635,7 @@ void FixChemAdas::print_reaction(OneReaction *r)
    return 1 if end-of-file, else return 0
 ------------------------------------------------------------------------- */
 
-int FixChemAdas::readone(char *line1, char *line2, int &n1, int &n2)
+int FixVolumeChemAdas::readone(char *line1, char *line2, int &n1, int &n2)
 {
   char *eof;
   while ((eof = fgets(line1,MAXLINE,fp))) {
@@ -1657,7 +1657,7 @@ int FixChemAdas::readone(char *line1, char *line2, int &n1, int &n2)
    error if any exist
 ------------------------------------------------------------------------- */
 
-void FixChemAdas::check_duplicate()
+void FixVolumeChemAdas::check_duplicate()
 {
   OneReaction *r,*s;
 
@@ -1701,7 +1701,7 @@ void FixChemAdas::check_duplicate()
    Returns λ (dimensionless).  Caller sums λ across channels and draws
    from Poisson: P(≥1 event) = 1 - exp(-λ_total).
 ------------------------------------------------------------------------- */
-double FixChemAdas::computeReactionLambda(double rate_log10_cm3s, // log10(k [cm^3/s])
+double FixVolumeChemAdas::computeReactionLambda(double rate_log10_cm3s, // log10(k [cm^3/s])
                                           double dt,              // [s]
                                           double ne_m3)           // [m^-3]
 {
@@ -1724,7 +1724,7 @@ double FixChemAdas::computeReactionLambda(double rate_log10_cm3s, // log10(k [cm
 /*----------------------------------------------------------------------
    Read ADAS data from HDF5 file
 -------------------------------------------------------------------------*/
-void FixChemAdas::readRateData(const std::string& filePath, RateData& rd) {
+void FixVolumeChemAdas::readRateData(const std::string& filePath, RateData& rd) {
   try {
       H5::H5File file(filePath, H5F_ACC_RDONLY);
 
@@ -1804,7 +1804,7 @@ void FixChemAdas::readRateData(const std::string& filePath, RateData& rd) {
 
 
 
-void FixChemAdas::interpolateRateData(int atomic_number, double charge, int /*icell*/, double te, double ne, double& rate_final, ReactionType reactionType) {
+void FixVolumeChemAdas::interpolateRateData(int atomic_number, double charge, int /*icell*/, double te, double ne, double& rate_final, ReactionType reactionType) {
 
   size_t charge_idx = static_cast<size_t>(charge);
 
@@ -1824,7 +1824,7 @@ void FixChemAdas::interpolateRateData(int atomic_number, double charge, int /*ic
    find indices for bilinear interpolation
 ------------------------------------------------------------------------- */
 
-bool FixChemAdas::setupInterpolation(ReactionType reactionType, int atomic_number, size_t charge_idx, double te, double ne, double& x0, double& x1, double& y0, double& y1, double& f00, double& f01, double& f10, double& f11) {
+bool FixVolumeChemAdas::setupInterpolation(ReactionType reactionType, int atomic_number, size_t charge_idx, double te, double ne, double& x0, double& x1, double& y0, double& y1, double& f00, double& f01, double& f10, double& f11) {
   auto& rd = materials_rate_data[atomic_number];
 
   auto bracket_index = [](const std::vector<double>& grid, double x,
@@ -1914,7 +1914,7 @@ bool FixChemAdas::setupInterpolation(ReactionType reactionType, int atomic_numbe
 }
 
 
-void FixChemAdas::readRateDataParallel(const std::string& filePath, RateData& rateData) {
+void FixVolumeChemAdas::readRateDataParallel(const std::string& filePath, RateData& rateData) {
   int me = comm->me;
 
   std::vector<char> filePathBuffer;
@@ -1941,7 +1941,7 @@ void FixChemAdas::readRateDataParallel(const std::string& filePath, RateData& ra
   broadcastRateData(rateData);
 }
 
-void FixChemAdas::broadcastRateData(RateData& rd) {
+void FixVolumeChemAdas::broadcastRateData(RateData& rd) {
 
   // Helper: broadcast a flat vector (single MPI_Bcast for the whole buffer)
   auto bcast1D = [this](std::vector<double>& vec) {
@@ -1988,7 +1988,7 @@ void FixChemAdas::broadcastRateData(RateData& rd) {
 }
 
 
-double FixChemAdas::read_cell(const GridSrc &S, int icell, int var_col)
+double FixVolumeChemAdas::read_cell(const GridSrc &S, int icell, int var_col)
 {
   if (S.kind == SRC_COMP) {
     if (S.src_index < 0) {
@@ -2001,7 +2001,7 @@ double FixChemAdas::read_cell(const GridSrc &S, int icell, int var_col)
   return plasma_cache_2d ? plasma_cache_2d[icell][var_col] : 0.0;
 }
 
-void FixChemAdas::refresh_compute_src(GridSrc &S) {
+void FixVolumeChemAdas::refresh_compute_src(GridSrc &S) {
   if (S.kind != SRC_COMP) return;
   if (S.cache_ts == update->ntimestep) return;
 

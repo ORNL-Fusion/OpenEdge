@@ -211,6 +211,14 @@ struct SurfHit2D {
     PCACHE_ALL     = (1 << 10) - 1
   };
   int pcache_need_mask;
+  // Populate the per-particle plasma cache only every N steps. Default 1
+  // (every step). When all cache consumers fire at a coarser cadence
+  // (e.g. chem/adas nevery=10 and no Boris/sheath), setting
+  // `global pcache_nevery 10` cuts the dominant per-step pcache cost
+  // by the same factor. Stale cache between refreshes is fine for plasma
+  // quantities whose spatial scale (~1 mm SOL width) far exceeds the
+  // particle displacement over N steps (~70 µm for 2 eV D at dt=5 ns).
+  int pcache_nevery;
   void cache_plasma_particles();
 
   // Hybrid Boris/GCA pusher (ERO2.0-style)

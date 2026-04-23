@@ -94,8 +94,8 @@ action fix_bfield_grid.cpp
 action fix_bfield_grid.h
 action fix_bfield_particle.cpp
 action fix_bfield_particle.h
-action fix_chem_adas.cpp
-action fix_chem_adas.h
+action fix_volume_chem_adas.cpp
+action fix_volume_chem_adas.h
 action fix_coll_background.cpp
 action fix_coll_background.h
 action fix_coll_nanbu.cpp
