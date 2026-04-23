@@ -1,3 +1,19 @@
+/* ----------------------------------------------------------------------
+   OpenEdge — Impurity transport, SOL & plasma-edge physics
+   Built on SPARTA (sparta.github.io; Plimpton et al., Sandia National Labs).
+
+   Author: Abdourahmane Diaw <diawa@ornl.gov>
+           Oak Ridge National Laboratory
+   https://github.com/ORNL-Fusion/OpenEdge
+
+   Distributed under the GNU General Public License, same as SPARTA.
+   See the LICENSE file at the top of the repository.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   fix gravity: uniform gravitational acceleration on particles.
+------------------------------------------------------------------------- */
+
 #ifdef FIX_CLASS
 FixStyle(gravity,FixGravity)
 #else

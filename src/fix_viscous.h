@@ -1,7 +1,22 @@
+/* ----------------------------------------------------------------------
+   OpenEdge — Impurity transport, SOL & plasma-edge physics
+   Built on SPARTA (sparta.github.io; Plimpton et al., Sandia National Labs).
+
+   Author: Abdourahmane Diaw <diawa@ornl.gov>
+           Oak Ridge National Laboratory
+   https://github.com/ORNL-Fusion/OpenEdge
+
+   Distributed under the GNU General Public License, same as SPARTA.
+   See the LICENSE file at the top of the repository.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   fix viscous — DEPRECATED, retained for backward compatibility only.
+   Use `fix drag` (FixDrag) instead; the droplet/drag/force and
+   droplet_drag_force aliases have moved there.
+------------------------------------------------------------------------- */
+
 #ifdef FIX_CLASS
-// DEPRECATED: use 'fix drag' (fix_drag.h) instead.
-// The droplet/drag/force and droplet_drag_force aliases have moved to FixDrag.
-// 'viscous' is retained here only for backward compatibility with old input decks.
 FixStyle(viscous,FixViscous)
 #else
 #ifndef SPARTA_FIX_VISCOUS_H
