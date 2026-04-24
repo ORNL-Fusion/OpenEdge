@@ -1,5 +1,15 @@
 # Performance: grid refinement near surface sources
 
+> **2026-04-24 caveat:** the `fix balance ... rcb part`/`rcb time` recipes
+> below crash on np>1 — the mere presence of `fix balance` in the fix
+> list induces a rank segfault in source-driven decks (bisected against
+> `test_diii_d_neutrals` np=4). Both weighting modes are affected. Until
+> the upstream `fix_balance` / RCB issue is patched, **omit `fix
+> balance` from np>1 decks** and rely on the initial
+> `balance_grid rcb cell` + adapt-driven rebalance only. You will run
+> imbalanced (5–20× max/min) but still get correct results and most of
+> the multi-rank speedup. The `fix adapt` recipes below remain valid.
+
 For wall-source cases (PMI sputtering, divertor emission, evaporation),
 particles spawn at the wall and cluster in a small set of cells near the
 strike point. Two performance bottlenecks this creates:

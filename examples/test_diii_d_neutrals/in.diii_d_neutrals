@@ -67,7 +67,7 @@ fix pw particle/weight
 compute cden grid/weighted all all nrho_w
 fix    fden  ave/grid all 1 1000 1000 c_cden[*]  ave running
 fix    frate ave/grid all 1 1000 1000 f_fchem[*] ave running
-fix fbal   balance 50 1.02 rcb part
+# fix fbal   balance 50 1.02 rcb part   # disabled for np>1 UAF bisect
 
 # ---- Convergence monitors for stats output ----
 compute rsp  reduce sum f_fchem[1]
