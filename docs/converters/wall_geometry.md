@@ -1,7 +1,7 @@
 # Wall geometry from SOLPS: `convert_solps_plasma.py --wall-source`
 
 Three ways to build `wall.surf` and the per-segment → B2-cell mapping that
-`fix emit/surf/recycle` consumes.
+`fix surface/emit/recycle` consumes.
 
 | `--wall-source` | source | segment→cell mapping | status |
 |---|---|---|---|

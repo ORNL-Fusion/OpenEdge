@@ -9,10 +9,10 @@ Standard SPARTA calls (`sparta_open`, `sparta_file`, `sparta_command`,
 
 | Call | Purpose |
 |------|---------|
-| `openedge_extract_fix(ptr, id, 2, type)` | Return `double*` (`type=0`, vector_grid) or `double**` (`type≥1`, array_grid) for a per-grid fix. Used to pull source tallies from `fix chem/adas`. |
+| `openedge_extract_fix(ptr, id, 2, type)` | Return `double*` (`type=0`, vector_grid) or `double**` (`type≥1`, array_grid) for a per-grid fix. Used to pull source tallies from `fix volume/chem/adas`. |
 | `openedge_get_ngrid(ptr)` | Number of owned grid cells on this rank. |
 | `openedge_reload_plasma(ptr, cid, path)` | Reload plasma HDF5 on a `compute plasma/fields`. `path=NULL` re-reads the existing file; otherwise swap to `path`. Used between Gkeyll/SOLPS iterations. |
-| `openedge_reset_fix_tally(ptr, id)` | Zero the 20-col source tally on a `fix chem/adas`. Called between coupling iterations so each handoff sees a fresh accumulation. Leaves per-type counters and exhaust state intact. Silent no-op if the ID is wrong or not a `FixChemAdas`. |
+| `openedge_reset_fix_tally(ptr, id)` | Zero the 20-col source tally on a `fix volume/chem/adas`. Called between coupling iterations so each handoff sees a fresh accumulation. Leaves per-type counters and exhaust state intact. Silent no-op if the ID is wrong or not a `FixVolumeChemAdas`. |
 
 ## Coupling loop skeleton
 

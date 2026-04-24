@@ -110,6 +110,52 @@ true axisymmetric slot mapping. There is no Cartesian-output toggle.
 Legacy 2D Cartesian decks must be migrated to true axi first — see
 [`docs/migration/axi_cookbook.md`](docs/migration/axi_cookbook.md).
 
+**Helper-only coordinate conversion (policy)** — physics code reads
+and writes physical `(R, Z, phi)`; conversion to/from SPARTA slot
+order happens only through the `openedge_geom.h` helpers
+(`sparta_to_RZ`, `sparta_v_to_RZphi`, `RZphi_force_to_sparta`). Never
+assume `x = R, y = Z` in 2D outside that header — it breaks the axi
+layout. Applies to pusher / field lookup / stencil builders / box-
+bound logic alike. Grep for `dim == 2` or `xyz[0]` in new code as a
+self-review tripwire.
+
+**Unified wall-normal convention (2026-04-21)** — every surface fix in
+OpenEdge now uses the SPARTA canonical convention: `normal[]` points
+INTO the fluid (plasma), and emission / outgoing-reflection velocity
+goes along `+normal`. Applies to `fix emit/surf`, `surface/emit/puff`,
+`surface/emit/recycle`, `surface/emit/sputter`, `surf_collide diffuse`,
+`surf_react surface/pwi`. The converters write `wall.surf` with walk
+order giving inward normals by default, so **no `read_surf ... invert`
+on wall.surf**. The old `-normal` quirk in `fix_surface_emit_recycle`
+is fixed. Inner-boundary `core.surf` pushes (surface/emit/sputter from
+the separatrix) still need `invert` — that surface is traversed the
+other way.
+
+**Inner core-absorb boundary (`core.surf`, 2026-04-23)** —
+`convert_solps_plasma.py` and `convert_s3x_plasma.py` both accept
+`--core-out <path>` and `--psi-norm-core <level>` to trace a
+psi_norm = const contour around the magnetic axis from the embedded
+`/equilibrium/*` and write it as a SPARTA surface file in axi (Z, R)
+layout. Uses `tools/extract_psi_contour.py::write_core_surf_from_plasma_h5`
+under the hood (decimates to 5 mm min segment so SPARTA cell-marking is
+robust). Default `psi_norm = 0.90` keeps the contour safely inside the
+wall near the X-point; **0.95 commonly dips into the private-flux
+region and intersects the divertor wall**, which fails
+SPARTA's grid flood-fill with `Cell type mis-match when marking on
+self`. If you see that error on combined wall + core, lower
+`--psi-norm-core` or verify with `ray-casting` that every core vertex
+is strictly inside the wall polygon before running.
+
+**SOLEDGE3X `config/{r, z}` axis orientation (2026-04-23)** — 3MW and
+other SOLEDGE3X runs ship `mesh.h5` with 2D (r, z) meshgrid-style
+arrays where `r[i, j]` varies along rows (i indexes R) and `z[i, j]`
+varies along columns (j indexes Z). `convert_s3x_plasma.py` now
+auto-detects which axis carries the R variation and transposes `psi`
+accordingly when writing `/equilibrium/{r, z, psi}`. Older converter
+output had degenerate `equilibrium/r` / `equilibrium/z` (all values
+identical) for this orientation — regen any plasma.h5 written before
+the 2026-04-23 fix.
+
 **Tests by layout (as of 2026-04-20):**
 - Axi: `test_diii_d_neutrals` (pilot)
 - Cart 2D (legacy, awaiting migration): `test_west_axi`,
@@ -197,7 +243,10 @@ and usage patterns.
 - **Sheath models.** Kick (`global sheath ... kick yes`) — velocity boost
   at wall collision, recommended for IEADs, no per-subcycle E-field.
   Spatial (`global sheath ... model <name>`) — per-subcycle E-field,
-  models: `borodkina`, `coulette_manfredi`, with overshoot guard.
+  models: `borodkina`, `coulette_manfredi`. Boltzmann ne correction
+  (`ne · exp(-φ/Te)`) flows into the per-particle pcache automatically,
+  so `fix volume/chem/adas` near-wall rates fall off without separate
+  plumbing. [`docs/fixes/sheath.md`](docs/fixes/sheath.md).
 - **Surface collision.** `surf_collide vanish`, `diffuse`, `toroidal`
   (phi-periodic wedge rotation).
 
@@ -205,10 +254,31 @@ and usage patterns.
 
 - **Plasma.h5 schema (mesh-only)** — [`docs/converters/plasma_h5_schema.md`](docs/converters/plasma_h5_schema.md).
   Three top-level groups: `/equilibrium`, `/ion_species`, `/mesh`.
-  Query via `fix plasma/data`.
+  `/ion_species/elements` (added 2026-04-21) carries the
+  charge-state-stripped element symbol per ion. Query via
+  `fix plasma/data`.
 - **Wall geometry from SOLPS** — [`docs/converters/wall_geometry.md`](docs/converters/wall_geometry.md).
   `--wall-source` options: `mesh-extra` (default), `b2`, `eirene`.
 - **Axi migration cookbook** — [`docs/migration/axi_cookbook.md`](docs/migration/axi_cookbook.md).
+
+### Database path resolution
+
+- `src/OPENEDGE/database_paths.{h,cpp}` — single source of truth for
+  locating consolidated process data and per-element reaction lists.
+  Lookup order: `OPENEDGE_ROOT` env var → compile-time
+  `OPENEDGE_DATABASE_DIR` (set by CMake to `${repo}/database`) →
+  literal `database` (cwd-relative).
+- `resolve_processes_file()` → `${root}/database/processes.h5`. Single
+  consolidated HDF5 carrying `/volume/adas/...` rate coefficients,
+  `/volume/pec/...` photon-emission coefficients, `/surface/sputter/...`
+  Eckstein yield tables, and `/surface/trim/...` reflection tables.
+  Returns empty string if absent (consumers may then fall back to
+  legacy text-file ADAS sources).
+- `resolve_reactions_file("D", error)` →
+  `${root}/database/adas/reactions/D.reactions`. Paths containing `/`
+  or ending in `.reactions` pass through literal.
+- Consumers: `fix volume/chem/adas`, `compute volume/emissivity/grid`,
+  `surf_react surface/pwi`, `compute surface/physical/sputter`.
 
 ### Transport fixes
 
@@ -221,21 +291,43 @@ and usage patterns.
 
 ### Neutral transport (EIRENE replacement)
 
-- **`fix chem/adas`** — volumetric ionization / recombination / CX /
+- **`fix volume/chem/adas`** — volumetric ionization / recombination / CX /
   dissociation with ADAS + Janev rates. 20-col per-cell source tally.
-  [`docs/fixes/chem_adas.md`](docs/fixes/chem_adas.md).
-- **`fix emit/surf/puff`** — hard-capped surface emission for Mode A
-  puffs. [`docs/fixes/emit_surf_puff.md`](docs/fixes/emit_surf_puff.md).
-- **`fix emit/surf/recycle`** — wall-recycling neutral source, Bohm
-  flux × recycling coeff. [`docs/fixes/emit_surf_recycle.md`](docs/fixes/emit_surf_recycle.md).
-- **`surf_react recycle`** — surface recycling with cosine re-emission.
-  [`docs/fixes/surf_react_recycle.md`](docs/fixes/surf_react_recycle.md).
+  Accepts element symbol or numeric Z as arg 3; reactions file arg 4
+  accepts a literal path, an element symbol (resolves to
+  `database/adas/reactions/<elem>.reactions`), or `auto` (same element
+  as arg 3). Channel toggles: `ionization / recombination / cx /
+  dissociation yes|no` disable by type without editing the file. Init
+  prints per-channel active/skipped counts + missing species.
+  [`docs/fixes/volume_chem_adas.md`](docs/fixes/volume_chem_adas.md).
+- **`fix surface/emit/puff`** — hard-capped surface emission for Mode A
+  puffs. [`docs/fixes/surface_emit_puff.md`](docs/fixes/surface_emit_puff.md).
+- **`fix surface/emit/recycle`** — wall-recycling neutral source, Bohm
+  flux × recycling coeff. Per-species emission temperature via
+  `twall_species <sp> <T> ...` (e.g. atomic D at Franck-Condon 23 210 K,
+  molecular D2 wall-thermalised at 500 K).
+  [`docs/fixes/surface_emit_recycle.md`](docs/fixes/surface_emit_recycle.md).
+- **`fix surface/emit/source`** — sputtered-impurity source driven by
+  a `compute surface/physical/sputter` erosion-flux column. Uses `fix particle/weight`
+  for spatially-variable emission rates.
+  [`docs/fixes/surface_emit_source.md`](docs/fixes/surface_emit_source.md).
+- **`surf_react surface/pwi`** — TRIM reflection + absorb-and-re-emit
+  at walls; reads reflection tables from `database/processes.h5`.
+  [`docs/fixes/surf_react_surface_pwi.md`](docs/fixes/surf_react_surface_pwi.md).
 
 ### Diagnostics
 
-- **`compute photon_emissivity/grid`** — synthetic line emission
+- **`compute surface/physical/sputter`** — per-surface Bohm flux, impact energy /
+  angle, sputter yield, and gross erosion flux (`erosion_flux`; old
+  alias `sputter_flux_total`). Post-2026-04-21 API resolves per-
+  projectile yield tables automatically: `target W projectiles D,O`
+  loads `D_on_W.h5` + `O_on_W.h5` and routes each plasma ion slot to
+  the matching table via `slot_to_table`. Legacy
+  `projectile_slots`/`mass_amu`/positional surface path still accepted.
+  [`docs/fixes/surface_physical_sputter.md`](docs/fixes/surface_physical_sputter.md).
+- **`compute volume/emissivity/grid`** — synthetic line emission
   `ε = ne · nz · PEC(Te, ne)` using ColRadPy PEC tables.
-  [`docs/fixes/photon_emissivity.md`](docs/fixes/photon_emissivity.md).
+  [`docs/fixes/volume_emissivity.md`](docs/fixes/volume_emissivity.md).
 
 ### Surface / liquid-metal models
 

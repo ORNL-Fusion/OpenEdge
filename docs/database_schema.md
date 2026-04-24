@@ -55,14 +55,14 @@ log-Te × log-ne × 0-based charge-state grid.  Grid axes come as sibling
 | `/surface/desorption/`   | thermal desorption rates, outgassing spectra    | literature             |
 
 Sub-group names reflect the physical process, which matches the fix
-naming convention (`fix surface/emit/sputter` reads from
+naming convention (`fix surface/emit/source` reads from
 `/surface/sputter/`, `fix surface/emit/recycle` reads from
 `/surface/recycling/`, etc.) — consumers can derive the HDF5 path
 directly from the fix style string.
 
 Datasets are binned on `(E, θ)` grids with arbitrary moments of the
 outgoing distribution (`cos_polar_q`, `Eout_q`, etc.) as used by the
-existing `surf_react wall_pwi` loader.
+existing `surf_react surface/pwi` loader.
 
 ## Naming conventions
 
@@ -124,16 +124,12 @@ any upstream update:
 
 ```bash
 cd database/ingest
-python3 build_openedge_h5.py
+python3 build_processes_h5.py
 ```
 
-Raw inputs live under `database/raw/` (gitignored; regenerable from
-public sources).  The consolidated `processes.h5` is committed.
+Raw inputs live under `database/ingest/{adf11,reactions,surface_generators,
+ionization_potentials}/`. The consolidated `processes.h5` is committed.
 
-## Legacy per-element files
-
-For a transition period, OpenEdge also ships the older per-element
-files (`ADAS_Rates_<Z>.h5`, `database/surface/trim/*_on_*.h5`).
-Consumers prefer `processes.h5` if present and fall back otherwise.
-These legacy files will be removed when all C++ consumers have been
-migrated.
+The previous per-element files (`ADAS_Rates_<Z>.h5`,
+`database/surface/trim/*_on_*.h5`, `database/surface/<proj>_on_<targ>.h5`)
+have been removed; all C++ consumers now read `processes.h5` exclusively.

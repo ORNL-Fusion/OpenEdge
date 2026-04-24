@@ -67,7 +67,7 @@ Total speedup: ~9× on a single rank (Move halved by fewer surface checks),
 
 ### `test_diii_d_neutrals` (wall-recycling)
 
-With `fix emit/surf/recycle` driving wall emission:
+With `fix surface/emit/recycle` driving wall emission:
 
 | config (np=16) | ms/step @ ~50k particles |
 |---|---|
