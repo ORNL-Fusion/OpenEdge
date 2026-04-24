@@ -18,13 +18,13 @@ The package has two categories of files:
 
     boris_grid.h  sheath_models.cpp/h  nanbu_scatter_table.h
     compute_incident_plasma_flux.cpp/h
-    compute_plasma_fields.cpp/h  compute_pmi_surf_data.cpp/h
-    compute_sheath_geometry_grid.cpp/h
+    compute_plasma_fields.cpp/h  compute_surface_physical_sputter.cpp/h
+    compute_nearest_surf_grid.cpp/h
     compute_surf_ead.cpp/h  compute_thermal_sheath_grid.cpp/h
     fix_bfield_grid.cpp/h  fix_bfield_particle.cpp/h
     fix_chem_adas.cpp/h  fix_coll_background.cpp/h  fix_coll_nanbu.cpp/h
     fix_drag.cpp/h  fix_efield_grid.cpp/h  fix_efield_particle.cpp/h
-    fix_emit_droplet.cpp/h  fix_emit_surf_file.cpp/h  fix_surface_emit_sputter.cpp/h
+    fix_emit_droplet.cpp/h  fix_emit_surf_file.cpp/h  fix_surface_emit_source.cpp/h
     fix_evaporation.cpp/h  fix_gravity.cpp/h
     fix_thermal_force.cpp/h  fix_thermal_force_e.cpp/h  fix_thermal_force_i.cpp/h
     fix_cross_diffusion.cpp/h  fix_reflect_psi.cpp/h  fix_viscous.cpp/h
@@ -175,7 +175,7 @@ Fortran sheath tracker for Ta²⁺/Ta³⁺/Ta⁴⁺ at α = 0°, 45°, 85° with
 ### Input syntax
 
 ```
-compute   cgeom sheath/geometry/grid all all dist nx ny nz surfidx
+compute   cgeom nearest_surf/grid all all dist nx ny nz surfidx
 global    sheath geom_compute cgeom plasma_compute cplasma &
           [model borodkina/coulette_manfredi] &
           [mD_amu 2.0] [pot_mult 0] [dmax 0.02] &

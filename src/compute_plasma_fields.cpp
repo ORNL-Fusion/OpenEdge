@@ -378,6 +378,12 @@ void ComputePlasmaFields::init()
       plasma_data.mesh_e_r = pd->mesh_e_r;
       plasma_data.mesh_e_z = pd->mesh_e_z;
       plasma_data.mesh_e_t = pd->mesh_e_t;
+      // Per-triangle mesh B (vertex-averaged). Empty on rank 0 =>
+      // mesh-B not loaded from plasma.h5; leave empty so the legacy
+      // regular-grid / equilibrium branches handle the query.
+      plasma_data.mesh_tri_br = pd->mesh_tri_br;
+      plasma_data.mesh_tri_bz = pd->mesh_tri_bz;
+      plasma_data.mesh_tri_bt = pd->mesh_tri_bt;
       // Build bounding boxes, mapped centroids, and spatial hash
       plasma_data.mesh_tri_rmin.resize(pd->mesh_ntri);
       plasma_data.mesh_tri_rmax.resize(pd->mesh_ntri);
@@ -980,7 +986,7 @@ PlasmaFileData ComputePlasmaFields::readPlasmaFileData(const std::string& filePa
         // converters emit mesh-only plasma.h5 — the regular grid at top
         // level is absent. Keep this path alive for older plasma.h5
         // files; consumers that need per-cell plasma (compute grid
-        // nrho, fix chem/adas) route through mesh_cell lookup instead.
+        // nrho, fix volume/chem/adas) route through mesh_cell lookup instead.
         size_t nr = 0;
         size_t nz = 0;
         if (hasDataset("r") && hasDataset("z")) {
@@ -1599,16 +1605,12 @@ bool ComputePlasmaFields::meshLookupPlasma(
 {
   Grid::ChildCell *cells = grid->cells;
   const int dim = domain->dimension;
+  const double xc[3] = {
+      0.5 * (cells[icell].lo[0] + cells[icell].hi[0]),
+      0.5 * (cells[icell].lo[1] + cells[icell].hi[1]),
+      (dim == 3) ? 0.5 * (cells[icell].lo[2] + cells[icell].hi[2]) : 0.0};
   double r, z;
-  if (dim == 2) {
-    r = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
-    z = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
-  } else {
-    const double x = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
-    const double y = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
-    r = std::sqrt(x*x + y*y);
-    z = 0.5 * (cells[icell].lo[2] + cells[icell].hi[2]);
-  }
+  OpenEdge::sparta_to_RZ(xc, dim, domain->axisymmetric, r, z);
   return meshLookupPlasmaAtPoint(data, r, z, P);
 }
 
@@ -1685,13 +1687,7 @@ ComputePlasmaFields::makeStencilAtPoint(
 
   const int dim = domain->dimension;
   double r, z;
-  if (dim == 2) {
-    r = xyz[0];
-    z = xyz[1];
-  } else {
-    r = std::sqrt(xyz[0] * xyz[0] + xyz[1] * xyz[1]);
-    z = xyz[2];
-  }
+  OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, r, z);
 
   const int nr = static_cast<int>(r_vals.size());
   const int nz = static_cast<int>(z_vals.size());
@@ -1855,8 +1851,7 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
 
   const int dim = domain->dimension;
   double r, z;
-  if (dim == 2) { r = xyz[0]; z = xyz[1]; }
-  else { r = std::sqrt(xyz[0]*xyz[0]+xyz[1]*xyz[1]); z = xyz[2]; }
+  OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, r, z);
 
   bool used_mesh = false;
   if (plasma_data.has_mesh)
@@ -1940,6 +1935,24 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
       B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
     }
     return B;
+  }
+
+  // Mesh-native B (per-triangle vertex average). Takes precedence when
+  // populated; gradient fields are not computed here since the mesh
+  // carries point values only. Consumers that need dB/dR, dB/dZ should
+  // fall through to the regular-grid or equilibrium branch instead.
+  if (!plasma_data.mesh_tri_br.empty()) {
+    double R, Z;
+    OpenEdge::sparta_to_RZ(xyz, domain->dimension, domain->axisymmetric, R, Z);
+    const int tri = findMeshTriangle(plasma_data, R, Z);
+    if (tri >= 0 && tri < static_cast<int>(plasma_data.mesh_tri_br.size())) {
+      B.br = plasma_data.mesh_tri_br[tri];
+      B.bz = plasma_data.mesh_tri_bz[tri];
+      B.bt = plasma_data.mesh_tri_bt[tri];
+      B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+      return B;
+    }
+    // outside mesh footprint: fall through to grid / equ branches.
   }
 
   if (!magnetic_data.r.empty() && !magnetic_data.z.empty()) {

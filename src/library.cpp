@@ -360,7 +360,7 @@ void openedge_reload_plasma(void *ptr, char *compute_id, char *new_path)
 }
 
 /* ----------------------------------------------------------------------
-   zero the per-cell source tally on a fix chem/adas instance between
+   zero the per-cell source tally on a fix volume/chem/adas instance between
    outer coupling iterations (Mode A / Gkeyll / SOLPS handoff).
    id = fix ID (e.g. "fchem")
    silently returns if fix is missing or not a FixVolumeChemAdas.

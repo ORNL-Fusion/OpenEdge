@@ -1,8 +1,12 @@
 /* ----------------------------------------------------------------------
-   OpenEdge: nearest wall geometry per grid cell for sheath workflows
+   OpenEdge: nearest wall surface per grid cell.
+   For each cell in <grid-group>, finds the closest surface in
+   <surf-group> and exposes distance / surface ID / outward normal
+   components. Used by sheath models, near-wall diagnostics, and any
+   compute or fix that needs cell-local wall geometry.
 ------------------------------------------------------------------------- */
 
-#include "compute_sheath_geometry_grid.h"
+#include "compute_nearest_surf_grid.h"
 
 #include <cstring>
 
@@ -22,17 +26,17 @@ namespace {
 constexpr double DIST_BIG = 1.0e20;
 }
 
-ComputeSheathGeometryGrid::ComputeSheathGeometryGrid(SPARTA *sparta, int narg, char **arg) :
+ComputeNearestSurfGrid::ComputeNearestSurfGrid(SPARTA *sparta, int narg, char **arg) :
   Compute(sparta, narg, arg)
 {
-  if (narg < 6) error->all(FLERR,"Illegal compute sheath/geometry/grid command");
+  if (narg < 6) error->all(FLERR,"Illegal compute nearest_surf/grid command");
 
   int igroup = grid->find_group(arg[2]);
-  if (igroup < 0) error->all(FLERR,"Compute sheath/geometry/grid grid group ID does not exist");
+  if (igroup < 0) error->all(FLERR,"Compute nearest_surf/grid grid group ID does not exist");
   groupbit = grid->bitmask[igroup];
 
   igroup = surf->find_group(arg[3]);
-  if (igroup < 0) error->all(FLERR,"Compute sheath/geometry/grid surface group ID does not exist");
+  if (igroup < 0) error->all(FLERR,"Compute nearest_surf/grid surface group ID does not exist");
   sgroupbit = surf->bitmask[igroup];
 
   nvalue = narg - 4;
@@ -46,7 +50,7 @@ ComputeSheathGeometryGrid::ComputeSheathGeometryGrid(SPARTA *sparta, int narg, c
     else if (strcmp(arg[iarg],"ny") == 0) value[iv] = NY;
     else if (strcmp(arg[iarg],"nz") == 0) value[iv] = NZ;
     else if (strcmp(arg[iarg],"surfidx") == 0) value[iv] = SURFIDX;
-    else error->all(FLERR,"Illegal compute sheath/geometry/grid command");
+    else error->all(FLERR,"Illegal compute nearest_surf/grid command");
     ++iarg;
     ++iv;
   }
@@ -60,7 +64,7 @@ ComputeSheathGeometryGrid::ComputeSheathGeometryGrid(SPARTA *sparta, int narg, c
   computed_once = 0;
 }
 
-ComputeSheathGeometryGrid::~ComputeSheathGeometryGrid()
+ComputeNearestSurfGrid::~ComputeNearestSurfGrid()
 {
   if (copymode) return;
   delete [] value;
@@ -69,12 +73,12 @@ ComputeSheathGeometryGrid::~ComputeSheathGeometryGrid()
   memory->destroy(midx_grid);
 }
 
-void ComputeSheathGeometryGrid::init()
+void ComputeNearestSurfGrid::init()
 {
   reallocate();
 }
 
-void ComputeSheathGeometryGrid::compute_per_grid()
+void ComputeNearestSurfGrid::compute_per_grid()
 {
   invoked_per_grid = update->ntimestep;
 
@@ -88,7 +92,7 @@ void ComputeSheathGeometryGrid::compute_per_grid()
   const int nsurf_all = surf->nsurf;
 
   int *eligible = nullptr;
-  memory->create(eligible,nsurf_all,"sheath/geometry/grid:eligible");
+  memory->create(eligible,nsurf_all,"nearest_surf/grid:eligible");
   int neligible = 0;
   for (int i = 0; i < nsurf_all; ++i) {
     int ok = 0;
@@ -199,16 +203,16 @@ void ComputeSheathGeometryGrid::compute_per_grid()
   computed_once = 1;
 }
 
-void ComputeSheathGeometryGrid::reallocate()
+void ComputeNearestSurfGrid::reallocate()
 {
   if (grid->nlocal == nglocal) return;
   memory->destroy(vector_grid);
   memory->destroy(array_grid);
   memory->destroy(midx_grid);
   nglocal = grid->nlocal;
-  if (nvalue == 1) memory->create(vector_grid,nglocal,"sheath/geometry/grid:vector");
-  else memory->create(array_grid,nglocal,nvalue,"sheath/geometry/grid:array");
-  memory->create(midx_grid,nglocal,"sheath/geometry/grid:midx");
+  if (nvalue == 1) memory->create(vector_grid,nglocal,"nearest_surf/grid:vector");
+  else memory->create(array_grid,nglocal,nvalue,"nearest_surf/grid:array");
+  memory->create(midx_grid,nglocal,"nearest_surf/grid:midx");
   computed_once = 0;
   if (nvalue == 1 && vector_grid) {
     for (int i = 0; i < nglocal; i++) vector_grid[i] = 0.0;
@@ -221,7 +225,7 @@ void ComputeSheathGeometryGrid::reallocate()
   }
 }
 
-bigint ComputeSheathGeometryGrid::memory_usage()
+bigint ComputeNearestSurfGrid::memory_usage()
 {
   bigint bytes = 0;
   if (nvalue == 1) bytes += nglocal * sizeof(double);

@@ -3,7 +3,7 @@
     Impurity Transport in Modeling of SOL and Edge Physics:
     This code built on top of SPARTA, a parallel DSMC code.
 
-    compute photon_emissivity/grid — per-grid volumetric photon emissivity
+    compute volume/emissivity/grid — per-grid volumetric line emissivity
       emissivity = ne * nz * PEC(Te, ne)   [photons/m^3/s/sr]
 
     where nz is the weighted number density of tracked impurity particles
@@ -13,12 +13,12 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(photon_emissivity/grid,ComputePhotonEmissivityGrid)
+ComputeStyle(volume/emissivity/grid,ComputeVolumeEmissivityGrid)
 
 #else
 
-#ifndef SPARTA_COMPUTE_PHOTON_EMISSIVITY_GRID_H
-#define SPARTA_COMPUTE_PHOTON_EMISSIVITY_GRID_H
+#ifndef SPARTA_COMPUTE_VOLUME_EMISSIVITY_GRID_H
+#define SPARTA_COMPUTE_VOLUME_EMISSIVITY_GRID_H
 
 #include "compute.h"
 #include <string>
@@ -26,10 +26,10 @@ ComputeStyle(photon_emissivity/grid,ComputePhotonEmissivityGrid)
 
 namespace SPARTA_NS {
 
-class ComputePhotonEmissivityGrid : public Compute {
+class ComputeVolumeEmissivityGrid : public Compute {
  public:
-  ComputePhotonEmissivityGrid(class SPARTA *, int, char **);
-  ~ComputePhotonEmissivityGrid();
+  ComputeVolumeEmissivityGrid(class SPARTA *, int, char **);
+  ~ComputeVolumeEmissivityGrid();
   void init();
   void compute_per_grid();
   int query_tally_grid(int, double **&, int *&);
@@ -54,15 +54,13 @@ class ComputePhotonEmissivityGrid : public Compute {
   char *plasma_compute_id;
   class ComputePlasmaFields *cp_plasma;
 
-  // PEC table (log10 space)
+  // PEC table (log10 space) loaded from processes.h5 /volume/pec/*
   std::vector<double> pec_log_te;   // log10(Te [eV])
   std::vector<double> pec_log_ne;   // log10(ne [m^-3])
   std::vector<double> pec_log_val;  // log10(PEC [m^3/s]), flat [nte * nne]
   int pec_nte,pec_nne;
   double pec_unit_conv;             // conversion factor to m^3/s
 
-  void readPECFile(const std::string &path);
-  void broadcastPECData();
   double interpolatePEC(double log_te, double log_ne) const;
 };
 

@@ -82,10 +82,10 @@ action process_library.cpp
 action process_library.h
 action compute_plasma_fields.cpp
 action compute_plasma_fields.h
-action compute_pmi_surf_data.cpp
-action compute_pmi_surf_data.h
-action compute_sheath_geometry_grid.cpp
-action compute_sheath_geometry_grid.h
+action compute_surface_physical_sputter.cpp
+action compute_surface_physical_sputter.h
+action compute_nearest_surf_grid.cpp
+action compute_nearest_surf_grid.h
 action compute_surf_ead.cpp
 action compute_surf_ead.h
 action compute_thermal_sheath_grid.cpp
@@ -110,8 +110,8 @@ action fix_emit_droplet.cpp
 action fix_emit_droplet.h
 action fix_emit_surf_file.cpp
 action fix_emit_surf_file.h
-action fix_surface_emit_sputter.cpp
-action fix_surface_emit_sputter.h
+action fix_surface_emit_source.cpp
+action fix_surface_emit_source.h
 action fix_evaporation.cpp
 action fix_evaporation.h
 action fix_gravity.cpp

@@ -266,7 +266,7 @@ global                  efield grid efield 0
 global                  boris_subcycles {BORIS_SUBCYCLES}
 
 # ---- Sheath (velocity kick at wall) ----
-compute                 cgeom sheath/geometry/grid all all dist nx ny nz surfidx
+compute                 cgeom nearest_surf/grid all all dist nx ny nz surfidx
 global                  sheath geom_compute cgeom plasma_compute cplasma &
                         mD_amu {mD_amu} pot_mult 0 kick yes
 

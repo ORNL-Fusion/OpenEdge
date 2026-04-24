@@ -1,24 +1,27 @@
 /* ----------------------------------------------------------------------
-   OpenEdge: nearest wall geometry per grid cell for sheath workflows
+   OpenEdge: nearest wall surface per grid cell.
+   Outputs distance / surface index / outward normal for the closest
+   member of a surface group, for each cell in a grid group. Static
+   geometry — computed once and cached.
 ------------------------------------------------------------------------- */
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(sheath/geometry/grid,ComputeSheathGeometryGrid)
+ComputeStyle(nearest_surf/grid,ComputeNearestSurfGrid)
 
 #else
 
-#ifndef SPARTA_COMPUTE_SHEATH_GEOMETRY_GRID_H
-#define SPARTA_COMPUTE_SHEATH_GEOMETRY_GRID_H
+#ifndef SPARTA_COMPUTE_NEAREST_SURF_GRID_H
+#define SPARTA_COMPUTE_NEAREST_SURF_GRID_H
 
 #include "compute.h"
 
 namespace SPARTA_NS {
 
-class ComputeSheathGeometryGrid : public Compute {
+class ComputeNearestSurfGrid : public Compute {
  public:
-  ComputeSheathGeometryGrid(class SPARTA *, int, char **);
-  ~ComputeSheathGeometryGrid();
+  ComputeNearestSurfGrid(class SPARTA *, int, char **);
+  ~ComputeNearestSurfGrid();
   void init();
   void compute_per_grid();
   void reallocate();

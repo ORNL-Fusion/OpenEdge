@@ -1,33 +1,33 @@
 /* ----------------------------------------------------------------------
-   OpenEdge: sheath geometry per grid cell — Kokkos wrapper.
+   OpenEdge: nearest wall surface per grid cell — Kokkos wrapper.
 ------------------------------------------------------------------------- */
 
-#include "compute_sheath_geometry_grid_kokkos.h"
+#include "compute_nearest_surf_grid_kokkos.h"
 #include "grid.h"
 #include "memory_kokkos.h"
 
 using namespace SPARTA_NS;
 
-ComputeSheathGeometryGridKokkos::ComputeSheathGeometryGridKokkos(
+ComputeNearestSurfGridKokkos::ComputeNearestSurfGridKokkos(
     SPARTA *sparta, int narg, char **arg) :
-  ComputeSheathGeometryGrid(sparta, narg, arg)
+  ComputeNearestSurfGrid(sparta, narg, arg)
 {
   kokkos_flag = 1;
   maxgrid_kk = 0;
 }
 
-ComputeSheathGeometryGridKokkos::~ComputeSheathGeometryGridKokkos()
+ComputeNearestSurfGridKokkos::~ComputeNearestSurfGridKokkos()
 {
   if (copymode) return;
 }
 
-void ComputeSheathGeometryGridKokkos::compute_per_grid()
+void ComputeNearestSurfGridKokkos::compute_per_grid()
 {
-  ComputeSheathGeometryGrid::compute_per_grid();
+  ComputeNearestSurfGrid::compute_per_grid();
   sync_to_device();
 }
 
-void ComputeSheathGeometryGridKokkos::sync_to_device()
+void ComputeNearestSurfGridKokkos::sync_to_device()
 {
   int ng = grid->nlocal;
   if (ng <= 0) return;
@@ -40,8 +40,8 @@ void ComputeSheathGeometryGridKokkos::sync_to_device()
 
   if (ng > maxgrid_kk || maxgrid_kk == 0) {
     maxgrid_kk = grid->maxlocal;
-    k_array_grid = DAT::tdual_float_2d_lr("sheath_geom:array", maxgrid_kk, nc);
-    k_midx_grid = DAT::tdual_int_1d("sheath_geom:midx", maxgrid_kk);
+    k_array_grid = DAT::tdual_float_2d_lr("nearest_surf:array", maxgrid_kk, nc);
+    k_midx_grid = DAT::tdual_int_1d("nearest_surf:midx", maxgrid_kk);
     d_array_grid = k_array_grid.d_view;
     d_midx_grid_kk = k_midx_grid.d_view;
   }

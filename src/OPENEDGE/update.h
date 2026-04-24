@@ -170,7 +170,7 @@ struct SurfHit2D {
 
   // Per-particle sheath E-field overlay (uses grid-cached geometry + plasma)
   int sheath_flag;             // 1 if per-particle sheath is active
-  char *sheath_geom_cid;       // compute ID for sheath/geometry/grid
+  char *sheath_geom_cid;       // compute ID for nearest_surf/grid
   char *sheath_plasma_cid;     // provider ID for plasma/fields or fix plasma/data
   int sheath_geom_cidx;        // resolved compute index for geometry
   int sheath_plasma_cidx;      // resolved compute index for plasma
@@ -213,7 +213,7 @@ struct SurfHit2D {
   int pcache_need_mask;
   // Populate the per-particle plasma cache only every N steps. Default 1
   // (every step). When all cache consumers fire at a coarser cadence
-  // (e.g. chem/adas nevery=10 and no Boris/sheath), setting
+  // (e.g. volume/chem/adas nevery=10 and no Boris/sheath), setting
   // `global pcache_nevery 10` cuts the dominant per-step pcache cost
   // by the same factor. Stale cache between refreshes is fine for plasma
   // quantities whose spatial scale (~1 mm SOL width) far exceeds the
@@ -242,7 +242,7 @@ struct SurfHit2D {
 
   // Early-exit request flag. Any fix can set this to 1 during end_of_step
   // to have the run loop break cleanly on the NEXT iteration. Used by
-  // fix chem/adas Mode A when `stop_on_exhaust yes` detects the source
+  // fix volume/chem/adas Mode A when `stop_on_exhaust yes` detects the source
   // neutral population has gone to zero.
   int early_exit_requested;
 

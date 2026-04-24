@@ -36,7 +36,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "openedge_geom.h"
 #include "random_mars.h"
 #include "sheath_models.h"
-#include "compute_sheath_geometry_grid.h"
+#include "compute_nearest_surf_grid.h"
 #include "compute_plasma_fields.h"
 #include "fix_plasma_data.h"
 #include "fix_cross_diffusion.h"
@@ -76,6 +76,35 @@ inline void xyz_to_rz(const double xyz[3], int dim, int axi, double &R, double &
     R = std::sqrt(xyz[0] * xyz[0] + xyz[1] * xyz[1]);
     Z = xyz[2];
   }
+}
+
+// Physics-derived sheath engagement cut-off distance, in meters.
+//   max( 5 * L_MPS, 10 * lambdaD )
+// where L_MPS = rho_i * tan(alpha_n), with alpha_n = angle(B, wall
+// normal) as returned by chodura_metrics. If user_ceiling > 0 it is
+// applied as an additional upper bound (legacy `global sheath dmax`).
+inline double sheath_auto_dmax(double te_eV, double ti_eV, double ne_m3,
+                                double bmag_T, double alpha_deg,
+                                double mD_amu, double user_ceiling)
+{
+  constexpr double QE_LOC   = 1.602176634e-19;
+  constexpr double AMU_LOC  = 1.66053906660e-27;
+  constexpr double EPS0_LOC = 8.8541878128e-12;
+  const double mD_kg = std::max(mD_amu * AMU_LOC, 1.0e-99);
+  const double lambdaD = std::sqrt(EPS0_LOC * std::max(te_eV, 1.0e-12)
+                                   / (std::max(ne_m3, 1.0e-60) * QE_LOC));
+  const double cs = std::sqrt(std::max(te_eV + ti_eV, 0.0) * QE_LOC
+                              / (2.0 * mD_kg));
+  const double omega_ci = QE_LOC * std::max(std::fabs(bmag_T), 1.0e-20) / mD_kg;
+  const double rho_i = cs / std::max(omega_ci, 1.0e-99);
+  const double alpha_n_rad = std::max(0.0, std::min(90.0, alpha_deg)) *
+                             M_PI / 180.0;
+  const double tan_an = std::min(std::max(std::fabs(std::tan(alpha_n_rad)),
+                                           1.0e-3), 30.0);
+  const double L_MPS = rho_i * tan_an;
+  double d_max = std::max(5.0 * L_MPS, 10.0 * lambdaD);
+  if (user_ceiling > 0.0) d_max = std::min(d_max, user_ceiling);
+  return d_max;
 }
 
 inline void grad_from_fix(const FixPlasmaData *pd, const std::vector<double> &field,
@@ -306,7 +335,11 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   sheath_plasma_cidx = -1;
   sheath_plasma_fidx = -1;
   sheath_model = 0;             // 0=borodkina, 1=coulette_manfredi
-  sheath_dmax = 0.02;
+  // sheath_dmax=0 means "auto": pusherBoris2D derives the cut-off from
+  // local physics as max(5·L_MPS, 10·λ_D). Any positive value set via
+  // `global sheath dmax <m>` acts as an additional ceiling, not a
+  // replacement for the auto value.
+  sheath_dmax = 0.0;
   sheath_pot_mult = 2.5;
   sheath_mD_amu = 2.01410177811;
   sheath_kick = 0;
@@ -540,6 +573,10 @@ void Update::init()
     if (boris_plasma_cidx >= 0) {
       if (!modify->compute[boris_plasma_cidx]->per_grid_flag)
         error->all(FLERR,"global bfield_compute: compute must be per-grid");
+      if (comm->me == 0 && screen)
+        fprintf(screen,
+                "  boris: bfield_compute '%s' bound to compute (per-grid)\n",
+                boris_plasma_cid);
     } else {
       boris_plasma_fidx = modify->find_fix(boris_plasma_cid);
       if (boris_plasma_fidx < 0)
@@ -548,6 +585,11 @@ void Update::init()
       if (!pd)
         error->all(FLERR,
                    "global bfield_compute: fix provider must be style plasma/data");
+      if (comm->me == 0 && screen)
+        fprintf(screen,
+                "  boris: bfield_compute '%s' bound to fix plasma/data "
+                "(has_bfield=%d, mesh_tri_b=%zu)\n",
+                boris_plasma_cid, pd->has_bfield, pd->mesh_tri_br.size());
     }
   }
 
@@ -665,8 +707,8 @@ void Update::init()
     int recognized = 0;
     for (int ifix = 0; ifix < modify->nfix; ifix++) {
       const char *s = modify->fix[ifix]->style;
-      if (strcmp(s,"chem/adas") == 0 || strcmp(s,"chem/adas/kk") == 0) {
-        // chem/adas always reads Te+Ne; Ti/Vpar/Bfield only matter for the
+      if (strcmp(s,"volume/chem/adas") == 0 || strcmp(s,"volume/chem/adas/kk") == 0) {
+        // volume/chem/adas always reads Te+Ne; Ti/Vpar/Bfield only matter for the
         // charge-exchange (EXCHANGE) channel. Skip those bits when the
         // reactions file has no CX entry — common for pure ionization runs.
         pcache_need_mask |= PCACHE_TE | PCACHE_NE;
@@ -833,7 +875,7 @@ void Update::run(int nsteps)
 
     // cache plasma fields at particle positions (one query per particle).
     // Gated by pcache_nevery so decks whose only consumer (e.g. fix
-    // chem/adas at nevery=10) doesn't need it every step can skip the
+    // volume/chem/adas at nevery=10) doesn't need it every step can skip the
     // population on the off steps. When pcache_nevery > 1, consumers
     // read stale values between refreshes; tradeoff is fine for plasma
     // quantities whose spatial scale (~mm) exceeds particle displacement
@@ -859,7 +901,7 @@ void Update::run(int nsteps)
     }
 
     // halt early if all particles have been absorbed/lost, or if any fix
-    // explicitly requested an early exit (fix chem/adas Mode A exhaustion).
+    // explicitly requested an early exit (fix volume/chem/adas Mode A exhaustion).
     {
       bigint nlocal = particle->nlocal;
       bigint nglobal;
@@ -977,10 +1019,10 @@ void Update::cache_plasma_particles()
       !gti_r_vec || !gti_z_vec) return;
 
   // Sheath geometry compute (for Boltzmann ne correction)
-  ComputeSheathGeometryGrid *csg = nullptr;
+  ComputeNearestSurfGrid *csg = nullptr;
   if (sheath_flag && sheath_geom_cidx >= 0) {
     Compute *cg = modify->compute[sheath_geom_cidx];
-    csg = dynamic_cast<ComputeSheathGeometryGrid *>(cg);
+    csg = dynamic_cast<ComputeNearestSurfGrid *>(cg);
   }
 
   Particle::OnePart *particles = particle->particles;
@@ -1109,9 +1151,10 @@ void Update::cache_plasma_particles()
         }
       }
       if (need_bfield && pd->has_bfield) {
-        bf.br = interp_pd_stencil(pd->br, st);
-        bf.bz = interp_pd_stencil(pd->bz, st);
-        bf.bt = interp_pd_stencil(pd->bt, st);
+        // Route through bfield_at() so mesh-native B (mesh_tri_b*) is
+        // picked up on mesh-only plasma.h5 runs; the stencil path only
+        // hits the empty regular-grid arrays and would return zero.
+        pd->bfield_at(R, Z, bf.br, bf.bz, bf.bt, particles[i].icell);
         bf.Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
       }
     }
@@ -1240,21 +1283,23 @@ void Update::cache_plasma_particles()
         const double d_particle = std::fabs(
           (x[0]-sref[0])*sh_nx + (x[1]-sref[1])*sh_ny + (x[2]-sref[2])*sh_nz);
 
-        if (d_particle > 0.0 && d_particle < sheath_dmax) {
-          const double te = pf.temp_e;
-          const double ti = pf.temp_i;
-          const double ne = pf.dens_e;
-          const double bmag = std::sqrt(bx*bx + by*by + bz*bz);
+        const double te = pf.temp_e;
+        const double ti = pf.temp_i;
+        const double ne = pf.dens_e;
+        const double bmag = std::sqrt(bx*bx + by*by + bz*bz);
 
-          double alpha_deg = 90.0;
-          if (bmag > 0.0) {
-            double bvec[3] = {bx, by, bz};
-            double nvec[3] = {sh_nx, sh_ny, sh_nz};
-            SheathModels::ChoduraMetrics cm =
-              SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
-            alpha_deg = cm.alpha_deg;
-          }
+        double alpha_deg = 90.0;
+        if (bmag > 0.0) {
+          double bvec[3] = {bx, by, bz};
+          double nvec[3] = {sh_nx, sh_ny, sh_nz};
+          SheathModels::ChoduraMetrics cm =
+            SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
+          alpha_deg = cm.alpha_deg;
+        }
 
+        const double d_max = sheath_auto_dmax(te, ti, ne, bmag, alpha_deg,
+                                              sheath_mD_amu, sheath_dmax);
+        if (d_particle > 0.0 && d_particle < d_max) {
           SheathModels::BorodkinaSheathResult sr;
           if (sheath_model == 1) {
             sr = SheathModels::coulette_manfredi_sheath_at_distance(
@@ -2585,19 +2630,32 @@ void Update::pusherBoris2D(int i, int icell, double dt,
   const int nsub = (boris_subcycles > 0) ? boris_subcycles : 1;
   const double dt_sub = dt / static_cast<double>(nsub);
 
+  const int dim = domain->dimension;
+  const bool axi = domain->axisymmetric;
+
   double xcur[2] = {x[0], x[1]};
   double zcur = x[2];
-  // 2D WEST-style runs store cylindrical components in SPARTA slots as
-  // (R,Z,phi). The Boris cross product assumes a right-handed basis, so
-  // rotate internally in (R,phi,Z) and map back to storage order.
+  // Positions stay in SPARTA slot order (layout-agnostic for the 2D
+  // position advance). Velocity, E and B are lifted into physical
+  // cylindrical (R, Z, phi) via openedge_geom helpers, then rotated
+  // into a right-handed (R, phi, Z) basis for the Boris cross product.
+  // Supported layouts:
+  //   - 2D Cartesian (legacy): SPARTA x = R, y = Z, z = phi
+  //   - 2D axisymmetric:       SPARTA x = Z, y = R, z = phi
+  // Both map to the same physics via OpenEdge::sparta_to_RZ /
+  // sparta_v_to_RZphi / RZphi_force_to_sparta.
   double vcur[3] = {v[0], v[1], v[2]};
-  double E[3] = {0.0, 0.0, 0.0};
-  double B[3] = {0.0, 0.0, 0.0};
+  double E_slot[3] = {0.0, 0.0, 0.0};
+  double B[3] = {0.0, 0.0, 0.0};   // cylindrical (BR, BZ, Bphi)
 
-  // Cache E-field once per Boris call
+  // Cache E-field once per Boris call (returned in SPARTA slot order by
+  // fix efield/grid and by compute plasma/fields column feeds)
   if (eperturbflag)
     BorisGrid::read_field_from_fix(modify->fix[efieldfix], (efstyle == GFIELD),
-                                   efield_active, i, icell, E);
+                                   efield_active, i, icell, E_slot);
+
+  double ER = 0.0, EZ = 0.0, Ephi = 0.0;
+  OpenEdge::sparta_v_to_RZphi(E_slot, dim, axi, 0.0, ER, EZ, Ephi);
 
   // Cache B-field once via point query at initial position.
   // Particle displacement per full step (~v*dt ~ 10μm) is negligible
@@ -2618,16 +2676,157 @@ void Update::pusherBoris2D(int i, int icell, double dt,
   } else if (boris_plasma_fidx >= 0) {
     auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[boris_plasma_fidx]);
     if (pd && pd->has_bfield) {
+      const double xyz[3] = {xcur[0], xcur[1], 0.0};
+      double R = 0.0, Z = 0.0;
+      OpenEdge::sparta_to_RZ(xyz, dim, axi, R, Z);
       double Br = 0.0, Bz = 0.0, Bt = 0.0;
-      pd->bfield_at(xcur[0], xcur[1], Br, Bz, Bt);
+      pd->bfield_at(R, Z, Br, Bz, Bt);
       B[0] = Br;
       B[1] = Bz;
       B[2] = Bt;
     }
   }
-  if (B[0] == 0.0 && B[1] == 0.0 && B[2] == 0.0 && bperturbflag)
+  if (B[0] == 0.0 && B[1] == 0.0 && B[2] == 0.0 && bperturbflag) {
+    // fix bfield/grid returns SPARTA slot order; lift to cylindrical.
+    double B_slot[3] = {0.0, 0.0, 0.0};
     BorisGrid::read_field_from_fix(modify->fix[bfieldfix], (bfstyle == GFIELD),
-                                   bfield_active, i, icell, B);
+                                   bfield_active, i, icell, B_slot);
+    double BR = 0.0, BZ = 0.0, Bphi = 0.0;
+    OpenEdge::sparta_v_to_RZphi(B_slot, dim, axi, 0.0, BR, BZ, Bphi);
+    B[0] = BR;
+    B[1] = BZ;
+    B[2] = Bphi;
+  }
+
+  // --- Pre-fetch per-particle sheath data (2D analogue of the 3D
+  //     pusher_boris3D block). Geometry + plasma are invariant during
+  //     subcycling, so evaluate once here in physical (R, Z).
+  double sh_nR = 0.0, sh_nZ = 0.0;           // unit normal in cylindrical
+  double sh_sR = 0.0, sh_sZ = 0.0;           // wall reference point (R, Z)
+  double sh_te = 0.0, sh_ti = 0.0, sh_ne = 0.0;
+  double sh_bmag = 0.0, sh_alpha_deg = 90.0;
+  int    sh_active = 0;
+  double sh_d0_sign = 0.0;
+
+  if (sheath_flag && !sheath_kick && sheath_geom_cidx >= 0 &&
+      (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
+    Compute *cg = modify->compute[sheath_geom_cidx];
+    int gcell = icell;
+    Grid::ChildCell *cells_tmp = grid->cells;
+    if (cells_tmp[icell].nsplit <= 0 && cells_tmp[icell].isplit >= 0)
+      gcell = grid->sinfo[cells_tmp[icell].isplit].icell;
+
+    auto *csg = dynamic_cast<ComputeNearestSurfGrid *>(cg);
+    if (csg) {
+      int midx = csg->midx_grid[gcell];
+      // Refine midx when the parent cell holds multiple surface segments
+      // (e.g. near corners); pick the one closest to the PARTICLE.
+      Grid::ChildCell *pc = &grid->cells[gcell];
+      if (pc->nsurf > 0) {
+        const int sbit = csg->sgroupbit;
+        surfint *cs = pc->csurfs;
+        double best_d = 1.0e20;
+        int best_m = -1;
+        for (int j = 0; j < pc->nsurf; j++) {
+          int m = static_cast<int>(cs[j]);
+          if (!(surf->lines[m].mask & sbit)) continue;
+          Surf::Line *ln = &surf->lines[m];
+          const double d = std::fabs((x[0]-ln->p1[0])*ln->norm[0] +
+                                     (x[1]-ln->p1[1])*ln->norm[1]);
+          if (d < best_d) { best_d = d; best_m = m; }
+        }
+        if (best_m >= 0) midx = best_m;
+      }
+
+      if (midx >= 0) {
+        Surf::Line *ln = &surf->lines[midx];
+        // Normalize then lift (nx, ny, 0) from SPARTA slot order into
+        // cylindrical (nR, nZ, 0) so Cart 2D and axi share one path.
+        double nx_raw = ln->norm[0];
+        double ny_raw = ln->norm[1];
+        const double nmag = std::sqrt(nx_raw*nx_raw + ny_raw*ny_raw);
+        if (nmag > 0.0) { nx_raw /= nmag; ny_raw /= nmag; }
+        const double n_slot[3] = {nx_raw, ny_raw, 0.0};
+        double nR_tmp = 0.0, nZ_tmp = 0.0, nphi_tmp = 0.0;
+        OpenEdge::sparta_v_to_RZphi(n_slot, dim, axi, 0.0,
+                                     nR_tmp, nZ_tmp, nphi_tmp);
+        sh_nR = nR_tmp;
+        sh_nZ = nZ_tmp;
+
+        const double xmid_slot[3] = {0.5*(ln->p1[0]+ln->p2[0]),
+                                     0.5*(ln->p1[1]+ln->p2[1]),
+                                     0.0};
+        OpenEdge::sparta_to_RZ(xmid_slot, dim, axi, sh_sR, sh_sZ);
+
+        // Plasma (Te, Ti, ne) at gcell from compute or fix.
+        if (sheath_plasma_cidx >= 0) {
+          Compute *cp_base = modify->compute[sheath_plasma_cidx];
+          auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
+          if (cp) {
+            sh_te = cp->plasma_arr[gcell].temp_e;
+            sh_ti = cp->plasma_arr[gcell].temp_i;
+            sh_ne = cp->plasma_arr[gcell].dens_e;
+          }
+        } else {
+          auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[sheath_plasma_fidx]);
+          if (pd) {
+            PlasmaFileParams sh_pf =
+              query_plasma_from_fix(pd, x, dim, axi);
+            sh_te = sh_pf.temp_e;
+            sh_ti = sh_pf.temp_i;
+            sh_ne = sh_pf.dens_e;
+          }
+        }
+
+        sh_bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
+
+        if (sh_te > 0.0 && sh_ne > 0.0 && sh_bmag > 0.0) {
+          // Chodura α between B (cylindrical (BR,BZ,Bphi) = B[0..2])
+          // and n (cylindrical (nR,nZ,0)). chodura_metrics is
+          // frame-agnostic (dot products only).
+          const double bvec[3] = {B[0], B[1], B[2]};
+          const double nvec[3] = {sh_nR, sh_nZ, 0.0};
+          SheathModels::ChoduraMetrics cm =
+            SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
+          sh_alpha_deg = cm.alpha_deg;
+          sh_active = 1;
+        }
+      }
+    }
+  }
+
+  // Per-particle sheath cut-off distance (physics-based).
+  // See sheath_auto_dmax() in the anonymous namespace above.
+  double sh_d_max = 0.0;
+  if (sh_active)
+    sh_d_max = sheath_auto_dmax(sh_te, sh_ti, sh_ne, sh_bmag,
+                                sh_alpha_deg, sheath_mD_amu, sheath_dmax);
+
+  if (sh_active) {
+    double R0 = 0.0, Z0 = 0.0;
+    const double xyz0[3] = {xcur[0], xcur[1], 0.0};
+    OpenEdge::sparta_to_RZ(xyz0, dim, axi, R0, Z0);
+    const double d0 = (R0 - sh_sR)*sh_nR + (Z0 - sh_sZ)*sh_nZ;
+    sh_d0_sign = (d0 >= 0.0) ? 1.0 : -1.0;
+  }
+
+  // Precompute sheath-model coefficients once per Boris call. Everything
+  // inside them (lambda_D, rho_i, L_MPS, fd, phi0, CM fit coefficients,
+  // all the transcendentals) depends only on Te, Ti, ne, B, alpha, which
+  // don't change across subcycles. sheath_emag_at_distance below then
+  // reduces to 2-4 exp() calls per subcycle.
+  SheathModels::SheathEmagCoeffs sh_coeffs;
+  if (sh_active) {
+    sh_coeffs = (sheath_model == 1)
+        ? SheathModels::sheath_prepare_coulette_manfredi(
+              sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
+              sheath_mD_amu, sheath_pot_mult)
+        : SheathModels::sheath_prepare_borodkina(
+              sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
+              sheath_mD_amu, sheath_pot_mult);
+  }
+
+  const double Brhs[3] = {B[0], B[2], B[1]};
 
   for (int isub = 0; isub < nsub; isub++) {
 
@@ -2643,32 +2842,71 @@ void Update::pusherBoris2D(int i, int icell, double dt,
 
     double xold[2] = {xcur[0], xcur[1]};
 
-    double vrhs[3] = {vcur[0], vcur[2], vcur[1]};
-    const double Erhs[3] = {E[0], E[2], E[1]};
-    const double Brhs[3] = {B[0], B[2], B[1]};
+    // E_rhs per subcycle: base E (from fix efield/grid or plasma column
+    // feed) + per-particle sheath E evaluated at the current position.
+    double ER_step = ER, EZ_step = EZ;
+    if (sh_active) {
+      double R_sub = 0.0, Z_sub = 0.0;
+      const double xyz_sub[3] = {xcur[0], xcur[1], 0.0};
+      OpenEdge::sparta_to_RZ(xyz_sub, dim, axi, R_sub, Z_sub);
+      const double d_raw = (R_sub - sh_sR)*sh_nR + (Z_sub - sh_sZ)*sh_nZ;
+      const double d_particle = d_raw;  // signed
+      // Engage sheath E only when the particle is on the PLASMA side
+      // of the wall (d_raw > 0) and still inside the engagement band.
+      // Overshoot past the wall (d_raw <= 0) is a numerical artifact;
+      // applying +n E out of the solid turns a correctable overshoot
+      // into an outward ejection with no surf_collide ever firing.
+      if (sh_d0_sign > 0.0 && d_particle > 0.0 && d_particle < sh_d_max) {
+        const double emag =
+            SheathModels::sheath_emag_at_distance(sh_coeffs, d_particle);
+        // E points INTO the wall (along -n, because n points into the
+        // fluid per the unified 2026-04-21 normal convention).
+        ER_step -= emag * sh_nR;
+        EZ_step -= emag * sh_nZ;
+      }
+    }
+    const double Erhs[3] = {ER_step, Ephi, EZ_step};
+
+    double vR = 0.0, vZ = 0.0, vphi = 0.0;
+    OpenEdge::sparta_v_to_RZphi(vcur, dim, axi, 0.0, vR, vZ, vphi);
+    double vrhs[3] = {vR, vphi, vZ};
 
     BorisGrid::push_velocity(qm, dt_sub, Erhs, Brhs, vrhs);
 
-    vcur[0] = vrhs[0];
-    vcur[1] = vrhs[2];
-    vcur[2] = vrhs[1];
+    OpenEdge::RZphi_force_to_sparta(vrhs[0], vrhs[2], vrhs[1], dim, axi, 0.0,
+                                     vcur[0], vcur[1], vcur[2]);
+
     xcur[0] += vcur[0] * dt_sub;
     xcur[1] += vcur[1] * dt_sub;
     zcur += vcur[2] * dt_sub;
 
-    if (boris_dump_flag && (ntimestep % boris_dump_every == 0)) {
-      const double emag = std::sqrt(E[0]*E[0] + E[1]*E[1] + E[2]*E[2]);
-      if (comm->me == 0 && i == 0 && emag > 0.0) {
-        printf("boris2D step=%lld icell=%d sub=%d/%d qm=%g E=(%g,%g,%g) B=(%g,%g,%g)\n",
-               (long long) ntimestep, icell, isub+1, nsub, qm,
-               E[0], E[1], E[2], B[0], B[1], B[2]);
-      }
+    if (boris_dump_flag && (ntimestep % boris_dump_every == 0) && i == 0) {
+      // Print on the first local particle of WHATEVER rank owns it.
+      // With source-biased decomp (fix balance rcb part) rank 0 often
+      // holds zero particles, so a `me == 0` gate silently suppresses
+      // the whole diagnostic. Tag the rank so output stays legible.
+      printf("boris2D rank=%d step=%lld icell=%d sub=%d/%d qm=%g E_rpz=(%g,%g,%g) B_rpz=(%g,%g,%g) sh=%d alpha=%g\n",
+             comm->me, (long long) ntimestep, icell, isub+1, nsub, qm,
+             Erhs[0], Erhs[1], Erhs[2], Brhs[0], Brhs[1], Brhs[2],
+             sh_active, sh_alpha_deg);
     }
 
-    // Per-subcycle surface crossing guard (2D version).
-    // Same logic as 3D guard: check segment xold→xcur against every line
-    // surface in the particle's grid cell.  If crossing detected, stop
-    // subcycling and return to move loop for collision handling.
+    // --- Per-subcycle wall / cell-exit guard (2D) ---
+    // Two distinct leak modes when sheath E accelerates a particle near
+    // the wall:
+    //   (a) xold->xcur segment crosses a wall line IN THE CURRENT CELL.
+    //       Clip xnew to the intersection point so SPARTA's move loop
+    //       sees a trajectory that exactly touches the wall instead of
+    //       one that punched through (important for grazing geometry
+    //       where a straight-line x->xnew past the wall can miss
+    //       entirely).
+    //   (b) xcur leaves this cell without hitting a surface here —
+    //       return immediately so SPARTA's outer move loop picks up
+    //       cell migration and runs the standard surface-crossing
+    //       check in each traversed cell.
+    // Without (b) the subcycle keeps pushing in the wrong cell and the
+    // final x->xnew straight line can miss divertor walls with grazing
+    // angles.
 
     if (nsub > 1) {
       int gcell = icell;
@@ -2676,6 +2914,7 @@ void Update::pusherBoris2D(int i, int icell, double dt,
       if (cells_local[icell].nsplit <= 0 && cells_local[icell].isplit >= 0)
         gcell = grid->sinfo[cells_local[icell].isplit].icell;
 
+      // (a) in-cell wall crossing — clip to intersection point.
       int nsurf_cell = cells_local[gcell].nsurf;
       if (nsurf_cell > 0) {
         surfint *csurfs_local = cells_local[gcell].csurfs;
@@ -2692,12 +2931,30 @@ void Update::pusherBoris2D(int i, int icell, double dt,
             v[0] = vcur[0];
             v[1] = vcur[1];
             v[2] = vcur[2];
-            xnew[0] = xcur[0];
-            xnew[1] = xcur[1];
-            xnew[2] = zcur;
+            // Clip to intersection; keep the toroidal slot consistent
+            // with the fraction of the subcycle that was traversed.
+            xnew[0] = xc[0];
+            xnew[1] = xc[1];
+            xnew[2] = zcur - vcur[2] * dt_sub * (1.0 - param);
             return;
           }
         }
+      }
+
+      // (b) cell-exit — bail so SPARTA handles the remainder.
+      // Use half-open [lo, hi) to match grid->id_find_child so a
+      // particle exactly at `hi` is recognized as having left.
+      const double *clo = cells_local[gcell].lo;
+      const double *chi = cells_local[gcell].hi;
+      if (xcur[0] < clo[0] || xcur[0] >= chi[0] ||
+          xcur[1] < clo[1] || xcur[1] >= chi[1]) {
+        v[0] = vcur[0];
+        v[1] = vcur[1];
+        v[2] = vcur[2];
+        xnew[0] = xcur[0];
+        xnew[1] = xcur[1];
+        xnew[2] = zcur;
+        return;
       }
     }
   }
@@ -2757,7 +3014,7 @@ void Update::pusher_boris3D(int i, int icell, double dt,
       gcell = grid->sinfo[cells_tmp[icell].isplit].icell;
 
     // Get nearest surface element index from geometry compute
-    auto *csg = dynamic_cast<ComputeSheathGeometryGrid *>(cg);
+    auto *csg = dynamic_cast<ComputeNearestSurfGrid *>(cg);
     if (csg) {
       int midx = csg->midx_grid[gcell];
 
@@ -2889,6 +3146,28 @@ void Update::pusher_boris3D(int i, int icell, double dt,
     sh_d0_sign = (d0 >= 0.0) ? 1.0 : -1.0;
   }
 
+  // Physics-derived sheath cut-off distance; replaces the old
+  // arbitrary sheath_dmax=0.02 m cap. Helper lives in the anonymous
+  // namespace at the top of this file.
+  double sh_d_max = 0.0;
+  if (sh_active)
+    sh_d_max = sheath_auto_dmax(sh_te, sh_ti, sh_ne, sh_bmag,
+                                sh_alpha_deg, sheath_mD_amu, sheath_dmax);
+
+  // Precompute sheath coefficients once per Boris call (Te, ne, B, alpha
+  // are constant across subcycles). Per-subcycle sheath E evaluation
+  // collapses to a cheap sheath_emag_at_distance() call below.
+  SheathModels::SheathEmagCoeffs sh_coeffs;
+  if (sh_active) {
+    sh_coeffs = (sheath_model == 1)
+        ? SheathModels::sheath_prepare_coulette_manfredi(
+              sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
+              sheath_mD_amu, sheath_pot_mult)
+        : SheathModels::sheath_prepare_borodkina(
+              sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
+              sheath_mD_amu, sheath_pot_mult);
+  }
+
   // Cache B-field once via point query at initial position.
   double B_cached[3] = {0.0, 0.0, 0.0};
   if (boris_plasma_cidx >= 0) {
@@ -2947,32 +3226,19 @@ void Update::pusher_boris3D(int i, int icell, double dt,
         (xcur[0] - sh_sref[0]) * sh_nx
       + (xcur[1] - sh_sref[1]) * sh_ny
       + (xcur[2] - sh_sref[2]) * sh_nz;
-      const double d_particle = std::fabs(d_raw);
-
-      // Skip if particle overshot past wall (sign flipped from initial side)
-      const double d_sign = (d_raw >= 0.0) ? 1.0 : -1.0;
-      if (d_sign == sh_d0_sign && d_particle > 0.0 && d_particle < sheath_dmax) {
-        double emag = 0.0;
-        if (sheath_model == 1) {
-          SheathModels::BorodkinaSheathResult sr =
-            SheathModels::coulette_manfredi_sheath_at_distance(
-              d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
-              sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
-          emag = sr.emag_vpm;
-        } else {
-          SheathModels::BorodkinaSheathResult sr =
-            SheathModels::borodkina_sheath_at_distance(
-              d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
-              sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
-          emag = sr.emag_vpm;
-        }
-        // E-field points toward wall (decreasing |d|):
-        //   d_raw > 0 → particle on +nhat side → E along -nhat
-        //   d_raw < 0 → particle on -nhat side → E along +nhat
-        const double dir = (d_raw > 0.0) ? -1.0 : 1.0;
-        E[0] += dir * emag * sh_nx;
-        E[1] += dir * emag * sh_ny;
-        E[2] += dir * emag * sh_nz;
+      // Engage sheath E only when the particle is on the PLASMA side
+      // (d_raw > 0) AND started there (sh_d0_sign > 0). Overshoot past
+      // the wall (d_raw <= 0) is a numerical artifact — applying +n E
+      // out of the solid turns a correctable overshoot into an outward
+      // ejection with no surf_collide ever firing. Matches the 2D gate.
+      if (sh_d0_sign > 0.0 && d_raw > 0.0 && d_raw < sh_d_max) {
+        const double emag =
+            SheathModels::sheath_emag_at_distance(sh_coeffs, d_raw);
+        // E points INTO the wall (along -n), matching the unified
+        // 2026-04-21 inward-normal convention.
+        E[0] -= emag * sh_nx;
+        E[1] -= emag * sh_ny;
+        E[2] -= emag * sh_nz;
       }
     }
 // printf("E field due to sheath is %g %g %g\n", E[0], E[1], E[2]);
@@ -2994,13 +3260,12 @@ void Update::pusher_boris3D(int i, int icell, double dt,
     xcur[1] += vcur[1] * dt_sub;
     xcur[2] += vcur[2] * dt_sub;
 
-    if (boris_dump_flag && (ntimestep % boris_dump_every == 0)) {
-      const double emag = std::sqrt(E[0]*E[0] + E[1]*E[1] + E[2]*E[2]);
-      if (comm->me == 0 && i == 0 && emag > 0.0) {
-        printf("boris3D step=%lld icell=%d sub=%d/%d qm=%g E=(%g,%g,%g) B=(%g,%g,%g)\n",
-               (long long) ntimestep, icell, isub+1, nsub, qm,
-               E[0], E[1], E[2], B[0], B[1], B[2]);
-      }
+    if (boris_dump_flag && (ntimestep % boris_dump_every == 0) && i == 0) {
+      // Print on first local particle of any rank; rcb-part decomp
+      // can leave rank 0 empty. Tag the rank so output stays legible.
+      printf("boris3D rank=%d step=%lld icell=%d sub=%d/%d qm=%g E=(%g,%g,%g) B=(%g,%g,%g)\n",
+             comm->me, (long long) ntimestep, icell, isub+1, nsub, qm,
+             E[0], E[1], E[2], B[0], B[1], B[2]);
     }
 
     // Per-subcycle surface crossing guard.
@@ -3026,6 +3291,10 @@ void Update::pusher_boris3D(int i, int icell, double dt,
       if (cells_local[icell].nsplit <= 0 && cells_local[icell].isplit >= 0)
         gcell = grid->sinfo[cells_local[icell].isplit].icell;
 
+      // (a) In-cell wall hit — clip xnew to intersection point so the
+      //     outer move loop sees a trajectory that touches the wall
+      //     exactly, not one that punched through. Critical for
+      //     grazing divertor geometry.
       int nsurf_cell = cells_local[gcell].nsurf;
       if (nsurf_cell > 0) {
         surfint *csurfs_local = cells_local[gcell].csurfs;
@@ -3042,12 +3311,32 @@ void Update::pusher_boris3D(int i, int icell, double dt,
             v[0] = vcur[0];
             v[1] = vcur[1];
             v[2] = vcur[2];
-            xnew[0] = xcur[0];
-            xnew[1] = xcur[1];
-            xnew[2] = xcur[2];
+            xnew[0] = xc[0];
+            xnew[1] = xc[1];
+            xnew[2] = xc[2];
             return;
           }
         }
+      }
+
+      // (b) Cell-exit — bail so SPARTA's outer move loop handles cell
+      //     migration and per-cell surface detection on the remainder
+      //     of the straight-line path (fixes the "wrong-cell csurfs"
+      //     blind spot for subcycles that cross a cell boundary).
+      //     Use half-open [lo, hi) to match grid->id_find_child so a
+      //     particle exactly at `hi` is recognized as having left.
+      const double *clo = cells_local[gcell].lo;
+      const double *chi = cells_local[gcell].hi;
+      if (xcur[0] < clo[0] || xcur[0] >= chi[0] ||
+          xcur[1] < clo[1] || xcur[1] >= chi[1] ||
+          xcur[2] < clo[2] || xcur[2] >= chi[2]) {
+        v[0] = vcur[0];
+        v[1] = vcur[1];
+        v[2] = vcur[2];
+        xnew[0] = xcur[0];
+        xnew[1] = xcur[1];
+        xnew[2] = xcur[2];
+        return;
       }
     }
   }
@@ -3256,7 +3545,7 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
     if (cells_h[icell].nsplit <= 0 && cells_h[icell].isplit >= 0)
       gcell = grid->sinfo[cells_h[icell].isplit].icell;
 
-    auto *csg = dynamic_cast<ComputeSheathGeometryGrid *>(cg);
+    auto *csg = dynamic_cast<ComputeNearestSurfGrid *>(cg);
     if (csg) {
       int midx = csg->midx_grid[gcell];
 
@@ -3313,7 +3602,7 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
           (x[0]-sref[0])*sh_nx + (x[1]-sref[1])*sh_ny + (x[2]-sref[2])*sh_nz;
         const double d_particle = std::fabs(d_raw);
 
-        if (d_particle > 0.0 && d_particle < sheath_dmax) {
+        {
           ComputePlasmaFields *cp = nullptr;
           FixPlasmaData *pd = nullptr;
           if (sheath_plasma_cidx >= 0) {
@@ -3341,25 +3630,31 @@ void Update::pusher_hybrid3D(int i, int icell, double dt,
                 sh_alpha_deg = cm.alpha_deg;
               }
 
-              double emag = 0.0;
-              if (sheath_model == 1) {
-                SheathModels::BorodkinaSheathResult sr =
-                  SheathModels::coulette_manfredi_sheath_at_distance(
-                    d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
-                    sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
-                emag = sr.emag_vpm;
-              } else {
-                SheathModels::BorodkinaSheathResult sr =
-                  SheathModels::borodkina_sheath_at_distance(
-                    d_particle, sh_te, sh_ti, sh_ne, sh_bmag,
-                    sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
-                emag = sr.emag_vpm;
+              const double d_max = sheath_auto_dmax(sh_te, sh_ti, sh_ne,
+                                                    sh_bmag, sh_alpha_deg,
+                                                    sheath_mD_amu, sheath_dmax);
+              // Plasma-side only: skip when d_raw <= 0 (particle on
+              // wall side, numerical overshoot). Matches 2D/3D gates.
+              if (d_raw > 0.0 && d_raw < d_max) {
+                double emag = 0.0;
+                if (sheath_model == 1) {
+                  SheathModels::BorodkinaSheathResult sr =
+                    SheathModels::coulette_manfredi_sheath_at_distance(
+                      d_raw, sh_te, sh_ti, sh_ne, sh_bmag,
+                      sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
+                  emag = sr.emag_vpm;
+                } else {
+                  SheathModels::BorodkinaSheathResult sr =
+                    SheathModels::borodkina_sheath_at_distance(
+                      d_raw, sh_te, sh_ti, sh_ne, sh_bmag,
+                      sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
+                  emag = sr.emag_vpm;
+                }
+                // E into the wall along -n (inward-normal convention).
+                E[0] -= emag * sh_nx;
+                E[1] -= emag * sh_ny;
+                E[2] -= emag * sh_nz;
               }
-                    // E-field toward wall: direction from signed distance
-              const double dir = (d_raw > 0.0) ? -1.0 : 1.0;
-              E[0] += dir * emag * sh_nx;
-              E[1] += dir * emag * sh_ny;
-              E[2] += dir * emag * sh_nz;
             }
           }
         }

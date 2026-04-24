@@ -42,10 +42,10 @@
 /compute_bfield_timedep.h
 /compute_plasma_fields.cpp
 /compute_plasma_fields.h
-/compute_pmi_surf_data.cpp
-/compute_pmi_surf_data.h
-/compute_sheath_geometry_grid.cpp
-/compute_sheath_geometry_grid.h
+/compute_surface_physical_sputter.cpp
+/compute_surface_physical_sputter.h
+/compute_nearest_surf_grid.cpp
+/compute_nearest_surf_grid.h
 /compute_surf_ead.cpp
 /compute_surf_ead.h
 /compute_thermal_sheath_grid.cpp
@@ -70,8 +70,8 @@
 /fix_emit_droplet.h
 /fix_emit_surf_file.cpp
 /fix_emit_surf_file.h
-/fix_surface_emit_sputter.cpp
-/fix_surface_emit_sputter.h
+/fix_surface_emit_source.cpp
+/fix_surface_emit_source.h
 /fix_evaporation.cpp
 /fix_evaporation.h
 /fix_gravity.cpp
