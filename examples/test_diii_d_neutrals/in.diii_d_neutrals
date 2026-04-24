@@ -60,7 +60,11 @@ fix frec surface/emit/recycle recmix wall pd mass 2.0 R 0.99 &
     twall 23210.0 twall_species D 23210.0 D2 1500.0
 
 # ---- Diagnostics (running averages for low MC noise) ----
-compute cden grid all species nrho
+# particle/weight + grid/weighted: nrho_w reads per-particle pweight so
+# variable-weight decks (recycling, hot-surface emission) give correct
+# density; reduces to plain nrho when every particle has weight 1.
+fix pw particle/weight
+compute cden grid/weighted all all nrho_w
 fix    fden  ave/grid all 1 1000 1000 c_cden[*]  ave running
 fix    frate ave/grid all 1 1000 1000 f_fchem[*] ave running
 fix fbal   balance 50 1.02 rcb part
@@ -76,11 +80,11 @@ timestep            5e-09
 stats               500
 stats_style         step cpu np c_rsp c_rsmx c_rqe c_rqi
 
-# Dump schema: id xc yc xlo ylo xhi yhi  nD nD2  Sp Sm_x Sm_y Sm_z Qe Qi
+# Dump schema: id xc yc xlo ylo xhi yhi  nrho_w  Sp Sm_x Sm_y Sm_z Qe Qi
 dump d1 grid all 1000 diii_d_neutrals.grid id xc yc &
      xlo ylo xhi yhi &
-     f_fden[1] f_fden[2] &
+     f_fden &
      f_frate[1] f_frate[2] f_frate[3] f_frate[4] &
      f_frate[5] f_frate[6]
 
-run                 50000
+run                 10000

@@ -27,22 +27,8 @@ namespace SPARTA_NS {
 
 enum class ReactionType { Ionization, Recombination, ChargeExchange,
                           LineRadiation, RecombRadiation };
-enum SrcKind { SRC_NONE, SRC_VAR, SRC_COMP };
-struct GridSrc {
-  SrcKind kind = SRC_NONE;
-  int  varid   = -1;
-  char *vname  = nullptr;
-  int   icompute = -1;
-  int   col      = 0;
-  char *cid      = nullptr;
-  double **arr_cache = nullptr;
-  double  *vec_cache = nullptr;
-  int      src_index = -1;
-  int      cache_ts  = -1;
-};
 
 class RanKnuth;
-class ComputePlasmaFields;
 
 
 class FixVolumeChemAdas : public Fix {
@@ -73,23 +59,12 @@ public:
     // are diagnostics, not coupled state.
     void reset_tally();
 
-int    use_grid_plasma = 0;
-char  *tstr = NULL, *nstr = NULL;
-int    tvar = -1,   nvar = -1;
-GridSrc srcTe, srcNe;
-    inline void compute_plasma_grid();
-double read_cell(const GridSrc &S, int icell, int var_col /*0=Te,1=ne*/);
-
 // Per-cell source-term output for Gkeyll / external coupling.
 // Columns: 0=ionization, 1=recombination, 2=charge exchange, 3=dissociation.
 // Units: cumulative event count per cell since fix start (stored as double).
 // Exposed via the inherited base-class array_grid with size_per_grid_cols = 4.
 // Allocated lazily when grid->nlocal changes (see ensure_src_alloc).
 int maxgrid_src = 0;
-
-// Internal 2-column buffer used to cache Te/ne from variables/computes during
-// attempt() when use_grid_plasma is set. Distinct from the output array_grid.
-double **plasma_cache_2d = NULL;
 
 // Output units for the 20-column per-cell source tally (array_grid):
 //   TALLY_COUNTS: raw cumulative event totals since the fix was created.
@@ -181,7 +156,6 @@ protected:
     bigint nreact_one, nreact_running;
     int tally_flag;
     int maxgrid;
-    int maxgrid_plasma;
     int icompute;
     virtual void end_of_step_no_average();
 
@@ -227,7 +201,6 @@ protected:
 
     RateData rate_data;
     RanKnuth *rng_adas;
-    ComputePlasmaFields *cp_plasma_cached_;
     double computeReactionLambda(double rate_log10_cm3s, double dt, double ne_m3);
     bool setupInterpolation(ReactionType reactionType, int atomic_number, size_t charge_idx,
                     double te, double ne, double& x0, double& x1, double& y0, double& y1,
@@ -268,7 +241,6 @@ protected:
     void check_duplicate();
     void print_reaction(char*, char*);
     void print_reaction(OneReaction*);
-    void refresh_compute_src(GridSrc &S);
 
     // Deferred particle creation for dissociation (avoids invalidation during iteration)
     struct DeferredParticle {

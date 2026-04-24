@@ -1,0 +1,98 @@
+################################################################################
+# OpenEdge vs EIRENE benchmark: 0D box, constant plasma, D2/D/D+ chemistry
+# ---------------------------------------------------------------------------
+# Adapted from test_neutral_transport/in.input
+#
+# PURPOSE: Compare species inventories vs time against EIRENE standalone
+#          running the same 4 reactions with the same plasma background.
+#
+# PHYSICS (must match EIRENE setup exactly):
+#   - Constant background: Te = 20 eV, ne = 1e19 m-3, Ti = 20 eV
+#   - Zero bulk flow (no Mach number)
+#   - No B-field, no sheath, no wall sputtering
+#   - No elastic neutral-neutral or neutral-ion scattering (VSS off)
+#   - 4 volumetric reactions only (see plasma.reactions)
+#   - Periodic boundaries = infinite homogeneous plasma (0D test)
+#
+# WHAT TO COMPARE:
+#   1. D2, D, D+ particle counts vs time (output/species_inventory.dat)
+#   2. Per-channel reaction tallies (printed to stdout every 10000 steps)
+#   3. Total particle balance (should be conserved)
+#
+# RUN:
+#   cd openedge/
+#   mpirun -np 1 /path/to/spa_mpi -in in.eirene_compare
+################################################################################
+
+# ---- Plasma parameters ----
+variable Te_eV        equal 20.0                  # electron temperature [eV]
+variable Ti_eV        equal 20.0                  # ion temperature [eV]
+variable ne           equal 1e19                  # electron density [1/m^3]
+variable fnum         equal 1e15                  # particle weight (real/sim)
+variable T_K          equal ${Te_eV}*11604.505    # temperature in Kelvin
+variable time         equal 1e-3                  # total run time [s]
+variable dt           equal 1e-07                 # timestep [s]
+variable numStep      equal floor(${time}/${dt})
+variable dumpFreq     equal 100                   # dump every 100 steps
+variable inventFreq   equal 10                    # inventory every 10 steps
+
+############################################
+# Domain setup: small periodic box (0D test)
+############################################
+seed                1245
+dimension           2
+boundary            p p p
+global              gridcut 0 comm/sort no
+
+# Box size doesn't matter for 0D test (periodic, uniform plasma)
+# but must be large enough for particles. Using 1 m x 1 m.
+create_box          0.0 1.0 0.0 1.0 -0.5 0.5
+create_grid         1 1 1
+balance_grid        rcb cell
+
+############################################
+# Global settings
+############################################
+global              nrho ${ne}  fnum ${fnum} temp ${T_K}
+
+##################################--- Species ---######################################
+species             plasma.species D2 D D+
+mixture             species D2    frac 1.0    # start with all D2
+mixture             species D     frac 0.0
+mixture             species D+    frac 0.0
+
+##################################--- Particles ---######################################
+# Start with 2000 simulation particles (all D2)
+# Real particles = 2000 * fnum = 2e18
+create_particles    species n 2000
+
+##################################--- Chemistry ---######################################
+# Constant plasma background fed through fix plasma/data so the per-particle
+# pcache picks it up. `global bfield_compute pd` activates pcache without a
+# pusher; volume/chem/adas reads Te/ne directly from the cache.
+fix pd plasma/data constant temp_e ${Te_eV} dens_e ${ne}
+global bfield_compute pd
+
+# ADAS rates for D (Z=1) + Janev for D2 dissociation
+# NO collide command = no VSS neutral-neutral elastic scattering
+fix fchem volume/chem/adas 1 1 plasma.reactions
+
+##################################--- Diagnostics ---######################################
+shell mkdir -p ../output
+
+# Per-species particle counts via compute count
+# Each returns a scalar (single species name, no ambiguity with mixture)
+compute cD  count D
+compute cD2 count D2
+compute cDp count D+
+
+# Print species inventory every inventFreq steps
+# Columns: step | cpu | total_particles | N_D | N_D2 | N_D+
+stats               ${inventFreq}
+stats_style         step cpu np c_cD c_cD2 c_cDp
+
+##################################--- Run ---######################################
+timestep            ${dt}
+run                 ${numStep}
+
+#EOF

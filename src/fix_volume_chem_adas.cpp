@@ -8,6 +8,7 @@
 
 #include "stdlib.h"
 #include "string.h"
+#include <unistd.h>
 #include "fix_volume_chem_adas.h"
 #include "update.h"
 #include "grid.h"
@@ -28,9 +29,7 @@
 #include "math_extra.h"
 #include "random_mars.h"
 #include "random_knuth.h"
-#include "variable.h"
 #include "compute.h"
-#include "compute_plasma_fields.h"
 #include "database_paths.h"
 #include "process_library.h"
 
@@ -45,7 +44,6 @@ enum{ADAS,JANEV};                                      // rate styles
 #define MAXREACTANT 2
 #define MAXPRODUCT 3
 #define MAXCOEFF 10              // Janev polynomials use up to 9 coeffs (b0..b8)
-#define INVOKED_PER_GRID 16
 #define MAXLINE 1024
 #define DELTALIST 16
 /* ---------------------------------------------------------------------- */
@@ -82,24 +80,80 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
     nlist = maxlist = 0;
     rlist = NULL;
 
-    // Reactions-file argument can be:
+    // Reactions-list argument can be:
     //   * literal path (contains '/' or ends in .reactions) -> used as-is
-    //   * element symbol (e.g. "D", "C") -> resolved to
+    //   * element symbol (e.g. "D", "C") -> first try processes.h5
+    //     /volume/reactions/<elem>/catalog, fall back to
     //     ${OPENEDGE_ROOT}/database/adas/reactions/<elem>.reactions
     //   * "auto" sentinel -> same as passing the arg[3] element here
     std::string reactions_path;
     {
       const std::string tok4(arg[4]);
-      if (tok4 == "auto") {
-        reactions_path = resolve_reactions_file(std::string(arg[3]), error);
-      } else {
-        reactions_path = resolve_reactions_file(tok4, error);
+      std::string elem_for_catalog;
+      bool is_literal_path = tok4.find('/') != std::string::npos ||
+          (tok4.size() >= 10 &&
+           tok4.compare(tok4.size() - 10, 10, ".reactions") == 0);
+
+      if (!is_literal_path) {
+        elem_for_catalog = (tok4 == "auto") ? std::string(arg[3]) : tok4;
+        // Normalise isotopes: processes.h5 stores hydrogen as "d" key.
+        // element_to_z already maps D/T/H -> 1; reuse for the lookup.
+        int zc = element_to_z(elem_for_catalog);
+        if (zc > 0) {
+          static const std::map<int, std::string> z_to_sym = {
+            {1,"d"}, {2,"he"}, {3,"li"}, {4,"be"}, {5,"b"}, {6,"c"},
+            {7,"n"}, {8,"o"}, {10,"ne"}, {18,"ar"}, {26,"fe"}, {36,"kr"},
+            {42,"mo"}, {54,"xe"}, {73,"ta"}, {74,"w"},
+          };
+          auto it = z_to_sym.find(zc);
+          if (it != z_to_sym.end()) elem_for_catalog = it->second;
+          else elem_for_catalog.clear();
+        } else elem_for_catalog.clear();
       }
-    }
-    {
-      std::vector<char> buf(reactions_path.begin(), reactions_path.end());
-      buf.push_back('\0');
-      readfile(buf.data());
+
+      bool loaded_from_processes = false;
+      if (!elem_for_catalog.empty()) {
+        std::string processes_path = resolve_processes_file();
+        if (!processes_path.empty()) {
+          ProcessLibrary lib_r;
+          lib_r.open(processes_path, world, error);
+          std::string catalog;
+          if (lib_r.is_open() &&
+              lib_r.load_reactions_catalog(elem_for_catalog, catalog)) {
+            // Write the catalog to a rank-0 tempfile, then readfile() it
+            // so every rank parses the same content through the existing
+            // text parser. The tempfile is removed after readfile() returns.
+            char tmpl[] = "/tmp/openedge_reactions_XXXXXX";
+            int fd = -1;
+            if (comm->me == 0) {
+              fd = mkstemp(tmpl);
+              if (fd >= 0) {
+                ssize_t nw = write(fd, catalog.data(), catalog.size());
+                (void) nw;
+                close(fd);
+              }
+            }
+            MPI_Bcast(tmpl, sizeof(tmpl), MPI_CHAR, 0, world);
+            std::vector<char> buf(tmpl, tmpl + strlen(tmpl) + 1);
+            readfile(buf.data());
+            if (comm->me == 0) unlink(tmpl);
+            loaded_from_processes = true;
+            if (comm->me == 0 && screen)
+              fprintf(screen,
+                "  reactions catalog: %s (processes.h5 "
+                "/volume/reactions/%s/catalog)\n",
+                elem_for_catalog.c_str(), elem_for_catalog.c_str());
+          }
+        }
+      }
+
+      if (!loaded_from_processes) {
+        const std::string tok = (tok4 == "auto") ? std::string(arg[3]) : tok4;
+        reactions_path = resolve_reactions_file(tok, error);
+        std::vector<char> buf(reactions_path.begin(), reactions_path.end());
+        buf.push_back('\0');
+        readfile(buf.data());
+      }
     }
     check_duplicate();
 
@@ -187,54 +241,12 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
     tally_flag = 0;
     nreact_one = nreact_running = 0;
     rng_adas = nullptr;
-    cp_plasma_cached_ = nullptr;
 
-    //
-   // --- Optional plasma grid args: plasma <TeSrc> <NeSrc> ---
-   // If omitted, Te/ne are read from the per-particle plasma cache
-   // populated by update.cpp (requires sheath or GCA plasma compute).
-  if (iarg < narg && strcmp(arg[iarg], "plasma") == 0) {
-    if (narg < iarg + 3)
-      error->all(FLERR,"fix volume/chem/adas plasma requires: plasma <TeSrc> <NeSrc>");
-
-    use_grid_plasma = 1;
-
-    auto parse_src = [&](const char *tok, GridSrc &dst, const char *label) {
-      if (strncmp(tok,"c_",2)==0) {
-        dst.kind = SRC_COMP;
-        const char *name = tok + 2;
-        const char *lb   = strchr(name,'[');
-        if (!lb || tok[strlen(tok)-1] != ']') {
-          char msg[160];
-          snprintf(msg, sizeof(msg),
-                  "fix volume/chem/adas: bad %s token (use c_id[idx])", label);
-          error->all(FLERR, msg);
-        }
-        const int idlen = lb - name;
-        dst.cid = new char[idlen+1];
-        strncpy(dst.cid, name, idlen);
-        dst.cid[idlen] = '\0';
-        dst.col = atoi(lb+1);
-        if (dst.col <= 0) {
-          char msg[160];
-          snprintf(msg, sizeof(msg),
-                  "fix volume/chem/adas: %s column must be >=1", label);
-          error->all(FLERR, msg);
-        }
-      } else {
-        dst.kind = SRC_VAR;
-        int n = strlen(tok) + 1;
-        char *copy = new char[n];
-        strcpy(copy, tok);
-        if (&dst == &srcTe) tstr = copy; else nstr = copy;
-      }
-    };
-
-    parse_src(arg[iarg+1], srcTe, "Te");
-    parse_src(arg[iarg+2], srcNe, "ne");
-    use_grid_plasma = (srcTe.kind == SRC_VAR) || (srcNe.kind == SRC_VAR);
-    iarg += 3;
-  }
+  // Te/ne come from the per-particle plasma cache (populated by
+  // update.cpp from a configured plasma_compute / plasma_fix). For a
+  // uniform synthetic plasma in test cases, use `fix plasma/data
+  // constant ...` — the pcache picks it up automatically and the
+  // sheath Boltzmann correction (when active) flows through.
 
   // --- Optional Mode A (EIRENE-semantics) keywords ---
   //   mode neutral                         -> delete particle on ionization
@@ -359,10 +371,6 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
     }
   }
 
-  tvar = nvar = -1;
-  maxgrid_plasma = 0;
-  plasma_cache_2d = NULL;
-
   // Per-grid source tally layout depends on `output` keyword:
   //   OUT_SUMMARY  (default): 6 cols {Sp, Sm_x, Sm_y, Sm_z, Qe, Qi},
   //                 signed plasma-frame moments, ready for fluid coupling.
@@ -409,8 +417,6 @@ FixVolumeChemAdas::~FixVolumeChemAdas()
   memory->destroy(reactions);
   memory->destroy(list_ij);
 
-delete [] tstr; delete [] nstr;
-memory->destroy(plasma_cache_2d);
 memory->destroy(array_grid);
 delete rng_adas;
 
@@ -608,30 +614,8 @@ void FixVolumeChemAdas::init()
     int isp = r->reactants[0];
   }
 
-// NOTE: if srcTe/srcNe are SRC_NONE, the per-particle plasma cache
-// (set in update->init) will be checked at runtime in end_of_step().
-// We cannot validate here because init() runs before update->init().
-
-  // --- resolve VARIABLE sources (old path) ---
-if (srcTe.kind == SRC_VAR) {
-  tvar = input->variable->find(tstr);
-  if (tvar < 0 || !input->variable->grid_style(tvar))
-    error->all(FLERR,"Temperature variable for volume/chem/adas must be grid-style");
-}
-if (srcNe.kind == SRC_VAR) {
-  nvar = input->variable->find(nstr);
-  if (nvar < 0 || !input->variable->grid_style(nvar))
-    error->all(FLERR,"Density variable for volume/chem/adas must be grid-style");
-}
-if ((srcTe.kind == SRC_VAR) || (srcNe.kind == SRC_VAR)) {
-  if (grid->nlocal > maxgrid_plasma) {
-    maxgrid_plasma = grid->maxlocal;
-    memory->destroy(plasma_cache_2d);
-    memory->create(plasma_cache_2d, maxgrid_plasma, 2, "volume/chem/adas:plasma_cache_2d");
-  }
-  if (grid->nlocal)
-    memset(&plasma_cache_2d[0][0], 0, sizeof(double)*grid->nlocal*2);
-}
+// Plasma cache is the only source path; the gate check fires at the
+// first end_of_step (here is too early — update->init() runs after).
 
 // Allocate per-cell source-tally output (array_grid, 6 or 20 cols depending
 // on output_mode) up front so dumps that fire at step 0
@@ -644,45 +628,6 @@ if (grid->maxlocal > maxgrid_src) {
 if (maxgrid_src > 0) {
   memset(&array_grid[0][0], 0,
          sizeof(double) * maxgrid_src * size_per_grid_cols);
-}
-
-// --- resolve COMPUTE sources (new path) ---
-auto bind_compute = [&](GridSrc &S, const char *label){
-  if (S.kind != SRC_COMP) return;
-
-  S.icompute = modify->find_compute(S.cid);
-  if (S.icompute < 0) {
-    char msg[160];
-    snprintf(msg, sizeof(msg),
-            "fix volume/chem/adas: compute ID for %s not found", label);
-    error->all(FLERR, msg);
-  }
-
-  Compute *c = modify->compute[S.icompute];
-    if (c->per_grid_flag == 0) {
-      char msg[160];
-      snprintf(msg, sizeof(msg),
-              "fix volume/chem/adas: compute for %s is not per-grid", label);
-      error->all(FLERR, msg);
-    };
-if (c->size_per_grid_cols == 0) {
-  if (S.col != 1) {
-    char msg[160];
-    snprintf(msg, sizeof(msg),
-             "fix volume/chem/adas: compute column for %s must be 1 for vector source", label);
-    error->all(FLERR, msg);
-  }
-} else if (S.col < 1 || S.col > c->size_per_grid_cols) {
-  char msg[160];
-  snprintf(msg, sizeof(msg),
-           "fix volume/chem/adas: compute column for %s out of range", label);
-  error->all(FLERR, msg);
-}
-};
-
-if (srcTe.kind == SRC_COMP || srcNe.kind == SRC_COMP) {
-  bind_compute(srcTe, "Te");
-  bind_compute(srcNe, "ne");
 }
 
 // initialize SPARTA RNG (same pattern as fix_coll_nanbu)
@@ -728,17 +673,6 @@ if (stop_on_exhaust && source_species.empty() && eirene_mode && comm->me == 0) {
     "run will rely on SPARTA's built-in nglobal==0 termination");
 }
 
-// cache dynamic_cast for per-particle plasma interpolation
-cp_plasma_cached_ = nullptr;
-if (srcTe.kind == SRC_COMP && srcTe.icompute >= 0) {
-  Compute *c = modify->compute[srcTe.icompute];
-  cp_plasma_cached_ = dynamic_cast<ComputePlasmaFields *>(c);
-}
-if (!cp_plasma_cached_ && srcNe.kind == SRC_COMP && srcNe.icompute >= 0) {
-  Compute *c = modify->compute[srcNe.icompute];
-  cp_plasma_cached_ = dynamic_cast<ComputePlasmaFields *>(c);
-}
-
 }
 
 /* ---------------------------------------------------------------------- */
@@ -747,12 +681,14 @@ void FixVolumeChemAdas::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
 
-  // One-time check: if no explicit Te/ne source, require plasma cache
-  if (srcTe.kind == SRC_NONE && srcNe.kind == SRC_NONE &&
-      !update->plasma_cache_flag) {
+  // Require the per-particle plasma cache. Activated by any one of:
+  // sheath, GCA, or `global bfield_compute`. For uniform test cases
+  // use `fix plasma/data constant ...` plus one of those activators.
+  if (!update->plasma_cache_flag) {
     error->all(FLERR,
-      "fix volume/chem/adas: no plasma source — either pass 'plasma <Te> <Ne>' "
-      "or configure sheath/GCA so the per-particle plasma cache is active");
+      "fix volume/chem/adas: per-particle plasma cache not active — "
+      "configure sheath / GCA / global bfield_compute so update.cpp "
+      "populates Te/ne at particle positions");
   }
 
   nreact_one = 0;
@@ -844,9 +780,11 @@ void FixVolumeChemAdas::end_of_step_no_average()
     memset(&array_grid[0][0], 0, sizeof(double) * maxgrid_src * ncols);
   }
 
-  // Fast path: read Te/ne/Ti/vpar/B from per-particle plasma cache
-  if (update->plasma_cache_flag &&
-      update->pc_te_custom >= 0 && update->pc_ne_custom >= 0) {
+  // Read Te/ne/Ti/vpar/B from per-particle plasma cache. The cache is
+  // populated by update.cpp from the configured plasma provider; the
+  // sheath Boltzmann correction (when active) is already folded in,
+  // so near-wall ne depletion shows up here automatically.
+  {
     double *te_vec = particle->edvec[particle->ewhich[update->pc_te_custom]];
     double *ne_vec = particle->edvec[particle->ewhich[update->pc_ne_custom]];
     double *ti_vec = (update->pc_ti_custom >= 0 && particle->ewhich[update->pc_ti_custom] >= 0)
@@ -872,22 +810,6 @@ void FixVolumeChemAdas::end_of_step_no_average()
         const double By = by_vec ? by_vec[ip] : 0.0;
         const double Bz = bz_vec ? bz_vec[ip] : 0.0;
         attempt(&particles[ip], ip, Te_eV, ne_m3, Ti_eV, vp, Bx, By, Bz);
-        ip = next[ip];
-      }
-    }
-  } else {
-    // Fallback: per-cell values from grid variable or compute
-    if (use_grid_plasma) compute_plasma_grid();
-    refresh_compute_src(srcTe);
-    refresh_compute_src(srcNe);
-
-    for (int icell = 0; icell < nglocal; icell++) {
-      if (cinfo[icell].count == 0) continue;
-      const double Te_eV = std::max(read_cell(srcTe, icell, 0), 1e-6);
-      const double ne_m3 = std::max(read_cell(srcNe, icell, 1), 0.0);
-      int ip = cinfo[icell].first;
-      while (ip >= 0) {
-        attempt(&particles[ip], ip, Te_eV, ne_m3);
         ip = next[ip];
       }
     }
@@ -1370,30 +1292,6 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
   return 1;
 }
 
-inline void FixVolumeChemAdas::compute_plasma_grid() {
-  if (!use_grid_plasma) return;
-  if (!grid->nlocal)    return;
-
-  const bool need_Te = (srcTe.kind == SRC_VAR);
-  const bool need_ne = (srcNe.kind == SRC_VAR);
-  if (!need_Te && !need_ne) return;   // both are compute-sourced
-
-  if (grid->maxlocal > maxgrid_plasma) {
-    maxgrid_plasma = grid->maxlocal;
-    memory->destroy(plasma_cache_2d);
-    memory->create(plasma_cache_2d, maxgrid_plasma, 2, "volume/chem/adas:plasma_cache_2d");
-  }
-
-  // plasma_cache_2d[icell][0]=Te ; [icell][1]=ne
-  if (grid->nlocal) memset(&plasma_cache_2d[0][0], 0, sizeof(double)*grid->nlocal*2);
-
-  const int stride = 2;
-  if (need_Te) input->variable->compute_grid(tvar, &plasma_cache_2d[0][0], stride, 0);
-  if (need_ne) input->variable->compute_grid(nvar, &plasma_cache_2d[0][1], stride, 0);
-}
-
-/* ---------------------------------------------------------------------- */
-
 void FixVolumeChemAdas::readfile(char *fname)
 {
   int n,n1,n2,eof;
@@ -1708,19 +1606,6 @@ double FixVolumeChemAdas::computeReactionLambda(double rate_log10_cm3s, // log10
 }
 
 
-double FixVolumeChemAdas::read_cell(const GridSrc &S, int icell, int var_col)
-{
-  if (S.kind == SRC_COMP) {
-    if (S.src_index < 0) {
-      return S.vec_cache ? S.vec_cache[icell] : 0.0;
-    }
-    if (!S.arr_cache) return 0.0;
-    return S.arr_cache[icell][S.src_index];
-  }
-  // VAR path
-  return plasma_cache_2d ? plasma_cache_2d[icell][var_col] : 0.0;
-}
-
 void FixVolumeChemAdas::interpolateRateData(int atomic_number, double charge, int /*icell*/, double te, double ne, double& rate_final, ReactionType reactionType) {
 
   size_t charge_idx = static_cast<size_t>(charge);
@@ -1832,18 +1717,3 @@ bool FixVolumeChemAdas::setupInterpolation(ReactionType reactionType, int atomic
 
 
 
-void FixVolumeChemAdas::refresh_compute_src(GridSrc &S) {
-  if (S.kind != SRC_COMP) return;
-  if (S.cache_ts == update->ntimestep) return;
-
-  Compute *c = modify->compute[S.icompute];
-  if (!(c->invoked_flag & INVOKED_PER_GRID)) {
-    c->compute_per_grid();
-    c->invoked_flag |= INVOKED_PER_GRID;
-  }
-
-  S.arr_cache = c->array_grid;
-  S.vec_cache = c->vector_grid;
-  S.src_index = (c->size_per_grid_cols == 0) ? -1 : (S.col - 1);
-  S.cache_ts  = update->ntimestep;
-}
