@@ -137,6 +137,9 @@ void ComputeThermalSheathGrid::compute_per_grid()
     igroup = s2g[ispecies];
     if (igroup < 0) continue;
     icell = particles[i].icell;
+    // Guard against stale icell after fix balance / fix adapt (same pattern
+    // as compute_grid.cpp fix in 96de7c5).
+    if (icell < 0 || icell >= nglocal) continue;
     if (!(cinfo[icell].mask & groupbit)) continue;
 
     mass = species[ispecies].mass;
