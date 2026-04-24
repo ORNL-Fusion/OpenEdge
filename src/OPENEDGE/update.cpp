@@ -335,7 +335,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   sheath_plasma_cidx = -1;
   sheath_plasma_fidx = -1;
   sheath_model = 0;             // 0=borodkina, 1=coulette_manfredi
-  // sheath_dmax=0 means "auto": pusherBoris2D derives the cut-off from
+  // sheath_dmax=0 means "auto": pusher_boris_2d derives the cut-off from
   // local physics as max(5·L_MPS, 10·λ_D). Any positive value set via
   // `global sheath dmax <m>` acts as an additional ceiling, not a
   // replacement for the auto value.
@@ -1496,25 +1496,25 @@ template < int DIM, int SURF, int OPT > void Update::move()
         dtremain = dt;
         if (DIM == 1 || DIM == 2)
         {
-          pusherBoris2D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+          pusher_boris_2d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
         else if (DIM == 3)
         {
           if (gca_flag)
-            pusher_hybrid3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+            pusher_hybrid_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
           else
-            pusher_boris3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+            pusher_boris_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
       } else if (pflag == PINSERT) {
         dtremain = dt;
         if (DIM == 1 || DIM == 2) {
-          pusherBoris2D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+          pusher_boris_2d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
         else if (DIM == 3) {
           if (gca_flag)
-            pusher_hybrid3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+            pusher_hybrid_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
           else
-            pusher_boris3D(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+            pusher_boris_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
       } else if (pflag == PENTRY) {
         // printf("We are in PENTRY move\n");
@@ -2613,7 +2613,7 @@ void Update::field_per_grid(int i, int icell, double dt, double *x, double *v)
    Boris pusher for 2D (x,y) positions with full 3-component velocity
 ------------------------------------------------------------------------- */
 
-void Update::pusherBoris2D(int i, int icell, double dt,
+void Update::pusher_boris_2d(int i, int icell, double dt,
                            double *x, double *v, double *xnew,
                            double charge, double mass)
 {
@@ -2699,7 +2699,7 @@ void Update::pusherBoris2D(int i, int icell, double dt,
   }
 
   // --- Pre-fetch per-particle sheath data (2D analogue of the 3D
-  //     pusher_boris3D block). Geometry + plasma are invariant during
+  //     pusher_boris_3d block). Geometry + plasma are invariant during
   //     subcycling, so evaluate once here in physical (R, Z).
   double sh_nR = 0.0, sh_nZ = 0.0;           // unit normal in cylindrical
   double sh_sR = 0.0, sh_sZ = 0.0;           // wall reference point (R, Z)
@@ -2971,7 +2971,7 @@ void Update::pusherBoris2D(int i, int icell, double dt,
    Boris pusher for 3D cartesian coordinates
 ------------------------------------------------------------------------- */
 
-void Update::pusher_boris3D(int i, int icell, double dt,
+void Update::pusher_boris_3d(int i, int icell, double dt,
                             double *x, double *v, double *xnew,
                             double charge, double mass)
 {
@@ -3357,7 +3357,7 @@ void Update::pusher_boris3D(int i, int icell, double dt,
    where L_B = B / |grad B| and rho_L = v_perp / (|q/m| * B)
 ------------------------------------------------------------------------- */
 
-void Update::pusher_hybrid3D(int i, int icell, double dt,
+void Update::pusher_hybrid_3d(int i, int icell, double dt,
                               double *x, double *v, double *xnew,
                               double charge, double mass)
 {

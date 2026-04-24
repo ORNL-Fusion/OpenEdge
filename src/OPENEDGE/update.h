@@ -304,7 +304,7 @@ struct SurfHit2D {
 double target_material_charge;
 double target_material_mass;
 double target_material_binding_energy;
-void pusherBoris2D( int i, int icell, double dt, double *x, double *v, double *xnew, double charge, double mass);
+void pusher_boris_2d( int i, int icell, double dt, double *x, double *v, double *xnew, double charge, double mass);
 
 double distance_to_surface_for_particle(int icell, const double x[3], const BoundaryInfo& info);
 inline double signed_plane_distance(const BoundaryInfo& info, const double x[3]) const {
@@ -490,9 +490,9 @@ static double dist_point_tri(const double p[3], const double a[3],
   //       unless possibly include modify.h and fix.h in this file
   void field_per_particle(int, int, double, double *, double *);
   void field_per_grid(int, int, double, double *, double *);
-  void pusher_boris3D(int i, int icell, double dt, double *x, double *v,
+  void pusher_boris_3d(int i, int icell, double dt, double *x, double *v,
                       double *xnew, double charge, double mass);
-  void pusher_hybrid3D(int i, int icell, double dt, double *x, double *v,
+  void pusher_hybrid_3d(int i, int icell, double dt, double *x, double *v,
                        double *xnew, double charge, double mass);
 
 };
