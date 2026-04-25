@@ -237,16 +237,23 @@ and usage patterns.
 
 ### Pushers / sheaths
 
-- **Boris / GCA hybrid pusher.** Boris with `global boris_subcycles N`;
-  GCA (Guiding Center Approximation) RK4 with Littlejohn corrections via
-  `global gca …`. Automatic switching via `gca_switch_factor`.
-- **Sheath models.** Kick (`global sheath ... kick yes`) — velocity boost
-  at wall collision, recommended for IEADs, no per-subcycle E-field.
-  Spatial (`global sheath ... model <name>`) — per-subcycle E-field,
-  models: `borodkina`, `coulette_manfredi`. Boltzmann ne correction
-  (`ne · exp(-φ/Te)`) flows into the per-particle pcache automatically,
-  so `fix volume/chem/adas` near-wall rates fall off without separate
-  plumbing. [`docs/fixes/sheath.md`](docs/fixes/sheath.md).
+- **Charged-particle pusher.** Single `global pusher` keyword tree:
+  `mode boris|hybrid` (Boris full-orbit or Boris/GCA hybrid),
+  `plasma <ID>` for the upstream provider, `subcycles N`,
+  `gca_switch <factor>` for hybrid switching, `dump`/`dump_every`,
+  `bad_dt_check`/`bad_dt_limit`, and a nested `sheath off|kick|spatial`
+  with `geom <nearest_surf/grid-ID>` and `mD_amu <amu>`. Sheath
+  internals (dmax, pot_mult, model blend) are auto.
+  [`docs/fixes/pusher.md`](docs/fixes/pusher.md),
+  [`docs/fixes/sheath.md`](docs/fixes/sheath.md).
+- **Sheath physics.** Kick mode applies the wall potential drop as a
+  velocity boost at wall collision (recommended for IEADs). Spatial
+  mode integrates the sheath E-field per subcycle along Boris steps.
+  Both share the auto-blended Coulette-Manfredi (close to wall) +
+  Borodkina tail (s > 60 λ_D). Boltzmann `ne · exp(-φ/Te)` correction
+  flows into the per-particle pcache automatically, so
+  `fix volume/chem/adas` near-wall rates fall off without separate
+  plumbing.
 - **Surface collision.** `surf_collide vanish`, `diffuse`, `toroidal`
   (phi-periodic wedge rotation).
 

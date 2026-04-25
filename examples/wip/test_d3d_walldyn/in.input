@@ -86,17 +86,11 @@ balance_grid        rcb cell
 fix                 pd plasma/data file input/data/plasma.h5 static yes
 
 # ===========================================================================
-# 2) Boris pusher with B-field from equilibrium point queries
+# 2) Charged-particle pusher: Boris with sheath kick
 # ===========================================================================
-global              boris_subcycles 50
-
-# 1b) Sheath geometry for the supported wall-kick sheath model
-compute cgeom nearest_surf/grid all 1 dist surfid nx ny nz
-
-# B-field direct from fix plasma/data point queries
-global              bfield_compute pd
-global              sheath geom_compute cgeom plasma_fix pd &
-                    mD_amu 2.0 pot_mult 2.5 kick yes
+compute             cgeom nearest_surf/grid all 1 dist surfid nx ny nz
+global              pusher mode boris plasma pd subcycles 50 &
+                    sheath kick geom cgeom mD_amu 2.0
 
 # ===========================================================================
 # 3) ADAS ionization/recombination for Carbon (Z=6)

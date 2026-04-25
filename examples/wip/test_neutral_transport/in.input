@@ -41,10 +41,10 @@ dump 1 grid all ${dumpFreq} output/tmp.grid.neutral id xc yc f_1[*]
 
 ##################################--- Chemistry ---######################################
 # Constant plasma background fed through fix plasma/data so the per-particle
-# pcache picks it up. `global bfield_compute pd` activates pcache without a
+# pcache picks it up. `global pusher plasma pd` activates pcache without a
 # pusher; volume/chem/adas reads Te/ne directly from the cache.
 fix pd plasma/data constant temp_e ${Tev} dens_e $n
-global bfield_compute pd
+global pusher plasma pd
 
 # ADAS rates for D (Z=1) + Janev for D2 dissociation
 fix 2 volume/chem/adas 1 1 plasma.reactions

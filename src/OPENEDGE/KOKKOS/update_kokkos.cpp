@@ -260,7 +260,7 @@ void UpdateKokkos::init()
   }
 
   // OpenEdge: Boris config — read B/E directly from plasma compute view
-  oe_boris_subcycles = boris_subcycles;
+  oe_pusher_subcycles = pusher_subcycles;
   oe_echarge = echarge;
   oe_bx_col = oe_by_col = oe_bz_col = -1;
   oe_ex_col = oe_ey_col = oe_ez_col = -1;
@@ -343,7 +343,7 @@ void UpdateKokkos::run(int nsteps)
 
   // OpenEdge: fetch plasma compute view for Boris B-field (bypass fixes)
   // The plasma/fields compute stores bx,by,bz as the first 3 columns
-  if (oe_boris_subcycles > 0 && sheath_plasma_cidx >= 0) {
+  if (oe_pusher_subcycles > 0 && sheath_plasma_cidx >= 0) {
     Compute *cp = modify->compute[sheath_plasma_cidx];
     if (!(cp->invoked_flag & INVOKED_PER_GRID)) {
       cp->compute_per_grid();
@@ -896,7 +896,7 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   if (pflag == PKEEP) {
     dtremain = dt;
     // OpenEdge: use Boris pusher when B-field is active with subcycling
-    if (DIM == 3 && oe_boris_subcycles > 0 && d_oe_plasma_compute.data()) {
+    if (DIM == 3 && oe_pusher_subcycles > 0 && d_oe_plasma_compute.data()) {
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
@@ -914,7 +914,7 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   } else if (pflag == PINSERT) {
     dtremain = particle_i.dtremain;
     // OpenEdge: Boris for newly inserted particles too
-    if (DIM == 3 && oe_boris_subcycles > 0 && d_oe_plasma_compute.data()) {
+    if (DIM == 3 && oe_pusher_subcycles > 0 && d_oe_plasma_compute.data()) {
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
@@ -2002,7 +2002,7 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
   }
 
   const double qm = (charge * oe_echarge) / mass;
-  const int nsub = (oe_boris_subcycles > 0) ? oe_boris_subcycles : 1;
+  const int nsub = (oe_pusher_subcycles > 0) ? oe_pusher_subcycles : 1;
   const double dt_sub = dt_full / static_cast<double>(nsub);
 
   double xcur[3] = {x[0], x[1], x[2]};

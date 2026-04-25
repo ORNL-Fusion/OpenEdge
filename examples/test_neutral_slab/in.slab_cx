@@ -29,7 +29,7 @@ mixture             puff D frac 1.0 nrho 1e18 temp 350.0 &
 # Need Ti in the per-particle plasma cache so fix volume/chem/adas CX resampler
 # can draw product velocities from a Maxwellian at local Ti.
 fix pd plasma/data file input/plasma_cx.h5 static yes
-global              bfield_compute pd
+global              pusher plasma pd
 
 # --- Ionization + CX, Mode A (ionization deletes; CX resamples v) ---
 # No `plasma` keyword -> Te/ne/Ti pulled from the per-particle pcache.

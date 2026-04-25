@@ -42,7 +42,7 @@ balance_grid        rcb cell
 
 # ---- Plasma background + B-field ----
 fix                 pd plasma/data file plasma.h5 static yes
-global              bfield_compute pd
+global              pusher plasma pd
 global              pcache_nevery 100
 
 # ---- Volumetric chemistry (Mode A neutral transport) ----

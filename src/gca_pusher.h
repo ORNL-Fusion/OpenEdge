@@ -1,13 +1,12 @@
 /* ----------------------------------------------------------------------
    OpenEdge Guiding Center Approximation (GCA) pusher
-   Hybrid Boris/GCA scheme inspired by ERO2.0.
+   Hybrid Boris/GCA scheme.
    When the Larmor radius is small compared to the B gradient scale length,
    GCA tracks only the drift motion (averaging over gyration), eliminating
    the need for expensive Boris subcycling.
 
    References:
      - Littlejohn, J. Plasma Phys. 29 (1983) 111
-     - Borodkina & Igitkhanov, PSI ERO2.0 approach
 ------------------------------------------------------------------------- */
 
 #ifndef SPARTA_GCA_PUSHER_H

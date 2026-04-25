@@ -53,8 +53,8 @@ fix fevap_3 evaporation 1 drops_3 plasma_data pd mass ${md3} radius ${rd3} temp 
 fix fdrag   drag 1 2.0 1 plasma_data pd gravity 0 -9.8 0 model epstein
 fix fcharge droplet/charge 1 plasma_data pd ion_mass_amu 2.0 thermionic no
 
-global bfield_compute pd
-global boris_subcycles 5
+global pusher plasma pd
+global pusher subcycles 5
 
 stats 1
 run 1

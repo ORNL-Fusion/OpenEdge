@@ -74,17 +74,14 @@ balance_grid        rcb cell
 # Uses the embedded /equilibrium/* in plasma.h5 via the pd handle.
 fix                 fcore reflect/psi plasma_data pd psi_norm 1.0 action absorb
 
-# --- Fields
-global              bfield_compute pd
-global              sheath geom_compute cgeom plasma_fix pd &
-                    mD_amu 2.0 pot_mult 2.5 kick no
-
+# --- Fields + pusher
 variable            exbg particle p_pc_ex
 variable            eybg particle p_pc_ey
 variable            ezbg particle p_pc_ez
 fix                 fEbg efield/particle exbg eybg ezbg
 global              efield particle fEbg 0
-global              boris_subcycles 10
+global              pusher mode boris plasma pd subcycles 10 &
+                    sheath spatial geom cgeom mD_amu 2.0
 
 # --- Chemistry (both carbon and boron ionization/recombination ladders)
 fix                 fchem_C chem/adas 1 6 input/plasma.adas adas_dir ../../database/adas

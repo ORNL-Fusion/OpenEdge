@@ -156,31 +156,29 @@ struct SurfHit2D {
   bigint nscheck_running;
   bigint nscollide_running;
 
-  // Point-query B-field for Boris pusher (from compute plasma/fields or fix plasma/data)
-  char *boris_plasma_cid;      // provider ID string (set by global bfield_compute)
-  int boris_plasma_cidx;       // resolved compute index (-1 = not set)
-  int boris_plasma_fidx;       // resolved fix index (-1 = not set)
+  // Charged-particle pusher (Boris full-orbit or Boris/GCA hybrid).
+  // Plasma provider feeds B (always) plus Te/ne for sheath/diagnostics.
+  enum PusherMode { PUSHER_BORIS = 0, PUSHER_HYBRID = 1 };
+  int pusher_mode;              // PUSHER_BORIS (default) | PUSHER_HYBRID
+  char *pusher_plasma_cid;      // plasma provider ID
+  int pusher_plasma_cidx;       // resolved compute index (-1 = not set)
+  int pusher_plasma_fidx;       // resolved fix index (-1 = not set)
+  int pusher_subcycles;         // velocity/position substeps per move (default 1)
+  int pusher_dump_flag;         // 1 enables E/B debug prints
+  int pusher_dump_every;        // print cadence in timesteps
+  int pusher_bad_dt_check;      // 1 warns when |q/m|*|B|*dt_sub is too large
+  int pusher_bad_dt_warned;     // suppress repeated warnings
+  double pusher_bad_dt_limit;   // recommended max for |q/m|*|B|*dt_sub
 
-  int boris_dump_flag;         // 1 enables Boris E/B debug prints
-  int boris_dump_every;        // print cadence in timesteps
-  int boris_subcycles;         // Boris velocity/position substeps per move
-  int boris_bad_dt_check;      // 1 warns when |q/m|*|B|*dt_sub is too large
-  int boris_bad_dt_warned;     // suppress repeated warnings
-  double boris_bad_dt_limit;   // recommended max for |q/m|*|B|*dt_sub
-
-  // Per-particle sheath E-field overlay (uses grid-cached geometry + plasma)
+  // Sheath overlay applied during the pusher. dmax / pot_mult / model are
+  // computed internally (auto): dmax = max(5*L_MPS, 10*lambdaD); pot_mult
+  // = 0 -> Bohm-Stangeby floating wall; model is the combined Coulette-
+  // Manfredi (close to wall) + Borodkina tail (s > 60 lambdaD).
   int sheath_flag;             // 1 if per-particle sheath is active
   char *sheath_geom_cid;       // compute ID for nearest_surf/grid
-  char *sheath_plasma_cid;     // provider ID for plasma/fields or fix plasma/data
   int sheath_geom_cidx;        // resolved compute index for geometry
-  int sheath_plasma_cidx;      // resolved compute index for plasma
-  int sheath_plasma_fidx;      // resolved fix index for plasma
-  int sheath_model;            // 0=borodkina, 1=coulette_manfredi
-  double sheath_dmax;          // max distance for sheath activation (m)
-  double sheath_pot_mult;      // potential multiplier
-  double sheath_mD_amu;        // ion mass in amu
-
-  int sheath_kick;             // 1=apply sheath as velocity kick at wall
+  double sheath_mD_amu;        // ion mass in amu (default D = 2.014)
+  int sheath_kick;             // 1 = apply sheath as velocity kick at wall
 
   // Per-particle plasma cache (populated once per step, read by Boris/ADAS/Nanbu)
   int plasma_cache_flag;       // 1 if plasma cache custom vectors are registered
@@ -221,11 +219,9 @@ struct SurfHit2D {
   int pcache_nevery;
   void cache_plasma_particles();
 
-  // Hybrid Boris/GCA pusher (ERO2.0-style)
-  int gca_flag;              // 1 if hybrid GCA mode is enabled
-  double gca_switch_factor;  // switching threshold (default 2.5, from ERO2.0)
-  char *gca_plasma_cid;      // compute ID string for plasma/fields (grad B source)
-  int gca_plasma_cidx;       // resolved compute index for plasma/fields
+  // GCA hybrid mode parameters (active when pusher_mode == PUSHER_HYBRID).
+  // Plasma provider is shared with the Boris path (pusher_plasma_*).
+  double pusher_gca_switch;  // switching threshold (default 2.5)
   // Persistent per-particle GCA state (stored in particle custom vectors)
   int gca_x_custom;
   int gca_y_custom;

@@ -156,7 +156,7 @@ particle remains on its original side of the wall.
 
 Instead of resolving the sheath spatially, the full sheath potential drop
 is applied as a velocity boost when the particle hits the wall surface.
-This is the approach used by EIRENE, ERO2.0, and WallDYN.
+This is the approach used by EIRENE and WallDYN.
 
 At each surface collision:
 

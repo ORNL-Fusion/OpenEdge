@@ -92,20 +92,13 @@ balance_grid        rcb cell
 
 # ---- Plasma background + B-field ------------------------------------------
 fix                 pd plasma/data file input/plasma.h5 static yes
-#global              bfield_compute pd
 #global              pcache_nevery 100
 
-# Sheath: wall-kick (sets ion impact energy at wall collision for PMI).
-compute cgeom nearest_surf/grid all wall dist surfid nx ny nz
-global              sheath geom_compute cgeom plasma_fix pd &
-                    mD_amu 2.0 pot_mult 2.5 kick no
-
-global boris_dump yes
-global boris_dump_every 1
-#global boris_subcycles 5
-global bfield_compute pd
-
-global              boris_subcycles 5
+# Charged-particle pusher: Boris with sheath spatial overlay.
+compute             cgeom nearest_surf/grid all wall dist surfid nx ny nz
+global              pusher mode boris plasma pd subcycles 5 &
+                    dump yes dump_every 1 &
+                    sheath spatial geom cgeom mD_amu 2.0
 
 # ---- W ionization/recombination chain (volume chemistry) ------------------
 # volume/chem/adas reads rate coefficients from database/processes.h5

@@ -108,7 +108,7 @@ class UpdateKokkos : public Update {
   int oe_ex_col, oe_ey_col, oe_ez_col;  // column indices for E (sheath)
 
   // OpenEdge: Boris config
-  int oe_boris_subcycles;
+  int oe_pusher_subcycles;
   double oe_echarge;
 
   KKCopy<GridKokkos> grid_kk_copy;

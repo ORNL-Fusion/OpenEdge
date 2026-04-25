@@ -107,15 +107,11 @@ global                  bfield grid bfield 0
 #fix                     efield efield/grid c_cplasma[4] c_cplasma[5] c_cplasma[6]
 #global                  efield grid efield 0
 
-# ---- Spatial sheath (Borodkina default) ----
-# Chodura + Debye profile, D+ background sets sheath scales
+# ---- Charged-particle pusher: Boris with spatial sheath ----
+# Subcycles resolve the sheath; per-subcycle surface guard prevents leakage.
 compute                 cgeom nearest_surf/grid all all dist nx ny nz surfidx
-global                  sheath geom_compute cgeom plasma_compute cplasma &
-                        mD_amu 2.0 kick no
-
-# ---- Boris pusher ----
-# Subcycles for sheath resolution; per-subcycle surface guard prevents leakage
-global                  boris_subcycles 10
+global                  pusher mode boris plasma cplasma subcycles 10 &
+                        sheath spatial geom cgeom mD_amu 2.0
 
 # ---- Nanbu Coulomb collisions with D+ background ----
 # Background: D+ (A=2.014, Z=1)

@@ -12,7 +12,7 @@ seed                 1245
 dimension            3
 boundary             p p p                   # periodic boundaries
 global               gridcut 0.0 comm/sort no
-global               boris_subcycles 1 boris_bad_dt_check yes boris_bad_dt_limit 0.05
+global               pusher subcycles 1 boris_bad_dt_check yes boris_bad_dt_limit 0.05
 
 # 3D cubic box (just needs to contain the orbit)
 create_box           -20 20 -40 40  -20 20

@@ -166,6 +166,7 @@ fixes/efield_plasma
 fixes/surface_physical_sputter
 fixes/volume_emissivity
 fixes/sheath
+fixes/pusher
 ```
 
 ```{toctree}

@@ -262,13 +262,10 @@ global                  bfield grid bfield 0
 fix                     efield efield/grid c_cplasma[4] c_cplasma[5] c_cplasma[6]
 global                  efield grid efield 0
 
-# ---- Boris subcycles ----
-global                  boris_subcycles {BORIS_SUBCYCLES}
-
-# ---- Sheath (velocity kick at wall) ----
+# ---- Charged-particle pusher: Boris with sheath kick ----
 compute                 cgeom nearest_surf/grid all all dist nx ny nz surfidx
-global                  sheath geom_compute cgeom plasma_compute cplasma &
-                        mD_amu {mD_amu} pot_mult 0 kick yes
+global                  pusher mode boris plasma cplasma subcycles {BORIS_SUBCYCLES} &
+                        sheath kick geom cgeom mD_amu {mD_amu}
 
 # ---- Load particles ----
 read_particles          {pfname} 0

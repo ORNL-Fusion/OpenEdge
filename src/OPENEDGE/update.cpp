@@ -291,21 +291,18 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
 
 
   thermal_gradient_forces_flag = 0;
-  boris_plasma_cid = NULL;
-  boris_plasma_cidx = -1;
-  boris_plasma_fidx = -1;
+  pusher_mode = PUSHER_BORIS;
+  pusher_plasma_cid = NULL;
+  pusher_plasma_cidx = -1;
+  pusher_plasma_fidx = -1;
+  pusher_subcycles = 1;
+  pusher_gca_switch = 2.5;
+  pusher_dump_flag = 0;
+  pusher_dump_every = 1;
+  pusher_bad_dt_check = 1;
+  pusher_bad_dt_warned = 0;
+  pusher_bad_dt_limit = 0.1;
 
-  boris_dump_flag = 0;
-  boris_dump_every = 1;
-  boris_subcycles = 1;
-  boris_bad_dt_check = 1;
-  boris_bad_dt_warned = 0;
-  boris_bad_dt_limit = 0.1;
-
-  gca_flag = 0;
-  gca_switch_factor = 2.5;
-  gca_plasma_cid = NULL;
-  gca_plasma_cidx = -1;
   gca_x_custom = -1;
   gca_y_custom = -1;
   gca_z_custom = -1;
@@ -330,17 +327,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
 
   sheath_flag = 0;
   sheath_geom_cid = NULL;
-  sheath_plasma_cid = NULL;
   sheath_geom_cidx = -1;
-  sheath_plasma_cidx = -1;
-  sheath_plasma_fidx = -1;
-  sheath_model = 0;             // 0=borodkina, 1=coulette_manfredi
-  // sheath_dmax=0 means "auto": pusher_boris_2d derives the cut-off from
-  // local physics as max(5·L_MPS, 10·λ_D). Any positive value set via
-  // `global sheath dmax <m>` acts as an additional ceiling, not a
-  // replacement for the auto value.
-  sheath_dmax = 0.0;
-  sheath_pot_mult = 2.5;
   sheath_mD_amu = 2.01410177811;
   sheath_kick = 0;
 
@@ -373,9 +360,7 @@ Update::~Update()
   delete [] blist_active;
   delete [] ulist_surfcollide;
   delete [] sheath_geom_cid;
-  delete [] sheath_plasma_cid;
-  delete [] boris_plasma_cid;
-  delete [] gca_plasma_cid;
+  delete [] pusher_plasma_cid;
   memory->destroy(dx_cd);
   // psi_r_grid, psi_z_grid, psi_rz are owned by fix_reflect_psi, not freed here
   delete ranmaster;
@@ -550,16 +535,16 @@ void Update::init()
     if (!modify->compute[sheath_geom_cidx]->per_grid_flag)
       error->all(FLERR,"global sheath: geometry compute must be per-grid");
 
-    sheath_plasma_cidx = modify->find_compute(sheath_plasma_cid);
-    sheath_plasma_fidx = -1;
-    if (sheath_plasma_cidx >= 0) {
-      if (!modify->compute[sheath_plasma_cidx]->per_grid_flag)
+    pusher_plasma_cidx = modify->find_compute(pusher_plasma_cid);
+    pusher_plasma_fidx = -1;
+    if (pusher_plasma_cidx >= 0) {
+      if (!modify->compute[pusher_plasma_cidx]->per_grid_flag)
         error->all(FLERR,"global sheath: plasma compute must be per-grid");
     } else {
-      sheath_plasma_fidx = modify->find_fix(sheath_plasma_cid);
-      if (sheath_plasma_fidx < 0)
+      pusher_plasma_fidx = modify->find_fix(pusher_plasma_cid);
+      if (pusher_plasma_fidx < 0)
         error->all(FLERR,"global sheath: plasma provider ID not found");
-      auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[sheath_plasma_fidx]);
+      auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
       if (!pd)
         error->all(FLERR,
                    "global sheath: plasma fix provider must be style plasma/data");
@@ -567,21 +552,21 @@ void Update::init()
   }
 
   // Resolve Boris point-query B-field compute
-  if (boris_plasma_cid) {
-    boris_plasma_cidx = modify->find_compute(boris_plasma_cid);
-    boris_plasma_fidx = -1;
-    if (boris_plasma_cidx >= 0) {
-      if (!modify->compute[boris_plasma_cidx]->per_grid_flag)
+  if (pusher_plasma_cid) {
+    pusher_plasma_cidx = modify->find_compute(pusher_plasma_cid);
+    pusher_plasma_fidx = -1;
+    if (pusher_plasma_cidx >= 0) {
+      if (!modify->compute[pusher_plasma_cidx]->per_grid_flag)
         error->all(FLERR,"global bfield_compute: compute must be per-grid");
       if (comm->me == 0 && screen)
         fprintf(screen,
                 "  boris: bfield_compute '%s' bound to compute (per-grid)\n",
-                boris_plasma_cid);
+                pusher_plasma_cid);
     } else {
-      boris_plasma_fidx = modify->find_fix(boris_plasma_cid);
-      if (boris_plasma_fidx < 0)
+      pusher_plasma_fidx = modify->find_fix(pusher_plasma_cid);
+      if (pusher_plasma_fidx < 0)
         error->all(FLERR,"global bfield_compute: provider ID not found");
-      auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[boris_plasma_fidx]);
+      auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
       if (!pd)
         error->all(FLERR,
                    "global bfield_compute: fix provider must be style plasma/data");
@@ -589,18 +574,18 @@ void Update::init()
         fprintf(screen,
                 "  boris: bfield_compute '%s' bound to fix plasma/data "
                 "(has_bfield=%d, mesh_tri_b=%zu)\n",
-                boris_plasma_cid, pd->has_bfield, pd->mesh_tri_br.size());
+                pusher_plasma_cid, pd->has_bfield, pd->mesh_tri_br.size());
     }
   }
 
   // Resolve GCA plasma/fields compute for grad(B)
-  if (gca_flag) {
-    if (!gca_plasma_cid)
+  if (pusher_mode == PUSHER_HYBRID) {
+    if (!pusher_plasma_cid)
       error->all(FLERR,"global gca requires plasma_compute ID");
-    gca_plasma_cidx = modify->find_compute(gca_plasma_cid);
-    if (gca_plasma_cidx < 0)
+    pusher_plasma_cidx = modify->find_compute(pusher_plasma_cid);
+    if (pusher_plasma_cidx < 0)
       error->all(FLERR,"global gca: plasma compute ID not found");
-    if (!modify->compute[gca_plasma_cidx]->per_grid_flag)
+    if (!modify->compute[pusher_plasma_cidx]->per_grid_flag)
       error->all(FLERR,"global gca: plasma compute must be per-grid");
 
     // GCA needs smooth B-field derivatives (grad|B|, curvature, curl(b̂))
@@ -610,7 +595,7 @@ void Update::init()
     // plasma.h5, nor an explicit `equilibrium <file>` keyword), abort
     // cleanly so the user knows what's missing.
     auto *gca_cp = dynamic_cast<ComputePlasmaFields*>(
-                     modify->compute[gca_plasma_cidx]);
+                     modify->compute[pusher_plasma_cidx]);
     if (gca_cp && !gca_cp->has_equilibrium) {
       error->all(FLERR,
         "global gca: equilibrium data is required but missing. "
@@ -619,7 +604,7 @@ void Update::init()
         "or add `equilibrium <file>` to the plasma/fields compute line.");
     }
 
-    // ERO2.0-style persistent guiding-center state per particle.
+    // Persistent guiding-center state per particle.
     // Keep this state across timesteps to avoid re-initializing from
     // instantaneous gyromotion every step.
     const int custom_double = 1;
@@ -660,14 +645,14 @@ void Update::init()
   {
     int plasma_cidx = -1;
     int plasma_fidx = -1;
-    if (sheath_flag && (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
-      plasma_cidx = sheath_plasma_cidx;
-      plasma_fidx = sheath_plasma_fidx;
-    } else if (gca_flag && gca_plasma_cidx >= 0) {
-      plasma_cidx = gca_plasma_cidx;
-    } else if (boris_plasma_cidx >= 0 || boris_plasma_fidx >= 0) {
-      plasma_cidx = boris_plasma_cidx;
-      plasma_fidx = boris_plasma_fidx;
+    if (sheath_flag && (pusher_plasma_cidx >= 0 || pusher_plasma_fidx >= 0)) {
+      plasma_cidx = pusher_plasma_cidx;
+      plasma_fidx = pusher_plasma_fidx;
+    } else if (pusher_mode == PUSHER_HYBRID && pusher_plasma_cidx >= 0) {
+      plasma_cidx = pusher_plasma_cidx;
+    } else if (pusher_plasma_cidx >= 0 || pusher_plasma_fidx >= 0) {
+      plasma_cidx = pusher_plasma_cidx;
+      plasma_fidx = pusher_plasma_fidx;
     }
 
     if (plasma_cidx >= 0 || plasma_fidx >= 0) {
@@ -956,14 +941,14 @@ void Update::cache_plasma_particles()
   // Resolve the plasma compute used for point-sampled particle caches.
   int plasma_cidx = -1;
   int plasma_fidx = -1;
-  if (sheath_flag && (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
-    plasma_cidx = sheath_plasma_cidx;
-    plasma_fidx = sheath_plasma_fidx;
-  } else if (gca_flag && gca_plasma_cidx >= 0) {
-    plasma_cidx = gca_plasma_cidx;
-  } else if (boris_plasma_cidx >= 0 || boris_plasma_fidx >= 0) {
-    plasma_cidx = boris_plasma_cidx;
-    plasma_fidx = boris_plasma_fidx;
+  if (sheath_flag && (pusher_plasma_cidx >= 0 || pusher_plasma_fidx >= 0)) {
+    plasma_cidx = pusher_plasma_cidx;
+    plasma_fidx = pusher_plasma_fidx;
+  } else if (pusher_mode == PUSHER_HYBRID && pusher_plasma_cidx >= 0) {
+    plasma_cidx = pusher_plasma_cidx;
+  } else if (pusher_plasma_cidx >= 0 || pusher_plasma_fidx >= 0) {
+    plasma_cidx = pusher_plasma_cidx;
+    plasma_fidx = pusher_plasma_fidx;
   }
   if (plasma_cidx < 0 && plasma_fidx < 0) return;
 
@@ -1298,18 +1283,12 @@ void Update::cache_plasma_particles()
         }
 
         const double d_max = sheath_auto_dmax(te, ti, ne, bmag, alpha_deg,
-                                              sheath_mD_amu, sheath_dmax);
+                                              sheath_mD_amu, 0.0);
         if (d_particle > 0.0 && d_particle < d_max) {
-          SheathModels::BorodkinaSheathResult sr;
-          if (sheath_model == 1) {
-            sr = SheathModels::coulette_manfredi_sheath_at_distance(
+          SheathModels::BorodkinaSheathResult sr =
+            SheathModels::coulette_manfredi_sheath_at_distance(
               d_particle, te, ti, ne, bmag,
-              alpha_deg, sheath_mD_amu, sheath_pot_mult);
-          } else {
-            sr = SheathModels::borodkina_sheath_at_distance(
-              d_particle, te, ti, ne, bmag,
-              alpha_deg, sheath_mD_amu, sheath_pot_mult);
-          }
+              alpha_deg, sheath_mD_amu, 0.0);
 
           // Boltzmann: ne_local = ne * exp(-phi/Te), phi = esheath_eV (positive)
           if (sr.esheath_eV > 0.0 && te > 0.0) {
@@ -1437,11 +1416,11 @@ template < int DIM, int SURF, int OPT > void Update::move()
   // Geometry is static (surfaces don't move) — compute once, reuse forever.
   // Plasma may update if coupled to a solver; for analytic profiles it's also static.
   if (sheath_flag && sheath_geom_cidx >= 0 &&
-      (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
+      (pusher_plasma_cidx >= 0 || pusher_plasma_fidx >= 0)) {
     Compute *cg = modify->compute[sheath_geom_cidx];
     if (cg->invoked_per_grid < 0) cg->compute_per_grid();  // only first time
-    if (sheath_plasma_cidx >= 0) {
-      Compute *cp = modify->compute[sheath_plasma_cidx];
+    if (pusher_plasma_cidx >= 0) {
+      Compute *cp = modify->compute[pusher_plasma_cidx];
       if (cp->invoked_per_grid < 0) cp->compute_per_grid();   // only first time
     }
   }
@@ -1500,7 +1479,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
         }
         else if (DIM == 3)
         {
-          if (gca_flag)
+          if (pusher_mode == PUSHER_HYBRID)
             pusher_hybrid_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
           else
             pusher_boris_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
@@ -1511,7 +1490,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
           pusher_boris_2d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
         else if (DIM == 3) {
-          if (gca_flag)
+          if (pusher_mode == PUSHER_HYBRID)
             pusher_hybrid_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
           else
             pusher_boris_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
@@ -2054,18 +2033,18 @@ template < int DIM, int SURF, int OPT > void Update::move()
               // --- Sheath kick: apply sheath energy as velocity boost at wall ---
               if (sheath_kick && sheath_flag &&
                   sheath_geom_cidx >= 0 &&
-                  (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
+                  (pusher_plasma_cidx >= 0 || pusher_plasma_fidx >= 0)) {
                 // Get surface normal (outward, toward plasma)
                 const double *snorm = (DIM == 3) ? tri->norm : line->norm;
 
                 // Plasma conditions at particle position (point query)
                 ComputePlasmaFields *cp = nullptr;
                 FixPlasmaData *pd = nullptr;
-                if (sheath_plasma_cidx >= 0) {
-                  Compute *cp_base = modify->compute[sheath_plasma_cidx];
+                if (pusher_plasma_cidx >= 0) {
+                  Compute *cp_base = modify->compute[pusher_plasma_cidx];
                   cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
-                } else if (sheath_plasma_fidx >= 0) {
-                  pd = dynamic_cast<FixPlasmaData *>(modify->fix[sheath_plasma_fidx]);
+                } else if (pusher_plasma_fidx >= 0) {
+                  pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
                 }
                 if (cp || pd) {
                   PlasmaFileParams sk_pf = cp ? cp->query_plasma_at_point(x)
@@ -2084,9 +2063,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
                     const double ti_ratio = (sk_ti > 0.0) ? (sk_ti / sk_te) : 0.0;
                     const double phi_float_mult =
                       0.5 * std::log(mD_kg / (2.0 * PI_kick * ME_kick) / (1.0 + ti_ratio));
-                    const double phi_eV = (sheath_pot_mult > 0.0)
-                      ? (sheath_pot_mult * sk_te)
-                      : (std::max(phi_float_mult, 0.0) * sk_te);
+                    const double phi_eV = std::max(phi_float_mult, 0.0) * sk_te;
 
                     // Particle charge and mass (from species table, not particle struct)
                     const int isp = particles[i].ispecies;
@@ -2627,7 +2604,7 @@ void Update::pusher_boris_2d(int i, int icell, double dt,
   }
 
   const double qm = (charge * echarge) / mass;
-  const int nsub = (boris_subcycles > 0) ? boris_subcycles : 1;
+  const int nsub = (pusher_subcycles > 0) ? pusher_subcycles : 1;
   const double dt_sub = dt / static_cast<double>(nsub);
 
   const int dim = domain->dimension;
@@ -2661,8 +2638,8 @@ void Update::pusher_boris_2d(int i, int icell, double dt,
   // Particle displacement per full step (~v*dt ~ 10μm) is negligible
   // compared to the B-field scale length, so re-querying per subcycle is
   // unnecessary.
-  if (boris_plasma_cidx >= 0) {
-    Compute *cp_base = modify->compute[boris_plasma_cidx];
+  if (pusher_plasma_cidx >= 0) {
+    Compute *cp_base = modify->compute[pusher_plasma_cidx];
     ComputePlasmaFields *cp_bf = dynamic_cast<ComputePlasmaFields *>(cp_base);
     if (cp_bf) {
       const double xyz[3] = {xcur[0], xcur[1], 0.0};
@@ -2673,8 +2650,8 @@ void Update::pusher_boris_2d(int i, int icell, double dt,
         B[2] = Bcyl.bt;
       }
     }
-  } else if (boris_plasma_fidx >= 0) {
-    auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[boris_plasma_fidx]);
+  } else if (pusher_plasma_fidx >= 0) {
+    auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
     if (pd && pd->has_bfield) {
       const double xyz[3] = {xcur[0], xcur[1], 0.0};
       double R = 0.0, Z = 0.0;
@@ -2709,7 +2686,7 @@ void Update::pusher_boris_2d(int i, int icell, double dt,
   double sh_d0_sign = 0.0;
 
   if (sheath_flag && !sheath_kick && sheath_geom_cidx >= 0 &&
-      (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
+      (pusher_plasma_cidx >= 0 || pusher_plasma_fidx >= 0)) {
     Compute *cg = modify->compute[sheath_geom_cidx];
     int gcell = icell;
     Grid::ChildCell *cells_tmp = grid->cells;
@@ -2759,8 +2736,8 @@ void Update::pusher_boris_2d(int i, int icell, double dt,
         OpenEdge::sparta_to_RZ(xmid_slot, dim, axi, sh_sR, sh_sZ);
 
         // Plasma (Te, Ti, ne) at gcell from compute or fix.
-        if (sheath_plasma_cidx >= 0) {
-          Compute *cp_base = modify->compute[sheath_plasma_cidx];
+        if (pusher_plasma_cidx >= 0) {
+          Compute *cp_base = modify->compute[pusher_plasma_cidx];
           auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
           if (cp) {
             sh_te = cp->plasma_arr[gcell].temp_e;
@@ -2768,7 +2745,7 @@ void Update::pusher_boris_2d(int i, int icell, double dt,
             sh_ne = cp->plasma_arr[gcell].dens_e;
           }
         } else {
-          auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[sheath_plasma_fidx]);
+          auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
           if (pd) {
             PlasmaFileParams sh_pf =
               query_plasma_from_fix(pd, x, dim, axi);
@@ -2800,7 +2777,7 @@ void Update::pusher_boris_2d(int i, int icell, double dt,
   double sh_d_max = 0.0;
   if (sh_active)
     sh_d_max = sheath_auto_dmax(sh_te, sh_ti, sh_ne, sh_bmag,
-                                sh_alpha_deg, sheath_mD_amu, sheath_dmax);
+                                sh_alpha_deg, sheath_mD_amu, 0.0);
 
   if (sh_active) {
     double R0 = 0.0, Z0 = 0.0;
@@ -2817,26 +2794,22 @@ void Update::pusher_boris_2d(int i, int icell, double dt,
   // reduces to 2-4 exp() calls per subcycle.
   SheathModels::SheathEmagCoeffs sh_coeffs;
   if (sh_active) {
-    sh_coeffs = (sheath_model == 1)
-        ? SheathModels::sheath_prepare_coulette_manfredi(
-              sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
-              sheath_mD_amu, sheath_pot_mult)
-        : SheathModels::sheath_prepare_borodkina(
-              sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
-              sheath_mD_amu, sheath_pot_mult);
+    sh_coeffs = SheathModels::sheath_prepare_coulette_manfredi(
+                    sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
+                    sheath_mD_amu, 0.0);
   }
 
   const double Brhs[3] = {B[0], B[2], B[1]};
 
   for (int isub = 0; isub < nsub; isub++) {
 
-    if (boris_bad_dt_check && !boris_bad_dt_warned) {
+    if (pusher_bad_dt_check && !pusher_bad_dt_warned) {
       const double bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
       const double bad = std::fabs(qm) * bmag * dt_sub;
-      if (bad > boris_bad_dt_limit) {
+      if (bad > pusher_bad_dt_limit) {
         if (comm->me == 0)
           error->warning(FLERR, "OpenEdge Boris warning: |q/m|*|B|*dt_sub is large");
-        boris_bad_dt_warned = 1;
+        pusher_bad_dt_warned = 1;
       }
     }
 
@@ -2880,7 +2853,7 @@ void Update::pusher_boris_2d(int i, int icell, double dt,
     xcur[1] += vcur[1] * dt_sub;
     zcur += vcur[2] * dt_sub;
 
-    if (boris_dump_flag && (ntimestep % boris_dump_every == 0) && i == 0) {
+    if (pusher_dump_flag && (ntimestep % pusher_dump_every == 0) && i == 0) {
       // Print on the first local particle of WHATEVER rank owns it.
       // With source-biased decomp (fix balance rcb part) rank 0 often
       // holds zero particles, so a `me == 0` gate silently suppresses
@@ -2986,7 +2959,7 @@ void Update::pusher_boris_3d(int i, int icell, double dt,
   }
 
   const double qm = (charge * echarge) / mass;
-  const int nsub = (boris_subcycles > 0) ? boris_subcycles : 1;
+  const int nsub = (pusher_subcycles > 0) ? pusher_subcycles : 1;
   const double dt_sub = dt / static_cast<double>(nsub);
 
   double xcur[3] = {x[0], x[1], x[2]};
@@ -3003,7 +2976,7 @@ void Update::pusher_boris_3d(int i, int icell, double dt,
   int sh_active = 0;
 
   if (sheath_flag && sheath_geom_cidx >= 0 &&
-      (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
+      (pusher_plasma_cidx >= 0 || pusher_plasma_fidx >= 0)) {
     Compute *cg = modify->compute[sheath_geom_cidx];
 
     // If particle is in a sub-cell (split cell), resolve to parent cell
@@ -3078,8 +3051,8 @@ void Update::pusher_boris_3d(int i, int icell, double dt,
         }
 
         double br = 0.0, bt = 0.0, bz = 0.0;
-        if (sheath_plasma_cidx >= 0) {
-          Compute *cp_base = modify->compute[sheath_plasma_cidx];
+        if (pusher_plasma_cidx >= 0) {
+          Compute *cp_base = modify->compute[pusher_plasma_cidx];
           auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
           if (cp) {
             sh_te = cp->plasma_arr[gcell].temp_e;
@@ -3089,8 +3062,8 @@ void Update::pusher_boris_3d(int i, int icell, double dt,
             bt = cp->mag_arr[gcell].bt;
             bz = cp->mag_arr[gcell].bz;
           }
-        } else if (sheath_plasma_fidx >= 0) {
-          auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[sheath_plasma_fidx]);
+        } else if (pusher_plasma_fidx >= 0) {
+          auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
           if (pd) {
             PlasmaFileParams sh_pf = query_plasma_from_fix(pd, x, 3, domain->axisymmetric);
             MagneticFieldFileDataParams sh_bf = query_bfield_from_fix(pd, x, 3, domain->axisymmetric);
@@ -3152,26 +3125,22 @@ void Update::pusher_boris_3d(int i, int icell, double dt,
   double sh_d_max = 0.0;
   if (sh_active)
     sh_d_max = sheath_auto_dmax(sh_te, sh_ti, sh_ne, sh_bmag,
-                                sh_alpha_deg, sheath_mD_amu, sheath_dmax);
+                                sh_alpha_deg, sheath_mD_amu, 0.0);
 
   // Precompute sheath coefficients once per Boris call (Te, ne, B, alpha
   // are constant across subcycles). Per-subcycle sheath E evaluation
   // collapses to a cheap sheath_emag_at_distance() call below.
   SheathModels::SheathEmagCoeffs sh_coeffs;
   if (sh_active) {
-    sh_coeffs = (sheath_model == 1)
-        ? SheathModels::sheath_prepare_coulette_manfredi(
-              sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
-              sheath_mD_amu, sheath_pot_mult)
-        : SheathModels::sheath_prepare_borodkina(
-              sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
-              sheath_mD_amu, sheath_pot_mult);
+    sh_coeffs = SheathModels::sheath_prepare_coulette_manfredi(
+                    sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
+                    sheath_mD_amu, 0.0);
   }
 
   // Cache B-field once via point query at initial position.
   double B_cached[3] = {0.0, 0.0, 0.0};
-  if (boris_plasma_cidx >= 0) {
-    Compute *cp_base = modify->compute[boris_plasma_cidx];
+  if (pusher_plasma_cidx >= 0) {
+    Compute *cp_base = modify->compute[pusher_plasma_cidx];
     ComputePlasmaFields *cp_bf = dynamic_cast<ComputePlasmaFields *>(cp_base);
     if (cp_bf) {
       MagneticFieldFileDataParams Bcyl = cp_bf->query_bfield_at_point(xcur);
@@ -3185,8 +3154,8 @@ void Update::pusher_boris_3d(int i, int icell, double dt,
         B_cached[2] = Bcyl.bz;
       }
     }
-  } else if (boris_plasma_fidx >= 0) {
-    auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[boris_plasma_fidx]);
+  } else if (pusher_plasma_fidx >= 0) {
+    auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
     if (pd && pd->has_bfield) {
       double Br = 0.0, Bz = 0.0, Bt = 0.0;
       const double rx = xcur[0], ry = xcur[1];
@@ -3243,13 +3212,13 @@ void Update::pusher_boris_3d(int i, int icell, double dt,
     }
 // printf("E field due to sheath is %g %g %g\n", E[0], E[1], E[2]);
 
-    if (boris_bad_dt_check && !boris_bad_dt_warned) {
+    if (pusher_bad_dt_check && !pusher_bad_dt_warned) {
       const double bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
       const double bad = std::fabs(qm) * bmag * dt_sub;
-      if (bad > boris_bad_dt_limit) {
+      if (bad > pusher_bad_dt_limit) {
         if (comm->me == 0)
           error->warning(FLERR, "OpenEdge Boris warning: |q/m|*|B|*dt_sub is large");
-        boris_bad_dt_warned = 1;
+        pusher_bad_dt_warned = 1;
       }
     }
 
@@ -3260,7 +3229,7 @@ void Update::pusher_boris_3d(int i, int icell, double dt,
     xcur[1] += vcur[1] * dt_sub;
     xcur[2] += vcur[2] * dt_sub;
 
-    if (boris_dump_flag && (ntimestep % boris_dump_every == 0) && i == 0) {
+    if (pusher_dump_flag && (ntimestep % pusher_dump_every == 0) && i == 0) {
       // Print on first local particle of any rank; rcb-part decomp
       // can leave rank 0 empty. Tag the rank so output stays legible.
       printf("boris3D rank=%d step=%lld icell=%d sub=%d/%d qm=%g E=(%g,%g,%g) B=(%g,%g,%g)\n",
@@ -3350,7 +3319,7 @@ void Update::pusher_boris_3d(int i, int icell, double dt,
 }
 
 /* ----------------------------------------------------------------------
-   Hybrid Boris/GCA 3D pusher (ERO2.0-style)
+   Hybrid Boris/GCA 3D pusher
    Uses full Boris when Larmor radius is well-resolved by the B gradient
    scale, and switches to GCA when the gyration is fast (small rho_L).
    Criterion: use GCA when L_B < switch_factor * rho_L
@@ -3401,8 +3370,8 @@ void Update::pusher_hybrid_3d(int i, int icell, double dt,
                                    efield_active, i, icell, E);
 
   ComputePlasmaFields *cp_bfield = NULL;
-  if (gca_plasma_cidx >= 0) {
-    Compute *cp_base = modify->compute[gca_plasma_cidx];
+  if (pusher_plasma_cidx >= 0) {
+    Compute *cp_base = modify->compute[pusher_plasma_cidx];
     cp_bfield = dynamic_cast<ComputePlasmaFields *>(cp_base);
   }
 
@@ -3536,7 +3505,7 @@ void Update::pusher_hybrid_3d(int i, int icell, double dt,
 
   // --- Per-particle sheath E-field (same approach as boris3D) ---
   if (sheath_flag && !sheath_kick && sheath_geom_cidx >= 0 &&
-      (sheath_plasma_cidx >= 0 || sheath_plasma_fidx >= 0)) {
+      (pusher_plasma_cidx >= 0 || pusher_plasma_fidx >= 0)) {
     Compute *cg = modify->compute[sheath_geom_cidx];
 
     // Resolve sub-cell to parent for geometry/plasma lookup
@@ -3605,11 +3574,11 @@ void Update::pusher_hybrid_3d(int i, int icell, double dt,
         {
           ComputePlasmaFields *cp = nullptr;
           FixPlasmaData *pd = nullptr;
-          if (sheath_plasma_cidx >= 0) {
-            Compute *cp_base = modify->compute[sheath_plasma_cidx];
+          if (pusher_plasma_cidx >= 0) {
+            Compute *cp_base = modify->compute[pusher_plasma_cidx];
             cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
-          } else if (sheath_plasma_fidx >= 0) {
-            pd = dynamic_cast<FixPlasmaData *>(modify->fix[sheath_plasma_fidx]);
+          } else if (pusher_plasma_fidx >= 0) {
+            pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
           }
           if (cp || pd) {
             // Point-query plasma data at particle position
@@ -3632,24 +3601,15 @@ void Update::pusher_hybrid_3d(int i, int icell, double dt,
 
               const double d_max = sheath_auto_dmax(sh_te, sh_ti, sh_ne,
                                                     sh_bmag, sh_alpha_deg,
-                                                    sheath_mD_amu, sheath_dmax);
+                                                    sheath_mD_amu, 0.0);
               // Plasma-side only: skip when d_raw <= 0 (particle on
               // wall side, numerical overshoot). Matches 2D/3D gates.
               if (d_raw > 0.0 && d_raw < d_max) {
-                double emag = 0.0;
-                if (sheath_model == 1) {
-                  SheathModels::BorodkinaSheathResult sr =
-                    SheathModels::coulette_manfredi_sheath_at_distance(
-                      d_raw, sh_te, sh_ti, sh_ne, sh_bmag,
-                      sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
-                  emag = sr.emag_vpm;
-                } else {
-                  SheathModels::BorodkinaSheathResult sr =
-                    SheathModels::borodkina_sheath_at_distance(
-                      d_raw, sh_te, sh_ti, sh_ne, sh_bmag,
-                      sh_alpha_deg, sheath_mD_amu, sheath_pot_mult);
-                  emag = sr.emag_vpm;
-                }
+                SheathModels::BorodkinaSheathResult sr =
+                  SheathModels::coulette_manfredi_sheath_at_distance(
+                    d_raw, sh_te, sh_ti, sh_ne, sh_bmag,
+                    sh_alpha_deg, sheath_mD_amu, 0.0);
+                double emag = sr.emag_vpm;
                 // E into the wall along -n (inward-normal convention).
                 E[0] -= emag * sh_nx;
                 E[1] -= emag * sh_ny;
@@ -3685,16 +3645,16 @@ void Update::pusher_hybrid_3d(int i, int icell, double dt,
     const double rho_L = GCAPusher::larmor_radius(v_perp, qm_abs, Bmag);
     const double L_B = GCAPusher::grad_b_length(Bmag, gradBmag_magnitude);
 
-    // ERO2.0 criterion: use GCA when L_B < switch_factor * rho_L
+    // Switching criterion: use GCA when L_B < switch_factor * rho_L
     // i.e., the gradient scale is smaller than the Larmor orbit
     // Equivalently: rho_L is large relative to gradient scale → fast gyration
     // Actually: use GCA when rho_L is SMALL (fast gyration), i.e.,
     // the particle gyrates many times within one gradient scale length.
-    // ERO2.0: GCA when d_char < 2.5 * rho_L  →  rho_L > L_B / 2.5
+    // GCA when d_char < 2.5 * rho_L  →  rho_L > L_B / 2.5
     // Rearranged: use GCA when rho_L < L_B / switch_factor
     // This means: gradient is gentle relative to orbit → GCA is valid
     if (rho_L > 0.0 && L_B < 1.0e19) {
-      use_gca = (rho_L < L_B / gca_switch_factor);
+      use_gca = (rho_L < L_B / pusher_gca_switch);
     }
   }
 
@@ -3736,7 +3696,7 @@ void Update::pusher_hybrid_3d(int i, int icell, double dt,
     GCAPusher::gca_to_particle(gca, B, mass, rand_u, xnew, v);
   } else {
     // --- Boris path (with subcycling) ---
-    const int nsub = (charge != 0.0 && boris_subcycles > 0) ? boris_subcycles : 1;
+    const int nsub = (charge != 0.0 && pusher_subcycles > 0) ? pusher_subcycles : 1;
     const double dt_sub = dt / static_cast<double>(nsub);
 
     double xcur[3] = {x[0], x[1], x[2]};
@@ -4298,22 +4258,6 @@ void Update::global(int narg, char **arg)
       else if (strcmp(arg[iarg + 1], "no") == 0) thermal_gradient_forces_flag = 0;
       else error->all(FLERR, "Illegal global thermal_gradient_forces command");
       iarg += 2;
-    } else if (strcmp(arg[iarg], "boris_dump") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_dump command");
-      if (strcmp(arg[iarg + 1], "yes") == 0) boris_dump_flag = 1;
-      else if (strcmp(arg[iarg + 1], "no") == 0) boris_dump_flag = 0;
-      else error->all(FLERR, "Illegal global boris_dump command");
-      iarg += 2;
-    } else if (strcmp(arg[iarg], "boris_dump_every") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_dump_every command");
-      boris_dump_every = input->inumeric(FLERR, arg[iarg + 1]);
-      if (boris_dump_every <= 0) error->all(FLERR, "Illegal global boris_dump_every command");
-      iarg += 2;
-    } else if (strcmp(arg[iarg], "boris_subcycles") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_subcycles command");
-      boris_subcycles = input->inumeric(FLERR, arg[iarg + 1]);
-      if (boris_subcycles <= 0) error->all(FLERR, "Illegal global boris_subcycles command");
-      iarg += 2;
     } else if (strcmp(arg[iarg], "pcache_nevery") == 0) {
       if (iarg + 1 >= narg)
         error->all(FLERR, "Illegal global pcache_nevery command");
@@ -4321,21 +4265,7 @@ void Update::global(int narg, char **arg)
       if (pcache_nevery <= 0)
         error->all(FLERR, "Illegal global pcache_nevery command");
       iarg += 2;
-    } else if (strcmp(arg[iarg], "boris_bad_dt_check") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_bad_dt_check command");
-      if (strcmp(arg[iarg + 1], "yes") == 0) boris_bad_dt_check = 1;
-      else if (strcmp(arg[iarg + 1], "no") == 0) boris_bad_dt_check = 0;
-      else error->all(FLERR, "Illegal global boris_bad_dt_check command");
-      iarg += 2;
-    } else if (strcmp(arg[iarg], "boris_bad_dt_limit") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global boris_bad_dt_limit command");
-      boris_bad_dt_limit = input->numeric(FLERR, arg[iarg + 1]);
-      if (boris_bad_dt_limit <= 0.0) error->all(FLERR, "Illegal global boris_bad_dt_limit command");
-      iarg += 2;
 
-    // Reuse the unstructured-mesh triangle lookup across all particles in the
-    // same SPARTA cell. Default yes; set no for validation runs that need
-    // every particle to do its own mesh_cell_at() lookup.
     } else if (strcmp(arg[iarg], "pcache_per_cell_mesh") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pcache_per_cell_mesh command");
       if (strcmp(arg[iarg + 1], "yes") == 0) pcache_per_cell_mesh = 1;
@@ -4343,92 +4273,100 @@ void Update::global(int narg, char **arg)
       else error->all(FLERR, "Illegal global pcache_per_cell_mesh command");
       iarg += 2;
 
-    // Point-query B-field for Boris pusher from a compute plasma/fields
-    // or fix plasma/data.
-    // Usage: global bfield_compute <ID>
-    } else if (strcmp(arg[iarg], "bfield_compute") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global bfield_compute command");
-      delete [] boris_plasma_cid;
-      int n = strlen(arg[iarg+1]) + 1;
-      boris_plasma_cid = new char[n];
-      strcpy(boris_plasma_cid, arg[iarg+1]);
-      iarg += 2;
-
-    // Hybrid Boris/GCA pusher (ERO2.0-style).
-    // Usage: global gca plasma_compute <ID> [switch_factor 2.5]
-    } else if (strcmp(arg[iarg], "gca") == 0) {
+    // Charged-particle pusher (Boris full-orbit or Boris/GCA hybrid) +
+    // optional sheath overlay. Single hierarchical keyword:
+    //
+    //   global pusher mode boris|hybrid
+    //                 [subcycles N]
+    //                 [plasma <ID>]            (compute plasma/fields or fix plasma/data)
+    //                 [gca_switch <factor>]
+    //                 [dump yes|no] [dump_every N]
+    //                 [bad_dt_check yes|no] [bad_dt_limit <max>]
+    //                 [sheath off|kick|spatial
+    //                         [geom <nearest_surf/grid-ID>]
+    //                         [mD_amu <amu>]]
+    //
+    // Sheath dmax / pot_mult / model are auto: dmax = max(5*L_MPS, 10*lambdaD);
+    // pot_mult = 0 -> Bohm-Stangeby floating wall; model is the combined
+    // Coulette-Manfredi (close to wall) + Borodkina tail (s > 60 lambdaD).
+    } else if (strcmp(arg[iarg], "pusher") == 0) {
       iarg++;
-      gca_flag = 1;
       while (iarg < narg) {
-        if (strcmp(arg[iarg], "plasma_compute") == 0) {
-          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global gca command");
-          delete [] gca_plasma_cid;
+        if (strcmp(arg[iarg], "mode") == 0) {
+          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher mode");
+          if (strcmp(arg[iarg+1], "boris") == 0) pusher_mode = PUSHER_BORIS;
+          else if (strcmp(arg[iarg+1], "hybrid") == 0) pusher_mode = PUSHER_HYBRID;
+          else error->all(FLERR, "global pusher mode must be boris or hybrid");
+          iarg += 2;
+        } else if (strcmp(arg[iarg], "subcycles") == 0) {
+          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher subcycles");
+          pusher_subcycles = input->inumeric(FLERR, arg[iarg+1]);
+          if (pusher_subcycles <= 0)
+            error->all(FLERR, "global pusher subcycles must be > 0");
+          iarg += 2;
+        } else if (strcmp(arg[iarg], "plasma") == 0) {
+          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher plasma");
+          delete [] pusher_plasma_cid;
           int n = strlen(arg[iarg+1]) + 1;
-          gca_plasma_cid = new char[n];
-          strcpy(gca_plasma_cid, arg[iarg+1]);
+          pusher_plasma_cid = new char[n];
+          strcpy(pusher_plasma_cid, arg[iarg+1]);
           iarg += 2;
-        } else if (strcmp(arg[iarg], "switch_factor") == 0) {
-          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global gca command");
-          gca_switch_factor = input->numeric(FLERR, arg[iarg+1]);
-          if (gca_switch_factor <= 0.0) error->all(FLERR, "global gca switch_factor must be > 0");
+        } else if (strcmp(arg[iarg], "gca_switch") == 0) {
+          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher gca_switch");
+          pusher_gca_switch = input->numeric(FLERR, arg[iarg+1]);
+          if (pusher_gca_switch <= 0.0)
+            error->all(FLERR, "global pusher gca_switch must be > 0");
           iarg += 2;
-        } else break;
-      }
-      if (!gca_plasma_cid)
-        error->all(FLERR, "global gca requires plasma_compute <ID>");
-
-    // Per-particle sheath E-field from grid-cached geometry + plasma provider.
-    // Usage: global sheath geom_compute <ID> plasma_compute <ID>
-    //          or global sheath geom_compute <ID> plasma_fix <ID>
-    //          [model borodkina/coulette_manfredi] [dmax 0.02] [pot_mult 2.5]
-    //          [mD_amu 2.014]
-    } else if (strcmp(arg[iarg], "sheath") == 0) {
-      iarg++;
-      sheath_flag = 1;
-      while (iarg < narg) {
-        if (strcmp(arg[iarg], "geom_compute") == 0) {
-          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
-          delete [] sheath_geom_cid;
-          int n = strlen(arg[iarg+1]) + 1;
-          sheath_geom_cid = new char[n];
-          strcpy(sheath_geom_cid, arg[iarg+1]);
+        } else if (strcmp(arg[iarg], "dump") == 0) {
+          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher dump");
+          if (strcmp(arg[iarg+1], "yes") == 0) pusher_dump_flag = 1;
+          else if (strcmp(arg[iarg+1], "no") == 0) pusher_dump_flag = 0;
+          else error->all(FLERR, "global pusher dump must be yes or no");
           iarg += 2;
-        } else if (strcmp(arg[iarg], "plasma_compute") == 0 ||
-                   strcmp(arg[iarg], "plasma_fix") == 0) {
-          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
-          delete [] sheath_plasma_cid;
-          int n = strlen(arg[iarg+1]) + 1;
-          sheath_plasma_cid = new char[n];
-          strcpy(sheath_plasma_cid, arg[iarg+1]);
+        } else if (strcmp(arg[iarg], "dump_every") == 0) {
+          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher dump_every");
+          pusher_dump_every = input->inumeric(FLERR, arg[iarg+1]);
+          if (pusher_dump_every <= 0)
+            error->all(FLERR, "global pusher dump_every must be > 0");
           iarg += 2;
-        } else if (strcmp(arg[iarg], "model") == 0) {
-          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
-          if (strcmp(arg[iarg+1], "borodkina") == 0) sheath_model = 0;
-          else if (strcmp(arg[iarg+1], "coulette_manfredi") == 0) sheath_model = 1;
-          else error->all(FLERR, "global sheath model must be borodkina or coulette_manfredi");
+        } else if (strcmp(arg[iarg], "bad_dt_check") == 0) {
+          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher bad_dt_check");
+          if (strcmp(arg[iarg+1], "yes") == 0) pusher_bad_dt_check = 1;
+          else if (strcmp(arg[iarg+1], "no") == 0) pusher_bad_dt_check = 0;
+          else error->all(FLERR, "global pusher bad_dt_check must be yes or no");
           iarg += 2;
-        } else if (strcmp(arg[iarg], "dmax") == 0) {
-          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
-          sheath_dmax = input->numeric(FLERR, arg[iarg+1]);
+        } else if (strcmp(arg[iarg], "bad_dt_limit") == 0) {
+          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher bad_dt_limit");
+          pusher_bad_dt_limit = input->numeric(FLERR, arg[iarg+1]);
+          if (pusher_bad_dt_limit <= 0.0)
+            error->all(FLERR, "global pusher bad_dt_limit must be > 0");
           iarg += 2;
-        } else if (strcmp(arg[iarg], "pot_mult") == 0) {
-          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
-          sheath_pot_mult = input->numeric(FLERR, arg[iarg+1]);
+        } else if (strcmp(arg[iarg], "sheath") == 0) {
+          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher sheath");
+          const char *mode = arg[iarg+1];
+          if (strcmp(mode, "off") == 0)      { sheath_flag = 0; sheath_kick = 0; }
+          else if (strcmp(mode, "kick") == 0)    { sheath_flag = 1; sheath_kick = 1; }
+          else if (strcmp(mode, "spatial") == 0) { sheath_flag = 1; sheath_kick = 0; }
+          else error->all(FLERR, "global pusher sheath must be off|kick|spatial");
           iarg += 2;
-        } else if (strcmp(arg[iarg], "mD_amu") == 0) {
-          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
-          sheath_mD_amu = input->numeric(FLERR, arg[iarg+1]);
-          iarg += 2;
-        } else if (strcmp(arg[iarg], "kick") == 0) {
-          if (iarg + 1 >= narg) error->all(FLERR, "Illegal global sheath command");
-          if (strcmp(arg[iarg+1], "yes") == 0) sheath_kick = 1;
-          else if (strcmp(arg[iarg+1], "no") == 0) sheath_kick = 0;
-          else error->all(FLERR, "global sheath kick must be yes or no");
-          iarg += 2;
+          while (iarg < narg) {
+            if (strcmp(arg[iarg], "geom") == 0) {
+              if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher sheath geom");
+              delete [] sheath_geom_cid;
+              int n = strlen(arg[iarg+1]) + 1;
+              sheath_geom_cid = new char[n];
+              strcpy(sheath_geom_cid, arg[iarg+1]);
+              iarg += 2;
+            } else if (strcmp(arg[iarg], "mD_amu") == 0) {
+              if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher sheath mD_amu");
+              sheath_mD_amu = input->numeric(FLERR, arg[iarg+1]);
+              iarg += 2;
+            } else break;
+          }
+          if (sheath_flag && !sheath_geom_cid)
+            error->all(FLERR, "global pusher sheath kick|spatial requires geom <ID>");
         } else break;  // next keyword belongs to a different global option
       }
-      if (!sheath_geom_cid || !sheath_plasma_cid)
-        error->all(FLERR, "global sheath requires geom_compute and plasma_compute/plasma_fix");
 
     } else if (strcmp(arg[iarg],"mem/limit") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal global command");

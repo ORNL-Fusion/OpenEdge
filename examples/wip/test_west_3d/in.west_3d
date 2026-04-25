@@ -74,16 +74,11 @@ fix fcore reflect/psi 1 equ input/data/west_3mw.equ psi_norm 0.8 action absorb  
 
 
 # ===========================================================================
-# 2) Boris pusher with B-field from equilibrium point queries
+# 2) Charged-particle pusher: Boris with sheath kick
 # ===========================================================================
-global              bfield_compute pfields
-
-global              boris_subcycles 5
-
-# Sheath geometry and kick model
 compute             cgeom nearest_surf/grid all all dist nx ny nz surfidx
-global              sheath geom_compute cgeom plasma_compute pfields &
-                    mD_amu 2.0 pot_mult 2.5 kick yes
+global              pusher mode boris plasma pfields subcycles 5 &
+                    sheath kick geom cgeom mD_amu 2.0
 
 # ===========================================================================
 # 3) ADAS ionization/recombination for Tungsten (Z=74)

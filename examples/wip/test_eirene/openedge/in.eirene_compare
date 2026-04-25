@@ -68,10 +68,10 @@ create_particles    species n 2000
 
 ##################################--- Chemistry ---######################################
 # Constant plasma background fed through fix plasma/data so the per-particle
-# pcache picks it up. `global bfield_compute pd` activates pcache without a
+# pcache picks it up. `global pusher plasma pd` activates pcache without a
 # pusher; volume/chem/adas reads Te/ne directly from the cache.
 fix pd plasma/data constant temp_e ${Te_eV} dens_e ${ne}
-global bfield_compute pd
+global pusher plasma pd
 
 # ADAS rates for D (Z=1) + Janev for D2 dissociation
 # NO collide command = no VSS neutral-neutral elastic scattering
