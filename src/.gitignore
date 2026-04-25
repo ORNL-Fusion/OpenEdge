@@ -48,8 +48,6 @@
 /compute_nearest_surf_grid.h
 /compute_surf_ead.cpp
 /compute_surf_ead.h
-/compute_thermal_sheath_grid.cpp
-/compute_thermal_sheath_grid.h
 /fix_bfield_grid.cpp
 /fix_bfield_grid.h
 /fix_bfield_particle.cpp

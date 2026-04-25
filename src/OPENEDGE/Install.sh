@@ -78,8 +78,6 @@ action compute_surface_physical_sputter.cpp
 action compute_surface_physical_sputter.h
 action compute_nearest_surf_grid.cpp
 action compute_nearest_surf_grid.h
-action compute_thermal_sheath_grid.cpp
-action compute_thermal_sheath_grid.h
 action fix_bfield_grid.cpp
 action fix_bfield_grid.h
 action fix_bfield_particle.cpp
