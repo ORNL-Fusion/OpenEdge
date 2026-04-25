@@ -60,10 +60,6 @@ override fix_emit_face_file.cpp
 override fix_emit_face_file.h
 override fix_emit_surf.cpp
 override fix_emit_surf.h
-override fix_field_grid.cpp
-override fix_field_grid.h
-override fix_field_particle.cpp
-override fix_field_particle.h
 override surf_collide_diffuse.cpp
 override surf_collide_diffuse.h
 
@@ -102,8 +98,6 @@ action fix_efield_particle.cpp
 action fix_efield_particle.h
 action fix_emit_droplet.cpp
 action fix_emit_droplet.h
-action fix_emit_surf_file.cpp
-action fix_emit_surf_file.h
 action fix_surface_emit_source.cpp
 action fix_surface_emit_source.h
 action fix_evaporation.cpp

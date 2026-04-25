@@ -39,10 +39,6 @@ if(PKG_OPENEDGE)
     ${CMAKE_CURRENT_SOURCE_DIR}/fix_emit_face_file.h
     ${CMAKE_CURRENT_SOURCE_DIR}/fix_emit_surf.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fix_emit_surf.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/fix_field_grid.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fix_field_grid.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/fix_field_particle.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fix_field_particle.h
     ${CMAKE_CURRENT_SOURCE_DIR}/surf_collide_diffuse.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/surf_collide_diffuse.h)
 

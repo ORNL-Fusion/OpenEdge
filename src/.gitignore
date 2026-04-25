@@ -68,8 +68,6 @@
 /fix_efield_particle.h
 /fix_emit_droplet.cpp
 /fix_emit_droplet.h
-/fix_emit_surf_file.cpp
-/fix_emit_surf_file.h
 /fix_surface_emit_source.cpp
 /fix_surface_emit_source.h
 /fix_evaporation.cpp
