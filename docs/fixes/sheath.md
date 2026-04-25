@@ -106,7 +106,7 @@ path.
 ## Required setup — kick mode (IEADs)
 
 ```
-fix           pd       plasma/data file plasma.h5 ...
+fix           pd       background file plasma.h5 ...
 compute       cgeom    nearest_surf/grid all <wall-group> dist nx ny nz surfid
 global        pusher mode boris plasma pd subcycles 5 \
                      sheath kick geom cgeom

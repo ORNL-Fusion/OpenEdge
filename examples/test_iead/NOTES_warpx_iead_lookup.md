@@ -84,7 +84,7 @@ equivalent C++ sampler in OpenEdge can be a line-by-line port.
 
 New fix `fix emit/surf/sheath_iead` (or extension to `fix emit/surf/pmi`):
 given per-surface (τ, ζ, α_B) computed from the local plasma (via
-`fix plasma/data`) and B-field projection, sample (E, α, β) from the
+`fix background`) and B-field projection, sample (E, α, β) from the
 HDF5 table and emit the particle along the wall normal with the
 appropriate velocity rotation.
 

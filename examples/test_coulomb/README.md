@@ -2,14 +2,14 @@
 
 Two independent cases validating the Nanbu–Takizuka binary Coulomb
 scattering operator, both using `fix coulomb/background` with
-`plasma_data <fix_id>`.
+`background <fix_id>`.
 
 | Case | Deck | Physics |
 |---|---|---|
 | slowdown | `in.nanbu_slowdown` | C3+ at 10 eV slows down against a fixed D+ background (Ti = 2 eV, n_i = 10¹⁷ m⁻³). Binary self-collisions are negligible (fnum = 1). |
 | thermalization | `in.nanbu_thermalize` | Hot D+ (10 eV, 5000 part.) and cold C3+ (5 eV, 5000 part.) equilibrate via binary pair collisions toward ~7.5 eV. No background partner. |
 
-Both decks use constant-background `fix plasma/data` for the Coulomb
+Both decks use constant-background `fix background` for the Coulomb
 logarithm input (Te, ne).
 
 ## Files
@@ -49,8 +49,8 @@ the particle dump never fails on a fresh checkout.
 
 ## Notes
 
-- `fix coulomb/background 1 plasma_data pd` uses `Te, ne` from the constant
-  plasma/data for the Coulomb log; with `background A_bg Z_bg` it pulls
+- `fix coulomb/background 1 background pd` uses `Te, ne` from the constant
+  background for the Coulomb log; with `background A_bg Z_bg` it pulls
   `Ti, n_i, V_par, B` from the same fix for virtual-background partners.
 - Without `background`, only binary self/pair collisions run — used by
   the thermalization case.

@@ -1,15 +1,15 @@
 /* ----------------------------------------------------------------------
     OpenEdge:
     fix evaporation — droplet evaporation driven by the plasma heat-flux
-    vector (q_par, q_perp) carried by fix plasma/data.
+    vector (q_par, q_perp) carried by fix background.
 
     Syntax:
-      fix ID evaporation Nevery MIXTURE plasma_data PD \
+      fix ID evaporation Nevery MIXTURE background PD \
           [mass M] [radius R] [temp T] [heatflux/scale S] [rocket_eta E]
 
-    plasma_data PD is required: the fix pulls q_par / q_perp and
-    grad_Te_{R,Z} from that fix plasma/data at the droplet position.
-    If the plasma.h5 does not carry q_par/q_perp, fix plasma/data prints
+    background PD is required: the fix pulls q_par / q_perp and
+    grad_Te_{R,Z} from that fix background at the droplet position.
+    If the plasma.h5 does not carry q_par/q_perp, fix background prints
     a one-time warning at init and this fix reads back the built-in
     defaults (default_q_par / default_q_perp on pd).
 ------------------------------------------------------------------------- */
@@ -28,7 +28,7 @@ FixStyle(droplet/evaporate,FixDropletEvaporate)
 
 namespace SPARTA_NS {
 
-class FixPlasmaData;
+class FixBackground;
 
 class FixDropletEvaporate : public Fix {
  public:
@@ -47,7 +47,7 @@ class FixDropletEvaporate : public Fix {
   void start_of_step() override;
 
   std::string plasma_fix_id_;
-  FixPlasmaData *pd_;
+  FixBackground *pd_;
 
   void droplet_evaporation_model(Particle::OnePart *ip, double dt_half);
   double set_mass   = -1.0;

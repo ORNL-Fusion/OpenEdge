@@ -74,7 +74,7 @@ class NanbuScatterTable {
 };
 
 class RanKnuth;
-class FixPlasmaData;
+class FixBackground;
 
 class FixCoulombBase : public Fix {
  public:
@@ -86,17 +86,17 @@ class FixCoulombBase : public Fix {
   double memory_usage();
 
   // True only if this fix reads from the per-particle plasma cache. In
-  // plasma_data mode the fix interpolates directly from FixPlasmaData and
+  // background mode the fix interpolates directly from FixBackground and
   // does not touch the cache, so Update::init() can drop the corresponding
   // mask bits and skip the writes.
-  bool needs_pcache() const { return !use_plasma_data_; }
+  bool needs_pcache() const { return !use_background_; }
 
  protected:
   NanbuScatterTable scatter_table_;
   RanKnuth *rng_;
-  int use_plasma_data_;
+  int use_background_;
   std::string plasma_fix_id_;
-  FixPlasmaData *pd_;
+  FixBackground *pd_;
 
   // mode flags set by subclass ctors
   int do_binary_;        // FixCoulombBinary sets to 1

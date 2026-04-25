@@ -244,7 +244,7 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
 
   // Te/ne come from the per-particle plasma cache (populated by
   // update.cpp from a configured plasma_compute / plasma_fix). For a
-  // uniform synthetic plasma in test cases, use `fix plasma/data
+  // uniform synthetic plasma in test cases, use `fix background
   // constant ...` — the pcache picks it up automatically and the
   // sheath Boltzmann correction (when active) flows through.
 
@@ -683,7 +683,7 @@ void FixVolumeChemAdas::end_of_step()
 
   // Require the per-particle plasma cache. Activated by any one of:
   // sheath, GCA, or `global bfield_compute`. For uniform test cases
-  // use `fix plasma/data constant ...` plus one of those activators.
+  // use `fix background constant ...` plus one of those activators.
   if (!update->plasma_cache_flag) {
     error->all(FLERR,
       "fix volume/chem/adas: per-particle plasma cache not active — "

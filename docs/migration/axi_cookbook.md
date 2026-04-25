@@ -42,8 +42,8 @@ python3 tools/converters/convert_solps_plasma.py <SOLPS_RUN> \
   (`xlo,xhi` are now Z range, `ylo,yhi` are now R range). Lower divertor
   region: `Z` is negative; upper divertor: `Z` is positive.
 - `compute plasma/fields` — drop any `file plasma.h5 …` syntax (rejected).
-  Declare `fix pd plasma/data file input/plasma.h5` first, then reference
-  it: `compute cp plasma/fields all plasma_data pd …`. Drop any
+  Declare `fix pd background file input/plasma.h5` first, then reference
+  it: `compute cp plasma/fields all background pd …`. Drop any
   `equilibrium <file>` keyword and any `bfield.h5` arg — the mesh-only
   `plasma.h5` carries everything.
 - All B-field / E-field source columns from `compute plasma/fields` stay

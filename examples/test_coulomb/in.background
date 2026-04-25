@@ -45,10 +45,10 @@ mixture         impurity C3+ frac 1.0
 mixture         impurity temp 116045         # 10 eV
 
 # ---- Plasma data (constant uniform background) ----
-# fix plasma/data constant holds Te/ne for the Coulomb log and
+# fix background constant holds Te/ne for the Coulomb log and
 # Ti/Ni/Vpar/B for the virtual background partner used by fix coulomb/background.
 # Temperatures in eV, densities in m^-3, flow in m/s, B in T.
-fix             pd plasma/data constant &
+fix             pd background constant &
                 te ${Te_bg} ne ${ne_bg} &
                 ti ${Ti_bg} ni ${ni_bg} &
                 upar ${vpar_bg} &
@@ -56,9 +56,9 @@ fix             pd plasma/data constant &
                 static yes
 
 # ---- Nanbu Coulomb collisions with background ----
-# Background species: D+ (A=2.014, Z=1). When plasma_data is used, Ti/Ni/Vpar
+# Background species: D+ (A=2.014, Z=1). When background is used, Ti/Ni/Vpar
 # and the magnetic-field direction are queried directly from fix pd.
-fix             nanbu coulomb/background 1 plasma_data pd 2.014 1.0
+fix             nanbu coulomb/background 1 background pd 2.014 1.0
 
 # ---- Create impurity particles ----
 create_particles impurity n 5000

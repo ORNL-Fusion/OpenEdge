@@ -25,13 +25,13 @@
 
     Syntax:
       fix ID thermal_force Nevery \
-          {bfield BxSRC BySRC BzSRC | plasma_data FIXID} \
+          {bfield BxSRC BySRC BzSRC | background FIXID} \
           [ion_thermal yes|no [gradTiR_SRC gradTiZ_SRC in source-token mode]] \
           [elec_thermal yes|no [gradTeR_SRC gradTeZ_SRC in source-token mode]]
 
-    Example (2D WEST, direct plasma/data path):
+    Example (2D WEST, direct background path):
       fix ftf thermal_force 1 \
-          plasma_data pd \
+          background pd \
           ion_thermal yes \
           elec_thermal yes
 
@@ -48,12 +48,12 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(thermal_force,FixThermalForce)
+FixStyle(force/thermal,FixForceThermal)
 
 #else
 
-#ifndef SPARTA_FIX_THERMAL_FORCE_H
-#define SPARTA_FIX_THERMAL_FORCE_H
+#ifndef SPARTA_FIX_FORCE_THERMAL_H
+#define SPARTA_FIX_FORCE_THERMAL_H
 
 #include "fix.h"
 #include "grid_src.h"
@@ -62,27 +62,27 @@ FixStyle(thermal_force,FixThermalForce)
 
 namespace SPARTA_NS {
 
-class FixPlasmaData;
+class FixBackground;
 
-class FixThermalForce : public Fix {
+class FixForceThermal : public Fix {
  public:
-  FixThermalForce(class SPARTA *, int, char **);
-  ~FixThermalForce();
+  FixForceThermal(class SPARTA *, int, char **);
+  ~FixForceThermal();
   int  setmask();
   void init();
   void start_of_step();
   void end_of_step();
 
   // True only if this fix reads from the per-particle plasma cache. In
-  // plasma_data mode the fix interpolates directly from FixPlasmaData and
+  // background mode the fix interpolates directly from FixBackground and
   // does not touch the cache, so Update::init() can drop the corresponding
   // mask bits and skip the writes.
-  bool needs_pcache() const { return !use_plasma_data_; }
+  bool needs_pcache() const { return !use_background_; }
 
  protected:
-  int use_plasma_data_;
+  int use_background_;
   std::string plasma_fix_id_;
-  FixPlasmaData *pd_;
+  FixBackground *pd_;
 
   // B-field sources in SPARTA coordinate order (bx, by, bz)
   CollGridSrc srcBx_, srcBy_, srcBz_;

@@ -9,15 +9,15 @@ particle. The leapfrog half-kick pattern (`START_OF_STEP` +
 Two modes depending on how B-field and temperature gradients are
 sourced.
 
-### Mode A — `plasma_data` (recommended, mesh-native)
+### Mode A — `background` (recommended, mesh-native)
 
 ```
-fix ID thermal_force Nevery plasma_data <plasma_fix_ID> \
+fix ID thermal_force Nevery background <plasma_fix_ID> \
     [ion_thermal yes|no] \
     [elec_thermal yes|no]
 ```
 
-Reads B and `grad_Te / grad_Ti` from a `fix plasma/data` instance. B
+Reads B and `grad_Te / grad_Ti` from a `fix background` instance. B
 comes from the mesh-native per-triangle field
 (`/mesh/vtx_b{r,z,t}`); gradients come from the per-cell
 `/mesh/grad_t{e,i}_{r,z}` datasets written by the post-2026-04-22
@@ -78,13 +78,13 @@ cap — that's a follow-up.
 
 ## Gradient source compatibility
 
-| plasma.h5 layout | Mode A (`plasma_data`) | Mode B (explicit srcs) |
+| plasma.h5 layout | Mode A (`background`) | Mode B (explicit srcs) |
 |---|---|---|
 | mesh-only (new converters, 2026-04-22+) | ✅ reads `mesh/grad_te_{r,z}` etc. via `pd->mesh_grad_*` | ❌ `compute plasma/fields` returns 0 for gradients on mesh-only |
 | legacy regular-grid | ✅ fallback to `pd->interp2D` on `grad_te` | ✅ `compute plasma/fields` populates columns |
 
 **Bottom line:** prefer Mode A everywhere. Mode B is kept only for
-old decks that haven't migrated to `fix plasma/data`.
+old decks that haven't migrated to `fix background`.
 
 ## Related
 
@@ -94,5 +94,5 @@ old decks that haven't migrated to `fix plasma/data`.
   closure that produces the β_i, α_e coefficients assumes a
   collisional background.
 - `compute plasma/fields` — legacy B-field projector (Mode B). For
-  new decks, `global bfield_compute <pd>` + `fix plasma/data` is
+  new decks, `global bfield_compute <pd>` + `fix background` is
   sufficient.

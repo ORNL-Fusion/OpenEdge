@@ -1,9 +1,9 @@
 /* ----------------------------------------------------------------------
    OpenEdge: fix droplet/charge — OML charging of droplets against a
-   plasma background carried by fix plasma/data.
+   plasma background carried by fix background.
 
    Syntax:
-     fix ID droplet/charge Nevery plasma_data PD \
+     fix ID droplet/charge Nevery background PD \
          [ion_mass_amu M] [thermionic yes|no] \
          [richardson_A V] [work_function_eV V] \
          [radius R] [mass M] [temp T]
@@ -28,7 +28,7 @@ FixStyle(droplet_charge,FixDropletCharge)
 
 namespace SPARTA_NS {
 
-class FixPlasmaData;
+class FixBackground;
 
 class FixDropletCharge : public Fix {
  public:
@@ -43,7 +43,7 @@ class FixDropletCharge : public Fix {
 
  protected:
   std::string plasma_fix_id_;
-  FixPlasmaData *pd_ = nullptr;
+  FixBackground *pd_ = nullptr;
 
   double seed_radius      = -1.0;
   double seed_mass        = -1.0;

@@ -25,8 +25,8 @@ centroid (via `findNearestMappedTriangle`) and emits `er`, `et`, `ez`, `ex`,
 ## Feeding into the Boris pusher
 
 ```
-fix pd plasma/data file plasma.h5
-compute cplasma plasma/fields all plasma_data pd ex ey ez
+fix pd background file plasma.h5
+compute cplasma plasma/fields all background pd ex ey ez
 fix fE efield/grid c_cplasma[ex_col] c_cplasma[ey_col] c_cplasma[ez_col]
 global efield grid fE 0
 ```

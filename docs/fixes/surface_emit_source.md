@@ -59,7 +59,7 @@ fix ID surface/emit/source <mixture> <group> <compute_id> \
 ## Pairing with `compute surface/physical/sputter`
 
 ```
-compute cpmiW surface/physical/sputter wall plasma_data pd \
+compute cpmiW surface/physical/sputter wall background pd \
     target W projectiles all \
     mass_amu 2.01410177811 static yes \
     erosion_flux

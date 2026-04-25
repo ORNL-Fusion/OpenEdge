@@ -35,7 +35,7 @@ own keywords and leaves the others at their current value.
   kick-only sheath, 50–500 for spatial sheath profiles.
 - **`plasma <ID>`** — upstream provider for B (always) plus Te/ne for
   sheath/diagnostics. Either a `compute plasma/fields` or a
-  `fix plasma/data`. Activates the per-particle plasma cache
+  `fix background`. Activates the per-particle plasma cache
   (`pcache`) — required for any deck where downstream fixes (e.g.
   `fix volume/chem/adas`) need per-particle Te/ne/Ti.
 - **`gca_switch <factor>`** (default 2.5) — GCA-vs-Boris switching
@@ -93,7 +93,7 @@ mD_amu 2.014
 decks that need `fix volume/chem/adas`:
 
 ```
-fix    pd plasma/data constant temp_e 20 dens_e 1e19
+fix    pd background constant temp_e 20 dens_e 1e19
 global pusher plasma pd
 ```
 
@@ -103,7 +103,7 @@ the pusher is a no-op. The `plasma pd` line is what activates pcache.)
 **IEAD run with sheath kick:**
 
 ```
-fix     pd plasma/data file plasma.h5 static yes
+fix     pd background file plasma.h5 static yes
 compute cgeom nearest_surf/grid all wall dist nx ny nz surfid
 global  pusher mode boris plasma pd subcycles 5 \
                sheath kick geom cgeom
@@ -132,6 +132,6 @@ global  pusher mode hybrid plasma cplasma subcycles 50 \
   model blend, Boltzmann ne correction, prepare/evaluate split).
 - `compute nearest_surf/grid` — per-cell wall geometry (required when
   sheath is on).
-- `compute plasma/fields` / `fix plasma/data` — plasma providers.
+- `compute plasma/fields` / `fix background` — plasma providers.
 - [`volume_chem_adas.md`](volume_chem_adas.md) — ionization/recombination
   consumer of the per-particle pcache filled by the pusher.

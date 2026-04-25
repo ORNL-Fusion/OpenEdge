@@ -26,7 +26,7 @@ FixCoulombBackground::FixCoulombBackground(SPARTA *sparta, int narg, char **arg)
   A_bg_ = input->numeric(FLERR, arg[iarg++]);
   Z_bg_ = input->numeric(FLERR, arg[iarg++]);
 
-  if (!use_plasma_data_) {
+  if (!use_background_) {
     if (iarg + 6 > narg)
       error->all(FLERR,
         "fix coulomb/background: need TiSrc NiSrc VparSrc BxSrc BySrc BzSrc");

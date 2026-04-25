@@ -3,7 +3,7 @@
     Wall-recycling neutral source emitter.
 
     Per wall segment, queries (ne, Te, Ti) at the adjacent SOLPS sheath-edge
-    plasma cell (cached at init) via a fix plasma/data, computes the Bohm
+    plasma cell (cached at init) via a fix background, computes the Bohm
     wall flux
        Gamma = n_i * c_s * sin(alpha_B)         c_s = sqrt((Te+Ti)/m_ion)
     and emits the mixture at rate
@@ -47,7 +47,7 @@ class FixSurfaceEmitRecycle : public FixEmit {
 
   // plasma data source
   int ifix_plasma;
-  class FixPlasmaData *plasma;
+  class FixBackground *plasma;
 
   // recycling parameters
   double mass_amu;       // main ion mass [amu], for c_s

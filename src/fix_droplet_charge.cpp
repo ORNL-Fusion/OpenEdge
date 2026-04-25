@@ -1,9 +1,9 @@
 /* ----------------------------------------------------------------------
-   OpenEdge: fix droplet/charge — OML charging against plasma_data background.
+   OpenEdge: fix droplet/charge — OML charging against background.
 ------------------------------------------------------------------------- */
 
 #include "fix_droplet_charge.h"
-#include "fix_plasma_data.h"
+#include "fix_background.h"
 #include "update.h"
 #include "grid.h"
 #include "particle.h"
@@ -30,17 +30,17 @@ using namespace MathConst;
 FixDropletCharge::FixDropletCharge(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
-  // fix ID droplet/charge Nevery plasma_data PD [keywords...]
+  // fix ID droplet/charge Nevery background PD [keywords...]
   if (narg < 5)
     error->all(FLERR,
       "Illegal fix droplet/charge command "
-      "(need: Nevery plasma_data PD)");
+      "(need: Nevery background PD)");
 
   int iarg = 2;
   nevery = input->inumeric(FLERR, arg[iarg++]);
 
-  if (strcmp(arg[iarg++], "plasma_data") != 0)
-    error->all(FLERR, "fix droplet/charge: argument 4 must be 'plasma_data'");
+  if (strcmp(arg[iarg++], "background") != 0)
+    error->all(FLERR, "fix droplet/charge: argument 4 must be 'background'");
   plasma_fix_id_ = std::string(arg[iarg++]);
 
   while (iarg < narg) {
@@ -101,14 +101,14 @@ void FixDropletCharge::init()
   if (ifix < 0) {
     char msg[200];
     snprintf(msg, sizeof(msg),
-             "fix droplet/charge: plasma_data fix '%s' not found",
+             "fix droplet/charge: background fix '%s' not found",
              plasma_fix_id_.c_str());
     error->all(FLERR, msg);
   }
-  pd_ = dynamic_cast<FixPlasmaData *>(modify->fix[ifix]);
+  pd_ = dynamic_cast<FixBackground *>(modify->fix[ifix]);
   if (!pd_)
     error->all(FLERR,
-      "fix droplet/charge: plasma_data fix must be style plasma/data");
+      "fix droplet/charge: background fix must be style background");
   pd_->init();
 }
 

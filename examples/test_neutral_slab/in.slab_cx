@@ -25,10 +25,10 @@ species             input/neutral.species D D+
 mixture             puff D frac 1.0 nrho 1e18 temp 350.0 &
                     vstream 1.695e4 0.0 0.0
 
-# --- Uniform plasma background via fix plasma/data (populates pcache Ti) ---
+# --- Uniform plasma background via fix background (populates pcache Ti) ---
 # Need Ti in the per-particle plasma cache so fix volume/chem/adas CX resampler
 # can draw product velocities from a Maxwellian at local Ti.
-fix pd plasma/data file input/plasma_cx.h5 static yes
+fix pd background file input/plasma_cx.h5 static yes
 global              pusher plasma pd
 
 # --- Ionization + CX, Mode A (ionization deletes; CX resamples v) ---

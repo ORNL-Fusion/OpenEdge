@@ -46,7 +46,7 @@ python3 ../../tools/converters/convert_solps_plasma.py /home/cloud/li/v0_1 \
 ## Notes on the physics
 
 - The deck warns at init that `plasma.h5` has no `q_par`/`q_perp` — the
-  SOLPS converter doesn't write these yet, so `fix plasma/data` falls
+  SOLPS converter doesn't write these yet, so `fix background` falls
   back to `q_par = 50 MW/m²`, `q_perp = 0`. `fix evaporation` applies
   `Qs = 0.25·|q|` (sphere geometric factor) to the droplet surface.
 - Droplets evaporate out long before gravity or drag can visibly bend

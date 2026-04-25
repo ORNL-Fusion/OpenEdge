@@ -1,10 +1,10 @@
 /* ----------------------------------------------------------------------
    OpenEdge: fix drag — Epstein / Coulomb drag on droplets.
    Plasma background (Te, Ti, Ni, Vpar, Br, Bt, Bz) is pulled at the
-   particle position from fix plasma/data via interp2D / bfield_at.
+   particle position from fix background via interp2D / bfield_at.
 
    Syntax:
-     fix ID drag Nevery A_bg Z_bg plasma_data PD \
+     fix ID drag Nevery A_bg Z_bg background PD \
          [gravity gx gy gz] \
          [model epstein|coulomb] \
          [coulomb/chi V] [coulomb/delta V] [coulomb/lnlambda V] \
@@ -26,7 +26,7 @@ FixStyle(droplet/drag,FixDropletDrag)
 
 namespace SPARTA_NS {
 
-class FixPlasmaData;
+class FixBackground;
 
 class FixDropletDrag : public Fix {
  public:
@@ -46,7 +46,7 @@ class FixDropletDrag : public Fix {
   int drag_model = DRAG_EPSTEIN;
 
   std::string plasma_fix_id_;
-  FixPlasmaData *pd_ = nullptr;
+  FixBackground *pd_ = nullptr;
 
   double A_background      = 2.0;
   double Z_background      = 1.0;

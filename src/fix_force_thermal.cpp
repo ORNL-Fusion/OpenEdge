@@ -34,7 +34,7 @@
 #include "modify.h"
 #include "particle.h"
 #include "update.h"
-#include "fix_plasma_data.h"
+#include "fix_background.h"
 #include "openedge_geom.h"
 
 using namespace SPARTA_NS;
@@ -46,7 +46,7 @@ enum { INT, DOUBLE };
 
 FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
-  use_plasma_data_(0),
+  use_background_(0),
   plasma_fix_id_(),
   pd_(nullptr),
   have_ion_thermal_(0),
@@ -54,22 +54,22 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
   beta_i_(2.6),
   alpha_e_(0.71)
 {
-  // fix ID thermal_force Nevery {bfield BxSRC BySRC BzSRC | plasma_data FIXID}
+  // fix ID thermal_force Nevery {bfield BxSRC BySRC BzSRC | background FIXID}
   //     [keywords...]
 
   if (narg < 5)
     error->all(FLERR,
       "Illegal fix thermal_force command "
-      "(need: Nevery {bfield BxSRC BySRC BzSRC | plasma_data FIXID})");
+      "(need: Nevery {bfield BxSRC BySRC BzSRC | background FIXID})");
 
   int iarg = 2;
   nevery = input->inumeric(FLERR, arg[iarg++]);
 
-  if (strcmp(arg[iarg], "plasma_data") == 0) {
+  if (strcmp(arg[iarg], "background") == 0) {
     iarg++;
     if (iarg >= narg)
-      error->all(FLERR, "fix thermal_force: plasma_data needs a fix ID");
-    use_plasma_data_ = 1;
+      error->all(FLERR, "fix thermal_force: background needs a fix ID");
+    use_background_ = 1;
     plasma_fix_id_ = arg[iarg++];
   } else {
     if (strcmp(arg[iarg++], "bfield") != 0)
@@ -96,7 +96,7 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
       have_ion_thermal_ = enabled;
       if (!enabled) continue;
 
-      if (!use_plasma_data_) {
+      if (!use_background_) {
         if (iarg + 2 > narg)
           error->all(FLERR,
             "fix thermal_force ion_thermal: need gradTiR_SRC gradTiZ_SRC");
@@ -106,7 +106,7 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
                  strcmp(arg[iarg], "ion_thermal") != 0 &&
                  strcmp(arg[iarg], "elec_thermal") != 0) {
         error->all(FLERR,
-          "fix thermal_force ion_thermal: in plasma_data mode use only yes/no");
+          "fix thermal_force ion_thermal: in background mode use only yes/no");
       }
 
     } else if (strcmp(arg[iarg], "elec_thermal") == 0) {
@@ -119,7 +119,7 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
       have_elec_thermal_ = enabled;
       if (!enabled) continue;
 
-      if (!use_plasma_data_) {
+      if (!use_background_) {
         if (iarg + 2 > narg)
           error->all(FLERR,
             "fix thermal_force elec_thermal: need gradTeR_SRC gradTeZ_SRC");
@@ -129,7 +129,7 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
                  strcmp(arg[iarg], "ion_thermal") != 0 &&
                  strcmp(arg[iarg], "elec_thermal") != 0) {
         error->all(FLERR,
-          "fix thermal_force elec_thermal: in plasma_data mode use only yes/no");
+          "fix thermal_force elec_thermal: in background mode use only yes/no");
       }
 
     } else {
@@ -230,19 +230,19 @@ void FixForceThermal::init()
     }
   };
 
-  if (use_plasma_data_) {
+  if (use_background_) {
     const int ifix = modify->find_fix(plasma_fix_id_.c_str());
     if (ifix < 0) {
       char msg[200];
       snprintf(msg, sizeof(msg),
-               "fix thermal_force: plasma_data fix '%s' not found",
+               "fix thermal_force: background fix '%s' not found",
                plasma_fix_id_.c_str());
       error->all(FLERR, msg);
     }
-    pd_ = dynamic_cast<FixPlasmaData *>(modify->fix[ifix]);
+    pd_ = dynamic_cast<FixBackground *>(modify->fix[ifix]);
     if (!pd_)
       error->all(FLERR,
-        "fix thermal_force: plasma_data fix must be style plasma/data");
+        "fix thermal_force: background fix must be style background");
     pd_->init();
   } else {
     bind(srcBx_, "Bx");
@@ -250,11 +250,11 @@ void FixForceThermal::init()
     bind(srcBz_, "Bz");
   }
 
-  if (have_ion_thermal_ && !use_plasma_data_) {
+  if (have_ion_thermal_ && !use_background_) {
     bind(srcGradTiR_, "gradTiR");
     bind(srcGradTiZ_, "gradTiZ");
   }
-  if (have_elec_thermal_ && !use_plasma_data_) {
+  if (have_elec_thermal_ && !use_background_) {
     bind(srcGradTeR_, "gradTeR");
     bind(srcGradTeZ_, "gradTeZ");
   }
@@ -267,17 +267,17 @@ void FixForceThermal::start_of_step()
   if ((update->ntimestep % nevery) != 0) return;
 
   // refresh caches once per timestep
-  if (!use_plasma_data_) {
+  if (!use_background_) {
     refresh_compute_src(srcBx_);
     refresh_compute_src(srcBy_);
     refresh_compute_src(srcBz_);
   }
 
-  if (have_ion_thermal_ && !use_plasma_data_) {
+  if (have_ion_thermal_ && !use_background_) {
     refresh_compute_src(srcGradTiR_);
     refresh_compute_src(srcGradTiZ_);
   }
-  if (have_elec_thermal_ && !use_plasma_data_) {
+  if (have_elec_thermal_ && !use_background_) {
     refresh_compute_src(srcGradTeR_);
     refresh_compute_src(srcGradTeZ_);
   }
@@ -295,16 +295,16 @@ void FixForceThermal::end_of_step()
   // particles are created during Update::move() between start_of_step and
   // end_of_step (e.g. by fix surface/emit/source). Re-fetch the pointers before
   // the second kick or read_src() will deref freed memory.
-  if (!use_plasma_data_) {
+  if (!use_background_) {
     refresh_compute_src(srcBx_);
     refresh_compute_src(srcBy_);
     refresh_compute_src(srcBz_);
   }
-  if (have_ion_thermal_ && !use_plasma_data_) {
+  if (have_ion_thermal_ && !use_background_) {
     refresh_compute_src(srcGradTiR_);
     refresh_compute_src(srcGradTiZ_);
   }
-  if (have_elec_thermal_ && !use_plasma_data_) {
+  if (have_elec_thermal_ && !use_background_) {
     refresh_compute_src(srcGradTeR_);
     refresh_compute_src(srcGradTeZ_);
   }
@@ -352,7 +352,7 @@ void FixForceThermal::kick_half(double dt_half)
 
     const int icell = p.icell;
     double B0, B1, B2;
-    if (use_plasma_data_) pd_bfield_sparta(p, B0, B1, B2);
+    if (use_background_) pd_bfield_sparta(p, B0, B1, B2);
     else {
       B0 = read_src(srcBx_, ip, icell);
       B1 = read_src(srcBy_, ip, icell);
@@ -383,10 +383,10 @@ void FixForceThermal::kick_half(double dt_half)
     const double Z2 = Z * Z;
 
     if (have_ion_thermal_) {
-      const double gTiR = use_plasma_data_
+      const double gTiR = use_background_
         ? pd_grad(pd_->mesh_grad_ti_r, pd_->grad_ti_r, p)
         : read_src(srcGradTiR_, ip, icell);
-      const double gTiZ = use_plasma_data_
+      const double gTiZ = use_background_
         ? pd_grad(pd_->mesh_grad_ti_z, pd_->grad_ti_z, p)
         : read_src(srcGradTiZ_, ip, icell);
       const double grad_par_Ti = gTiR * bhat_R_cyl + gTiZ * bhat_Z_cyl;
@@ -394,10 +394,10 @@ void FixForceThermal::kick_half(double dt_half)
     }
 
     if (have_elec_thermal_) {
-      const double gTeR = use_plasma_data_
+      const double gTeR = use_background_
         ? pd_grad(pd_->mesh_grad_te_r, pd_->grad_te_r, p)
         : read_src(srcGradTeR_, ip, icell);
-      const double gTeZ = use_plasma_data_
+      const double gTeZ = use_background_
         ? pd_grad(pd_->mesh_grad_te_z, pd_->grad_te_z, p)
         : read_src(srcGradTeZ_, ip, icell);
       const double grad_par_Te = gTeR * bhat_R_cyl + gTeZ * bhat_Z_cyl;

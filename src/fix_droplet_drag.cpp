@@ -1,10 +1,10 @@
 /* ----------------------------------------------------------------------
    OpenEdge: fix drag — Epstein / Coulomb drag on droplets.
-   Background plasma at particle position pulled from fix plasma/data.
+   Background plasma at particle position pulled from fix background.
 ------------------------------------------------------------------------- */
 
 #include "fix_droplet_drag.h"
-#include "fix_plasma_data.h"
+#include "fix_background.h"
 #include "update.h"
 #include "grid.h"
 #include "particle.h"
@@ -27,19 +27,19 @@ using namespace MathConst;
 FixDropletDrag::FixDropletDrag(SPARTA *sparta, int narg, char **arg)
     : Fix(sparta, narg, arg)
 {
-  // fix ID drag Nevery A_bg Z_bg plasma_data PD [keywords...]
+  // fix ID drag Nevery A_bg Z_bg background PD [keywords...]
   if (narg < 7)
     error->all(FLERR,
       "Illegal fix drag command "
-      "(need: Nevery A_bg Z_bg plasma_data PD)");
+      "(need: Nevery A_bg Z_bg background PD)");
 
   int iarg = 2;
   nevery       = input->inumeric(FLERR, arg[iarg++]);
   A_background = input->numeric (FLERR, arg[iarg++]);
   Z_background = input->inumeric(FLERR, arg[iarg++]);
 
-  if (strcmp(arg[iarg++], "plasma_data") != 0)
-    error->all(FLERR, "fix drag: argument 6 must be 'plasma_data'");
+  if (strcmp(arg[iarg++], "background") != 0)
+    error->all(FLERR, "fix drag: argument 6 must be 'background'");
   plasma_fix_id_ = std::string(arg[iarg++]);
 
   while (iarg < narg) {
@@ -109,13 +109,13 @@ void FixDropletDrag::init()
   if (ifix < 0) {
     char msg[200];
     snprintf(msg, sizeof(msg),
-             "fix drag: plasma_data fix '%s' not found",
+             "fix drag: background fix '%s' not found",
              plasma_fix_id_.c_str());
     error->all(FLERR, msg);
   }
-  pd_ = dynamic_cast<FixPlasmaData *>(modify->fix[ifix]);
+  pd_ = dynamic_cast<FixBackground *>(modify->fix[ifix]);
   if (!pd_)
-    error->all(FLERR, "fix drag: plasma_data fix must be style plasma/data");
+    error->all(FLERR, "fix drag: background fix must be style background");
   pd_->init();
 }
 

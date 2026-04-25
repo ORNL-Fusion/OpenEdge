@@ -263,7 +263,7 @@ and usage patterns.
   Three top-level groups: `/equilibrium`, `/ion_species`, `/mesh`.
   `/ion_species/elements` (added 2026-04-21) carries the
   charge-state-stripped element symbol per ion. Query via
-  `fix plasma/data`.
+  `fix background`.
 - **Wall geometry from SOLPS** — [`docs/converters/wall_geometry.md`](docs/converters/wall_geometry.md).
   `--wall-source` options: `mesh-extra` (default), `b2`, `eirene`.
 - **Axi migration cookbook** — [`docs/migration/axi_cookbook.md`](docs/migration/axi_cookbook.md).

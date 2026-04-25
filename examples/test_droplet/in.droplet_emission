@@ -40,18 +40,18 @@ surf_collide        wallColModel  diffuse ${temp_droplet} 1.0
 surf_react          wallReact global 1. .0
 surf_modify         surfID collide wallColModel react wallReact
 
-fix    pd plasma/data file plasma.h5 static yes
+fix    pd background file plasma.h5 static yes
 
 read_particles source 1
 
 dump dtraj particle all ${Ndump} case.outer id type x y z vx vy vz v_pmass temp radius
 
-fix fevap_1 droplet/evaporate 1 drops_1 plasma_data pd mass ${md1} radius ${rd1} temp ${temp_droplet}
-fix fevap_2 droplet/evaporate 1 drops_2 plasma_data pd mass ${md2} radius ${rd2} temp ${temp_droplet}
-fix fevap_3 droplet/evaporate 1 drops_3 plasma_data pd mass ${md3} radius ${rd3} temp ${temp_droplet}
+fix fevap_1 droplet/evaporate 1 drops_1 background pd mass ${md1} radius ${rd1} temp ${temp_droplet}
+fix fevap_2 droplet/evaporate 1 drops_2 background pd mass ${md2} radius ${rd2} temp ${temp_droplet}
+fix fevap_3 droplet/evaporate 1 drops_3 background pd mass ${md3} radius ${rd3} temp ${temp_droplet}
 
-fix fdrag   droplet/drag 1 2.0 1 plasma_data pd gravity 0 -9.8 0 model epstein
-fix fcharge droplet/charge 1 plasma_data pd ion_mass_amu 2.0 thermionic no
+fix fdrag   droplet/drag 1 2.0 1 background pd gravity 0 -9.8 0 model epstein
+fix fcharge droplet/charge 1 background pd ion_mass_amu 2.0 thermionic no
 
 global pusher plasma pd
 global pusher subcycles 5

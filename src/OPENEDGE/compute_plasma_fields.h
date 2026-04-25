@@ -213,13 +213,13 @@ void computeMagneticGeometry(int icell, const EquilibriumData &equ,
                              MagneticGeometry &geom);
 
 protected:
-  enum InputMode { MODE_FILE=0, MODE_CONSTANT, MODE_ANALYTIC, MODE_PLASMA_DATA };
+  enum InputMode { MODE_FILE=0, MODE_CONSTANT, MODE_ANALYTIC, MODE_BACKGROUND };
   InputMode input_mode = MODE_FILE;
 
 int nglocal,groupbit;
 std::string plasmaStatePath;
 std::string magneticFieldsPath;
-std::string plasma_data_fix_id;  // fix ID for plasma/data mode
+std::string background_fix_id;  // fix ID for background mode
 double bconst[3];
 double econst[3];
 double teconst;

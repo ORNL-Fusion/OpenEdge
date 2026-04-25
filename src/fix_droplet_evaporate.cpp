@@ -8,7 +8,7 @@
 ------------------------------------------------------------------------- */
 
 #include "fix_droplet_evaporate.h"
-#include "fix_plasma_data.h"
+#include "fix_background.h"
 #include "update.h"
 #include "grid.h"
 #include "particle.h"
@@ -38,19 +38,19 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
   rocket_eta(0.0),
   pd_(nullptr)
 {
-  // fix ID evaporation Nevery MIXTURE plasma_data PD [keywords...]
+  // fix ID evaporation Nevery MIXTURE background PD [keywords...]
   if (narg < 6)
     error->all(FLERR,
       "Illegal fix evaporation command "
-      "(need: Nevery MIXTURE plasma_data PD)");
+      "(need: Nevery MIXTURE background PD)");
 
   nevery = atoi(arg[2]);
   imix   = particle->find_mixture(arg[3]);
   if (imix < 0) error->all(FLERR,"Fix evaporation: unknown mixture ID");
 
-  if (strcmp(arg[4], "plasma_data") != 0)
+  if (strcmp(arg[4], "background") != 0)
     error->all(FLERR,
-      "Fix evaporation: argument 5 must be 'plasma_data'");
+      "Fix evaporation: argument 5 must be 'background'");
   plasma_fix_id_ = std::string(arg[5]);
 
   set_mass = set_temp = set_radius = -1.0;
@@ -112,14 +112,14 @@ void FixDropletEvaporate::init()
   if (ifix < 0) {
     char msg[200];
     snprintf(msg, sizeof(msg),
-             "Fix evaporation: plasma_data fix '%s' not found",
+             "Fix evaporation: background fix '%s' not found",
              plasma_fix_id_.c_str());
     error->all(FLERR, msg);
   }
-  pd_ = dynamic_cast<FixPlasmaData *>(modify->fix[ifix]);
+  pd_ = dynamic_cast<FixBackground *>(modify->fix[ifix]);
   if (!pd_)
     error->all(FLERR,
-      "Fix evaporation: plasma_data fix must be style plasma/data");
+      "Fix evaporation: background fix must be style background");
   pd_->init();
 }
 
@@ -180,7 +180,7 @@ void FixDropletEvaporate::evap_half(double dt_half)
      dR/dt = -(m_atom / rho) * Gevap
      dT/dt = (3 / (rho * Cp * R)) * (Qs - Gevap * DHm / N_A)
    where Qs = sqrt(q_par^2 + q_perp^2) at the droplet position, pulled
-   from fix plasma/data. Rocket force uses -grad(Te) as the recoil axis.
+   from fix background. Rocket force uses -grad(Te) as the recoil axis.
 ------------------------------------------------------------------------- */
 void FixDropletEvaporate::droplet_evaporation_model(Particle::OnePart *ip,
                                         const double dt_half)
@@ -204,7 +204,7 @@ void FixDropletEvaporate::droplet_evaporation_model(Particle::OnePart *ip,
 
   // Heat-flux vector at droplet position. When plasma.h5 carries q_par /
   // q_perp (mesh-level or regular grid), interp2D routes through the
-  // appropriate path inside fix plasma/data. Otherwise read the default.
+  // appropriate path inside fix background. Otherwise read the default.
   double q_par  = pd_->default_q_par;
   double q_perp = pd_->default_q_perp;
   if (pd_->has_qheatflux) {

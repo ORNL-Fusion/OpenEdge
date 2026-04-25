@@ -20,14 +20,14 @@
 
     Syntax:
       fix ID cross_diffusion Nevery \
-          {bfield BxSRC BySRC BzSRC | plasma_data FIXID} \
+          {bfield BxSRC BySRC BzSRC | background FIXID} \
           [D_perp VAL | bohm [TeSRC in source-token mode] [scale VAL]] \
           [pinch Vr Vz] \
           [gradient_pinch Cp [neSRC gradNeR_SRC gradNeZ_SRC in source-token mode]]
 
-    Example (direct plasma/data path):
+    Example (direct background path):
       fix fcd cross_diffusion 100 \
-          plasma_data pd \
+          background pd \
           D_perp 0.1 \
           gradient_pinch 2.0
 
@@ -49,12 +49,12 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(cross_diffusion,FixCrossDiffusion)
+FixStyle(cross_field_diffusion,FixCrossFieldDiffusion)
 
 #else
 
-#ifndef SPARTA_FIX_CROSS_DIFFUSION_H
-#define SPARTA_FIX_CROSS_DIFFUSION_H
+#ifndef SPARTA_FIX_CROSS_FIELD_DIFFUSION_H
+#define SPARTA_FIX_CROSS_FIELD_DIFFUSION_H
 
 #include "fix.h"
 #include "grid_src.h"
@@ -64,12 +64,12 @@ FixStyle(cross_diffusion,FixCrossDiffusion)
 namespace SPARTA_NS {
 
 class RanKnuth;
-class FixPlasmaData;
+class FixBackground;
 
-class FixCrossDiffusion : public Fix {
+class FixCrossFieldDiffusion : public Fix {
  public:
-  FixCrossDiffusion(class SPARTA *, int, char **);
-  ~FixCrossDiffusion();
+  FixCrossFieldDiffusion(class SPARTA *, int, char **);
+  ~FixCrossFieldDiffusion();
   int  setmask();
   void init();
   void start_of_step();
@@ -80,16 +80,16 @@ class FixCrossDiffusion : public Fix {
   bool needs_grad_ne() const { return have_grad_pinch_ != 0; }
 
   // True only if this fix reads from the per-particle plasma cache. In
-  // plasma_data mode the fix interpolates directly from FixPlasmaData and
+  // background mode the fix interpolates directly from FixBackground and
   // does not touch the cache, so Update::init() can drop the corresponding
   // mask bits and skip the writes.
-  bool needs_pcache() const { return !use_plasma_data_; }
+  bool needs_pcache() const { return !use_background_; }
 
  protected:
   RanKnuth *rng_;
-  int use_plasma_data_;
+  int use_background_;
   std::string plasma_fix_id_;
-  FixPlasmaData *pd_;
+  FixBackground *pd_;
 
   // B-field sources in SPARTA coordinate order
   CollGridSrc srcBx_, srcBy_, srcBz_;

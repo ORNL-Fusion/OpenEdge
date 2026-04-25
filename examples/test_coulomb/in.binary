@@ -50,12 +50,12 @@ mixture         cold C3+ frac 1.0
 mixture         cold temp 58022.6          # 5 eV
 
 # ---- Plasma data (Te, ne only -- no background partner for binary test) ----
-fix             pd plasma/data constant &
+fix             pd background constant &
                 te ${Te} ne ${ne} &
                 static yes
 
 # ---- Nanbu Coulomb collisions (binary D+ <-> C3+, no background) ----
-fix             nanbu coulomb/binary 1 plasma_data pd
+fix             nanbu coulomb/binary 1 background pd
 
 # ---- Create two populations at different temperatures ----
 create_particles hot  n 5000

@@ -5,7 +5,7 @@
 # Layout: true axi, x=Z axial, y=R radial (axis at y=0), z=phi wedge.
 #
 # Flow:
-#   plasma/data -> B-field -> sheath -> compute pmi erosion -> emit sputtered W
+#   background -> B-field -> sheath -> compute pmi erosion -> emit sputtered W
 #   W advected with thermal_force + cross_diffusion + Nanbu collisions
 #   W wall reflection + O/D recycling via surface/pwi (reads processes.h5)
 #   W ionization chain via volume/chem/adas (reads processes.h5)
@@ -24,7 +24,7 @@ create_grid         200 150 1
 balance_grid        rcb cell
 
 # Species: W neutral through W20+. Main-ion plasma D+ is background only (via
-# fix plasma/data); O sputter projectiles come from plasma.h5 ion slots too.
+# fix background); O sputter projectiles come from plasma.h5 ion slots too.
 species input/plasma.species W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+ W11+ W12+ W13+ W14+ W15+ W16+ W17+ W18+ W19+ W20+
 mixture             tungstenSource  W    frac 1.
 mixture             tungstenSource  W+   frac 0.
@@ -91,7 +91,7 @@ adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
 balance_grid        rcb cell
 
 # ---- Plasma background + B-field ------------------------------------------
-fix                 pd plasma/data file input/plasma.h5 static yes
+fix                 pd background file input/plasma.h5 static yes
 #global              pcache_nevery 100
 
 # Charged-particle pusher: Boris with sheath spatial overlay.
@@ -108,16 +108,16 @@ fix fchem volume/chem/adas 1 W auto
 # ---- Braginskii thermal forces on impurity ions ---------------------------
 # Reads mesh-level grad_te/grad_ti from plasma.h5 (new converter writes
 # mesh/grad_te_{r,z} and mesh/grad_ti_{r,z}).
-#fix ftf force/thermal 100 plasma_data pd &
+#fix ftf force/thermal 100 background pd &
 #                    ion_thermal yes &
 #                    elec_thermal yes
 
 # ---- Nanbu Coulomb collisions against D+ background -----------------------
-#fix fnanbu coulomb/background 100 plasma_data pd &
+#fix fnanbu coulomb/background 100 background pd &
 #                    2.0 1.0
 
 # ---- Anomalous cross-field diffusion (pinch disabled) ---------------------
-#fix fcd force/cross_field 100 plasma_data pd &
+#fix fcd force/cross_field 100 background pd &
 #                    D_perp 0.1
 
 # ---- W erosion from O sputtering (analytic Eckstein, per-projectile) ------
@@ -126,7 +126,7 @@ fix fchem volume/chem/adas 1 W auto
 # listed more elements, e.g. `projectiles D,O`). Plasma ion slots that
 # don't match a projectile element are silently excluded.
 # mass_amu sets the main-ion background for sheath impact energy.
-compute cpmiO surface/physical/sputter wall plasma_data pd &
+compute cpmiO surface/physical/sputter wall background pd &
                     target W projectiles O &
                     mass_amu 2.01410177811 static yes &
                     erosion_flux
@@ -155,7 +155,7 @@ mixture allW W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+ &
              group wsum
 compute cwtot grid/weighted all allW nrho_w
 
-compute cpmiO_rate surface/physical/sputter wall plasma_data pd &
+compute cpmiO_rate surface/physical/sputter wall background pd &
                     target W projectiles O &
                     mass_amu 2.01410177811 static yes &
                     erosion_rate

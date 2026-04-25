@@ -5,7 +5,7 @@
    algorithm. Thin subclass of FixCoulombBase.
 
    Syntax:
-     fix ID coulomb/binary Nevery {plasma TeSrc NeSrc | plasma_data FIXID}
+     fix ID coulomb/binary Nevery {plasma TeSrc NeSrc | background FIXID}
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS

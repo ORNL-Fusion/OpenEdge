@@ -7,10 +7,10 @@
 
    Syntax:
      fix ID coulomb/background Nevery \
-         {plasma TeSrc NeSrc | plasma_data FIXID} \
+         {plasma TeSrc NeSrc | background FIXID} \
          A_bg Z_bg [TiSrc NiSrc VparSrc BxSrc BySrc BzSrc]
 
-   The bg-source list is required when using `plasma`; with `plasma_data`
+   The bg-source list is required when using `plasma`; with `background`
    the same fix supplies all bg fields and the source list is omitted.
 ------------------------------------------------------------------------- */
 

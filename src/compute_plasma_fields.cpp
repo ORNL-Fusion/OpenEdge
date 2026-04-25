@@ -9,7 +9,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 
 #include "string.h"
 #include "compute_plasma_fields.h"
-#include "fix_plasma_data.h"
+#include "fix_background.h"
 #include "update.h"
 #include "grid.h"
 #include "domain.h"
@@ -72,37 +72,37 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
   analytic_use_y0 = 0;
 
   // parse:
-  // compute ... plasma/fields ggroup plasma_data <fix_id> ...
+  // compute ... plasma/fields ggroup background <fix_id> ...
   // compute ... plasma/fields ggroup constant [const args] ...
   // compute ... plasma/fields ggroup analytic [analytic args] ...
   //
-  // File-based plasma input is now routed through fix plasma/data
+  // File-based plasma input is now routed through fix background
   // (which owns the single-source-of-truth plasma.h5 + mesh/equilibrium
   // data). `compute plasma/fields ... file plasma.h5 ...` is DEPRECATED
   // and rejected below with a pointer to the migration. Declare
-  //   fix pd plasma/data file plasma.h5
-  //   compute cplasma plasma/fields all plasma_data pd ...
+  //   fix pd background file plasma.h5
+  //   compute cplasma plasma/fields all background pd ...
   // instead.
   int iarg = 3;
   if (iarg >= narg)
     error->all(FLERR,
-      "compute plasma/fields requires mode: plasma_data, constant, or analytic");
+      "compute plasma/fields requires mode: background, constant, or analytic");
   if (strcmp(arg[iarg],"file") == 0) {
     error->all(FLERR,
       "compute plasma/fields: the 'file' mode has been removed. "
-      "Declare a `fix plasma/data file plasma.h5` instance and use "
-      "`compute plasma/fields ... plasma_data <fix_id> ...` instead. "
+      "Declare a `fix background file plasma.h5` instance and use "
+      "`compute plasma/fields ... background <fix_id> ...` instead. "
       "This routes per-cell / per-particle plasma lookups through the "
-      "EIRENE triangulation owned by fix plasma/data (single source of "
+      "EIRENE triangulation owned by fix background (single source of "
       "truth, no duplicate file reads, no regular-grid interpolation).");
     // keep compiler happy — MODE_FILE code paths are unreachable now
-    input_mode = MODE_PLASMA_DATA;
-  } else if (strcmp(arg[iarg],"plasma_data") == 0) {
-    input_mode = MODE_PLASMA_DATA;
+    input_mode = MODE_BACKGROUND;
+  } else if (strcmp(arg[iarg],"background") == 0) {
+    input_mode = MODE_BACKGROUND;
     iarg++;
     if (iarg >= narg)
-      error->all(FLERR,"compute plasma/fields plasma_data mode needs fix ID");
-    plasma_data_fix_id = std::string(arg[iarg++]);
+      error->all(FLERR,"compute plasma/fields background mode needs fix ID");
+    background_fix_id = std::string(arg[iarg++]);
   } else if (strcmp(arg[iarg],"constant") == 0) {
     input_mode = MODE_CONSTANT;
     iarg++;
@@ -111,7 +111,7 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
     iarg++;
   } else {
     error->all(FLERR,
-      "compute plasma/fields mode must be 'plasma_data', 'constant', or 'analytic'");
+      "compute plasma/fields mode must be 'background', 'constant', or 'analytic'");
   }
 
   // constant/analytic mode options
@@ -309,20 +309,20 @@ void ComputePlasmaFields::init()
   memory->create(plasma_arr, ncells, "plasma/fields:plasma_arr");
   memory->create(mag_arr,    ncells, "plasma/fields:mag_arr");
 
-  if (input_mode == MODE_PLASMA_DATA) {
-    // Pull plasma data from fix plasma/data — no file reads
-    int ifix = modify->find_fix(plasma_data_fix_id.c_str());
+  if (input_mode == MODE_BACKGROUND) {
+    // Pull plasma data from fix background — no file reads
+    int ifix = modify->find_fix(background_fix_id.c_str());
     if (ifix < 0) {
       char msg[256];
       snprintf(msg, sizeof(msg),
                "compute plasma/fields: fix '%s' not found",
-               plasma_data_fix_id.c_str());
+               background_fix_id.c_str());
       error->all(FLERR, msg);
     }
-    auto *pd = dynamic_cast<FixPlasmaData*>(modify->fix[ifix]);
+    auto *pd = dynamic_cast<FixBackground*>(modify->fix[ifix]);
     if (!pd)
       error->all(FLERR,
-        "compute plasma/fields: plasma_data fix must be style plasma/data");
+        "compute plasma/fields: background fix must be style background");
 
     // Build PlasmaFileData from the fix's flat arrays
     // (convert flat vectors to vector<vector<double>> format)
@@ -440,7 +440,7 @@ void ComputePlasmaFields::init()
     if (me == 0 && screen)
       fprintf(screen,
         "compute plasma/fields: using data from fix '%s' (gen=%d)\n",
-        plasma_data_fix_id.c_str(), pd->generation);
+        background_fix_id.c_str(), pd->generation);
 
   } else if (input_mode == MODE_FILE) {
     if (me == 0) {
@@ -505,8 +505,8 @@ void ComputePlasmaFields::init()
   }
 
   // --- Stencil computation and per-cell interpolation ---
-  // (shared by MODE_FILE and MODE_PLASMA_DATA)
-  if (input_mode == MODE_FILE || input_mode == MODE_PLASMA_DATA) {
+  // (shared by MODE_FILE and MODE_BACKGROUND)
+  if (input_mode == MODE_FILE || input_mode == MODE_BACKGROUND) {
     precomputeStencils(plasma_data.r, plasma_data.z, plasma_stencil);
     if (!magnetic_data.r.empty())
       precomputeStencils(magnetic_data.r, magnetic_data.z, magnetic_stencil);
@@ -815,7 +815,7 @@ void ComputePlasmaFields::compute_per_grid()
                   ? econst[1] : 0.0;
     double Ezv = (input_mode == MODE_CONSTANT || input_mode == MODE_ANALYTIC)
                   ? econst[2] : 0.0;
-    if (input_mode == MODE_PLASMA_DATA && plasma_data.has_mesh &&
+    if (input_mode == MODE_BACKGROUND && plasma_data.has_mesh &&
         !plasma_data.mesh_e_r.empty()) {
       // Look up the mesh cell for this SPARTA cell centroid and read
       // stored E components directly.

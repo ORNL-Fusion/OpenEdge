@@ -41,7 +41,7 @@ Override `-var nlaunchTotalW` for macroparticle-count scans;
 
 ## Physics stack in `in.west`
 
-1. `fix plasma/data` — loads mesh-native plasma.h5, provides per-particle
+1. `fix background` — loads mesh-native plasma.h5, provides per-particle
    queries of `ne`, `Te`, `Ti`, `B`, and mesh-level `grad_Te` / `grad_Ti`.
 2. `surf_collide diffuse` + `surf_react surface/pwi` — thermal wall +
    TRIM-reflect PWI via `processes.h5`.

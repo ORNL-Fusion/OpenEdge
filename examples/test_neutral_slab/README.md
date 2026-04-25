@@ -1,7 +1,7 @@
 # test_neutral_slab — 1-D neutral transport channels
 
 Four 1-D slab setups, each isolating one neutral-transport channel in
-`fix chem/adas`. A monoenergetic neutral beam is puffed from `xlo` into
+`fix volume/chem/adas`. A monoenergetic neutral beam is puffed from `xlo` into
 a uniform plasma background; grid diagnostics dump the steady-state
 density (and temperature, for CX) across the slab.
 
@@ -57,5 +57,5 @@ All four cases:
 - 2-D slab, 0 ≤ x ≤ 0.6 m, thin y / periodic
 - 3 eV monoenergetic beam from the xlo face (Franck-Condon)
 - Uniform plasma background (`compute plasma/fields constant` for the
-  simple cases; `fix plasma/data file plasma_cx.h5` for CX, which needs
+  simple cases; `fix background file plasma_cx.h5` for CX, which needs
   local Ti in the per-particle pcache)

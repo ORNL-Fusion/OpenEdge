@@ -55,7 +55,7 @@
 #include "random_knuth.h"
 #include "random_mars.h"
 #include "update.h"
-#include "fix_plasma_data.h"
+#include "fix_background.h"
 #include "openedge_geom.h"
 
 using namespace SPARTA_NS;
@@ -69,7 +69,7 @@ enum { INT, DOUBLE };
 FixCoulombBase::FixCoulombBase(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   rng_(nullptr),
-  use_plasma_data_(0),
+  use_background_(0),
   plasma_fix_id_(),
   pd_(nullptr),
   do_binary_(0),
@@ -80,21 +80,21 @@ FixCoulombBase::FixCoulombBase(SPARTA *sparta, int narg, char **arg) :
   plist_(nullptr)
 {
   // Common syntax (subclasses extend with mode-specific args):
-  //   fix ID <coulomb-style> Nevery {plasma TeSrc NeSrc | plasma_data FIXID}
+  //   fix ID <coulomb-style> Nevery {plasma TeSrc NeSrc | background FIXID}
 
   if (narg < 5)
     error->all(FLERR,
       "Illegal coulomb/* command "
-      "(need: nevery {plasma TeSrc NeSrc | plasma_data FIXID})");
+      "(need: nevery {plasma TeSrc NeSrc | background FIXID})");
 
   int iarg = 2;
   nevery = input->inumeric(FLERR, arg[iarg++]);
 
-  if (strcmp(arg[iarg], "plasma_data") == 0) {
+  if (strcmp(arg[iarg], "background") == 0) {
     iarg++;
     if (iarg >= narg)
-      error->all(FLERR, "coulomb/*: plasma_data needs a fix ID");
-    use_plasma_data_ = 1;
+      error->all(FLERR, "coulomb/*: background needs a fix ID");
+    use_background_ = 1;
     plasma_fix_id_ = arg[iarg++];
   } else {
     if (strcmp(arg[iarg++], "plasma") != 0)
@@ -203,26 +203,26 @@ void FixCoulombBase::init()
     }
   };
 
-  if (use_plasma_data_) {
+  if (use_background_) {
     const int ifix = modify->find_fix(plasma_fix_id_.c_str());
     if (ifix < 0) {
       char msg[200];
       snprintf(msg, sizeof(msg),
-               "fix coulomb/base: plasma_data fix '%s' not found",
+               "fix coulomb/base: background fix '%s' not found",
                plasma_fix_id_.c_str());
       error->all(FLERR, msg);
     }
-    pd_ = dynamic_cast<FixPlasmaData *>(modify->fix[ifix]);
+    pd_ = dynamic_cast<FixBackground *>(modify->fix[ifix]);
     if (!pd_)
       error->all(FLERR,
-        "fix coulomb/base: plasma_data fix must be style plasma/data");
+        "fix coulomb/base: background fix must be style background");
     pd_->init();
   } else {
     bind_compute(srcTe_, "Te");
     bind_compute(srcNe_, "Ne");
   }
 
-  if (have_background_ && !use_plasma_data_) {
+  if (have_background_ && !use_background_) {
     bind_compute(srcTi_bg_,  "Ti_bg");
     bind_compute(srcNi_bg_,  "Ni_bg");
     bind_compute(srcVpar_bg_, "Vpar_bg");
@@ -240,12 +240,12 @@ void FixCoulombBase::end_of_step()
   if (!particle->sorted) particle->sort();
 
   // refresh compute caches for this timestep
-  if (!use_plasma_data_) {
+  if (!use_background_) {
     refresh_compute_src(srcTe_);
     refresh_compute_src(srcNe_);
   }
 
-  if (have_background_ && !use_plasma_data_) {
+  if (have_background_ && !use_background_) {
     refresh_compute_src(srcTi_bg_);
     refresh_compute_src(srcNi_bg_);
     refresh_compute_src(srcVpar_bg_);
@@ -360,12 +360,12 @@ void FixCoulombBase::nanbu_collisions_cell(int icell, int np)
     double *vA = pA.v;
     double *vB = pB.v;
     const double Te_eV = std::max(
-      use_plasma_data_
+      use_background_
         ? 0.5 * (pd_interp(pd_->temp_e, pA) + pd_interp(pd_->temp_e, pB))
         : 0.5 * (read_src(srcTe_, idxA, icell) + read_src(srcTe_, idxB, icell)),
       0.0);
     const double ne = std::max(
-      use_plasma_data_
+      use_background_
         ? 0.5 * (pd_interp(pd_->dens_e, pA) + pd_interp(pd_->dens_e, pB))
         : 0.5 * (read_src(srcNe_, idxA, icell) + read_src(srcNe_, idxB, icell)),
       0.0);
@@ -498,18 +498,18 @@ void FixCoulombBase::nanbu_background_cell(int icell, int np)
     if (species[isp].charge == 0.0) continue;
 
     const Particle::OnePart &part = particles[idx];
-    double Te_eV   = use_plasma_data_ ? std::max(pd_interp(pd_->temp_e, part), 0.0)
+    double Te_eV   = use_background_ ? std::max(pd_interp(pd_->temp_e, part), 0.0)
                                       : std::max(read_src(srcTe_, idx, icell), 0.0);
-    double ne      = use_plasma_data_ ? std::max(pd_interp(pd_->dens_e, part), 0.0)
+    double ne      = use_background_ ? std::max(pd_interp(pd_->dens_e, part), 0.0)
                                       : std::max(read_src(srcNe_, idx, icell), 0.0);
-    double Ti_eV   = use_plasma_data_ ? std::max(pd_interp(pd_->temp_i, part), 0.0)
+    double Ti_eV   = use_background_ ? std::max(pd_interp(pd_->temp_i, part), 0.0)
                                       : std::max(read_src(srcTi_bg_, idx, icell), 0.0);
-    double Ni_bg   = use_plasma_data_ ? std::max(pd_interp(pd_->dens_i, part), 0.0)
+    double Ni_bg   = use_background_ ? std::max(pd_interp(pd_->dens_i, part), 0.0)
                                       : std::max(read_src(srcNi_bg_, idx, icell), 0.0);
-    double Vpar_bg = use_plasma_data_ ? pd_interp(pd_->parr_flow, part)
+    double Vpar_bg = use_background_ ? pd_interp(pd_->parr_flow, part)
                                       : read_src(srcVpar_bg_, idx, icell);
     double Bx = 0.0, By = 0.0, Bz = 0.0;
-    if (use_plasma_data_) pd_bfield_sparta(part, Bx, By, Bz);
+    if (use_background_) pd_bfield_sparta(part, Bx, By, Bz);
     else {
       Bx = read_src(srcBx_, idx, icell);
       By = read_src(srcBy_, idx, icell);

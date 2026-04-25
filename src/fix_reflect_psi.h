@@ -18,11 +18,11 @@
     Supports both G-EQDSK and SOLPS .equ equilibrium formats.
 
     Syntax:
-      fix ID reflect/psi {equ PATH | plasma_data FIXID} [psi_norm VALUE] [action reflect|absorb]
+      fix ID reflect/psi {equ PATH | background FIXID} [psi_norm VALUE] [action reflect|absorb]
 
     Data source:
       - equ PATH          : read psi map from a SOLPS .equ file (GEQDSK-style)
-      - plasma_data FIXID : read psi map from a fix plasma/data (from
+      - background FIXID : read psi map from a fix background (from
                             plasma.h5 /psi + /psicore + /psisep). The
                             default threshold is 0, i.e. anything on the
                             core side of /psicore triggers the action.
@@ -32,7 +32,7 @@
 
     Examples:
       fix fcore reflect/psi equ input/g174310.03500_153.X4.equ psi_norm 0.926
-      fix fcore reflect/psi plasma_data pd action absorb
+      fix fcore reflect/psi background pd action absorb
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -75,7 +75,7 @@ class FixReflectPsi : public Fix {
 
   // File readers
   void read_equ_file(const std::string &path);
-  void load_from_plasma_data(const std::string &fix_id);
+  void load_from_background(const std::string &fix_id);
 };
 
 }  // namespace SPARTA_NS

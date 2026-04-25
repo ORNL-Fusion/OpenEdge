@@ -7,7 +7,7 @@
 #include "stdlib.h"
 #include "string.h"
 #include "fix_surface_emit_recycle.h"
-#include "fix_plasma_data.h"
+#include "fix_background.h"
 #include "update.h"
 #include "compute.h"
 #include "domain.h"
@@ -67,9 +67,9 @@ FixSurfaceEmitRecycle::FixSurfaceEmitRecycle(SPARTA *sparta, int narg, char **ar
   ifix_plasma = modify->find_fix(arg[4]);
   if (ifix_plasma < 0)
     error->all(FLERR,"Fix emit/surf/recycle plasma fix ID does not exist");
-  plasma = dynamic_cast<FixPlasmaData *>(modify->fix[ifix_plasma]);
+  plasma = dynamic_cast<FixBackground *>(modify->fix[ifix_plasma]);
   if (!plasma)
-    error->all(FLERR,"Fix emit/surf/recycle requires a fix plasma/data");
+    error->all(FLERR,"Fix emit/surf/recycle requires a fix background");
 
   // defaults
   mass_amu   = 2.0;     // D+ (main ion)
@@ -89,7 +89,7 @@ FixSurfaceEmitRecycle::FixSurfaceEmitRecycle(SPARTA *sparta, int narg, char **ar
   diag_printed = 0;
 
   // Plasma-generation tracking for dynamic reloads. Bumped every time
-  // FixPlasmaData::reload() runs; we compare here and rebuild tasks +
+  // FixBackground::reload() runs; we compare here and rebuild tasks +
   // centroid cache if it changed.
   plasma_generation_ = -1;
   plasma_cell_centroid_gen_ = -1;
@@ -129,9 +129,9 @@ void FixSurfaceEmitRecycle::init()
 
   if (ifix_plasma < 0 || ifix_plasma >= modify->nfix)
     error->all(FLERR,"Fix emit/surf/recycle plasma fix ID no longer exists");
-  plasma = dynamic_cast<FixPlasmaData *>(modify->fix[ifix_plasma]);
+  plasma = dynamic_cast<FixBackground *>(modify->fix[ifix_plasma]);
   if (!plasma)
-    error->all(FLERR,"Fix emit/surf/recycle requires a fix plasma/data");
+    error->all(FLERR,"Fix emit/surf/recycle requires a fix background");
 
   // Resolve per-species temperature overrides into a mixture-local table.
   // Unmatched mixture species fall back to the scalar twall. A name listed
@@ -660,7 +660,7 @@ double FixSurfaceEmitRecycle::emission_rate_per_surface(int itask)
 void FixSurfaceEmitRecycle::perform_task()
 {
   // Rebuild tasks if the plasma mesh reloaded since we built them
-  // (pd->generation bumps on every FixPlasmaData::reload). For DIII-D
+  // (pd->generation bumps on every FixBackground::reload). For DIII-D
   // with `static yes` this check is a single int compare per step and
   // never triggers a rebuild. For dynamic plasma (SOLPS coupling) it's
   // what keeps tasks[].plasma_cell valid across reloads.

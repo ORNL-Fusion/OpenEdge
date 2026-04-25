@@ -13,16 +13,16 @@ plus an optional convective pinch for impurity ions.
 
 Two modes depending on how B-field and gradient sources are plumbed.
 
-### Mode A — `plasma_data` (recommended, mesh-native)
+### Mode A — `background` (recommended, mesh-native)
 
 ```
-fix ID cross_diffusion Nevery plasma_data <plasma_fix_ID> \
+fix ID cross_diffusion Nevery background <plasma_fix_ID> \
     [D_perp VAL | bohm [scale VAL]] \
     [pinch Vr Vz] \
     [gradient_pinch Cp]
 ```
 
-Reads B and (if needed) Te / ne from a `fix plasma/data` instance.
+Reads B and (if needed) Te / ne from a `fix background` instance.
 Gradient_pinch in this mode uses per-particle finite differences on
 `pd` instead of explicit variable inputs.
 
@@ -40,7 +40,7 @@ fix ID cross_diffusion Nevery \
 
 - **Constant** — `D_perp 1.0` gives D⊥ = 1.0 m²/s.
 - **Bohm** — `bohm [scale 0.1]` gives `D = scale · Te / (16 e B)`.
-  Default `scale = 1.0`. In `plasma_data` mode, Te is read from `pd`
+  Default `scale = 1.0`. In `background` mode, Te is read from `pd`
   directly; in Mode B, pass `bohm c_cplasma[Te_col]`.
 
 ## Pinch modes
@@ -49,7 +49,7 @@ fix ID cross_diffusion Nevery \
   `(R, Z)` [m/s].
 - **Gradient-driven** — `gradient_pinch Cp` gives
   `V = Cp · D⊥ · ∇⊥(ne)/ne`. Typical `Cp = 1–3` (ITG turbulence).
-  In `plasma_data` mode, ∇ne is computed by FD on `pd`; in Mode B
+  In `background` mode, ∇ne is computed by FD on `pd`; in Mode B
   you pass explicit `neSRC gradNeR gradNeZ`.
 
 ## Dimensionality
@@ -64,7 +64,7 @@ collisions still apply normally).
 
 ## Gradient source compatibility
 
-| plasma.h5 layout | Mode A (`plasma_data`) | Mode B (explicit srcs) |
+| plasma.h5 layout | Mode A (`background`) | Mode B (explicit srcs) |
 |---|---|---|
 | mesh-only (new converters, 2026-04-22+) | ✅ FD via `pd->interp2D` on mesh | ❌ `compute plasma/fields` returns 0 for grad_ne on mesh-only |
 | legacy regular-grid | ✅ | ✅ |

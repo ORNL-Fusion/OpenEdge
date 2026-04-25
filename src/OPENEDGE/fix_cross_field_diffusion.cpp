@@ -26,7 +26,7 @@
     via grid->id_find_child().
 ------------------------------------------------------------------------- */
 
-#include "fix_cross_diffusion.h"
+#include "fix_cross_field_diffusion.h"
 
 #include <cmath>
 #include <cstring>
@@ -43,7 +43,7 @@
 #include "random_knuth.h"
 #include "random_mars.h"
 #include "update.h"
-#include "fix_plasma_data.h"
+#include "fix_background.h"
 #include "openedge_geom.h"
 
 using namespace SPARTA_NS;
@@ -55,10 +55,10 @@ enum { DIFF_NONE=0, DIFF_CONST, DIFF_BOHM };
 
 /* ---------------------------------------------------------------------- */
 
-FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
+FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   rng_(nullptr),
-  use_plasma_data_(0),
+  use_background_(0),
   plasma_fix_id_(),
   pd_(nullptr),
   diff_model_(DIFF_NONE),
@@ -71,21 +71,21 @@ FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
   C_p_(0.0)
 {
   // fix ID cross_diffusion Nevery
-  //     {bfield BxSRC BySRC BzSRC | plasma_data FIXID} [keywords...]
+  //     {bfield BxSRC BySRC BzSRC | background FIXID} [keywords...]
 
   if (narg < 5)
     error->all(FLERR,
       "Illegal fix cross_diffusion command "
-      "(need: Nevery {bfield BxSRC BySRC BzSRC | plasma_data FIXID})");
+      "(need: Nevery {bfield BxSRC BySRC BzSRC | background FIXID})");
 
   int iarg = 2;
   nevery = input->inumeric(FLERR, arg[iarg++]);
 
-  if (strcmp(arg[iarg], "plasma_data") == 0) {
+  if (strcmp(arg[iarg], "background") == 0) {
     iarg++;
     if (iarg >= narg)
-      error->all(FLERR, "fix cross_diffusion: plasma_data needs a fix ID");
-    use_plasma_data_ = 1;
+      error->all(FLERR, "fix cross_diffusion: background needs a fix ID");
+    use_background_ = 1;
     plasma_fix_id_ = arg[iarg++];
   } else {
     if (strcmp(arg[iarg++], "bfield") != 0)
@@ -113,7 +113,7 @@ FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
 
     } else if (strcmp(arg[iarg], "bohm") == 0) {
       iarg++;
-      if (!use_plasma_data_) {
+      if (!use_background_) {
         if (iarg >= narg)
           error->all(FLERR, "fix cross_diffusion bohm: need TeSRC");
         parse_compute_src(arg[iarg++], srcTe_, "Te");
@@ -123,7 +123,7 @@ FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
                  strcmp(arg[iarg], "pinch") != 0 &&
                  strcmp(arg[iarg], "gradient_pinch") != 0) {
         error->all(FLERR,
-          "fix cross_diffusion bohm: in plasma_data mode only 'scale VAL' is allowed");
+          "fix cross_diffusion bohm: in background mode only 'scale VAL' is allowed");
       }
       diff_model_ = DIFF_BOHM;
 
@@ -146,7 +146,7 @@ FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
       if (iarg >= narg)
         error->all(FLERR, "fix cross_diffusion gradient_pinch: need Cp");
       C_p_ = input->numeric(FLERR, arg[iarg++]);
-      if (!use_plasma_data_) {
+      if (!use_background_) {
         if (iarg + 3 > narg)
           error->all(FLERR,
             "fix cross_diffusion gradient_pinch: need Cp neSRC gradNeR_SRC gradNeZ_SRC");
@@ -159,7 +159,7 @@ FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
                  strcmp(arg[iarg], "pinch") != 0 &&
                  strcmp(arg[iarg], "gradient_pinch") != 0) {
         error->all(FLERR,
-          "fix cross_diffusion gradient_pinch: in plasma_data mode only Cp is required");
+          "fix cross_diffusion gradient_pinch: in background mode only Cp is required");
       }
       have_grad_pinch_ = 1;
 
@@ -179,7 +179,7 @@ FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixCrossDiffusion::~FixCrossDiffusion()
+FixCrossFieldDiffusion::~FixCrossFieldDiffusion()
 {
   if (copymode) return;
   delete rng_;
@@ -205,7 +205,7 @@ FixCrossDiffusion::~FixCrossDiffusion()
 
 /* ---------------------------------------------------------------------- */
 
-int FixCrossDiffusion::setmask()
+int FixCrossFieldDiffusion::setmask()
 {
   int mask = 0;
   mask |= START_OF_STEP;
@@ -214,7 +214,7 @@ int FixCrossDiffusion::setmask()
 
 /* ---------------------------------------------------------------------- */
 
-void FixCrossDiffusion::init()
+void FixCrossFieldDiffusion::init()
 {
   // seed RNG (same pattern as fix_coll_nanbu)
   if (!rng_) {
@@ -268,28 +268,28 @@ void FixCrossDiffusion::init()
     }
   };
 
-  if (use_plasma_data_) {
+  if (use_background_) {
     const int ifix = modify->find_fix(plasma_fix_id_.c_str());
     if (ifix < 0) {
       char msg[200];
       snprintf(msg, sizeof(msg),
-               "fix cross_diffusion: plasma_data fix '%s' not found",
+               "fix cross_diffusion: background fix '%s' not found",
                plasma_fix_id_.c_str());
       error->all(FLERR, msg);
     }
-    pd_ = dynamic_cast<FixPlasmaData *>(modify->fix[ifix]);
+    pd_ = dynamic_cast<FixBackground *>(modify->fix[ifix]);
     if (!pd_)
       error->all(FLERR,
-        "fix cross_diffusion: plasma_data fix must be style plasma/data");
+        "fix cross_diffusion: background fix must be style background");
     pd_->init();
   } else {
     bind(srcBx_, "Bx");
     bind(srcBy_, "By");
     bind(srcBz_, "Bz");
   }
-  if (diff_model_ == DIFF_BOHM && !use_plasma_data_)
+  if (diff_model_ == DIFF_BOHM && !use_background_)
     bind(srcTe_, "Te");
-  if (have_grad_pinch_ && !use_plasma_data_) {
+  if (have_grad_pinch_ && !use_background_) {
     bind(srcNe_, "Ne");
     bind(srcGradNeR_, "gradNeR");
     bind(srcGradNeZ_, "gradNeZ");
@@ -298,7 +298,7 @@ void FixCrossDiffusion::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixCrossDiffusion::start_of_step()
+void FixCrossFieldDiffusion::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) {
     update->cd_flag = 0;
@@ -306,14 +306,14 @@ void FixCrossDiffusion::start_of_step()
   }
 
   // refresh caches
-  if (!use_plasma_data_) {
+  if (!use_background_) {
     refresh_compute_src(srcBx_);
     refresh_compute_src(srcBy_);
     refresh_compute_src(srcBz_);
   }
-  if (diff_model_ == DIFF_BOHM && !use_plasma_data_)
+  if (diff_model_ == DIFF_BOHM && !use_background_)
     refresh_compute_src(srcTe_);
-  if (have_grad_pinch_ && !use_plasma_data_) {
+  if (have_grad_pinch_ && !use_background_) {
     refresh_compute_src(srcNe_);
     refresh_compute_src(srcGradNeR_);
     refresh_compute_src(srcGradNeZ_);
@@ -354,7 +354,7 @@ void FixCrossDiffusion::start_of_step()
 
     const int icell = p.icell;
     double B0, B1, B2;
-    if (use_plasma_data_) pd_bfield_sparta(p, B0, B1, B2);
+    if (use_background_) pd_bfield_sparta(p, B0, B1, B2);
     else {
       B0 = read_src(srcBx_, ip, icell);
       B1 = read_src(srcBy_, ip, icell);
@@ -368,7 +368,7 @@ void FixCrossDiffusion::start_of_step()
     if (diff_model_ == DIFF_CONST) {
       D_local = D_perp_;
     } else if (diff_model_ == DIFF_BOHM) {
-      const double Te_eV = use_plasma_data_ ? std::max(pd_interp(pd_->temp_e, p), 0.0)
+      const double Te_eV = use_background_ ? std::max(pd_interp(pd_->temp_e, p), 0.0)
                                             : std::max(read_src(srcTe_, ip, icell), 0.0);
       D_local = bohm_scale_ * Te_eV / (16.0 * Bmag);
     }
@@ -440,10 +440,10 @@ void FixCrossDiffusion::start_of_step()
 
     // gradient-driven pinch
     if (have_grad_pinch_ && D_local > 0.0) {
-      const double ne_loc = use_plasma_data_ ? std::max(pd_interp(pd_->dens_e, p), 1.0e10)
+      const double ne_loc = use_background_ ? std::max(pd_interp(pd_->dens_e, p), 1.0e10)
                                              : std::max(read_src(srcNe_, ip, icell), 1.0e10);
       double gNeR, gNeZ;
-      if (use_plasma_data_) {
+      if (use_background_) {
         // grad(ne) is not precomputed on mesh plasma.h5. Falls back
         // to per-particle FD on the regular (R, Z) grid if present;
         // returns zero on mesh-only data (flagged as a known gap —
@@ -520,7 +520,7 @@ void FixCrossDiffusion::start_of_step()
 
 /* ---------------------------------------------------------------------- */
 
-void FixCrossDiffusion::parse_compute_src(const char *tok, CollGridSrc &dst,
+void FixCrossFieldDiffusion::parse_compute_src(const char *tok, CollGridSrc &dst,
                                            const char *label)
 {
   if (!tok || !*tok) {
@@ -566,7 +566,7 @@ void FixCrossDiffusion::parse_compute_src(const char *tok, CollGridSrc &dst,
 
 /* ---------------------------------------------------------------------- */
 
-void FixCrossDiffusion::refresh_compute_src(CollGridSrc &S)
+void FixCrossFieldDiffusion::refresh_compute_src(CollGridSrc &S)
 {
   if (S.kind == COLL_SRC_PCUSTOM) {
     if (S.cache_ts == update->ntimestep) return;
@@ -611,7 +611,7 @@ void FixCrossDiffusion::refresh_compute_src(CollGridSrc &S)
 
 /* ---------------------------------------------------------------------- */
 
-double FixCrossDiffusion::read_src(const CollGridSrc &S, int ip, int icell) const
+double FixCrossFieldDiffusion::read_src(const CollGridSrc &S, int ip, int icell) const
 {
   if (S.kind == COLL_SRC_PCUSTOM) {
     if (!S.pvec_cache) return 0.0;
@@ -624,7 +624,7 @@ double FixCrossDiffusion::read_src(const CollGridSrc &S, int ip, int icell) cons
 
 /* ---------------------------------------------------------------------- */
 
-void FixCrossDiffusion::particle_rz(const Particle::OnePart &p,
+void FixCrossFieldDiffusion::particle_rz(const Particle::OnePart &p,
                                     double &R, double &Z) const
 {
   OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z);
@@ -632,7 +632,7 @@ void FixCrossDiffusion::particle_rz(const Particle::OnePart &p,
 
 /* ---------------------------------------------------------------------- */
 
-double FixCrossDiffusion::pd_interp(const std::vector<double> &field,
+double FixCrossFieldDiffusion::pd_interp(const std::vector<double> &field,
                                     const Particle::OnePart &p) const
 {
   if (!pd_) return 0.0;
@@ -643,7 +643,7 @@ double FixCrossDiffusion::pd_interp(const std::vector<double> &field,
 
 /* ---------------------------------------------------------------------- */
 
-void FixCrossDiffusion::pd_bfield_sparta(const Particle::OnePart &p,
+void FixCrossFieldDiffusion::pd_bfield_sparta(const Particle::OnePart &p,
                                          double &B0, double &B1, double &B2) const
 {
   B0 = B1 = B2 = 0.0;

@@ -50,12 +50,12 @@ full-3D quantities — no `2π · R̄` post-multiply.  See
 
 | fix / read\_surf                 | role                                                  |
 |----------------------------------|-------------------------------------------------------|
-| `fix pd plasma/data`             | loads `plasma.h5` (mesh + plasma + equilibrium)       |
+| `fix pd background`             | loads `plasma.h5` (mesh + plasma + equilibrium)       |
 | `read_surf wall.surf`            | outer vessel; diffuse reflection                      |
 | `surf_react wallPWI surface/pwi`    | TRIM + thermal re-emission of incoming D / D2 / D⁺    |
 | `read_surf core.surf ... vanish` | psi\_norm = 0.95 inner absorb surface                 |
 | `fix frec surface/emit/recycle`     | Bohm-flux wall source, `R = 0.99`                     |
-| `fix fchem chem/adas`            | volumetric D ionisation + CX + D₂ dissociation        |
+| `fix fchem volume/chem/adas`            | volumetric D ionisation + CX + D₂ dissociation        |
 
 ## Dump schema
 

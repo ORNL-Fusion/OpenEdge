@@ -12,7 +12,7 @@ Plays the role of EIRENE's collision operator in OpenEdge standalone runs.
 > override) was removed. Te/ne now come exclusively from the per-particle
 > plasma cache so the sheath Boltzmann correction is applied
 > consistently. Migration: feed the deck's plasma through
-> `fix plasma/data` (use `constant ...` for uniform test cases) and
+> `fix background` (use `constant ...` for uniform test cases) and
 > activate the cache with `global bfield_compute <fix-or-compute-ID>`,
 > sheath, or GCA.
 
@@ -65,8 +65,8 @@ needs an upstream provider AND an activator:
 
 | Provider | Activator |
 |---|---|
-| `fix plasma/data file plasma.h5 ...` | `global bfield_compute <fix-ID>`, sheath, GCA, or Boris with bfield source |
-| `fix plasma/data constant temp_e ... dens_e ...` | same — pcache works in test cases too |
+| `fix background file plasma.h5 ...` | `global bfield_compute <fix-ID>`, sheath, GCA, or Boris with bfield source |
+| `fix background constant temp_e ... dens_e ...` | same — pcache works in test cases too |
 | `compute plasma/fields all file plasma.h5 ...` | `global bfield_compute <compute-ID>`, sheath, or GCA |
 
 When sheath is active, the Boltzmann correction
@@ -76,7 +76,7 @@ plumbing — see [`sheath.md`](sheath.md) for details.
 
 A pure-neutral deck (no charged particles, no pusher) still needs an
 activator. The simplest is `global bfield_compute pd` against a
-`fix pd plasma/data constant ...` provider — Boris won't engage on
+`fix pd background constant ...` provider — Boris won't engage on
 neutrals, but the activator populates the cache.
 
 Init diagnostic (rank 0) prints which reactions fired and why any were

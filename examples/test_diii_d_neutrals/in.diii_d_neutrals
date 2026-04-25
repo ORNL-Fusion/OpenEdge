@@ -41,7 +41,7 @@ adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
 balance_grid        rcb cell
 
 # ---- Plasma background + B-field ----
-fix                 pd plasma/data file plasma.h5 static yes
+fix                 pd background file plasma.h5 static yes
 global              pusher plasma pd
 global              pcache_nevery 100
 
