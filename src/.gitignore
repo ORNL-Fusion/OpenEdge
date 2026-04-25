@@ -31,7 +31,6 @@
 
 # OpenEdge new files (installed by OPENEDGE/Install.sh)
 /boris_grid.h
-/nanbu_scatter_table.h
 /sheath_models.cpp
 /sheath_models.h
 /compute_iead.cpp

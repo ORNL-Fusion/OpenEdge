@@ -65,7 +65,6 @@ override surf_collide_diffuse.h
 
 # --- New OpenEdge files ---
 action boris_grid.h
-action nanbu_scatter_table.h
 action sheath_models.cpp
 action sheath_models.h
 action database_paths.cpp
