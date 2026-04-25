@@ -15,10 +15,10 @@
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
-FixStyle(drag,FixDrag)
+FixStyle(droplet/drag,FixDropletDrag)
 #else
-#ifndef SPARTA_FIX_DRAG_H
-#define SPARTA_FIX_DRAG_H
+#ifndef SPARTA_FIX_DROPLET_DRAG_H
+#define SPARTA_FIX_DROPLET_DRAG_H
 
 #include "fix.h"
 #include "particle.h"
@@ -28,10 +28,10 @@ namespace SPARTA_NS {
 
 class FixPlasmaData;
 
-class FixDrag : public Fix {
+class FixDropletDrag : public Fix {
  public:
-  FixDrag(class SPARTA *, int, char **);
-  ~FixDrag() override;
+  FixDropletDrag(class SPARTA *, int, char **);
+  ~FixDropletDrag() override;
 
   int  setmask() override;
   void init() override;

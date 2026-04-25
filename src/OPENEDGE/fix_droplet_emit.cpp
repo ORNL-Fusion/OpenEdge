@@ -9,7 +9,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 
 #include "stdlib.h"
 #include "string.h"
-#include "fix_emit_droplet.h"
+#include "fix_droplet_emit.h"
 #include "update.h"
 #include "compute.h"
 #include "domain.h"
@@ -42,7 +42,7 @@ enum{INT,DOUBLE};                                        // several files
 
 /* ---------------------------------------------------------------------- */
 
-FixEmitDroplet::FixEmitDroplet(SPARTA *sparta, int narg, char **arg) :
+FixDropletEmit::FixDropletEmit(SPARTA *sparta, int narg, char **arg) :
   FixEmit(sparta, narg, arg)
 {
   if (narg < 4) error->all(FLERR,"Illegal fix emit/dropletcommand");
@@ -122,7 +122,7 @@ FixEmitDroplet::FixEmitDroplet(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixEmitDroplet::~FixEmitDroplet()
+FixDropletEmit::~FixDropletEmit()
 {
   if (copymode) return;
 
@@ -155,7 +155,7 @@ FixEmitDroplet::~FixEmitDroplet()
 
 /* ---------------------------------------------------------------------- */
 
-void FixEmitDroplet::init()
+void FixDropletEmit::init()
 {
   // invoke FixEmit::init() to set flags
 
@@ -308,7 +308,7 @@ void FixEmitDroplet::init()
    invoked after custom per-surf attributes have changed (fix custom)
 ------------------------------------------------------------------------- */
 
-void FixEmitDroplet::grid_changed()
+void FixDropletEmit::grid_changed()
 {
   // if any custom attributes are used,
   // ensure owned custom values are spread to nlocal+nghost surfs
@@ -373,7 +373,7 @@ void FixEmitDroplet::grid_changed()
    invoked by fix custom after it resets per-surf custom attributes
 ------------------------------------------------------------------------- */
 
-void FixEmitDroplet::custom_surf_changed()
+void FixDropletEmit::custom_surf_changed()
 {
   grid_changed();
 }
@@ -383,7 +383,7 @@ void FixEmitDroplet::custom_surf_changed()
    add them to tasks list and increment ntasks
 ------------------------------------------------------------------------- */
 
-void FixEmitDroplet::create_task(int icell)
+void FixDropletEmit::create_task(int icell)
 {
   int i,m,isurf,isp,npoint,isplit,subcell;
   double indot,area,areaone,ntargetsp;
@@ -610,7 +610,7 @@ void FixEmitDroplet::create_task(int icell)
    insert particles in grid cells with emitting surface elements
 ------------------------------------------------------------------------- */
 
-void FixEmitDroplet::perform_task()
+void FixDropletEmit::perform_task()
 {
   if (!twopass) perform_task_onepass();
   else perform_task_twopass();
@@ -622,7 +622,7 @@ void FixEmitDroplet::perform_task()
    but uses random #s differently than Kokkos, so insertions are different
 ------------------------------------------------------------------------- */
 
-void FixEmitDroplet::perform_task_onepass()
+void FixDropletEmit::perform_task_onepass()
 {
   int i,m,n,pcell,isurf,ninsert,nactual,isp,ispecies,ntri,id;
   double indot,scosine,rn,ntarget,vr,alpha,beta;
@@ -951,7 +951,7 @@ void FixEmitDroplet::perform_task_onepass()
    this uses random #s the same as Kokkos, for easier debugging
 ------------------------------------------------------------------------- */
 
-void FixEmitDroplet::perform_task_twopass()
+void FixDropletEmit::perform_task_twopass()
 {
   int i,m,n,pcell,isurf,ninsert,nactual,isp,ispecies,ntri,id;
   double indot,scosine,rn,ntarget,vr,alpha,beta;
@@ -1285,7 +1285,7 @@ void FixEmitDroplet::perform_task_twopass()
    recalculate task properties based on subsonic BC
 ------------------------------------------------------------------------- */
 
-void FixEmitDroplet::subsonic_inflow()
+void FixDropletEmit::subsonic_inflow()
 {
   // for grid cells that are part of tasks:
   // calculate local nrho, vstream, and thermal temperature
@@ -1356,7 +1356,7 @@ void FixEmitDroplet::subsonic_inflow()
    store count and linked list, same as for particle sorting
 ------------------------------------------------------------------------- */
 
-void FixEmitDroplet::subsonic_sort()
+void FixDropletEmit::subsonic_sort()
 {
   int i,icell;
 
@@ -1413,7 +1413,7 @@ void FixEmitDroplet::subsonic_sort()
    first compute for grid cells, then adjust due to boundary conditions
 ------------------------------------------------------------------------- */
 
-void FixEmitDroplet::subsonic_grid()
+void FixDropletEmit::subsonic_grid()
 {
   int m,ip,np,icell,ispecies;
   double mass,masstot,gamma,ke;
@@ -1539,7 +1539,7 @@ void FixEmitDroplet::subsonic_grid()
    grow task list
 ------------------------------------------------------------------------- */
 
-void FixEmitDroplet::grow_task()
+void FixDropletEmit::grow_task()
 {
   int oldmax = ntaskmax;
   ntaskmax += DELTATASK;
@@ -1580,7 +1580,7 @@ void FixEmitDroplet::grow_task()
    reallocate nspecies arrays
 ------------------------------------------------------------------------- */
 
-void FixEmitDroplet::realloc_nspecies()
+void FixDropletEmit::realloc_nspecies()
 {
   if (perspecies) {
     for (int i = 0; i < ntask; i++) {
@@ -1600,7 +1600,7 @@ void FixEmitDroplet::realloc_nspecies()
    process keywords specific to this class
 ------------------------------------------------------------------------- */
 
-int FixEmitDroplet::option(int narg, char **arg)
+int FixDropletEmit::option(int narg, char **arg)
 {
   if (strcmp(arg[0],"n") == 0) {
     if (2 > narg) error->all(FLERR,"Illegal fix emit/dropletcommand");
@@ -1703,7 +1703,7 @@ int FixEmitDroplet::option(int narg, char **arg)
   return 0;
 }
 
-void FixEmitDroplet::options2(int narg, char **arg)
+void FixDropletEmit::options2(int narg, char **arg)
 {
   // defaults (match FixEmit)
   nevery = 1;

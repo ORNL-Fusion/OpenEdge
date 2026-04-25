@@ -14,12 +14,12 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(droplet/emission,FixDropletEmission)
+FixStyle(droplet/emit,FixDropletEmit)
 
 #else
 
-#ifndef SPARTA_FIX_DROPLET_EMISSION_H
-#define SPARTA_FIX_DROPLET_EMISSION_H
+#ifndef SPARTA_FIX_EMIT_DROPLET_
+#define SPARTA_FIX_DROPLET_EMIT_H
 
 #include "fix_emit.h"
 #include "surf.h"
@@ -27,10 +27,10 @@ FixStyle(droplet/emission,FixDropletEmission)
 
 namespace SPARTA_NS {
 
-class FixDropletEmission : public FixEmit {
+class FixDropletEmit : public FixEmit {
  public:
-  FixDropletEmission(class SPARTA *, int, char **);
-  ~FixDropletEmission();
+  FixDropletEmit(class SPARTA *, int, char **);
+  ~FixDropletEmit();
   void init();
 
   void grid_changed() override;
@@ -62,11 +62,6 @@ class FixDropletEmission : public FixEmit {
   };
 
  protected:
-  char *evap_id;            // ID string from input (may be NULL)
-  int ifix_evap;            // index in modify->fix[] (or -1)
-  class FixEvap *evap_fix;  // resolved pointer (or nullptr)
-  
-  void options2(int narg, char **arg);
   int imix,groupbit,normalflag,subsonic,subsonic_style,subsonic_warning;
   int npertask,nthresh,twopass,max_npoint;
   double psubsonic,tsubsonic,nsubsonic;
@@ -75,6 +70,9 @@ class FixDropletEmission : public FixEmit {
   int npmode,np;    // npmode = FLOW,CONSTANT,VARIABLE
   int npvar;
   char *npstr;
+  int user_mag_velocity;
+  double incidentAngle;
+  double magVelocity;
 
   // copies of data from other classes
 
@@ -125,6 +123,8 @@ class FixDropletEmission : public FixEmit {
 
   virtual void realloc_nspecies();
   int option(int, char **);
+  void options2(int narg, char **arg);
+
 };
 
 }

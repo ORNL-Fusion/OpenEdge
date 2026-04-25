@@ -64,13 +64,13 @@ compute cnear plasma/fields all file ../input/plasma.h5 &
     bx by bz temp_e dens_e temp_i dens_i parrflow er et ez
 
 # evaporation with rocket force (heat flux + grad_Te from plasma compute)
-fix fevap_I evaporation 1 LigamentSourceInner mass ${md} radius ${rd} temp ${temp_droplet} &
+fix fevap_I droplet/evaporate 1 LigamentSourceInner mass ${md} radius ${rd} temp ${temp_droplet} &
     heatflux/compute cnear heatflux/scale 4.0 rocket_eta 0.5
-fix fevap_O evaporation 1 LigamentSourceOuter mass ${md} radius ${rd} temp ${temp_droplet} &
+fix fevap_O droplet/evaporate 1 LigamentSourceOuter mass ${md} radius ${rd} temp ${temp_droplet} &
     heatflux/compute cnear heatflux/scale 4.0 rocket_eta 0.5
 
 # Drag + gravity + cylindrical geometric terms (DUSTT-style axisymmetric)
-fix fdrag drag 1 2.0 1 &
+fix fdrag droplet/drag 1 2.0 1 &
     plasma c_cnear[4] c_cnear[6] c_cnear[7] c_cnear[8] &
     bfield c_cnear[1] c_cnear[3] c_cnear[2] &
     gravity 0 -9.8 0 &

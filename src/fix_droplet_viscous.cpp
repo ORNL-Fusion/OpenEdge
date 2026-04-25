@@ -13,7 +13,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include <algorithm>
 #include <limits>
 
-#include "fix_viscous.h"
+#include "fix_droplet_viscous.h"
 #include "update.h"
 #include "grid.h"
 #include "particle.h"
@@ -31,7 +31,7 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-FixViscous::FixViscous(SPARTA *sparta, int narg, char **arg) :
+FixDropletViscous::FixDropletViscous(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
 
@@ -170,7 +170,7 @@ FixViscous::FixViscous(SPARTA *sparta, int narg, char **arg) :
     
 /* ---------------------------------------------------------------------- */
 
-FixViscous::~FixViscous()
+FixDropletViscous::~FixDropletViscous()
 {
   if (copymode) return;
   memory->destroy(plasma_grid);
@@ -193,7 +193,7 @@ FixViscous::~FixViscous()
 
 /* ---------------------------------------------------------------------- */
 
-int FixViscous::setmask()
+int FixDropletViscous::setmask()
 {
   int mask = 0;
   mask |= START_OF_STEP;   // pre-Boris half-kick
@@ -202,7 +202,7 @@ int FixViscous::setmask()
 }
 
 /* ---------------------------------------------------------------------- */
-void FixViscous::init()
+void FixDropletViscous::init()
 {
   
   if (use_gravity) {
@@ -297,7 +297,7 @@ void FixViscous::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixViscous::end_of_step()
+void FixDropletViscous::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
 
@@ -311,7 +311,7 @@ void FixViscous::end_of_step()
    memory usage
 ------------------------------------------------------------------------- */
 
-double FixViscous::memory_usage()
+double FixDropletViscous::memory_usage()
 {
   double bytes = 0.0;
   if (plasma_grid) bytes += (size_t)maxgrid_plasma * 4 * sizeof(double);
@@ -320,7 +320,7 @@ double FixViscous::memory_usage()
 }
 
 // Compute grid variables into our local buffers (only those requested)
-void FixViscous::compute_plasma_grid() {
+void FixDropletViscous::compute_plasma_grid() {
   if (!use_grid_plasma || !grid->nlocal) return;
 
   if (grid->maxlocal > maxgrid_plasma) {
@@ -338,7 +338,7 @@ void FixViscous::compute_plasma_grid() {
   if (srcVpar.kind == COLL_SRC_VAR) input->variable->compute_grid(srcVpar.varid, &plasma_grid[0][3], stride, 0);
 }
 
-void FixViscous::compute_bfield_grid() {
+void FixDropletViscous::compute_bfield_grid() {
   if (!use_grid_bfield || !grid->nlocal) return;
 
   if (grid->maxlocal > maxgrid_b) {
@@ -355,7 +355,7 @@ void FixViscous::compute_bfield_grid() {
 }
 
 // Ensure compute_per_grid ran and read 1-based column c_ID[col]
-double FixViscous::fetch_compute_cell_value(const CollGridSrc& S, int icell)
+double FixDropletViscous::fetch_compute_cell_value(const CollGridSrc& S, int icell)
 {
   Compute *c = modify->compute[S.icompute];
   if (c->invoked_per_grid != update->ntimestep) c->compute_per_grid();
@@ -380,7 +380,7 @@ double FixViscous::fetch_compute_cell_value(const CollGridSrc& S, int icell)
   return 0.0;
 }
 
-inline void FixViscous::refresh_compute_src(CollGridSrc &S) {
+inline void FixDropletViscous::refresh_compute_src(CollGridSrc &S) {
   if (S.kind != COLL_SRC_COMP) return;
   if (S.cache_ts == update->ntimestep) return;
 
@@ -410,7 +410,7 @@ inline void FixViscous::refresh_compute_src(CollGridSrc &S) {
 }
 
 
-double FixViscous::epstein_nu(double Ni, double Ti_eV, double rd_m) const {
+double FixDropletViscous::epstein_nu(double Ni, double Ti_eV, double rd_m) const {
   if (Ni<=0.0 || Ti_eV<=0.0 || rd_m<=0.0 || rho_d<=0.0) return 0.0;
 
   const double mi   = A_background * update->proton_mass;
@@ -419,7 +419,7 @@ double FixViscous::epstein_nu(double Ni, double Ti_eV, double rd_m) const {
   return alpha_E * (rho_g * vth) / (rho_d * rd_m);
 }
 
-double FixViscous::coulomb_drag_multiplier(double u) const
+double FixDropletViscous::coulomb_drag_multiplier(double u) const
 {
   // Implements a Coulomb-corrected Epstein scaling using
   // collisional + orbital terms, normalized by baseline Epstein drag.
@@ -447,7 +447,7 @@ double FixViscous::coulomb_drag_multiplier(double u) const
   return std::max(0.0, xi);
 }
 
-void FixViscous::start_of_step()
+void FixDropletViscous::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
 
@@ -467,7 +467,7 @@ void FixViscous::start_of_step()
 }
 
 
-void FixViscous::kick_half(double dt_half, int diag_phase)
+void FixDropletViscous::kick_half(double dt_half, int diag_phase)
 {
   if (grid->nlocal == 0) return;
   auto * const parts = particle->particles;
@@ -569,7 +569,7 @@ void FixViscous::kick_half(double dt_half, int diag_phase)
   }
 
 }
-inline void FixViscous::epstein_params(int icell, const Particle::OnePart &p,
+inline void FixDropletViscous::epstein_params(int icell, const Particle::OnePart &p,
                                        double &nuE, double upar_cyl[3])
 {
   auto read_src = [&](const CollGridSrc& S, int col_plasma, int col_b)->double {

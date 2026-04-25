@@ -7,7 +7,7 @@
     https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
-#include "fix_evaporation.h"
+#include "fix_droplet_evaporate.h"
 #include "fix_plasma_data.h"
 #include "update.h"
 #include "grid.h"
@@ -32,7 +32,7 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
+FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   heatflux_scale(1.0),
   rocket_eta(0.0),
@@ -89,11 +89,11 @@ FixEvap::FixEvap(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixEvap::~FixEvap() {}
+FixDropletEvaporate::~FixDropletEvaporate() {}
 
 /* ---------------------------------------------------------------------- */
 
-int FixEvap::setmask()
+int FixDropletEvaporate::setmask()
 {
   int mask = 0;
   mask |= START_OF_STEP;
@@ -103,7 +103,7 @@ int FixEvap::setmask()
 
 /* ---------------------------------------------------------------------- */
 
-void FixEvap::init()
+void FixDropletEvaporate::init()
 {
   if (domain->dimension != 2)
     error->all(FLERR,"Fix evaporation: only 2D geometry supported");
@@ -125,23 +125,23 @@ void FixEvap::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixEvap::start_of_step()
+void FixDropletEvaporate::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
   evap_half(0.5 * update->dt);
 }
 
-void FixEvap::end_of_step()
+void FixDropletEvaporate::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
   evap_half(0.5 * update->dt);
 }
 
-double FixEvap::memory_usage() { return 0.0; }
+double FixDropletEvaporate::memory_usage() { return 0.0; }
 
 /* ---------------------------------------------------------------------- */
 
-void FixEvap::evap_half(double dt_half)
+void FixDropletEvaporate::evap_half(double dt_half)
 {
   if ((update->ntimestep % nevery) != 0) return;
 
@@ -182,7 +182,7 @@ void FixEvap::evap_half(double dt_half)
    where Qs = sqrt(q_par^2 + q_perp^2) at the droplet position, pulled
    from fix plasma/data. Rocket force uses -grad(Te) as the recoil axis.
 ------------------------------------------------------------------------- */
-void FixEvap::droplet_evaporation_model(Particle::OnePart *ip,
+void FixDropletEvaporate::droplet_evaporation_model(Particle::OnePart *ip,
                                         const double dt_half)
 {
   const double AM   = 1.53e-26;      // Li atom mass [kg]

@@ -16,7 +16,7 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(evaporation,FixEvap)
+FixStyle(droplet/evaporate,FixDropletEvaporate)
 
 #else
 
@@ -30,10 +30,10 @@ namespace SPARTA_NS {
 
 class FixPlasmaData;
 
-class FixEvap : public Fix {
+class FixDropletEvaporate : public Fix {
  public:
-  FixEvap(class SPARTA*, int, char**);
-  ~FixEvap() override;
+  FixDropletEvaporate(class SPARTA*, int, char**);
+  ~FixDropletEvaporate() override;
   int setmask() override;
   void init() override;
   double memory_usage() override;

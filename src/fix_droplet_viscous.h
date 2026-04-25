@@ -1,5 +1,5 @@
 /* ----------------------------------------------------------------------
-   OpenEdge — Impurity transport, SOL & plasma-edge physics
+   OpenEdge — Neutral and charge-state transport with plasma-wall interactions
    Built on SPARTA (sparta.github.io; Plimpton et al., Sandia National Labs).
 
    Author: Abdourahmane Diaw <diawa@ornl.gov>
@@ -12,15 +12,15 @@
 
 /* ----------------------------------------------------------------------
    fix viscous — DEPRECATED, retained for backward compatibility only.
-   Use `fix drag` (FixDrag) instead; the droplet/drag/force and
+   Use `fix drag` (FixDropletDrag) instead; the droplet/drag/force and
    droplet_drag_force aliases have moved there.
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
-FixStyle(viscous,FixViscous)
+FixStyle(droplet/viscous,FixDropletViscous)
 #else
-#ifndef SPARTA_FIX_VISCOUS_H
-#define SPARTA_FIX_VISCOUS_H
+#ifndef SPARTA_FIX_DROPLET_VISCOUS_H
+#define SPARTA_FIX_DROPLET_VISCOUS_H
 
 #include "fix.h"
 #include "grid_src.h"
@@ -29,10 +29,10 @@ FixStyle(viscous,FixViscous)
 
 namespace SPARTA_NS {
 
-class FixViscous : public Fix {
+class FixDropletViscous : public Fix {
 public:
-  FixViscous(class SPARTA*, int, char**);
-  ~FixViscous() override;
+  FixDropletViscous(class SPARTA*, int, char**);
+  ~FixDropletViscous() override;
 
   int  setmask() override;
   void init() override;

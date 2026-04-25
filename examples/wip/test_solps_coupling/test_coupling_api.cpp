@@ -59,14 +59,14 @@ int main(int argc, char **argv)
   double md = (4.0/3.0) * 3.14159265358979 * rho * rd * rd * rd;
   char cmd[512];
   snprintf(cmd, sizeof(cmd),
-    "fix fevap evaporation 1 DropletSource mass %.10e radius %.6e temp 773.15 "
+    "fix fevap droplet/evaporate 1 DropletSource mass %.10e radius %.6e temp 773.15 "
     "heatflux/compute cnear heatflux/scale 1.0",
     md, rd);
   sparta_command(oe, cmd);
 
   // Drag, charging, efield
   snprintf(cmd, sizeof(cmd),
-    "fix fdrag drag 1 2.0 1 "
+    "fix fdrag droplet/drag 1 2.0 1 "
     "plasma c_cnear[4] c_cnear[6] c_cnear[7] c_cnear[8] "
     "bfield c_cnear[1] c_cnear[3] c_cnear[2] "
     "gravity 0 -9.8 0 model epstein "

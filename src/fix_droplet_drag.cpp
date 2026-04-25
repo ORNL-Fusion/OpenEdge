@@ -3,7 +3,7 @@
    Background plasma at particle position pulled from fix plasma/data.
 ------------------------------------------------------------------------- */
 
-#include "fix_drag.h"
+#include "fix_droplet_drag.h"
 #include "fix_plasma_data.h"
 #include "update.h"
 #include "grid.h"
@@ -24,7 +24,7 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-FixDrag::FixDrag(SPARTA *sparta, int narg, char **arg)
+FixDropletDrag::FixDropletDrag(SPARTA *sparta, int narg, char **arg)
     : Fix(sparta, narg, arg)
 {
   // fix ID drag Nevery A_bg Z_bg plasma_data PD [keywords...]
@@ -84,9 +84,9 @@ FixDrag::FixDrag(SPARTA *sparta, int narg, char **arg)
 
 /* ---------------------------------------------------------------------- */
 
-FixDrag::~FixDrag() {}
+FixDropletDrag::~FixDropletDrag() {}
 
-int FixDrag::setmask()
+int FixDropletDrag::setmask()
 {
   int mask = 0;
   mask |= START_OF_STEP;
@@ -96,7 +96,7 @@ int FixDrag::setmask()
 
 /* ---------------------------------------------------------------------- */
 
-void FixDrag::init()
+void FixDropletDrag::init()
 {
   if (use_gravity) {
     for (int k = 0; k < modify->nfix; ++k)
@@ -121,13 +121,13 @@ void FixDrag::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixDrag::start_of_step()
+void FixDropletDrag::start_of_step()
 {
   if (update->ntimestep % nevery) return;
   kick_half(0.5 * update->dt);
 }
 
-void FixDrag::end_of_step()
+void FixDropletDrag::end_of_step()
 {
   if (update->ntimestep % nevery) return;
   kick_half(0.5 * update->dt);
@@ -135,7 +135,7 @@ void FixDrag::end_of_step()
 
 /* ---------------------------------------------------------------------- */
 
-void FixDrag::kick_half(double dt_half)
+void FixDropletDrag::kick_half(double dt_half)
 {
   const int nlocal = particle->nlocal;
   Particle::OnePart * const parts = particle->particles;
@@ -230,7 +230,7 @@ void FixDrag::kick_half(double dt_half)
 
 /* ---------------------------------------------------------------------- */
 
-double FixDrag::epstein_nu(double Ni, double Ti_eV, double rd_m) const
+double FixDropletDrag::epstein_nu(double Ni, double Ti_eV, double rd_m) const
 {
   if (Ni <= 0.0 || Ti_eV <= 0.0 || rd_m <= 0.0 || rho_d <= 0.0) return 0.0;
   const double mi    = A_background * update->proton_mass;
@@ -239,7 +239,7 @@ double FixDrag::epstein_nu(double Ni, double Ti_eV, double rd_m) const
   return alpha_E * (rho_g * vth) / (rho_d * rd_m);
 }
 
-double FixDrag::coulomb_multiplier(double u) const
+double FixDropletDrag::coulomb_multiplier(double u) const
 {
   const double sqrt_pi    = std::sqrt(MY_PI);
   const double ueff       = std::max(u, 1.0e-8);
