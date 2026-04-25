@@ -26,10 +26,13 @@ examples/test_iead/wall.surf
 examples/test_polarization/state
 examples/test_polarization/figs_polarization/
 
-# Local run/test artifacts
-log.*
-log.openedge
-dump.*
+# Local run/test artifacts — confined to examples/ and the repo root
+# so they don't eat SPARTA base files like src/dump.h / src/log.cpp.
+examples/**/log.*
+examples/**/log.openedge
+examples/**/dump.*
+/log.*
+/dump.*
 *.dump
 *.state
 *.rst
@@ -71,8 +74,13 @@ examples/*/input/geometry/*.surf
 examples/*/input/geometry/*.obj
 examples/*/*.equ
 openedge-testdata-*.tar.gz
-database/adas/adf11/
 PSI2026/
+
+# The database/ingest/ tree is developer tooling for regenerating
+# processes.h5. Not part of the shipped repo — users consume
+# processes.h5 directly. Kept on-disk for local rebuilds but not
+# committed so PRs / checkouts stay clean.
+database/ingest/
 
 # WIP test cases (not ready for public repo)
 examples/test_reclycling/
@@ -83,3 +91,14 @@ examples/test_west_timedep/
 examples/test_solps_coupling/
 examples/test_liquid_metal/
 examples/test_eirene/
+
+# Sphinx build output
+/docs/_build/
+
+# WIP code in the OpenEdge package — local-only, not part of the build.
+# CMake globs only src/OPENEDGE/*.cpp,h (single dir, no recurse), so
+# anything inside this directory is ignored by the compiler too.
+src/OPENEDGE/wip/
+
+# Stray nested WarpX clones (use ~/WarpX/ instead)
+examples/test_iead/WarpX/

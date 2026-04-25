@@ -72,10 +72,6 @@ action boris_grid.h
 action nanbu_scatter_table.h
 action sheath_models.cpp
 action sheath_models.h
-action compute_incident_plasma_flux.cpp
-action compute_incident_plasma_flux.h
-action compute_bfield_timedep.cpp
-action compute_bfield_timedep.h
 action database_paths.cpp
 action database_paths.h
 action process_library.cpp
@@ -86,8 +82,6 @@ action compute_surface_physical_sputter.cpp
 action compute_surface_physical_sputter.h
 action compute_nearest_surf_grid.cpp
 action compute_nearest_surf_grid.h
-action compute_surf_ead.cpp
-action compute_surf_ead.h
 action compute_thermal_sheath_grid.cpp
 action compute_thermal_sheath_grid.h
 action fix_bfield_grid.cpp
