@@ -34,7 +34,7 @@
 #include "stdlib.h"
 #include "string.h"
 #include "math.h"
-#include "fix_liquid_metal.h"
+#include "fix_surface_state_liquid_metal.h"
 #include "domain.h"
 #include "comm.h"
 #include "surf.h"
@@ -58,7 +58,7 @@ enum { COMPUTE, FIX, CONSTANT, PLASMA, TARGET };
 
 /* ---------------------------------------------------------------------- */
 
-FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
+FixSurfaceStateLiquidMetal::FixSurfaceStateLiquidMetal(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
   if (narg < 14)
@@ -158,8 +158,6 @@ FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
 
   // defaults
   id_custom_t = NULL;
-  id_custom_evap = NULL;
-  id_custom_adatom = NULL;
   id_custom_h = NULL;
 
   // plasma compute pointer (for PLASMA mode)
@@ -172,21 +170,6 @@ FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
     target_file = NULL;
     target_leg = NULL;
   }
-
-  // D+ flux source defaults
-  id_dp = NULL;
-  cdp = NULL;
-  fdp = NULL;
-  dp_index = 0;
-  dp_source = CONSTANT;
-  dp_constant = 0.0;
-
-  // ad-atom model defaults
-  Yad_D_Li = 1e-3;
-  Yad_Yps = 1.0;
-  f_ad_neutral = 1.0;
-  A_arrhenius = 1e-7;
-  E_eff_eV = 0.9;
 
   // parse keyword/value pairs (start after hf_source args)
   int iarg = 5;
@@ -269,54 +252,6 @@ FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
       else error->all(FLERR, "Invalid evap value: use yes or no");
       iarg += 2;
 
-    // --- D+ flux source for ad-atom model ---
-    } else if (strcmp(arg[iarg], "dp_flux") == 0) {
-      if (iarg + 1 >= narg)
-        error->all(FLERR, "Missing value for dp_flux");
-      if (strncmp(arg[iarg + 1], "c_", 2) == 0) {
-        dp_source = COMPUTE;
-        int n = strlen(arg[iarg + 1]);
-        id_dp = new char[n];
-        strcpy(id_dp, &arg[iarg + 1][2]);
-        char *ptr = strchr(id_dp, '[');
-        if (ptr) {
-          dp_index = atoi(ptr + 1);
-          *ptr = '\0';
-        }
-      } else if (strncmp(arg[iarg + 1], "f_", 2) == 0) {
-        dp_source = FIX;
-        int n = strlen(arg[iarg + 1]);
-        id_dp = new char[n];
-        strcpy(id_dp, &arg[iarg + 1][2]);
-        char *ptr = strchr(id_dp, '[');
-        if (ptr) {
-          dp_index = atoi(ptr + 1);
-          *ptr = '\0';
-        }
-      } else {
-        dp_source = CONSTANT;
-        dp_constant = input->numeric(FLERR, arg[iarg + 1]);
-      }
-      iarg += 2;
-
-    // --- ad-atom model parameters ---
-    } else if (strcmp(arg[iarg], "Yad") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Missing value for Yad");
-      Yad_D_Li = input->numeric(FLERR, arg[iarg + 1]);
-      iarg += 2;
-    } else if (strcmp(arg[iarg], "Yad_Yps") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Missing value for Yad_Yps");
-      Yad_Yps = input->numeric(FLERR, arg[iarg + 1]);
-      iarg += 2;
-    } else if (strcmp(arg[iarg], "E_eff") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Missing value for E_eff");
-      E_eff_eV = input->numeric(FLERR, arg[iarg + 1]);
-      iarg += 2;
-    } else if (strcmp(arg[iarg], "A_arr") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Missing value for A_arr");
-      A_arrhenius = input->numeric(FLERR, arg[iarg + 1]);
-      iarg += 2;
-
     } else if (strcmp(arg[iarg], "hf_scale") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "Missing value for hf_scale");
       hf_scale = input->numeric(FLERR, arg[iarg + 1]);
@@ -335,27 +270,20 @@ FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
     }
   }
 
-  // set default custom attribute names
+  // set default custom attribute names. Tsurf and h_film are the
+  // model's persistent state. Evaporation and adatom fluxes are
+  // computed from these by `compute surface/chemical/evaporation`
+  // and `compute surface/chemical/adatom` respectively.
   if (!id_custom_t) {
     id_custom_t = new char[16];
     strcpy(id_custom_t, "Tsurf_lm");
   }
-  id_custom_evap = new char[16];
-  strcpy(id_custom_evap, "evap_lm");
-  id_custom_adatom = new char[16];
-  strcpy(id_custom_adatom, "adatom_lm");
   id_custom_h = new char[16];
   strcpy(id_custom_h, "h_lm");
 
   // create custom per-surf attributes
   tindex = surf->find_custom(id_custom_t);
   if (tindex < 0) tindex = surf->add_custom(id_custom_t, DOUBLE, 0);
-
-  evap_index = surf->find_custom(id_custom_evap);
-  if (evap_index < 0) evap_index = surf->add_custom(id_custom_evap, DOUBLE, 0);
-
-  adatom_index = surf->find_custom(id_custom_adatom);
-  if (adatom_index < 0) adatom_index = surf->add_custom(id_custom_adatom, DOUBLE, 0);
 
   hindex = surf->find_custom(id_custom_h);
   if (hindex < 0) hindex = surf->add_custom(id_custom_h, DOUBLE, 0);
@@ -365,26 +293,21 @@ FixLiquidMetal::FixLiquidMetal(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixLiquidMetal::~FixLiquidMetal()
+FixSurfaceStateLiquidMetal::~FixSurfaceStateLiquidMetal()
 {
   delete[] id_hf;
-  delete[] id_dp;
   delete[] id_plasma;
   delete[] target_file;
   delete[] target_leg;
   delete[] id_custom_t;
-  delete[] id_custom_evap;
-  delete[] id_custom_adatom;
   delete[] id_custom_h;
   surf->remove_custom(tindex);
-  surf->remove_custom(evap_index);
-  surf->remove_custom(adatom_index);
   surf->remove_custom(hindex);
 }
 
 /* ---------------------------------------------------------------------- */
 
-int FixLiquidMetal::setmask()
+int FixSurfaceStateLiquidMetal::setmask()
 {
   int mask = 0;
   mask |= END_OF_STEP;
@@ -393,34 +316,20 @@ int FixLiquidMetal::setmask()
 
 /* ---------------------------------------------------------------------- */
 
-void FixLiquidMetal::init()
+void FixSurfaceStateLiquidMetal::init()
 {
   // load target heat flux profiles from HDF5
   if (hf_source == TARGET && target_file) {
     load_target_heatflux();
-    dp_source = TARGET;  // D+ flux also from target file
   }
 
   // resolve plasma compute for point-query mode
   if (hf_source == PLASMA && id_plasma) {
     int ic = modify->find_compute(id_plasma);
-    if (ic < 0) error->all(FLERR, "Fix liquid_metal: plasma compute ID not found");
+    if (ic < 0) error->all(FLERR, "Fix surface/state/liquid_metal: plasma compute ID not found");
     cp_plasma = dynamic_cast<ComputePlasmaFields*>(modify->compute[ic]);
     if (!cp_plasma)
-      error->all(FLERR, "Fix liquid_metal: plasma source must be a plasma/fields compute");
-    // in PLASMA mode, D+ flux also comes from the plasma compute
-    dp_source = PLASMA;
-  }
-
-  // resolve D+ flux source if specified by name
-  if (dp_source == COMPUTE && id_dp) {
-    int ic = modify->find_compute(id_dp);
-    if (ic < 0) error->all(FLERR, "Fix liquid_metal dp_flux compute not found");
-    cdp = modify->compute[ic];
-  } else if (dp_source == FIX && id_dp) {
-    int ifx = modify->find_fix(id_dp);
-    if (ifx < 0) error->all(FLERR, "Fix liquid_metal dp_flux fix not found");
-    fdp = modify->fix[ifx];
+      error->all(FLERR, "Fix surface/state/liquid_metal: plasma source must be a plasma/fields compute");
   }
 
   // initialize strip solver
@@ -434,15 +343,11 @@ void FixLiquidMetal::init()
     firstflag = 0;
 
     double *tvec = surf->edvec[surf->ewhich[tindex]];
-    double *evapvec = surf->edvec[surf->ewhich[evap_index]];
-    double *adatomvec = surf->edvec[surf->ewhich[adatom_index]];
     double *hvec = surf->edvec[surf->ewhich[hindex]];
     int nsown = surf->nown;
 
     for (int i = 0; i < nsown; i++) {
       tvec[i] = strip.Tin;
-      evapvec[i] = 0.0;
-      adatomvec[i] = 0.0;
       hvec[i] = strip.h0;
     }
   }
@@ -468,7 +373,7 @@ void FixLiquidMetal::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixLiquidMetal::build_geometry_map()
+void FixSurfaceStateLiquidMetal::build_geometry_map()
 {
   int dimension = domain->dimension;
   int distributed = surf->distributed;
@@ -558,7 +463,7 @@ void FixLiquidMetal::build_geometry_map()
 
 /* ---------------------------------------------------------------------- */
 
-void FixLiquidMetal::gather_heat_flux()
+void FixSurfaceStateLiquidMetal::gather_heat_flux()
 {
   if (hf_source == CONSTANT) return;
 
@@ -625,36 +530,7 @@ void FixLiquidMetal::gather_heat_flux()
 
 /* ---------------------------------------------------------------------- */
 
-void FixLiquidMetal::gather_dp_flux(std::vector<double> &dp_per_surf)
-{
-  int nsown = surf->nown;
-  dp_per_surf.assign(nsown, dp_constant);
-
-  if (dp_source == CONSTANT) return;
-
-  double *dpvector = NULL;
-  double **dparray = NULL;
-
-  if (dp_source == COMPUTE) {
-    cdp->post_process_surf();
-    if (dp_index == 0) dpvector = cdp->vector_surf;
-    else dparray = cdp->array_surf;
-  } else {
-    if (dp_index == 0) dpvector = fdp->vector_surf;
-    else dparray = fdp->array_surf;
-  }
-
-  int icol = (dp_index > 0) ? dp_index - 1 : 0;
-
-  for (int i = 0; i < nsown; i++) {
-    if (dp_index == 0) dp_per_surf[i] = dpvector[i];
-    else dp_per_surf[i] = dparray[i][icol];
-  }
-}
-
-/* ---------------------------------------------------------------------- */
-
-void FixLiquidMetal::end_of_step()
+void FixSurfaceStateLiquidMetal::end_of_step()
 {
   if (update->ntimestep % nevery) return;
 
@@ -674,12 +550,9 @@ void FixLiquidMetal::end_of_step()
     tris = surf->tris;
   }
 
-  // --- Gather heat flux and D+ flux ---
-  std::vector<double> dp_per_surf(nsown, dp_constant);
-
+  // --- Gather heat flux per strip station ---
   if (hf_source == PLASMA && cp_plasma) {
-    // Point-query plasma at each surface element midpoint
-    // Gets q_mag for heat flux and ni*u_parallel for D+ flux
+    // Point-query plasma at each surface element midpoint; q_mag gives heat flux.
     for (int n = 1; n <= strip.Nx; n++)
       strip.Qs0[n] = 0.0;
     std::vector<int> count(strip.Nx + 2, 0);
@@ -717,11 +590,6 @@ void FixLiquidMetal::end_of_step()
         strip.Qs0[ix] += qw / strip.qss;
         count[ix]++;
       }
-
-      // D+ flux = ni * |u_parallel|
-      double gamma_dp = pp.dens_i * std::fabs(pp.parr_flow);
-      if (!std::isfinite(gamma_dp)) gamma_dp = 0.0;
-      dp_per_surf[i] = gamma_dp;
     }
 
     for (int n = 1; n <= strip.Nx; n++) {
@@ -730,27 +598,20 @@ void FixLiquidMetal::end_of_step()
     }
 
   } else if (hf_source == TARGET && !tgt_s.empty()) {
-    // Interpolate target heat flux and D+ flux profiles onto strip stations
+    // Interpolate target heat flux profile onto strip stations.
     int ntgt = (int)tgt_s.size();
     double s_max = tgt_s[ntgt - 1];
 
     for (int n = 1; n <= strip.Nx; n++) {
-      // map strip station to physical arc length
       double s_phys = strip.X[n] * strip.h0;
-      // linear interpolation from target profile
-      double qw = 0.0, gd = 0.0;
-      if (s_phys <= tgt_s[0]) {
-        qw = tgt_q[0];
-        gd = tgt_gamma[0];
-      } else if (s_phys >= s_max) {
-        qw = tgt_q[ntgt - 1];
-        gd = tgt_gamma[ntgt - 1];
-      } else {
+      double qw = 0.0;
+      if (s_phys <= tgt_s[0]) qw = tgt_q[0];
+      else if (s_phys >= s_max) qw = tgt_q[ntgt - 1];
+      else {
         for (int k = 0; k < ntgt - 1; k++) {
           if (s_phys >= tgt_s[k] && s_phys <= tgt_s[k + 1]) {
             double frac = (s_phys - tgt_s[k]) / (tgt_s[k + 1] - tgt_s[k]);
             qw = tgt_q[k] + frac * (tgt_q[k + 1] - tgt_q[k]);
-            gd = tgt_gamma[k] + frac * (tgt_gamma[k + 1] - tgt_gamma[k]);
             break;
           }
         }
@@ -759,38 +620,17 @@ void FixLiquidMetal::end_of_step()
       strip.Qs[n] = strip.Qs0[n];
     }
 
-    // map D+ flux to per-surface via arc length
-    for (int i = 0; i < nsown; i++) {
-      if (surf_to_strip[i] < 1) continue;
-      double s_phys = surf_arc_len[i];
-      double gd = 0.0;
-      if (s_phys <= tgt_s[0]) gd = tgt_gamma[0];
-      else if (s_phys >= s_max) gd = tgt_gamma[ntgt - 1];
-      else {
-        for (int k = 0; k < ntgt - 1; k++) {
-          if (s_phys >= tgt_s[k] && s_phys <= tgt_s[k + 1]) {
-            double frac = (s_phys - tgt_s[k]) / (tgt_s[k + 1] - tgt_s[k]);
-            gd = tgt_gamma[k] + frac * (tgt_gamma[k + 1] - tgt_gamma[k]);
-            break;
-          }
-        }
-      }
-      dp_per_surf[i] = gd;
-    }
-
   } else {
     // COMPUTE/FIX/CONSTANT path
     gather_heat_flux();
-    gather_dp_flux(dp_per_surf);
   }
 
   // solve strip MHD model to steady state
   strip.solve_steady();
 
-  // map strip outputs to per-surf custom attributes
+  // map strip state outputs (Tsurf, h_film) to per-surf custom attributes.
+  // Evaporation and adatom fluxes are produced by the dedicated computes.
   double *tvec = surf->edvec[surf->ewhich[tindex]];
-  double *evapvec = surf->edvec[surf->ewhich[evap_index]];
-  double *adatomvec = surf->edvec[surf->ewhich[adatom_index]];
   double *hvec = surf->edvec[surf->ewhich[hindex]];
 
   for (int i = 0; i < nsown; i++) {
@@ -806,24 +646,17 @@ void FixLiquidMetal::end_of_step()
     int ix = surf_to_strip[i];
     if (ix < 1 || ix > strip.Nx) continue;
 
-    double Tsurf = strip.Tsurf_dim[ix];
-    tvec[i] = Tsurf;
-    evapvec[i] = strip.evap_flux[ix];
-    adatomvec[i] = LiquidMetal::li_adatom_flux(
-        Tsurf, dp_per_surf[i],
-        Yad_D_Li, Yad_Yps, f_ad_neutral, A_arrhenius, E_eff_eV);
+    tvec[i] = strip.Tsurf_dim[ix];
     hvec[i] = strip.h_dim[ix];
   }
 
   surf->estatus[tindex] = 0;
-  surf->estatus[evap_index] = 0;
-  surf->estatus[adatom_index] = 0;
   surf->estatus[hindex] = 0;
 }
 
 /* ---------------------------------------------------------------------- */
 
-void FixLiquidMetal::load_target_heatflux()
+void FixSurfaceStateLiquidMetal::load_target_heatflux()
 {
   // Read target heat flux and D+ flux profiles from HDF5
   // Format: group "outer" or "inner" containing datasets s, q_total, gamma_D

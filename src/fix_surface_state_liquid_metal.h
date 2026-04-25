@@ -20,12 +20,12 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(liquid_metal,FixLiquidMetal)
+FixStyle(surface/state/liquid_metal,FixSurfaceStateLiquidMetal)
 
 #else
 
-#ifndef SPARTA_FIX_LIQUID_METAL_H
-#define SPARTA_FIX_LIQUID_METAL_H
+#ifndef SPARTA_FIX_SURFACE_STATE_LIQUID_METAL_H
+#define SPARTA_FIX_SURFACE_STATE_LIQUID_METAL_H
 
 #include "fix.h"
 #include "surf.h"
@@ -35,10 +35,10 @@ namespace SPARTA_NS {
 
 class ComputePlasmaFields;
 
-class FixLiquidMetal : public Fix {
+class FixSurfaceStateLiquidMetal : public Fix {
  public:
-  FixLiquidMetal(class SPARTA *, int, char **);
-  virtual ~FixLiquidMetal();
+  FixSurfaceStateLiquidMetal(class SPARTA *, int, char **);
+  virtual ~FixSurfaceStateLiquidMetal();
   int setmask();
   virtual void init();
   virtual void end_of_step();
@@ -69,30 +69,14 @@ class FixLiquidMetal : public Fix {
   std::vector<double> tgt_gamma;   // D+ flux [m⁻²s⁻¹]
   void load_target_heatflux();
 
-  // D+ flux source for ad-atom calculation
-  int dp_source;        // COMPUTE, FIX, CONSTANT, or PLASMA
-  char *id_dp;
-  class Compute *cdp;
-  class Fix *fdp;
-  int dp_index;
-  double dp_constant;   // constant D+ flux [ions/m²/s]
-
-  // ad-atom model parameters
-  double Yad_D_Li;      // ad-atom yield D on Li (default 1e-3)
-  double Yad_Yps;       // Yad/Yps ratio (default 1.0)
-  double f_ad_neutral;  // neutral fraction (default 1.0)
-  double A_arrhenius;   // Arrhenius pre-factor (default 1e-7)
-  double E_eff_eV;      // effective binding energy [eV] (default 0.9)
-
-  // custom per-surf attribute indices
+  // Per-surf custom attribute indices for the fix's outputs.
+  // Tsurf and h_film are the model's state. Evaporation and adatom
+  // fluxes are now produced by `compute surface/chemical/evaporation`
+  // and `compute surface/chemical/adatom` from these state values.
   int tindex;           // Tsurf [C]
-  int evap_index;       // evaporation flux [atoms/m^2-s]
-  int adatom_index;     // ad-atom flux [atoms/m^2-s]
   int hindex;           // film thickness [m]
 
   char *id_custom_t;
-  char *id_custom_evap;
-  char *id_custom_adatom;
   char *id_custom_h;
 
   // the strip solver
@@ -105,7 +89,6 @@ class FixLiquidMetal : public Fix {
 
   // helpers
   void gather_heat_flux();
-  void gather_dp_flux(std::vector<double> &dp_per_surf);
 };
 
 }
