@@ -35,10 +35,6 @@ if(PKG_OPENEDGE)
     ${CMAKE_CURRENT_SOURCE_DIR}/dump_particle.h
     ${CMAKE_CURRENT_SOURCE_DIR}/sparta.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sparta.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/fix_emit_face_file.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fix_emit_face_file.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/fix_emit_surf.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fix_emit_surf.h
     ${CMAKE_CURRENT_SOURCE_DIR}/surf_collide_diffuse.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/surf_collide_diffuse.h)
 

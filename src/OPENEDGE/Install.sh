@@ -56,10 +56,6 @@ override dump_particle.cpp
 override dump_particle.h
 override sparta.cpp
 override sparta.h
-override fix_emit_face_file.cpp
-override fix_emit_face_file.h
-override fix_emit_surf.cpp
-override fix_emit_surf.h
 override surf_collide_diffuse.cpp
 override surf_collide_diffuse.h
 
