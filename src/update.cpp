@@ -41,7 +41,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "fix_plasma_data.h"
 #include "fix_cross_diffusion.h"
 #include "fix_thermal_force.h"
-#include "fix_coll_nanbu.h"
+#include "fix_coulomb_base.h"
 #include "fix_volume_chem_adas.h"
 #include "memory.h"
 #include "error.h"
@@ -682,11 +682,14 @@ void Update::init()
           pcache_need_mask |= PCACHE_BFIELD | PCACHE_GRAD_TE | PCACHE_GRAD_TI;
         }
         recognized = 1;
-      } else if (strcmp(s,"coll/nanbu") == 0 || strcmp(s,"coll/nanbu/kk") == 0) {
+      } else if (strcmp(s,"coulomb/binary") == 0 ||
+                 strcmp(s,"coulomb/binary/kk") == 0 ||
+                 strcmp(s,"coulomb/background") == 0 ||
+                 strcmp(s,"coulomb/background/kk") == 0) {
         // Same plasma_data-bypass pattern as thermal_force.
-        FixCollNanbu *fnan =
-            dynamic_cast<FixCollNanbu *>(modify->fix[ifix]);
-        if (!fnan || fnan->needs_pcache()) {
+        FixCoulombBase *fcb =
+            dynamic_cast<FixCoulombBase *>(modify->fix[ifix]);
+        if (!fcb || fcb->needs_pcache()) {
           pcache_need_mask |= PCACHE_TE | PCACHE_NE | PCACHE_TI | PCACHE_NI |
                               PCACHE_VPAR | PCACHE_BFIELD;
         }

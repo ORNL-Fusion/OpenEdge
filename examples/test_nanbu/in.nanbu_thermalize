@@ -55,7 +55,7 @@ fix             pd plasma/data constant &
                 static yes
 
 # ---- Nanbu Coulomb collisions (binary D+ <-> C3+, no background) ----
-fix             nanbu coll/nanbu 1 plasma_data pd
+fix             nanbu coulomb/binary 1 plasma_data pd
 
 # ---- Create two populations at different temperatures ----
 create_particles hot  n 5000

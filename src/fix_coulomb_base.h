@@ -5,23 +5,16 @@
     Oak Ridge National Laboratory
     https://github.com/ORNL-Fusion/OpenEdge
 
-    fix coll/nanbu: binary Coulomb collisions via the Nanbu (1997) /
-    Takizuka-Abe (1977) algorithm.  Coexists with collide vss for
-    neutral-neutral collisions.
+    FixCoulombBase -- shared Nanbu (1997) / Takizuka-Abe (1977) Coulomb
+    scatter infrastructure. Internal base class; no FixStyle. Two
+    user-facing fixes derive from it:
 
-    Optional background mode: each charged simulation particle also
-    collides with a virtual partner sampled from a prescribed
-    Maxwellian background plasma (Ti, Ni, Vpar, B-field direction).
+      fix coulomb/binary       binary kinetic-kinetic Coulomb pairs
+      fix coulomb/background   kinetic vs. Maxwellian fluid background
 ------------------------------------------------------------------------- */
 
-#ifdef FIX_CLASS
-
-FixStyle(coll/nanbu,FixCollNanbu)
-
-#else
-
-#ifndef SPARTA_FIX_COLL_NANBU_H
-#define SPARTA_FIX_COLL_NANBU_H
+#ifndef SPARTA_FIX_COULOMB_BASE_H
+#define SPARTA_FIX_COULOMB_BASE_H
 
 #include "fix.h"
 #include "grid_src.h"
@@ -35,7 +28,7 @@ namespace SPARTA_NS {
 // 801-point table with A from 10^5 down to 10^-3. Linear interpolation
 // inside; asymptotic forms outside (1/s for small s, 3*exp(-s) for large
 // s -- both <0.10% error at the boundaries). Inlined here because
-// fix coll/nanbu is the sole consumer.
+// fix coulomb/base is the sole consumer.
 class NanbuScatterTable {
  public:
   NanbuScatterTable() : initialized_(false) {}
@@ -83,10 +76,10 @@ class NanbuScatterTable {
 class RanKnuth;
 class FixPlasmaData;
 
-class FixCollNanbu : public Fix {
+class FixCoulombBase : public Fix {
  public:
-  FixCollNanbu(class SPARTA *, int, char **);
-  ~FixCollNanbu();
+  FixCoulombBase(class SPARTA *, int, char **);
+  ~FixCoulombBase();
   int  setmask();
   void init();
   void end_of_step();
@@ -105,14 +98,18 @@ class FixCollNanbu : public Fix {
   std::string plasma_fix_id_;
   FixPlasmaData *pd_;
 
-  // binary particle-particle collisions (0 = off via nobinary keyword)
-  int do_binary_;
+  // mode flags set by subclass ctors
+  int do_binary_;        // FixCoulombBinary sets to 1
+  int have_background_;  // FixCoulombBackground sets to 1
+
+  // index into argv after FixCoulombBase parsed nevery + plasma block.
+  // Subclasses continue parsing their mode-specific args from here.
+  int iarg_after_common_;
 
   // plasma sources for Coulomb logarithm (Te, Ne)
   CollGridSrc srcTe_, srcNe_;
 
-  // background collision mode
-  int have_background_;
+  // background collision parameters (set by FixCoulombBackground subclass)
   double A_bg_, Z_bg_, m_bg_, q_bg_;
   CollGridSrc srcTi_bg_, srcNi_bg_, srcVpar_bg_;
   CollGridSrc srcBx_, srcBy_, srcBz_;
@@ -140,5 +137,4 @@ class FixCollNanbu : public Fix {
 
 }  // namespace SPARTA_NS
 
-#endif
 #endif

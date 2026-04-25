@@ -5,24 +5,24 @@
     Oak Ridge National Laboratory
     https://github.com/ORNL-Fusion/OpenEdge
 
-    fix coll/nanbu: binary Coulomb collisions via the Nanbu (1997) /
+    fix coulomb/base: binary Coulomb collisions via the Nanbu (1997) /
     Takizuka-Abe (1977) algorithm.
 
     Syntax:
-      fix ID coll/nanbu Nevery plasma TeSrc NeSrc \
+      fix ID coulomb/base Nevery plasma TeSrc NeSrc \
           [nobinary] \
           [background A_bg Z_bg TiSrc NiSrc VparSrc BxSrc BySrc BzSrc]
 
     Example (binary only):
-      fix nanbu coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10]
+      fix nanbu coulomb/base 1 plasma c_cplasma[7] c_cplasma[10]
 
     Example (binary + background D+ at Z=1, A=2):
-      fix nanbu coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10] \
+      fix nanbu coulomb/base 1 plasma c_cplasma[7] c_cplasma[10] \
           background 2.0 1.0 c_cplasma[8] c_cplasma[10] c_cplasma[11] \
           c_cplasma[1] c_cplasma[2] c_cplasma[3]
 
     Example (background-only electron collisions, no binary):
-      fix nanbu_e coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10] \
+      fix nanbu_e coulomb/base 1 plasma c_cplasma[7] c_cplasma[10] \
           nobinary \
           background 5.486e-4 -1.0 c_cplasma[7] c_cplasma[10] \
           c_cplasma[11] c_cplasma[1] c_cplasma[2] c_cplasma[3]
@@ -37,7 +37,7 @@
     Maxwellian at the prescribed Ti, Ni, Vpar along the local B-field.
 ------------------------------------------------------------------------- */
 
-#include "fix_coll_nanbu.h"
+#include "fix_coulomb_base.h"
 
 #include <algorithm>
 #include <cmath>
@@ -66,25 +66,25 @@ enum { INT, DOUBLE };
 
 /* ---------------------------------------------------------------------- */
 
-FixCollNanbu::FixCollNanbu(SPARTA *sparta, int narg, char **arg) :
+FixCoulombBase::FixCoulombBase(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   rng_(nullptr),
   use_plasma_data_(0),
   plasma_fix_id_(),
   pd_(nullptr),
-  do_binary_(1),
+  do_binary_(0),
   have_background_(0),
+  iarg_after_common_(0),
   A_bg_(0.0), Z_bg_(0.0), m_bg_(0.0), q_bg_(0.0),
   npmax_(0),
   plist_(nullptr)
 {
-  // Syntax: fix ID coll/nanbu Nevery {plasma TeSrc NeSrc | plasma_data FIXID}
-  //         [nobinary]
-  //         [background A_bg Z_bg [TiSrc NiSrc VparSrc BxSrc BySrc BzSrc]]
+  // Common syntax (subclasses extend with mode-specific args):
+  //   fix ID <coulomb-style> Nevery {plasma TeSrc NeSrc | plasma_data FIXID}
 
   if (narg < 5)
     error->all(FLERR,
-      "Illegal fix coll/nanbu command "
+      "Illegal coulomb/* command "
       "(need: nevery {plasma TeSrc NeSrc | plasma_data FIXID})");
 
   int iarg = 2;
@@ -93,58 +93,25 @@ FixCollNanbu::FixCollNanbu(SPARTA *sparta, int narg, char **arg) :
   if (strcmp(arg[iarg], "plasma_data") == 0) {
     iarg++;
     if (iarg >= narg)
-      error->all(FLERR, "fix coll/nanbu: plasma_data needs a fix ID");
+      error->all(FLERR, "coulomb/*: plasma_data needs a fix ID");
     use_plasma_data_ = 1;
     plasma_fix_id_ = arg[iarg++];
   } else {
     if (strcmp(arg[iarg++], "plasma") != 0)
-      error->all(FLERR, "fix coll/nanbu: missing 'plasma' keyword");
+      error->all(FLERR, "coulomb/*: missing 'plasma' keyword");
     if (iarg + 2 > narg)
       error->all(FLERR,
-        "Illegal fix coll/nanbu command (need: nevery plasma TeSrc NeSrc)");
+        "Illegal coulomb/* command (need: nevery plasma TeSrc NeSrc)");
     parse_compute_src(arg[iarg++], srcTe_, "Te");
     parse_compute_src(arg[iarg++], srcNe_, "Ne");
   }
 
-  // optional nobinary keyword
-  if (iarg < narg && strcmp(arg[iarg], "nobinary") == 0) {
-    do_binary_ = 0;
-    iarg++;
-  }
-
-  // optional background keyword
-  if (iarg < narg && strcmp(arg[iarg], "background") == 0) {
-    iarg++;
-    if (iarg + 2 > narg)
-      error->all(FLERR, "fix coll/nanbu background: need A_bg Z_bg");
-
-    A_bg_ = input->numeric(FLERR, arg[iarg++]);
-    Z_bg_ = input->numeric(FLERR, arg[iarg++]);
-
-    if (!use_plasma_data_) {
-      if (iarg + 6 > narg)
-        error->all(FLERR,
-          "fix coll/nanbu background: need A_bg Z_bg TiSrc NiSrc VparSrc BxSrc BySrc BzSrc");
-      parse_compute_src(arg[iarg++], srcTi_bg_,  "Ti_bg");
-      parse_compute_src(arg[iarg++], srcNi_bg_,  "Ni_bg");
-      parse_compute_src(arg[iarg++], srcVpar_bg_, "Vpar_bg");
-      parse_compute_src(arg[iarg++], srcBx_,     "Bx");
-      parse_compute_src(arg[iarg++], srcBy_,     "By");
-      parse_compute_src(arg[iarg++], srcBz_,     "Bz");
-    }
-
-    // precompute background mass and charge
-    const double amu = 1.66053906660e-27;  // kg
-    m_bg_ = A_bg_ * amu;
-    q_bg_ = Z_bg_ * update->echarge;
-
-    have_background_ = 1;
-  }
+  iarg_after_common_ = iarg;
 }
 
 /* ---------------------------------------------------------------------- */
 
-FixCollNanbu::~FixCollNanbu()
+FixCoulombBase::~FixCoulombBase()
 {
   if (copymode) return;
   delete rng_;
@@ -172,7 +139,7 @@ FixCollNanbu::~FixCollNanbu()
 
 /* ---------------------------------------------------------------------- */
 
-int FixCollNanbu::setmask()
+int FixCoulombBase::setmask()
 {
   int mask = 0;
   mask |= END_OF_STEP;
@@ -181,7 +148,7 @@ int FixCollNanbu::setmask()
 
 /* ---------------------------------------------------------------------- */
 
-void FixCollNanbu::init()
+void FixCoulombBase::init()
 {
   // seed RNG from ranmaster (same pattern as collide.cpp)
   if (!rng_) {
@@ -200,18 +167,18 @@ void FixCollNanbu::init()
       if (S.icompute < 0) {
         char msg[200];
         snprintf(msg, sizeof(msg),
-                 "fix coll/nanbu: compute '%s' for %s not found", S.cid, label);
+                 "fix coulomb/base: compute '%s' for %s not found", S.cid, label);
         error->all(FLERR, msg);
       }
       Compute *c = modify->compute[S.icompute];
       if (c->per_grid_flag == 0)
-        error->all(FLERR, "fix coll/nanbu: compute must be per-grid");
+        error->all(FLERR, "fix coulomb/base: compute must be per-grid");
       if (c->size_per_grid_cols == 0)
-        error->all(FLERR, "fix coll/nanbu: compute has no per-grid array");
+        error->all(FLERR, "fix coulomb/base: compute has no per-grid array");
       if (S.col < 1 || S.col > c->size_per_grid_cols) {
         char msg[200];
         snprintf(msg, sizeof(msg),
-                 "fix coll/nanbu: column %d for compute '%s' (%s) out of range [1..%d]",
+                 "fix coulomb/base: column %d for compute '%s' (%s) out of range [1..%d]",
                  S.col, S.cid, label, c->size_per_grid_cols);
         error->all(FLERR, msg);
       }
@@ -222,16 +189,16 @@ void FixCollNanbu::init()
       if (S.ipcustom < 0) {
         char msg[200];
         snprintf(msg, sizeof(msg),
-                 "fix coll/nanbu: particle custom '%s' for %s not found",
+                 "fix coulomb/base: particle custom '%s' for %s not found",
                  S.pname, label);
         error->all(FLERR, msg);
       }
       if (particle->etype[S.ipcustom] != DOUBLE)
         error->all(FLERR,
-          "fix coll/nanbu: particle custom source must be floating point");
+          "fix coulomb/base: particle custom source must be floating point");
       if (particle->esize[S.ipcustom] != 0)
         error->all(FLERR,
-          "fix coll/nanbu: particle custom source must be a vector");
+          "fix coulomb/base: particle custom source must be a vector");
       S.ipwhich = particle->ewhich[S.ipcustom];
     }
   };
@@ -241,14 +208,14 @@ void FixCollNanbu::init()
     if (ifix < 0) {
       char msg[200];
       snprintf(msg, sizeof(msg),
-               "fix coll/nanbu: plasma_data fix '%s' not found",
+               "fix coulomb/base: plasma_data fix '%s' not found",
                plasma_fix_id_.c_str());
       error->all(FLERR, msg);
     }
     pd_ = dynamic_cast<FixPlasmaData *>(modify->fix[ifix]);
     if (!pd_)
       error->all(FLERR,
-        "fix coll/nanbu: plasma_data fix must be style plasma/data");
+        "fix coulomb/base: plasma_data fix must be style plasma/data");
     pd_->init();
   } else {
     bind_compute(srcTe_, "Te");
@@ -267,7 +234,7 @@ void FixCollNanbu::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixCollNanbu::end_of_step()
+void FixCoulombBase::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
   if (!particle->sorted) particle->sort();
@@ -304,7 +271,7 @@ void FixCollNanbu::end_of_step()
     if (np > npmax_) {
       while (np > npmax_) npmax_ += DELTAPART;
       memory->destroy(plist_);
-      memory->create(plist_, npmax_, "coll/nanbu:plist");
+      memory->create(plist_, npmax_, "coulomb/base:plist");
     }
 
     int n = 0;
@@ -329,7 +296,7 @@ void FixCollNanbu::end_of_step()
    3) Pair sequentially and scatter
 ------------------------------------------------------------------------- */
 
-void FixCollNanbu::nanbu_collisions_cell(int icell, int np)
+void FixCoulombBase::nanbu_collisions_cell(int icell, int np)
 {
   Particle::OnePart *particles = particle->particles;
   Particle::Species *species   = particle->species;
@@ -510,7 +477,7 @@ void FixCollNanbu::nanbu_collisions_cell(int icell, int np)
    Only the simulation particle velocity is updated.
 ------------------------------------------------------------------------- */
 
-void FixCollNanbu::nanbu_background_cell(int icell, int np)
+void FixCoulombBase::nanbu_background_cell(int icell, int np)
 {
   Particle::OnePart *particles = particle->particles;
   Particle::Species *species   = particle->species;
@@ -671,7 +638,7 @@ void FixCollNanbu::nanbu_background_cell(int icell, int np)
    Box-Muller transform: generate a standard normal random variate
 ------------------------------------------------------------------------- */
 
-double FixCollNanbu::box_muller()
+double FixCoulombBase::box_muller()
 {
   double u1 = rng_->uniform();
   double u2 = rng_->uniform();
@@ -685,7 +652,7 @@ double FixCollNanbu::box_muller()
    lambda_D = sqrt(epsilon_0 * Te / (ne * e^2))
 ------------------------------------------------------------------------- */
 
-double FixCollNanbu::compute_coulomb_log(double ne, double Te_eV)
+double FixCoulombBase::compute_coulomb_log(double ne, double Te_eV)
 {
   if (ne <= 0.0 || Te_eV <= 0.0) return 2.0;
 
@@ -703,20 +670,20 @@ double FixCollNanbu::compute_coulomb_log(double ne, double Te_eV)
 
 /* ---------------------------------------------------------------------- */
 
-double FixCollNanbu::memory_usage()
+double FixCoulombBase::memory_usage()
 {
   return static_cast<double>(npmax_) * sizeof(int);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void FixCollNanbu::parse_compute_src(const char *tok, CollGridSrc &dst,
+void FixCoulombBase::parse_compute_src(const char *tok, CollGridSrc &dst,
                                      const char *label)
 {
   if (!tok || !*tok) {
     char msg[128];
     snprintf(msg, sizeof(msg),
-             "fix coll/nanbu: empty token for %s", label);
+             "fix coulomb/base: empty token for %s", label);
     error->all(FLERR, msg);
   }
 
@@ -728,7 +695,7 @@ void FixCollNanbu::parse_compute_src(const char *tok, CollGridSrc &dst,
 
     if (!lb || !rb || rb <= lb + 1)
       error->all(FLERR,
-        "fix coll/nanbu: use c_ID[col] syntax for compute sources");
+        "fix coulomb/base: use c_ID[col] syntax for compute sources");
 
     int idlen = static_cast<int>(lb - name);
     dst.cid = new char[idlen + 1];
@@ -738,7 +705,7 @@ void FixCollNanbu::parse_compute_src(const char *tok, CollGridSrc &dst,
 
     if (dst.col <= 0)
       error->all(FLERR,
-        "fix coll/nanbu: compute column must be >= 1");
+        "fix coulomb/base: compute column must be >= 1");
     return;
   }
 
@@ -751,12 +718,12 @@ void FixCollNanbu::parse_compute_src(const char *tok, CollGridSrc &dst,
   }
 
   error->all(FLERR,
-    "fix coll/nanbu: source must be c_ID[col] or p_name");
+    "fix coulomb/base: source must be c_ID[col] or p_name");
 }
 
 /* ---------------------------------------------------------------------- */
 
-void FixCollNanbu::refresh_compute_src(CollGridSrc &S)
+void FixCoulombBase::refresh_compute_src(CollGridSrc &S)
 {
   if (S.kind == COLL_SRC_PCUSTOM) {
     if (S.cache_ts == update->ntimestep) return;
@@ -802,7 +769,7 @@ void FixCollNanbu::refresh_compute_src(CollGridSrc &S)
 
 /* ---------------------------------------------------------------------- */
 
-double FixCollNanbu::read_src(const CollGridSrc &S, int ip, int icell) const
+double FixCoulombBase::read_src(const CollGridSrc &S, int ip, int icell) const
 {
   if (S.kind == COLL_SRC_PCUSTOM) {
     if (!S.pvec_cache) return 0.0;
@@ -815,7 +782,7 @@ double FixCollNanbu::read_src(const CollGridSrc &S, int ip, int icell) const
 
 /* ---------------------------------------------------------------------- */
 
-void FixCollNanbu::particle_rz(const Particle::OnePart &p,
+void FixCoulombBase::particle_rz(const Particle::OnePart &p,
                                double &R, double &Z) const
 {
   OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z);
@@ -823,7 +790,7 @@ void FixCollNanbu::particle_rz(const Particle::OnePart &p,
 
 /* ---------------------------------------------------------------------- */
 
-double FixCollNanbu::pd_interp(const std::vector<double> &field,
+double FixCoulombBase::pd_interp(const std::vector<double> &field,
                                const Particle::OnePart &p) const
 {
   if (!pd_) return 0.0;
@@ -834,7 +801,7 @@ double FixCollNanbu::pd_interp(const std::vector<double> &field,
 
 /* ---------------------------------------------------------------------- */
 
-void FixCollNanbu::pd_bfield_sparta(const Particle::OnePart &p,
+void FixCoulombBase::pd_bfield_sparta(const Particle::OnePart &p,
                                     double &Bx, double &By, double &Bz) const
 {
   Bx = By = Bz = 0.0;

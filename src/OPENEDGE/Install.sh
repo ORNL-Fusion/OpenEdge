@@ -81,8 +81,12 @@ action fix_volume_chem_adas.cpp
 action fix_volume_chem_adas.h
 action fix_coll_background.cpp
 action fix_coll_background.h
-action fix_coll_nanbu.cpp
-action fix_coll_nanbu.h
+action fix_coulomb_base.cpp
+action fix_coulomb_binary.cpp
+action fix_coulomb_background.cpp
+action fix_coulomb_base.h
+action fix_coulomb_binary.h
+action fix_coulomb_background.h
 action fix_drag.cpp
 action fix_drag.h
 action fix_efield_grid.cpp
