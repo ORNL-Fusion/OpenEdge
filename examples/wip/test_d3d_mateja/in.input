@@ -89,21 +89,20 @@ fix                 fchem_B chem/adas 1 5 input/plasma_boron.adas adas_dir ../..
 
 # --- Collisions
 # Main background: D+, A=2.0, Z=1.0
-#fix                 fnanbu coll/nanbu 1 plasma p_pc_te p_pc_ne &
-                    nobinary &
-                    background 2.0 1.0 &
+#fix                 fnanbu coulomb/background 1 plasma p_pc_te p_pc_ne &
+                    2.0 1.0 &
                     p_pc_ti p_pc_ni p_pc_vpar &
                     p_pc_bx p_pc_by p_pc_bz
 
 # --- Forces
 # ion_thermal β_i and elec_thermal α_e are hardcoded to the defaults
 # (2.6 and 0.71 respectively); no `coeff` keyword.
-fix                 ftf thermal_force 1 &
+fix                 ftf force/thermal 1 &
                     bfield p_pc_bx p_pc_by p_pc_bz &
                     ion_thermal p_pc_grad_ti_r p_pc_grad_ti_z &
                     elec_thermal p_pc_grad_te_r p_pc_grad_te_z
 
-fix                 fcd cross_diffusion 1 &
+fix                 fcd force/cross_field 1 &
                     bfield p_pc_bx p_pc_by p_pc_bz &
                     D_perp 0.3
 

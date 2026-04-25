@@ -28,7 +28,7 @@ myst:
 :margin: 0 0 4 0
 
 :::{grid-item-card} Impurity transport
-:link: fixes/thermal_force
+:link: fixes/force_thermal
 :link-type: doc
 
 Boris and guiding-center (GCA) pushers with Littlejohn corrections,
@@ -155,12 +155,12 @@ appear here once the companion papers are finalised.
 :hidden:
 
 fixes/volume_chem_adas
-fixes/cross_diffusion
+fixes/cross_field_diffusion
 fixes/surface_emit_puff
 fixes/surface_emit_recycle
 fixes/surface_emit_source
 fixes/liquid_metal
-fixes/thermal_force
+fixes/force_thermal
 fixes/surf_react_surface_pwi
 fixes/efield_plasma
 fixes/surface_physical_sputter

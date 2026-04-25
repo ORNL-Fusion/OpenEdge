@@ -14,7 +14,7 @@ https://github.com/ORNL-Fusion/OpenEdge
    v <- v + (g * dt/2) at end_of_step
 ------------------------------------------------------------------------- */
 
-#include "fix_gravity.h"
+#include "fix_force_gravity.h"
 #include "update.h"
 #include "particle.h"
 #include "domain.h"
@@ -30,7 +30,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 using namespace SPARTA_NS;
 
 
-FixGravity::FixGravity(SPARTA *sparta, int narg, char **arg)
+FixForceGravity::FixForceGravity(SPARTA *sparta, int narg, char **arg)
 : Fix(sparta, narg, arg)
 {
   // Expected: fix ID group-ID gravity g1 g2 g3
@@ -55,7 +55,7 @@ FixGravity::FixGravity(SPARTA *sparta, int narg, char **arg)
   g_[2] = parse_or_die(arg[5], "g3");
 }
 
-int FixGravity::setmask()
+int FixForceGravity::setmask()
 {
   int mask = 0;
   mask |= START_OF_STEP;  // +½ kick before mover
@@ -63,22 +63,22 @@ int FixGravity::setmask()
   return mask;
 }
 
-void FixGravity::init()
+void FixForceGravity::init()
 {
 }
 
-void FixGravity::start_of_step()
+void FixForceGravity::start_of_step()
 {
   half_kick(0.5 * update->dt);
 }
 
-void FixGravity::end_of_step()
+void FixForceGravity::end_of_step()
 {
   half_kick(0.5 * update->dt);
   
 }
 
-void FixGravity::half_kick(double dt_half)
+void FixForceGravity::half_kick(double dt_half)
 {
   const int nlocal = particle->nlocal;
   if (nlocal == 0) return;
@@ -104,7 +104,7 @@ void FixGravity::half_kick(double dt_half)
   }
 }
 
-double FixGravity::memory_usage()
+double FixForceGravity::memory_usage()
 {
   return 0.0;
 }

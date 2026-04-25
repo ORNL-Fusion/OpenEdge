@@ -39,8 +39,8 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "compute_nearest_surf_grid.h"
 #include "compute_plasma_fields.h"
 #include "fix_plasma_data.h"
-#include "fix_cross_diffusion.h"
-#include "fix_thermal_force.h"
+#include "fix_cross_field_diffusion.h"
+#include "fix_force_thermal.h"
 #include "fix_coulomb_base.h"
 #include "fix_volume_chem_adas.h"
 #include "memory.h"
@@ -673,11 +673,11 @@ void Update::init()
           pcache_need_mask |= PCACHE_TI | PCACHE_VPAR | PCACHE_BFIELD;
         }
         recognized = 1;
-      } else if (strcmp(s,"thermal_force") == 0) {
+      } else if (strcmp(s,"force/thermal") == 0) {
         // In plasma_data mode the fix interpolates from FixPlasmaData
         // directly and does not read pcache; skip the writes entirely.
-        FixThermalForce *ftf =
-            dynamic_cast<FixThermalForce *>(modify->fix[ifix]);
+        FixForceThermal *ftf =
+            dynamic_cast<FixForceThermal *>(modify->fix[ifix]);
         if (!ftf || ftf->needs_pcache()) {
           pcache_need_mask |= PCACHE_BFIELD | PCACHE_GRAD_TE | PCACHE_GRAD_TI;
         }
@@ -694,11 +694,11 @@ void Update::init()
                               PCACHE_VPAR | PCACHE_BFIELD;
         }
         recognized = 1;
-      } else if (strcmp(s,"cross_diffusion") == 0) {
+      } else if (strcmp(s,"cross_field_diffusion") == 0) {
         // Same plasma_data-bypass pattern. NE/GRAD_NE only matter when
         // gradient_pinch is configured (needs_grad_ne()).
-        FixCrossDiffusion *fcd =
-            dynamic_cast<FixCrossDiffusion *>(modify->fix[ifix]);
+        FixCrossFieldDiffusion *fcd =
+            dynamic_cast<FixCrossFieldDiffusion *>(modify->fix[ifix]);
         if (!fcd || fcd->needs_pcache()) {
           pcache_need_mask |= PCACHE_BFIELD;
           if (fcd && fcd->needs_grad_ne()) {

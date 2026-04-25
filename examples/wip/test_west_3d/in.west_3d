@@ -88,16 +88,15 @@ fix                 chem volume/chem/adas 1 74 input/data/plasma.adas
 # ===========================================================================
 # 4) Nanbu Coulomb collisions with D+ background
 # ===========================================================================
-#fix                 fnanbu coll/nanbu 1 plasma c_pfields[5] c_pfields[6] &
-#                    nobinary &
-#                    background 2.0 1.0 &
+#fix                 fnanbu coulomb/background 1 plasma c_pfields[5] c_pfields[6] &
+#                    2.0 1.0 &
 #                                        c_pfields[7] c_pfields[8] c_pfields[9] &
 #                   c_pfields[1] c_pfields[2] c_pfields[3]
 
 # ===========================================================================
 # 5) Braginskii thermal forces on impurity ions
 # ===========================================================================
-#fix                 ftf thermal_force 1 &
+#fix                 ftf force/thermal 1 &
 #                    bfield c_pfields[1] c_pfields[2] c_pfields[3] &
 #                    ion_thermal c_pfields[12] c_pfields[13] coeff 2.6 &
 #                    elec_thermal c_pfields[10] c_pfields[11] coeff 0.71
@@ -105,7 +104,7 @@ fix                 chem volume/chem/adas 1 74 input/data/plasma.adas
 # ===========================================================================
 # 6) Anomalous cross-field diffusion + gradient-driven pinch
 # ===========================================================================
-#fix                 fcd cross_diffusion 1 &
+#fix                 fcd force/cross_field 1 &
 #                    bfield c_pfields[1] c_pfields[2] c_pfields[3] &
 #                    D_perp 1.0 &
  #                   gradient_pinch 1.0 c_pfields[6] c_pfields[17] c_pfields[18]

@@ -20,12 +20,12 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(surface/state/liquid_metal,FixSurfaceStateLiquidMetal)
+FixStyle(surface/state/lm,FixSurfaceStateLm)
 
 #else
 
-#ifndef SPARTA_FIX_SURFACE_STATE_LIQUID_METAL_H
-#define SPARTA_FIX_SURFACE_STATE_LIQUID_METAL_H
+#ifndef SPARTA_FIX_SURFACE_STATE_LM_H
+#define SPARTA_FIX_SURFACE_STATE_LM_H
 
 #include "fix.h"
 #include "surf.h"
@@ -35,10 +35,10 @@ namespace SPARTA_NS {
 
 class ComputePlasmaFields;
 
-class FixSurfaceStateLiquidMetal : public Fix {
+class FixSurfaceStateLm : public Fix {
  public:
-  FixSurfaceStateLiquidMetal(class SPARTA *, int, char **);
-  virtual ~FixSurfaceStateLiquidMetal();
+  FixSurfaceStateLm(class SPARTA *, int, char **);
+  virtual ~FixSurfaceStateLm();
   int setmask();
   virtual void init();
   virtual void end_of_step();

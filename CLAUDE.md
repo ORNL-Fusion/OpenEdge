@@ -99,7 +99,7 @@ fields onto SPARTA slots route through these, so they work in any of
 `ex ey ez`, `vx vy vz`) sources to a fix or compute, the values must be
 in **SPARTA slot order** (matching the velocity slots).
 `compute plasma/fields` does the projection automatically — feeding
-`c_cplasma[bx_col]` etc. into `fix thermal_force` or `fix efield/grid`
+`c_cplasma[bx_col]` etc. into `fix force/thermal` or `fix efield/grid`
 works in either coord layout without further user intervention.
 
 **Edge-code converters always emit axi** — SOLPS / SOLEDGE3X / OEDGE
@@ -289,10 +289,10 @@ and usage patterns.
 
 ### Transport fixes
 
-- **`fix thermal_force`** — Braginskii ion + electron thermal forces on
-  impurity ions. [`docs/fixes/thermal_force.md`](docs/fixes/thermal_force.md).
-- **`fix cross_diffusion`** — anomalous perpendicular diffusion + pinch.
-  [`docs/fixes/cross_diffusion.md`](docs/fixes/cross_diffusion.md).
+- **`fix force/thermal`** — Braginskii ion + electron thermal forces on
+  impurity ions. [`docs/fixes/force_thermal.md`](docs/fixes/force_thermal.md).
+- **`fix cross_field_diffusion`** — anomalous perpendicular diffusion + pinch.
+  [`docs/fixes/cross_field_diffusion.md`](docs/fixes/cross_field_diffusion.md).
 - **Plasma-native E-field** — `compute plasma/fields` reads `E = −∇ϕ`
   from converter. [`docs/fixes/efield_plasma.md`](docs/fixes/efield_plasma.md).
 

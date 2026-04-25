@@ -99,12 +99,8 @@ action fix_surface_emit_source.cpp
 action fix_surface_emit_source.h
 action fix_evaporation.cpp
 action fix_evaporation.h
-action fix_gravity.cpp
-action fix_gravity.h
-action fix_thermal_force_e.cpp
-action fix_thermal_force_e.h
-action fix_thermal_force_i.cpp
-action fix_thermal_force_i.h
+action fix_force_gravity.cpp
+action fix_force_gravity.h
 action fix_viscous.cpp
 action fix_viscous.h
 action surf_react_surface_pwi.cpp

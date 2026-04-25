@@ -34,7 +34,7 @@
 #include "stdlib.h"
 #include "string.h"
 #include "math.h"
-#include "fix_surface_state_liquid_metal.h"
+#include "fix_surface_state_lm.h"
 #include "domain.h"
 #include "comm.h"
 #include "surf.h"
@@ -58,7 +58,7 @@ enum { COMPUTE, FIX, CONSTANT, PLASMA, TARGET };
 
 /* ---------------------------------------------------------------------- */
 
-FixSurfaceStateLiquidMetal::FixSurfaceStateLiquidMetal(SPARTA *sparta, int narg, char **arg) :
+FixSurfaceStateLm::FixSurfaceStateLm(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
   if (narg < 14)
@@ -293,7 +293,7 @@ FixSurfaceStateLiquidMetal::FixSurfaceStateLiquidMetal(SPARTA *sparta, int narg,
 
 /* ---------------------------------------------------------------------- */
 
-FixSurfaceStateLiquidMetal::~FixSurfaceStateLiquidMetal()
+FixSurfaceStateLm::~FixSurfaceStateLm()
 {
   delete[] id_hf;
   delete[] id_plasma;
@@ -307,7 +307,7 @@ FixSurfaceStateLiquidMetal::~FixSurfaceStateLiquidMetal()
 
 /* ---------------------------------------------------------------------- */
 
-int FixSurfaceStateLiquidMetal::setmask()
+int FixSurfaceStateLm::setmask()
 {
   int mask = 0;
   mask |= END_OF_STEP;
@@ -316,7 +316,7 @@ int FixSurfaceStateLiquidMetal::setmask()
 
 /* ---------------------------------------------------------------------- */
 
-void FixSurfaceStateLiquidMetal::init()
+void FixSurfaceStateLm::init()
 {
   // load target heat flux profiles from HDF5
   if (hf_source == TARGET && target_file) {
@@ -373,7 +373,7 @@ void FixSurfaceStateLiquidMetal::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixSurfaceStateLiquidMetal::build_geometry_map()
+void FixSurfaceStateLm::build_geometry_map()
 {
   int dimension = domain->dimension;
   int distributed = surf->distributed;
@@ -463,7 +463,7 @@ void FixSurfaceStateLiquidMetal::build_geometry_map()
 
 /* ---------------------------------------------------------------------- */
 
-void FixSurfaceStateLiquidMetal::gather_heat_flux()
+void FixSurfaceStateLm::gather_heat_flux()
 {
   if (hf_source == CONSTANT) return;
 
@@ -530,7 +530,7 @@ void FixSurfaceStateLiquidMetal::gather_heat_flux()
 
 /* ---------------------------------------------------------------------- */
 
-void FixSurfaceStateLiquidMetal::end_of_step()
+void FixSurfaceStateLm::end_of_step()
 {
   if (update->ntimestep % nevery) return;
 
@@ -656,7 +656,7 @@ void FixSurfaceStateLiquidMetal::end_of_step()
 
 /* ---------------------------------------------------------------------- */
 
-void FixSurfaceStateLiquidMetal::load_target_heatflux()
+void FixSurfaceStateLm::load_target_heatflux()
 {
   // Read target heat flux and D+ flux profiles from HDF5
   // Format: group "outer" or "inner" containing datasets s, q_total, gamma_D

@@ -108,17 +108,16 @@ fix fchem volume/chem/adas 1 W auto
 # ---- Braginskii thermal forces on impurity ions ---------------------------
 # Reads mesh-level grad_te/grad_ti from plasma.h5 (new converter writes
 # mesh/grad_te_{r,z} and mesh/grad_ti_{r,z}).
-#fix ftf thermal_force 100 plasma_data pd &
+#fix ftf force/thermal 100 plasma_data pd &
 #                    ion_thermal yes &
 #                    elec_thermal yes
 
 # ---- Nanbu Coulomb collisions against D+ background -----------------------
-#fix fnanbu coll/nanbu 100 plasma_data pd &
-#                    nobinary &
-#                    background 2.0 1.0
+#fix fnanbu coulomb/background 100 plasma_data pd &
+#                    2.0 1.0
 
 # ---- Anomalous cross-field diffusion (pinch disabled) ---------------------
-#fix fcd cross_diffusion 100 plasma_data pd &
+#fix fcd force/cross_field 100 plasma_data pd &
 #                    D_perp 0.1
 
 # ---- W erosion from O sputtering (analytic Eckstein, per-projectile) ------

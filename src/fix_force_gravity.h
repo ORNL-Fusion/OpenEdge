@@ -1,5 +1,5 @@
 /* ----------------------------------------------------------------------
-   OpenEdge — Impurity transport, SOL & plasma-edge physics
+   OpenEdge — Neutral and charge-state transport with plasma-wall interactions
    Built on SPARTA (sparta.github.io; Plimpton et al., Sandia National Labs).
 
    Author: Abdourahmane Diaw <diawa@ornl.gov>
@@ -15,19 +15,19 @@
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
-FixStyle(gravity,FixGravity)
+FixStyle(force/gravity,FixForceGravity)
 #else
-#ifndef SPARTA_FIX_GRAVITY_H
-#define SPARTA_FIX_GRAVITY_H
+#ifndef SPARTA_FIX_FORCE_GRAVITY_H
+#define SPARTA_FIX_FORCE_GRAVITY_H
 
 #include "fix.h"
 
 namespace SPARTA_NS {
 
-class FixGravity : public Fix {
+class FixForceGravity : public Fix {
 public:
-  FixGravity(class SPARTA*, int, char**);
-  ~FixGravity() override = default;
+  FixForceGravity(class SPARTA*, int, char**);
+  ~FixForceGravity() override = default;
 
   int    setmask() override;
   void   init() override;

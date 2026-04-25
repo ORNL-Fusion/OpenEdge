@@ -48,12 +48,12 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(thermal_force,FixThermalForce)
+FixStyle(force/thermal,FixForceThermal)
 
 #else
 
-#ifndef SPARTA_FIX_THERMAL_FORCE_H
-#define SPARTA_FIX_THERMAL_FORCE_H
+#ifndef SPARTA_FIX_FORCE_THERMAL_H
+#define SPARTA_FIX_FORCE_THERMAL_H
 
 #include "fix.h"
 #include "grid_src.h"
@@ -64,10 +64,10 @@ namespace SPARTA_NS {
 
 class FixPlasmaData;
 
-class FixThermalForce : public Fix {
+class FixForceThermal : public Fix {
  public:
-  FixThermalForce(class SPARTA *, int, char **);
-  ~FixThermalForce();
+  FixForceThermal(class SPARTA *, int, char **);
+  ~FixForceThermal();
   int  setmask();
   void init();
   void start_of_step();

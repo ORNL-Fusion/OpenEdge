@@ -26,7 +26,7 @@
     via grid->id_find_child().
 ------------------------------------------------------------------------- */
 
-#include "fix_cross_diffusion.h"
+#include "fix_cross_field_diffusion.h"
 
 #include <cmath>
 #include <cstring>
@@ -55,7 +55,7 @@ enum { DIFF_NONE=0, DIFF_CONST, DIFF_BOHM };
 
 /* ---------------------------------------------------------------------- */
 
-FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
+FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   rng_(nullptr),
   use_plasma_data_(0),
@@ -179,7 +179,7 @@ FixCrossDiffusion::FixCrossDiffusion(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixCrossDiffusion::~FixCrossDiffusion()
+FixCrossFieldDiffusion::~FixCrossFieldDiffusion()
 {
   if (copymode) return;
   delete rng_;
@@ -205,7 +205,7 @@ FixCrossDiffusion::~FixCrossDiffusion()
 
 /* ---------------------------------------------------------------------- */
 
-int FixCrossDiffusion::setmask()
+int FixCrossFieldDiffusion::setmask()
 {
   int mask = 0;
   mask |= START_OF_STEP;
@@ -214,7 +214,7 @@ int FixCrossDiffusion::setmask()
 
 /* ---------------------------------------------------------------------- */
 
-void FixCrossDiffusion::init()
+void FixCrossFieldDiffusion::init()
 {
   // seed RNG (same pattern as fix_coll_nanbu)
   if (!rng_) {
@@ -298,7 +298,7 @@ void FixCrossDiffusion::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixCrossDiffusion::start_of_step()
+void FixCrossFieldDiffusion::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) {
     update->cd_flag = 0;
@@ -520,7 +520,7 @@ void FixCrossDiffusion::start_of_step()
 
 /* ---------------------------------------------------------------------- */
 
-void FixCrossDiffusion::parse_compute_src(const char *tok, CollGridSrc &dst,
+void FixCrossFieldDiffusion::parse_compute_src(const char *tok, CollGridSrc &dst,
                                            const char *label)
 {
   if (!tok || !*tok) {
@@ -566,7 +566,7 @@ void FixCrossDiffusion::parse_compute_src(const char *tok, CollGridSrc &dst,
 
 /* ---------------------------------------------------------------------- */
 
-void FixCrossDiffusion::refresh_compute_src(CollGridSrc &S)
+void FixCrossFieldDiffusion::refresh_compute_src(CollGridSrc &S)
 {
   if (S.kind == COLL_SRC_PCUSTOM) {
     if (S.cache_ts == update->ntimestep) return;
@@ -611,7 +611,7 @@ void FixCrossDiffusion::refresh_compute_src(CollGridSrc &S)
 
 /* ---------------------------------------------------------------------- */
 
-double FixCrossDiffusion::read_src(const CollGridSrc &S, int ip, int icell) const
+double FixCrossFieldDiffusion::read_src(const CollGridSrc &S, int ip, int icell) const
 {
   if (S.kind == COLL_SRC_PCUSTOM) {
     if (!S.pvec_cache) return 0.0;
@@ -624,7 +624,7 @@ double FixCrossDiffusion::read_src(const CollGridSrc &S, int ip, int icell) cons
 
 /* ---------------------------------------------------------------------- */
 
-void FixCrossDiffusion::particle_rz(const Particle::OnePart &p,
+void FixCrossFieldDiffusion::particle_rz(const Particle::OnePart &p,
                                     double &R, double &Z) const
 {
   OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z);
@@ -632,7 +632,7 @@ void FixCrossDiffusion::particle_rz(const Particle::OnePart &p,
 
 /* ---------------------------------------------------------------------- */
 
-double FixCrossDiffusion::pd_interp(const std::vector<double> &field,
+double FixCrossFieldDiffusion::pd_interp(const std::vector<double> &field,
                                     const Particle::OnePart &p) const
 {
   if (!pd_) return 0.0;
@@ -643,7 +643,7 @@ double FixCrossDiffusion::pd_interp(const std::vector<double> &field,
 
 /* ---------------------------------------------------------------------- */
 
-void FixCrossDiffusion::pd_bfield_sparta(const Particle::OnePart &p,
+void FixCrossFieldDiffusion::pd_bfield_sparta(const Particle::OnePart &p,
                                          double &B0, double &B1, double &B2) const
 {
   B0 = B1 = B2 = 0.0;

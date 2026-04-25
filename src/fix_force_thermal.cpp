@@ -20,7 +20,7 @@
     Temperature gradients are always cylindrical (grad_T_R, grad_T_Z).
 ------------------------------------------------------------------------- */
 
-#include "fix_thermal_force.h"
+#include "fix_force_thermal.h"
 
 #include <cmath>
 #include <cstring>
@@ -44,7 +44,7 @@ enum { INT, DOUBLE };
 
 /* ---------------------------------------------------------------------- */
 
-FixThermalForce::FixThermalForce(SPARTA *sparta, int narg, char **arg) :
+FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   use_plasma_data_(0),
   plasma_fix_id_(),
@@ -148,7 +148,7 @@ FixThermalForce::FixThermalForce(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixThermalForce::~FixThermalForce()
+FixForceThermal::~FixForceThermal()
 {
   if (copymode) return;
   delete[] srcBx_.cid;
@@ -173,7 +173,7 @@ FixThermalForce::~FixThermalForce()
 
 /* ---------------------------------------------------------------------- */
 
-int FixThermalForce::setmask()
+int FixForceThermal::setmask()
 {
   int mask = 0;
   mask |= START_OF_STEP;
@@ -183,7 +183,7 @@ int FixThermalForce::setmask()
 
 /* ---------------------------------------------------------------------- */
 
-void FixThermalForce::init()
+void FixForceThermal::init()
 {
   // resolve compute sources
   auto bind = [&](CollGridSrc &S, const char *label) {
@@ -262,7 +262,7 @@ void FixThermalForce::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixThermalForce::start_of_step()
+void FixForceThermal::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
 
@@ -287,13 +287,13 @@ void FixThermalForce::start_of_step()
 
 /* ---------------------------------------------------------------------- */
 
-void FixThermalForce::end_of_step()
+void FixForceThermal::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
 
   // Per-particle custom vectors (S.pvec_cache) can be reallocated when
   // particles are created during Update::move() between start_of_step and
-  // end_of_step (e.g. by fix surface/emit/sputter). Re-fetch the pointers before
+  // end_of_step (e.g. by fix surface/emit/source). Re-fetch the pointers before
   // the second kick or read_src() will deref freed memory.
   if (!use_plasma_data_) {
     refresh_compute_src(srcBx_);
@@ -333,7 +333,7 @@ void FixThermalForce::end_of_step()
    Velocity kick is always in SPARTA coordinates (matches bhat order).
 ------------------------------------------------------------------------- */
 
-void FixThermalForce::kick_half(double dt_half)
+void FixForceThermal::kick_half(double dt_half)
 {
   Particle::OnePart *particles = particle->particles;
   Particle::Species *species   = particle->species;
@@ -415,7 +415,7 @@ void FixThermalForce::kick_half(double dt_half)
 
 /* ---------------------------------------------------------------------- */
 
-void FixThermalForce::parse_compute_src(const char *tok, CollGridSrc &dst,
+void FixForceThermal::parse_compute_src(const char *tok, CollGridSrc &dst,
                                         const char *label)
 {
   if (!tok || !*tok) {
@@ -461,7 +461,7 @@ void FixThermalForce::parse_compute_src(const char *tok, CollGridSrc &dst,
 
 /* ---------------------------------------------------------------------- */
 
-void FixThermalForce::refresh_compute_src(CollGridSrc &S)
+void FixForceThermal::refresh_compute_src(CollGridSrc &S)
 {
   if (S.kind == COLL_SRC_PCUSTOM) {
     // Always re-fetch: particle->edvec[] is reallocated by particle->grow()
@@ -508,7 +508,7 @@ void FixThermalForce::refresh_compute_src(CollGridSrc &S)
 
 /* ---------------------------------------------------------------------- */
 
-double FixThermalForce::read_src(const CollGridSrc &S, int ip, int icell) const
+double FixForceThermal::read_src(const CollGridSrc &S, int ip, int icell) const
 {
   if (S.kind == COLL_SRC_PCUSTOM) {
     if (!S.pvec_cache) return 0.0;
@@ -521,7 +521,7 @@ double FixThermalForce::read_src(const CollGridSrc &S, int ip, int icell) const
 
 /* ---------------------------------------------------------------------- */
 
-void FixThermalForce::particle_rz(const Particle::OnePart &p,
+void FixForceThermal::particle_rz(const Particle::OnePart &p,
                                   double &R, double &Z) const
 {
   OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z);
@@ -529,7 +529,7 @@ void FixThermalForce::particle_rz(const Particle::OnePart &p,
 
 /* ---------------------------------------------------------------------- */
 
-double FixThermalForce::pd_interp(const std::vector<double> &field,
+double FixForceThermal::pd_interp(const std::vector<double> &field,
                                   const Particle::OnePart &p) const
 {
   if (!pd_) return 0.0;
@@ -540,7 +540,7 @@ double FixThermalForce::pd_interp(const std::vector<double> &field,
 
 /* ---------------------------------------------------------------------- */
 
-double FixThermalForce::pd_grad(const std::vector<double> &mesh_grad,
+double FixForceThermal::pd_grad(const std::vector<double> &mesh_grad,
                                 const std::vector<double> &regular_grad,
                                 const Particle::OnePart &p) const
 {
@@ -569,7 +569,7 @@ double FixThermalForce::pd_grad(const std::vector<double> &mesh_grad,
 
 /* ---------------------------------------------------------------------- */
 
-void FixThermalForce::pd_bfield_sparta(const Particle::OnePart &p,
+void FixForceThermal::pd_bfield_sparta(const Particle::OnePart &p,
                                        double &B0, double &B1, double &B2) const
 {
   B0 = B1 = B2 = 0.0;

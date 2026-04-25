@@ -116,8 +116,8 @@ global                  pusher mode boris plasma cplasma subcycles 10 &
 # ---- Nanbu Coulomb collisions with D+ background ----
 # Background: D+ (A=2.014, Z=1)
 # Sources: Ti=col8, Ni=col9, Vpar=col11, Bx=col1, By=col2, Bz=col3
-fix                     nanbu coll/nanbu 1 plasma c_cplasma[7] c_cplasma[10] &
-                        background 2.014 1.0 &
+fix                     nanbu coulomb/background 1 plasma c_cplasma[7] c_cplasma[10] &
+                        2.014 1.0 &
                         c_cplasma[8] c_cplasma[9] c_cplasma[11] &
                         c_cplasma[1] c_cplasma[2] c_cplasma[3]
 

@@ -49,12 +49,12 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(cross_diffusion,FixCrossDiffusion)
+FixStyle(cross_field_diffusion,FixCrossFieldDiffusion)
 
 #else
 
-#ifndef SPARTA_FIX_CROSS_DIFFUSION_H
-#define SPARTA_FIX_CROSS_DIFFUSION_H
+#ifndef SPARTA_FIX_CROSS_FIELD_DIFFUSION_H
+#define SPARTA_FIX_CROSS_FIELD_DIFFUSION_H
 
 #include "fix.h"
 #include "grid_src.h"
@@ -66,10 +66,10 @@ namespace SPARTA_NS {
 class RanKnuth;
 class FixPlasmaData;
 
-class FixCrossDiffusion : public Fix {
+class FixCrossFieldDiffusion : public Fix {
  public:
-  FixCrossDiffusion(class SPARTA *, int, char **);
-  ~FixCrossDiffusion();
+  FixCrossFieldDiffusion(class SPARTA *, int, char **);
+  ~FixCrossFieldDiffusion();
   int  setmask();
   void init();
   void start_of_step();

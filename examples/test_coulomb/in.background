@@ -46,7 +46,7 @@ mixture         impurity temp 116045         # 10 eV
 
 # ---- Plasma data (constant uniform background) ----
 # fix plasma/data constant holds Te/ne for the Coulomb log and
-# Ti/Ni/Vpar/B for the virtual background partner used by fix coll/nanbu.
+# Ti/Ni/Vpar/B for the virtual background partner used by fix coulomb/background.
 # Temperatures in eV, densities in m^-3, flow in m/s, B in T.
 fix             pd plasma/data constant &
                 te ${Te_bg} ne ${ne_bg} &

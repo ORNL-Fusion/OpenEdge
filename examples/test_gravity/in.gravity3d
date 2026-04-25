@@ -10,7 +10,7 @@ balance_grid        rcb cell
 species             ar.species Ar
 read_particles      source.1 0
 
-fix grav gravity    all 0.0 0.0 -9.81
+fix grav force/gravity    all 0.0 0.0 -9.81
 
 timestep            1.0e-3
 stats               10
