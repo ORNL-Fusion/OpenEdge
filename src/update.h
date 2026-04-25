@@ -121,19 +121,6 @@ struct SurfHit2D {
   int *bfield_active;   // ptr to field_active flags in fix
   int bfieldfreq;        // update bfield GFIELD every this many timesteps
 
-  int ethermalflag;     // external electron thermal gradient field: NOFIELD, PFIELD
-  int ethermalstyle;            // external electron thermal gradient field: NOFIELD, PFIELD
-  char *ethermalID;     // fix ID for PFIELD
-  int ethermalfix;       // index of external electron thermal gradient fix ethermalfix
-  int *ethermal_active; // ptr to field_active flags in fix
-
-  // for the ion now
-  int ithermalflag;     // external ion thermal gradient field: NOFIELD, PFIELD
-  int ithermalstyle;            // external ion thermal gradient field: NOFIELD, PF
-  char *ithermalID;     // fix ID for PFIELD
-  int ithermalfix;       // index of external ion thermal gradient fix ithermal
-  int *ithermal_active; // ptr to field_active flags in fix
-
   int nmigrate;          // # of particles to migrate to new procs
   int *mlist;            // indices of particles to migrate
 
@@ -392,9 +379,6 @@ static double dist_point_tri(const double p[3], const double a[3],
  protected:
 
  int sgroupbit;
-
-   // PMI
-   int thermal_gradient_forces_flag;
 
   int me,nprocs;
   int maxmigrate;            // max # of particles in mlist

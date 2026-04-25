@@ -262,15 +262,6 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   bfieldID = NULL;
   bfieldfreq = 0;
 
-  ethermalstyle = NOFIELD;
-  ethermalID = NULL;
-
-  ithermalstyle = NOFIELD;
-  ithermalID = NULL;
-  ithermalflag = 0;
-  ithermal_active = NULL;
-
-
   maxmigrate = 0;
   mlist = NULL;
 
@@ -289,8 +280,6 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
 
   copymode = 0;
 
-
-  thermal_gradient_forces_flag = 0;
   pusher_mode = PUSHER_BORIS;
   pusher_plasma_cid = NULL;
   pusher_plasma_cidx = -1;
@@ -506,25 +495,6 @@ void Update::init()
       error->all(FLERR,"External magnetic field fix does not compute necessary field");
     bfield_active = modify->fix[bfieldfix]->field_active;  // packed columns
     bperturbflag = 1;
-  }
-
-  ethermalflag = 0;
-  if (ethermalstyle==GFIELD) {
-    ethermalfix = modify->find_fix(ethermalID);        
-    if (ethermalfix < 0) error->all(FLERR,"External electron thermal gradient field fix ID not found");
-    if (!modify->fix[ethermalfix]->per_grid_field)
-      error->all(FLERR,"External electron thermal gradient field fix does not compute necessary field");
-    ethermal_active = modify->fix[ethermalfix]->field_active;  // packed columns
-    ethermalflag = 1;
-  }
-  ithermalflag = 0;
-  if (ithermalstyle==GFIELD) {
-    ithermalfix = modify->find_fix(ithermalID);
-    if (ithermalfix < 0) error->all(FLERR,"External ion thermal gradient field fix ID not found");
-    if (!modify->fix[ithermalfix]->per_grid_field)
-      error->all(FLERR,"External ion thermal gradient field fix does not compute necessary field");
-    ithermal_active = modify->fix[ithermalfix]->field_active;  // packed columns
-    ithermalflag = 1;
   }
 
   // Resolve per-particle sheath geometry compute and plasma provider IDs
@@ -1405,13 +1375,6 @@ template < int DIM, int SURF, int OPT > void Update::move()
   if (bfstyle == GFIELD && bfieldfreq && ((ntimestep-1) % bfieldfreq == 0))
     modify->fix[bfieldfix]->compute_field();
 
-  // per-grid ethermal
-  if (ethermalstyle == GFIELD && fieldfreq && ((ntimestep-1) % fieldfreq == 0))
-    modify->fix[ethermalfix]->compute_field();
-
-  // per-grid ithermal
-  if (ithermalstyle == GFIELD && fieldfreq && ((ntimestep-1) % fieldfreq == 0))
-    modify->fix[ithermalfix]->compute_field();
   // Pre-compute sheath geometry and plasma BEFORE the particle loop.
   // Geometry is static (surfaces don't move) — compute once, reuse forever.
   // Plasma may update if coupled to a solver; for analytic profiles it's also static.
@@ -4137,45 +4100,6 @@ void Update::global(int narg, char **arg)
 
 
     }
-    // Ethermal field
-    else if (strcmp(arg[iarg],"ethermal") == 0) {
-      if (iarg+1 > narg) error->all(FLERR,"Illegal global command");
-      if (strcmp(arg[iarg+1],"none") == 0) {
-        ethermalstyle = NOFIELD;
-        iarg += 2;
-      } else if (strcmp(arg[iarg+1],"grid") == 0) {
-        if (iarg+4 > narg) error->all(FLERR,"Illegal global ethermal field command");
-        delete [] ethermalID;
-        ethermalstyle = GFIELD;
-        int n = strlen(arg[iarg+2]) + 1;
-        ethermalID = new char[n];
-        strcpy(ethermalID,arg[iarg+2]);
-        fieldfreq = input->inumeric(FLERR,arg[iarg+3]);
-        if (fieldfreq < 0) error->all(FLERR,"Illegal global ethermal field command");
-        iarg += 4;
-      } else error->all(FLERR,"Illegal global ethermal field command");
-
-    }
-    // Ithermal field
-    else if (strcmp(arg[iarg],"ithermal") == 0) {
-      if (iarg+1 > narg) error->all(FLERR,"Illegal global command");
-      if (strcmp(arg[iarg+1],"none") == 0) {
-        ithermalstyle = NOFIELD;
-        iarg += 2;
-      } else if (strcmp(arg[iarg+1],"grid") == 0) {
-        if (iarg+4 > narg) error->all(FLERR,"Illegal global ithermal field command");
-        delete [] ithermalID;
-        ithermalstyle = GFIELD;
-        int n = strlen(arg[iarg+2]) + 1;
-        ithermalID = new char[n];
-        strcpy(ithermalID,arg[iarg+2]);
-        fieldfreq = input->inumeric(FLERR,arg[iarg+3]);
-        if (fieldfreq < 0) error->all(FLERR,"Illegal global ithermal field command");
-        iarg += 4;
-      } else error->all(FLERR,"Illegal global ithermal field command");
-
-    }
-
     else if (strcmp(arg[iarg],"surfs") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal global command");
       surf->global(arg[iarg+1]);
@@ -4250,15 +4174,9 @@ void Update::global(int narg, char **arg)
       reorder_period = input->inumeric(FLERR,arg[iarg+1]);
       if (reorder_period < 0) error->all(FLERR,"Illegal global command");
       iarg += 2;
-    } 
+    }
     // OpenEdge additions
-    else if (strcmp(arg[iarg], "thermal_gradient_forces") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global thermal_gradient_forces command");
-      if (strcmp(arg[iarg + 1], "yes") == 0) thermal_gradient_forces_flag = 1;
-      else if (strcmp(arg[iarg + 1], "no") == 0) thermal_gradient_forces_flag = 0;
-      else error->all(FLERR, "Illegal global thermal_gradient_forces command");
-      iarg += 2;
-    } else if (strcmp(arg[iarg], "pcache_nevery") == 0) {
+    else if (strcmp(arg[iarg], "pcache_nevery") == 0) {
       if (iarg + 1 >= narg)
         error->all(FLERR, "Illegal global pcache_nevery command");
       pcache_nevery = input->inumeric(FLERR, arg[iarg + 1]);
