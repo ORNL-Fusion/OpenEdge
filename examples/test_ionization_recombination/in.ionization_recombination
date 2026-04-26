@@ -45,9 +45,13 @@ compute           pfields plasma/fields all constant &
                   temp_e ${Tev} dens_e $n &
                   values temp_e dens_e
 
+# Register the plasma provider so volume/chem/adas can read the
+# per-particle Te/ne cache populated by update.cpp.
+global            pusher plasma pfields
+
 # ---- Volumetric ionization + recombination ----
 fix fchem volume/chem/adas 1 O plasma.reactions &
-                  plasma c_pfields[1] c_pfields[2]
+                  output summary
 
 # ---- Per-species number density, reduced to scalars ----
 compute cden      grid all species nrho

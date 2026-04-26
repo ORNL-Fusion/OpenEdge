@@ -18,15 +18,19 @@ against the expected Te, ne charge-state balance.
 ## Run
 
 ```bash
-source /opt/intel/oneapi/setvars.sh --force
-BIN=/home/cloud/buildOpenEdge/src/spa_mpi
-mpirun -np 4 $BIN -in in.ionization_recombination
+BIN=~/build_oe/openedge_mac_mpi/src/spa_mac_mpi
+mpirun -np 8 $BIN -in in.ionization_recombination
 python3 plot_charged_states.py
 ```
 
 Default run: 100 ms at dt = 0.1 us (1 M steps), ~ 1 min wall time on
 4 ranks.  Drop `time` to 10 ms for a quick smoke test; bump to 500 ms
 if the highest charge states are still drifting.
+
+The current deck uses `global pusher plasma pfields` so
+`fix volume/chem/adas` reads Te and ne through the per-particle plasma
+cache. The older inline `plasma <Te> <Ne>` arguments are no longer
+accepted by the parser.
 
 ## Expected result
 

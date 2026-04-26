@@ -63,17 +63,37 @@ def main():
     cmap = plt.get_cmap("tab10")
     labels = [ELEMENT] + [rf"${ELEMENT}^{{{k}+}}$" for k in range(1, 9)]
 
-    fig, ax = plt.subplots(figsize=(6, 3.5), dpi=300)
+    plt.rcParams.update({
+        "font.family": "STIXGeneral",
+        "mathtext.fontset": "stix",
+        "font.size": 13,
+        "axes.labelsize": 16,
+        "axes.titlesize": 17,
+        "xtick.labelsize": 13,
+        "ytick.labelsize": 13,
+        "legend.fontsize": 11,
+    })
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.8), dpi=300)
     for k in range(9):
-        ax.semilogx(t_ms, frac[k], "-", lw=2, color=cmap(k), label=labels[k])
-    ax.set_xlabel("Time (ms)", fontsize=13)
-    ax.set_ylabel("Fractional abundance", fontsize=13)
-    ax.set_title(rf"{ELEMENT} ionization balance, "
-                 rf"$T_e = 12$ eV, $n_e = 5\times10^{{18}}$ m$^{{-3}}$",
-                 fontsize=12)
-    ax.grid(True, which="both", ls="--", lw=0.5, alpha=0.5)
-    ax.legend(fontsize=10, frameon=False, loc="upper right", ncol=2)
+        ax.semilogx(t_ms, frac[k], "-", lw=2.4, color=cmap(k), label=labels[k])
+    ax.set_xlabel("Time (ms)")
+    ax.set_ylabel("Fractional abundance")
+    ax.set_title("Oxygen charge-state balance")
+    ax.text(
+        0.02,
+        0.98,
+        r"$T_e = 12\ \mathrm{eV}$,  $n_e = 5\times10^{18}\ \mathrm{m}^{-3}$",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=13,
+    )
+    ax.grid(True, which="major", ls="--", lw=0.7, alpha=0.55)
+    ax.grid(True, which="minor", ls=":", lw=0.45, alpha=0.35)
+    ax.legend(frameon=False, loc="upper right", ncol=2, handlelength=2.6)
     ax.set_ylim(-0.02, 1.02)
+    ax.tick_params(direction="in", top=True, right=True)
     fig.tight_layout()
     fig.savefig(OUTPNG, bbox_inches="tight")
     print(f"wrote {OUTPNG}  ({len(step)} stats rows)")
