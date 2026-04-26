@@ -119,29 +119,27 @@ def style_density_axis(ax):
 # -----------------------------------------------------------------------
 # Plotters
 # -----------------------------------------------------------------------
-def plot_density_decay(ax, headers, data, label, color="C0"):
+def plot_density_decay(ax, headers, data, color="C0"):
     xc = data[:, col(headers, "xc")]
     nD = data[:, first_col(headers, "f_fden[1]", "f_fmom[1]", "c_cden[1]")]
     order = np.argsort(xc)
-    ax.plot(xc[order], nD[order], color=color, label=label)
+    ax.plot(xc[order], nD[order], color=color)
     style_density_axis(ax)
 
 
 def plot_iz(path, outpng):
     headers, d = last_frame(path)
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    plot_density_decay(ax, headers, d, "simulation")
+    plot_density_decay(ax, headers, d)
     ax.set_title(r"1-D slab: ionization-limited neutral density")
-    ax.legend()
     fig.savefig(outpng); print(f"wrote {outpng}")
 
 
 def plot_recycle(path, outpng):
     headers, d = last_frame(path)
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    plot_density_decay(ax, headers, d, "simulation")
+    plot_density_decay(ax, headers, d)
     ax.set_title(r"1-D slab: ionization $+$ wall recycling")
-    ax.legend()
     fig.savefig(outpng); print(f"wrote {outpng}")
 
 
@@ -193,17 +191,71 @@ PLOTTERS = {"iz": plot_iz, "recycle": plot_recycle,
             "cx": plot_cx, "diss": plot_diss}
 
 
-def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in CASES:
-        print(f"usage: python3 plot_slab.py {'|'.join(CASES)}")
+def plot_composite(base, outpng):
+    """2x2 panel for the slide: iz | recycle / cx-T_D | diss."""
+    paths = {c: base / "output" / f"slab_{c}.grid" for c in CASES}
+    missing = [c for c, p in paths.items() if not p.exists()]
+    if missing:
+        print(f"missing dumps: {missing} — run those decks first.")
         sys.exit(1)
-    case = sys.argv[1]
+
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7), constrained_layout=True)
+    (ax_iz, ax_rec), (ax_cx, ax_diss) = axes
+
+    # iz
+    h, d = last_frame(paths["iz"])
+    plot_density_decay(ax_iz, h, d)
+    ax_iz.set_title(r"(a) Ionization: $\lambda_{iz} \approx 130$ mm")
+
+    # recycle
+    h, d = last_frame(paths["recycle"])
+    plot_density_decay(ax_rec, h, d)
+    ax_rec.set_title(r"(b) Ionization $+$ wall recycling")
+
+    # cx (temperature panel — the standout diagnostic)
+    h, d = last_frame(paths["cx"])
+    xc = d[:, col(h, "xc")]
+    TD_eV = d[:, first_col(h, "f_fmom[3]", "c_ctemp[1]")] / 11604.525
+    order = np.argsort(xc)
+    ax_cx.plot(xc[order], TD_eV[order])
+    ax_cx.axhline(50.0, color="0.5", ls="--", lw=0.9,
+                  label=r"$T_i = 50 \; \mathrm{eV}$")
+    ax_cx.set_xlabel(LABEL_X); ax_cx.set_ylabel(LABEL_TD_EV)
+    ax_cx.set_title(r"(c) CX thermalization: $T_D \to T_i$")
+    ax_cx.legend(loc="lower right")
+
+    # diss
+    h, d = last_frame(paths["diss"])
+    xc = d[:, col(h, "xc")]
+    nD2 = d[:, first_col(h, "f_fden[1]", "c_cden[1]")]
+    nD  = d[:, first_col(h, "f_fden[2]", "c_cden[2]")]
+    order = np.argsort(xc)
+    ax_diss.plot(xc[order], nD2[order], label=r"$n_{D_2}$ (reactant)")
+    ax_diss.plot(xc[order], nD[order],  label=r"$n_{D}$ (product)")
+    style_density_axis(ax_diss)
+    ax_diss.set_title(r"(d) $D_2$ dissociation: $\lambda_{diss} \approx 121$ mm")
+    ax_diss.legend(loc="lower left")
+
+    fig.savefig(outpng); print(f"wrote {outpng}")
+
+
+def main():
+    if len(sys.argv) != 2:
+        print(f"usage: python3 plot_slab.py {'|'.join(CASES)}|composite")
+        sys.exit(1)
+    arg = sys.argv[1]
     base = Path(__file__).resolve().parent
-    src = base / "output" / f"slab_{case}.grid"
+    if arg == "composite":
+        plot_composite(base, base / "slab_validation_2x2.png")
+        return
+    if arg not in CASES:
+        print(f"usage: python3 plot_slab.py {'|'.join(CASES)}|composite")
+        sys.exit(1)
+    src = base / "output" / f"slab_{arg}.grid"
     if not src.exists():
         print(f"missing: {src} — run the deck first.")
         sys.exit(1)
-    PLOTTERS[case](src, base / f"{case}.png")
+    PLOTTERS[arg](src, base / f"{arg}.png")
 
 
 if __name__ == "__main__":

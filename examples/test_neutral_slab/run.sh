@@ -16,5 +16,6 @@ for case in iz recycle diss cx; do
 done
 
 wait
+python3 plot_slab.py composite
 echo "all 4 cases done"
 ls -l output/slab_*.grid *.png 2>/dev/null
