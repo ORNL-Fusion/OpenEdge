@@ -409,6 +409,146 @@ void query_bfield_at_point(
   }
 }
 
+/* ---------------------------------------------------------------------- */
+// Full point-query: B + grad|B| + κ + curl(b̂) at particle position from
+// the equilibrium ψ map. Used by the GCA hybrid pusher (Phase C). All
+// outputs are in SPARTA slot order matching the input position.
+//
+// Math is identical to ComputePlasmaFields::query_bfield_at_point (CPU,
+// equilibrium branch lines 1976–2037 of compute_plasma_fields.cpp) +
+// the κ / curl(b̂) cylindrical-decomposition block in
+// pusher.cpp::push_hybrid_3d.
+//
+// Returns true on success, false when point falls outside the equilibrium
+// grid or no equilibrium is loaded — caller should fall back to plain
+// Boris with B-only point-query.
+/* ---------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+bool query_bfield_grad_at_point(
+    const double xyz[3], int dim, int axisymmetric,
+    const Kokkos::View<double*,  DeviceType> &equ_r,
+    const Kokkos::View<double*,  DeviceType> &equ_z,
+    const Kokkos::View<double**, DeviceType> &equ_psi,
+    double btf, double rtf, int jm, int km,
+    double B[3], double gradBmag[3],
+    double kappa[3], double curl_b[3])
+{
+  for (int k = 0; k < 3; k++) {
+    B[k] = 0.0; gradBmag[k] = 0.0; kappa[k] = 0.0; curl_b[k] = 0.0;
+  }
+  if (jm < 3 || km < 3) return false;
+
+  double R, Z;
+  if (axisymmetric)      { Z = xyz[0]; R = xyz[1]; }
+  else if (dim == 2)     { R = xyz[0]; Z = xyz[1]; }
+  else                   { R = Kokkos::sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]);
+                           Z = xyz[2]; }
+  if (R < 1.0e-10) return false;
+
+  const double dr = equ_r(1) - equ_r(0);
+  const double dz = equ_z(1) - equ_z(0);
+  if (dr <= 0.0 || dz <= 0.0) return false;
+
+  const double fj = (R - equ_r(0)) / dr;
+  const double fk = (Z - equ_z(0)) / dz;
+  int jc = static_cast<int>(Kokkos::round(fj));
+  int kc = static_cast<int>(Kokkos::round(fk));
+  if (jc < 1) jc = 1;  else if (jc > jm - 2) jc = jm - 2;
+  if (kc < 1) kc = 1;  else if (kc > km - 2) kc = km - 2;
+
+  // Centred-difference psi derivatives + 2nd derivatives + mixed partial
+  const double dRsum = equ_r(jc+1) - equ_r(jc-1);
+  const double dZsum = equ_z(kc+1) - equ_z(kc-1);
+  const double dpsi_dR  = (equ_psi(kc, jc+1) - equ_psi(kc, jc-1)) / dRsum;
+  const double dpsi_dZ  = (equ_psi(kc+1, jc) - equ_psi(kc-1, jc)) / dZsum;
+
+  const double dR1 = equ_r(jc+1) - equ_r(jc);
+  const double dR0 = equ_r(jc)   - equ_r(jc-1);
+  const double dZ1 = equ_z(kc+1) - equ_z(kc);
+  const double dZ0 = equ_z(kc)   - equ_z(kc-1);
+  const double d2psi_dR2 = 2.0 * (equ_psi(kc, jc+1) / (dR1*(dR1+dR0))
+                                 - equ_psi(kc, jc)   / (dR1*dR0)
+                                 + equ_psi(kc, jc-1) / (dR0*(dR1+dR0)));
+  const double d2psi_dZ2 = 2.0 * (equ_psi(kc+1, jc) / (dZ1*(dZ1+dZ0))
+                                 - equ_psi(kc, jc)   / (dZ1*dZ0)
+                                 + equ_psi(kc-1, jc) / (dZ0*(dZ1+dZ0)));
+  const double d2psi_dRdZ = (equ_psi(kc+1, jc+1) - equ_psi(kc+1, jc-1)
+                            - equ_psi(kc-1, jc+1) + equ_psi(kc-1, jc-1))
+                           / (dRsum * dZsum);
+
+  const double invR  = 1.0 / R;
+  const double invR2 = invR * invR;
+
+  // Cylindrical B and B-component derivatives
+  const double bR   = -dpsi_dZ * invR;
+  const double bZ   =  dpsi_dR * invR;
+  const double bphi = (btf * rtf) * invR;
+
+  const double dBr_dr =  dpsi_dZ * invR2 - d2psi_dRdZ * invR;
+  const double dBr_dz = -d2psi_dZ2 * invR;
+  const double dBz_dr = -dpsi_dR * invR2 + d2psi_dR2  * invR;
+  const double dBz_dz =  d2psi_dRdZ * invR;
+  const double dBt_dr = -btf * rtf * invR2;
+  const double dBt_dz =  0.0;
+
+  const double Bmag = Kokkos::sqrt(bR*bR + bphi*bphi + bZ*bZ);
+  if (Bmag <= 0.0) return false;
+  const double invBm = 1.0 / Bmag;
+
+  const double dBmag_dr = (bR*dBr_dr + bphi*dBt_dr + bZ*dBz_dr) * invBm;
+  const double dBmag_dz = (bR*dBr_dz + bphi*dBt_dz + bZ*dBz_dz) * invBm;
+
+  // Unit b̂ derivatives
+  const double bhR = bR * invBm, bhP = bphi * invBm, bhZ = bZ * invBm;
+  const double dbR_dR  = invBm * (dBr_dr - bhR * dBmag_dr);
+  const double dbR_dZ  = invBm * (dBr_dz - bhR * dBmag_dz);
+  const double dbP_dR  = invBm * (dBt_dr - bhP * dBmag_dr);
+  const double dbP_dZ  = invBm * (dBt_dz - bhP * dBmag_dz);
+  const double dbZ_dR  = invBm * (dBz_dr - bhZ * dBmag_dr);
+  const double dbZ_dZ  = invBm * (dBz_dz - bhZ * dBmag_dz);
+
+  // κ = (b̂·∇)b̂ in cylindrical (axisymmetric, ∂/∂φ = 0)
+  const double kR  = bhR * dbR_dR  + bhZ * dbR_dZ - bhP * bhP * invR;
+  const double kP  = bhR * dbP_dR  + bhZ * dbP_dZ + bhR * bhP * invR;
+  const double kZ  = bhR * dbZ_dR  + bhZ * dbZ_dZ;
+
+  // curl(b̂) in cylindrical (axisymmetric, ∂/∂φ = 0)
+  const double cR  = -dbP_dZ;
+  const double cP  =  dbR_dZ - dbZ_dR;
+  const double cZ  =  bhP * invR + dbP_dR;
+
+  // Pack all outputs into SPARTA slot order
+  if (axisymmetric) {
+    B[0] = bZ;   B[1] = bR;   B[2] = bphi;
+    gradBmag[0] = dBmag_dz; gradBmag[1] = dBmag_dr; gradBmag[2] = 0.0;
+    kappa[0]    = kZ;       kappa[1]    = kR;       kappa[2]    = kP;
+    curl_b[0]   = cZ;       curl_b[1]   = cR;       curl_b[2]   = cP;
+  } else if (dim == 2) {
+    B[0] = bR;   B[1] = bZ;   B[2] = bphi;
+    gradBmag[0] = dBmag_dr; gradBmag[1] = dBmag_dz; gradBmag[2] = 0.0;
+    kappa[0]    = kR;       kappa[1]    = kZ;       kappa[2]    = kP;
+    curl_b[0]   = cR;       curl_b[1]   = cZ;       curl_b[2]   = cP;
+  } else {
+    const double rxy = Kokkos::sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]);
+    double cphi = 1.0, sphi = 0.0;
+    if (rxy > 1.0e-20) { cphi = xyz[0] / rxy; sphi = xyz[1] / rxy; }
+    B[0] = bR * cphi - bphi * sphi;
+    B[1] = bR * sphi + bphi * cphi;
+    B[2] = bZ;
+    gradBmag[0] = dBmag_dr * cphi;
+    gradBmag[1] = dBmag_dr * sphi;
+    gradBmag[2] = dBmag_dz;
+    kappa[0]    = kR * cphi - kP * sphi;
+    kappa[1]    = kR * sphi + kP * cphi;
+    kappa[2]    = kZ;
+    curl_b[0]   = cR * cphi - cP * sphi;
+    curl_b[1]   = cR * sphi + cP * cphi;
+    curl_b[2]   = cZ;
+  }
+  return true;
+}
+
 }  // namespace EquilibriumKokkos
 
 /* ===================================================================
