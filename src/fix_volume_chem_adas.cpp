@@ -852,12 +852,20 @@ void FixVolumeChemAdas::end_of_step_no_average()
     dellist.clear();
   }
 
-  // Create deferred particles from dissociation reactions
+  // Create deferred particles from dissociation reactions.
+  // Notify update_custom subscribers so per-particle attributes (pweight
+  // via fix particle/weight, etc.) get initialized — otherwise spawned
+  // products carry the zero defaults from zero_custom() and downstream
+  // weighted diagnostics tally zero on them.
+  const int nfix_update_custom_local = modify->n_update_custom;
+  double zero_v[3] = {0.0, 0.0, 0.0};
   for (size_t i = 0; i < deferred_particles.size(); i++) {
     DeferredParticle &dp = deferred_particles[i];
     int id = MAXSMALLINT * rng_adas->uniform();
     particle->add_particle(id, dp.species, dp.icell,
                            dp.x, dp.v, 0.0, 0.0);
+    if (nfix_update_custom_local)
+      modify->update_custom(particle->nlocal - 1, 0.0, 0.0, 0.0, zero_v);
   }
 
   // Mode A: optional stop-when-exhausted across the global source-species pool.

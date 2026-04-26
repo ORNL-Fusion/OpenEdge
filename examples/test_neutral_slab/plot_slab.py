@@ -231,6 +231,31 @@ def parse_log_stats(log_path, columns):
     return np.array(rows)
 
 
+def plot_dissociation(base, outpng, dt=2e-8):
+    """<n_D2>(t) decay and <n_D>(t) build-up from the 0-D diss deck."""
+    log = base / "log.diss_0d"
+    if not log.exists():
+        print(f"missing: {log} — run in.slab_diss_0d first.")
+        sys.exit(1)
+    arr = parse_log_stats(log, ["Step", "c_Nd2", "c_Nd"])
+    if arr.size == 0:
+        print(f"no rows parsed from {log}")
+        sys.exit(1)
+    t   = arr[:, 0] * dt * 1e6     # us
+    nD2 = arr[:, 1]
+    nD  = arr[:, 2]
+
+    fig, ax = plt.subplots(figsize=(7, 4.5), constrained_layout=True)
+    ax.plot(t, nD2, label=r"$\langle n_{D_2} \rangle$ (reactant)")
+    ax.plot(t, nD,  label=r"$\langle n_{D}   \rangle$ (product)")
+    ax.set_xlabel(r"$t \; (\mathrm{\mu s})$")
+    ax.set_ylabel(r"$n \; (\mathrm{m}^{-3})$")
+    ax.set_yscale("log")
+    ax.set_title(r"0-D $D_2$ dissociation: reactant decay $+$ product build-up")
+    ax.legend()
+    fig.savefig(outpng); print(f"wrote {outpng}")
+
+
 def plot_thermalization(base, outpng, dt=2e-8, Ti_eV=50.0):
     """T_D(t) from the 0-D CX deck (log.cx_0d).
 
@@ -310,7 +335,7 @@ def plot_composite(base, outpng):
 
 
 def main():
-    modes = list(CASES) + ["composite", "thermalization"]
+    modes = list(CASES) + ["composite", "thermalization", "dissociation"]
     if len(sys.argv) != 2 or sys.argv[1] not in modes:
         print(f"usage: python3 plot_slab.py {'|'.join(modes)}")
         sys.exit(1)
@@ -321,6 +346,9 @@ def main():
         return
     if arg == "thermalization":
         plot_thermalization(base, base / "cx_thermalization.png")
+        return
+    if arg == "dissociation":
+        plot_dissociation(base, base / "diss_thermalization.png")
         return
     src = base / "output" / f"slab_{arg}.grid"
     if not src.exists():

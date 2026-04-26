@@ -15,10 +15,12 @@ for case in iz recycle diss cx; do
       && python3 plot_slab.py "$case" ) &
 done
 
-# 0-D CX thermalization runs faster (single cell, 10k steps) — plot
-# is generated from log.cx_0d via plot_slab.py thermalization.
+# 0-D companion decks (closed box, single cell): time-domain CX
+# thermalization and D2 dissociation. Logs feed plot_slab.py.
 ( mpirun -np "$NPROC" "$SPA" -in "in.slab_cx_0d" > "log.cx_0d" 2>&1 \
     && python3 plot_slab.py thermalization ) &
+( mpirun -np "$NPROC" "$SPA" -in "in.slab_diss_0d" > "log.diss_0d" 2>&1 \
+    && python3 plot_slab.py dissociation ) &
 
 wait
 python3 plot_slab.py composite
