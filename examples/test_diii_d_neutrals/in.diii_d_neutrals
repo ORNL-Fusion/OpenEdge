@@ -88,4 +88,4 @@ dump d1 grid all 1000 diii_d_neutrals.grid id xc yc &
      f_frate[1] f_frate[2] f_frate[3] f_frate[4] &
      f_frate[5] f_frate[6]
 
-run                 50000
+run                 100000
