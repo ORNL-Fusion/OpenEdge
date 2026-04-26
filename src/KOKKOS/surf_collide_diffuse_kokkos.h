@@ -31,7 +31,7 @@ SurfCollideStyle(diffuse/kk,SurfCollideDiffuseKokkos)
 #include "fix_vibmode_kokkos.h"
 #include "surf_react_global_kokkos.h"
 #include "surf_react_prob_kokkos.h"
-#include "surf_react_pmi_kokkos.h"
+// surf_react_pmi_kokkos parked in wip; SurfReactPmi types are not used here.
 
 namespace SPARTA_NS {
 
