@@ -17,7 +17,6 @@ FixStyle(volume/chem/adas, FixVolumeChemAdas)
 #define SPARTA_FIX_VOLUME_CHEM_ADAS_H
 
 #include <string>
-#include <H5Cpp.h>
 #include <map>
 #include <stdio.h>
 #include "fix.h"
