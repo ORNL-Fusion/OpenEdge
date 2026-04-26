@@ -5,7 +5,7 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(volume/volume/chem/adas/kk,FixVolumeChemAdasKokkos)
+FixStyle(volume/chem/adas/kk,FixVolumeChemAdasKokkos)
 
 #else
 
