@@ -324,6 +324,92 @@ double grad_b_length(double Bmag, double gradBmag_magnitude)
 }
 
 }  // namespace GCAPusherKokkos
+
+/* ===================================================================
+   Equilibrium-based B-field point-query on device.
+
+   Mirrors the equilibrium branch of
+       ComputePlasmaFields::query_bfield_at_point() (CPU)
+   for use inside the Kokkos Boris/GCA pushers. Computes B at an
+   arbitrary particle position (xyz) by bilinear-interpolating
+   psi(R,Z) gradients off the equilibrium grid:
+
+     B_R   = -(1/R) ∂psi/∂Z
+     B_Z   =  (1/R) ∂psi/∂R
+     B_phi =  btf · rtf / R
+
+   Only the three B components are returned (Phase A). Gradients of
+   |B| (needed for grad-B / curvature drifts) come in Phase C with the
+   GCA-on-device port.
+
+   Slot conventions handled the same as openedge_geom.h:
+     axisymmetric == 1 :  x = Z (axis), y = R (radial)
+     dim == 2          :  x = R, y = Z (legacy 2D Cartesian)
+     dim == 3          :  R = sqrt(x^2 + y^2), Z = z (3D Cartesian)
+   The output B[3] is delivered in the same SPARTA slot order as the
+   input position (so Boris can apply v×B directly without an extra
+   rotation):
+     axisymmetric : (B_Z, B_R, B_phi)
+     2D Cartesian : (B_R, B_Z, B_phi)
+     3D Cartesian : (B_R cos φ - B_phi sin φ,  B_R sin φ + B_phi cos φ,  B_Z)
+   =================================================================== */
+namespace EquilibriumKokkos {
+
+KOKKOS_INLINE_FUNCTION
+void query_bfield_at_point(
+    const double xyz[3], int dim, int axisymmetric,
+    const Kokkos::View<double*,  DeviceType> &equ_r,
+    const Kokkos::View<double*,  DeviceType> &equ_z,
+    const Kokkos::View<double**, DeviceType> &equ_psi,
+    double btf, double rtf, int jm, int km,
+    double B[3])
+{
+  B[0] = 0.0; B[1] = 0.0; B[2] = 0.0;
+  if (jm < 3 || km < 3) return;
+
+  // SPARTA-slot → cylindrical (R, Z)
+  double R, Z;
+  if (axisymmetric)      { Z = xyz[0]; R = xyz[1]; }
+  else if (dim == 2)     { R = xyz[0]; Z = xyz[1]; }
+  else                   { R = Kokkos::sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]);
+                           Z = xyz[2]; }
+  if (R < 1.0e-10) return;
+
+  const double dr = equ_r(1) - equ_r(0);
+  const double dz = equ_z(1) - equ_z(0);
+  if (dr <= 0.0 || dz <= 0.0) return;
+
+  const double fj = (R - equ_r(0)) / dr;
+  const double fk = (Z - equ_z(0)) / dz;
+  int jc = static_cast<int>(Kokkos::round(fj));
+  int kc = static_cast<int>(Kokkos::round(fk));
+  if (jc < 1) jc = 1;  else if (jc > jm - 2) jc = jm - 2;
+  if (kc < 1) kc = 1;  else if (kc > km - 2) kc = km - 2;
+
+  const double dR = equ_r(jc+1) - equ_r(jc-1);
+  const double dZ = equ_z(kc+1) - equ_z(kc-1);
+  const double dpsi_dR = (equ_psi(kc, jc+1) - equ_psi(kc, jc-1)) / dR;
+  const double dpsi_dZ = (equ_psi(kc+1, jc) - equ_psi(kc-1, jc)) / dZ;
+
+  const double invR = 1.0 / R;
+  const double bR   = -dpsi_dZ * invR;
+  const double bZ   =  dpsi_dR * invR;
+  const double bphi = (btf * rtf) * invR;
+
+  // Pack into SPARTA slot order
+  if (axisymmetric)  { B[0] = bZ;  B[1] = bR;  B[2] = bphi; }
+  else if (dim == 2) { B[0] = bR;  B[1] = bZ;  B[2] = bphi; }
+  else {
+    const double rxy = Kokkos::sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]);
+    double cphi = 1.0, sphi = 0.0;
+    if (rxy > 1.0e-20) { cphi = xyz[0] / rxy; sphi = xyz[1] / rxy; }
+    B[0] = bR * cphi - bphi * sphi;
+    B[1] = bR * sphi + bphi * cphi;
+    B[2] = bZ;
+  }
+}
+
+}  // namespace EquilibriumKokkos
 }  // namespace SPARTA_NS
 
 #endif  // SPARTA_PUSHER_KOKKOS_H

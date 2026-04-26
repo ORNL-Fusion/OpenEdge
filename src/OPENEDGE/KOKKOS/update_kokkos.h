@@ -107,6 +107,19 @@ class UpdateKokkos : public Update {
   int oe_bx_col, oe_by_col, oe_bz_col;  // column indices for B in compute
   int oe_ex_col, oe_ey_col, oe_ez_col;  // column indices for E (sheath)
 
+  // OpenEdge: device-resident equilibrium psi map (Phase A of pusher port).
+  // Filled by binding to ComputePlasmaFieldsKokkos at init time. When
+  // oe_has_equilibrium = 1, oe_boris3d uses bilinear point-query off the
+  // psi grid; otherwise it falls back to cell-center reads from
+  // d_oe_plasma_compute.
+  Kokkos::View<double*,  DeviceType> d_oe_equ_r;
+  Kokkos::View<double*,  DeviceType> d_oe_equ_z;
+  Kokkos::View<double**, DeviceType> d_oe_equ_psi;
+  double oe_equ_btf, oe_equ_rtf;
+  int oe_equ_jm, oe_equ_km;
+  int oe_has_equilibrium;
+  int oe_dim, oe_axisymmetric;        // cached domain layout for point-query
+
   // OpenEdge: Boris config
   int oe_pusher_subcycles;
   double oe_echarge;

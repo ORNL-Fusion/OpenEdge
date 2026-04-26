@@ -21,6 +21,7 @@
 #include "string.h"
 #include "update_kokkos.h"
 #include "pusher.h"
+#include "compute_plasma_fields_kokkos.h"
 #include "math_const.h"
 #include "particle_kokkos.h"
 #include "modify.h"
@@ -265,6 +266,15 @@ void UpdateKokkos::init()
   oe_echarge = echarge;
   oe_bx_col = oe_by_col = oe_bz_col = -1;
   oe_ex_col = oe_ey_col = oe_ez_col = -1;
+
+  // OpenEdge Phase A: equilibrium-based point-query B (defaults off).
+  // Actual binding to ComputePlasmaFieldsKokkos's d_equ_* views happens
+  // at the same site where d_oe_plasma_compute is bound (see below).
+  oe_has_equilibrium = 0;
+  oe_equ_jm = oe_equ_km = 0;
+  oe_equ_btf = oe_equ_rtf = 0.0;
+  oe_dim = domain->dimension;
+  oe_axisymmetric = domain->axisymmetric;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -355,6 +365,23 @@ void UpdateKokkos::run(int nsteps)
       d_oe_plasma_compute = kk_cp->d_array_grid;
       // Column mapping from compute: bx=0, by=1, bz=2 (first 3 values)
       oe_bx_col = 0; oe_by_col = 1; oe_bz_col = 2;
+    }
+
+    // Phase A: bind to the device-resident equilibrium psi map (if any)
+    // for smooth point-query B inside oe_boris3d. Falls back to cell-center
+    // columns when no equilibrium is loaded.
+    auto *cp_pf = dynamic_cast<ComputePlasmaFieldsKokkos*>(cp);
+    if (cp_pf && cp_pf->d_has_equilibrium) {
+      d_oe_equ_r        = cp_pf->d_equ_r;
+      d_oe_equ_z        = cp_pf->d_equ_z;
+      d_oe_equ_psi      = cp_pf->d_equ_psi;
+      oe_equ_btf        = cp_pf->d_equ_btf;
+      oe_equ_rtf        = cp_pf->d_equ_rtf;
+      oe_equ_jm         = cp_pf->d_equ_jm;
+      oe_equ_km         = cp_pf->d_equ_km;
+      oe_has_equilibrium = 1;
+      oe_dim            = domain->dimension;
+      oe_axisymmetric   = domain->axisymmetric;
     }
   }
 
@@ -2013,8 +2040,16 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
     double E[3] = {0.0, 0.0, 0.0};
     double B[3] = {0.0, 0.0, 0.0};
 
-    // Read B-field directly from plasma compute view (no fix intermediary)
-    if (d_oe_plasma_compute.data() && oe_bx_col >= 0) {
+    // Phase A: smooth point-query B from equilibrium psi map (preferred)
+    // — bilinear-interpolates B at the particle position. Falls back to
+    // the cell-center column read when no equilibrium is loaded.
+    if (oe_has_equilibrium) {
+      EquilibriumKokkos::query_bfield_at_point(
+          xcur, oe_dim, oe_axisymmetric,
+          d_oe_equ_r, d_oe_equ_z, d_oe_equ_psi,
+          oe_equ_btf, oe_equ_rtf, oe_equ_jm, oe_equ_km,
+          B);
+    } else if (d_oe_plasma_compute.data() && oe_bx_col >= 0) {
       B[0] = d_oe_plasma_compute(icell, oe_bx_col);
       B[1] = d_oe_plasma_compute(icell, oe_by_col);
       B[2] = d_oe_plasma_compute(icell, oe_bz_col);
