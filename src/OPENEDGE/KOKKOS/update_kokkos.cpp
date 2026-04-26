@@ -20,6 +20,7 @@
 #include "stdlib.h"
 #include "string.h"
 #include "update_kokkos.h"
+#include "pusher.h"
 #include "math_const.h"
 #include "particle_kokkos.h"
 #include "modify.h"
@@ -343,8 +344,8 @@ void UpdateKokkos::run(int nsteps)
 
   // OpenEdge: fetch plasma compute view for Boris B-field (bypass fixes)
   // The plasma/fields compute stores bx,by,bz as the first 3 columns
-  if (oe_pusher_subcycles > 0 && sheath_plasma_cidx >= 0) {
-    Compute *cp = modify->compute[sheath_plasma_cidx];
+  if (oe_pusher_subcycles > 0 && pusher->pusher_plasma_cidx >= 0) {
+    Compute *cp = modify->compute[pusher->pusher_plasma_cidx];
     if (!(cp->invoked_flag & INVOKED_PER_GRID)) {
       cp->compute_per_grid();
       cp->invoked_flag |= INVOKED_PER_GRID;
