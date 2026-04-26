@@ -1,6 +1,6 @@
 /* ----------------------------------------------------------------------
    OpenEdge: EIRENE-equivalent analytic sputter formulas and shorthand
-   lookup, for use inside surf_react_pmi (CPU and Kokkos).
+   lookup, used by compute surface/physical/sputter (CPU and Kokkos).
 
    Host/device header shared by the CPU and GPU react() paths.  All
    math is marked with a HOST_DEVICE macro that expands to
