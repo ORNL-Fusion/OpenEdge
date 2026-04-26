@@ -45,7 +45,7 @@ fix fpuff emit/face puff xlo
 # (no weighted variant yet). Combined into one ave/grid so the column
 # layout matches the old c_cmom: cols 1..Nsp = nrho_w, Nsp+1..2Nsp = temp.
 fix pw particle/weight
-compute cden  grid/weighted all all nrho_w
+compute cden  grid/weighted all species nrho_w
 compute ctemp grid          all species temp
 fix    fmom ave/grid all 1 4000 4000 c_cden[*] c_ctemp[*] ave one
 fix    frate ave/grid all 1 4000 4000 f_fchem[*] ave one

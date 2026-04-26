@@ -44,7 +44,7 @@ fix fpuff emit/face puff xlo
 
 # --- Diagnostics ---
 fix pw particle/weight
-compute cden grid/weighted all all nrho_w
+compute cden grid/weighted all species nrho_w
 fix    fden ave/grid all 1 2000 2000 c_cden[*] ave one
 fix    frate ave/grid all 1 2000 2000 f_fchem[*] ave one
 

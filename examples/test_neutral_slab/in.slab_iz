@@ -46,7 +46,7 @@ fix fpuff emit/face puff xlo
 # reduces to plain nrho here (constant-weight emission) but keeps the
 # API consistent with variable-weight decks.
 fix pw particle/weight
-compute cden grid/weighted all all nrho_w
+compute cden grid/weighted all species nrho_w
 fix    fden ave/grid all 1 2000 2000 c_cden[*] ave one
 
 # Ionization source rate (fchem col 1 = count/rate).
