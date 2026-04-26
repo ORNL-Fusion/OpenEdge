@@ -2271,6 +2271,7 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt_full,
     const double L_B   = GCAPusherKokkos::grad_b_length(Bmag, gradBmag_mag);
     if (rho_L > 0.0 && L_B < 1.0e19)
       use_gca = (rho_L < L_B / oe_pusher_gca_switch);
+    use_gca = true;   // Phase C3 DEBUG: force GCA path to confirm dispatch
   }
 
   if (use_gca) {
