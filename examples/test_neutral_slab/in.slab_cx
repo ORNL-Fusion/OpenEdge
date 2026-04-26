@@ -55,9 +55,9 @@ stats_style         step cpu np nscoll nattempt ncoll
 run                 20000
 
 # Dump: id xc yc n_D T_D[K] ion-source-rate CX-source-rate
-# c_cden[1] = n_D (col 1 of grid/weighted nrho_w over D, D+)
-# c_ctemp[1] = T_D in K (col 1 of grid species temp over D, D+)
+# f_fmom layout (concatenated cden + ctemp over D, D+): [1]=n_D
+# [2]=n_D+, [3]=T_D, [4]=T_D+. Pick cols 1 and 3.
 dump d1 grid all 20000 output/slab_cx.grid id xc yc &
-     c_cden[1] c_ctemp[1] f_frate[1] f_frate[3]
+     f_fmom[1] f_fmom[3] f_frate[1] f_frate[3]
 dump_modify d1 pad 6
 run                 0

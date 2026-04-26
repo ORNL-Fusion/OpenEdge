@@ -50,7 +50,7 @@ run                 20000
 
 # Dump: id, xc, yc, n_D2, n_D, n_Dp, ionize_rate, rec_rate, CX_rate, diss_rate
 dump d1 grid all 20000 output/slab_diss.grid id xc yc &
-     c_cden[1] c_cden[2] c_cden[3] &
+     f_fden[1] f_fden[2] f_fden[3] &
      f_frate[1] f_frate[2] f_frate[3] f_frate[4]
 dump_modify d1 pad 6
 run                 0

@@ -69,7 +69,7 @@ def first_col(headers, *names):
 
 def plot_density_decay(case, ax, headers, data, label, color="C0"):
     xc = data[:, col(headers, "xc")]
-    nD = data[:, first_col(headers, "c_cden[1]", "f_fden", "f_fden[1]", "f_fmom[1]")]
+    nD = data[:, first_col(headers, "f_fden[1]", "f_fmom[1]", "c_cden[1]")]
     order = np.argsort(xc)
     ax.plot(xc[order], nD[order], color=color, lw=1.6, label=label)
     ax.set_xlabel("x [m]")
@@ -99,9 +99,10 @@ def plot_recycle(path, outpng):
 def plot_cx(path, outpng):
     headers, d = last_frame(path)
     xc = d[:, col(headers, "xc")]
-    nD = d[:, first_col(headers, "c_cden[1]", "f_fmom[1]")]
+    nD = d[:, first_col(headers, "f_fmom[1]", "c_cden[1]")]
     # compute grid ... species temp returns Kelvin (m <v^2> / (3 kB)).
-    TD_eV = d[:, first_col(headers, "c_ctemp[1]", "f_fmom[2]")] / 11604.525
+    # f_fmom layout: [1]=n_D [2]=n_D+ [3]=T_D [4]=T_D+ (cden then ctemp).
+    TD_eV = d[:, first_col(headers, "f_fmom[3]", "c_ctemp[1]")] / 11604.525
     order = np.argsort(xc)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5), dpi=150)
@@ -122,8 +123,8 @@ def plot_cx(path, outpng):
 def plot_diss(path, outpng):
     headers, d = last_frame(path)
     xc = d[:, col(headers, "xc")]
-    nD2 = d[:, first_col(headers, "c_cden[1]", "f_fden[1]")]
-    nD  = d[:, first_col(headers, "c_cden[2]", "f_fden[2]")]
+    nD2 = d[:, first_col(headers, "f_fden[1]", "c_cden[1]")]
+    nD  = d[:, first_col(headers, "f_fden[2]", "c_cden[2]")]
     order = np.argsort(xc)
 
     fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
