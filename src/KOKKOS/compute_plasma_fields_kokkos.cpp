@@ -47,9 +47,9 @@ void ComputePlasmaFieldsKokkos::sync_equilibrium_to_device()
   const int km = equ_data.km;
 
   if (d_equ_jm != jm || d_equ_km != km) {
-    d_equ_r   = Kokkos::View<double*,  DeviceType>("equ_r",  jm);
-    d_equ_z   = Kokkos::View<double*,  DeviceType>("equ_z",  km);
-    d_equ_psi = Kokkos::View<double**, DeviceType>("equ_psi", km, jm);
+    d_equ_r   = DAT::t_float_1d("equ_r",  jm);
+    d_equ_z   = DAT::t_float_1d("equ_z",  km);
+    d_equ_psi = DAT::t_float_2d_lr("equ_psi", km, jm);
     d_equ_jm = jm;
     d_equ_km = km;
   }
@@ -95,16 +95,16 @@ void ComputePlasmaFieldsKokkos::sync_mesh_to_device()
 
   // Allocate device views once (re-allocate if mesh changed)
   if (d_mesh_ntri != ntri) {
-    d_mesh_vtx_r    = Kokkos::View<double*, DeviceType>("mesh_vtx_r",    nvtx);
-    d_mesh_vtx_z    = Kokkos::View<double*, DeviceType>("mesh_vtx_z",    nvtx);
-    d_mesh_tri      = Kokkos::View<int*,    DeviceType>("mesh_tri",      ntri*3);
-    d_mesh_tri_br   = Kokkos::View<double*, DeviceType>("mesh_tri_br",   ntri);
-    d_mesh_tri_bz   = Kokkos::View<double*, DeviceType>("mesh_tri_bz",   ntri);
-    d_mesh_tri_bt   = Kokkos::View<double*, DeviceType>("mesh_tri_bt",   ntri);
-    d_mesh_tri_rmin = Kokkos::View<double*, DeviceType>("mesh_tri_rmin", ntri);
-    d_mesh_tri_rmax = Kokkos::View<double*, DeviceType>("mesh_tri_rmax", ntri);
-    d_mesh_tri_zmin = Kokkos::View<double*, DeviceType>("mesh_tri_zmin", ntri);
-    d_mesh_tri_zmax = Kokkos::View<double*, DeviceType>("mesh_tri_zmax", ntri);
+    d_mesh_vtx_r    = DAT::t_float_1d("mesh_vtx_r",    nvtx);
+    d_mesh_vtx_z    = DAT::t_float_1d("mesh_vtx_z",    nvtx);
+    d_mesh_tri      = DAT::t_int_1d("mesh_tri",      ntri*3);
+    d_mesh_tri_br   = DAT::t_float_1d("mesh_tri_br",   ntri);
+    d_mesh_tri_bz   = DAT::t_float_1d("mesh_tri_bz",   ntri);
+    d_mesh_tri_bt   = DAT::t_float_1d("mesh_tri_bt",   ntri);
+    d_mesh_tri_rmin = DAT::t_float_1d("mesh_tri_rmin", ntri);
+    d_mesh_tri_rmax = DAT::t_float_1d("mesh_tri_rmax", ntri);
+    d_mesh_tri_zmin = DAT::t_float_1d("mesh_tri_zmin", ntri);
+    d_mesh_tri_zmax = DAT::t_float_1d("mesh_tri_zmax", ntri);
     d_mesh_ntri = ntri;
   }
 
@@ -158,9 +158,9 @@ void ComputePlasmaFieldsKokkos::sync_mesh_to_device()
     const int ntotal = offset[nbins];
 
     if (static_cast<int>(d_hash_offset.extent(0))  != nbins + 1)
-      d_hash_offset  = Kokkos::View<int*, DeviceType>("hash_offset", nbins + 1);
+      d_hash_offset  = DAT::t_int_1d("hash_offset", nbins + 1);
     if (static_cast<int>(d_hash_entries.extent(0)) != ntotal)
-      d_hash_entries = Kokkos::View<int*, DeviceType>("hash_entries", ntotal);
+      d_hash_entries = DAT::t_int_1d("hash_entries", ntotal);
 
     auto h_offset  = Kokkos::create_mirror_view(d_hash_offset);
     auto h_entries = Kokkos::create_mirror_view(d_hash_entries);

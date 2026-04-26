@@ -358,9 +358,9 @@ namespace EquilibriumKokkos {
 KOKKOS_INLINE_FUNCTION
 void query_bfield_at_point(
     const double xyz[3], int dim, int axisymmetric,
-    const Kokkos::View<double*,  DeviceType> &equ_r,
-    const Kokkos::View<double*,  DeviceType> &equ_z,
-    const Kokkos::View<double**, DeviceType> &equ_psi,
+    const DAT::t_float_1d &equ_r,
+    const DAT::t_float_1d &equ_z,
+    const DAT::t_float_2d_lr &equ_psi,
     double btf, double rtf, int jm, int km,
     double B[3])
 {
@@ -427,9 +427,9 @@ void query_bfield_at_point(
 KOKKOS_INLINE_FUNCTION
 bool query_bfield_grad_at_point(
     const double xyz[3], int dim, int axisymmetric,
-    const Kokkos::View<double*,  DeviceType> &equ_r,
-    const Kokkos::View<double*,  DeviceType> &equ_z,
-    const Kokkos::View<double**, DeviceType> &equ_psi,
+    const DAT::t_float_1d &equ_r,
+    const DAT::t_float_1d &equ_z,
+    const DAT::t_float_2d_lr &equ_psi,
     double btf, double rtf, int jm, int km,
     double B[3], double gradBmag[3],
     double kappa[3], double curl_b[3])
@@ -569,18 +569,18 @@ namespace MeshKokkos {
 KOKKOS_INLINE_FUNCTION
 bool query_bfield_at_point(
     const double xyz[3], int dim, int axisymmetric,
-    const Kokkos::View<double*, DeviceType> &mesh_vtx_r,
-    const Kokkos::View<double*, DeviceType> &mesh_vtx_z,
-    const Kokkos::View<int*,    DeviceType> &mesh_tri,
-    const Kokkos::View<double*, DeviceType> &mesh_tri_br,
-    const Kokkos::View<double*, DeviceType> &mesh_tri_bz,
-    const Kokkos::View<double*, DeviceType> &mesh_tri_bt,
-    const Kokkos::View<double*, DeviceType> &mesh_tri_rmin,
-    const Kokkos::View<double*, DeviceType> &mesh_tri_rmax,
-    const Kokkos::View<double*, DeviceType> &mesh_tri_zmin,
-    const Kokkos::View<double*, DeviceType> &mesh_tri_zmax,
-    const Kokkos::View<int*,    DeviceType> &hash_offset,
-    const Kokkos::View<int*,    DeviceType> &hash_entries,
+    const DAT::t_float_1d &mesh_vtx_r,
+    const DAT::t_float_1d &mesh_vtx_z,
+    const DAT::t_int_1d &mesh_tri,
+    const DAT::t_float_1d &mesh_tri_br,
+    const DAT::t_float_1d &mesh_tri_bz,
+    const DAT::t_float_1d &mesh_tri_bt,
+    const DAT::t_float_1d &mesh_tri_rmin,
+    const DAT::t_float_1d &mesh_tri_rmax,
+    const DAT::t_float_1d &mesh_tri_zmin,
+    const DAT::t_float_1d &mesh_tri_zmax,
+    const DAT::t_int_1d &hash_offset,
+    const DAT::t_int_1d &hash_entries,
     double hash_rmin, double hash_zmin,
     double hash_dr,   double hash_dz,
     int hash_nr, int hash_nz, int ntri,

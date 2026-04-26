@@ -112,9 +112,9 @@ class UpdateKokkos : public Update {
   // oe_has_equilibrium = 1, oe_boris3d uses bilinear point-query off the
   // psi grid; otherwise it falls back to cell-center reads from
   // d_oe_plasma_compute.
-  Kokkos::View<double*,  DeviceType> d_oe_equ_r;
-  Kokkos::View<double*,  DeviceType> d_oe_equ_z;
-  Kokkos::View<double**, DeviceType> d_oe_equ_psi;
+  DAT::t_float_1d d_oe_equ_r;
+  DAT::t_float_1d d_oe_equ_z;
+  DAT::t_float_2d_lr d_oe_equ_psi;
   double oe_equ_btf, oe_equ_rtf;
   int oe_equ_jm, oe_equ_km;
   int oe_has_equilibrium;
@@ -122,18 +122,18 @@ class UpdateKokkos : public Update {
 
   // OpenEdge: device-resident triangulation B (Phase B). Mesh path takes
   // precedence over equilibrium when both are loaded — matches CPU.
-  Kokkos::View<double*, DeviceType> d_oe_mesh_vtx_r;
-  Kokkos::View<double*, DeviceType> d_oe_mesh_vtx_z;
-  Kokkos::View<int*,    DeviceType> d_oe_mesh_tri;
-  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_br;
-  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_bz;
-  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_bt;
-  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_rmin;
-  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_rmax;
-  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_zmin;
-  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_zmax;
-  Kokkos::View<int*,    DeviceType> d_oe_hash_offset;
-  Kokkos::View<int*,    DeviceType> d_oe_hash_entries;
+  DAT::t_float_1d d_oe_mesh_vtx_r;
+  DAT::t_float_1d d_oe_mesh_vtx_z;
+  DAT::t_int_1d d_oe_mesh_tri;
+  DAT::t_float_1d d_oe_mesh_tri_br;
+  DAT::t_float_1d d_oe_mesh_tri_bz;
+  DAT::t_float_1d d_oe_mesh_tri_bt;
+  DAT::t_float_1d d_oe_mesh_tri_rmin;
+  DAT::t_float_1d d_oe_mesh_tri_rmax;
+  DAT::t_float_1d d_oe_mesh_tri_zmin;
+  DAT::t_float_1d d_oe_mesh_tri_zmax;
+  DAT::t_int_1d d_oe_hash_offset;
+  DAT::t_int_1d d_oe_hash_entries;
   double oe_mesh_hash_rmin, oe_mesh_hash_zmin;
   double oe_mesh_hash_dr,   oe_mesh_hash_dz;
   int    oe_mesh_hash_nr,   oe_mesh_hash_nz;
