@@ -44,6 +44,6 @@ fix pw              particle/weight
 compute ctemp       grid all species temp
 compute TavgD       reduce ave c_ctemp[1]
 
-stats               50
+stats               100
 stats_style         step cpu np c_TavgD
-run                 10000
+run                 30000
