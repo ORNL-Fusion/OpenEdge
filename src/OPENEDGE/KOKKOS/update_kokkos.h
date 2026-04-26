@@ -153,6 +153,7 @@ class UpdateKokkos : public Update {
 
   // OpenEdge: Boris config
   int oe_pusher_subcycles;
+  int oe_pusher_mode;     // 0=Boris, 1=hybrid Boris/GCA (Pusher::PUSHER_*)
   double oe_echarge;
 
   KKCopy<GridKokkos> grid_kk_copy;
@@ -243,6 +244,15 @@ class UpdateKokkos : public Update {
   void oe_boris3d(int i, int icell, double dt_full,
                   double *x, double *v, double *xnew,
                   double charge, double mass) const;
+
+  // OpenEdge: device-callable hybrid Boris/GCA dispatcher (Phase C3).
+  // Per-particle: chooses GCA when rho_L < L_B / pusher_gca_switch,
+  // falls back to subcycled Boris otherwise. Reads/writes the
+  // persistent GCA state (gca_x/y/z/vpar/mu/on) bound by Phase C2.
+  KOKKOS_INLINE_FUNCTION
+  void oe_hybrid3d(int i, int icell, double dt_full,
+                   double *x, double *v, double *xnew,
+                   double charge, double mass) const;
 
   KOKKOS_INLINE_FUNCTION
   int split3d(int, double*) const;

@@ -263,6 +263,7 @@ void UpdateKokkos::init()
 
   // OpenEdge: Boris config — read B/E directly from plasma compute view
   oe_pusher_subcycles = pusher->pusher_subcycles;
+  oe_pusher_mode = pusher->pusher_mode;
   oe_echarge = echarge;
   oe_bx_col = oe_by_col = oe_bz_col = -1;
   oe_ex_col = oe_ey_col = oe_ez_col = -1;
@@ -976,12 +977,15 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   if (DIM < 3) xnew[2] = 0.0;
   if (pflag == PKEEP) {
     dtremain = dt;
-    // OpenEdge: use Boris pusher when B-field is active with subcycling
+    // OpenEdge: dispatch to hybrid Boris/GCA when mode==hybrid, else Boris
     if (DIM == 3 && oe_pusher_subcycles > 0 && d_oe_plasma_compute.data()) {
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
-      oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      if (oe_pusher_mode == 1)
+        oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      else
+        oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
     } else {
       xnew[0] = x[0] + dtremain*v[0];
       xnew[1] = x[1] + dtremain*v[1];
@@ -994,12 +998,15 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
     }
   } else if (pflag == PINSERT) {
     dtremain = particle_i.dtremain;
-    // OpenEdge: Boris for newly inserted particles too
+    // OpenEdge: same hybrid/Boris dispatch for newly inserted particles
     if (DIM == 3 && oe_pusher_subcycles > 0 && d_oe_plasma_compute.data()) {
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
-      oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      if (oe_pusher_mode == 1)
+        oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      else
+        oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
     } else {
       xnew[0] = x[0] + dtremain*v[0];
       xnew[1] = x[1] + dtremain*v[1];
@@ -2163,6 +2170,142 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
 
   v[0] = vcur[0]; v[1] = vcur[1]; v[2] = vcur[2];
   xnew[0] = xcur[0]; xnew[1] = xcur[1]; xnew[2] = xcur[2];
+}
+
+/* ----------------------------------------------------------------------
+   OpenEdge Phase C3: device-callable hybrid Boris/GCA dispatcher.
+   Mirrors the no-sheath core of CPU Pusher::push_hybrid_3d:
+     - reads B + grad|B| + kappa + curl(b_hat) at particle position
+       (equilibrium psi map preferred; mesh and cell-center fall-throughs
+       give B-only and so disable the GCA branch for that particle).
+     - per-particle decision: GCA when rho_L < L_B / pusher_gca_switch,
+       else subcycled Boris fallback.
+     - persistent GCA state read/written through C2 device views.
+   Sheath E-field stays out of this port — Phase D.
+------------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt_full,
+                                double *x, double *v, double *xnew,
+                                double charge, double mass) const
+{
+  // Neutrals: pure advection
+  if (charge == 0.0) {
+    xnew[0] = x[0] + v[0] * dt_full;
+    xnew[1] = x[1] + v[1] * dt_full;
+    xnew[2] = x[2] + v[2] * dt_full;
+    return;
+  }
+
+  const double qm = (charge * oe_echarge) / mass;
+  const double qm_abs = Kokkos::fabs(qm);
+
+  // --- Read B + (optionally) grad|B|, kappa, curl(b_hat) ---
+  double E[3] = {0.0, 0.0, 0.0};
+  double B[3] = {0.0, 0.0, 0.0};
+  double gradBmag[3] = {0.0, 0.0, 0.0};
+  double kappa[3]    = {0.0, 0.0, 0.0};
+  double curl_b[3]   = {0.0, 0.0, 0.0};
+
+  bool have_grad = false;
+  if (oe_has_equilibrium) {
+    have_grad = EquilibriumKokkos::query_bfield_grad_at_point(
+        x, oe_dim, oe_axisymmetric,
+        d_oe_equ_r, d_oe_equ_z, d_oe_equ_psi,
+        oe_equ_btf, oe_equ_rtf, oe_equ_jm, oe_equ_km,
+        B, gradBmag, kappa, curl_b);
+  }
+  bool got_B = have_grad;
+  if (!got_B && oe_has_mesh_b) {
+    got_B = MeshKokkos::query_bfield_at_point(
+        x, oe_dim, oe_axisymmetric,
+        d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
+        d_oe_mesh_tri_br, d_oe_mesh_tri_bz, d_oe_mesh_tri_bt,
+        d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
+        d_oe_mesh_tri_zmin, d_oe_mesh_tri_zmax,
+        d_oe_hash_offset, d_oe_hash_entries,
+        oe_mesh_hash_rmin, oe_mesh_hash_zmin,
+        oe_mesh_hash_dr,   oe_mesh_hash_dz,
+        oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri,
+        B);
+  }
+  if (!got_B && d_oe_plasma_compute.data() && oe_bx_col >= 0) {
+    B[0] = d_oe_plasma_compute(icell, oe_bx_col);
+    B[1] = d_oe_plasma_compute(icell, oe_by_col);
+    B[2] = d_oe_plasma_compute(icell, oe_bz_col);
+  }
+
+  const double Bmag = Kokkos::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
+  const double gradBmag_mag = Kokkos::sqrt(gradBmag[0]*gradBmag[0]
+                                         + gradBmag[1]*gradBmag[1]
+                                         + gradBmag[2]*gradBmag[2]);
+
+  // --- Decide GCA vs Boris fallback per particle ---
+  bool use_gca = false;
+  if (have_grad && Bmag > 0.0 && qm_abs > 0.0 && oe_has_gca_state) {
+    const double bhx = B[0]/Bmag, bhy = B[1]/Bmag, bhz = B[2]/Bmag;
+    double v_perp = 0.0;
+    if (d_oe_gca_on(i) > 0.5) {
+      const double mu_eff = (d_oe_gca_mu(i) > 0.0) ? d_oe_gca_mu(i) : 0.0;
+      const double vperp2 = (2.0 * mu_eff * Bmag) / mass;
+      v_perp = (vperp2 > 0.0) ? Kokkos::sqrt(vperp2) : 0.0;
+    } else {
+      const double v_par = v[0]*bhx + v[1]*bhy + v[2]*bhz;
+      const double v2 = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
+      double vperp2 = v2 - v_par*v_par;
+      if (vperp2 < 0.0) vperp2 = 0.0;
+      v_perp = Kokkos::sqrt(vperp2);
+    }
+    const double rho_L = GCAPusherKokkos::larmor_radius(v_perp, qm_abs, Bmag);
+    const double L_B   = GCAPusherKokkos::grad_b_length(Bmag, gradBmag_mag);
+    if (rho_L > 0.0 && L_B < 1.0e19)
+      use_gca = (rho_L < L_B / oe_pusher_gca_switch);
+  }
+
+  if (use_gca) {
+    GCAPusherKokkos::GCAState st;
+    if (d_oe_gca_on(i) > 0.5) {
+      st.X[0]  = d_oe_gca_x(i);
+      st.X[1]  = d_oe_gca_y(i);
+      st.X[2]  = d_oe_gca_z(i);
+      st.v_par = d_oe_gca_vpar(i);
+      st.mu    = (d_oe_gca_mu(i) > 0.0) ? d_oe_gca_mu(i) : 0.0;
+    } else {
+      st = GCAPusherKokkos::init_from_particle(x, v, mass, B);
+    }
+    GCAPusherKokkos::push_gca_rk4(qm, dt_full, mass, E, B, Bmag,
+                                  gradBmag, kappa, curl_b, st);
+    d_oe_gca_x(i)    = st.X[0];
+    d_oe_gca_y(i)    = st.X[1];
+    d_oe_gca_z(i)    = st.X[2];
+    d_oe_gca_vpar(i) = st.v_par;
+    d_oe_gca_mu(i)   = st.mu;
+    d_oe_gca_on(i)   = 1.0;
+
+    // Reconstruct full v from GC state for diagnostics + Boris fallback.
+    // Phase derived from particle ID alone (deterministic, no ntimestep
+    // capture from device). Slightly different from CPU's id+omega*dt
+    // mixing, but adequate for orbit shape + future Boris fallback.
+    const double phi_golden = 0.6180339887498949;
+    const double pid = static_cast<double>(d_particles(i).id);
+    double phase_turns = pid * phi_golden;
+    const double rand_u = phase_turns - Kokkos::floor(phase_turns);
+    GCAPusherKokkos::gca_to_particle(st, B, mass, rand_u, xnew, v);
+  } else {
+    if (oe_has_gca_state) d_oe_gca_on(i) = 0.0;
+    const int nsub = (oe_pusher_subcycles > 0) ? oe_pusher_subcycles : 1;
+    const double dt_sub = dt_full / static_cast<double>(nsub);
+    double xcur[3] = {x[0], x[1], x[2]};
+    double vcur[3] = {v[0], v[1], v[2]};
+    for (int s = 0; s < nsub; s++) {
+      BorisGridKokkos::push_velocity(qm, dt_sub, E, B, vcur);
+      xcur[0] += vcur[0] * dt_sub;
+      xcur[1] += vcur[1] * dt_sub;
+      xcur[2] += vcur[2] * dt_sub;
+    }
+    v[0] = vcur[0]; v[1] = vcur[1]; v[2] = vcur[2];
+    xnew[0] = xcur[0]; xnew[1] = xcur[1]; xnew[2] = xcur[2];
+  }
 }
 
 /* ---------------------------------------------------------------------- */
