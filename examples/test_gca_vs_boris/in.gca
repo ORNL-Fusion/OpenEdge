@@ -1,0 +1,37 @@
+# Khan-orbit pusher validation — hybrid Boris/GCA.
+# Same setup as in.boris but with GCA enabled (gca_switch 2.5).
+
+seed                12345
+dimension           3
+boundary            o o o
+global              gridcut 0.0 comm/sort no
+global              fnum 1
+
+create_box          -2.0 2.0 -2.0 2.0 -2.0 2.0
+create_grid         10 10 10
+balance_grid        rcb part
+
+species             input/plasma.species H+
+mixture             ions H+ frac 1.0
+
+read_particles      input/source.single 0
+
+fix                 pd background file khan_plasma.h5 static yes
+compute pfields plasma/fields all background pd br bt bz
+
+# ---- Hybrid Boris/GCA. gca_switch 2.5 picks GCA when ρ_L/L_B < 1/2.5.
+# Same dt and run length as in.boris for direct apples-to-apples compare.
+global pusher plasma pfields mode hybrid gca_switch 2.5 &
+       subcycles 1 bad_dt_check yes bad_dt_limit 0.5 dump no
+
+variable dt         equal 5e-10
+variable numStep    equal 600000
+variable dumpFreq   equal 300
+
+dump dpart particle all ${dumpFreq} output/traj.gca id type x y z vx vy vz
+dump_modify dpart first yes
+
+timestep            ${dt}
+stats               5000
+stats_style         step cpu np
+run                 ${numStep}
