@@ -18,15 +18,15 @@ broken; — = no Kokkos version yet.
 These run per-particle every step on the impurity hot path. Without
 Kokkos versions, GPU runs shuttle particles host↔device on each step.
 
-| Style | Effort | Notes |
+| Style | Status | Notes |
 |---|---|---|
-| `fix coulomb/binary/kk` | ~1 week | replaces deleted `coll/nanbu/kk`; partial reuse possible |
-| `fix coulomb/background/kk` | ~1 week | as above |
-| `fix force/thermal/kk` | 2–3 days | per-particle, point-query plasma |
-| `fix cross_field_diffusion/kk` | 2–3 days | per-particle random walk + pinch |
-| `surf_react surface/pwi/kk` | ~1 week | TRIM table interpolation, branch-heavy |
-| `fix surface/emit/source/kk` | 2–3 days | per-segment Bohm-flux source |
-| `fix background/kk` | ~3 days | mesh interpolation kernels (already mostly device-side via plasma/fields) |
+| `fix force/thermal/kk` | skeleton | file registered, host-fallback `kick_half`; kernel pending |
+| `fix coulomb/binary/kk` | not started | replaces deleted `coll/nanbu/kk`; per-cell pairing kernel |
+| `fix coulomb/background/kk` | not started | virtual-partner version of above |
+| `fix cross_field_diffusion/kk` | not started | per-particle Gaussian + pinch |
+| `surf_react surface/pwi/kk` | not started | TRIM table interp, branch-heavy |
+| `fix surface/emit/source/kk` | not started | per-segment Bohm-flux source |
+| `fix background/kk` | not started | mesh interp kernels |
 
 ## Missing — lower priority
 

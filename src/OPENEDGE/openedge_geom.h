@@ -3,6 +3,13 @@
 
 #include <cmath>
 
+// Make the helpers callable from device kernels when Kokkos is in scope.
+// Falls back to plain `inline` on CPU-only builds, so this header has no
+// hard dependency on Kokkos.
+#ifndef KOKKOS_INLINE_FUNCTION
+#define KOKKOS_INLINE_FUNCTION inline
+#endif
+
 namespace OpenEdge {
 
 // Maps a SPARTA position (xyz from particle->x or surf line endpoint) to
@@ -14,8 +21,9 @@ namespace OpenEdge {
 // The 2D-axisymmetric layout is enforced by SPARTA: `boundary o a p` requires
 // the `a` token at ylo, with boxlo[1] == 0 and y the radial direction
 // (domain.cpp:174-182, create_box.cpp:55).
-inline void sparta_to_RZ(const double *xyz, int dim, bool axisymmetric,
-                          double &R, double &Z) {
+KOKKOS_INLINE_FUNCTION
+void sparta_to_RZ(const double *xyz, int dim, bool axisymmetric,
+                  double &R, double &Z) {
   if (axisymmetric) {            // x = Z (axis), y = R (radial)
     Z = xyz[0];
     R = xyz[1];
@@ -31,9 +39,10 @@ inline void sparta_to_RZ(const double *xyz, int dim, bool axisymmetric,
 // Decompose a physical cylindrical force (F_R, F_Z, F_phi) onto SPARTA's
 // (Fx, Fy, Fz) slots. In 3D the azimuth `phi = atan2(y, x)` of the particle
 // is needed to project R/phi onto Cartesian X/Y; pass 0 when irrelevant.
-inline void RZphi_force_to_sparta(double FR, double FZ, double Fphi,
-                                   int dim, bool axisymmetric, double phi,
-                                   double &fx, double &fy, double &fz) {
+KOKKOS_INLINE_FUNCTION
+void RZphi_force_to_sparta(double FR, double FZ, double Fphi,
+                           int dim, bool axisymmetric, double phi,
+                           double &fx, double &fy, double &fz) {
   if (axisymmetric) {            // SPARTA slots: x=Z, y=R, z=phi
     fx = FZ;
     fy = FR;
@@ -53,8 +62,9 @@ inline void RZphi_force_to_sparta(double FR, double FZ, double Fphi,
 
 // Inverse: SPARTA velocity slots back to cylindrical (vR, vZ, vphi). Mirror
 // of RZphi_force_to_sparta. Used when reading particle->v in physics code.
-inline void sparta_v_to_RZphi(const double *v, int dim, bool axisymmetric,
-                               double phi, double &vR, double &vZ, double &vphi) {
+KOKKOS_INLINE_FUNCTION
+void sparta_v_to_RZphi(const double *v, int dim, bool axisymmetric,
+                       double phi, double &vR, double &vZ, double &vphi) {
   if (axisymmetric) {
     vZ = v[0];
     vR = v[1];
