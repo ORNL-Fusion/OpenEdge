@@ -173,11 +173,11 @@ fix     fwden ave/grid all 1 ${Ndump} ${Ndump} c_cwden[*] ave one
 fix     fadapt adapt 200 all refine particle 500 0 maxlevel 8 cells 2 2 1
 fix     fbal balance 100 1.05 rcb part
 
-run              1 #   ${Nwarm}
+run              ${Nwarm}
 
 # Production window: dump grid density per W charge state + volume.
 #dump    dwden grid all ${Ndump} output/grid.dens.${tag}.west id xc yc vol f_fwden[*]
 dump    dpart particle all ${Nphase} output/state.${tag}.west.final id type x y z vx vy vz
 dump_modify dpart first no
 
-run           1000 #    ${Nphase}
+run           ${Nphase}
