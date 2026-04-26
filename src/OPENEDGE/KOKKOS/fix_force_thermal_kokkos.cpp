@@ -13,10 +13,10 @@ FixForceThermalKokkos::FixForceThermalKokkos(SPARTA *sparta, int narg,
                                              char **arg) :
   FixForceThermal(sparta, narg, arg)
 {
-  kokkosable = 1;
-  // The CPU base sets per-particle data masks; the Kokkos backend doesn't
-  // currently push any work to device, so leave datamask_read /
-  // datamask_modify as the parent already configured them.
+  kokkos_flag = 0;  // host-fallback: needs auto-sync from device
+  // The CPU base sets per-particle data masks; this Kokkos shim doesn't
+  // run on device yet, so leave datamask_read / datamask_modify as the
+  // parent already configured them.
 }
 
 /* ---------------------------------------------------------------------- */
