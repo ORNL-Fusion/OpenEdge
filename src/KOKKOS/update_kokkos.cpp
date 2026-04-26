@@ -303,15 +303,6 @@ void UpdateKokkos::init()
     d_oe_gca_on   = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_on_custom]].k_view.d_view;
     oe_has_gca_state = 1;
   }
-
-  // One-shot Phase C3 diagnostic: confirm the dispatch path is wired.
-  if (comm->me == 0 && screen)
-    fprintf(screen,
-            "oe_kokkos init: mode=%d gca_switch=%g has_equ=%d has_mesh_b=%d "
-            "has_gca_state=%d gca_x_custom=%d\n",
-            oe_pusher_mode, oe_pusher_gca_switch,
-            oe_has_equilibrium, oe_has_mesh_b,
-            oe_has_gca_state, pusher->gca_x_custom);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -446,6 +437,17 @@ void UpdateKokkos::run(int nsteps)
       oe_mesh_ntri       = cp_pf->d_mesh_ntri;
       oe_has_mesh_b      = 1;
     }
+  }
+
+  // One-shot Phase C3 diagnostic at run-time (after binding completes).
+  static int oe_diag_once = 0;
+  if (!oe_diag_once && comm->me == 0 && screen) {
+    fprintf(screen,
+            "oe_kokkos run: mode=%d gca_switch=%g has_equ=%d has_mesh_b=%d "
+            "has_gca_state=%d\n",
+            oe_pusher_mode, oe_pusher_gca_switch,
+            oe_has_equilibrium, oe_has_mesh_b, oe_has_gca_state);
+    oe_diag_once = 1;
   }
 
   // cellweightflag = 1 if grid-based particle weighting is ON
