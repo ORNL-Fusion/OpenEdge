@@ -40,14 +40,10 @@ mixture           species O   frac 0
 
 create_particles  species n 2000
 
-# ---- Uniform plasma background ----
-compute           pfields plasma/fields all constant &
-                  temp_e ${Tev} dens_e $n &
-                  values temp_e dens_e
-
-# Register the plasma provider so volume/chem/adas can read the
-# per-particle Te/ne cache populated by update.cpp.
-global            pusher plasma pfields
+# ---- Uniform plasma background via fix background ----
+# Provides Te/ne in the per-particle pcache populated by update.cpp.
+fix bg            background constant te ${Tev} ne $n
+global            pusher plasma bg
 
 # ---- Volumetric ionization + recombination ----
 fix fchem volume/chem/adas 1 O plasma.reactions &

@@ -25,17 +25,14 @@ species             input/neutral_diss.species D2 D D+
 mixture             puff D2 frac 1.0 nrho 1e18 temp 350.0 &
                     vstream 1.2e4 0.0 0.0
 
-# --- Uniform plasma via compute plasma/fields constant ---
+# --- Uniform plasma background via fix background ---
 # Dissociation rate depends on Te and ne (via nu = ne * <sv>_diss).
 # Janev polynomial uses Te; ne multiplied into lambda at runtime.
-compute             pfields plasma/fields all constant &
-                    temp_e 15.0 dens_e 1.0e19 &
-                    temp_i 15.0 dens_i 1.0e19 &
-                    values temp_e dens_e
+fix pd              background constant te 15.0 ne 1.0e19 ti 15.0
+global              pusher plasma pd
 
-# --- Dissociation only (fix chem/adas) ---
+# --- Dissociation only (fix volume/chem/adas) ---
 fix fchem volume/chem/adas 1 D input/neutral_diss.reactions &
-    plasma c_pfields[1] c_pfields[2] &
     mode neutral source_species D2 &
     units rate
 
