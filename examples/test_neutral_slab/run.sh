@@ -17,5 +17,6 @@ done
 
 wait
 python3 plot_slab.py composite
+python3 plot_slab.py thermalization
 echo "all 4 cases done"
 ls -l output/slab_*.grid *.png 2>/dev/null

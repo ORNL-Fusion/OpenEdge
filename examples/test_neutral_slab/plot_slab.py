@@ -191,6 +191,65 @@ PLOTTERS = {"iz": plot_iz, "recycle": plot_recycle,
             "cx": plot_cx, "diss": plot_diss}
 
 
+# -----------------------------------------------------------------------
+# CX thermalization: T_D(t) parsed from log.cx stats output
+# -----------------------------------------------------------------------
+def parse_log_stats(log_path, columns):
+    """Parse SPARTA-style stats blocks from a log file.
+
+    Looks for the most recent header line containing every name in
+    `columns` (whitespace-separated) and returns numeric arrays for
+    each column until the next blank/non-numeric line.
+    """
+    with open(log_path) as f:
+        lines = f.readlines()
+    # find header row that has all requested column names
+    header_idx = -1
+    for i, ln in enumerate(lines):
+        toks = ln.split()
+        if all(c in toks for c in columns):
+            header_idx = i
+    if header_idx < 0:
+        raise ValueError(f"no stats header with {columns} in {log_path}")
+    header = lines[header_idx].split()
+    idx = [header.index(c) for c in columns]
+    data = []
+    for ln in lines[header_idx + 1:]:
+        toks = ln.split()
+        if not toks:
+            break
+        try:
+            row = [float(toks[k]) for k in idx]
+        except (ValueError, IndexError):
+            break
+        data.append(row)
+    return np.array(data)
+
+
+def plot_thermalization(base, outpng, dt=2e-8, Ti_eV=50.0):
+    """T_D(t) from log.cx stats; cross-checks CX equilibration timescale."""
+    log = base / "log.cx"
+    if not log.exists():
+        print(f"missing: {log} — run in.slab_cx first.")
+        sys.exit(1)
+    arr = parse_log_stats(log, ["Step", "c_TavgD"])
+    if arr.size == 0:
+        print(f"no rows parsed from {log}")
+        sys.exit(1)
+    t  = arr[:, 0] * dt * 1e6      # us
+    TD = arr[:, 1] / 11604.525     # K -> eV
+
+    fig, ax = plt.subplots(figsize=(7, 4.5), constrained_layout=True)
+    ax.plot(t, TD, color="C0")
+    ax.axhline(Ti_eV, color="0.5", ls="--", lw=0.9,
+               label=fr"$T_i = {Ti_eV:g} \; \mathrm{{eV}}$")
+    ax.set_xlabel(r"$t \; (\mathrm{\mu s})$")
+    ax.set_ylabel(r"$\langle T_D \rangle \; (\mathrm{eV})$")
+    ax.set_title(r"CX thermalization: domain-averaged $T_D(t) \to T_i$")
+    ax.legend()
+    fig.savefig(outpng); print(f"wrote {outpng}")
+
+
 def plot_composite(base, outpng):
     """2x2 panel for the slide: iz | recycle / cx-T_D | diss."""
     paths = {c: base / "output" / f"slab_{c}.grid" for c in CASES}
@@ -240,17 +299,18 @@ def plot_composite(base, outpng):
 
 
 def main():
-    if len(sys.argv) != 2:
-        print(f"usage: python3 plot_slab.py {'|'.join(CASES)}|composite")
+    modes = list(CASES) + ["composite", "thermalization"]
+    if len(sys.argv) != 2 or sys.argv[1] not in modes:
+        print(f"usage: python3 plot_slab.py {'|'.join(modes)}")
         sys.exit(1)
     arg = sys.argv[1]
     base = Path(__file__).resolve().parent
     if arg == "composite":
         plot_composite(base, base / "slab_validation_2x2.png")
         return
-    if arg not in CASES:
-        print(f"usage: python3 plot_slab.py {'|'.join(CASES)}|composite")
-        sys.exit(1)
+    if arg == "thermalization":
+        plot_thermalization(base, base / "cx_thermalization.png")
+        return
     src = base / "output" / f"slab_{arg}.grid"
     if not src.exists():
         print(f"missing: {src} — run the deck first.")

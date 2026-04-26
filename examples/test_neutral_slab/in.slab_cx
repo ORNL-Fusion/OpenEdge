@@ -50,8 +50,12 @@ compute ctemp grid          all species temp
 fix    fmom ave/grid all 1 4000 4000 c_cden[*] c_ctemp[*] ave one
 fix    frate ave/grid all 1 4000 4000 f_fchem[*] ave one
 
+# Domain-averaged D temperature for time-domain thermalization plot.
+# c_ctemp[1] = T_D per cell; reduce ave -> single scalar in K.
+compute             TavgD reduce ave c_ctemp[1]
+
 stats               500
-stats_style         step cpu np nscoll nattempt ncoll
+stats_style         step cpu np nscoll nattempt ncoll c_TavgD
 run                 20000
 
 # Dump: id xc yc n_D T_D[K] ion-source-rate CX-source-rate
