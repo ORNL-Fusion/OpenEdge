@@ -1,150 +1,83 @@
-# Copyright 2023–2025, OpenEdge contributors
-# Author: Abdou Diaw 
+"""Plot O charge-state fractional abundance vs time from log.openedge.
 
-import os
+Parses the stats block produced by `in.ionization_recombination`:
+    Step cpu np c_n0 c_n1 ... c_n8
+where c_n<k> is the cell-averaged number density of O^(k+).
+"""
+
+import re
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
-from typing import Optional
 
 
-# ----------------------------
-# Parsing
-# ----------------------------
-def parse_data_openedge(file_path: str, n_species: int) -> pd.DataFrame:
-    """
-    Parse OpenEdge 'tmp.grid.*' text output into a tidy DataFrame.
-    Columns: Timestep, Cell ID, xc, yc, f_1[1..n_species]
-    """
-    with open(file_path, 'r') as f:
+DT      = 1e-7         # must match the deck's `variable dt`
+LOGFILE = "log.openedge"
+OUTPNG  = "oxygen_balance.png"
+ELEMENT = "O"
+COLS    = [f"c_n{k}" for k in range(9)]   # n0 = O, n1 = O+, ... n8 = O8+
+
+
+def parse_stats(path):
+    """Return (step, {col: array}) scraped from the SPARTA stats block."""
+    with open(path) as f:
         lines = f.readlines()
 
-    data = []
-    cur_ts = None
-    reading_cells = False
+    header = None
+    rows = []
+    in_block = False
+    for line in lines:
+        s = line.strip()
+        if not in_block:
+            if s.startswith("Step ") and all(c in s for c in COLS):
+                header = s.split()
+                in_block = True
+            continue
+        if not s or s.startswith("Loop time") or re.match(r"^[A-Za-z]", s):
+            in_block = False
+            header = None
+            continue
+        parts = s.split()
+        if len(parts) != len(header):
+            continue
+        try:
+            rows.append([float(x) for x in parts])
+        except ValueError:
+            continue
 
-    for i, line in enumerate(lines):
-        if line.startswith('ITEM: TIMESTEP'):
-            reading_cells = False
-            try:
-                cur_ts = int(lines[i + 1].strip())
-            except Exception:
-                cur_ts = None
-        elif line.startswith('ITEM: CELLS'):
-            reading_cells = True
-        elif reading_cells:
-            parts = line.split()
-            if len(parts) >= 4:
-                cell_id, xc, yc, *rest = parts
-                # take only n_species columns (OpenEdge may print more)
-                fvals = [float(x) for x in rest[:n_species]]
-                data.append([cur_ts, int(cell_id), float(xc), float(yc)] + fvals)
+    if not rows:
+        raise RuntimeError(f"No stats rows found in {path}")
 
-    cols = ['Timestep', 'Cell ID', 'xc', 'yc'] + [f'f_1[{i}]' for i in range(1, n_species + 1)]
-    return pd.DataFrame(data, columns=cols)
-
-# ----------------------------
-# Plotting
-# ----------------------------
-def plot_ionization_balance(df: pd.DataFrame,
-                            material: str,
-                            n_species: int,
-                            dt: float,
-                            save_path: Optional[str] = None,
-                            title: Optional[str] = None):
-    """
-    Plot fractional abundances vs time (ms) from OpenEdge output.
-    Colors are consistent across species; no reversal.
-    """
-    # LaTeX-like labels: X, X^{1+}, ..., X^{Z+}
-    species_labels = [material] + [fr"${material}^{{{i}+}}$" for i in range(1, n_species)]
-
-    # 10 distinct colors (repeat if n_species > 10)
-    cmap = plt.get_cmap('tab10')
-    colors = [cmap(i % 10) for i in range(n_species)]
-
-    fig, ax = plt.subplots(1, 1, figsize=(6, 3), dpi=300)
-    ax.tick_params(axis='both', direction='in')
-
-    # Stable normalization by the max of ground-state column (fall back to 1)
-    denom_series = df.get('f_1[1]')
-    denom = float(np.max(denom_series)) if denom_series is not None and np.max(denom_series) != 0 else 1.0
-
-    t_ms = df['Timestep'].to_numpy(dtype=float) * dt * 1e3
-
-    for s in range(n_species):
-        col = colors[s]
-        y = df[f'f_1[{s+1}]'].to_numpy(dtype=float) / denom
-        ax.semilogx(t_ms, y, '-', lw=2, color=col)
-
-    # Legends
-    species_handles = [Line2D([0], [0], color=colors[s], lw=2) for s in range(n_species)]
-    leg_species = ax.legend(handles=species_handles, labels=species_labels,
-                            fontsize=14, frameon=False, loc='lower left')
-    ax.add_artist(leg_species)
-
-    style_handles = [Line2D([0], [0], color='k', lw=2, linestyle='-', label='OpenEdge')]
-    ax.legend(handles=style_handles, fontsize=14, frameon=False, loc='upper right')
-
-    ax.set_xlabel('Time (ms)', fontsize=14, fontname='Times New Roman')
-    ax.set_ylabel('Fractional abundance (-)', fontsize=14, fontname='Times New Roman')
-    ax.grid(True, which="both", ls="--", linewidth=0.5, alpha=0.5)
-    plt.xticks(fontsize=14)
-    plt.yticks(fontsize=14)
-    if title:
-        ax.set_title(title, fontsize=14)
-
-    if save_path:
-        plt.savefig(save_path, format='png', dpi=300, bbox_inches='tight')
-    else:
-        plt.show()
-
-# ----------------------------
-# Selection helper
-# ----------------------------
+    arr = np.array(rows)
+    cols = {name: arr[:, i] for i, name in enumerate(header)}
+    return cols["Step"].astype(int), cols
 
 
-def load_and_plot(element: str,
-                  base_path: str,
-                  n_species: Optional[int] = None,
-                  dt: Optional[float] = None,
-                  save_path: Optional[str] = None):
-    """
-    Choose which element to load/plot. You can override n_species and dt.
-    """
-    element = element.upper()
-    if element not in ELEMENTS:
-        raise ValueError(f"Unknown element '{element}'. Options: {list(ELEMENTS)}")
+def main():
+    step, cols = parse_stats(LOGFILE)
+    t_ms = step * DT * 1e3
 
-    cfg = ELEMENTS[element].copy()
-    if n_species is not None:
-        cfg['n_species'] = n_species
-    if dt is not None:
-        cfg['dt'] = dt
+    n = np.vstack([cols[c] for c in COLS])
+    total = n.sum(axis=0)
+    frac = n / np.where(total > 0, total, 1.0)
 
-    fpath = os.path.join(base_path, cfg['file'])
-    if not os.path.isfile(fpath):
-        raise FileNotFoundError(f"Could not find file: {fpath}")
+    cmap = plt.get_cmap("tab10")
+    labels = [ELEMENT] + [rf"${ELEMENT}^{{{k}+}}$" for k in range(1, 9)]
 
-    df = parse_data_openedge(fpath, cfg['n_species'])
-    print(cfg['dt'])
-    plot_ionization_balance(df,
-                            material=element,
-                            n_species=cfg['n_species'],
-                            dt=cfg['dt'],
-                            save_path=save_path,
-                            title=f"{element} ionization balance")
+    fig, ax = plt.subplots(figsize=(6, 3.5), dpi=300)
+    for k in range(9):
+        ax.semilogx(t_ms, frac[k], "-", lw=2, color=cmap(k), label=labels[k])
+    ax.set_xlabel("Time (ms)", fontsize=13)
+    ax.set_ylabel("Fractional abundance", fontsize=13)
+    ax.set_title(rf"{ELEMENT} ionization balance, "
+                 rf"$T_e = 12$ eV, $n_e = 5\times10^{{18}}$ m$^{{-3}}$",
+                 fontsize=12)
+    ax.grid(True, which="both", ls="--", lw=0.5, alpha=0.5)
+    ax.legend(fontsize=10, frameon=False, loc="upper right", ncol=2)
+    ax.set_ylim(-0.02, 1.02)
+    fig.tight_layout()
+    fig.savefig(OUTPNG, bbox_inches="tight")
+    print(f"wrote {OUTPNG}  ({len(step)} stats rows)")
 
 
 if __name__ == "__main__":
-    base = "output"
-    
-    ELEMENTS = {
-    # tweak dt and n_species for your runs here
-    'O': dict(file='tmp.grid.oxygen',  n_species=9,  dt=1e-7),
-    }
-
-
-    # load and plot data
-    load_and_plot('O', base_path=base)
+    main()

@@ -1,84 +1,141 @@
 # OpenEdge Database
 
-Central repository for atomic, surface, and material data used by OpenEdge simulations.
+Runtime atomic-physics, PMI, and surface data consumed by OpenEdge at
+simulation time, plus the ingest pipeline that builds the consolidated
+`processes.h5` from raw ADAS / TRIM sources.
 
-## Structure
+## Layout (2026-04-23)
 
 ```
 database/
-  adas/           # ADAS ionization/recombination rate tables (HDF5)
-  surface/        # BCA sputtering/reflection yield tables (HDF5)
+  README.md                 # this file.
+  processes.h5              # the one and only runtime data file.
+                            # Carries ADAS rates + thresholds + PEC +
+                            # TRIM reflection + reaction catalogs,
+                            # all under /volume/* and /surface/*.
+  ingest/                   # build-time pipeline, LOCAL-ONLY
+                            # (gitignored). Developer tooling to
+                            # regenerate processes.h5 from open-ADAS
+                            # and TRIM sources; NOT shipped in the
+                            # repo or release tarballs.
+    build_processes_h5.py   # driver: adf11 + IP + TRIM + reactions
+                            # -> processes.h5
+    adas.py                 # adf11 parser + element / class tables
+    adas_boron.py           # B-specific ingest helper
+    check.py                # sanity checks on processes.h5
+    reactions/              # reaction-list text files (D.reactions,
+                            #   W.reactions, ...) — tracked source of
+                            #   /volume/reactions/<elem>/catalog
+    adf11/                  # raw open-ADAS text files (scd89, acd89, ...)
+                            #   — gitignored; fetch via download_data.sh
+    ionization_potentials/  # ADAS_ionization_potentials_<elt> text files
+                            #   — gitignored; fetch via download_data.sh
+    trim/                   # raw TRIM reflection tables (when shipped)
+                            #   — gitignored
+    surface_generators/     # legacy generate_*.py for per-pair Eckstein
+                            #   yield tables (deprecated: sputter computes
+                            #   use analytic Eckstein from header now)
 ```
 
-## ADAS Data (`adas/`)
+Per-pair surface yield tables (`database/surface/*.h5`) and standalone
+PEC line files (`database/pec/*.h5`) were **removed** after
+`processes.h5` became the consolidated source. The reaction-list text
+files at `database/adas/reactions/` also moved to
+`database/ingest/reactions/` since the runtime path now reads the
+`/volume/reactions/<elem>/catalog` string directly from processes.h5
+(legacy text-file fallback still works but runtime no longer touches
+the tracked text files in a normal run).
 
-Pre-computed rate coefficients from the [ADAS](https://www.adas.ac.uk/)
-database, stored as HDF5 files. Each file contains ionization (SCD),
-recombination (ACD), and charge exchange (CCD) rate tables as functions
-of electron temperature and density.
+## `processes.h5` — the runtime consolidation
 
-| File | Element | Z | Rates |
-|------|---------|---|-------|
-| `ADAS_Rates_1.h5` | Hydrogen/Deuterium | 1 | ionization, recombination, CX |
-| `ADAS_Rates_6.h5` | Carbon | 6 | ionization, recombination, CX |
-| `ADAS_Rates_8.h5` | Oxygen | 8 | ionization, recombination, CX |
-| `ADAS_Rates_73.h5` | Tantalum | 73 | ionization, recombination |
-| `ADAS_Rates_74.h5` | Tungsten | 74 | ionization, recombination |
+Single HDF5 file carrying every atomic-physics and surface-reaction
+coefficient used during a run. Layout:
 
-**HDF5 datasets:**
-- `IonizationRateCoeff[nQ, nT, nD]` — ionization rates in log10(cm³/s)
-- `RecombinationRateCoeff[nQ, nT, nD]` — recombination rates
-- `ChargeExchangeRateCoeff[nQ, nT, nD]` — CX rates (optional, backward compatible)
-- `gridTemperature_*[nT]`, `gridDensity_*[nD]` — log10 grids
-- `gridChargeState_*[2, nQ]` — charge state pairs
-
-**Molecular dissociation** (D₂ → 2D) uses Janev polynomial fits from
-HYDHEL (not ADAS tables). Coefficients are specified directly in the
-reactions file with style `J`:
 ```
+/volume/
+  rates/
+    scd/<elem>/{coefficient, temperature, density}       # ionization
+    acd/<elem>/...                                       # recombination
+    ccd/<elem>/...                                       # charge exchange
+  radiation/
+    plt/<elem>/...                                       # line radiation
+    prb/<elem>/...                                       # recomb + bremsstrahlung
+  thresholds/<elem>/{coefficient, charge_state}          # ionization potentials
+  pec/<elem>/<line>/...                                  # PEC (ingested; compute
+                                                        #   photon_emissivity/grid
+                                                        #   still uses per-line files)
+  reactions/                                             # catalog of reaction types
+/surface/
+  reflection/<proj>_on_<target>/                         # TRIM reflection moments
+  sputter/<proj>_on_<target>/{E, theta}                  # sputter axes (yields TBA)
+```
+
+### Consumers (runtime reads — all from `processes.h5`)
+
+- `fix volume/chem/adas` — `/volume/rates/*`, `/volume/thresholds/*`,
+  `/volume/reactions/<elem>/catalog` (via
+  `ProcessLibrary::load_reactions_catalog`). Legacy text-file fallback
+  at `database/ingest/reactions/<elem>.reactions` only fires when the
+  catalog is absent.
+- `surf_react surface/pwi` — `/surface/reflection/<pair>`.
+- `compute surface/physical/sputter` — analytic Eckstein coefficients
+  from `src/eckstein_sputter_data.h` (compiled in). Does *not* read
+  any HDF5 yield table at runtime in the `target`/`projectiles` API.
+- `compute photon_emissivity/grid` — `/volume/pec/<elem>/<id>/<line>/`
+  (via `ProcessLibrary::load_pec_line`).
+
+## Reaction-list catalogs (`/volume/reactions/<elem>/catalog`)
+
+Runtime input for `fix volume/chem/adas`. Plain-text lists that tell
+the fix which reactions to consider and with which rate class (`A` =
+ADAS, `J` = Janev polynomial), ingested into
+`processes.h5:/volume/reactions/<elem>/catalog` as opaque strings.
+
+```
+D --> D+
+I A 1.0 0.0 0.0 0.0 0.0
+
 D2 --> D + D
-D J -2.787e+01 1.052e+01 -4.973e+00 1.451e+00 -3.063e-01 4.433e-02 -4.096e-03 2.160e-04 -4.929e-06
+D J -2.787e+01 1.052e+01 -4.973e+00 1.451e+00 ...
 ```
 
-**Usage in input scripts:**
+Usage:
+
 ```
-# Impurity ionization/recombination/CX (Z=6 carbon)
-fix chem chem/adas 1 6 plasma.reactions adas_dir ../../database/adas plasma Te Ne
-
-# Neutral transport (Z=1 hydrogen with D2 dissociation)
-fix chem chem/adas 1 1 neutral.reactions adas_dir ../../database/adas plasma Te Ne
-```
-
-**Regenerating from raw ADF11 data:**
-```bash
-# Symlink ADAS ADF11 source data
-ln -s /path/to/solps/modules/adas/adf11/acd89 database/adas/adf11/acd89
-ln -s /path/to/solps/modules/adas/adf11/scd89 database/adas/adf11/scd89
-ln -s /path/to/solps/modules/adas/adf11/ccd89 database/adas/adf11/ccd89
-
-# Generate HDF5 files
-cd database/adas
-# Edit adas.py to set element/Z, then:
-python adas.py        # generates ADAS_Rates_{Z}.h5 with ion/rec/CX
+fix fchem volume/chem/adas 1 D auto            # → processes.h5 catalog
+fix fchem volume/chem/adas 1 W auto            # → processes.h5 catalog
+fix fchem volume/chem/adas 1 D ../input/custom.reactions   # override with file
 ```
 
-## Surface Data (`surface/`)
+The fix tries `/volume/reactions/<elem>/catalog` first; the text-file
+fallback at `database/ingest/reactions/<elem>.reactions` only fires if
+the element is absent from processes.h5.
 
-BCA (Binary Collision Approximation) sputtering and reflection yield tables,
-pre-computed as functions of incident energy and angle.
+## PEC tables (`/volume/pec/<elem>/<id>/<line>/`)
 
-| File | System | Description |
-|------|--------|-------------|
-| `74_on_74.h5` | W on W | Self-sputtering yields |
-| `O_on_W.h5` | O on W | Oxygen sputtering of tungsten |
-| `6_on_6_pmi.h5` | C on C | Carbon self-sputtering (for surf_react pmi) |
+Per-emission-line photon emissivity coefficients for
+`compute photon_emissivity/grid`. Stored in processes.h5 under
+`/volume/pec/<elem>/<pec_id>/<line_key>/`, ingested from **open-ADAS
+adf15** files by `build_processes_h5.py`.
 
-HDF5 structure for `surf_react pmi`: `E` (energies), `A` (angles), `RN` (reflection probability), `RE` (reflected energy fraction), `spyld` (sputter yield), `E_bind` (binding energy).
+## Regenerating `processes.h5`
 
-Legacy format: `E`, `A`, `rfyld`, `spyld`.
+Needs raw open-ADAS ASCII text (adf11 rates + adf15 PEC +
+ionization-potential files) under `database/ingest/`. If those aren't
+shipped with your checkout, symlink from a SOLPS / open-ADAS mirror:
 
-**Generating C-on-C tables with RustBCA:**
-```bash
-cd database/surface
-python generate_c_on_c.py --output 6_on_6_pmi.h5 --nsamples 1000
 ```
+ln -s /path/to/adas/adf11/scd89 database/ingest/adf11/scd89
+ln -s /path/to/adas/adf11/acd89 database/ingest/adf11/acd89
+ln -s /path/to/adas/adf11/ccd89 database/ingest/adf11/ccd89
+ln -s /path/to/adas/adf11/plt89 database/ingest/adf11/plt89
+ln -s /path/to/adas/adf11/prb89 database/ingest/adf11/prb89
+ln -s /path/to/adas/adf15      database/ingest/adf15
+
+cd database/ingest
+python3 build_processes_h5.py
+```
+
+The ingest also absorbs TRIM reflection tables from `ingest/trim/`
+(currently empty — pending SDTrimSP run batch) and the reaction-list
+text files from `ingest/reactions/`.

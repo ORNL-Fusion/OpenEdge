@@ -92,7 +92,11 @@ std::string resolve_reactions_file(const std::string &spec, Error *error)
     if (spec.empty())
       error->all(FLERR,
                  "resolve_reactions_file: empty element / path");
-    p = openedge_database_dir() + "/adas/reactions/" + spec + ".reactions";
+    // Legacy text-file fallback when processes.h5 catalog is absent.
+    // Runtime consumer (fix volume/chem/adas) prefers
+    // /volume/reactions/<elem>/catalog inside processes.h5 first; only
+    // hits this resolver when that lookup fails.
+    p = openedge_database_dir() + "/ingest/reactions/" + spec + ".reactions";
   }
   if (!file_exists(p)) {
     std::string msg = "Reactions file not found: " + p;

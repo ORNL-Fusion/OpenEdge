@@ -108,48 +108,21 @@ BorodkinaSheathResult borodkina_sheath_at_distance(double dist_m,
                                                    double mD_amu,
                                                    double pot_mult)
 {
+  // Thin wrapper: prepare coefficients and evaluate at `dist_m`.
+  // For hot loops (Boris subcycles) call sheath_prepare_borodkina()
+  // once outside the loop and sheath_emag_at_distance() inside.
+  const SheathEmagCoeffs c = sheath_prepare_borodkina(te_eV, ti_eV, ne_m3,
+                                                       bmag_T, alpha_deg,
+                                                       mD_amu, pot_mult);
   BorodkinaSheathResult out;
-
-  const double d = std::max(dist_m, 0.0);
-  const double te = std::max(te_eV, 1.0e-12);
-  const double ti = std::max(ti_eV, 0.0);
-  const double ne = std::max(ne_m3, 1.0e-60);
-  const double bmag = std::max(std::abs(bmag_T), 1.0e-20);
-  const double mD = std::max(mD_amu * AMU, 1.0e-99);
-
-  // Keep Debye length fixed at sheath-entrance values.
-  const double lambdaD = std::sqrt(EPS0 * te / (ne * QE));
-  out.lambdaD_m = lambdaD;
-
-  // c_s = sqrt((Te+Ti)e/(2mD))
-  const double cs = std::sqrt((te + ti) * QE / (2.0 * mD));
-  const double omega_ci = QE * bmag / mD;
-  const double rho_i = cs / std::max(std::abs(omega_ci), 1.0e-99);
-  out.rho_i_m = rho_i;
-
-  const double alpha = std::max(0.0, std::min(90.0, alpha_deg));
-  const double alpha_n_rad = alpha * PI / 180.0;
-  const double sin_a = std::abs(std::sin(alpha_n_rad));
-  const double sin_floor = 0.05;
-  const double lmps = rho_i / std::max(sin_a, sin_floor);
-  out.lmps_m = lmps;
-
-  const double fd = fd_poly_deg(alpha);
-  out.fd = fd;
-  const double phi0 = std::max(pot_mult, 0.0) * te;
-  out.phi_ds_eV = fd * phi0;
-  out.phi_cs_eV = (1.0 - fd) * phi0;
-
-  const double e_ds = std::exp(-d / std::max(2.0 * lambdaD, 1.0e-99));
-  const double e_mps = std::exp(-d / std::max(lmps, 1.0e-99));
-
-  // phi relative to plasma potential (in eV-equivalent potential drop).
-  const double phi_eV = -phi0 * (fd * e_ds + (1.0 - fd) * e_mps);
-  out.esheath_eV = -phi_eV;
-
-  const double e_ds_vpm = phi0 * fd * e_ds / std::max(2.0 * lambdaD, 1.0e-99);
-  const double e_mps_vpm = phi0 * (1.0 - fd) * e_mps / std::max(lmps, 1.0e-99);
-  out.emag_vpm = std::abs(e_ds_vpm + e_mps_vpm);
+  out.lambdaD_m  = c.lambdaD_m;
+  out.lmps_m     = c.lmps_m;
+  out.rho_i_m    = c.rho_i_m;
+  out.fd         = c.fd;
+  out.phi_ds_eV  = c.phi0_ds_eV;   // fd * phi0 at sheath entrance
+  out.phi_cs_eV  = c.phi0_mps_eV;  // (1-fd) * phi0 at sheath entrance
+  out.emag_vpm   = sheath_emag_at_distance(c, dist_m);
+  out.esheath_eV = sheath_phi_at_distance(c, dist_m);
   return out;
 }
 
@@ -171,9 +144,42 @@ BorodkinaSheathResult coulette_manfredi_sheath_at_distance(
     double dist_m, double te_eV, double ti_eV, double ne_m3,
     double bmag_T, double alpha_deg, double mD_amu, double pot_mult)
 {
+  // Thin wrapper over the fast-evaluation API.
+  const SheathEmagCoeffs c = sheath_prepare_coulette_manfredi(
+      te_eV, ti_eV, ne_m3, bmag_T, alpha_deg, mD_amu, pot_mult);
   BorodkinaSheathResult out;
+  out.lambdaD_m  = c.lambdaD_m;
+  out.lmps_m     = c.lmps_m;
+  out.rho_i_m    = c.rho_i_m;
+  out.fd         = c.fd;
+  out.phi_cs_eV  = c.phi_cm_slow_eV;   // slow -> CS
+  out.phi_ds_eV  = c.phi_cm_fast_eV;   // fast -> DS
+  out.emag_vpm   = sheath_emag_at_distance(c, dist_m);
+  out.esheath_eV = sheath_phi_at_distance(c, dist_m);
+  return out;
+}
 
-  const double d = std::max(dist_m, 0.0);
+/* ----------------------------------------------------------------------
+   Fast-evaluation API: prepare once per Boris call, evaluate per subcycle.
+
+   Every field of SheathEmagCoeffs is a function of Te, Ti, ne, B, alpha,
+   mD, pot_mult only, so they can be hoisted out of the subcycle loop.
+   The per-subcycle call (sheath_emag_at_distance / sheath_phi_at_distance)
+   reduces to 2-4 exp() and a handful of multiplies.
+
+   Behavior matches borodkina_sheath_at_distance and
+   coulette_manfredi_sheath_at_distance exactly; those functions now
+   delegate here.
+------------------------------------------------------------------------- */
+
+SheathEmagCoeffs sheath_prepare_borodkina(double te_eV, double ti_eV,
+                                          double ne_m3, double bmag_T,
+                                          double alpha_deg, double mD_amu,
+                                          double pot_mult)
+{
+  SheathEmagCoeffs c;
+  c.kind = SHEATH_BORODKINA;
+
   const double te = std::max(te_eV, 1.0e-12);
   const double ti = std::max(ti_eV, 0.0);
   const double ne = std::max(ne_m3, 1.0e-60);
@@ -181,18 +187,59 @@ BorodkinaSheathResult coulette_manfredi_sheath_at_distance(
   const double mD = std::max(mD_amu * AMU, 1.0e-99);
 
   const double lambdaD = std::sqrt(EPS0 * te / (ne * QE));
-  out.lambdaD_m = lambdaD;
-
   const double cs = std::sqrt((te + ti) * QE / (2.0 * mD));
   const double omega_ci = QE * bmag / mD;
   const double rho_i = cs / std::max(std::abs(omega_ci), 1.0e-99);
-  out.rho_i_m = rho_i;
 
   const double alpha = std::max(0.0, std::min(90.0, alpha_deg));
+  const double alpha_n_rad = alpha * PI / 180.0;
+  constexpr double tan_ratio_max = 30.0;
+  constexpr double tan_ratio_min = 1.0e-3;
+  const double tan_a = std::min(std::abs(std::tan(alpha_n_rad)), tan_ratio_max);
+  const double lmps = rho_i * std::max(tan_a, tan_ratio_min);
 
-  // --- CM two-exponential fit coefficients ---
-  // B1(α) = exp(b10 + b11*α),  k1(α) = exp(p10 + p11*α)  (slow/CS)
-  // B2(α) = exp(b20 + b21*α),  k2(α) = exp(p20 + p21*α)  (fast/DS)
+  const double fd = fd_poly_deg(alpha);
+  const double phi0 = std::max(pot_mult, 0.0) * te;
+
+  const double inv_2lD = 1.0 / std::max(2.0 * lambdaD, 1.0e-99);
+  const double inv_lmps = 1.0 / std::max(lmps, 1.0e-99);
+
+  c.lambdaD_m = lambdaD;
+  c.rho_i_m   = rho_i;
+  c.lmps_m    = lmps;
+  c.fd        = fd;
+  c.phi_total_eV = phi0;
+  c.phi0_ds_eV   = phi0 * fd;
+  c.phi0_mps_eV  = phi0 * (1.0 - fd);
+  c.inv_2lD      = inv_2lD;
+  c.inv_lmps     = inv_lmps;
+  c.amp_ds_vpm   = c.phi0_ds_eV  * inv_2lD;
+  c.amp_mps_vpm  = c.phi0_mps_eV * inv_lmps;
+  return c;
+}
+
+SheathEmagCoeffs sheath_prepare_coulette_manfredi(double te_eV, double ti_eV,
+                                                  double ne_m3, double bmag_T,
+                                                  double alpha_deg, double mD_amu,
+                                                  double pot_mult)
+{
+  SheathEmagCoeffs c;
+  c.kind = SHEATH_COULETTE_MANFREDI;
+
+  const double te = std::max(te_eV, 1.0e-12);
+  const double ti = std::max(ti_eV, 0.0);
+  const double ne = std::max(ne_m3, 1.0e-60);
+  const double bmag = std::max(std::abs(bmag_T), 1.0e-20);
+  const double mD = std::max(mD_amu * AMU, 1.0e-99);
+
+  const double lambdaD = std::sqrt(EPS0 * te / (ne * QE));
+  const double cs = std::sqrt((te + ti) * QE / (2.0 * mD));
+  const double omega_ci = QE * bmag / mD;
+  const double rho_i = cs / std::max(std::abs(omega_ci), 1.0e-99);
+
+  const double alpha_n  = std::max(0.0, std::min(90.0, alpha_deg));
+  const double alpha    = 90.0 - alpha_n;   // CM fit uses B-wall angle.
+
   constexpr double b10 =  0.788600127141, b11 = -0.0140352947024;
   constexpr double b20 = -0.511290440114, b21 =  0.0149209038566;
   constexpr double p10 = -3.57918079952,  p11 =  0.0414523939029;
@@ -200,47 +247,111 @@ BorodkinaSheathResult coulette_manfredi_sheath_at_distance(
 
   const double B1 = std::exp(b10 + b11 * alpha);
   const double B2 = std::exp(b20 + b21 * alpha);
-  const double K1 = std::exp(p10 + p11 * alpha);  // 1/λ_D units
+  const double K1 = std::exp(p10 + p11 * alpha);
   const double K2 = std::exp(p20 + p21 * alpha);
 
-  // CM fit was calibrated at ρ_i = 20 λ_D.  Scale the slow (CS)
-  // component so its physical extent tracks the actual ρ_i/λ_D ratio.
   const double rho_over_lD = rho_i / std::max(lambdaD, 1.0e-99);
-  constexpr double rho_over_lD_ref = 20.0;  // CM simulation value
+  constexpr double rho_over_lD_ref = 20.0;
   const double K1_scaled = K1 * rho_over_lD_ref / std::max(rho_over_lD, 1.0);
 
-  // Distance in Debye lengths
-  const double s = d / std::max(lambdaD, 1.0e-99);
-
-  // Total wall potential: use floating potential or pot_mult
   const double phi_float_mult =
-    0.5 * std::log((mD / std::max(2.0 * PI * ME, 1.0e-99)) / (1.0 + ti / te));
-  const double phi_total = (pot_mult > 0.0) ? (pot_mult * te) : (std::max(phi_float_mult, 0.0) * te);
-
-  // CM wall potential (in Te units)
+      0.5 * std::log((mD / std::max(2.0 * PI * ME, 1.0e-99)) / (1.0 + ti / te));
+  const double phi_total =
+      (pot_mult > 0.0) ? (pot_mult * te) : (std::max(phi_float_mult, 0.0) * te);
   const double phi_cm_wall_Te = B1 + B2;
-  // Rescale to match the requested total potential
   const double scale = phi_total / std::max(phi_cm_wall_Te * te, 1.0e-99);
+  const double phi_cm_slow = scale * B1 * te;
+  const double phi_cm_fast = scale * B2 * te;
 
-  // Potential components (in eV, positive = drop toward wall)
-  const double phi_cm_slow = scale * B1 * te;  // CS/slow component
-  const double phi_cm_fast = scale * B2 * te;  // DS/fast component
+  constexpr double tan_ratio_max = 30.0;
+  constexpr double tan_ratio_min = 1.0e-3;
+  const double alpha_n_rad = alpha_n * PI / 180.0;
+  const double tan_an = std::min(std::max(std::abs(std::tan(alpha_n_rad)),
+                                           tan_ratio_min), tan_ratio_max);
+  const double lmps_phys = rho_i * tan_an;
 
-  out.phi_cs_eV = phi_cm_slow;
-  out.phi_ds_eV = phi_cm_fast;
-  out.fd = (phi_total > 0.0) ? (phi_cm_fast / phi_total) : 0.0;
-  out.lmps_m = 1.0 / (K1_scaled / std::max(lambdaD, 1.0e-99));  // physical CS scale
+  constexpr double s_blend_start = 60.0;
+  constexpr double s_blend_end   = 120.0;
 
-  // E-field magnitude (V/m)
-  const double e_slow = phi_cm_slow * K1_scaled * std::exp(-K1_scaled * s)
-                        / std::max(lambdaD, 1.0e-99);
-  const double e_fast = phi_cm_fast * K2 * std::exp(-K2 * s)
-                        / std::max(lambdaD, 1.0e-99);
+  const double inv_lD   = 1.0 / std::max(lambdaD, 1.0e-99);
+  const double inv_lmps = 1.0 / std::max(lmps_phys, 1.0e-99);
 
-  out.esheath_eV = phi_cm_slow * std::exp(-K1_scaled * s)
-                 + phi_cm_fast * std::exp(-K2 * s);
-  out.emag_vpm = std::abs(e_slow + e_fast);
-  return out;
+  c.lambdaD_m        = lambdaD;
+  c.rho_i_m          = rho_i;
+  c.lmps_m           = lmps_phys;
+  c.phi_total_eV     = phi_total;
+  c.fd               = (phi_total > 0.0) ? (phi_cm_fast / phi_total) : 0.0;
+  c.phi_cm_slow_eV   = phi_cm_slow;
+  c.phi_cm_fast_eV   = phi_cm_fast;
+  c.inv_lD           = inv_lD;
+  c.inv_lmps         = inv_lmps;
+  c.K1_scaled        = K1_scaled;
+  c.K2               = K2;
+  c.amp_slow_vpm     = phi_cm_slow * K1_scaled * inv_lD;
+  c.amp_fast_vpm     = phi_cm_fast * K2        * inv_lD;
+  c.s_blend_start    = s_blend_start;
+  c.s_blend_end      = s_blend_end;
+  c.s_blend_width_inv = 1.0 / (s_blend_end - s_blend_start);
+  c.e_slow_at_anchor_vpm =
+      c.amp_slow_vpm * std::exp(-K1_scaled * s_blend_start);
+  return c;
+}
+
+double sheath_emag_at_distance(const SheathEmagCoeffs &c, double dist_m)
+{
+  const double d = std::max(dist_m, 0.0);
+
+  if (c.kind == SHEATH_BORODKINA) {
+    const double e_ds  = c.amp_ds_vpm  * std::exp(-d * c.inv_2lD);
+    const double e_mps = c.amp_mps_vpm * std::exp(-d * c.inv_lmps);
+    return std::abs(e_ds + e_mps);
+  }
+
+  // Coulette-Manfredi with BK Chodura tail for s > s_blend_start.
+  const double s = d * c.inv_lD;
+  const double e_slow_cm = c.amp_slow_vpm * std::exp(-c.K1_scaled * s);
+  const double e_fast    = c.amp_fast_vpm * std::exp(-c.K2        * s);
+
+  if (s <= c.s_blend_start) {
+    return std::abs(e_slow_cm + e_fast);
+  }
+
+  const double d_past_anchor = (s - c.s_blend_start) * c.lambdaD_m;
+  const double e_slow_mps =
+      c.e_slow_at_anchor_vpm * std::exp(-d_past_anchor * c.inv_lmps);
+  const double blend = (s >= c.s_blend_end) ? 1.0
+                      : (s - c.s_blend_start) * c.s_blend_width_inv;
+  const double e_slow = (1.0 - blend) * e_slow_cm + blend * e_slow_mps;
+  return std::abs(e_slow + e_fast);
+}
+
+double sheath_phi_at_distance(const SheathEmagCoeffs &c, double dist_m)
+{
+  const double d = std::max(dist_m, 0.0);
+
+  if (c.kind == SHEATH_BORODKINA) {
+    // phi(d) = phi0 * [fd·exp(-d·inv_2lD) + (1-fd)·exp(-d·inv_lmps)]
+    // with phi_total_eV = phi0. Returned as positive potential drop.
+    const double phi_ds  = c.phi0_ds_eV  * std::exp(-d * c.inv_2lD);
+    const double phi_mps = c.phi0_mps_eV * std::exp(-d * c.inv_lmps);
+    return phi_ds + phi_mps;
+  }
+
+  const double s = d * c.inv_lD;
+  const double phi_slow_cm = c.phi_cm_slow_eV * std::exp(-c.K1_scaled * s);
+  const double phi_fast    = c.phi_cm_fast_eV * std::exp(-c.K2        * s);
+
+  if (s <= c.s_blend_start) {
+    return phi_slow_cm + phi_fast;
+  }
+
+  const double d_past_anchor = (s - c.s_blend_start) * c.lambdaD_m;
+  const double phi_slow_mps = c.e_slow_at_anchor_vpm * c.lmps_m *
+                              std::exp(-d_past_anchor * c.inv_lmps);
+  const double blend = (s >= c.s_blend_end) ? 1.0
+                      : (s - c.s_blend_start) * c.s_blend_width_inv;
+  const double phi_slow = (1.0 - blend) * phi_slow_cm + blend * phi_slow_mps;
+  return phi_slow + phi_fast;
 }
 
 }  // namespace SheathModels

@@ -4,11 +4,11 @@ Plot OpenEdge/SPARTA grid density dump in WEST-style R-Z subplots.
 
 Example:
   python3 plot_grid_density_west.py \
-    --dump output/tmp.grid.density \
-    --wall input/wall.txt \
+    --dump output/grid.dens.A.west \
+    --wall input/wall.surf \
     --out output/grid_density.west.png \
     --show
-      python3 plot_grid_density_west.py --show --log --sum-all
+      python3 plot_grid_density_west.py --show --log
 """
 
 from __future__ import annotations
@@ -123,6 +123,33 @@ def parse_surface(path: Path):
         poly = np.vstack([poly, poly[0]])
 
     return np.array(seg_r), np.array(seg_z), poly
+
+
+def resolve_default_dump(example_root: Path) -> Path:
+    candidates = sorted((example_root / "output").glob("grid.dens.*.west"))
+    if candidates:
+        return candidates[-1]
+    return example_root / "output" / "grid.dens.A.west"
+
+
+def resolve_default_wall(example_root: Path) -> Path:
+    surf = example_root / "input" / "wall.surf"
+    if surf.exists():
+        return surf
+    return example_root / "input" / "wall.txt"
+
+
+def map_plot_coords(x: np.ndarray, y: np.ndarray, coord_layout: str):
+    if coord_layout == "zr":
+        return y, x
+    return x, y
+
+
+def map_surface_coords(seg_a: np.ndarray, seg_b: np.ndarray, poly: np.ndarray, coord_layout: str):
+    if coord_layout != "zr":
+        return seg_a, seg_b, poly
+    poly_out = poly[:, [1, 0]] if poly.size else poly
+    return seg_b, seg_a, poly_out
 
 
 def parse_grid_dump(path: Path):
@@ -445,8 +472,9 @@ def mask_outside_wall(
 
 def main():
     here = Path(__file__).resolve().parent
-    default_dump = here / "output" / "tmp.grid.density"
-    default_wall = here / "input" / "wall.txt"
+    example_root = here.parent
+    default_dump = resolve_default_dump(example_root)
+    default_wall = resolve_default_wall(example_root)
 
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -459,13 +487,15 @@ def main():
         default=str(default_wall),
         help=f"wall surface file (default: {default_wall})",
     )
+    ap.add_argument(
+        "--coord-layout",
+        choices=("zr", "rz"),
+        default="zr",
+        help="physical coordinate order of stored x/y-like columns and wall points: "
+        "'zr' means xc=Z,yc=R and wall=(Z,R); 'rz' means xc=R,yc=Z and wall=(R,Z)",
+    )
     ap.add_argument("--timestep", default="last", help="last or explicit integer")
     ap.add_argument("--labels", nargs="*", default=None, help="subplot labels")
-    ap.add_argument(
-        "--sum-all",
-        action="store_true",
-        help="sum all value columns and plot a single total-density panel",
-    )
     ap.add_argument(
         "--w0-and-total",
         action="store_true",
@@ -554,7 +584,19 @@ def main():
     )
     args = ap.parse_args()
 
-    blocks = parse_grid_dump(Path(args.dump))
+    dump_path = Path(args.dump).expanduser()
+    if not dump_path.exists():
+        candidates = sorted((example_root / "output").glob("grid.dens.*.west"))
+        hint = ""
+        if candidates:
+            hint = " Available dumps: " + ", ".join(str(p) for p in candidates)
+        raise FileNotFoundError(f"Grid dump not found: {dump_path}.{hint}")
+
+    wall_path = Path(args.wall).expanduser()
+    if not wall_path.exists():
+        raise FileNotFoundError(f"Wall surface not found: {wall_path}")
+
+    blocks = parse_grid_dump(dump_path)
     ts = max(blocks.keys()) if args.timestep == "last" else int(args.timestep)
     header, cols = blocks[ts]
     cmap = "plasma"
@@ -563,8 +605,9 @@ def main():
     hmap = {h: i for i, h in enumerate(header)}
     if "xc" not in hmap or "yc" not in hmap:
         raise RuntimeError("CELLS header must include xc and yc")
-    xc = cols[hmap["xc"]]
-    yc = cols[hmap["yc"]]
+    xc_raw = cols[hmap["xc"]]
+    yc_raw = cols[hmap["yc"]]
+    xc, yc = map_plot_coords(xc_raw, yc_raw, args.coord_layout)
 
     val_idx = [i for i, h in enumerate(header) if h not in ("id", "xc", "yc", "zc")]
     if not val_idx:
@@ -572,18 +615,14 @@ def main():
 
     values = [cols[i] for i in val_idx]
     names = [header[i] for i in val_idx]
-    if args.sum_all and args.w0_and_total:
-        raise RuntimeError("Use only one of --sum-all or --w0-and-total")
+    total = np.zeros_like(values[0], dtype=float)
+    for arr in values:
+        total += arr
+
     if args.w0_and_total:
-        total = np.zeros_like(values[0], dtype=float)
-        for arr in values:
-            total += arr
         values = [values[0], total]
-        names = ["W0", "sum all"]
-    elif args.sum_all:
-        total = np.zeros_like(values[0], dtype=float)
-        for arr in values:
-            total += arr
+        names = ["W0", "total tungsten"]
+    else:
         values = [total]
         names = ["total tungsten"]
 
@@ -594,7 +633,10 @@ def main():
     else:
         labels = names
 
-    wall_r, wall_z, wall_poly = parse_surface(Path(args.wall))
+    wall_a, wall_b, wall_poly_raw = parse_surface(wall_path)
+    wall_r, wall_z, wall_poly = map_surface_coords(
+        wall_a, wall_b, wall_poly_raw, args.coord_layout
+    )
 
     # Resolve psi-overlay source
     psi_overlay = None
@@ -605,7 +647,7 @@ def main():
             psi_overlay = load_psi_map(psi_overlay_src, warn=True)
         else:
             # Guess: input/plasma.h5 next to the wall file
-            guess = Path(args.wall).resolve().parent / "plasma.h5"
+            guess = wall_path.resolve().parent / "plasma.h5"
             if guess.exists():
                 psi_overlay_src = guess
                 psi_overlay = load_psi_map(guess, warn=True)
@@ -621,15 +663,20 @@ def main():
     if render_mode == "auto":
         render_mode = "binned" if fill_fraction < 0.25 else "mesh"
 
-    xmin = float(np.min(xc))
-    xmax = float(np.max(xc))
-    ymin = float(np.min(yc))
-    ymax = float(np.max(yc))
+    data_xmin = float(np.min(xc))
+    data_xmax = float(np.max(xc))
+    data_ymin = float(np.min(yc))
+    data_ymax = float(np.max(yc))
     if wall_poly.size:
-        xmin = min(xmin, float(np.min(wall_poly[:, 0])))
-        xmax = max(xmax, float(np.max(wall_poly[:, 0])))
-        ymin = min(ymin, float(np.min(wall_poly[:, 1])))
-        ymax = max(ymax, float(np.max(wall_poly[:, 1])))
+        xmin = float(np.min(wall_poly[:, 0]))
+        xmax = float(np.max(wall_poly[:, 0]))
+        ymin = float(np.min(wall_poly[:, 1]))
+        ymax = float(np.max(wall_poly[:, 1]))
+    else:
+        xmin = data_xmin
+        xmax = data_xmax
+        ymin = data_ymin
+        ymax = data_ymax
     if args.bins:
         bin_nx, bin_ny = args.bins
     else:
@@ -647,6 +694,11 @@ def main():
             if render_mode == "binned"
             else ")"
         )
+    )
+    print(
+        "Coordinate layout: "
+        + ("xc=Z,yc=R -> plotting R horizontal, Z vertical" if args.coord_layout == "zr"
+           else "xc=R,yc=Z -> plotting R horizontal, Z vertical")
     )
 
     nsp = len(values)
@@ -781,8 +833,12 @@ def main():
         ax.set_aspect("equal", adjustable="box")
         if args.xlim:
             ax.set_xlim(args.xlim[0], args.xlim[1])
+        else:
+            ax.set_xlim(xmin, xmax)
         if args.ylim:
             ax.set_ylim(args.ylim[0], args.ylim[1])
+        else:
+            ax.set_ylim(ymin, ymax)
         ax.set_title(labels[s])
         ax.set_xlabel("R [m]", weight="semibold")
         ax.set_ylabel("Z [m]", weight="semibold")
@@ -800,3 +856,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

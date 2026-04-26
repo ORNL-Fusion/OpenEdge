@@ -1,0 +1,68 @@
+################################################################################
+# Oxygen charge-state balance in a uniform plasma (0-D).
+#
+# Single cell, 2000 fully-stripped O8+ test particles that ionize and
+# recombine under ADAS scd/acd rates until coronal equilibrium sets in
+# (Te = 12 eV, ne = 5e18 m^-3).  Per-charge-state densities are reduced
+# to scalars and printed in the stats block; plot_charged_states.py
+# parses log.openedge.
+################################################################################
+
+variable n        equal 5e18
+variable fnum     equal 1e15
+variable Tev      equal 12.0
+variable T        equal ${Tev}*11604.505
+variable dt       equal 1e-07
+variable time     equal 10e-3 #100e-3
+variable numStep  equal floor(${time}/${dt})
+
+seed              1245
+dimension         2
+boundary          p p p
+global            gridcut 0 comm/sort no
+create_box        1.8 3.22 -1 1 -0.5 0.5
+create_grid       100 100 1
+balance_grid      rcb cell
+
+global            nrho $n fnum ${fnum} temp $T
+
+# ---- Species: 9 O charge states (O through O8+) ----
+species           plasma.species O8+ O7+ O6+ O5+ O4+ O3+ O2+ O+ O
+mixture           species O8+ frac 1
+mixture           species O7+ frac 0
+mixture           species O6+ frac 0
+mixture           species O5+ frac 0
+mixture           species O4+ frac 0
+mixture           species O3+ frac 0
+mixture           species O2+ frac 0
+mixture           species O+  frac 0
+mixture           species O   frac 0
+
+create_particles  species n 2000
+
+# ---- Uniform plasma background ----
+compute           pfields plasma/fields all constant &
+                  temp_e ${Tev} dens_e $n &
+                  values temp_e dens_e
+
+# ---- Volumetric ionization + recombination ----
+fix fchem volume/chem/adas 1 O plasma.reactions &
+                  plasma c_pfields[1] c_pfields[2]
+
+# ---- Per-species number density, reduced to scalars ----
+compute cden      grid all species nrho
+compute n8        reduce sum c_cden[1]
+compute n7        reduce sum c_cden[2]
+compute n6        reduce sum c_cden[3]
+compute n5        reduce sum c_cden[4]
+compute n4        reduce sum c_cden[5]
+compute n3        reduce sum c_cden[6]
+compute n2        reduce sum c_cden[7]
+compute n1        reduce sum c_cden[8]
+compute n0        reduce sum c_cden[9]
+
+timestep          ${dt}
+stats             1000
+stats_style       step cpu np c_n0 c_n1 c_n2 c_n3 c_n4 c_n5 c_n6 c_n7 c_n8
+
+run               ${numStep}

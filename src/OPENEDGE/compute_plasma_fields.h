@@ -51,6 +51,11 @@ struct PlasmaFileData{
   // not an internal -grad(pe)/(ne*e) approximation). Empty vector means
   // "no E-field stored"; consumers return zero.
   std::vector<double> mesh_e_r, mesh_e_z, mesh_e_t;
+  // Magnetic field on the mesh: per-triangle vertex average of
+  // mesh/vtx_b{r,z,t} from the converter. Non-empty => use mesh lookup
+  // in query_bfield_at_point; empty => fall back to legacy (br,bz,bt)
+  // regular-grid arrays or the equilibrium path.
+  std::vector<double> mesh_tri_br, mesh_tri_bz, mesh_tri_bt;
   // Bounding boxes for triangle search
   std::vector<double> mesh_tri_rmin, mesh_tri_rmax, mesh_tri_zmin, mesh_tri_zmax;
   // Precomputed centroids for nearest-neighbor fallback

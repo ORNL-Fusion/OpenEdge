@@ -43,7 +43,7 @@ SCHEMA_VERSION = "1.0"
 # Phase 2 removes the per-element ADAS_Rates_<Z>.h5 intermediate, so
 # this ingest now reads adf11 text directly (via parse_adf11) and
 # writes straight into the canonical /volume/ schema.
-sys.path.insert(0, str(DB / "adas"))
+sys.path.insert(0, str(DB / "ingest"))
 from adas import (                                          # noqa: E402
     parse_adf11, load_ionization_potentials, ip_filename,
     DEFAULT_ELEMENTS, CLASSES,
@@ -87,15 +87,15 @@ def ingest_volume_adas(fout: h5py.File) -> dict:
 
     For each element in adas.DEFAULT_ELEMENTS and each class in
     adas.CLASSES (scd, acd, ccd, plt, prb), read
-    ${DB}/adas/adf11/<cls>89/<cls>89_<sym>.dat if present.  Required
+    ${DB}/ingest/adf11/<cls>89/<cls>89_<sym>.dat if present.  Required
     classes (scd, acd) missing from an element skip that element.
 
     Ionization potentials come from
-    ${DB}/adas/ionization_potentials/ADAS_ionization_potentials_<Elt>
+    ${DB}/ingest/ionization_potentials/ADAS_ionization_potentials_<Elt>
     when the file exists (hydrogenic isotopes resolve to 'D').
     """
-    adf11_dir = DB / "adas" / "adf11"
-    ip_dir    = DB / "adas" / "ionization_potentials"
+    adf11_dir = DB / "ingest" / "adf11"
+    ip_dir    = DB / "ingest" / "ionization_potentials"
 
     # class short name -> (top-group "rates" or "radiation", units, year)
     CLASS_META = {
@@ -174,11 +174,11 @@ def ingest_volume_adas(fout: h5py.File) -> dict:
 
 def ingest_reactions(fout: h5py.File) -> dict:
     """Ingest per-element reaction catalogs (plain text in
-    database/adas/reactions/) as opaque string datasets under
+    database/ingest/reactions/) as opaque string datasets under
     /volume/reactions/<sym>/."""
     grp_root = fout.require_group("volume/reactions")
     stats = {"reaction_files": 0}
-    for path in sorted(DB.glob("adas/reactions/*.reactions")):
+    for path in sorted(DB.glob("ingest/reactions/*.reactions")):
         sym = path.stem.lower()
         text = path.read_text()
         grp = fout.require_group(f"volume/reactions/{sym}")
@@ -186,7 +186,7 @@ def ingest_reactions(fout: h5py.File) -> dict:
             del grp["catalog"]
         ds = grp.create_dataset("catalog", data=text)
         ds.attrs["units"]  = "-"
-        ds.attrs["source"] = f"database/adas/reactions/{path.name}"
+        ds.attrs["source"] = f"database/ingest/reactions/{path.name}"
         ds.attrs["method"] = ("plain-text reaction list; columns parsed "
                               "by fix_chem_adas::readfile")
         stats["reaction_files"] += 1
@@ -245,7 +245,7 @@ def ingest_surface_trim(fout: h5py.File) -> dict:
     grp_sputter = fout.require_group("surface/sputter")
     grp_refl    = fout.require_group("surface/reflection")
     stats = {"pairs": 0}
-    for path in sorted((DB / "surface" / "trim").glob("*.h5")):
+    for path in sorted((DB / "ingest" / "trim").glob("*.h5")):
         pair = path.stem.lower()  # e.g. "d_on_w"
         stats["pairs"] += 1
         with h5py.File(path, "r") as fin:
@@ -297,7 +297,7 @@ def main(argv=None) -> int:
         f.attrs["sources"]         = json.dumps([
             "open-ADAS adf11 (scd/acd/ccd/plt/prb year 89)",
             "TRIM yield tables (pre-computed per projectile/target pair)",
-            "In-repo reaction catalogs (database/adas/reactions/)",
+            "In-repo reaction catalogs (database/ingest/reactions/)",
         ])
 
         stats_vol_adas = ingest_volume_adas(f)

@@ -29,6 +29,22 @@
 
 namespace SPARTA_NS {
 
+namespace {
+// RAII guard that silences the HDF5 error stack for the lifetime of the
+// guard, then restores it. Use inside rank-0 blocks that probe optional
+// datasets with H5Lexists — without this the HDF5 library dumps its
+// error stack to stderr every time an optional path is absent.
+struct H5ErrGuard {
+  H5E_auto2_t fn;
+  void *data;
+  H5ErrGuard() {
+    H5Eget_auto2(H5E_DEFAULT, &fn, &data);
+    H5Eset_auto2(H5E_DEFAULT, nullptr, nullptr);
+  }
+  ~H5ErrGuard() { H5Eset_auto2(H5E_DEFAULT, fn, data); }
+};
+}
+
 // ------------------------------------------------------------------------
 // open()
 // ------------------------------------------------------------------------
@@ -152,6 +168,7 @@ bool ProcessLibrary::load_trim_reflection(const std::string &pair,
 
   if (me_ == 0) {
     try {
+      H5ErrGuard _h5err;
       H5::H5File f(path_, H5F_ACC_RDONLY);
       if (H5Lexists(f.getId(), grp.c_str(), H5P_DEFAULT) > 0) {
         auto read1 = [&](const std::string &p, std::vector<double> &v,
@@ -252,6 +269,7 @@ bool ProcessLibrary::load_pec_line(const std::string &elem,
   int present = 0;
   if (me_ == 0) {
     try {
+      H5ErrGuard _h5err;
       H5::H5File f(path_, H5F_ACC_RDONLY);
       if (H5Lexists(f.getId(), grp.c_str(), H5P_DEFAULT) > 0) {
         H5::DataSet dc = f.openDataSet(grp + "/coefficient");
@@ -304,6 +322,52 @@ bool ProcessLibrary::load_pec_line(const std::string &elem,
 }
 
 // ------------------------------------------------------------------------
+// load_reactions_catalog()
+// ------------------------------------------------------------------------
+bool ProcessLibrary::load_reactions_catalog(const std::string &elem,
+                                            std::string &out)
+{
+  if (!opened_) return false;
+  out.clear();
+
+  const std::string grp = "/volume/reactions/" + elem + "/catalog";
+  int present = 0;
+  int len = 0;
+  std::string local_out;
+
+  if (me_ == 0) {
+    try {
+      H5ErrGuard _h5err;
+      H5::H5File f(path_, H5F_ACC_RDONLY);
+      if (H5Lexists(f.getId(), grp.c_str(), H5P_DEFAULT) > 0) {
+        H5::DataSet ds = f.openDataSet(grp);
+        // Stored by build_processes_h5.py as a scalar opaque string.
+        H5::StrType stype = ds.getStrType();
+        H5::DataSpace sp  = ds.getSpace();
+        if (sp.getSimpleExtentNdims() == 0) {
+          std::string tmp;
+          ds.read(tmp, stype);
+          local_out = std::move(tmp);
+          present = 1;
+          len = static_cast<int>(local_out.size());
+        }
+      }
+    } catch (const H5::Exception &) {
+      present = 0;
+    }
+  }
+
+  MPI_Bcast(&present, 1, MPI_INT, 0, comm_);
+  if (!present) return false;
+  MPI_Bcast(&len, 1, MPI_INT, 0, comm_);
+  std::vector<char> buf(len + 1, 0);
+  if (me_ == 0 && len > 0) std::memcpy(buf.data(), local_out.data(), len);
+  MPI_Bcast(buf.data(), len + 1, MPI_CHAR, 0, comm_);
+  out.assign(buf.data(), len);
+  return true;
+}
+
+// ------------------------------------------------------------------------
 // fetch_rate(): rank-0 reads /<group>/coefficient + temperature +
 // density, broadcasts to all ranks.
 // ------------------------------------------------------------------------
@@ -315,6 +379,7 @@ bool ProcessLibrary::fetch_rate(const std::string &group_path,
 
   if (me_ == 0) {
     try {
+      H5ErrGuard _h5err;
       H5::H5File f(path_, H5F_ACC_RDONLY);
       if (H5Lexists(f.getId(), group_path.c_str(), H5P_DEFAULT) > 0) {
         const std::string coef_path = group_path + "/coefficient";
@@ -391,6 +456,7 @@ bool ProcessLibrary::fetch_vector(const std::string &dataset_path,
   int n = 0;
   if (me_ == 0) {
     try {
+      H5ErrGuard _h5err;
       H5::H5File f(path_, H5F_ACC_RDONLY);
       if (H5Lexists(f.getId(), dataset_path.c_str(), H5P_DEFAULT) > 0) {
         H5::DataSet ds = f.openDataSet(dataset_path);

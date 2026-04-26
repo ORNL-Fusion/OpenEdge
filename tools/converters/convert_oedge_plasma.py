@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
-"""
-OEDGE/DIVIMP NetCDF -> OpenEdge converter.
+"""OEDGE/DIVIMP NetCDF -> OpenEdge plasma.h5 (mesh-native).
 
-Reads an OEDGE .nc background file and an equilibrium (.equ) file,
-interpolates onto a regular (R,Z) grid, and writes plasma.h5 (with
-B-field embedded as br/bt/bz) in the format expected by OpenEdge's
-``compute plasma/fields file`` command.
+Reads an OEDGE `.nc` background file plus an equilibrium `.equ`, builds the
+native OEDGE cell polygons (via KORPG/NVERTP/RVERTP/ZVERTP) as an
+unstructured triangular mesh, and writes plasma.h5 with the same /mesh/*
+schema as `convert_solps_plasma.py` and `convert_s3x_plasma.py`.
+
+Output groups:
+    /equilibrium/{r, z, psi, btf, rtf, psib}
+    /ion_species/{names, spec_index, main_ion_spec_index, mass_amu, charge_state_z}
+    /mesh/{vtx_r, vtx_z, triangles, cell_index,
+           dens_e, temp_e, dens_i, temp_i, parr_flow,
+           grad_te_r, grad_te_z, grad_ti_r, grad_ti_z,
+           e_r, e_z, e_t, pob,
+           vtx_br, vtx_bz, vtx_bt, vtx_bmag, vtx_bpol, vtx_btor,
+           tri_source_kind, wall_gap_mask,
+           ions/{dens, temp, parr_flow}}
 
 Usage:
-    python convert_oedge_plasma.py d3d-204953-bkg-v25.nc \
-        --equ-file 204953_3000.x16.equ \
-        --plasma-out plasma.h5 \
-        --nr 300 --nz 300 --plot
+    python convert_oedge_plasma.py d3d-204953-bkg-v25.nc \\
+        --equ-file 204953_3000.x16.equ \\
+        --plasma-out plasma.h5
 """
 
 from __future__ import annotations
@@ -27,19 +36,11 @@ from scipy.interpolate import griddata
 
 
 # ======================================================================
-# Equilibrium (.equ) file reader  — same format as SOLPS converter
+# Equilibrium (.equ) file reader — same format as SOLPS/s3x converters
 # ======================================================================
 
 def read_equilibrium(equ_file: Path):
-    """
-    Read .equ equilibrium file and reconstruct (Br, Bt, Bz) on its own
-    regular (R,Z) grid from the poloidal flux function psi(R,Z).
-
-    Returns a dict with:
-      r, z, br, bt, bz    — regular-grid fields for interpolation
-      equ_r, equ_z, equ_psi — raw .equ arrays (same as r, z, psi here)
-      btf, rtf, psib      — toroidal-field params + boundary psi
-    """
+    """Read .equ and reconstruct (Br, Bt, Bz) from psi on its native grid."""
     jm = km = btf = rtf = None
     psib = 0.0
     read_r = read_z = read_psi = False
@@ -50,7 +51,6 @@ def read_equilibrium(equ_file: Path):
             tok = line.split()
             if not tok:
                 continue
-            # Header scalars
             if len(tok) >= 3 and tok[0] == "jm" and tok[1] == "=":
                 jm = int(tok[2]); continue
             if len(tok) >= 3 and tok[0] == "km" and tok[1] == "=":
@@ -61,14 +61,12 @@ def read_equilibrium(equ_file: Path):
                 rtf = float(tok[2]); continue
             if len(tok) >= 3 and tok[0] == "psib" and tok[1] == "=":
                 psib = float(tok[2]); continue
-            # Section markers
             if tok[0] == "r(1:jm);":
                 read_r, read_z, read_psi = True, False, False; continue
             if tok[0] == "z(1:km);":
                 read_r, read_z, read_psi = False, True, False; continue
             if tok[0].startswith("((psi(j,k)"):
                 read_r, read_z, read_psi = False, False, True; continue
-            # Data body
             if read_r:
                 try: r_vals.extend(float(x) for x in tok)
                 except ValueError: read_r = False
@@ -89,17 +87,15 @@ def read_equilibrium(equ_file: Path):
     z_eq = np.asarray(z_vals[:km], dtype=np.float64)
     psi = np.asarray(psi_vals[: jm * km], dtype=np.float64).reshape((km, jm))
 
-    # Reconstruct B-field from psi:
-    #   Br = -(1/R) dpsi/dZ,  Bz = (1/R) dpsi/dR,  Bt = btf*rtf/R
+    # Reconstruct B from psi: Br = -(1/R) dpsi/dZ, Bz = (1/R) dpsi/dR,
+    # Bt = btf*rtf/R.
     dz = z_eq[1] - z_eq[0]
     dr = r_eq[1] - r_eq[0]
     grad_z, grad_r = np.gradient(psi, dz, dr)
-
     rr = np.meshgrid(r_eq, z_eq)[0]
     safe_r = np.where(np.abs(rr) > 1e-12, rr, 1e-12)
-
     br = -grad_z / safe_r
-    bz = grad_r / safe_r
+    bz =  grad_r / safe_r
     bt = (btf * rtf) / safe_r
 
     return {
@@ -113,178 +109,229 @@ def read_equilibrium(equ_file: Path):
 # OEDGE NetCDF reader
 # ======================================================================
 
-def read_oedge_nc(nc_file: Path):
-    """
-    Read OEDGE/DIVIMP .nc file and extract valid cell-centred plasma data.
+def _detect_korpg_offset(korpg: np.ndarray, nvertp: np.ndarray) -> int:
+    """OEDGE sometimes indexes polygons from 0 and sometimes from 1.
+    Match what plot_oedge_native.py does."""
+    max_id = int(korpg.max())
+    if max_id == len(nvertp):
+        return 1
+    if max_id == len(nvertp) - 1:
+        return 0
+    return 1 if len(nvertp) > 1 else 0
 
-    Returns
-    -------
-    dict with keys: r, z  (1-D flat arrays of valid cell centres)
-                    te, ti, ne, v_par, e_par, bts, kbfs,
-                    te_grad, ti_grad  (parallel gradients)
-                    + grid metadata
-    """
+
+def read_oedge_nc(nc_file: Path) -> dict:
+    """Read OEDGE .nc and return both ring/knot-indexed fields AND native
+    polygon geometry (KORPG/NVERTP/RVERTP/ZVERTP) for mesh building."""
     ds = nc.Dataset(str(nc_file), "r")
 
-    nrs = int(ds.variables["NRS"][:])
-    nks_arr = np.array(ds.variables["NKS"][:])
-    irsep = int(ds.variables["IRSEP"][:])
+    # Grid metadata
+    nrs    = int(ds.variables["NRS"][:])
+    nks    = np.asarray(ds.variables["NKS"][:])
+    irsep  = int(ds.variables["IRSEP"][:])
     irwall = int(ds.variables["IRWALL"][:])
     irtrap = int(ds.variables["IRTRAP"][:])
 
-    rs = np.array(ds.variables["RS"][:])
-    zs = np.array(ds.variables["ZS"][:])
-    ktebs = np.array(ds.variables["KTEBS"][:])
-    ktibs = np.array(ds.variables["KTIBS"][:])
-    knbs = np.array(ds.variables["KNBS"][:])
-    kvhs = np.array(ds.variables["KVHS"][:])
-    kes = np.array(ds.variables["KES"][:])
-    bts = np.array(ds.variables["BTS"][:])
-    kbfs = np.array(ds.variables["KBFS"][:])
-    tegs = np.array(ds.variables["TEGS"][:])
-    tigs = np.array(ds.variables["TIGS"][:])
+    # Per-cell fields on (ring, knot) layout.
+    rs    = np.asarray(ds.variables["RS"][:])
+    zs    = np.asarray(ds.variables["ZS"][:])
+    ktebs = np.asarray(ds.variables["KTEBS"][:])
+    ktibs = np.asarray(ds.variables["KTIBS"][:])
+    knbs  = np.asarray(ds.variables["KNBS"][:])
+    kvhs  = np.asarray(ds.variables["KVHS"][:])
+    kes   = np.asarray(ds.variables["KES"][:])
+    tegs  = np.asarray(ds.variables["TEGS"][:])
+    tigs  = np.asarray(ds.variables["TIGS"][:])
+
+    # Parallel flow is sometimes pre-scaled by QTIM; undo if present.
+    qtim = None
+    if "QTIM" in ds.variables:
+        qtim = float(ds.variables["QTIM"][:])
+        if qtim > 0.0:
+            kvhs = kvhs / qtim
+
+    # Native polygon geometry.
+    korpg  = np.asarray(ds.variables["KORPG"][:])
+    nvertp = np.asarray(ds.variables["NVERTP"][:])
+    rvertp = np.asarray(ds.variables["RVERTP"][:])
+    zvertp = np.asarray(ds.variables["ZVERTP"][:])
+    offset = _detect_korpg_offset(korpg, nvertp)
 
     # Scalar metadata
-    cbphi = float(ds.variables["CBPHI"][:])
-    r0 = float(ds.variables["R0"][:])
-    z0 = float(ds.variables["Z0"][:])
-    crmb = float(ds.variables["CRMB"][:])
+    crmb = float(ds.variables["CRMB"][:]) if "CRMB" in ds.variables else 2.0
+    r0   = float(ds.variables["R0"][:])   if "R0"   in ds.variables else 0.0
+    z0   = float(ds.variables["Z0"][:])   if "Z0"   in ds.variables else 0.0
 
     ds.close()
 
-    # Build validity mask: ring/knot structure + physical values
-    valid = np.zeros(rs.shape, dtype=bool)
-    for ir in range(1, nrs):
-        nk = int(nks_arr[ir])
-        if nk > 0:
-            valid[ir, 1 : nk + 1] = True
-    valid &= (rs > 0.5) & (knbs > 1e10)
+    # Validity mask on (ring, knot). Same filter plot_oedge_native.py uses:
+    # polygon id > 0 and at least 3 vertices.
+    valid = np.zeros(korpg.shape, dtype=bool)
+    for ir in range(korpg.shape[0]):
+        nk = int(nks[ir]) if ir < len(nks) else korpg.shape[1]
+        for ik in range(min(nk, korpg.shape[1])):
+            pid_raw = int(korpg[ir, ik])
+            if pid_raw <= 0:
+                continue
+            pid = pid_raw - offset
+            if pid < 0 or pid >= len(nvertp):
+                continue
+            if int(nvertp[pid]) < 3:
+                continue
+            # Skip degenerate centroids at origin (OEDGE sometimes pads).
+            if not (np.isfinite(rs[ir, ik]) and rs[ir, ik] > 0.1):
+                continue
+            valid[ir, ik] = True
 
     return dict(
-        # Flat arrays of valid cells
-        r=rs[valid],
-        z=zs[valid],
-        te=ktebs[valid],
-        ti=ktibs[valid],
-        ne=knbs[valid],
-        v_par=kvhs[valid],
-        e_par=kes[valid],
-        bts=bts[valid],
-        kbfs=kbfs[valid],
-        te_grad_par=tegs[valid],
-        ti_grad_par=tigs[valid],
+        # Ring/knot grid (full 2D arrays; filtered via `valid` downstream)
+        rs=rs, zs=zs, valid=valid, nks=nks, nrs=nrs,
+        # Polygon geometry
+        korpg=korpg, nvertp=nvertp, rvertp=rvertp, zvertp=zvertp,
+        korpg_offset=offset,
+        # Per-cell plasma (eV, eV, m^-3, m/s, V/m, eV/m, eV/m)
+        ktebs=ktebs, ktibs=ktibs, knbs=knbs, kvhs=kvhs, kes=kes,
+        tegs=tegs, tigs=tigs,
         # Metadata
-        cbphi=cbphi,
-        r0=r0,
-        z0=z0,
-        crmb=crmb,
-        irsep=irsep,
-        irwall=irwall,
-        irtrap=irtrap,
-        n_valid=int(valid.sum()),
+        crmb=crmb, r0=r0, z0=z0,
+        irsep=irsep, irwall=irwall, irtrap=irtrap,
     )
 
 
 # ======================================================================
-# Interpolation helpers
+# Mesh builder — polygons -> deduplicated triangular mesh
 # ======================================================================
 
-def make_regular_grid(rc, zc, nr, nz, rmin=None, rmax=None, zmin=None, zmax=None):
-    """Build a regular (R,Z) grid enclosing the valid cell centres."""
-    if rmin is None:
-        rmin = float(rc.min())
-    if rmax is None:
-        rmax = float(rc.max())
-    if zmin is None:
-        zmin = float(zc.min())
-    if zmax is None:
-        zmax = float(zc.max())
-    # Small padding
-    dr = (rmax - rmin) * 0.01
-    dz = (zmax - zmin) * 0.01
-    rmin -= dr
-    rmax += dr
-    zmin -= dz
-    zmax += dz
-    r = np.linspace(rmin, rmax, nr)
-    z = np.linspace(zmin, zmax, nz)
-    return r, z
-
-
-def interp_scatter_to_grid(src_r, src_z, values, grid_r, grid_z,
-                           method="linear", fill_value=0.0):
-    """
-    Interpolate scattered (R,Z) data onto a regular grid.
-
-    Parameters
-    ----------
-    src_r, src_z : 1-D arrays of source cell centres
-    values       : 1-D array of field values at those centres
-    grid_r, grid_z : 1-D arrays defining the regular output grid
-    method       : 'linear', 'nearest', or 'cubic'
+def build_oedge_mesh(oedge: dict, vertex_round_digits: int = 9):
+    """Fan-triangulate OEDGE cell polygons into a single triangular mesh
+    with deduplicated vertices.
 
     Returns
     -------
-    2-D array (nz, nr) on the regular grid.
+    vtx_r, vtx_z     : (nvtx,) float64   deduplicated vertex coords
+    triangles        : (ntri, 3) int32   vertex indices per triangle
+    cell_index       : (ntri,)  int32    per-triangle -> cell ordinal (0..ncell-1)
+    cell_ir, cell_ik : (ncell,) int32    per-cell -> OEDGE (ring, knot) for plasma lookup
     """
-    rr, zz = np.meshgrid(grid_r, grid_z)
-    pts = np.column_stack([src_r, src_z])
-    out = griddata(pts, values, (rr, zz), method=method, fill_value=np.nan)
-    # Fill remaining NaNs with nearest-neighbour
-    nans = np.isnan(out)
-    if nans.any():
-        nn = griddata(pts, values, (rr[nans], zz[nans]),
-                      method="nearest")
-        out[nans] = nn
-    # Replace any lingering NaN with fill_value
-    out = np.nan_to_num(out, nan=fill_value)
-    return out
+    korpg   = oedge["korpg"]
+    nvertp  = oedge["nvertp"]
+    rvertp  = oedge["rvertp"]
+    zvertp  = oedge["zvertp"]
+    valid   = oedge["valid"]
+    offset  = oedge["korpg_offset"]
 
+    vtx_map: dict[tuple[float, float], int] = {}
+    vtx_r_list: list[float] = []
+    vtx_z_list: list[float] = []
+    tri_list: list[tuple[int, int, int]] = []
+    cell_index_list: list[int] = []
+    cell_ir_list: list[int] = []
+    cell_ik_list: list[int] = []
 
-def interp_equilibrium_to_grid(r_eq, z_eq, field_eq, grid_r, grid_z):
-    """
-    Interpolate a field on the equilibrium's own regular grid onto
-    the output regular grid using bilinear interpolation.
-    """
-    from scipy.interpolate import RegularGridInterpolator
-    interp = RegularGridInterpolator(
-        (z_eq, r_eq), field_eq,
-        method="linear", bounds_error=False, fill_value=None,
-    )
-    rr, zz = np.meshgrid(grid_r, grid_z)
-    pts = np.column_stack([zz.ravel(), rr.ravel()])
-    return interp(pts).reshape(zz.shape)
+    def _get_vid(r: float, z: float) -> int:
+        key = (round(float(r), vertex_round_digits),
+               round(float(z), vertex_round_digits))
+        vid = vtx_map.get(key)
+        if vid is None:
+            vid = len(vtx_r_list)
+            vtx_map[key] = vid
+            vtx_r_list.append(key[0])
+            vtx_z_list.append(key[1])
+        return vid
+
+    cell_ord = 0
+    nr, nk = korpg.shape
+    for ir in range(nr):
+        for ik in range(nk):
+            if not valid[ir, ik]:
+                continue
+            pid = int(korpg[ir, ik]) - offset
+            nv = int(nvertp[pid])
+            poly_r = rvertp[pid, :nv]
+            poly_z = zvertp[pid, :nv]
+            if not (np.isfinite(poly_r).all() and np.isfinite(poly_z).all()):
+                continue
+            vids = [_get_vid(poly_r[i], poly_z[i]) for i in range(nv)]
+            # Fan triangulation: (v0, vi, vi+1) for i=1..nv-2.
+            added_tri = 0
+            for i in range(1, nv - 1):
+                a, b, c = vids[0], vids[i], vids[i + 1]
+                if a == b or b == c or a == c:
+                    continue
+                tri_list.append((a, b, c))
+                cell_index_list.append(cell_ord)
+                added_tri += 1
+            if added_tri == 0:
+                continue
+            cell_ir_list.append(ir)
+            cell_ik_list.append(ik)
+            cell_ord += 1
+
+    vtx_r = np.asarray(vtx_r_list, dtype=np.float64)
+    vtx_z = np.asarray(vtx_z_list, dtype=np.float64)
+    triangles = np.asarray(tri_list, dtype=np.int32)
+    cell_index = np.asarray(cell_index_list, dtype=np.int32)
+    cell_ir = np.asarray(cell_ir_list, dtype=np.int32)
+    cell_ik = np.asarray(cell_ik_list, dtype=np.int32)
+    return vtx_r, vtx_z, triangles, cell_index, cell_ir, cell_ik
 
 
 # ======================================================================
-# Flow decomposition
+# Per-triangle mesh-native LSQ gradient (same pattern as s3x/SOLPS)
 # ======================================================================
 
-def decompose_parallel_flow(v_par, br, bt, bz):
-    """
-    Decompose parallel flow magnitude into cylindrical components
-    using the B-field unit vector:
-        v_r = v_par * Br/|B|,  v_t = v_par * Bt/|B|,  v_z = v_par * Bz/|B|
-    """
-    bmag = np.sqrt(br**2 + bt**2 + bz**2)
-    safe_b = np.where(bmag > 1e-12, bmag, 1e-12)
-    vr = v_par * br / safe_b
-    vt = v_par * bt / safe_b
-    vz = v_par * bz / safe_b
-    return v_par, vr, vt, vz
+def mesh_lsq_gradient(vtx_r, vtx_z, triangles, field_tri):
+    """One-ring vertex-neighbor LSQ fit of (grad_R, grad_Z) per triangle."""
+    ntri = triangles.shape[0]
+    nvtx = vtx_r.size
+    tri_R = vtx_r[triangles].mean(axis=1)
+    tri_Z = vtx_z[triangles].mean(axis=1)
 
+    vtx_tris: list[list[int]] = [[] for _ in range(nvtx)]
+    for t in range(ntri):
+        for k in range(3):
+            vtx_tris[triangles[t, k]].append(t)
 
-def decompose_parallel_gradient(grad_par, br, bt, bz):
-    """
-    Project a parallel gradient into cylindrical (R, toroidal, Z) components
-    using the B-field unit vector.  Same decomposition as flow.
-    """
-    bmag = np.sqrt(br**2 + bt**2 + bz**2)
-    safe_b = np.where(bmag > 1e-12, bmag, 1e-12)
-    gr = grad_par * br / safe_b
-    gt = grad_par * bt / safe_b
-    gz = grad_par * bz / safe_b
-    return gr, gt, gz
+    gR = np.zeros(ntri, dtype=np.float64)
+    gZ = np.zeros(ntri, dtype=np.float64)
+    f_tri = np.asarray(field_tri, dtype=np.float64)
+    for t in range(ntri):
+        f0 = f_tri[t]
+        r0 = tri_R[t]; z0 = tri_Z[t]
+        if not (np.isfinite(f0) and np.isfinite(r0) and np.isfinite(z0)):
+            continue
+        stencil = set()
+        for k in range(3):
+            stencil.update(vtx_tris[triangles[t, k]])
+        stencil.discard(t)
+        a11 = a12 = a22 = 0.0
+        b1 = b2 = 0.0
+        npt = 0
+        for s in stencil:
+            f1 = f_tri[s]
+            if not np.isfinite(f1):
+                continue
+            dR = tri_R[s] - r0
+            dZ = tri_Z[s] - z0
+            ds2 = dR * dR + dZ * dZ
+            if ds2 <= 1e-20:
+                continue
+            w = 1.0 / ds2
+            df = f1 - f0
+            a11 += w * dR * dR
+            a12 += w * dR * dZ
+            a22 += w * dZ * dZ
+            b1  += w * dR * df
+            b2  += w * dZ * df
+            npt += 1
+        det = a11 * a22 - a12 * a12
+        if npt < 3 or abs(det) <= 1e-24:
+            continue
+        gR[t] = ( a22 * b1 - a12 * b2) / det
+        gZ[t] = (-a12 * b1 + a11 * b2) / det
+    gR[~np.isfinite(gR)] = 0.0
+    gZ[~np.isfinite(gZ)] = 0.0
+    return gR, gZ
 
 
 # ======================================================================
@@ -295,131 +342,126 @@ def convert_oedge_to_openedge(
     nc_file: Path,
     equ_file: Path,
     plasma_out: Path = Path("plasma.h5"),
-    nr: int = 300,
-    nz: int = 300,
-    rmin: float = None,
-    rmax: float = None,
-    zmin: float = None,
-    zmax: float = None,
-    plot: bool = False,
-    plot_prefix: Path = None,
 ):
     print(f"Reading OEDGE file: {nc_file}")
     oedge = read_oedge_nc(nc_file)
-    print(f"  {oedge['n_valid']} valid cells, "
-          f"R=[{oedge['r'].min():.3f}, {oedge['r'].max():.3f}], "
-          f"Z=[{oedge['z'].min():.3f}, {oedge['z'].max():.3f}]")
+    print(f"  ring/knot grid: NRS={oedge['nrs']}, valid cells={int(oedge['valid'].sum())}, "
+          f"IRSEP={oedge['irsep']}, IRWALL={oedge['irwall']}, IRTRAP={oedge['irtrap']}")
 
     print(f"Reading equilibrium: {equ_file}")
     equ_dict = read_equilibrium(equ_file)
-    r_eq  = equ_dict["r"]
-    z_eq  = equ_dict["z"]
-    br_eq = equ_dict["br"]
-    bt_eq = equ_dict["bt"]
-    bz_eq = equ_dict["bz"]
-    print(f"  Equilibrium grid: {len(r_eq)}x{len(z_eq)}, "
-          f"R=[{r_eq[0]:.3f}, {r_eq[-1]:.3f}], Z=[{z_eq[0]:.3f}, {z_eq[-1]:.3f}]")
+    print(f"  equilibrium grid: {len(equ_dict['r'])}x{len(equ_dict['z'])}, "
+          f"R=[{equ_dict['r'][0]:.3f}, {equ_dict['r'][-1]:.3f}], "
+          f"Z=[{equ_dict['z'][0]:.3f}, {equ_dict['z'][-1]:.3f}]")
 
-    # ---- Build output regular grid ----
-    grid_r, grid_z = make_regular_grid(
-        oedge["r"], oedge["z"], nr, nz, rmin, rmax, zmin, zmax
-    )
-    print(f"Output grid: {nr}x{nz}, "
-          f"R=[{grid_r[0]:.3f}, {grid_r[-1]:.3f}], "
-          f"Z=[{grid_z[0]:.3f}, {grid_z[-1]:.3f}]")
+    # ---- Build mesh from OEDGE polygons ----
+    print("Building OEDGE native polygon mesh ...")
+    vtx_r, vtx_z, tri, cell_index, cell_ir, cell_ik = build_oedge_mesh(oedge)
+    ntri = tri.shape[0]
+    ncell = cell_ir.size
+    print(f"  mesh: {vtx_r.size} vertices, {ntri} triangles, {ncell} cells "
+          f"(typically ~2 triangles/cell for quad polygons)")
 
-    # ---- Interpolate B-field from equilibrium onto output grid ----
-    print("Interpolating B-field from equilibrium ...")
-    br_grid = interp_equilibrium_to_grid(r_eq, z_eq, br_eq, grid_r, grid_z)
-    bt_grid = interp_equilibrium_to_grid(r_eq, z_eq, bt_eq, grid_r, grid_z)
-    bz_grid = interp_equilibrium_to_grid(r_eq, z_eq, bz_eq, grid_r, grid_z)
+    # ---- Gather per-cell plasma (length = ncell, NOT ntri). ----
+    # Downstream consumers (fix background, compute pmi/surf/data) expect
+    # mesh/dens_e, mesh/temp_e, mesh/ions/*, etc. to be ncell-long, and
+    # mesh/cell_index[tri] maps each triangle to its owning cell. This
+    # matches the SOLPS / s3x converter convention.
+    def per_cell(field_rk):
+        v = field_rk[cell_ir, cell_ik].astype(np.float64, copy=False)
+        return np.nan_to_num(v, nan=0.0)
 
-    # ---- Interpolate plasma fields from scattered OEDGE cells ----
-    print("Interpolating plasma fields ...")
-    src_r, src_z = oedge["r"], oedge["z"]
+    mesh_dens_e    = per_cell(oedge["knbs"])
+    mesh_temp_e    = per_cell(oedge["ktebs"])
+    mesh_temp_i    = per_cell(oedge["ktibs"])
+    mesh_parr_flow = per_cell(oedge["kvhs"])
+    mesh_e_par     = per_cell(oedge["kes"])
+    # OEDGE is single-ion deuterium: ni = ne under quasi-neutrality.
+    mesh_dens_i    = mesh_dens_e.copy()
 
-    ne_grid = interp_scatter_to_grid(src_r, src_z, oedge["ne"], grid_r, grid_z)
-    te_grid = interp_scatter_to_grid(src_r, src_z, oedge["te"], grid_r, grid_z)
-    ti_grid = interp_scatter_to_grid(src_r, src_z, oedge["ti"], grid_r, grid_z)
-    vpar_grid = interp_scatter_to_grid(src_r, src_z, oedge["v_par"], grid_r, grid_z)
+    # ---- Evaluate equilibrium B directly onto mesh vertices ----
+    # Same approach as SOLPS: scipy.griddata linear with nearest fallback.
+    rr_eq, zz_eq = np.meshgrid(equ_dict["r"], equ_dict["z"])
+    eq_pts = np.column_stack([rr_eq.reshape(-1), zz_eq.reshape(-1)])
+    vtx_pts = np.column_stack([vtx_r, vtx_z])
 
-    # ---- Decompose parallel flow into (R, toroidal, Z) ----
-    print("Decomposing parallel flow and gradients ...")
-    parr_flow, parr_flow_r, parr_flow_t, parr_flow_z = decompose_parallel_flow(
-        vpar_grid, br_grid, bt_grid, bz_grid
-    )
+    def _interp(values_2d):
+        v = np.asarray(values_2d, dtype=np.float64).reshape(-1)
+        lin = griddata(eq_pts, v, vtx_pts, method="linear")
+        nn  = griddata(eq_pts, v, vtx_pts, method="nearest")
+        return np.where(np.isfinite(lin), lin, nn)
 
-    # ---- Decompose parallel temperature gradients ----
-    tegrad_par_grid = interp_scatter_to_grid(
-        src_r, src_z, oedge["te_grad_par"], grid_r, grid_z
-    )
-    tigrad_par_grid = interp_scatter_to_grid(
-        src_r, src_z, oedge["ti_grad_par"], grid_r, grid_z
-    )
+    mesh_vtx_br = _interp(equ_dict["br"])
+    mesh_vtx_bz = _interp(equ_dict["bz"])
+    mesh_vtx_bt = _interp(equ_dict["bt"])
+    mesh_vtx_bpol = np.sqrt(mesh_vtx_br ** 2 + mesh_vtx_bz ** 2)
+    mesh_vtx_bmag = np.sqrt(mesh_vtx_bpol ** 2 + mesh_vtx_bt ** 2)
+    print(f"Per-vertex B from equilibrium: "
+          f"|B| range=[{mesh_vtx_bmag.min():.3f}, {mesh_vtx_bmag.max():.3f}] T")
 
-    gte_r, gte_t, gte_z = decompose_parallel_gradient(
-        tegrad_par_grid, br_grid, bt_grid, bz_grid
-    )
-    gti_r, gti_t, gti_z = decompose_parallel_gradient(
-        tigrad_par_grid, br_grid, bt_grid, bz_grid
-    )
+    # ---- Cylindrical-component decomposition of parallel quantities ----
+    # Need per-cell B-hat for E-field decomposition. Compute per-triangle
+    # B (vertex-mean), then average the (potentially 2) triangles of each
+    # cell back to per-cell via cell_index.
+    tri_br = mesh_vtx_br[tri].mean(axis=1)
+    tri_bz = mesh_vtx_bz[tri].mean(axis=1)
+    tri_bt = mesh_vtx_bt[tri].mean(axis=1)
+    cell_br = np.zeros(ncell); cell_bz = np.zeros(ncell); cell_bt = np.zeros(ncell)
+    cell_count = np.zeros(ncell, dtype=np.int32)
+    np.add.at(cell_br,    cell_index, tri_br)
+    np.add.at(cell_bz,    cell_index, tri_bz)
+    np.add.at(cell_bt,    cell_index, tri_bt)
+    np.add.at(cell_count, cell_index, 1)
+    nz_mask = cell_count > 0
+    cell_br[nz_mask] /= cell_count[nz_mask]
+    cell_bz[nz_mask] /= cell_count[nz_mask]
+    cell_bt[nz_mask] /= cell_count[nz_mask]
+    cell_bmag = np.sqrt(cell_br**2 + cell_bz**2 + cell_bt**2)
+    safe = np.where(cell_bmag > 1e-12, cell_bmag, 1e-12)
+    bhat_r_c = cell_br / safe
+    bhat_t_c = cell_bt / safe
+    bhat_z_c = cell_bz / safe
+
+    # Per-species ion arrays (shape (nion, ncell)) -- single ion for OEDGE.
+    mesh_ions_dens = mesh_dens_i[np.newaxis, :]
+    mesh_ions_temp = mesh_temp_i[np.newaxis, :]
+    mesh_ions_upar = mesh_parr_flow[np.newaxis, :]
+
+    # ---- Temperature gradients on the mesh via per-triangle LSQ, then
+    # cell-average (matches the per-cell layout of dens_e/temp_e).
+    print("Computing mesh-native LSQ gradients ...")
+    tri_grad_te_r, tri_grad_te_z = mesh_lsq_gradient(
+        vtx_r, vtx_z, tri, mesh_temp_e[cell_index])
+    tri_grad_ti_r, tri_grad_ti_z = mesh_lsq_gradient(
+        vtx_r, vtx_z, tri, mesh_temp_i[cell_index])
+
+    def tri_to_cell(tri_arr):
+        out = np.zeros(ncell)
+        np.add.at(out, cell_index, tri_arr)
+        out[nz_mask] /= cell_count[nz_mask]
+        return out
+
+    mesh_grad_te_r = tri_to_cell(tri_grad_te_r)
+    mesh_grad_te_z = tri_to_cell(tri_grad_te_z)
+    mesh_grad_ti_r = tri_to_cell(tri_grad_ti_r)
+    mesh_grad_ti_z = tri_to_cell(tri_grad_ti_z)
+
+    # ---- E-field from KES (parallel E) projected into cylindrical (per-cell).
+    mesh_e_r = mesh_e_par * bhat_r_c
+    mesh_e_t = mesh_e_par * bhat_t_c
+    mesh_e_z = mesh_e_par * bhat_z_c
+
+    # pob (potential) — not carried through OEDGE standard output; zero stub.
+    mesh_pob = np.zeros(ncell, dtype=np.float64)
+
+    # Provenance stubs (OEDGE polygons extend to the wall, no vacuum fill).
+    mesh_tri_source_kind = np.ones(ntri, dtype=np.int32)
+    mesh_wall_gap_mask   = np.zeros(ntri, dtype=np.int32)
 
     # ---- Write plasma.h5 ----
     print(f"Writing {plasma_out} ...")
     with h5py.File(str(plasma_out), "w") as f:
-        f.create_dataset("r", data=grid_r)
-        f.create_dataset("z", data=grid_z)
-        f.create_dataset("dens_e", data=ne_grid)
-        f.create_dataset("temp_e", data=te_grid)
-        f.create_dataset("dens_i", data=ne_grid)      # quasi-neutrality: ni = ne
-        f.create_dataset("temp_i", data=ti_grid)
-        f.create_dataset("parr_flow", data=parr_flow)
-        f.create_dataset("parr_flow_r", data=parr_flow_r)
-        f.create_dataset("parr_flow_t", data=parr_flow_t)
-        f.create_dataset("parr_flow_z", data=parr_flow_z)
-        f.create_dataset("grad_te_r", data=gte_r)
-        f.create_dataset("grad_te_t", data=gte_t)
-        f.create_dataset("grad_te_z", data=gte_z)
-        f.create_dataset("grad_ti_r", data=gti_r)
-        f.create_dataset("grad_ti_t", data=gti_t)
-        f.create_dataset("grad_ti_z", data=gti_z)
-
-        # Single-species metadata (deuterium)
-        sdt = h5py.string_dtype(encoding="utf-8")
-        f.create_dataset("ion_species/names",
-                         data=np.array(["D+"], dtype=object), dtype=sdt)
-        f.create_dataset("ion_species/spec_index",
-                         data=np.array([0], dtype=np.int32))
-        f.create_dataset("ion_species/main_ion_spec_index",
-                         data=np.array([0], dtype=np.int32))
-        f.create_dataset("ion_species/mass_amu",
-                         data=np.array([oedge["crmb"]]))
-        f.create_dataset("ion_species/charge_state_z",
-                         data=np.array([1], dtype=np.int32))
-
-        # Single-ion "ions/" arrays — shape (1, nz, nr)
-        f.create_dataset("ions/dens",
-                         data=ne_grid[np.newaxis, :, :])
-        f.create_dataset("ions/temp",
-                         data=ti_grid[np.newaxis, :, :])
-        f.create_dataset("ions/parr_flow",
-                         data=parr_flow[np.newaxis, :, :])
-        f.create_dataset("ions/parr_flow_r",
-                         data=parr_flow_r[np.newaxis, :, :])
-        f.create_dataset("ions/parr_flow_t",
-                         data=parr_flow_t[np.newaxis, :, :])
-        f.create_dataset("ions/parr_flow_z",
-                         data=parr_flow_z[np.newaxis, :, :])
-
-        # B-field embedded in plasma.h5 — no separate bfield.h5 needed.
-        # compute plasma/fields reads br/bt/bz directly from this file.
-        f.create_dataset("br", data=np.nan_to_num(br_grid))
-        f.create_dataset("bt", data=np.nan_to_num(bt_grid))
-        f.create_dataset("bz", data=np.nan_to_num(bz_grid))
-
-        # Embedded equilibrium (psi map + btf/rtf/psib). Downstream
-        # consumers (compute plasma/fields, fix plasma/data) read this
-        # group directly so the .equ file isn't needed at run time.
+        # Embedded equilibrium on its native .equ grid.
         f.create_dataset("equilibrium/r",    data=np.asarray(equ_dict["equ_r"], dtype=np.float64))
         f.create_dataset("equilibrium/z",    data=np.asarray(equ_dict["equ_z"], dtype=np.float64))
         f.create_dataset("equilibrium/psi",  data=np.asarray(equ_dict["equ_psi"], dtype=np.float64))
@@ -427,96 +469,62 @@ def convert_oedge_to_openedge(
         f.create_dataset("equilibrium/rtf",  data=float(equ_dict["rtf"]))
         f.create_dataset("equilibrium/psib", data=float(equ_dict["psib"]))
 
-        # Source metadata
-        f.attrs["source"] = f"OEDGE: {nc_file.name}"
+        # Single-ion metadata (deuterium).
+        sdt = h5py.string_dtype(encoding="utf-8")
+        f.create_dataset("ion_species/names",
+                         data=np.array(["D+"], dtype=object), dtype=sdt)
+        f.create_dataset("ion_species/elements",
+                         data=np.array(["D"], dtype=object), dtype=sdt)
+        f.create_dataset("ion_species/spec_index",
+                         data=np.array([0], dtype=np.int32))
+        f.create_dataset("ion_species/main_ion_spec_index",
+                         data=np.array([0], dtype=np.int32))
+        f.create_dataset("ion_species/mass_amu",
+                         data=np.array([oedge["crmb"]], dtype=np.float64))
+        f.create_dataset("ion_species/charge_state_z",
+                         data=np.array([1], dtype=np.int32))
+
+        # Mesh.
+        f.create_dataset("mesh/vtx_r",      data=vtx_r)
+        f.create_dataset("mesh/vtx_z",      data=vtx_z)
+        f.create_dataset("mesh/triangles",  data=tri)
+        f.create_dataset("mesh/cell_index", data=cell_index)
+
+        f.create_dataset("mesh/dens_e",    data=mesh_dens_e)
+        f.create_dataset("mesh/temp_e",    data=mesh_temp_e)
+        f.create_dataset("mesh/dens_i",    data=mesh_dens_i)
+        f.create_dataset("mesh/temp_i",    data=mesh_temp_i)
+        f.create_dataset("mesh/parr_flow", data=mesh_parr_flow)
+        f.create_dataset("mesh/pob",       data=mesh_pob)
+
+        f.create_dataset("mesh/grad_te_r", data=mesh_grad_te_r)
+        f.create_dataset("mesh/grad_te_z", data=mesh_grad_te_z)
+        f.create_dataset("mesh/grad_ti_r", data=mesh_grad_ti_r)
+        f.create_dataset("mesh/grad_ti_z", data=mesh_grad_ti_z)
+
+        f.create_dataset("mesh/e_r", data=mesh_e_r)
+        f.create_dataset("mesh/e_z", data=mesh_e_z)
+        f.create_dataset("mesh/e_t", data=mesh_e_t)
+
+        f.create_dataset("mesh/vtx_br",   data=mesh_vtx_br)
+        f.create_dataset("mesh/vtx_bz",   data=mesh_vtx_bz)
+        f.create_dataset("mesh/vtx_bt",   data=mesh_vtx_bt)
+        f.create_dataset("mesh/vtx_bmag", data=mesh_vtx_bmag)
+        f.create_dataset("mesh/vtx_bpol", data=mesh_vtx_bpol)
+        f.create_dataset("mesh/vtx_btor", data=mesh_vtx_bt)
+
+        f.create_dataset("mesh/tri_source_kind", data=mesh_tri_source_kind)
+        f.create_dataset("mesh/wall_gap_mask",   data=mesh_wall_gap_mask)
+
+        f.create_dataset("mesh/ions/dens",      data=mesh_ions_dens)
+        f.create_dataset("mesh/ions/temp",      data=mesh_ions_temp)
+        f.create_dataset("mesh/ions/parr_flow", data=mesh_ions_upar)
+
+        f.attrs["source"] = f"OEDGE: {Path(nc_file).name}"
         f.attrs["r0"] = oedge["r0"]
         f.attrs["z0"] = oedge["z0"]
 
     print("Done.")
-
-    # ---- Optional diagnostic plots ----
-    if plot:
-        _plot_results(
-            grid_r, grid_z,
-            ne_grid, te_grid, ti_grid, vpar_grid,
-            br_grid, bt_grid, bz_grid,
-            src_r, src_z, oedge,
-            plot_prefix,
-        )
-
-
-# ======================================================================
-# Plotting
-# ======================================================================
-
-def _plot_results(grid_r, grid_z, ne, te, ti, vpar,
-                  br, bt, bz, src_r, src_z, oedge, prefix):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.colors import LogNorm
-
-    if prefix is None:
-        prefix = Path("oedge_convert")
-    prefix = Path(prefix)
-
-    rr, zz = np.meshgrid(grid_r, grid_z)
-    bmag = np.sqrt(br**2 + bt**2 + bz**2)
-
-    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-    fig.suptitle("OEDGE → OpenEdge conversion", fontsize=14)
-
-    fields = [
-        (te, "Te [eV]", "plasma"),
-        (ti, "Ti [eV]", "plasma"),
-        (ne, "ne [m⁻³]", "hot"),
-        (vpar, "v_par [m/s]", "RdBu_r"),
-        (bmag, "|B| [T]", "inferno"),
-        (bt, "Bt [T]", "RdBu_r"),
-    ]
-
-    for ax, (field, label, cmap) in zip(axes.ravel(), fields):
-        vmin, vmax = np.nanpercentile(field[field != 0], [2, 98]) if np.any(field != 0) else (0, 1)
-        if "RdBu" in cmap:
-            vlim = max(abs(vmin), abs(vmax))
-            im = ax.pcolormesh(rr, zz, field, cmap=cmap,
-                               vmin=-vlim, vmax=vlim, shading="auto")
-        else:
-            im = ax.pcolormesh(rr, zz, field, cmap=cmap,
-                               vmin=vmin, vmax=vmax, shading="auto")
-        ax.set_title(label)
-        ax.set_xlabel("R [m]")
-        ax.set_ylabel("Z [m]")
-        ax.set_aspect("equal")
-        fig.colorbar(im, ax=ax, shrink=0.8)
-
-    plt.tight_layout()
-    outfile = f"{prefix}_fields.png"
-    fig.savefig(outfile, dpi=150, bbox_inches="tight")
-    print(f"Saved plot: {outfile}")
-    plt.close(fig)
-
-    # Scatter of original OEDGE cells for comparison
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-    fig.suptitle("Original OEDGE cell data (scatter)", fontsize=14)
-    for ax, (vals, label, cmap) in zip(axes, [
-        (oedge["te"], "Te [eV]", "plasma"),
-        (oedge["ne"], "ne [m⁻³]", "hot"),
-        (oedge["ti"], "Ti [eV]", "plasma"),
-    ]):
-        vmin, vmax = np.nanpercentile(vals, [2, 98])
-        sc = ax.scatter(src_r, src_z, c=vals, s=0.5, cmap=cmap,
-                        vmin=vmin, vmax=vmax)
-        ax.set_title(label)
-        ax.set_xlabel("R [m]")
-        ax.set_ylabel("Z [m]")
-        ax.set_aspect("equal")
-        fig.colorbar(sc, ax=ax, shrink=0.8)
-    plt.tight_layout()
-    outfile = f"{prefix}_oedge_scatter.png"
-    fig.savefig(outfile, dpi=150, bbox_inches="tight")
-    print(f"Saved plot: {outfile}")
-    plt.close(fig)
 
 
 # ======================================================================
@@ -525,25 +533,14 @@ def _plot_results(grid_r, grid_z, ne, te, ti, vpar,
 
 def _build_parser():
     p = argparse.ArgumentParser(
-        description="Convert OEDGE/DIVIMP .nc to OpenEdge plasma.h5 (B-field embedded)"
+        description="Convert OEDGE/DIVIMP .nc to OpenEdge plasma.h5 "
+                    "(mesh-native, matches SOLPS/s3x /mesh/* schema)."
     )
     p.add_argument("nc_file", type=Path,
                    help="OEDGE NetCDF background file (.nc)")
     p.add_argument("--equ-file", type=Path, required=True,
-                   help="Equilibrium .equ file for B-field reconstruction")
+                   help="Equilibrium .equ file for B-field reconstruction.")
     p.add_argument("--plasma-out", type=Path, default=Path("plasma.h5"))
-    p.add_argument("--nr", type=int, default=300,
-                   help="Number of R grid points (default: 300)")
-    p.add_argument("--nz", type=int, default=300,
-                   help="Number of Z grid points (default: 300)")
-    p.add_argument("--rmin", type=float, default=None)
-    p.add_argument("--rmax", type=float, default=None)
-    p.add_argument("--zmin", type=float, default=None)
-    p.add_argument("--zmax", type=float, default=None)
-    p.add_argument("--plot", action="store_true",
-                   help="Generate diagnostic plots")
-    p.add_argument("--plot-prefix", type=Path, default=None,
-                   help="Prefix for plot filenames (default: oedge_convert)")
     return p
 
 
@@ -553,14 +550,6 @@ def main():
         nc_file=args.nc_file,
         equ_file=args.equ_file,
         plasma_out=args.plasma_out,
-        nr=args.nr,
-        nz=args.nz,
-        rmin=args.rmin,
-        rmax=args.rmax,
-        zmin=args.zmin,
-        zmax=args.zmax,
-        plot=args.plot,
-        plot_prefix=args.plot_prefix,
     )
 
 

@@ -38,7 +38,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "sheath_models.h"
 #include "compute_nearest_surf_grid.h"
 #include "compute_plasma_fields.h"
-#include "fix_plasma_data.h"
+#include "fix_background.h"
 #include "fix_cross_field_diffusion.h"
 #include "fix_force_thermal.h"
 #include "fix_coulomb_base.h"
@@ -107,7 +107,7 @@ inline double sheath_auto_dmax(double te_eV, double ti_eV, double ne_m3,
   return d_max;
 }
 
-inline void grad_from_fix(const FixPlasmaData *pd, const std::vector<double> &field,
+inline void grad_from_fix(const FixBackground *pd, const std::vector<double> &field,
                           double R, double Z, double &d_dr, double &d_dz)
 {
   d_dr = 0.0;
@@ -120,7 +120,7 @@ inline void grad_from_fix(const FixPlasmaData *pd, const std::vector<double> &fi
   d_dz = (pd->interp2D(field, R, Z + dZ) - pd->interp2D(field, R, Z - dZ)) / (2.0 * dZ);
 }
 
-inline PlasmaFileParams query_plasma_from_fix(const FixPlasmaData *pd, const double xyz[3], int dim, int axi)
+inline PlasmaFileParams query_plasma_from_fix(const FixBackground *pd, const double xyz[3], int dim, int axi)
 {
   PlasmaFileParams P{};
   if (!pd) return P;
@@ -148,7 +148,7 @@ inline PlasmaFileParams query_plasma_from_fix(const FixPlasmaData *pd, const dou
   return P;
 }
 
-inline MagneticFieldFileDataParams query_bfield_from_fix(const FixPlasmaData *pd,
+inline MagneticFieldFileDataParams query_bfield_from_fix(const FixBackground *pd,
                                                          const double xyz[3], int dim, int axi)
 {
   MagneticFieldFileDataParams B{};
@@ -160,7 +160,7 @@ inline MagneticFieldFileDataParams query_bfield_from_fix(const FixPlasmaData *pd
   return B;
 }
 
-// ---- Fused bilinear stencil for FixPlasmaData ----
+// ---- Fused bilinear stencil for FixBackground ----
 // Build once per particle (R,Z); reuse across every field interp.
 // Replaces ~21 redundant clamp/index/weight computations with 1.
 struct PdStencil2D {
@@ -170,7 +170,7 @@ struct PdStencil2D {
   bool valid;
 };
 
-inline PdStencil2D make_pd_stencil(const FixPlasmaData *pd, double R, double Z)
+inline PdStencil2D make_pd_stencil(const FixBackground *pd, double R, double Z)
 {
   PdStencil2D st{};
   if (!pd || pd->nr < 2 || pd->nz < 2) return st;
@@ -514,10 +514,10 @@ void Update::init()
       pusher_plasma_fidx = modify->find_fix(pusher_plasma_cid);
       if (pusher_plasma_fidx < 0)
         error->all(FLERR,"global sheath: plasma provider ID not found");
-      auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
+      auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
       if (!pd)
         error->all(FLERR,
-                   "global sheath: plasma fix provider must be style plasma/data");
+                   "global sheath: plasma fix provider must be style background");
     }
   }
 
@@ -536,13 +536,13 @@ void Update::init()
       pusher_plasma_fidx = modify->find_fix(pusher_plasma_cid);
       if (pusher_plasma_fidx < 0)
         error->all(FLERR,"global bfield_compute: provider ID not found");
-      auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
+      auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
       if (!pd)
         error->all(FLERR,
-                   "global bfield_compute: fix provider must be style plasma/data");
+                   "global bfield_compute: fix provider must be style background");
       if (comm->me == 0 && screen)
         fprintf(screen,
-                "  boris: bfield_compute '%s' bound to fix plasma/data "
+                "  boris: bfield_compute '%s' bound to fix background "
                 "(has_bfield=%d, mesh_tri_b=%zu)\n",
                 pusher_plasma_cid, pd->has_bfield, pd->mesh_tri_br.size());
     }
@@ -674,7 +674,7 @@ void Update::init()
         }
         recognized = 1;
       } else if (strcmp(s,"force/thermal") == 0) {
-        // In plasma_data mode the fix interpolates from FixPlasmaData
+        // In background mode the fix interpolates from FixBackground
         // directly and does not read pcache; skip the writes entirely.
         FixForceThermal *ftf =
             dynamic_cast<FixForceThermal *>(modify->fix[ifix]);
@@ -686,7 +686,7 @@ void Update::init()
                  strcmp(s,"coulomb/binary/kk") == 0 ||
                  strcmp(s,"coulomb/background") == 0 ||
                  strcmp(s,"coulomb/background/kk") == 0) {
-        // Same plasma_data-bypass pattern as thermal_force.
+        // Same background-bypass pattern as thermal_force.
         FixCoulombBase *fcb =
             dynamic_cast<FixCoulombBase *>(modify->fix[ifix]);
         if (!fcb || fcb->needs_pcache()) {
@@ -695,7 +695,7 @@ void Update::init()
         }
         recognized = 1;
       } else if (strcmp(s,"cross_field_diffusion") == 0) {
-        // Same plasma_data-bypass pattern. NE/GRAD_NE only matter when
+        // Same background-bypass pattern. NE/GRAD_NE only matter when
         // gradient_pinch is configured (needs_grad_ne()).
         FixCrossFieldDiffusion *fcd =
             dynamic_cast<FixCrossFieldDiffusion *>(modify->fix[ifix]);
@@ -926,7 +926,7 @@ void Update::cache_plasma_particles()
   if (plasma_cidx < 0 && plasma_fidx < 0) return;
 
   ComputePlasmaFields *cp = nullptr;
-  FixPlasmaData *pd = nullptr;
+  FixBackground *pd = nullptr;
   if (plasma_cidx >= 0) {
     Compute *c_base = modify->compute[plasma_cidx];
     cp = dynamic_cast<ComputePlasmaFields *>(c_base);
@@ -936,7 +936,7 @@ void Update::cache_plasma_particles()
       c_base->invoked_flag |= 16;
     }
   } else {
-    pd = dynamic_cast<FixPlasmaData *>(modify->fix[plasma_fidx]);
+    pd = dynamic_cast<FixBackground *>(modify->fix[plasma_fidx]);
     if (!pd) return;
   }
 
@@ -1045,7 +1045,7 @@ void Update::cache_plasma_particles()
       if (need_plasma) pf = cp->query_plasma_at_point(x);
       if (need_bfield) bf = cp->query_bfield_at_point(x);
     } else if (pd) {
-      // ---- fix plasma/data path: shared bilinear stencil ----
+      // ---- fix background path: shared bilinear stencil ----
       double R, Z;
       xyz_to_rz(x, dim, domain->axisymmetric, R, Z);
       const PdStencil2D st = make_pd_stencil(pd, R, Z);
@@ -2005,12 +2005,12 @@ template < int DIM, int SURF, int OPT > void Update::move()
 
                 // Plasma conditions at particle position (point query)
                 ComputePlasmaFields *cp = nullptr;
-                FixPlasmaData *pd = nullptr;
+                FixBackground *pd = nullptr;
                 if (pusher_plasma_cidx >= 0) {
                   Compute *cp_base = modify->compute[pusher_plasma_cidx];
                   cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
                 } else if (pusher_plasma_fidx >= 0) {
-                  pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
+                  pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
                 }
                 if (cp || pd) {
                   PlasmaFileParams sk_pf = cp ? cp->query_plasma_at_point(x)
@@ -2617,7 +2617,7 @@ void Update::pusher_boris_2d(int i, int icell, double dt,
       }
     }
   } else if (pusher_plasma_fidx >= 0) {
-    auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
+    auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
     if (pd && pd->has_bfield) {
       const double xyz[3] = {xcur[0], xcur[1], 0.0};
       double R = 0.0, Z = 0.0;
@@ -2711,7 +2711,7 @@ void Update::pusher_boris_2d(int i, int icell, double dt,
             sh_ne = cp->plasma_arr[gcell].dens_e;
           }
         } else {
-          auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
+          auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
           if (pd) {
             PlasmaFileParams sh_pf =
               query_plasma_from_fix(pd, x, dim, axi);
@@ -3029,7 +3029,7 @@ void Update::pusher_boris_3d(int i, int icell, double dt,
             bz = cp->mag_arr[gcell].bz;
           }
         } else if (pusher_plasma_fidx >= 0) {
-          auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
+          auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
           if (pd) {
             PlasmaFileParams sh_pf = query_plasma_from_fix(pd, x, 3, domain->axisymmetric);
             MagneticFieldFileDataParams sh_bf = query_bfield_from_fix(pd, x, 3, domain->axisymmetric);
@@ -3121,7 +3121,7 @@ void Update::pusher_boris_3d(int i, int icell, double dt,
       }
     }
   } else if (pusher_plasma_fidx >= 0) {
-    auto *pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
+    auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
     if (pd && pd->has_bfield) {
       double Br = 0.0, Bz = 0.0, Bt = 0.0;
       const double rx = xcur[0], ry = xcur[1];
@@ -3539,12 +3539,12 @@ void Update::pusher_hybrid_3d(int i, int icell, double dt,
 
         {
           ComputePlasmaFields *cp = nullptr;
-          FixPlasmaData *pd = nullptr;
+          FixBackground *pd = nullptr;
           if (pusher_plasma_cidx >= 0) {
             Compute *cp_base = modify->compute[pusher_plasma_cidx];
             cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
           } else if (pusher_plasma_fidx >= 0) {
-            pd = dynamic_cast<FixPlasmaData *>(modify->fix[pusher_plasma_fidx]);
+            pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
           }
           if (cp || pd) {
             // Point-query plasma data at particle position
@@ -4199,7 +4199,7 @@ void Update::global(int narg, char **arg)
     //
     //   global pusher mode boris|hybrid
     //                 [subcycles N]
-    //                 [plasma <ID>]            (compute plasma/fields or fix plasma/data)
+    //                 [plasma <ID>]            (compute plasma/fields or fix background)
     //                 [gca_switch <factor>]
     //                 [dump yes|no] [dump_every N]
     //                 [bad_dt_check yes|no] [bad_dt_limit <max>]

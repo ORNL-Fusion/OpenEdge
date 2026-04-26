@@ -34,8 +34,7 @@ compute             pfields plasma/fields all constant &
                     values temp_e dens_e
 
 # --- Dissociation only (fix chem/adas) ---
-fix fchem chem/adas 1 1 input/neutral_diss.reactions &
-    adas_dir ../../database/adas &
+fix fchem volume/chem/adas 1 D input/neutral_diss.reactions &
     plasma c_pfields[1] c_pfields[2] &
     mode neutral source_species D2 &
     units rate
@@ -43,7 +42,8 @@ fix fchem chem/adas 1 1 input/neutral_diss.reactions &
 fix fpuff emit/face puff xlo
 
 # --- Diagnostics: per-species density + dissociation source rate ---
-compute cden grid all species nrho
+fix pw particle/weight
+compute cden grid/weighted all all nrho_w
 fix    fden ave/grid all 1 2000 2000 c_cden[*] ave one
 fix    frate ave/grid all 1 2000 2000 f_fchem[*] ave one
 

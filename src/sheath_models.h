@@ -76,6 +76,67 @@ BorodkinaSheathResult coulette_manfredi_sheath_at_distance(double dist_m,
                                                            double mD_amu,
                                                            double pot_mult = 0.0);
 
+// ----------------------------------------------------------------------
+// Fast-evaluation API (prepare + emag/phi-at-distance).
+//
+// The subcycle loop in the Boris pusher evaluates E(d) on every step,
+// but Te, ne, B, alpha and the derived scales (lambda_D, rho_i, L_MPS,
+// fd, phi0, fit coefficients) are constant over one Boris call.
+// `sheath_prepare_*` runs the expensive transcendentals once; the
+// per-subcycle `sheath_emag_at_distance`/`sheath_phi_at_distance` are
+// reduced to 2-4 exp() and a handful of multiplies.
+// ----------------------------------------------------------------------
+
+enum SheathKind { SHEATH_BORODKINA = 0, SHEATH_COULETTE_MANFREDI = 1 };
+
+struct SheathEmagCoeffs {
+  int kind = SHEATH_BORODKINA;
+
+  // Physical scales (exposed for diagnostics).
+  double lambdaD_m = 0.0;
+  double lmps_m    = 0.0;
+  double rho_i_m   = 0.0;
+  double phi_total_eV = 0.0;
+  double fd        = 0.0;
+
+  // Borodkina: E(d) = amp_ds·exp(-d·inv_2lD) + amp_mps·exp(-d·inv_lmps)
+  double amp_ds_vpm  = 0.0;
+  double amp_mps_vpm = 0.0;
+  double inv_2lD     = 0.0;
+  double inv_lmps    = 0.0;
+  double phi0_ds_eV  = 0.0;   // phi0 * fd
+  double phi0_mps_eV = 0.0;   // phi0 * (1 - fd)
+
+  // Coulette-Manfredi: two-exponential fit in s = d/lambdaD, with a
+  // blended Borodkina-style Chodura tail for s >= s_blend_start.
+  double inv_lD           = 0.0;
+  double K1_scaled        = 0.0;
+  double K2               = 0.0;
+  double amp_slow_vpm     = 0.0;  // phi_cm_slow * K1_scaled / lambdaD
+  double amp_fast_vpm     = 0.0;  // phi_cm_fast * K2        / lambdaD
+  double phi_cm_slow_eV   = 0.0;
+  double phi_cm_fast_eV   = 0.0;
+  double s_blend_start    = 60.0;
+  double s_blend_end      = 120.0;
+  double s_blend_width_inv = 1.0 / 60.0;
+  double e_slow_at_anchor_vpm = 0.0;  // amp_slow_vpm · exp(-K1_scaled·s_start)
+};
+
+SheathEmagCoeffs sheath_prepare_borodkina(double te_eV, double ti_eV,
+                                          double ne_m3, double bmag_T,
+                                          double alpha_deg, double mD_amu,
+                                          double pot_mult = 2.5);
+
+SheathEmagCoeffs sheath_prepare_coulette_manfredi(double te_eV, double ti_eV,
+                                                  double ne_m3, double bmag_T,
+                                                  double alpha_deg, double mD_amu,
+                                                  double pot_mult = 0.0);
+
+// Per-subcycle evaluation. `dist_m` must be >= 0; negative (overshoot)
+// callers should gate upstream.
+double sheath_emag_at_distance(const SheathEmagCoeffs &c, double dist_m);
+double sheath_phi_at_distance (const SheathEmagCoeffs &c, double dist_m);
+
 }  // namespace SheathModels
 }  // namespace SPARTA_NS
 

@@ -116,6 +116,13 @@ class ProcessLibrary {
                      const std::string &line_key,
                      PecTable &out);
 
+  // Load the reaction catalog string for one element from
+  // /volume/reactions/<elem>/catalog.  The catalog is an opaque string
+  // holding the original <elem>.reactions text file content; the caller
+  // parses it the same way as the on-disk file.  Returns false when the
+  // element is absent (so the caller can fall back to a text-file path).
+  bool load_reactions_catalog(const std::string &elem, std::string &out);
+
  private:
   bool         opened_ = false;
   std::string  path_;

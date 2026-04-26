@@ -126,6 +126,107 @@ def write_surf_axi(out: Path, R_Z_pts: np.ndarray):
             f.write(f"{i} {i} {j}\n")
 
 
+def _decimate_contour(pts: np.ndarray, min_seg: float) -> np.ndarray:
+    """Drop vertices closer than min_seg to the previously kept one.
+
+    matplotlib's contour can emit very short segments (~25 um) in regions
+    where psi barely varies along the level-set. SPARTA's cell marker is
+    sensitive to multiple surface crossings within a single grid cell, so
+    we downsample to a uniform-ish segment length before writing.
+    """
+    if len(pts) < 4 or min_seg <= 0.0:
+        return pts
+    keep = [0]
+    last = pts[0]
+    for i in range(1, len(pts)):
+        d = float(np.hypot(pts[i, 0] - last[0], pts[i, 1] - last[1]))
+        if d >= min_seg:
+            keep.append(i)
+            last = pts[i]
+    # guarantee we don't leave a giant closing segment
+    closing = float(np.hypot(pts[0, 0] - last[0], pts[0, 1] - last[1]))
+    if closing < 0.5 * min_seg and len(keep) > 4:
+        keep = keep[:-1]
+    return pts[np.array(keep)]
+
+
+def write_core_surf_from_plasma_h5(plasma_h5: Path,
+                                   out_path: Path,
+                                   psi_norm: float = 0.95,
+                                   preview: Path | None = None,
+                                   min_seg: float = 5.0e-3,
+                                   verbose: bool = False) -> None:
+    """Extract the psi_norm = const contour that encloses the magnetic axis
+    and write it as a SPARTA surface file (axi layout: (Z, R) columns).
+
+    Shared entry point used by both `tools/extract_psi_contour.py` (CLI)
+    and the `convert_{solps,s3x,oedge}_plasma.py` converters, so the
+    core-absorb boundary can be generated as a single step from plasma.h5.
+
+    Parameters
+    ----------
+    plasma_h5 : Path
+        Source plasma.h5 with /equilibrium/{r, z, psi, psib}.
+    out_path : Path
+        Destination SPARTA surface file (e.g. input/core.surf).
+    psi_norm : float
+        Normalised psi level for the contour. 0.95 by convention for the
+        core-absorb boundary; 1.0 would be the separatrix.
+    preview : Path, optional
+        If given, write a PNG showing the selected contour overlaid on
+        psi_norm.  Useful for a quick visual check.
+    """
+    r, z, psi, psib = read_equilibrium(plasma_h5)
+    psin, psi_axis = psi_norm_grid(psi, psib)
+    iZ_ax, iR_ax = np.unravel_index(np.argmin(psi), psi.shape)
+    R_ax = float(r[iR_ax]); Z_ax = float(z[iZ_ax])
+
+    fig, ax = plt.subplots()
+    RR, ZZ = np.meshgrid(r, z)
+    cs = ax.contour(RR, ZZ, psin, levels=[psi_norm])
+    segs = cs.allsegs[0]
+    plt.close(fig)
+
+    path = select_inner_contour(segs, R_ax, Z_ax)
+    if path is None:
+        raise RuntimeError(
+            f"No closed psi_norm={psi_norm} contour encloses the magnetic "
+            f"axis (R={R_ax:.3f}, Z={Z_ax:.3f}) in {plasma_h5}")
+    if np.allclose(path[0], path[-1], atol=1e-8):
+        path = path[:-1]
+
+    n_raw = len(path)
+    path = _decimate_contour(path, min_seg)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    write_surf_axi(out_path, path)
+    if verbose:
+        print(
+            f"[core.surf] psi_norm={psi_norm:.3f} -> {len(path)} vertices "
+            f"(decimated from {n_raw} at min_seg={min_seg*1e3:.1f} mm), "
+            f"R in [{path[:,0].min():.3f}, {path[:,0].max():.3f}], "
+            f"Z in [{path[:,1].min():.3f}, {path[:,1].max():.3f}] "
+            f"-> {out_path}",
+            file=sys.stderr,
+        )
+
+    if preview is not None:
+        preview.parent.mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots(figsize=(8, 10))
+        im = ax.pcolormesh(RR, ZZ, psin, shading="auto", cmap="viridis",
+                           vmin=0.0, vmax=1.2)
+        ax.plot(path[:, 0], path[:, 1], color="red", linewidth=2.0,
+                label=f"psi_norm={psi_norm}")
+        ax.plot(R_ax, Z_ax, marker="*", color="yellow", markersize=14,
+                markeredgecolor="black", label="mag axis")
+        ax.set_aspect("equal")
+        ax.set_xlabel("R [m]"); ax.set_ylabel("Z [m]")
+        ax.legend(loc="upper right", fontsize=8)
+        fig.colorbar(im, ax=ax, label=r"$\psi_n$")
+        fig.savefig(preview, dpi=140, bbox_inches="tight")
+        plt.close(fig)
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
         description=__doc__,

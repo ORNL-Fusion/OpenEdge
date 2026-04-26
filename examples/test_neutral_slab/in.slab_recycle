@@ -37,8 +37,7 @@ compute             pfields plasma/fields all constant &
                     values temp_e dens_e
 
 # --- Mode A ionization (same as A1) ---
-fix fchem chem/adas 1 1 input/neutral.reactions &
-    adas_dir ../../database/adas &
+fix fchem volume/chem/adas 1 D input/neutral.reactions &
     plasma c_pfields[1] c_pfields[2] &
     mode neutral source_species D &
     units rate
@@ -47,7 +46,8 @@ fix fchem chem/adas 1 1 input/neutral.reactions &
 fix fpuff emit/face puff xlo
 
 # --- Diagnostics ---
-compute cden grid all species nrho
+fix pw particle/weight
+compute cden grid/weighted all all nrho_w
 fix    fden ave/grid all 1 2000 2000 c_cden[*] ave one
 fix    frate ave/grid all 1 2000 2000 f_fchem[*] ave one
 

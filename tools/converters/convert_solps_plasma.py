@@ -1546,7 +1546,7 @@ def convert_solps_to_openedge(
     with h5py.File(plasma_out, "w") as f:
         # Embedded equilibrium: raw .equ / GEQDSK-derived psi map on its
         # native jm×km grid, plus btf/rtf/psib. compute plasma/fields and
-        # fix plasma/data use this to evaluate B at any (R, Z) and
+        # fix background use this to evaluate B at any (R, Z) and
         # psi_norm for the core-sink boundary; no separate .equ file is
         # needed at run time.
         f.create_dataset("equilibrium/r",    data=np.asarray(equ_dict["equ_r"], dtype=np.float64))
@@ -1815,6 +1815,18 @@ def _build_parser():
                          "mesh-extra if available, else eirene, else b2. "
                          "'mesh-extra' + 'b2' are SOLPS-native and do NOT "
                          "depend on EIRENE fort.33/34/35 files."))
+    p.add_argument("--core-out", type=Path, default=None,
+                   help="If given, also write a SPARTA surface file tracing "
+                        "the psi_norm=<--psi-norm-core> contour around the "
+                        "magnetic axis. Use as the core-absorb boundary "
+                        "(read_surf + surf_collide vanish).")
+    p.add_argument("--psi-norm-core", type=float, default=0.90,
+                   help="Normalized psi level for --core-out. Default 0.90 "
+                        "keeps the contour safely inside the wall near the "
+                        "X-point; 0.95 often dips into the private-flux "
+                        "region and crosses the divertor wall.")
+    p.add_argument("--core-preview", type=Path, default=None,
+                   help="Optional PNG preview of the core contour.")
     return p
 
 
@@ -1836,6 +1848,22 @@ def main():
         b2fstate_path=args.b2fstate,
         wall_source=args.wall_source,
     )
+
+    # Optional: trace the psi_norm=<level> contour from the equilibrium
+    # embedded in plasma.h5 and write it as a SPARTA surface, matching the
+    # convention used by convert_s3x_plasma.py.
+    if args.core_out:
+        import sys as _sys, os as _os
+        _sys.path.insert(0,
+            _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..")))
+        from extract_psi_contour import write_core_surf_from_plasma_h5
+        write_core_surf_from_plasma_h5(
+            args.plasma_out,
+            args.core_out,
+            psi_norm=args.psi_norm_core,
+            preview=args.core_preview,
+            verbose=True,
+        )
 
 
 if __name__ == "__main__":
