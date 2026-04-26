@@ -197,33 +197,38 @@ PLOTTERS = {"iz": plot_iz, "recycle": plot_recycle,
 def parse_log_stats(log_path, columns):
     """Parse SPARTA-style stats blocks from a log file.
 
-    Looks for the most recent header line containing every name in
-    `columns` (whitespace-separated) and returns numeric arrays for
-    each column until the next blank/non-numeric line.
+    Concatenates rows from every block whose header contains all of
+    `columns`. Multi-block runs (e.g. `run N` followed by `run 0` for
+    a dump-trigger) yield one combined time series.
     """
     with open(log_path) as f:
         lines = f.readlines()
-    # find header row that has all requested column names
-    header_idx = -1
-    for i, ln in enumerate(lines):
-        toks = ln.split()
+    rows = []
+    seen_steps = set()
+    i = 0
+    while i < len(lines):
+        toks = lines[i].split()
         if all(c in toks for c in columns):
-            header_idx = i
-    if header_idx < 0:
-        raise ValueError(f"no stats header with {columns} in {log_path}")
-    header = lines[header_idx].split()
-    idx = [header.index(c) for c in columns]
-    data = []
-    for ln in lines[header_idx + 1:]:
-        toks = ln.split()
-        if not toks:
-            break
-        try:
-            row = [float(toks[k]) for k in idx]
-        except (ValueError, IndexError):
-            break
-        data.append(row)
-    return np.array(data)
+            header = toks
+            idx = [header.index(c) for c in columns]
+            i += 1
+            while i < len(lines):
+                row_toks = lines[i].split()
+                if not row_toks:
+                    break
+                try:
+                    row = [float(row_toks[k]) for k in idx]
+                except (ValueError, IndexError):
+                    break
+                # skip duplicate step entries from `run 0` echo blocks
+                step_key = row[0]
+                if step_key not in seen_steps:
+                    seen_steps.add(step_key)
+                    rows.append(row)
+                i += 1
+        else:
+            i += 1
+    return np.array(rows)
 
 
 def plot_thermalization(base, outpng, dt=2e-8, Ti_eV=50.0):
