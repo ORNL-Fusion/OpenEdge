@@ -23,8 +23,8 @@ examples/*/in.*.regression
 examples/test_iead/in.iead_alpha*
 examples/test_iead/particles_alpha*.dat
 examples/test_iead/wall.surf
-examples/test_polarization/state
-examples/test_polarization/figs_polarization/
+examples/test_efield_polarization/state
+examples/test_efield_polarization/figs_polarization/
 
 # Local run/test artifacts — confined to examples/ and the repo root
 # so they don't eat SPARTA base files like src/dump.h / src/log.cpp.

@@ -1,4 +1,4 @@
-# test_polarization
+# test_efield_polarization
 
 Single-particle polarization-drift validation for the OpenEdge Boris
 pusher in SI units. Compares the simulation output against the

@@ -14,21 +14,15 @@ Some tests require large data files (plasma.h5, bfield.h5, .equ,
 
 Test cases:
 
-test_collide = collisional thermalization with Nanbu scattering
-test_cpc_gitr = CPC GITR benchmark for impurity transport with PMI
+test_coulomb = Coulomb collision validation (Nanbu-Takizuka, fix coulomb/background)
+test_diii_d_neutrals = plasma-neutral interaction benchmark on DIII-D axisymmetric geometry
 test_droplet = droplet emission, transport, and surface-interaction workflows
-test_evaporation = evaporation validation and coupled drag+evaporation cases
-test_gca = hybrid Boris/GCA pusher with equilibrium-based magnetic geometry
-test_gravity_3d = 3D gravity-driven droplet transport
+test_efield_polarization = polarization-drift validation for Boris pusher
+test_gravity = 3D gravity-driven ballistic transport (fix gravity validation)
 test_iead = ion energy-angle distribution validation (sheath kick + spatial)
 test_ionization_recombination = ionization, recombination, and charge exchange with ADAS rates
-test_liquid_metal = MHD shallow-water liquid metal film solver validation
-test_eirene = OpenEdge vs EIRENE standalone benchmark (0D box, D2/D/D+ chemistry)
-test_neutral_transport = D2 dissociation + D ionization + CX (EIRENE-replacement demo)
-test_particle_weight = particle weight (pweight) functionality
-test_polarization = polarization-drift validation for Boris pusher
-test_rocket_force = rocket force model validation
-test_sheath = sheath electric field with Boris pusher and IEAD diagnostics
+test_neutral_slab = 1-D neutral transport channel isolation tests
+test_west_axi = WEST tokamak axisymmetric impurity transport validation
 
 To run a test case:
 

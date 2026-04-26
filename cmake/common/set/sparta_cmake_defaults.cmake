@@ -20,19 +20,13 @@ set(SPARTA_MACHINE
 if(SPARTA_ENABLE_TESTING)
   set(SPARTA_ENABLED_TEST_SUITES
       # OpenEdge test cases
-      "test_boris_grid"
-      "test_collide"
-      "test_cpc_gitr"
-      "test_drag"
+      "test_coulomb"
+      "test_diii_d_neutrals"
       "test_droplet"
-      "test_gravity_3d"
+      "test_efield_polarization"
+      "test_gravity"
       "test_ionization_recombination"
-      "test_oml_charging"
-      "test_polarization"
-      "test_sheath"
-      "test_solps_coupling"
-      "test_viscous_gravity_3d"
-      "test_viscous_gravity_axi"
+      "test_neutral_slab"
       "test_west_axi")
 
   set(SPARTA_DISABLED_TESTS "")

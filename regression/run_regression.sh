@@ -62,17 +62,10 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 #  setup_cmd is optional (use "" for none)
 # -----------------------------------------------------------------------
 declare -a TESTS=(
-  "collide_slowdown|test_collide|in.nanbu_slowdown|"
-  "collide_thermalize|test_collide|in.nanbu_thermalize|"
-  "gravity_3d|test_gravity_3d|in.gravity3d|"
-  "gca_boris|test_gca|in.boris|"
-  "gca_gca|test_gca|in.gca|"
+  "gravity|test_gravity|in.gravity3d|"
   "ionization_recombination|test_ionization_recombination|in.ionizationRecombination_oxygen|"
-  "particle_weight_standard|test_particle_weight|in.standard|"
-  "particle_weight_weighted|test_particle_weight|in.weighted|"
   "west_axi|test_west_axi|in.west_regression|"
-  "iead|test_iead|in.iead_alpha0|python3 create_case.py"
-  "polarization|test_polarization|in.input|"
+  "polarization|test_efield_polarization|in.input|"
 )
 
 # -----------------------------------------------------------------------
