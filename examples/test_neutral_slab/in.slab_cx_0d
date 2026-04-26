@@ -1,0 +1,49 @@
+################################################################################
+# 0-D CX thermalization. Closed periodic box, no flow.
+#
+# 5000 D atoms initialized at T_D0 = 3 eV; hot D+ background at Ti = 50 eV.
+# CX is the only active chemistry channel. Domain-averaged T_D(t) relaxes
+# exponentially toward Ti with timescale 1/(n_e <sigma v>_CX). This is the
+# textbook companion to the 1-D streaming slab in in.slab_cx — the spatial
+# thermalization there is the same physics played out vs distance traveled.
+################################################################################
+
+shell               mkdir output
+
+seed                12345
+dimension           2
+boundary            p p p
+global              gridcut 0.0 comm/sort no
+global              fnum 1e9
+timestep            2e-8
+
+# 1 cm^2 x 1 cm thick (z is dummy in 2-D).
+create_box          0.0 0.01 0.0 0.01 -0.005 0.005
+create_grid         1 1 1
+balance_grid        rcb cell
+
+species             input/neutral.species D D+
+
+# D at T_D0 = 3 eV  (3 eV * 11604.525 K/eV = 34813.6 K), no drift.
+mixture             cold D frac 1.0 nrho 5e18 temp 34813.6
+create_particles    cold n 5000
+
+# Hot D+ background. Te kept low so any residual ionization rate is tiny;
+# the explicit `ionization no` toggle below disables it anyway.
+fix pd              background constant te 5.0 ne 1.0e19 ti 50.0
+global              pusher plasma pd
+
+# CX-only chemistry. Reactions file already contains both I and E
+# channels; disable everything except CX so no neutrals are removed.
+fix fchem volume/chem/adas 1 D input/neutral_cx.reactions &
+    ionization no recombination no dissociation no &
+    units rate
+
+# Domain-averaged D temperature for the time-domain relaxation plot.
+fix pw              particle/weight
+compute ctemp       grid all species temp
+compute TavgD       reduce ave c_ctemp[1]
+
+stats               50
+stats_style         step cpu np c_TavgD
+run                 10000

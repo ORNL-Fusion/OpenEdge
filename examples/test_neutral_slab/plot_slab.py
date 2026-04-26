@@ -232,10 +232,16 @@ def parse_log_stats(log_path, columns):
 
 
 def plot_thermalization(base, outpng, dt=2e-8, Ti_eV=50.0):
-    """T_D(t) from log.cx stats; cross-checks CX equilibration timescale."""
-    log = base / "log.cx"
+    """T_D(t) from the 0-D CX deck (log.cx_0d).
+
+    The closed-box deck initializes 5000 D at 3 eV against a Ti=50 eV
+    D+ background; <T_D>(t) relaxes exponentially to Ti via CX. The
+    streaming slab (log.cx) plateaus at a steady-state spatial average
+    instead, so we deliberately read the 0-D log here.
+    """
+    log = base / "log.cx_0d"
     if not log.exists():
-        print(f"missing: {log} — run in.slab_cx first.")
+        print(f"missing: {log} — run in.slab_cx_0d first.")
         sys.exit(1)
     arr = parse_log_stats(log, ["Step", "c_TavgD"])
     if arr.size == 0:
@@ -250,7 +256,7 @@ def plot_thermalization(base, outpng, dt=2e-8, Ti_eV=50.0):
                label=fr"$T_i = {Ti_eV:g} \; \mathrm{{eV}}$")
     ax.set_xlabel(r"$t \; (\mathrm{\mu s})$")
     ax.set_ylabel(r"$\langle T_D \rangle \; (\mathrm{eV})$")
-    ax.set_title(r"CX thermalization: domain-averaged $T_D(t) \to T_i$")
+    ax.set_title(r"0-D CX thermalization: $\langle T_D \rangle(t) \to T_i$")
     ax.legend()
     fig.savefig(outpng); print(f"wrote {outpng}")
 

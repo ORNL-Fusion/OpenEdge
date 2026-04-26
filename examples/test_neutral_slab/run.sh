@@ -8,12 +8,17 @@ cd "$(dirname "$0")"
 mkdir -p output
 
 SPA=${SPA:-$HOME/buildOpenEdge/src/spa_mpi}
-NPROC=${NPROC:-4}
+NPROC=${NPROC:-8}
 
 for case in iz recycle diss cx; do
   ( mpirun -np "$NPROC" "$SPA" -in "in.slab_$case" > "log.$case" 2>&1 \
       && python3 plot_slab.py "$case" ) &
 done
+
+# 0-D CX thermalization runs faster (single cell, 10k steps) — plot
+# is generated from log.cx_0d via plot_slab.py thermalization.
+( mpirun -np "$NPROC" "$SPA" -in "in.slab_cx_0d" > "log.cx_0d" 2>&1 \
+    && python3 plot_slab.py thermalization ) &
 
 wait
 python3 plot_slab.py composite
