@@ -275,6 +275,13 @@ void UpdateKokkos::init()
   oe_equ_btf = oe_equ_rtf = 0.0;
   oe_dim = domain->dimension;
   oe_axisymmetric = domain->axisymmetric;
+
+  // OpenEdge Phase B: mesh-triangulation B (defaults off).
+  oe_has_mesh_b = 0;
+  oe_mesh_ntri = 0;
+  oe_mesh_hash_nr = oe_mesh_hash_nz = 0;
+  oe_mesh_hash_rmin = oe_mesh_hash_zmin = 0.0;
+  oe_mesh_hash_dr = oe_mesh_hash_dz = 1.0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -382,6 +389,32 @@ void UpdateKokkos::run(int nsteps)
       oe_has_equilibrium = 1;
       oe_dim            = domain->dimension;
       oe_axisymmetric   = domain->axisymmetric;
+    }
+
+    // Phase B: bind to the mesh-triangulation B Views (SOLPS / SOLEDGE3X
+    // plasmas). Mesh takes precedence over equilibrium in the per-particle
+    // dispatch — matches CPU semantics in compute_plasma_fields.cpp.
+    if (cp_pf && cp_pf->d_has_mesh_b) {
+      d_oe_mesh_vtx_r    = cp_pf->d_mesh_vtx_r;
+      d_oe_mesh_vtx_z    = cp_pf->d_mesh_vtx_z;
+      d_oe_mesh_tri      = cp_pf->d_mesh_tri;
+      d_oe_mesh_tri_br   = cp_pf->d_mesh_tri_br;
+      d_oe_mesh_tri_bz   = cp_pf->d_mesh_tri_bz;
+      d_oe_mesh_tri_bt   = cp_pf->d_mesh_tri_bt;
+      d_oe_mesh_tri_rmin = cp_pf->d_mesh_tri_rmin;
+      d_oe_mesh_tri_rmax = cp_pf->d_mesh_tri_rmax;
+      d_oe_mesh_tri_zmin = cp_pf->d_mesh_tri_zmin;
+      d_oe_mesh_tri_zmax = cp_pf->d_mesh_tri_zmax;
+      d_oe_hash_offset   = cp_pf->d_hash_offset;
+      d_oe_hash_entries  = cp_pf->d_hash_entries;
+      oe_mesh_hash_rmin  = cp_pf->d_mesh_hash_rmin;
+      oe_mesh_hash_zmin  = cp_pf->d_mesh_hash_zmin;
+      oe_mesh_hash_dr    = cp_pf->d_mesh_hash_dr;
+      oe_mesh_hash_dz    = cp_pf->d_mesh_hash_dz;
+      oe_mesh_hash_nr    = cp_pf->d_mesh_hash_nr;
+      oe_mesh_hash_nz    = cp_pf->d_mesh_hash_nz;
+      oe_mesh_ntri       = cp_pf->d_mesh_ntri;
+      oe_has_mesh_b      = 1;
     }
   }
 
@@ -2040,16 +2073,31 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
     double E[3] = {0.0, 0.0, 0.0};
     double B[3] = {0.0, 0.0, 0.0};
 
-    // Phase A: smooth point-query B from equilibrium psi map (preferred)
-    // — bilinear-interpolates B at the particle position. Falls back to
-    // the cell-center column read when no equilibrium is loaded.
-    if (oe_has_equilibrium) {
+    // Per-particle B point-query (matches CPU dispatch order):
+    //   mesh > equilibrium > cell-center fallback.
+    bool got_B = false;
+    if (oe_has_mesh_b) {
+      got_B = MeshKokkos::query_bfield_at_point(
+          xcur, oe_dim, oe_axisymmetric,
+          d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
+          d_oe_mesh_tri_br, d_oe_mesh_tri_bz, d_oe_mesh_tri_bt,
+          d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
+          d_oe_mesh_tri_zmin, d_oe_mesh_tri_zmax,
+          d_oe_hash_offset, d_oe_hash_entries,
+          oe_mesh_hash_rmin, oe_mesh_hash_zmin,
+          oe_mesh_hash_dr,   oe_mesh_hash_dz,
+          oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri,
+          B);
+    }
+    if (!got_B && oe_has_equilibrium) {
       EquilibriumKokkos::query_bfield_at_point(
           xcur, oe_dim, oe_axisymmetric,
           d_oe_equ_r, d_oe_equ_z, d_oe_equ_psi,
           oe_equ_btf, oe_equ_rtf, oe_equ_jm, oe_equ_km,
           B);
-    } else if (d_oe_plasma_compute.data() && oe_bx_col >= 0) {
+      got_B = true;
+    }
+    if (!got_B && d_oe_plasma_compute.data() && oe_bx_col >= 0) {
       B[0] = d_oe_plasma_compute(icell, oe_bx_col);
       B[1] = d_oe_plasma_compute(icell, oe_by_col);
       B[2] = d_oe_plasma_compute(icell, oe_bz_col);

@@ -120,6 +120,26 @@ class UpdateKokkos : public Update {
   int oe_has_equilibrium;
   int oe_dim, oe_axisymmetric;        // cached domain layout for point-query
 
+  // OpenEdge: device-resident triangulation B (Phase B). Mesh path takes
+  // precedence over equilibrium when both are loaded — matches CPU.
+  Kokkos::View<double*, DeviceType> d_oe_mesh_vtx_r;
+  Kokkos::View<double*, DeviceType> d_oe_mesh_vtx_z;
+  Kokkos::View<int*,    DeviceType> d_oe_mesh_tri;
+  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_br;
+  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_bz;
+  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_bt;
+  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_rmin;
+  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_rmax;
+  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_zmin;
+  Kokkos::View<double*, DeviceType> d_oe_mesh_tri_zmax;
+  Kokkos::View<int*,    DeviceType> d_oe_hash_offset;
+  Kokkos::View<int*,    DeviceType> d_oe_hash_entries;
+  double oe_mesh_hash_rmin, oe_mesh_hash_zmin;
+  double oe_mesh_hash_dr,   oe_mesh_hash_dz;
+  int    oe_mesh_hash_nr,   oe_mesh_hash_nz;
+  int    oe_mesh_ntri;
+  int    oe_has_mesh_b;
+
   // OpenEdge: Boris config
   int oe_pusher_subcycles;
   double oe_echarge;

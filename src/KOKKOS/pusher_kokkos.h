@@ -410,6 +410,101 @@ void query_bfield_at_point(
 }
 
 }  // namespace EquilibriumKokkos
+
+/* ===================================================================
+   Mesh-triangulation B-field point-query on device.
+
+   Mirrors the mesh branch of
+       ComputePlasmaFields::query_bfield_at_point() (CPU)
+   for SOLPS / SOLEDGE3X plasmas where B is carried as
+   /mesh/vtx_b{r,t,z} (vertex values, vertex-averaged per triangle on
+   ingest). Locates the triangle containing (R,Z) via the CSR-flat
+   spatial hash uploaded by ComputePlasmaFieldsKokkos::sync_mesh_to_device,
+   then reads B[3] from that triangle's stored values. No interpolation
+   inside the triangle — matches CPU semantics. Returns true on hit,
+   false if the point falls outside the meshed footprint.
+   =================================================================== */
+namespace MeshKokkos {
+
+KOKKOS_INLINE_FUNCTION
+bool query_bfield_at_point(
+    const double xyz[3], int dim, int axisymmetric,
+    const Kokkos::View<double*, DeviceType> &mesh_vtx_r,
+    const Kokkos::View<double*, DeviceType> &mesh_vtx_z,
+    const Kokkos::View<int*,    DeviceType> &mesh_tri,
+    const Kokkos::View<double*, DeviceType> &mesh_tri_br,
+    const Kokkos::View<double*, DeviceType> &mesh_tri_bz,
+    const Kokkos::View<double*, DeviceType> &mesh_tri_bt,
+    const Kokkos::View<double*, DeviceType> &mesh_tri_rmin,
+    const Kokkos::View<double*, DeviceType> &mesh_tri_rmax,
+    const Kokkos::View<double*, DeviceType> &mesh_tri_zmin,
+    const Kokkos::View<double*, DeviceType> &mesh_tri_zmax,
+    const Kokkos::View<int*,    DeviceType> &hash_offset,
+    const Kokkos::View<int*,    DeviceType> &hash_entries,
+    double hash_rmin, double hash_zmin,
+    double hash_dr,   double hash_dz,
+    int hash_nr, int hash_nz, int ntri,
+    double B[3])
+{
+  B[0] = 0.0; B[1] = 0.0; B[2] = 0.0;
+  if (ntri <= 0) return false;
+
+  // SPARTA-slot → cylindrical (R,Z)
+  double R, Z;
+  if (axisymmetric)      { Z = xyz[0]; R = xyz[1]; }
+  else if (dim == 2)     { R = xyz[0]; Z = xyz[1]; }
+  else                   { R = Kokkos::sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]);
+                           Z = xyz[2]; }
+
+  // Find triangle containing (R,Z) via spatial hash (O(1)).
+  int tri = -1;
+  if (hash_nr > 0 && hash_nz > 0 && hash_dr > 0.0 && hash_dz > 0.0) {
+    const int ir = static_cast<int>((R - hash_rmin) / hash_dr);
+    const int iz = static_cast<int>((Z - hash_zmin) / hash_dz);
+    if (ir >= 0 && ir < hash_nr && iz >= 0 && iz < hash_nz) {
+      const int b   = iz * hash_nr + ir;
+      const int beg = hash_offset(b);
+      const int end = hash_offset(b + 1);
+      for (int k = beg; k < end; k++) {
+        const int t = hash_entries(k);
+        const int v0 = mesh_tri(3*t+0);
+        const int v1 = mesh_tri(3*t+1);
+        const int v2 = mesh_tri(3*t+2);
+        const double r0 = mesh_vtx_r(v0), z0 = mesh_vtx_z(v0);
+        const double r1 = mesh_vtx_r(v1), z1 = mesh_vtx_z(v1);
+        const double r2 = mesh_vtx_r(v2), z2 = mesh_vtx_z(v2);
+        const double d  = (r1-r0)*(z2-z0) - (r2-r0)*(z1-z0);
+        if (Kokkos::fabs(d) < 1e-30) continue;
+        const double a  = ((R-r0)*(z2-z0) - (r2-r0)*(Z-z0)) / d;
+        const double bb = ((r1-r0)*(Z-z0) - (R-r0)*(z1-z0)) / d;
+        if (a >= -1e-10 && bb >= -1e-10 && (a+bb) <= 1.0+1e-10) {
+          tri = t; break;
+        }
+      }
+    }
+  }
+
+  if (tri < 0) return false;
+
+  const double bR   = mesh_tri_br(tri);
+  const double bZ   = mesh_tri_bz(tri);
+  const double bphi = mesh_tri_bt(tri);
+
+  // Pack into SPARTA slot order
+  if (axisymmetric)  { B[0] = bZ;  B[1] = bR;  B[2] = bphi; }
+  else if (dim == 2) { B[0] = bR;  B[1] = bZ;  B[2] = bphi; }
+  else {
+    const double rxy = Kokkos::sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]);
+    double cphi = 1.0, sphi = 0.0;
+    if (rxy > 1.0e-20) { cphi = xyz[0] / rxy; sphi = xyz[1] / rxy; }
+    B[0] = bR * cphi - bphi * sphi;
+    B[1] = bR * sphi + bphi * cphi;
+    B[2] = bZ;
+  }
+  return true;
+}
+
+}  // namespace MeshKokkos
 }  // namespace SPARTA_NS
 
 #endif  // SPARTA_PUSHER_KOKKOS_H

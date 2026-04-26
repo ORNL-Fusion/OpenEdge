@@ -46,11 +46,33 @@ class ComputePlasmaFieldsKokkos : public ComputePlasmaFields, public KokkosBase 
   int    d_equ_km = 0;
   int    d_has_equilibrium = 0;
 
+  // Phase B: device-resident mesh triangulation B (per-triangle vertex-avg)
+  // for SOLPS / SOLEDGE3X plasmas where B is carried on /mesh/vtx_b*.
+  // Spatial hash is flattened to CSR (offset+entries) for device lookup.
+  Kokkos::View<double*, DeviceType> d_mesh_vtx_r;        // [nvtx]
+  Kokkos::View<double*, DeviceType> d_mesh_vtx_z;        // [nvtx]
+  Kokkos::View<int*,    DeviceType> d_mesh_tri;          // [ntri*3] vertex idx
+  Kokkos::View<double*, DeviceType> d_mesh_tri_br;       // [ntri]
+  Kokkos::View<double*, DeviceType> d_mesh_tri_bz;       // [ntri]
+  Kokkos::View<double*, DeviceType> d_mesh_tri_bt;       // [ntri]
+  Kokkos::View<double*, DeviceType> d_mesh_tri_rmin;     // [ntri] bbox
+  Kokkos::View<double*, DeviceType> d_mesh_tri_rmax;
+  Kokkos::View<double*, DeviceType> d_mesh_tri_zmin;
+  Kokkos::View<double*, DeviceType> d_mesh_tri_zmax;
+  Kokkos::View<int*,    DeviceType> d_hash_offset;       // [nbins+1] CSR offsets
+  Kokkos::View<int*,    DeviceType> d_hash_entries;      // flat tri indices
+  double d_mesh_hash_rmin = 0.0, d_mesh_hash_zmin = 0.0;
+  double d_mesh_hash_dr   = 1.0, d_mesh_hash_dz   = 1.0;
+  int    d_mesh_hash_nr   = 0,   d_mesh_hash_nz   = 0;
+  int    d_mesh_ntri      = 0;
+  int    d_has_mesh_b     = 0;
+
  private:
   DAT::tdual_float_2d_lr k_array_grid;
   int maxgrid_kk;
   void sync_to_device();
   void sync_equilibrium_to_device();
+  void sync_mesh_to_device();
 };
 
 }
