@@ -69,13 +69,14 @@ GCARhs gca_rhs(double qm, double mass, double v_par, double mu,
 
   const double invB = 1.0 / Bmag;
   const double bhat[3] = {B[0]*invB, B[1]*invB, B[2]*invB};
-  const double Omega = qm * Bmag;
-  const double vpar_over_Omega = v_par / Omega;
+  const double Omega = qm * Bmag;     // signed cyclotron frequency q/m * B
+  // Littlejohn B* = B + (m v_par / q) * curl(b̂); v_par/qm has units T·m.
+  const double mvpar_over_q = v_par / qm;
 
   double Bstar[3];
-  Bstar[0] = B[0] + vpar_over_Omega * curl_b[0];
-  Bstar[1] = B[1] + vpar_over_Omega * curl_b[1];
-  Bstar[2] = B[2] + vpar_over_Omega * curl_b[2];
+  Bstar[0] = B[0] + mvpar_over_q * curl_b[0];
+  Bstar[1] = B[1] + mvpar_over_q * curl_b[1];
+  Bstar[2] = B[2] + mvpar_over_q * curl_b[2];
 
   const double Bstar_par = bhat[0]*Bstar[0] + bhat[1]*Bstar[1] + bhat[2]*Bstar[2];
   if (Kokkos::fabs(Bstar_par) < 1.0e-30) {

@@ -1,20 +1,151 @@
 /* ----------------------------------------------------------------------
-   OpenEdge Guiding Center Approximation (GCA) pusher
-   Hybrid Boris/GCA scheme.
-   When the Larmor radius is small compared to the B gradient scale length,
-   GCA tracks only the drift motion (averaging over gyration), eliminating
-   the need for expensive Boris subcycling.
+   OpenEdge unified pusher math (CPU).
+
+   Single header containing both pusher kernels:
+     BorisGrid::push_velocity   — Boris kick-rotate-kick, used by the
+                                   Boris and the Boris fallback branch
+                                   of the hybrid pusher.
+     BorisGrid::read_field_from_fix — generic helper that reads E or B
+                                      from a fix's grid or particle array.
+     GCAPusher::push_gca        — simplified GCA (no curvature term).
+     GCAPusher::gca_rhs         — full Littlejohn RHS with B* correction.
+     GCAPusher::push_gca_rk4    — RK4 integrator on top of gca_rhs.
+     GCAPusher::init_from_particle / gca_to_particle — GC ↔ particle.
+
+   Phase-1 refactor (consolidated from boris_grid.h + gca_pusher.h).
+   The two old headers are gone — include this one instead.
 
    References:
-     - Littlejohn, J. Plasma Phys. 29 (1983) 111
+     Boris, J.P., 4th Conf. Numerical Simulation of Plasmas, NRL (1970).
+     Littlejohn, R.G., J. Plasma Phys. 29 (1983) 111.
 ------------------------------------------------------------------------- */
 
-#ifndef SPARTA_GCA_PUSHER_H
-#define SPARTA_GCA_PUSHER_H
+#ifndef SPARTA_PUSHER_H
+#define SPARTA_PUSHER_H
 
 #include <cmath>
+#include "fix.h"
+#include "math_extra.h"
+#include "pointers.h"
 
 namespace SPARTA_NS {
+
+/* ===================================================================
+   Pusher class — owns all pusher state and dispatch.
+   Update has a single Pusher* member and calls into it from move()
+   plus init()/global() dispatch points. All other pusher logic lives
+   in pusher.cpp (state, parser, push kernels).
+   =================================================================== */
+
+class Pusher : protected Pointers {
+ public:
+  Pusher(class SPARTA *);
+  ~Pusher();
+
+  enum PusherMode { PUSHER_BORIS = 0, PUSHER_HYBRID = 1 };
+
+  // ---- State (was on Update) -----------------------------------------
+  int pusher_mode;
+  char *pusher_plasma_cid;
+  int pusher_plasma_cidx;
+  int pusher_plasma_fidx;
+  int pusher_subcycles;
+  int pusher_dump_flag;
+  int pusher_dump_every;
+  int pusher_bad_dt_check;
+  int pusher_bad_dt_warned;
+  double pusher_bad_dt_limit;
+  double pusher_gca_switch;
+
+  int gca_x_custom;
+  int gca_y_custom;
+  int gca_z_custom;
+  int gca_vpar_custom;
+  int gca_mu_custom;
+  int gca_on_custom;
+
+  // ---- Methods (were on Update) --------------------------------------
+  void init();
+  void global_keyword(int narg, char **arg, int &iarg);
+  void push_boris_2d(int i, int icell, double dt,
+                     double *x, double *v, double *xnew,
+                     double charge, double mass);
+  void push_boris_3d(int i, int icell, double dt,
+                     double *x, double *v, double *xnew,
+                     double charge, double mass);
+  void push_hybrid_3d(int i, int icell, double dt,
+                      double *x, double *v, double *xnew,
+                      double charge, double mass);
+};
+
+}  // namespace SPARTA_NS
+
+namespace SPARTA_NS {
+
+/* ===================================================================
+   Boris kick-rotate-kick + grid-fix field extraction
+   =================================================================== */
+namespace BorisGrid {
+
+inline void read_field_from_fix(Fix *fix, int use_grid, const int active[3],
+                                int iparticle, int icell, double out[3])
+{
+  out[0] = out[1] = out[2] = 0.0;
+  if (!fix) return;
+
+  double **arr = use_grid ? fix->array_grid : fix->array_particle;
+  if (!arr) return;
+
+  const int idx = use_grid ? icell : iparticle;
+  int col = 0;
+  if (active[0]) out[0] = arr[idx][col++];
+  if (active[1]) out[1] = arr[idx][col++];
+  if (active[2]) out[2] = arr[idx][col++];
+}
+
+inline void push_velocity(double qm, double dt,
+                          const double E[3], const double B[3],
+                          double v[3])
+{
+  double vminus[3] = {
+    v[0] + qm * E[0] * 0.5 * dt,
+    v[1] + qm * E[1] * 0.5 * dt,
+    v[2] + qm * E[2] * 0.5 * dt
+  };
+
+  const double t[3] = {
+    qm * B[0] * 0.5 * dt,
+    qm * B[1] * 0.5 * dt,
+    qm * B[2] * 0.5 * dt
+  };
+  const double t2 = t[0]*t[0] + t[1]*t[1] + t[2]*t[2];
+  const double s[3] = {
+    2.0 * t[0] / (1.0 + t2),
+    2.0 * t[1] / (1.0 + t2),
+    2.0 * t[2] / (1.0 + t2)
+  };
+
+  double vprime[3], vplus[3];
+  MathExtra::cross3(vminus, t, vprime);
+  vprime[0] += vminus[0];
+  vprime[1] += vminus[1];
+  vprime[2] += vminus[2];
+
+  MathExtra::cross3(vprime, s, vplus);
+  vplus[0] += vminus[0];
+  vplus[1] += vminus[1];
+  vplus[2] += vminus[2];
+
+  v[0] = vplus[0] + qm * E[0] * 0.5 * dt;
+  v[1] = vplus[1] + qm * E[1] * 0.5 * dt;
+  v[2] = vplus[2] + qm * E[2] * 0.5 * dt;
+}
+
+}  // namespace BorisGrid
+
+/* ===================================================================
+   Guiding-Center Approximation (GCA) pusher
+   =================================================================== */
 namespace GCAPusher {
 
 struct GCAState {
@@ -199,11 +330,10 @@ inline void gca_to_particle(const GCAState &state, const double B[3],
 /* ---------------------------------------------------------------------- */
 // Right-hand side of the full Littlejohn GCA equations with B* correction.
 //
-// B* = B + (m v_par / (q B)) curl(b̂)
+// B* = B + (m v_par / q) * curl(b̂)
 // B*_par = b̂ · B*
 //
-// dX/dt = (v_par B* + (1/B*_par)[E×b̂ + (μ/qB)(B×∇B)]) / B*_par ... wait
-// Simplified: we compute the full GCA velocity including all drifts.
+// dX/dt = (v_par B* + (1/B*_par)[E×b̂ + (μ/qB)(B×∇B)]) / B*_par
 //
 // Inputs in Cartesian (XYZ).
 // kappa[3], curl_b[3], gradBmag[3] are exact from equilibrium.
@@ -232,12 +362,15 @@ inline GCARhs gca_rhs(double qm, double mass, double v_par, double mu,
 
   const double Omega = qm * Bmag;  // signed cyclotron frequency q/m * B
 
-  // B* = B + (v_par / Omega) * curl(b̂)   [since m*v_par/(q*B) = v_par/Omega]
-  const double vpar_over_Omega = v_par / Omega;
+  // Littlejohn B* = B + (m v_par / q) * curl(b̂)
+  // Using qm = q/m, the prefactor is v_par/qm (units kg·m/(C·s) = T·m).
+  // Earlier code wrote `v_par/Omega * curl_b` which is dimensionless and
+  // missed a factor of |B| — fixed below.
+  const double mvpar_over_q = v_par / qm;          // = m·v_par/q
   double Bstar[3];
-  Bstar[0] = B[0] + vpar_over_Omega * curl_b[0];
-  Bstar[1] = B[1] + vpar_over_Omega * curl_b[1];
-  Bstar[2] = B[2] + vpar_over_Omega * curl_b[2];
+  Bstar[0] = B[0] + mvpar_over_q * curl_b[0];
+  Bstar[1] = B[1] + mvpar_over_q * curl_b[1];
+  Bstar[2] = B[2] + mvpar_over_q * curl_b[2];
 
   // B*_par = b̂ · B*
   const double Bstar_par = bhat[0]*Bstar[0] + bhat[1]*Bstar[1] + bhat[2]*Bstar[2];
@@ -261,9 +394,8 @@ inline GCARhs gca_rhs(double qm, double mass, double v_par, double mu,
   BxgradB[1] = B[2]*gradBmag[0] - B[0]*gradBmag[2];
   BxgradB[2] = B[0]*gradBmag[1] - B[1]*gradBmag[0];
 
-  // dX/dt = (1/B*_par) * [v_par * B* + E×b̂ + (μ/(mΩ)) * (B×∇B)/B * B_par_correction]
-  // More precisely: dX/dt = v_par * B*/B*_par + (1/B*_par) * [E×b̂ + (μ/(mΩ))(B×∇|B|)/B]
-  // where the last term reduces to the grad-B drift.
+  // dX/dt = v_par * B*/B*_par + (1/B*_par) * [E×b̂ + (μ/(mΩ))(B×∇|B|)/B]
+  // The last term reduces to the grad-B drift.
   rhs.dXdt[0] = invBstar_par * (v_par * Bstar[0] + ExB[0] + gradB_coeff * BxgradB[0] * invB);
   rhs.dXdt[1] = invBstar_par * (v_par * Bstar[1] + ExB[1] + gradB_coeff * BxgradB[1] * invB);
   rhs.dXdt[2] = invBstar_par * (v_par * Bstar[2] + ExB[2] + gradB_coeff * BxgradB[2] * invB);
@@ -349,4 +481,4 @@ inline double grad_b_length(double Bmag, double gradBmag_magnitude)
 }  // namespace GCAPusher
 }  // namespace SPARTA_NS
 
-#endif  // SPARTA_GCA_PUSHER_H
+#endif  // SPARTA_PUSHER_H

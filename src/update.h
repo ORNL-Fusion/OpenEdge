@@ -46,6 +46,7 @@ struct PairHash {
 namespace SPARTA_NS {
 
 class Update : protected Pointers {
+  friend class Pusher;       // Pusher reaches Update::eperturbflag etc.
  public:
 
 struct BoundaryInfo {
@@ -143,19 +144,10 @@ struct SurfHit2D {
   bigint nscheck_running;
   bigint nscollide_running;
 
-  // Charged-particle pusher (Boris full-orbit or Boris/GCA hybrid).
-  // Plasma provider feeds B (always) plus Te/ne for sheath/diagnostics.
-  enum PusherMode { PUSHER_BORIS = 0, PUSHER_HYBRID = 1 };
-  int pusher_mode;              // PUSHER_BORIS (default) | PUSHER_HYBRID
-  char *pusher_plasma_cid;      // plasma provider ID
-  int pusher_plasma_cidx;       // resolved compute index (-1 = not set)
-  int pusher_plasma_fidx;       // resolved fix index (-1 = not set)
-  int pusher_subcycles;         // velocity/position substeps per move (default 1)
-  int pusher_dump_flag;         // 1 enables E/B debug prints
-  int pusher_dump_every;        // print cadence in timesteps
-  int pusher_bad_dt_check;      // 1 warns when |q/m|*|B|*dt_sub is too large
-  int pusher_bad_dt_warned;     // suppress repeated warnings
-  double pusher_bad_dt_limit;   // recommended max for |q/m|*|B|*dt_sub
+  // Charged-particle pusher state + dispatch lives entirely in class Pusher
+  // (src/OPENEDGE/pusher.{h,cpp}). Update has only this owning pointer;
+  // call sites use pusher->mode, pusher->push_boris_*, etc.
+  class Pusher *pusher;
 
   // Sheath overlay applied during the pusher. dmax / pot_mult / model are
   // computed internally (auto): dmax = max(5*L_MPS, 10*lambdaD); pot_mult
@@ -206,16 +198,7 @@ struct SurfHit2D {
   int pcache_nevery;
   void cache_plasma_particles();
 
-  // GCA hybrid mode parameters (active when pusher_mode == PUSHER_HYBRID).
-  // Plasma provider is shared with the Boris path (pusher_plasma_*).
-  double pusher_gca_switch;  // switching threshold (default 2.5)
-  // Persistent per-particle GCA state (stored in particle custom vectors)
-  int gca_x_custom;
-  int gca_y_custom;
-  int gca_z_custom;
-  int gca_vpar_custom;
-  int gca_mu_custom;
-  int gca_on_custom;
+  // GCA persistent custom-attr indices moved to class Pusher.
 
   // Per-particle position displacement buffer (filled by fix cross_diffusion,
   // consumed by the mover before surface-tracing loop).
@@ -287,7 +270,7 @@ struct SurfHit2D {
 double target_material_charge;
 double target_material_mass;
 double target_material_binding_energy;
-void pusher_boris_2d( int i, int icell, double dt, double *x, double *v, double *xnew, double charge, double mass);
+// Pusher methods moved to class Pusher; call as pusher->push_boris_2d etc.
 
 double distance_to_surface_for_particle(int icell, const double x[3], const BoundaryInfo& info);
 inline double signed_plane_distance(const BoundaryInfo& info, const double x[3]) const {
@@ -470,10 +453,8 @@ static double dist_point_tri(const double p[3], const double a[3],
   //       unless possibly include modify.h and fix.h in this file
   void field_per_particle(int, int, double, double *, double *);
   void field_per_grid(int, int, double, double *, double *);
-  void pusher_boris_3d(int i, int icell, double dt, double *x, double *v,
-                      double *xnew, double charge, double mass);
-  void pusher_hybrid_3d(int i, int icell, double dt, double *x, double *v,
-                       double *xnew, double charge, double mass);
+  // Pusher methods moved to class Pusher (src/OPENEDGE/pusher.{h,cpp}).
+  // Update calls into the owning Pusher* (see member declaration above).
 
 };
 
