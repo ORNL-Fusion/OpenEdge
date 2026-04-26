@@ -20,7 +20,7 @@
 #include "surf_collide_transparent_kokkos.h"
 #include "compute_boundary_kokkos.h"
 #include "compute_surf_kokkos.h"
-#include "boris_grid_kokkos.h"
+#include "pusher_kokkos.h"
 
 namespace SPARTA_NS {
 

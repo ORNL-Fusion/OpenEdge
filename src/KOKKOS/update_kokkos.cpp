@@ -260,7 +260,7 @@ void UpdateKokkos::init()
   }
 
   // OpenEdge: Boris config — read B/E directly from plasma compute view
-  oe_pusher_subcycles = pusher_subcycles;
+  oe_pusher_subcycles = pusher->pusher_subcycles;
   oe_echarge = echarge;
   oe_bx_col = oe_by_col = oe_bz_col = -1;
   oe_ex_col = oe_ey_col = oe_ez_col = -1;

@@ -1,20 +1,96 @@
 /* ----------------------------------------------------------------------
-   OpenEdge Guiding Center Approximation (GCA) pusher — Kokkos version.
+   OpenEdge unified pusher math — Kokkos device-callable kernels.
 
-   Device-callable equivalents of GCAPusher functions for use in the
-   Kokkos particle move kernel.
+   Single header containing both pusher kernels, mirroring src/OPENEDGE/pusher.h
+   on the GPU side:
+     BorisGridKokkos::push_velocity   — Boris kick-rotate-kick.
+     BorisGridKokkos::read_field      — read 3-component field from a 2D view.
+     GCAPusherKokkos::push_gca        — simplified GCA (no curvature term).
+     GCAPusherKokkos::gca_rhs         — full Littlejohn RHS with B* correction.
+     GCAPusherKokkos::push_gca_rk4    — RK4 integrator on top of gca_rhs.
+     GCAPusherKokkos::init_from_particle / gca_to_particle.
+
+   Phase-1 refactor (consolidated from boris_grid_kokkos.h + gca_pusher_kokkos.h).
+   The two old headers are gone — include this one instead.
+
+   References:
+     Boris, J.P., 4th Conf. Numerical Simulation of Plasmas, NRL (1970).
+     Littlejohn, R.G., J. Plasma Phys. 29 (1983) 111.
 
    Contributors:
      - Abdourahmane (Abdou) Diaw (ORNL, diawa@ornl.gov)
 ------------------------------------------------------------------------- */
 
-#ifndef SPARTA_GCA_PUSHER_KOKKOS_H
-#define SPARTA_GCA_PUSHER_KOKKOS_H
+#ifndef SPARTA_PUSHER_KOKKOS_H
+#define SPARTA_PUSHER_KOKKOS_H
 
 #include "Kokkos_Core.hpp"
+#include "kokkos_type.h"
 #include <cmath>
 
 namespace SPARTA_NS {
+
+/* ===================================================================
+   Boris kick-rotate-kick + view field extraction.
+   =================================================================== */
+namespace BorisGridKokkos {
+
+KOKKOS_INLINE_FUNCTION
+void read_field(const DAT::t_float_2d_lr &d_arr, int idx, double out[3])
+{
+  out[0] = d_arr(idx, 0);
+  out[1] = d_arr(idx, 1);
+  out[2] = d_arr(idx, 2);
+}
+
+KOKKOS_INLINE_FUNCTION
+void push_velocity(double qm, double dt,
+                   const double E[3], const double B[3],
+                   double v[3])
+{
+  // Half E-kick
+  double vminus[3] = {
+    v[0] + qm * E[0] * 0.5 * dt,
+    v[1] + qm * E[1] * 0.5 * dt,
+    v[2] + qm * E[2] * 0.5 * dt
+  };
+
+  // Rotation vectors
+  const double t[3] = {
+    qm * B[0] * 0.5 * dt,
+    qm * B[1] * 0.5 * dt,
+    qm * B[2] * 0.5 * dt
+  };
+  const double t2 = t[0]*t[0] + t[1]*t[1] + t[2]*t[2];
+  const double s[3] = {
+    2.0 * t[0] / (1.0 + t2),
+    2.0 * t[1] / (1.0 + t2),
+    2.0 * t[2] / (1.0 + t2)
+  };
+
+  // vminus x t
+  double vprime[3];
+  vprime[0] = vminus[1]*t[2] - vminus[2]*t[1] + vminus[0];
+  vprime[1] = vminus[2]*t[0] - vminus[0]*t[2] + vminus[1];
+  vprime[2] = vminus[0]*t[1] - vminus[1]*t[0] + vminus[2];
+
+  // vprime x s
+  double vplus[3];
+  vplus[0] = vprime[1]*s[2] - vprime[2]*s[1] + vminus[0];
+  vplus[1] = vprime[2]*s[0] - vprime[0]*s[2] + vminus[1];
+  vplus[2] = vprime[0]*s[1] - vprime[1]*s[0] + vminus[2];
+
+  // Second half E-kick
+  v[0] = vplus[0] + qm * E[0] * 0.5 * dt;
+  v[1] = vplus[1] + qm * E[1] * 0.5 * dt;
+  v[2] = vplus[2] + qm * E[2] * 0.5 * dt;
+}
+
+}  // namespace BorisGridKokkos
+
+/* ===================================================================
+   Guiding-Center Approximation (GCA) device-callable kernels.
+   =================================================================== */
 namespace GCAPusherKokkos {
 
 struct GCAState {
@@ -22,8 +98,6 @@ struct GCAState {
   double v_par;
   double mu;
 };
-
-/* ---------------------------------------------------------------------- */
 
 KOKKOS_INLINE_FUNCTION
 GCAState init_from_particle(const double x[3], const double v[3],
@@ -46,8 +120,6 @@ GCAState init_from_particle(const double x[3], const double v[3],
   }
   return s;
 }
-
-/* ---------------------------------------------------------------------- */
 
 struct GCARhs {
   double dXdt[3];
@@ -112,8 +184,6 @@ GCARhs gca_rhs(double qm, double mass, double v_par, double mu,
   return rhs;
 }
 
-/* ---------------------------------------------------------------------- */
-
 KOKKOS_INLINE_FUNCTION
 void push_gca(double qm, double dt, double mass,
               const double E[3], const double B[3],
@@ -163,8 +233,6 @@ void push_gca(double qm, double dt, double mass,
   state.v_par += dvpar_dt * dt;
 }
 
-/* ---------------------------------------------------------------------- */
-
 KOKKOS_INLINE_FUNCTION
 void push_gca_rk4(double qm, double dt, double mass,
                    const double E[3], const double B[3],
@@ -197,8 +265,6 @@ void push_gca_rk4(double qm, double dt, double mass,
     state.X[i] = y[i] + (k1[i] + 2.0*k2[i] + 2.0*k3[i] + k4[i]) / 6.0;
   state.v_par = y[3] + (k1[3] + 2.0*k2[3] + 2.0*k3[3] + k4[3]) / 6.0;
 }
-
-/* ---------------------------------------------------------------------- */
 
 KOKKOS_INLINE_FUNCTION
 void gca_to_particle(const GCAState &state, const double B[3],
@@ -243,8 +309,6 @@ void gca_to_particle(const GCAState &state, const double B[3],
   v[2] = state.v_par * bhat[2] + vperp * (cp * e1[2] + sp * e2[2]);
 }
 
-/* ---------------------------------------------------------------------- */
-
 KOKKOS_INLINE_FUNCTION
 double larmor_radius(double v_perp, double qm_abs, double Bmag)
 {
@@ -262,4 +326,4 @@ double grad_b_length(double Bmag, double gradBmag_magnitude)
 }  // namespace GCAPusherKokkos
 }  // namespace SPARTA_NS
 
-#endif  // SPARTA_GCA_PUSHER_KOKKOS_H
+#endif  // SPARTA_PUSHER_KOKKOS_H
