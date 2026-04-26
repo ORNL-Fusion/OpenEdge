@@ -10,9 +10,9 @@ Reads `output/slab_<case>.grid` (SPARTA grid dump) and writes
 
 Column layout per deck (dump ordering in in.slab_*):
 
-  iz / recycle : id xc yc n_D iz_rate rec_rate cx_rate diss_rate
-  cx           : id xc yc n_D T_D     iz_rate cx_rate
-  diss         : id xc yc n_D2 n_D n_Dp iz_rate rec_rate cx_rate diss_rate
+  iz / recycle : id xc yc c_cden[1]=n_D            f_frate[1..4] (iz/rec/cx/diss)
+  cx           : id xc yc c_cden[1]=n_D c_ctemp[1]=T_D[K] f_frate[1] f_frate[3]
+  diss         : id xc yc c_cden[1]=n_D2 c_cden[2]=n_D c_cden[3]=n_Dp f_frate[1..4]
 """
 
 import sys
@@ -99,9 +99,9 @@ def plot_recycle(path, outpng):
 def plot_cx(path, outpng):
     headers, d = last_frame(path)
     xc = d[:, col(headers, "xc")]
-    nD = d[:, col(headers, "f_fmom[1]")]
+    nD = d[:, first_col(headers, "c_cden[1]", "f_fmom[1]")]
     # compute grid ... species temp returns Kelvin (m <v^2> / (3 kB)).
-    TD_eV = d[:, col(headers, "f_fmom[2]")] / 11604.525
+    TD_eV = d[:, first_col(headers, "c_ctemp[1]", "f_fmom[2]")] / 11604.525
     order = np.argsort(xc)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5), dpi=150)
@@ -122,8 +122,8 @@ def plot_cx(path, outpng):
 def plot_diss(path, outpng):
     headers, d = last_frame(path)
     xc = d[:, col(headers, "xc")]
-    nD2 = d[:, col(headers, "f_fden[1]")]
-    nD  = d[:, col(headers, "f_fden[2]")]
+    nD2 = d[:, first_col(headers, "c_cden[1]", "f_fden[1]")]
+    nD  = d[:, first_col(headers, "c_cden[2]", "f_fden[2]")]
     order = np.argsort(xc)
 
     fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
