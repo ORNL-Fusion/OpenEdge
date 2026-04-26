@@ -23,6 +23,8 @@ class FixParticleWeight : public Fix {
   ~FixParticleWeight();
   int setmask();
   void init();
+  void setup();
+  void update_custom(int, double, double, double, double *);
 
   int pweight_index;          // index into particle custom data structs
 
