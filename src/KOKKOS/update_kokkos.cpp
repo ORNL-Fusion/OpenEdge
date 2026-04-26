@@ -282,6 +282,26 @@ void UpdateKokkos::init()
   oe_mesh_hash_nr = oe_mesh_hash_nz = 0;
   oe_mesh_hash_rmin = oe_mesh_hash_zmin = 0.0;
   oe_mesh_hash_dr = oe_mesh_hash_dz = 1.0;
+
+  // OpenEdge Phase C: GCA persistent state binding (defaults off).
+  // Activated at the same site that binds the plasma compute, when the
+  // pusher is in hybrid mode and the custom attrs were registered by
+  // Pusher::init() on the host side.
+  oe_has_gca_state = 0;
+  oe_pusher_gca_switch = pusher->pusher_gca_switch;
+  if (pusher->pusher_mode == Pusher::PUSHER_HYBRID &&
+      pusher->gca_x_custom >= 0 && pusher->gca_y_custom >= 0 &&
+      pusher->gca_z_custom >= 0 && pusher->gca_vpar_custom >= 0 &&
+      pusher->gca_mu_custom >= 0 && pusher->gca_on_custom >= 0) {
+    auto *pkk = (ParticleKokkos*) particle;
+    d_oe_gca_x    = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_x_custom]].k_view.d_view;
+    d_oe_gca_y    = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_y_custom]].k_view.d_view;
+    d_oe_gca_z    = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_z_custom]].k_view.d_view;
+    d_oe_gca_vpar = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_vpar_custom]].k_view.d_view;
+    d_oe_gca_mu   = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_mu_custom]].k_view.d_view;
+    d_oe_gca_on   = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_on_custom]].k_view.d_view;
+    oe_has_gca_state = 1;
+  }
 }
 
 /* ---------------------------------------------------------------------- */

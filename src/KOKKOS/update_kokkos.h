@@ -140,6 +140,17 @@ class UpdateKokkos : public Update {
   int    oe_mesh_ntri;
   int    oe_has_mesh_b;
 
+  // OpenEdge Phase C: persistent GCA state on device. Bound to the
+  // ParticleKokkos custom-attribute device views at init time (mode=hybrid).
+  DAT::t_float_1d d_oe_gca_x;
+  DAT::t_float_1d d_oe_gca_y;
+  DAT::t_float_1d d_oe_gca_z;
+  DAT::t_float_1d d_oe_gca_vpar;
+  DAT::t_float_1d d_oe_gca_mu;
+  DAT::t_float_1d d_oe_gca_on;
+  int oe_has_gca_state;
+  double oe_pusher_gca_switch;
+
   // OpenEdge: Boris config
   int oe_pusher_subcycles;
   double oe_echarge;
