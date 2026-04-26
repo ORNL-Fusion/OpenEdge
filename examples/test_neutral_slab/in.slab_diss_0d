@@ -44,6 +44,6 @@ compute cden        grid/weighted all species nrho_w
 compute Nd2         reduce ave c_cden[1]
 compute Nd          reduce ave c_cden[2]
 
-stats               100
+stats               50
 stats_style         step cpu np c_Nd2 c_Nd
-run                 30000
+run                 7000

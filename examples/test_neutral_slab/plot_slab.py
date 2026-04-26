@@ -251,6 +251,7 @@ def plot_dissociation(base, outpng, dt=2e-8):
     ax.set_xlabel(r"$t \; (\mathrm{\mu s})$")
     ax.set_ylabel(r"$n \; (\mathrm{m}^{-3})$")
     ax.set_yscale("log")
+    ax.set_xlim(0, 150)
     ax.set_title(r"0-D $D_2$ dissociation: reactant decay $+$ product build-up")
     ax.legend()
     fig.savefig(outpng); print(f"wrote {outpng}")

@@ -31,6 +31,7 @@
 #include "update.h"
 #include "comm.h"
 #include "particle.h"
+#include "modify.h"
 #include "surf.h"
 #include "random_mars.h"
 #include "random_knuth.h"
@@ -274,6 +275,12 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
             particle->add_particle(id, sp1, ip->icell, x, v, erot1, evib1);
           if (reallocflag) ip = particle->particles + (ip - particles);
           jp = &particle->particles[particle->nlocal-1];
+          // Notify update_custom subscribers (e.g. fix particle/weight
+          // setting pweight = fnum) for the spawned dissociation product.
+          if (modify->n_update_custom) {
+            double zero_v[3] = {0.0, 0.0, 0.0};
+            modify->update_custom(particle->nlocal - 1, 0.0, 0.0, 0.0, zero_v);
+          }
           return (list[i] + 1);
         }
       case EXCHANGE:
