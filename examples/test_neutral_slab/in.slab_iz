@@ -59,6 +59,5 @@ run                 10000
 # --- Dump steady-state snapshot at end of run ---
 # cols: id xc yc n_D[m^-3] (+19 other chem cols, keep col 4 for n_D)
 dump d1 grid all 10000 output/slab_iz.grid id xc yc &
-     f_fden[1] f_frate[1] f_frate[2] f_frate[3] f_frate[4]
+     c_cden[1] f_frate[1] f_frate[2] f_frate[3] f_frate[4]
 dump_modify d1 pad 6
-run                 0

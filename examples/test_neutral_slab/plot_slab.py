@@ -60,10 +60,16 @@ def col(headers, name):
     return headers.index(name)
 
 
+def first_col(headers, *names):
+    for name in names:
+        if name in headers:
+            return col(headers, name)
+    raise ValueError(f"none of the expected columns were found: {names}")
+
+
 def plot_density_decay(case, ax, headers, data, label, color="C0"):
     xc = data[:, col(headers, "xc")]
-    nD = data[:, col(headers, "f_fden[1]") if "f_fden[1]" in headers
-              else col(headers, "f_fmom[1]")]
+    nD = data[:, first_col(headers, "c_cden[1]", "f_fden", "f_fden[1]", "f_fmom[1]")]
     order = np.argsort(xc)
     ax.plot(xc[order], nD[order], color=color, lw=1.6, label=label)
     ax.set_xlabel("x [m]")

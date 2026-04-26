@@ -34,7 +34,6 @@ def parse_stats(path):
             continue
         if not s or s.startswith("Loop time") or re.match(r"^[A-Za-z]", s):
             in_block = False
-            header = None
             continue
         parts = s.split()
         if len(parts) != len(header):
