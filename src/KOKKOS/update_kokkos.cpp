@@ -439,17 +439,6 @@ void UpdateKokkos::run(int nsteps)
     }
   }
 
-  // One-shot Phase C3 diagnostic at run-time (after binding completes).
-  static int oe_diag_once = 0;
-  if (!oe_diag_once && comm->me == 0 && screen) {
-    fprintf(screen,
-            "oe_kokkos run: mode=%d gca_switch=%g has_equ=%d has_mesh_b=%d "
-            "has_gca_state=%d\n",
-            oe_pusher_mode, oe_pusher_gca_switch,
-            oe_has_equilibrium, oe_has_mesh_b, oe_has_gca_state);
-    oe_diag_once = 1;
-  }
-
   // cellweightflag = 1 if grid-based particle weighting is ON
 
   int cellweightflag = 0;
