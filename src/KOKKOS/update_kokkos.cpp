@@ -22,6 +22,9 @@
 #include "update_kokkos.h"
 #include "pusher.h"
 #include "compute_plasma_fields_kokkos.h"
+#include "compute_nearest_surf_grid.h"
+#include "sheath_models.h"
+#include "surf.h"
 #include "math_const.h"
 #include "particle_kokkos.h"
 #include "modify.h"
@@ -284,6 +287,10 @@ void UpdateKokkos::init()
   oe_mesh_hash_rmin = oe_mesh_hash_zmin = 0.0;
   oe_mesh_hash_dr = oe_mesh_hash_dz = 1.0;
 
+  // OpenEdge Phase D: sheath spatial-mode cache (defaults off).
+  oe_has_sheath_spatial = 0;
+  oe_sheath_mD_amu = sheath_mD_amu;
+
   // OpenEdge Phase C: GCA persistent state binding (defaults off).
   // Activated at the same site that binds the plasma compute, when the
   // pusher is in hybrid mode and the custom attrs were registered by
@@ -437,6 +444,13 @@ void UpdateKokkos::run(int nsteps)
       oe_mesh_ntri       = cp_pf->d_mesh_ntri;
       oe_has_mesh_b      = 1;
     }
+
+    // Phase D: build per-cell sheath spatial-mode cache once at run() setup.
+    // Static-plasma assumption: cache is not refreshed per step. Triggered
+    // only when `global pusher ... sheath spatial geom <ID>` is configured
+    // (sheath_flag=1 && sheath_kick=0 && sheath_geom_cidx resolved).
+    if (sheath_flag && !sheath_kick && sheath_geom_cidx >= 0)
+      build_oe_sheath_cache();
   }
 
   // cellweightflag = 1 if grid-based particle weighting is ON
@@ -2071,6 +2085,175 @@ int UpdateKokkos::split2d(int icell, double *x) const
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
+   OpenEdge Phase D: build the per-cell sheath spatial-mode cache on host.
+   Mirrors what CPU pusher.cpp:566-705 computes per Boris call, but does it
+   once per run() (static plasma) and stores per-cell rather than recomputing
+   per particle. Layout: 13 cols documented in update_kokkos.h.
+
+   Looks up the nearest surface element from compute_nearest_surf_grid,
+   reads cell-center plasma + B from compute_plasma_fields, computes the
+   Chodura angle and the physics-derived d_max engagement gate. Pure host
+   code — feeds a DualView mirrored to device.
+
+   No sheath_kick gating here: kick mode fires at wall-collision time
+   (separate code path), so a kick-mode deck never enters this builder.
+------------------------------------------------------------------------- */
+void UpdateKokkos::build_oe_sheath_cache()
+{
+  oe_has_sheath_spatial = 0;
+  if (!sheath_flag || sheath_kick) return;
+  if (sheath_geom_cidx < 0) return;
+
+  Compute *cg = modify->compute[sheath_geom_cidx];
+  auto *csg = dynamic_cast<ComputeNearestSurfGrid*>(cg);
+  if (!csg) return;
+  if (!(cg->invoked_flag & INVOKED_PER_GRID)) {
+    cg->compute_per_grid();
+    cg->invoked_flag |= INVOKED_PER_GRID;
+  }
+
+  // Plasma provider: prefer ComputePlasmaFields (matches CPU pusher).
+  // FixBackground point-query fallback would require host-side bfield_at()
+  // calls per cell — not wired in this first cut. Decks that use the
+  // bench (test_west_axi) drive sheath via compute plasma/fields.
+  ComputePlasmaFields *cp = nullptr;
+  if (pusher->pusher_plasma_cidx >= 0) {
+    Compute *cp_base = modify->compute[pusher->pusher_plasma_cidx];
+    cp = dynamic_cast<ComputePlasmaFields*>(cp_base);
+    if (cp && !(cp_base->invoked_flag & INVOKED_PER_GRID)) {
+      cp_base->compute_per_grid();
+      cp_base->invoked_flag |= INVOKED_PER_GRID;
+    }
+  }
+  if (!cp || !cp->plasma_arr || !cp->mag_arr) return;
+
+  const int ng = grid->nlocal;
+  const int dim = domain->dimension;
+  const int ncols = 13;
+  // csg->sgroupbit not needed in this first cut: no per-particle
+  // nearest-face refinement, only cell-center midx_grid lookup.
+
+  k_oe_sheath_cell = DAT::tdual_float_2d_lr("oe_sheath_cell", ng, ncols);
+  d_oe_sheath_cell = k_oe_sheath_cell.d_view;
+  auto h_cache = k_oe_sheath_cell.h_view;
+
+  oe_sheath_mD_amu = sheath_mD_amu;
+
+  Grid::ChildCell *cells = grid->cells;
+  Surf::Line *lines = surf->lines;
+  Surf::Tri  *tris  = surf->tris;
+
+  int n_active = 0;
+  for (int icell = 0; icell < ng; icell++) {
+    for (int c = 0; c < ncols; c++) h_cache(icell, c) = 0.0;
+
+    // Resolve to parent cell when in a sub-cell (compute skips sub-cells).
+    int gcell = icell;
+    if (cells[icell].nsplit <= 0 && cells[icell].isplit >= 0)
+      gcell = grid->sinfo[cells[icell].isplit].icell;
+
+    int midx = csg->midx_grid[gcell];
+    if (midx < 0) continue;
+
+    // Per-cell sheath cache uses the cell-center-nearest surface from the
+    // compute. Per-particle nearest-face refinement (the inner loop in
+    // CPU pusher.cpp:598-622 that picks among csurfs) is NOT replicated
+    // here — that refinement matters only for thin-slab cells where the
+    // cell center is between two faces. The bench deck does not have
+    // such cells, so we skip the cost.
+
+    double nx, ny, nz;
+    double srefx, srefy, srefz;
+    if (dim == 2) {
+      Surf::Line *ln = &lines[midx];
+      nx = ln->norm[0]; ny = ln->norm[1]; nz = 0.0;
+      srefx = 0.5*(ln->p1[0] + ln->p2[0]);
+      srefy = 0.5*(ln->p1[1] + ln->p2[1]);
+      srefz = 0.0;
+    } else {
+      Surf::Tri *tr = &tris[midx];
+      nx = tr->norm[0]; ny = tr->norm[1]; nz = tr->norm[2];
+      srefx = (tr->p1[0] + tr->p2[0] + tr->p3[0]) / 3.0;
+      srefy = (tr->p1[1] + tr->p2[1] + tr->p3[1]) / 3.0;
+      srefz = (tr->p1[2] + tr->p2[2] + tr->p3[2]) / 3.0;
+    }
+    const double nmag = std::sqrt(nx*nx + ny*ny + nz*nz);
+    if (nmag <= 0.0) continue;
+    nx /= nmag; ny /= nmag; nz /= nmag;
+
+    const double te = cp->plasma_arr[gcell].temp_e;
+    const double ti = cp->plasma_arr[gcell].temp_i;
+    const double ne = cp->plasma_arr[gcell].dens_e;
+    if (!(te > 0.0) || !(ne > 0.0)) continue;
+
+    // Cylindrical (br, bt, bz) → Cartesian at the surface reference point,
+    // matching the per-particle CPU treatment in pusher.cpp:677-689.
+    const double br = cp->mag_arr[gcell].br;
+    const double bt = cp->mag_arr[gcell].bt;
+    const double bz = cp->mag_arr[gcell].bz;
+    const double rmag = std::sqrt(srefx*srefx + srefy*srefy);
+    double bvec[3];
+    if (rmag > 1.0e-20) {
+      const double cphi = srefx / rmag, sphi = srefy / rmag;
+      bvec[0] = br * cphi - bt * sphi;
+      bvec[1] = br * sphi + bt * cphi;
+      bvec[2] = bz;
+    } else {
+      bvec[0] = br; bvec[1] = 0.0; bvec[2] = bz;
+    }
+    const double bmag = std::sqrt(bvec[0]*bvec[0] + bvec[1]*bvec[1] + bvec[2]*bvec[2]);
+    if (!(bmag > 0.0)) continue;
+
+    double nvec[3] = {nx, ny, nz};
+    SheathModels::ChoduraMetrics cm =
+      SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
+    const double alpha_deg = cm.alpha_deg;
+
+    // sheath_auto_dmax replicated from pusher.cpp anonymous-namespace
+    // helper; identical formula. Couldn't include pusher.cpp here without
+    // pulling the whole class.
+    constexpr double QE_LOC   = 1.602176634e-19;
+    constexpr double AMU_LOC  = 1.66053906660e-27;
+    constexpr double EPS0_LOC = 8.8541878128e-12;
+    const double mD_kg = std::max(sheath_mD_amu * AMU_LOC, 1.0e-99);
+    const double lambdaD = std::sqrt(EPS0_LOC * std::max(te, 1.0e-12)
+                                     / (std::max(ne, 1.0e-60) * QE_LOC));
+    const double cs = std::sqrt(std::max(te + ti, 0.0) * QE_LOC / (2.0 * mD_kg));
+    const double omega_ci = QE_LOC * std::max(std::fabs(bmag), 1.0e-20) / mD_kg;
+    const double rho_i = cs / std::max(omega_ci, 1.0e-99);
+    const double alpha_n_rad = std::max(0.0, std::min(90.0, alpha_deg)) * M_PI / 180.0;
+    const double tan_an = std::min(std::max(std::fabs(std::tan(alpha_n_rad)),
+                                            1.0e-3), 30.0);
+    const double L_MPS = rho_i * tan_an;
+    const double d_max = std::max(5.0 * L_MPS, 10.0 * lambdaD);
+
+    h_cache(icell, 0)  = nx;       h_cache(icell, 1)  = ny;     h_cache(icell, 2)  = nz;
+    h_cache(icell, 3)  = srefx;    h_cache(icell, 4)  = srefy;  h_cache(icell, 5)  = srefz;
+    h_cache(icell, 6)  = te;       h_cache(icell, 7)  = ti;     h_cache(icell, 8)  = ne;
+    h_cache(icell, 9)  = bmag;
+    h_cache(icell, 10) = alpha_deg;
+    h_cache(icell, 11) = d_max;
+    h_cache(icell, 12) = 1.0;
+    n_active++;
+  }
+
+  k_oe_sheath_cell.modify_host();
+  k_oe_sheath_cell.sync_device();
+  d_oe_sheath_cell = k_oe_sheath_cell.d_view;
+  oe_has_sheath_spatial = 1;
+
+  // CLAUDE.md MPI trap: Allreduce must be called on every rank — gate
+  // only the printf, not the collective.
+  int n_active_global = 0, ng_global = 0;
+  MPI_Allreduce(&n_active, &n_active_global, 1, MPI_INT, MPI_SUM, world);
+  MPI_Allreduce(&ng,       &ng_global,       1, MPI_INT, MPI_SUM, world);
+  if (comm->me == 0 && screen)
+    fprintf(screen, "OpenEdge Phase D: sheath spatial cache built — "
+            "%d / %d cells active globally\n",
+            n_active_global, ng_global);
+}
+
+/* ----------------------------------------------------------------------
    OpenEdge: device-callable Boris 3D pusher.
    Reads B directly from plasma compute device view (bypass field fixes).
    No sheath E-field in this version — added incrementally.
@@ -2095,6 +2278,41 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
 
   double xcur[3] = {x[0], x[1], x[2]};
   double vcur[3] = {v[0], v[1], v[2]};
+
+  // Phase D: read this cell's sheath cache once before the subcycle loop.
+  // Replicates CPU pusher.cpp:566-736 prefetch — Te, Ti, ne, B, alpha,
+  // surface normal & ref point are invariant during subcycling.
+  bool sh_active = false;
+  double sh_nx = 0.0, sh_ny = 0.0, sh_nz = 0.0;
+  double sh_srefx = 0.0, sh_srefy = 0.0, sh_srefz = 0.0;
+  double sh_te = 0.0, sh_ti = 0.0, sh_ne = 0.0;
+  double sh_bmag = 0.0, sh_alpha = 0.0, sh_dmax = 0.0;
+  double sh_d0_sign = 0.0;
+  if (oe_has_sheath_spatial && d_oe_sheath_cell.data()
+      && icell >= 0 && icell < (int)d_oe_sheath_cell.extent(0)
+      && d_oe_sheath_cell(icell, 12) > 0.5) {
+    sh_nx    = d_oe_sheath_cell(icell, 0);
+    sh_ny    = d_oe_sheath_cell(icell, 1);
+    sh_nz    = d_oe_sheath_cell(icell, 2);
+    sh_srefx = d_oe_sheath_cell(icell, 3);
+    sh_srefy = d_oe_sheath_cell(icell, 4);
+    sh_srefz = d_oe_sheath_cell(icell, 5);
+    sh_te    = d_oe_sheath_cell(icell, 6);
+    sh_ti    = d_oe_sheath_cell(icell, 7);
+    sh_ne    = d_oe_sheath_cell(icell, 8);
+    sh_bmag  = d_oe_sheath_cell(icell, 9);
+    sh_alpha = d_oe_sheath_cell(icell, 10);
+    sh_dmax  = d_oe_sheath_cell(icell, 11);
+    sh_active = true;
+    // d0_sign locks which side of the wall the particle started on.
+    // Once set, only apply E-field while the particle stays on that side
+    // (matches CPU pusher.cpp:711-718; prevents reverse-field deceleration
+    // and outward ejection on overshoot).
+    const double d0 = (xcur[0] - sh_srefx) * sh_nx
+                    + (xcur[1] - sh_srefy) * sh_ny
+                    + (xcur[2] - sh_srefz) * sh_nz;
+    sh_d0_sign = (d0 >= 0.0) ? 1.0 : -1.0;
+  }
 
   for (int isub = 0; isub < nsub; isub++) {
     double E[3] = {0.0, 0.0, 0.0};
@@ -2130,7 +2348,25 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
       B[2] = d_oe_plasma_compute(icell, oe_bz_col);
     }
 
-    // E-field from sheath (future: read from compute view too)
+    // Phase D: per-subcycle sheath E-field via Coulette-Manfredi at the
+    // particle's current distance from the wall. Gated on plasma-side
+    // start (sh_d0_sign > 0) and physics-derived d_max engagement window.
+    if (sh_active && sh_d0_sign > 0.0) {
+      const double d_raw = (xcur[0] - sh_srefx) * sh_nx
+                         + (xcur[1] - sh_srefy) * sh_ny
+                         + (xcur[2] - sh_srefz) * sh_nz;
+      if (d_raw > 0.0 && d_raw < sh_dmax) {
+        SheathModelsKokkos::BorodkinaSheathResult sr =
+          SheathModelsKokkos::coulette_manfredi_sheath_at_distance(
+            d_raw, sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha,
+            oe_sheath_mD_amu, 0.0);
+        // E points INTO the wall (along -n) — unified inward-normal
+        // convention from the 2026-04-21 emit/surf overhaul.
+        E[0] -= sr.emag_vpm * sh_nx;
+        E[1] -= sr.emag_vpm * sh_ny;
+        E[2] -= sr.emag_vpm * sh_nz;
+      }
+    }
 
     BorisGridKokkos::push_velocity(qm, dt_sub, E, B, vcur);
     xcur[0] += vcur[0] * dt_sub;
@@ -2235,6 +2471,55 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt_full,
     B[2] = d_oe_plasma_compute(icell, oe_bz_col);
   }
 
+  // Phase D: read this cell's sheath cache once. Mirrors the CPU
+  // pusher.cpp:1104-1221 hybrid-mode sheath block (which precedes the
+  // GCA-vs-Boris switching decision).
+  bool sh_active = false;
+  double sh_nx = 0.0, sh_ny = 0.0, sh_nz = 0.0;
+  double sh_srefx = 0.0, sh_srefy = 0.0, sh_srefz = 0.0;
+  double sh_te = 0.0, sh_ti = 0.0, sh_ne = 0.0;
+  double sh_bmag = 0.0, sh_alpha = 0.0, sh_dmax = 0.0;
+  double sh_d0_sign = 0.0;
+  if (oe_has_sheath_spatial && d_oe_sheath_cell.data()
+      && icell >= 0 && icell < (int)d_oe_sheath_cell.extent(0)
+      && d_oe_sheath_cell(icell, 12) > 0.5) {
+    sh_nx    = d_oe_sheath_cell(icell, 0);
+    sh_ny    = d_oe_sheath_cell(icell, 1);
+    sh_nz    = d_oe_sheath_cell(icell, 2);
+    sh_srefx = d_oe_sheath_cell(icell, 3);
+    sh_srefy = d_oe_sheath_cell(icell, 4);
+    sh_srefz = d_oe_sheath_cell(icell, 5);
+    sh_te    = d_oe_sheath_cell(icell, 6);
+    sh_ti    = d_oe_sheath_cell(icell, 7);
+    sh_ne    = d_oe_sheath_cell(icell, 8);
+    sh_bmag  = d_oe_sheath_cell(icell, 9);
+    sh_alpha = d_oe_sheath_cell(icell, 10);
+    sh_dmax  = d_oe_sheath_cell(icell, 11);
+    sh_active = true;
+    const double d0 = (x[0] - sh_srefx) * sh_nx
+                    + (x[1] - sh_srefy) * sh_ny
+                    + (x[2] - sh_srefz) * sh_nz;
+    sh_d0_sign = (d0 >= 0.0) ? 1.0 : -1.0;
+
+    // Pre-evaluate sheath E at initial particle position. This is what
+    // the GCA branch sees (single E used during the whole RK4 step). The
+    // Boris-fallback branch overrides it per subcycle below.
+    if (sh_d0_sign > 0.0) {
+      const double d_raw = (x[0] - sh_srefx) * sh_nx
+                         + (x[1] - sh_srefy) * sh_ny
+                         + (x[2] - sh_srefz) * sh_nz;
+      if (d_raw > 0.0 && d_raw < sh_dmax) {
+        SheathModelsKokkos::BorodkinaSheathResult sr =
+          SheathModelsKokkos::coulette_manfredi_sheath_at_distance(
+            d_raw, sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha,
+            oe_sheath_mD_amu, 0.0);
+        E[0] -= sr.emag_vpm * sh_nx;
+        E[1] -= sr.emag_vpm * sh_ny;
+        E[2] -= sr.emag_vpm * sh_nz;
+      }
+    }
+  }
+
   const double Bmag = Kokkos::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
   const double gradBmag_mag = Kokkos::sqrt(gradBmag[0]*gradBmag[0]
                                          + gradBmag[1]*gradBmag[1]
@@ -2298,7 +2583,30 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt_full,
     double xcur[3] = {x[0], x[1], x[2]};
     double vcur[3] = {v[0], v[1], v[2]};
     for (int s = 0; s < nsub; s++) {
-      BorisGridKokkos::push_velocity(qm, dt_sub, E, B, vcur);
+      // Per-subcycle E: keep whatever was set above (incl. baseline
+      // sheath at x), then refresh sheath at the current position.
+      double E_sub[3] = {E[0], E[1], E[2]};
+      if (sh_active && sh_d0_sign > 0.0) {
+        // Overwrite the baseline sheath contribution with one evaluated
+        // at xcur. (Baseline above was at x; here we evaluate at xcur
+        // each subcycle for the same physical reason as oe_boris3d.)
+        // Strip the baseline first by re-zeroing the sheath term, then
+        // re-add at xcur. Simpler: re-evaluate from a clean E.
+        E_sub[0] = 0.0; E_sub[1] = 0.0; E_sub[2] = 0.0;
+        const double d_raw = (xcur[0] - sh_srefx) * sh_nx
+                           + (xcur[1] - sh_srefy) * sh_ny
+                           + (xcur[2] - sh_srefz) * sh_nz;
+        if (d_raw > 0.0 && d_raw < sh_dmax) {
+          SheathModelsKokkos::BorodkinaSheathResult sr =
+            SheathModelsKokkos::coulette_manfredi_sheath_at_distance(
+              d_raw, sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha,
+              oe_sheath_mD_amu, 0.0);
+          E_sub[0] -= sr.emag_vpm * sh_nx;
+          E_sub[1] -= sr.emag_vpm * sh_ny;
+          E_sub[2] -= sr.emag_vpm * sh_nz;
+        }
+      }
+      BorisGridKokkos::push_velocity(qm, dt_sub, E_sub, B, vcur);
       xcur[0] += vcur[0] * dt_sub;
       xcur[1] += vcur[1] * dt_sub;
       xcur[2] += vcur[2] * dt_sub;

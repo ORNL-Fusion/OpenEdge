@@ -21,6 +21,7 @@
 #include "compute_boundary_kokkos.h"
 #include "compute_surf_kokkos.h"
 #include "pusher_kokkos.h"
+#include "sheath_models_kokkos.h"
 
 namespace SPARTA_NS {
 
@@ -155,6 +156,24 @@ class UpdateKokkos : public Update {
   int oe_pusher_subcycles;
   int oe_pusher_mode;     // 0=Boris, 1=hybrid Boris/GCA (Pusher::PUSHER_*)
   double oe_echarge;
+
+  // OpenEdge Phase D: per-cell sheath spatial-mode cache.
+  // Layout per cell: 13 columns
+  //   [0..2]  nx, ny, nz        — outward surface normal (unit, raw from Surf)
+  //   [3..5]  srefx, srefy, srefz — reference point on nearest surface
+  //   [6..8]  te, ti, ne        — cell-center plasma at the surface
+  //   [9]    bmag                — cell-center |B| (cylindrical → Cartesian)
+  //   [10]   alpha_deg          — Chodura angle between B and normal (deg)
+  //   [11]   d_max              — sheath engagement cut-off (m)
+  //   [12]   active             — 1.0 if cell has a valid sheath, 0.0 otherwise
+  // Built on host once per run() in build_oe_sheath_cache(), mirrored
+  // device-side for O(1) lookup-by-icell inside oe_boris3d / oe_hybrid3d.
+  // Static-plasma assumption: rebuilt only at run() setup; not per step.
+  DAT::tdual_float_2d_lr k_oe_sheath_cell;
+  DAT::t_float_2d_lr     d_oe_sheath_cell;
+  int    oe_has_sheath_spatial;
+  double oe_sheath_mD_amu;
+  void build_oe_sheath_cache();
 
   KKCopy<GridKokkos> grid_kk_copy;
   KKCopy<DomainKokkos> domain_kk_copy;
