@@ -13,9 +13,13 @@ bench/openedge/
   GPU_PORT_STATUS.md            Kokkos coverage table per fix/compute
   test_west_axi/
     submit_strong.sbatch        CPU strong-scaling SLURM array
-    submit_gpu.sbatch           Perlmutter A100 GPU run
+    submit_gpu.sbatch           Perlmutter A100 GPU production run
+    submit_cpu_match.sbatch     CPU baseline matched to submit_gpu (4 ranks/node)
+    submit_cpu_smoke.sbatch     small CPU smoke run (~5 min) — Phase D check
+    submit_gpu_smoke.sbatch     small GPU smoke run (~5 min) — Phase D check
     collect_timings.py          parse SPARTA log timing -> CSV
     plot_scaling.py             strong-scaling speedup figure
+    compare_outputs.py          diff CPU vs GPU grid-density dumps
     logs/                       SLURM stdout/stderr (gitignored)
     results/                    CSV + plots (gitignored)
 ```
@@ -65,16 +69,41 @@ make -j$(nproc)
 cd ../OpenEdge/bench/openedge/test_west_axi
 sbatch submit_strong.sbatch       # one SLURM array
 
-# GPU run:
+# GPU production run:
+sbatch submit_gpu.sbatch
+
+# Phase D correctness pair (smoke, ~5 min each):
+sbatch submit_cpu_smoke.sbatch    # writes output/grid.dens.cpu_smoke_4.west
+sbatch submit_gpu_smoke.sbatch    # writes output/grid.dens.gpu_smoke_4.west
+
+# Same problem, matched 4-rank layout (production-size, ~30 min):
+sbatch submit_cpu_match.sbatch
 sbatch submit_gpu.sbatch
 ```
 
-Both submit scripts have `<PROJECT>` placeholders --- fill in your
+All submit scripts have `<PROJECT>` placeholders --- fill in your
 NERSC allocation ID before submission.
 
 ## Post-processing
+
+Strong-scaling sweep:
 
 ```bash
 python3 collect_timings.py logs/ -o results/timings.csv
 python3 plot_scaling.py results/timings.csv -o results/strong_scaling.png
 ```
+
+CPU vs GPU correctness diff (Phase D validation):
+
+```bash
+python3 compare_outputs.py \
+    ../../examples/test_west_axi/output/grid.dens.cpu_smoke_4.west \
+    ../../examples/test_west_axi/output/grid.dens.gpu_smoke_4.west
+```
+
+The script reads the last frame of each grid-density dump, aligns by
+cell id (handles MPI rank shuffling), and reports per-column relative
+diff (RMS, max, p99) plus volume-integrated mass agreement. Default
+tolerance is 5%% peak / 1%% RMS — loosen for small-sample stochastic
+noise via `--tol`. Pass criterion is what we need to lock in before
+calling Phase D done.
