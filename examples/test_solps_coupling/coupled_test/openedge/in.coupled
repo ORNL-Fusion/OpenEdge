@@ -1,0 +1,67 @@
+# OpenEdge droplet transport — coupled-mode template for openedge_solps_driver.py.
+# SPARTA-native axisymmetric layout: x = Z (axial), y = R (radial, >= 0), z = phi.
+#
+# Driver substitutes Ndump per chunk and appends `run <N_OE>` + `write_restart`.
+# Do NOT add a trailing `run` line.
+
+variable dt              equal 1e-05
+variable Ndump           equal 1000
+variable heatflux_scale  equal 2.0
+variable temp_droplet    equal 773.15
+variable temp_emit       equal 1.e20
+
+variable Rho equal 534.0
+variable rd2 equal 2.5e-3
+variable md2 equal (4.0/3.0)*PI*${Rho}*${rd2}*${rd2}*${rd2}
+
+seed                12345
+timestep            ${dt}
+
+dimension           2
+boundary            o ao p
+global              gridcut 0.0 comm/sort no
+global              temp ${temp_emit}
+create_box          -3.8 3.8 0 5.7 -0.05 0.05
+create_grid         200 200 1
+balance_grid        rcb cell
+
+# Per-cell radial weighting for axi statistics (must come AFTER create_grid).
+global              weight cell radius
+global              fnum 0.0000001
+
+species ../../input/droplet.species drop_2
+mixture DropletSource drop_2 frac 1.0 nrho 1
+
+variable            pmass particle mass
+
+read_surf           ../../input/wall.surf invert group surfID particle check
+surf_collide        wallColModel diffuse ${temp_droplet} 1.0
+surf_react          wallReact global 1. .0
+surf_modify         surfID collide wallColModel react wallReact
+
+read_particles      ../../input/particle.source 1
+
+# Inner core absorb boundary — surface walked the other way relative to wall,
+# so it needs `invert` (cf. CLAUDE.md unified-normal note, 2026-04-23).
+read_surf           ../../input/core.surf invert group surfID2 particle check
+surf_modify         surfID2 collide wallColModel react wallReact
+
+# Plasma background — driver rewrites plasma.h5 (regular nr x nz grid via
+# solps.write_plasma_h5) at each coupling chunk start. `static yes` is fine
+# because nothing changes within a chunk.
+fix    pd background file plasma.h5 static yes
+
+fix fevap   droplet/evaporate 1 DropletSource background pd mass ${md2} radius ${rd2} temp ${temp_droplet} heatflux/scale ${heatflux_scale} rocket_eta 0.5
+fix fdrag   droplet/drag 1 2.0 1 background pd gravity 0 -9.8 0 model epstein
+fix fcharge droplet/charge 1 background pd ion_mass_amu 2.0 thermionic no
+
+global pusher plasma pd
+global pusher subcycles 5
+
+# Per-step particle dump — driver reads output/particles.txt to integrate the
+# Li source tally into SOLPS. Do not change path / columns / format without
+# also updating openedge_solps_driver.read_particle_mass_loss().
+dump d_part particle all 1 output/particles.txt id type x y z vx vy vz temp radius
+dump_modify d_part format float "%.15e"
+
+stats ${Ndump}
