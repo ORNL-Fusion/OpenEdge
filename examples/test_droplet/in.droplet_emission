@@ -17,8 +17,6 @@ variable md1    equal (4.0/3.0)*PI*${Rho}*${rd1}*${rd1}*${rd1}
 variable md2    equal (4.0/3.0)*PI*${Rho}*${rd2}*${rd2}*${rd2}
 variable md3    equal (4.0/3.0)*PI*${Rho}*${rd3}*${rd3}*${rd3}
 
-shell               mkdir -p output
-
 seed                12345
 timestep            ${dt}
 dimension           2
@@ -51,8 +49,7 @@ fix    pd background file plasma.h5 static yes
 
 read_particles source 1
 
-dump dtraj  particle all ${Ndump} case.outer        id type x y z vx vy vz v_pmass temp radius
-dump dtraj2 particle all ${Ndump} output/case.outer id type x y z vx vy vz
+dump dtraj particle all ${Ndump} case.outer id type x y z vx vy vz v_pmass temp radius
 
 fix fevap_1 droplet/evaporate 1 drops_1 background pd mass ${md1} radius ${rd1} temp ${temp_droplet} heatflux/scale 5.0 rocket_eta 0.5
 fix fevap_2 droplet/evaporate 1 drops_2 background pd mass ${md2} radius ${rd2} temp ${temp_droplet} heatflux/scale 5.0 rocket_eta 0.5

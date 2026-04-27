@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Plot droplet trajectories from case.outer over the axi wall.surf outline."""
+"""Plot droplet trajectories from case.outer in the (R, Z) plane."""
 
 from pathlib import Path
-import re
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
 
 def parse_dump(path):
-    blocks = {"t": [], "id": [], "x": [], "y": [], "temp": [], "radius": []}
+    blocks = {"t": [], "id": [], "x": [], "y": [], "radius": []}
     with open(path) as f:
         lines = f.read().splitlines()
     i = 0
@@ -31,7 +30,6 @@ def parse_dump(path):
                 blocks["id"].append(int(v[col["id"]]))
                 blocks["x"].append(float(v[col["x"]]))
                 blocks["y"].append(float(v[col["y"]]))
-                blocks["temp"].append(float(v[col["temp"]]))
                 blocks["radius"].append(float(v[col["radius"]]))
             i += 1 + n; continue
         i += 1
@@ -59,19 +57,15 @@ def main():
     data = parse_dump(base / "case.outer")
     wall = parse_wall(base / "wall.surf")
 
-    # axi slot layout: x=Z (axial), y=R (radial)
+    # axi slot layout: x = Z (axial), y = R (radial)
     Z_dr = data["x"]; R_dr = data["y"]
     Z_w = wall[:, 0]; R_w = wall[:, 1]
 
-    fig = plt.figure(figsize=(12, 5.2), dpi=140)
-    gs  = fig.add_gridspec(2, 2, width_ratios=[1.3, 1], hspace=0.05, wspace=0.3)
-    ax  = fig.add_subplot(gs[:, 0])
-    axR = fig.add_subplot(gs[0, 1])
-    axT = fig.add_subplot(gs[1, 1], sharex=axR)
-
+    fig, ax = plt.subplots(figsize=(7, 8), dpi=140)
     ax.plot(R_w, Z_w, "-", lw=1.0, color="0.4", label="vessel wall")
-    ax.set_xlabel("R [m]"); ax.set_ylabel("Z [m]")
-    ax.set_title("Droplet trajectories in (R, Z)")
+    ax.set_xlabel(r"$R$ (m)")
+    ax.set_ylabel(r"$Z$ (m)")
+    ax.set_title("Droplet trajectories in $(R, Z)$")
     ax.set_aspect("equal")
     ax.set_xlim(2.5, 5.0)
     z_hi = float(np.nanmax(Z_dr)) + 0.3
@@ -88,7 +82,7 @@ def main():
         r0_per_id[pid] = pos[0] if pos.size else 0.0
     ids = sorted(ids, key=lambda p: r0_per_id[p])
 
-    for k, pid in enumerate(ids):
+    for pid in ids:
         m = data["id"] == pid
         r_series = data["radius"][m]
         r0 = r0_per_id[pid]
@@ -100,7 +94,6 @@ def main():
         lc.set_array(frac[:-1])
         ax.add_collection(lc)
 
-    # Launch marker (shared — all three droplets start at the same point).
     pid0 = ids[0]
     m0 = data["id"] == pid0
     ax.plot(R_dr[m0][0], Z_dr[m0][0], "o", ms=11,
@@ -108,7 +101,6 @@ def main():
     ax.annotate("launch", (R_dr[m0][0], Z_dr[m0][0]),
                 xytext=(10, -10), textcoords="offset points", fontsize=9)
 
-    # End markers with labels.
     legend_lines = []
     for k, pid in enumerate(ids):
         m = data["id"] == pid
@@ -123,37 +115,14 @@ def main():
                     xytext=(R_end + dx, Z_end + dy),
                     fontsize=9, color="darkred",
                     arrowprops=dict(arrowstyle="-", lw=0.7, color="0.4"))
-        legend_lines.append(f"drop {k+1}: {r0*1e3:.1f} mm → {r_end*1e3:.2f} mm")
+        legend_lines.append(f"drop {k+1}: {r0*1e3:.1f} mm $\\rightarrow$ {r_end*1e3:.2f} mm")
 
     cb = fig.colorbar(lc, ax=ax, shrink=0.85)
-    cb.set_label("r(t) / r₀")
-    # Size summary box — bottom-right corner (away from trajectories).
+    cb.set_label(r"$r(t) / r_0$")
     ax.text(0.98, 0.02, "\n".join(legend_lines),
             transform=ax.transAxes, fontsize=9,
             bbox=dict(facecolor="white", edgecolor="0.6", alpha=0.9),
             verticalalignment="bottom", horizontalalignment="right")
-
-    # Right panels — radius (top) and temperature (bottom) vs. timestep.
-    # Each droplet gets a consistent color across the two panels. ids is
-    # already sorted by launch radius, so drop 1 = smallest.
-    drop_colors = plt.get_cmap("tab10")
-    for k, pid in enumerate(ids):
-        m = data["id"] == pid
-        c = drop_colors(k)
-        r_mm = data["radius"][m] * 1e3
-        axR.plot(data["t"][m], np.where(r_mm > 0, r_mm, np.nan),
-                 lw=1.6, color=c, label=f"drop {k+1}")
-        axT.plot(data["t"][m],
-                 np.where(data["temp"][m] > 0, data["temp"][m], np.nan),
-                 lw=1.6, color=c)
-    axR.set_ylabel("radius [mm]")
-    axR.grid(alpha=0.3)
-    axR.legend(fontsize=9, loc="upper right")
-    plt.setp(axR.get_xticklabels(), visible=False)
-
-    axT.set_xlabel("timestep")
-    axT.set_ylabel("T [K]")
-    axT.grid(alpha=0.3)
 
     fig.tight_layout()
     out = base / "trajs.png"

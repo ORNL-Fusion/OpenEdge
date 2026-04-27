@@ -1,4 +1,8 @@
 .DS_Store
 case.*
+case_*.outer
+log.openedge
+output/
+trajs.png
 state.*
 tmp.all.surf
