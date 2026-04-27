@@ -61,15 +61,28 @@ def main():
     Z_dr = data["x"]; R_dr = data["y"]
     Z_w = wall[:, 0]; R_w = wall[:, 1]
 
-    fig, ax = plt.subplots(figsize=(7, 8), dpi=140)
+    fig, ax = plt.subplots(figsize=(8, 8), dpi=140)
     ax.plot(R_w, Z_w, "-", lw=1.0, color="0.4", label="vessel wall")
     ax.set_xlabel(r"$R$ (m)")
     ax.set_ylabel(r"$Z$ (m)")
     ax.set_title("Droplet trajectories in $(R, Z)$")
     ax.set_aspect("equal")
-    ax.set_xlim(2.5, 5.0)
-    z_hi = float(np.nanmax(Z_dr)) + 0.3
-    ax.set_ylim(-4.0, max(0.5, z_hi))
+
+    # Auto-zoom around the trajectory extent with 25 % padding so short arcs
+    # don't disappear into a vessel-wide axis. Falls back to vessel bounds if
+    # only a single point of trajectory exists.
+    R_tr = R_dr[np.isfinite(R_dr)]; Z_tr = Z_dr[np.isfinite(Z_dr)]
+    if R_tr.size > 1 and Z_tr.size > 1:
+        Rmin, Rmax = float(R_tr.min()), float(R_tr.max())
+        Zmin, Zmax = float(Z_tr.min()), float(Z_tr.max())
+        spanR = max(Rmax - Rmin, 0.02)
+        spanZ = max(Zmax - Zmin, 0.02)
+        span  = max(spanR, spanZ)
+        Rc = 0.5 * (Rmin + Rmax); Zc = 0.5 * (Zmin + Zmax)
+        ax.set_xlim(Rc - 0.75 * span, Rc + 0.75 * span)
+        ax.set_ylim(Zc - 0.75 * span, Zc + 0.75 * span)
+    else:
+        ax.set_xlim(2.5, 5.0); ax.set_ylim(-4.0, 0.5)
 
     ids = np.unique(data["id"])
     cmap = plt.get_cmap("plasma")
@@ -94,39 +107,40 @@ def main():
         lc.set_array(frac[:-1])
         ax.add_collection(lc)
 
-    pid0 = ids[0]
-    m0 = data["id"] == pid0
-    ax.plot(R_dr[m0][0], Z_dr[m0][0], "o", ms=11,
-            color="white", mec="k", mew=1.5, zorder=6)
-    ax.annotate("launch", (R_dr[m0][0], Z_dr[m0][0]),
-                xytext=(10, -10), textcoords="offset points", fontsize=9)
-
     legend_lines = []
     for k, pid in enumerate(ids):
         m = data["id"] == pid
         r0 = r0_per_id[pid]
-        R_end = R_dr[m][-1]; Z_end = Z_dr[m][-1]
         r_end = data["radius"][m][-1]
-        ax.plot(R_end, Z_end, "*", ms=18,
-                color="red", mec="white", mew=1.5, zorder=7)
-        dx = 0.18 if k % 2 == 0 else -0.05
-        dy = 0.10 * (1 if k < 2 else -1)
-        ax.annotate(f"drop {k+1} END", (R_end, Z_end),
-                    xytext=(R_end + dx, Z_end + dy),
-                    fontsize=9, color="darkred",
-                    arrowprops=dict(arrowstyle="-", lw=0.7, color="0.4"))
         legend_lines.append(f"drop {k+1}: {r0*1e3:.1f} mm $\\rightarrow$ {r_end*1e3:.2f} mm")
 
     cb = fig.colorbar(lc, ax=ax, shrink=0.85)
     cb.set_label(r"$r(t) / r_0$")
+
+    # Vessel-overview inset — small panel showing where the zoomed view sits.
+    if R_tr.size > 1 and Z_tr.size > 1:
+        from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+        axin = inset_axes(ax, width="28%", height="28%", loc="upper right",
+                          borderpad=1.0)
+        axin.plot(R_w, Z_w, "-", lw=0.8, color="0.4")
+        for pid in ids:
+            m = data["id"] == pid
+            axin.plot(R_dr[m], Z_dr[m], "-", lw=1.2, color="C3")
+        rect_x = ax.get_xlim(); rect_y = ax.get_ylim()
+        axin.add_patch(plt.Rectangle((rect_x[0], rect_y[0]),
+                                     rect_x[1] - rect_x[0],
+                                     rect_y[1] - rect_y[0],
+                                     fill=False, ec="C0", lw=1.2))
+        axin.set_aspect("equal")
+        axin.set_xticks([]); axin.set_yticks([])
+        axin.set_title("vessel", fontsize=8)
     ax.text(0.98, 0.02, "\n".join(legend_lines),
             transform=ax.transAxes, fontsize=9,
             bbox=dict(facecolor="white", edgecolor="0.6", alpha=0.9),
             verticalalignment="bottom", horizontalalignment="right")
 
-    fig.tight_layout()
     out = base / "trajs.png"
-    fig.savefig(out)
+    fig.savefig(out, bbox_inches="tight")
     print(f"wrote {out}")
 
 
