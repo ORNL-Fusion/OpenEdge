@@ -20,11 +20,16 @@ Pass criterion (default):
 Adjust thresholds for stochastic noise — at small particle counts the
 shot noise floor dominates. Increase nlaunch / Nphase for tighter checks.
 
-Usage:
+Usage (from bench/openedge/test_west_axi/):
     python3 compare_outputs.py \\
-        ../../../examples/test_west_axi/output/grid.dens.cpu_smoke_4.west \\
-        ../../../examples/test_west_axi/output/grid.dens.gpu_smoke_4.west \\
+        output/grid.dens.cpu_smoke_4.west \\
+        output/grid.dens.gpu_smoke_4.west \\
         --col 9 --tol 0.05
+
+Both submit_cpu_*.sbatch and submit_gpu_*.sbatch run from this bench
+directory and write dumps to ./output/ (the deck reads input/ via a
+symlink to ../../../examples/test_west_axi/input). So the dumps live
+side-by-side in one place, no cross-tree paths needed.
 """
 
 import argparse

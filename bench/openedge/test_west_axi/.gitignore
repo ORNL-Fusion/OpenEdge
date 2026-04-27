@@ -1,4 +1,7 @@
 logs/*
 results/*
+output/*
+input
 !logs/.keep
 !results/.keep
+!output/.keep

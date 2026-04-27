@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=openedge_gpu_smoke
-#SBATCH --account=<PROJECT>
+#SBATCH --account=m5186
 #SBATCH --constraint=gpu
 #SBATCH --qos=debug
 #SBATCH --time=00:10:00
@@ -19,15 +19,18 @@ NLAUNCH=2
 NPHASE=2000
 NWARM=200
 
-REPO=$(realpath "$(dirname "$0")/../../..")
+REPO=/global/u1/d/diawa/OpenEdge
+BENCH=$REPO/bench/openedge/test_west_axi
 DECK=$REPO/examples/test_west_axi/in.west
-SPA=$REPO/../buildOpenEdge/src/spa_kokkos_cuda
+SPA=/global/u1/d/diawa/build_gpu/src/spa_mpi
 
 export OMP_NUM_THREADS=1
 export OMP_PROC_BIND=spread
 export OMP_PLACES=threads
 
-cd $REPO/examples/test_west_axi
+cd $BENCH
+[ -e input ]  || ln -sf $REPO/examples/test_west_axi/input input
+mkdir -p output
 
 srun --ntasks=4 --cpus-per-task=32 --gpu-bind=single:1 $SPA \
      -k on g 4 -sf kk \
@@ -36,4 +39,4 @@ srun --ntasks=4 --cpus-per-task=32 --gpu-bind=single:1 $SPA \
      -var Nwarm  $NWARM \
      -var Nphase $NPHASE \
      -var tag    "gpu_smoke_4" \
-   | tee $REPO/bench/openedge/test_west_axi/logs/gpu_smoke_4.log
+   | tee $BENCH/logs/gpu_smoke_4.log

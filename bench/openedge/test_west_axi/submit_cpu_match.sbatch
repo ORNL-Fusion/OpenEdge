@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=openedge_cpu_match
-#SBATCH --account=<PROJECT>
+#SBATCH --account=m5186
 #SBATCH --constraint=cpu
 #SBATCH --qos=regular
 #SBATCH --time=00:45:00
@@ -18,15 +18,20 @@ NLAUNCH=10
 NPHASE=30000
 NWARM=2000
 
-REPO=$(realpath "$(dirname "$0")/../../..")
+REPO=/global/u1/d/diawa/OpenEdge
+BENCH=$REPO/bench/openedge/test_west_axi
 DECK=$REPO/examples/test_west_axi/in.west
-SPA=$REPO/../buildOpenEdge/src/spa_mpi
+SPA=/global/u1/d/diawa/build_gpu/src/spa_mpi
 
 export OMP_NUM_THREADS=1
 export OMP_PROC_BIND=spread
 export OMP_PLACES=cores
 
-cd $REPO/examples/test_west_axi
+# Run from the bench dir; symlink input/ from examples; output/ is
+# bench-local so dumps land alongside the GPU run for compare_outputs.py.
+cd $BENCH
+[ -e input ]  || ln -sf $REPO/examples/test_west_axi/input input
+mkdir -p output
 
 srun --ntasks=4 --cpus-per-task=32 $SPA \
      -in $DECK \
@@ -34,4 +39,4 @@ srun --ntasks=4 --cpus-per-task=32 $SPA \
      -var Nwarm  $NWARM \
      -var Nphase $NPHASE \
      -var tag    "cpu_match_4" \
-   | tee $REPO/bench/openedge/test_west_axi/logs/cpu_match_4.log
+   | tee $BENCH/logs/cpu_match_4.log

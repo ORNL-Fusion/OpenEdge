@@ -96,9 +96,10 @@ python3 plot_scaling.py results/timings.csv -o results/strong_scaling.png
 CPU vs GPU correctness diff (Phase D validation):
 
 ```bash
+cd test_west_axi
 python3 compare_outputs.py \
-    ../../examples/test_west_axi/output/grid.dens.cpu_smoke_4.west \
-    ../../examples/test_west_axi/output/grid.dens.gpu_smoke_4.west
+    output/grid.dens.cpu_smoke_4.west \
+    output/grid.dens.gpu_smoke_4.west
 ```
 
 The script reads the last frame of each grid-density dump, aligns by
@@ -107,3 +108,20 @@ diff (RMS, max, p99) plus volume-integrated mass agreement. Default
 tolerance is 5%% peak / 1%% RMS — loosen for small-sample stochastic
 noise via `--tol`. Pass criterion is what we need to lock in before
 calling Phase D done.
+
+## Layout
+
+All bench runs execute from `bench/openedge/test_west_axi/` itself so
+the deck's relative paths resolve against a single, predictable cwd:
+
+- `input/` is a symlink (auto-created on first sbatch) to
+  `examples/test_west_axi/input/`. The deck (in `examples/`) is the
+  single source of truth for `wall.surf`, `plasma.h5`, `*.species`.
+- `output/` is bench-local — every dump (`grid.dens.<tag>.west`) lands
+  here, so `compare_outputs.py` and analysis scripts read from one
+  place regardless of which submit script wrote them.
+- `logs/` and `results/` are bench-local for SLURM stdout / CSVs.
+
+This keeps the `examples/test_west_axi/` tree clean of bench artefacts
+and avoids the previous confusion where dumps from `submit_*.sbatch`
+runs ended up scattered across both directories.

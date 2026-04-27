@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=openedge_cpu_smoke
-#SBATCH --account=<PROJECT>
+#SBATCH --account=m5186
 #SBATCH --constraint=cpu
 #SBATCH --qos=debug
 #SBATCH --time=00:10:00
@@ -17,15 +17,18 @@ NLAUNCH=2          # 2 W launches per PMI tally (vs 10 in match)
 NPHASE=2000        # 2k phase steps (vs 30k in match)
 NWARM=200          # 200 warm steps (vs 2k in match)
 
-REPO=$(realpath "$(dirname "$0")/../../..")
+REPO=/global/u1/d/diawa/OpenEdge
+BENCH=$REPO/bench/openedge/test_west_axi
 DECK=$REPO/examples/test_west_axi/in.west
-SPA=$REPO/../buildOpenEdge/src/spa_mpi
+SPA=/global/u1/d/diawa/build_gpu/src/spa_mpi
 
 export OMP_NUM_THREADS=1
 export OMP_PROC_BIND=spread
 export OMP_PLACES=cores
 
-cd $REPO/examples/test_west_axi
+cd $BENCH
+[ -e input ]  || ln -sf $REPO/examples/test_west_axi/input input
+mkdir -p output
 
 srun --ntasks=4 --cpus-per-task=32 $SPA \
      -in $DECK \
@@ -33,4 +36,4 @@ srun --ntasks=4 --cpus-per-task=32 $SPA \
      -var Nwarm  $NWARM \
      -var Nphase $NPHASE \
      -var tag    "cpu_smoke_4" \
-   | tee $REPO/bench/openedge/test_west_axi/logs/cpu_smoke_4.log
+   | tee $BENCH/logs/cpu_smoke_4.log

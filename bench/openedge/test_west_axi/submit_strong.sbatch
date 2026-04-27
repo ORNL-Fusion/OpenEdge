@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=openedge_strong
-#SBATCH --account=<PROJECT>
+#SBATCH --account=m5186
 #SBATCH --constraint=cpu
 #SBATCH --qos=regular
 #SBATCH --time=00:30:00
@@ -21,18 +21,27 @@ NLAUNCH=10           # nlaunchTotalW (per-PMI W launches)
 NPHASE=30000         # main-phase steps
 NWARM=2000           # adaptation + equilibration before timed phase
 
-REPO=$(realpath "$(dirname "$0")/../../..")
+REPO=/global/u1/d/diawa/OpenEdge
+BENCH=$REPO/bench/openedge/test_west_axi
 DECK=$REPO/examples/test_west_axi/in.west
-SPA=$REPO/../buildOpenEdge/src/spa_mpi   # adjust if your build is elsewhere
+# Single binary: Kokkos+CUDA preset with SPARTA_MACHINE=mpi keeps the
+# `spa_mpi` name. CPU runs use it without `-sf kk`; GPU runs add it.
+SPA=/global/u1/d/diawa/build_gpu/src/spa_mpi
 
 # Pin to one rank per core; nothing fancy on AMD Milan.
 export OMP_NUM_THREADS=1
 
-cd $REPO/examples/test_west_axi   # so `read_surf input/wall.surf` resolves
+# Run from the bench dir, NOT from examples/. Symlink input/ from
+# examples (single source of truth) so `read_surf input/wall.surf`
+# resolves; output/ stays bench-local so dumps don't pollute the
+# examples tree and compare_outputs.py finds them in one place.
+cd $BENCH
+[ -e input ]  || ln -sf $REPO/examples/test_west_axi/input input
+mkdir -p output
 
 srun --ntasks=$NRANKS --cpus-per-task=1 $SPA -in $DECK \
      -var nlaunchTotalW $NLAUNCH \
      -var Nwarm  $NWARM \
      -var Nphase $NPHASE \
      -var tag    "strong_n${NRANKS}" \
-   | tee $REPO/bench/openedge/test_west_axi/logs/strong_n${NRANKS}.log
+   | tee $BENCH/logs/strong_n${NRANKS}.log
