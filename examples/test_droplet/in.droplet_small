@@ -1,0 +1,62 @@
+# Force-validation variant — single 100 um Li droplet dropped from rest
+# in a VACUUM background (no plasma, no walls). Gravity-only sanity check.
+#
+# With Ni=0 everywhere -> Epstein nuE = 0 -> drag is silent. Charging not
+# loaded -> droplet stays neutral -> pusher does nothing. Gravity in
+# fix droplet/drag fires unconditionally (cf. fix_droplet_drag.cpp:223-227).
+#
+# Expected at t = 0.5 s under pure -9.8 m/s^2 along Z slot:
+#   vZ = -4.9 m/s,  Z = +3.0 - 4.9*0.25 = +1.775 m,  R unchanged.
+
+variable dt    equal 1e-05
+variable time  equal 0.5
+variable N     equal floor(${time}/${dt})
+variable Ndump equal 50
+
+variable temp_droplet equal 773.15
+
+variable Rho   equal 534.0
+variable rd_s  equal 1.0e-4
+variable md_s  equal (4.0/3.0)*PI*${Rho}*${rd_s}*${rd_s}*${rd_s}
+
+shell               mkdir -p output
+
+seed                12345
+timestep            ${dt}
+dimension           2
+boundary            o ao p
+global              gridcut 0.0 comm/sort no
+create_box          -3.8 3.8 0 5.7 -0.05 0.05
+create_grid         40 30 1
+balance_grid        rcb cell
+
+global              weight cell radius
+global              fnum 0.0000001
+
+species droplet.species drop_1
+mixture drops_s drop_1 frac 1.0
+
+variable pmass particle mass
+
+# Vacuum background: `constant` mode with all scalars defaulting to 0.
+fix    pd background constant
+
+read_particles source_small 1
+
+dump dtraj particle all ${Ndump} case_small.outer id type x y z vx vy vz v_pmass temp radius
+
+# heatflux/scale 0 + Qs<=0 short-circuit -> no evap, no rocket.
+fix fevap droplet/evaporate 1 drops_s background pd mass ${md_s} radius ${rd_s} temp ${temp_droplet} heatflux/scale 0.0
+
+# Gravity in axi: input is Cartesian (gR, gZ, gphi); helper remaps to slots.
+# 0 -9.8 0 -> gZ = -9.8 m/s^2, slot[0] gets it.
+fix fdrag droplet/drag 1 2.0 1 background pd gravity 0 -9.8 0 model epstein
+
+stats 1
+run 1
+
+variable npart equal np
+fix 31 halt 100 v_npart <= 0
+
+stats ${Ndump}
+run $N
