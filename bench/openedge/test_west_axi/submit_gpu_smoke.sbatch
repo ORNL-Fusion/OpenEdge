@@ -33,7 +33,7 @@ cd $BENCH
 mkdir -p output
 
 srun --ntasks=4 --cpus-per-task=32 --gpu-bind=single:1 $SPA \
-     -k on g 4 -sf kk \
+     -k on g 1 -sf kk \
      -in $DECK \
      -var nlaunchTotalW $NLAUNCH \
      -var Nwarm  $NWARM \
