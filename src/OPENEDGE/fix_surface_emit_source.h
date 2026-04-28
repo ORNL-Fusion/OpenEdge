@@ -32,12 +32,24 @@ class FixSurfaceEmitSource : public FixEmit {
   void grid_changed();
   void custom_surf_changed() { grid_changed(); }
 
+ public:
+  enum EmitModel { MODEL_THERMAL, MODEL_THERMAL_TSURF, MODEL_THOMPSON,
+                   MODEL_FIXED_ENERGY };
+
  private:
   int imix,groupbit,normalflag;
 
   int npmode,np;    // npmode = FLOW,CONSTANT
   char *npstr;
   int iflux,flux_index;
+
+  // outgoing-particle sampling model
+  int emit_model;            // one of EmitModel
+  double model_Ub;           // surface binding energy [eV] (thompson)
+  double model_cos_n;        // angular cos^n exponent (thompson; default 1)
+  double model_E_fixed;      // fixed emission energy [eV] (fixed_energy)
+  char *model_tsurf_name;    // custom-attribute name (thermal_tsurf)
+  int model_tsurf_index;     // surf->find_custom(...) index (resolved in init)
 
   int nlaunch_mode;           // 1 if per-task nlaunch weighted mode is active
   int nlaunch_per_surf;       // # of particles to launch per emitting task

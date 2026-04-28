@@ -37,6 +37,44 @@ enum{FLOW,CONSTANT};
 
 #define DELTATASK 256
 
+namespace {
+  // Boltzmann constant in eV/K
+  constexpr double KB_EV_PER_K = 8.617333262e-5;
+  // 1 eV in joules
+  constexpr double EV_TO_J = 1.602176634e-19;
+
+  // Thompson sputtered-atom energy distribution
+  //   f(E) = 2·E·U_b/(E+U_b)^3,  E in [0,∞)
+  // Closed-form inverse CDF: with u = (U_b/(E+U_b))^2 ~ U(0,1),
+  //   E = U_b · (1/sqrt(u) - 1).
+  inline double sample_thompson_energy(double Ub_eV, RanKnuth *rng) {
+    double u = rng->uniform();
+    if (u <= 0.0) u = 1.0e-12;            // guard against 1/sqrt(0)
+    return Ub_eV * (1.0 / std::sqrt(u) - 1.0);
+  }
+
+  // Thermal flux energy: cos-weighted Maxwell flux through a surface gives
+  // f(E) = (E/(kT)^2) exp(-E/kT) — Gamma(2,kT) — sampled as
+  //   E = -kT · ln(R1·R2)
+  inline double sample_thermal_flux_energy(double T_K, RanKnuth *rng) {
+    double r1 = rng->uniform(), r2 = rng->uniform();
+    if (r1 <= 0.0) r1 = 1.0e-12;
+    if (r2 <= 0.0) r2 = 1.0e-12;
+    return -KB_EV_PER_K * T_K * std::log(r1 * r2);
+  }
+
+  // cos^n angular sampling: cos(theta) = xi^(1/(n+1)),  xi ~ U(0,1].
+  // Returns cos_th, sin_th by reference. n=1 is Knudsen cosine.
+  inline void sample_cos_n(double n, RanKnuth *rng,
+                           double &cos_th, double &sin_th) {
+    double xi = rng->uniform();
+    if (xi <= 0.0) xi = 1.0e-12;
+    cos_th = std::pow(xi, 1.0 / (n + 1.0));
+    double s2 = 1.0 - cos_th * cos_th;
+    sin_th = (s2 > 0.0) ? std::sqrt(s2) : 0.0;
+  }
+}
+
 /* ---------------------------------------------------------------------- */
 
 FixSurfaceEmitSource::FixSurfaceEmitSource(SPARTA *sparta, int narg, char **arg) :
@@ -80,6 +118,13 @@ FixSurfaceEmitSource::FixSurfaceEmitSource(SPARTA *sparta, int narg, char **arg)
   pweight_index = -1;
   pweight_ewhich = -1;
 
+  emit_model = MODEL_THERMAL;
+  model_Ub = 0.0;
+  model_cos_n = 1.0;
+  model_E_fixed = 0.0;
+  model_tsurf_name = NULL;
+  model_tsurf_index = -1;
+
   options(narg-iarg,&arg[iarg]);
 
   if (!surf->exist)
@@ -113,6 +158,7 @@ FixSurfaceEmitSource::~FixSurfaceEmitSource()
   if (copymode) return;
 
   delete [] npstr;
+  delete [] model_tsurf_name;
 
   for (int i = 0; i < ntaskmax; i++) {
     delete [] tasks[i].ntargetsp;
@@ -168,6 +214,20 @@ void FixSurfaceEmitSource::init()
     for (int i = 0; i < ntask; i++) {
       delete [] tasks[i].ntargetsp;
       tasks[i].ntargetsp = new double[nspecies];
+    }
+  }
+
+  // resolve per-surf Tsurf custom attribute (thermal_tsurf model only)
+  if (emit_model == MODEL_THERMAL_TSURF) {
+    if (!model_tsurf_name)
+      error->all(FLERR,"Fix surface/emit/source thermal_tsurf needs custom name");
+    model_tsurf_index = surf->find_custom(model_tsurf_name);
+    if (model_tsurf_index < 0) {
+      char msg[256];
+      snprintf(msg,sizeof(msg),
+        "Fix surface/emit/source: surf custom attribute '%s' not found "
+        "(produced by fix surface/state/lm)", model_tsurf_name);
+      error->all(FLERR,msg);
     }
   }
 
@@ -413,6 +473,12 @@ void FixSurfaceEmitSource::perform_task()
   Compute *c = modify->compute[iflux];
   c->compute_per_surf();
 
+  // resolve per-surf Tsurf vector for thermal_tsurf model
+  // (custom edvec can be reallocated; refresh pointer each step)
+  double *tsurf_vec = NULL;
+  if (emit_model == MODEL_THERMAL_TSURF && model_tsurf_index >= 0)
+    tsurf_vec = surf->edvec[surf->ewhich[model_tsurf_index]];
+
   Surf::Line *lines = surf->lines;
   Surf::Tri *tris = surf->tris;
 
@@ -491,6 +557,20 @@ void FixSurfaceEmitSource::perform_task()
     magvstream = tasks[i].magvstream;
     vstream = tasks[i].vstream;
     vscale = particle->mixture[imix]->vscale;
+
+    // per-task model state (THERMAL_TSURF reads Tsurf [°C] from custom)
+    double Tsurf_K_task = -1.0;
+    if (emit_model == MODEL_THERMAL_TSURF) {
+      int ilocal = local_isurf_index(isurf);
+      if (ilocal < 0 || tsurf_vec == NULL) continue;
+      double T_K = tsurf_vec[ilocal] + 273.15;
+      if (!std::isfinite(T_K) || T_K <= 0.0) continue;
+      Tsurf_K_task = T_K;
+      // override mixture rot/vib so internal energies match wall temperature
+      temp_thermal = T_K;
+      temp_rot = T_K;
+      temp_vib = T_K;
+    }
 
     if (normalflag) indot = magvstream;
     else indot = vstream[0]*normal[0] + vstream[1]*normal[1] + vstream[2]*normal[2];
@@ -571,26 +651,49 @@ void FixSurfaceEmitSource::perform_task()
 
           if (region && !region->match(x)) continue;
 
-          do {
-            do beta_un = (6.0*random->uniform() - 3.0);
-            while (beta_un + scosine < 0.0);
-            normalized_distbn_fn = 2.0 * (beta_un + scosine) /
-              (scosine + sqrt(scosine*scosine + 2.0)) *
-              exp(0.5 + (0.5*scosine)*(scosine-sqrt(scosine*scosine + 2.0)) -
-                  beta_un*beta_un);
-          } while (normalized_distbn_fn < random->uniform());
+          if (emit_model == MODEL_THERMAL) {
+            do {
+              do beta_un = (6.0*random->uniform() - 3.0);
+              while (beta_un + scosine < 0.0);
+              normalized_distbn_fn = 2.0 * (beta_un + scosine) /
+                (scosine + sqrt(scosine*scosine + 2.0)) *
+                exp(0.5 + (0.5*scosine)*(scosine-sqrt(scosine*scosine + 2.0)) -
+                    beta_un*beta_un);
+            } while (normalized_distbn_fn < random->uniform());
 
-          if (normalflag) vnmag = beta_un*vscale[isp] + magvstream;
-          else vnmag = beta_un*vscale[isp] + indot;
+            if (normalflag) vnmag = beta_un*vscale[isp] + magvstream;
+            else vnmag = beta_un*vscale[isp] + indot;
 
-          theta = MY_2PI * random->uniform();
-          vr = vscale[isp] * sqrt(-log(random->uniform()));
-          if (normalflag) {
-            vamag = vr * sin(theta);
-            vbmag = vr * cos(theta);
+            theta = MY_2PI * random->uniform();
+            vr = vscale[isp] * sqrt(-log(random->uniform()));
+            if (normalflag) {
+              vamag = vr * sin(theta);
+              vbmag = vr * cos(theta);
+            } else {
+              vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
+              vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+            }
           } else {
-            vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
-            vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+            // energy + cos^n direction in the surface frame (n=1 cosine default)
+            double E_eV;
+            double cos_n_local = 1.0;
+            if (emit_model == MODEL_THOMPSON) {
+              E_eV = sample_thompson_energy(model_Ub, random);
+              cos_n_local = model_cos_n;
+            } else if (emit_model == MODEL_FIXED_ENERGY) {
+              E_eV = model_E_fixed;
+            } else { // MODEL_THERMAL_TSURF
+              E_eV = sample_thermal_flux_energy(Tsurf_K_task, random);
+            }
+            double cos_th, sin_th;
+            sample_cos_n(cos_n_local, random, cos_th, sin_th);
+            double phi_az = MY_2PI * random->uniform();
+            double mass_sp = particle->species[ispecies].mass;
+            double speed = (mass_sp > 0.0)
+              ? std::sqrt(2.0 * E_eV * EV_TO_J / mass_sp) : 0.0;
+            vnmag = speed * cos_th;
+            vamag = speed * sin_th * std::cos(phi_az);
+            vbmag = speed * sin_th * std::sin(phi_az);
           }
 
           v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
@@ -668,26 +771,48 @@ void FixSurfaceEmitSource::perform_task()
 
         if (region && !region->match(x)) continue;
 
-        do {
-          do beta_un = (6.0*random->uniform() - 3.0);
-          while (beta_un + scosine < 0.0);
-          normalized_distbn_fn = 2.0 * (beta_un + scosine) /
-            (scosine + sqrt(scosine*scosine + 2.0)) *
-            exp(0.5 + (0.5*scosine)*(scosine-sqrt(scosine*scosine + 2.0)) -
-                beta_un*beta_un);
-        } while (normalized_distbn_fn < random->uniform());
+        if (emit_model == MODEL_THERMAL) {
+          do {
+            do beta_un = (6.0*random->uniform() - 3.0);
+            while (beta_un + scosine < 0.0);
+            normalized_distbn_fn = 2.0 * (beta_un + scosine) /
+              (scosine + sqrt(scosine*scosine + 2.0)) *
+              exp(0.5 + (0.5*scosine)*(scosine-sqrt(scosine*scosine + 2.0)) -
+                  beta_un*beta_un);
+          } while (normalized_distbn_fn < random->uniform());
 
-        if (normalflag) vnmag = beta_un*vscale[isp] + magvstream;
-        else vnmag = beta_un*vscale[isp] + indot;
+          if (normalflag) vnmag = beta_un*vscale[isp] + magvstream;
+          else vnmag = beta_un*vscale[isp] + indot;
 
-        theta = MY_2PI * random->uniform();
-        vr = vscale[isp] * sqrt(-log(random->uniform()));
-        if (normalflag) {
-          vamag = vr * sin(theta);
-          vbmag = vr * cos(theta);
+          theta = MY_2PI * random->uniform();
+          vr = vscale[isp] * sqrt(-log(random->uniform()));
+          if (normalflag) {
+            vamag = vr * sin(theta);
+            vbmag = vr * cos(theta);
+          } else {
+            vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
+            vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+          }
         } else {
-          vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
-          vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+          double E_eV;
+          double cos_n_local = 1.0;
+          if (emit_model == MODEL_THOMPSON) {
+            E_eV = sample_thompson_energy(model_Ub, random);
+            cos_n_local = model_cos_n;
+          } else if (emit_model == MODEL_FIXED_ENERGY) {
+            E_eV = model_E_fixed;
+          } else { // MODEL_THERMAL_TSURF
+            E_eV = sample_thermal_flux_energy(Tsurf_K_task, random);
+          }
+          double cos_th, sin_th;
+          sample_cos_n(cos_n_local, random, cos_th, sin_th);
+          double phi_az = MY_2PI * random->uniform();
+          double mass_sp = particle->species[ispecies].mass;
+          double speed = (mass_sp > 0.0)
+            ? std::sqrt(2.0 * E_eV * EV_TO_J / mass_sp) : 0.0;
+          vnmag = speed * cos_th;
+          vamag = speed * sin_th * std::cos(phi_az);
+          vbmag = speed * sin_th * std::sin(phi_az);
         }
 
         v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
@@ -805,6 +930,52 @@ int FixSurfaceEmitSource::option(int narg, char **arg)
     if (source_thresh < 0.0)
       error->all(FLERR,"Fix surface/emit/source source_thresh must be >= 0");
     return 2;
+  }
+
+  if (strcmp(arg[0],"model") == 0) {
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/source command");
+    if (strcmp(arg[1],"thermal") == 0) {
+      emit_model = MODEL_THERMAL;
+      return 2;
+    }
+    if (strcmp(arg[1],"thermal_tsurf") == 0) {
+      if (3 > narg)
+        error->all(FLERR,"Fix surface/emit/source: model thermal_tsurf needs custom name");
+      delete [] model_tsurf_name;
+      int n = strlen(arg[2]) + 1;
+      model_tsurf_name = new char[n];
+      strcpy(model_tsurf_name, arg[2]);
+      emit_model = MODEL_THERMAL_TSURF;
+      return 3;
+    }
+    if (strcmp(arg[1],"thompson") == 0) {
+      if (3 > narg)
+        error->all(FLERR,"Fix surface/emit/source: model thompson needs Ub_eV");
+      model_Ub = atof(arg[2]);
+      if (model_Ub <= 0.0)
+        error->all(FLERR,"Fix surface/emit/source: model thompson Ub must be > 0");
+      emit_model = MODEL_THOMPSON;
+      int consumed = 3;
+      // optional cos_n <n>
+      if (consumed + 1 < narg && strcmp(arg[consumed],"cos_n") == 0) {
+        model_cos_n = atof(arg[consumed+1]);
+        if (model_cos_n <= 0.0)
+          error->all(FLERR,"Fix surface/emit/source: model thompson cos_n must be > 0");
+        consumed += 2;
+      }
+      return consumed;
+    }
+    if (strcmp(arg[1],"fixed_energy") == 0) {
+      if (3 > narg)
+        error->all(FLERR,"Fix surface/emit/source: model fixed_energy needs E_eV");
+      model_E_fixed = atof(arg[2]);
+      if (model_E_fixed <= 0.0)
+        error->all(FLERR,"Fix surface/emit/source: model fixed_energy E must be > 0");
+      emit_model = MODEL_FIXED_ENERGY;
+      return 3;
+    }
+    error->all(FLERR,"Fix surface/emit/source: unknown model "
+                     "(thermal | thermal_tsurf | thompson | fixed_energy)");
   }
 
   error->all(FLERR,"Illegal fix surface/emit/source command");

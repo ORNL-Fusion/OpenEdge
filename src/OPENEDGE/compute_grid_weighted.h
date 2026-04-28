@@ -44,7 +44,12 @@ class ComputeGridWeighted : public Compute {
   int pweight_index;         // index of pweight custom attribute
   int pweight_ewhich;        // index into edvec
 
+  int cellcount_w,cellmass_w; // 1 if total cell weight/mass is tallied
+                              // (for nfrac_w / massfrac_w)
+
   double eprefactor;         // velocity^2 to energy
+  double tprefactor;         // KE to temperature
+  double rvprefactor;        // rot/vib energy to temperature
 
   void set_map(int, int);
   void reset_map();
