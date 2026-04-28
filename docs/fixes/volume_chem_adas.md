@@ -1,8 +1,11 @@
-# `fix volume/chem/adas` — volumetric neutral reactions
+# `fix volume/chem/adas`
 
-ADAS-based volumetric chemistry with competing Poisson channel selection.
-Supports ionization, recombination, charge exchange (CX), and dissociation.
-Plays the role of EIRENE's collision operator in OpenEdge standalone runs.
+## Description
+
+This fix applies ADAS-based volumetric chemistry with competing Poisson
+channel selection. It supports ionization, recombination, charge
+exchange (CX), and dissociation, and it plays the role of EIRENE's
+collision operator in OpenEdge standalone runs.
 
 > **Renamed 2026-04-22.** Formerly `fix chem/adas`. Old decks should
 > sweep that token; the keyword grammar below is unchanged apart from the
@@ -89,6 +92,15 @@ skipped:
 [volume/chem/adas] dissociation  : 1 active, 0 skipped (of 1)
 [volume/chem/adas] output summary (6 cols)  ADAS tables: SCD ACD CCD PLT PRB -
 ```
+
+## Restrictions and behavior
+
+- This fix reads Te/ne from the per-particle plasma cache, not directly
+  from a cell-centered override.
+- A pure-neutral deck still needs a cache activator such as
+  `global pusher plasma <ID>`.
+- Reactions whose required species are missing from the SPARTA species
+  table are skipped at init.
 
 ## Truncated charge-state ladders
 
@@ -180,6 +192,22 @@ Per-reaction-type breakdown, quantity-major across 4 types (I, R, CX, D):
 - **`batch_fix <emit_id> <R_puff>`** — same as `batch`, but `N` is
   pulled from the paired emit fix's cumulative emit count each step.
   Tracks ramp-up automatically, no hand-matching with `stop_at_np`.
+
+## Examples
+
+Typical deuterium chemistry:
+
+```text
+fix pd    background file plasma.h5 static yes
+global pusher plasma pd
+fix fchem volume/chem/adas 1 D auto mode neutral units rate
+```
+
+Disable charge exchange:
+
+```text
+fix fchem volume/chem/adas 1 D auto cx no
+```
 
 ## Data pipeline
 

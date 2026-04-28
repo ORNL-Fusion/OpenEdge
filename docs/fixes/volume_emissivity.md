@@ -7,18 +7,10 @@ Per-grid volumetric line emissivity:
 ```
 
 Uses per-particle `pweight` for weighted density (`nz`), Te/ne from a
-`compute plasma/fields`, and a PEC table pulled from `processes.h5`.
-
-> **Renamed 2026-04-24.** Formerly `compute photon_emissivity/grid`.
-> Moved into the `volume/*` namespace alongside `fix volume/chem/adas`
-> (volumetric atomic processes share a prefix).
->
-> **Migrated to `processes.h5` 2026-04-23.** The legacy `pec_file PATH`
-> keyword + standalone `database/pec/*.h5` files were removed. PEC data
-> now lives under `/volume/pec/<elem>/<pec_id>/<line>/` in
-> `database/processes.h5`, ingested by
-> `database/ingest/build_processes_h5.py` from **open-ADAS adf15**
-> files.
+`compute plasma/fields`, and a PEC table from
+`database/processes.h5:/volume/pec/<elem>/<pec_id>/<line>/`. PEC data
+is ingested by `database/ingest/build_processes_h5.py` from open-ADAS
+adf15 files.
 
 ## Syntax
 

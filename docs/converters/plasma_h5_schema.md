@@ -25,11 +25,9 @@ Per-species element symbol with the charge-state suffix stripped:
 | `O+` … `O8+` | `O` |
 | `W5+` | `W` |
 
-Used by `compute surface/physical/sputter target <elem> projectiles <elem_list>` to
-aggregate plasma ion slots by element and resolve the corresponding
-`<proj>_on_<target>.h5` surface file. Falls back to parsing `names` (strip
-trailing digits + `±` characters) when `elements` is absent — so legacy
-plasma.h5 files produced by pre-2026-04-21 converters still work.
+Used by `compute surface/physical/sputter target <elem> projectiles <elem_list>`
+to aggregate plasma ion slots by element and resolve the corresponding
+`<proj>_on_<target>` Eckstein parameters.
 
 ## Query pattern
 
@@ -41,9 +39,11 @@ fix pd background file input/plasma.h5
 # Per-cell via pd->mesh_ne[cell], mesh_te[cell], ...
 ```
 
-The `compute plasma/fields file <plasma.h5>` mode has been removed and
-hard-errors on use. Declare `fix background` then reference it from
-`compute plasma/fields all background <fix_id> …`.
+All `compute plasma/fields` invocations reference a `fix background`:
+
+```
+compute cplasma plasma/fields all background <fix_id> ne te ti br bz bt
+```
 
 ## GCA requires equilibrium
 

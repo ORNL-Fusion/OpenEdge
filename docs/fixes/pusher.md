@@ -1,9 +1,14 @@
-# Charged-particle pusher — `global pusher ...`
+# `global pusher`
 
-Single hierarchical keyword for the charged-particle pusher
-(Boris full-orbit or Boris/GCA hybrid) plus an optional sheath
-overlay. Replaces the older `global boris_*`, `global gca`,
-`global bfield_compute`, and `global sheath` keywords.
+## Description
+
+This global command configures the charged-particle pusher used by
+OpenEdge. It selects Boris full-orbit or Boris/GCA hybrid motion and
+can also enable a sheath overlay on top of the base pusher.
+
+It replaces the older `global boris_*`, `global gca`,
+`global bfield_compute`, and `global sheath` controls with one command
+tree.
 
 ## Syntax
 
@@ -22,7 +27,7 @@ global pusher mode boris|hybrid \
 Multiple `global pusher ...` lines accumulate; each call processes its
 own keywords and leaves the others at their current value.
 
-## Top-level keywords
+## Keywords
 
 - **`mode boris|hybrid`** (default `boris`) —
   - `boris`: full-orbit Boris pusher.
@@ -72,7 +77,7 @@ keyword — there is no separate sheath plasma. Internal scales
 (`dmax`, `pot_mult`, model blend) are computed automatically; see
 [`sheath.md`](sheath.md) for the physics details.
 
-## Defaults
+## Default settings
 
 ```
 mode boris
@@ -89,18 +94,18 @@ mD_amu 2.014
 
 ## Examples
 
-**Pure neutral run, no charged push** — pcache only, for test
-decks that need `fix volume/chem/adas`:
+Pure-neutral run with plasma cache only:
 
 ```
 fix    pd background constant temp_e 20 dens_e 1e19
 global pusher plasma pd
 ```
 
-(No `mode` needed — defaults to `boris`, but with no charged particles
-the pusher is a no-op. The `plasma pd` line is what activates pcache.)
+No `mode` keyword is needed here. The default is `boris`, but with no
+charged particles the push is a no-op. The `plasma pd` keyword is what
+activates the per-particle plasma cache.
 
-**IEAD run with sheath kick:**
+IEAD run with sheath kick:
 
 ```
 fix     pd background file plasma.h5 static yes
@@ -109,7 +114,7 @@ global  pusher mode boris plasma pd subcycles 5 \
                sheath kick geom cgeom
 ```
 
-**Spatial sheath profile:**
+Spatial sheath profile:
 
 ```
 compute cplasma plasma/fields all file plasma.h5 ...
@@ -118,13 +123,22 @@ global  pusher mode boris plasma cplasma subcycles 100 \
                sheath spatial geom cgeom
 ```
 
-**Boris/GCA hybrid for impurity transport:**
+Boris/GCA hybrid for impurity transport:
 
 ```
 compute cplasma plasma/fields all file plasma.h5 ...
 global  pusher mode hybrid plasma cplasma subcycles 50 \
                gca_switch 2.5
 ```
+
+## Notes
+
+- Use `mode boris` when the gyro-motion is directly resolved on the
+  timestep.
+- Use `mode hybrid` when some charged particles transition between
+  well-resolved and under-resolved gyro-motion during the run.
+- Attach `plasma <ID>` whenever downstream OpenEdge models need the
+  per-particle plasma cache.
 
 ## Related
 

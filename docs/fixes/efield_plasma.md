@@ -9,10 +9,8 @@ B2 / SOLEDGE3X triangulation mesh and writes `/mesh/e_r, /mesh/e_z, /mesh/e_t`.
 centroid (via `findNearestMappedTriangle`) and emits `er`, `et`, `ez`, `ex`,
 `ey` output columns.
 
-- **`epar` output** = `E · b̂` (dot product of the mesh-stored E vector with
-  `b̂` from equilibrium ψ).
-- **No runtime `−∇pe/(ne·e)` approximation** — the pressure-balance code
-  path was removed from both `compute_per_grid` and `query_plasma_at_point`.
+**`epar` output** = `E · b̂` (dot product of the mesh-stored E vector with
+`b̂` from equilibrium ψ).
 
 ## Converter status
 
@@ -20,7 +18,7 @@ centroid (via `findNearestMappedTriangle`) and emits `er`, `et`, `ez`, `ex`,
 |---|---|
 | SOLPS | fully implemented (reads `balance.nc:po`, Jacobian FD on the B2 `(ix, iy)` grid) |
 | SOLEDGE3X | writes `mesh/e_{r,z,t} = 0` placeholders. Zone-based `/zone*/PHI` resampling onto EIRENE triangle centroids is TODO. Prints WARNING at converter time. |
-| OEDGE | no `/mesh/*` output; legacy regular-grid path (deprecated) returned zero E via default-initialized fields. Proper fix comes with a future OEDGE → mesh migration. |
+| OEDGE | mesh-output path pending; current builds emit zero E. Proper support comes with a future OEDGE → mesh migration. |
 
 ## Feeding into the Boris pusher
 

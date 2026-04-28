@@ -9,7 +9,7 @@ particle. The leapfrog half-kick pattern (`START_OF_STEP` +
 Two modes depending on how B-field and temperature gradients are
 sourced.
 
-### Mode A — `background` (recommended, mesh-native)
+### Syntax
 
 ```
 fix ID thermal_force Nevery background <plasma_fix_ID> \
@@ -26,21 +26,6 @@ converters. No per-particle variables need to be pre-populated.
 `ion_thermal` / `elec_thermal` accept `yes`/`no` to enable/disable each
 channel independently. Default: both on if the keyword is present, off
 if the keyword is absent.
-
-### Mode B — legacy explicit sources
-
-```
-fix ID thermal_force Nevery \
-    bfield BxSRC BySRC BzSRC \
-    [ion_thermal gradTiR_SRC gradTiZ_SRC] \
-    [elec_thermal gradTeR_SRC gradTeZ_SRC]
-```
-
-Each `*_SRC` is a variable or compute reference (e.g.
-`c_pfields[1]`). B sources are in **SPARTA slot order** — use
-`compute plasma/fields` to auto-project into the right columns for
-the current coordinate layout (axi vs Cart). Gradient sources are
-always cylindrical (`grad_ti_r`, `grad_ti_z`).
 
 ## Physics
 
@@ -76,16 +61,6 @@ If the particle dump shows W ions outside the wall polygon (see
 overshoot is the usual culprit. The fix does not yet apply a force
 cap — that's a follow-up.
 
-## Gradient source compatibility
-
-| plasma.h5 layout | Mode A (`background`) | Mode B (explicit srcs) |
-|---|---|---|
-| mesh-only (new converters, 2026-04-22+) | ✅ reads `mesh/grad_te_{r,z}` etc. via `pd->mesh_grad_*` | ❌ `compute plasma/fields` returns 0 for gradients on mesh-only |
-| legacy regular-grid | ✅ fallback to `pd->interp2D` on `grad_te` | ✅ `compute plasma/fields` populates columns |
-
-**Bottom line:** prefer Mode A everywhere. Mode B is kept only for
-old decks that haven't migrated to `fix background`.
-
 ## Related
 
 - `fix cross_field_diffusion` — anomalous perpendicular diffusion
@@ -93,6 +68,3 @@ old decks that haven't migrated to `fix background`.
 - `fix coulomb/binary` — Coulomb pitch-angle scatter; the Chapman-Enskog
   closure that produces the β_i, α_e coefficients assumes a
   collisional background.
-- `compute plasma/fields` — legacy B-field projector (Mode B). For
-  new decks, `global bfield_compute <pd>` + `fix background` is
-  sufficient.

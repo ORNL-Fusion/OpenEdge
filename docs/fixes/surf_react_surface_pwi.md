@@ -5,16 +5,6 @@ SPARTA wall surfaces. Reads reflection data from the consolidated
 `database/processes.h5` (`/surface/reflection/<proj>_on_<target>/`) so no
 per-pair files need to live beside the deck.
 
-> **Renamed / consolidated 2026-04-22.** This style replaces two older
-> ones:
->
-> - `surf_react recycle` (legacy: cosine-reemission exchange only)
-> - `surf_react wall_pwi` (intermediate rename)
->
-> The reactions-file grammar has been extended to add the `T` (TRIM
-> reflect) channel; the `A` / `E` / `D` / `R` channels are carried over
-> with compatible semantics.
-
 ## Syntax
 
 ```
@@ -31,9 +21,10 @@ surf_react ID surface/pwi <reactions_file> \
 - **`twall_surf <attr>`** — per-surf wall temperature attribute, read
   from `fix surf/custom` or a precomputed attribute on the surf group.
   Mutually exclusive with `twall`.
-- **`trim_dir <path>`** — only needed when falling back to legacy
-  per-pair TRIM files instead of processes.h5. In the standard OpenEdge
-  workflow this is left unset; reflection tables come from processes.h5.
+- **`trim_dir <path>`** — optional override pointing at a directory of
+  per-pair TRIM files (one `<proj>_on_<target>.h5` each). In the
+  standard workflow this is left unset; reflection tables come from
+  `database/processes.h5`.
 - **`R_surf <attr>`** — per-surf recycling coefficient attribute. When
   set, the `R` value of any `A`-type reaction is overridden per surface
   segment.
@@ -44,7 +35,7 @@ surf_react ID surface/pwi <reactions_file> \
 |---|---|---|---|
 | `T` | TRIM reflect (E, θ -> reflection probability + outgoing energy + direction from processes.h5) | 1 | 1 |
 | `A` | absorb + re-emit (probability `R`; optional f_mol for atom → molecule partition) | 1 | 1 |
-| `E` | exchange (1 → 1, deterministic, legacy) | 1 | 1 |
+| `E` | exchange (1 → 1, deterministic species swap) | 1 | 1 |
 | `D` | dissociation (1 → 2, shared KE absorbs bond energy) | 1 | 2 |
 | `R` | recombination / pure absorb (no re-emit) | 1 | 0 |
 
