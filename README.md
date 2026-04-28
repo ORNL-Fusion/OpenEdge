@@ -4,14 +4,13 @@
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-orange.svg)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-green.svg)
 
-A kinetic transport package for plasma-material and plasma-wall
-interactions, built on top of [**SPARTA**](https://github.com/sparta/sparta).
+A kinetic transport package for plasma-material and plasma-wall interactions.
 
 OpenEdge evolves neutrals, impurity ions, and dust/droplets in prescribed
 plasma and magnetic backgrounds, with surface and volume interactions
 (sputtering, reflection, recycling, ionisation, recombination, CX,
 dissociation). Used for edge / SOL transport studies, PMI / PWI workflows,
-and plasma-wall coupling with codes like SOLPS-ITER and SOLEDGE3X.
+and plasma-wall.
 
 ## Build
 
