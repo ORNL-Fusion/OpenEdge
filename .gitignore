@@ -83,6 +83,7 @@ PSI2026/
 database/ingest/
 
 # WIP test cases (not ready for public repo)
+examples/wip/
 examples/test_reclycling/
 examples/test_d3d_mateja/
 examples/test_d3d_walldyn/
