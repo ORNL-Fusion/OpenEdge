@@ -1,0 +1,25 @@
+{
+  "wall_file": "/Users/42d/OpenEdge/examples/test_west_3d/input/data/wall.txt",
+  "phi_min_deg": 0.0,
+  "phi_max_deg": 30.0,
+  "dphi_deg": 30.0,
+  "n_rz_vertices": 102,
+  "mesh_size": 0.1,
+  "mesh_size_min": null,
+  "mesh_size_max": null,
+  "gmsh_algorithm": 6,
+  "n_wall_triangles": 4866,
+  "n_cap_min_triangles": 1152,
+  "n_cap_max_triangles": 1154,
+  "n_total_triangles": 7172,
+  "triangle_groups": {
+    "wall": {
+      "first": 1,
+      "last": 4866
+    },
+    "caps": {
+      "first": 4867,
+      "last": 7172
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "mesh_extra": "mesh.extra",
+  "phi_min_deg": 0.0,
+  "phi_max_deg": 30.0,
+  "n_rz_original": 68,
+  "n_rz_refined": 920,
+  "n_toroidal_segments": 4,
+  "wall_refine": 10,
+  "divertor_refine": 20,
+  "divertor_region": {
+    "rmin": 1.0,
+    "rmax": 1.8,
+    "zmin": -1.5,
+    "zmax": -0.5
+  },
+  "n_vertices": 4600,
+  "n_wall_triangles": 7360,
+  "n_cap_min_triangles": 918,
+  "n_cap_max_triangles": 918,
+  "n_total_triangles": 9196,
+  "triangle_groups": {
+    "wall": {
+      "first": 1,
+      "last": 7360
+    },
+    "caps": {
+      "first": 7361,
+      "last": 9196
+    },
+    "cap_phi_min": {
+      "first": 7361,
+      "last": 8278
+    },
+    "cap_phi_max": {
+      "first": 8279,
+      "last": 9196
+    }
+  }
+}

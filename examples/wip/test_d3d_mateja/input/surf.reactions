@@ -1,0 +1,70 @@
+# PMI surface reactions for the DIII-D boron source hitting a carbon wall.
+# Pair this with an HDF5 table whose coefficients match boron-on-carbon
+# impacts if you want the reflection/sputtering probabilities to be
+# physically consistent with the emitted species.
+#
+# Reaction roles in this file:
+#   R = reflected boron (neutralized on impact)
+#   S = sputtered carbon from the substrate
+#   A = absorbed/implanted boron
+#
+# Only boron impact species are defined here, since the active emitted
+# mixture is boronSource. If you later turn carbonSource back on, use a
+# separate PMI model/table for carbon impacts instead of reusing boron
+# coefficients for both species.
+
+B --> B
+R Simple 1.0
+
+B --> C
+S Simple 1.0
+
+B --> NULL
+A Simple 1.0
+
+B+ --> B
+R Simple 1.0
+
+B+ --> C
+S Simple 1.0
+
+B+ --> NULL
+A Simple 1.0
+
+B2+ --> B
+R Simple 1.0
+
+B2+ --> C
+S Simple 1.0
+
+B2+ --> NULL
+A Simple 1.0
+
+B3+ --> B
+R Simple 1.0
+
+B3+ --> C
+S Simple 1.0
+
+B3+ --> NULL
+A Simple 1.0
+
+B4+ --> B
+R Simple 1.0
+
+B4+ --> C
+S Simple 1.0
+
+B4+ --> NULL
+A Simple 1.0
+
+B5+ --> B
+R Simple 1.0
+
+B5+ --> C
+S Simple 1.0
+
+B5+ --> NULL
+A Simple 1.0
+
+

@@ -1,0 +1,69 @@
+################################################################################
+# P3' sanity test: surf_react recycle with TRIM-based reflection.
+#
+# Exercises:
+#   - trim_dir <path> keyword parsing
+#   - TRIM table load (D_on_W.h5, EIRENE-derived)
+#   - New `T <table>` reaction type in wall.recycle.trim
+#   - Dynamic R_N(E,theta) probability per hit
+#   - Fallback thermal re-emission channel
+#
+# Scope: smoke test -- not a physics validation.
+# Expected: run completes, tally shows nonzero "T D_on_W" reactions for D.
+################################################################################
+
+seed                12345
+dimension           2
+boundary            p p p
+global              gridcut 0.0 comm/sort no
+global              fnum 1e12
+
+create_box          1.82 3.2 -1.0 1.0 -0.05 0.05
+create_grid         100 100 1
+balance_grid        rcb cell
+
+species             input/neutral.species D2 D D+
+mixture             neutrals D2  frac 1.0
+mixture             neutrals D   frac 0.0
+mixture             neutrals D+  frac 0.0
+mixture             puff_mix D2  frac 1.0 nrho 1e18 temp 300.0
+
+read_surf           input/wall.surf group wall particle check
+surf_collide        wallColl diffuse 400.0 1.0
+surf_react          wallRecycle recycle input/wall.recycle.trim &
+                    trim_dir ../../database/surface/trim &
+                    twall 400.0
+surf_modify         wall collide wallColl react wallRecycle
+
+group               gpuff surf id == 405
+
+read_surf           input/core.surf invert group core particle check
+surf_collide        coreColl vanish
+surf_modify         core collide coreColl react none
+
+region              rdiv_lo block 1.82 3.2 -0.94 -0.40 -INF INF
+region              rdiv_up block 1.82 3.2  0.40  0.80 -INF INF
+adapt_grid          all refine surf all 0.001 maxlevel 3 cells 2 2 1 region rdiv_lo all iterate 3
+adapt_grid          all refine surf all 0.001 maxlevel 3 cells 2 2 1 region rdiv_up all iterate 3
+balance_grid        rcb cell
+
+fix                 pd plasma/data file input/plasma.h5 static yes
+global              pusher plasma pd
+
+fix fchem chem/adas 1 1 input/neutral.reactions adas_dir ../../database/adas &
+    mode neutral source_species D D2 &
+    units rate
+
+fix fpuff emit/surf/puff puff_mix gpuff n 200 normal yes perspecies no &
+    stop_at_np 20000
+
+fix fadapt adapt 200 all refine particle 500 0 maxlevel 5 cells 2 2 1
+fix fbal   balance 100 1.05 rcb part
+
+timestep            1e-08
+stats               500
+stats_style         step cpu np nscoll nsreact
+
+run                 5000
+
+#EOF

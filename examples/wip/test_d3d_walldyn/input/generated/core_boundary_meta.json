@@ -1,0 +1,25 @@
+{
+  "input_file": "input/geometry/flux_surface_core.surf",
+  "phi_min_deg": 0.0,
+  "phi_max_deg": 30.0,
+  "dphi_deg": 30.0,
+  "n_rz_vertices": 40,
+  "min_edge": 0.02,
+  "n_wall_triangles": 80,
+  "n_cap_triangles_each": 40,
+  "n_total_triangles": 160,
+  "triangle_groups": {
+    "core_wall": {
+      "first": 1,
+      "last": 80
+    },
+    "cap_phi_min": {
+      "first": 81,
+      "last": 120
+    },
+    "cap_phi_max": {
+      "first": 121,
+      "last": 160
+    }
+  }
+}

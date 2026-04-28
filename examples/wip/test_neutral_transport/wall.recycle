@@ -1,0 +1,18 @@
+# Surface recycling reactions for D+/D/D2 neutral transport
+# Format: reactant --> product(s)
+#         type prob energy1 [energy2]
+# type: E=exchange (1->1), D=dissociation (1->2), R=recombination (absorb)
+# prob: recycling probability
+# energy: return energy per product [eV]
+
+# D+ hits wall -> returns as D atom at Franck-Condon energy (~3 eV)
+D+ --> D
+E 1.0 3.0
+
+# D hits wall -> reflects as D at wall thermal energy (~0.025 eV = 300K)
+D --> D
+E 1.0 0.025
+
+# D2 hits wall -> reflects as D2 at wall thermal energy
+D2 --> D2
+E 1.0 0.025

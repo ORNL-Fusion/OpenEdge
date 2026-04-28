@@ -1,0 +1,37 @@
+# Neutral transport reactions for D2/D/D+ system
+# --------------------------------------------------
+# These 4 reactions are the INTERSECTION of OpenEdge and EIRENE physics
+# for the benchmark comparison.  Nothing else should be turned on.
+#
+# Reactions:
+#   D ionization:       e + D  -> D+ + 2e    (ADAS SCD, Z=1)
+#   D recombination:    D+ + e -> D           (ADAS ACD, Z=1)
+#   D charge exchange:  D+ + D -> D + D+      (ADAS CCD, Z=1)
+#   D2 dissociation:    e + D2 -> 2D + e      (Janev/HYDHEL H.2 2.2.5)
+#
+# EIRENE equivalents (for cross-check):
+#   ionization:    AMJUEL H.4 2.1.5 (EI)
+#   recombination: AMJUEL H.4 2.1.8 (RC)
+#   charge exch:   HYDHEL H.1 3.1.8 (CX)
+#   dissociation:  HYDHEL H.2 2.2.5 (DS)  -- NOTE: cylinder test uses 2.2.10
+#                  OpenEdge uses Janev polynomial fit for dissociation
+#                  EIRENE uses HYDHEL tabulated data
+#                  >>> Compare raw rate coefficients at Te=20eV first! <<<
+
+# --- D ionization (ADAS SCD) ---
+D --> D+
+I A 1.0 0.0 0.0 0.0 0.0
+
+# --- D+ recombination (ADAS ACD) ---
+D+ --> D
+R A 1.0 0.0 0.0 0.0 0.0
+
+# --- D+ charge exchange (ADAS CCD) ---
+D+ --> D
+E A 1.0 0.0 0.0 0.0 0.0
+
+# --- D2 electron-impact dissociation (Janev/HYDHEL H.2 2.2.5) ---
+# ln<sv> = sum b_n (ln Te)^n, Te in eV, <sv> in cm3/s
+# Coefficients from HYDHEL (corrected Janev 1987)
+D2 --> D + D
+D J -2.787217511174e+01 1.052252660075e+01 -4.973212347860e+00 1.451198183114e+00 -3.062790554644e-01 4.433379509258e-02 -4.096344172875e-03 2.159670289222e-04 -4.928545325189e-06

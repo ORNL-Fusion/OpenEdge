@@ -1,0 +1,12 @@
+# Species data
+# ID     Molwt (amu)           Molmass (kg)           Rotational dof    RotRel    Vibrational dof    VibRel    VibTemp (K)    species wt    charge
+mist           1.683801072756355e+17    2.796017461694916e-10   0      0.0    0      0.0    0.0        1.0        0.0
+Instability    2.104751340945444e+22    3.495021827118645e-05   0      0.0    0      0.0    0.0        1.0        0.0
+Ligament       1.347040858205084e+24    2.236813969355933e-03   0      0.0    0      0.0    0.0        1.0        0.0
+
+drop_1     4.546262896442158e+21     7.549247146576273e-06      0      0.0    0      0.0    0.0        1.0        0.0
+# Li droplet, rd = 1.5 mm
+drop_2     2.104751340945444e+22     3.495021827118645e-05      0      0.0    0      0.0    0.0        1.0        0.0
+# Li droplet, rd = 2.5 mm
+drop_3     5.775437679554298e+22     9.590339893613564e-05      0      0.0    0      0.0    0.0        1.0        0.0
+# Li droplet, rd = 3.5 mm

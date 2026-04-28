@@ -1,0 +1,81 @@
+################################################################################
+# Particle weight test — WEIGHTED mode (per-particle weight emission)
+# Uses WEST axisymmetric geometry with PMI emission
+# Run 500 steps, dump weighted density
+################################################################################
+
+seed                12345
+dimension           2
+boundary            p p p
+global              gridcut 0.0 comm/sort yes
+
+create_box          1.82 3.2 -1.0 1.0 -0.05 0.05
+create_grid         200 200 1
+balance_grid        rcb cell
+
+global              fnum 1e6
+
+species             ../test_west_axi/input/plasma.species W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+
+
+mixture             tungstenSource  W    frac 1.
+mixture             tungstenSource  W+   frac 0.
+mixture             tungstenSource  W2+  frac 0.
+mixture             tungstenSource  W3+  frac 0.
+mixture             tungstenSource  W4+  frac 0.
+mixture             tungstenSource  W5+  frac 0.
+mixture             tungstenSource  W6+  frac 0.
+mixture             tungstenSource  W7+  frac 0.
+mixture             tungstenSource  W8+  frac 0.
+mixture             tungstenSource  W9+  frac 0.
+mixture             tungstenSource  W10+ frac 0.
+
+variable            TbindW equal 4.0*11600.
+variable            TwallK equal 773.15
+mixture             tungstenSource temp ${TbindW}
+
+read_surf           ../test_west_axi/input/wall.txt group 1 particle check
+surf_collide        wallColModel vanish
+surf_modify         1 collide wallColModel
+
+# Mesh adaptation
+region rdiv_lo block 2.0 3.2 -1.0 -0.35 -1 1
+region rdiv_up block 2.0 3.2 0.35 1.0 -1 1
+region rlim   block 1.82 2.35 -0.20 0.20 -1 1
+adapt_grid all refine surf all 0.001 maxlevel 5 cells 2 2 1 region rdiv_lo all iterate 3
+adapt_grid all refine surf all 0.001 maxlevel 5 cells 2 2 1 region rdiv_up all iterate 3
+adapt_grid all refine surf all 0.001 maxlevel 5 cells 2 2 1 region rlim   all iterate 3
+balance_grid rcb cell
+
+# Plasma/B-field from mesh-native plasma.h5 via fix plasma/data.
+fix pd plasma/data file ../test_west_axi/input/plasma.h5 static yes
+global pusher plasma pd
+
+# PMI source: analytic Eckstein per-projectile via target/projectiles.
+# Main-ion mass for sheath impact energy is D+ (2.014 amu); projectile
+# list drives W erosion off the O charge states in the WEST plasma.
+compute cpmi surface/physical/sputter 1 plasma_data pd &
+                    target W projectiles O mass_amu 2.01410177811 erosion_flux
+
+# Per-particle weight infrastructure
+fix pw particle/weight
+
+# Weighted emission: 5 particles per surface element per timestep
+fix femit surface/emit/source tungstenSource 1 cpmi perspecies no normal yes nlaunch 5 flux_thresh 1e10
+
+# Weighted density — use tungstenSource mixture (1 group = W only)
+compute cwden grid/weighted all tungstenSource nrho_w
+fix fwden ave/grid all 1 100 500 c_cwden[1] ave running
+dump dwden grid all 500 output/density_weighted id xc yc f_fwden
+
+# Also dump standard density for cross-check
+compute cden grid all tungstenSource nrho
+fix fden ave/grid all 1 100 500 c_cden[1] ave running
+dump dden grid all 500 output/density_standard_from_weighted id xc yc f_fden
+
+# Particle dump with weights
+dump dpart particle all 500 output/state.weighted id type x y z vx vy vz p_pweight
+
+timestep            1.0e-09
+stats               50
+stats_style         step cpu np
+run                 500
