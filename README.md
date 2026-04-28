@@ -1,115 +1,69 @@
 # OpenEdge
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
-![C++11/17](https://img.shields.io/badge/C%2B%2B-11%2F17-orange.svg)
+![C++17](https://img.shields.io/badge/C%2B%2B-17-orange.svg)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-green.svg)
-![MPI](https://img.shields.io/badge/MPI-OpenMPI%20%7C%20MPICH-purple.svg)
-![HDF5](https://img.shields.io/badge/HDF5-required-yellow.svg)
 
-OpenEdge is developed as a package for [**SPARTA**](https://github.com/sparta/sparta), using SPARTA as the particle engine.
-It is a research code for kinetic transport of charged and neutral particles and their interactions with solid surfaces and plasmas.
-Primary focus is plasma-material interactions (PMI), including lithium droplet physics for the Liquid-Metal SciDAC project.
+A kinetic transport package for plasma-material and plasma-wall
+interactions, built on top of [**SPARTA**](https://github.com/sparta/sparta).
 
-> **Contributors welcome:** Diagnostics, verification cases, and tests are especially helpful.
+OpenEdge evolves neutrals, impurity ions, and dust/droplets in prescribed
+plasma and magnetic backgrounds, with surface and volume interactions
+(sputtering, reflection, recycling, ionisation, recombination, CX,
+dissociation). Used for edge / SOL transport studies, PMI / PWI workflows,
+and plasma-wall coupling with codes like SOLPS-ITER and SOLEDGE3X.
 
-## Features
-
-- **Particle Transport & Collisions**
-  - Charged and neutral particle transport (trace-impurity friendly).
-  - Coulomb/Nanbu collisions (charged); soft-sphere and hard-sphere/VSS (neutrals).
-  - ADAS-based ionization, recombination, and charge exchange with HDF5 rate tables.
-  - Molecular dissociation with Janev polynomial fits (HYDHEL).
-  - Surface recycling with configurable energy and cosine angular distribution.
-- **Droplet Physics**
-  - OML charging with thermionic emission.
-  - Epstein and Coulomb drag models.
-  - Evaporation with file-driven or constant heat flux.
-  - Gravity (3D Cartesian and axisymmetric RZ).
-- **Surfaces & PMI**
-  - File-driven BCA/F-TRIDYN yield tables (energy x angle); sputtering, reflection, absorption.
-  - PMI-driven surface emission and redeposition workflows.
-- **Fields & Pushers**
-  - Boris pusher with subcycling; grid- and particle-based E/B fields.
-  - Plasma field interpolation from grid to particle position.
-  - Electron and ion thermal gradient forces.
-- **Sheath Physics**
-  - Exact point-to-triangle nearest-wall projection per particle.
-  - Sheath models: Borodkina, Coulette-Manfredi, EIRENE-style multi-ion sheath drop.
-  - Per-cell sheath potential and electric field diagnostics.
-- **Geometry**
-  - 2D/3D watertight surface meshes; arbitrary domains.
-  - Particle-passing domain decomposition for parallel runs.
-- **Diagnostics & IO**
-  - HDF5 input/output for particles, grids, surfaces, and fields.
-  - Ion energy-angle distributions (IEAD/EAD) per surface.
-  - Sheath geometry (wall distance, surface normals) and field diagnostics.
-  - Tallies for fluxes, energy/momentum transfer, and surface hits.
-- **Configurability**
-  - All physics and numerics controlled from the input file (no recompile).
-
-
-## System Requirements
-
-> - CMake ≥ **3.18**
-> - C++11 compiler (**GCC**, **Clang**, or **ICC**); C++17 required for GPU/Kokkos builds
-> - **HDF5** (with C++ bindings; **+MPI** if running distributed)
-> - **MPI** (OpenMPI or MPICH)
->
-
-## Quick Start
-
-### CPU (MPI + OpenMP)
+## Build
 
 ```bash
-$ git clone https://github.com/ORNL-Fusion/OpenEdge.git
-$ mkdir build && cd build
-$ cmake -C ../OpenEdge/cmake/presets/mpi.cmake ../OpenEdge/cmake -DPKG_OPENEDGE=ON
-$ make -j 4
-$ mpirun -np 4 ./src/spa_mpi -in input.in
+git clone https://github.com/ORNL-Fusion/OpenEdge.git
+mkdir buildOpenEdge && cd buildOpenEdge
+cmake -C ../OpenEdge/cmake/presets/mpi.cmake ../OpenEdge/cmake -DPKG_OPENEDGE=ON
+make -j$(nproc)
 ```
 
-### GPU (CUDA + MPI)
-
-Requires NVIDIA GPU, CUDA toolkit, and Kokkos (bundled in `lib/kokkos`).
+GPU build (Kokkos + CUDA):
 
 ```bash
-$ git clone https://github.com/ORNL-Fusion/OpenEdge.git
-$ mkdir build_gpu && cd build_gpu
-$ cmake -C ../OpenEdge/cmake/presets/kokkos_cuda.cmake ../OpenEdge/cmake \
+mkdir buildOpenEdge_gpu && cd buildOpenEdge_gpu
+cmake -C ../OpenEdge/cmake/presets/kokkos_cuda.cmake ../OpenEdge/cmake \
     -DPKG_OPENEDGE=ON -DPKG_KOKKOS=ON \
-    -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_OPENMP=ON \
-    -DKokkos_ARCH_AMPERE80=ON
-$ make -j 16
-$ mpirun -np 1 ./src/spa_mpi -k on g 1 -sf kk -in input.in
+    -DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON
+make -j$(nproc)
+mpirun -np 1 ./src/spa_mpi -k on g 1 -sf kk -in input.deck
 ```
 
-Adjust `Kokkos_ARCH_*` for your GPU: `AMPERE80` (A100), `HOPPER90` (H100),
-`VOLTA70` (V100), `PASCAL60` (P100). On Perlmutter (NERSC), load `cray-hdf5`
-and set `-DHDF5_ROOT=$CRAY_HDF5_PREFIX`.
+Set `Kokkos_ARCH_*` to your GPU (`AMPERE80`, `HOPPER90`, `VOLTA70`,
+`PASCAL60`).
 
-**Kokkos flags:**
-- `-k on g 1` — use 1 GPU per MPI rank
-- `-sf kk` — auto-select Kokkos-accelerated styles
-- `-k on t 4` — use 4 OpenMP threads (CPU-only Kokkos, no GPU)
+### Requirements
 
+- CMake >= 3.18, C++17 compiler (GCC, Clang, ICC)
+- HDF5 with C++ bindings (`+MPI` for distributed runs)
+- MPI (OpenMPI or MPICH)
 
-## Test Data
+## Documentation
 
-Some test cases in `examples/` require large binary input files (plasma fields,
-B-field, equilibrium, geometry) that are not stored in the git repository.
-Download them with:
+Per-feature reference docs live under [`docs/`](docs/) — fixes, computes,
+converters, performance, migration guides. Start at
+[`docs/index.md`](docs/index.md).
 
-```bash
-./download_data.sh                      # download all test data (~115 MB)
-./download_data.sh test_west_3d         # download data for one test
-./download_data.sh --list               # list available datasets
-```
+## Examples
+
+Validated test cases under [`examples/`](examples/):
+
+- `test_west_axi` — WEST axisymmetric W transport (PMI-driven, SOLEDGE3X
+  3 MW background).
+- `test_solps_coupling` — SOLPS-ITER <-> OpenEdge Li droplet coupling.
+- `test_diii_d_neutrals` — neutral-transport benchmark on a DIII-D plasma
+  background.
+- `test_iead` — sheath ion energy/angle distribution validation.
+- `test_gca`, `test_droplet`, `test_collide`, ... — algorithmic
+  verification.
+
+In-progress benchmarks under [`examples/wip/`](examples/wip/).
 
 ## License
-OpenEdge is licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html) (GPL-3.0).
-This means the code is open source — you are free to use, modify, and distribute it,
-provided that any derivative work is also released under the same GPL-3.0 license.
 
-OpenEdge builds on [SPARTA](https://github.com/sparta/sparta), which is itself GPL-3.0,
-so OpenEdge inherits the same license terms. Original SPARTA copyright notices are
-preserved in file headers. See [LICENSE](LICENSE) for full details.
+[GPL-3.0](LICENSE), inherited from SPARTA. See [LICENSE](LICENSE) for
+details.
