@@ -483,6 +483,8 @@ void ComputeSurfacePhysicalSputter::load_plasma_from_fix(const FixBackground *pd
   mesh_vtx_z = pd->mesh_vtx_z;
   mesh_tri = pd->mesh_tri;
   mesh_cell_idx = pd->mesh_cell_idx;
+  mesh_wall_surf_cell = pd->mesh_wall_surf_cell;
+  has_mesh_wall_surf_cell = pd->has_mesh_wall_surf_cell;
   mesh_ne = pd->mesh_ne;
   mesh_te = pd->mesh_te;
   mesh_ti = pd->mesh_ti;
@@ -1407,14 +1409,32 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
     int mesh_cell = -1;
     int tri_idx = -1;
     if (has_mesh) {
+      // Always locate the triangle containing (or nearest to) the wall
+      // centroid; we need it for per-triangle B-field interpolation
+      // regardless of which path supplies the plasma cell.
       tri_idx = find_mesh_triangle(r, z);
-      // Wall centroids typically fall in the vacuum gap between the B2.5
-      // domain and the physical wall.  Fall back to nearest mapped triangle
-      // within 5 cm (covers typical SOLPS Eirene vacuum layer thickness).
       if (tri_idx < 0 || mesh_cell_idx[tri_idx] < 0)
         tri_idx = find_nearest_mapped_triangle(r, z, 0.05);
-      if (tri_idx >= 0) mesh_cell = mesh_cell_idx[tri_idx];
-      else continue;  // genuinely outside SOLPS domain — zero flux
+
+      // Plasma cell: prefer the converter-supplied wall_surf_cell map,
+      // which identifies the SOLPS cell *adjacent* to each wall segment
+      // (matching what SOLPS calls the target volume cell). Falls back
+      // to the triangle's own cell_index when wall_surf_cell isn't
+      // available, or for non-wall surfaces.
+      if (has_mesh_wall_surf_cell) {
+        const int sid = (dimension == 2)
+          ? static_cast<int>(lines[m].id)
+          : static_cast<int>(tris[m].id);
+        const int wid = sid - 1;        // wall_surf_cell is 0-based by line idx
+        if (wid >= 0 && wid < static_cast<int>(mesh_wall_surf_cell.size())) {
+          const int wcell = mesh_wall_surf_cell[wid];
+          if (wcell >= 0) mesh_cell = wcell;
+        }
+      }
+      if (mesh_cell < 0) {
+        if (tri_idx >= 0) mesh_cell = mesh_cell_idx[tri_idx];
+        else continue;  // genuinely outside SOLPS domain — zero flux
+      }
     }
 
     // B-field at surface centroid (cylindrical components). Prefer the

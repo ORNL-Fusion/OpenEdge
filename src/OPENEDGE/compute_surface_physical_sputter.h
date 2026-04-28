@@ -147,6 +147,14 @@ class ComputeSurfacePhysicalSputter : public Compute {
   std::vector<double> mesh_vtx_r, mesh_vtx_z;
   std::vector<int> mesh_tri;        // (ntri*3) vertex indices
   std::vector<int> mesh_cell_idx;   // (ntri) cell index per triangle
+  // mesh/wall_surf_cell[isurf-1] = SOLPS cell index adjacent to wall.surf
+  // line `isurf`. When loaded by the converter (and present in plasma.h5),
+  // the per-segment plasma sampling uses these directly instead of the
+  // nearest-triangle fallback. Avoids the few-mm extrapolation gap that
+  // turned out to dominate the OE-vs-SOLPS sputter difference at near
+  // grazing incidence.
+  std::vector<int> mesh_wall_surf_cell;
+  int has_mesh_wall_surf_cell = 0;
   std::vector<double> mesh_ne, mesh_te, mesh_ti, mesh_ni, mesh_upar;
   int mesh_nion;
   std::vector<double> mesh_ions_dens, mesh_ions_temp, mesh_ions_upar;
