@@ -43,12 +43,12 @@ class ComputeSurfaceChemicalAdatom : public Compute {
   int tsurf_index;          // surf-custom index for Tsurf
   char *tsurf_name;
 
-  // D+ flux source: compute or fix per-surf vector/array
-  enum { SRC_NONE, SRC_COMPUTE, SRC_FIX };
+  // D+ flux source: compute, fix, or per-surf custom attribute
+  enum { SRC_NONE, SRC_COMPUTE, SRC_FIX, SRC_CUSTOM };
   int dp_kind;
   char *dp_id;
-  int dp_col;               // 1-based column for array sources, 0 for vector
-  int dp_index;             // resolved compute/fix index
+  int dp_col;               // 1-based column for array sources, 0 for vector/custom
+  int dp_index;             // resolved compute/fix index, or surf-custom index
 
   // adatom physics coefficients
   double Yad_D_Li;

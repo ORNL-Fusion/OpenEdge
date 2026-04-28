@@ -20,7 +20,9 @@
 #define LIQUID_METAL_STRIP_H
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace LiquidMetal {
@@ -248,6 +250,21 @@ struct Strip {
   // evaporation toggle
   int evap_on;
 
+  // divergence diagnostics — set by solve_steady() if numerical guards trip.
+  // Callers (SPARTA fix or standalone driver) should inspect both fields
+  // and abort or fall back rather than trust output silently.
+  bool diverged;                   // true if any guard tripped
+  std::string diverged_reason;     // human-readable message
+  double Tdim_max_seen;            // peak |T_dimless| reached during the run
+  int    Qs_clamped_count;         // # of times Qs hit the evap-cooling clamp
+
+  // Thresholds for the runtime guards (override before solve_steady()).
+  // Defaults are calibrated so the validated ITER-scale baseline runs
+  // clean and the thin-film/slow-flow runaway gets caught.
+  double Tdim_diverge;             // |T_dimless| above this -> diverged (default 50)
+  double Qs_clamp_factor;          // |Qs| capped at this * |Qs0| (default 5)
+  int    diverge_check_every;      // check every N pseudo-time iters (default 25)
+
   // inline 2D indexing
   inline int idx(int n, int m) const { return n * (Ny + 1) + m; }
 
@@ -304,6 +321,31 @@ struct Strip {
     evap_flux.assign(sz1, 0.0);
     Q_net.assign(sz1, 0.0);
     h_dim.assign(sz1, h0);
+
+    // reset diagnostics
+    diverged = false;
+    diverged_reason.clear();
+    Tdim_max_seen = 0.0;
+    Qs_clamped_count = 0;
+
+    // Validated baseline (Smolentsev ITER-scale) lives at:
+    //   Re ~ 5e4, Ha_s ~ 4e5, Pr ~ 0.035, Xl/Nx-spacing modest.
+    // Warn if we're far from that envelope. These are SOFT warnings —
+    // the run continues, but the user has been told.
+    if (Re < 1.0e3)
+      std::fprintf(stderr,
+        "[liquid_metal_strip] WARN: Re = %.2e is well below the "
+        "validated range (~1e4-1e5). Convective sink for surface "
+        "heating will be weak; expect slow convergence or runaway.\n", Re);
+    if (Ha_s < 5.0e4)
+      std::fprintf(stderr,
+        "[liquid_metal_strip] WARN: Ha_s = %.2e is below the validated "
+        "range (~1e5-1e6). MHD drag may not bound U; expect divergence "
+        "if Re is also small. Consider increasing Bs or width.\n", Ha_s);
+    if (Pr < 1.0e-3 || Pr > 1.0e2)
+      std::fprintf(stderr,
+        "[liquid_metal_strip] WARN: Pr = %.2e is outside the liquid-"
+        "metal physical range (~1e-3 .. 1e1).\n", Pr);
   }
 
   // ------------------------------------------------------------------
@@ -319,6 +361,13 @@ struct Strip {
     double Xlength = Xout - Xin;
     Xl = Xlength / h0;
     hx = Xl / (Nx - 1);
+
+    if (Xl > 300.0)
+      std::fprintf(stderr,
+        "[liquid_metal_strip] WARN: Xl = L/h0 = %.1f is well above the "
+        "validated range (~50-200). The marching x-solve may not have "
+        "enough pseudo-time to convect heat downstream; consider thicker "
+        "h0 or truncating to the wetted target region.\n", Xl);
 
     // temperature scale
     Tscale = qss * h0 / li.k_th;
@@ -517,17 +566,56 @@ struct Strip {
       Ho = Hn;
       T1 = T2;
 
-      // update surface heat flux with evaporative cooling
+      // update surface heat flux with evaporative cooling.
+      // Clamp |Qs| against |Qs0| * Qs_clamp_factor so a single overshoot
+      // in T cannot drive Qs hugely negative and oscillate the next sweep.
       if (evap_on) {
+        const double clamp = Qs_clamp_factor;
         for (int n = 1; n <= Nx; n++) {
           double TMPRDIM = Tin + T2[idx(n, Ny)] * Tscale;
           double EFN = li_evap_flux(TMPRDIM);
+          double q_new;
           if (EFN > 0.0) {
             double Qvapor = li_evap_cooling(EFN, li.H_vap);
-            Qs[n] = Qs0[n] - Qvapor / qss;
+            q_new = Qs0[n] - Qvapor / qss;
           } else {
-            Qs[n] = Qs0[n];
+            q_new = Qs0[n];
           }
+          double q_bound = clamp * std::fabs(Qs0[n]);
+          if (q_new >  q_bound) { q_new =  q_bound; ++Qs_clamped_count; }
+          if (q_new < -q_bound) { q_new = -q_bound; ++Qs_clamped_count; }
+          Qs[n] = q_new;
+        }
+      }
+
+      // runtime divergence guard: every diverge_check_every iterations,
+      // scan T2 for NaN or runaway. Sets diverged + reason and breaks.
+      if (k % diverge_check_every == 0) {
+        double Tmax_iter = 0.0;
+        bool nanseen = false;
+        for (int n = 1; n <= Nx && !nanseen; n++) {
+          for (int m = 1; m <= Ny && !nanseen; m++) {
+            double v = T2[idx(n, m)];
+            if (!std::isfinite(v)) { nanseen = true; break; }
+            double a = std::fabs(v);
+            if (a > Tmax_iter) Tmax_iter = a;
+          }
+        }
+        if (Tmax_iter > Tdim_max_seen) Tdim_max_seen = Tmax_iter;
+        if (nanseen) {
+          diverged = true;
+          diverged_reason = "non-finite T encountered (NaN or Inf)";
+          break;
+        }
+        if (Tmax_iter > Tdim_diverge) {
+          diverged = true;
+          char buf[256];
+          std::snprintf(buf, sizeof(buf),
+            "max |T_dimless| = %.2e > Tdim_diverge = %.2e (~%.0f K dim) "
+            "at pseudo-time iter %d; check Re, Ha_s, Xl",
+            Tmax_iter, Tdim_diverge, Tmax_iter * Tscale, k);
+          diverged_reason = buf;
+          break;
         }
       }
 
@@ -556,7 +644,9 @@ struct Strip {
     sigma_w(0.0), tw(25e-6),
     qss(1.0e6),
     dt_pseudo(0.5), max_iter(3000), eps_conv(5e-8),
-    relax(1.0), ncase(1), evap_on(1) {}
+    relax(1.0), ncase(1), evap_on(1),
+    diverged(false), Tdim_max_seen(0.0), Qs_clamped_count(0),
+    Tdim_diverge(50.0), Qs_clamp_factor(5.0), diverge_check_every(25) {}
 };
 
 }  // namespace LiquidMetal

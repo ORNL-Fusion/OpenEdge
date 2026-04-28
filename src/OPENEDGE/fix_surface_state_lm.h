@@ -34,6 +34,7 @@ FixStyle(surface/state/lm,FixSurfaceStateLm)
 namespace SPARTA_NS {
 
 class ComputePlasmaFields;
+class FixBackground;
 
 class FixSurfaceStateLm : public Fix {
  public:
@@ -61,23 +62,50 @@ class FixSurfaceStateLm : public Fix {
   char *id_plasma;
   double hf_scale;      // heat flux multiplier (default 1.0)
 
+  // fix background pointer for BACKGROUND mode (reads mesh/q_par,q_perp
+  // from plasma.h5 via fix background's public interp2D).
+  FixBackground *fbg;
+  char *id_background;
+
   // target HDF5 file mode (TARGET)
   char *target_file;    // path to target_heatflux.h5
   char *target_leg;     // "outer" or "inner"
-  std::vector<double> tgt_s;       // arc length [m]
+  std::vector<double> tgt_s;       // arc length [m] (shifted so [0]=0)
   std::vector<double> tgt_q;       // heat flux [W/m²]
   std::vector<double> tgt_gamma;   // D+ flux [m⁻²s⁻¹]
+  std::vector<double> tgt_R;       // R [m] at each tgt_s (Rclfc)
+  std::vector<double> tgt_Z;       // Z [m] at each tgt_s (Zclfc)
   void load_target_heatflux();
+
+  // SOLPS b2pl postprocessor text-file mode (SOLPS_B2PL).
+  // Currently consumes ld_tg_*.dat (target loading along arc length); a
+  // future extension can autodetect wlld.dat. Fills tgt_s/tgt_q/tgt_gamma
+  // (same internal storage as TARGET) so the heat-flux interpolation reuses
+  // the existing path.
+  char *solps_b2pl_path;            // path to ld_tg_*.dat
+  double solps_m_ion_amu;           // ion mass for Bohm flux (default 2.014)
+  void load_solps_b2pl();
+
+  // static-mode: run the strip once during init() and freeze. Useful when
+  // the heat-flux source does not evolve (e.g. solps_b2pl, target HDF5).
+  // end_of_step() returns early once frozen_=1.
+  int static_mode;
+  int frozen_;
+  void run_strip_and_write();       // factored from end_of_step()
 
   // Per-surf custom attribute indices for the fix's outputs.
   // Tsurf and h_film are the model's state. Evaporation and adatom
   // fluxes are now produced by `compute surface/chemical/evaporation`
   // and `compute surface/chemical/adatom` from these state values.
+  // Gamma_D_lm carries the D+ Bohm flux when the heat-flux source
+  // provides it (SOLPS_B2PL); zero otherwise.
   int tindex;           // Tsurf [C]
   int hindex;           // film thickness [m]
+  int gindex;           // Gamma_D [m^-2 s^-1]
 
   char *id_custom_t;
   char *id_custom_h;
+  char *id_custom_g;
 
   // the strip solver
   LiquidMetal::Strip strip;

@@ -67,12 +67,17 @@ ComputeSurfaceChemicalAdatom::ComputeSurfaceChemicalAdatom(
       const char *tok = arg[iarg+1];
       if (strncmp(tok, "c_", 2) == 0)      dp_kind = SRC_COMPUTE;
       else if (strncmp(tok, "f_", 2) == 0) dp_kind = SRC_FIX;
+      else if (strncmp(tok, "s_", 2) == 0) dp_kind = SRC_CUSTOM;
       else error->all(FLERR,
-        "compute surface/chemical/adatom: dp_flux must be c_<id>[col] or f_<id>[col]");
+        "compute surface/chemical/adatom: dp_flux must be c_<id>[col], "
+        "f_<id>[col], or s_<custom-name>");
       const char *body = tok + 2;
       const char *lb = strchr(body, '[');
       int idlen;
       if (lb) {
+        if (dp_kind == SRC_CUSTOM)
+          error->all(FLERR,
+            "compute surface/chemical/adatom: s_<custom> takes no [col]");
         if (tok[strlen(tok)-1] != ']')
           error->all(FLERR, "compute surface/chemical/adatom: bad dp_flux token");
         idlen = lb - body;
@@ -143,12 +148,21 @@ void ComputeSurfaceChemicalAdatom::init()
       error->all(FLERR, "compute surface/chemical/adatom: dp_flux compute ID not found");
     if (!modify->compute[dp_index]->per_surf_flag)
       error->all(FLERR, "compute surface/chemical/adatom: dp_flux compute is not per-surf");
-  } else {
+  } else if (dp_kind == SRC_FIX) {
     dp_index = modify->find_fix(dp_id);
     if (dp_index < 0)
       error->all(FLERR, "compute surface/chemical/adatom: dp_flux fix ID not found");
     if (!modify->fix[dp_index]->per_surf_flag)
       error->all(FLERR, "compute surface/chemical/adatom: dp_flux fix is not per-surf");
+  } else { // SRC_CUSTOM
+    dp_index = surf->find_custom(dp_id);
+    if (dp_index < 0) {
+      char msg[256];
+      snprintf(msg, sizeof(msg),
+        "compute surface/chemical/adatom: surf custom '%s' not found "
+        "(produced e.g. by fix surface/state/lm in solps_b2pl mode)", dp_id);
+      error->all(FLERR, msg);
+    }
   }
 
   reallocate();
@@ -173,7 +187,7 @@ void ComputeSurfaceChemicalAdatom::compute_per_surf()
   invoked_per_surf = update->ntimestep;
   reallocate();
 
-  // Pull dp_flux per-surf from the bound compute or fix.
+  // Pull dp_flux per-surf from the bound compute, fix, or surf custom.
   double *dp_vec = nullptr;
   double **dp_arr = nullptr;
   if (dp_kind == SRC_COMPUTE) {
@@ -184,10 +198,12 @@ void ComputeSurfaceChemicalAdatom::compute_per_surf()
     }
     if (dp_col == 0) dp_vec = c->vector_surf;
     else             dp_arr = c->array_surf;
-  } else {
+  } else if (dp_kind == SRC_FIX) {
     Fix *f = modify->fix[dp_index];
     if (dp_col == 0) dp_vec = f->vector_surf;
     else             dp_arr = f->array_surf;
+  } else { // SRC_CUSTOM
+    dp_vec = surf->edvec[surf->ewhich[dp_index]];
   }
 
   const int dim = domain->dimension;
