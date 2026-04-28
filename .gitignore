@@ -101,3 +101,6 @@ src/OPENEDGE/wip/
 
 # Stray nested WarpX clones (use ~/WarpX/ instead)
 examples/test_iead/WarpX/
+
+# Local Claude Code memory / context file (kept untracked)
+CLAUDE.md
