@@ -69,21 +69,6 @@ Per-feature reference docs live under [`docs/`](docs/) — fixes, computes,
 converters, performance, migration guides. Start at
 [`docs/index.md`](docs/index.md).
 
-## Examples
-
-Validated test cases under [`examples/`](examples/):
-
-- `test_west_axi` — WEST axisymmetric W transport (PMI-driven, SOLEDGE3X
-  3 MW background).
-- `test_solps_coupling` — SOLPS-ITER <-> OpenEdge Li droplet coupling.
-- `test_diii_d_neutrals` — neutral-transport benchmark on a DIII-D plasma
-  background.
-- `test_iead` — sheath ion energy/angle distribution validation.
-- `test_gca`, `test_droplet`, `test_collide`, ... — algorithmic
-  verification.
-
-In-progress benchmarks under [`examples/wip/`](examples/wip/).
-
 ## License
 
 [GPL-3.0](LICENSE), inherited from SPARTA. See [LICENSE](LICENSE) for
