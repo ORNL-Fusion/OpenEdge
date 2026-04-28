@@ -14,12 +14,16 @@ and plasma-wall.
 
 ## Build
 
+CPU build (MPI):
+
 ```bash
 git clone https://github.com/ORNL-Fusion/OpenEdge.git
 mkdir buildOpenEdge && cd buildOpenEdge
 cmake -C ../OpenEdge/cmake/presets/mpi.cmake ../OpenEdge/cmake -DPKG_OPENEDGE=ON
 make -j$(nproc)
 ```
+
+Produces `./src/spa_mpi`.
 
 GPU build (Kokkos + CUDA):
 
@@ -29,11 +33,29 @@ cmake -C ../OpenEdge/cmake/presets/kokkos_cuda.cmake ../OpenEdge/cmake \
     -DPKG_OPENEDGE=ON -DPKG_KOKKOS=ON \
     -DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON
 make -j$(nproc)
-mpirun -np 1 ./src/spa_mpi -k on g 1 -sf kk -in input.deck
 ```
 
 Set `Kokkos_ARCH_*` to your GPU (`AMPERE80`, `HOPPER90`, `VOLTA70`,
 `PASCAL60`).
+
+## Run a case
+
+CPU (MPI):
+
+```bash
+cd OpenEdge/examples/test_west_axi
+mpirun -np 8 ../../../buildOpenEdge/src/spa_mpi -in in.west
+```
+
+GPU (Kokkos + CUDA, one rank per GPU):
+
+```bash
+mpirun -np 1 ../../../buildOpenEdge_gpu/src/spa_mpi \
+    -k on g 1 -sf kk -in in.west
+```
+
+Outputs (log, dumps, surface tallies) land in the case directory. See
+each `examples/*/README.md` for case-specific post-processing.
 
 ### Requirements
 
