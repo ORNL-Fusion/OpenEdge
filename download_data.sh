@@ -13,7 +13,7 @@
 set -euo pipefail
 trap 'rm -f /tmp/openedge-testdata-*.tar.gz' EXIT
 
-REPO="diawabdou/OpenEdge"
+REPO="ORNL-Fusion/OpenEdge"
 VERSION="latest"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
