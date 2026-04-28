@@ -12,12 +12,14 @@ ComputeStyle(surface/physical/sputter,ComputeSurfacePhysicalSputter)
 #define SPARTA_COMPUTE_SURFACE_PHYSICAL_SPUTTER_H
 
 #include "compute.h"
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace SPARTA_NS {
 
 class FixBackground;
+struct IeadTable;
 
 class ComputeSurfacePhysicalSputter : public Compute {
  public:
@@ -88,6 +90,25 @@ class ComputeSurfacePhysicalSputter : public Compute {
   std::vector<double> per_proj_Es, per_proj_Eth, per_proj_Q, per_proj_ETF;
 
   void resolve_projectile_tables(const FixBackground *pd);
+
+  // IEAD lookup — when active, replaces Y(<E>, <theta>) with the
+  // distribution-weighted < Y > = sum_{Et,theta} Y(Et*Z*Te, theta) f(...).
+  // `iead_arg` is the user token from the input deck:
+  //   "auto"       -> resolve via database_paths::resolve_iead_file()
+  //   "<path.h5>"  -> explicit file (single light table)
+  //   ""           -> off (mean-impact path, default)
+  // Two tables can be loaded simultaneously when `iead auto` and the
+  // projectiles list mixes W with lighter elements: the light table
+  // handles Z=1..10 elements up to Ne via D-scaling, and the W-specific
+  // table (m_proj=184 amu, Z=1..20) handles tungsten. iead_per_proj maps
+  // each projectile element index to the appropriate table (or null when
+  // no IEAD lookup applies to that element).
+  std::string iead_arg;
+  std::unique_ptr<IeadTable> iead_light;
+  std::unique_ptr<IeadTable> iead_W;
+  std::vector<IeadTable *> iead_per_proj;   // ptrs into iead_light/iead_W
+  void load_iead_if_requested();
+  IeadTable *iead_for_slot(int s) const;
 
   // Virtual background impurity (not in plasma.h5)
   // Usage: impurity mass_amu frac Zmax f1 f2 ... fZmax

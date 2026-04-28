@@ -111,4 +111,12 @@ std::string resolve_processes_file()
   return file_exists(p) ? p : std::string();
 }
 
+std::string resolve_iead_file(const std::string &tag)
+{
+  std::string filename = "iead_database.h5";
+  if (tag == "W") filename = "iead_database_W.h5";
+  std::string p = openedge_database_dir() + "/iead/" + filename;
+  return file_exists(p) ? p : std::string();
+}
+
 }

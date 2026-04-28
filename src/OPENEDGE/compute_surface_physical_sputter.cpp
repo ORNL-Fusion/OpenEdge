@@ -16,6 +16,8 @@
 #include "openedge_geom.h"
 #include "eckstein_sputter_data.h"
 #include "eckstein_sputter.h"
+#include "iead_table.h"
+#include "database_paths.h"
 
 #include <H5Cpp.h>
 #include <algorithm>
@@ -80,6 +82,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
         "sputter_flux_total", "sputter_rate_total",
         "erosion_flux", "erosion_rate",
         "bfield", "equilibrium", "background", "boundary", "impurity",
+        "iead",
         "debug_interp",
         nullptr};
     for (int i = 0; kws[i]; i++) if (strcmp(t, kws[i]) == 0) return true;
@@ -296,6 +299,11 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
         error->all(FLERR,"impurity charge fractions should sum to ~1.0");
       has_impurity = 1;
       iarg += 4 + imp_Zmax;
+    } else if (strcmp(arg[iarg],"iead") == 0) {
+      if (iarg+1 >= narg)
+        error->all(FLERR,"iead needs auto|<path.h5>|none");
+      iead_arg = std::string(arg[iarg+1]);
+      iarg += 2;
     } else if (strcmp(arg[iarg],"debug_interp") == 0) {
       if (iarg+2 >= narg) error->all(FLERR,"debug_interp needs E(eV) angle(deg)");
       debug_interp = 1;
@@ -607,6 +615,115 @@ void ComputeSurfacePhysicalSputter::resolve_projectile_tables(const FixBackgroun
               (i + 1 < N) ? "," : "");
     fprintf(screen, "  (slots %d..%d mapped)\n", lo, hi);
   }
+}
+
+// Helper: load a single IeadTable from disk and announce it on rank 0.
+// Returns the loaded table or null on resolve-miss; throws on malformed.
+static std::unique_ptr<IeadTable>
+load_iead_table_announce(const std::string &path, const char *tag,
+                         FILE *screen, FILE *logfile)
+{
+  if (path.empty()) return nullptr;
+  auto tbl = std::unique_ptr<IeadTable>(new IeadTable);
+  tbl->load(path);
+  char buf[512];
+  snprintf(buf, sizeof(buf),
+           "IEAD lookup loaded (%s): %s  axes (n_tau,n_psi,n_Z,n_E,n_theta) = "
+           "(%d,%d,%d,%d,%d)  Te_sweep=%.1f eV\n",
+           tag, path.c_str(), tbl->n_tau, tbl->n_psi,
+           tbl->n_Z, tbl->n_E, tbl->n_theta, tbl->Te_eV_sweep);
+  if (screen)  fputs(buf, screen);
+  if (logfile) fputs(buf, logfile);
+  return tbl;
+}
+
+void ComputeSurfacePhysicalSputter::load_iead_if_requested()
+{
+  iead_light.reset();
+  iead_W.reset();
+  iead_per_proj.clear();
+
+  if (iead_arg.empty() || iead_arg == "none") return;
+
+  // Decide which tables we need based on projectile_elements (filled by
+  // resolve_projectile_tables for the api_new path) or fall back to a
+  // single light table for the legacy single-projectile API.
+  const int npj = static_cast<int>(projectile_elements.size());
+  bool need_light = (npj == 0);   // legacy path: always need the light table
+  bool need_W     = false;
+  for (int ti = 0; ti < npj; ++ti) {
+    if (projectile_elements[ti] == "W") need_W = true;
+    else                                 need_light = true;
+  }
+
+  // Resolve paths.
+  // - "auto" -> database_paths::resolve_iead_file with light/W tag.
+  // - explicit path -> treated as the light table (W must be auto-resolved).
+  std::string light_path, W_path;
+  if (iead_arg == "auto") {
+    if (need_light) light_path = resolve_iead_file("light");
+    if (need_W)     W_path     = resolve_iead_file("W");
+  } else {
+    light_path = iead_arg;
+    // No way to specify a W table explicitly via this single-arg form;
+    // users mixing W projectiles with a custom light path should switch
+    // to iead auto + standard install paths.
+  }
+
+  if (need_light && light_path.empty()) {
+    if (comm->me == 0)
+      error->warning(FLERR,
+          "compute surface/physical/sputter: iead requested but light "
+          "iead_database.h5 not found; lighter projectiles will fall "
+          "back to mean-impact yield Y(<E>,<theta>)");
+  }
+  if (need_W && W_path.empty()) {
+    if (comm->me == 0)
+      error->warning(FLERR,
+          "compute surface/physical/sputter: iead auto requested with W "
+          "projectile but iead_database_W.h5 not found; W will use the "
+          "light D-scaled table (angular distribution biased; energy OK)");
+  }
+
+  try {
+    if (!light_path.empty())
+      iead_light = load_iead_table_announce(light_path, "light",
+                                            screen, logfile);
+    if (!W_path.empty())
+      iead_W = load_iead_table_announce(W_path, "W", screen, logfile);
+  } catch (const std::exception &e) {
+    std::string msg =
+        std::string("compute surface/physical/sputter: failed loading IEAD "
+                    "table: ") + e.what();
+    error->all(FLERR, msg.c_str());
+  }
+
+  // Build per-projectile dispatch table.
+  iead_per_proj.assign(static_cast<size_t>(std::max(1, npj)), nullptr);
+  if (npj == 0) {
+    iead_per_proj[0] = iead_light.get();   // legacy single-table path
+  } else {
+    for (int ti = 0; ti < npj; ++ti) {
+      if (projectile_elements[ti] == "W")
+        iead_per_proj[ti] = iead_W ? iead_W.get() : iead_light.get();
+      else
+        iead_per_proj[ti] = iead_light.get();
+    }
+  }
+}
+
+IeadTable *ComputeSurfacePhysicalSputter::iead_for_slot(int s) const
+{
+  // api_new path: route by slot_to_table[s] -> projectile element index
+  if (api_new && s >= 0 && s < static_cast<int>(slot_to_table.size())) {
+    const int ti = slot_to_table[s];
+    if (ti >= 0 && ti < static_cast<int>(iead_per_proj.size()))
+      return iead_per_proj[ti];
+    return nullptr;
+  }
+  // Legacy single-table path
+  if (!iead_per_proj.empty()) return iead_per_proj[0];
+  return nullptr;
 }
 
 void ComputeSurfacePhysicalSputter::load_plasma()
@@ -1042,6 +1159,7 @@ void ComputeSurfacePhysicalSputter::init()
 
   load_boundary();
   if (background_fix_id.empty()) load_mesh();
+  load_iead_if_requested();
 
   if (debug_interp && !eckstein_mode && comm->me == 0) {
     auto interp_yield_raw = [&](double e_eV, double a_deg)->double {
@@ -1402,6 +1520,16 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
 
       if (in_projectile_slots(s+1)) {
         double ys = 0.0;
+        // Decide whether the IEAD distribution-weighted yield is
+        // applicable for this projectile slot (falls through to the
+        // mean-impact path otherwise — Z outside grid, table absent,
+        // or no table for this projectile element).
+        IeadTable *tbl = iead_for_slot(s);
+        const bool use_iead = tbl &&
+            tbl->find_z_slot(z_inc) >= 0 && te_eV > 0.0;
+        const double tau_local = ti_eV / std::max(te_eV, 1.0e-30);
+        const double psi_local = theta_deg;   // angle from wall normal
+
         if (api_new && s < static_cast<int>(slot_to_table.size()) &&
             slot_to_table[s] >= 0) {
           // Per-slot Eckstein: pick coefficients by the projectile element
@@ -1413,9 +1541,25 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
           p.Z2 = per_proj_Z2[ti];  p.M2 = per_proj_M2[ti];
           p.Es = per_proj_Es[ti];  p.Eth = per_proj_Eth[ti];
           p.Q  = per_proj_Q[ti];   p.ETF = per_proj_ETF[ti];
-          ys = Eckstein::sputter_yield(E, theta_deg, p);
+          if (use_iead) {
+            ys = tbl->convolve_yield(
+                tau_local, psi_local, z_inc, te_eV,
+                [&](double e_eV, double th_deg) {
+                  return Eckstein::sputter_yield(e_eV, th_deg, p);
+                });
+          } else {
+            ys = Eckstein::sputter_yield(E, theta_deg, p);
+          }
         } else {
-          ys = yield_lookup(E, theta_deg);
+          if (use_iead) {
+            ys = tbl->convolve_yield(
+                tau_local, psi_local, z_inc, te_eV,
+                [&](double e_eV, double th_deg) {
+                  return yield_lookup(e_eV, th_deg);
+                });
+          } else {
+            ys = yield_lookup(E, theta_deg);
+          }
         }
         yld[s] = ys;
         sput_flux[s] = g * ys;

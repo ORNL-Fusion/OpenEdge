@@ -42,6 +42,14 @@ std::string resolve_reactions_file(const std::string &element_or_path,
 // per-element files when processes.h5 is not shipped.
 std::string resolve_processes_file();
 
+// Resolve the IEAD lookup table for a given projectile-mass class.
+// `tag = "light"` resolves database/iead/iead_database.h5 (the
+// D-scaled table covering Z=1..10 elements up to Ne). `tag = "W"`
+// resolves database/iead/iead_database_W.h5 (separate W table).
+// Returns absolute path if present, empty string otherwise. Non-fatal:
+// consumers may fall back to mean-impact yield when missing.
+std::string resolve_iead_file(const std::string &tag = "light");
+
 }
 
 #endif
