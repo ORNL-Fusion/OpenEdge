@@ -72,6 +72,8 @@ action compute_plasma_fields.cpp
 action compute_plasma_fields.h
 action compute_surface_physical_sputter.cpp
 action compute_surface_physical_sputter.h
+action iead_table.cpp
+action iead_table.h
 action compute_nearest_surf_grid.cpp
 action compute_nearest_surf_grid.h
 action fix_bfield_grid.cpp
