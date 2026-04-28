@@ -23,7 +23,11 @@ cd solps/v0_1
 if ($nprocs > 1) then
     setenv OMPI_FC /usr/bin/gfortran
     source $SOLPSTOP/SETUP/mpi
-    b2run -m "mpirun -np $nprocs" b2mn
+    # b2run's -m handler scans for embedded quote chars in the argv (it sed-strips
+    # `^"` and `"$`). Without backslash-escaping the script-context tcsh strips the
+    # quotes too aggressively, leading to a `shift: No more words.` error in the
+    # wrapper's mpiloop. The escaped form preserves the quotes inside argv.
+    b2run -m \"mpirun -np $nprocs\" b2mn
 else
     b2run b2mn
 endif

@@ -10,15 +10,13 @@
 
     "n_warmup_solps_steps": 0,
     "warmup_ntim": 2,
-    "mpi_np_warmup": 32,
+    "mpi_np_warmup": 8,
 
-    "n_coupling_steps": 20,
+    "n_coupling_steps": 1,
     "n_oe_steps": 1000,
-    "n_solps_steps": 100,
+    "n_solps_steps": 1,
     "dt_oe": 1e-5,
     "relaxation_alpha": 0.5,
     "mpi_np_openedge": 4,
-    "mpi_np_solps": 32,
-    "plasma_nr": 1000,
-    "plasma_nz": 500
+    "mpi_np_solps": 64
 }

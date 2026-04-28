@@ -46,6 +46,82 @@ eV = 1.602176634e-19
 
 
 # ======================================================================
+# Mesh-format plasma.h5 via tools/converters/convert_solps_plasma.py.
+# Replaces the legacy solps_interface.write_plasma_h5 (regular nr x nz grid,
+# no q_par / q_perp) with the canonical mesh schema (/equilibrium,
+# /ion_species, /mesh/...) that fix background expects.
+# ======================================================================
+
+def write_plasma_h5_via_converter(solps_run_dir, solps_base_dir, plasma_h5_path,
+                                  equ_file=None, b2fstate=None,
+                                  mesh_extra=None, verbose=False):
+    """Generate plasma.h5 (mesh format) by invoking convert_solps_plasma.py.
+
+    Args:
+        solps_run_dir: SOLPS case directory (contains b2fgmtry, b2fstati/state).
+        solps_base_dir: SOLPS baserun directory (.equ file lives here).
+        plasma_h5_path: output path for plasma.h5.
+        equ_file: explicit .equ path; if None, auto-find in solps_base_dir
+                  (preferring g*symm*.equ).
+        b2fstate: explicit b2fstate path; if None, prefer b2fstate in run_dir,
+                  fall back to b2fstati.
+        mesh_extra: optional path to mesh.extra (only needed if --wall-out).
+        verbose: print converter stdout on success (always printed on failure).
+    """
+    import subprocess
+    from pathlib import Path
+
+    converter = (Path(__file__).resolve().parent.parent
+                 / "converters" / "convert_solps_plasma.py")
+    if not converter.exists():
+        raise FileNotFoundError(f"converter not found at {converter}")
+
+    if equ_file is None:
+        cands = sorted(Path(solps_base_dir).glob("g*symm*.equ"))
+        if not cands:
+            cands = sorted(Path(solps_base_dir).glob("*.equ"))
+        if not cands:
+            raise FileNotFoundError(
+                f"no .equ file in {solps_base_dir} (set 'equ_file' in config)")
+        equ_file = cands[0]
+
+    if b2fstate is None:
+        run = Path(solps_run_dir)
+        if (run / "b2fstate").exists():
+            b2fstate = run / "b2fstate"
+        elif (run / "b2fstati").exists():
+            b2fstate = run / "b2fstati"
+
+    cmd = [
+        sys.executable, str(converter), str(solps_run_dir),
+        "--plasma-out", str(plasma_h5_path),
+        "--equ-file",   str(equ_file),
+    ]
+    if b2fstate is not None:
+        cmd += ["--b2fstate", str(b2fstate)]
+    if mesh_extra is not None:
+        cmd += ["--mesh-extra", str(mesh_extra)]
+
+    import time
+    t0 = time.time()
+    label = (f"[yellow]convert_solps_plasma -> "
+             f"{Path(plasma_h5_path).name}[/yellow]")
+    with console.status(label, spinner="dots"):
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    dt = time.time() - t0
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"convert_solps_plasma.py failed (rc={result.returncode}):\n"
+            f"--- stderr ---\n{result.stderr}\n"
+            f"--- stdout ---\n{result.stdout}")
+    console.print(f"  [green]wrote[/green] {plasma_h5_path} "
+                  f"[dim]({dt:.1f}s)[/dim]")
+    if verbose:
+        console.print(result.stdout.strip())
+    return result.stdout
+
+
+# ======================================================================
 # Error handling
 # ======================================================================
 
@@ -249,6 +325,18 @@ def read_particle_mass_loss(filepath, rho=534.0):
     if len(frames) < 2:
         return None, None, None, None
 
+    # Detect coordinate layout from BOX BOUNDS line in the first frame:
+    #   "ITEM: BOX BOUNDS oo ao pp"   -> axi   (x_slot = Z, y_slot = R)
+    #   "ITEM: BOX BOUNDS rr rr pp"   -> 2D Cart legacy (x_slot = R, y_slot = Z)
+    is_axi = False
+    for line in frames[0]:
+        s = line.strip()
+        if s.startswith('ITEM: BOX BOUNDS'):
+            tokens = s.split()[3:]
+            if len(tokens) >= 2 and 'a' in tokens[1]:
+                is_axi = True
+            break
+
     def parse_frame(frame_lines):
         """Parse a single frame into {id: (x, y, radius)} dict."""
         col_map = None
@@ -291,6 +379,11 @@ def read_particle_mass_loss(filepath, rho=534.0):
     if not first:
         return None, None, None, None
 
+    # Slot order for the SPARTA dump: axi -> (x=Z, y=R), 2D Cart -> (x=R, y=Z).
+    # The downstream KD-tree (map_source_to_solps) expects (R, Z), so swap when axi.
+    def to_RZ(x, y):
+        return (y, x) if is_axi else (x, y)
+
     R_list, Z_list, dm_list = [], [], []
     for pid, (x0, y0, r0) in first.items():
         m0 = radius_to_mass(r0)
@@ -300,12 +393,14 @@ def read_particle_mass_loss(filepath, rho=534.0):
             x1, y1, r1 = last[pid]
             m1 = radius_to_mass(r1)
             dm = m0 - m1
-            R_list.append(0.5 * (x0 + x1))
-            Z_list.append(0.5 * (y0 + y1))
+            R_avg, Z_avg = to_RZ(0.5 * (x0 + x1), 0.5 * (y0 + y1))
+            R_list.append(R_avg)
+            Z_list.append(Z_avg)
         else:
             dm = m0
-            R_list.append(x0)
-            Z_list.append(y0)
+            R0, Z0 = to_RZ(x0, y0)
+            R_list.append(R0)
+            Z_list.append(Z0)
         if dm > 0:
             dm_list.append(dm)
         else:
@@ -650,16 +745,34 @@ def run_coupling(config):
     bfield_h5_path   = config.get('bfield_h5', '')
     solps_run_script = config.get('solps_run_script', '')
     coupled_dir      = config.get('coupled_dir', '')
-    plasma_nr        = config.get('plasma_nr', 200)
-    plasma_nz        = config.get('plasma_nz', 400)
+    equ_file         = config.get('equ_file', None)  # auto-find in baserun if None
 
-    # Initialize SOLPS interface
+    # Initialize SOLPS interface (used for source mapping; plasma.h5 itself
+    # is now written via the canonical convert_solps_plasma.py converter).
     solps = SolpsInterface(solps_run_dir, solps_base_dir)
     solps.load_geometry()
     solps.load_plasma_state()
 
-    # Write initial plasma.h5 from SOLPS state
-    solps.write_plasma_h5(plasma_h5_path, nr=plasma_nr, nz=plasma_nz)
+    # Write initial plasma.h5 (mesh format) via convert_solps_plasma.py.
+    # Skip the ~20s conversion if plasma.h5 already exists and is newer than
+    # b2fstate / b2fstati — relevant for back-to-back OE-only sanity runs
+    # where the SOLPS state hasn't been touched. Per-step regen after a
+    # SOLPS chunk still runs unconditionally (line ~1085 below) because
+    # SOLPS will have updated b2fstate.
+    def _b2state_mtime():
+        for cand in ("b2fstate", "b2fstati"):
+            p = os.path.join(solps_run_dir, cand)
+            if os.path.exists(p):
+                return os.path.getmtime(p)
+        return 0.0
+    plasma_h5_fresh = (os.path.exists(plasma_h5_path)
+                       and os.path.getmtime(plasma_h5_path) > _b2state_mtime())
+    if plasma_h5_fresh:
+        console.print(f"  [dim]reusing existing[/dim] {plasma_h5_path}"
+                      f" [dim](newer than b2fstate)[/dim]")
+    else:
+        write_plasma_h5_via_converter(solps_run_dir, solps_base_dir,
+                                       plasma_h5_path, equ_file=equ_file)
 
     nxp2, nyp2 = solps.nx + 2, solps.ny + 2
     source_prev = np.zeros((nxp2, nyp2))
@@ -799,8 +912,9 @@ def run_coupling(config):
             except Exception as e:
                 console.print(f"  [red]Warmup {w+1}: Could not read state: {e}[/red]")
 
-        # Write converged plasma.h5 for OpenEdge
-        solps.write_plasma_h5(plasma_h5_path, nr=plasma_nr, nz=plasma_nz)
+        # Write converged plasma.h5 for OpenEdge (mesh format via converter)
+        write_plasma_h5_via_converter(solps_run_dir, solps_base_dir,
+                                       plasma_h5_path, equ_file=equ_file)
 
         # Archive warmup output
         save_warmup_output(solps_run_dir, coupled_dir or
@@ -985,7 +1099,8 @@ def run_coupling(config):
         te_max = te_prev.max()
 
         solps.load_plasma_state()
-        solps.write_plasma_h5(plasma_h5_path, nr=plasma_nr, nz=plasma_nz)
+        write_plasma_h5_via_converter(solps_run_dir, solps_base_dir,
+                                       plasma_h5_path, equ_file=equ_file)
 
         fields_new = solps.get_plasma_fields()
         ne_new = np.array(fields_new['ne'])

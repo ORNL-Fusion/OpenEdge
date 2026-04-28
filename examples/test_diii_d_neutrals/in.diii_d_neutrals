@@ -40,6 +40,13 @@ adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
                     region rdiv_up all iterate 5
 balance_grid        rcb cell
 
+# Per-cell radial weighting: large-R cells get larger weight so each cell
+# holds approximately the same particle count regardless of R. Reduces
+# stats noise for axisymmetric runs (cells at R=3 have ~30x the volume of
+# cells at R=0.1, otherwise far-R cells starve while near-axis overshoot).
+# Must come AFTER the grid is created/adapted.
+global              weight cell radius
+
 # ---- Plasma background + B-field ----
 fix                 pd background file plasma.h5 static yes
 global              pusher plasma pd
