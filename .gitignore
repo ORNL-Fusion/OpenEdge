@@ -84,6 +84,7 @@ database/ingest/
 
 # WIP test cases (not ready for public repo)
 examples/wip/
+examples/test_iead/
 examples/test_reclycling/
 examples/test_d3d_mateja/
 examples/test_d3d_walldyn/
@@ -92,7 +93,6 @@ examples/test_west_timedep/
 examples/test_liquid_metal/
 examples/test_eirene/
 examples/_test_west_ciraolo/
-examples/wip/
 
 # Per-test READMEs and reference PDFs (keep local)
 examples/test_*/README.md
