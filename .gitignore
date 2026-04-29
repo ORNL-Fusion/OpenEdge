@@ -91,6 +91,12 @@ examples/test_west_3d/
 examples/test_west_timedep/
 examples/test_liquid_metal/
 examples/test_eirene/
+examples/_test_west_ciraolo/
+examples/wip/
+
+# Per-test READMEs and reference PDFs (keep local)
+examples/test_*/README.md
+examples/test_*/*.pdf
 
 # Sphinx build output
 /docs/_build/
