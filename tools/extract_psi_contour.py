@@ -44,26 +44,43 @@ def read_equilibrium(path: Path):
         z = f["equilibrium/z"][:]
         psi = f["equilibrium/psi"][:]
         psib = float(f["equilibrium/psib"][()])
-    # Authoritative HDF5 layout per compute_plasma_fields.cpp:2223-2240:
-    # psi.shape = (km, jm) = (nZ, nR), so psi[iZ, iR] is the value at
-    # (Z = z[iZ], R = r[iR]).  Do NOT transpose: when nR == nZ a generic
-    # shape-based transpose guard cannot distinguish the two orders and
-    # silently corrupts the output.  If a future plasma.h5 ships psi in
-    # the other order, the caller has to fix the converter, not us.
+        psi_axis_hint = (float(f["equilibrium/psi_axis"][()])
+                         if "equilibrium/psi_axis" in f else None)
     assert psi.shape == (len(z), len(r)), (
         f"psi.shape {psi.shape} != (nZ={len(z)}, nR={len(r)}); "
         f"plasma.h5 layout differs from compute_plasma_fields.cpp convention")
-    return r, z, psi, psib
+    return r, z, psi, psib, psi_axis_hint
 
 
-def psi_norm_grid(psi: np.ndarray, psib: float) -> tuple[np.ndarray, float, float]:
-    """Compute psi_norm = (psi - psi_axis)/(psib - psi_axis).  Returns (psin, psi_axis)."""
-    psi_axis = float(np.nanmin(psi))
+def _axis_index(psi: np.ndarray, axis_is_max: bool) -> tuple[int, int]:
+    fn = np.nanargmax if axis_is_max else np.nanargmin
+    return np.unravel_index(fn(psi), psi.shape)
+
+
+def psi_norm_grid(psi: np.ndarray, psib: float,
+                  psi_axis_hint: float | None = None
+                  ) -> tuple[np.ndarray, float, bool]:
+    """Compute psi_norm = (psi - psi_axis)/(psib - psi_axis).
+
+    Convention is auto-detected: SOLEDGE3X runs may store psi with the axis
+    as either the global min (sign(psi_axis - psib) < 0) or the global max
+    (sign > 0). When an explicit psi_axis hint is present in plasma.h5
+    (written as psicore by the converter), use its sign relative to psib.
+    Otherwise fall back to the historical "axis is min" convention.
+
+    Returns (psin, psi_axis_used, axis_is_max).
+    """
+    if psi_axis_hint is not None and psi_axis_hint > psib:
+        axis_is_max = True
+        psi_axis = float(np.nanmax(psi))
+    else:
+        axis_is_max = False
+        psi_axis = float(np.nanmin(psi))
     dpsi = psib - psi_axis
     if abs(dpsi) < 1e-30:
-        raise RuntimeError("degenerate equilibrium: psib == min(psi)")
+        raise RuntimeError("degenerate equilibrium: psib == axis psi")
     psin = (psi - psi_axis) / dpsi
-    return psin, psi_axis
+    return psin, psi_axis, axis_is_max
 
 
 def select_inner_contour(paths, r_axis_guess: float, z_axis_guess: float):
@@ -176,9 +193,9 @@ def write_core_surf_from_plasma_h5(plasma_h5: Path,
         If given, write a PNG showing the selected contour overlaid on
         psi_norm.  Useful for a quick visual check.
     """
-    r, z, psi, psib = read_equilibrium(plasma_h5)
-    psin, psi_axis = psi_norm_grid(psi, psib)
-    iZ_ax, iR_ax = np.unravel_index(np.argmin(psi), psi.shape)
+    r, z, psi, psib, psi_axis_hint = read_equilibrium(plasma_h5)
+    psin, psi_axis, axis_is_max = psi_norm_grid(psi, psib, psi_axis_hint)
+    iZ_ax, iR_ax = _axis_index(psi, axis_is_max)
     R_ax = float(r[iR_ax]); Z_ax = float(z[iZ_ax])
 
     fig, ax = plt.subplots()
@@ -240,15 +257,16 @@ def main(argv=None) -> int:
                    help="Optional PNG showing the contour on a psi_norm map")
     args = p.parse_args(argv)
 
-    r, z, psi, psib = read_equilibrium(args.plasma_h5)
-    psin, psi_axis = psi_norm_grid(psi, psib)
-    print(f"psi_axis = {psi_axis:+.4e}  psib = {psib:+.4e}", file=sys.stderr)
+    r, z, psi, psib, psi_axis_hint = read_equilibrium(args.plasma_h5)
+    psin, psi_axis, axis_is_max = psi_norm_grid(psi, psib, psi_axis_hint)
+    print(f"psi_axis = {psi_axis:+.4e}  psib = {psib:+.4e}  "
+          f"(axis is psi {'MAX' if axis_is_max else 'MIN'})", file=sys.stderr)
     print(f"R range [{r.min():.3f}, {r.max():.3f}]  Z range [{z.min():.3f}, {z.max():.3f}]",
           file=sys.stderr)
 
     # Locate the magnetic axis (R, Z of psi_axis) as a point the target contour
     # should enclose.
-    iZ_ax, iR_ax = np.unravel_index(np.argmin(psi), psi.shape)
+    iZ_ax, iR_ax = _axis_index(psi, axis_is_max)
     R_ax = float(r[iR_ax]); Z_ax = float(z[iZ_ax])
     print(f"magnetic axis ~ (R={R_ax:.3f}, Z={Z_ax:.3f})", file=sys.stderr)
 

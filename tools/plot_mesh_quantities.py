@@ -21,7 +21,10 @@ from matplotlib.tri import Triangulation
 
 
 def _parse_wall_surf(path: Path):
-    pts, segs, mode = [], [], None
+    """Return wall (R, Z) points + segments. Auto-detects axi (col1=Z, col2=R)
+    vs cart (col1=R, col2=Z) by which column has any negative values:
+    R is always positive on a tokamak wall; Z usually crosses 0."""
+    pts_raw, segs, mode = [], [], None
     for line in path.read_text().splitlines():
         s = line.strip()
         if not s:
@@ -36,10 +39,19 @@ def _parse_wall_surf(path: Path):
         if not parts or not parts[0].lstrip("-").isdigit():
             continue
         if mode == "P" and len(parts) >= 3:
-            pts.append((float(parts[2]), float(parts[1])))
+            pts_raw.append((float(parts[1]), float(parts[2])))
         elif mode == "L" and len(parts) >= 3:
             segs.append((int(parts[1]) - 1, int(parts[2]) - 1))
-    return np.asarray(pts), np.asarray(segs)
+    arr = np.asarray(pts_raw)
+    col1_has_neg = (arr[:, 0] < 0).any()
+    col2_has_neg = (arr[:, 1] < 0).any()
+    if col1_has_neg and not col2_has_neg:
+        # axi layout: col1=Z (negative allowed), col2=R (>0)
+        pts = arr[:, [1, 0]]
+    else:
+        # cart layout: col1=R (>0), col2=Z
+        pts = arr
+    return pts, np.asarray(segs)
 
 
 FIELD_SPECS = [

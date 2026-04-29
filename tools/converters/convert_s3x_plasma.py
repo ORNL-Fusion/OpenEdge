@@ -101,14 +101,20 @@ def _wall_and_config_from_mesh(mesh_file, ref_file):
         return rwall, zwall, r2d, z2d, psi2d, psisep, psicore
 
 
-def _write_sparta_surface_polyline(path, rvals, zvals, title="surface geometry"):
+def _write_sparta_surface_polyline(path, rvals, zvals, title="surface geometry",
+                                    geometry="cart"):
     """Write a closed polyline into SPARTA 2D surface text format.
 
-    SOLEDGE3X is an axisymmetric edge code, so we always write the file
-    in SPARTA's true axisymmetric layout: column 1 = Z (axial), column 2
-    = R (radial). Pairs with `boundary o ao p`, `create_box ... 0 R_max
-    ... `, where SPARTA computes correct cylindrical cell volumes and
-    2*pi*R*L surface areas internally.
+    geometry='cart' (default): write (x=R, y=Z). Pairs with
+        `boundary o o p`, `create_box R_min R_max Z_min Z_max ...`. Apply
+        2*pi*R post-processing externally for axisymmetric integrals.
+    geometry='axi': write (x=Z, y=R) for SPARTA's true axisymmetric layout
+        with `boundary o ao p`, `create_box Z_min Z_max 0 R_max ...`,
+        SPARTA handles cylindrical cell volumes and 2*pi*R*L surface
+        areas internally.
+
+    Vertex order is forced CCW in the chosen (x,y) so SPARTA normals
+    point inward (into the fluid) and the deck does not need `invert`.
     """
     if rvals is None or zvals is None:
         return
@@ -117,20 +123,15 @@ def _write_sparta_surface_polyline(path, rvals, zvals, title="surface geometry")
     if r.size < 3 or r.size != z.size:
         return
 
-    # Remove final duplicate point for SPARTA points/lines indexing.
     if np.isclose(r[0], r[-1]) and np.isclose(z[0], z[-1]):
         r = r[:-1]
         z = z[:-1]
 
-    # Remove consecutive duplicate vertices that would otherwise create
-    # zero-length segments and fail SPARTA's watertight checks.
     keep = np.ones(r.size, dtype=bool)
     keep[1:] = ~(np.isclose(r[1:], r[:-1]) & np.isclose(z[1:], z[:-1]))
     r = r[keep]
     z = z[keep]
 
-    # Re-check closure after deduplication and drop the repeated endpoint if
-    # the cleaned polyline still ends where it begins.
     if r.size >= 2 and np.isclose(r[0], r[-1]) and np.isclose(z[0], z[-1]):
         r = r[:-1]
         z = z[:-1]
@@ -139,13 +140,26 @@ def _write_sparta_surface_polyline(path, rvals, zvals, title="surface geometry")
     if n < 3:
         return
 
+    if geometry == "axi":
+        x = z; y = r
+    elif geometry == "cart":
+        x = r; y = z
+    else:
+        raise ValueError(f"geometry must be 'cart' or 'axi', got {geometry!r}")
+
+    # Shoelace signed area; flip to CCW so SPARTA normals point inward.
+    signed_area = 0.5 * float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y))
+    if signed_area < 0.0:
+        x = x[::-1]
+        y = y[::-1]
+
     with open(path, "w", encoding="utf-8") as f:
         f.write(f"{title}\n\n")
         f.write(f"{n} points\n")
         f.write(f"{n} lines\n\n")
         f.write("Points\n\n")
         for i in range(n):
-            f.write(f"{i+1} {z[i]:.12g} {r[i]:.12g}\n")
+            f.write(f"{i+1} {x[i]:.12g} {y[i]:.12g}\n")
         f.write("\nLines\n\n")
         for i in range(n):
             j = i + 1
@@ -211,6 +225,7 @@ def interpolate_and_save_plasma_field(
     equ_file=None,
     gfile=None,
     config_file=None,
+    geometry="cart",
 ):
     """
     Convert SOLEDGE3X plasma/mesh data to OpenEdge-style HDF5.
@@ -308,8 +323,10 @@ def interpolate_and_save_plasma_field(
     # Optional SPARTA geometry exports from mesh-derived contours.
     if wall_sparta_file:
         _write_sparta_surface_polyline(wall_sparta_file, Rwall, Zwall,
-                                        title="surface geometry")
-        print(f"Wrote SPARTA wall surface (axi: x=Z, y=R): {wall_sparta_file}")
+                                        title="surface geometry",
+                                        geometry=geometry)
+        layout = "x=Z, y=R" if geometry == "axi" else "x=R, y=Z"
+        print(f"Wrote SPARTA wall surface ({geometry}: {layout}): {wall_sparta_file}")
 
     # Wall extent (informational).
     print(
@@ -667,18 +684,10 @@ def _build_parser():
                    help="Optional GEQDSK override for B-field (fallback path).")
     p.add_argument("--equ-file", type=str, default=None,
                    help="Optional .equ override for B-field (fallback path).")
-    p.add_argument("--core-out", type=str, default=None,
-                   help="If given, also write a SPARTA surface file tracing "
-                        "the psi_norm=<--psi-norm-core> contour around the "
-                        "magnetic axis. Use as the core-absorb boundary "
-                        "(read_surf + surf_collide vanish).")
-    p.add_argument("--psi-norm-core", type=float, default=0.90,
-                   help="Normalized psi level for --core-out. Default 0.90 "
-                        "keeps the contour safely inside the wall near the "
-                        "X-point; 0.95 often dips into the private-flux "
-                        "region and crosses the divertor wall.")
-    p.add_argument("--core-preview", type=str, default=None,
-                   help="Optional PNG preview of the core contour.")
+    p.add_argument("--geometry", choices=["cart", "axi"], default="cart",
+                   help="SPARTA wall.surf slot layout. cart (default): "
+                        "x=R, y=Z; pairs with 'boundary o o p'. axi: "
+                        "x=Z, y=R; pairs with 'boundary o ao p'.")
     return p
 
 
@@ -698,25 +707,8 @@ def main():
         config_file=os.path.join(base, "mesh.h5"),
         equ_file=args.equ_file,
         gfile=args.gfile,
+        geometry=args.geometry,
     )
-
-    # Optional: trace the psi_norm=<level> contour from the equilibrium we
-    # just embedded in plasma.h5 and write it as a SPARTA surface, so the
-    # deck can use it for the core-absorb boundary (avoids a separate
-    # `tools/extract_psi_contour.py` run).
-    if args.core_out:
-        import sys as _sys
-        from pathlib import Path as _Path
-        _sys.path.insert(0,
-            os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-        from extract_psi_contour import write_core_surf_from_plasma_h5
-        write_core_surf_from_plasma_h5(
-            _Path(args.plasma_out),
-            _Path(args.core_out),
-            psi_norm=args.psi_norm_core,
-            preview=_Path(args.core_preview) if args.core_preview else None,
-            verbose=True,
-        )
 
 
 if __name__ == "__main__":
