@@ -282,7 +282,11 @@ void FixForceThermal::start_of_step()
     refresh_compute_src(srcGradTeZ_);
   }
 
-  kick_half(0.5 * update->dt);
+  // Scale the kick by `nevery`: when this fix only fires every N steps,
+  // the integrated impulse over N steps must equal F·N·dt, not F·dt.
+  // Mirrors fix_cross_field_diffusion.cpp:326. See
+  // docs/bugs/force_thermal_nevery_scaling.md.
+  kick_half(0.5 * update->dt * nevery);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -309,7 +313,7 @@ void FixForceThermal::end_of_step()
     refresh_compute_src(srcGradTeZ_);
   }
 
-  kick_half(0.5 * update->dt);
+  kick_half(0.5 * update->dt * nevery);
 }
 
 /* ----------------------------------------------------------------------
