@@ -343,9 +343,13 @@ void FixCrossFieldDiffusion::start_of_step()
 
   double **dx = update->dx_cd;
 
-  // zero the buffer
-  if (nlocal > 0)
-    memset(&dx[0][0], 0, sizeof(double) * nlocal * 3);
+  // Zero the FULL buffer (not just nlocal) so PINSERT particles created
+  // mid-step that land in indices >= nlocal read 0, not stale/uninit memory.
+  // Update::move() now skips the cross-diff kick for PINSERT particles
+  // explicitly, so this is defense-in-depth: even if the move loop is
+  // changed, any read of dx_cd[i] beyond the active particle set is safe.
+  if (update->cd_nmax > 0)
+    memset(&dx[0][0], 0, sizeof(double) * update->cd_nmax * 3);
 
   for (int ip = 0; ip < nlocal; ip++) {
     Particle::OnePart &p = particles[ip];
