@@ -1,6 +1,0 @@
-# Simulation outputs
-output/
-restart.dat
-*.log
-log.*
-*.vtk
