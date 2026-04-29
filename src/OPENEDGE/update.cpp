@@ -1417,10 +1417,44 @@ template < int DIM, int SURF, int OPT > void Update::move()
       // The displacement was pre-computed by fix cross_diffusion in
       // START_OF_STEP and stored in dx_cd[i].
 
-      if (cd_flag && (pflag == PKEEP || pflag == PINSERT)) {
+      // PKEEP only (NOT PINSERT): fix cross_field_diffusion fills dx_cd at
+      // START_OF_STEP for the then-current nlocal particles. PINSERT
+      // particles are created mid-step by surface emitters and live in
+      // indices beyond that nlocal — their dx_cd[i] is uninitialized
+      // memory and would inject NaN into xnew. They will get a kick on
+      // the next step, when start_of_step refills dx_cd over the new
+      // nlocal.
+      if (cd_flag && pflag == PKEEP) {
+        // Tentatively apply the cross-diff kick.
+        const double xnew_pre_cd[3] = {xnew[0], xnew[1],
+                                       (DIM == 3) ? xnew[2] : 0.0};
         xnew[0] += dx_cd[i][0];
         xnew[1] += dx_cd[i][1];
         if (DIM == 3) xnew[2] += dx_cd[i][2];
+
+        // Wall-aware veto: if the kicked endpoint would land in a vacuum
+        // cell (cinfo.volume == 0), the linear surf-particle check is
+        // unreliable in axi (wall.surf segments can coincide with cell
+        // edges or be tangent-grazed by the kick). Reject the kick this
+        // step rather than rely on the downstream reflect-on-escape patch.
+        // Diffusion physically can't drive a particle through a solid
+        // wall — a skipped kick is a statistically faithful boundary
+        // condition for D_perp near the wall.
+        double x_probe[3] = {xnew[0], xnew[1], (DIM == 3) ? xnew[2] : 0.0};
+        int probe_cell = grid->id_find_child(0, 0,
+                                  domain->boxlo, domain->boxhi, x_probe);
+        if (probe_cell >= 0 && SURF &&
+            cells[probe_cell].nsplit > 1 &&
+            cells[probe_cell].nsurf >= 0) {
+          probe_cell = (DIM == 3) ? split3d(probe_cell, x_probe)
+                                  : split2d(probe_cell, x_probe);
+        }
+        if (probe_cell < 0 || cinfo[probe_cell].volume <= 0.0) {
+          // Probe cell is outside domain or a vacuum sub-cell — revert.
+          xnew[0] = xnew_pre_cd[0];
+          xnew[1] = xnew_pre_cd[1];
+          if (DIM == 3) xnew[2] = xnew_pre_cd[2];
+        }
       }
 
       // Psi-based core boundary: check if xnew is inside the core
@@ -2006,6 +2040,66 @@ template < int DIM, int SURF, int OPT > void Update::move()
                       slist_active[m]->surf_tally(dtremain,minsurf,icell,reaction,
                                                                     &iorig,ipart,jpart);
 
+              // ---- DEBUG: post-collision wall-side audit ----------------
+              // Flag events where surf_collide / surf_react leaves the
+              // particle behind the wall normal (the most likely cause of
+              // visible OVITO leaks in axi runs with full chemistry).
+              // Rate-limited to MAX prints per rank; remove the block once
+              // the underlying surface model is fixed.
+              {
+                static int wall_leak_count = 0;
+                constexpr int wall_leak_max  = 200;
+                constexpr double dxn_thresh  = -1.0e-10;  // 0.1 nm behind wall
+                if (ipart && wall_leak_count < wall_leak_max) {
+                  const double *snorm = (DIM == 3) ? tri->norm : line->norm;
+                  double sref0, sref1, sref2;
+                  if (DIM == 3) {
+                    sref0 = (tri->p1[0]+tri->p2[0]+tri->p3[0])/3.0;
+                    sref1 = (tri->p1[1]+tri->p2[1]+tri->p3[1])/3.0;
+                    sref2 = (tri->p1[2]+tri->p2[2]+tri->p3[2])/3.0;
+                  } else {
+                    sref0 = 0.5*(line->p1[0]+line->p2[0]);
+                    sref1 = 0.5*(line->p1[1]+line->p2[1]);
+                    sref2 = 0.0;
+                  }
+                  const double dxn =
+                    (x[0]-sref0)*snorm[0] + (x[1]-sref1)*snorm[1] +
+                    (DIM == 3 ? (x[2]-sref2)*snorm[2] : 0.0);
+                  const double vdotn =
+                    v[0]*snorm[0] + v[1]*snorm[1] +
+                    (DIM == 3 ? v[2]*snorm[2] : 0.0);
+                  if (dxn < dxn_thresh) {
+                    FILE *fp = screen ? screen : stdout;
+                    fprintf(fp,
+                      "[wall-leak] step=%lld proc=%d pid=%d isp=%d DIM=%d "
+                      "surf=%d isc=%d isr=%d  x=(%.6e,%.6e,%.6e) "
+                      "v=(%.3e,%.3e,%.3e) n=(%.4f,%.4f,%.4f) "
+                      "sref=(%.6e,%.6e,%.6e) dx.n=%.3e v.n=%.3e "
+                      "jpart=%d\n",
+                      (long long)ntimestep, me, particles[i].id,
+                      particles[i].ispecies, DIM, minsurf,
+                      (DIM==3) ? tri->isc : line->isc,
+                      (DIM==3) ? tri->isr : line->isr,
+                      x[0], x[1], x[2], v[0], v[1], v[2],
+                      snorm[0], snorm[1], (DIM==3) ? snorm[2] : 0.0,
+                      sref0, sref1, sref2,
+                      dxn, vdotn, jpart ? 1 : 0);
+                    if (fp != stdout && logfile) {
+                      fprintf(logfile,
+                        "[wall-leak] step=%lld proc=%d pid=%d surf=%d "
+                        "dx.n=%.3e v.n=%.3e\n",
+                        (long long)ntimestep, me, particles[i].id, minsurf,
+                        dxn, vdotn);
+                    }
+                    wall_leak_count++;
+                    if (wall_leak_count == wall_leak_max)
+                      fprintf(fp, "[wall-leak] suppressing further events "
+                                  "on proc %d (cap=%d)\n", me, wall_leak_max);
+                  }
+                }
+              }
+              // ---- END DEBUG -------------------------------------------
+
               // stuck_iterate = consecutive iterations particle is immobile
 
               if (minparam == 0.0) stuck_iterate++;
@@ -2139,8 +2233,95 @@ template < int DIM, int SURF, int OPT > void Update::move()
           if (DIM == 3) x[2] = xnew[2];
           if (DIM == 1) {
             if (x[1] < lo[1] || x[1] > hi[1]) {
-              particles[i].flag = PDISCARD;
-              naxibad++;
+              // Particle ended outside its current cell after axi_remap.
+              // Try to rehome via id_find_child (same recipe as the
+              // post-surf-collide teleport handler) instead of silently
+              // discarding. Most of these are charged ions whose Boris
+              // gyromotion crossed a cell boundary the linear cell-cross
+              // check missed.
+              const int icell_old = icell;
+              int newcell = grid->id_find_child(0,0,
+                                domain->boxlo,domain->boxhi,x);
+              int rehomed = 0;
+              if (newcell >= 0) {
+                if (SURF && cells[newcell].nsplit > 1 &&
+                    cells[newcell].nsurf >= 0) {
+                  newcell = split2d(newcell,x);
+                }
+                // Only accept the rehome if the new cell is on the FLUID
+                // side of the wall (volume > 0). Vacuum/wall cells
+                // (volume == 0) mean the particle slipped through the
+                // wall.surf during a partial Boris step that the linear
+                // surface check missed — treat as genuine escape.
+                if (newcell >= 0 && cinfo[newcell].volume > 0.0) {
+                  // Update LOCAL icell so post_move_bookkeeping sets
+                  // particles[i].icell to the new cell and the
+                  // migrate-to-self sanity check uses the new proc.
+                  icell = newcell;
+                  if (cells[newcell].proc != me)
+                    particles[i].flag = PDONE;
+                  rehomed = 1;
+                }
+              }
+
+              // Genuine escape: the linear cell-cross check missed a
+              // wall.surf segment coincident with the cell edge. Reflect
+              // specularly off the boundary the particle exited (clamp x
+              // back to the boundary and flip the outward normal velocity
+              // component). Particle stays alive in the old cell — this
+              // approximates the wall hit that the geometry missed and
+              // conserves W mass.
+              if (!rehomed) {
+                if (x[1] < lo[1]) {
+                  x[1] = lo[1];
+                  if (v[1] < 0.0) v[1] = -v[1];
+                } else if (x[1] > hi[1]) {
+                  x[1] = hi[1];
+                  if (v[1] > 0.0) v[1] = -v[1];
+                }
+              }
+
+              // ---- DEBUG: only log when rehome FAILED (genuine escape).
+              // Successful rehomes are normal axi-mover behaviour and
+              // would just spam the log. naxibad still counts failures.
+              if (!rehomed) {
+                static int axibad_count = 0;
+                constexpr int axibad_max = 50;
+                if (axibad_count < axibad_max) {
+                  FILE *fp = screen ? screen : stdout;
+                  const double over =
+                    (x[1] > hi[1]) ? (x[1] - hi[1]) : (lo[1] - x[1]);
+                  const double cellw_R = hi[1] - lo[1];
+                  // Old-cell centroid in (Z, R) so the offending wall
+                  // location is greppable directly from the log.
+                  const double cellZ = 0.5 * (cells[icell_old].lo[0] +
+                                              cells[icell_old].hi[0]);
+                  const double cellR = 0.5 * (lo[1] + hi[1]);
+                  fprintf(fp,
+                    "[axibad-escape] step=%lld proc=%d pid=%d isp=%d  "
+                    "x=(%.6e,%.6e,%.6e) v=(%.3e,%.3e,%.3e) "
+                    "cellR=[%.6e,%.6e] dR_cell=%.3e over=%.3e dt=%.3e "
+                    "v_perp=%.3e icell=%d newcell=%d "
+                    "cell_Z=%.4f cell_R=%.4f\n",
+                    (long long)ntimestep, me, particles[i].id,
+                    particles[i].ispecies,
+                    x[0], x[1], x[2], v[0], v[1], v[2],
+                    lo[1], hi[1], cellw_R, over, dtremain,
+                    std::sqrt(v[1]*v[1] + v[2]*v[2]), icell_old, newcell,
+                    cellZ, cellR);
+                  axibad_count++;
+                  if (axibad_count == axibad_max)
+                    fprintf(fp, "[axibad-escape] suppressing further events "
+                                "on proc %d (cap=%d)\n", me, axibad_max);
+                }
+              }
+              // ---- END DEBUG ----
+
+              // Reflected particles stay alive (no PDISCARD). Keep the
+              // naxibad counter as a visibility metric — it now counts
+              // wall reflections recovered from the linear-check miss
+              // rather than discards.
+              if (!rehomed) naxibad++;
               break;
             }
           }

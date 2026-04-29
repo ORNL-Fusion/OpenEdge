@@ -90,6 +90,7 @@ examples/test_west_3d/
 examples/test_west_timedep/
 examples/test_liquid_metal/
 examples/test_eirene/
+examples/test_iead/
 
 # Sphinx build output
 /docs/_build/
@@ -104,3 +105,6 @@ examples/test_iead/WarpX/
 
 # Local Claude Code memory / context file (kept untracked)
 CLAUDE.md
+
+# Per-test READMEs are local-only notes
+examples/test_*/README.md
