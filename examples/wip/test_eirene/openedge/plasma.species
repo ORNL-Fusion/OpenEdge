@@ -1,5 +1,0 @@
-# Species data
-# ID  Molwt  Molmass  rotDOF  RotRel  vibDOF  VibRel  VibTemp  specwt  charge
-D2    4.028   6.690e-27  2  1.0  2  1.0  4400.0  1.0  0.0
-D     2.014   3.345e-27  0  0.0  0  0.0  0.0     1.0  0.0
-D+    2.014   3.344e-27  0  0.0  0  0.0  0.0     1.0  1.0
