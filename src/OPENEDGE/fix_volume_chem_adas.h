@@ -231,10 +231,37 @@ protected:
     ReactionIJ* reactions;
     int* list_ij;
 
+    // attempt() optionally accepts precomputed per-channel rates
+    // (cached_lambda[0..cached_nchan-1], cached_ridx_map[0..cached_nchan-1],
+    // cached_lambda_total). When cached_nchan >= 0, the rate-table lookup
+    // and Poisson-rate computation block (lines ~935-1003 of attempt() in
+    // .cpp) is skipped and the cached values are used instead. Used by the
+    // `rate_cache cell` mode to amortize the per-(cell,species) rate work
+    // across all particles of that species in the cell.
     int attempt(Particle::OnePart* ip, int ip_index,
                 double Te_eV, double ne_m3,
                 double Ti_eV = 0.0, double vpar = 0.0,
-                double bx = 0.0, double by = 0.0, double bz = 0.0);
+                double bx = 0.0, double by = 0.0, double bz = 0.0,
+                const double *cached_lambda = nullptr,
+                const int *cached_ridx_map = nullptr,
+                int cached_nchan = -1,
+                double cached_lambda_total = 0.0);
+
+    // Compute per-channel Poisson rates λ_i = k_i * ne * dt_chem for the
+    // given (species, Te, ne). Used by `rate_cache cell` mode to amortize
+    // the rate-table interpolation across all particles of this species in
+    // the cell. Returns nchan = 0 if no valid channels (caller skips).
+    // `lambda_out` and `ridx_map_out` must be sized >= 16.
+    void compute_species_lambdas(int isp, double Te_eV, double ne_m3, int icell,
+                                  double *lambda_out, int *ridx_map_out,
+                                  int &nchan_out, double &lambda_total_out);
+
+    // rate_cache_mode: 0 = particle (per-particle rate compute, default),
+    //                  1 = cell (per-(cell,species) rate compute, reused
+    //                            across all particles of that species in
+    //                            the same cell). Set via deck keyword
+    //                            `rate_cache cell|particle`.
+    int rate_cache_mode = 0;
     void readfile(char*);
     int readone(char*, char*, int&, int&);
     void check_duplicate();

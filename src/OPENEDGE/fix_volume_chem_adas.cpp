@@ -260,11 +260,28 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
       else if (strcmp(arg[iarg+1], "kinetic") == 0) eirene_mode = 0;
       else error->all(FLERR, "fix volume/chem/adas: unknown mode (use kinetic|neutral)");
       iarg += 2;
+    } else if (strcmp(arg[iarg], "rate_cache") == 0) {
+      // rate_cache cell|particle
+      //   particle (default) — recompute reaction rates for every particle.
+      //   cell                — compute rates once per (cell, species) using
+      //                         the first encountered particle's pcache and
+      //                         reuse for all subsequent particles of that
+      //                         species in the same cell. ~10x cheaper for
+      //                         dense impurities; identical physics in cells
+      //                         where Te/ne don't vary across particles
+      //                         (i.e., away from sheath cells).
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix volume/chem/adas: rate_cache requires cell|particle");
+      if (strcmp(arg[iarg+1], "cell") == 0) rate_cache_mode = 1;
+      else if (strcmp(arg[iarg+1], "particle") == 0) rate_cache_mode = 0;
+      else error->all(FLERR, "fix volume/chem/adas: rate_cache must be cell|particle");
+      iarg += 2;
     } else if (strcmp(arg[iarg], "source_species") == 0) {
       // consume species names until the next keyword or end of args
       int j = iarg + 1;
       while (j < narg &&
              strcmp(arg[j], "mode") != 0 &&
+             strcmp(arg[j], "rate_cache") != 0 &&
              strcmp(arg[j], "stop_on_exhaust") != 0 &&
              strcmp(arg[j], "source_species") != 0 &&
              strcmp(arg[j], "units") != 0 &&
@@ -798,19 +815,74 @@ void FixVolumeChemAdas::end_of_step_no_average()
     double *bz_vec = (update->pc_bz_custom >= 0 && particle->ewhich[update->pc_bz_custom] >= 0)
                      ? particle->edvec[particle->ewhich[update->pc_bz_custom]] : nullptr;
 
-    for (int icell = 0; icell < nglocal; icell++) {
-      if (cinfo[icell].count == 0) continue;
-      int ip = cinfo[icell].first;
-      while (ip >= 0) {
-        const double Te_eV = std::max(te_vec[ip], 1e-6);
-        const double ne_m3 = std::max(ne_vec[ip], 0.0);
-        const double Ti_eV = ti_vec ? std::max(ti_vec[ip], 0.0) : 0.0;
-        const double vp = vpar_vec ? vpar_vec[ip] : 0.0;
-        const double Bx = bx_vec ? bx_vec[ip] : 0.0;
-        const double By = by_vec ? by_vec[ip] : 0.0;
-        const double Bz = bz_vec ? bz_vec[ip] : 0.0;
-        attempt(&particles[ip], ip, Te_eV, ne_m3, Ti_eV, vp, Bx, By, Bz);
-        ip = next[ip];
+    if (rate_cache_mode == 1) {
+      // Cell mode: compute λ_i once per (cell, species) using the first
+      // encountered particle's pcache values, then reuse for every
+      // subsequent particle of that species in the cell. Identical
+      // physics to the particle path away from sheath cells where
+      // Te/ne don't vary across particles within a cell. ~10x cheaper
+      // for dense impurities (W chain in this case).
+      const int nspec = particle->nspecies;
+      // Per-species scratch buffers, refilled per cell.
+      // -1 in lambda_total marks "not yet computed for this cell".
+      std::vector<double> sp_lambda(nspec * 16, 0.0);
+      std::vector<int>    sp_ridx_map(nspec * 16, 0);
+      std::vector<int>    sp_nchan(nspec, -1);
+      std::vector<double> sp_lambda_total(nspec, 0.0);
+
+      for (int icell = 0; icell < nglocal; icell++) {
+        if (cinfo[icell].count == 0) continue;
+        // Reset species cache for this cell. Only species that actually
+        // appear get their slot recomputed below.
+        for (int s = 0; s < nspec; ++s) sp_nchan[s] = -1;
+
+        int ip = cinfo[icell].first;
+        while (ip >= 0) {
+          const int isp = particles[ip].ispecies;
+          const double Te_eV = std::max(te_vec[ip], 1e-6);
+          const double ne_m3 = std::max(ne_vec[ip], 0.0);
+          const double Ti_eV = ti_vec ? std::max(ti_vec[ip], 0.0) : 0.0;
+          const double vp = vpar_vec ? vpar_vec[ip] : 0.0;
+          const double Bx = bx_vec ? bx_vec[ip] : 0.0;
+          const double By = by_vec ? by_vec[ip] : 0.0;
+          const double Bz = bz_vec ? bz_vec[ip] : 0.0;
+
+          // First particle of this species in this cell? Compute lambdas.
+          if (sp_nchan[isp] < 0) {
+            int nchan_loc = 0;
+            double ltot = 0.0;
+            compute_species_lambdas(isp, Te_eV, ne_m3, icell,
+                                    &sp_lambda[isp * 16],
+                                    &sp_ridx_map[isp * 16],
+                                    nchan_loc, ltot);
+            sp_nchan[isp] = nchan_loc;
+            sp_lambda_total[isp] = ltot;
+          }
+
+          attempt(&particles[ip], ip, Te_eV, ne_m3, Ti_eV, vp, Bx, By, Bz,
+                  &sp_lambda[isp * 16],
+                  &sp_ridx_map[isp * 16],
+                  sp_nchan[isp],
+                  sp_lambda_total[isp]);
+          ip = next[ip];
+        }
+      }
+    } else {
+      // Particle mode (default): rates recomputed per particle.
+      for (int icell = 0; icell < nglocal; icell++) {
+        if (cinfo[icell].count == 0) continue;
+        int ip = cinfo[icell].first;
+        while (ip >= 0) {
+          const double Te_eV = std::max(te_vec[ip], 1e-6);
+          const double ne_m3 = std::max(ne_vec[ip], 0.0);
+          const double Ti_eV = ti_vec ? std::max(ti_vec[ip], 0.0) : 0.0;
+          const double vp = vpar_vec ? vpar_vec[ip] : 0.0;
+          const double Bx = bx_vec ? bx_vec[ip] : 0.0;
+          const double By = by_vec ? by_vec[ip] : 0.0;
+          const double Bz = bz_vec ? bz_vec[ip] : 0.0;
+          attempt(&particles[ip], ip, Te_eV, ne_m3, Ti_eV, vp, Bx, By, Bz);
+          ip = next[ip];
+        }
       }
     }
   }
@@ -915,9 +987,79 @@ double FixVolumeChemAdas::memory_usage()
    attempt a reaction for a single particle
 ------------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   compute_species_lambdas: per-channel Poisson rates λ_i = k_i * ne * dt
+   for one (species, Te, ne, icell). Mirrors the rate-table block of
+   attempt() so the cell-mode caller in end_of_step_no_average can
+   precompute lambdas once per (cell, species) and reuse them across all
+   particles of that species in the cell.
+------------------------------------------------------------------------- */
+void FixVolumeChemAdas::compute_species_lambdas(int isp, double Te_eV, double ne_m3, int icell,
+                                                  double *lambda_out, int *ridx_map_out,
+                                                  int &nchan_out, double &lambda_total_out)
+{
+  nchan_out = 0;
+  lambda_total_out = 0.0;
+  if (Te_eV <= 0.0 || ne_m3 <= 0.0) return;
+  if (isp < 0 || reactions[isp].n == 0) return;
+
+  Particle::Species *species = particle->species;
+  const double logTe    = std::log10(Te_eV);
+  const double logne_cm = std::log10(std::max(ne_m3 * 1e-6, 1e-99));
+  const double dt_chem  = nevery * update->dt;
+
+  const int n = reactions[isp].n;
+  for (int i = 0; i < n && nchan_out < 16; ++i) {
+    const int ridx = reactions[isp].list[i];
+    OneReaction *r = &rlist[ridx];
+    const size_t q = static_cast<size_t>(std::max(0.0, species[isp].charge));
+
+    double rate_log10_cm3s = -INFINITY;
+    if (r->type == IONIZATION) {
+      if (q >= static_cast<size_t>(atomic_number)) continue;
+      interpolateRateData(atomic_number, q,   icell, logTe, logne_cm,
+                          rate_log10_cm3s, ReactionType::Ionization);
+    } else if (r->type == RECOMBINATION) {
+      if (q == 0) continue;
+      interpolateRateData(atomic_number, q-1, icell, logTe, logne_cm,
+                          rate_log10_cm3s, ReactionType::Recombination);
+    } else if (r->type == EXCHANGE) {
+      const size_t cx_row = (q > 0) ? (q - 1) : 0;
+      interpolateRateData(atomic_number, cx_row, icell, logTe, logne_cm,
+                          rate_log10_cm3s, ReactionType::ChargeExchange);
+    } else if (r->type == DISSOCIATION && r->style == JANEV) {
+      const double lnT = std::log(Te_eV);
+      double lnsv = r->coeff[0];
+      double lnTn = 1.0;
+      for (int k = 1; k < r->ncoeff; k++) {
+        lnTn *= lnT;
+        lnsv += r->coeff[k] * lnTn;
+      }
+      rate_log10_cm3s = lnsv / 2.302585092994046;
+    } else {
+      continue;
+    }
+
+    if (!std::isfinite(rate_log10_cm3s)) continue;
+    const double lam = computeReactionLambda(rate_log10_cm3s, dt_chem, ne_m3);
+    if (lam <= 0.0) continue;
+
+    lambda_out[nchan_out] = lam;
+    ridx_map_out[nchan_out] = ridx;
+    lambda_total_out += lam;
+    nchan_out++;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
 int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
                          double Te_eV, double ne_m3,
-                         double Ti_eV, double vpar, double bx, double by, double bz)
+                         double Ti_eV, double vpar, double bx, double by, double bz,
+                         const double *cached_lambda,
+                         const int *cached_ridx_map,
+                         int cached_nchan,
+                         double cached_lambda_total)
 {
   Particle::Species *species = particle->species;
 
@@ -929,6 +1071,10 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
 
   if (Te_eV <= 0.0 || ne_m3 <= 0.0) return 0;
 
+  // logTe/logne_cm are needed by the per-event tally branch (PLT/PRB
+  // interpolations on lines ~1130-1138, 1149+) regardless of whether the
+  // per-channel lambdas were precomputed by the caller, so always compute
+  // them here.
   const double logTe    = std::log10(Te_eV);
   const double logne_cm = std::log10(std::max(ne_m3 * 1e-6, 1e-99));
 
@@ -949,57 +1095,70 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
   int    nchan = 0;
   double lambda_total = 0.0;
 
-  for (int i = 0; i < n && nchan < 16; ++i) {
-    const int ridx = reactions[isp].list[i];
-    OneReaction *r = &rlist[ridx];
-
-    const size_t q = static_cast<size_t>(std::max(0.0, species[isp].charge));
-
-    double rate_log10_cm3s = -INFINITY;
-
-    if (r->type == IONIZATION) {
-      if (q >= static_cast<size_t>(atomic_number)) continue;
-      interpolateRateData(atomic_number, q,   icell, logTe, logne_cm,
-                          rate_log10_cm3s, ReactionType::Ionization);
-    } else if (r->type == RECOMBINATION) {
-      if (q == 0) continue;
-      interpolateRateData(atomic_number, q-1, icell, logTe, logne_cm,
-                          rate_log10_cm3s, ReactionType::Recombination);
-    } else if (r->type == EXCHANGE) {
-      // Two branches share the CCD rate row for the Z=1 → 0 transition:
-      //   q > 0  : ion-side CX (kinetic D+ → kinetic D). Table row = q-1.
-      //   q == 0 : neutral-side CX (kinetic D + background D+ → kinetic D,
-      //            velocity resampled at Ti). Rule in the reactions file is
-      //            `D --> D`. Partner is the background plasma, not a
-      //            kinetic ion, so this fires even in Mode A where kinetic
-      //            D+ is suppressed.
-      const size_t cx_row = (q > 0) ? (q - 1) : 0;
-      interpolateRateData(atomic_number, cx_row, icell, logTe, logne_cm,
-                          rate_log10_cm3s, ReactionType::ChargeExchange);
-    } else if (r->type == DISSOCIATION && r->style == JANEV) {
-      // Janev polynomial: ln<sv> = sum_n b_n (ln Te)^n, Te in eV
-      const double lnT = std::log(Te_eV);
-      double lnsv = r->coeff[0];
-      double lnTn = 1.0;
-      for (int k = 1; k < r->ncoeff; k++) {
-        lnTn *= lnT;
-        lnsv += r->coeff[k] * lnTn;
-      }
-      // Convert from ln(cm3/s) to log10(cm3/s)
-      rate_log10_cm3s = lnsv / 2.302585092994046;
-    } else {
-      continue;
+  if (cached_nchan >= 0 && cached_lambda && cached_ridx_map) {
+    // Fast path: caller (rate_cache=cell mode in end_of_step_no_average)
+    // already computed lambdas for this (cell, species) using the first
+    // encountered particle's pcache values. Reuse them — saves the
+    // per-particle log10 + bracket_index + bilinearInterpolate work.
+    nchan = cached_nchan;
+    lambda_total = cached_lambda_total;
+    for (int i = 0; i < nchan; ++i) {
+      lambda[i] = cached_lambda[i];
+      ridx_map[i] = cached_ridx_map[i];
     }
+  } else {
+    for (int i = 0; i < n && nchan < 16; ++i) {
+      const int ridx = reactions[isp].list[i];
+      OneReaction *r = &rlist[ridx];
 
-    if (!std::isfinite(rate_log10_cm3s)) continue;
+      const size_t q = static_cast<size_t>(std::max(0.0, species[isp].charge));
 
-    const double lam = computeReactionLambda(rate_log10_cm3s, dt_chem, ne_m3);
-    if (lam <= 0.0) continue;
+      double rate_log10_cm3s = -INFINITY;
 
-    lambda[nchan] = lam;
-    ridx_map[nchan] = ridx;
-    lambda_total += lam;
-    nchan++;
+      if (r->type == IONIZATION) {
+        if (q >= static_cast<size_t>(atomic_number)) continue;
+        interpolateRateData(atomic_number, q,   icell, logTe, logne_cm,
+                            rate_log10_cm3s, ReactionType::Ionization);
+      } else if (r->type == RECOMBINATION) {
+        if (q == 0) continue;
+        interpolateRateData(atomic_number, q-1, icell, logTe, logne_cm,
+                            rate_log10_cm3s, ReactionType::Recombination);
+      } else if (r->type == EXCHANGE) {
+        // Two branches share the CCD rate row for the Z=1 → 0 transition:
+        //   q > 0  : ion-side CX (kinetic D+ → kinetic D). Table row = q-1.
+        //   q == 0 : neutral-side CX (kinetic D + background D+ → kinetic D,
+        //            velocity resampled at Ti). Rule in the reactions file is
+        //            `D --> D`. Partner is the background plasma, not a
+        //            kinetic ion, so this fires even in Mode A where kinetic
+        //            D+ is suppressed.
+        const size_t cx_row = (q > 0) ? (q - 1) : 0;
+        interpolateRateData(atomic_number, cx_row, icell, logTe, logne_cm,
+                            rate_log10_cm3s, ReactionType::ChargeExchange);
+      } else if (r->type == DISSOCIATION && r->style == JANEV) {
+        // Janev polynomial: ln<sv> = sum_n b_n (ln Te)^n, Te in eV
+        const double lnT = std::log(Te_eV);
+        double lnsv = r->coeff[0];
+        double lnTn = 1.0;
+        for (int k = 1; k < r->ncoeff; k++) {
+          lnTn *= lnT;
+          lnsv += r->coeff[k] * lnTn;
+        }
+        // Convert from ln(cm3/s) to log10(cm3/s)
+        rate_log10_cm3s = lnsv / 2.302585092994046;
+      } else {
+        continue;
+      }
+
+      if (!std::isfinite(rate_log10_cm3s)) continue;
+
+      const double lam = computeReactionLambda(rate_log10_cm3s, dt_chem, ne_m3);
+      if (lam <= 0.0) continue;
+
+      lambda[nchan] = lam;
+      ridx_map[nchan] = ridx;
+      lambda_total += lam;
+      nchan++;
+    }
   }
 
   if (nchan == 0 || lambda_total <= 0.0) return 0;
