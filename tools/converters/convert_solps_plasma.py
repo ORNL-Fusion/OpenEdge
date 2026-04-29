@@ -615,7 +615,32 @@ def _wall_from_mesh_extra(mesh_extra_path: Path, nx, ny, crx4, cry4,
     return pts, segs, seg_cells, seg_areas
 
 
-def _write_sparta_wall_from_mesh_extra(mesh_extra: Path, wall_out: Path, tol: float = 1e-8):
+def _layout_polyline(rs, zs, geometry: str):
+    """Return (x, y) arrays ordered for SPARTA wall.surf in the requested
+    layout, with vertex order forced CCW so SPARTA normals point inward
+    and the deck does not need `invert`.
+
+    geometry='cart' (default): x=R, y=Z. Pairs with `boundary o o p`.
+    geometry='axi'           : x=Z, y=R. Pairs with `boundary o ao p`.
+    """
+    r = np.asarray(rs, dtype=np.float64).reshape(-1)
+    z = np.asarray(zs, dtype=np.float64).reshape(-1)
+    if geometry == "axi":
+        x = z; y = r
+    elif geometry == "cart":
+        x = r; y = z
+    else:
+        raise ValueError(f"geometry must be 'cart' or 'axi', got {geometry!r}")
+    signed_area = 0.5 * float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y))
+    if signed_area < 0.0:
+        x = x[::-1]
+        y = y[::-1]
+    return x, y
+
+
+def _write_sparta_wall_from_mesh_extra(mesh_extra: Path, wall_out: Path,
+                                       tol: float = 1e-8,
+                                       geometry: str = "cart"):
     if not mesh_extra.exists():
         raise FileNotFoundError(f"mesh.extra not found: {mesh_extra}")
 
@@ -664,12 +689,13 @@ def _write_sparta_wall_from_mesh_extra(mesh_extra: Path, wall_out: Path, tol: fl
     if n < 3:
         raise RuntimeError("mesh.extra did not produce a valid closed wall polygon")
 
+    x, y = _layout_polyline(r, z, geometry)
     wall_out.parent.mkdir(parents=True, exist_ok=True)
     with wall_out.open("w", encoding="utf-8") as f:
         f.write("surface geometry\n\n")
         f.write(f"{n} points\n{n} lines\n\nPoints\n\n")
         for i in range(n):
-            f.write(f"{i+1} {r[i]:.12g} {z[i]:.12g}\n")
+            f.write(f"{i+1} {x[i]:.12g} {y[i]:.12g}\n")
         f.write("\nLines\n\n")
         for i in range(n):
             f.write(f"{i+1} {i+1} {(i+1) % n + 1}\n")
@@ -765,6 +791,7 @@ def convert_solps_to_openedge(
     b2fgmtry_path: Path | None = None,
     b2fstate_path: Path | None = None,
     wall_source: str = "auto",
+    geometry: str = "cart",
 ) -> None:
     """
     Convert SOLPS run directory to OpenEdge plasma.h5 (B-field embedded).
@@ -1172,21 +1199,20 @@ def convert_solps_to_openedge(
                 f"wall_source=mesh-extra requested but {mesh_extra_path} missing")
         me_pts, me_segs, me_cells, me_areas = _wall_from_mesh_extra(
             mesh_extra_path, nx, ny, crx4, cry4, mesh_wall_face_area)
-        # SOLPS is an axisymmetric code. Write wall.surf in SPARTA's
-        # native axisymmetric layout: column 1 = x = Z (axial), column 2
-        # = y = R (radial). Pairs with `boundary o ao p`, `create_box ...
-        # 0 R_max ...`, where SPARTA computes true cylindrical cell
-        # volumes and 2*pi*R*L surface areas internally.
+        me_r = np.array([rv for rv, _ in me_pts], dtype=np.float64)
+        me_z = np.array([zv for _, zv in me_pts], dtype=np.float64)
+        x_pts, y_pts = _layout_polyline(me_r, me_z, geometry)
         wall_out.parent.mkdir(parents=True, exist_ok=True)
         with wall_out.open("w", encoding="utf-8") as f:
             f.write("surface geometry\n\n")
             f.write(f"{len(me_pts)} points\n{len(me_segs)} lines\n\nPoints\n\n")
-            for i, (rv, zv) in enumerate(me_pts):
-                f.write(f"{i+1} {zv:.12g} {rv:.12g}\n")
+            for i in range(len(me_pts)):
+                f.write(f"{i+1} {x_pts[i]:.12g} {y_pts[i]:.12g}\n")
             f.write("\nLines\n\n")
             for i, (a, b) in enumerate(me_segs):
                 f.write(f"{i+1} {a+1} {b+1}\n")
-        print(f"Wrote wall.surf from mesh.extra (axi: x=Z, y=R): {wall_out}")
+        layout = "x=Z, y=R" if geometry == "axi" else "x=R, y=Z"
+        print(f"Wrote wall.surf from mesh.extra ({geometry}: {layout}): {wall_out}")
         mesh_wall_surf_cell = me_cells
         mesh_wall_surf_area = me_areas
 
@@ -1290,11 +1316,15 @@ def convert_solps_to_openedge(
             f.write(f"{len(unique_rz)} points\n{len(wall_edges)} lines"
                     f"\n\nPoints\n\n")
             for i, (rv, zv) in enumerate(unique_rz):
-                f.write(f"{i+1} {zv:.12g} {rv:.12g}\n")
+                if geometry == "axi":
+                    f.write(f"{i+1} {zv:.12g} {rv:.12g}\n")
+                else:
+                    f.write(f"{i+1} {rv:.12g} {zv:.12g}\n")
             f.write("\nLines\n\n")
             for i, (va, vb) in enumerate(wall_edges):
                 f.write(f"{i+1} {vmap[va]} {vmap[vb]}\n")
-        print(f"Wrote EIRENE-consistent wall (axi: x=Z, y=R): {wall_out} "
+        layout = "x=Z, y=R" if geometry == "axi" else "x=R, y=Z"
+        print(f"Wrote EIRENE-consistent wall ({geometry}: {layout}): {wall_out} "
               f"({len(wall_edges)} segments, {len(unique_rz)} unique pts "
               f"after snap)")
         mesh_wall_surf_cell = np.asarray(wall_edge_cells, dtype=np.int32)
@@ -1711,7 +1741,7 @@ def convert_solps_to_openedge(
     # EIRENE-based path couldn't produce edges (e.g. no fort.33/34/35).
     if wall_out is not None and mesh_wall_surf_cell.size == 0:
         mesh_path = mesh_extra if mesh_extra is not None else (run_path / "mesh.extra")
-        _write_sparta_wall_from_mesh_extra(mesh_path, wall_out)
+        _write_sparta_wall_from_mesh_extra(mesh_path, wall_out, geometry=geometry)
         print(f"Wrote wall (legacy mesh.extra walk): {wall_out}")
 
     print(f"Wrote plasma: {plasma_out}")
@@ -1844,6 +1874,10 @@ def _build_parser():
                          "mesh-extra if available, else eirene, else b2. "
                          "'mesh-extra' + 'b2' are SOLPS-native and do NOT "
                          "depend on EIRENE fort.33/34/35 files."))
+    p.add_argument("--geometry", choices=["cart", "axi"], default="cart",
+                   help="SPARTA wall.surf slot layout. cart (default): "
+                        "x=R, y=Z; pairs with 'boundary o o p'. axi: "
+                        "x=Z, y=R; pairs with 'boundary o ao p'.")
     p.add_argument("--core-out", type=Path, default=None,
                    help="If given, also write a SPARTA surface file tracing "
                         "the psi_norm=<--psi-norm-core> contour around the "
@@ -1876,6 +1910,7 @@ def main():
         b2fgmtry_path=args.b2fgmtry,
         b2fstate_path=args.b2fstate,
         wall_source=args.wall_source,
+        geometry=args.geometry,
     )
 
     # Optional: trace the psi_norm=<level> contour from the equilibrium
