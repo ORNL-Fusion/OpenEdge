@@ -228,7 +228,8 @@ void FixDropletCharge::apply_charge_update()
     if (!(rd > 0.0)) continue;
 
     double R = 0.0, Z = 0.0;
-    OpenEdge::sparta_to_RZ(p.x, dim, axi, R, Z);
+    OpenEdge::sparta_to_RZ(p.x, dim, axi, R, Z,
+                           pd_->column_x0, pd_->column_y0);
     const double Te = std::max(pd_->interp2D(pd_->temp_e, R, Z, p.icell), 0.0);
     const double Ti = std::max(pd_->interp2D(pd_->temp_i, R, Z, p.icell), 0.0);
     const double Ne = std::max(pd_->interp2D(pd_->dens_e, R, Z, p.icell), 0.0);

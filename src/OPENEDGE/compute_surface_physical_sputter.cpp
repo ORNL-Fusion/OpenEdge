@@ -449,6 +449,8 @@ void ComputeSurfacePhysicalSputter::load_plasma_from_fix(const FixBackground *pd
 
   nr = pd->nr;
   nz = pd->nz;
+  column_x0 = pd->column_x0;
+  column_y0 = pd->column_y0;
   rvals = pd->rvals;
   zvals = pd->zvals;
   dens_i = pd->dens_i;
@@ -1369,12 +1371,14 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
     if (dimension == 2) {
       const double mid[3] = {0.5*(lines[m].p1[0] + lines[m].p2[0]),
                              0.5*(lines[m].p1[1] + lines[m].p2[1]), 0.0};
-      OpenEdge::sparta_to_RZ(mid, dimension, domain->axisymmetric, r, z);
+      OpenEdge::sparta_to_RZ(mid, dimension, domain->axisymmetric, r, z,
+                             column_x0, column_y0);
     } else {
       const double mid[3] = {(tris[m].p1[0] + tris[m].p2[0] + tris[m].p3[0]) / 3.0,
                              (tris[m].p1[1] + tris[m].p2[1] + tris[m].p3[1]) / 3.0,
                              (tris[m].p1[2] + tris[m].p2[2] + tris[m].p3[2]) / 3.0};
-      OpenEdge::sparta_to_RZ(mid, dimension, domain->axisymmetric, r, z);
+      OpenEdge::sparta_to_RZ(mid, dimension, domain->axisymmetric, r, z,
+                             column_x0, column_y0);
     }
 
     // Skip surface elements outside SOLPS domain.
@@ -1644,9 +1648,9 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
     if (dimension == 2) {
       double R1, Z1, R2, Z2;
       OpenEdge::sparta_to_RZ(lines[m].p1, dimension, domain->axisymmetric,
-                              R1, Z1);
+                              R1, Z1, column_x0, column_y0);
       OpenEdge::sparta_to_RZ(lines[m].p2, dimension, domain->axisymmetric,
-                              R2, Z2);
+                              R2, Z2, column_x0, column_y0);
       const double seg = std::sqrt((R2-R1)*(R2-R1) + (Z2-Z1)*(Z2-Z1));
       const double R_mid = 0.5 * (R1 + R2);
       ring_area = 2.0 * M_PI * R_mid * seg;

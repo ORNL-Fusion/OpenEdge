@@ -752,7 +752,8 @@ void FixSurfaceStateLm::end_of_step()
         xmid[2] = (tris[m].p1[2] + tris[m].p2[2] + tris[m].p3[2]) / 3.0;
       }
       double R = 0.0, Z = 0.0;
-      OpenEdge::sparta_to_RZ(xmid, dimension, domain->axisymmetric, R, Z);
+      OpenEdge::sparta_to_RZ(xmid, dimension, domain->axisymmetric, R, Z,
+                             fbg->column_x0, fbg->column_y0);
 
       double q_par  = fbg->default_q_par;
       double q_perp = fbg->default_q_perp;

@@ -415,7 +415,8 @@ void FixSurfaceEmitRecycle::create_task(int icell)
                                   0.5 * (path[1] + path[4]),
                                   0.0 };
       OpenEdge::sparta_to_RZ(xyz_mid, dimension, domain->axisymmetric,
-                              tasks[ntask].rmid, tasks[ntask].zmid);
+                              tasks[ntask].rmid, tasks[ntask].zmid,
+                              plasma->column_x0, plasma->column_y0);
 
       // normal[] points INTO the fluid (SPARTA canonical).
       tasks[ntask].inward[0] = normal[0];

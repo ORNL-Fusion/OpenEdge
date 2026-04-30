@@ -1,0 +1,62 @@
+# ------------------------------------------------------------------------------
+# OpenEdge/SPARTA Test: MPEX 45-degree single-particle hybrid Boris/GCA case
+# Goal: generate a publication-ready trajectory showing pusher behavior toward
+# the tilted target.
+# ------------------------------------------------------------------------------
+
+log output/log.mpex_45_gca.openedge
+
+seed                 1245
+dimension            3
+boundary             o o o
+global               gridcut 0.0 comm/sort no
+global               fnum 1
+
+create_box           0 0.1 0.0 0.1 0.0 0.2
+create_grid          20 20 100
+balance_grid         rcb part
+
+species              input/plasma.species Ta Ta+ Ta2+ Ta3+ Ta4+ Ta5+
+mixture              ions Ta4+ frac 1.0
+
+read_particles       input/source.single 0
+
+read_surf            surfaces/target_45deg_Te.txt custom temp float 0 group 1 particle check
+surf_collide         targetCollideModel vanish log yes file output/target_vanish_gca_45.csv
+surf_modify          1 collide targetCollideModel react none
+
+read_surf            surfaces/skimmer_ring.txt group 2 particle check
+surf_collide         skimmerCollideModel vanish
+surf_modify          2 collide skimmerCollideModel react none
+
+#read_surf            surfaces/box.txt group 3 particle check
+#surf_collide         boxCollideModel vanish
+#surf_modify          3 collide boxCollideModel react none
+
+fix      pd background file input/plasma.h5 static yes
+compute  cnear plasma/fields all background pd br bt bz ex ey ez dens_e dens_i temp_e temp_i parrflow
+compute cgeom sheath/geometry/grid all 1 dist surfid nx ny nz
+
+global pusher plasma cnear mode hybrid gca_switch 2.5 &
+       subcycles 1 bad_dt_check yes bad_dt_limit 0.5 dump no
+
+fix      fB bfield/grid c_cnear[1] c_cnear[2] c_cnear[3] every 1
+global   bfield grid fB 0
+
+variable ExTot grid "0.0"
+variable EyTot grid "0.0"
+variable EzTot grid "2000.0"
+fix      fEgrid efield/grid ExTot EyTot EzTot every 1
+global   efield grid fEgrid 0
+
+variable dt       equal 5e-09
+variable numStep  equal 200000
+variable dumpFreq equal 100
+
+dump     dpart particle all ${dumpFreq} output/traj.gca.45.dump id type x y z vx vy vz
+dump_modify dpart first yes
+
+timestep   ${dt}
+stats      1000
+stats_style step cpu np
+run        ${numStep}

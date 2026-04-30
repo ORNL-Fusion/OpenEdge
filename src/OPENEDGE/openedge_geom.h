@@ -16,14 +16,20 @@ namespace OpenEdge {
 // physical cylindrical (R, Z). Three SPARTA modes:
 //   2D Cartesian (legacy):  x[0]=R, x[1]=Z              (R, Z) = (x, y)
 //   2D axisymmetric:        x[0]=Z (axis), x[1]=R       (R, Z) = (y, x)
-//   3D Cartesian:           x[0..2] = (X, Y, Z)         (R, Z) = (sqrt(X^2+Y^2), Z)
+//   3D Cartesian:           x[0..2] = (X, Y, Z)         (R, Z) = (sqrt((X-x0)^2+(Y-y0)^2), Z)
+//
+// The 3D Cartesian path accepts an optional axis offset (x0, y0) for
+// linear-device cases (MPEX, proto-lite) whose simulation box is not
+// centered on the plasma column. Default (0, 0) preserves SOLPS /
+// SOLEDGE3X axisymmetric behavior. Offset is ignored in 2D and axi modes.
 //
 // The 2D-axisymmetric layout is enforced by SPARTA: `boundary o a p` requires
 // the `a` token at ylo, with boxlo[1] == 0 and y the radial direction
 // (domain.cpp:174-182, create_box.cpp:55).
 KOKKOS_INLINE_FUNCTION
 void sparta_to_RZ(const double *xyz, int dim, bool axisymmetric,
-                  double &R, double &Z) {
+                  double &R, double &Z,
+                  double x0 = 0.0, double y0 = 0.0) {
   if (axisymmetric) {            // x = Z (axis), y = R (radial)
     Z = xyz[0];
     R = xyz[1];
@@ -31,7 +37,9 @@ void sparta_to_RZ(const double *xyz, int dim, bool axisymmetric,
     R = xyz[0];
     Z = xyz[1];
   } else {                       // 3D
-    R = std::sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]);
+    const double dx = xyz[0] - x0;
+    const double dy = xyz[1] - y0;
+    R = std::sqrt(dx*dx + dy*dy);
     Z = xyz[2];
   }
 }

@@ -1,0 +1,98 @@
+# ------------------------------------------------------------------------------
+# OpenEdge/SPARTA Test: MPEX 45-degree production case
+# Goal: generate particle, surface, and charge-resolved density dumps for
+# PSI-poster figure preparation.
+# ------------------------------------------------------------------------------
+
+log output/log.mpex_45_main.openedge
+
+variable fnum         equal 1e5
+variable time         equal 0.1
+variable dt           equal 1e-08
+variable N            equal floor(${time}/${dt})
+variable fieldfreq    equal 0
+variable fieldevery   equal 1
+variable Nfreq        equal floor(${N}/1000)
+variable dumpEvery    equal floor(${N}/200)
+
+global boris_dump no
+global boris_dump_every 1
+
+seed                 1245
+dimension            3
+boundary             o o o
+global               gridcut 0. comm/style neigh comm/sort no
+create_box           0 0.1 0. 0.1 0.0 0.2
+create_grid          20 20 100
+balance_grid         rcb part
+
+global               fnum ${fnum}
+
+species              input/plasma.species Ta Ta+ Ta2+ Ta3+ Ta4+ Ta5+
+mixture              TantalumSource Ta   frac 0.00
+mixture              TantalumSource Ta+  frac 0.00
+mixture              TantalumSource Ta2+ frac 0.08
+mixture              TantalumSource Ta3+ frac 0.62
+mixture              TantalumSource Ta4+ frac 0.30
+mixture              TantalumSource Ta5+ frac 0.00
+
+read_surf            surfaces/target_45deg_Te.txt custom temp float 0 group 1 particle check
+surf_collide         targetCollideModel vanish log yes file output/target_vanish_45.csv
+surf_modify          1 collide targetCollideModel react none
+
+read_surf            surfaces/skimmer_ring.txt group 2 particle check
+surf_collide         skimmerCollideModel vanish
+surf_modify          2 collide skimmerCollideModel react none
+
+read_surf            surfaces/box.txt group 3 particle check
+surf_collide         boxCollideModel vanish
+surf_modify          3 collide boxCollideModel react none
+
+include              surfaces/include_surf_ids_45
+group                exposedTarget_45 surf id <> ${case_min} ${case_max}
+
+fix      pd background file input/plasma.h5 static yes
+compute  cnear plasma/fields all background pd br bt bz ex ey ez dens_e dens_i temp_e temp_i parrflow
+
+# Keep the existing simple grid E-field used in the local MPEX input until the
+# full production sheath path is reintroduced into this driver.
+variable ExTot grid "0.0"
+variable EyTot grid "0.0"
+variable EzTot grid "2000.0"
+fix      fEgrid efield/grid ExTot EyTot EzTot every 1
+global   efield grid fEgrid 0
+
+fix      in emit/face/file TantalumSource zlo input/ta_inlet.dat ZLO
+fix      fB bfield/grid c_cnear[1] c_cnear[2] c_cnear[3] every ${fieldevery}
+global   bfield grid fB ${fieldfreq}
+
+# Time-resolved particle dump for trajectory extraction and charge-state views.
+dump     dstate particle all ${dumpEvery} output/state.45.dump id type x y z vx vy vz
+
+# Charge-resolved volumetric densities for Ta states.
+compute  cRho grid all species nrho
+fix      fRho ave/grid all 1 ${Nfreq} ${Nfreq} c_cRho[*] ave running
+dump     dRho grid all ${Nfreq} output/ta_density.45.grid id xc yc zc f_fRho[*]
+
+# Per-surface diagnostics on every loaded surface for areal-density style plots.
+compute  cSurfAll surf all all nflux_incident mflux etot press ke shx shy shz px py pz
+fix      fSurfAll ave/surf all 1 ${Nfreq} ${Nfreq} c_cSurfAll[*] ave running
+dump     dSurfAll surf all ${Nfreq} output/surface_diag.45.surf id v1x v1y v1z v2x v2y v2z v3x v3y v3z area f_fSurfAll[*]
+
+# Target-only EAD is kept because it is already part of the working workflow.
+compute  cEAD surf/ead exposedTarget_45 TantalumSource 1000 200 90 90 quantities sum_particles hist
+fix      fEAD ave/surf exposedTarget_45 1 10 100 c_cEAD[*] ave one
+dump     dEAD surf exposedTarget_45 100 output/ead.45.surf id f_fEAD[*]
+
+variable npart equal np
+
+timestep   ${dt}
+stats_style step time cpu np
+stats      1
+run        1000
+
+fix        31 halt ${Nfreq} v_npart <= 100
+unfix      in
+
+stats      ${Nfreq}
+run        ${N}

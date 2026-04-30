@@ -154,7 +154,8 @@ void FixDropletDrag::kick_half(double dt_half)
 
     // R/Z at particle for plasma queries.
     double R = 0.0, Z = 0.0;
-    OpenEdge::sparta_to_RZ(p.x, dim, axisym, R, Z);
+    OpenEdge::sparta_to_RZ(p.x, dim, axisym, R, Z,
+                           pd_->column_x0, pd_->column_y0);
 
     const double Ti_eV = std::max(pd_->interp2D(pd_->temp_i, R, Z, p.icell), 0.0);
     const double Ni    = std::max(pd_->interp2D(pd_->dens_i, R, Z, p.icell), 0.0);

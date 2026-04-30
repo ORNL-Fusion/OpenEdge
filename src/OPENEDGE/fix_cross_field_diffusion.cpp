@@ -454,7 +454,8 @@ void FixCrossFieldDiffusion::start_of_step()
         // gradient-pinch cross-diffusion is disabled for mesh-only
         // plasma.h5 cases).
         double R, Z;
-        OpenEdge::sparta_to_RZ(p.x, dim, domain->axisymmetric, R, Z);
+        OpenEdge::sparta_to_RZ(p.x, dim, domain->axisymmetric, R, Z,
+                               pd_->column_x0, pd_->column_y0);
         if (pd_->rvals.size() < 2 || pd_->zvals.size() < 2) {
           gNeR = 0.0; gNeZ = 0.0;
         } else {
@@ -631,7 +632,10 @@ double FixCrossFieldDiffusion::read_src(const CollGridSrc &S, int ip, int icell)
 void FixCrossFieldDiffusion::particle_rz(const Particle::OnePart &p,
                                     double &R, double &Z) const
 {
-  OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z);
+  const double x0 = pd_ ? pd_->column_x0 : 0.0;
+  const double y0 = pd_ ? pd_->column_y0 : 0.0;
+  OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z,
+                         x0, y0);
 }
 
 /* ---------------------------------------------------------------------- */

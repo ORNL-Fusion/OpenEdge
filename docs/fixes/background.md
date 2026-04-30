@@ -36,7 +36,16 @@ fix ID background constant \
 | `file <plasma.h5>` | HDF5 file from a converter (`/mesh/*`, `/equilibrium/*`, `/ion_species/*`) |
 | `equilibrium <file.equ>` | optional standalone equilibrium file overriding `/equilibrium/` group |
 | `static yes\|no` | if `yes`, plasma data is loaded once at init and never reread (right choice for SOLPS-coupled outer-loop runs). Default `no`. |
+| `column_axis <x0> <y0>` | (3D Cartesian only) sets the (x, y) position of the axisymmetric plasma column axis. Default `(0, 0)`. |
 | `constant` | declare the plasma analytically — useful for unit tests and benchmarks |
+
+`column_axis` applies only to 3D Cartesian runs. It controls the
+SPARTA-to-cylindrical mapping `R = sqrt((x - x0)^2 + (y - y0)^2)` used
+for every plasma / B-field / sputter query. Default `(0, 0)` preserves
+SOLPS / SOLEDGE3X behavior where the simulation box is centered on the
+column. Use it for linear-device cases (MPEX, proto-lite) whose box is
+not centered on the column. The keyword is ignored in 2D and
+axisymmetric modes.
 
 ## Output provided
 

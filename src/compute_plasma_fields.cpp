@@ -326,6 +326,8 @@ void ComputePlasmaFields::init()
 
     // Build PlasmaFileData from the fix's flat arrays
     // (convert flat vectors to vector<vector<double>> format)
+    plasma_data.column_x0 = pd->column_x0;
+    plasma_data.column_y0 = pd->column_y0;
     plasma_data.r.assign(pd->rvals.begin(), pd->rvals.end());
     plasma_data.z.assign(pd->zvals.begin(), pd->zvals.end());
     int pnr = pd->nr, pnz = pd->nz;
@@ -826,7 +828,8 @@ void ComputePlasmaFields::compute_per_grid()
         (dim == 3) ? 0.5 * (cell.lo[2] + cell.hi[2]) : 0.0
       };
       double Rc, Zc;
-      OpenEdge::sparta_to_RZ(xyz_c, dim, domain->axisymmetric, Rc, Zc);
+      OpenEdge::sparta_to_RZ(xyz_c, dim, domain->axisymmetric, Rc, Zc,
+                             plasma_data.column_x0, plasma_data.column_y0);
       const int tri = findNearestMappedTriangle(plasma_data, Rc, Zc, 0.1);
       int mcell = -1;
       if (tri >= 0 && tri < static_cast<int>(plasma_data.mesh_cell_idx.size()))
@@ -1610,7 +1613,8 @@ bool ComputePlasmaFields::meshLookupPlasma(
       0.5 * (cells[icell].lo[1] + cells[icell].hi[1]),
       (dim == 3) ? 0.5 * (cells[icell].lo[2] + cells[icell].hi[2]) : 0.0};
   double r, z;
-  OpenEdge::sparta_to_RZ(xc, dim, domain->axisymmetric, r, z);
+  OpenEdge::sparta_to_RZ(xc, dim, domain->axisymmetric, r, z,
+                         data.column_x0, data.column_y0);
   return meshLookupPlasmaAtPoint(data, r, z, P);
 }
 
@@ -1687,7 +1691,8 @@ ComputePlasmaFields::makeStencilAtPoint(
 
   const int dim = domain->dimension;
   double r, z;
-  OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, r, z);
+  OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, r, z,
+                         plasma_data.column_x0, plasma_data.column_y0);
 
   const int nr = static_cast<int>(r_vals.size());
   const int nz = static_cast<int>(z_vals.size());
@@ -1851,7 +1856,8 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
 
   const int dim = domain->dimension;
   double r, z;
-  OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, r, z);
+  OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, r, z,
+                         plasma_data.column_x0, plasma_data.column_y0);
 
   bool used_mesh = false;
   if (plasma_data.has_mesh)
@@ -1888,7 +1894,8 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
   // available. No pressure-balance approximation.
   if (plasma_data.has_mesh && !plasma_data.mesh_e_r.empty()) {
     double R, Z;
-    OpenEdge::sparta_to_RZ(xyz, domain->dimension, domain->axisymmetric, R, Z);
+    OpenEdge::sparta_to_RZ(xyz, domain->dimension, domain->axisymmetric, R, Z,
+                           plasma_data.column_x0, plasma_data.column_y0);
     const int tri = findNearestMappedTriangle(plasma_data, R, Z, 0.1);
     int mcell = -1;
     if (tri >= 0 && tri < static_cast<int>(plasma_data.mesh_cell_idx.size()))
@@ -1943,7 +1950,8 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
   // fall through to the regular-grid or equilibrium branch instead.
   if (!plasma_data.mesh_tri_br.empty()) {
     double R, Z;
-    OpenEdge::sparta_to_RZ(xyz, domain->dimension, domain->axisymmetric, R, Z);
+    OpenEdge::sparta_to_RZ(xyz, domain->dimension, domain->axisymmetric, R, Z,
+                           plasma_data.column_x0, plasma_data.column_y0);
     const int tri = findMeshTriangle(plasma_data, R, Z);
     if (tri >= 0 && tri < static_cast<int>(plasma_data.mesh_tri_br.size())) {
       B.br = plasma_data.mesh_tri_br[tri];
@@ -1977,7 +1985,8 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
 
   const int dim = domain->dimension;
   double R, Z;
-  OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, R, Z);
+  OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, R, Z,
+                         plasma_data.column_x0, plasma_data.column_y0);
   if (R < 1.0e-10) return B;
 
   const EquilibriumData &equ = equ_data;
@@ -2292,7 +2301,8 @@ void ComputePlasmaFields::computeMagneticGeometry(
     (dim == 3) ? 0.5 * (cells[icell].lo[2] + cells[icell].hi[2]) : 0.0
   };
   double R, Z;
-  OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, R, Z);
+  OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, R, Z,
+                         plasma_data.column_x0, plasma_data.column_y0);
   if (R < 1.0e-10) return;
 
   const int jm = equ.jm;

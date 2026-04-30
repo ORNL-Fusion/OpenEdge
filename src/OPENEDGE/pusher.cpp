@@ -253,7 +253,8 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
     if (pd && pd->has_bfield) {
       const double xyz[3] = {xcur[0], xcur[1], 0.0};
       double R = 0.0, Z = 0.0;
-      OpenEdge::sparta_to_RZ(xyz, dim, axi, R, Z);
+      OpenEdge::sparta_to_RZ(xyz, dim, axi, R, Z,
+                             pd->column_x0, pd->column_y0);
       double Br = 0.0, Bz = 0.0, Bt = 0.0;
       pd->bfield_at(R, Z, Br, Bz, Bt);
       B[0] = Br;
@@ -331,7 +332,8 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
         const double xmid_slot[3] = {0.5*(ln->p1[0]+ln->p2[0]),
                                      0.5*(ln->p1[1]+ln->p2[1]),
                                      0.0};
-        OpenEdge::sparta_to_RZ(xmid_slot, dim, axi, sh_sR, sh_sZ);
+        // 2D pusher: offset ignored by sparta_to_RZ, default 0,0 OK
+        OpenEdge::sparta_to_RZ(xmid_slot, dim, axi, sh_sR, sh_sZ, 0.0, 0.0);
 
         // Plasma (Te, Ti, ne) at gcell from compute or fix.
         if (pusher_plasma_cidx >= 0) {
@@ -380,7 +382,8 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
   if (sh_active) {
     double R0 = 0.0, Z0 = 0.0;
     const double xyz0[3] = {xcur[0], xcur[1], 0.0};
-    OpenEdge::sparta_to_RZ(xyz0, dim, axi, R0, Z0);
+    // 2D pusher: offset ignored by sparta_to_RZ, default 0,0 OK
+    OpenEdge::sparta_to_RZ(xyz0, dim, axi, R0, Z0, 0.0, 0.0);
     const double d0 = (R0 - sh_sR)*sh_nR + (Z0 - sh_sZ)*sh_nZ;
     sh_d0_sign = (d0 >= 0.0) ? 1.0 : -1.0;
   }
@@ -419,7 +422,8 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
     if (sh_active) {
       double R_sub = 0.0, Z_sub = 0.0;
       const double xyz_sub[3] = {xcur[0], xcur[1], 0.0};
-      OpenEdge::sparta_to_RZ(xyz_sub, dim, axi, R_sub, Z_sub);
+      // 2D pusher: offset ignored by sparta_to_RZ, default 0,0 OK
+      OpenEdge::sparta_to_RZ(xyz_sub, dim, axi, R_sub, Z_sub, 0.0, 0.0);
       const double d_raw = (R_sub - sh_sR)*sh_nR + (Z_sub - sh_sZ)*sh_nZ;
       const double d_particle = d_raw;  // signed
       // Engage sheath E only when the particle is on the PLASMA side
@@ -1059,7 +1063,9 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
 
       double R_pt, Z_pt_unused;
       OpenEdge::sparta_to_RZ(x, domain->dimension, domain->axisymmetric,
-                              R_pt, Z_pt_unused);
+                              R_pt, Z_pt_unused,
+                              cp_bfield ? cp_bfield->plasma_data.column_x0 : 0.0,
+                              cp_bfield ? cp_bfield->plasma_data.column_y0 : 0.0);
       if (R_pt < 1.0e-10) R_pt = 1.0e-10;
       const double invR_pt = 1.0 / R_pt;
 

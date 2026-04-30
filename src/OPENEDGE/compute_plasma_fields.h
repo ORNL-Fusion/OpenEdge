@@ -26,8 +26,12 @@ namespace SPARTA_NS {
 
     // Structs for plasma data and parameters
 struct PlasmaFileData{
-  std::vector<double> r;   
-  std::vector<double> z;  
+  // Column-axis offset (3D Cartesian only). Mirrored from FixBackground at
+  // init / reload so all sparta_to_RZ call sites can apply the offset
+  // without holding a FixBackground pointer. Default (0, 0).
+  double column_x0 = 0.0, column_y0 = 0.0;
+  std::vector<double> r;
+  std::vector<double> z;
   std::vector<std::vector<double>> dens_e, temp_e;
   std::vector<std::vector<double>> dens_i, temp_i;
   std::vector<std::vector<double>> parr_flow_r, parr_flow_t, parr_flow_z, parr_flow;

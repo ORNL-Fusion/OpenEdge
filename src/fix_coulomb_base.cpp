@@ -785,7 +785,10 @@ double FixCoulombBase::read_src(const CollGridSrc &S, int ip, int icell) const
 void FixCoulombBase::particle_rz(const Particle::OnePart &p,
                                double &R, double &Z) const
 {
-  OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z);
+  const double x0 = pd_ ? pd_->column_x0 : 0.0;
+  const double y0 = pd_ ? pd_->column_y0 : 0.0;
+  OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z,
+                         x0, y0);
 }
 
 /* ---------------------------------------------------------------------- */

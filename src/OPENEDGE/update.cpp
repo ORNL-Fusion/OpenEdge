@@ -1430,8 +1430,10 @@ template < int DIM, int SURF, int OPT > void Update::move()
       // so that the reflected trajectory goes through proper surface checks.
       if (psi_reflect_flag && (pflag == PKEEP || pflag == PINSERT)) {
         double Rnew, Znew;
+        // psi grid is independent of plasma column; no plasma context here,
+        // default 0,0 (psi reflection is a tokamak-only feature anyway).
         OpenEdge::sparta_to_RZ(xnew, domain->dimension, domain->axisymmetric,
-                                Rnew, Znew);
+                                Rnew, Znew, 0.0, 0.0);
 
         // Bilinear interpolation of psi_norm at xnew
         double psi_n = 1.0;

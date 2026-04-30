@@ -122,6 +122,9 @@ class ComputeSurfacePhysicalSputter : public Compute {
 
   // plasma data
   int nr,nz,nspec;
+  // Column-axis offset for 3D Cartesian sparta_to_RZ. Mirrored from
+  // FixBackground in load_plasma_from_fix; default (0, 0) for file mode.
+  double column_x0 = 0.0, column_y0 = 0.0;
   std::vector<double> rvals,zvals;
   std::vector<double> dens_i,temp_e,temp_i,parr_flow,parr_flow_r,parr_flow_t,parr_flow_z;
   std::vector<double> br,bt,bz;

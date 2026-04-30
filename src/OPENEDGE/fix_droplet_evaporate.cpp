@@ -200,7 +200,8 @@ void FixDropletEvaporate::droplet_evaporation_model(Particle::OnePart *ip,
 
   // R/Z at particle position (handles 2D Cart, 2D axi, 3D Cart via helper).
   double R = 0.0, Z = 0.0;
-  OpenEdge::sparta_to_RZ(ip->x, domain->dimension, domain->axisymmetric, R, Z);
+  OpenEdge::sparta_to_RZ(ip->x, domain->dimension, domain->axisymmetric, R, Z,
+                         pd_->column_x0, pd_->column_y0);
 
   // Heat-flux vector at droplet position. When plasma.h5 carries q_par /
   // q_perp (mesh-level or regular grid), interp2D routes through the
