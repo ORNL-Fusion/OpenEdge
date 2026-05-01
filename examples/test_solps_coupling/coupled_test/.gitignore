@@ -12,4 +12,9 @@ openedge/core.surf
 openedge/wall.surf
 openedge/droplet.species
 openedge/particle.source
-solps/
+
+# SOLPS-ITER run data (heavy: balance.nc ~400 MB, b2fplasmf ~400 MB).
+# Keep solps/ tracked so submission/sweep helpers can ship; never
+# commit baserun/ or v0_1/ themselves.
+solps/baserun/
+solps/v0_1/
