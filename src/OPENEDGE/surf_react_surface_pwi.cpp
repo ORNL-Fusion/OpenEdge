@@ -462,7 +462,14 @@ char *SurfReactSurfacePWI::reactionID(int m)
 
 double SurfReactSurfacePWI::reaction_coeff(int m)
 {
-  return rlist[m].prob;
+  // SPARTA's compute surf etot expects reaction_coeff() in J/event
+  // (chemical energy released/absorbed). For PWI (wall recycling via
+  // TRIM tables) there is no chemical energy budget: the kinetic
+  // energy change is already captured via (V_post - V_pre).  Returning
+  // rlist[m].prob (a unitless probability ~1) caused compute surf to
+  // add ~1 J per event, scaled by fnum/dt, giving spurious wall energy
+  // ~1e23 W per macroparticle hit.  Return 0 so etot tallies only KE.
+  return 0.0;
 }
 
 int SurfReactSurfacePWI::match_reactant(char *species, int m)

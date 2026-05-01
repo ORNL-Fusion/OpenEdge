@@ -88,6 +88,7 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
   const_epar = 0.0;
   const_br = const_bz = const_bt = 0.0;
   const_has_bfield = 0;
+  column_x0 = column_y0 = 0.0;
 
   int iarg = 2;
   auto parse_scalar = [&](double &dst, const char *label) {
@@ -175,6 +176,12 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
     } else if (strcmp(arg[iarg], "bt") == 0) {
       parse_scalar(const_bt, arg[iarg]);
       const_has_bfield = 1;
+    } else if (strcmp(arg[iarg], "column_axis") == 0) {
+      if (iarg + 2 >= narg)
+        error->all(FLERR, "fix background: column_axis needs x0 y0");
+      column_x0 = input->numeric(FLERR, arg[iarg + 1]);
+      column_y0 = input->numeric(FLERR, arg[iarg + 2]);
+      iarg += 3;
     } else {
       char msg[256];
       snprintf(msg, sizeof(msg),
@@ -1432,10 +1439,16 @@ void FixBackground::build_cell_mesh_index()
     // Physical (R, Z) — matches OpenEdge::sparta_to_RZ convention used by
     // all other pd consumers (fix thermal_force, cross_diffusion, emit/surf/
     // recycle). In axi: SPARTA x = Z_axis, y = R_radial.
+    // 3D Cartesian honors the column_axis offset (default 0,0).
     double R, Z;
     if (axi)          { Z = xc[0]; R = xc[1]; }
     else if (dim == 2) { R = xc[0]; Z = xc[1]; }
-    else              { R = std::sqrt(xc[0]*xc[0] + xc[1]*xc[1]); Z = xc[2]; }
+    else {
+      const double dx = xc[0] - column_x0;
+      const double dy = xc[1] - column_y0;
+      R = std::sqrt(dx*dx + dy*dy);
+      Z = xc[2];
+    }
 
     // Fast hash-grid lookup only — do NOT run find_nearest_mapped_triangle.
     // Cells outside the plasma mesh (wall shadow, vacuum) correctly get -1;

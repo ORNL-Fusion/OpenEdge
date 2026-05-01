@@ -114,6 +114,38 @@ class FixSurfaceEmitSource : public FixEmit {
 
   // custom options for per-surf emission properties
 
+  // ---- File-driven flux mode (alternative to compute-driven) ----
+  // When file_mode = 1, per-surf nrho/vstream/temp_thermal come from a
+  // SPARTA inflow-file (IMESH/JMESH/VALUES) bilinear-interpolated at each
+  // surf centroid. The file format is the same as fix emit/face/file:
+  //   <SECTION>             # e.g. ZLO  (declares which face axes are i,j)
+  //   NIJ Ni Nj
+  //   NV Nv
+  //   VALUES name1 name2 ...   # any of: nrho, vx, vy, vz, temp, gamma
+  //   IMESH x_0 ... x_{Ni-1}
+  //   JMESH y_0 ... y_{Nj-1}
+  //
+  //   i j v1 v2 ... vNv
+  //   ...
+  // Section name picks the axis pair: ZLO/ZHI -> (xc,yc), XLO/XHI -> (yc,zc),
+  // YLO/YHI -> (xc,zc). gamma column is read but ignored (redundant with
+  // nrho * vz). Set face_axis_idx accordingly in load_file().
+  int  file_mode;
+  char *file_path;
+  char *file_section;
+  int  face_axis_idx;            // 0,1,2 of (X,Y,Z); selects (i,j) axes
+  struct InflowMesh {
+    int ni, nj, nvalues;
+    std::vector<double> imesh, jmesh;        // (ni), (nj)
+    std::vector<int>    which;               // (nvalues) -- IM_* enum values
+    std::vector<double> values;              // (ni*nj*nvalues), [j*ni+i]*nv+m
+    double lo[2], hi[2];
+  } fmesh;
+  void file_load();
+  void file_bcast();
+  void file_lookup(const double *xyz, double &nrho_out,
+                   double *vstream_out, double &T_out) const;
+
  protected:
   virtual void perform_task();
 

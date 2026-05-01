@@ -147,6 +147,42 @@ char **src_species_names = nullptr;
 std::vector<int> source_species;
 std::vector<int> dellist;
 
+// Volume recombination source: fires once per nevery step inside
+// end_of_step_no_average() AFTER the per-particle attempt() loop. Spawns
+// new neutral D macroparticles at a Poisson rate per cell:
+//   N_phys/cell/step = ni · ne · <σv>_ACD · V · dt_chem
+// (background D+ recombines into a kinetic D atom; in Mode A there are no
+// kinetic D+ so attempt() never fires the recombination branch — this is
+// the missing source.) Inactive unless the user passes `volume_source <id>`
+// pointing at a ComputePlasmaFields or FixBackground that owns the cell-
+// indexed (Te, ne, ni_D+, Ti, vpar, B) fields. Disabled in non-Mode-A
+// runs to avoid double-counting against attempt()'s kinetic-ion path.
+char *volume_source_id = nullptr;
+int   volume_source_cidx = -1;     // resolved compute index (or -1)
+int   volume_source_fidx = -1;     // resolved fix index    (or -1)
+int   nrec_active = 0;             // # of active recombination reactions
+std::vector<int> rec_ridx;         // rlist indices of active recomb rxns
+std::vector<int> rec_product_isp;  // product species index for each
+
+// Per-cell cache for the recomb spawn path. Plasma query + ACD lookup is
+// 10-30 us per cell; iterating every step (nevery=1) over 26k cells is
+// 64+ s/5000 steps. Cache the static parts -- for `fix background ... static
+// yes` and any plasma whose `generation` counter is unchanged, the cached
+// values are reused across steps; the only per-step work is the Poisson
+// sample + particle creation. Invalidated on grid resize / cell reshuffle
+// (nlocal change or first-cell ID change) and on plasma reload.
+struct RecCellCache {
+  double mu;          // mean # of macros to spawn per nevery step
+  double vix, viy, viz;
+  double v_th;
+  double Ti_J;
+  double dQe_per;     // Qe contribution per event (J)
+};
+std::vector<RecCellCache> rec_cache;
+int    rec_cache_nlocal = -1;
+bigint rec_cache_first_id = -1;
+int    rec_cache_generation = -1;
+
 protected:
     FILE* fp;
     int nlist;
@@ -157,6 +193,10 @@ protected:
     int maxgrid;
     int icompute;
     virtual void end_of_step_no_average();
+    // Spawn new neutral D macroparticles from background-D+ recombination.
+    // Called inside end_of_step_no_average(); guarded by eirene_mode and
+    // a resolved volume_source. See header comment on volume_source_id.
+    void spawn_volume_recombination();
 
     struct RateData {
         std::vector<double> Atomic_Number;
@@ -252,7 +292,8 @@ protected:
     // the rate-table interpolation across all particles of this species in
     // the cell. Returns nchan = 0 if no valid channels (caller skips).
     // `lambda_out` and `ridx_map_out` must be sized >= 16.
-    void compute_species_lambdas(int isp, double Te_eV, double ne_m3, int icell,
+    void compute_species_lambdas(int isp, double Te_eV, double ne_m3,
+                                  double Ti_eV, int icell,
                                   double *lambda_out, int *ridx_map_out,
                                   int &nchan_out, double &lambda_total_out);
 

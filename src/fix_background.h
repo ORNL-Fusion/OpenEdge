@@ -161,6 +161,15 @@ class FixBackground : public Fix {
   std::string plasma_path;
   std::string equ_path;
 
+  // ---- Column-axis offset (3D Cartesian only) ----
+  // Position of the axisymmetric plasma column axis in SPARTA (x, y).
+  // The 3D Cartesian R = sqrt((x - column_x0)^2 + (y - column_y0)^2).
+  // Default (0, 0) preserves SOLPS / SOLEDGE3X axisymmetric behavior
+  // and 2D / 2D-axisymmetric paths (where this offset is ignored).
+  // Set via 'column_axis x0 y0' keyword for linear-device cases (MPEX,
+  // proto-lite) whose box is not centered at the origin.
+  double column_x0, column_y0;
+
  private:
   void clear_loaded_data();
   void load_plasma_h5();

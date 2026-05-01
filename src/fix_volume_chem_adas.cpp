@@ -30,6 +30,10 @@
 #include "random_mars.h"
 #include "random_knuth.h"
 #include "compute.h"
+#include "compute_plasma_fields.h"
+#include "fix_background.h"
+#include "domain.h"
+#include "openedge_geom.h"
 #include "database_paths.h"
 #include "process_library.h"
 
@@ -43,6 +47,125 @@ enum{ADAS,JANEV};                                      // rate styles
 
 #define MAXREACTANT 2
 #define MAXPRODUCT 3
+
+// HYDHEL H.1 3.1.8: H + H+ -> H+ + H charge exchange cross-section.
+// Janev/Smirnov fit. Natural-log polynomial:
+//   ln(sigma[cm^2]) = sum_{n=0..8} a_n * (ln E_lab[eV])^n
+// Valid range: 0.1 eV <= E_lab <= 5e5 eV.
+// Returns sigma in m^2; E_lab is the projectile-rest-frame energy in eV.
+static inline double sigma_cx_hh_m2(double E_lab_eV) {
+  static const double a[9] = {
+    -3.274123792568e+01, -8.916456579806e-02, -3.016990732025e-02,
+     9.205482406462e-03,  2.400266568315e-03, -1.927122311323e-03,
+     3.654750340106e-04, -2.788866460622e-05,  7.422296363524e-07
+  };
+  const double E = (E_lab_eV < 0.1) ? 0.1
+                : (E_lab_eV > 5e5) ? 5e5
+                : E_lab_eV;
+  const double aL = std::log(E);
+  double s = a[8];
+  for (int n = 7; n >= 0; --n) s = s * aL + a[n];
+  return std::exp(s) * 1.0e-4;   // cm^2 -> m^2
+}
+
+// AMJUEL H.4 2.1.5: e + D -> D+ + 2e effective ionization rate (Sawada/Fujimoto).
+// Double-polynomial in (ln Te, ln(ne_cm3/1e8)):
+//   ln(<sigma v>[cm^3/s]) = sum_{i,j=0..8} c[i,j] * (ln Te[eV])^i * (ln(ne[cm^-3]/1e8))^j
+// Valid: Te in [0.1, 2e4] eV, ne in [1e8, 1e16] cm^-3.
+// Returns log10(<sv> [cm^3/s]). Replaces ADAS SCD89 (~2x lower across 1-100 eV).
+static inline double log10_sigmav_ioniz_amjuel_cm3s(double Te_eV, double ne_m3) {
+  static const double c[9][9] = {
+    {-3.248025330340e+01, -5.440669186583e-02,  9.048888225109e-02,
+     -4.054078993576e-02,  8.976513750477e-03, -1.060334011186e-03,
+      6.846238436472e-05, -2.242955329604e-06,  2.890437688072e-08},
+    { 1.425332391510e+01, -3.594347160760e-02, -2.014729121556e-02,
+      1.039773615730e-02, -1.771792153042e-03,  1.237467264294e-04,
+     -3.130184159149e-06, -3.051994601527e-08,  1.888148175469e-09},
+    {-6.632235026785e+00,  9.255558353174e-02, -5.580210154625e-03,
+     -5.902218748238e-03,  1.295609806553e-03, -1.056721622588e-04,
+      4.646310029498e-06, -1.479612391848e-07,  2.852251258320e-09},
+    { 2.059544135448e+00, -7.562462086943e-02,  1.519595967433e-02,
+      5.803498098354e-04, -3.527285012725e-04,  3.201533740322e-05,
+     -1.835196889733e-06,  9.474014343303e-08, -2.342505583774e-09},
+    {-4.425370331410e-01,  2.882634019199e-02, -7.285771485050e-03,
+      4.643389885987e-04,  1.145700685235e-06,  8.493662724988e-07,
+     -1.001032516512e-08, -1.476839184318e-08,  6.047700368169e-10},
+    { 6.309381861496e-02, -5.788686535780e-03,  1.507382955250e-03,
+     -1.201550548662e-04,  6.574487543511e-06, -9.678782818849e-07,
+      5.176265845225e-08,  1.291551676860e-09, -9.685157340473e-11},
+    {-5.620091829261e-03,  6.329105568040e-04, -1.527777697951e-04,
+      8.270124691336e-06,  3.224101773605e-08,  4.377402649057e-08,
+     -2.622921686955e-09, -2.259663431436e-10,  1.161438990709e-11},
+    { 2.812016578355e-04, -3.564132950345e-05,  7.222726811078e-06,
+      1.433018694347e-07, -1.097431215601e-07,  7.789031791949e-09,
+     -4.197728680251e-10,  3.032260338723e-11, -8.911076930014e-13},
+    {-6.011143453374e-06,  8.089651265488e-07, -1.186212683668e-07,
+     -2.381080756307e-08,  6.271173694534e-09, -5.483010244930e-10,
+      3.064611702159e-11, -1.355903284487e-12,  2.935080031599e-14}
+  };
+  const double Te = (Te_eV < 0.1) ? 0.1 : (Te_eV > 2e4 ? 2e4 : Te_eV);
+  const double ne_cm3 = ne_m3 * 1.0e-6;
+  const double ne_norm = ne_cm3 / 1.0e8;
+  const double ne_c = (ne_norm < 1.0) ? 1.0 : (ne_norm > 1.0e8 ? 1.0e8 : ne_norm);
+  const double lT = std::log(Te);
+  const double lD = std::log(ne_c);
+  double sum = 0.0;
+  for (int i = 8; i >= 0; --i) {
+    double row = c[i][8];
+    for (int j = 7; j >= 0; --j) row = row * lD + c[i][j];
+    sum = sum * lT + row;
+  }
+  return sum / 2.302585092994046;
+}
+
+// HYDHEL H.3 3.1.8: D + D+ -> D+ + D charge exchange RATE coefficient.
+// Double-polynomial:
+//   ln(<sigma v>[cm^3/s]) = sum_{i,j=0..8} c[i,j] * (ln Ti[eV])^i * (ln E_atom[eV])^j
+// Replaces ADAS CCD89 (which is for impurity-hydrogen CX, not H-H+ resonant)
+// for the D--D+ EXCHANGE channel. ADAS CCD is 10-20x lower across 1-200 eV.
+// Returns log10(<sv> [cm^3/s]) for compatibility with computeReactionLambda.
+static inline double log10_sigmav_cx_hh_cm3s(double Ti_eV, double E_atom_eV) {
+  static const double c[9][9] = {
+    {-1.831670498376e+01,  1.650239332070e-01,  5.025740610454e-02,
+      5.288358515136e-03, -2.437122342843e-03, -4.461891214720e-04,
+      1.731631548110e-04, -1.588434781959e-05,  4.482291414386e-07},
+    { 2.143624996483e-01, -1.067658289373e-01, -5.304993033743e-03,
+      8.289383645942e-03, -9.698773663345e-05, -4.470180279338e-04,
+      7.944326905066e-05, -5.303688417551e-06,  1.235167254501e-07},
+    { 5.139117192662e-02,  9.536923957409e-03, -1.306075129405e-02,
+     -1.033166370333e-03,  1.280464204775e-03, -8.453294908907e-05,
+     -3.040874906105e-05,  4.747888095498e-06, -1.923953750574e-07},
+    {-9.896180369559e-04,  6.315097684976e-03,  2.655464630308e-03,
+     -1.365781346175e-03, -1.859939123743e-04,  1.237942304972e-04,
+     -1.588253432932e-05,  6.603560345800e-07, -1.970606344918e-09},
+    {-2.495327546080e-03, -1.265503371044e-03,  7.569269700468e-04,
+      2.756946036257e-04, -1.107375149384e-04, -7.217379426085e-06,
+      5.769971321188e-06, -6.717311113584e-07,  2.440961351104e-08},
+    {-2.417046684097e-05, -6.945512319613e-05, -2.956984088728e-04,
+      2.318277483195e-05,  3.704494397140e-05, -6.066558692480e-06,
+     -4.951573401626e-07,  1.437520597154e-07, -6.998724470004e-09},
+    { 1.177406072793e-04,  3.698501620365e-05,  3.424317896619e-05,
+     -9.815693511794e-06, -4.285719813022e-06,  1.169257650609e-06,
+     -4.968953461875e-10, -1.618948982477e-08,  9.440094842562e-10},
+    {-1.483036457978e-05, -3.348172574417e-06, -1.527018819072e-06,
+      8.362050692462e-07,  2.058392726953e-07, -7.463594884928e-08,
+      5.924370389093e-10,  1.078208689229e-09, -6.619767848464e-11},
+    { 5.351909441226e-07,  9.728230870242e-08,  1.676354786072e-08,
+     -2.237567830699e-08, -3.081685803820e-09,  1.450862501121e-09,
+      4.434231893204e-11, -3.324377862622e-11,  1.935019679501e-12}
+  };
+  const double Ti  = (Ti_eV     < 0.1) ? 0.1 : (Ti_eV     > 1e5 ? 1e5 : Ti_eV);
+  const double Ea  = (E_atom_eV < 0.1) ? 0.1 : (E_atom_eV > 1e5 ? 1e5 : E_atom_eV);
+  const double lT  = std::log(Ti);
+  const double lE  = std::log(Ea);
+  double sum = 0.0;
+  for (int i = 8; i >= 0; --i) {
+    double row = c[i][8];
+    for (int j = 7; j >= 0; --j) row = row * lE + c[i][j];
+    sum = sum * lT + row;
+  }
+  return sum / 2.302585092994046;
+}
 #define MAXCOEFF 10              // Janev polynomials use up to 9 coeffs (b0..b8)
 #define MAXLINE 1024
 #define DELTALIST 16
@@ -290,7 +413,8 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
              strcmp(arg[j], "ionization") != 0 &&
              strcmp(arg[j], "recombination") != 0 &&
              strcmp(arg[j], "cx") != 0 &&
-             strcmp(arg[j], "dissociation") != 0) j++;
+             strcmp(arg[j], "dissociation") != 0 &&
+             strcmp(arg[j], "volume_source") != 0) j++;
       nsrc_species = j - (iarg + 1);
       if (nsrc_species <= 0)
         error->all(FLERR, "fix volume/chem/adas: source_species needs >=1 species name");
@@ -356,6 +480,21 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
       if (strcmp(arg[iarg+1], "summary") == 0) output_mode = OUT_SUMMARY;
       else if (strcmp(arg[iarg+1], "detailed") == 0) output_mode = OUT_DETAILED;
       else error->all(FLERR, "fix volume/chem/adas: output must be summary|detailed");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "volume_source") == 0) {
+      // volume_source <id>
+      //   id = compute or fix that exposes cell-indexed plasma fields.
+      //   Resolved at init() to either a ComputePlasmaFields (for the
+      //   `compute … plasma/fields …` path) or a FixBackground (for the
+      //   `fix … background …` path). Activates volume recombination
+      //   spawning in end_of_step_no_average. Required to make Mode A
+      //   neutral runs see recombination at all -- attempt() can't fire
+      //   it (no kinetic D+ in the cell list).
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix volume/chem/adas: volume_source requires <id>");
+      const int n = strlen(arg[iarg+1]) + 1;
+      volume_source_id = new char[n];
+      strcpy(volume_source_id, arg[iarg+1]);
       iarg += 2;
     } else if (strcmp(arg[iarg], "ionization") == 0 ||
                strcmp(arg[iarg], "recombination") == 0 ||
@@ -443,6 +582,7 @@ if (src_species_names) {
 }
 
 delete [] batch_fix_id;
+delete [] volume_source_id;
 
 
 
@@ -690,6 +830,44 @@ if (stop_on_exhaust && source_species.empty() && eirene_mode && comm->me == 0) {
     "run will rely on SPARTA's built-in nglobal==0 termination");
 }
 
+// Volume recombination: resolve plasma source handle and build the list
+// of active recombination reactions whose product is a defined species.
+// Inactive in non-Mode-A runs (attempt() handles kinetic-ion recomb) and
+// when chan_recombination = no.
+volume_source_cidx = -1;
+volume_source_fidx = -1;
+rec_ridx.clear();
+rec_product_isp.clear();
+nrec_active = 0;
+if (volume_source_id) {
+  volume_source_cidx = modify->find_compute(volume_source_id);
+  if (volume_source_cidx < 0) {
+    volume_source_fidx = modify->find_fix(volume_source_id);
+    if (volume_source_fidx < 0) {
+      char msg[160];
+      snprintf(msg, sizeof(msg),
+               "fix volume/chem/adas: volume_source '%s' not found "
+               "(expected compute plasma/fields or fix background)",
+               volume_source_id);
+      error->all(FLERR, msg);
+    }
+  }
+  for (int m = 0; m < nlist; m++) {
+    OneReaction *r = &rlist[m];
+    if (!r->active) continue;
+    if (r->type != RECOMBINATION) continue;
+    if (r->nproduct < 1) continue;
+    rec_ridx.push_back(m);
+    rec_product_isp.push_back(r->products[0]);
+  }
+  nrec_active = static_cast<int>(rec_ridx.size());
+  if (eirene_mode && nrec_active == 0 && chan_recombination && comm->me == 0) {
+    error->warning(FLERR,
+      "fix volume/chem/adas: volume_source set but no active recombination "
+      "reaction found in the reactions file -- volume source is a no-op");
+  }
+}
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -851,7 +1029,7 @@ void FixVolumeChemAdas::end_of_step_no_average()
           if (sp_nchan[isp] < 0) {
             int nchan_loc = 0;
             double ltot = 0.0;
-            compute_species_lambdas(isp, Te_eV, ne_m3, icell,
+            compute_species_lambdas(isp, Te_eV, ne_m3, Ti_eV, icell,
                                     &sp_lambda[isp * 16],
                                     &sp_ridx_map[isp * 16],
                                     nchan_loc, ltot);
@@ -885,6 +1063,15 @@ void FixVolumeChemAdas::end_of_step_no_average()
         }
       }
     }
+  }
+
+  // Volume recombination spawn: background-D+ → kinetic-D macroparticles.
+  // Adds raw events into array_grid before the RATE normalization below so
+  // the same fnum/(vol*window) scaling applies. Spawned particles go onto
+  // deferred_particles and get created by the existing add_particle loop.
+  if (eirene_mode && nrec_active > 0 &&
+      (volume_source_cidx >= 0 || volume_source_fidx >= 0)) {
+    spawn_volume_recombination();
   }
 
   // Rate-mode normalization. Tally was zeroed at the start of this call and
@@ -973,6 +1160,303 @@ void FixVolumeChemAdas::end_of_step_no_average()
 }
 
 /* ----------------------------------------------------------------------
+   spawn_volume_recombination
+
+   Volume recombination is a *source* (no kinetic reactant): background D+
+   plus a free electron recombines into a neutral D atom. In Mode A there
+   are no kinetic D+ particles, so the per-particle attempt() loop never
+   sees this channel — it has to be sampled per-cell.
+
+   Per-cell physical event rate:
+       R_phys = ne * ni_D+ * <σv>_ACD(Te,ne)              [m^-3 s^-1]
+   Events per cell per chem step:
+       N_phys = R_phys * V_cell * dt_chem
+   Macroparticles to spawn (mean of Poisson):
+       λ_macro = N_phys / fnum
+
+   For each spawned macroparticle:
+     - position = cell centroid (bbox midpoint)
+     - velocity = v_drift + v_thermal
+                  v_drift  = vpar * b_hat   (fluid parallel flow)
+                  v_thermal ~ Maxwellian at Ti, isotropic 3D
+     - tally into array_grid:  Sp += -1, Sm += -m*v_drift,
+                               Qe += -E_rad (PRB/ACD), Qi += -(½m·v_drift² + 1.5 kTi)
+
+   `scale` matches attempt()'s convention (COUNTS / RATE / BATCH /
+   BATCH_FIX) so this path drops into the same `array_grid` row layout
+   used by the per-particle channels and ave/grid normalization.
+------------------------------------------------------------------------- */
+
+void FixVolumeChemAdas::spawn_volume_recombination()
+{
+  if (nrec_active == 0) return;
+  if (volume_source_cidx < 0 && volume_source_fidx < 0) return;
+
+  Grid::ChildCell *cells = grid->cells;
+  Grid::ChildInfo *cinfo = grid->cinfo;
+  const int nglocal = grid->nlocal;
+  const int dim     = domain->dimension;
+  const bool axi    = (domain->axisymmetric != 0);
+  const double dt_chem = nevery * update->dt;
+  const double fnum    = update->fnum;
+  if (dt_chem <= 0.0 || fnum <= 0.0) return;
+
+  // Resolve plasma source: prefer compute (point-query API), fall back to
+  // FixBackground (R,Z stencil interp). Both expose ne/Te/ni/Ti/vpar/B.
+  ComputePlasmaFields *cp = nullptr;
+  FixBackground       *pd = nullptr;
+  int gen_now = 0;
+  if (volume_source_cidx >= 0) {
+    cp = dynamic_cast<ComputePlasmaFields *>(modify->compute[volume_source_cidx]);
+    // Make sure the per-cell plasma_arr is current (cheap if already invoked
+    // this step by another consumer).
+    if (cp && !(cp->invoked_flag & 16)) {
+      cp->compute_per_grid();
+      cp->invoked_flag |= 16;
+    }
+  }
+  if (!cp && volume_source_fidx >= 0) {
+    pd = dynamic_cast<FixBackground *>(modify->fix[volume_source_fidx]);
+    if (pd) gen_now = pd->generation;
+  }
+  if (!cp && !pd) return;
+
+  // Single-charge convention: only the q=1 -> 0 transition is supported
+  // here (the only one ADAS lists for D, and the only one this fix's
+  // attempt() path uses). Use rec_ridx[0]; if a future deck adds another
+  // recomb reaction with a different reactant Z we fall through cleanly.
+  const int   ridx_rec = rec_ridx[0];
+  const int   sp_prod  = rec_product_isp[0];
+  const double m_prod  = particle->species[sp_prod].mass;
+
+  constexpr double eV_to_J = 1.602176634e-19;
+  constexpr double kB      = 1.380649e-23;
+
+  auto mit = materials_rate_data.find(atomic_number);
+  const bool have_tables = (mit != materials_rate_data.end());
+  const RateData *rd = have_tables ? &mit->second : nullptr;
+  const bool have_rad = rd && rd->prb_nQ > 0 && rd->rec_nQ > 0;
+
+  // Build / refresh per-cell cache. Plasma query + ACD lookup is the hot
+  // path (10s of us per cell × thousands of cells × every step). For static
+  // plasma the cached μ/v_drift/v_th/Ti/E_rad are reused across all steps;
+  // we only redo the work on grid changes (nlocal / first-cell ID) or on
+  // plasma reload (FixBackground::generation bump).
+  const bigint first_id =
+      (nglocal > 0 && cells) ? cells[0].id : -1;
+  const bool need_rebuild =
+      (static_cast<int>(rec_cache.size()) != nglocal) ||
+      (rec_cache_nlocal != nglocal) ||
+      (rec_cache_first_id != first_id) ||
+      (pd && rec_cache_generation != gen_now);
+
+  if (need_rebuild) {
+    rec_cache.assign(nglocal, RecCellCache{});
+    rec_cache_nlocal = nglocal;
+    rec_cache_first_id = first_id;
+    rec_cache_generation = gen_now;
+
+    for (int icell = 0; icell < nglocal; icell++) {
+      RecCellCache &c = rec_cache[icell];
+      c.mu = 0.0;
+      const double vol = cinfo[icell].volume;
+      if (vol <= 0.0) continue;
+      if (cells[icell].nsplit > 1) continue;
+
+      const double xc[3] = {
+        0.5 * (cells[icell].lo[0] + cells[icell].hi[0]),
+        0.5 * (cells[icell].lo[1] + cells[icell].hi[1]),
+        (dim == 3) ? 0.5 * (cells[icell].lo[2] + cells[icell].hi[2]) : 0.0
+      };
+
+      double Te_eV = 0.0, ne_m3 = 0.0, ni_m3 = 0.0, Ti_eV = 0.0, vpar = 0.0;
+      double bx = 0.0, by = 0.0, bz = 0.0;
+      if (cp) {
+        PlasmaFileParams pf = cp->query_plasma_at_point(xc);
+        Te_eV = pf.temp_e;
+        ne_m3 = pf.dens_e;
+        ni_m3 = (pf.dens_i > 0.0) ? pf.dens_i : pf.dens_e;
+        Ti_eV = pf.temp_i;
+        vpar  = pf.parr_flow;
+        MagneticFieldFileDataParams bf = cp->query_bfield_at_point(xc);
+        bx = bf.br;  by = bf.bt;  bz = bf.bz;
+      } else {
+        double R = 0.0, Z = 0.0;
+        OpenEdge::sparta_to_RZ(xc, dim, axi, R, Z,
+                               pd->column_x0, pd->column_y0);
+        Te_eV = pd->interp2D(pd->temp_e, R, Z, icell);
+        ne_m3 = pd->interp2D(pd->dens_e, R, Z, icell);
+        ni_m3 = pd->dens_i.empty() ? ne_m3 : pd->interp2D(pd->dens_i, R, Z, icell);
+        Ti_eV = pd->temp_i.empty() ? Te_eV : pd->interp2D(pd->temp_i, R, Z, icell);
+        vpar  = pd->parr_flow.empty() ? 0.0
+                                      : pd->interp2D(pd->parr_flow, R, Z, icell);
+        if (pd->has_bfield) {
+          double Br = 0.0, Bz_ = 0.0, Bt = 0.0;
+          pd->bfield_at(R, Z, Br, Bz_, Bt, icell);
+          bx = Br; by = Bt; bz = Bz_;
+        }
+      }
+      if (Te_eV <= 0.0 || ne_m3 <= 0.0 || ni_m3 <= 0.0) continue;
+
+      const double logTe    = std::log10(std::max(Te_eV, 1e-6));
+      const double logne_cm = std::log10(std::max(ne_m3 * 1e-6, 1e-99));
+      double acd_log10 = -INFINITY;
+      interpolateRateData(atomic_number, /*q-1*/ 0, icell, logTe, logne_cm,
+                          acd_log10, ReactionType::Recombination);
+      if (!std::isfinite(acd_log10)) continue;
+
+      const double sigv_m3s = std::pow(10.0, acd_log10) * 1e-6;
+      const double mu = ne_m3 * ni_m3 * sigv_m3s * vol * dt_chem / fnum;
+      if (mu <= 0.0 || !std::isfinite(mu)) continue;
+
+      const double Bmag = std::sqrt(bx*bx + by*by + bz*bz);
+      double vix = 0.0, viy = 0.0, viz = 0.0;
+      if (Bmag > 1e-30) {
+        const double invB = 1.0 / Bmag;
+        vix = vpar * bx * invB;
+        viy = vpar * by * invB;
+        viz = vpar * bz * invB;
+      }
+      const double Ti_J = std::max(Ti_eV, 0.0) * eV_to_J;
+      const double Ti_K = Ti_J / kB;
+      const double v_th = (m_prod > 0.0) ? std::sqrt(kB * Ti_K / m_prod) : 0.0;
+
+      double E_rad_J = 0.0;
+      if (have_rad) {
+        double prb_log10 = -INFINITY;
+        interpolateRateData(atomic_number, 0, icell, logTe, logne_cm,
+                            prb_log10, ReactionType::RecombRadiation);
+        if (std::isfinite(prb_log10)) {
+          E_rad_J = std::pow(10.0, prb_log10 - acd_log10);
+        }
+      }
+
+      c.mu      = mu;
+      c.vix     = vix;
+      c.viy     = viy;
+      c.viz     = viz;
+      c.v_th    = v_th;
+      c.Ti_J    = Ti_J;
+      c.dQe_per = -E_rad_J;
+    }
+  }
+
+  const int nfix_update_custom_local = modify->n_update_custom;
+  double zero_v[3] = {0.0, 0.0, 0.0};
+
+  bigint nevents_local = 0;
+
+  for (int icell = 0; icell < nglocal; icell++) {
+    const RecCellCache &c = rec_cache[icell];
+    if (c.mu <= 0.0) continue;
+
+    const double vol = cinfo[icell].volume;
+
+    // Poisson(mu) sampler: small-mu uses inverse-CDF (Knuth);
+    // large-mu uses Gaussian(mu, sqrt(mu)) clamped at 0.
+    const double mu = c.mu;
+    int N_macro = 0;
+    if (mu < 30.0) {
+      const double L = std::exp(-mu);
+      double p = 1.0;
+      int k = 0;
+      while (true) {
+        p *= rng_adas->uniform();
+        if (p < L) break;
+        k++;
+        if (k > 10000) break;   // runaway guard
+      }
+      N_macro = k;
+    } else {
+      const double u1 = std::max(rng_adas->uniform(), 1e-30);
+      const double u2 = rng_adas->uniform();
+      const double g  = std::sqrt(-2.0 * std::log(u1)) * std::cos(MY_2PI * u2);
+      const double sample = mu + std::sqrt(mu) * g;
+      N_macro = (sample > 0.0) ? static_cast<int>(sample + 0.5) : 0;
+    }
+    if (N_macro <= 0) continue;
+
+    const double xc[3] = {
+      0.5 * (cells[icell].lo[0] + cells[icell].hi[0]),
+      0.5 * (cells[icell].lo[1] + cells[icell].hi[1]),
+      (dim == 3) ? 0.5 * (cells[icell].lo[2] + cells[icell].hi[2]) : 0.0
+    };
+
+    const double vix = c.vix, viy = c.viy, viz = c.viz;
+    const double v_th = c.v_th;
+
+    double scale = 1.0;
+    if (tally_units == TALLY_BATCH) {
+      const double w = batch_R_puff / static_cast<double>(batch_N);
+      scale = w / vol;
+    } else if (tally_units == TALLY_BATCH_FIX && batch_N_cached > 0) {
+      const double w = batch_R_puff / static_cast<double>(batch_N_cached);
+      scale = w / vol;
+    }
+
+    const double vi2 = vix*vix + viy*viy + viz*viz;
+    const double dQi_per = -(0.5 * m_prod * vi2 + 1.5 * c.Ti_J);
+    const double dQe_per = c.dQe_per;
+
+    for (int s = 0; s < N_macro; s++) {
+      // Sample shifted-Maxwellian velocity (3 i.i.d. Gaussians).
+      const double u1 = std::max(rng_adas->uniform(), 1e-30);
+      const double u2 = rng_adas->uniform();
+      const double u3 = rng_adas->uniform();
+      const double u4 = std::max(rng_adas->uniform(), 1e-30);
+      const double g1 = std::sqrt(-2.0 * std::log(u1)) * std::cos(MY_2PI * u2);
+      const double g2 = std::sqrt(-2.0 * std::log(u1)) * std::sin(MY_2PI * u2);
+      const double g3 = std::sqrt(-2.0 * std::log(u4)) * std::cos(MY_2PI * u3);
+
+      DeferredParticle dp;
+      dp.x[0] = xc[0]; dp.x[1] = xc[1]; dp.x[2] = xc[2];
+      dp.v[0] = vix + v_th * g1;
+      dp.v[1] = viy + v_th * g2;
+      dp.v[2] = viz + v_th * g3;
+      dp.species = sp_prod;
+      dp.icell = icell;
+      deferred_particles.push_back(dp);
+
+      // Tally into array_grid in the same row layout as attempt().
+      if (array_grid && icell < maxgrid_src) {
+        double *row = array_grid[icell];
+        if (output_mode == OUT_DETAILED) {
+          // Recombination column = index 1 in the {ioniz, recomb, CX, dissoc}
+          // bucket layout (col 0..3 count, 4..7 mvx, 8..11 mvy, 12..15 mvz,
+          // 16..19 ½mv²). Use product-particle drift velocity as the event
+          // velocity, matching the per-particle attempt() detailed path.
+          const double vx = dp.v[0], vy = dp.v[1], vz = dp.v[2];
+          const double ke = 0.5 * m_prod * (vx*vx + vy*vy + vz*vz);
+          row[1]    += scale;
+          row[5]    += m_prod * vx * scale;
+          row[9]    += m_prod * vy * scale;
+          row[13]   += m_prod * vz * scale;
+          row[17]   += ke * scale;
+        } else {
+          row[0] += -1.0 * scale;        // Sp
+          row[1] += -m_prod * vix * scale; // Sm_x
+          row[2] += -m_prod * viy * scale; // Sm_y
+          row[3] += -m_prod * viz * scale; // Sm_z
+          row[4] += dQe_per * scale;     // Qe
+          row[5] += dQi_per * scale;     // Qi
+        }
+      }
+      nevents_local++;
+    }
+  }
+
+  // Bump the per-reaction event tally (used by post_run summary).
+  if (nevents_local > 0) {
+    tally_reactions[ridx_rec] += nevents_local;
+    nreact_one += nevents_local;
+  }
+
+  (void) nfix_update_custom_local;  // creation/update_custom done by the
+                                    // shared deferred_particles loop below.
+  (void) zero_v;
+}
+
+/* ----------------------------------------------------------------------
    memory usage
 ------------------------------------------------------------------------- */
 
@@ -994,7 +1478,8 @@ double FixVolumeChemAdas::memory_usage()
    precompute lambdas once per (cell, species) and reuse them across all
    particles of that species in the cell.
 ------------------------------------------------------------------------- */
-void FixVolumeChemAdas::compute_species_lambdas(int isp, double Te_eV, double ne_m3, int icell,
+void FixVolumeChemAdas::compute_species_lambdas(int isp, double Te_eV, double ne_m3,
+                                                  double Ti_eV, int icell,
                                                   double *lambda_out, int *ridx_map_out,
                                                   int &nchan_out, double &lambda_total_out)
 {
@@ -1017,16 +1502,27 @@ void FixVolumeChemAdas::compute_species_lambdas(int isp, double Te_eV, double ne
     double rate_log10_cm3s = -INFINITY;
     if (r->type == IONIZATION) {
       if (q >= static_cast<size_t>(atomic_number)) continue;
-      interpolateRateData(atomic_number, q,   icell, logTe, logne_cm,
-                          rate_log10_cm3s, ReactionType::Ionization);
+      if (atomic_number == 1 && q == 0) {
+        // AMJUEL H.4 2.1.5 (D ionization). Replaces ADAS SCD89.
+        rate_log10_cm3s = log10_sigmav_ioniz_amjuel_cm3s(Te_eV, ne_m3);
+      } else {
+        interpolateRateData(atomic_number, q,   icell, logTe, logne_cm,
+                            rate_log10_cm3s, ReactionType::Ionization);
+      }
     } else if (r->type == RECOMBINATION) {
       if (q == 0) continue;
       interpolateRateData(atomic_number, q-1, icell, logTe, logne_cm,
                           rate_log10_cm3s, ReactionType::Recombination);
     } else if (r->type == EXCHANGE) {
-      const size_t cx_row = (q > 0) ? (q - 1) : 0;
-      interpolateRateData(atomic_number, cx_row, icell, logTe, logne_cm,
-                          rate_log10_cm3s, ReactionType::ChargeExchange);
+      if (atomic_number == 1 && Ti_eV > 0.0) {
+        // HYDHEL H.3 3.1.8 (D-D+ resonant CX).
+        rate_log10_cm3s = log10_sigmav_cx_hh_cm3s(Ti_eV, 1.5 * Ti_eV);
+      } else {
+        // Impurity-H CX: keep ADAS CCD.
+        const size_t cx_row = (q > 0) ? (q - 1) : 0;
+        interpolateRateData(atomic_number, cx_row, icell, logTe, logne_cm,
+                            rate_log10_cm3s, ReactionType::ChargeExchange);
+      }
     } else if (r->type == DISSOCIATION && r->style == JANEV) {
       const double lnT = std::log(Te_eV);
       double lnsv = r->coeff[0];
@@ -1117,23 +1613,32 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
 
       if (r->type == IONIZATION) {
         if (q >= static_cast<size_t>(atomic_number)) continue;
-        interpolateRateData(atomic_number, q,   icell, logTe, logne_cm,
-                            rate_log10_cm3s, ReactionType::Ionization);
+        if (atomic_number == 1 && q == 0) {
+          // AMJUEL H.4 2.1.5 (D ionization, Sawada/Fujimoto).
+          rate_log10_cm3s = log10_sigmav_ioniz_amjuel_cm3s(Te_eV, ne_m3);
+        } else {
+          interpolateRateData(atomic_number, q,   icell, logTe, logne_cm,
+                              rate_log10_cm3s, ReactionType::Ionization);
+        }
       } else if (r->type == RECOMBINATION) {
         if (q == 0) continue;
         interpolateRateData(atomic_number, q-1, icell, logTe, logne_cm,
                             rate_log10_cm3s, ReactionType::Recombination);
       } else if (r->type == EXCHANGE) {
-        // Two branches share the CCD rate row for the Z=1 → 0 transition:
-        //   q > 0  : ion-side CX (kinetic D+ → kinetic D). Table row = q-1.
-        //   q == 0 : neutral-side CX (kinetic D + background D+ → kinetic D,
-        //            velocity resampled at Ti). Rule in the reactions file is
-        //            `D --> D`. Partner is the background plasma, not a
-        //            kinetic ion, so this fires even in Mode A where kinetic
-        //            D+ is suppressed.
-        const size_t cx_row = (q > 0) ? (q - 1) : 0;
-        interpolateRateData(atomic_number, cx_row, icell, logTe, logne_cm,
-                            rate_log10_cm3s, ReactionType::ChargeExchange);
+        if (atomic_number == 1 && Ti_eV > 0.0) {
+          // HYDHEL H.3 3.1.8 (D-D+ resonant CX). Per-particle E_atom.
+          const double m_atom = particle->species[isp].mass;
+          const double vx0p = ip->v[0], vy0p = ip->v[1], vz0p = ip->v[2];
+          const double v2p  = vx0p*vx0p + vy0p*vy0p + vz0p*vz0p;
+          constexpr double eV_to_J_local = 1.602176634e-19;
+          const double E_atom_eV = 0.5 * m_atom * v2p / eV_to_J_local;
+          rate_log10_cm3s = log10_sigmav_cx_hh_cm3s(Ti_eV, E_atom_eV);
+        } else {
+          // Impurity-H CX: keep ADAS CCD.
+          const size_t cx_row = (q > 0) ? (q - 1) : 0;
+          interpolateRateData(atomic_number, cx_row, icell, logTe, logne_cm,
+                              rate_log10_cm3s, ReactionType::ChargeExchange);
+        }
       } else if (r->type == DISSOCIATION && r->style == JANEV) {
         // Janev polynomial: ln<sv> = sum_n b_n (ln Te)^n, Te in eV
         const double lnT = std::log(Te_eV);
@@ -1301,7 +1806,10 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
         dSmy = +m * vy0;
         dSmz = +m * vz0;
         dQe  = -E_eff_eV * eV_to_J;
-        dQi  = +0.5 * m * v2;            // thermal 1.5*Ti baked in via MC sampling
+        // EIRENE convention: ionization adds the neutral's KE to the ion
+        // fluid. Thermalisation to local Ti happens later as a fluid
+        // process, not from EIRENE. No thermal subtraction here.
+        dQi  = +0.5 * m * v2;
         break;
       }
       case RECOMBINATION: {
@@ -1335,7 +1843,11 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
         dSmy = +m * (vy0 - viy);
         dSmz = +m * (vz0 - viz);
         dQe  = 0.0;
-        dQi  = +0.5 * m * (v2 - vi2);
+        // Model 1 (analytical mean) for all CX channels: dQi = drift KE
+        // swap minus thermal 3/2 Ti. Previous Model 2 (sigma*v-sampled
+        // v_post) over-weighted high v_rel and inflated per-event |dQi|
+        // by ~2x at SOL temperatures.
+        dQi = +0.5 * m * (v2 - vi2) - 1.5 * Ti_J;
         break;
       }
       case DISSOCIATION: {
@@ -1404,17 +1916,58 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
       vfz = vpar * bz * invB;
     }
 
-    const double u1 = std::max(rng_adas->uniform(), 1e-30);
-    const double u2 = rng_adas->uniform();
-    const double u3 = rng_adas->uniform();
-    const double u4 = std::max(rng_adas->uniform(), 1e-30);
-    const double g1 = std::sqrt(-2.0 * std::log(u1)) * std::cos(MY_2PI * u2);
-    const double g2 = std::sqrt(-2.0 * std::log(u1)) * std::sin(MY_2PI * u2);
-    const double g3 = std::sqrt(-2.0 * std::log(u4)) * std::cos(MY_2PI * u3);
+    if (atomic_number == 1) {
+      // Hydrogen: cross-section-weighted post-CX velocity sampling. The
+      // bulk-ion partner velocity is rejection-sampled from the drifting
+      // Maxwellian weighted by sigma_CX(E_rel)*v_rel. Post-CX neutral
+      // takes the sampled ion velocity. SGCVMX is a conservative upper
+      // bound on sigma*v across the relevant E_rel range.
+      const double E_lab_factor = 0.5 * m_prod / eV_to_J;
+      constexpr double SGCVMX = 1.2e-13;
+      double v_post_x = 0.0, v_post_y = 0.0, v_post_z = 0.0;
+      int icount = 0;
+      while (true) {
+        const double u1 = std::max(rng_adas->uniform(), 1e-30);
+        const double u2 = rng_adas->uniform();
+        const double u3 = rng_adas->uniform();
+        const double u4 = std::max(rng_adas->uniform(), 1e-30);
+        const double g1 = std::sqrt(-2.0 * std::log(u1)) * std::cos(MY_2PI * u2);
+        const double g2 = std::sqrt(-2.0 * std::log(u1)) * std::sin(MY_2PI * u2);
+        const double g3 = std::sqrt(-2.0 * std::log(u4)) * std::cos(MY_2PI * u3);
+        v_post_x = vfx + v_th * g1;
+        v_post_y = vfy + v_th * g2;
+        v_post_z = vfz + v_th * g3;
 
-    ip->v[0] = vfx + v_th * g1;
-    ip->v[1] = vfy + v_th * g2;
-    ip->v[2] = vfz + v_th * g3;
+        const double dvx = v_post_x - vpx_parent;
+        const double dvy = v_post_y - vpy_parent;
+        const double dvz = v_post_z - vpz_parent;
+        const double vrel_sq = dvx*dvx + dvy*dvy + dvz*dvz;
+        const double vrel    = std::sqrt(vrel_sq);
+        const double E_lab   = E_lab_factor * vrel_sq;
+        const double sigma   = sigma_cx_hh_m2(E_lab);
+        const double sgv     = sigma * vrel;
+
+        if (rng_adas->uniform() * SGCVMX < sgv) break;
+        if (++icount >= 500) break;
+      }
+      ip->v[0] = v_post_x;
+      ip->v[1] = v_post_y;
+      ip->v[2] = v_post_z;
+      // Per-event dQi tallied above via Model 1 in the EXCHANGE case.
+    } else {
+      // Impurity-H CX (Z>=2): simple shifted-Maxwellian draw. dQi is
+      // tallied in the per-event block above using the analytical mean.
+      const double u1 = std::max(rng_adas->uniform(), 1e-30);
+      const double u2 = rng_adas->uniform();
+      const double u3 = rng_adas->uniform();
+      const double u4 = std::max(rng_adas->uniform(), 1e-30);
+      const double g1 = std::sqrt(-2.0 * std::log(u1)) * std::cos(MY_2PI * u2);
+      const double g2 = std::sqrt(-2.0 * std::log(u1)) * std::sin(MY_2PI * u2);
+      const double g3 = std::sqrt(-2.0 * std::log(u4)) * std::cos(MY_2PI * u3);
+      ip->v[0] = vfx + v_th * g1;
+      ip->v[1] = vfy + v_th * g2;
+      ip->v[2] = vfz + v_th * g3;
+    }
   }
   else if (do_dissoc) {
     const double E_FC_eV = 3.0;

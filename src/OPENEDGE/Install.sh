@@ -112,3 +112,5 @@ action fix_surface_emit_recycle.cpp
 action fix_surface_emit_recycle.h
 action fix_surface_emit_puff.cpp
 action fix_surface_emit_puff.h
+action surf_collide_partial_recycle.cpp
+action surf_collide_partial_recycle.h
