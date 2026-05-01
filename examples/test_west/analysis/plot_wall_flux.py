@@ -11,7 +11,7 @@ Two panels:
   (b) wall polyline in (R, Z) coloured by flux
 
 Usage:
-    cd test_west_ciraolo
+    cd test_west
     python3 analysis/plot_wall_flux.py \
         --dump output/wall.flux.A.west \
         --out  output/wall_flux.png

@@ -23,11 +23,11 @@ mixture             tungstenSource  W10+ frac 0.
 
 variable            TbindW equal 4.*11600.
 variable            TwallK equal 773.15
-variable            dt equal 1.0e-08
-variable            nlaunchTotalW index 5000
+variable            dt equal 1.0e-07
+variable            nlaunchPerSurfW index 1
 variable            sourceThreshW equal 0.
 variable            Nwarm  index 2
-variable            Nphase index 1000000
+variable            Nphase index 1000
 variable            Nrep   equal ${Nphase}/100
 variable            Ndump  index 10000
 variable            tag    index A
@@ -47,11 +47,18 @@ adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
 balance_grid        rcb cell
 
 fix                 pd background file input/plasma.h5 static yes
-#fix                 fcore reflect/psi background pd psi_norm 0.0 action absorb
+fix                 fcore reflect/psi background pd psi_norm 1.0 action reflect
 global              pcache_nevery 20
 
+# Point-based B-field for GCA (queried at particle position, not cell center).
+compute             pfields plasma/fields all background pd br bt bz
+
 compute             cgeom nearest_surf/grid all wall dist surfid nx ny nz
-global              pusher mode boris plasma pd subcycles 5 &
+# Hybrid Boris/GCA: lower gca_switch makes GCA aggressive — for heavy W
+# in WEST SOL (rho_L ~ um, L_B ~ m), gca_switch=0.1 => GCA used everywhere
+# rho_L < 10*L_B (effectively all the time, except near-uniform-B patches).
+global              pusher plasma pfields mode hybrid gca_switch 0.1 &
+                    subcycles 1 bad_dt_check yes bad_dt_limit 0.5 dump no &
                     sheath kick geom cgeom mD_amu 2.0
 
 fix fchem volume/chem/adas 1 W auto rate_cache cell
@@ -70,7 +77,7 @@ compute cpmiO surface/physical/sputter wall background pd &
 fix pw particle/weight
 
 fix femit surface/emit/source tungstenSource wall cpmiO perspecies no &
-                    nlaunch_total ${nlaunchTotalW} source_thresh ${sourceThreshW} &
+                    nlaunch ${nlaunchPerSurfW} source_thresh ${sourceThreshW} &
                     model thompson 4.4
 
 mixture allW W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+ &
@@ -110,14 +117,14 @@ fix     fbal balance 100 1.05 rcb part
 
 run              ${Nwarm}
 
-dump    dwgrid grid all ${Nphase} output/grid.dens.${tag}.west &
-                    id xc yc xlo ylo xhi yhi &
-                    f_fwgrid[1] f_fwgrid[2] f_fwgrid[3]
+#dump    dwgrid grid all ${Nphase} output/grid.dens.${tag}.west &
+#                    id xc yc xlo ylo xhi yhi &
+#                    f_fwgrid[1] f_fwgrid[2] f_fwgrid[3]
 dump    dpart particle all ${Nphase} output/state.${tag}.west.final &
                     id type x y z vx vy vz
-dump_modify dpart first no
-dump    dwflux surf all ${Ndump} output/wall.flux.${tag}.west &
-                    id v1x v1y v2x v2y c_cpmiO_rate
-dump_modify dwflux first no
+#dump_modify dpart first no
+#dump    dwflux surf all ${Ndump} output/wall.flux.${tag}.west &
+#                    id v1x v1y v2x v2y c_cpmiO_rate
+#dump_modify dwflux first no
 
 run           ${Nphase}
