@@ -42,7 +42,7 @@ class Pusher : protected Pointers {
   Pusher(class SPARTA *);
   ~Pusher();
 
-  enum PusherMode { PUSHER_BORIS = 0, PUSHER_HYBRID = 1 };
+  enum PusherMode { PUSHER_BORIS = 0, PUSHER_HYBRID = 1, PUSHER_GCA = 2 };
 
   // ---- State (was on Update) -----------------------------------------
   int pusher_mode;

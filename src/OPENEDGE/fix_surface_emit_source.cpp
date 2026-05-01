@@ -34,6 +34,7 @@ using namespace MathConst;
 
 enum{PKEEP,PINSERT,PDONE,PDISCARD,PENTRY,PEXIT,PSURF};
 enum{FLOW,CONSTANT};
+enum{INT,DOUBLE};                       // type tag for Surf::spread_own2local
 // File-mode column kinds; matches the layout in wip/fix_emit_face_file.cpp
 // minus species fractions (we only consume scalar inflow fields).
 enum IM_Kind { IM_NRHO = 1, IM_VX, IM_VY, IM_VZ, IM_TEMP_THERMAL, IM_GAMMA };
@@ -176,6 +177,9 @@ FixSurfaceEmitSource::FixSurfaceEmitSource(SPARTA *sparta, int narg, char **arg)
   cached_source_total = 0.0;
   task_source_cached = 0;
 
+  flux_localghost = NULL;
+  flux_n_localghost = 0;
+
   dimension = domain->dimension;
   if (dimension == 3) cut3d = new Cut3d(sparta);
   else cut2d = new Cut2d(sparta,domain->axisymmetric);
@@ -199,6 +203,8 @@ FixSurfaceEmitSource::~FixSurfaceEmitSource()
     delete [] tasks[i].fracarea;
   }
   memory->sfree(tasks);
+
+  memory->destroy(flux_localghost);
 
   if (dimension == 3) delete cut3d;
   else delete cut2d;
@@ -304,20 +310,55 @@ int FixSurfaceEmitSource::local_isurf_index(surfint isurf) const
 
 double FixSurfaceEmitSource::flux_for_surface(surfint isurf)
 {
-  Compute *c = modify->compute[iflux];
+  // Flux is read from the globally-replicated flux_localghost[] vector built
+  // in spread_flux() via the canonical SPARTA Surf::spread_own2local() path.
+  // This is indexed by the global isurf (local+ghost layout), so the cell-
+  // owning rank can read any surface its tasks touch — no rank ownership
+  // mismatch even when the upstream compute writes only at this rank's
+  // owned surfaces.
+  if (!flux_localghost) return 0.0;
+  if (isurf < 0 || isurf >= flux_n_localghost) return 0.0;
+  return flux_localghost[isurf];
+}
 
-  int ilocal = local_isurf_index(isurf);
-  if (ilocal < 0) return 0.0;
+/* ----------------------------------------------------------------------
+   build/refresh flux_localghost[] from the upstream per-surf flux compute
+   uses Surf::spread_own2local() — same pattern as SurfCollide VARSURF Tsurf
+------------------------------------------------------------------------- */
 
+void FixSurfaceEmitSource::spread_flux(Compute *c)
+{
+  const int nown = surf->nown;
+  const int nlg  = surf->nlocal + surf->nghost;
+
+  // (re)allocate replicated buffer when local+ghost size changes
+  if (flux_n_localghost != nlg) {
+    memory->destroy(flux_localghost);
+    flux_n_localghost = nlg;
+    if (nlg > 0)
+      memory->create(flux_localghost,nlg,"surface/emit/source:flux_localghost");
+    else
+      flux_localghost = NULL;
+  }
+  if (nlg == 0) return;
+
+  // pack per-rank-owned flux into a contiguous vector of size nown
+  flux_owned_buf.assign(nown,0.0);
   if (c->size_per_surf_cols == 0) {
-    if (!c->vector_surf) return 0.0;
-    return c->vector_surf[ilocal];
+    if (c->vector_surf) {
+      for (int i = 0; i < nown; i++) flux_owned_buf[i] = c->vector_surf[i];
+    }
+  } else if (c->array_surf) {
+    const int icol = (flux_index > 0) ? flux_index-1 : 0;
+    if (icol >= 0 && icol < c->size_per_surf_cols) {
+      for (int i = 0; i < nown; i++) flux_owned_buf[i] = c->array_surf[i][icol];
+    }
   }
 
-  if (!c->array_surf) return 0.0;
-  int icol = (flux_index > 0) ? flux_index-1 : 0;
-  if (icol < 0 || icol >= c->size_per_surf_cols) return 0.0;
-  return c->array_surf[ilocal][icol];
+  // spread owned -> local+ghost (Allreduce for non-distributed,
+  // rendezvous for distributed; handled by Surf)
+  surf->spread_own2local(1, DOUBLE,
+                         flux_owned_buf.data(), flux_localghost);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -543,13 +584,21 @@ void FixSurfaceEmitSource::perform_task()
   if (!file_mode) {
     c = modify->compute[iflux];
     c->compute_per_surf();
+    // spread per-rank-owned flux into a globally-replicated vector indexed
+    // by global isurf — canonical SPARTA pattern (Surf::spread_own2local)
+    spread_flux(c);
   }
 
   // resolve per-surf Tsurf vector for thermal_tsurf model
-  // (custom edvec can be reallocated; refresh pointer each step)
+  // canonical SPARTA pattern (mirrors SurfCollide CUSTOM mode at
+  // surf_collide.cpp:225-233): ensure custom owned values are spread to
+  // local+ghost, then read tsurf_vec[isurf] using the global surf index.
   double *tsurf_vec = NULL;
-  if (emit_model == MODEL_THERMAL_TSURF && model_tsurf_index >= 0)
-    tsurf_vec = surf->edvec[surf->ewhich[model_tsurf_index]];
+  if (emit_model == MODEL_THERMAL_TSURF && model_tsurf_index >= 0) {
+    if (surf->estatus[model_tsurf_index] == 0)
+      surf->spread_custom(model_tsurf_index);
+    tsurf_vec = surf->edvec_local[surf->ewhich[model_tsurf_index]];
+  }
 
   Surf::Line *lines = surf->lines;
   Surf::Tri *tris = surf->tris;
@@ -641,11 +690,11 @@ void FixSurfaceEmitSource::perform_task()
     vscale = particle->mixture[imix]->vscale;
 
     // per-task model state (THERMAL_TSURF reads Tsurf [°C] from custom)
+    // tsurf_vec is the local+ghost view from spread_custom(), indexed by isurf
     double Tsurf_K_task = -1.0;
     if (emit_model == MODEL_THERMAL_TSURF) {
-      int ilocal = local_isurf_index(isurf);
-      if (ilocal < 0 || tsurf_vec == NULL) continue;
-      double T_K = tsurf_vec[ilocal] + 273.15;
+      if (tsurf_vec == NULL) continue;
+      double T_K = tsurf_vec[isurf] + 273.15;
       if (!std::isfinite(T_K) || T_K <= 0.0) continue;
       Tsurf_K_task = T_K;
       // override mixture rot/vib so internal energies match wall temperature

@@ -92,10 +92,11 @@ inline double sheath_auto_dmax(double te_eV, double ti_eV, double ne_m3,
   const double mD_kg = std::max(mD_amu * AMU_LOC, 1.0e-99);
   const double lambdaD = std::sqrt(EPS0_LOC * std::max(te_eV, 1.0e-12)
                                    / (std::max(ne_m3, 1.0e-60) * QE_LOC));
-  const double cs = std::sqrt(std::max(te_eV + ti_eV, 0.0) * QE_LOC
-                              / (2.0 * mD_kg));
+  // vth_d: 1D effective thermal speed for rho_i (not Bohm cs).
+  const double vth_d = std::sqrt(std::max(te_eV + ti_eV, 0.0) * QE_LOC
+                                 / (2.0 * mD_kg));
   const double omega_ci = QE_LOC * std::max(std::fabs(bmag_T), 1.0e-20) / mD_kg;
-  const double rho_i = cs / std::max(omega_ci, 1.0e-99);
+  const double rho_i = vth_d / std::max(omega_ci, 1.0e-99);
   const double alpha_n_rad = std::max(0.0, std::min(90.0, alpha_deg)) *
                              M_PI / 180.0;
   const double tan_an = std::min(std::max(std::fabs(std::tan(alpha_n_rad)),
@@ -543,8 +544,10 @@ void Update::init()
     if (sheath_flag && (pusher->pusher_plasma_cidx >= 0 || pusher->pusher_plasma_fidx >= 0)) {
       plasma_cidx = pusher->pusher_plasma_cidx;
       plasma_fidx = pusher->pusher_plasma_fidx;
-    } else if (pusher->pusher_mode == Pusher::PUSHER_HYBRID && pusher->pusher_plasma_cidx >= 0) {
+    } else if (pusher->pusher_mode == Pusher::PUSHER_HYBRID &&
+               (pusher->pusher_plasma_cidx >= 0 || pusher->pusher_plasma_fidx >= 0)) {
       plasma_cidx = pusher->pusher_plasma_cidx;
+      plasma_fidx = pusher->pusher_plasma_fidx;
     } else if (pusher->pusher_plasma_cidx >= 0 || pusher->pusher_plasma_fidx >= 0) {
       plasma_cidx = pusher->pusher_plasma_cidx;
       plasma_fidx = pusher->pusher_plasma_fidx;
@@ -1366,11 +1369,16 @@ template < int DIM, int SURF, int OPT > void Update::move()
         dtremain = dt;
         if (DIM == 1 || DIM == 2)
         {
-          pusher->push_boris_2d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+          if (pusher->pusher_mode == Pusher::PUSHER_HYBRID ||
+              pusher->pusher_mode == Pusher::PUSHER_GCA)
+            pusher->push_hybrid_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+          else
+            pusher->push_boris_2d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
         else if (DIM == 3)
         {
-          if (pusher->pusher_mode == Pusher::PUSHER_HYBRID)
+          if (pusher->pusher_mode == Pusher::PUSHER_HYBRID ||
+              pusher->pusher_mode == Pusher::PUSHER_GCA)
             pusher->push_hybrid_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
           else
             pusher->push_boris_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
@@ -1378,10 +1386,15 @@ template < int DIM, int SURF, int OPT > void Update::move()
       } else if (pflag == PINSERT) {
         dtremain = dt;
         if (DIM == 1 || DIM == 2) {
-          pusher->push_boris_2d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+          if (pusher->pusher_mode == Pusher::PUSHER_HYBRID ||
+              pusher->pusher_mode == Pusher::PUSHER_GCA)
+            pusher->push_hybrid_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
+          else
+            pusher->push_boris_2d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
         }
         else if (DIM == 3) {
-          if (pusher->pusher_mode == Pusher::PUSHER_HYBRID)
+          if (pusher->pusher_mode == Pusher::PUSHER_HYBRID ||
+              pusher->pusher_mode == Pusher::PUSHER_GCA)
             pusher->push_hybrid_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);
           else
             pusher->push_boris_3d(i,particles[i].icell,dtremain,x,v,xnew,charge,mass);

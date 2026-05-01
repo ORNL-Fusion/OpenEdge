@@ -19,6 +19,8 @@ FixStyle(background,FixBackground)
 
 namespace SPARTA_NS {
 
+struct MagneticFieldFileDataParams;
+
 class FixBackground : public Fix {
  public:
   FixBackground(class SPARTA *, int, char **);
@@ -46,6 +48,11 @@ class FixBackground : public Fix {
                   int icell = -1) const;
   void   bfield_at(double R, double Z, double &Br, double &Bz, double &Bt,
                    int icell = -1) const;
+  // Cylindrical-derivative B query for the GCA pusher: returns Br/Bz/Bt
+  // along with dB/dR, dB/dZ in the same MagneticFieldFileDataParams shape
+  // ComputePlasmaFields produces. Equilibrium-derivative branch when
+  // has_equ; falls back to mesh / regular-grid (finite differences).
+  MagneticFieldFileDataParams query_bfield_at_point(const double xyz[3]) const;
   double psi_norm_at(double R, double Z) const;
 
   // ---- Plasma grid ----

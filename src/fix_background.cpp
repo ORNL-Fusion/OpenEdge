@@ -22,11 +22,13 @@
 #include "string.h"
 #include "fix_background.h"
 #include "comm.h"
+#include "compute_plasma_fields.h"
 #include "domain.h"
 #include "error.h"
 #include "grid.h"
 #include "input.h"
 #include "modify.h"
+#include "openedge_geom.h"
 
 #include <H5Cpp.h>
 #include <algorithm>
@@ -1553,6 +1555,151 @@ void FixBackground::bfield_at(double R, double Z,
   Br_out = interp2D(br, R, Z, icell);
   Bz_out = interp2D(bz, R, Z, icell);
   Bt_out = interp2D(bt, R, Z, icell);
+}
+
+/* ----------------------------------------------------------------------
+   Cylindrical-derivative B query (mirrors
+   ComputePlasmaFields::query_bfield_at_point). Branch order:
+     1. mesh-native B (per-triangle vertex average) — no derivatives
+     2. regular-grid br/bz/bt with finite-difference derivatives
+     3. equilibrium ψ analytic derivatives
+   For GCA smoothness, prefer the equilibrium branch when has_equ is
+   set: derive_bfield_from_equ() also writes br/bz/bt on the regular
+   grid, which would otherwise short-circuit branch 2 with finite-
+   difference noise.
+------------------------------------------------------------------------- */
+
+MagneticFieldFileDataParams
+FixBackground::query_bfield_at_point(const double xyz[3]) const
+{
+  MagneticFieldFileDataParams B{};
+
+  const int dim = domain->dimension;
+  const bool axi = domain->axisymmetric;
+  double R, Z;
+  OpenEdge::sparta_to_RZ(xyz, dim, axi, R, Z, column_x0, column_y0);
+  B.r = R;
+  B.z = Z;
+
+  // 1. Mesh-native B (per-triangle vertex average) — no derivatives.
+  if (!mesh_tri_br.empty()) {
+    const int tri = find_mesh_triangle(R, Z);
+    if (tri >= 0 && tri < static_cast<int>(mesh_tri_br.size())) {
+      B.br = mesh_tri_br[tri];
+      B.bz = mesh_tri_bz[tri];
+      B.bt = mesh_tri_bt[tri];
+      B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+      return B;
+    }
+    // outside mesh footprint: fall through.
+  }
+
+  // 3. Equilibrium analytic derivatives — preferred over branch 2 when
+  // available because derive_bfield_from_equ() populates br/bz/bt from
+  // the same ψ map, so branch 2 would just be a noisier finite-difference
+  // version of the same physics.
+  if (has_equ && equ_jm >= 3 && equ_km >= 3 && !psirz.empty() && R > 1.0e-10) {
+    const int jm = equ_jm;
+    const int km = equ_km;
+    const double dr = equ_r[1] - equ_r[0];
+    const double dz = equ_z[1] - equ_z[0];
+    if (dr > 0.0 && dz > 0.0) {
+      double fj = (R - equ_r[0]) / dr;
+      double fk = (Z - equ_z[0]) / dz;
+      int jc = static_cast<int>(std::round(fj));
+      int kc = static_cast<int>(std::round(fk));
+      jc = std::max(1, std::min(jc, jm - 2));
+      kc = std::max(1, std::min(kc, km - 2));
+
+      auto P = [&](int k, int j) -> double {
+        return psirz[static_cast<size_t>(k) * jm + j];
+      };
+
+      const double dR = equ_r[jc+1] - equ_r[jc-1];
+      const double dZ = equ_z[kc+1] - equ_z[kc-1];
+      const double dpsi_dR = (P(kc, jc+1) - P(kc, jc-1)) / dR;
+      const double dpsi_dZ = (P(kc+1, jc) - P(kc-1, jc)) / dZ;
+
+      const double dR1 = equ_r[jc+1] - equ_r[jc];
+      const double dR0 = equ_r[jc] - equ_r[jc-1];
+      const double dZ1 = equ_z[kc+1] - equ_z[kc];
+      const double dZ0 = equ_z[kc] - equ_z[kc-1];
+
+      const double d2psi_dR2 = 2.0 * (P(kc, jc+1) / (dR1*(dR1+dR0))
+                                      - P(kc, jc) / (dR1*dR0)
+                                      + P(kc, jc-1) / (dR0*(dR1+dR0)));
+      const double d2psi_dZ2 = 2.0 * (P(kc+1, jc) / (dZ1*(dZ1+dZ0))
+                                      - P(kc, jc) / (dZ1*dZ0)
+                                      + P(kc-1, jc) / (dZ0*(dZ1+dZ0)));
+      const double d2psi_dRdZ = (P(kc+1, jc+1) - P(kc+1, jc-1)
+                                 - P(kc-1, jc+1) + P(kc-1, jc-1)) / (dR * dZ);
+
+      const double invR = 1.0 / R;
+      const double invR2 = invR * invR;
+
+      B.br = -dpsi_dZ * invR;
+      B.bz = dpsi_dR * invR;
+      B.bt = btf * rtf * invR;
+
+      B.dBr_dr = dpsi_dZ * invR2 - d2psi_dRdZ * invR;
+      B.dBr_dz = -d2psi_dZ2 * invR;
+      B.dBz_dr = -dpsi_dR * invR2 + d2psi_dR2 * invR;
+      B.dBz_dz = d2psi_dRdZ * invR;
+      B.dBt_dr = -btf * rtf * invR2;
+      B.dBt_dz = 0.0;
+
+      B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+      if (B.Bmag > 0.0) {
+        B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr + B.bz*B.dBz_dr) / B.Bmag;
+        B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz + B.bz*B.dBz_dz) / B.Bmag;
+      }
+      return B;
+    }
+  }
+
+  // 2. Regular-grid bilinear with finite-difference derivatives.
+  if (has_bfield && !br.empty() && nr >= 2 && nz >= 2) {
+    const double dr = rvals[1] - rvals[0];
+    const double dz = zvals[1] - zvals[0];
+    if (dr > 0.0 && dz > 0.0) {
+      const double Rc = std::min(std::max(R, rvals.front()), rvals.back());
+      const double Zc = std::min(std::max(Z, zvals.front()), zvals.back());
+      const double fi = (Rc - rvals.front()) / dr;
+      const double fj = (Zc - zvals.front()) / dz;
+      const int ir0 = std::max(0, std::min((int)fi, nr - 2));
+      const int iz0 = std::max(0, std::min((int)fj, nz - 2));
+      const double s = std::max(0.0, std::min(1.0, fi - ir0));
+      const double t = std::max(0.0, std::min(1.0, fj - iz0));
+      const size_t k00 = static_cast<size_t>(iz0) * nr + ir0;
+      const size_t k10 = k00 + 1;
+      const size_t k01 = k00 + nr;
+      const size_t k11 = k01 + 1;
+
+      auto interp = [&](const std::vector<double> &f) {
+        return (1-s)*(1-t)*f[k00] + s*(1-t)*f[k10]
+             + (1-s)*t*f[k01] + s*t*f[k11];
+      };
+      auto grad_r = [&](const std::vector<double> &f) {
+        return ((1-t)*(f[k10]-f[k00]) + t*(f[k11]-f[k01])) / dr;
+      };
+      auto grad_z = [&](const std::vector<double> &f) {
+        return ((1-s)*(f[k01]-f[k00]) + s*(f[k11]-f[k10])) / dz;
+      };
+
+      B.br = interp(br); B.bz = interp(bz); B.bt = interp(bt);
+      B.dBr_dr = grad_r(br); B.dBr_dz = grad_z(br);
+      B.dBt_dr = grad_r(bt); B.dBt_dz = grad_z(bt);
+      B.dBz_dr = grad_r(bz); B.dBz_dz = grad_z(bz);
+      B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+      if (B.Bmag > 0.0) {
+        B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr + B.bz*B.dBz_dr) / B.Bmag;
+        B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz + B.bz*B.dBz_dz) / B.Bmag;
+      }
+      return B;
+    }
+  }
+
+  return B;
 }
 
 /* ---------------------------------------------------------------------- */

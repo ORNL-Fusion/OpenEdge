@@ -112,6 +112,15 @@ class FixSurfaceEmitSource : public FixEmit {
   double cached_source_total;
   int task_source_cached;        // 0 = stale, 1 = valid
 
+  // Per-surface flux replicated across ranks (canonical SPARTA pattern: the
+  // upstream compute writes array_surf only at this rank's owned surfaces, so
+  // we spread owned->local+ghost via Surf::spread_own2local() before the task
+  // loop reads it. Without this, a task's cell owner and surface owner can
+  // disagree under MPI and flux_for_surface() returns 0.)
+  double *flux_localghost;
+  int     flux_n_localghost;
+  std::vector<double> flux_owned_buf;
+
   // custom options for per-surf emission properties
 
   // ---- File-driven flux mode (alternative to compute-driven) ----
@@ -154,6 +163,7 @@ class FixSurfaceEmitSource : public FixEmit {
   void grow_task();
   int local_isurf_index(surfint) const;
   double flux_for_surface(surfint);
+  void spread_flux(class Compute *);
 
   int option(int, char **);
 

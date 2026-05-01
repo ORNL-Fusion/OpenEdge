@@ -113,15 +113,10 @@ inline PlasmaFileParams query_plasma_from_fix(const FixBackground *pd,
 }
 
 inline MagneticFieldFileDataParams query_bfield_from_fix(const FixBackground *pd,
-                                                         const double xyz[3], int dim, int axi)
+                                                         const double xyz[3], int /*dim*/, int /*axi*/)
 {
-  MagneticFieldFileDataParams B{};
-  if (!pd || !pd->has_bfield) return B;
-
-  xyz_to_rz(xyz, dim, axi, B.r, B.z);
-  pd->bfield_at(B.r, B.z, B.br, B.bz, B.bt);
-  B.Bmag = std::sqrt(B.br * B.br + B.bt * B.bt + B.bz * B.bz);
-  return B;
+  if (!pd) return MagneticFieldFileDataParams{};
+  return pd->query_bfield_at_point(xyz);
 }
 
 inline double sheath_auto_dmax(double te_eV, double ti_eV, double ne_m3,
@@ -134,10 +129,11 @@ inline double sheath_auto_dmax(double te_eV, double ti_eV, double ne_m3,
   const double mD_kg = std::max(mD_amu * AMU_LOC, 1.0e-99);
   const double lambdaD = std::sqrt(EPS0_LOC * std::max(te_eV, 1.0e-12)
                                    / (std::max(ne_m3, 1.0e-60) * QE_LOC));
-  const double cs = std::sqrt(std::max(te_eV + ti_eV, 0.0) * QE_LOC
-                              / (2.0 * mD_kg));
+  // vth_d: 1D effective thermal speed for rho_i (not Bohm cs).
+  const double vth_d = std::sqrt(std::max(te_eV + ti_eV, 0.0) * QE_LOC
+                                 / (2.0 * mD_kg));
   const double omega_ci = QE_LOC * std::max(std::fabs(bmag_T), 1.0e-20) / mD_kg;
-  const double rho_i = cs / std::max(omega_ci, 1.0e-99);
+  const double rho_i = vth_d / std::max(omega_ci, 1.0e-99);
   const double alpha_n_rad = std::max(0.0, std::min(90.0, alpha_deg)) *
                              M_PI / 180.0;
   const double tan_an = std::min(std::max(std::fabs(std::tan(alpha_n_rad)),
@@ -972,21 +968,33 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
                                    update->efield_active, i, icell, E);
 
   ComputePlasmaFields *cp_bfield = NULL;
+  FixBackground *pd_bfield = NULL;
   if (pusher_plasma_cidx >= 0) {
     Compute *cp_base = modify->compute[pusher_plasma_cidx];
     cp_bfield = dynamic_cast<ComputePlasmaFields *>(cp_base);
+  } else if (pusher_plasma_fidx >= 0) {
+    pd_bfield = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
   }
 
   MagneticFieldFileDataParams Bcyl{};
   bool have_point_b = false;
-  if (cp_bfield) {
-    Bcyl = cp_bfield->query_bfield_at_point(x);
+  if (cp_bfield || pd_bfield) {
+    Bcyl = cp_bfield ? cp_bfield->query_bfield_at_point(x)
+                     : pd_bfield->query_bfield_at_point(x);
     if (Bcyl.Bmag > 0.0) {
       have_point_b = true;
       if (domain->dimension == 2) {
-        B[0] = Bcyl.br;
-        B[1] = Bcyl.bz;
-        B[2] = Bcyl.bt;
+        if (domain->axisymmetric) {
+          // 2D axi slots: x=Z, y=R, z=toroidal
+          B[0] = Bcyl.bz;
+          B[1] = Bcyl.br;
+          B[2] = Bcyl.bt;
+        } else {
+          // 2D Cartesian (legacy): x=R, y=Z, z=toroidal
+          B[0] = Bcyl.br;
+          B[1] = Bcyl.bz;
+          B[2] = Bcyl.bt;
+        }
       } else {
         const double rx = x[0], ry = x[1];
         const double rxy = std::sqrt(rx*rx + ry*ry);
@@ -1062,10 +1070,12 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
       const double dbZ_dZ = invBm * (Bcyl.dBz_dz - bZ * Bcyl.dBmag_dz);
 
       double R_pt, Z_pt_unused;
+      const double col_x0 = cp_bfield ? cp_bfield->plasma_data.column_x0
+                          : (pd_bfield ? pd_bfield->column_x0 : 0.0);
+      const double col_y0 = cp_bfield ? cp_bfield->plasma_data.column_y0
+                          : (pd_bfield ? pd_bfield->column_y0 : 0.0);
       OpenEdge::sparta_to_RZ(x, domain->dimension, domain->axisymmetric,
-                              R_pt, Z_pt_unused,
-                              cp_bfield ? cp_bfield->plasma_data.column_x0 : 0.0,
-                              cp_bfield ? cp_bfield->plasma_data.column_y0 : 0.0);
+                              R_pt, Z_pt_unused, col_x0, col_y0);
       if (R_pt < 1.0e-10) R_pt = 1.0e-10;
       const double invR_pt = 1.0 / R_pt;
 
@@ -1227,10 +1237,12 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
   }
 
   // --- Switching criterion ---
-  // Compute v_perp and check whether GCA is appropriate
+  // mode=gca: always GCA (no Boris fallback) when B is available.
+  // mode=hybrid: use rho_L/L_B criterion below.
   bool use_gca = false;
+  if (pusher_mode == PUSHER_GCA && Bmag > 0.0 && qm_abs > 0.0) use_gca = true;
 
-  if (Bmag > 0.0 && qm_abs > 0.0) {
+  if (!use_gca && Bmag > 0.0 && qm_abs > 0.0) {
     const double bhat[3] = {B[0]/Bmag, B[1]/Bmag, B[2]/Bmag};
     double v_perp = 0.0;
     if (have_gca_state && gca_on_vec[i] > 0.5) {
@@ -1307,13 +1319,23 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
     double vcur[3] = {v[0], v[1], v[2]};
 
     // Cache B-field once at initial position for subcycling
-    if (cp_bfield) {
-      MagneticFieldFileDataParams Bc = cp_bfield->query_bfield_at_point(xcur);
+    if (cp_bfield || pd_bfield) {
+      MagneticFieldFileDataParams Bc = cp_bfield
+          ? cp_bfield->query_bfield_at_point(xcur)
+          : pd_bfield->query_bfield_at_point(xcur);
       if (Bc.Bmag > 0.0) {
         if (domain->dimension == 2) {
-          B[0] = Bc.br;
-          B[1] = Bc.bz;
-          B[2] = Bc.bt;
+          if (domain->axisymmetric) {
+            // 2D axi slots: x=Z, y=R, z=toroidal
+            B[0] = Bc.bz;
+            B[1] = Bc.br;
+            B[2] = Bc.bt;
+          } else {
+            // 2D Cartesian (legacy): x=R, y=Z, z=toroidal
+            B[0] = Bc.br;
+            B[1] = Bc.bz;
+            B[2] = Bc.bt;
+          }
         } else {
           const double rx = xcur[0], ry = xcur[1];
           const double rxy = std::sqrt(rx*rx + ry*ry);
@@ -1353,22 +1375,31 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
 
 void Pusher::init()
 {
-  if (pusher_mode != PUSHER_HYBRID) return;
+  if (pusher_mode != PUSHER_HYBRID && pusher_mode != PUSHER_GCA) return;
 
   if (!pusher_plasma_cid)
-    error->all(FLERR,"global gca requires plasma_compute ID");
+    error->all(FLERR,"global gca requires plasma provider ID");
   pusher_plasma_cidx = modify->find_compute(pusher_plasma_cid);
-  if (pusher_plasma_cidx < 0)
-    error->all(FLERR,"global gca: plasma compute ID not found");
-  if (!modify->compute[pusher_plasma_cidx]->per_grid_flag)
-    error->all(FLERR,"global gca: plasma compute must be per-grid");
+  pusher_plasma_fidx = -1;
+  if (pusher_plasma_cidx >= 0) {
+    if (!modify->compute[pusher_plasma_cidx]->per_grid_flag)
+      error->all(FLERR,"global gca: plasma compute must be per-grid");
+  } else {
+    pusher_plasma_fidx = modify->find_fix(pusher_plasma_cid);
+    if (pusher_plasma_fidx < 0)
+      error->all(FLERR,"global gca: plasma provider ID not found");
+    auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
+    if (!pd)
+      error->all(FLERR,
+                 "global gca: plasma fix provider must be style background");
+  }
 
   // GCA needs smooth B-field derivatives (grad|B|, curvature, curl(b̂))
   // from an equilibrium psi map. When the embedded /equilibrium/* group
   // in plasma.h5 (or an explicit `equilibrium <file>` keyword) is
-  // present, ComputePlasmaFields::query_bfield_at_point picks it up;
-  // otherwise update.cpp's grad-|B| sample returns the unmodified B
-  // and the GCA reverts to its simpler kernel.
+  // present, ComputePlasmaFields / FixBackground query_bfield_at_point
+  // picks it up; otherwise grad-|B| sample returns the unmodified B and
+  // the GCA reverts to its simpler kernel.
 
   // Persistent guiding-center state per particle. Keep this state across
   // timesteps to avoid re-initializing from instantaneous gyromotion
@@ -1427,7 +1458,9 @@ void Pusher::global_keyword(int narg, char **arg, int &iarg)
       if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher mode");
       if (strcmp(arg[iarg+1], "boris") == 0) pusher_mode = PUSHER_BORIS;
       else if (strcmp(arg[iarg+1], "hybrid") == 0) pusher_mode = PUSHER_HYBRID;
-      else error->all(FLERR, "global pusher mode must be boris or hybrid");
+      else if (strcmp(arg[iarg+1], "gca") == 0) pusher_mode = PUSHER_GCA;
+      else error->all(FLERR,
+        "global pusher mode must be boris, hybrid, or gca");
       iarg += 2;
     } else if (strcmp(arg[iarg], "subcycles") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher subcycles");
