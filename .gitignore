@@ -92,6 +92,7 @@ examples/test_west_3d/
 examples/test_west_timedep/
 examples/test_liquid_metal/
 examples/test_eirene/
+examples/test_diii_d_neutrals/
 examples/_test_west_ciraolo/
 
 # Per-test READMEs and reference PDFs (keep local)

@@ -1,6 +1,0 @@
-# Generated SPARTA output (can get very large, e.g. ~1 GB for 50 k steps)
-*.grid
-log.openedge
-run.log
-# Post-processing figures (regenerable from the dump)
-plots/

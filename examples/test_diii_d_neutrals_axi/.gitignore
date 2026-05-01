@@ -1,0 +1,10 @@
+# Run outputs
+*.grid
+log.openedge*
+log.diii_d_neutrals_axi
+wall_energy.surf
+plots/
+__pycache__/
+
+# Scratch / WIP (kept locally, not tracked)
+wip/
