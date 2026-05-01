@@ -68,8 +68,8 @@ compute         ctemp grid all species temp
 compute         Tavg reduce ave c_ctemp[1]
 
 # Particle tracks (sample every 1000 steps)
-dump            dpart particle all 1000 output/particles id type x y z vx vy vz
-dump_modify     dpart first yes
+#dump            dpart particle all 1000 output/particles id type x y z vx vy vz
+#dump_modify     dpart first yes
 
 # ---- Time integration ----
 timestep        1.0e-8
@@ -77,4 +77,4 @@ stats           500
 stats_style     step cpu np c_Tavg
 
 # ---- Run ----
-run             50000
+run             1000

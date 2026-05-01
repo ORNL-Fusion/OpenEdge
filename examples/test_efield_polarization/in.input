@@ -81,11 +81,11 @@ variable numStep  equal 62832
 variable dumpFreq equal 50
 
 timestep  ${dt}
-dump      10 particle all ${dumpFreq} state id type x y z vx vy vz
+#dump      10 particle all ${dumpFreq} state id type x y z vx vy vz
 stats    ${dumpFreq}
 stats_style step cpu np
 
-run     ${numStep}
+run     1000
 
 # -----------------------------------------------------------------------------
 # End of file

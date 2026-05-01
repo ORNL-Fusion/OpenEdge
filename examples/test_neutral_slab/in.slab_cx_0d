@@ -46,4 +46,4 @@ compute TavgD       reduce ave c_ctemp[1]
 
 stats               100
 stats_style         step cpu np c_TavgD
-run                 30000
+run                 1000

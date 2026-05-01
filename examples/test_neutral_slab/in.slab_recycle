@@ -50,9 +50,9 @@ fix    frate ave/grid all 1 2000 2000 f_fchem[*] ave one
 
 stats               500
 stats_style         step cpu np nscoll nattempt ncoll
-run                 10000
+run                 1000
 
-dump d1 grid all 10000 output/slab_recycle.grid id xc yc &
-     f_fden[1] f_frate[1] f_frate[2] f_frate[3] f_frate[4]
-dump_modify d1 pad 6
-run                 0
+#dump d1 grid all 10000 output/slab_recycle.grid id xc yc &
+#     f_fden[1] f_frate[1] f_frate[2] f_frate[3] f_frate[4]
+#dump_modify d1 pad 6
+#run                 0

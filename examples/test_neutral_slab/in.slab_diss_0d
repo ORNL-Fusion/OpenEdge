@@ -46,4 +46,4 @@ compute Nd          reduce ave c_cden[2]
 
 stats               50
 stats_style         step cpu np c_Nd2 c_Nd
-run                 7000
+run                 1000

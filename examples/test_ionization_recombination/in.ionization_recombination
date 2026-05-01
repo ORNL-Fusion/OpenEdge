@@ -65,4 +65,4 @@ timestep          ${dt}
 stats             1000
 stats_style       step cpu np c_n0 c_n1 c_n2 c_n3 c_n4 c_n5 c_n6 c_n7 c_n8
 
-run               ${numStep}
+run               1000

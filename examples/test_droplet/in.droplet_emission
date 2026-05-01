@@ -49,7 +49,7 @@ fix    pd background file plasma.h5 static yes
 
 read_particles source 1
 
-dump dtraj particle all ${Ndump} case.outer id type x y z vx vy vz v_pmass temp radius
+#dump dtraj particle all ${Ndump} case.outer id type x y z vx vy vz v_pmass temp radius
 
 fix fevap_1 droplet/evaporate 1 drops_1 background pd mass ${md1} radius ${rd1} temp ${temp_droplet} heatflux/scale 2.0 rocket_eta 0.5
 fix fevap_2 droplet/evaporate 1 drops_2 background pd mass ${md2} radius ${rd2} temp ${temp_droplet} heatflux/scale 2.0 rocket_eta 0.5
@@ -69,4 +69,4 @@ variable Nd equal ${Ndump}*2
 fix 31 halt ${Nd} v_npart <= 0
 
 stats ${Ndump}
-run $N
+run 1000

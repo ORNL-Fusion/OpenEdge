@@ -51,11 +51,11 @@ global   pusher mode hybrid plasma cpf subcycles 1 gca_switch 0.001 sheath off
 
 fix      femit surface/emit/source TantalumSource source file input/ta_inlet.dat section ZLO model thompson 8.1
 
-dump     dstate particle all ${dumpEvery} output/state.45.dump id type x y z vx vy vz
+#dump     dstate particle all ${dumpEvery} output/state.45.dump id type x y z vx vy vz
 
 compute  cRho grid all species nrho
 fix      fRho ave/grid all 1 ${Nfreq} ${Nfreq} c_cRho[*] ave running
-dump     dRho grid all ${Nfreq} output/ta_density.45.grid id xc yc zc f_fRho[*]
+#dump     dRho grid all ${Nfreq} output/ta_density.45.grid id xc yc zc f_fRho[*]
 
 #compute  cSurfAll surf exposedTarget_45 all nflux_incident mflux etot press ke shx shy shz px py pz
 #fix      fSurfAll ave/surf exposedTarget_45 1 ${Nfreq} ${Nfreq} c_cSurfAll[*]
@@ -72,4 +72,4 @@ fix        31 halt ${Nfreq} v_npart <= 100
 unfix      femit
 
 stats      ${Nfreq}
-run        ${N}
+#run        ${N}

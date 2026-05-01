@@ -68,7 +68,7 @@ compute         Tavg_1 reduce ave c_ctemp[1]
 compute         Tavg_2 reduce ave c_ctemp[2]
 
 # Particle tracks (sample every 1000 steps)
-dump            dpart particle all 10000 output/particles id type x y z vx vy vz
+#dump            dpart particle all 10000 output/particles id type x y z vx vy vz
 
 # ---- Time integration ----
 timestep        1.0e-8
@@ -76,4 +76,4 @@ stats           5000
 stats_style     step cpu np c_Tavg_1 c_Tavg_2
 
 # ---- Run ----
-run             400000
+run             1000

@@ -16,5 +16,5 @@ timestep            1.0e-3
 stats               10
 stats_style         step cpu np
 
-dump d1 particle all 1 dump.gravity3d id type x y z vx vy vz
-run                 200
+#dump d1 particle all 1 dump.gravity3d id type x y z vx vy vz
+run                 1000

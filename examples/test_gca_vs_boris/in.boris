@@ -39,10 +39,10 @@ variable dt         equal 5e-10
 variable numStep    equal 600000           # 300 µs ≈ 6 bounce periods
 variable dumpFreq   equal 300              # ~150 ns per dump
 
-dump dpart particle all ${dumpFreq} output/traj.boris id type x y z vx vy vz
-dump_modify dpart first yes
+#dump dpart particle all ${dumpFreq} output/traj.boris id type x y z vx vy vz
+#dump_modify dpart first yes
 
 timestep            ${dt}
 stats               5000
 stats_style         step cpu np
-run                 ${numStep}
+run                 1000
