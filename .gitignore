@@ -80,7 +80,10 @@ PSI2026/
 # processes.h5. Not part of the shipped repo — users consume
 # processes.h5 directly. Kept on-disk for local rebuilds but not
 # committed so PRs / checkouts stay clean.
-database/ingest/
+# Exception: adas.py is the parser imported by build_processes_h5.py
+# itself, so the script is broken without it on a fresh checkout.
+database/ingest/*
+!database/ingest/adas.py
 
 # WIP test cases (not ready for public repo)
 examples/wip/
