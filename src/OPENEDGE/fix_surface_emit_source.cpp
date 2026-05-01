@@ -34,8 +34,12 @@ using namespace MathConst;
 
 enum{PKEEP,PINSERT,PDONE,PDISCARD,PENTRY,PEXIT,PSURF};
 enum{FLOW,CONSTANT};
+// File-mode column kinds; matches the layout in wip/fix_emit_face_file.cpp
+// minus species fractions (we only consume scalar inflow fields).
+enum IM_Kind { IM_NRHO = 1, IM_VX, IM_VY, IM_VZ, IM_TEMP_THERMAL, IM_GAMMA };
 
 #define DELTATASK 256
+#define MAXLINE 16384
 
 namespace {
   // Boltzmann constant in eV/K
@@ -91,18 +95,44 @@ FixSurfaceEmitSource::FixSurfaceEmitSource(SPARTA *sparta, int narg, char **arg)
     error->all(FLERR,"Fix surface/emit/source group ID does not exist");
   groupbit = surf->bitmask[igroup];
 
-  iflux = modify->find_compute(arg[4]);
-  if (iflux < 0)
-    error->all(FLERR,"Fix surface/emit/source compute ID does not exist");
-
+  // arg[4] is either a compute ID (default, compute-driven flux) or the
+  // literal keyword "file" (file-driven flux from an inflow .dat).
+  file_mode = 0;
+  file_path = nullptr;
+  file_section = nullptr;
+  face_axis_idx = 2;        // ZLO/ZHI default
+  iflux = -1;
   flux_index = 0;
   int iarg = 5;
-  if (strcmp(arg[iarg],"flux_index") == 0) {
-    if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix surface/emit/source command");
-    flux_index = atoi(arg[iarg+1]);
-    if (flux_index <= 0)
-      error->all(FLERR,"Fix surface/emit/source flux_index must be >= 1");
-    iarg += 2;
+  if (strcmp(arg[4],"file") == 0) {
+    file_mode = 1;
+    if (narg < 6)
+      error->all(FLERR,"Fix surface/emit/source: 'file' needs a path");
+    int n = strlen(arg[5]) + 1;
+    file_path = new char[n];
+    memcpy(file_path, arg[5], n);
+    iarg = 6;
+    // optional 'section <NAME>' (default ZLO)
+    if (iarg + 1 < narg && strcmp(arg[iarg],"section") == 0) {
+      int sn = strlen(arg[iarg+1]) + 1;
+      file_section = new char[sn];
+      memcpy(file_section, arg[iarg+1], sn);
+      iarg += 2;
+    } else {
+      file_section = new char[4];
+      memcpy(file_section, "ZLO", 4);
+    }
+  } else {
+    iflux = modify->find_compute(arg[4]);
+    if (iflux < 0)
+      error->all(FLERR,"Fix surface/emit/source compute ID does not exist");
+    if (strcmp(arg[iarg],"flux_index") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix surface/emit/source command");
+      flux_index = atoi(arg[iarg+1]);
+      if (flux_index <= 0)
+        error->all(FLERR,"Fix surface/emit/source flux_index must be >= 1");
+      iarg += 2;
+    }
   }
 
   np = 0;
@@ -159,6 +189,8 @@ FixSurfaceEmitSource::~FixSurfaceEmitSource()
 
   delete [] npstr;
   delete [] model_tsurf_name;
+  delete [] file_path;
+  delete [] file_section;
 
   for (int i = 0; i < ntaskmax; i++) {
     delete [] tasks[i].ntargetsp;
@@ -178,12 +210,29 @@ void FixSurfaceEmitSource::init()
 {
   FixEmit::init();
 
-  if (iflux < 0 || iflux >= modify->ncompute)
-    error->all(FLERR,"Fix surface/emit/source compute ID no longer exists");
-
-  Compute *c = modify->compute[iflux];
-  if (!c->per_surf_flag)
-    error->all(FLERR,"Fix surface/emit/source compute must provide per-surf values");
+  if (file_mode) {
+    // File mode: no compute, no flux_index, no nlaunch* paths.
+    if (nlaunch_mode || nlaunch_total_mode)
+      error->all(FLERR,"Fix surface/emit/source: file mode is incompatible "
+                       "with nlaunch / nlaunch_total");
+    if (fmesh.values.empty()) {
+      if (comm->me == 0) file_load();
+      file_bcast();
+      // resolve face_axis_idx from section name
+      const char *s = file_section ? file_section : "ZLO";
+      if      (!strcmp(s,"XLO") || !strcmp(s,"XHI")) face_axis_idx = 0;
+      else if (!strcmp(s,"YLO") || !strcmp(s,"YHI")) face_axis_idx = 1;
+      else if (!strcmp(s,"ZLO") || !strcmp(s,"ZHI")) face_axis_idx = 2;
+      else error->all(FLERR,"Fix surface/emit/source: section must be one of "
+                            "XLO/XHI/YLO/YHI/ZLO/ZHI");
+    }
+  } else {
+    if (iflux < 0 || iflux >= modify->ncompute)
+      error->all(FLERR,"Fix surface/emit/source compute ID no longer exists");
+    Compute *c = modify->compute[iflux];
+    if (!c->per_surf_flag)
+      error->all(FLERR,"Fix surface/emit/source compute must provide per-surf values");
+  }
 
   fnum = update->fnum;
 
@@ -342,6 +391,24 @@ void FixSurfaceEmitSource::create_task(int icell)
       if (!(tris[isurf].mask & groupbit)) continue;
     }
 
+    // File mode: replace the mixture defaults with per-surf values from the
+    // inflow file, looked up at the surf centroid via bilinear interpolation.
+    double per_nrho = nrho;
+    double per_T    = temp_thermal;
+    double per_v[3] = {vstream[0], vstream[1], vstream[2]};
+    if (file_mode) {
+      double xc[3] = {0.0, 0.0, 0.0};
+      if (dimension == 2) {
+        xc[0] = 0.5 * (lines[isurf].p1[0] + lines[isurf].p2[0]);
+        xc[1] = 0.5 * (lines[isurf].p1[1] + lines[isurf].p2[1]);
+      } else {
+        xc[0] = (tris[isurf].p1[0] + tris[isurf].p2[0] + tris[isurf].p3[0]) / 3.0;
+        xc[1] = (tris[isurf].p1[1] + tris[isurf].p2[1] + tris[isurf].p3[1]) / 3.0;
+        xc[2] = (tris[isurf].p1[2] + tris[isurf].p2[2] + tris[isurf].p3[2]) / 3.0;
+      }
+      file_lookup(xc, per_nrho, per_v, per_T);
+    }
+
     if (ntask == ntaskmax) grow_task();
 
     tasks[ntask].icell = icell;
@@ -439,14 +506,15 @@ void FixSurfaceEmitSource::create_task(int icell)
       for (int isp = 0; isp < nspecies; isp++) tasks[ntask].ntargetsp[isp] = 0.0;
     }
 
-    tasks[ntask].nrho = nrho;
-    tasks[ntask].temp_thermal = temp_thermal;
+    tasks[ntask].nrho = per_nrho;
+    tasks[ntask].temp_thermal = per_T;
     tasks[ntask].temp_rot = particle->mixture[imix]->temp_rot;
     tasks[ntask].temp_vib = particle->mixture[imix]->temp_vib;
-    tasks[ntask].magvstream = magvstream;
-    tasks[ntask].vstream[0] = vstream[0];
-    tasks[ntask].vstream[1] = vstream[1];
-    tasks[ntask].vstream[2] = vstream[2];
+    tasks[ntask].magvstream =
+      std::sqrt(per_v[0]*per_v[0] + per_v[1]*per_v[1] + per_v[2]*per_v[2]);
+    tasks[ntask].vstream[0] = per_v[0];
+    tasks[ntask].vstream[1] = per_v[1];
+    tasks[ntask].vstream[2] = per_v[2];
 
     ntask++;
   }
@@ -470,8 +538,12 @@ void FixSurfaceEmitSource::perform_task()
   int *species = particle->mixture[imix]->species;
 
   // evaluate requested per-surf flux once per timestep
-  Compute *c = modify->compute[iflux];
-  c->compute_per_surf();
+  // (skipped in file_mode: per-task nrho/vstream are static from the inflow file)
+  Compute *c = NULL;
+  if (!file_mode) {
+    c = modify->compute[iflux];
+    c->compute_per_surf();
+  }
 
   // resolve per-surf Tsurf vector for thermal_tsurf model
   // (custom edvec can be reallocated; refresh pointer each step)
@@ -499,8 +571,8 @@ void FixSurfaceEmitSource::perform_task()
     // Fast path: when the upstream compute reports a frozen static cache,
     // reuse cached_task_source / cached_source_total instead of rebuilding.
     // The cached size must match ntask (grid_changed() invalidates).
-    auto *cpmi = dynamic_cast<ComputeSurfacePhysicalSputter *>(c);
-    const bool upstream_static = (cpmi && cpmi->is_static_cached());
+    auto *cpmi = file_mode ? NULL : dynamic_cast<ComputeSurfacePhysicalSputter *>(c);
+    const bool upstream_static = file_mode || (cpmi && cpmi->is_static_cached());
 
     if (upstream_static && task_source_cached &&
         static_cast<int>(cached_task_source.size()) == ntask) {
@@ -516,7 +588,17 @@ void FixSurfaceEmitSource::perform_task()
         source_strength = 0.0;
         isurf = tasks[i].isurf;
 
-        double flux = flux_for_surface(isurf);
+        double flux;
+        if (file_mode) {
+          double *vs = tasks[i].vstream;
+          double *nrm = (dimension == 2)
+                        ? surf->lines[isurf].norm
+                        : surf->tris[isurf].norm;
+          double vn = vs[0]*nrm[0] + vs[1]*nrm[1] + vs[2]*nrm[2];
+          flux = tasks[i].nrho * (vn > 0.0 ? vn : -vn);
+        } else {
+          flux = flux_for_surface(isurf);
+        }
         if (!std::isfinite(flux) || flux <= 0.0) continue;
         if (flux < flux_thresh) continue;
 
@@ -590,7 +672,14 @@ void FixSurfaceEmitSource::perform_task()
 
         w_emit = source_strength / ninsert;
       } else {
-        double flux = flux_for_surface(isurf);
+        double flux;
+        if (file_mode) {
+          double vn = vstream[0]*normal[0] + vstream[1]*normal[1] +
+                      vstream[2]*normal[2];
+          flux = tasks[i].nrho * (vn > 0.0 ? vn : -vn);
+        } else {
+          flux = flux_for_surface(isurf);
+        }
         if (!std::isfinite(flux) || flux <= 0.0) continue;
         if (flux < flux_thresh) continue;
 
@@ -694,6 +783,9 @@ void FixSurfaceEmitSource::perform_task()
             vnmag = speed * cos_th;
             vamag = speed * sin_th * std::cos(phi_az);
             vbmag = speed * sin_th * std::sin(phi_az);
+            vnmag += vstream[0]*normal[0] + vstream[1]*normal[1] + vstream[2]*normal[2];
+            vamag += vstream[0]*atan[0]   + vstream[1]*atan[1]   + vstream[2]*atan[2];
+            vbmag += vstream[0]*btan[0]   + vstream[1]*btan[1]   + vstream[2]*btan[2];
           }
 
           v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
@@ -813,6 +905,9 @@ void FixSurfaceEmitSource::perform_task()
           vnmag = speed * cos_th;
           vamag = speed * sin_th * std::cos(phi_az);
           vbmag = speed * sin_th * std::sin(phi_az);
+          vnmag += vstream[0]*normal[0] + vstream[1]*normal[1] + vstream[2]*normal[2];
+          vamag += vstream[0]*atan[0]   + vstream[1]*atan[1]   + vstream[2]*atan[2];
+          vbmag += vstream[0]*btan[0]   + vstream[1]*btan[1]   + vstream[2]*btan[2];
         }
 
         v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
@@ -980,4 +1075,198 @@ int FixSurfaceEmitSource::option(int narg, char **arg)
 
   error->all(FLERR,"Illegal fix surface/emit/source command");
   return 0;
+}
+
+/* ----------------------------------------------------------------------
+   File-driven flux mode helpers (cribbed from wip/fix_emit_face_file).
+   read_file -> file_load: rank 0 parses the SPARTA inflow .dat
+   bcast_mesh -> file_bcast: broadcast to all ranks
+   file_lookup: bilinear-interp at a surf centroid
+------------------------------------------------------------------------- */
+
+void FixSurfaceEmitSource::file_load()
+{
+  FILE *fp = fopen(file_path,"r");
+  if (!fp) {
+    char msg[256];
+    snprintf(msg,sizeof(msg),
+             "Fix surface/emit/source: cannot open file %s", file_path);
+    error->one(FLERR,msg);
+  }
+
+  char line[MAXLINE];
+  char *word, *tmp;
+
+  // scan to the requested section keyword
+  while (1) {
+    if (fgets(line,MAXLINE,fp) == NULL)
+      error->one(FLERR,"Fix surface/emit/source: section not found in file");
+    if (strspn(line," \t\n\r") == strlen(line)) continue;
+    if (line[0] == '#') continue;
+    word = strtok(line," \t\n\r");
+    if (word && strcmp(word,file_section) == 0) break;
+  }
+
+  // NIJ Ni Nj
+  tmp = fgets(line,MAXLINE,fp);
+  word = strtok(line," \t\n\r");
+  if (!word || strcmp(word,"NIJ") != 0)
+    error->one(FLERR,"Fix surface/emit/source: expected NIJ");
+  fmesh.ni = atoi(strtok(NULL," \t\n\r"));
+  fmesh.nj = atoi(strtok(NULL," \t\n\r"));
+  if (fmesh.ni < 2 || fmesh.nj < 2)
+    error->one(FLERR,"Fix surface/emit/source: NIJ too small");
+
+  // NV Nv
+  tmp = fgets(line,MAXLINE,fp);
+  word = strtok(line," \t\n\r");
+  if (!word || strcmp(word,"NV") != 0)
+    error->one(FLERR,"Fix surface/emit/source: expected NV");
+  fmesh.nvalues = atoi(strtok(NULL," \t\n\r"));
+  if (fmesh.nvalues <= 0)
+    error->one(FLERR,"Fix surface/emit/source: bad NV");
+
+  // VALUES name1 ...
+  tmp = fgets(line,MAXLINE,fp);
+  word = strtok(line," \t\n\r");
+  if (!word || strcmp(word,"VALUES") != 0)
+    error->one(FLERR,"Fix surface/emit/source: expected VALUES");
+  fmesh.which.assign(fmesh.nvalues, 0);
+  for (int m = 0; m < fmesh.nvalues; m++) {
+    word = strtok(NULL," \t\n\r");
+    if      (!strcmp(word,"nrho"))  fmesh.which[m] = IM_NRHO;
+    else if (!strcmp(word,"vx"))    fmesh.which[m] = IM_VX;
+    else if (!strcmp(word,"vy"))    fmesh.which[m] = IM_VY;
+    else if (!strcmp(word,"vz"))    fmesh.which[m] = IM_VZ;
+    else if (!strcmp(word,"temp"))  fmesh.which[m] = IM_TEMP_THERMAL;
+    else if (!strcmp(word,"gamma")) fmesh.which[m] = IM_GAMMA;
+    else error->one(FLERR,"Fix surface/emit/source: unknown VALUES entry "
+                          "(nrho/vx/vy/vz/temp/gamma)");
+  }
+
+  // IMESH x_0 ...
+  tmp = fgets(line,MAXLINE,fp);
+  word = strtok(line," \t\n\r");
+  if (!word || strcmp(word,"IMESH") != 0)
+    error->one(FLERR,"Fix surface/emit/source: expected IMESH");
+  fmesh.imesh.assign(fmesh.ni, 0.0);
+  for (int i = 0; i < fmesh.ni; i++)
+    fmesh.imesh[i] = atof(strtok(NULL," \t\n\r"));
+
+  // JMESH y_0 ...
+  tmp = fgets(line,MAXLINE,fp);
+  word = strtok(line," \t\n\r");
+  if (!word || strcmp(word,"JMESH") != 0)
+    error->one(FLERR,"Fix surface/emit/source: expected JMESH");
+  fmesh.jmesh.assign(fmesh.nj, 0.0);
+  for (int j = 0; j < fmesh.nj; j++)
+    fmesh.jmesh[j] = atof(strtok(NULL," \t\n\r"));
+
+  fmesh.lo[0] = fmesh.imesh[0];
+  fmesh.hi[0] = fmesh.imesh[fmesh.ni-1];
+  fmesh.lo[1] = fmesh.jmesh[0];
+  fmesh.hi[1] = fmesh.jmesh[fmesh.nj-1];
+
+  // Skip blank line, then read Ni*Nj rows: i j v1 v2 ...
+  size_t n = static_cast<size_t>(fmesh.ni) * fmesh.nj * fmesh.nvalues;
+  fmesh.values.assign(n, 0.0);
+  // read until we have Ni*Nj data rows; tolerate blank lines in between
+  long count = 0;
+  long target = static_cast<long>(fmesh.ni) * fmesh.nj;
+  while (count < target && fgets(line,MAXLINE,fp)) {
+    if (strspn(line," \t\n\r") == strlen(line)) continue;
+    if (line[0] == '#') continue;
+    word = strtok(line," \t\n\r");
+    int ii = atoi(word);
+    int jj = atoi(strtok(NULL," \t\n\r"));
+    if (ii < 1 || ii > fmesh.ni || jj < 1 || jj > fmesh.nj)
+      error->one(FLERR,"Fix surface/emit/source: row indices out of range");
+    long off = (static_cast<long>(jj-1) * fmesh.ni + (ii-1)) * fmesh.nvalues;
+    for (int m = 0; m < fmesh.nvalues; m++)
+      fmesh.values[off + m] = atof(strtok(NULL," \t\n\r"));
+    count++;
+  }
+  fclose(fp);
+  if (count != target)
+    error->one(FLERR,"Fix surface/emit/source: not enough data rows in file");
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixSurfaceEmitSource::file_bcast()
+{
+  MPI_Bcast(&fmesh.ni,      1, MPI_INT,    0, world);
+  MPI_Bcast(&fmesh.nj,      1, MPI_INT,    0, world);
+  MPI_Bcast(&fmesh.nvalues, 1, MPI_INT,    0, world);
+  MPI_Bcast(fmesh.lo,       2, MPI_DOUBLE, 0, world);
+  MPI_Bcast(fmesh.hi,       2, MPI_DOUBLE, 0, world);
+
+  if (comm->me) {
+    fmesh.imesh.assign(fmesh.ni, 0.0);
+    fmesh.jmesh.assign(fmesh.nj, 0.0);
+    fmesh.which.assign(fmesh.nvalues, 0);
+    fmesh.values.assign(static_cast<size_t>(fmesh.ni) * fmesh.nj * fmesh.nvalues, 0.0);
+  }
+  MPI_Bcast(fmesh.imesh.data(),  fmesh.ni,      MPI_DOUBLE, 0, world);
+  MPI_Bcast(fmesh.jmesh.data(),  fmesh.nj,      MPI_DOUBLE, 0, world);
+  MPI_Bcast(fmesh.which.data(),  fmesh.nvalues, MPI_INT,    0, world);
+  MPI_Bcast(fmesh.values.data(),
+            static_cast<int>(fmesh.values.size()), MPI_DOUBLE, 0, world);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixSurfaceEmitSource::file_lookup(const double *xyz, double &nrho_out,
+                                       double *vstream_out, double &T_out) const
+{
+  // Pick the (i, j) coordinates of the surf centroid based on the section's
+  // face axis. The face axis itself is the "perpendicular" coordinate.
+  int i_axis = (face_axis_idx == 0) ? 1 : 0;     // skip face axis
+  int j_axis = (face_axis_idx == 2) ? 1 : 2;
+  if (face_axis_idx == 1) { i_axis = 0; j_axis = 2; }
+
+  double xq = xyz[i_axis];
+  double yq = xyz[j_axis];
+
+  // Bilinear lookup, edge-clamped
+  if (xq < fmesh.lo[0]) xq = fmesh.lo[0];
+  if (xq > fmesh.hi[0]) xq = fmesh.hi[0];
+  if (yq < fmesh.lo[1]) yq = fmesh.lo[1];
+  if (yq > fmesh.hi[1]) yq = fmesh.hi[1];
+
+  // find lower index in each axis
+  int i = 0;
+  while (i < fmesh.ni - 2 && fmesh.imesh[i+1] < xq) i++;
+  int j = 0;
+  while (j < fmesh.nj - 2 && fmesh.jmesh[j+1] < yq) j++;
+
+  double dxi = fmesh.imesh[i+1] - fmesh.imesh[i];
+  double dyj = fmesh.jmesh[j+1] - fmesh.jmesh[j];
+  double fx = (dxi > 0.0) ? (xq - fmesh.imesh[i]) / dxi : 0.0;
+  double fy = (dyj > 0.0) ? (yq - fmesh.jmesh[j]) / dyj : 0.0;
+
+  auto cell_off = [&](int ii, int jj) {
+    return (static_cast<long>(jj) * fmesh.ni + ii) * fmesh.nvalues;
+  };
+  long o00 = cell_off(i,     j);
+  long o10 = cell_off(i + 1, j);
+  long o01 = cell_off(i,     j + 1);
+  long o11 = cell_off(i + 1, j + 1);
+
+  // walk the value columns; only override outputs for fields that appear
+  for (int m = 0; m < fmesh.nvalues; m++) {
+    double v = (1.0 - fx) * (1.0 - fy) * fmesh.values[o00 + m]
+             +        fx  * (1.0 - fy) * fmesh.values[o10 + m]
+             + (1.0 - fx) *        fy  * fmesh.values[o01 + m]
+             +        fx  *        fy  * fmesh.values[o11 + m];
+    switch (fmesh.which[m]) {
+      case IM_NRHO:           nrho_out      = v; break;
+      case IM_VX:             vstream_out[0] = v; break;
+      case IM_VY:             vstream_out[1] = v; break;
+      case IM_VZ:             vstream_out[2] = v; break;
+      case IM_TEMP_THERMAL:   T_out         = v; break;
+      case IM_GAMMA:          /* redundant with nrho * vz; ignore */ break;
+      default: break;
+    }
+  }
 }
