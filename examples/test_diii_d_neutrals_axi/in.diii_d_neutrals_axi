@@ -1,0 +1,115 @@
+################################################################################
+# DIII-D plasma-neutral interaction test (TRUE AXISYMMETRIC, x=Z, y=R).
+# Sibling of test_diii_d_neutrals (2D Cartesian) for studying the impact
+# of 2D-Cartesian transport limitations on the SOLPS comparison.
+################################################################################
+
+seed                12345
+dimension           2
+boundary            o ao p
+global              gridcut 0.0 comm/sort no
+global              fnum 5e15
+
+# Axi slot map: x = Z (axial), y = R (radial, axis at y=0).
+create_box          -1.4 1.4 0.0 2.4 -0.05 0.05
+create_grid         500 500 1
+balance_grid        rcb cell
+
+species             neutral.species D2 D D+
+mixture             recmix D2 frac 0.95
+mixture             recmix D  frac 0.05
+
+# D2 puff mixture (Lore stratum 6): 300 K Maxwellian.
+mixture             puffD2 D2 frac 1.0 nrho 1.0 temp 300.0
+
+# ---- Outer wall: diffuse reflection + TRIM-based surface reactions ----
+# Wall walked CW in (Z,R) -> normals outward; invert flips them inward.
+read_surf           wall.surf invert group wall particle check
+surf_collide        wallColl diffuse 1160.0 1.0
+surf_react          wallPWI surface/pwi wall.recycle twall 1160.0
+surf_modify         wall collide wallColl react wallPWI
+
+# ---- Static refinement near both divertors (max level 5) ----
+region              rdiv_lo block -1.4 -0.8 1.0 2.4 -INF INF
+region              rdiv_up block  0.7  1.4 1.0 2.4 -INF INF
+adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
+                    region rdiv_lo all iterate 5
+adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
+                    region rdiv_up all iterate 5
+balance_grid        rcb cell
+
+# ---- Plasma background + B-field ----
+fix                 pd background file plasma_eirene.h5 static yes
+fix                 fcore reflect/psi background pd psi_norm 0.85 action absorb
+global              pusher plasma pd
+global              pcache_nevery 100
+
+# ---- Volumetric chemistry (Mode A neutral transport) ----
+fix fchem volume/chem/adas 1 D auto &
+    mode neutral source_species D D2 &
+    volume_source pd &
+    units rate &
+    output summary
+
+# ---- Lore 2023 NF surface groups (same segment IDs as Cartesian case) ----
+group               puffgrp     surf id 18
+group               outer_div   surf id <> 1 7
+group               pump        surf id 64 65 66 67 68
+group               wall_recyc  surf subtract wall pump
+
+# ---- Wall recycling: R=1.0 (Lore: all other surfaces fully recycling) ----
+fix frec surface/emit/recycle recmix wall_recyc pd mass 2.0 R 1.0 &
+    twall 1160.0 twall_species D 1160.0 D2 1160.0
+
+# ---- Pump: EIRENE-style partial recycle (R=0.5 to match Lore) ----
+# 50% of incident particles vanish (pumped throughput), 50% are diffusely
+# re-emitted at twall as D2 (atom recombines on wall to molecule).
+surf_collide        pumpColl partial_recycle 1160.0 1.0 r 0.5 return_species D2
+surf_modify         pump collide pumpColl react none
+
+# ---- D2 puff (Lore stratum 6: 2.5e21 atoms/s = 1.25e21 D2/s) ----
+#fix fpuff           surface/emit/puff puffD2 puffgrp n 1 nevery 80 perspecies no normal yes
+
+# ---- Diagnostics (running averages) ----
+# nrho instead of nrho_w (no per-particle weight in axi for now to keep it light).
+compute cden grid all species nrho
+fix    fden  ave/grid all 1 1000 1000 c_cden[*]  ave running
+fix    frate ave/grid all 1 1000 1000 f_fchem[*] ave running
+
+# ---- Volume-integrated source rates (true axi cell volume, time-averaged) ----
+# In axi: cell volume = pi * (R_hi^2 - R_lo^2) * dZ.  ylo/yhi are R, xlo/xhi are Z.
+# Use f_frate (1000-step running average) instead of raw f_fchem so the
+# integrated stats trace is smooth, not dominated by per-step MC spikes
+# in small near-axis cells.
+compute pgeom property/grid all xlo xhi ylo yhi
+variable cellvol grid "(c_pgeom[2]-c_pgeom[1])*3.141592653589793*(c_pgeom[4]*c_pgeom[4]-c_pgeom[3]*c_pgeom[3])"
+variable QeV  grid "v_cellvol*f_frate[5]"
+variable QiV  grid "v_cellvol*f_frate[6]"
+variable SpV  grid "v_cellvol*f_frate[1]"
+variable SmV  grid "v_cellvol*sqrt(f_frate[2]*f_frate[2]+f_frate[3]*f_frate[3]+f_frate[4]*f_frate[4])"
+compute Qe_int reduce sum v_QeV
+compute Qi_int reduce sum v_QiV
+compute Sp_int reduce sum v_SpV
+compute Sm_int reduce sum v_SmV
+
+timestep            5e-08
+stats               5000
+# Wall-side energy diagnostic: per-segment etot (norm flow), summed.
+# Skip fix ave/surf (crashes); just dump raw and time-average in stats.
+compute esurf       surf wall all etot norm flow
+compute Qwall_etot  reduce sum c_esurf[1]
+
+stats_style         step cpu np c_Sp_int c_Sm_int c_Qe_int c_Qi_int c_Qwall_etot  #f_fpuff[2]
+
+# Dump schema (axi: xc=Z, yc=R; xlo/xhi=Z bounds, ylo/yhi=R bounds).
+dump d1 grid all 5000 diii_d_neutrals_axi.grid id xc yc &
+     xlo ylo xhi yhi &
+     f_fden[1] f_fden[2] f_fden[3] &
+     f_frate[1] f_frate[2] f_frate[3] f_frate[4] &
+     f_frate[5] f_frate[6]
+
+# Wall-side energy dump (raw per-segment etot, post-process to W in Python).
+dump dwall surf all 50000 wall_energy.surf &
+     id v1x v1y v2x v2y c_esurf[1]
+
+run                 100000
