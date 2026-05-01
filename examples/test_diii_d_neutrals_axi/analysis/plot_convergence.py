@@ -106,16 +106,12 @@ def main():
 
     plt.rcParams.update({
         "font.family": "serif", "font.size": 13,
-        "axes.labelsize": 14, "axes.titlesize": 13,
+        "axes.labelsize": 14,
     })
     fig, axes = plt.subplots(3, 2, figsize=(11.5, 10), sharex=True)
     for ax, (key, label, unit) in zip(axes.flat, PANELS):
         y = np.asarray(totals[key])
         ax.plot(t_ms, y, color="tab:blue", lw=1.8)
-        if len(y) >= 4:
-            ax.axhline(y[len(y)//2:].mean(), color="tab:red", lw=1.0, ls="--",
-                       label="tail mean")
-            ax.legend(loc="best", frameon=False, fontsize=10)
         ax.axhline(0, color="0.6", lw=0.5)
         ax.set_ylabel(f"{label} ({unit})")
         ax.ticklabel_format(axis="y", style="sci", scilimits=(-2, 3),

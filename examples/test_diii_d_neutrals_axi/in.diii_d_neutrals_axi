@@ -19,7 +19,7 @@ species             neutral.species D2 D D+
 mixture             recmix D2 frac 0.95
 mixture             recmix D  frac 0.05
 
-# D2 puff mixture (Lore stratum 6): 300 K Maxwellian.
+# D2 puff mixture (stratum 6): 300 K Maxwellian.
 mixture             puffD2 D2 frac 1.0 nrho 1.0 temp 300.0
 
 # ---- Outer wall: diffuse reflection + TRIM-based surface reactions ----
@@ -51,24 +51,24 @@ fix fchem volume/chem/adas 1 D auto &
     units rate &
     output summary
 
-# ---- Lore 2023 NF surface groups (same segment IDs as Cartesian case) ----
+# ---- Surface groups (same segment IDs as Cartesian case) ----
 group               puffgrp     surf id 18
 group               outer_div   surf id <> 1 7
 group               pump        surf id 64 65 66 67 68
 group               wall_recyc  surf subtract wall pump
 
-# ---- Wall recycling: R=1.0 (Lore: all other surfaces fully recycling) ----
+# ---- Wall recycling: R=1.0 (all other surfaces fully recycling) ----
 fix frec surface/emit/recycle recmix wall_recyc pd mass 2.0 R 1.0 &
     twall 1160.0 twall_species D 1160.0 D2 1160.0
 
-# ---- Pump: EIRENE-style partial recycle (R=0.5 to match Lore) ----
+# ---- Pump: EIRENE-style partial recycle (R=0.5) ----
 # 50% of incident particles vanish (pumped throughput), 50% are diffusely
 # re-emitted at twall as D2 (atom recombines on wall to molecule).
 surf_collide        pumpColl partial_recycle 1160.0 1.0 r 0.5 return_species D2
 surf_modify         pump collide pumpColl react none
 
-# ---- D2 puff (Lore stratum 6: 2.5e21 atoms/s = 1.25e21 D2/s) ----
-#fix fpuff           surface/emit/puff puffD2 puffgrp n 1 nevery 80 perspecies no normal yes
+# ---- D2 puff (stratum 6: 2.5e21 atoms/s = 1.25e21 D2/s) ----
+fix fpuff           surface/emit/puff puffD2 puffgrp n 1 nevery 80 perspecies no normal yes
 
 # ---- Diagnostics (running averages) ----
 # nrho instead of nrho_w (no per-particle weight in axi for now to keep it light).
@@ -92,7 +92,7 @@ compute Qi_int reduce sum v_QiV
 compute Sp_int reduce sum v_SpV
 compute Sm_int reduce sum v_SmV
 
-timestep            5e-08
+timestep            5e-07
 stats               5000
 # Wall-side energy diagnostic: per-segment etot (norm flow), summed.
 # Skip fix ave/surf (crashes); just dump raw and time-average in stats.
@@ -109,7 +109,7 @@ dump d1 grid all 5000 diii_d_neutrals_axi.grid id xc yc &
      f_frate[5] f_frate[6]
 
 # Wall-side energy dump (raw per-segment etot, post-process to W in Python).
-dump dwall surf all 50000 wall_energy.surf &
+dump dwall surf all 30000 wall_energy.surf &
      id v1x v1y v2x v2y c_esurf[1]
 
-run                 100000
+run                 60000

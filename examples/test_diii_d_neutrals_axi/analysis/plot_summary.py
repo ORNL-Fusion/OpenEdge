@@ -27,6 +27,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection, PolyCollection
 from matplotlib.colors import SymLogNorm
+from scipy.spatial import cKDTree
+import netCDF4 as nc
 
 NCOLS = 16
 COL_XLO, COL_YLO, COL_XHI, COL_YHI = 3, 4, 5, 6
@@ -100,33 +102,68 @@ def symlog_norm(v, pct=99.5, lin_frac=0.03):
                       vmin=-absmax, vmax=absmax, base=10)
 
 
-def draw_map(ax, quads, v, label, title, wall):
+def style_axes(ax):
+    """Journal-style frame: thicker spines, tick marks inward both sides."""
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.2)
+    ax.tick_params(direction="in", which="both", length=5, width=1.0,
+                   top=True, right=True)
+    ax.tick_params(which="minor", length=3)
+    ax.minorticks_on()
+
+
+def draw_map(ax, quads, v, label, wall, panel_tag=None):
     pc = PolyCollection(quads, array=v, cmap="RdBu_r",
                         norm=symlog_norm(v), edgecolors="none")
     ax.add_collection(pc)
-    ax.add_collection(LineCollection(wall, colors="black", linewidths=0.5))
+    ax.add_collection(LineCollection(wall, colors="black", linewidths=0.7))
     ax.set_xlim(0.95, 2.45); ax.set_ylim(-1.45, 1.45)
     ax.set_aspect("equal")
     ax.set_xlabel(r"$R$ (m)"); ax.set_ylabel(r"$Z$ (m)")
-    ax.set_title(title, pad=4)
-    cb = plt.colorbar(pc, ax=ax, fraction=0.06, pad=0.02)
+    style_axes(ax)
+    cb = plt.colorbar(pc, ax=ax, fraction=0.055, pad=0.02)
     cb.set_label(label)
-    cb.ax.tick_params(labelsize=9)
+    cb.ax.tick_params(direction="in", length=4, width=0.8)
+    cb.outline.set_linewidth(1.0)
+    if panel_tag:
+        ax.text(0.04, 0.96, panel_tag, transform=ax.transAxes,
+                ha="left", va="top", fontsize=15, fontweight="bold",
+                bbox=dict(facecolor="white", edgecolor="none", alpha=0.85,
+                          pad=2))
 
 
-def draw_series(ax, t_ms, y, label, title):
-    ax.plot(t_ms, y, color="tab:blue", lw=1.8)
-    if len(y) >= 4:
-        tail = y[len(y)//2:].mean()
-        ax.axhline(tail, color="tab:red", lw=1.0, ls="--", label="tail mean")
-        ax.legend(loc="lower right", frameon=False, fontsize=9)
-    ax.axhline(0, color="0.6", lw=0.4)
+def draw_series(ax, t_ms, y, label, panel_tag=None):
+    ax.plot(t_ms, y, color="#1f4b8e", lw=2.2)
+    ax.axhline(0, color="0.6", lw=0.5)
     ax.set_xlabel(r"$t$ (ms)")
     ax.set_ylabel(label)
-    ax.set_title(title, pad=4)
+    ax.set_xlim(t_ms[0], t_ms[-1])
     ax.ticklabel_format(axis="y", style="sci", scilimits=(-2, 3),
                         useMathText=True)
-    ax.grid(alpha=0.25)
+    style_axes(ax)
+    if panel_tag:
+        ax.text(0.04, 0.96, panel_tag, transform=ax.transAxes,
+                ha="left", va="top", fontsize=15, fontweight="bold",
+                bbox=dict(facecolor="white", edgecolor="none", alpha=0.85,
+                          pad=2))
+
+
+def solps_quads(path: Path):
+    with nc.Dataset(path) as f:
+        crx = f.variables['crx'][:]
+        cry = f.variables['cry'][:]
+    ny, nx = crx.shape[1], crx.shape[2]
+    nq = ny * nx
+    quads = np.empty((nq, 4, 2))
+    k = 0
+    for iy in range(ny):
+        for ix in range(nx):
+            quads[k, 0] = (crx[0, iy, ix], cry[0, iy, ix])
+            quads[k, 1] = (crx[1, iy, ix], cry[1, iy, ix])
+            quads[k, 2] = (crx[3, iy, ix], cry[3, iy, ix])
+            quads[k, 3] = (crx[2, iy, ix], cry[2, iy, ix])
+            k += 1
+    return quads
 
 
 def main():
@@ -136,6 +173,10 @@ def main():
     ap.add_argument("--out",  type=Path, required=True)
     ap.add_argument("--dt",   type=float, default=5e-8,
                     help="physical timestep in s (default 5e-8 = deck dt)")
+    ap.add_argument("--balance-nc", type=Path, default=None,
+                    help="SOLPS-ITER balance.nc; if given, the two 2D maps "
+                         "(Sp, Sm) are nearest-cell resampled onto the B2 "
+                         "mesh instead of plotted on OpenEdge native quads.")
     args = ap.parse_args()
 
     steps, intD, intD2, last = [], [], [], None
@@ -149,35 +190,58 @@ def main():
         raise SystemExit(f"no snapshots in {args.dump}")
     t_ms = np.asarray(steps) * args.dt * 1e3
 
-    quads = cell_quads_RZ(last)
     wall  = parse_wall_segments(args.wall)
     Sm    = last[:, COL_SMX] + last[:, COL_SMY] + last[:, COL_SMZ]
+    Sp    = last[:, COL_SP]
+
+    if args.balance_nc is not None:
+        # Resample OpenEdge values onto SOLPS B2 quad centroids.
+        oe_Z_lo = last[:, COL_XLO]; oe_R_lo = last[:, COL_YLO]
+        oe_Z_hi = last[:, COL_XHI]; oe_R_hi = last[:, COL_YHI]
+        oe_R = 0.5 * (oe_R_lo + oe_R_hi)
+        oe_Z = 0.5 * (oe_Z_lo + oe_Z_hi)
+        sp_q = solps_quads(args.balance_nc)
+        sp_R = sp_q[:, :, 0].mean(axis=1)
+        sp_Z = sp_q[:, :, 1].mean(axis=1)
+        _, idx = cKDTree(np.column_stack([oe_R, oe_Z])).query(
+            np.column_stack([sp_R, sp_Z]))
+        Sp_plot = Sp[idx]
+        Sm_plot = Sm[idx]
+        quads_map = sp_q
+    else:
+        Sp_plot = Sp
+        Sm_plot = Sm
+        quads_map = cell_quads_RZ(last)
 
     plt.rcParams.update({
-        "font.family": "serif", "font.size": 11,
-        "axes.labelsize": 11, "axes.titlesize": 11,
-        "xtick.labelsize": 9, "ytick.labelsize": 9,
-        "legend.fontsize": 9,
+        "font.family":     "serif",
+        "mathtext.fontset": "cm",
+        "font.size":       14,
+        "axes.labelsize":  15,
+        "xtick.labelsize": 13,
+        "ytick.labelsize": 13,
+        "axes.linewidth":  1.2,
+        "lines.linewidth": 2.0,
+        "savefig.dpi":     300,
     })
 
-    fig = plt.figure(figsize=(16, 4.0))
-    # Width ratios: time series get wider panels (squarer), maps stay
-    # narrower since they're taller-than-wide in (R, Z).
-    gs = fig.add_gridspec(1, 4, width_ratios=[1.25, 1.25, 1.0, 1.0],
-                          wspace=0.55)
+    fig = plt.figure(figsize=(18, 4.6))
+    gs = fig.add_gridspec(1, 4, width_ratios=[1.35, 1.35, 1.0, 1.0],
+                          wspace=0.45, left=0.05, right=0.99,
+                          bottom=0.18, top=0.95)
     ax_nd = fig.add_subplot(gs[0, 0])
     ax_n2 = fig.add_subplot(gs[0, 1])
     ax_sp = fig.add_subplot(gs[0, 2])
     ax_sm = fig.add_subplot(gs[0, 3])
 
     draw_series(ax_nd, t_ms, np.asarray(intD),
-                r"$\int n_D\,dV$ (atoms)", "atom inventory")
+                r"$\int n_D\,\mathrm{d}V$ (atoms)", panel_tag="(a)")
     draw_series(ax_n2, t_ms, np.asarray(intD2),
-                r"$\int n_{D_2}\,dV$ (molecules)", "molecule inventory")
-    draw_map(ax_sp, quads, last[:, COL_SP],
-             r"$S_p$ (m$^{-3}$ s$^{-1}$)", "particle source", wall)
-    draw_map(ax_sm, quads, Sm,
-             r"$S_m$ (kg m$^{-2}$ s$^{-2}$)", "momentum source", wall)
+                r"$\int n_{D_2}\,\mathrm{d}V$ (molecules)", panel_tag="(b)")
+    draw_map(ax_sp, quads_map, Sp_plot,
+             r"$S_p$ (m$^{-3}\,$s$^{-1}$)", wall, panel_tag="(c)")
+    draw_map(ax_sm, quads_map, Sm_plot,
+             r"$S_m$ (kg$\,$m$^{-2}\,$s$^{-2}$)", wall, panel_tag="(d)")
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out, dpi=180, bbox_inches="tight")
