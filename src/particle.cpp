@@ -653,9 +653,9 @@ int Particle::add_particle(int id, int ispecies, int icell,
   p->erot = erot;
   p->evib = evib;
   p->flag = PKEEP;
-  p->temp = 0.0;      // not needed due to memset in grow() ??
-  p->radius = 0.0; //4.99751e-05;    // not needed due to memset in grow() ??
-  p->mass = 0.0; //2.791846102485784e-10; //      not needed due to memset in grow() ??
+  p->mass   = species[ispecies].mass;
+  p->radius = species[ispecies].radius;
+  p->temp   = species[ispecies].temp;
 
   //p->dtremain = 0.0;    not needed due to memset in grow() ??
   //p->weight = 1.0;      not needed due to memset in grow() ??
@@ -1111,9 +1111,9 @@ void Particle::read_species_file()
 {
   // read file line by line
   // skip blank lines or comment lines starting with '#'
-  // all other lines must have NWORDS
+  // accept legacy 10-column format or extended 12-column (radius, temp)
 
-  int NWORDS = 10;
+  int NWORDS = 12;
   char **words = new char*[NWORDS];
   char line[MAXLINE],copy[MAXLINE];
 
@@ -1123,7 +1123,7 @@ void Particle::read_species_file()
 
     strcpy(copy,line);
     int nwords = wordcount(copy,NULL);
-    if (nwords != NWORDS)
+    if (nwords != 10 && nwords != 12)
       error->one(FLERR,"Incorrect line format in species file");
 
     if (nfile == maxfile) {
@@ -1150,6 +1150,8 @@ void Particle::read_species_file()
     fsp->vibtemp[0] = atof(words[7]);
     fsp->specwt = atof(words[8]);
     fsp->charge = atof(words[9]);
+    fsp->radius = (nwords == 12) ? atof(words[10]) : 0.0;
+    fsp->temp   = (nwords == 12) ? atof(words[11]) : 0.0;
 
     if (fsp->rotdof > 0 || fsp->vibdof > 0) fsp->internaldof = 1;
     else fsp->internaldof = 0;

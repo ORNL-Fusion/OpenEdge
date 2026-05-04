@@ -53,20 +53,9 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
       "Fix evaporation: argument 5 must be 'background'");
   plasma_fix_id_ = std::string(arg[5]);
 
-  set_mass = set_temp = set_radius = -1.0;
-
   int i = 6;
   while (i < narg) {
-    if (strcmp(arg[i], "mass") == 0) {
-      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'mass'");
-      set_mass = atof(arg[i+1]); i += 2;
-    } else if (strcmp(arg[i], "temp") == 0) {
-      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'temp'");
-      set_temp = atof(arg[i+1]); i += 2;
-    } else if (strcmp(arg[i], "radius") == 0) {
-      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'radius'");
-      set_radius = atof(arg[i+1]); i += 2;
-    } else if (strcmp(arg[i], "heatflux/scale") == 0) {
+    if (strcmp(arg[i], "heatflux/scale") == 0) {
       if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'heatflux/scale'");
       heatflux_scale = atof(arg[i+1]);
       if (!std::isfinite(heatflux_scale) || heatflux_scale < 0.0)
@@ -155,15 +144,10 @@ void FixDropletEvaporate::evap_half(double dt_half)
     const int ig = s2g[is];
     if (ig < 0) continue;
 
-    if (set_mass   > 0.0 && parts[ip].mass   <= 0.0) parts[ip].mass   = set_mass;
-    if (set_radius > 0.0 && parts[ip].radius <= 0.0) parts[ip].radius = set_radius;
-    if (set_temp   > 0.0 && parts[ip].temp   <= 0.0) parts[ip].temp   = set_temp;
-
     droplet_evaporation_model(&parts[ip], dt_half);
 
-    const double m0_ref = (set_mass > 0.0) ? set_mass : particle->species[is].mass;
-    const double m_cut  = 0.1 * m0_ref;
-    if (parts[ip].mass > 0.0 && m0_ref > 0.0 && parts[ip].mass <= m_cut) {
+    const double m_cut = 0.1 * particle->species[is].mass;
+    if (parts[ip].mass > 0.0 && parts[ip].mass <= m_cut) {
       parts[ip].mass   = 0.0;
       parts[ip].radius = 0.0;
       parts[ip].temp   = 0.0;
@@ -192,11 +176,9 @@ void FixDropletEvaporate::droplet_evaporation_model(Particle::OnePart *ip,
   const double AN   = 6.022e+23;     // 1/mol
   const double DT   = dt_half;
 
-  const double mass   = (ip->mass   > 0.0) ? ip->mass
-                        : particle->species[ip->ispecies].mass;
-  const double radius = (ip->radius > 0.0) ? ip->radius
-                        : std::pow((3.0*mass)/(4.0*MY_PI*Rho), 1.0/3.0);
-  const double TK     = (ip->temp   > 0.0) ? ip->temp : 300.0;
+  const double mass   = ip->mass;
+  const double radius = ip->radius;
+  const double TK     = ip->temp;
 
   // R/Z at particle position (handles 2D Cart, 2D axi, 3D Cart via helper).
   double R = 0.0, Z = 0.0;

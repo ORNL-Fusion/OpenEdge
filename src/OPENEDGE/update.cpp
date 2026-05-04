@@ -1352,11 +1352,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
       v = particles[i].v;
       exclude = -1;
 
-      // Use per-particle mass when available (e.g. evaporation updates),
-      // fall back to species mass for legacy particles.
-      double mass = (particles[i].mass > 0.0)
-                    ? particles[i].mass
-                    : species[particles[i].ispecies].mass;
+      double mass = particles[i].mass;
       double charge = species[particles[i].ispecies].charge;
       
       // apply moveperturb() to PKEEP and PINSERT since are computing xnew

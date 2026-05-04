@@ -38,6 +38,8 @@ class Particle : protected Pointers {
     int internaldof;        // 1 if either rotdof or vibdof != 0
     int vibdiscrete_read;   // 1 if species.vib file read for this species
     double magmoment;       // magnetic moment, set by species_modify command
+    double radius;          // particle radius (m); 0 unless set in species file
+    double temp;            // bulk temperature (K); 0 unless set in species file
   };
 
   struct RotFile {          // extra rotation info read from rotfile

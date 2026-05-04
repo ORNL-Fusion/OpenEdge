@@ -5,7 +5,10 @@
 
     Syntax:
       fix ID evaporation Nevery MIXTURE background PD \
-          [mass M] [radius R] [temp T] [heatflux/scale S] [rocket_eta E]
+          [heatflux/scale S] [rocket_eta E]
+
+    Per-particle mass, radius, and bulk temperature are taken from the
+    species file (extended 12-column format).
 
     background PD is required: the fix pulls q_par / q_perp and
     grad_Te_{R,Z} from that fix background at the droplet position.
@@ -50,9 +53,6 @@ class FixDropletEvaporate : public Fix {
   FixBackground *pd_;
 
   void droplet_evaporation_model(Particle::OnePart *ip, double dt_half);
-  double set_mass   = -1.0;
-  double set_temp   = -1.0;
-  double set_radius = -1.0;
 
   void evap_half(double dt_half);
 };
