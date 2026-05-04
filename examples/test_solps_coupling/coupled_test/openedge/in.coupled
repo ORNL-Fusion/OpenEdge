@@ -24,34 +24,36 @@ mixture DropletSource mist frac 1.0 nrho 1
 variable pmass particle mass
 
 read_surf           ../../input/wall.surf group wall particle check
-surf_collide        wallColModel diffuse ${temp_droplet} 1.0
-surf_react          wallReact global 1. .0
-surf_modify         wall collide wallColModel react wallReact
+surf_collide        wallColModel vanish
+surf_modify         wall collide wallColModel
 
-group               divertor surf id <> 103 150
-group               div_il   surf id <> 103 116
-group               div_ol   surf id <> 137 150
+group               div_il surf id <> 110 117
+group               div_ol surf id <> 140 150
 
-read_particles      ../../input/particle.source 1
+fix pd    background file plasma.h5 static yes
+fix fcore reflect/psi background pd psi_norm 0.95 action absorb
 
-fix    pd background file plasma.h5 static yes
+fix fdrop_ol droplet/emit DropletSource div_ol nevery 1000 n 1 perspecies no normal no
+fix fevap    droplet/evaporate 1 DropletSource background pd heatflux/scale ${heatflux_scale} rocket_eta 0.5
+fix fdrag    droplet/drag 1 2.0 1 background pd gravity 0 -9.8 0 model epstein
+fix fcharge  droplet/charge 1 background pd ion_mass_amu 2.0 thermionic no
 
-fix fcore reflect/psi background pd psi_norm 1.0 action absorb
-
-fix fdrop_il droplet/emit DropletSource div_il nevery 1000 n 1 perspecies no normal yes
-fix fdrop_ol droplet/emit DropletSource div_ol nevery 1000 n 1 perspecies no normal yes
-fix fevap   droplet/evaporate 1 DropletSource background pd heatflux/scale ${heatflux_scale} rocket_eta 0.5
-fix fdrag   droplet/drag 1 2.0 1 background pd gravity 0 -9.8 0 model epstein
-fix fcharge droplet/charge 1 background pd ion_mass_amu 2.0 thermionic no
-
-# Smolentsev free-flowing-film model on the lower divertor (one fix per leg).
+# Smolentsev free-flowing-film model: one fix per lower-divertor leg.
 fix flm_ol surface/state/lm div_ol 100 solps_b2pl ../solps/v0_1/b2pl.exe.dir/ld_tg_o.dat h0 5e-3 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350 static yes
 fix flm_il surface/state/lm div_il 100 solps_b2pl ../solps/v0_1/b2pl.exe.dir/ld_tg_i.dat h0 5e-3 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350 static yes
 
-dump d_part particle all 1 output/particles.txt id type x y z vx vy vz temp radius
+# Diagnostic per-surf source fluxes on the outer leg (computed, not emitted).
+compute cpmiLi surface/physical/sputter   div_ol background pd target Li projectiles D,Ne,Li static yes erosion_flux
+compute cevap  surface/chemical/evaporation div_ol tsurf Tsurf_lm sticking 1.0
+compute cadat  surface/chemical/adatom      div_ol tsurf Tsurf_lm dp_flux s_Gamma_D_lm
+
+global pusher plasma pd
+global pusher subcycles 5
+
+dump d_part particle all ${Ndump} output/particles.txt id type x y z vx vy vz temp radius
 dump_modify d_part format float "%.15e"
 
-dump d_surf surf all 1 output/surf_fluxes.txt id v1x v1y v2x v2y s_Tsurf_lm s_Gamma_D_lm
+dump d_surf surf div_ol ${Ndump} output/surf_fluxes.txt id v1x v1y v2x v2y c_cpmiLi c_cevap c_cadat s_Tsurf_lm s_Gamma_D_lm
 dump_modify d_surf format float "%.6e"
 
 stats ${Ndump}

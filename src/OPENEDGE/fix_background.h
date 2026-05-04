@@ -53,6 +53,11 @@ class FixBackground : public Fix {
   // ComputePlasmaFields produces. Equilibrium-derivative branch when
   // has_equ; falls back to mesh / regular-grid (finite differences).
   MagneticFieldFileDataParams query_bfield_at_point(const double xyz[3]) const;
+  // Cylindrical E-field at particle position, from mesh/e_{r,z,t}.
+  // Returns true and (ER,EZ,Et) if mesh E-field is loaded and the point
+  // sits inside the mesh footprint; false otherwise (out variables zeroed).
+  bool query_efield_at_point(const double xyz[3],
+                             double &ER, double &EZ, double &Et) const;
   double psi_norm_at(double R, double Z) const;
 
   // ---- Plasma grid ----

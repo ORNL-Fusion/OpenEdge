@@ -1702,6 +1702,38 @@ FixBackground::query_bfield_at_point(const double xyz[3]) const
   return B;
 }
 
+/* ----------------------------------------------------------------------
+   Cylindrical E-field at particle position from mesh/e_{r,z,t} (written
+   by the converter from the plasma code's native potential). Returns
+   false (and zeros) when E is not in plasma.h5 or the point is outside
+   the mesh footprint. Pusher uses this as the direct provider of E so
+   no separate fix efield/grid wiring is needed.
+------------------------------------------------------------------------- */
+bool FixBackground::query_efield_at_point(const double xyz[3],
+                                          double &ER, double &EZ, double &Et) const
+{
+  ER = EZ = Et = 0.0;
+  if (mesh_e_r.empty() || mesh_e_z.empty() || mesh_e_t.empty()) return false;
+
+  const int dim = domain->dimension;
+  const bool axi = domain->axisymmetric;
+  double R, Z;
+  OpenEdge::sparta_to_RZ(xyz, dim, axi, R, Z, column_x0, column_y0);
+
+  const int tri = find_mesh_triangle(R, Z);
+  if (tri < 0) return false;
+  const int ncell = static_cast<int>(mesh_e_r.size());
+  int cell = tri;
+  if (!mesh_cell_idx.empty() && tri < static_cast<int>(mesh_cell_idx.size()))
+    cell = mesh_cell_idx[tri];
+  if (cell < 0 || cell >= ncell) return false;
+
+  ER = mesh_e_r[cell];
+  EZ = mesh_e_z[cell];
+  Et = mesh_e_t[cell];
+  return true;
+}
+
 /* ---------------------------------------------------------------------- */
 
 double FixBackground::psi_norm_at(double R, double Z) const

@@ -219,9 +219,26 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
   double E_slot[3] = {0.0, 0.0, 0.0};
   double B[3] = {0.0, 0.0, 0.0};   // cylindrical (BR, BZ, Bphi)
 
-  // Cache E-field once per Boris call (returned in SPARTA slot order by
-  // fix efield/grid and by compute plasma/fields column feeds)
-  if (update->eperturbflag)
+  // Cache E-field once per Boris call. Priority mirrors B-field below:
+  // fix background's mesh/e_{r,z,t} (loaded from the plasma code's native
+  // potential) is preferred; fall back to fix efield/grid when pd has no
+  // E at this point or no fix background is registered.
+  if (pusher_plasma_fidx >= 0) {
+    auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
+    if (pd) {
+      const double xyz[3] = {xcur[0], xcur[1], (dim == 3) ? xcur[2] : 0.0};
+      double ERp = 0.0, EZp = 0.0, Etp = 0.0;
+      if (pd->query_efield_at_point(xyz, ERp, EZp, Etp)) {
+        const double phi_p = (dim == 3)
+          ? std::atan2(xyz[1] - pd->column_y0, xyz[0] - pd->column_x0)
+          : 0.0;
+        OpenEdge::RZphi_force_to_sparta(ERp, EZp, Etp, dim, axi, phi_p,
+                                        E_slot[0], E_slot[1], E_slot[2]);
+      }
+    }
+  }
+  if (E_slot[0] == 0.0 && E_slot[1] == 0.0 && E_slot[2] == 0.0
+      && update->eperturbflag)
     BorisGrid::read_field_from_fix(modify->fix[update->efieldfix], (update->efstyle == GFIELD),
                                    update->efield_active, i, icell, E_slot);
 
@@ -774,7 +791,20 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
     double E[3] = {0.0, 0.0, 0.0};
     double B[3] = {B_cached[0], B_cached[1], B_cached[2]};
 
-    if (update->eperturbflag)
+    if (pusher_plasma_fidx >= 0) {
+      auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
+      if (pd) {
+        const double xyz[3] = {xcur[0], xcur[1], xcur[2]};
+        double ERp = 0.0, EZp = 0.0, Etp = 0.0;
+        if (pd->query_efield_at_point(xyz, ERp, EZp, Etp)) {
+          const double phi_p = std::atan2(xyz[1] - pd->column_y0,
+                                          xyz[0] - pd->column_x0);
+          OpenEdge::RZphi_force_to_sparta(ERp, EZp, Etp, 3, false, phi_p,
+                                          E[0], E[1], E[2]);
+        }
+      }
+    }
+    if (E[0] == 0.0 && E[1] == 0.0 && E[2] == 0.0 && update->eperturbflag)
       BorisGrid::read_field_from_fix(modify->fix[update->efieldfix], (update->efstyle == GFIELD),
                                      update->efield_active, i, icell, E);
 
@@ -963,10 +993,6 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
   double E[3] = {0.0, 0.0, 0.0};
   double B[3] = {0.0, 0.0, 0.0};
 
-  if (update->eperturbflag)
-    BorisGrid::read_field_from_fix(modify->fix[update->efieldfix], (update->efstyle == GFIELD),
-                                   update->efield_active, i, icell, E);
-
   ComputePlasmaFields *cp_bfield = NULL;
   FixBackground *pd_bfield = NULL;
   if (pusher_plasma_cidx >= 0) {
@@ -975,6 +1001,20 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
   } else if (pusher_plasma_fidx >= 0) {
     pd_bfield = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
   }
+
+  if (pd_bfield) {
+    const double xyz[3] = {x[0], x[1], x[2]};
+    double ERp = 0.0, EZp = 0.0, Etp = 0.0;
+    if (pd_bfield->query_efield_at_point(xyz, ERp, EZp, Etp)) {
+      const double phi_p = std::atan2(xyz[1] - pd_bfield->column_y0,
+                                      xyz[0] - pd_bfield->column_x0);
+      OpenEdge::RZphi_force_to_sparta(ERp, EZp, Etp, 3, false, phi_p,
+                                      E[0], E[1], E[2]);
+    }
+  }
+  if (E[0] == 0.0 && E[1] == 0.0 && E[2] == 0.0 && update->eperturbflag)
+    BorisGrid::read_field_from_fix(modify->fix[update->efieldfix], (update->efstyle == GFIELD),
+                                   update->efield_active, i, icell, E);
 
   MagneticFieldFileDataParams Bcyl{};
   bool have_point_b = false;
