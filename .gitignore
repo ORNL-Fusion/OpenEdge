@@ -98,9 +98,11 @@ examples/test_eirene/
 examples/test_diii_d_neutrals/
 examples/_test_west_ciraolo/
 
-# Per-test READMEs and reference PDFs (keep local)
+# Per-test READMEs and reference PDFs (keep local, any depth)
 examples/test_*/README.md
+examples/test_*/**/README.md
 examples/test_*/*.pdf
+examples/test_*/**/*.pdf
 
 # Sphinx build output
 /docs/_build/
