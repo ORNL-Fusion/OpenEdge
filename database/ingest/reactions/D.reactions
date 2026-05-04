@@ -1,0 +1,24 @@
+# Volumetric reactions for D/D2/D+ neutral transport
+# D ionization (ADAS SCD, Z=1)
+D --> D+
+I A 1.0 0.0 0.0 0.0 0.0
+
+# D+ recombination (ADAS ACD, Z=1)
+D+ --> D
+R A 1.0 0.0 0.0 0.0 0.0
+
+# Ion-side CX: kinetic D+ loses charge to background D (EIRENE-style
+# ion-to-neutral conversion). Inactive in Mode A since kinetic D+ is
+# deleted on ionization.
+D+ --> D
+E A 1.0 0.0 0.0 0.0 0.0
+
+# Neutral-side CX: kinetic D exchanges with background D+ plasma.
+# Species unchanged; velocity resampled at local Ti. This is the
+# EIRENE-dominant CX channel for puff neutrals in Mode A.
+D --> D
+E A 1.0 0.0 0.0 0.0 0.0
+
+# D2 electron-impact dissociation (Janev/HYDHEL H.2 2.2.5)
+D2 --> D + D
+D J -2.787217511174e+01 1.052252660075e+01 -4.973212347860e+00 1.451198183114e+00 -3.062790554644e-01 4.433379509258e-02 -4.096344172875e-03 2.159670289222e-04 -4.928545325189e-06

@@ -1,0 +1,25 @@
+# Volumetric reactions for lithium (Z=3), neutral Li through Li3+.
+# Rate tables come from /volume/rates/{scd,acd,ccd}/li in processes.h5
+# (ADAS SCD ionization, ACD recombination). CX reactions skipped: the
+# OpenEdge species list for the SOLPS-coupling deck does not include
+# atomic D, so CCD reactions have no donor species.
+
+# --- Ionization (ADAS SCD) ----------------------------------------------
+Li --> Li+
+I A 1.0 0.0 0.0 0.0 0.0
+
+Li+ --> Li2+
+I A 1.0 0.0 0.0 0.0 0.0
+
+Li2+ --> Li3+
+I A 1.0 0.0 0.0 0.0 0.0
+
+# --- Recombination (ADAS ACD) -------------------------------------------
+Li+ --> Li
+R A 1.0 0.0 0.0 0.0 0.0
+
+Li2+ --> Li+
+R A 1.0 0.0 0.0 0.0 0.0
+
+Li3+ --> Li2+
+R A 1.0 0.0 0.0 0.0 0.0

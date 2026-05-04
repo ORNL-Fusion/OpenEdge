@@ -1,0 +1,41 @@
+# Volumetric reactions for carbon (Z=6), neutral C through C6+.
+# Rate tables come from ADAS adf11 (SCD / ACD / CCD89, scd89_c.dat etc.)
+# consolidated into database/processes.h5 by build_processes_h5.py.
+
+# --- Ionization (ADAS SCD) ----------------------------------------------
+C --> C+
+I A 1.0 0.0 0.0 0.0 0.0
+
+C+ --> C2+
+I A 1.0 0.0 0.0 0.0 0.0
+
+C2+ --> C3+
+I A 1.0 0.0 0.0 0.0 0.0
+
+C3+ --> C4+
+I A 1.0 0.0 0.0 0.0 0.0
+
+C4+ --> C5+
+I A 1.0 0.0 0.0 0.0 0.0
+
+C5+ --> C6+
+I A 1.0 0.0 0.0 0.0 0.0
+
+# --- Recombination (ADAS ACD) -------------------------------------------
+C+ --> C
+R A 1.0 0.0 0.0 0.0 0.0
+
+C2+ --> C+
+R A 1.0 0.0 0.0 0.0 0.0
+
+C3+ --> C2+
+R A 1.0 0.0 0.0 0.0 0.0
+
+C4+ --> C3+
+R A 1.0 0.0 0.0 0.0 0.0
+
+C5+ --> C4+
+R A 1.0 0.0 0.0 0.0 0.0
+
+C6+ --> C5+
+R A 1.0 0.0 0.0 0.0 0.0
