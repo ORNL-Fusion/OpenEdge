@@ -42,7 +42,7 @@ surf_collide        wallColModel vanish
 surf_modify         wall collide wallColModel
 
 group               div_il surf id <> 110 117
-group               div_ol surf id <> 140 150
+group               div_ol surf id <> 140 239
 
 # Refine grid around the lower divertor (~2.5 mm cells at strike-point).
 region rdiv_lo block 2.0 6.0 -4.0 -2.5 -0.05 0.05
