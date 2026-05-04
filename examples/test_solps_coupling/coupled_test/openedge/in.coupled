@@ -44,6 +44,11 @@ surf_modify         wall collide wallColModel
 group               div_il surf id <> 110 117
 group               div_ol surf id <> 140 150
 
+# Refine grid around the lower divertor (~2.5 mm cells at strike-point).
+region rdiv_lo block 2.0 6.0 -4.0 -2.5 -0.05 0.05
+adapt_grid all refine surf div_ol 0.001 maxlevel 3 cells 2 2 1 region rdiv_lo all iterate 3
+balance_grid rcb cell
+
 fix pd    background file plasma.h5 static yes
 fix fcore reflect/psi background pd psi_norm 0.95 action absorb
 
