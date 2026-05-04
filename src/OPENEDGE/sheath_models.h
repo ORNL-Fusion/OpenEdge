@@ -27,8 +27,10 @@ struct BorodkinaSheathResult {
   double phi_cs_eV = 0.0;   // Chodura/magnetic pre-sheath contribution at sheath entrance
 };
 
-// c_s = sqrt((Te + Ti) * e / (2*mD))
-double sound_speed_d(double te_eV, double ti_eV, double mD_amu);
+// 1D effective thermal speed sqrt((Te+Ti)*e / (2*mD)) used for sheath-scale
+// estimates (lambda_D, rho_i, L_MPS). NOT the Bohm sound speed; for Bohm
+// flux Gamma = n*c_s*sin(alpha_B) use cs = sqrt((Te+Ti)*e/mD) directly.
+double vth_d_eff(double te_eV, double ti_eV, double mD_amu);
 
 // EIRENE-like sheath drop from multi-ion moments.
 // dens_m3, upar_ms, charge_state_z must have same size.

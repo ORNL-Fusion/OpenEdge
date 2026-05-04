@@ -3,7 +3,7 @@
 
    These are KOKKOS_INLINE_FUNCTION equivalents of the functions in
    sheath_models.cpp.  Only the two spatial sheath models
-   (borodkina, coulette_manfredi), sound_speed_d, and chodura_metrics
+   (borodkina, coulette_manfredi), vth_d_eff, and chodura_metrics
    are ported here — they are called in the Boris subcycle inner loop.
    eirene_sheath_ev (uses std::vector) stays host-only.
 
@@ -61,8 +61,9 @@ double fd_poly_deg(const double a)
 
 /* ---------------------------------------------------------------------- */
 
+// 1D effective thermal speed (not Bohm cs); see sheath_models.h.
 KOKKOS_INLINE_FUNCTION
-double sound_speed_d(double te_eV, double ti_eV, double mD_amu)
+double vth_d_eff(double te_eV, double ti_eV, double mD_amu)
 {
   const double m = Kokkos::fmax(mD_amu * AMU(), 1.0e-99);
   return Kokkos::sqrt(Kokkos::fmax(te_eV + ti_eV, 0.0) * QE() / (2.0 * m));

@@ -27,7 +27,8 @@ double fd_poly_deg(const double a)
 }
 }
 
-double sound_speed_d(double te_eV, double ti_eV, double mD_amu)
+// 1D effective thermal speed (not Bohm cs) — see header comment.
+double vth_d_eff(double te_eV, double ti_eV, double mD_amu)
 {
   const double m = std::max(mD_amu * AMU, 1.0e-99);
   return std::sqrt(std::max(te_eV + ti_eV, 0.0) * QE / (2.0 * m));
@@ -187,9 +188,10 @@ SheathEmagCoeffs sheath_prepare_borodkina(double te_eV, double ti_eV,
   const double mD = std::max(mD_amu * AMU, 1.0e-99);
 
   const double lambdaD = std::sqrt(EPS0 * te / (ne * QE));
-  const double cs = std::sqrt((te + ti) * QE / (2.0 * mD));
+  // vth_d: 1D effective thermal speed for rho_i (not Bohm cs).
+  const double vth_d = std::sqrt((te + ti) * QE / (2.0 * mD));
   const double omega_ci = QE * bmag / mD;
-  const double rho_i = cs / std::max(std::abs(omega_ci), 1.0e-99);
+  const double rho_i = vth_d / std::max(std::abs(omega_ci), 1.0e-99);
 
   const double alpha = std::max(0.0, std::min(90.0, alpha_deg));
   const double alpha_n_rad = alpha * PI / 180.0;
@@ -233,9 +235,10 @@ SheathEmagCoeffs sheath_prepare_coulette_manfredi(double te_eV, double ti_eV,
   const double mD = std::max(mD_amu * AMU, 1.0e-99);
 
   const double lambdaD = std::sqrt(EPS0 * te / (ne * QE));
-  const double cs = std::sqrt((te + ti) * QE / (2.0 * mD));
+  // vth_d: 1D effective thermal speed for rho_i (not Bohm cs).
+  const double vth_d = std::sqrt((te + ti) * QE / (2.0 * mD));
   const double omega_ci = QE * bmag / mD;
-  const double rho_i = cs / std::max(std::abs(omega_ci), 1.0e-99);
+  const double rho_i = vth_d / std::max(std::abs(omega_ci), 1.0e-99);
 
   const double alpha_n  = std::max(0.0, std::min(90.0, alpha_deg));
   const double alpha    = 90.0 - alpha_n;   // CM fit uses B-wall angle.
