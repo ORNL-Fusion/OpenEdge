@@ -30,6 +30,8 @@ FixStyle(surface/state/lm,FixSurfaceStateLm)
 #include "fix.h"
 #include "surf.h"
 #include "liquid_metal_strip.h"
+#include <string>
+#include <vector>
 
 namespace SPARTA_NS {
 
@@ -92,6 +94,13 @@ class FixSurfaceStateLm : public Fix {
   int static_mode;
   int frozen_;
   void run_strip_and_write();       // factored from end_of_step()
+
+  // Optional CSV dump of the strip's smooth (Smolentsev) profile after
+  // each solve. Header row + one row per strip station n=1..Nx with
+  // s [m], R [m], Z [m], Tsurf [degC], h [m], Wtot [W/m^2], Gamma_D [m^-2 s^-1],
+  // Gamma_evap [m^-2 s^-1].  Empty path => no CSV.
+  std::string csv_path;
+  void write_strip_csv();
 
   // Per-surf custom attribute indices for the fix's outputs.
   // Tsurf and h_film are the model's state. Evaporation and adatom

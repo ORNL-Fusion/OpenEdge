@@ -5,10 +5,17 @@
 
     Syntax:
       fix ID evaporation Nevery MIXTURE background PD \
-          [heatflux/scale S] [rocket_eta E]
+          [heatflux/scale S] [rocket_eta E] [emit_into MIXTURE_ID]
 
     Per-particle mass, radius, and bulk temperature are taken from the
     species file (extended 12-column format).
+
+    emit_into MIX_ID:
+      Optional — when set, evaporated atoms are spawned as new particles
+      at each droplet's current cell. Number per call is Poisson with
+      lambda = 4*pi*R^2 * Gevap_atoms * dt_half / fnum. Velocity is
+      isotropic Maxwellian at droplet T. Species drawn from MIX_ID's
+      fraction-weighted distribution.
 
     background PD is required: the fix pulls q_par / q_perp and
     grad_Te_{R,Z} from that fix background at the droplet position.
@@ -32,6 +39,7 @@ FixStyle(droplet/evaporate,FixDropletEvaporate)
 namespace SPARTA_NS {
 
 class FixBackground;
+class RanKnuth;
 
 class FixDropletEvaporate : public Fix {
  public:
@@ -52,7 +60,15 @@ class FixDropletEvaporate : public Fix {
   std::string plasma_fix_id_;
   FixBackground *pd_;
 
-  void droplet_evaporation_model(Particle::OnePart *ip, double dt_half);
+  // Optional volumetric Li source on droplet evaporation.
+  // When emit_imix >= 0, each droplet spawns Maxwellian atoms in its
+  // cell each evap call.  Mixture defines the species menu.
+  int       emit_imix;
+  RanKnuth *random;
+
+  void droplet_evaporation_model(int idrop, double dt_half);
+  void spawn_evap_atoms(int idrop, double area, double Gevap_atoms,
+                         double TK, double dt_half);
 
   void evap_half(double dt_half);
 };

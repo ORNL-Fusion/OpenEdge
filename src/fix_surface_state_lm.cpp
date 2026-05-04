@@ -234,6 +234,10 @@ FixSurfaceStateLm::FixSurfaceStateLm(SPARTA *sparta, int narg, char **arg) :
       if (iarg + 1 >= narg) error->all(FLERR, "Missing value for width");
       strip.width = input->numeric(FLERR, arg[iarg + 1]);
       iarg += 2;
+    } else if (strcmp(arg[iarg], "csv") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "Missing value for csv");
+      csv_path = std::string(arg[iarg + 1]);
+      iarg += 2;
     } else if (strcmp(arg[iarg], "Tin") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "Missing value for Tin");
       strip.Tin = input->numeric(FLERR, arg[iarg + 1]);
@@ -460,6 +464,62 @@ void FixSurfaceStateLm::init()
     end_of_step();
     frozen_ = 1;
   }
+
+  // Optional smooth-strip CSV dump (Sergey's solver output, 201 stations).
+  // Useful for paper-quality plots that bypass the SPARTA per-surf jagginess.
+  if (!csv_path.empty() && comm->me == 0) write_strip_csv();
+}
+
+/* ----------------------------------------------------------------------
+   Dump strip's smooth Smolentsev profile to CSV.  One row per strip
+   station (n=1..Nx).  Columns: s_phys, R, Z, Tsurf, h, Wtot, Gamma_D,
+   Gamma_evap.  R/Z/Wtot/Gamma_D are linearly interpolated from the
+   SOLPS source data at each strip arc position.
+------------------------------------------------------------------------- */
+void FixSurfaceStateLm::write_strip_csv()
+{
+  FILE *fp = fopen(csv_path.c_str(), "w");
+  if (!fp) {
+    if (comm->me == 0)
+      error->warning(FLERR, "fix surface/state/lm: cannot open csv path");
+    return;
+  }
+  fprintf(fp, "s_m,R_m,Z_m,Tsurf_C,h_m,Wtot_Wm2,Gamma_D_m2s,Gamma_evap_m2s\n");
+
+  const int Nx_sm = strip.Nx;
+  const int ntgt = static_cast<int>(tgt_s.size());
+
+  auto interp_at_s = [&](const std::vector<double> &arr, double s) -> double {
+    if (ntgt == 0 || arr.empty()) return 0.0;
+    if (s <= tgt_s[0]) return arr[0];
+    if (s >= tgt_s[ntgt - 1]) return arr[ntgt - 1];
+    for (int k = 0; k + 1 < ntgt; k++) {
+      if (s >= tgt_s[k] && s <= tgt_s[k + 1]) {
+        const double dx = tgt_s[k + 1] - tgt_s[k];
+        const double f = (dx > 0.0) ? (s - tgt_s[k]) / dx : 0.0;
+        return arr[k] + f * (arr[k + 1] - arr[k]);
+      }
+    }
+    return arr[ntgt - 1];
+  };
+
+  for (int n = 1; n <= Nx_sm; n++) {
+    const double s_phys = strip.X[n] * strip.h0;
+    const double Rn = interp_at_s(tgt_R, s_phys);
+    const double Zn = interp_at_s(tgt_Z, s_phys);
+    const double Wn = interp_at_s(tgt_q, s_phys);
+    const double Gn = interp_at_s(tgt_gamma, s_phys);
+    const double Tn = strip.Tsurf_dim[n];
+    const double hn = strip.h_dim[n];
+    const double En = strip.evap_flux[n];
+    fprintf(fp, "%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e\n",
+            s_phys, Rn, Zn, Tn, hn, Wn, Gn, En);
+  }
+  fclose(fp);
+  if (comm->me == 0)
+    fprintf(screen ? screen : stdout,
+            "  fix surface/state/lm: wrote strip profile -> %s (Nx=%d)\n",
+            csv_path.c_str(), Nx_sm);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -534,11 +594,15 @@ void FixSurfaceStateLm::build_geometry_map()
     const int npts_solps = (int)tgt_R.size();
     const double s_max = tgt_s[npts_solps - 1];
     if (s_max <= 0.0) return;
+    const bool axi_local = (domain->axisymmetric != 0);
     for (size_t k = 0; k < pts.size(); k++) {
-      // pts[k].r is mid SPARTA-x = Z; pts[k].z is mid SPARTA-y = R.
-      // Compare against tgt_R / tgt_Z (axi physical coords).
-      double Z_surf = pts[k].r;
-      double R_surf = pts[k].z;
+      // pts[k].r/.z are SPARTA-x/-y slot midpoints. The mapping to physical
+      // (R, Z) depends on the box convention:
+      //   axi      : SPARTA x = Z, y = R
+      //   Cartesian: SPARTA x = R, y = Z
+      double R_surf, Z_surf;
+      if (axi_local) { Z_surf = pts[k].r; R_surf = pts[k].z; }
+      else           { R_surf = pts[k].r; Z_surf = pts[k].z; }
       int kbest = 0;
       double dbest = 1.0e30;
       for (int j = 0; j < npts_solps; j++) {

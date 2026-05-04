@@ -76,8 +76,11 @@ def select_leg(sp, idx, sid_lo, sid_hi, ld_tg_path):
         else np.zeros_like(Tsp)
     v1x = sub[:, idx["v1x"]][order]; v1y = sub[:, idx["v1y"]][order]
     v2x = sub[:, idx["v2x"]][order]; v2y = sub[:, idx["v2y"]][order]
-    Z_mid = 0.5 * (v1x + v2x)        # axi: SPARTA x = Z
-    R_mid = 0.5 * (v1y + v2y)        # axi: SPARTA y = R
+    # 2D Cartesian convention (current OpenEdge default): SPARTA x = R, y = Z.
+    # The legacy axi convention swapped these; check the deck's `boundary` line
+    # if you need to revisit. Pre-2026-04-29 wall.surf files used (x=Z, y=R).
+    R_mid = 0.5 * (v1x + v2x)
+    Z_mid = 0.5 * (v1y + v2y)
 
     x, tgt_R, tgt_Z, xMP = load_ld_tg(ld_tg_path)
     i_strike = int(np.argmin(np.abs(x)))

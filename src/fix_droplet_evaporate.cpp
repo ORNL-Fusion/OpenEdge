@@ -22,6 +22,8 @@
 #include "domain.h"
 #include "openedge_geom.h"
 #include "mixture.h"
+#include "random_knuth.h"
+#include "random_mars.h"
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -30,13 +32,41 @@
 using namespace SPARTA_NS;
 using namespace MathConst;
 
+namespace {
+  // Sample a Poisson-distributed integer with mean lam.
+  // Knuth direct method for small lam; Gaussian approx for large lam.
+  inline int sample_poisson(double lam, SPARTA_NS::RanKnuth *rng) {
+    if (lam <= 0.0) return 0;
+    if (lam < 30.0) {
+      const double L = std::exp(-lam);
+      int k = 0;
+      double p = 1.0;
+      while (true) {
+        ++k;
+        p *= rng->uniform();
+        if (p <= L) return k - 1;
+      }
+    }
+    // Gaussian approximation: Box-Muller.
+    const double u1 = std::max(rng->uniform(), 1.0e-300);
+    const double u2 = rng->uniform();
+    const double z  = std::sqrt(-2.0 * std::log(u1)) *
+                      std::cos(2.0 * M_PI * u2);
+    long long n = static_cast<long long>(std::floor(lam + std::sqrt(lam) * z + 0.5));
+    if (n < 0) n = 0;
+    return static_cast<int>(n);
+  }
+}
+
 /* ---------------------------------------------------------------------- */
 
 FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   heatflux_scale(1.0),
   rocket_eta(0.0),
-  pd_(nullptr)
+  pd_(nullptr),
+  emit_imix(-1),
+  random(nullptr)
 {
   // fix ID evaporation Nevery MIXTURE background PD [keywords...]
   if (narg < 6)
@@ -67,6 +97,12 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
       if (rocket_eta < 0.0 || rocket_eta > 1.0)
         error->all(FLERR,"Fix evaporation: rocket_eta must be in [0,1]");
       i += 2;
+    } else if (strcmp(arg[i], "emit_into") == 0) {
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'emit_into'");
+      emit_imix = particle->find_mixture(arg[i+1]);
+      if (emit_imix < 0)
+        error->all(FLERR,"Fix evaporation: unknown emit_into mixture ID");
+      i += 2;
     } else {
       char msg[256];
       snprintf(msg, sizeof(msg),
@@ -74,11 +110,20 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
       error->all(FLERR, msg);
     }
   }
+
+  if (emit_imix >= 0) {
+    random = new RanKnuth(update->ranmaster->uniform());
+    double seed = comm->me + 1;
+    random->reset(seed, comm->me, 100);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
 
-FixDropletEvaporate::~FixDropletEvaporate() {}
+FixDropletEvaporate::~FixDropletEvaporate()
+{
+  delete random;
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -134,18 +179,22 @@ void FixDropletEvaporate::evap_half(double dt_half)
 {
   if ((update->ntimestep % nevery) != 0) return;
 
-  Particle::OnePart *parts = particle->particles;
+  // Snapshot nlocal before the loop so we don't process atoms spawned by
+  // emit_into during this same call.
   const int nlocal = particle->nlocal;
   int *s2g = particle->mixture[imix]->species2group;
   int ndeleted = 0;
 
   for (int ip = 0; ip < nlocal; ip++) {
+    // Refetch pointer each iter — emit_into may have realloc'd particles.
+    Particle::OnePart *parts = particle->particles;
     const int is = parts[ip].ispecies;
     const int ig = s2g[is];
     if (ig < 0) continue;
 
-    droplet_evaporation_model(&parts[ip], dt_half);
+    droplet_evaporation_model(ip, dt_half);
 
+    parts = particle->particles;     // refresh in case spawn_evap reallocated
     const double m_cut = 0.1 * particle->species[is].mass;
     if (parts[ip].mass > 0.0 && parts[ip].mass <= m_cut) {
       parts[ip].mass   = 0.0;
@@ -166,7 +215,7 @@ void FixDropletEvaporate::evap_half(double dt_half)
    where Qs = sqrt(q_par^2 + q_perp^2) at the droplet position, pulled
    from fix background. Rocket force uses -grad(Te) as the recoil axis.
 ------------------------------------------------------------------------- */
-void FixDropletEvaporate::droplet_evaporation_model(Particle::OnePart *ip,
+void FixDropletEvaporate::droplet_evaporation_model(int idrop,
                                         const double dt_half)
 {
   const double AM   = 1.53e-26;      // Li atom mass [kg]
@@ -176,13 +225,20 @@ void FixDropletEvaporate::droplet_evaporation_model(Particle::OnePart *ip,
   const double AN   = 6.022e+23;     // 1/mol
   const double DT   = dt_half;
 
+  // Snapshot droplet state. After spawn_evap_atoms() the Particle::particles
+  // array may realloc — never read through ip after that. We refresh the
+  // pointer at the end and write final state via index.
+  Particle::OnePart *ip = &particle->particles[idrop];
   const double mass   = ip->mass;
   const double radius = ip->radius;
   const double TK     = ip->temp;
+  const double xs[3]  = {ip->x[0], ip->x[1], ip->x[2]};
+  const int icell_ip  = ip->icell;
 
   // R/Z at particle position (handles 2D Cart, 2D axi, 3D Cart via helper).
   double R = 0.0, Z = 0.0;
-  OpenEdge::sparta_to_RZ(ip->x, domain->dimension, domain->axisymmetric, R, Z);
+  OpenEdge::sparta_to_RZ(xs, domain->dimension, domain->axisymmetric, R, Z,
+                         pd_->column_x0, pd_->column_y0);
 
   // Heat-flux vector at droplet position. When plasma.h5 carries q_par /
   // q_perp (mesh-level or regular grid), interp2D routes through the
@@ -225,9 +281,10 @@ void FixDropletEvaporate::droplet_evaporation_model(Particle::OnePart *ip,
   }
 
   if (Qs <= 0.0) {
-    ip->radius = radius;
-    ip->temp   = TK;
-    ip->mass   = mass;
+    Particle::OnePart *ip_w = &particle->particles[idrop];
+    ip_w->radius = radius;
+    ip_w->temp   = TK;
+    ip_w->mass   = mass;
     return;
   }
 
@@ -249,30 +306,106 @@ void FixDropletEvaporate::droplet_evaporation_model(Particle::OnePart *ip,
   if (T_new < 0.0)
     error->one(FLERR,"Fix evaporation: particle temperature dropped below 0 K");
 
+  // Rocket-force kick (in-place velocity update via fresh pointer).
   if (rocket_eta > 0.0 && m_new > 0.0 && Gevap_atoms > 0.0) {
     const double grad_mag = std::sqrt(gTeR*gTeR + gTeZ*gTeZ);
     if (std::isfinite(grad_mag) && grad_mag > 0.0) {
       const double kB = 1.380649e-23;
       const double v_thermal = std::sqrt(8.0 * kB * TK / (MY_PI * AM));
-      const double area = 4.0 * MY_PI * radius * radius;
-      const double dmdt = area * Gevap_atoms * AM;
+      const double area0 = 4.0 * MY_PI * radius * radius;
+      const double dmdt = area0 * Gevap_atoms * AM;
       const double a_mag = rocket_eta * dmdt * v_thermal / m_new;
       const double nr = -gTeR / grad_mag;
       const double nz = -gTeZ / grad_mag;
 
       double phi = 0.0;
-      if (domain->dimension == 3) phi = std::atan2(ip->x[1], ip->x[0]);
+      if (domain->dimension == 3) phi = std::atan2(xs[1], xs[0]);
       double dvx, dvy, dvz;
       OpenEdge::RZphi_force_to_sparta(a_mag * nr, a_mag * nz, 0.0,
                                        domain->dimension, domain->axisymmetric,
                                        phi, dvx, dvy, dvz);
-      ip->v[0] += dvx * DT;
-      ip->v[1] += dvy * DT;
-      ip->v[2] += dvz * DT;
+      Particle::OnePart *ip_w = &particle->particles[idrop];
+      ip_w->v[0] += dvx * DT;
+      ip_w->v[1] += dvy * DT;
+      ip_w->v[2] += dvz * DT;
     }
   }
 
-  ip->radius = R_new;
-  ip->temp   = T_new;
-  ip->mass   = m_new;
+  // Volumetric Li source: spawn evaporated atoms in the droplet's cell.
+  // Must precede the final ip-> write (spawn may realloc the particle array).
+  if (emit_imix >= 0 && Gevap_atoms > 0.0 && radius > 0.0) {
+    const double area = 4.0 * MY_PI * radius * radius;
+    spawn_evap_atoms(idrop, area, Gevap_atoms, TK, dt_half);
+  }
+
+  // Final state write through a fresh pointer (any spawn above may have
+  // invalidated earlier pointers via Particle::particles realloc).
+  Particle::OnePart *ip_w = &particle->particles[idrop];
+  ip_w->radius = R_new;
+  ip_w->temp   = T_new;
+  ip_w->mass   = m_new;
+}
+
+/* ----------------------------------------------------------------------
+   Spawn evaporated atoms in the droplet's cell. Called only when
+   emit_imix >= 0. Lambda = area * Gevap_atoms * dt / fnum.
+------------------------------------------------------------------------- */
+void FixDropletEvaporate::spawn_evap_atoms(int idrop, double area,
+                                            double Gevap_atoms, double TK,
+                                            double dt_half)
+{
+  const double fnum = update->fnum;
+  if (fnum <= 0.0) return;
+  const double dN_phys = area * Gevap_atoms * dt_half;       // atoms / call
+  const double lam     = dN_phys / fnum;                     // sim particles
+  if (lam <= 0.0 || !std::isfinite(lam)) return;
+
+  const int n_to_emit = sample_poisson(lam, random);
+  if (n_to_emit == 0) return;
+
+  // Pick species inside emit mixture by fraction; cumulative CDF.
+  Mixture *mix = particle->mixture[emit_imix];
+  const int    nsp_mix = mix->nspecies;
+  const double *frac   = mix->fraction;
+  const int    *spec   = mix->species;
+
+  // Snapshot droplet position / cell — pointer may invalidate after first add.
+  Particle::OnePart *ip_snap = &particle->particles[idrop];
+  const double xs[3] = {ip_snap->x[0], ip_snap->x[1], ip_snap->x[2]};
+  const int icell_ip = ip_snap->icell;
+  if (icell_ip < 0) return;
+
+  const double kB = 1.380649e-23;
+
+  for (int k = 0; k < n_to_emit; ++k) {
+    // Pick species via cumulative fraction.
+    int isp = spec[0];
+    if (nsp_mix > 1) {
+      const double u = random->uniform();
+      double cum = 0.0;
+      for (int s = 0; s < nsp_mix; ++s) {
+        cum += frac[s];
+        if (u <= cum) { isp = spec[s]; break; }
+      }
+    }
+    const double m_atom = particle->species[isp].mass;
+    if (m_atom <= 0.0) continue;
+
+    // 3D Maxwellian velocity at droplet T (sigma = sqrt(kT/m) per component).
+    const double sigma = std::sqrt(kB * TK / m_atom);
+    double u1 = std::max(random->uniform(), 1.0e-300);
+    double u2 = random->uniform();
+    double u3 = std::max(random->uniform(), 1.0e-300);
+    double u4 = random->uniform();
+    const double r12 = std::sqrt(-2.0 * std::log(u1));
+    const double r34 = std::sqrt(-2.0 * std::log(u3));
+    double v[3];
+    v[0] = sigma * r12 * std::cos(2.0 * MY_PI * u2);
+    v[1] = sigma * r12 * std::sin(2.0 * MY_PI * u2);
+    v[2] = sigma * r34 * std::cos(2.0 * MY_PI * u4);
+
+    double x[3] = {xs[0], xs[1], xs[2]};
+    int newid = MAXSMALLINT * random->uniform();
+    particle->add_particle(newid, isp, icell_ip, x, v, 0.0, 0.0);
+  }
 }
