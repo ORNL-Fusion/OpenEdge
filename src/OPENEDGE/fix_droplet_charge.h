@@ -53,6 +53,10 @@ class FixDropletCharge : public Fix {
   double richardson_A     =  1.2e6;
   double work_function_eV =  2.9;
 
+  // Optional mixture filter. -1 = no filter. >= 0 = only species in this
+  // mixture's groups are charged.
+  int imix = -1;
+
   void apply_charge_update();
   bool solve_phi_oml(double Te_eV, double Ti_eV, double ne_m3, double ni_m3,
                      double Td_K, double rd_m, double &phi_V) const;

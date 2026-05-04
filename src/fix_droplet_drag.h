@@ -61,6 +61,10 @@ class FixDropletDrag : public Fix {
   double seed_radius = -1.0;
   double seed_temp   = -1.0;
 
+  // Optional mixture filter. -1 = no filter (act on every particle).
+  // When >= 0, only species in this mixture's groups are processed.
+  int imix = -1;
+
   void kick_half(double dt_half);
   double epstein_nu(double Ni, double Ti_eV, double rd_m) const;
   double coulomb_multiplier(double u) const;

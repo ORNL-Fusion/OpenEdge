@@ -7,6 +7,7 @@
 #include "update.h"
 #include "grid.h"
 #include "particle.h"
+#include "mixture.h"
 #include "error.h"
 #include "comm.h"
 #include "domain.h"
@@ -72,6 +73,12 @@ FixDropletCharge::FixDropletCharge(SPARTA *sparta, int narg, char **arg) :
       iarg += 2;
     } else if (strcmp(arg[iarg], "temp") == 0) {
       seed_temp = input->numeric(FLERR, arg[iarg+1]); iarg += 2;
+    } else if (strcmp(arg[iarg], "mixture") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix droplet/charge: missing mixture ID");
+      imix = particle->find_mixture(arg[iarg+1]);
+      if (imix < 0) error->all(FLERR, "fix droplet/charge: unknown mixture ID");
+      iarg += 2;
     } else {
       char msg[200];
       snprintf(msg, sizeof(msg),
@@ -216,8 +223,11 @@ void FixDropletCharge::apply_charge_update()
   std::vector<double>    zsum(particle->nspecies, 0.0);
   std::vector<long long> zcount(particle->nspecies, 0);
 
+  int *s2g = (imix >= 0) ? particle->mixture[imix]->species2group : nullptr;
+
   for (int ip = 0; ip < nlocal; ++ip) {
     Particle::OnePart &p = parts[ip];
+    if (s2g && s2g[p.ispecies] < 0) continue;
 
     if (p.mass   <= 0.0 && seed_mass   > 0.0) p.mass   = seed_mass;
     if (p.radius <= 0.0 && seed_radius > 0.0) p.radius = seed_radius;

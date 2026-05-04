@@ -8,6 +8,7 @@
 #include "update.h"
 #include "grid.h"
 #include "particle.h"
+#include "mixture.h"
 #include "error.h"
 #include "comm.h"
 #include "domain.h"
@@ -74,6 +75,11 @@ FixDropletDrag::FixDropletDrag(SPARTA *sparta, int narg, char **arg)
       seed_radius = input->numeric(FLERR, arg[iarg+1]); iarg += 2;
     } else if (strcmp(arg[iarg], "temp") == 0) {
       seed_temp = input->numeric(FLERR, arg[iarg+1]); iarg += 2;
+    } else if (strcmp(arg[iarg], "mixture") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "fix drag: missing mixture ID");
+      imix = particle->find_mixture(arg[iarg+1]);
+      if (imix < 0) error->all(FLERR, "fix drag: unknown mixture ID");
+      iarg += 2;
     } else {
       char msg[200];
       snprintf(msg, sizeof(msg), "fix drag: unknown keyword '%s'", arg[iarg]);
@@ -145,8 +151,11 @@ void FixDropletDrag::kick_half(double dt_half)
   const int    dim      = domain->dimension;
   const int    axisym   = domain->axisymmetric;
 
+  int *s2g = (imix >= 0) ? particle->mixture[imix]->species2group : nullptr;
+
   for (int ip = 0; ip < nlocal; ++ip) {
     Particle::OnePart &p = parts[ip];
+    if (s2g && s2g[p.ispecies] < 0) continue;
 
     if (seed_mass   > 0.0 && p.mass   <= 0.0) p.mass   = seed_mass;
     if (seed_radius > 0.0 && p.radius <= 0.0) p.radius = seed_radius;

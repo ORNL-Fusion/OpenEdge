@@ -46,7 +46,7 @@ group               div_ol surf id <> 140 239
 
 # Refine grid around the lower divertor (~2.5 mm cells at strike-point).
 region rdiv_lo block 2.0 6.0 -4.0 -2.5 -0.05 0.05
-adapt_grid all refine surf div_ol 0.001 maxlevel 3 cells 2 2 1 region rdiv_lo all iterate 3
+adapt_grid all refine surf div_ol 0.001 maxlevel 3 cells 4 4 1 region rdiv_lo all iterate 3
 balance_grid rcb cell
 
 fix pd    background file plasma.h5 static yes
@@ -54,8 +54,8 @@ fix fcore reflect/psi background pd psi_norm 0.95 action absorb
 
 fix fdrop_ol droplet/emit DropletSource div_ol nevery 1 n 1 perspecies no normal no vmin ${v_drop_min} vmax ${v_drop_max} angle cosine
 fix fevap    droplet/evaporate 1 DropletSource background pd heatflux/scale ${heatflux_scale} rocket_eta 0.5
-fix fdrag    droplet/drag 1 2.0 1 background pd gravity 0 -9.8 0 model epstein
-fix fcharge  droplet/charge 1 background pd ion_mass_amu 2.0 thermionic no
+fix fdrag    droplet/drag 1 2.0 1 background pd gravity 0 -9.8 0 model epstein mixture DropletSource
+fix fcharge  droplet/charge 1 background pd ion_mass_amu 2.0 thermionic no mixture DropletSource
 
 # Smolentsev free-flowing-film model: one fix per lower-divertor leg.
 fix flm_ol surface/state/lm div_ol 1 solps_b2pl ../solps/v0_1/b2pl.exe.dir/ld_tg_o.dat h0 5e-3 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350 static yes
