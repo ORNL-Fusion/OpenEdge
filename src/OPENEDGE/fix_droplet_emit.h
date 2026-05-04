@@ -73,6 +73,9 @@ class FixDropletEmit : public FixEmit {
   int user_mag_velocity;
   double incidentAngle;
   double magVelocity;
+  int user_speed_range;
+  double vmin, vmax;
+  int angle_cosine;   // 0 = uniform-in-theta (default), 1 = Knudsen cosine
 
   // copies of data from other classes
 

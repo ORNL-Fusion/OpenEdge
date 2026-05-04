@@ -72,6 +72,9 @@ FixDropletEmit::FixDropletEmit(SPARTA *sparta, int narg, char **arg) :
   // If not provided by input, sample launch angle per emitted particle.
   incidentAngle = -1.0;
   magVelocity = 0.0;
+  user_speed_range = 0;
+  vmin = vmax = 0.0;
+  angle_cosine = 0;
 
   nrho_custom_flag = temp_custom_flag = vstream_custom_flag =
     speed_custom_flag = fractions_custom_flag = 0;
@@ -751,12 +754,18 @@ void FixDropletEmit::perform_task_onepass()
           else vnmag = beta_un*vscale[isp] + indot;
 
           theta = MY_2PI * random->uniform();
-          if (user_mag_velocity && magVelocity > 0.0) {
+          if ((user_mag_velocity && magVelocity > 0.0) || user_speed_range) {
             // User-prescribed launch speed/angle relative to surface normal.
-            const double inc_deg = (incidentAngle >= 0.0) ? incidentAngle : (90.0 * random->uniform());
-            const double inc = inc_deg * MY_PI / 180.0;
-            vnmag = magVelocity * cos(inc);
-            const double vt = magVelocity * sin(inc);
+            // With vmin/vmax set, sample speed uniformly per emitted particle.
+            const double mag_v = user_speed_range
+              ? (vmin + (vmax - vmin) * random->uniform())
+              : magVelocity;
+            double inc;
+            if      (incidentAngle >= 0.0) inc = incidentAngle * MY_PI / 180.0;
+            else if (angle_cosine)         inc = std::asin(std::sqrt(random->uniform()));
+            else                           inc = 0.5 * MY_PI * random->uniform();
+            vnmag = mag_v * cos(inc);
+            const double vt = mag_v * sin(inc);
             vamag = vt * sin(theta);
             vbmag = vt * cos(theta);
             if (!normalflag) {
@@ -885,12 +894,18 @@ void FixDropletEmit::perform_task_onepass()
         else vnmag = beta_un*vscale[isp] + indot;
 
         theta = MY_2PI * random->uniform();
-        if (user_mag_velocity && magVelocity > 0.0) {
+        if ((user_mag_velocity && magVelocity > 0.0) || user_speed_range) {
           // User-prescribed launch speed/angle relative to surface normal.
-          const double inc_deg = (incidentAngle >= 0.0) ? incidentAngle : (90.0 * random->uniform());
-          const double inc = inc_deg * MY_PI / 180.0;
-          vnmag = magVelocity * cos(inc);
-          const double vt = magVelocity * sin(inc);
+          // With vmin/vmax set, sample speed uniformly per emitted particle.
+          const double mag_v = user_speed_range
+            ? (vmin + (vmax - vmin) * random->uniform())
+            : magVelocity;
+          double inc;
+          if      (incidentAngle >= 0.0) inc = incidentAngle * MY_PI / 180.0;
+          else if (angle_cosine)         inc = std::asin(std::sqrt(random->uniform()));
+          else                           inc = 0.5 * MY_PI * random->uniform();
+          vnmag = mag_v * cos(inc);
+          const double vt = mag_v * sin(inc);
           vamag = vt * sin(theta);
           vbmag = vt * cos(theta);
           if (!normalflag) {
@@ -1104,12 +1119,18 @@ void FixDropletEmit::perform_task_twopass()
           else vnmag = beta_un*vscale[isp] + indot;
 
           theta = MY_2PI * random->uniform();
-          if (user_mag_velocity && magVelocity > 0.0) {
+          if ((user_mag_velocity && magVelocity > 0.0) || user_speed_range) {
             // User-prescribed launch speed/angle relative to surface normal.
-            const double inc_deg = (incidentAngle >= 0.0) ? incidentAngle : (90.0 * random->uniform());
-            const double inc = inc_deg * MY_PI / 180.0;
-            vnmag = magVelocity * cos(inc);
-            const double vt = magVelocity * sin(inc);
+            // With vmin/vmax set, sample speed uniformly per emitted particle.
+            const double mag_v = user_speed_range
+              ? (vmin + (vmax - vmin) * random->uniform())
+              : magVelocity;
+            double inc;
+            if      (incidentAngle >= 0.0) inc = incidentAngle * MY_PI / 180.0;
+            else if (angle_cosine)         inc = std::asin(std::sqrt(random->uniform()));
+            else                           inc = 0.5 * MY_PI * random->uniform();
+            vnmag = mag_v * cos(inc);
+            const double vt = mag_v * sin(inc);
             vamag = vt * sin(theta);
             vbmag = vt * cos(theta);
             if (!normalflag) {
@@ -1222,12 +1243,18 @@ void FixDropletEmit::perform_task_twopass()
         else vnmag = beta_un*vscale[isp] + indot;
 
         theta = MY_2PI * random->uniform();
-        if (user_mag_velocity && magVelocity > 0.0) {
+        if ((user_mag_velocity && magVelocity > 0.0) || user_speed_range) {
           // User-prescribed launch speed/angle relative to surface normal.
-          const double inc_deg = (incidentAngle >= 0.0) ? incidentAngle : (90.0 * random->uniform());
-          const double inc = inc_deg * MY_PI / 180.0;
-          vnmag = magVelocity * cos(inc);
-          const double vt = magVelocity * sin(inc);
+          // With vmin/vmax set, sample speed uniformly per emitted particle.
+          const double mag_v = user_speed_range
+            ? (vmin + (vmax - vmin) * random->uniform())
+            : magVelocity;
+          double inc;
+          if      (incidentAngle >= 0.0) inc = incidentAngle * MY_PI / 180.0;
+          else if (angle_cosine)         inc = std::asin(std::sqrt(random->uniform()));
+          else                           inc = 0.5 * MY_PI * random->uniform();
+          vnmag = mag_v * cos(inc);
+          const double vt = mag_v * sin(inc);
           vamag = vt * sin(theta);
           vbmag = vt * cos(theta);
           if (!normalflag) {
@@ -1757,6 +1784,41 @@ void FixDropletEmit::options2(int narg, char **arg)
       // If you expect degrees in the input, convert to radians:
       if (incidentAngle < 0.0 || incidentAngle > 180.0)
         error->all(FLERR,"Illegal fix emit/droplet: incidentAngle must be in [0, 180] degrees");
+      iarg += 2;
+      continue;
+    }
+
+    // Uniform per-emit speed sampling in [vmin, vmax]. Bypasses the
+    // mixture-temperature Maxwellian; angular spread still uses
+    // incidentAngle if set, else uniform [0, 90 deg) about the normal.
+    if (strcmp(arg[iarg], "vmin") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: vmin <m/s>");
+      vmin = atof(arg[iarg+1]);
+      if (!std::isfinite(vmin) || vmin < 0.0)
+        error->all(FLERR,"Illegal fix emit/droplet: vmin must be finite and >= 0");
+      user_speed_range = 1;
+      iarg += 2;
+      continue;
+    }
+    if (strcmp(arg[iarg], "vmax") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: vmax <m/s>");
+      vmax = atof(arg[iarg+1]);
+      if (!std::isfinite(vmax) || vmax < 0.0)
+        error->all(FLERR,"Illegal fix emit/droplet: vmax must be finite and >= 0");
+      user_speed_range = 1;
+      iarg += 2;
+      continue;
+    }
+
+    // Angular distribution about the surface normal.
+    // 'cosine' = Knudsen / Lambert cosine law (theta = asin(sqrt(U))),
+    // 'uniform' = polar angle uniform in [0, 90 deg) (legacy default).
+    // Ignored when 'incidentAngle' is also set (fixed angle wins).
+    if (strcmp(arg[iarg], "angle") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: angle cosine|uniform");
+      if      (strcmp(arg[iarg+1], "cosine")  == 0) angle_cosine = 1;
+      else if (strcmp(arg[iarg+1], "uniform") == 0) angle_cosine = 0;
+      else error->all(FLERR,"Illegal fix emit/droplet: angle must be cosine or uniform");
       iarg += 2;
       continue;
     }

@@ -4,7 +4,8 @@ variable dt              equal 1e-05
 variable Ndump           equal 1000
 variable heatflux_scale  equal 2.0
 variable temp_droplet    equal 773.15
-variable temp_emit       equal 1.e20
+variable v_drop_min      equal 0.1
+variable v_drop_max      equal 20.0
 
 seed                12345
 timestep            ${dt}
@@ -12,14 +13,27 @@ timestep            ${dt}
 dimension           2
 boundary            o o p
 global              gridcut 0.0 comm/sort no
-global              temp ${temp_emit}
 create_box          2.0 6.0 -4.0 4.0 -0.05 0.05
 create_grid         200 400 1
 balance_grid        rcb cell
 global              fnum 0.0000001
 
 species ../../input/droplet.species mist
+species ../../input/plasma.species  Li Li+ Li2+ Li3+
 mixture DropletSource mist frac 1.0 nrho 1
+mixture LiSource Li   frac 1.0
+mixture LiSource Li+  frac 0.0
+mixture LiSource Li2+ frac 0.0
+mixture LiSource Li3+ frac 0.0
+
+variable UbLi_eV         equal 1.65
+variable cosN_Li         equal 1.5
+variable TwallK          equal 773.15
+variable nlaunchTotalSpu index 200
+variable nlaunchTotalEvp index 200
+variable nlaunchTotalAda index 200
+variable sourceThreshLi  equal 0.0
+mixture  LiSource temp ${TwallK}
 
 variable pmass particle mass
 
@@ -33,19 +47,31 @@ group               div_ol surf id <> 140 150
 fix pd    background file plasma.h5 static yes
 fix fcore reflect/psi background pd psi_norm 0.95 action absorb
 
-fix fdrop_ol droplet/emit DropletSource div_ol nevery 1000 n 1 perspecies no normal no
+fix fdrop_ol droplet/emit DropletSource div_ol nevery 1 n 1 perspecies no normal no vmin ${v_drop_min} vmax ${v_drop_max} angle cosine
 fix fevap    droplet/evaporate 1 DropletSource background pd heatflux/scale ${heatflux_scale} rocket_eta 0.5
 fix fdrag    droplet/drag 1 2.0 1 background pd gravity 0 -9.8 0 model epstein
 fix fcharge  droplet/charge 1 background pd ion_mass_amu 2.0 thermionic no
 
 # Smolentsev free-flowing-film model: one fix per lower-divertor leg.
-fix flm_ol surface/state/lm div_ol 100 solps_b2pl ../solps/v0_1/b2pl.exe.dir/ld_tg_o.dat h0 5e-3 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350 static yes
-fix flm_il surface/state/lm div_il 100 solps_b2pl ../solps/v0_1/b2pl.exe.dir/ld_tg_i.dat h0 5e-3 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350 static yes
+fix flm_ol surface/state/lm div_ol 1 solps_b2pl ../solps/v0_1/b2pl.exe.dir/ld_tg_o.dat h0 5e-3 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350 static yes
+fix flm_il surface/state/lm div_il 1 solps_b2pl ../solps/v0_1/b2pl.exe.dir/ld_tg_i.dat h0 5e-3 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350 static yes
 
-# Diagnostic per-surf source fluxes on the outer leg (computed, not emitted).
+# Per-surf source fluxes on the outer leg, used by both diagnostic dump
+# and fix surface/emit/source below.
 compute cpmiLi surface/physical/sputter   div_ol background pd target Li projectiles D,Ne,Li static yes erosion_flux
 compute cevap  surface/chemical/evaporation div_ol tsurf Tsurf_lm sticking 1.0
 compute cadat  surface/chemical/adatom      div_ol tsurf Tsurf_lm dp_flux s_Gamma_D_lm
+
+fix pw  particle/weight
+
+# Three Li atomic sources, all on outer leg, cosine angular distribution
+# (sputter Thompson energy + over-cosine angular; evap & adatom Knudsen-thermal).
+fix femit_spu surface/emit/source LiSource div_ol cpmiLi perspecies no normal no  nlaunch_total ${nlaunchTotalSpu} source_thresh ${sourceThreshLi} model thompson ${UbLi_eV} cos_n ${cosN_Li}
+fix femit_evp surface/emit/source LiSource div_ol cevap  perspecies no normal no  nlaunch_total ${nlaunchTotalEvp} source_thresh ${sourceThreshLi} model thermal_tsurf Tsurf_lm
+fix femit_ada surface/emit/source LiSource div_ol cadat  perspecies no normal no  nlaunch_total ${nlaunchTotalAda} source_thresh ${sourceThreshLi} model thermal_tsurf Tsurf_lm
+
+# Li volumetric ionization / recombination via ADAS rates.
+fix fchem volume/chem/adas 1 Li auto
 
 global pusher plasma pd
 global pusher subcycles 5
@@ -57,4 +83,4 @@ dump d_surf surf div_ol ${Ndump} output/surf_fluxes.txt id v1x v1y v2x v2y c_cpm
 dump_modify d_surf format float "%.6e"
 
 stats ${Ndump}
-run 1 #200
+run 200
