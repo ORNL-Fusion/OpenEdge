@@ -1,0 +1,36 @@
+# Volumetric reactions for boron (Z=5), neutral B through B5+.
+# Rate tables come from /volume/rates/{scd,acd}/b in processes.h5
+# (ADAS SCD ionization, ACD recombination). CCD CX skipped: matches
+# the Li/C convention -- no atomic D donor in the SOLPS-coupling decks.
+
+# --- Ionization (ADAS SCD) ----------------------------------------------
+B --> B+
+I A 1.0 0.0 0.0 0.0 0.0
+
+B+ --> B2+
+I A 1.0 0.0 0.0 0.0 0.0
+
+B2+ --> B3+
+I A 1.0 0.0 0.0 0.0 0.0
+
+B3+ --> B4+
+I A 1.0 0.0 0.0 0.0 0.0
+
+B4+ --> B5+
+I A 1.0 0.0 0.0 0.0 0.0
+
+# --- Recombination (ADAS ACD) -------------------------------------------
+B+ --> B
+R A 1.0 0.0 0.0 0.0 0.0
+
+B2+ --> B+
+R A 1.0 0.0 0.0 0.0 0.0
+
+B3+ --> B2+
+R A 1.0 0.0 0.0 0.0 0.0
+
+B4+ --> B3+
+R A 1.0 0.0 0.0 0.0 0.0
+
+B5+ --> B4+
+R A 1.0 0.0 0.0 0.0 0.0
