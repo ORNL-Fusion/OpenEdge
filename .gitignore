@@ -93,6 +93,7 @@ examples/test_d3d_mateja/
 examples/test_d3d_walldyn/
 examples/test_west_3d/
 examples/test_west_timedep/
+examples/test_tsurf_emission/
 examples/test_liquid_metal/
 examples/test_eirene/
 examples/test_diii_d_neutrals/
