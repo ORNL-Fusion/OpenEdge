@@ -1,0 +1,16 @@
+unit-square source patch on zlo face (area = 1.0 m^2, normal = +z into fluid)
+
+4 points
+2 triangles
+
+Points
+
+1 0.0 0.0 0.0
+2 1.0 0.0 0.0
+3 1.0 1.0 0.0
+4 0.0 1.0 0.0
+
+Triangles
+
+1 1 2 3
+2 1 3 4

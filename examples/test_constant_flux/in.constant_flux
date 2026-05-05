@@ -1,0 +1,38 @@
+variable    nevery_in index 1
+variable    flux      equal 1.0e6
+variable    Atot      equal 1.0
+variable    dt        equal 1.0e-5
+variable    nsteps    equal 1000
+variable    fnumv     equal 1.0
+variable    Ub        equal 1.0
+
+shell       mkdir output
+
+seed        12345
+dimension   3
+boundary    o o o
+global      gridcut 0.0 comm/sort no
+global      fnum ${fnumv}
+timestep    ${dt}
+
+create_box  0 1 0 1 0 1
+create_grid 4 4 4
+balance_grid rcb cell
+
+species     input/li.species Li
+mixture     lim Li frac 1.0 nrho 1.0e19 temp 300.0 vstream 0.0 0.0 0.0
+
+read_surf   input/source.surf group source particle check
+surf_collide vac vanish
+surf_modify source collide vac
+
+fix femit surface/emit/source lim source constant ${flux} perspecies no normal no &
+          nevery ${nevery_in} model thompson ${Ub} cos_n 1.0
+
+stats       100
+stats_style step np f_femit[1] f_femit[2]
+
+run         ${nsteps}
+
+variable    expected equal v_flux*v_Atot*v_dt*v_nsteps
+print       "EXPECTED_TOTAL flux=${flux} A=${Atot} dt=${dt} N=${nsteps} -> ${expected}"

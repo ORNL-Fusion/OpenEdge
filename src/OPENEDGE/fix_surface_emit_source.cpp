@@ -99,13 +99,23 @@ FixSurfaceEmitSource::FixSurfaceEmitSource(SPARTA *sparta, int narg, char **arg)
   // arg[4] is either a compute ID (default, compute-driven flux) or the
   // literal keyword "file" (file-driven flux from an inflow .dat).
   file_mode = 0;
+  const_mode = 0;
+  const_flux = 0.0;
   file_path = nullptr;
   file_section = nullptr;
   face_axis_idx = 2;        // ZLO/ZHI default
   iflux = -1;
   flux_index = 0;
   int iarg = 5;
-  if (strcmp(arg[4],"file") == 0) {
+  if (strcmp(arg[4],"constant") == 0) {
+    const_mode = 1;
+    if (narg < 6)
+      error->all(FLERR,"Fix surface/emit/source: 'constant' needs a flux value");
+    const_flux = atof(arg[5]);
+    if (!std::isfinite(const_flux) || const_flux <= 0.0)
+      error->all(FLERR,"Fix surface/emit/source: 'constant' flux must be > 0");
+    iarg = 6;
+  } else if (strcmp(arg[4],"file") == 0) {
     file_mode = 1;
     if (narg < 6)
       error->all(FLERR,"Fix surface/emit/source: 'file' needs a path");
@@ -232,6 +242,8 @@ void FixSurfaceEmitSource::init()
       else error->all(FLERR,"Fix surface/emit/source: section must be one of "
                             "XLO/XHI/YLO/YHI/ZLO/ZHI");
     }
+  } else if (const_mode) {
+    // Constant-flux mode: no compute, uniform per-surf flux from input deck.
   } else {
     if (iflux < 0 || iflux >= modify->ncompute)
       error->all(FLERR,"Fix surface/emit/source compute ID no longer exists");
@@ -575,13 +587,15 @@ void FixSurfaceEmitSource::perform_task()
   double x[3],v[3],e1[3],e2[3];
   Particle::OnePart *p;
 
-  const double dt = update->dt;
+  // multiply by nevery so source_strength integrates the full inter-firing
+  // interval, preserving total flux when nevery > 1
+  const double dt = update->dt * nevery;
   int *species = particle->mixture[imix]->species;
 
   // evaluate requested per-surf flux once per timestep
-  // (skipped in file_mode: per-task nrho/vstream are static from the inflow file)
+  // (skipped in file_mode and const_mode: per-task flux is static)
   Compute *c = NULL;
-  if (!file_mode) {
+  if (!file_mode && !const_mode) {
     c = modify->compute[iflux];
     c->compute_per_surf();
     // spread per-rank-owned flux into a globally-replicated vector indexed
@@ -620,8 +634,10 @@ void FixSurfaceEmitSource::perform_task()
     // Fast path: when the upstream compute reports a frozen static cache,
     // reuse cached_task_source / cached_source_total instead of rebuilding.
     // The cached size must match ntask (grid_changed() invalidates).
-    auto *cpmi = file_mode ? NULL : dynamic_cast<ComputeSurfacePhysicalSputter *>(c);
-    const bool upstream_static = file_mode || (cpmi && cpmi->is_static_cached());
+    auto *cpmi = (file_mode || const_mode) ? NULL
+                                            : dynamic_cast<ComputeSurfacePhysicalSputter *>(c);
+    const bool upstream_static = file_mode || const_mode ||
+                                 (cpmi && cpmi->is_static_cached());
 
     if (upstream_static && task_source_cached &&
         static_cast<int>(cached_task_source.size()) == ntask) {
@@ -645,6 +661,8 @@ void FixSurfaceEmitSource::perform_task()
                         : surf->tris[isurf].norm;
           double vn = vs[0]*nrm[0] + vs[1]*nrm[1] + vs[2]*nrm[2];
           flux = tasks[i].nrho * (vn > 0.0 ? vn : -vn);
+        } else if (const_mode) {
+          flux = const_flux;
         } else {
           flux = flux_for_surface(isurf);
         }
@@ -726,6 +744,8 @@ void FixSurfaceEmitSource::perform_task()
           double vn = vstream[0]*normal[0] + vstream[1]*normal[1] +
                       vstream[2]*normal[2];
           flux = tasks[i].nrho * (vn > 0.0 ? vn : -vn);
+        } else if (const_mode) {
+          flux = const_flux;
         } else {
           flux = flux_for_surface(isurf);
         }

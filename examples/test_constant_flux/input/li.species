@@ -1,0 +1,2 @@
+# format: ID Molwt(amu) Molmass(kg) RotDOF RotRel VibDOF VibRel VibTemp(K) speciesWt charge
+Li      6.94    1.15225e-26     0       0.0     0       0.0     0.0     1.0     0.0

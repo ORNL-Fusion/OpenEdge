@@ -140,6 +140,8 @@ class FixSurfaceEmitSource : public FixEmit {
   // YLO/YHI -> (xc,zc). gamma column is read but ignored (redundant with
   // nrho * vz). Set face_axis_idx accordingly in load_file().
   int  file_mode;
+  int  const_mode;               // 1 if uniform constant flux mode is active
+  double const_flux;             // particles/m^2/s applied uniformly to group
   char *file_path;
   char *file_section;
   int  face_axis_idx;            // 0,1,2 of (X,Y,Z); selects (i,j) axes
