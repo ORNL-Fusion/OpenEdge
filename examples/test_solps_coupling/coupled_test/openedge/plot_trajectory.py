@@ -97,12 +97,12 @@ def main(argv):
                     help="Particle type to plot (default 1 = mist).")
     ap.add_argument("--max-tracks", type=int, default=200,
                     help="Cap on number of trajectories drawn (default 200).")
-    ap.add_argument("--min-points", type=int, default=2,
-                    help="Skip particles with fewer than this many recorded points.")
-    ap.add_argument("--xlim", nargs=2, type=float, default=None,
-                    help="R-axis limits (m).")
-    ap.add_argument("--ylim", nargs=2, type=float, default=None,
-                    help="Z-axis limits (m).")
+    ap.add_argument("--min-points", type=int, default=1,
+                    help="Skip particles with fewer than this many recorded points (default 1).")
+    ap.add_argument("--xlim", nargs=2, type=float, default=[3.0, 4.0],
+                    help="R-axis limits (m), default 3 4.")
+    ap.add_argument("--ylim", nargs=2, type=float, default=[-4.0, 2.0],
+                    help="Z-axis limits (m), default -4 2.")
     ap.add_argument("--out", default="trajectory.png", help="Output PNG path")
     args = ap.parse_args(argv)
 
@@ -132,9 +132,12 @@ def main(argv):
         col = cmap((k % 64) / 63.0)
         xs = [p[1] for p in pts]
         ys = [p[2] for p in pts]
-        ax.plot(xs, ys, color=col, lw=1.0, alpha=0.7, zorder=2)
-        ax.plot(xs[0], ys[0], 'o', color=col, ms=3, zorder=3)   # start
-        ax.plot(xs[-1], ys[-1], 's', color=col, ms=3, zorder=3) # end
+        if len(pts) >= 2:
+            ax.plot(xs, ys, color=col, lw=1.0, alpha=0.7, zorder=2)
+            ax.plot(xs[0], ys[0], 'o', color=col, ms=3, zorder=3)   # start
+            ax.plot(xs[-1], ys[-1], 's', color=col, ms=3, zorder=3) # end
+        else:
+            ax.plot(xs[0], ys[0], 'o', color=col, ms=4, alpha=0.8, zorder=3)
 
     ax.set_xlabel(r"$R\ (\mathrm{m})$")
     ax.set_ylabel(r"$Z\ (\mathrm{m})$")

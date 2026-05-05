@@ -112,7 +112,7 @@ def plot_leg(ax_in, ax_T, ax_F, leg, leg_name, args):
 def main(argv):
     ap = argparse.ArgumentParser(
         description="Plot LM strip profile from fix surface/state/lm csv dump.")
-    ap.add_argument("--csv", required=True,
+    ap.add_argument("--csv", default="output/strip_ol.csv",
                     help="Outer-leg CSV (or single-leg).")
     ap.add_argument("--csv-il", default=None,
                     help="Optional inner-leg CSV. If omitted, plot only outer.")
