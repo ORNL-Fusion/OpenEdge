@@ -143,6 +143,25 @@ def read_oedge_nc(nc_file: Path) -> dict:
     tegs  = np.asarray(ds.variables["TEGS"][:])
     tigs  = np.asarray(ds.variables["TIGS"][:])
 
+    # Radial (cross-flux-surface) E and electric potential. E_RAD shares the
+    # standard (MAXNRS, MAXNKS) ring/knot layout. POT has dims (MAXNRS,
+    # MAXNKSP2) — two extra virtual boundary cells in IK; trim with a [:, 1:1+nk]
+    # slice so it lines up with KORPG/KES/KTEBS.
+    e_rad = (np.asarray(ds.variables["E_RAD"][:])
+             if "E_RAD" in ds.variables
+             else np.zeros_like(kes))
+    if "POT" in ds.variables:
+        pot_full = np.asarray(ds.variables["POT"][:])
+        nk_match = kes.shape[1]
+        if pot_full.shape[1] == nk_match + 2:
+            pot = pot_full[:, 1:1 + nk_match]
+        elif pot_full.shape[1] == nk_match:
+            pot = pot_full
+        else:
+            pot = pot_full[:, :nk_match]
+    else:
+        pot = np.zeros_like(kes)
+
     # Parallel flow is sometimes pre-scaled by QTIM; undo if present.
     qtim = None
     if "QTIM" in ds.variables:
@@ -189,8 +208,9 @@ def read_oedge_nc(nc_file: Path) -> dict:
         # Polygon geometry
         korpg=korpg, nvertp=nvertp, rvertp=rvertp, zvertp=zvertp,
         korpg_offset=offset,
-        # Per-cell plasma (eV, eV, m^-3, m/s, V/m, eV/m, eV/m)
+        # Per-cell plasma (eV, eV, m^-3, m/s, V/m, V/m, V, eV/m, eV/m)
         ktebs=ktebs, ktibs=ktibs, knbs=knbs, kvhs=kvhs, kes=kes,
+        e_rad=e_rad, pot=pot,
         tegs=tegs, tigs=tigs,
         # Metadata
         crmb=crmb, r0=r0, z0=z0,
@@ -422,6 +442,13 @@ def convert_oedge_to_openedge(
     bhat_t_c = cell_bt / safe
     bhat_z_c = cell_bz / safe
 
+    # Radial (∇ψ̂) unit vector for projecting OEDGE E_RAD into Cartesian.
+    # ∇ψ has components (∂ψ/∂R, ∂ψ/∂Z) = (R*Bz, -R*Br); normalise by R*Bp.
+    cell_bpol = np.sqrt(cell_br ** 2 + cell_bz ** 2)
+    safe_bp   = np.where(cell_bpol > 1e-12, cell_bpol, 1e-12)
+    psihat_r_c =  cell_bz / safe_bp
+    psihat_z_c = -cell_br / safe_bp
+
     # Per-species ion arrays (shape (nion, ncell)) -- single ion for OEDGE.
     mesh_ions_dens = mesh_dens_i[np.newaxis, :]
     mesh_ions_temp = mesh_temp_i[np.newaxis, :]
@@ -446,13 +473,15 @@ def convert_oedge_to_openedge(
     mesh_grad_ti_r = tri_to_cell(tri_grad_ti_r)
     mesh_grad_ti_z = tri_to_cell(tri_grad_ti_z)
 
-    # ---- E-field from KES (parallel E) projected into cylindrical (per-cell).
-    mesh_e_r = mesh_e_par * bhat_r_c
+    # ---- E-field per cell: parallel KES along B̂ + radial E_RAD along ∇ψ̂.
+    # E_RAD has no toroidal component (axisymmetric).
+    mesh_e_rad = per_cell(oedge["e_rad"])
+    mesh_e_r = mesh_e_par * bhat_r_c + mesh_e_rad * psihat_r_c
     mesh_e_t = mesh_e_par * bhat_t_c
-    mesh_e_z = mesh_e_par * bhat_z_c
+    mesh_e_z = mesh_e_par * bhat_z_c + mesh_e_rad * psihat_z_c
 
-    # pob (potential) — not carried through OEDGE standard output; zero stub.
-    mesh_pob = np.zeros(ncell, dtype=np.float64)
+    # Electric potential (V) per cell from OEDGE POT.
+    mesh_pob = per_cell(oedge["pot"])
 
     # Provenance stubs (OEDGE polygons extend to the wall, no vacuum fill).
     mesh_tri_source_kind = np.ones(ntri, dtype=np.int32)
