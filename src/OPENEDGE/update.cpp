@@ -786,21 +786,22 @@ void Update::run(int nsteps)
       timer->stamp(TIME_COMM);
     }
 
-    // halt early if all particles have been absorbed/lost, or if any fix
-    // explicitly requested an early exit (fix volume/chem/adas Mode A exhaustion).
-    {
-      bigint nlocal = particle->nlocal;
-      bigint nglobal;
-      MPI_Allreduce(&nlocal, &nglobal, 1, MPI_SPARTA_BIGINT, MPI_SUM, world);
-      if (nglobal == 0 || early_exit_requested) {
-        // force final output before breaking
-        output->next = ntimestep;
-        output->write(ntimestep);
-        update->nsteps = i;
-        early_exit_requested = 0;  // reset so a follow-up run isn't pre-halted
-        break;
-      }
-    }
+    // Early-exit on empty domain — disabled. Was added for fix
+    // volume/chem/adas Mode A exhaustion but kills emit-only decks
+    // (fix droplet/emit with nevery > 1) at step 1 before the first
+    // emission can fire. Re-enable behind a flag if Mode A needs it.
+    // {
+    //   bigint nlocal = particle->nlocal;
+    //   bigint nglobal;
+    //   MPI_Allreduce(&nlocal, &nglobal, 1, MPI_SPARTA_BIGINT, MPI_SUM, world);
+    //   if (nglobal == 0 || early_exit_requested) {
+    //     output->next = ntimestep;
+    //     output->write(ntimestep);
+    //     update->nsteps = i;
+    //     early_exit_requested = 0;
+    //     break;
+    //   }
+    // }
 
     if (collide) {
       particle->sort();
