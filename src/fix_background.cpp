@@ -462,6 +462,41 @@ void FixBackground::reload()
         mesh_wall_face_area.resize(mesh_ncell, 0.0);
       MPI_Bcast(mesh_wall_face_area.data(), mesh_ncell, MPI_DOUBLE, 0, world);
     }
+    // ---- Broadcast /wall_flux/* scatter ----
+    MPI_Bcast(&wall_flux.n,     1, MPI_INT, 0, world);
+    MPI_Bcast(&wall_flux.nspec, 1, MPI_INT, 0, world);
+    if (wall_flux.n > 0) {
+      const int N = wall_flux.n;
+      const size_t Ng = static_cast<size_t>(wall_flux.nspec) * N;
+      if (comm->me != 0) {
+        wall_flux.r.assign(N, 0.0);
+        wall_flux.z.assign(N, 0.0);
+        wall_flux.gamma_i.assign(Ng, 0.0);
+      }
+      MPI_Bcast(wall_flux.r.data(), N, MPI_DOUBLE, 0, world);
+      MPI_Bcast(wall_flux.z.data(), N, MPI_DOUBLE, 0, world);
+      MPI_Bcast(wall_flux.gamma_i.data(), Ng, MPI_DOUBLE, 0, world);
+      // optional 1D fields: rank-0 declares present/absent via size, then bcast
+      auto bcast_opt_1d = [&](std::vector<double> &v) {
+        int has = (comm->me == 0) ? (static_cast<int>(v.size()) == N) : 0;
+        MPI_Bcast(&has, 1, MPI_INT, 0, world);
+        if (has) {
+          if (comm->me != 0) v.assign(N, 0.0);
+          MPI_Bcast(v.data(), N, MPI_DOUBLE, 0, world);
+        } else if (comm->me != 0) {
+          v.clear();
+        }
+      };
+      bcast_opt_1d(wall_flux.s_arc);
+      bcast_opt_1d(wall_flux.te);
+      bcast_opt_1d(wall_flux.ti);
+      bcast_opt_1d(wall_flux.area);
+      bcast_opt_1d(wall_flux.normal_r);
+      bcast_opt_1d(wall_flux.normal_z);
+      bcast_opt_1d(wall_flux.b_r);
+      bcast_opt_1d(wall_flux.b_z);
+      bcast_opt_1d(wall_flux.b_t);
+    }
     MPI_Bcast(&has_mesh_wall_surf_cell, 1, MPI_INT, 0, world);
     int n_wall_surf = has_mesh_wall_surf_cell
                     ? static_cast<int>(mesh_wall_surf_cell.size()) : 0;
@@ -619,6 +654,7 @@ void FixBackground::clear_loaded_data()
   mesh_ne.clear();
   mesh_wall_face_area.clear();
   has_mesh_wall_face_area = 0;
+  wall_flux = WallFluxData{};
   mesh_wall_surf_cell.clear();
   has_mesh_wall_surf_cell = 0;
   mesh_te.clear();
@@ -1106,7 +1142,119 @@ void FixBackground::load_plasma_h5()
                                                      H5::PredType::NATIVE_DOUBLE);
       }
     }
+
+    // ---- /wall_flux/ group: plasma-source-agnostic wall flux scatter ----
+    wall_flux = WallFluxData{};
+    if (file.nameExists("wall_flux")) {
+      H5::Group g = file.openGroup("wall_flux");
+      auto read1d = [&](const char *name, std::vector<double> &v) -> bool {
+        if (!g.nameExists(name)) { v.clear(); return false; }
+        H5::DataSet ds = g.openDataSet(name);
+        hsize_t dim;
+        ds.getSpace().getSimpleExtentDims(&dim);
+        v.resize(dim);
+        ds.read(v.data(), H5::PredType::NATIVE_DOUBLE);
+        return true;
+      };
+      read1d("r", wall_flux.r);
+      read1d("z", wall_flux.z);
+      read1d("s", wall_flux.s_arc);
+      read1d("te", wall_flux.te);
+      read1d("ti", wall_flux.ti);
+      read1d("area", wall_flux.area);
+      read1d("normal_r", wall_flux.normal_r);
+      read1d("normal_z", wall_flux.normal_z);
+      read1d("b_r", wall_flux.b_r);
+      read1d("b_z", wall_flux.b_z);
+      read1d("b_t", wall_flux.b_t);
+      if (g.nameExists("gamma_i")) {
+        H5::DataSet ds = g.openDataSet("gamma_i");
+        hsize_t dims[2] = {0, 0};
+        ds.getSpace().getSimpleExtentDims(dims);
+        wall_flux.nspec = static_cast<int>(dims[0]);
+        wall_flux.n     = static_cast<int>(dims[1]);
+        wall_flux.gamma_i.resize(static_cast<size_t>(dims[0]) * dims[1]);
+        ds.read(wall_flux.gamma_i.data(), H5::PredType::NATIVE_DOUBLE);
+      }
+      // sanity: sizes must agree with wall_flux.n if present
+      if (wall_flux.n > 0 &&
+          static_cast<int>(wall_flux.r.size()) != wall_flux.n) {
+        if (screen)
+          fprintf(screen, "[background] /wall_flux/ size mismatch; ignoring\n");
+        wall_flux = WallFluxData{};
+      } else if (screen && wall_flux.n > 0) {
+        fprintf(screen, "[background] /wall_flux/ loaded: N=%d nspec=%d\n",
+                wall_flux.n, wall_flux.nspec);
+      }
+    }
   }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Wall-flux query: inverse-distance weighting over knn nearest sources
+   within max_dist of (R, Z). N is small (~250 typical) so brute-force
+   is plenty; replace with a KDTree if profiling ever shows it matters. */
+
+double FixBackground::query_wall_flux_at_point(double R, double Z, int ispec,
+                                                double max_dist, int knn) const
+{
+  if (wall_flux.empty() || ispec < 0 || ispec >= wall_flux.nspec) return 0.0;
+  if (knn < 1) knn = 1;
+  if (knn > 8) knn = 8;
+  // collect knn smallest distances by O(N*knn) selection
+  double best_d[8];
+  int    best_i[8];
+  for (int k = 0; k < knn; k++) { best_d[k] = 1e300; best_i[k] = -1; }
+  const int N = wall_flux.n;
+  const double dmax2 = max_dist * max_dist;
+  for (int i = 0; i < N; i++) {
+    const double dr = wall_flux.r[i] - R;
+    const double dz = wall_flux.z[i] - Z;
+    const double d2 = dr*dr + dz*dz;
+    if (d2 > dmax2) continue;
+    if (d2 >= best_d[knn-1]) continue;
+    int p = knn - 1;
+    while (p > 0 && d2 < best_d[p-1]) {
+      best_d[p] = best_d[p-1];
+      best_i[p] = best_i[p-1];
+      p--;
+    }
+    best_d[p] = d2;
+    best_i[p] = i;
+  }
+  double wsum = 0.0, gsum = 0.0;
+  for (int k = 0; k < knn; k++) {
+    if (best_i[k] < 0) break;
+    const double d = std::sqrt(best_d[k]);
+    const double w = (d < 1.0e-12) ? 1.0e12 : 1.0 / d;
+    wsum += w;
+    gsum += w * wall_flux.gamma_i[
+        static_cast<size_t>(ispec) * wall_flux.n + best_i[k]];
+  }
+  return (wsum > 0.0) ? (gsum / wsum) : 0.0;
+}
+
+bool FixBackground::query_wall_te_ti_at_point(double R, double Z,
+                                               double &te, double &ti,
+                                               double max_dist) const
+{
+  if (wall_flux.empty()) return false;
+  if (wall_flux.te.empty() || wall_flux.ti.empty()) return false;
+  // single nearest neighbor for Te/Ti — they're already smooth across
+  // the source-side wall path, no need to interpolate.
+  int ibest = -1;
+  double dbest2 = max_dist * max_dist;
+  const int N = wall_flux.n;
+  for (int i = 0; i < N; i++) {
+    const double dr = wall_flux.r[i] - R;
+    const double dz = wall_flux.z[i] - Z;
+    const double d2 = dr*dr + dz*dz;
+    if (d2 < dbest2) { dbest2 = d2; ibest = i; }
+  }
+  if (ibest < 0) return false;
+  te = wall_flux.te[ibest];
+  ti = wall_flux.ti[ibest];
+  return true;
 }
 
 /* ---------------------------------------------------------------------- */

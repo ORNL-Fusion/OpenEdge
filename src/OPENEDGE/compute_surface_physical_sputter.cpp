@@ -195,6 +195,12 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       mass_amu = atof(arg[iarg+1]);
       if (mass_amu < 0.0) error->all(FLERR,"mass_amu must be >= 0");
       iarg += 2;
+    } else if (strcmp(arg[iarg],"wall_flux_cutoff") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"wall_flux_cutoff needs value [m]");
+      wall_flux_cutoff = atof(arg[iarg+1]);
+      if (wall_flux_cutoff <= 0.0)
+        error->all(FLERR,"wall_flux_cutoff must be > 0");
+      iarg += 2;
     } else if (strcmp(arg[iarg],"nflux_species") == 0) {
       if (iarg+1 >= narg) error->all(FLERR,"nflux_species needs slot or all");
       add_slot_list(NFLUX_SPECIES,arg[iarg+1],0);
@@ -496,6 +502,17 @@ void ComputeSurfacePhysicalSputter::load_plasma_from_fix(const FixBackground *pd
   mesh_ions_dens = pd->mesh_ions_dens;
   mesh_ions_temp = pd->mesh_ions_temp;
   mesh_ions_upar = pd->mesh_ions_upar;
+  // Copy /wall_flux/ scatter (empty if plasma.h5 didn't have it).
+  wall_flux_n     = pd->wall_flux.n;
+  wall_flux_nspec = pd->wall_flux.nspec;
+  wall_flux_r     = pd->wall_flux.r;
+  wall_flux_z     = pd->wall_flux.z;
+  wall_flux_te    = pd->wall_flux.te;
+  wall_flux_ti    = pd->wall_flux.ti;
+  wall_flux_gamma_i = pd->wall_flux.gamma_i;
+  wall_flux_b_r   = pd->wall_flux.b_r;
+  wall_flux_b_z   = pd->wall_flux.b_z;
+  wall_flux_b_t   = pd->wall_flux.b_t;
   // Per-triangle B-field from mesh-native plasma.h5 (mesh/vtx_b*
   // averaged to triangle centers by fix background). When present,
   // this takes precedence over the legacy top-level br/bz/bt arrays
@@ -1454,6 +1471,48 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
       bt_loc = bt.empty() ? 0.0 : interp2D(bt, r, z);
       bz_loc = interp2D(bz, r, z);
     }
+    // Prefer the smooth /wall_flux/ B-field (IDW K=3 over the same
+    // source samples used for gamma and Te/Ti) when available. Otherwise
+    // use the per-triangle B (vertex-averaged in fix background) which
+    // can have cell-to-cell jitter that propagates into Y(E,theta) near
+    // the sputter threshold.
+    if (wall_flux_n > 0 && !wall_flux_b_r.empty() && !wall_flux_b_z.empty()) {
+      constexpr int KNN = 3;
+      double dbest2[KNN]; int ibest[KNN];
+      for (int k = 0; k < KNN; k++) { dbest2[k] = 1e300; ibest[k] = -1; }
+      const double dmax2 = wall_flux_cutoff * wall_flux_cutoff;
+      for (int i = 0; i < wall_flux_n; i++) {
+        const double dr = wall_flux_r[i] - r;
+        const double dz = wall_flux_z[i] - z;
+        const double d2 = dr*dr + dz*dz;
+        if (d2 > dmax2) continue;
+        if (d2 >= dbest2[KNN-1]) continue;
+        int p = KNN - 1;
+        while (p > 0 && d2 < dbest2[p-1]) {
+          dbest2[p] = dbest2[p-1];
+          ibest[p]  = ibest[p-1];
+          p--;
+        }
+        dbest2[p] = d2;
+        ibest[p]  = i;
+      }
+      double wsum = 0.0, br_sum = 0.0, bz_sum = 0.0, bt_sum = 0.0;
+      const bool have_bt = !wall_flux_b_t.empty();
+      for (int k = 0; k < KNN; k++) {
+        if (ibest[k] < 0) break;
+        const double d = std::sqrt(dbest2[k]);
+        const double w = (d < 1.0e-12) ? 1.0e12 : 1.0 / d;
+        wsum += w;
+        br_sum += w * wall_flux_b_r[ibest[k]];
+        bz_sum += w * wall_flux_b_z[ibest[k]];
+        if (have_bt) bt_sum += w * wall_flux_b_t[ibest[k]];
+      }
+      if (wsum > 0.0) {
+        br_loc = br_sum / wsum;
+        bz_loc = bz_sum / wsum;
+        if (have_bt) bt_loc = bt_sum / wsum;
+      }
+    }
     const double bmag = std::sqrt(br_loc*br_loc + bt_loc*bt_loc + bz_loc*bz_loc);
 
     // B-field incidence angle on wall surface.
@@ -1495,8 +1554,60 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
     std::fill(sput_flux.begin(), sput_flux.end(), 0.0);
 
     double sput_total = 0.0;
-    const double te_loc = (mesh_cell >= 0) ? mesh_te[mesh_cell]
-                                           : interp2D(temp_e, r, z);
+
+    // Te, Ti at the wall: prefer the smooth /wall_flux/ scatter (single
+    // nearest neighbor within wall_flux_cutoff) when present. Otherwise
+    // fall back to the wall-adjacent volume cell. Smooth Te/Ti are
+    // critical for the yield path because Y(E,theta) is steep near the
+    // sputter threshold; jaggedness in mesh_te[mesh_cell] (cell-to-cell
+    // jumps) amplifies into Gamma_erode through Eckstein.
+    double te_loc = 0.0, ti_bulk = 0.0;
+    bool wf_te_ti_ok = false;
+    if (wall_flux_n > 0 && !wall_flux_te.empty() && !wall_flux_ti.empty()) {
+      // K=3 IDW (same kernel used for gamma_i above). Single-NN gives
+      // stair-step plateaus when SPARTA wall is finer than the
+      // wall_flux source — that pumps right back into Y(E,theta)
+      // jaggedness near the sputter threshold.
+      constexpr int KNN = 3;
+      double dbest2[KNN]; int ibest[KNN];
+      for (int k = 0; k < KNN; k++) { dbest2[k] = 1e300; ibest[k] = -1; }
+      const double dmax2 = wall_flux_cutoff * wall_flux_cutoff;
+      for (int i = 0; i < wall_flux_n; i++) {
+        const double dr = wall_flux_r[i] - r;
+        const double dz = wall_flux_z[i] - z;
+        const double d2 = dr*dr + dz*dz;
+        if (d2 > dmax2) continue;
+        if (d2 >= dbest2[KNN-1]) continue;
+        int p = KNN - 1;
+        while (p > 0 && d2 < dbest2[p-1]) {
+          dbest2[p] = dbest2[p-1];
+          ibest[p]  = ibest[p-1];
+          p--;
+        }
+        dbest2[p] = d2;
+        ibest[p]  = i;
+      }
+      double wsum = 0.0, te_sum = 0.0, ti_sum = 0.0;
+      for (int k = 0; k < KNN; k++) {
+        if (ibest[k] < 0) break;
+        const double d = std::sqrt(dbest2[k]);
+        const double w = (d < 1.0e-12) ? 1.0e12 : 1.0 / d;
+        wsum += w;
+        te_sum += w * wall_flux_te[ibest[k]];
+        ti_sum += w * wall_flux_ti[ibest[k]];
+      }
+      if (wsum > 0.0) {
+        te_loc  = te_sum / wsum;
+        ti_bulk = ti_sum / wsum;
+        wf_te_ti_ok = true;
+      }
+    }
+    if (!wf_te_ti_ok) {
+      te_loc = (mesh_cell >= 0) ? mesh_te[mesh_cell]
+                                : interp2D(temp_e, r, z);
+      // ti_bulk remains 0.0 here; per-species ti from species_plasma()
+      // will be used in the loop below in the legacy path.
+    }
 
     for (int s = 0; s < ns; s++) {
       double ni, ti;
@@ -1506,17 +1617,67 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
       const int z_inc = (s >= 0 && s < static_cast<int>(ion_charge_state_z.size())) ?
         std::max(1,ion_charge_state_z[s]) : 1;
       const double te_eV = (std::isfinite(te_loc) && te_loc > 0.0) ? te_loc : 0.0;
-      const double ti_eV = (std::isfinite(ti) && ti > 0.0) ? ti : 0.0;
+      // Prefer the bulk Ti from /wall_flux/ over the per-species ti
+      // from the volume cell when wall_flux Te/Ti are loaded. Bulk Ti
+      // is smoother (one nearest-source value per segment vs. cell-to-
+      // cell jumps from mesh_ions_temp). Per-charge-state Ti differences
+      // at the wall are small compared to the threshold-region steepness
+      // of Y(E,theta), so the smoothness gain dominates the accuracy hit.
+      const double ti_for_E = wf_te_ti_ok ? ti_bulk : ti;
+      const double ti_eV = (std::isfinite(ti_for_E) && ti_for_E > 0.0) ? ti_for_E : 0.0;
 
-      // Isothermal ion sound speed: cs = sqrt((Te + Ti) / mi)
-      // Standard Bohm-criterion form; Stangeby 2000, ch. 2.
-      const double cs_arg = (te_eV + ti_eV) * QE / (mass_amu * AMU);
-      const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
-
-      // Bohm flux: Gamma = n_i * c_s * sin(alpha_B), with n_i at the
-      // sheath edge (SOLPS/B2.5 convention: n_t = n_u/2 is already applied
-      // upstream, so no extra 1/2 here).
-      const double g = ni * cs * sin_alpha;
+      // Per-species wall-face flux. When /wall_flux/ is present in
+      // plasma.h5, query the scatter at the segment centroid (R, Z)
+      // via inverse-distance weighting over the K=3 nearest source
+      // points within wall_flux_cutoff. Otherwise fall back to the
+      // Bohm reconstruction Gamma = n_i * c_s * sin(alpha_B) at the
+      // wall-adjacent volume cell.
+      double g = 0.0;
+      if (wall_flux_n > 0 && s < wall_flux_nspec) {
+        // K=3 IDW; sources are scattered along the source-side wall.
+        constexpr int KNN = 3;
+        double dbest2[KNN]; int ibest[KNN];
+        for (int k = 0; k < KNN; k++) { dbest2[k] = 1e300; ibest[k] = -1; }
+        const double dmax2 = wall_flux_cutoff * wall_flux_cutoff;
+        for (int i = 0; i < wall_flux_n; i++) {
+          const double dr = wall_flux_r[i] - r;
+          const double dz = wall_flux_z[i] - z;
+          const double d2 = dr*dr + dz*dz;
+          if (d2 > dmax2) continue;
+          if (d2 >= dbest2[KNN-1]) continue;
+          int p = KNN - 1;
+          while (p > 0 && d2 < dbest2[p-1]) {
+            dbest2[p] = dbest2[p-1];
+            ibest[p]  = ibest[p-1];
+            p--;
+          }
+          dbest2[p] = d2;
+          ibest[p]  = i;
+        }
+        double wsum = 0.0, gsum = 0.0;
+        for (int k = 0; k < KNN; k++) {
+          if (ibest[k] < 0) break;
+          const double d = std::sqrt(dbest2[k]);
+          const double w = (d < 1.0e-12) ? 1.0e12 : 1.0 / d;
+          wsum += w;
+          gsum += w * wall_flux_gamma_i[
+              static_cast<size_t>(s) * wall_flux_n + ibest[k]];
+        }
+        if (wsum > 0.0) {
+          const double gw = gsum / wsum;
+          g = (gw > 0.0) ? gw : 0.0;     // outflow only feeds sputter
+        } else {
+          // No source within cutoff: fall back to Bohm if we have it.
+          const double cs_arg = (te_eV + ti_eV) * QE / (mass_amu * AMU);
+          const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
+          g = ni * cs * sin_alpha;
+        }
+      } else {
+        // Legacy Bohm: cs = sqrt((Te + Ti) / mi); Stangeby ch. 2.
+        const double cs_arg = (te_eV + ti_eV) * QE / (mass_amu * AMU);
+        const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
+        g = ni * cs * sin_alpha;
+      }
       gamma_n[s] = g;
 
       // alpha_B = grazing angle from surface plane (diagnostic output).

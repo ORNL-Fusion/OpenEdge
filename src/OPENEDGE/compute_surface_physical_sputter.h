@@ -161,6 +161,18 @@ class ComputeSurfacePhysicalSputter : public Compute {
   std::vector<double> mesh_ne, mesh_te, mesh_ti, mesh_ni, mesh_upar;
   int mesh_nion;
   std::vector<double> mesh_ions_dens, mesh_ions_temp, mesh_ions_upar;
+  // Wall-flux scatter copied from fix background. Empty if absent.
+  // Layout (wall_flux_nspec, wall_flux_n) row-major for gamma_i.
+  int wall_flux_n = 0;
+  int wall_flux_nspec = 0;
+  std::vector<double> wall_flux_r, wall_flux_z;
+  std::vector<double> wall_flux_te, wall_flux_ti;
+  std::vector<double> wall_flux_gamma_i;
+  std::vector<double> wall_flux_b_r, wall_flux_b_z, wall_flux_b_t;
+  // Cutoff distance [m] for IDW point-query of wall_flux. SPARTA
+  // segments farther than this from any source point fall back to the
+  // Bohm reconstruction. Default 5 cm.
+  double wall_flux_cutoff = 0.05;
   // Per-triangle B-field from fix background (mesh-only plasma.h5 path)
   std::vector<double> mesh_tri_br, mesh_tri_bz, mesh_tri_bt;
   // bounding boxes for triangle search acceleration

@@ -136,6 +136,45 @@ class FixBackground : public Fix {
                                               // toroidally integrated. Zero
                                               // for non-boundary cells.
 
+  // ---- Wall-flux scatter (plasma-source agnostic) ----
+  // /wall_flux/* group in plasma.h5: per-species ion flux into wall
+  // sampled at scattered (R, Z) points along the source-side wall.
+  // Used by compute surface/* etc. via query_wall_flux_at_point()
+  // below, so plasma.h5 stays decoupled from the SPARTA wall.surf
+  // geometry. See tools/converters/_wall_flux.py for the schema.
+  struct WallFluxData {
+    int n = 0;
+    int nspec = 0;
+    std::vector<double> r, z;            // (N,)
+    std::vector<double> s_arc;           // (N,) optional
+    std::vector<double> gamma_i;         // (nspec, N) row-major
+    std::vector<double> te, ti;          // (N,) optional
+    std::vector<double> area;            // (N,) optional
+    std::vector<double> normal_r;        // (N,) optional
+    std::vector<double> normal_z;        // (N,) optional
+    std::vector<double> b_r, b_z, b_t;   // (N,) optional, T
+    bool empty() const { return n == 0; }
+  };
+  WallFluxData wall_flux;
+
+  bool has_wall_flux() const { return !wall_flux.empty(); }
+  int wall_flux_nspec() const { return wall_flux.nspec; }
+
+  // Per-species ion flux density (m^-2 s^-1, positive = into wall) at
+  // (R, Z), inverse-distance-weighted over the K nearest source points
+  // within max_dist. Returns 0 if no source within cutoff or wall_flux
+  // not loaded.
+  double query_wall_flux_at_point(double R, double Z, int ispec,
+                                  double max_dist = 0.05,
+                                  int knn = 3) const;
+
+  // Bulk Te, Ti (eV) at the wall sample nearest (R, Z). Returns false
+  // if /wall_flux/te or /ti is absent or no source within max_dist.
+  bool query_wall_te_ti_at_point(double R, double Z,
+                                 double &te, double &ti,
+                                 double max_dist = 0.05) const;
+
+
   // ---- SPARTA wall-segment -> B2 cell map ----
   // mesh/wall_surf_cell[isurf] = flat cell index of the B2 cell whose
   // outer face is wall_b2.surf segment isurf. Enables direct (not
