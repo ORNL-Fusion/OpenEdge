@@ -127,3 +127,5 @@ database/iead/IEAD_REGENERATE.md
 
 # internal
 examples/test_mpex_45deg/
+
+examples/test_solps_coupling/

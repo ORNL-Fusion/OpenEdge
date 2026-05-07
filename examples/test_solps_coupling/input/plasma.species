@@ -1,9 +1,0 @@
-# Atomic Li species used by the wall-sputter source.
-# Distinct from droplet.species, which carries the macroscopic 2.5 mm Li
-# droplets. Sputtered atoms are point particles with mass = m(Li atom).
-#
-# format: ID Molwt(amu) Molmass(kg) RotDOF RotRel VibDOF VibRel VibTemp(K) speciesWt charge
-Li      6.94    1.15225e-26     0       0.0     0       0.0     0.0     1.0     0.0
-Li+     6.94    1.15225e-26     0       0.0     0       0.0     0.0     1.0     1.0
-Li2+    6.94    1.15225e-26     0       0.0     0       0.0     0.0     1.0     2.0
-Li3+    6.94    1.15225e-26     0       0.0     0       0.0     0.0     1.0     3.0
