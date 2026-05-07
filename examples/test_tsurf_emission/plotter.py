@@ -89,7 +89,7 @@ def plot_tsurf_profile(s_mid, T_strip, ax=None):
     ax.plot(s_mid, T_strip, "-", lw=2, color="firebrick")
     ax.set_xlabel(r"arc length $s$ (m)")
     ax.set_ylabel(r"$T_\mathrm{surf}$ ($^\circ$C)")
-    ax.set_title("strip-code surface temperature along outer divertor")
+    ax.set_title("LM MHD model surface temperature along outer divertor")
     ax.grid(True, ls=":", alpha=0.5)
     return ax
 
