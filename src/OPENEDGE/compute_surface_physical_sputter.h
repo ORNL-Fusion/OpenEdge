@@ -80,6 +80,11 @@ class ComputeSurfacePhysicalSputter : public Compute {
   int api_new;                                 // 1 when target/projectiles used
   std::string target_element;                  // e.g. "W"
   std::vector<std::string> projectile_elements;// e.g. {"D","O"}
+  // Override Es (target surface binding energy) at runtime; Eth is rescaled
+  // proportionally per pair using the table Eth/Es ratio. <=0 means use
+  // Eckstein table values verbatim. Allain 2003 measured U_s = 1.0-2.5 eV
+  // on liquid Li depending on chemistry/temperature.
+  double target_us = 0.0;
   std::vector<int> slot_to_table;              // per plasma-ion slot (0-based),
                                                // index into per_proj_eck_*
                                                // or -1 if that slot is not a

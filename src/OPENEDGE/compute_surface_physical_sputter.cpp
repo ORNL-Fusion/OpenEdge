@@ -201,6 +201,14 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       if (wall_flux_cutoff <= 0.0)
         error->all(FLERR,"wall_flux_cutoff must be > 0");
       iarg += 2;
+    } else if (strcmp(arg[iarg],"us") == 0) {
+      // Override target surface binding energy (eV). Eth per pair is
+      // rescaled as (Eth_table / Es_table) * us so threshold ratios are
+      // preserved. Allain 2003: U_s ~ 1 eV (clean Li) to 2.5 eV (passivated).
+      if (iarg+1 >= narg) error->all(FLERR,"us needs value [eV]");
+      target_us = atof(arg[iarg+1]);
+      if (target_us <= 0.0) error->all(FLERR,"us must be > 0");
+      iarg += 2;
     } else if (strcmp(arg[iarg],"nflux_species") == 0) {
       if (iarg+1 >= narg) error->all(FLERR,"nflux_species needs slot or all");
       add_slot_list(NFLUX_SPECIES,arg[iarg+1],0);
@@ -362,17 +370,36 @@ ComputeSurfacePhysicalSputter::~ComputeSurfacePhysicalSputter()
 
 int ComputeSurfacePhysicalSputter::peek_nspec_from_plasma() const
 {
+  // Resolve at parse time. fix background's nion is 0 until init() loads
+  // plasma.h5, so fall back on opening the H5 directly through the fix's
+  // plasma_path. Lets `sputter_flux_species all` expand correctly even
+  // when the compute is parsed before the fix initialises.
+  std::string h5_path;
   if (!background_fix_id.empty()) {
     int ifix = modify->find_fix(background_fix_id.c_str());
     if (ifix >= 0) {
       auto *pd = dynamic_cast<FixBackground *>(modify->fix[ifix]);
-      if (pd) return (pd->nion > 0) ? pd->nion : 1;
+      if (pd) {
+        if (pd->nion > 0) return pd->nion;
+        if (!pd->plasma_path.empty()) h5_path = pd->plasma_path;
+      }
     }
-    return 1;
+  } else {
+    h5_path = plasma_path;
   }
+  if (h5_path.empty()) return 1;
 
   try {
-    H5::H5File file(plasma_path, H5F_ACC_RDONLY);
+    H5::H5File file(h5_path, H5F_ACC_RDONLY);
+    // Newer schema: /ion_species/names is shape (nspec,)
+    if (H5Lexists(file.getId(), "ion_species/names", H5P_DEFAULT) > 0) {
+      H5::DataSet ds = file.openDataSet("ion_species/names");
+      H5::DataSpace sp = ds.getSpace();
+      hsize_t dim = 0;
+      sp.getSimpleExtentDims(&dim);
+      if (dim > 0) return static_cast<int>(dim);
+    }
+    // Legacy schema: /ions/dens is shape (nspec, nr, nz)
     if (H5Lexists(file.getId(), "ions/dens", H5P_DEFAULT) > 0) {
       H5::DataSet ds = file.openDataSet("ions/dens");
       H5::DataSpace sp = ds.getSpace();
@@ -593,6 +620,26 @@ void ComputeSurfacePhysicalSputter::resolve_projectile_tables(const FixBackgroun
         "compute surface/physical/sputter: missing Eckstein entries: " + missing +
         " (add to src/eckstein_sputter_data.h or drop from projectiles list)";
     error->all(FLERR, msg.c_str());
+  }
+
+  // Optional Us override (Allain 2003): preserve Eckstein Eth/Es ratio per
+  // pair, scale to user-supplied U_s. Lets a single deck knob match Allain's
+  // measured Li surface-binding range without editing the data table.
+  if (target_us > 0.0) {
+    for (size_t i = 0; i < N; i++) {
+      if (per_proj_Es[i] > 0.0) {
+        per_proj_Eth[i] = (per_proj_Eth[i] / per_proj_Es[i]) * target_us;
+        per_proj_Es[i]  = target_us;
+      }
+    }
+    if (comm->me == 0) {
+      char msg[256];
+      snprintf(msg, sizeof(msg),
+               "  compute surface/physical/sputter: Us override = %.3f eV "
+               "(Allain scaling); Eth rescaled per pair\n", target_us);
+      if (screen)  fputs(msg, screen);
+      if (logfile) fputs(msg, logfile);
+    }
   }
 
   // Match plasma ion slots to projectile tables via element symbol.
