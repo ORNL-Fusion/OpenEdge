@@ -69,7 +69,6 @@ stats_style step np
 # stop emitting new droplets after the warm-up
 unfix  fdrop
 
-# halt the run once every droplet has evaporated (np tracks total particle count)
 variable npart equal np
 fix halt_drops halt 100 v_npart <= 0
 
