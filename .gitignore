@@ -68,6 +68,7 @@ src/STUBS/*.a
 
 # Large test data (downloaded via ./download_data.sh)
 examples/*/input/*.h5
+!examples/test_tsurf_emission/input/plasma.h5
 examples/*/input/*.equ
 examples/*/input/*.stl
 examples/*/input/data/*.h5
