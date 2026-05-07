@@ -121,3 +121,6 @@ examples/test_iead/WarpX/
 
 # Local Claude Code memory / context file (kept untracked)
 CLAUDE.md
+
+# Local planning / regeneration notes (kept on disk, not pushed)
+database/iead/IEAD_REGENERATE.md
