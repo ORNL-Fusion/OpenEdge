@@ -1817,8 +1817,12 @@ def convert_solps_to_openedge(
         # (converter writes only the equilibrium psi/btf/rtf, not a
         # per-cell br). Pass zeros for the br panel — diagnostic plots
         # should be rebuilt to read from /equilibrium/ directly.
-        _save_plots(
+        plot_plasma_h5_b2(
             cell_polys,
+            rc.reshape(ncell_flat, order="F"),
+            zc.reshape(ncell_flat, order="F"),
+            nx,
+            ny,
             ne,
             te_eV,
             main_dens_raw,
@@ -1828,78 +1832,104 @@ def convert_solps_to_openedge(
             plot_prefix or Path("convert_solps_plasma"),
         )
 
-def _save_plots(cell_polys, ne, te, ni, ti, upar, br, prefix):
-    import matplotlib.pyplot as plt
-    from matplotlib import colors
+def _best_ordered_b2_polys(polys, r_center, z_center, nx, ny):
+    """Choose polygon ordering that best matches stored B2 cell centers."""
+    polys = np.asarray(polys, dtype=float)
+    centers = np.column_stack([np.asarray(r_center, dtype=float), np.asarray(z_center, dtype=float)])
+
+    candidates = [polys]
+    ncell = (nx + 2) * (ny + 2)
+    if polys.shape[0] == ncell:
+        candidates.append(polys.reshape(nx + 2, ny + 2, 4, 2, order='C').reshape(-1, 4, 2, order='F'))
+        candidates.append(polys.reshape(nx + 2, ny + 2, 4, 2, order='F').reshape(-1, 4, 2, order='C'))
+
+    best = candidates[0]
+    best_score = np.inf
+    for cand in candidates:
+        cent = np.nanmean(cand, axis=1)
+        score = float(np.nanmedian(np.hypot(cent[:, 0] - centers[:, 0], cent[:, 1] - centers[:, 1])))
+        if score < best_score:
+            best = cand
+            best_score = score
+    return best
+
+
+def _poly_panel(ax, polys, values, title, cmap, *, log=False, symmetric=False):
+    from matplotlib.colors import LogNorm, Normalize, TwoSlopeNorm
     from matplotlib.collections import PolyCollection
 
-    valid_poly = np.all(np.isfinite(cell_polys), axis=(1, 2))
+    vals = np.asarray(values, dtype=float).reshape(-1)
+    valid_poly = np.all(np.isfinite(polys), axis=(1, 2))
+    vals = vals[valid_poly]
+    poly_use = polys[valid_poly]
 
-    def _flatten(arr):
-        vals = np.asarray(arr, dtype=np.float64).reshape(-1)
-        return vals[valid_poly]
-
-    polys = cell_polys[valid_poly]
-
-    def _add_poly_panel(ax, values, title, cmap, *, log10=False, symmetric=False):
-        vals = _flatten(values)
-        mask = np.isfinite(vals)
-        if log10:
-            mask &= vals > 0.0
-            vals = np.where(mask, np.log10(vals), np.nan)
-        else:
-            vals = np.where(mask, vals, np.nan)
-
+    if log:
+        vals = np.where(vals > 0.0, vals, np.nan)
         finite = vals[np.isfinite(vals)]
         if finite.size == 0:
-            finite = np.array([0.0], dtype=np.float64)
+            finite = np.array([1.0])
+        vmin = float(np.nanpercentile(finite, 1))
+        vmax = float(np.nanpercentile(finite, 99))
+        if not np.isfinite(vmin) or vmin <= 0.0:
+            vmin = max(float(np.nanmin(finite)), 1e-30)
+        if not np.isfinite(vmax) or vmax <= vmin:
+            vmax = vmin * 10.0
+        norm = LogNorm(vmin=vmin, vmax=vmax)
+    elif symmetric:
+        finite = vals[np.isfinite(vals)]
+        if finite.size == 0:
+            finite = np.array([0.0])
+        vlim = float(np.nanpercentile(np.abs(finite), 99))
+        if not np.isfinite(vlim) or vlim <= 0.0:
+            vlim = 1.0
+        norm = TwoSlopeNorm(vmin=-vlim, vcenter=0.0, vmax=vlim)
+    else:
+        finite = vals[np.isfinite(vals)]
+        if finite.size == 0:
+            finite = np.array([0.0])
+        vmin = float(np.nanpercentile(finite, 1))
+        vmax = float(np.nanpercentile(finite, 99))
+        if not np.isfinite(vmin):
+            vmin = 0.0
+        if not np.isfinite(vmax) or vmax <= vmin:
+            vmax = vmin + 1.0
+        norm = Normalize(vmin=vmin, vmax=vmax)
 
-        if symmetric:
-            vmax = float(np.nanmax(np.abs(finite)))
-            if not np.isfinite(vmax) or vmax <= 0.0:
-                vmax = 1.0
-            norm = colors.TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
-        else:
-            vmin = float(np.nanmin(finite))
-            vmax = float(np.nanmax(finite))
-            if not np.isfinite(vmin):
-                vmin = 0.0
-            if not np.isfinite(vmax) or vmax <= vmin:
-                vmax = vmin + 1.0
-            norm = colors.Normalize(vmin=vmin, vmax=vmax)
+    coll = PolyCollection(poly_use, array=vals, cmap=cmap, norm=norm,
+                          edgecolors='none', linewidths=0.0, antialiased=False)
+    ax.add_collection(coll)
+    ax.autoscale_view()
+    ax.set_aspect('equal')
+    ax.set_title(title)
+    ax.set_xlabel(r'$R$ (m)')
+    ax.set_ylabel(r'$Z$ (m)')
+    return coll
 
-        coll = PolyCollection(
-            polys,
-            array=vals,
-            cmap=cmap,
-            norm=norm,
-            edgecolors="none",
-            linewidths=0.0,
-            antialiased=False,
-        )
-        ax.add_collection(coll)
-        ax.autoscale_view()
-        ax.set_aspect("equal", adjustable="box")
-        ax.set_title(title)
-        ax.set_xlabel("R [m]")
-        ax.set_ylabel("Z [m]")
-        return coll
+
+def plot_plasma_h5_b2(cell_polys, r_center, z_center, nx, ny, ne, te, ni, ti, upar, br, prefix):
+    import matplotlib.pyplot as plt
+
+    polys = _best_ordered_b2_polys(cell_polys, r_center, z_center, nx, ny)
 
     panels = [
-        (ne, "log10(ne) [m^-3]", "inferno", True, False),
-        (te, "Te [eV]", "magma", False, False),
-        (ni, "log10(ni) [m^-3]", "inferno", True, False),
-        (ti, "Ti [eV]", "magma", False, False),
-        (upar, "u_par [m/s]", "RdBu_r", False, True),
-        (br, "Br [T]", "RdBu_r", False, True),
+        ('ne', ne, True,  r'$n_e$ (m$^{-3}$)', 'viridis', False),
+        ('Te', te, True,  r'$T_e$ (eV)', 'inferno', False),
+        ('ni', ni, True,  r'$n_i$ (m$^{-3}$)', 'viridis', False),
+        ('Ti', ti, True,  r'$T_i$ (eV)', 'inferno', False),
+        ('upar', upar, False, r'$u_\parallel$ (m s$^{-1}$)', 'RdBu_r', True),
+        ('Br', br, False, r'$B_r$ (T)', 'RdBu_r', True),
     ]
-    fig, axes = plt.subplots(2, 3, figsize=(14, 8), constrained_layout=True)
-    for ax, (arr, title, cmap, log10, symmetric) in zip(axes.flat, panels):
-        coll = _add_poly_panel(ax, arr, title, cmap, log10=log10, symmetric=symmetric)
-        fig.colorbar(coll, ax=ax, shrink=0.9)
-    fig.savefig(f"{prefix}_plasma.png", dpi=180)
+
+    fig, axes = plt.subplots(2, 3, figsize=(16, 11))
+    for ax, (_, val, log, label, cmap, symmetric) in zip(axes.flat, panels):
+        coll = _poly_panel(ax, polys, val, label, cmap, log=log, symmetric=symmetric)
+        cb = fig.colorbar(coll, ax=ax, shrink=0.85, pad=0.02)
+        cb.ax.tick_params(labelsize=12)
+
+    plt.tight_layout()
+    fig.savefig(f"{prefix}_plasma.png", dpi=180, bbox_inches='tight')
     plt.close(fig)
-    print(f"Wrote plot: {prefix}_plasma.png")
+    print(f"Wrote B2 plot: {prefix}_plasma.png")
 
 
 # ==========================================================================
@@ -1920,7 +1950,8 @@ def _build_parser():
     p.add_argument("--zmax", type=float, default=None)
     p.add_argument("--gfile", type=Path, default=None, help="GEQDSK file for B-field (preferred)")
     p.add_argument("--equ-file", type=Path, default=None, help=".equ file for B-field")
-    p.add_argument("--plot", action="store_true")
+    p.add_argument("--plot", action="store_true",
+                   help="Write the default native-B2 diagnostic plot (plot_plasma_h5_b2 style).")
     p.add_argument("--plot-prefix", type=Path, default=None)
     p.add_argument("--wall-out", type=Path, default=None, help="Output SPARTA wall file from mesh.extra")
     p.add_argument("--mesh-extra", type=Path, default=None)

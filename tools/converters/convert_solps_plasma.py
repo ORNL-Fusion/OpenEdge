@@ -8,14 +8,11 @@ Reads SOLPS binary text files (b2fgmtry, b2fstate) directly using the
 Current EIRENE-mesh mapping model:
   1. Native EIRENE triangles with a valid fort.35 (ix,iy) host-cell map
      receive a direct copy of that B2.5 cell's plasma data.
-  2. Non-native EIRENE triangles are treated as vacuum candidates.
-  3. The converter identifies the wall-connected vacuum component on the
-     existing EIRENE triangulation and fills that component from adjacent
-     native plasma triangles by nearest-centroid source assignment.
+  2. Non-native EIRENE triangles are left unmapped.
 
-This is more permissive than the strict EIRENE interface behavior, where
-triangles outside the valid fort.35 host-cell map are typically left on a
-vacuum floor rather than being filled from neighboring plasma cells.
+This follows the stricter B2.5/EIRENE interface behavior: triangles
+outside the valid fort.35 host-cell map remain on a vacuum floor and are
+not filled from neighboring plasma cells.
 
 Outputs:
   plasma.h5  - regular (R,Z) grid with all plasma fields + multi-ion
@@ -48,8 +45,10 @@ from scipy.interpolate import griddata
 # and get back the per-B2-cell plasma SOLPS writes out for EIRENE.
 try:
     from read_fort31 import read_fort31, Fort31Data
+    from _wall_flux import build_wall_flux_solps, write_wall_flux_h5
 except ImportError:
     from .read_fort31 import read_fort31, Fort31Data  # type: ignore
+    from ._wall_flux import build_wall_flux_solps, write_wall_flux_h5  # type: ignore
 
 
 # ==========================================================================
@@ -171,7 +170,7 @@ def _cell_polygons_from_corners(crx: np.ndarray, cry: np.ndarray,
     cry4 = cry.reshape(nx + 2, ny + 2, 4, order="F")
     corner_order = [0, 1, 3, 2]
     polys = np.stack((crx4[:, :, corner_order], cry4[:, :, corner_order]), axis=-1)
-    return polys.reshape(-1, 4, 2)
+    return polys.reshape(-1, 4, 2, order="F")
 
 
 def _regular_grid(rc, zc, nr, nz, rmin, rmax, zmin, zmax):
@@ -787,6 +786,7 @@ def convert_solps_to_openedge(
     plot: bool = False,
     plot_prefix: Path | None = None,
     wall_out: Path | None = None,
+    wall_in: Path | None = None,
     mesh_extra: Path | None = None,
     b2fgmtry_path: Path | None = None,
     b2fstate_path: Path | None = None,
@@ -988,8 +988,10 @@ def convert_solps_to_openedge(
         except Exception as e:
             print(f"WARNING: could not parse mesh.extra wall polygon for gap logic: {e}")
 
-    # Boundary edges geometrically close to the physical wall define the
-    # wall-connected vacuum component we are allowed to fill.
+    # Boundary edges geometrically close to the physical wall are still
+    # identified for diagnostics and downstream wall bookkeeping, but
+    # non-native EIRENE triangles are not back-filled with neighboring
+    # B2.5 plasma data.
     edge_count = {}
     edge_tri = {}
     tri_neighbors = [[] for _ in range(ntri_eirene)]
@@ -1048,47 +1050,10 @@ def convert_solps_to_openedge(
     print(f"EIRENE wall-facing boundary edges: {len(wall_boundary_edges)} "
           f"across {len(wall_boundary_loops)} loop(s)")
 
-    if (~has_cell_native).any() and len(wall_boundary_edges) > 0:
-        from collections import deque
-        from scipy.spatial import cKDTree
-
-        vacuum_seed = np.zeros(ntri_eirene, dtype=bool)
-        for e in wall_boundary_edges:
-            t = edge_tri[e]
-            if not has_cell_native[t]:
-                vacuum_seed[t] = True
-
-        fill_mask = np.zeros(ntri_eirene, dtype=bool)
-        q = deque(np.flatnonzero(vacuum_seed).tolist())
-        while q:
-            t = int(q.popleft())
-            if fill_mask[t] or has_cell_native[t]:
-                continue
-            fill_mask[t] = True
-            for nb in tri_neighbors[t]:
-                if not fill_mask[nb] and not has_cell_native[nb]:
-                    q.append(int(nb))
-
-        src_native = np.zeros(ntri_eirene, dtype=bool)
-        for t in np.flatnonzero(fill_mask):
-            for nb in tri_neighbors[int(t)]:
-                if has_cell_native[nb]:
-                    src_native[nb] = True
-        src_idx = np.flatnonzero(src_native)
-        if src_idx.size == 0:
-            src_idx = sheath_src
-
-        if src_idx.size > 0 and fill_mask.any():
-            tree = cKDTree(np.column_stack([centroid_r[src_idx], centroid_z[src_idx]]))
-            dst_idx = np.flatnonzero(fill_mask)
-            _, j = tree.query(np.column_stack([centroid_r[dst_idx], centroid_z[dst_idx]]))
-            mesh_cell_idx[dst_idx] = mesh_cell_idx[src_idx[j]]
-            tri_source_kind[dst_idx] = 2
-            wall_gap_mask[dst_idx] = True
-
-        print(f"Eirene mesh -> B2.5 mapping: {int(fill_mask.sum())} wall-connected "
-              f"vacuum/PFR triangles filled, {int((~has_cell_native & ~fill_mask).sum())} "
-              f"kept at zero plasma")
+    n_vacuum_native = int((~has_cell_native).sum())
+    if n_vacuum_native > 0:
+        print(f"Eirene mesh -> B2.5 mapping: {n_vacuum_native} vacuum/PFR triangles "
+              "kept at zero plasma (no wall-vacuum extrapolation)")
 
     print("Triangle provenance: "
           f"native={int((tri_source_kind == 1).sum())}, "
@@ -1335,8 +1300,17 @@ def convert_solps_to_openedge(
 
     # Legacy path below — keep in case wall_out wasn't passed but an
     # existing wall.surf is already present; we still write the mapping.
-    wall_path_for_map = wall_out if (wall_out and wall_out.exists()) else \
-                        (plasma_out.parent / "wall.surf")
+    # If the user passed --wall-in (a custom SPARTA wall.surf to map
+    # against — typically a strip-of-target test surface that doesn't
+    # match the auto-generated full-vessel wall.surf), skip the auto
+    # paths' mapping and use the user's geometry directly.
+    if wall_in is not None:
+        wall_path_for_map = wall_in
+        mesh_wall_surf_cell = np.array([], dtype=np.int32)
+        mesh_wall_surf_area = np.array([], dtype=np.float64)
+    else:
+        wall_path_for_map = wall_out if (wall_out and wall_out.exists()) else \
+                            (plasma_out.parent / "wall.surf")
     if wall_path_for_map.exists() and mesh_wall_surf_cell.size == 0:
         wall_out = wall_path_for_map   # rebind for the block below
         def _edge_mid(ix_c, iy_c, ca, cb):
@@ -1381,30 +1355,43 @@ def convert_solps_to_openedge(
             seg_rmid = 0.5 * (P[S[:,0]-1, 0] + P[S[:,1]-1, 0])
             seg_zmid = 0.5 * (P[S[:,0]-1, 1] + P[S[:,1]-1, 1])
 
-            # Each B2 boundary face chooses its closest wall segment.
-            # Wall segments accumulate flux by summing the face areas of
-            # every B2 face that picked them. This conserves the total
-            # Bohm-flux budget from the B2 boundary onto the SPARTA wall.
             from scipy.spatial import cKDTree
-            tree = cKDTree(np.column_stack([seg_rmid, seg_zmid]))
-            _, seg_for_face = tree.query(np.column_stack([face_rc, face_zc]))
-
-            # Aggregate face area onto each wall segment, and assign the
-            # DOMINANT cell (largest-area contributor) as the segment's
-            # owner in mesh_wall_surf_cell[i].
             nseg_wall = len(S)
-            seg_dominant_cell = np.full(nseg_wall, -1, dtype=np.int32)
-            seg_dominant_area = np.zeros(nseg_wall, dtype=np.float64)
-            seg_total_area = np.zeros(nseg_wall, dtype=np.float64)
             face_area = mesh_wall_face_area[face_cell]
-            for k in range(len(face_cell)):
-                s = int(seg_for_face[k])
-                c = int(face_cell[k])
-                a = float(face_area[k])
-                seg_total_area[s] += a
-                if a > seg_dominant_area[s]:
-                    seg_dominant_area[s] = a
-                    seg_dominant_cell[s] = c
+            seg_dominant_cell = np.full(nseg_wall, -1, dtype=np.int32)
+            seg_total_area = np.zeros(nseg_wall, dtype=np.float64)
+
+            if wall_in is not None:
+                # User-supplied wall.surf may be a partial strip that
+                # doesn't cover the full B2 boundary. For each segment,
+                # find the NEAREST B2 boundary face (segment->face), so
+                # only the segments themselves get cell assignments and
+                # nothing is forced onto far-away strip points.
+                tree = cKDTree(np.column_stack([face_rc, face_zc]))
+                _, face_for_seg = tree.query(
+                    np.column_stack([seg_rmid, seg_zmid]))
+                for s in range(nseg_wall):
+                    k = int(face_for_seg[s])
+                    seg_dominant_cell[s] = int(face_cell[k])
+                    seg_total_area[s] = float(face_area[k])
+            else:
+                # Default (full wall): each B2 boundary face chooses its
+                # closest wall segment. Segments accumulate face area;
+                # the dominant cell wins. Conserves the total flux
+                # budget when user-wall and B2-boundary cover the same
+                # extent.
+                tree = cKDTree(np.column_stack([seg_rmid, seg_zmid]))
+                _, seg_for_face = tree.query(
+                    np.column_stack([face_rc, face_zc]))
+                seg_dominant_area = np.zeros(nseg_wall, dtype=np.float64)
+                for k in range(len(face_cell)):
+                    s = int(seg_for_face[k])
+                    c = int(face_cell[k])
+                    a = float(face_area[k])
+                    seg_total_area[s] += a
+                    if a > seg_dominant_area[s]:
+                        seg_dominant_area[s] = a
+                        seg_dominant_cell[s] = c
             mesh_wall_surf_cell = seg_dominant_cell
             print(f"wall.surf <- B2 face mapping: {len(face_cell)} B2 faces "
                   f"distributed onto {nseg_wall} wall segments "
@@ -1581,9 +1568,9 @@ def convert_solps_to_openedge(
 
     # Evaluate the equilibrium magnetic field directly on the EIRENE mesh
     # vertices. Unlike plasma quantities, B should not inherit the
-    # wall-connected vacuum fill via mesh_cell_idx; otherwise bmag/bpol/btor
-    # jump across the native->filled seam even though the equilibrium is
-    # smooth there.
+    # Sample B-field on the EIRENE mesh vertices directly. Plasma remains
+    # piecewise-constant per mapped B2.5 cell, while non-native triangles
+    # stay unmapped.
     # Equilibrium B-field is on a regular (R, Z) grid (jm x km), so we can
     # use RegularGridInterpolator instead of scipy.griddata. This drops ~20s
     # from the converter (was 86% of total runtime in profiling).
@@ -1598,6 +1585,64 @@ def convert_solps_to_openedge(
         equ_r, equ_z, np.asarray(equ_dict["bz"], dtype=np.float64), mesh_vtx_pts)
     mesh_vtx_bpol = np.sqrt(mesh_vtx_br**2 + mesh_vtx_bz**2)
     mesh_vtx_bmag = np.sqrt(mesh_vtx_bpol**2 + mesh_vtx_bt**2)
+
+    b2_pts = np.column_stack([
+        rc.reshape(ncell_flat, order="F"),
+        zc.reshape(ncell_flat, order="F"),
+    ])
+    b2_br = _interp_regular_to_points(
+        equ_r, equ_z, np.asarray(equ_dict["br"], dtype=np.float64), b2_pts)
+    b2_bt = _interp_regular_to_points(
+        equ_r, equ_z, np.asarray(equ_dict["bt"], dtype=np.float64), b2_pts)
+    b2_bz = _interp_regular_to_points(
+        equ_r, equ_z, np.asarray(equ_dict["bz"], dtype=np.float64), b2_pts)
+    b2_bpol = np.sqrt(b2_br**2 + b2_bz**2)
+    b2_bmag = np.sqrt(b2_bpol**2 + b2_bt**2)
+
+    # ------------------------------------------------------------------
+    # Per-species wall-face ion flux scatter for /wall_flux/ group.
+    # ------------------------------------------------------------------
+    # Plasma-source-agnostic wall-flux representation. Each B2 wall-
+    # boundary face contributes one (R, Z) sample with per-species
+    # gamma (m^-2 s^-1, +ve into wall), Te, Ti, area, and outward
+    # normal. OpenEdge runtime queries this scatter at any wall-segment
+    # midpoint via fix background's KDTree, so plasma.h5 stays
+    # decoupled from the SPARTA wall.surf geometry.
+    #
+    # SOLPS staggered convention (verified vs b2plot b2ptrgl.F /
+    # b2pwldw.F):
+    #   inner target  ix=1:  -fnixb[0,    iy,  s] / area_face
+    #   outer target  ix=nx: +fnixb[nx,   iy,  s] / area_face
+    #   outer SOL     iy=ny: +fniyb[ix,   ny,  s] / area_face
+    # The guard-face entries fnixb[nx+1, ...], fniyb[..., ny+1] are
+    # zero in fort.31; the actual wall flux is one index earlier
+    # (right face of last fluid cell). Matches what b2plot wlld
+    # consumes when extracting per-segment loads.
+    # ------------------------------------------------------------------
+    wall_flux_data = None
+    if ft31 is not None and ft31.fnixb is not None and ft31.fniyb is not None:
+        wall_flux_data = build_wall_flux_solps(
+            ft31, nx, ny, nion, crx4, cry4)
+        # B-field at each wall-flux sample, sampled from the equilibrium
+        # psi map. Consumers (compute surface/physical/sputter) IDW-
+        # smooth this with K=3 and combine with the SPARTA segment's
+        # own normal to get a smooth incidence angle. The per-triangle
+        # B-field used at runtime otherwise gives cell-to-cell jitter
+        # that propagates into Y(E,theta) near the sputter threshold.
+        wf_pts = np.column_stack([wall_flux_data["r"], wall_flux_data["z"]])
+        wall_flux_data["b_r"] = _interp_regular_to_points(
+            equ_r, equ_z, np.asarray(equ_dict["br"], dtype=np.float64), wf_pts)
+        wall_flux_data["b_z"] = _interp_regular_to_points(
+            equ_r, equ_z, np.asarray(equ_dict["bz"], dtype=np.float64), wf_pts)
+        wall_flux_data["b_t"] = _interp_regular_to_points(
+            equ_r, equ_z, np.asarray(equ_dict["bt"], dtype=np.float64), wf_pts)
+        gpeak = float(np.abs(wall_flux_data["gamma_i"]).max())
+        print(f"/wall_flux/ built from fort.31 staggered fluxes: "
+              f"N={wall_flux_data['r'].size}, "
+              f"nspec={wall_flux_data['gamma_i'].shape[0]}, "
+              f"peak |gamma_i| = {gpeak:.3e} m^-2 s^-1")
+    else:
+        print("fort.31 absent; /wall_flux/ will not be written")
 
     # -- Write plasma.h5 --
     with h5py.File(plasma_out, "w") as f:
@@ -1623,6 +1668,31 @@ def convert_solps_to_openedge(
         f.create_dataset("ion_species/main_ion_spec_index", data=np.array([int(ion_indices[main_k])], dtype=np.int32))
         f.create_dataset("ion_species/mass_amu", data=ion_masses)
         f.create_dataset("ion_species/charge_state_z", data=ion_charges)
+
+        # Native B2.5 cell geometry and per-cell fields. These preserve the
+        # SOLPS quadrilateral mesh and are the right choice for patch-style
+        # visualization near the separatrix and X-point.
+        f.create_dataset("b2/nx", data=np.array(nx, dtype=np.int32))
+        f.create_dataset("b2/ny", data=np.array(ny, dtype=np.int32))
+        f.create_dataset("b2/cell_polygons", data=cell_polys)
+        f.create_dataset("b2/r_center", data=rc.reshape(ncell_flat, order="F"))
+        f.create_dataset("b2/z_center", data=zc.reshape(ncell_flat, order="F"))
+        f.create_dataset("b2/dens_e", data=mesh_ne)
+        f.create_dataset("b2/temp_e", data=mesh_te)
+        f.create_dataset("b2/dens_i", data=mesh_ni)
+        f.create_dataset("b2/temp_i", data=mesh_ti)
+        f.create_dataset("b2/parr_flow", data=mesh_upar)
+        f.create_dataset("b2/grad_te_r", data=mesh_grad_te_r)
+        f.create_dataset("b2/grad_te_z", data=mesh_grad_te_z)
+        f.create_dataset("b2/grad_ti_r", data=mesh_grad_ti_r)
+        f.create_dataset("b2/grad_ti_z", data=mesh_grad_ti_z)
+        f.create_dataset("b2/e_r", data=mesh_e_r)
+        f.create_dataset("b2/e_z", data=mesh_e_z)
+        f.create_dataset("b2/e_t", data=mesh_e_t)
+        f.create_dataset("b2/b_r", data=b2_br)
+        f.create_dataset("b2/b_z", data=b2_bz)
+        f.create_dataset("b2/b_t", data=b2_bt)
+        f.create_dataset("b2/b_mag", data=b2_bmag)
 
         # SOLPS mesh triangulation for direct point-in-cell interpolation
         f.create_dataset("mesh/vtx_r", data=mesh_vtx_r)
@@ -1659,6 +1729,16 @@ def convert_solps_to_openedge(
         # drives wall recycling at each boundary cell.
         f.create_dataset("mesh/wall_face_area", data=mesh_wall_face_area)
 
+        # Plasma-source-agnostic wall-flux scatter. See _wall_flux.py
+        # for the schema. Consumers (e.g. compute surface/physical/
+        # sputter) query this via fix background's KDTree at any
+        # SPARTA segment (R, Z) — no per-segment cell mapping needed.
+        if wall_flux_data is not None:
+            write_wall_flux_h5(f, wall_flux_data,
+                               source="SOLPS-ITER",
+                               extraction="fort31",
+                               species_names=ion_names)
+
         # Per-wall-segment topological mapping to B2 boundary cells:
         #   mesh_wall_surf_cell[iseg]: flat index of the B2 boundary cell
         #       that dominantly owns SPARTA wall segment iseg (the B2 cell
@@ -1675,9 +1755,8 @@ def convert_solps_to_openedge(
         # get triangle-level values via /mesh/cell_index in a uniform
         # way. Native triangles follow the EIRENE pattern:
         # triangle -> fort.35 B2 cell -> fort.31 piecewise-constant
-        # plasma. For non-native triangles, this converter may also fill
-        # the wall-connected vacuum region by assigning a neighboring
-        # native source cell into mesh_cell_idx.
+        # plasma. Non-native triangles remain unmapped
+        # (mesh/cell_index == -1) and therefore stay on a vacuum floor.
         if ft31 is not None:
             if ft31.pob is not None:
                 f.create_dataset("mesh/pob",
@@ -1757,8 +1836,12 @@ def convert_solps_to_openedge(
         # (converter writes only the equilibrium psi/btf/rtf, not a
         # per-cell br). Pass zeros for the br panel — diagnostic plots
         # should be rebuilt to read from /equilibrium/ directly.
-        _save_plots(
+        plot_plasma_h5_b2(
             cell_polys,
+            rc.reshape(ncell_flat, order="F"),
+            zc.reshape(ncell_flat, order="F"),
+            nx,
+            ny,
             ne,
             te_eV,
             main_dens_raw,
@@ -1768,78 +1851,104 @@ def convert_solps_to_openedge(
             plot_prefix or Path("convert_solps_plasma"),
         )
 
-def _save_plots(cell_polys, ne, te, ni, ti, upar, br, prefix):
-    import matplotlib.pyplot as plt
-    from matplotlib import colors
+def _best_ordered_b2_polys(polys, r_center, z_center, nx, ny):
+    """Choose polygon ordering that best matches stored B2 cell centers."""
+    polys = np.asarray(polys, dtype=float)
+    centers = np.column_stack([np.asarray(r_center, dtype=float), np.asarray(z_center, dtype=float)])
+
+    candidates = [polys]
+    ncell = (nx + 2) * (ny + 2)
+    if polys.shape[0] == ncell:
+        candidates.append(polys.reshape(nx + 2, ny + 2, 4, 2, order='C').reshape(-1, 4, 2, order='F'))
+        candidates.append(polys.reshape(nx + 2, ny + 2, 4, 2, order='F').reshape(-1, 4, 2, order='C'))
+
+    best = candidates[0]
+    best_score = np.inf
+    for cand in candidates:
+        cent = np.nanmean(cand, axis=1)
+        score = float(np.nanmedian(np.hypot(cent[:, 0] - centers[:, 0], cent[:, 1] - centers[:, 1])))
+        if score < best_score:
+            best = cand
+            best_score = score
+    return best
+
+
+def _poly_panel(ax, polys, values, title, cmap, *, log=False, symmetric=False):
+    from matplotlib.colors import LogNorm, Normalize, TwoSlopeNorm
     from matplotlib.collections import PolyCollection
 
-    valid_poly = np.all(np.isfinite(cell_polys), axis=(1, 2))
+    vals = np.asarray(values, dtype=float).reshape(-1)
+    valid_poly = np.all(np.isfinite(polys), axis=(1, 2))
+    vals = vals[valid_poly]
+    poly_use = polys[valid_poly]
 
-    def _flatten(arr):
-        vals = np.asarray(arr, dtype=np.float64).reshape(-1)
-        return vals[valid_poly]
-
-    polys = cell_polys[valid_poly]
-
-    def _add_poly_panel(ax, values, title, cmap, *, log10=False, symmetric=False):
-        vals = _flatten(values)
-        mask = np.isfinite(vals)
-        if log10:
-            mask &= vals > 0.0
-            vals = np.where(mask, np.log10(vals), np.nan)
-        else:
-            vals = np.where(mask, vals, np.nan)
-
+    if log:
+        vals = np.where(vals > 0.0, vals, np.nan)
         finite = vals[np.isfinite(vals)]
         if finite.size == 0:
-            finite = np.array([0.0], dtype=np.float64)
+            finite = np.array([1.0])
+        vmin = float(np.nanpercentile(finite, 1))
+        vmax = float(np.nanpercentile(finite, 99))
+        if not np.isfinite(vmin) or vmin <= 0.0:
+            vmin = max(float(np.nanmin(finite)), 1e-30)
+        if not np.isfinite(vmax) or vmax <= vmin:
+            vmax = vmin * 10.0
+        norm = LogNorm(vmin=vmin, vmax=vmax)
+    elif symmetric:
+        finite = vals[np.isfinite(vals)]
+        if finite.size == 0:
+            finite = np.array([0.0])
+        vlim = float(np.nanpercentile(np.abs(finite), 99))
+        if not np.isfinite(vlim) or vlim <= 0.0:
+            vlim = 1.0
+        norm = TwoSlopeNorm(vmin=-vlim, vcenter=0.0, vmax=vlim)
+    else:
+        finite = vals[np.isfinite(vals)]
+        if finite.size == 0:
+            finite = np.array([0.0])
+        vmin = float(np.nanpercentile(finite, 1))
+        vmax = float(np.nanpercentile(finite, 99))
+        if not np.isfinite(vmin):
+            vmin = 0.0
+        if not np.isfinite(vmax) or vmax <= vmin:
+            vmax = vmin + 1.0
+        norm = Normalize(vmin=vmin, vmax=vmax)
 
-        if symmetric:
-            vmax = float(np.nanmax(np.abs(finite)))
-            if not np.isfinite(vmax) or vmax <= 0.0:
-                vmax = 1.0
-            norm = colors.TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
-        else:
-            vmin = float(np.nanmin(finite))
-            vmax = float(np.nanmax(finite))
-            if not np.isfinite(vmin):
-                vmin = 0.0
-            if not np.isfinite(vmax) or vmax <= vmin:
-                vmax = vmin + 1.0
-            norm = colors.Normalize(vmin=vmin, vmax=vmax)
+    coll = PolyCollection(poly_use, array=vals, cmap=cmap, norm=norm,
+                          edgecolors='none', linewidths=0.0, antialiased=False)
+    ax.add_collection(coll)
+    ax.autoscale_view()
+    ax.set_aspect('equal')
+    ax.set_title(title)
+    ax.set_xlabel(r'$R$ (m)')
+    ax.set_ylabel(r'$Z$ (m)')
+    return coll
 
-        coll = PolyCollection(
-            polys,
-            array=vals,
-            cmap=cmap,
-            norm=norm,
-            edgecolors="none",
-            linewidths=0.0,
-            antialiased=False,
-        )
-        ax.add_collection(coll)
-        ax.autoscale_view()
-        ax.set_aspect("equal", adjustable="box")
-        ax.set_title(title)
-        ax.set_xlabel("R [m]")
-        ax.set_ylabel("Z [m]")
-        return coll
+
+def plot_plasma_h5_b2(cell_polys, r_center, z_center, nx, ny, ne, te, ni, ti, upar, br, prefix):
+    import matplotlib.pyplot as plt
+
+    polys = _best_ordered_b2_polys(cell_polys, r_center, z_center, nx, ny)
 
     panels = [
-        (ne, "log10(ne) [m^-3]", "inferno", True, False),
-        (te, "Te [eV]", "magma", False, False),
-        (ni, "log10(ni) [m^-3]", "inferno", True, False),
-        (ti, "Ti [eV]", "magma", False, False),
-        (upar, "u_par [m/s]", "RdBu_r", False, True),
-        (br, "Br [T]", "RdBu_r", False, True),
+        ('ne', ne, True,  r'$n_e$ (m$^{-3}$)', 'viridis', False),
+        ('Te', te, True,  r'$T_e$ (eV)', 'inferno', False),
+        ('ni', ni, True,  r'$n_i$ (m$^{-3}$)', 'viridis', False),
+        ('Ti', ti, True,  r'$T_i$ (eV)', 'inferno', False),
+        ('upar', upar, False, r'$u_\parallel$ (m s$^{-1}$)', 'RdBu_r', True),
+        ('Br', br, False, r'$B_r$ (T)', 'RdBu_r', True),
     ]
-    fig, axes = plt.subplots(2, 3, figsize=(14, 8), constrained_layout=True)
-    for ax, (arr, title, cmap, log10, symmetric) in zip(axes.flat, panels):
-        coll = _add_poly_panel(ax, arr, title, cmap, log10=log10, symmetric=symmetric)
-        fig.colorbar(coll, ax=ax, shrink=0.9)
-    fig.savefig(f"{prefix}_plasma.png", dpi=180)
+
+    fig, axes = plt.subplots(2, 3, figsize=(16, 11))
+    for ax, (_, val, log, label, cmap, symmetric) in zip(axes.flat, panels):
+        coll = _poly_panel(ax, polys, val, label, cmap, log=log, symmetric=symmetric)
+        cb = fig.colorbar(coll, ax=ax, shrink=0.85, pad=0.02)
+        cb.ax.tick_params(labelsize=12)
+
+    plt.tight_layout()
+    fig.savefig(f"{prefix}_plasma.png", dpi=180, bbox_inches='tight')
     plt.close(fig)
-    print(f"Wrote plot: {prefix}_plasma.png")
+    print(f"Wrote B2 plot: {prefix}_plasma.png")
 
 
 # ==========================================================================
@@ -1860,9 +1969,14 @@ def _build_parser():
     p.add_argument("--zmax", type=float, default=None)
     p.add_argument("--gfile", type=Path, default=None, help="GEQDSK file for B-field (preferred)")
     p.add_argument("--equ-file", type=Path, default=None, help=".equ file for B-field")
-    p.add_argument("--plot", action="store_true")
+    p.add_argument("--plot", action="store_true",
+                   help="Write the default native-B2 diagnostic plot (plot_plasma_h5_b2 style).")
     p.add_argument("--plot-prefix", type=Path, default=None)
     p.add_argument("--wall-out", type=Path, default=None, help="Output SPARTA wall file from mesh.extra")
+    p.add_argument("--wall-in", type=Path, default=None,
+                   help="Input SPARTA wall.surf to map against (e.g., a custom "
+                   "test strip). Builds mesh/wall_surf_cell from this geometry "
+                   "instead of auto-generating one. Does not overwrite the file.")
     p.add_argument("--mesh-extra", type=Path, default=None)
     p.add_argument("--b2fgmtry", type=Path, default=None, help="Path to b2fgmtry (if not in run_path)")
     p.add_argument("--b2fstate", type=Path, default=None,
@@ -1906,6 +2020,7 @@ def main():
         plot=args.plot,
         plot_prefix=args.plot_prefix,
         wall_out=args.wall_out,
+        wall_in=args.wall_in,
         mesh_extra=args.mesh_extra,
         b2fgmtry_path=args.b2fgmtry,
         b2fstate_path=args.b2fstate,
