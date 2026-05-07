@@ -370,6 +370,11 @@ int FixSurfaceStateLm::setmask()
 
 void FixSurfaceStateLm::init()
 {
+  // SPARTA calls init() before every run command. strip.init() below
+  // re-allocates Tsurf_dim to Tin, so we must let end_of_step re-solve;
+  // otherwise a stale frozen_ leaves the wall stuck at the inlet temp.
+  if (static_mode) frozen_ = 0;
+
   // load target heat flux profiles from HDF5
   if (hf_source == TARGET && target_file) {
     load_target_heatflux();
