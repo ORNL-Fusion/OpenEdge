@@ -23,6 +23,9 @@ examples/*/in.*.regression
 examples/test_iead/in.iead_alpha*
 examples/test_iead/particles_alpha*.dat
 examples/test_iead/wall.surf
+examples/test_tsurf_emission/output/
+examples/test_tsurf_emission/log.*
+examples/test_tsurf_emission/*.swp
 examples/test_efield_polarization/state
 examples/test_efield_polarization/figs_polarization/
 
@@ -93,7 +96,6 @@ examples/test_d3d_mateja/
 examples/test_d3d_walldyn/
 examples/test_west_3d/
 examples/test_west_timedep/
-examples/test_tsurf_emission/
 examples/test_liquid_metal/
 examples/test_eirene/
 examples/test_diii_d_neutrals/
