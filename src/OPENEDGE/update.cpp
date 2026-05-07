@@ -1320,6 +1320,14 @@ template < int DIM, int SURF, int OPT > void Update::move()
     }
   }
 
+  // Per-particle charge override from fix droplet/charge (custom DOUBLE
+  // vector "droplet_charge"). Look it up once per move(); pusher reads
+  // qvec[i] in the dispatch loop and falls back to species[is].charge.
+  const int dq_idx = particle->find_custom((char *) "droplet_charge");
+  double *qvec_drop = (dq_idx >= 0)
+    ? particle->edvec[particle->ewhich[dq_idx]]
+    : nullptr;
+
   // one or more loops over particles
   // first iteration = all my particles
   // subsequent iterations = received particles
@@ -1355,6 +1363,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
 
       double mass = particles[i].mass;
       double charge = species[particles[i].ispecies].charge;
+      if (qvec_drop && qvec_drop[i] != 0.0) charge = qvec_drop[i];
       
       // apply moveperturb() to PKEEP and PINSERT since are computing xnew
       // not to PENTRY,PEXIT since are just re-computing xnew of sender

@@ -86,6 +86,12 @@ FixDropletCharge::FixDropletCharge(SPARTA *sparta, int narg, char **arg) :
       error->all(FLERR, msg);
     }
   }
+
+  // Register the per-particle "droplet_charge" custom DOUBLE vector here
+  // (constructor) so it exists at dump-command parse time.
+  qcustom = particle->find_custom((char *) "droplet_charge");
+  if (qcustom < 0)
+    qcustom = particle->add_custom((char *) "droplet_charge", 1, 0);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -117,6 +123,9 @@ void FixDropletCharge::init()
     error->all(FLERR,
       "fix droplet/charge: background fix must be style background");
   pd_->init();
+
+  if (qcustom < 0)
+    qcustom = particle->find_custom((char *) "droplet_charge");
 }
 
 void FixDropletCharge::start_of_step()
@@ -219,11 +228,10 @@ void FixDropletCharge::apply_charge_update()
   auto *parts = particle->particles;
   const int nlocal = particle->nlocal;
 
-  // Per-species accumulated mean charge (avoids last-particle-wins behavior).
-  std::vector<double>    zsum(particle->nspecies, 0.0);
-  std::vector<long long> zcount(particle->nspecies, 0);
-
   int *s2g = (imix >= 0) ? particle->mixture[imix]->species2group : nullptr;
+
+  if (qcustom < 0) return;
+  double *qvec = particle->edvec[particle->ewhich[qcustom]];
 
   for (int ip = 0; ip < nlocal; ++ip) {
     Particle::OnePart &p = parts[ip];
@@ -253,24 +261,6 @@ void FixDropletCharge::apply_charge_update()
     const double zd         = qd_coulomb / qe;
     if (!std::isfinite(zd)) continue;
 
-    const int is = p.ispecies;
-    if (is >= 0 && is < particle->nspecies) {
-      zsum[is]   += zd;
-      zcount[is] += 1;
-    }
-  }
-
-  // Aggregate mean species charges across ranks and write back.
-  std::vector<double>    zsum_g(zsum.size(), 0.0);
-  std::vector<long long> zcount_g(zcount.size(), 0);
-  if (!zsum.empty()) {
-    MPI_Allreduce(zsum.data(),   zsum_g.data(),
-                  static_cast<int>(zsum.size()),   MPI_DOUBLE,     MPI_SUM, world);
-    MPI_Allreduce(zcount.data(), zcount_g.data(),
-                  static_cast<int>(zcount.size()), MPI_LONG_LONG,  MPI_SUM, world);
-  }
-  for (int is = 0; is < particle->nspecies; ++is) {
-    const long long n = zcount_g[is];
-    if (n > 0) particle->species[is].charge = zsum_g[is] / static_cast<double>(n);
+    qvec[ip] = zd;
   }
 }

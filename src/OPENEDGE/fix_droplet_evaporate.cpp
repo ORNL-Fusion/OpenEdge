@@ -218,10 +218,10 @@ void FixDropletEvaporate::evap_half(double dt_half)
 void FixDropletEvaporate::droplet_evaporation_model(int idrop,
                                         const double dt_half)
 {
-  const double AM   = 1.53e-26;      // Li atom mass [kg]
+  const double AM   = 1.15225e-26;   // Li atom mass [kg] (6.94 amu)
   const double Rho  = 534.0;         // kg/m^3
   const double Cp   = 4200.0;        // J/kg-K
-  const double DHm  = 3.158e+03;     // J/mol
+  const double DHm  = 1.47e+05;      // Li heat of vaporization [J/mol]
   const double AN   = 6.022e+23;     // 1/mol
   const double DT   = dt_half;
 

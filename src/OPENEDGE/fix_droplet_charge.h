@@ -9,8 +9,10 @@
          [radius R] [mass M] [temp T]
 
    The fix solves the OML potential equation at each droplet position and
-   stamps the resulting charge (in e-units) onto particle->species[is].charge
-   as a per-species mean (all particles of a given species share a charge).
+   writes the resulting per-particle charge (in e-units) into the custom
+   DOUBLE vector "droplet_charge". The pusher reads it in update.cpp and
+   uses it in place of species[is].charge whenever it is non-zero, so each
+   droplet sees the local-plasma charge rather than a species mean.
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -56,6 +58,9 @@ class FixDropletCharge : public Fix {
   // Optional mixture filter. -1 = no filter. >= 0 = only species in this
   // mixture's groups are charged.
   int imix = -1;
+
+  // Per-particle custom DOUBLE vector "droplet_charge" (e units).
+  int qcustom = -1;
 
   void apply_charge_update();
   bool solve_phi_oml(double Te_eV, double Ti_eV, double ne_m3, double ni_m3,
