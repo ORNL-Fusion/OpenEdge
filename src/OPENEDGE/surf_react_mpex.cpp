@@ -128,7 +128,8 @@ int SurfReactMpex::react(Particle::OnePart *&ip,
 
   // no secondaries in this model
   jp = nullptr;
-  // let SurfCollideDiffuse::diffuse() modify the direction if we reflect
+  // velreset toggled below: 1 if we set ip->v ourselves (reflected branch),
+  // 0 if surf_collide should handle the leftover (stick branch with ip=nullptr).
   velreset = 0;
 
   // If no reaction templates exist for this species, do nothing
@@ -166,15 +167,66 @@ int SurfReactMpex::react(Particle::OnePart *&ip,
   double u = random->uniform();
 
   if (u < RN) {
-    // REFLECTION: keep ip alive; SurfCollideDiffuse::diffuse will
-    // randomize direction, but we can enforce the energy loss via RE.
-    if (RE > 0.0) {
-      double scale = sqrt(RE);      // v' = sqrt(RE) * v  => E' = RE * E
-      ip->v[0] *= scale;
-      ip->v[1] *= scale;
-      ip->v[2] *= scale;
+    // REFLECTION. We write the outgoing velocity directly here and tell
+    // SPARTA's surf_collide to leave it alone (velreset = 1). Direction is
+    // sampled from a cosine (Lambert) distribution in the outgoing half-
+    // space; speed is set by the angle-dependent energy reflection
+    // coefficient RE(theta): |v_out| = sqrt(RE) * |v_in|.
+    velreset = 1;
+
+    // ---- local frame (n_hat, tan1, tan2) at the surface ----
+    double n_hat[3];
+    if (nlen > 0.0) {
+      n_hat[0] = norm[0] / nlen;
+      n_hat[1] = norm[1] / nlen;
+      n_hat[2] = norm[2] / nlen;
+    } else {
+      n_hat[0] = 0.0; n_hat[1] = 0.0; n_hat[2] = 1.0;
     }
- ip->ispecies = r->products[0];
+
+    // tangent1 = component of incoming v perpendicular to n_hat (then
+    // normalised). Falls back to a random tangent for normal incidence.
+    double dotvn = MathExtra::dot3(v, n_hat);
+    double tan1[3] = {
+      v[0] - dotvn * n_hat[0],
+      v[1] - dotvn * n_hat[1],
+      v[2] - dotvn * n_hat[2]
+    };
+    if (MathExtra::lensq3(tan1) < 1.0e-30) {
+      tan1[0] = random->uniform();
+      tan1[1] = random->uniform();
+      tan1[2] = random->uniform();
+      double dt = MathExtra::dot3(tan1, n_hat);
+      tan1[0] -= dt * n_hat[0];
+      tan1[1] -= dt * n_hat[1];
+      tan1[2] -= dt * n_hat[2];
+    }
+    MathExtra::norm3(tan1);
+    double tan2[3];
+    MathExtra::cross3(n_hat, tan1, tan2);
+    MathExtra::norm3(tan2);
+
+    // ---- cosine-weighted (Lambert) hemisphere sample ----
+    double xi1 = random->uniform();
+    double xi2 = random->uniform();
+    double cosT = sqrt(xi1);                   // p(cos theta) = 2 cos theta
+    double sinT = sqrt(std::max(0.0, 1.0 - cosT * cosT));
+    double phi  = 2.0 * MathConst::MY_PI * xi2;
+    double cosP = cos(phi), sinP = sin(phi);
+
+    double dir[3] = {
+      sinT * cosP * tan1[0] + sinT * sinP * tan2[0] + cosT * n_hat[0],
+      sinT * cosP * tan1[1] + sinT * sinP * tan2[1] + cosT * n_hat[1],
+      sinT * cosP * tan1[2] + sinT * sinP * tan2[2] + cosT * n_hat[2]
+    };
+
+    // ---- speed from RE(theta) ----
+    double speed = vlen * sqrt(std::max(0.0, RE));
+    ip->v[0] = speed * dir[0];
+    ip->v[1] = speed * dir[1];
+    ip->v[2] = speed * dir[2];
+
+    ip->ispecies = r->products[0];
     nsingle++;
     tally_single[list[0]]++;        // bookkeeping
 
