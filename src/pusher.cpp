@@ -161,6 +161,7 @@ Pusher::Pusher(SPARTA *sparta) : Pointers(sparta)
   pusher_plasma_fidx  = -1;
   pusher_subcycles    = 1;
   pusher_gca_switch   = 2.5;
+  pusher_boris_near   = 0.0;
   pusher_dump_flag    = 0;
   pusher_dump_every   = 1;
   pusher_bad_dt_check = 1;
@@ -1282,6 +1283,37 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
   bool use_gca = false;
   if (pusher_mode == PUSHER_GCA && Bmag > 0.0 && qm_abs > 0.0) use_gca = true;
 
+  // boris_near override: when > 0 and a sheath_geom (compute nearest_surf/grid)
+  // is configured, force Boris (gyro-resolved) for particles within
+  // pusher_boris_near metres of the cell's nearest surf in that group.
+  // Use cgeom's per-cell midx_grid (already populated) -> compute distance to
+  // that one surf only. Cheap and good enough for visualization buffering.
+  if (use_gca && pusher_boris_near > 0.0 && update->sheath_geom_cidx >= 0) {
+    Compute *cg_bn = modify->compute[update->sheath_geom_cidx];
+    auto *csg_bn = dynamic_cast<ComputeNearestSurfGrid *>(cg_bn);
+    if (csg_bn) {
+      int gcell_bn = icell;
+      Grid::ChildCell *cells_bn = grid->cells;
+      if (cells_bn[icell].nsplit <= 0 && cells_bn[icell].isplit >= 0)
+        gcell_bn = grid->sinfo[cells_bn[icell].isplit].icell;
+      const int midx_bn = csg_bn->midx_grid[gcell_bn];
+      if (midx_bn >= 0) {
+        double dnear;
+        if (domain->dimension == 2) {
+          Surf::Line *ln = &surf->lines[midx_bn];
+          dnear = std::fabs((x[0]-ln->p1[0])*ln->norm[0] +
+                            (x[1]-ln->p1[1])*ln->norm[1]);
+        } else {
+          Surf::Tri *tr = &surf->tris[midx_bn];
+          dnear = std::fabs((x[0]-tr->p1[0])*tr->norm[0] +
+                            (x[1]-tr->p1[1])*tr->norm[1] +
+                            (x[2]-tr->p1[2])*tr->norm[2]);
+        }
+        if (dnear < pusher_boris_near) use_gca = false;
+      }
+    }
+  }
+
   if (!use_gca && Bmag > 0.0 && qm_abs > 0.0) {
     const double bhat[3] = {B[0]/Bmag, B[1]/Bmag, B[2]/Bmag};
     double v_perp = 0.0;
@@ -1520,6 +1552,12 @@ void Pusher::global_keyword(int narg, char **arg, int &iarg)
       pusher_gca_switch = input->numeric(FLERR, arg[iarg+1]);
       if (pusher_gca_switch <= 0.0)
         error->all(FLERR, "global pusher gca_switch must be > 0");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "boris_near") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher boris_near");
+      pusher_boris_near = input->numeric(FLERR, arg[iarg+1]);
+      if (pusher_boris_near < 0.0)
+        error->all(FLERR, "global pusher boris_near must be >= 0");
       iarg += 2;
     } else if (strcmp(arg[iarg], "dump") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher dump");
