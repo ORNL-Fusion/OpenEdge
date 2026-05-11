@@ -51,6 +51,9 @@ fix fdrag   droplet/drag     1 2.0 1 background pd model coulomb coulomb/lnlambd
                              gravity 0 -9.8 0 mixture droplet
 fix fevap   droplet/evaporate 1 droplet background pd heatflux/scale 1.0 rocket_eta 0.5
 
+# cumulative real Li atoms evaporated from all droplets (f_fevap scalar)
+fix devap_tot ave/time 100 1 100 f_fevap file output/droplet_evap_total.csv
+
 # per-step particle dump (droplet trajectories)
 dump dpart particle all 10 output/dump.txt id type x y z vx vy vz radius temp
 

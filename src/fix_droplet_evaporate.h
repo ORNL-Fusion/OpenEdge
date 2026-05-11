@@ -48,6 +48,7 @@ class FixDropletEvaporate : public Fix {
   int setmask() override;
   void init() override;
   double memory_usage() override;
+  double compute_scalar() override;
 
   double heatflux_scale;  // multiplier on |q| (default 1.0)
   double rocket_eta;      // asymmetry parameter for rocket force [0,1]
@@ -56,6 +57,10 @@ class FixDropletEvaporate : public Fix {
   int imix;
   void end_of_step() override;
   void start_of_step() override;
+
+  // Cumulative real Li atoms evaporated by all droplets, on this rank.
+  // compute_scalar() MPI-reduces across ranks on demand.
+  double evap_atoms_local_;
 
   std::string plasma_fix_id_;
   FixBackground *pd_;

@@ -64,10 +64,15 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   heatflux_scale(1.0),
   rocket_eta(0.0),
+  evap_atoms_local_(0.0),
   pd_(nullptr),
   emit_imix(-1),
   random(nullptr)
 {
+  scalar_flag = 1;
+  extscalar   = 1;
+  global_freq = 1;
+
   // fix ID evaporation Nevery MIXTURE background PD [keywords...]
   if (narg < 6)
     error->all(FLERR,
@@ -172,6 +177,13 @@ void FixDropletEvaporate::end_of_step()
 }
 
 double FixDropletEvaporate::memory_usage() { return 0.0; }
+
+double FixDropletEvaporate::compute_scalar()
+{
+  double global = 0.0;
+  MPI_Allreduce(&evap_atoms_local_, &global, 1, MPI_DOUBLE, MPI_SUM, world);
+  return global;
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -292,6 +304,10 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
   const double a1 = 5.055, b1 = -8023.0, xm1 = 6.939;
   const double vpres1 = 760.0 * std::pow(10.0, a1 + b1/TK);          // mmHg
   const double Gevap_atoms = 1.0e4 * 3.513e22 * vpres1 / std::sqrt(xm1 * TK);
+
+  // Tally cumulative real Li atoms evaporated from this droplet over the
+  // half-step. Each macro-particle = 1 real droplet (specwt=1 expected).
+  evap_atoms_local_ += 4.0 * MY_PI * radius * radius * Gevap_atoms * DT;
 
   const double dRdt = -AM * Gevap_atoms / Rho;
   const double HF   = Qs - Gevap_atoms * (DHm / AN);
