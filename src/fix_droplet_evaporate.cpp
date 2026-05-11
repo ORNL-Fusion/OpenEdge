@@ -70,7 +70,6 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
   random(nullptr)
 {
   scalar_flag = 1;
-  extscalar   = 1;
   global_freq = 1;
 
   // fix ID evaporation Nevery MIXTURE background PD [keywords...]
