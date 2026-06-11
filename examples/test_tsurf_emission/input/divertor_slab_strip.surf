@@ -1,4 +1,4 @@
-# divertor_slab.surf with Tsurf_lm [degC] and Gamma_D_lm [m^-2 s^-1]
+# divertor_slab.surf with Tsurf_lm [degC] and Gamma_D_lm [m^-2 s^-1] columns
 # n_arc=199, back-cap rows zero in both columns
 
 # inline-built slab, P1=(3.47877407, -3.11049628), P2=(3.38162422, -3.77747631), slab width 8.0 mm
