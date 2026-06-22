@@ -792,6 +792,7 @@ def convert_solps_to_openedge(
     b2fstate_path: Path | None = None,
     wall_source: str = "auto",
     geometry: str = "cart",
+    heatflux: str = "none",
 ) -> None:
     """
     Convert SOLPS run directory to OpenEdge plasma.h5 (B-field embedded).
@@ -1712,6 +1713,27 @@ def convert_solps_to_openedge(
         f.create_dataset("mesh/dens_i", data=mesh_ni)
         f.create_dataset("mesh/temp_i", data=mesh_ti)
         f.create_dataset("mesh/parr_flow", data=mesh_upar)
+
+        # Optional: plasma heat flux INTO plasma.h5 for fix droplet/evaporate.
+        # Reuse the SOLPS-face-flux computation; |q| -> q_par, q_perp=0 (the
+        # droplet model uses |q|=sqrt(q_par^2+q_perp^2)). Padded to the full
+        # (nx+2)(ny+2) Fortran-flat layout so it aligns with mesh/temp_e.
+        if heatflux != "none":
+            from convert_solps_heatflux import compute_heatflux_cell_center
+            _rc, _zc, _qmag = compute_heatflux_cell_center(
+                run_path, method=heatflux, b2fgmtry_path=b2fgmtry_path)
+            _qfull = np.zeros((nx + 2, ny + 2), dtype=np.float64)
+            _qfull[1:-1, 1:-1] = np.nan_to_num(_qmag, nan=0.0,
+                                               posinf=0.0, neginf=0.0)
+            mesh_q_par = _qfull.reshape(ncell_flat, order="F")
+            mesh_q_perp = np.zeros_like(mesh_q_par)
+            f.create_dataset("mesh/q_par",  data=mesh_q_par)
+            f.create_dataset("mesh/q_perp", data=mesh_q_perp)
+            f.create_dataset("b2/q_par",  data=mesh_q_par)
+            f.create_dataset("b2/q_perp", data=mesh_q_perp)
+            print(f"mesh/q_par written (heatflux={heatflux}): peak "
+                  f"{mesh_q_par.max():.3e} W/m^2, nonzero "
+                  f"{int(np.count_nonzero(mesh_q_par))}/{mesh_q_par.size}")
         f.create_dataset("mesh/grad_te_r", data=mesh_grad_te_r)
         f.create_dataset("mesh/grad_te_z", data=mesh_grad_te_z)
         f.create_dataset("mesh/grad_ti_r", data=mesh_grad_ti_r)
@@ -1992,6 +2014,11 @@ def _build_parser():
                    help="SPARTA wall.surf slot layout. cart (default): "
                         "x=R, y=Z; pairs with 'boundary o o p'. axi: "
                         "x=Z, y=R; pairs with 'boundary o ao p'.")
+    p.add_argument("--heatflux", default="none",
+                   choices=["none", "jeremy_no_jv", "jeremy_total", "vector_mag"],
+                   help="Also write plasma heat flux INTO plasma.h5 as "
+                        "mesh/q_par (=|q| from SOLPS face fluxes) + mesh/q_perp=0, "
+                        "for fix droplet/evaporate. Default none (no q written).")
     p.add_argument("--core-out", type=Path, default=None,
                    help="If given, also write a SPARTA surface file tracing "
                         "the psi_norm=<--psi-norm-core> contour around the "
@@ -2026,6 +2053,7 @@ def main():
         b2fstate_path=args.b2fstate,
         wall_source=args.wall_source,
         geometry=args.geometry,
+        heatflux=args.heatflux,
     )
 
     # Optional: trace the psi_norm=<level> contour from the equilibrium

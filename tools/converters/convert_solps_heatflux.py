@@ -24,7 +24,8 @@ from convert_solps_plasma import b2f_read_dims, b2f_extract, read_b2fgmtry, \
     _cell_centers_from_corners, _regular_grid, _interp_field
 
 
-def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv") -> tuple:
+def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
+                                 b2fgmtry_path: Path | None = None) -> tuple:
     """
     Compute heat-flux from SOLPS face fluxes on a cell-centered grid.
 
@@ -36,7 +37,7 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv") -
     Returns (rc, zc, qmag) where rc/zc are cell centers and qmag is heat flux.
     """
     b2fstate = run_path / "b2fstate"
-    b2fgmtry = run_path / "b2fgmtry"
+    b2fgmtry = b2fgmtry_path if b2fgmtry_path is not None else (run_path / "b2fgmtry")
 
     nx, ny, ns = b2f_read_dims(b2fstate)
     gmtry = read_b2fgmtry(str(b2fgmtry))
