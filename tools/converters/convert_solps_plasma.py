@@ -2015,10 +2015,12 @@ def _build_parser():
                         "x=R, y=Z; pairs with 'boundary o o p'. axi: "
                         "x=Z, y=R; pairs with 'boundary o ao p'.")
     p.add_argument("--heatflux", default="none",
-                   choices=["none", "jeremy_no_jv", "jeremy_total", "vector_mag"],
+                   choices=["none", "total", "jeremy_no_jv", "jeremy_total",
+                            "vector_mag"],
                    help="Also write plasma heat flux INTO plasma.h5 as "
                         "mesh/q_par (=|q| from SOLPS face fluxes) + mesh/q_perp=0, "
-                        "for fix droplet/evaporate. Default none (no q written).")
+                        "for fix droplet/evaporate. 'total' = |fht/sx| parallel "
+                        "heat flux (recommended). Default none.")
     p.add_argument("--core-out", type=Path, default=None,
                    help="If given, also write a SPARTA surface file tracing "
                         "the psi_norm=<--psi-norm-core> contour around the "

@@ -36,6 +36,9 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
 
     Returns (rc, zc, qmag) where rc/zc are cell centers and qmag is heat flux.
     """
+    if method == "total":          # friendly alias for jeremy_total (|fht/sx|)
+        method = "jeremy_total"
+
     b2fstate = run_path / "b2fstate"
     b2fgmtry = b2fgmtry_path if b2fgmtry_path is not None else (run_path / "b2fgmtry")
 
