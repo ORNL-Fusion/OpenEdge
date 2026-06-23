@@ -1633,6 +1633,10 @@ const std::vector<double> *FixBackground::mesh_field_for(const std::vector<doubl
   if (&field == &dens_i) return &mesh_ni;
   if (&field == &temp_i) return &mesh_ti;
   if (&field == &parr_flow) return &mesh_upar;
+  if (&field == &q_par)     return &mesh_q_par;
+  if (&field == &q_perp)    return &mesh_q_perp;
+  if (&field == &grad_te_r) return &mesh_grad_te_r;
+  if (&field == &grad_te_z) return &mesh_grad_te_z;
   return nullptr;
 }
 

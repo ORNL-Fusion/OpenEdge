@@ -257,16 +257,14 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
   double q_par  = pd_->default_q_par;
   double q_perp = pd_->default_q_perp;
   if (pd_->has_qheatflux) {
-    if (!pd_->mesh_q_par.empty() || !pd_->q_par.empty()) {
-      q_par  = !pd_->mesh_q_par.empty()
-               ? pd_->interp2D(pd_->mesh_q_par,  R, Z, ip->icell)
-               : pd_->interp2D(pd_->q_par,       R, Z, ip->icell);
-    }
-    if (!pd_->mesh_q_perp.empty() || !pd_->q_perp.empty()) {
-      q_perp = !pd_->mesh_q_perp.empty()
-               ? pd_->interp2D(pd_->mesh_q_perp, R, Z, ip->icell)
-               : pd_->interp2D(pd_->q_perp,      R, Z, ip->icell);
-    }
+    // Always pass the regular-grid field handle: interp2D() routes to the
+    // mesh-native counterpart via mesh_field_for() when plasma.h5 is
+    // mesh-based. Passing the mesh_* array directly bypasses that routing
+    // and falls through to the (empty) regular-grid path -> returns 0.
+    if (!pd_->mesh_q_par.empty() || !pd_->q_par.empty())
+      q_par  = pd_->interp2D(pd_->q_par,  R, Z, ip->icell);
+    if (!pd_->mesh_q_perp.empty() || !pd_->q_perp.empty())
+      q_perp = pd_->interp2D(pd_->q_perp, R, Z, ip->icell);
   }
   // |q_plasma| from the stored components. A sphere in a uniform
   // directional flux intercepts q·πR² = (1/4)·q·(4πR²), so the
@@ -281,13 +279,9 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
   // grad_Te at particle position (for rocket-force direction).
   double gTeR = 0.0, gTeZ = 0.0;
   if (rocket_eta > 0.0) {
-    if (!pd_->mesh_grad_te_r.empty())
-      gTeR = pd_->interp2D(pd_->mesh_grad_te_r, R, Z, ip->icell);
-    else if (!pd_->grad_te_r.empty())
+    if (!pd_->mesh_grad_te_r.empty() || !pd_->grad_te_r.empty())
       gTeR = pd_->interp2D(pd_->grad_te_r, R, Z, ip->icell);
-    if (!pd_->mesh_grad_te_z.empty())
-      gTeZ = pd_->interp2D(pd_->mesh_grad_te_z, R, Z, ip->icell);
-    else if (!pd_->grad_te_z.empty())
+    if (!pd_->mesh_grad_te_z.empty() || !pd_->grad_te_z.empty())
       gTeZ = pd_->interp2D(pd_->grad_te_z, R, Z, ip->icell);
   }
 
