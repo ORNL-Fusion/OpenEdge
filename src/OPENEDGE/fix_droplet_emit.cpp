@@ -714,7 +714,6 @@ void FixDropletEmit::perform_task_onepass()
             rn = random->uniform();
             p1 = &tasks[i].path[0];
             p2 = &tasks[i].path[3];
-            rn =0.5;
             x[0] = p1[0] + rn * (p2[0]-p1[0]);
             x[1] = p1[1] + rn * (p2[1]-p1[1]);
             x[2] = 0.0;
@@ -848,15 +847,9 @@ void FixDropletEmit::perform_task_onepass()
           rn = random->uniform();
           p1 = &tasks[i].path[0];
           p2 = &tasks[i].path[3];
-          // get midpoint of line segment
-          double x1 = 0.5 * (p1[0] + p2[0]);
-          double x2 = 0.5 * (p1[1] + p2[1]);
-          // printf("Midpoint: x=%f y=%f\n",x1,x2);
-          rn=0.5;
           x[0] = p1[0] + rn * (p2[0]-p1[0]);
           x[1] = p1[1] + rn * (p2[1]-p1[1]);
           x[2] = 0.0;
-          // printf("Random point: x=%f y=%f\n",x[0],x[1]);
         } else {
           rn = random->uniform();
           ntri = tasks[i].npoint - 2;
@@ -1079,7 +1072,6 @@ void FixDropletEmit::perform_task_twopass()
             rn = random->uniform();
             p1 = &tasks[i].path[0];
             p2 = &tasks[i].path[3];
-            rn =0.5;
             x[0] = p1[0] + rn * (p2[0]-p1[0]);
             x[1] = p1[1] + rn * (p2[1]-p1[1]);
             x[2] = 0.0;

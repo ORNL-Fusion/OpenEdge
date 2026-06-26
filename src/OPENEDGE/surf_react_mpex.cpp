@@ -429,7 +429,7 @@ void SurfReactMpex::readfile(char *fname)
           strcpy(r->id_reactants[r->nreactant],word);
           r->nreactant++;
         } else {
-          if (r->nreactant == MAXPRODUCT)
+          if (r->nproduct == MAXPRODUCT)
             error->all(FLERR,"Too many products in a reaction formula");
           n = strlen(word) + 1;
           r->id_products[r->nproduct] = new char[n];

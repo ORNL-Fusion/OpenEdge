@@ -188,7 +188,7 @@ void SurfReactSurfacePWI::init()
 /* ---------------------------------------------------------------------- */
 
 int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
-                            Particle::OnePart *&jp, int &)
+                            Particle::OnePart *&jp, int &velreset)
 {
   int n = reactions[ip->ispecies].n;
   if (n == 0) return 0;
@@ -246,6 +246,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
     if (react_prob > random_prob) {
       nsingle++;
       tally_single[list[i]]++;
+      velreset = 1;   // react() sets the outgoing velocity; don't let collide override it
 
       switch (r->type) {
       case DISSOCIATION:

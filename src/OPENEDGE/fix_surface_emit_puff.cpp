@@ -394,7 +394,9 @@ void FixSurfaceEmitPuff::perform_task()
     if (perspecies) {
       for (isp = 0; isp < nspecies; isp++) {
         ispecies = species[isp];
-        double ntarget_sp = ntarget * fraction[isp];
+        // FLOW: per-species count already weighted by mol_inflow; CONSTANT: split by fraction
+        double ntarget_sp = (npmode == FLOW) ? tasks[i].ntargetsp[isp]
+                                             : ntarget * fraction[isp];
         ninsert = static_cast<int>(ntarget_sp + random->uniform());
         if (cap_remaining >= 0) {
           bigint slot = cap_remaining - static_cast<bigint>(nsingle);

@@ -56,6 +56,8 @@ class Pusher : protected Pointers {
   int pusher_bad_dt_warned;
   double pusher_bad_dt_limit;
   double pusher_gca_switch;
+  double pusher_boris_near;     // force Boris when |dist to sheath_geom surf| < this (m); 0 = off
+  int    pusher_gca_integrator; // 0 = RK4 (default), 1 = simple (single-stage leapfrog, no curvature)
 
   int gca_x_custom;
   int gca_y_custom;

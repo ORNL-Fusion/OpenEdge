@@ -1020,7 +1020,10 @@ void FixBackground::load_plasma_h5()
     H5::DataSpace sp = ds.getSpace();
     hsize_t dims[3];
     sp.getSimpleExtentDims(dims);
-    out.resize(dims[0] * dims[1] * dims[2]);
+    if (static_cast<int>(dims[0]) != nion || static_cast<int>(dims[1]) != nz ||
+        static_cast<int>(dims[2]) != nr)
+      throw std::runtime_error("Shape mismatch in " + name);
+    out.resize(static_cast<size_t>(nion) * n);
     ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
   };
 

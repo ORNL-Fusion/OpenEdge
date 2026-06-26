@@ -907,6 +907,17 @@ void FixSurfaceStateLm::end_of_step()
   // solve strip MHD model to steady state
   strip.solve_steady();
 
+  // bail on a diverged/NaN solve: keep previous wall state rather than writing garbage
+  if (strip.diverged) {
+    if (comm->me == 0 && screen)
+      fprintf(screen, "WARNING: surface/state/lm solve diverged (%s); keeping previous wall state\n",
+              strip.diverged_reason.c_str());
+    surf->estatus[tindex] = 0;
+    surf->estatus[hindex] = 0;
+    surf->estatus[gindex] = 0;
+    return;
+  }
+
   // map strip state outputs (Tsurf, h_film, Gamma_D) to per-surf customs.
   // Evaporation and adatom fluxes are produced by dedicated SPARTA computes.
   // Gamma_D is non-zero only when the heat-flux source carries it

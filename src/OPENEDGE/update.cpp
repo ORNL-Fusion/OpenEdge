@@ -2998,6 +2998,8 @@ void Update::global(int narg, char **arg)
     //                 [subcycles N]
     //                 [plasma <ID>]            (compute plasma/fields or fix background)
     //                 [gca_switch <factor>]
+    //                 [boris_near <m>]        (force Boris when |dist to sheath_geom surf| < m; 0 = off)
+    //                 [gca_integrator rk4|simple]   (rk4 = 4-stage default; simple = 1-stage leapfrog, ~4x cheaper, no curvature)
     //                 [dump yes|no] [dump_every N]
     //                 [bad_dt_check yes|no] [bad_dt_limit <max>]
     //                 [sheath off|kick|spatial
