@@ -46,14 +46,75 @@ class SolpsInterface:
     # ------------------------------------------------------------------
 
     def load_geometry(self, path=None):
-        """Load SOLPS geometry from b2fgmtry.mat."""
+        """Load SOLPS geometry.
+
+        Prefers a MATLAB ``b2fgmtry.mat`` (run_dir then baserun); falls back
+        to the native text ``b2fgmtry`` (run_dir then baserun). The geometry
+        is shared across run cases, so it usually lives only in baserun.
+        """
+        if path is not None:
+            if path.endswith('.mat'):
+                return self._load_geometry_mat(path)
+            return self._load_geometry_text(path)
+
+        mat = [os.path.join(self.run_dir, 'b2fgmtry.mat'),
+               os.path.join(self.baserun_dir, 'b2fgmtry.mat')]
+        txt = [os.path.join(self.run_dir, 'b2fgmtry'),
+               os.path.join(self.baserun_dir, 'b2fgmtry')]
+        if HAS_SCIPY:
+            for p in mat:
+                if os.path.exists(p):
+                    return self._load_geometry_mat(p)
+        for p in txt:
+            if os.path.exists(p):
+                return self._load_geometry_text(p)
+        raise FileNotFoundError(
+            f"no b2fgmtry(.mat) in {self.run_dir} or {self.baserun_dir}")
+
+    def _load_geometry_mat(self, path):
         if not HAS_SCIPY:
             raise ImportError("scipy required for .mat file reading")
-        path = path or os.path.join(self.run_dir, 'b2fgmtry.mat')
         m = sio.loadmat(path)
         self.geo = m['Geo'][0, 0]
         self.nx = int(self.geo['nx'].flat[0])
         self.ny = int(self.geo['ny'].flat[0])
+        return self.geo
+
+    def _load_geometry_text(self, path):
+        """Parse a native SOLPS text b2fgmtry (*cf: type count name blocks).
+
+        crx/cry are Fortran-ordered (nx+2, ny+2, 4); vol is (nx+2, ny+2).
+        """
+        with open(path) as f:
+            lines = f.readlines()
+        raw = {}
+        nx = ny = 0
+        i = 0
+        while i < len(lines):
+            s = lines[i].strip()
+            if s.startswith('*cf:'):
+                parts = s.split()
+                dtype, count, name = parts[1], int(parts[2]), parts[3]
+                i += 1
+                vals = []
+                while i < len(lines) and not lines[i].strip().startswith('*cf:'):
+                    vals.extend(lines[i].split())
+                    i += 1
+                    if len(vals) >= count:
+                        break
+                if name == 'nx,ny':
+                    nx, ny = int(vals[0]), int(vals[1])
+                elif dtype == 'real':
+                    raw[name] = np.array(vals[:count], dtype=float)
+            else:
+                i += 1
+        self.nx, self.ny = nx, ny
+        nxp2, nyp2 = nx + 2, ny + 2
+        geo = {'nx': np.array([[nx]]), 'ny': np.array([[ny]])}
+        for name in ('crx', 'cry'):
+            geo[name] = raw[name].reshape((nxp2, nyp2, 4), order='F')
+        geo['vol'] = raw['vol'].reshape((nxp2, nyp2), order='F')
+        self.geo = geo
         return self.geo
 
     def get_cell_centers(self):
@@ -134,15 +195,23 @@ class SolpsInterface:
     # ------------------------------------------------------------------
 
     def load_plasma_state(self, path=None):
-        """Load SOLPS plasma state from b2fstate (text) or b2fstate.mat.
+        """Load SOLPS plasma state from b2fstate / b2fstati (text) or b2fstate.mat.
 
         Prefers text format b2fstate (written by b2run) over .mat format,
-        since .mat files require separate post-processing to generate.
+        since .mat files require separate post-processing to generate. If
+        b2fstate is missing or empty (e.g. before SOLPS has run), falls back
+        to the restart/input state b2fstati, which has the same *cf: format
+        and carries everything this routine needs (ns, nx, ny, zn, am).
         """
-        # Try text-format b2fstate first (written directly by b2run)
-        txt_path = path or os.path.join(self.run_dir, 'b2fstate')
-        if os.path.exists(txt_path) and os.path.getsize(txt_path) > 10000:
-            return self._load_plasma_state_text(txt_path)
+        # Try text-format b2fstate / b2fstati first (written by b2run)
+        if path is not None:
+            candidates = [path]
+        else:
+            candidates = [os.path.join(self.run_dir, 'b2fstate'),
+                          os.path.join(self.run_dir, 'b2fstati')]
+        for txt_path in candidates:
+            if os.path.exists(txt_path) and os.path.getsize(txt_path) > 10000:
+                return self._load_plasma_state_text(txt_path)
 
         # Fall back to .mat format
         if not HAS_SCIPY:
@@ -297,16 +366,46 @@ class SolpsInterface:
                     line = ' '.join(f'{v:.8e}' for v in row)
                     f.write(line + '\n')
 
+    def write_she0_2d(self, she_array, filename):
+        """Write a she0 (external electron-heat) 2D source file.
+
+        The SOLPS reader (b2mod_input_profile.F, source_input_2d) expects::
+
+            Do i = -1,ny
+               Read(99,*) profile2d(:,i)   ! nx+2 radial values per row
+            she0(:,:,0) = profile2d
+
+        i.e. (ny+2) rows, each with (nx+2) values, NO species index. The
+        log line `JDL total she0 power W = sum(profile2d)` confirms the
+        unit is W integrated per cell.
+
+        Args:
+            she_array: shape (nx+2, ny+2), electron-energy source [W per cell]
+            filename: output file name (e.g., 'she2d.00001')
+        """
+        nyp2 = self.ny + 2
+        if she_array.ndim != 2:
+            raise ValueError("she_array must be 2D (nx+2, ny+2)")
+        filepath = os.path.join(self.run_dir, filename)
+        with open(filepath, 'w') as f:
+            for i in range(nyp2):
+                row = she_array[:, i]
+                f.write(' '.join(f'{v:.8e}' for v in row) + '\n')
+
     def write_sources_profile_chain(self, n_windows, dt_windows, t_start=0.0,
-                                    source_filenames=None):
+                                    source_filenames=None,
+                                    she_filenames=None):
         """Write b2.sources.profile and its chain files.
 
         Args:
             n_windows: number of time windows (source2d files)
             dt_windows: list of dt for each window [s]
             t_start: simulation start time [s]
-            source_filenames: optional list of explicit source2d file names
-                              to reference, one per time window
+            source_filenames: optional list of explicit sna0_2d (particle)
+                              file names, one per time window
+            she_filenames: optional list of she0_2d (electron-energy) file
+                           names, one per time window. When given, the
+                           namelist also carries read_she0_2d/she0_2d_filename.
         """
         if source_filenames is not None:
             if len(source_filenames) != n_windows:
@@ -316,6 +415,9 @@ class SolpsInterface:
             source_filenames = [
                 f'source2d.{k:05d}' for k in range(1, n_windows + 1)
             ]
+        if she_filenames is not None and len(she_filenames) != n_windows:
+            raise ValueError(
+                "she_filenames must have one entry per time window")
 
         t = t_start
         for k in range(1, n_windows + 1):
@@ -329,6 +431,9 @@ class SolpsInterface:
                 f.write('&profile\n')
                 f.write('read_sna0_2d=.true.\n')
                 f.write(f'sna0_2d_filename="{source_filenames[k - 1]}"\n')
+                if she_filenames is not None:
+                    f.write('read_she0_2d=.true.\n')
+                    f.write(f'she0_2d_filename="{she_filenames[k - 1]}"\n')
                 if next_profile:
                     f.write(f'sources_time_switch={switch_time:.6e}\n')
                     f.write(f'sources_filename="{next_profile}"\n')
