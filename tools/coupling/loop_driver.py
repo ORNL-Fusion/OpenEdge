@@ -259,7 +259,7 @@ def main():
     kconsec = int(loop.get("consecutive", 2))
     archive_state = bool(loop.get("archive_state", False))
     archive_full = bool(loop.get("archive_full", False))
-    check_conv = bool(loop.get("check_convergence", False))
+    check_conv = False  # convergence-stop disabled: always run to max_iters
 
     oneshot = os.path.join(HERE, "oneshot_driver.py")
     work = absp(os.path.join(f"loop_{case}"))
@@ -316,8 +316,7 @@ def main():
         prev = history[-1]["int_Sp"] if history else None
         rel = abs(sp - prev) / abs(sp) if (prev and sp) else float("nan")
         history.append({"iter": it, "step": step, "int_Sp": sp, "int_Qe": qe, "rel": rel})
-        print(f"\n  >> iter {it}: int Sp = {sp:.6e} Li/s   int Qe = {qe:.6e} W"
-              f"   rel d = {rel:.4f}")
+        print(f"\n  >> iter {it}: int Sp = {sp:.6e} Li/s   int Qe = {qe:.6e} W")
         if not args.dry:
             with open(conv_csv, "a") as f:
                 f.write(f"{it},{step},{sp:.6e},{qe:.6e},{rel:.6e}\n")
@@ -358,10 +357,10 @@ def main():
         it += 1
 
     print("\n== loop summary ==")
-    print(f"{'iter':>4} {'step':>9} {'int Sp [Li/s]':>16} {'int Qe [W]':>14} {'rel d':>8}")
+    print(f"{'iter':>4} {'step':>9} {'int Sp [Li/s]':>16} {'int Qe [W]':>14}")
     for h in history:
         print(f"{h['iter']:>4} {h['step']:>9} {h['int_Sp']:>16.6e} "
-              f"{h['int_Qe']:>14.6e} {h['rel']:>8.4f}")
+              f"{h['int_Qe']:>14.6e}")
     if not args.dry:
         print(f"\nconvergence trace: {conv_csv}")
         print(f"per-iteration archive: {work}/iter_*/")
