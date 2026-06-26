@@ -54,10 +54,9 @@ global              pcache_nevery 20
 compute             pfields plasma/fields all background pd br bt bz
 
 compute             cgeom nearest_surf/grid all wall dist surfid nx ny nz
-# Hybrid Boris/GCA: lower gca_switch makes GCA aggressive — for heavy W
-# in WEST SOL (rho_L ~ um, L_B ~ m), gca_switch=0.1 => GCA used everywhere
-# rho_L < 10*L_B (effectively all the time, except near-uniform-B patches).
-global              pusher plasma pfields mode hybrid gca_switch 0.1 &
+# Boris pusher: full-orbit integration using the point-queried B-field
+# (br,bt,bz from compute pfields). No GCA, so no /equilibrium btf/rtf needed.
+global              pusher plasma pfields mode boris &
                     subcycles 1 bad_dt_check yes bad_dt_limit 0.5 dump no &
                     sheath kick geom cgeom mD_amu 2.0
 
