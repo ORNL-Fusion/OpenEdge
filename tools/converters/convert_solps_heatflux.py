@@ -29,10 +29,11 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
     """
     Compute heat-flux from SOLPS face fluxes on a cell-centered grid.
 
-    Methods:
-      - jeremy_no_jv: |(fht_x - fhj_x)/sx|
-      - jeremy_total: |fht_x/sx|
-      - vector_mag:   sqrt((fht_x/sx)^2 + (fht_y/sy)^2)
+    Methods (the PARALLEL heat flux uses sxprl = |pbs[:,:,0]| from b2fgmtry,
+    per Jeremy: q_par = fht/sxprl, NOT the poloidal fht/sx):
+      - jeremy_no_jv: |(fht_x - fhj_x)/sxprl|              (parallel, jv removed)
+      - jeremy_total: |fht_x/sxprl|                        (parallel, total)
+      - vector_mag:   sqrt((fht_x/sx)^2 + (fht_y/sy)^2)    (real-space pol+rad)
 
     Returns (rc, zc, qmag) where rc/zc are cell centers and qmag is heat flux.
     """
@@ -59,20 +60,15 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
         fht = fhe + fhi
         print("Using fhe + fhi as total heat flux (fht not in b2fstate)")
 
-    # Face areas: use sx if available, otherwise gs(:,:,0) from geometry
-    # (consistent with Jeremy's SOLPS postprocessing: sx = Geo.gs(:,:,1))
-    try:
-        sx = b2f_extract("sx", b2fstate)    # (nx+2, ny+2)
-    except KeyError:
-        try:
-            gs = b2f_extract("gs", b2fgmtry)  # (nx+2, ny+2, 3)
-            if gs.ndim == 2:
-                gs = gs.reshape(nx + 2, ny + 2, -1, order="F")
-            sx = gs[:, :, 0]  # poloidal face area
-            print("Using gs(:,:,0) from b2fgmtry as poloidal face area")
-        except KeyError:
-            sx = b2f_extract("hx", b2fgmtry)
-            print("WARNING: Using hx from b2fgmtry as face area fallback (gs not found)")
+    # PARALLEL face area sxprl = |pbs(:,:,1)| (matlab) = |pbs[:,:,0]| (python),
+    # read from b2fgmtry (Jeremy's suggestion). The PARALLEL heat-flux density is
+    # q_par = fht/sxprl, NOT the poloidal fht/sx. sx is the geometric poloidal
+    # face area; sxprl projects it onto the field line via the pitch B/B_pol
+    # (typically ~20x smaller, so q_par is ~20x larger than the poloidal flux).
+    pbs = b2f_extract("pbs", b2fgmtry)        # (nx+2, ny+2, 2)
+    if pbs.ndim == 2:
+        pbs = pbs.reshape(nx + 2, ny + 2, -1, order="F")
+    sxprl = np.abs(pbs[:, :, 0])
 
     if fht.ndim == 2:
         fht = fht.reshape(nx + 2, ny + 2, -1, order="F")
@@ -82,9 +78,11 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
     s = np.s_[1:-1, 1:-1]  # interior slice
     rc, zc = rc[s], zc[s]
     fht = fht[s]
-    sx = sx[s]
+    sxprl = sxprl[s]
 
-    qx = np.divide(fht[:, :, 0], sx, out=np.full_like(sx, np.nan), where=sx > 0)
+    # Parallel heat-flux density: q_par = fht / sxprl  (Jeremy's formula)
+    qx = np.divide(fht[:, :, 0], sxprl,
+                   out=np.full_like(sxprl, np.nan), where=sxprl > 0)
 
     if method == "jeremy_no_jv":
         try:
@@ -92,8 +90,8 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
             if fhj.ndim == 2:
                 fhj = fhj.reshape(nx + 2, ny + 2, -1, order="F")
             fhj = fhj[s]
-            qx = np.divide(fht[:, :, 0] - fhj[:, :, 0], sx,
-                            out=np.full_like(sx, np.nan), where=sx > 0)
+            qx = np.divide(fht[:, :, 0] - fhj[:, :, 0], sxprl,
+                            out=np.full_like(sxprl, np.nan), where=sxprl > 0)
         except KeyError:
             print("fhj not in b2fstate — falling back to jeremy_total method")
 
@@ -103,6 +101,20 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
         return rc, zc, np.abs(qx_c)
 
     if method == "vector_mag":
+        # Real-space vector magnitude uses the GEOMETRIC poloidal (sx) and radial
+        # (sy) face areas, not the parallel sxprl above.
+        try:
+            sx_geo = b2f_extract("sx", b2fstate)    # (nx+2, ny+2)
+        except KeyError:
+            try:
+                gs = b2f_extract("gs", b2fgmtry)  # (nx+2, ny+2, 3)
+                if gs.ndim == 2:
+                    gs = gs.reshape(nx + 2, ny + 2, -1, order="F")
+                sx_geo = gs[:, :, 0]  # poloidal face area
+                print("Using gs(:,:,0) from b2fgmtry as poloidal face area")
+            except KeyError:
+                sx_geo = b2f_extract("hx", b2fgmtry)
+                print("WARNING: Using hx from b2fgmtry as poloidal face area fallback")
         try:
             sy = b2f_extract("sy", b2fstate)
         except KeyError:
@@ -115,9 +127,12 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
             except KeyError:
                 sy = b2f_extract("hy", b2fgmtry)
                 print("WARNING: Using hy from b2fgmtry as radial face area fallback")
+        sx_geo = sx_geo[s]
         sy = sy[s]
+        qx_pol = np.divide(fht[:, :, 0], sx_geo,
+                           out=np.full_like(sx_geo, np.nan), where=sx_geo > 0)
         qy = np.divide(fht[:, :, 1], sy, out=np.full_like(sy, np.nan), where=sy > 0)
-        qx_c = 0.5 * (qx + np.roll(qx, -1, axis=0))
+        qx_c = 0.5 * (qx_pol + np.roll(qx_pol, -1, axis=0))
         qx_c[-1, :] = np.nan
         qy_c = 0.5 * (qy + np.roll(qy, -1, axis=1))
         qy_c[:, -1] = np.nan

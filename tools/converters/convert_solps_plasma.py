@@ -2019,8 +2019,9 @@ def _build_parser():
                             "vector_mag"],
                    help="Also write plasma heat flux INTO plasma.h5 as "
                         "mesh/q_par (=|q| from SOLPS face fluxes) + mesh/q_perp=0, "
-                        "for fix droplet/evaporate. 'total' = |fht/sx| parallel "
-                        "heat flux (recommended). Default none.")
+                        "for fix droplet/evaporate. 'total' = |fht/sxprl| parallel "
+                        "heat flux (sxprl=|pbs[:,:,0]| from b2fgmtry; recommended). "
+                        "Default none.")
     p.add_argument("--core-out", type=Path, default=None,
                    help="If given, also write a SPARTA surface file tracing "
                         "the psi_norm=<--psi-norm-core> contour around the "
