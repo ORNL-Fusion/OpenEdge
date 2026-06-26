@@ -237,8 +237,13 @@ def main():
     args = ap.parse_args()
 
     cfg_path = os.path.abspath(args.config)
+    def _expand(o):
+        if isinstance(o, str):  return os.path.expandvars(o)
+        if isinstance(o, dict): return {k: _expand(v) for k, v in o.items()}
+        if isinstance(o, list): return [_expand(v) for v in o]
+        return o
     with open(cfg_path) as f:
-        cfg = json.load(f)
+        cfg = _expand(json.load(f))
 
     coupled = cfg["coupled_dir"]
     loop = cfg.get("loop", {})

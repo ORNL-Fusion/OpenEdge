@@ -46,15 +46,20 @@ def main():
     ap.add_argument("config")
     ap.add_argument("--case", required=True)
     ap.add_argument("--campaign-root", default=None,
-                    help="default <coupled>/campaigns")
+                    help="default <coupled>/ensemble_runs")
     ap.add_argument("--fresh", action="store_true", help="rebuild even if it exists")
     ap.add_argument("--allow-incomplete", action="store_true",
                     help="stage even if the source SOLPS run did not finish")
     ap.add_argument("--dry", action="store_true")
     args = ap.parse_args()
 
+    def _expand(o):
+        if isinstance(o, str):  return os.path.expandvars(o)
+        if isinstance(o, dict): return {k: _expand(v) for k, v in o.items()}
+        if isinstance(o, list): return [_expand(v) for v in o]
+        return o
     with open(args.config) as f:
-        cfg = json.load(f)
+        cfg = _expand(json.load(f))
     coupled = cfg["coupled_dir"]
     case = args.case
     base = case.split("__")[0]
@@ -63,7 +68,7 @@ def main():
     def absp(p):
         return p if os.path.isabs(p) else os.path.join(coupled, p)
 
-    camp_root = args.campaign_root or os.path.join(coupled, "campaigns")
+    camp_root = args.campaign_root or os.path.join(coupled, "ensemble_runs")
     campaign = os.path.join(camp_root, case)
     src_solps = absp(cc["solps_run_dir"])
     src_deck = absp(cc["oe_deck"])

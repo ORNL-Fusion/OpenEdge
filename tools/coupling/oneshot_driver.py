@@ -110,7 +110,12 @@ def main():
     if not args:
         print(__doc__)
         sys.exit(1)
-    cfg = json.load(open(args[0]))
+    def _expand(o):
+        if isinstance(o, str):  return os.path.expandvars(o)
+        if isinstance(o, dict): return {k: _expand(v) for k, v in o.items()}
+        if isinstance(o, list): return [_expand(v) for v in o]
+        return o
+    cfg = _expand(json.load(open(args[0])))
 
     coupled = cfg["coupled_dir"]
     case = case_override or cfg.get("case", "attached")
