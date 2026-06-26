@@ -1,0 +1,99 @@
+{
+    "coupled_dir": "${OPENEDGE_ROOT}/examples/test_solps_coupling/coupled_test",
+    "solps_run_dir": "${OPENEDGE_ROOT}/examples/test_solps_coupling/coupled_test/solps/attached",
+    "solps_base_dir": "${OPENEDGE_ROOT}/examples/test_solps_coupling/coupled_test/solps/baserun",
+    "solps_run_script": "${OPENEDGE_ROOT}/examples/test_solps_coupling/coupled_test/run_solps.csh",
+    "openedge_binary": "${OPENEDGE_BUILD}/src/spa_mpi",
+    "oneapi_setvars": "/opt/intel/oneapi/setvars.sh",
+    "mpirun": "mpirun",
+    "plasma_h5": "${OPENEDGE_ROOT}/examples/test_solps_coupling/coupled_test/openedge/plasma.h5",
+    "case": "detached__mist",
+    "cases": {
+        "attached__mist": {
+            "oe_deck": "openedge/full_runs/attached__mist/in.oedge_wall",
+            "oe_output_dir": "openedge/full_runs/attached__mist/output",
+            "solps_run_dir": "solps/attached__mist",
+            "droplet_emit": {
+                "enabled": true,
+                "n_per_leg": 100,
+                "nevery": 1,
+                "rate_per_s_target": 3770000000.0,
+                "_note": "Table 4 rate 3.77e9/s needs n~9400/leg (infeasible); capped at n_per_leg, source scales linearly per particle"
+            }
+        },
+        "attached__no_mist": {
+            "oe_deck": "openedge/full_runs/attached__no_mist/in.oedge_wall",
+            "oe_output_dir": "openedge/full_runs/attached__no_mist/output",
+            "solps_run_dir": "solps/attached__no_mist",
+            "droplet_emit": {
+                "enabled": false
+            }
+        },
+        "detached__mist": {
+            "oe_deck": "openedge/full_runs/detached__mist/in.oedge_wall",
+            "oe_output_dir": "openedge/full_runs/detached__mist/output",
+            "solps_run_dir": "solps/detached__mist",
+            "droplet_emit": {
+                "enabled": true,
+                "rate_per_s": 82200000.0,
+                "nevery": 1
+            }
+        },
+        "detached__no_mist": {
+            "oe_deck": "openedge/full_runs/detached__no_mist/in.oedge_wall",
+            "oe_output_dir": "openedge/full_runs/detached__no_mist/output",
+            "solps_run_dir": "solps/detached__no_mist",
+            "droplet_emit": {
+                "enabled": false
+            }
+        }
+    },
+    "source_export": {
+        "sna_prefix": "source2d",
+        "she_prefix": "she2d",
+        "write_energy": true,
+        "max_map_dist_m": 0.5,
+        "li_species": "Li+"
+    },
+    "oe_convergence": {
+        "metric": "int_Sp",
+        "rel_tol": 0.03,
+        "window": 10,
+        "poll_seconds": 15,
+        "max_steps": 20
+    },
+    "loop": {
+        "case": "attached__mist",
+        "max_iters": 10,
+        "check_convergence": true,
+        "rel_tol": 0.05,
+        "consecutive": 2,
+        "archive_state": false,
+        "archive_full": true
+    },
+    "plasma_build": {
+        "b2fgmtry": "solps/baserun/b2fgmtry",
+        "equ_file": "solps/baserun/dg.equ",
+        "wall_in": "${OPENEDGE_ROOT}/examples/test_solps_coupling/input/wall.surf",
+        "geometry": "cart",
+        "heatflux": "total"
+    },
+    "tsurf_leg": {
+        "surf_dir": "openedge/surf_with_strip",
+        "strip_dir": "openedge/strip_csv",
+        "strip_runs_dir": "openedge/runs",
+        "plasma_dir": "openedge/plasma",
+        "outer_lids": [
+            185,
+            282
+        ],
+        "inner_lids": [
+            110,
+            165
+        ]
+    },
+    "solps_ntim": 2,
+    "dt_oe": 5e-06,
+    "mpi_np_openedge": 4,
+    "mpi_np_solps": 64
+}
