@@ -55,8 +55,18 @@ examples/**/dump.*
 # Local dev tool config
 .claude/
 **/.claude/
+/.codex
+/.codex/
+
+# Local virtualenvs / notebook scratch state
+/.venv*/
+*.ipynb.save
+*:Zone.Identifier
+\#*\#
+*~
 
 # Build artifacts
+/build*/
 src/Obj_mpi/
 src/Obj_mac_mpi/
 src/OPENEDGE/*.o

@@ -24,6 +24,7 @@
 #include "mixture.h"
 #include "random_knuth.h"
 #include "random_mars.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -293,36 +294,77 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
     return;
   }
 
-  // Antoine + Hertz-Knudsen flux.
   const double a1 = 5.055, b1 = -8023.0, xm1 = 6.939;
-  const double vpres1 = 760.0 * std::pow(10.0, a1 + b1/TK);          // mmHg
-  const double Gevap_atoms = 1.0e4 * 3.513e22 * vpres1 / std::sqrt(xm1 * TK);
+  const double max_dT = 25.0;       // K, local explicit substep limiter
+  const double max_dR_frac = 0.02;  // limit radius loss in one substep
+  const int max_substeps = 10000;
 
-  // Tally cumulative real Li atoms evaporated from this droplet over the
-  // half-step. Each macro-particle = 1 real droplet (specwt=1 expected).
-  evap_atoms_local_ += 4.0 * MY_PI * radius * radius * Gevap_atoms * DT;
+  double R_new = radius;
+  double T_new = TK;
+  double evap_atoms_step = 0.0;
+  double t_left = DT;
+  int nsub = 0;
 
-  const double dRdt = -AM * Gevap_atoms / Rho;
-  const double HF   = Qs - Gevap_atoms * (DHm / AN);
-  const double r_safe = (radius > 1.0e-20) ? radius : 1.0e-20;
-  const double dTdt = (3.0 / (Rho * Cp * r_safe)) * HF;
+  while (t_left > 0.0 && R_new > 0.0) {
+    if (T_new <= 0.0 || !std::isfinite(T_new))
+      error->one(FLERR,"Fix evaporation: invalid particle temperature");
 
-  const double R_new   = std::max(0.0, radius + dRdt * DT);
-  const double T_new   = TK + dTdt * DT;
+    // Antoine + Hertz-Knudsen flux.
+    const double vpres1 = 760.0 * std::pow(10.0, a1 + b1/T_new);      // mmHg
+    const double Gevap_atoms =
+      1.0e4 * 3.513e22 * vpres1 / std::sqrt(xm1 * T_new);
+    if (!std::isfinite(Gevap_atoms) || Gevap_atoms < 0.0)
+      error->one(FLERR,"Fix evaporation: invalid evaporation flux");
+
+    const double dRdt = -AM * Gevap_atoms / Rho;
+    const double HF   = Qs - Gevap_atoms * (DHm / AN);
+    const double r_safe = (R_new > 1.0e-20) ? R_new : 1.0e-20;
+    const double dTdt = (3.0 / (Rho * Cp * r_safe)) * HF;
+    if (!std::isfinite(dRdt) || !std::isfinite(dTdt))
+      error->one(FLERR,"Fix evaporation: invalid evaporation rate");
+
+    double dt_sub = t_left;
+    if (dTdt != 0.0 && std::isfinite(dTdt)) {
+      const double dT_limit = (dTdt < 0.0)
+                            ? std::min(max_dT, 0.5 * T_new)
+                            : max_dT;
+      const double dt_T = dT_limit / std::fabs(dTdt);
+      if (dt_T > 0.0 && dt_T < dt_sub) dt_sub = dt_T;
+    }
+    if (dRdt < 0.0 && std::isfinite(dRdt)) {
+      const double dt_R = max_dR_frac * R_new / (-dRdt);
+      if (dt_R > 0.0 && dt_R < dt_sub) dt_sub = dt_R;
+    }
+    if (dt_sub <= 0.0 || !std::isfinite(dt_sub))
+      error->one(FLERR,"Fix evaporation: invalid adaptive timestep");
+
+    evap_atoms_step += 4.0 * MY_PI * R_new * R_new * Gevap_atoms * dt_sub;
+    R_new = std::max(0.0, R_new + dRdt * dt_sub);
+    T_new += dTdt * dt_sub;
+    t_left -= dt_sub;
+
+    if (++nsub > max_substeps)
+      error->one(FLERR,"Fix evaporation: adaptive timestep exceeded limit");
+  }
+
   const double m_new   = (R_new > 0.0)
                          ? (Rho * (4.0/3.0) * MY_PI * R_new*R_new*R_new)
                          : 0.0;
-  if (T_new < 0.0)
+  if (!std::isfinite(T_new) || T_new < 0.0)
     error->one(FLERR,"Fix evaporation: particle temperature dropped below 0 K");
 
+  // Tally cumulative real Li atoms evaporated from this droplet over the
+  // half-step. Each macro-particle = 1 real droplet (specwt=1 expected).
+  evap_atoms_local_ += evap_atoms_step;
+
   // Rocket-force kick (in-place velocity update via fresh pointer).
-  if (rocket_eta > 0.0 && m_new > 0.0 && Gevap_atoms > 0.0) {
+  if (rocket_eta > 0.0 && m_new > 0.0 && evap_atoms_step > 0.0) {
     const double grad_mag = std::sqrt(gTeR*gTeR + gTeZ*gTeZ);
     if (std::isfinite(grad_mag) && grad_mag > 0.0) {
       const double kB = 1.380649e-23;
-      const double v_thermal = std::sqrt(8.0 * kB * TK / (MY_PI * AM));
-      const double area0 = 4.0 * MY_PI * radius * radius;
-      const double dmdt = area0 * Gevap_atoms * AM;
+      const double T_rocket = std::max(1.0, 0.5 * (TK + T_new));
+      const double v_thermal = std::sqrt(8.0 * kB * T_rocket / (MY_PI * AM));
+      const double dmdt = evap_atoms_step * AM / DT;
       const double a_mag = rocket_eta * dmdt * v_thermal / m_new;
       const double nr = -gTeR / grad_mag;
       const double nz = -gTeZ / grad_mag;
@@ -342,9 +384,11 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
 
   // Volumetric Li source: spawn evaporated atoms in the droplet's cell.
   // Must precede the final ip-> write (spawn may realloc the particle array).
-  if (emit_imix >= 0 && Gevap_atoms > 0.0 && radius > 0.0) {
+  if (emit_imix >= 0 && evap_atoms_step > 0.0 && radius > 0.0) {
     const double area = 4.0 * MY_PI * radius * radius;
-    spawn_evap_atoms(idrop, area, Gevap_atoms, TK, dt_half);
+    const double Gevap_emit = evap_atoms_step / (area * DT);
+    const double T_emit = std::max(1.0, 0.5 * (TK + T_new));
+    spawn_evap_atoms(idrop, area, Gevap_emit, T_emit, dt_half);
   }
 
   // Final state write through a fresh pointer (any spawn above may have

@@ -2,8 +2,8 @@
 """
 SOLPS heatflux -> OpenEdge converter (no quixote dependency).
 
-Extracts heat-flux density from SOLPS face-centered fluxes (fht, fhj, sx, sy)
-read directly from b2fstate, and writes heatflux.h5.
+Extracts heat-flux density from SOLPS face-centered fluxes read directly from
+b2fstate/b2fgmtry, and writes heatflux.h5.
 
 Usage:
     python solps_heatflux2openedge.py /path/to/solps_run \\
@@ -30,13 +30,13 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
     Compute heat-flux from SOLPS face fluxes on a cell-centered grid.
 
     Methods:
-      - jeremy_no_jv: |(fht_x - fhj_x)/sx|
-      - jeremy_total: |fht_x/sx|
+      - jeremy_no_jv: |(fht_x - fhj_x)/sxprl|
+      - jeremy_total: |fht_x/sxprl|
       - vector_mag:   sqrt((fht_x/sx)^2 + (fht_y/sy)^2)
 
     Returns (rc, zc, qmag) where rc/zc are cell centers and qmag is heat flux.
     """
-    if method == "total":          # friendly alias for jeremy_total (|fht/sx|)
+    if method == "total":          # friendly alias for jeremy_total
         method = "jeremy_total"
 
     b2fstate = run_path / "b2fstate"
@@ -59,8 +59,20 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
         fht = fhe + fhi
         print("Using fhe + fhi as total heat flux (fht not in b2fstate)")
 
-    # Face areas: use sx if available, otherwise gs(:,:,0) from geometry
-    # (consistent with Jeremy's SOLPS postprocessing: sx = Geo.gs(:,:,1))
+    # Parallel contact area from geometry: pbs(:,:,0) = (B_x/|B|) * sx.
+    try:
+        pbs = b2f_extract("pbs", b2fgmtry)  # (nx+2, ny+2, 2)
+        if pbs.ndim == 2:
+            pbs = pbs.reshape(nx + 2, ny + 2, -1, order="F")
+        sxprl = np.abs(pbs[:, :, 0])
+    except KeyError as exc:
+        raise KeyError(
+            "Variable 'pbs' not found in b2fgmtry; cannot compute SOLPS "
+            "parallel heat flux. For deposited target heat flux use fht/sx "
+            "outside this converter."
+        ) from exc
+
+    # Poloidal face areas used only for the legacy vector_mag option.
     try:
         sx = b2f_extract("sx", b2fstate)    # (nx+2, ny+2)
     except KeyError:
@@ -82,9 +94,14 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
     s = np.s_[1:-1, 1:-1]  # interior slice
     rc, zc = rc[s], zc[s]
     fht = fht[s]
+    sxprl = sxprl[s]
     sx = sx[s]
 
-    qx = np.divide(fht[:, :, 0], sx, out=np.full_like(sx, np.nan), where=sx > 0)
+    qx = np.divide(
+        fht[:, :, 0], sxprl,
+        out=np.full_like(sxprl, np.nan),
+        where=sxprl > 0,
+    )
 
     if method == "jeremy_no_jv":
         try:
@@ -92,8 +109,11 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
             if fhj.ndim == 2:
                 fhj = fhj.reshape(nx + 2, ny + 2, -1, order="F")
             fhj = fhj[s]
-            qx = np.divide(fht[:, :, 0] - fhj[:, :, 0], sx,
-                            out=np.full_like(sx, np.nan), where=sx > 0)
+            qx = np.divide(
+                fht[:, :, 0] - fhj[:, :, 0], sxprl,
+                out=np.full_like(sxprl, np.nan),
+                where=sxprl > 0,
+            )
         except KeyError:
             print("fhj not in b2fstate — falling back to jeremy_total method")
 
@@ -116,6 +136,7 @@ def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
                 sy = b2f_extract("hy", b2fgmtry)
                 print("WARNING: Using hy from b2fgmtry as radial face area fallback")
         sy = sy[s]
+        qx = np.divide(fht[:, :, 0], sx, out=np.full_like(sx, np.nan), where=sx > 0)
         qy = np.divide(fht[:, :, 1], sy, out=np.full_like(sy, np.nan), where=sy > 0)
         qx_c = 0.5 * (qx + np.roll(qx, -1, axis=0))
         qx_c[-1, :] = np.nan
