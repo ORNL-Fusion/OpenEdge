@@ -95,6 +95,15 @@ int maxgrid_src = 0;
 enum { TALLY_COUNTS, TALLY_RATE, TALLY_BATCH, TALLY_BATCH_FIX };
 int    tally_units   = TALLY_COUNTS;
 
+// Per-particle weight (fix particle/weight "pweight" custom attribute), the
+// number of real particles each macroparticle represents. In TALLY_RATE mode
+// the source tally weights each event by pweight/fnum so flux-scaled emission
+// (fix surface/emit/source nlaunch) yields the correct source magnitude;
+// pweight defaults to fnum, so this is a no-op when weighting is unused.
+// Refreshed each step in end_of_step_no_average(); -1 means not present.
+int    pweight_index  = -1;
+int    pweight_ewhich = -1;
+
 // Output layout of the per-cell tally (array_grid):
 //   OUT_SUMMARY  (default): 6 cols = {Sp, Sm_x, Sm_y, Sm_z, Qe, Qi}, signs per
 //                 Sec.4 of docs/neutral_plasma_coupling/main.tex -- signed

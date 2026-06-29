@@ -955,6 +955,15 @@ void FixVolumeChemAdas::end_of_step_no_average()
     batch_N_cached = static_cast<bigint>(n_global);
   }
 
+  // Refresh the per-particle weight handle (fix particle/weight). In RATE
+  // mode attempt() weights each event by this real-particle weight instead
+  // of the global fnum that the RATE normalization re-applies, so that
+  // flux-scaled emission (fix surface/emit/source nlaunch) produces the
+  // correct source magnitude. ewhich can change as custom attrs realloc, so
+  // look it up fresh each step. -1 => attribute absent (no-op weighting).
+  pweight_index  = particle->find_custom((char *) "pweight");
+  pweight_ewhich = (pweight_index >= 0) ? particle->ewhich[pweight_index] : -1;
+
   // Ensure per-cell source-tally array (20 columns) tracks current grid size.
   // In TALLY_COUNTS mode this grows but never zeros across steps (cumulative).
   // In TALLY_RATE mode we additionally zero the whole buffer each call so the
@@ -1719,6 +1728,16 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
       const double vol = grid->cinfo[icell].volume;
       const double w   = batch_R_puff / static_cast<double>(batch_N_cached);
       scale = (vol > 0.0) ? (w / vol) : 0.0;
+    } else if (tally_units == TALLY_RATE && pweight_ewhich >= 0 &&
+               ip_index >= 0) {
+      // Weight the event by the reacting particle's real-particle count
+      // (pweight) rather than the global fnum the RATE normalization
+      // re-applies below. pweight defaults to fnum, so unweighted particles
+      // give scale = 1 (identical to the previous behaviour); flux-scaled
+      // emission (fix surface/emit/source nlaunch) is now tracked correctly.
+      const double fnum = update->fnum;
+      if (fnum > 0.0)
+        scale = particle->edvec[pweight_ewhich][ip_index] / fnum;
     }
 
     const double m   = particle->species[isp0].mass;
