@@ -754,11 +754,13 @@ void ComputeSurfacePhysicalSputter::load_iead_if_requested()
   }
 
   try {
+    // Only rank 0 announces the load (every rank replicates the table).
+    FILE *scr = (comm->me == 0) ? screen  : nullptr;
+    FILE *log = (comm->me == 0) ? logfile : nullptr;
     if (!light_path.empty())
-      iead_light = load_iead_table_announce(light_path, "light",
-                                            screen, logfile);
+      iead_light = load_iead_table_announce(light_path, "light", scr, log);
     if (!W_path.empty())
-      iead_W = load_iead_table_announce(W_path, "W", screen, logfile);
+      iead_W = load_iead_table_announce(W_path, "W", scr, log);
   } catch (const std::exception &e) {
     std::string msg =
         std::string("compute surface/physical/sputter: failed loading IEAD "
