@@ -24,3 +24,7 @@ openedge/restart.dat
 # SOLPS-ITER run data — heavy; only solps/README.md is tracked
 solps/*
 !solps/README.md
+sanity_*.log
+config_sanity.json
+run_sanity.sh
+sanity.log

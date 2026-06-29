@@ -12,7 +12,7 @@ export OPENEDGE_ROOT="${OPENEDGE_ROOT:-/home/cloud/OpenEdge}"
 export OPENEDGE_BUILD="${OPENEDGE_BUILD:-/home/cloud/buildOpenEdge}"
 COUPLING="$OPENEDGE_ROOT/tools/coupling"
 ROOT="$OPENEDGE_ROOT/examples/test_solps_coupling/coupled_test"
-CASES="detached__mist detached__no_mist attached__no_mist attached__mist"
+CASES="detached__no_mist attached__no_mist"
 
 cd "$ROOT"
 for c in $CASES; do

@@ -60,11 +60,11 @@
         "rel_tol": 0.03,
         "window": 10,
         "poll_seconds": 15,
-        "max_steps": 20
+        "max_steps": 1000
     },
     "loop": {
         "case": "attached__mist",
-        "max_iters": 10,
+        "max_iters": 20,
         "check_convergence": true,
         "rel_tol": 0.05,
         "consecutive": 2,
@@ -92,7 +92,7 @@
             165
         ]
     },
-    "solps_ntim": 2,
+    "solps_ntim": 100,
     "dt_oe": 5e-06,
     "mpi_np_openedge": 4,
     "mpi_np_solps": 64
