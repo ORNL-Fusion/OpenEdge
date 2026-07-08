@@ -217,6 +217,17 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
   //   - 2D axisymmetric:       SPARTA x = Z, y = R, z = phi
   // Both map to the same physics via OpenEdge::sparta_to_RZ /
   // sparta_v_to_RZphi / RZphi_force_to_sparta.
+  //
+  // Axisymmetric mode is kick-drift: the Boris kicks below update the
+  // velocity at FIXED position, and the returned move is the single
+  // straight segment xnew = x + dt*v. Update::move()'s axi machinery
+  // (axi_horizontal_line, axi_line_intersect, axi_remap) reconstructs
+  // the trajectory as x + t*v with constant v; handing it a curved,
+  // subcycled endpoint makes the face/surface crossing tests disagree
+  // with xnew, and particles that end up outside their cell after
+  // axi_remap are discarded (naxibad). Gyration across the step is
+  // captured geometrically by axi_remap, so dt must resolve the
+  // gyroperiod (bad_dt_check guards this).
   double vcur[3] = {v[0], v[1], v[2]};
   double E_slot[3] = {0.0, 0.0, 0.0};
   double B[3] = {0.0, 0.0, 0.0};   // cylindrical (BR, BZ, Bphi)
@@ -466,9 +477,11 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
     OpenEdge::RZphi_force_to_sparta(vrhs[0], vrhs[2], vrhs[1], dim, axi, 0.0,
                                      vcur[0], vcur[1], vcur[2]);
 
-    xcur[0] += vcur[0] * dt_sub;
-    xcur[1] += vcur[1] * dt_sub;
-    zcur += vcur[2] * dt_sub;
+    if (!axi) {
+      xcur[0] += vcur[0] * dt_sub;
+      xcur[1] += vcur[1] * dt_sub;
+      zcur += vcur[2] * dt_sub;
+    }
 
     if (pusher_dump_flag && (update->ntimestep % pusher_dump_every == 0) && i == 0) {
       // Print on the first local particle of WHATEVER rank owns it.
@@ -497,8 +510,10 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
     // Without (b) the subcycle keeps pushing in the wrong cell and the
     // final x->xnew straight line can miss divertor walls with grazing
     // angles.
+    // Skipped in axi: position is fixed during the kicks, and the exact
+    // curved-face crossing tests in Update::move() handle the drift.
 
-    if (nsub > 1) {
+    if (nsub > 1 && !axi) {
       int gcell = icell;
       Grid::ChildCell *cells_local = grid->cells;
       if (cells_local[icell].nsplit <= 0 && cells_local[icell].isplit >= 0)
@@ -552,9 +567,17 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
   v[0] = vcur[0];
   v[1] = vcur[1];
   v[2] = vcur[2];
-  xnew[0] = xcur[0];
-  xnew[1] = xcur[1];
-  xnew[2] = zcur;
+  if (axi) {
+    // Kick-drift: single linear segment with the post-kick velocity,
+    // so that xnew = x + dt*v holds exactly for the axi tracing.
+    xnew[0] = x[0] + vcur[0] * dt;
+    xnew[1] = x[1] + vcur[1] * dt;
+    xnew[2] = x[2] + vcur[2] * dt;
+  } else {
+    xnew[0] = xcur[0];
+    xnew[1] = xcur[1];
+    xnew[2] = zcur;
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -1459,6 +1482,14 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
 void Pusher::init()
 {
   if (pusher_mode != PUSHER_HYBRID && pusher_mode != PUSHER_GCA) return;
+
+  // hybrid/gca still integrate positions inside the pusher, which breaks
+  // the linear-segment contract of the axisymmetric mover (see
+  // push_boris_2d). Refuse rather than silently lose particles.
+  if (domain->axisymmetric)
+    error->all(FLERR,
+               "global pusher mode hybrid/gca not supported for "
+               "axisymmetric domains; use mode boris");
 
   if (!pusher_plasma_cid)
     error->all(FLERR,"global gca requires plasma provider ID");
