@@ -1431,12 +1431,14 @@ template < int DIM, int SURF, int OPT > void Update::move()
       }
 
       // Apply cross-field diffusion displacement (if active).
-      // Only on the initial push (PKEEP/PINSERT), not on re-entries
-      // after migration or surface collision (PENTRY/PEXIT/PSURF).
-      // The displacement was pre-computed by fix cross_diffusion in
-      // START_OF_STEP and stored in dx_cd[i].
+      // PKEEP only: fix cross_field_diffusion fills dx_cd at START_OF_STEP
+      // for the then-current nlocal particles. PINSERT particles are
+      // created mid-step by emission fixes and can live at indices beyond
+      // that nlocal, so dx_cd[i] may be past the end of the buffer. They
+      // get their first kick next step. Not applied on re-entries either
+      // (PENTRY/PEXIT/PSURF), since the kick is already in xnew.
 
-      if (cd_flag && (pflag == PKEEP || pflag == PINSERT)) {
+      if (cd_flag && pflag == PKEEP) {
         xnew[0] += dx_cd[i][0];
         xnew[1] += dx_cd[i][1];
         if (DIM == 3) xnew[2] += dx_cd[i][2];
