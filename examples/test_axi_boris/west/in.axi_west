@@ -1,0 +1,62 @@
+# WEST axisymmetric geometry, Boris-only conservation test.
+#
+# Real WEST wall (SOLEDGE3X 3MW case, axi layout: x = Z axial, y = R
+# radial, axis at y=0) and the matching plasma.h5 B-field, but every
+# transport complication stripped out: no sheath, no chemistry, no
+# diffusion, no PWI. The wall is SPECULAR, so the vessel is closed and
+# the W+ inventory can only change if the mover loses particles.
+#
+# Pass criteria:
+#   - "Axisymm bad moves" = 0 in the run summary
+#   - np constant for the whole run
+#   - nexit stays 0 (a particle reaching the outer box boundary means it
+#     tunneled through the wall)
+#   - c_T flat (pure B does no work)
+
+seed                12345
+dimension           2
+# Axi slot map: x=Z (axial), y=R (radial, axis at y=0), z=phi.
+boundary            o ao p
+global              gridcut 0.0 comm/sort no
+global              fnum 5e4
+
+create_box          -1.00 0.85 0.0 3.25 -0.05 0.05
+create_grid         200 150 1
+balance_grid        rcb cell
+
+species             input/plasma.species W+
+mixture             ions W+ frac 1.0 temp 1160500.0     # 100 eV
+
+# Wall walked CW in (Z,R) -> outward normals; invert points them into
+# the fluid (same convention as the production WEST axi case).
+# wall_fine.surf = wall.surf subdivided (subdivide_surf.py): tiles <= 2 cm
+# everywhere, <= 1 cm in the upper divertor/baffle (Z > 0.30).
+read_surf           input/wall_fine.surf invert group wall particle check
+surf_collide        wallColl specular
+surf_modify         wall collide wallColl
+
+# Divertor refinement from the production case: exercises split cells
+# and fine cells against gyrating orbits.
+region              rdiv_lo block -1.00 -0.45 1.90 3.20 -INF INF
+region              rdiv_up block  0.35  0.85 1.90 3.20 -INF INF
+adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
+                    region rdiv_lo all iterate 5
+adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
+                    region rdiv_up all iterate 5
+balance_grid        rcb cell
+
+create_particles    ions n 10000
+
+# Real WEST B-field from the SOLEDGE3X plasma file.
+fix                 pd background file input/plasma.h5 static yes
+global              pcache_nevery 100
+global              pusher plasma pd mode boris &
+                    subcycles 10 bad_dt_check yes bad_dt_limit 0.5
+
+# W+ at |B| ~ 3-5 T: omega_c up to ~2.6e6 rad/s, so omega_c*dt ~ 0.5
+# per step, resolved by 10 subcycles.
+timestep            2e-7
+stats               500
+compute             T temp
+stats_style         step cpu np nexit c_T
+run                 10000

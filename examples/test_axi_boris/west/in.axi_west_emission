@@ -1,0 +1,88 @@
+# WEST axisymmetric W emission demo (work in progress).
+#
+# Same geometry and B-field as in.axi_west, but with the physical W
+# source: O-on-W sputter erosion flux drives surface/emit/source with a
+# Thompson energy distribution, wall is diffuse, core boundary via
+# reflect/psi. Ionization chain (volume/chem/adas) is off for now.
+# This is the starting point for the full-physics validation phase, not
+# a pass/fail test.
+
+variable            nlaunchPerSurfW index 1
+variable            sourceThreshW equal 1e-8
+
+seed                12345
+dimension           2
+# Axi slot map: x=Z (axial), y=R (radial, axis at y=0), z=phi.
+boundary            o ao p
+global              gridcut 0.0 comm/sort no
+global              fnum 5e6
+
+create_box          -1.00 0.85 0.0 3.25 -0.05 0.05
+create_grid         200 150 1
+balance_grid        rcb cell
+
+species input/plasma.species W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+
+mixture             tungstenSource  W    frac 1.
+mixture             tungstenSource  W+   frac 0.
+mixture             tungstenSource  W2+  frac 0.
+mixture             tungstenSource  W3+  frac 0.
+mixture             tungstenSource  W4+  frac 0.
+mixture             tungstenSource  W5+  frac 0.
+mixture             tungstenSource  W6+  frac 0.
+mixture             tungstenSource  W7+  frac 0.
+mixture             tungstenSource  W8+  frac 0.
+mixture             tungstenSource  W9+  frac 0.
+mixture             tungstenSource  W10+ frac 0.
+
+# Wall walked CW in (Z,R) -> outward normals; invert points them into
+# the fluid (same convention as the production WEST axi case).
+# wall_fine.surf = wall.surf subdivided (subdivide_surf.py): tiles <= 2 cm
+# everywhere, <= 1 cm in the upper divertor/baffle (Z > 0.30), so
+# surface/emit/source and the erosion-flux tallies resolve the source
+# profile there instead of lumping it onto 5-13 cm tiles.
+read_surf           input/wall_fine.surf invert group wall particle check
+surf_collide        wallColl specular
+surf_modify         wall collide wallColl
+
+
+# Divertor refinement from the production case: exercises split cells
+# and fine cells against gyrating orbits.
+region              rdiv_lo block -1.00 -0.45 1.90 3.20 -INF INF
+region              rdiv_up block  0.35  0.85 1.90 3.20 -INF INF
+adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
+                    region rdiv_lo all iterate 5
+adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
+                    region rdiv_up all iterate 5
+balance_grid        rcb cell
+
+
+
+# Real WEST B-field from the SOLEDGE3X plasma file.
+fix                 pd background file input/plasma.h5 static yes
+global              pcache_nevery 100
+global              pusher plasma pd mode boris &
+                    subcycles 10 bad_dt_check yes bad_dt_limit 0.5
+
+fix fcore reflect/psi background pd psi_norm 0.1 action reflect
+
+compute cpmiO surface/physical/sputter wall background pd &
+                    target W projectiles O &
+                    mass_amu 2.01410177811 static yes &
+                    erosion_flux
+
+fix pw particle/weight
+
+fix femit surface/emit/source tungstenSource wall cpmiO perspecies no &
+                    nlaunch ${nlaunchPerSurfW} source_thresh ${sourceThreshW} &
+                    model thompson 4.4
+
+#fix fchem volume/chem/adas 1 W auto  #rate_cache cell
+
+# Uncomment to dump for OVITO (writes ~25 MB per 1000 steps at this rate).
+#dump    dpart particle all 100 state_west id type x y z vx vy vz
+
+timestep            1e-9
+stats               10
+compute             T temp
+stats_style         step cpu np nexit c_T
+run                 10000

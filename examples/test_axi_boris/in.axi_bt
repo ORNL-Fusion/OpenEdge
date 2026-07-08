@@ -1,0 +1,47 @@
+# Axisymmetric Boris mover acceptance test: uniform TOROIDAL B.
+#
+# Same closed domain as in.axi_bz, but B is toroidal (slot z = phi
+# component), so ions gyrate in the poloidal (Z, R) plane. This checks
+# the in-plane orbit against the analytic gyroradius while the axi
+# remap stays nearly passive (only the thermal v_phi moves particles
+# out of plane).
+#
+# Pass criteria: same as in.axi_bz — "Axisymm bad moves" = 0, np
+# constant, temp flat.
+
+seed                12345
+dimension           2
+boundary            r ar p            # x specular; ylo axis, yhi specular
+global              gridcut 0.0 comm/sort no
+global              fnum 1e10
+
+create_box          -0.5 0.5 0.0 0.4 -0.05 0.05
+create_grid         40 32 1
+balance_grid        rcb part
+
+species             plasma.species H+
+mixture             ions H+ frac 1.0 temp 580225.0     # 50 eV
+
+create_particles    ions n 20000
+
+# Uniform toroidal field: slot z is the phi component in axi layout.
+variable B0         equal 0.05                          # [T]
+variable Bx         particle "0.0"
+variable By         particle "0.0"
+variable Bz         particle "v_B0"
+fix                 fB bfield/particle Bx By Bz
+global              bfield particle fB 0
+
+global              pusher subcycles 10 bad_dt_check yes bad_dt_limit 0.5
+
+# H+ at 0.05 T: omega_c = 4.79e6 rad/s, so omega_c*dt = 0.48 per step,
+# resolved by 10 subcycles (omega_c*dt_sub = 0.048). Subcycling is what
+# made the pre-fix pusher return a curved endpoint in axi.
+
+dump    dpart particle all 1000 state id type x y z vx vy vz
+
+timestep            1e-7
+stats               1000
+compute             T temp
+stats_style         step cpu np c_T
+run                 20000
