@@ -61,6 +61,7 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
   use_background_(0),
   plasma_fix_id_(),
   pd_(nullptr),
+  use_const_(0),
   diff_model_(DIFF_NONE),
   D_perp_(0.0),
   bohm_scale_(1.0),
@@ -81,12 +82,23 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
   int iarg = 2;
   nevery = input->inumeric(FLERR, arg[iarg++]);
 
+  Bconst_[0] = Bconst_[1] = Bconst_[2] = 0.0;
+
   if (strcmp(arg[iarg], "background") == 0) {
     iarg++;
     if (iarg >= narg)
       error->all(FLERR, "fix cross_diffusion: background needs a fix ID");
     use_background_ = 1;
     plasma_fix_id_ = arg[iarg++];
+  } else if (strcmp(arg[iarg], "bfield_const") == 0) {
+    // uniform B in SPARTA slot order — analytic verification cases
+    iarg++;
+    if (iarg + 3 > narg)
+      error->all(FLERR, "fix cross_diffusion: bfield_const needs BX BY BZ");
+    use_const_ = 1;
+    Bconst_[0] = input->numeric(FLERR, arg[iarg++]);
+    Bconst_[1] = input->numeric(FLERR, arg[iarg++]);
+    Bconst_[2] = input->numeric(FLERR, arg[iarg++]);
   } else {
     if (strcmp(arg[iarg++], "bfield") != 0)
       error->all(FLERR, "fix cross_diffusion: missing 'bfield' keyword");
@@ -282,7 +294,7 @@ void FixCrossFieldDiffusion::init()
       error->all(FLERR,
         "fix cross_diffusion: background fix must be style background");
     pd_->init();
-  } else {
+  } else if (!use_const_) {
     bind(srcBx_, "Bx");
     bind(srcBy_, "By");
     bind(srcBz_, "Bz");
@@ -306,7 +318,7 @@ void FixCrossFieldDiffusion::start_of_step()
   }
 
   // refresh caches
-  if (!use_background_) {
+  if (!use_background_ && !use_const_) {
     refresh_compute_src(srcBx_);
     refresh_compute_src(srcBy_);
     refresh_compute_src(srcBz_);
@@ -359,7 +371,11 @@ void FixCrossFieldDiffusion::start_of_step()
     const int icell = p.icell;
     double B0, B1, B2;
     if (use_background_) pd_bfield_sparta(p, B0, B1, B2);
-    else {
+    else if (use_const_) {
+      B0 = Bconst_[0];
+      B1 = Bconst_[1];
+      B2 = Bconst_[2];
+    } else {
       B0 = read_src(srcBx_, ip, icell);
       B1 = read_src(srcBy_, ip, icell);
       B2 = read_src(srcBz_, ip, icell);
@@ -454,7 +470,8 @@ void FixCrossFieldDiffusion::start_of_step()
         // gradient-pinch cross-diffusion is disabled for mesh-only
         // plasma.h5 cases).
         double R, Z;
-        OpenEdge::sparta_to_RZ(p.x, dim, domain->axisymmetric, R, Z);
+        OpenEdge::sparta_to_RZ(p.x, dim, domain->axisymmetric, R, Z,
+                               pd_->column_x0, pd_->column_y0);
         if (pd_->rvals.size() < 2 || pd_->zvals.size() < 2) {
           gNeR = 0.0; gNeZ = 0.0;
         } else {
@@ -631,7 +648,10 @@ double FixCrossFieldDiffusion::read_src(const CollGridSrc &S, int ip, int icell)
 void FixCrossFieldDiffusion::particle_rz(const Particle::OnePart &p,
                                     double &R, double &Z) const
 {
-  OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z);
+  const double x0 = pd_ ? pd_->column_x0 : 0.0;
+  const double y0 = pd_ ? pd_->column_y0 : 0.0;
+  OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z,
+                         x0, y0);
 }
 
 /* ---------------------------------------------------------------------- */

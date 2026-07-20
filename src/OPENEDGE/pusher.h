@@ -24,9 +24,11 @@
 #define SPARTA_PUSHER_H
 
 #include <cmath>
+#include <vector>
 #include "fix.h"
 #include "math_extra.h"
 #include "pointers.h"
+#include "sheath_models.h"
 
 namespace SPARTA_NS {
 
@@ -65,6 +67,38 @@ class Pusher : protected Pointers {
   int gca_vpar_custom;
   int gca_mu_custom;
   int gca_on_custom;
+
+  // ---- Spatial-sheath per-wall-element coefficient cache -------------
+  // The Coulette-Manfredi sheath coefficients (and the geometry, plasma,
+  // Chodura angle and cut-off distance they derive from) depend only on
+  // the wall element, all of which are invariant when the background
+  // plasma is static. Without the cache the pusher re-queries the plasma
+  // mesh and re-runs sheath_prepare_coulette_manfredi for every near-wall
+  // particle every step; with it, each wall element is evaluated once
+  // (at its midpoint, the physical sheath-edge location) and reused.
+  // Enabled only for a static fix-background plasma; other plasma sources
+  // fall back to the per-particle path.
+  struct SheathElemCache {
+    int state;         // 0 = unset, 1 = active, -1 = evaluated but inactive
+    double nR, nZ;     // unit wall normal (cylindrical), into the fluid
+    double sR, sZ;     // wall element midpoint (R, Z)
+    double d_max;      // sheath engagement distance
+    double phi_total;  // total sheath potential drop [V] (boundary mode)
+    SheathModels::SheathEmagCoeffs coeffs;
+  };
+  std::vector<SheathElemCache> sheath_cache;
+  int sheath_cache_enabled;   // 1 = static fix-background plasma -> cache ok
+  void build_sheath_cache_entry(int midx, SheathElemCache &C);
+
+  // Per-step spatial-sheath diagnostics (verify the field is non-zero and
+  // that particles actually see it). Reset in Update::move() each step,
+  // incremented in push_boris_2d, reduced + printed when pusher_dump_flag.
+  long   sheath_diag_nactive;   // push_boris_2d calls with a live sheath
+  long   sheath_diag_nengage;   // subcycles that applied a non-zero E_sheath
+  double sheath_diag_emax;      // max |E_sheath| applied [V/m]
+  double sheath_diag_esum;      // sum |E_sheath| (for the mean) [V/m]
+  long   sheath_diag_nreflect;  // boundary mode: outbound ions reflected
+  long   sheath_diag_nescape;   // boundary mode: outbound ions decelerated
 
   // ---- Methods (were on Update) --------------------------------------
   void init();

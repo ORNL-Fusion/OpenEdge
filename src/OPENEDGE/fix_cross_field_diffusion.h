@@ -20,7 +20,7 @@
 
     Syntax:
       fix ID cross_diffusion Nevery \
-          {bfield BxSRC BySRC BzSRC | background FIXID} \
+          {bfield BxSRC BySRC BzSRC | background FIXID | bfield_const BX BY BZ} \
           [D_perp VAL | bohm [TeSRC in source-token mode] [scale VAL]] \
           [pinch Vr Vz] \
           [gradient_pinch Cp [neSRC gradNeR_SRC gradNeZ_SRC in source-token mode]]
@@ -93,6 +93,11 @@ class FixCrossFieldDiffusion : public Fix {
 
   // B-field sources in SPARTA coordinate order
   CollGridSrc srcBx_, srcBy_, srcBz_;
+
+  // uniform B in SPARTA slots (bfield_const Bx By Bz) — for analytic
+  // verification cases (e.g. MSD tests) with no plasma file or compute
+  int use_const_;
+  double Bconst_[3];
 
   // diffusion model
   int diff_model_;       // 0=none, 1=constant, 2=bohm

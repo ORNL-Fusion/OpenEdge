@@ -158,6 +158,17 @@ struct SurfHit2D {
   int sheath_geom_cidx;        // resolved compute index for geometry
   double sheath_mD_amu;        // ion mass in amu (default D = 2.014)
   int sheath_kick;             // 1 = apply sheath as velocity kick at wall
+  int sheath_boundary;         // 1 = sub-grid sheath-as-boundary (impact kick
+                               //     + outbound potential-barrier reflection)
+  int sheath_paid_custom;      // per-particle int "sheath_paid" flag index
+
+  // Incident macroparticle weight (pweight custom) for the surf collision
+  // currently being tallied. surf_tally() receives the incident particle as
+  // a bare struct copy (iorig) with no custom data, so an ABSORBED particle
+  // (ip=NULL) loses its pweight. The mover stamps it here before each
+  // surf_tally batch so pweight-aware surf computes (compute surf/weighted)
+  // can weight sticking/incidence correctly. Set to 1.0 when no pweight.
+  double tally_pweight;
 
   // Per-particle plasma cache (populated once per step, read by Boris/ADAS/Nanbu)
   int plasma_cache_flag;       // 1 if plasma cache custom vectors are registered

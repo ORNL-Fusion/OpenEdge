@@ -163,6 +163,13 @@ Pusher::Pusher(SPARTA *sparta) : Pointers(sparta)
   pusher_gca_switch   = 2.5;
   pusher_boris_near   = 0.0;
   pusher_gca_integrator = 0;
+  sheath_cache_enabled = 0;
+  sheath_diag_nactive = 0;
+  sheath_diag_nengage = 0;
+  sheath_diag_emax = 0.0;
+  sheath_diag_esum = 0.0;
+  sheath_diag_nreflect = 0;
+  sheath_diag_nescape = 0;
   pusher_dump_flag    = 0;
   pusher_dump_every   = 1;
   pusher_bad_dt_check = 1;
@@ -180,6 +187,87 @@ Pusher::Pusher(SPARTA *sparta) : Pointers(sparta)
 Pusher::~Pusher()
 {
   delete [] pusher_plasma_cid;
+}
+
+/* ----------------------------------------------------------------------
+   Build one spatial-sheath cache entry for wall element `midx`.
+
+   Evaluates the geometry, plasma (Te, Ti, ne), B, Chodura angle, cut-off
+   distance and Coulette-Manfredi coefficients at the wall element MIDPOINT
+   — the physical sheath edge — rather than at a particle position. For a
+   static fix-background plasma every input is invariant, so this runs once
+   per element and is reused by every near-wall particle for the whole run.
+   Only called when sheath_cache_enabled (static fix-background plasma), so
+   the plasma provider is always pusher_plasma_fidx here.
+------------------------------------------------------------------------- */
+
+void Pusher::build_sheath_cache_entry(int midx, SheathElemCache &C)
+{
+  const int  dim = domain->dimension;
+  const bool axi = domain->axisymmetric;
+
+  C.state = -1;   // assume inactive until proven otherwise
+
+  Surf::Line *ln = &surf->lines[midx];
+
+  // Unit normal (SPARTA slots -> cylindrical (nR, nZ, 0)).
+  double nx_raw = ln->norm[0], ny_raw = ln->norm[1];
+  const double nmag = std::sqrt(nx_raw*nx_raw + ny_raw*ny_raw);
+  if (nmag > 0.0) { nx_raw /= nmag; ny_raw /= nmag; }
+  const double n_slot[3] = {nx_raw, ny_raw, 0.0};
+  double nR_tmp = 0.0, nZ_tmp = 0.0, nphi_tmp = 0.0;
+  OpenEdge::sparta_v_to_RZphi(n_slot, dim, axi, 0.0, nR_tmp, nZ_tmp, nphi_tmp);
+  C.nR = nR_tmp;
+  C.nZ = nZ_tmp;
+
+  // Wall element midpoint, in SPARTA slots and in cylindrical (R, Z).
+  const double xmid_slot[3] = {0.5*(ln->p1[0]+ln->p2[0]),
+                               0.5*(ln->p1[1]+ln->p2[1]), 0.0};
+  OpenEdge::sparta_to_RZ(xmid_slot, dim, axi, C.sR, C.sZ, 0.0, 0.0);
+
+  auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
+  if (!pd) return;
+
+  // Plasma at the wall midpoint (sheath-edge conditions).
+  PlasmaFileParams pf = query_plasma_from_fix(pd, xmid_slot, dim, axi);
+  const double te = pf.temp_e, ti = pf.temp_i, ne = pf.dens_e;
+
+  // B at the wall midpoint (cylindrical), for |B| and the Chodura angle.
+  double Br = 0.0, Bz = 0.0, Bt = 0.0;
+  if (pd->has_bfield) pd->bfield_at(C.sR, C.sZ, Br, Bz, Bt);
+  const double bmag = std::sqrt(Br*Br + Bz*Bz + Bt*Bt);
+
+  if (!(te > 0.0 && ne > 0.0 && bmag > 0.0)) return;   // stays inactive
+
+  const double bvec[3] = {Br, Bz, Bt};
+  const double nvec[3] = {C.nR, C.nZ, 0.0};
+  SheathModels::ChoduraMetrics cm =
+    SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
+  const double alpha_deg = cm.alpha_deg;
+
+  C.d_max  = sheath_auto_dmax(te, ti, ne, bmag, alpha_deg,
+                              update->sheath_mD_amu, 0.0);
+  C.coeffs = SheathModels::sheath_prepare_coulette_manfredi(
+                 te, ti, ne, bmag, alpha_deg, update->sheath_mD_amu, 0.0);
+  // Total sheath potential drop (V) = potential at the wall (d=0), used as
+  // the escape barrier in sheath boundary mode.
+  C.phi_total = SheathModels::sheath_phi_at_distance(C.coeffs, 0.0);
+  C.state = 1;   // active
+
+  // One-time-per-element field profile dump (first few elements) so a run
+  // can see whether the model produces the expected strong near-wall field.
+  static int ndbg = 0;
+  if (pusher_dump_flag && ndbg < 6) {
+    ndbg++;
+    const double e0  = SheathModels::sheath_emag_at_distance(C.coeffs, 0.0);
+    const double elD = SheathModels::sheath_emag_at_distance(C.coeffs, C.coeffs.lambdaD_m);
+    const double edm = SheathModels::sheath_emag_at_distance(C.coeffs, C.d_max);
+    printf("  [rank %d] sheath elem midx=%d Te=%.1f Ti=%.1f ne=%.2e B=%.2f "
+           "alpha=%.1f lambdaD=%.2e d_max=%.2e | E(0)=%.3e E(lD)=%.3e "
+           "E(dmax)=%.3e V/m\n",
+           comm->me, midx, te, ti, ne, bmag, alpha_deg, C.coeffs.lambdaD_m,
+           C.d_max, e0, elD, edm);
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -300,15 +388,20 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
     B[2] = Bphi;
   }
 
-  // --- Pre-fetch per-particle sheath data (2D analogue of the 3D
-  //     pusher_boris_3d block). Geometry + plasma are invariant during
-  //     subcycling, so evaluate once here in physical (R, Z).
+  // --- Pre-fetch sheath data for the spatial-sheath E-field. Geometry,
+  //     plasma and the derived Coulette-Manfredi coefficients are constant
+  //     across subcycles; for a static fix-background plasma they are also
+  //     constant per wall element across the whole run, so they come from a
+  //     per-element cache (build once, reuse for every near-wall particle).
+  //     Other plasma sources use the per-particle fallback below. Only the
+  //     side test (sh_d0_sign) is genuinely per-particle.
   double sh_nR = 0.0, sh_nZ = 0.0;           // unit normal in cylindrical
   double sh_sR = 0.0, sh_sZ = 0.0;           // wall reference point (R, Z)
-  double sh_te = 0.0, sh_ti = 0.0, sh_ne = 0.0;
-  double sh_bmag = 0.0, sh_alpha_deg = 90.0;
-  int    sh_active = 0;
+  double sh_d_max = 0.0;
   double sh_d0_sign = 0.0;
+  double sh_phi_total = 0.0;                 // total sheath potential [V]
+  int    sh_active = 0;
+  SheathModels::SheathEmagCoeffs sh_coeffs;
 
   if (update->sheath_flag && !update->sheath_kick && update->sheath_geom_cidx >= 0 &&
       (pusher_plasma_cidx >= 0 || pusher_plasma_fidx >= 0)) {
@@ -340,10 +433,28 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
         if (best_m >= 0) midx = best_m;
       }
 
-      if (midx >= 0) {
+      if (midx >= 0 && sheath_cache_enabled) {
+        // ---- Cached path (static fix-background plasma) ----
+        const int nsurf_all = surf->nlocal + surf->nghost;
+        if ((int) sheath_cache.size() != nsurf_all)
+          sheath_cache.assign(nsurf_all, SheathElemCache{});
+        if (midx < nsurf_all) {
+          SheathElemCache &C = sheath_cache[midx];
+          if (C.state == 0) build_sheath_cache_entry(midx, C);
+          if (C.state == 1) {
+            sh_nR = C.nR; sh_nZ = C.nZ;
+            sh_sR = C.sR; sh_sZ = C.sZ;
+            sh_d_max = C.d_max;
+            sh_phi_total = C.phi_total;
+            sh_coeffs = C.coeffs;
+            sh_active = 1;
+          }
+        }
+      } else if (midx >= 0) {
+        // ---- Per-particle fallback (compute plasma or non-static fix):
+        //      evaluate geometry, plasma, B and the coefficients at the
+        //      particle position, as before. ----
         Surf::Line *ln = &surf->lines[midx];
-        // Normalize then lift (nx, ny, 0) from SPARTA slot order into
-        // cylindrical (nR, nZ, 0) so Cart 2D and axi share one path.
         double nx_raw = ln->norm[0];
         double ny_raw = ln->norm[1];
         const double nmag = std::sqrt(nx_raw*nx_raw + ny_raw*ny_raw);
@@ -358,10 +469,9 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
         const double xmid_slot[3] = {0.5*(ln->p1[0]+ln->p2[0]),
                                      0.5*(ln->p1[1]+ln->p2[1]),
                                      0.0};
-        // 2D pusher: offset ignored by sparta_to_RZ, default 0,0 OK
         OpenEdge::sparta_to_RZ(xmid_slot, dim, axi, sh_sR, sh_sZ, 0.0, 0.0);
 
-        // Plasma (Te, Ti, ne) at gcell from compute or fix.
+        double sh_te = 0.0, sh_ti = 0.0, sh_ne = 0.0;
         if (pusher_plasma_cidx >= 0) {
           Compute *cp_base = modify->compute[pusher_plasma_cidx];
           auto *cp = dynamic_cast<ComputePlasmaFields *>(cp_base);
@@ -373,57 +483,84 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
         } else {
           auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
           if (pd) {
-            PlasmaFileParams sh_pf =
-              query_plasma_from_fix(pd, x, dim, axi);
+            PlasmaFileParams sh_pf = query_plasma_from_fix(pd, x, dim, axi);
             sh_te = sh_pf.temp_e;
             sh_ti = sh_pf.temp_i;
             sh_ne = sh_pf.dens_e;
           }
         }
 
-        sh_bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
-
+        const double sh_bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
         if (sh_te > 0.0 && sh_ne > 0.0 && sh_bmag > 0.0) {
-          // Chodura α between B (cylindrical (BR,BZ,Bphi) = B[0..2])
-          // and n (cylindrical (nR,nZ,0)). chodura_metrics is
-          // frame-agnostic (dot products only).
           const double bvec[3] = {B[0], B[1], B[2]};
           const double nvec[3] = {sh_nR, sh_nZ, 0.0};
           SheathModels::ChoduraMetrics cm =
             SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
-          sh_alpha_deg = cm.alpha_deg;
+          const double sh_alpha_deg = cm.alpha_deg;
+          sh_d_max = sheath_auto_dmax(sh_te, sh_ti, sh_ne, sh_bmag,
+                                      sh_alpha_deg, update->sheath_mD_amu, 0.0);
+          sh_coeffs = SheathModels::sheath_prepare_coulette_manfredi(
+                          sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
+                          update->sheath_mD_amu, 0.0);
+          sh_phi_total = SheathModels::sheath_phi_at_distance(sh_coeffs, 0.0);
           sh_active = 1;
         }
       }
     }
   }
 
-  // Per-particle sheath cut-off distance (physics-based).
-  // See sheath_auto_dmax() in the anonymous namespace above.
-  double sh_d_max = 0.0;
-  if (sh_active)
-    sh_d_max = sheath_auto_dmax(sh_te, sh_ti, sh_ne, sh_bmag,
-                                sh_alpha_deg, update->sheath_mD_amu, 0.0);
-
+  // Per-particle: which side of the wall is the particle on? Engage the
+  // sheath E only on the plasma side. One dot product, always recomputed.
   if (sh_active) {
     double R0 = 0.0, Z0 = 0.0;
     const double xyz0[3] = {xcur[0], xcur[1], 0.0};
-    // 2D pusher: offset ignored by sparta_to_RZ, default 0,0 OK
     OpenEdge::sparta_to_RZ(xyz0, dim, axi, R0, Z0, 0.0, 0.0);
     const double d0 = (R0 - sh_sR)*sh_nR + (Z0 - sh_sZ)*sh_nZ;
     sh_d0_sign = (d0 >= 0.0) ? 1.0 : -1.0;
+    sheath_diag_nactive++;
   }
 
-  // Precompute sheath-model coefficients once per Boris call. Everything
-  // inside them (lambda_D, rho_i, L_MPS, fd, phi0, CM fit coefficients,
-  // all the transcendentals) depends only on Te, Ti, ne, B, alpha, which
-  // don't change across subcycles. sheath_emag_at_distance below then
-  // reduces to 2-4 exp() calls per subcycle.
-  SheathModels::SheathEmagCoeffs sh_coeffs;
-  if (sh_active) {
-    sh_coeffs = SheathModels::sheath_prepare_coulette_manfredi(
-                    sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
-                    update->sheath_mD_amu, 0.0);
+  // --- Sheath BOUNDARY mode: sub-grid potential barrier (prompt redep) ---
+  // The Debye sheath (~lambda_D) is below the grid, so instead of resolving
+  // its E-field we treat it as a thin potential sheet at the wall and apply
+  // an energy-conserving impulse to the ion's wall-normal velocity:
+  //   outbound ion, normal KE < Z e phi_total  -> reflect (can't escape;
+  //                                                this IS prompt redeposition)
+  //   outbound ion, normal KE >= Z e phi_total  -> decelerate (escapes)
+  // A per-particle "paid" flag makes the escape charge fire once per transit
+  // (the plasma-side band d_max is cm-scale, so an escaping ion would
+  // otherwise be re-charged for the ~100 steps it takes to cross it). The
+  // reflect branch leaves the ion inbound, so it re-arms naturally next step.
+  if (update->sheath_boundary && sh_active && sh_phi_total > 0.0 &&
+      sh_d0_sign > 0.0) {
+    int *paid_vec = (update->sheath_paid_custom >= 0)
+      ? particle->eivec[particle->ewhich[update->sheath_paid_custom]] : nullptr;
+    double vR = 0.0, vZ = 0.0, vphi = 0.0;
+    OpenEdge::sparta_v_to_RZphi(vcur, dim, axi, 0.0, vR, vZ, vphi);
+    const double vn = vR*sh_nR + vZ*sh_nZ;   // >0 = outbound (into fluid)
+
+    if (vn <= 0.0) {
+      if (paid_vec) paid_vec[i] = 0;          // inbound: re-arm the barrier
+    } else if (!paid_vec || paid_vec[i] == 0) {
+      const double Zc = std::fabs(charge);
+      const double barrier_J = Zc * update->echarge * sh_phi_total;
+      const double KEn = 0.5 * mass * vn * vn;
+      double dvn;                             // amount to remove from vn (>=0)
+      if (KEn < barrier_J) {
+        dvn = 2.0 * vn;                       // reflect: vn -> -vn (elastic)
+        sheath_diag_nreflect++;
+      } else {
+        const double vn_new = std::sqrt(vn*vn - 2.0*barrier_J/mass);
+        dvn = vn - vn_new;                    // decelerate: escapes
+        if (paid_vec) paid_vec[i] = 1;
+        sheath_diag_nescape++;
+      }
+      const double vR2 = vR - dvn*sh_nR;
+      const double vZ2 = vZ - dvn*sh_nZ;
+      const double v_cyl[3] = {vR2, vZ2, vphi};
+      OpenEdge::RZphi_force_to_sparta(v_cyl[0], v_cyl[1], v_cyl[2], dim, axi,
+                                       0.0, vcur[0], vcur[1], vcur[2]);
+    }
   }
 
   const double Brhs[3] = {B[0], B[2], B[1]};
@@ -444,8 +581,10 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
 
     // E_rhs per subcycle: base E (from fix efield/grid or plasma column
     // feed) + per-particle sheath E evaluated at the current position.
+    // Skipped in boundary mode, where the sheath is applied as a one-shot
+    // potential-barrier impulse above rather than a resolved spatial field.
     double ER_step = ER, EZ_step = EZ;
-    if (sh_active) {
+    if (sh_active && !update->sheath_boundary) {
       double R_sub = 0.0, Z_sub = 0.0;
       const double xyz_sub[3] = {xcur[0], xcur[1], 0.0};
       // 2D pusher: offset ignored by sparta_to_RZ, default 0,0 OK
@@ -464,6 +603,10 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
         // fluid per the unified 2026-04-21 normal convention).
         ER_step -= emag * sh_nR;
         EZ_step -= emag * sh_nZ;
+        // diagnostics: confirm the field is non-zero and seen by particles
+        sheath_diag_nengage++;
+        sheath_diag_esum += emag;
+        if (emag > sheath_diag_emax) sheath_diag_emax = emag;
       }
     }
     const double Erhs[3] = {ER_step, Ephi, EZ_step};
@@ -488,10 +631,10 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
       // With source-biased decomp (fix balance rcb part) rank 0 often
       // holds zero particles, so a `me == 0` gate silently suppresses
       // the whole diagnostic. Tag the rank so output stays legible.
-      printf("boris2D rank=%d step=%lld icell=%d sub=%d/%d qm=%g E_rpz=(%g,%g,%g) B_rpz=(%g,%g,%g) sh=%d alpha=%g\n",
+      printf("boris2D rank=%d step=%lld icell=%d sub=%d/%d qm=%g E_rpz=(%g,%g,%g) B_rpz=(%g,%g,%g) sh=%d d_max=%g\n",
              comm->me, (long long) update->ntimestep, icell, isub+1, nsub, qm,
              Erhs[0], Erhs[1], Erhs[2], Brhs[0], Brhs[1], Brhs[2],
-             sh_active, sh_alpha_deg);
+             sh_active, sh_d_max);
     }
 
     // --- Per-subcycle wall / cell-exit guard (2D) ---
@@ -1634,10 +1777,11 @@ void Pusher::global_keyword(int narg, char **arg, int &iarg)
     } else if (strcmp(arg[iarg], "sheath") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher sheath");
       const char *mode = arg[iarg+1];
-      if (strcmp(mode, "off") == 0)         { update->sheath_flag = 0; update->sheath_kick = 0; }
-      else if (strcmp(mode, "kick") == 0)    { update->sheath_flag = 1; update->sheath_kick = 1; }
-      else if (strcmp(mode, "spatial") == 0) { update->sheath_flag = 1; update->sheath_kick = 0; }
-      else error->all(FLERR, "global pusher sheath must be off|kick|spatial");
+      if (strcmp(mode, "off") == 0)         { update->sheath_flag = 0; update->sheath_kick = 0; update->sheath_boundary = 0; }
+      else if (strcmp(mode, "kick") == 0)    { update->sheath_flag = 1; update->sheath_kick = 1; update->sheath_boundary = 0; }
+      else if (strcmp(mode, "spatial") == 0) { update->sheath_flag = 1; update->sheath_kick = 0; update->sheath_boundary = 0; }
+      else if (strcmp(mode, "boundary") == 0){ update->sheath_flag = 1; update->sheath_kick = 0; update->sheath_boundary = 1; }
+      else error->all(FLERR, "global pusher sheath must be off|kick|spatial|boundary");
       iarg += 2;
       while (iarg < narg) {
         if (strcmp(arg[iarg], "geom") == 0) {

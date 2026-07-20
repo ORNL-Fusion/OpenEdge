@@ -1,21 +1,29 @@
 # WEST axisymmetric W emission demo (work in progress).
 #
-# Same geometry and B-field as in.axi_west, but with the physical W
-# source: O-on-W sputter erosion flux drives surface/emit/source with a
-# Thompson energy distribution, wall is diffuse, core boundary via
-# reflect/psi. Ionization chain (volume/chem/adas) is off for now.
-# This is the starting point for the full-physics validation phase, not
-# a pass/fail test.
+# Physical W source in real WEST geometry + B-field: O-on-W sputter erosion
+# flux drives surface/emit/source (Thompson energy). W is Boris-pushed in
+# the static plasma, ionized through W+..W10+ (volume/chem/adas), and the
+# wall is a depositing PWI surface (surf_react surface/pwi: TRIM w_on_w
+# reflection + absorption). Sheath is applied as a sub-grid potential
+# boundary (mode boundary), core boundary absorbs via reflect/psi, and
+# anomalous cross-field diffusion (fix cross_field_diffusion) is swept over
+# Dperp. Building toward the Di Genova 2021 (NF 61 106019) comparison.
+#
+# Collisional friction (fix coulomb/background) IS now on: D+ parallel-flow
+# drag flushes W to the divertor targets. Verified — parr_flow*bhat converges
+# on the targets and ~98% of the W density ends up in the lower divertor.
 
 variable            nlaunchPerSurfW index 1
-variable            sourceThreshW equal 1e-8
+variable            sourceThreshW equal 1e5
+# Emission cadence: launch every emitEvery steps. Higher = fewer W macro-
+# particles (cheaper, less mesh-adapt churn); lower = better statistics.
+variable            emitEvery equal 100
 
 seed                12345
 dimension           2
 # Axi slot map: x=Z (axial), y=R (radial, axis at y=0), z=phi.
 boundary            o ao p
 global              gridcut 0.0 comm/sort no
-global              fnum 5e6
 
 create_box          -1.00 0.85 0.0 3.25 -0.05 0.05
 create_grid         200 150 1
@@ -41,8 +49,26 @@ mixture             tungstenSource  W10+ frac 0.
 # surface/emit/source and the erosion-flux tallies resolve the source
 # profile there instead of lumping it onto 5-13 cm tiles.
 read_surf           input/wall_fine.surf invert group wall particle check
-surf_collide        wallColl specular
-surf_modify         wall collide wallColl
+# Depositing wall (Di Genova parity, item #1): W reflects with the TRIM
+# w_on_w probability (re-emitted as neutral W), otherwise it is absorbed
+# into the wall (net erosion = gross emission - redeposition). The diffuse
+# surf_collide is only a catch-all; surf_react intercepts every W channel.
+variable            TwallK  equal 773.15                 # WEST wall 500 C
+variable            TbindW  equal 4.*11600.              # W E_bind as T [K]
+surf_collide        wallColl diffuse ${TbindW} 1.0
+surf_react          wallPWI surface/pwi input/wall.recycle twall ${TwallK}
+surf_modify         wall collide wallColl react wallPWI
+
+# Core boundary (mesh exclusion): the psi_norm=0.1 flux surface, generated
+# from plasma.h5 by make_core_surf.py, with normals pointing OUTWARD into
+# the SOL. SPARTA marks the core interior as inside/solid so the base grid
+# and adapt_grid only resolve the wall->core annulus (the region we care
+# about) instead of the deep core. Read before adapt_grid so refinement and
+# inside/outside marking both see it. Specular reflection: W that reaches
+# psi_norm=0.1 bounces back into the SOL (replaces fix reflect/psi below).
+read_surf           input/core.surf group core particle check
+surf_collide        coreColl specular
+surf_modify         core collide coreColl
 
 
 # Divertor refinement from the production case: exercises split cells
@@ -60,10 +86,42 @@ balance_grid        rcb cell
 # Real WEST B-field from the SOLEDGE3X plasma file.
 fix                 pd background file input/plasma.h5 static yes
 global              pcache_nevery 100
-global              pusher plasma pd mode boris &
-                    subcycles 10 bad_dt_check yes bad_dt_limit 0.5
 
-fix fcore reflect/psi background pd psi_norm 0.1 action reflect
+# Sheath (Di Genova parity, item #2): nearest-wall geometry per grid cell
+# feeds the sub-grid sheath BOUNDARY model. Inbound ions get the impact-
+# energy boost (sets sputtering energy); outbound near-wall ions face the
+# Z*e*phi_total potential barrier and are reflected if they can't escape
+# (prompt redeposition). Resolution-independent, unlike `sheath spatial`
+# which needs the Debye layer resolved. `dump yes` enables the per-step
+# "sheath step [boundary]" summary (near-wall/reflect/escape counts) and
+# the per-element "sheath elem" field profile; raise dump_every (or set
+# `dump no`) to quiet the per-subcycle boris2D trace lines.
+compute             cgeom nearest_surf/grid all wall dist surfid nx ny nz
+global              pusher plasma pd mode boris &
+                    subcycles 10 bad_dt_check yes bad_dt_limit 0.5 &
+                    sheath boundary geom cgeom mD_amu 2.0 &
+                    dump yes dump_every 10000
+
+# Core boundary now handled geometrically by core.surf (specular) above.
+#fix fcore reflect/psi background pd psi_norm 0.1 action absorb
+
+# Anomalous cross-field diffusion (Phase 2, verified): the per-step kick is
+# folded into v for the traced chord then stripped at the first velocity
+# event, so the axi mover stays consistent (naxibad = 0) and the kick does
+# not heat the population. Swept over Dperp; run one value with -var Dperp.
+variable            Dperp index 0.1 # 0.1 1 10.0
+fix                 fcd cross_field_diffusion 1 background pd D_perp ${Dperp}
+
+# Collisional friction with the D+ background (roadmap item #3): each
+# charged W scatters (Nanbu/Takizuka-Abe) off a virtual Maxwellian D+
+# partner drifting at the background parallel flow. This is the DOMINANT
+# mechanism that couples W to the parallel flow and flushes it to the
+# targets (Di Genova's Fokker-Planck drag). Velocity-only kick at
+# END_OF_STEP, so it respects the axi kick-drift chord. Args: A_bg=2 (D),
+# Z_bg=1; Ti, Ni, Vpar, B all come from the pd background.
+# NOTE: verify parr_flow sign drags W toward the divertor (SOLEDGE
+# convention) by watching where W accumulates once this is on.
+fix                 fcoul coulomb/background 1 background pd 2.0 1.0
 
 compute cpmiO surface/physical/sputter wall background pd &
                     target W projectiles O &
@@ -74,15 +132,94 @@ fix pw particle/weight
 
 fix femit surface/emit/source tungstenSource wall cpmiO perspecies no &
                     nlaunch ${nlaunchPerSurfW} source_thresh ${sourceThreshW} &
-                    model thompson 4.4
+                    model thompson 4.4 nevery ${emitEvery}
 
-#fix fchem volume/chem/adas 1 W auto  #rate_cache cell
+fix fchem volume/chem/adas 1 W auto  #rate_cache cell
 
-# Uncomment to dump for OVITO (writes ~25 MB per 1000 steps at this rate).
-#dump    dpart particle all 100 state_west id type x y z vx vy vz
-
-timestep            1e-9
-stats               10
+variable            dt equal 5e-9
+timestep            ${dt}
+stats               100
 compute             T temp
 stats_style         step cpu np nexit c_T
-run                 10000
+
+# OVITO trajectory dump (LAMMPS-dump format): id type x y z every 200 steps
+# so the W cloud can be watched approaching / depositing on the walls.
+# Axi slot map: x = Z (axial), y = R (radial), z = phi ~ 0.
+#dump    dovito particle all 10000 state/ovito.west.D${Dperp} id type x y z
+
+# Particle-based mesh adaptation, WARMUP ONLY: refine any cell holding > 8
+# W particles (up to maxlevel 5) so resolution follows the W cloud. The
+# initial adapt_grid still guarantees near-wall refinement; this adds
+# volume resolution where W accumulates. It is unfix'd before the
+# diagnostic phase so the grid is FROZEN while ave/grid accumulates (a
+# grid that changes mid-window corrupts the per-cell tally).
+fix                 fadapt adapt 500 all refine particle 8 2 maxlevel 5
+
+# Warm-up to steady state with the source ON and the depositing wall,
+# letting the mesh adapt to the W cloud.
+run                 5000
+
+# Freeze the mesh, then zero the clock so the diagnostic averaging window
+# (Nevery Nrepeat Nfreq below) completes WITHIN the diagnostic run. Without
+# reset_timestep, a window whose start (Nfreq - (Nrepeat-1)*Nevery) predates
+# the fix definition never completes -> ave/grid and ave/surf output all
+# zeros (the bug that made the notebook read empty density).
+unfix               fadapt
+reset_timestep      0
+
+
+# --- Diagnostics for the Di Genova fig-6a comparison (per wall element) ---
+mixture allW W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+ group wsum
+
+# Time-averaged W density (all charge states) on the grid.
+compute cwtot grid/weighted all allW nrho_w
+fix     fwgrid ave/grid all 100 100 10000 &
+                    c_cwtot[1] ave one
+dump    dwgrid grid all 10000 state/grid.dens.west.D${Dperp} &
+                    id xc yc xlo ylo xhi yhi f_fwgrid
+
+# Ionization-length diagnostic: neutral-W-ONLY density (species W, charge 0)
+# vs distance-to-wall. Neutrals fly ballistically from the wall and the
+# neutral density decays over the ionization mean free path lambda_ion, so
+# n_W0(d) ~ exp(-d/lambda_ion). c_cgeom[1] is the per-cell distance to the
+# nearest wall element (from the sheath geometry compute). Binning n_W0 by
+# that distance (notebook) gives the distance-to-ionization distribution:
+# short decay (~cm) in the dense divertor, long (~m) in the thin SOL.
+mixture neutralW W group w0
+compute cwneut grid/weighted all neutralW nrho_w
+fix     fw0 ave/grid all 100 100 10000 c_cwneut[1] ave one
+dump    dw0 grid all 10000 state/ndens0.west.D${Dperp} &
+                    id xc yc c_cgeom[1] f_fw0
+
+
+# Erosion side: gross W sputter-erosion FLUX [m^-2 s^-1] per wall element
+# (col 1) and total RATE [s^-1] (col 2). Flux matches Di Genova fig 6a and
+# the deposition units for a net-erosion comparison; rate (= flux x ring
+# area) is for mass balance.
+compute cero surface/physical/sputter wall background pd &
+                    target W projectiles O &
+                    mass_amu 2.01410177811 static yes &
+                    erosion_flux erosion_rate
+# Deposition side (all W charge states), pweight-aware and incidence-only:
+#   [1] nflux          = deposition (redeposition) flux, W that sticks
+#   [2] nflux_incident = gross wall load (every incidence)
+# Net erosion = c_cero[1] - f_fdep[1]; redep fraction = f_fdep[1]/c_cero[1].
+compute cdep surf/weighted wall allW nflux nflux_incident
+# erosion_rate/flux are STATIC per-surf values (background O flux, static
+# yes) — dumped DIRECTLY (c_cero); ave/surf would zero them (it accumulates
+# collision tallies, not static values). Deposition IS a collision tally.
+fix     fdep ave/surf wall 100 100 10000 c_cdep[1] c_cdep[2]
+dump    dwflux surf wall 10000 state/wall.flux.west.D${Dperp} &
+                    id v1x v1y v2x v2y c_cero[1] c_cero[2] f_fdep[1] f_fdep[2]
+
+# Particle snapshot (all species) for OVITO / leak checks.
+#dump    dpart particle all 100 state/state_west.D${Dperp} &
+#                    id type x y z vx vy vz
+
+run                 50000
+
+#clear
+#next Dperp
+#jump in.axi_west_emission
+
+

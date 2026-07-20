@@ -303,6 +303,9 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   sheath_geom_cidx = -1;
   sheath_mD_amu = 2.01410177811;
   sheath_kick = 0;
+  sheath_boundary = 0;
+  sheath_paid_custom = -1;
+  tally_pweight = 1.0;
 
   plasma_cache_flag = 0;
   pcache_per_cell_mesh = 1;
@@ -535,6 +538,32 @@ void Update::init()
   // Pusher-specific init (GCA plasma compute resolution + persistent
   // guiding-center custom particle attributes). Body in pusher.cpp.
   pusher->init();
+
+  // Enable the spatial-sheath per-wall-element coefficient cache only when
+  // the sheath E-field is applied in the pusher (spatial mode, not kick)
+  // and the plasma is a static fix background — the only case where the
+  // per-element coefficients are truly invariant across steps. Any other
+  // plasma source keeps the per-particle path.
+  pusher->sheath_cache_enabled = 0;
+  pusher->sheath_cache.clear();
+  if (sheath_flag && !sheath_kick && pusher->pusher_plasma_fidx >= 0) {
+    auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher->pusher_plasma_fidx]);
+    if (pd && pd->is_static) pusher->sheath_cache_enabled = 1;
+  }
+  // Escape hatch to force the per-particle sheath path (A/B validation
+  // and benchmarking): set OE_NO_SHEATH_CACHE in the environment.
+  if (getenv("OE_NO_SHEATH_CACHE")) pusher->sheath_cache_enabled = 0;
+
+  // Boundary mode needs a persistent per-particle "paid" flag so the escape
+  // deceleration fires once per sheath transit (see the barrier impulse in
+  // push_boris_2d). Register it as an int custom particle attribute.
+  sheath_paid_custom = -1;
+  if (sheath_boundary) {
+    sheath_paid_custom = particle->find_custom((char *) "sheath_paid");
+    if (sheath_paid_custom < 0)
+      // type 0 = INT (enum{INT,DOUBLE}), size 0 = per-particle scalar.
+      sheath_paid_custom = particle->add_custom((char *) "sheath_paid", 0, 0);
+  }
 
   // Register per-particle plasma cache vectors.
   // Active when any plasma provider is available (sheath, GCA, or Boris B query).
@@ -1266,6 +1295,14 @@ template < int DIM, int SURF, int OPT > void Update::move()
   nscheck_one = nscollide_one = 0;
   surf->nreact_one = 0;
 
+  // Reset spatial-sheath diagnostics for this step (see print below).
+  pusher->sheath_diag_nactive = 0;
+  pusher->sheath_diag_nengage = 0;
+  pusher->sheath_diag_emax = 0.0;
+  pusher->sheath_diag_esum = 0.0;
+  pusher->sheath_diag_nreflect = 0;
+  pusher->sheath_diag_nescape = 0;
+
   // move/migrate iterations
 
   Grid::ChildCell *cells = grid->cells;
@@ -1328,6 +1365,13 @@ template < int DIM, int SURF, int OPT > void Update::move()
     ? particle->edvec[particle->ewhich[dq_idx]]
     : nullptr;
 
+  // pweight custom (fix particle/weight) -> stamped into tally_pweight
+  // before each surf_tally batch so pweight-aware surf computes can weight
+  // the incident particle even when it is absorbed (ip=NULL). Refreshed in
+  // the loop since add_particle can reallocate edvec mid-move.
+  const int pw_idx = particle->find_custom((char *) "pweight");
+  const int pw_ewhich = (pw_idx >= 0) ? particle->ewhich[pw_idx] : -1;
+
   // one or more loops over particles
   // first iteration = all my particles
   // subsequent iterations = received particles
@@ -1360,6 +1404,12 @@ template < int DIM, int SURF, int OPT > void Update::move()
       x = particles[i].x;
       v = particles[i].v;
       exclude = -1;
+
+      // cross-field diffusion kick folded into v for this step (see PKEEP
+      // block below); stripped again once the move completes so the random
+      // kick does not accumulate as velocity-space heating.
+      double vkick0 = 0.0, vkick1 = 0.0, vkick2 = 0.0;
+      int has_kick = 0;
 
       double mass = particles[i].mass;
       double charge = species[particles[i].ispecies].charge;
@@ -1436,12 +1486,32 @@ template < int DIM, int SURF, int OPT > void Update::move()
       // created mid-step by emission fixes and can live at indices beyond
       // that nlocal, so dx_cd[i] may be past the end of the buffer. They
       // get their first kick next step. Not applied on re-entries either
-      // (PENTRY/PEXIT/PSURF), since the kick is already in xnew.
+      // (PENTRY/PEXIT/PSURF), since the kick is already in v and xnew.
+      //
+      // The kick goes into v as well as xnew so the traced chord
+      // xnew = x + dtremain*v stays exact. The axi crossing/remap tests
+      // (axi_horizontal_line, axi_line_intersect, axi_remap) parameterize
+      // the trajectory by v, and surface collisions see v — with the kick
+      // only in xnew, axi tracing misses the diffusive displacement
+      // (INTERIOR verdict -> remap outside cell -> naxibad) and walls
+      // never see it. The kick is stripped from v again at the first
+      // velocity-transforming event (surf/boundary collide, psi reflect,
+      // mid-move migration) or at post_move_bookkeeping, whichever comes
+      // first.
 
       if (cd_flag && pflag == PKEEP) {
+        vkick0 = dx_cd[i][0] / dtremain;
+        vkick1 = dx_cd[i][1] / dtremain;
+        v[0] += vkick0;
+        v[1] += vkick1;
         xnew[0] += dx_cd[i][0];
         xnew[1] += dx_cd[i][1];
-        if (DIM == 3) xnew[2] += dx_cd[i][2];
+        if (DIM == 3) {
+          vkick2 = dx_cd[i][2] / dtremain;
+          v[2] += vkick2;
+          xnew[2] += dx_cd[i][2];
+        }
+        has_kick = 1;
       }
 
       // Psi-based core boundary: check if xnew is inside the core
@@ -1496,6 +1566,16 @@ template < int DIM, int SURF, int OPT > void Update::move()
         }
 
         if (psi_n < psi_reflect_threshold) {
+          // Crossing into the core ends the diffusion step: strip the
+          // cross-field kick before the move is rejected / v_R flipped,
+          // so the kick cannot leak into v past the reflection.
+          if (has_kick) {
+            v[0] -= vkick0;
+            v[1] -= vkick1;
+            if (DIM == 3) v[2] -= vkick2;
+            has_kick = 0;
+          }
+
           if (psi_reflect_action == 1) {
             // Absorb: mark for deletion and let the normal post-move
             // bookkeeping queue the particle for removal.
@@ -1575,6 +1655,13 @@ template < int DIM, int SURF, int OPT > void Update::move()
               mlist[nmigrate++] = i;
               particles[i].flag = PDONE;
               ncomm_one++;
+            }
+
+            // move complete on the fast path: strip the diffusion kick
+            if (has_kick) {
+              particles[i].v[0] -= vkick0;
+              particles[i].v[1] -= vkick1;
+              if (DIM == 3) particles[i].v[2] -= vkick2;
             }
 
             continue;
@@ -1922,6 +2009,47 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 v[2] = minvc[2];
               }
 
+              // The diffusion step ends at the wall: strip the cross-field
+              // kick from v BEFORE the sheath kick and the collision model,
+              // so PWI physics (incident energy/angle, sputtering) and the
+              // reflected velocity never see the phantom kick velocity
+              // (dx_cd/dt can dwarf the thermal speed). The kick carried
+              // the particle to the wall — that diffusive flux is the
+              // physical part; the remaining chord after the bounce is
+              // traced with the clean velocity.
+              //
+              // The chord reached this surf only because of the kick, so
+              // the stripped velocity may no longer point at it. Reflecting
+              // a non-incident velocity would aim it THROUGH the wall, and
+              // the exclude guard below would let it escape the domain
+              // (leak). Treat that case as a graze: no collision physics,
+              // no tallies; the particle continues from the wall point
+              // with its own velocity, which already carries it back into
+              // the domain.
+              if (has_kick) {
+                v[0] -= vkick0;
+                v[1] -= vkick1;
+                if (DIM == 3) v[2] -= vkick2;
+                has_kick = 0;
+
+                const double *nrm = (DIM == 3) ? tri->norm : line->norm;
+                if (v[0]*nrm[0] + v[1]*nrm[1] + v[2]*nrm[2] >= 0.0) {
+                  dtremain *= 1.0 - minparam*frac;
+                  if (minparam == 0.0) stuck_iterate++;
+                  else stuck_iterate = 0;
+                  if (stuck_iterate >= MAXSTUCK) {
+                    particles[i].flag = PDISCARD;
+                    nstuck++;
+                    break;
+                  }
+                  xnew[0] = x[0] + dtremain*v[0];
+                  xnew[1] = x[1] + dtremain*v[1];
+                  if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+                  exclude = minsurf;
+                  continue;
+                }
+              }
+
               // borisorm surface collision using surface collision model
               // surface chemistry may destroy particle or create new one
               // must update particle's icell to current icell so that
@@ -1945,7 +2073,11 @@ template < int DIM, int SURF, int OPT > void Update::move()
               }
 
               // --- Sheath kick: apply sheath energy as velocity boost at wall ---
-              if (sheath_kick && sheath_flag &&
+              // Inbound sheath impact-energy boost: sets the wall impact
+              // energy for sputtering. Applied in both kick mode and
+              // boundary mode (boundary mode adds the outbound barrier in
+              // the pusher; this is its inbound half).
+              if ((sheath_kick || sheath_boundary) && sheath_flag &&
                   sheath_geom_cidx >= 0 &&
                   (pusher->pusher_plasma_cidx >= 0 || pusher->pusher_plasma_fidx >= 0)) {
                 // Get surface normal (outward, toward plasma)
@@ -2024,10 +2156,15 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 pstop++;
               }
 
-              if (nsurf_tally)
+              if (nsurf_tally) {
+                // incident macroparticle weight for pweight-aware surf
+                // computes (edvec refreshed post-collide reallocation).
+                tally_pweight = (pw_ewhich >= 0)
+                  ? particle->edvec[pw_ewhich][i] : 1.0;
                 for (m = 0; m < nsurf_tally; m++)
                       slist_active[m]->surf_tally(dtremain,minsurf,icell,reaction,
                                                                     &iorig,ipart,jpart);
+              }
 
               // stuck_iterate = consecutive iterations particle is immobile
 
@@ -2250,6 +2387,16 @@ template < int DIM, int SURF, int OPT > void Update::move()
         else {
           ipart = &particles[i];
 
+          // Diffusion step ends at a domain boundary too: strip the
+          // cross-field kick before the boundary model transforms or
+          // tallies v (same rationale as the surface-collision strip).
+          if (has_kick) {
+            v[0] -= vkick0;
+            v[1] -= vkick1;
+            if (DIM == 3) v[2] -= vkick2;
+            has_kick = 0;
+          }
+
           if (nboundary_tally)
             memcpy(&iorig,&particles[i],sizeof(Particle::OnePart));
 
@@ -2338,6 +2485,16 @@ template < int DIM, int SURF, int OPT > void Update::move()
           particles[i].flag = PEXIT;
           particles[i].dtremain = dtremain;
           entryexit = 1;
+          // strip the cross-field kick before migrating mid-move: the
+          // receiver rebuilds xnew = x + dtremain*v and cannot strip
+          // later, so the kick must not leave this rank inside v. Only
+          // the untraversed remainder of the kick displacement is lost.
+          if (has_kick) {
+            v[0] -= vkick0;
+            v[1] -= vkick1;
+            if (DIM == 3) v[2] -= vkick2;
+            has_kick = 0;
+          }
           break;
         }
 
@@ -2348,6 +2505,13 @@ template < int DIM, int SURF, int OPT > void Update::move()
           particles[i].flag = PENTRY;
           particles[i].dtremain = dtremain;
           entryexit = 1;
+          // same mid-move migration strip as the PEXIT case above
+          if (has_kick) {
+            v[0] -= vkick0;
+            v[1] -= vkick1;
+            if (DIM == 3) v[2] -= vkick2;
+            has_kick = 0;
+          }
           break;
         }
 
@@ -2377,6 +2541,21 @@ template < int DIM, int SURF, int OPT > void Update::move()
       // if discarding, migration will delete particle
 
 post_move_bookkeeping:
+
+      // Strip the cross-field diffusion kick from v now that this step's
+      // move is complete: the kick models a position random walk, not
+      // heating, so it must not persist in the velocity. has_kick is only
+      // still set here if the particle saw no surf/boundary/psi event and
+      // no mid-move migration (those paths strip earlier), so this
+      // subtraction is exact up to the tiny axi_remap rotation of v
+      // accumulated within the step.
+      if (has_kick &&
+          (particles[i].flag == PKEEP || particles[i].flag == PDONE)) {
+        particles[i].v[0] -= vkick0;
+        particles[i].v[1] -= vkick1;
+        if (DIM == 3) particles[i].v[2] -= vkick2;
+      }
+
       particles[i].icell = icell;
 
       if (particles[i].flag != PKEEP) {
@@ -2426,6 +2605,41 @@ post_move_bookkeeping:
   }
 
   // END of all move/migrate iterations
+
+  // Spatial-sheath diagnostic: reduce the per-step engagement counters and
+  // field magnitudes across ranks and print on rank 0, so a run can confirm
+  // the sheath E is non-zero and that particles actually enter its band.
+  // Gated on the pusher `dump yes` flag + cadence to stay quiet by default.
+  if (sheath_flag && !sheath_kick && pusher->pusher_dump_flag &&
+      (ntimestep % pusher->pusher_dump_every == 0)) {
+    long loc[4] = {pusher->sheath_diag_nactive, pusher->sheath_diag_nengage,
+                   pusher->sheath_diag_nreflect, pusher->sheath_diag_nescape};
+    long glob[4] = {0, 0, 0, 0};
+    double emax_loc = pusher->sheath_diag_emax, emax_glob = 0.0;
+    double esum_loc = pusher->sheath_diag_esum, esum_glob = 0.0;
+    MPI_Reduce(loc, glob, 4, MPI_LONG, MPI_SUM, 0, world);
+    MPI_Reduce(&emax_loc, &emax_glob, 1, MPI_DOUBLE, MPI_MAX, 0, world);
+    MPI_Reduce(&esum_loc, &esum_glob, 1, MPI_DOUBLE, MPI_SUM, 0, world);
+    if (comm->me == 0) {
+      const double emean = glob[1] > 0 ? esum_glob / glob[1] : 0.0;
+      FILE *fp = screen ? screen : logfile;
+      if (fp) {
+        if (sheath_boundary)
+          // Boundary mode: the spatial E is off by design; the sheath acts
+          // through the potential-barrier impulse (reflect = prompt redep).
+          fprintf(fp, "  sheath step " BIGINT_FORMAT " [boundary]: "
+                  "near-wall=%ld  barrier reflect=%ld escape=%ld\n",
+                  ntimestep, glob[0], glob[2], glob[3]);
+        else
+          // Spatial mode: report the per-subcycle E-field seen by particles.
+          fprintf(fp, "  sheath step " BIGINT_FORMAT " [spatial]: "
+                  "near-wall=%ld engaged=%ld  |E_sheath| mean=%.3e "
+                  "max=%.3e V/m\n",
+                  ntimestep, glob[0], glob[1], emean, emax_glob);
+      }
+    }
+
+  }
 
   particle->sorted = 0;
 
