@@ -45,13 +45,17 @@ class SurfReactSurfacePWI : public SurfReact {
 
   struct OneReaction {
     int active;
-    int type;                      // EXCHANGE, DISSOCIATION, RECOMBINATION, TRIM_REFLECT
+    int type;                      // EXCHANGE, DISSOCIATION, RECOMBINATION, TRIM_REFLECT, ABSORB_REEMIT, SPUTTER
     int nreactant, nproduct;
     char **id_reactants, **id_products;
     int *reactants, *products;
     double prob;                   // fixed recycling probability (0 to 1); ignored for TRIM_REFLECT
     double *energy;                // return energy per product [eV]; ignored for TRIM_REFLECT
     int trim_table;                // index into trim_tables, -1 if not a TRIM reaction
+    // SPUTTER channel: additive Eckstein yield Y_WW(E,theta), emits the
+    // product species with a Thompson energy. Not part of the reflect/absorb
+    // first-to-fire lottery.
+    double sp_Es, sp_Eth, sp_Q, sp_ETF;  // Eckstein sputter params (type==SPUTTER)
     char *id;
   };
 
@@ -85,6 +89,14 @@ class SurfReactSurfacePWI : public SurfReact {
 
   ReactionI *reactions;
   int *indices;
+
+  // additive W-on-W self-sputtering: emit N = floor(Y)+Bernoulli(frac Y)
+  // product atoms (Thompson energy, cosine angle) per incident, weighted by
+  // the incident pweight. pweight_ewhich = edvec index of the pweight custom
+  // (-1 if fix particle/weight is absent).
+  int pweight_ewhich;
+  void emit_sputtered(Particle::OnePart *&ip, int isurf, double *norm,
+                      double E_in_eV, double theta_in_deg);
 
   void init_reactions();
   void readfile(char *);

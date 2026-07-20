@@ -40,14 +40,24 @@
 #include "math_extra.h"
 #include "memory.h"
 #include "error.h"
+#include "eckstein_sputter.h"
+#include "eckstein_sputter_data.h"
 
 #include <stdexcept>
 #include "H5Cpp.h"
 
 using namespace SPARTA_NS;
 
-enum{DISSOCIATION,EXCHANGE,RECOMBINATION,TRIM_REFLECT,ABSORB_REEMIT};
+enum{DISSOCIATION,EXCHANGE,RECOMBINATION,TRIM_REFLECT,ABSORB_REEMIT,SPUTTER};
 enum{INT,DOUBLE};                        // match surf.cpp custom-attribute type codes
+
+// Thompson sputtered-atom energy: f(E) = 2 E Ub /(E+Ub)^3, inverse-CDF
+// E = Ub (1/sqrt(u) - 1), u ~ U(0,1].
+static inline double pwi_sample_thompson(double Ub_eV, RanKnuth *rng) {
+  double u = rng->uniform();
+  if (u <= 0.0) u = 1.0e-12;
+  return Ub_eV * (1.0 / sqrt(u) - 1.0);
+}
 
 #define MAXREACTANT 1
 #define MAXPRODUCT 2
@@ -151,6 +161,13 @@ void SurfReactSurfacePWI::init()
   SurfReact::init();
   init_reactions();
 
+  // pweight custom (fix particle/weight): sputtered atoms inherit the
+  // incident macroparticle's pweight. -1 if fix particle/weight is absent
+  // (then sputtered atoms fall back to the fnum default).
+  pweight_ewhich = -1;
+  int pw_idx = particle->find_custom((char *) "pweight");
+  if (pw_idx >= 0) pweight_ewhich = particle->ewhich[pw_idx];
+
   // bind per-surf twall attribute if requested. Deferred to init() so the
   // attribute can be created by read_surf (via custom columns) or by
   // fix surf/temp before this runs.
@@ -187,8 +204,70 @@ void SurfReactSurfacePWI::init()
 
 /* ---------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   Additive self-sputtering. For each SPUTTER channel of the incident species,
+   evaluate the Eckstein yield Y(E,theta), draw N = floor(Y)+Bernoulli(frac Y)
+   whole atoms, and emit each as the product species (neutral W) with a
+   Thompson energy + cosine angle at the impact point. Each sputtered atom
+   inherits the incident pweight, so the emitted real-atom flux = Y x incident
+   flux. Independent of the reflect/absorb outcome (may run with ip about to be
+   reflected OR absorbed). add_particle may grow the particle list -> re-point
+   ip (by reference) and re-index the pweight custom.
+------------------------------------------------------------------------- */
+
+void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int /*isurf*/,
+                                         double *norm, double E_in_eV,
+                                         double theta_in_deg)
+{
+  int n = reactions[ip->ispecies].n;
+  if (n == 0) return;
+  int *list = reactions[ip->ispecies].list;
+
+  // incident pweight (real atoms this macroparticle represents)
+  double pw_inc = update->fnum;
+  if (pweight_ewhich >= 0)
+    pw_inc = particle->edvec[pweight_ewhich][ip - particle->particles];
+
+  for (int i = 0; i < n; i++) {
+    OneReaction *r = &rlist[list[i]];
+    if (r->type != SPUTTER) continue;
+
+    Eckstein::SputterParams p;
+    p.Es = r->sp_Es; p.Eth = r->sp_Eth; p.Q = r->sp_Q; p.ETF = r->sp_ETF;
+    double Y = Eckstein::sputter_yield(E_in_eV, theta_in_deg, p);
+    if (Y <= 0.0) continue;
+
+    int nemit = (int) Y;                         // floor(Y)
+    if (random->uniform() < Y - nemit) nemit++;  // + Bernoulli(frac Y)
+    if (nemit == 0) continue;
+
+    int sp = r->products[0];                     // sputtered species (neutral W)
+    double mass = particle->species[sp].mass;
+
+    for (int k = 0; k < nemit; k++) {
+      double E_eV = pwi_sample_thompson(p.Es, random);   // Ub = surface binding
+      double x[3], v[3];
+      memcpy(x, ip->x, 3*sizeof(double));
+      sample_cosine_velocity(v, norm, E_eV, mass);
+
+      int id = MAXSMALLINT * random->uniform();
+      Particle::OnePart *particles = particle->particles;
+      int reallocflag = particle->add_particle(id, sp, ip->icell, x, v, 0.0, 0.0);
+      if (reallocflag) ip = particle->particles + (ip - particles);
+
+      if (pweight_ewhich >= 0)                    // inherit incident pweight
+        particle->edvec[pweight_ewhich][particle->nlocal-1] = pw_inc;
+
+      nsingle++;
+      tally_single[list[i]]++;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
 int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
-                            Particle::OnePart *&jp, int &)
+                            Particle::OnePart *&jp, int &velreset)
 {
   int n = reactions[ip->ispecies].n;
   if (n == 0) return 0;
@@ -205,15 +284,39 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
   if (tindex_custom >= 0)
     twall_eff = surf->edvec_local[tindex_custom][isurf];
 
-  // precompute incident (E, theta) for TRIM channels (needed at most once
-  // per event; skip work if no TRIM reactions exist for this species).
+  // Incident impact (E, theta) at the wall. The incident velocity here
+  // already includes the sheath boundary energy boost (the mover kicks v
+  // inbound before the collision), so E_in_eV is the physical sputtering
+  // energy. Computed up front and reused by TRIM and SPUTTER.
   double E_in_eV = 0.0, theta_in_deg = 0.0;
   bool trim_precomputed = false;
+  {
+    double mass_in = particle->species[ip->ispecies].mass;
+    double v2 = ip->v[0]*ip->v[0] + ip->v[1]*ip->v[1] + ip->v[2]*ip->v[2];
+    if (mass_in > 0.0)
+      E_in_eV = 0.5 * mass_in * v2 * update->joule2ev * update->mvv2e;
+    double nlen = sqrt(norm[0]*norm[0] + norm[1]*norm[1] + norm[2]*norm[2]);
+    double vlen = sqrt(v2);
+    if (nlen > 0.0 && vlen > 0.0) {
+      double cos_th = -(ip->v[0]*norm[0] + ip->v[1]*norm[1] + ip->v[2]*norm[2])
+                     / (nlen * vlen);
+      if (cos_th < 0.0) cos_th = 0.0;
+      if (cos_th > 1.0) cos_th = 1.0;
+      theta_in_deg = acos(cos_th) * 180.0 / Reflection::PI_CONST;
+    }
+    trim_precomputed = true;
+  }
+
+  // Additive self-sputtering: emit sputtered atoms BEFORE the reflect/absorb
+  // lottery (uses the intact incident state). May add particles and thus
+  // re-point ip (handled by reference).
+  emit_sputtered(ip, isurf, norm, E_in_eV, theta_in_deg);
 
   OneReaction *r;
 
   for (int i = 0; i < n; i++) {
     r = &rlist[list[i]];
+    if (r->type == SPUTTER) continue;   // additive; handled in emit_sputtered
 
     double p_this;
     if (r->type == TRIM_REFLECT) {
@@ -246,6 +349,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
     if (react_prob > random_prob) {
       nsingle++;
       tally_single[list[i]]++;
+      velreset = 1;   // react() sets the outgoing velocity; don't let collide override it
 
       switch (r->type) {
       case DISSOCIATION:
@@ -647,7 +751,27 @@ void SurfReactSurfacePWI::readfile(char *fname)
     else if (word[0] == 'R' || word[0] == 'r') r->type = RECOMBINATION;
     else if (word[0] == 'T' || word[0] == 't') r->type = TRIM_REFLECT;
     else if (word[0] == 'A' || word[0] == 'a') r->type = ABSORB_REEMIT;
+    else if (word[0] == 'S' || word[0] == 's') r->type = SPUTTER;
     else error->all(FLERR, "Invalid reaction type in recycle file");
+
+    // Tag the printed reaction label with the channel type, so the surf
+    // reaction tally distinguishes reflect/absorb/sputter/... (otherwise every
+    // "W+ --> W" channel prints identically). r->id was built from line1 above.
+    {
+      const char *tag = (r->type == TRIM_REFLECT)  ? " [T:reflect]"  :
+                        (r->type == ABSORB_REEMIT) ? " [A:absorb]"   :
+                        (r->type == SPUTTER)       ? " [S:sputter]"  :
+                        (r->type == EXCHANGE)      ? " [E:exchange]" :
+                        (r->type == RECOMBINATION) ? " [R:recomb]"   :
+                        (r->type == DISSOCIATION)  ? " [D:dissoc]"   : "";
+      if (r->id && tag[0]) {
+        char *newid = new char[strlen(r->id) + strlen(tag) + 1];
+        strcpy(newid, r->id);
+        strcat(newid, tag);
+        delete [] r->id;
+        r->id = newid;
+      }
+    }
 
     // validate reactant/product counts
     if (r->type == DISSOCIATION) {
@@ -667,6 +791,10 @@ void SurfReactSurfacePWI::readfile(char *fname)
         error->all(FLERR, "Absorb/re-emit recycle reaction needs 1 reactant, 1 product "
                           "(product = returning species; same as reactant for simple "
                           "return, or D2 if atomic-to-molecular conversion allowed)");
+    } else if (r->type == SPUTTER) {
+      if (r->nreactant != 1 || r->nproduct != 1)
+        error->all(FLERR, "Sputter recycle reaction needs 1 reactant, 1 product "
+                          "(product = sputtered species, e.g. W)");
     }
 
     if (r->type == TRIM_REFLECT) {
@@ -717,6 +845,23 @@ void SurfReactSurfacePWI::readfile(char *fname)
         r->energy[1] = 0.0;
       }
       r->prob = 1.0;
+
+    } else if (r->type == SPUTTER) {
+      // Sputter reaction: `S <eckstein_entry>` (e.g. W_on_W). Additive — it
+      // does NOT participate in the reflect/absorb lottery (prob = 0); the
+      // yield Y(E,theta) is evaluated per event in emit_sputtered().
+      word = strtok(NULL, " \t\n");
+      if (!word) error->all(FLERR, "Missing Eckstein entry name in S recycle reaction");
+      Eckstein::SputterParams p;
+      if (!Eckstein::lookup_sputter(word, p)) {
+        char str[256];
+        snprintf(str, sizeof(str),
+                 "surf_react surface/pwi: unknown eckstein sputter entry '%s' "
+                 "(check eckstein_sputter_data.h)", word);
+        error->all(FLERR, str);
+      }
+      r->sp_Es = p.Es; r->sp_Eth = p.Eth; r->sp_Q = p.Q; r->sp_ETF = p.ETF;
+      r->prob = 0.0;
 
     } else {
       // non-TRIM: probability
