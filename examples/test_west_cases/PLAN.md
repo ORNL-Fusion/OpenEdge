@@ -86,18 +86,30 @@ emission + depositing PWI wall + ADAS chain + sheath boundary + diffusion
 3. ADAS ionization: DONE — `volume/chem/adas 1 W auto`, W+..W10+ all
    Boris-pushed. Neutral ionization length verified lambda_ion ~ 1.1 cm
    (neutral-W density decay vs distance-to-wall, analysis.ipynb).
-4. Acceptance NOT DONE: W mass balance closure (emitted = deposited +
-   in-flight + core-lost) still to check; deposition profile vs Cartesian
-   `test_west` still to compare.
-5. Optional gold standard NOT DONE: single W+ canonical angular momentum
-   p_phi = m*R*v_phi + q*psi conservation.
+4. Acceptance IN PROGRESS: W mass balance closure (emitted = deposited +
+   in-flight + core-lost). All four tallies now exist — erosion_rate
+   (emitted), surf/weighted nflux (deposited), c_cwNtot convergence trace
+   (in-flight inventory), compute closs (core-lost). Just needs the numbers
+   checked on the converged load-balanced run. Deposition profile vs
+   Cartesian `test_west` still to compare.
+5. Gold standard DONE (in.axi_pphi): canonical toroidal angular momentum
+   p_phi = m*R*v_phi + q*psi conserved. Uniform axial B (B0 x-hat) so
+   psi = B0*R^2/2; H+ at 50 eV, pure Boris (no collisions/diffusion), 500
+   particles, 20k steps (~1500 gyroperiods). SECULAR drift (linear-fit slope
+   x runtime, relative) median 1.2e-4, p95 5.5e-4 for particles that avoid
+   the walls/axis -> no accumulation. The larger (max-min)/mean ~7% is bounded
+   phase-sampling oscillation (dumped every ~15 gyroperiods), not drift.
+   Complements energy conservation (7 digits) + naxibad=0. Rerun after any
+   mover change; analysis = decompose drift into secular vs oscillation.
 
 Also added this session (not originally in the plan):
 - Core-boundary mesh exclusion: `west/make_core_surf.py` extracts the
   psi_norm=0.1 flux surface from plasma.h5 -> `input/core.surf` (normals
-  into the SOL). Read as a specular surf so the deep core is marked
-  inside/solid (flow volume 27.3 -> 17.4 m^3, annulus only). REPLACES the
-  old `fix reflect/psi` core boundary.
+  into the SOL). The deep core is marked inside/solid (flow volume
+  27.3 -> 17.4 m^3, annulus only). REPLACES the old `fix reflect/psi`.
+  Boundary condition is now `surf_collide vanish` (absorbing): W that
+  reaches psi_norm=0.1 is lost to the confined core — a physical sink and
+  the global net-erosion channel (was specular; see core-loss tally below).
 - Particle-based mesh adaptation: `fix adapt ... refine particle` in the
   WARMUP phase (unfix + reset_timestep before diagnostics, so the frozen
   grid keeps the ave/grid tally valid).
@@ -105,6 +117,29 @@ Also added this session (not originally in the plan):
   ave/grid|ave/surf window completes (else it silently outputs zeros);
   erosion_rate is a STATIC per-surf value dumped directly (ave/surf zeroes
   it because it accumulates per-collision tallies, not static values).
+
+Run infrastructure (deposition/convergence session):
+- Convergence trace: `c_cwNtot` (total real W atoms) + per-charge-state
+  c_cwN0..10 in stats_style, from the mesh-independent pweight-weighted
+  count `n_w` (reduce sum over cells; robust to warmup mesh adaptation,
+  unlike nrho). Total W fills exponentially, tau ~ 35k steps; single-exp
+  fit is optimistic (real tail slower), so warmup 150k gets ~98% / +1.6%
+  drift. Notebook cell 13 plots it + reports last-decile drift.
+- Load balancing: `fix fbal balance 1000 1.1 rcb part`. The W cloud
+  concentrates in the lower divertor, so the static rcb-by-cell partition
+  left one rank with ALL the W (~40k) and others with 0 -> effectively
+  1-core, %varavg ~1700. With balance the load evens out (min 0 -> ~32k,
+  max/min ~1.1) — the real speedup lever (~3-4x), dwarfs the I/O tweaks.
+- I/O / robustness: sheath `dump no` (kills per-subcycle boris2D trace
+  spew); diagnostic dumps once per 50k with a 250-sample window (was every
+  10k); stats 500. `shell mkdir -p state` at top (state/ is git-ignored and
+  a git clean removes it -> dumps abort AFTER the warmup). `write_restart
+  state/warmup.D${Dperp}.restart` after the warmup so a diagnostic crash /
+  re-run does not redo the ~85 min warmup (companion read_restart deck TODO).
+- Pump: evaluated a sub-baffle pump (SOLEDGE has one) and DECLINED for the
+  kinetic W run — SOLEDGE's R=0.95/0.5 are fuel-gas albedos not W; the pump
+  shapes the (already static) background; little neutral W reaches the
+  plenum. W sinks are wall deposition (dominant) + core loss.
 
 ## Di Genova 2021 (NF 61 106019) parity — gap analysis
 
@@ -141,50 +176,72 @@ Di Genova ingredient -> OpenEdge status (in in.axi_west_emission):
   SOLEDGE parr_flow sign convention. Also verified correct in axi (velocity
   kick at END_OF_STEP, respects kick-drift chord).
 - W self-sputtering (W-on-W; changes n_W^bound by ~4-5x low density,
-  fig 6c/d): code SUPPORTS it (compute surface/physical/sputter takes a
-  projectiles list) — currently O only. Add W to the projectiles + iterate
-  the deposited-W flux to convergence. Config change, not new code.
+  fig 6c/d): DONE (commit 15d562c). New per-collision SPUTTER (`S`) channel in
+  surf_react surface/pwi — NOT via `projectiles` (that list is BACKGROUND ions;
+  W is the SIMULATED impurity). On each W-ion impact, additively (outside the
+  reflect/absorb lottery) emit N = floor(Y)+Bernoulli(frac Y) neutral W with a
+  Thompson energy + cosine angle, inheriting the incident pweight. Y_WW(E,theta)
+  from the Eckstein/Bohdansky fit (Eckstein::sputter_yield, entry W_on_W); E is
+  the sheath-boosted impact energy (mover kicks v before the collision). Self-
+  consistent — no Di Genova iteration loop. Grammar: `W+ --> W` / `S W_on_W`
+  (wall.recycle, W+..W10+). VERIFIED firing with correct Z-scaling (W2+ sputters
+  >> W+, since higher Z -> more sheath acceleration -> higher yield). First
+  resolved run (sourceThreshW=1e6): N_inf jumped 7.9e10 -> 2.45e11 (~3x), i.e.
+  the expected self-sputtering n_W bump. Reaction labels now tagged
+  [T:reflect]/[A:absorb]/[S:sputter] so the surf tally distinguishes channels.
 - Braginskii thermal force ................. HAVE (fix thermal_force), OFF.
   Di Genova did NOT include it (lists as future work) — leave off for
   parity, available if wanted.
 - Drifts .................................... he switched OFF; we have none.
 
-Priority order — items 1-3 DONE (depositing wall, sheath, friction all ON
-and verified). Remaining:
-4. Self-sputtering: add W to sputter projectiles, iterate to convergence
-   (his loop). Config change (code supports it). Expect n_W^bound up
-   ~4-5x at low density. Do AFTER the baseline comparison (B) so its
-   effect can be measured against a reference.
-5. VERIFY sputter incident-energy model and yield fit vs his
-   E_i = 2Ti+3ZTe + SDTrimSP.
+Priority order — items 1-4 DONE (depositing wall, sheath, friction,
+self-sputtering all ON and verified). Remaining:
+5. VERIFY sputter incident-energy model and yield fit. IMPLEMENTED: E is the
+   sheath-boosted ion impact energy (from ip->v at the collision), Y from the
+   Eckstein/Bohdansky fit (W_on_W). Still to check the impact energy against
+   his E_i = 2Ti+3ZTe and the yield vs SDTrimSP.
 
 **NEXT (task B): comparison diagnostics.** All inputs now exist (depositing
 wall + friction + core surface), so these are the highest-value work — they
 are what let us actually compare to Di Genova. s-axis machinery from
 analysis.ipynb's wall-vs-s cell is reusable.
-- Wall EROSION + DEPOSITION flux vs wall coordinate s (his fig 6a): DONE
-  (analysis.ipynb fig-6a cell). Erosion compute outputs erosion_flux
-  (c_cero[1]) + erosion_rate (c_cero[2]).
+- Wall EROSION + DEPOSITION + net erosion flux vs wall coordinate s (his
+  fig 6a): DONE (analysis.ipynb cells 8/12). Erosion compute outputs
+  erosion_flux (c_cero[1]) + erosion_rate (c_cero[2]).
   DEPOSITION-TALLY BUG FOUND + FIXED: stock `compute surf nflux_incident`
   is pweight-UNAWARE (uses the struct .weight, not the OpenEdge pweight
   custom that carries the real macroparticle count ~1e5). It undercounted
   deposition by the pweight/fnum ratio -> erosion appeared ~4e4x above
   deposition. Fix: new `compute surf/weighted` (src/OPENEDGE/, mirrors
-  compute grid/weighted; subclasses ComputeSurf, overrides surf_tally to
-  weight by pweight, divides normflux by fnum since pweight is already the
-  real count). Deposition now uses it -> erosion/deposition peak ratio
-  0.05 (was ~4e4), i.e. comparable as physics requires. Re-run the full
-  case for the quantitative fig-6a.
+  compute grid/weighted; subclasses ComputeSurf, weights surf_tally by
+  pweight, divides normflux by fnum since pweight is already the real count).
+  Made INCIDENCE-ONLY (emission events dropped) so the semantics are clean:
+    nflux          = deposition (redeposition) flux, W that sticks
+    nflux_incident = gross wall load (every incidence)
+  Emission/gross-erosion stays with erosion_flux; the mover stamps the
+  incident pweight into update->tally_pweight so absorbed W (ip=NULL) is
+  weighted right. Net erosion = erosion_flux - nflux, redep fraction =
+  nflux/erosion_flux (formed in the notebook). First converged run gave
+  redep ~76% at the strike point, deposition co-located with erosion -
+  the Di Genova prompt-redep picture. Re-running load-balanced + converged
+  for the final quantitative fig-6a.
 - W penetration factor tau_W = N_in / phi_W (his eq 1, tables 3-5): DONE
   (analysis.ipynb penetration cell). N_in = confined W (psi_norm<1),
   phi_W = sum erosion_rate. Result tau_W = 8e-6 s (log10 -5.1) — IN his
   range (-3..-8). ~20% of W penetrates inside the separatrix.
-- Core-boundary <n_W^bound> (his figs 6c/d, 7a/b): DONE (same cell) but
-  LOW (~2e5 vs his ~1e14). CAVEAT: our core.surf is SPECULAR (reflects),
-  his inner boundary ABSORBS -> W accumulates as core content there. For a
-  comparable n_W^bound, switch core.surf to absorbing (surf_collide vanish
-  or a counting react). Penetration profile n_W(psi_norm) also plotted:
-  peaks at separatrix, falls ~5 decades inward (W is edge-localized).
+- Core-boundary loss / <n_W^bound> (his figs 6c/d, 7a/b): core.surf is now
+  ABSORBING (`surf_collide vanish`, was specular), and the W lost through it
+  is tallied per element by `compute closs surf/weighted core allW nflux`
+  (fix floss -> core.flux dump). Integrated x ring area = the total core-loss
+  RATE, which is the global net-erosion channel that closes the mass balance
+  (erosion = deposition + core-loss + dInventory/dt). NOTE the vanish core
+  removes W each transit, so it does NOT accumulate a standing n_W^bound the
+  way his reflecting-then-counting boundary does; comparing to his fig 6c/d
+  absolute n_W^bound would need a counting-but-not-removing react instead.
+  Empirically the core sink is SMALL (specular vs vanish changed the steady
+  inventory <1%; N_inf 2.01e11 -> 1.76e11), i.e. little W reaches psi=0.1.
+  Penetration profile n_W(psi_norm): peaks at separatrix, falls ~5 decades
+  inward (W is edge-localized).
 - Impact-energy PDF at the wall (his fig 7c, <E_in>_LDP = 112 eV). NOT
   DONE — needs a per-collision incident-KE tally at the wall.
 - Sputtered-energy PDF (his fig 6b) — Thompson tail, self-sput cutoff.
@@ -225,8 +282,19 @@ convergence checks.
 
 ## Phase 4 — platform and merge
 
-- KOKKOS: `src/KOKKOS/update_kokkos.cpp` (+ OPENEDGE KOKKOS) still has the
-  old behavior if it implements its own axi/Boris path — audit and mirror.
+- KOKKOS: AUDITED (KOKKOS is OFF in the mac_mpi build, so no current impact).
+  FINDING: the OpenEdge Boris/hybrid pusher in update_kokkos.cpp is DIM==3
+  ONLY — oe_boris3d/oe_hybrid3d (the only Boris kernels; BorisGridKokkos::
+  push_velocity is called only inside them) fire at update_kokkos.cpp:1002/1023
+  gated on `DIM == 3`. In axisymmetric mode (DIM==1) the move falls through to
+  the straight-chord `xnew = x + dt*v` (line 1004) then axi_remap — i.e. NO
+  magnetic push, ballistic W with no gyration. And there is NO fail-fast guard
+  (init errors on external-field-in-y for axi, but not on axi+plasma-Boris).
+  So a KOKKOS+axi+Boris run is SILENTLY WRONG. Merge blocker for recommending
+  axi. Fix, in order of effort: (a) minimum — add an init() guard that refuses
+  axisymmetric + plasma Boris/hybrid under KOKKOS (mirror the non-KOKKOS
+  Pusher::init() refusal), verify in a KOKKOS build; (b) full — port the
+  kick-drift axi Boris (an oe_borisaxi with chord-consistent kick + axi_remap).
 - hybrid/GCA in axi: either implement kick-drift for the Boris branch of
   hybrid + GCA-consistent linear segments, or leave the init() error.
 - `west/input/plasma.h5` (12 MB) into the `download_data.sh` tarball flow

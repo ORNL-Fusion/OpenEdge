@@ -12,6 +12,14 @@
 
 namespace OpenEdge {
 
+// Override: when true, force the axisymmetric (x=Z, y=R) R/Z convention even
+// in planar 2D mode. Set by `fix background ... rz_axes axi` so a Cartesian
+// (planar) run can reuse an axi-convention deck unchanged (same wall_fine.surf
+// and plasma.h5, x=Z/y=R) instead of the default planar R=x/Z=y. Default false
+// leaves axi and legacy-Cartesian behavior untouched. Host-side global (the
+// KOKKOS axi/planar path is separate and already flagged unsupported).
+extern bool oe_force_axi_rz;
+
 // Maps a SPARTA position (xyz from particle->x or surf line endpoint) to
 // physical cylindrical (R, Z). Three SPARTA modes:
 //   2D Cartesian (legacy):  x[0]=R, x[1]=Z              (R, Z) = (x, y)
@@ -30,7 +38,7 @@ KOKKOS_INLINE_FUNCTION
 void sparta_to_RZ(const double *xyz, int dim, bool axisymmetric,
                   double &R, double &Z,
                   double x0 = 0.0, double y0 = 0.0) {
-  if (axisymmetric) {            // x = Z (axis), y = R (radial)
+  if (axisymmetric || oe_force_axi_rz) {   // x = Z (axis), y = R (radial)
     Z = xyz[0];
     R = xyz[1];
   } else if (dim == 2) {         // 2D Cartesian (legacy)
@@ -51,7 +59,7 @@ KOKKOS_INLINE_FUNCTION
 void RZphi_force_to_sparta(double FR, double FZ, double Fphi,
                            int dim, bool axisymmetric, double phi,
                            double &fx, double &fy, double &fz) {
-  if (axisymmetric) {            // SPARTA slots: x=Z, y=R, z=phi
+  if (axisymmetric || oe_force_axi_rz) {   // SPARTA slots: x=Z, y=R, z=phi
     fx = FZ;
     fy = FR;
     fz = Fphi;
@@ -73,7 +81,7 @@ void RZphi_force_to_sparta(double FR, double FZ, double Fphi,
 KOKKOS_INLINE_FUNCTION
 void sparta_v_to_RZphi(const double *v, int dim, bool axisymmetric,
                        double phi, double &vR, double &vZ, double &vphi) {
-  if (axisymmetric) {
+  if (axisymmetric || oe_force_axi_rz) {
     vZ = v[0];
     vR = v[1];
     vphi = v[2];

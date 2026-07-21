@@ -39,6 +39,10 @@
 
 using namespace SPARTA_NS;
 
+// Definition of the planar R/Z-axis override declared in openedge_geom.h.
+// Default false; set true by the `rz_axes axi` keyword below.
+namespace OpenEdge { bool oe_force_axi_rz = false; }
+
 namespace {
 enum { PLASMA_SOURCE_FILE = 0, PLASMA_SOURCE_CONSTANT = 1 };
 }
@@ -124,6 +128,12 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
       if (strcmp(arg[iarg + 1], "yes") == 0) is_static = 1;
       else if (strcmp(arg[iarg + 1], "no") == 0) is_static = 0;
       else error->all(FLERR, "fix background: static must be yes or no");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "rz_axes") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "fix background: rz_axes needs axi|planar");
+      if (strcmp(arg[iarg + 1], "axi") == 0) OpenEdge::oe_force_axi_rz = 1;
+      else if (strcmp(arg[iarg + 1], "planar") == 0) OpenEdge::oe_force_axi_rz = 0;
+      else error->all(FLERR, "fix background: rz_axes must be axi or planar");
       iarg += 2;
     } else if (strcmp(arg[iarg], "r_bounds") == 0) {
       if (iarg + 2 >= narg) error->all(FLERR, "fix background: r_bounds needs rmin rmax");
@@ -696,8 +706,8 @@ void FixBackground::load_constant_profile()
   if (!const_has_r_bounds || !const_has_z_bounds) {
     if (domain->dimension == 2) {
       // Axi: SPARTA x = Z, y = R. Cart 2D: SPARTA x = R, y = Z.
-      const int iR = domain->axisymmetric ? 1 : 0;
-      const int iZ = domain->axisymmetric ? 0 : 1;
+      const int iR = (domain->axisymmetric || OpenEdge::oe_force_axi_rz) ? 1 : 0;
+      const int iZ = (domain->axisymmetric || OpenEdge::oe_force_axi_rz) ? 0 : 1;
       if (!const_has_r_bounds) { rmin = domain->boxlo[iR]; rmax = domain->boxhi[iR]; }
       if (!const_has_z_bounds) { zmin = domain->boxlo[iZ]; zmax = domain->boxhi[iZ]; }
     } else {
@@ -1573,7 +1583,7 @@ void FixBackground::build_cell_mesh_index()
   Grid::SplitInfo *sinfo = grid->sinfo;
   if (!cells) return;
   const int dim = domain->dimension;
-  const int axi = domain->axisymmetric;
+  const int axi = domain->axisymmetric || OpenEdge::oe_force_axi_rz;
 
   const int ncell_idx = static_cast<int>(mesh_cell_idx.size());
 
@@ -1730,7 +1740,7 @@ FixBackground::query_bfield_at_point(const double xyz[3]) const
   MagneticFieldFileDataParams B{};
 
   const int dim = domain->dimension;
-  const bool axi = domain->axisymmetric;
+  const bool axi = domain->axisymmetric || OpenEdge::oe_force_axi_rz;
   double R, Z;
   OpenEdge::sparta_to_RZ(xyz, dim, axi, R, Z, column_x0, column_y0);
   B.r = R;
@@ -1871,7 +1881,7 @@ bool FixBackground::query_efield_at_point(const double xyz[3],
   if (mesh_e_r.empty() || mesh_e_z.empty() || mesh_e_t.empty()) return false;
 
   const int dim = domain->dimension;
-  const bool axi = domain->axisymmetric;
+  const bool axi = domain->axisymmetric || OpenEdge::oe_force_axi_rz;
   double R, Z;
   OpenEdge::sparta_to_RZ(xyz, dim, axi, R, Z, column_x0, column_y0);
 

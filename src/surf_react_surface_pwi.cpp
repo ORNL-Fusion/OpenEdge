@@ -51,12 +51,23 @@ using namespace SPARTA_NS;
 enum{DISSOCIATION,EXCHANGE,RECOMBINATION,TRIM_REFLECT,ABSORB_REEMIT,SPUTTER};
 enum{INT,DOUBLE};                        // match surf.cpp custom-attribute type codes
 
-// Thompson sputtered-atom energy: f(E) = 2 E Ub /(E+Ub)^3, inverse-CDF
-// E = Ub (1/sqrt(u) - 1), u ~ U(0,1].
-static inline double pwi_sample_thompson(double Ub_eV, RanKnuth *rng) {
-  double u = rng->uniform();
-  if (u <= 0.0) u = 1.0e-12;
-  return Ub_eV * (1.0 / sqrt(u) - 1.0);
+// Thompson sputtered-atom energy with the recoil (max-transferable) cutoff:
+//   f(E) proportional to E/(E+Ub)^3 * [1 - sqrt((E+Ub)/(Emax+Ub))],  0<=E<=Emax
+// where Emax = gamma*E_in - Ub is the maximum ejection energy (gamma = the
+// binary energy-transfer factor 4 M1 M2/(M1+M2)^2). Rejection-sampled off the
+// pure-Thompson inverse CDF E = Ub(1/sqrt(u)-1); efficient since the Thompson
+// peak (~Ub/2) sits far below Emax for divertor impact energies.
+static inline double pwi_sample_thompson(double Ub_eV, double Emax_eV,
+                                         RanKnuth *rng) {
+  double denom = Emax_eV + Ub_eV;
+  for (int it = 0; it < 64; it++) {
+    double u = rng->uniform();
+    if (u <= 0.0) u = 1.0e-12;
+    double E = Ub_eV * (1.0 / sqrt(u) - 1.0);
+    if (E > Emax_eV) continue;                       // recoil cutoff
+    if (rng->uniform() < 1.0 - sqrt((E + Ub_eV) / denom)) return E;
+  }
+  return 0.5 * Emax_eV;                              // rare fallback
 }
 
 #define MAXREACTANT 1
@@ -244,8 +255,15 @@ void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int /*isurf*/,
     int sp = r->products[0];                     // sputtered species (neutral W)
     double mass = particle->species[sp].mass;
 
+    // recoil cutoff: max ejection energy Emax = gamma*E_in - Es, with the
+    // binary transfer factor gamma = 4 M1 M2/(M1+M2)^2 (~1 for W-on-W).
+    double m_in = particle->species[ip->ispecies].mass;
+    double gamma = 4.0 * m_in * mass / ((m_in + mass) * (m_in + mass));
+    double Emax = gamma * E_in_eV - p.Es;
+    if (Emax <= 0.0) continue;                   // incident too soft to eject
+
     for (int k = 0; k < nemit; k++) {
-      double E_eV = pwi_sample_thompson(p.Es, random);   // Ub = surface binding
+      double E_eV = pwi_sample_thompson(p.Es, Emax, random);  // Ub, cutoff
       double x[3], v[3];
       memcpy(x, ip->x, 3*sizeof(double));
       sample_cosine_velocity(v, norm, E_eV, mass);
