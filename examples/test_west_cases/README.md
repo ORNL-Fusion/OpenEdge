@@ -1,68 +1,35 @@
-# Axisymmetric Boris mover acceptance tests
+# WEST tungsten transport: axisymmetric vs Cartesian
 
-Charged-particle transport in 2D axisymmetric domains (x = Z axial,
-y = R radial, axis at ylo). No collisions, no chemistry, no sinks: the
-only physics is the Boris push and the axisymmetric move/remap
-machinery in `Update::move()`.
+Two matched W-impurity transport cases in real WEST geometry that differ
+**only in geometry mode**, to isolate the effect of the axisymmetric
+(2πR ring) vs planar Cartesian (flat slab) treatment.
 
-The axi mover traces every move as a straight 3D chord
-(`xnew = x + dt*v`, constant `v`) and handles gyration around the axis
-geometrically (`axi_remap`). The Boris pusher therefore runs in
-kick-drift form in axi mode: velocity kicks at fixed position, then one
-linear drift per step (see `Pusher::push_boris_2d`). These inputs are
-the regression tests for that contract.
-
-## Cases
-
-Uniform-B box (this directory):
-
-- `in.axi_bz` — uniform axial B. Ions gyrate in the (R, phi) plane, the
-  motion handled entirely by `axi_remap` and the curved-cell-face
-  crossing tests. This is the case that loses particles if the mover
-  and pusher disagree.
-- `in.axi_bt` — uniform toroidal B. Ions gyrate in the poloidal (Z, R)
-  plane; checks in-plane orbits with the remap nearly passive.
-
-Real WEST geometry (`west/`):
-
-- `west/in.axi_west` — WEST wall (SOLEDGE3X 3MW case) with the matching
-  plasma.h5 B-field, specular walls, 100 eV W+, divertor grid
-  refinement (split cells). Closed vessel: np must stay constant.
-  Requires `west/input/plasma.h5` (12 MB, not in git — see below).
-- `west/in.axi_west_emission` — work-in-progress full-physics demo
-  (sputter-driven W emission); not a pass/fail test.
-- `west/subdivide_surf.py` — splits wall segments to a max length
-  (finer emission/erosion resolution); `wall_fine.surf` was generated
-  with `--maxlen 0.02 --region 0.30 0.85 1.8 3.25 0.01`.
+- `axi/`  — 2D axisymmetric (x = Z, y = R). The physically correct tokamak
+  reduced model (matches SOLEDGE/ERO); kick-drift Boris mover.
+- `cart/` — 2D planar, **identical** physics and inputs (same
+  `wall_fine.surf`, `plasma.h5`, sheath, PWI + self-sputtering, friction,
+  cross-field diffusion, ADAS). The only difference is flat-slab geometry.
+  Uses `fix background ... rz_axes axi` so the planar run keeps the axi
+  x=Z, y=R convention (otherwise planar assumes R=x, Z=y and the wall
+  samples outside the plasma mesh → no emission).
 
 ## Run
 
-    mpirun -np 4 spa_mac_mpi -in in.axi_bz
-    mpirun -np 4 spa_mac_mpi -in in.axi_bt
-    cd west && mpirun -np 4 spa_mac_mpi -in in.axi_west
+    cd axi  && mpirun -np 4 spa_mac_mpi -in in.axi_west_emission  -var Dperp 0.5
+    cd cart && mpirun -np 4 spa_mac_mpi -in in.cart_west_emission -var Dperp 0.5
 
-## Pass criteria
+Short runs: append `-var nwarm 20000 -var ndiag 5000 -var sourceThreshW 1e5`.
+Full convergence needs ~500k warmup steps (self-sputtering slow tail).
 
-1. `Axisymm bad moves = 0` in the run summary.
-2. `np` in the stats output stays at its initial value: the domains are
-   closed, so any drop is particles lost by the mover. In the WEST case
-   `nexit` must also stay 0 (a nonzero value means a particle tunneled
-   through the wall and left through the outer box boundary).
-3. `c_T` (temperature) stays flat: a static B field does no work, so a
-   drift means the mover is corrupting velocities.
+## Analysis
 
-These criteria fail on builds before the kick-drift fix: the subcycled
-Boris endpoint was inconsistent with the chord the axi tracer assumes,
-so particles ended up outside their cell after remap and were discarded
-(`naxibad`). With subcycles 10, the uniform-B case lost 19659/20000
-particles in 20000 steps and the WEST case 9528/10000 in 10000 steps.
+`axi/input/analysis.ipynb` — per-case diagnostics plus axi-vs-cart comparison
+cells: deposition/erosion vs wall coordinate, summary table, self-normalized
+density ratio, and convergence + impact-energy overlays.
 
 ## Data
 
-`west/input/plasma.h5` is too large for git (it was recovered from
-commit db597e4, the old `examples/test_west_axi` case). Regenerate it
-from that commit with
+`input/plasma.h5` (12 MB WEST SOLEDGE3X background) is git-ignored. Recover:
 
-    git show db597e4:examples/test_west_axi/input/plasma.h5 > west/input/plasma.h5
-
-or add it to the `download_data.sh` release tarballs.
+    git show db597e4:examples/test_west_axi/input/plasma.h5 > axi/input/plasma.h5
+    cp axi/input/plasma.h5 cart/input/plasma.h5
