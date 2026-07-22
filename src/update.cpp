@@ -1100,7 +1100,12 @@ void Update::cache_plasma_particles()
     if (need_bfield) {
       // Store B and background E at particle position using the same component
       // mapping as compute plasma/fields: 2D -> (Bx,By,Bz)=(Br,Bz,Bt).
-      const double rx = x[0], ry = x[1];
+      // Azimuth about the column axis, not the domain origin.
+      const double bcol_x0 = cp ? cp->plasma_data.column_x0
+                          : (pd ? pd->column_x0 : 0.0);
+      const double bcol_y0 = cp ? cp->plasma_data.column_y0
+                          : (pd ? pd->column_y0 : 0.0);
+      const double rx = x[0] - bcol_x0, ry = x[1] - bcol_y0;
       const double rmag = std::sqrt(rx*rx + ry*ry);
       double ex = 0.0, ey = 0.0, ez = 0.0;
       const double Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
