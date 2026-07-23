@@ -1,0 +1,97 @@
+# Multi-ionization deck: full W isonuclear chain (W..W10+), full 3D. Flat W target at z=0; uniform grazing
+# B (5.3 T at angle alpha to the surface); constant Te/ne plasma + MPS/DS sheath.
+# Neutral W is sputtered from the target -> ADAS multi-ionization -> the sheath
+# E-field draws the W+ back -> redeposition. Full 3D fields come from the
+# constant background (cylindrical B about an axis placed far outside the domain,
+# so the in-plane field is ~uniform; |B| and the grazing angle are EXACTLY
+# uniform over the target because its normal is the cylinder Z-axis).
+
+variable            Bmag  index 5.3          # T  (ITER on-axis, Chankin)
+variable            alpha index 3.0          # deg, B-to-surface grazing angle
+variable            TeV   index 100.0        # eV
+variable            ne    index 1e20         # m^-3
+variable            EbW   index 8.68         # eV, W surface binding (Thompson)
+variable            flux  index 1e22         # m^-2 s^-1 sputtered-W source
+variable            nrun  index 20000
+variable            tag   index base          # output/dump suffix (p-scan)
+variable            smode index spatial        # sheath mode: spatial (with E) | off (geometry only)
+variable            blat  index p              # lateral BC: p=periodic (infinite target; fate from dumps)
+                                               #             o=absorbing (finite patch; clips ~1 mm orbits at the x walls)
+
+seed                12345
+dimension           3
+boundary            ${blat} ${blat} ro       # zlo reflect (backstop below target); zhi outflow (escape)
+global              gridcut 0.0 comm/sort no
+global              fnum 1e11
+shell               mkdir state
+
+# x = perpendicular to B (contains the gyro-orbit), y = along B=+y (contains the
+# parallel drift while an ion completes its orbit), z = surface normal. Height
+# must exceed the sheath-accelerated W+ Larmor radius (~6 mm at phi~300 V); the
+# lateral y-extent must exceed the along-B drift per gyration (~few mm) or
+# redepositing ions escape sideways first (fakes non-redeposition).
+create_box          0.0 0.004 0.0 0.040 -0.0001 0.020
+create_grid         20 100 60
+balance_grid        rcb cell
+
+species             plasma.species W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+
+mixture             tungstenSource W    frac 1.0
+mixture             tungstenSource W+   frac 0.0
+mixture             tungstenSource W2+  frac 0.0
+mixture             tungstenSource W3+  frac 0.0
+mixture             tungstenSource W4+  frac 0.0
+mixture             tungstenSource W5+  frac 0.0
+mixture             tungstenSource W6+  frac 0.0
+mixture             tungstenSource W7+  frac 0.0
+mixture             tungstenSource W8+  frac 0.0
+mixture             tungstenSource W9+  frac 0.0
+mixture             tungstenSource W10+ frac 0.0
+
+read_surf           target.surf group wall particle check
+surf_collide        targ vanish              # target absorbs -> redeposition tally
+surf_modify         wall collide targ
+
+# uniform grazing field: normal (Z=z) component = Bmag*sin(alpha), in-plane
+# (radial) component = Bmag*cos(alpha); axis far in -y so radial ~ +y, uniform.
+variable            br equal ${Bmag}*cos(v_alpha*PI/180)
+variable            bz equal ${Bmag}*sin(v_alpha*PI/180)
+variable            y0 index -1.0            # field-axis offset (far -> straighter B, less curvature drift)
+fix                 pd background constant te ${TeV} ti ${TeV} ne ${ne} ni ${ne} &
+                    br ${br} bz ${bz} bt 0.0 column_axis 0.001 ${y0} static yes
+
+compute             cgeom nearest_surf/grid all wall dist surfid nx ny nz
+# sheath spatial = distributed MPS/DS E(d) (Coulette-Manfredi), the Chankin
+# model. In 3D push_boris_3d applies this per-particle; the thin-sheet 'boundary'
+# barrier and its near-wall/reflect counters are 2D-only, so use spatial here.
+global              pusher plasma pd mode boris subcycles 10 &
+                    bad_dt_check yes bad_dt_limit 0.5 &
+                    sheath ${smode} geom cgeom mD_amu 2.0 dump no
+
+fix                 pw particle/weight
+# NOTE nemit>1 pre-advances inserted particles by xi*nemit*dt of free flight
+# during which volume chemistry cannot act -> ionization heights inflated and
+# prompt redeposition suppressed when nemit*dt ~ tau_ion. Use nemit 1 for
+# redeposition physics; nemit 50 kept as default for back-compat.
+variable            nemit index 50
+variable            orbit index 0              # 1 = Fig-3 orbit mode: launch the
+                                               # atoms in particles.dat, no emission
+if "${orbit} == 1" then "read_particles particles.dat 0" else "fix femit surface/emit/source tungstenSource wall constant ${flux} perspecies no model thompson ${EbW} nevery ${nemit}"
+fix                 fchem volume/chem/adas 1 W auto
+
+variable            dt equal 5e-9
+timestep            ${dt}
+stats               500
+
+mixture allW W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+ group wsum
+compute             cwn    grid/weighted all allW n_w
+compute             cwNtot reduce sum c_cwn[1]
+compute             cwsp   grid/weighted all species n_w
+compute             cwN0   reduce sum c_cwsp[1]
+compute             cwN1   reduce sum c_cwsp[2]
+compute             cwN2   reduce sum c_cwsp[3]
+stats_style         step cpu np c_cwNtot c_cwN0 c_cwN1 c_cwN2 nexit
+
+variable            dcad  index 2              # dump cadence (1 for per-step diagnostics)
+dump 10 particle all ${dcad} state/redepo.${tag} id type x y z vx vy vz
+
+run                 ${nrun}
