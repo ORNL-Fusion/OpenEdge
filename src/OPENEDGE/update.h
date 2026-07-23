@@ -157,6 +157,7 @@ struct SurfHit2D {
   char *sheath_geom_cid;       // compute ID for nearest_surf/grid
   int sheath_geom_cidx;        // resolved compute index for geometry
   double sheath_mD_amu;        // ion mass in amu (default D = 2.014)
+  double sheath_dmax;          // user ceiling on sheath extent [m]; 0 = auto
   int sheath_kick;             // 1 = apply sheath as velocity kick at wall
   int sheath_boundary;         // 1 = sub-grid sheath-as-boundary (impact kick
                                //     + outbound potential-barrier reflection)

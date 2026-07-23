@@ -295,8 +295,16 @@ SheathEmagCoeffs sheath_prepare_coulette_manfredi(double te_eV, double ti_eV,
   c.s_blend_start    = s_blend_start;
   c.s_blend_end      = s_blend_end;
   c.s_blend_width_inv = 1.0 / (s_blend_end - s_blend_start);
+  // MPS tail amplitude, chosen phi-consistent: the tail's potential
+  // integral E*L_mps must equal the CM slow potential remaining at the
+  // anchor, phi_cm_slow*exp(-K1_scaled*s_start). Using the raw CM field
+  // amplitude here (amp_slow*exp(-K1_scaled*s_start)) made phi(d) jump
+  // ~x17 at the anchor at grazing incidence (E_anchor*L_mps with
+  // L_mps = rho_i*tan(88 deg) >> lambda_D vastly overshoots phi_total),
+  // which the sheath Boltzmann ne correction exponentiates into a total
+  // ionization dead zone 0.2-2 mm off the target.
   c.e_slow_at_anchor_vpm =
-      c.amp_slow_vpm * std::exp(-K1_scaled * s_blend_start);
+      phi_cm_slow * std::exp(-K1_scaled * s_blend_start) * inv_lmps;
   return c;
 }
 

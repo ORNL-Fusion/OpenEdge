@@ -121,7 +121,7 @@ struct SheathEmagCoeffs {
   double s_blend_start    = 60.0;
   double s_blend_end      = 120.0;
   double s_blend_width_inv = 1.0 / 60.0;
-  double e_slow_at_anchor_vpm = 0.0;  // amp_slow_vpm · exp(-K1_scaled·s_start)
+  double e_slow_at_anchor_vpm = 0.0;  // MPS tail E amp: phi_slow(anchor)/L_mps (phi-consistent)
 };
 
 SheathEmagCoeffs sheath_prepare_borodkina(double te_eV, double ti_eV,

@@ -97,12 +97,12 @@ inline double sheath_auto_dmax(double te_eV, double ti_eV, double ne_m3,
                                  / (2.0 * mD_kg));
   const double omega_ci = QE_LOC * std::max(std::fabs(bmag_T), 1.0e-20) / mD_kg;
   const double rho_i = vth_d / std::max(omega_ci, 1.0e-99);
-  const double alpha_n_rad = std::max(0.0, std::min(90.0, alpha_deg)) *
-                             M_PI / 180.0;
-  const double tan_an = std::min(std::max(std::fabs(std::tan(alpha_n_rad)),
-                                           1.0e-3), 30.0);
-  const double L_MPS = rho_i * tan_an;
-  double d_max = std::max(5.0 * L_MPS, 10.0 * lambdaD);
+  // MPS normal-direction thickness is a few rho_i, roughly angle-independent
+  // (Chodura ~sqrt(6) rho_i; grazing-incidence PIC shows a few rho_i). The
+  // former rho_i*tan(alpha_from_normal) factor diverged at grazing incidence
+  // (tan 88deg ~ 28) and engulfed the whole domain in "sheath".
+  (void)alpha_deg;
+  double d_max = std::max(5.0 * rho_i, 10.0 * lambdaD);
   if (user_ceiling > 0.0) d_max = std::min(d_max, user_ceiling);
   return d_max;
 }
@@ -302,6 +302,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   sheath_geom_cid = NULL;
   sheath_geom_cidx = -1;
   sheath_mD_amu = 2.01410177811;
+  sheath_dmax = 0.0;
   sheath_kick = 0;
   sheath_boundary = 0;
   sheath_paid_custom = -1;
@@ -1100,7 +1101,12 @@ void Update::cache_plasma_particles()
     if (need_bfield) {
       // Store B and background E at particle position using the same component
       // mapping as compute plasma/fields: 2D -> (Bx,By,Bz)=(Br,Bz,Bt).
-      const double rx = x[0], ry = x[1];
+      // Azimuth about the column axis, not the domain origin.
+      const double bcol_x0 = cp ? cp->plasma_data.column_x0
+                          : (pd ? pd->column_x0 : 0.0);
+      const double bcol_y0 = cp ? cp->plasma_data.column_y0
+                          : (pd ? pd->column_y0 : 0.0);
+      const double rx = x[0] - bcol_x0, ry = x[1] - bcol_y0;
       const double rmag = std::sqrt(rx*rx + ry*ry);
       double ex = 0.0, ey = 0.0, ez = 0.0;
       const double Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
@@ -1214,7 +1220,7 @@ void Update::cache_plasma_particles()
         }
 
         const double d_max = sheath_auto_dmax(te, ti, ne, bmag, alpha_deg,
-                                              sheath_mD_amu, 0.0);
+                                              sheath_mD_amu, sheath_dmax);
         if (d_particle > 0.0 && d_particle < d_max) {
           SheathModels::BorodkinaSheathResult sr =
             SheathModels::coulette_manfredi_sheath_at_distance(

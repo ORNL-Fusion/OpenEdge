@@ -445,8 +445,9 @@ void FixCrossFieldDiffusion::start_of_step()
         dx[ip][0] += dxs0 * dt;
         dx[ip][1] += dxs1 * dt;
       } else {
-        const double rx = p.x[0];
-        const double ry = p.x[1];
+        // radial direction about the column axis, not the domain origin
+        const double rx = p.x[0] - (pd_ ? pd_->column_x0 : 0.0);
+        const double ry = p.x[1] - (pd_ ? pd_->column_y0 : 0.0);
         const double R = std::sqrt(rx*rx + ry*ry);
         if (R > 1.0e-20) {
           const double cphi = rx / R;
@@ -515,7 +516,8 @@ void FixCrossFieldDiffusion::start_of_step()
         const double bhat0 = B0 * inv_Bmag;
         const double bhat1 = B1 * inv_Bmag;
         const double bhat2 = B2 * inv_Bmag;
-        const double rx = p.x[0], ry = p.x[1];
+        const double rx = p.x[0] - (pd_ ? pd_->column_x0 : 0.0);
+        const double ry = p.x[1] - (pd_ ? pd_->column_y0 : 0.0);
         const double R = std::sqrt(rx*rx + ry*ry);
         double gNe_x, gNe_y, gNe_z;
         if (R > 1.0e-20) {
