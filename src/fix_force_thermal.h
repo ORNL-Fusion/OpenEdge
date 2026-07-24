@@ -91,6 +91,7 @@ class FixForceThermal : public Fix {
   int have_ion_thermal_;
   CollGridSrc srcGradTiR_, srcGradTiZ_;
   double beta_i_;  // coefficient (default 2.6)
+  double ne_min_;      // thermal force off below this ne [m^-3]
 
   // electron thermal force
   int have_elec_thermal_;

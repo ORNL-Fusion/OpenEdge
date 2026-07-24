@@ -52,7 +52,8 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
   have_ion_thermal_(0),
   have_elec_thermal_(0),
   beta_i_(2.6),
-  alpha_e_(0.71)
+  alpha_e_(0.71),
+  ne_min_(1.0e17)
 {
   // fix ID thermal_force Nevery {bfield BxSRC BySRC BzSRC | background FIXID}
   //     [keywords...]
@@ -104,7 +105,8 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
         parse_compute_src(arg[iarg++], srcGradTiZ_, "gradTiZ");
       } else if (iarg < narg &&
                  strcmp(arg[iarg], "ion_thermal") != 0 &&
-                 strcmp(arg[iarg], "elec_thermal") != 0) {
+                 strcmp(arg[iarg], "elec_thermal") != 0 &&
+                 strcmp(arg[iarg], "ne_min") != 0) {
         error->all(FLERR,
           "fix thermal_force ion_thermal: in background mode use only yes/no");
       }
@@ -127,10 +129,20 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
         parse_compute_src(arg[iarg++], srcGradTeZ_, "gradTeZ");
       } else if (iarg < narg &&
                  strcmp(arg[iarg], "ion_thermal") != 0 &&
-                 strcmp(arg[iarg], "elec_thermal") != 0) {
+                 strcmp(arg[iarg], "elec_thermal") != 0 &&
+                 strcmp(arg[iarg], "ne_min") != 0) {
         error->all(FLERR,
           "fix thermal_force elec_thermal: in background mode use only yes/no");
       }
+
+    } else if (strcmp(arg[iarg], "ne_min") == 0) {
+      iarg++;
+      if (iarg >= narg)
+        error->all(FLERR, "fix thermal_force: ne_min needs a value");
+      ne_min_ = input->numeric(FLERR, arg[iarg]);
+      iarg++;
+      if (ne_min_ < 0.0)
+        error->all(FLERR, "fix thermal_force: ne_min must be >= 0");
 
     } else {
       char msg[200];
@@ -345,11 +357,22 @@ void FixForceThermal::kick_half(double dt_half)
   const int dim    = domain->dimension;
   const double QE  = update->echarge;   // elementary charge [C]
 
+  // Local ne from the particle plasma cache: the Braginskii thermal force
+  // only exists in a collisional background. Below ne_min (default 1e17
+  // m^-3) the force is switched off -- otherwise ions in near-vacuum gap
+  // cells (steep numerical grad-T at the mesh's plasma edge, zero
+  // friction) get unopposed Z^2 kicks and jet artificially.
+  double *ne_vec = nullptr;
+  if (update->pc_ne_custom >= 0 &&
+      particle->ewhich[update->pc_ne_custom] >= 0)
+    ne_vec = particle->edvec[particle->ewhich[update->pc_ne_custom]];
+
   for (int ip = 0; ip < nlocal; ip++) {
     Particle::OnePart &p = particles[ip];
     const int isp = p.ispecies;
     const double Z = species[isp].charge;
     if (Z == 0.0) continue;  // skip neutrals
+    if (ne_vec && ne_vec[ip] < ne_min_) continue;  // collisionless region
 
     const double m_Z = species[isp].mass;  // kg
     if (m_Z <= 0.0) continue;
@@ -528,7 +551,10 @@ double FixForceThermal::read_src(const CollGridSrc &S, int ip, int icell) const
 void FixForceThermal::particle_rz(const Particle::OnePart &p,
                                   double &R, double &Z) const
 {
-  OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z);
+  const double x0 = pd_ ? pd_->column_x0 : 0.0;
+  const double y0 = pd_ ? pd_->column_y0 : 0.0;
+  OpenEdge::sparta_to_RZ(p.x, domain->dimension, domain->axisymmetric, R, Z,
+                         x0, y0);
 }
 
 /* ---------------------------------------------------------------------- */
