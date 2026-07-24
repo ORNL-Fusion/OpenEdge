@@ -71,21 +71,21 @@ fix fpw particle/weight
 # cpmiLi_*[1] = total erosion flux [/m^2/s]; emit neutral Li into the livapor mixture
 fix femit_sp_inner surface/emit/source livapor div_front_inner cpmiLi_inner flux_index 1 &
                    perspecies no normal yes nevery 1 &
-                   nlaunch 50 source_thresh 0.0 &
+                   nlaunch 50 &
                    model thompson 1.65 cos_n 1.5
 fix femit_sp_outer surface/emit/source livapor div_front_outer cpmiLi_outer flux_index 1 &
                    perspecies no normal yes nevery 1 &
-                   nlaunch 50 source_thresh 0.0 &
+                   nlaunch 50 &
                    model thompson 1.65 cos_n 1.5
 
 # --- Adatom desorption Li neutral source (thermal at local Tsurf) -----------
 fix femit_ad_inner surface/emit/source livapor div_front_inner cadat_inner &
                    perspecies no normal yes nevery 1 &
-                   nlaunch 50 source_thresh 0.0 &
+                   nlaunch 50 &
                    model thermal_tsurf Tsurf_lm
 fix femit_ad_outer surface/emit/source livapor div_front_outer cadat_outer &
                    perspecies no normal yes nevery 1 &
-                   nlaunch 50 source_thresh 0.0 &
+                   nlaunch 50 &
                    model thermal_tsurf Tsurf_lm
 
 # --- Volume ionization of emitted neutral Li -> SOLPS coupling sources ------

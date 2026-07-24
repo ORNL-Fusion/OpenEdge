@@ -1,0 +1,6 @@
+# Large binary data: distributed via download_data.sh tarballs, not git.
+input/plasma.h5
+# Run artifacts
+log.*
+state*
+output/

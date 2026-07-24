@@ -4,7 +4,7 @@ seed        12345
 dimension   2
 boundary    o o p
 global      gridcut 0.0 comm/sort no
-global      fnum 1e+14
+global      fnum 1e+16
 timestep    5e-06
 
 create_box  2. 5.7 -3.8 3.8 -0.05 0.05
@@ -16,7 +16,7 @@ species     li.species      Li Li+ Li2+ Li3+
 mixture     droplet droplet frac 1.0 nrho 1.0e19 temp 300.0 vstream 0.0 0.0 0.0
 mixture     livapor Li      frac 1.0 nrho 1.0e19 temp 300.0 vstream 0.0 0.0 0.0
 
-read_surf   /home/cloud/OpenEdge/examples/test_solps_coupling/coupled_test/openedge/surf_with_strip/wall_strip_detached.surf custom Tsurf_lm float 0 custom Gamma_D_lm float 0 &
+read_surf   /Users/42d/OpenEdge/examples/test_tsurf_emission/jeremy_cases_generated_wall/surf_with_strip/wall_strip_detached.surf custom Tsurf_lm float 0 custom Gamma_D_lm float 0 &
             group slab particle check
 group div_front_outer surf id <> 185 282
 group div_front_inner surf id <> 110 165
@@ -25,7 +25,7 @@ group div_front_inner surf id <> 110 165
 surf_collide vac vanish
 surf_modify  slab collide vac
 
-fix pd background file /home/cloud/OpenEdge/examples/test_solps_coupling/coupled_test/openedge/plasma/plasma_detached.h5 static yes
+fix pd background file /Users/42d/OpenEdge/examples/test_tsurf_emission/jeremy_cases_generated_wall/plasma/plasma_detached.h5 static yes
 
 # Core reflective
 fix                 fcore reflect/psi background pd psi_norm 0.85 action reflect
@@ -55,8 +55,8 @@ compute cpmiLi_inner surface/physical/sputter     div_front_inner background pd 
                target Li projectiles D,Ne,Li us 1.0 iead auto static yes &
                projectile_slots 1 14 erosion_flux sputter_flux_species all
 
-fix fdrop_inner droplet/emit droplet div_front_inner nevery 1 n ${ndrop} perspecies no normal no vmin 5.0 vmax 100.0 angle cosine
-fix fdrop_outer droplet/emit droplet div_front_outer nevery 1 n ${ndrop} perspecies no normal no vmin 5.0 vmax 100.0 angle cosine
+fix fdrop_inner droplet/emit droplet div_front_inner nevery 10 n 100 perspecies no normal no vmin 0.1 vmax 20.0 angle cosine
+fix fdrop_outer droplet/emit droplet div_front_outer nevery 10 n 100 perspecies no normal no vmin 0.1 vmax 20.0 angle cosine
 
 fix fcharge droplet/charge   1 background pd ion_mass_amu 2.0 thermionic no mixture droplet
 fix fdrag   droplet/drag     1 2.0 1 background pd model coulomb coulomb/lnlambda 10 &
@@ -70,23 +70,23 @@ fix fpw particle/weight
 # --- Sputtered Li neutral source (Thompson spectrum, U_s=1.65 eV) ----
 # cpmiLi_*[1] = total erosion flux [/m^2/s]; emit neutral Li into the livapor mixture
 fix femit_sp_inner surface/emit/source livapor div_front_inner cpmiLi_inner flux_index 1 &
-                   perspecies no normal yes nevery 1 &
+                   perspecies no normal yes nevery 10 &
                    nlaunch 50 &
                    model thompson 1.65 cos_n 1.5
 fix femit_sp_outer surface/emit/source livapor div_front_outer cpmiLi_outer flux_index 1 &
-                   perspecies no normal yes nevery 1 &
+                   perspecies no normal yes nevery 10 &
                    nlaunch 50 &
                    model thompson 1.65 cos_n 1.5
 
 # --- Adatom desorption Li neutral source (thermal at local Tsurf) -----------
-fix femit_ad_inner surface/emit/source livapor div_front_inner cadat_inner &
-                   perspecies no normal yes nevery 1 &
-                   nlaunch 50 &
-                   model thermal_tsurf Tsurf_lm
-fix femit_ad_outer surface/emit/source livapor div_front_outer cadat_outer &
-                   perspecies no normal yes nevery 1 &
-                   nlaunch 50 &
-                   model thermal_tsurf Tsurf_lm
+#fix femit_ad_inner surface/emit/source livapor div_front_inner cadat_inner &
+#                   perspecies no normal yes nevery 10 &
+#                   nlaunch 50 &
+#                   model thermal_tsurf Tsurf_lm
+#fix femit_ad_outer surface/emit/source livapor div_front_outer cadat_outer &
+#                   perspecies no normal yes nevery 10 &
+#                   nlaunch 50 &
+#                   model thermal_tsurf Tsurf_lm
 
 # --- Volume ionization of emitted neutral Li -> SOLPS coupling sources ------
 # f_fchem summary cols: [1]=Sp particle source [/m^3/s], [5]=Se=Qe electron-
@@ -99,25 +99,24 @@ compute cSp_tot reduce sum f_fchem[1]    # sum_cells Sp  [/m^3/s]
 compute cSe_tot reduce sum f_fchem[5]    # sum_cells Se  [W/m^3]
 
 fix devap_tot ave/time 100 1 100 f_fevap file output/droplet_evap_total.csv
-#dump dpart particle droplet 10 output/dump_droplet.txt id type x y z vx vy vz radius temp
+dump dpart particle droplet 10 output/dump_droplet.txt id type x y z vx vy vz radius temp
 
 #dump dpart2 particle all 10 output/state_droplet id type x y z vx vy vz 
 
-dump dsurf1 surf div_front_inner 100 output/surf_flux_inner.* &
+dump dsurf1 surf div_front_inner 10 output/surf_flux_inner.* &
      id v1x v1y v2x v2y c_cevap_inner c_cadat_inner c_cpmiLi_inner[*] &
      s_Tsurf_lm s_Gamma_D_lm
 
-dump dsurf2 surf div_front_outer 100 output/surf_flux_outer.* &
+dump dsurf2 surf div_front_outer 10 output/surf_flux_outer.* &
      id v1x v1y v2x v2y c_cevap_outer c_cadat_outer c_cpmiLi_outer[*] &
      s_Tsurf_lm s_Gamma_D_lm
 
 # per-cell SOLPS coupling source fields: f_fsrc[1]=Sp [/m^3/s], f_fsrc[5]=Se [W/m^3]
-dump dsrc grid all 100 output/source_SpSe.* id xc yc vol f_fsrc[1] f_fsrc[5]
+dump dsrc grid all 10 output/source_SpSe.* id xc yc vol f_fsrc[1] f_fsrc[5]
 
 stats       1
 stats_style step np c_cSp_tot c_cSe_tot
 run 2
 
 stats       10
-variable Nrun index 1000
-run         ${Nrun}
+run         1000
