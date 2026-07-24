@@ -155,7 +155,6 @@ FixSurfaceEmitSource::FixSurfaceEmitSource(SPARTA *sparta, int narg, char **arg)
   nlaunch_total_mode = 0;
   nlaunch_total = 0;
   flux_thresh = 0.0;
-  source_thresh = 0.0;
   pweight_index = -1;
   pweight_ewhich = -1;
 
@@ -671,7 +670,6 @@ void FixSurfaceEmitSource::perform_task()
 
         source_strength = flux * tasks[i].area * dt;
         if (!std::isfinite(source_strength) || source_strength <= 0.0) continue;
-        if (source_strength < source_thresh) continue;
 
         task_source[i] = source_strength;
         source_total_me += source_strength;
@@ -737,7 +735,14 @@ void FixSurfaceEmitSource::perform_task()
         ninsert = static_cast<int>(ntarget + random->uniform());
         if (ninsert <= 0) continue;
 
-        w_emit = source_strength / ninsert;
+        // Stratified source conservation. Elements resolved by the budget
+        // (ntarget >= 1) emit exactly their own source each event. Elements
+        // below one particle per event fire with probability ntarget; the
+        // unbiased weight is then s_i/ntarget = S_total/N, the global
+        // per-particle quantum (w = s_i/ninsert would under-emit weak
+        // elements by the factor ntarget in expectation).
+        if (ntarget >= 1.0) w_emit = source_strength / ninsert;
+        else w_emit = source_total / static_cast<double>(nlaunch_total);
       } else {
         double flux;
         if (file_mode) {
@@ -754,7 +759,6 @@ void FixSurfaceEmitSource::perform_task()
 
         source_strength = flux * tasks[i].area * dt;
         if (!std::isfinite(source_strength) || source_strength <= 0.0) continue;
-        if (source_strength < source_thresh) continue;
 
         if (nlaunch_mode) {
           // per-particle weight mode: fixed number of particles per task
@@ -1089,10 +1093,10 @@ int FixSurfaceEmitSource::option(int narg, char **arg)
   }
 
   if (strcmp(arg[0],"source_thresh") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/source command");
-    source_thresh = atof(arg[1]);
-    if (source_thresh < 0.0)
-      error->all(FLERR,"Fix surface/emit/source source_thresh must be >= 0");
+    error->all(FLERR,"fix surface/emit/source: source_thresh was removed "
+               "(it censored real source and made the total emission depend "
+               "on the cutoff). Use nlaunch_total N for a fixed particle "
+               "budget with flux-carrying weights, or nlaunch N per element.");
     return 2;
   }
 

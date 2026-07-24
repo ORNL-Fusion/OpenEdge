@@ -56,7 +56,6 @@ class FixSurfaceEmitSource : public FixEmit {
   int nlaunch_total_mode;     // 1 if global-budget weighted mode is active
   int nlaunch_total;          // expected total # of particles launched per step
   double flux_thresh;         // minimum flux to emit (skip tasks below this)
-  double source_thresh;       // minimum source strength flux*area*dt to emit
   int pweight_index;          // index of pweight custom attribute (-1 if none)
   int pweight_ewhich;         // index into edvec for pweight
 

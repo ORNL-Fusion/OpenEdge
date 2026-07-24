@@ -1,0 +1,96 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix surface/emit/source command :h3
+
+[Syntax:]
+
+fix ID surface/emit/source mix-ID group-ID source keyword value ... :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+surface/emit/source = style name of this fix command :l
+mix-ID = ID of mixture to use when creating particles :l
+group-ID = ID of surface group that emits particles :l
+source = {compute-ID} or {constant F} or {file path \[section NAME\]} :l
+zero or more keyword/value pairs may be appended :l
+keyword = {flux_index} or {n} or {nlaunch} or {nlaunch_total} or {flux_thresh} or {nevery} or {perspecies} or {normal} or {model} :l
+  {flux_index} value = M = column of the source compute to use as flux (default 1)
+  {n} value = Np = emit a fixed number of particles per event (no flux weighting)
+  {nlaunch} value = N = emit N particles per eroding surface element per event;
+    each particle carries weight = (element source)/N
+  {nlaunch_total} value = N = emit N particles per event TOTAL, apportioned over
+    all eroding elements in proportion to their source strength (stratified
+    source sampling); weights carry the flux so the physical source is
+    conserved for any N
+  {flux_thresh} value = F = ignore elements with flux below F (default 0)
+  {nevery} value = Ne = emit every Ne steps (default 1)
+  {perspecies} value = {yes} or {no}
+  {normal} value = {yes} or {no} = launch along the element normal
+  {model} values = {thermal} or {thermal_tsurf name} or {thompson Ub \[cos_n n\]} or {fixed_energy E}
+    thermal = half-Maxwellian at the task temperature (default)
+    thermal_tsurf = half-Maxwellian at the per-element surface temperature
+      stored in custom attribute {name} (deg C)
+    thompson = Thompson energy distribution with surface binding energy Ub (eV);
+      optional cos_n exponent for the angular distribution (default 1 = cosine)
+    fixed_energy = monoenergetic launch at E (eV); cosine angular distribution :pre
+
+[Examples:]
+
+compute cpmiO surface/physical/sputter wall background pd target W projectiles O erosion_flux
+fix femit surface/emit/source tungstenSource wall cpmiO perspecies no &
+    nlaunch_total 200 model thompson 4.4 nevery 100 :pre
+
+[Description:]
+
+Emit particles from the surface elements of a group, with the emitted flux
+taken from a per-element source: a compute (e.g. a physical-sputtering
+erosion flux), a constant, or an inflow file. Each emission event converts
+the per-element source strength s_i = flux_i * area_i * dt_window into
+launched computational particles.
+
+Three launch modes control the statistics:
+
+{n Np} emits a fixed particle count with the default weight (fnum); the
+source only selects launch locations. :ulb,l
+
+{nlaunch N} emits N particles from EVERY eroding element, each carrying
+weight s_i/N. Statistics are uniform across elements regardless of their
+strength; total particle count scales with the number of eroding elements.
+Suited to small emitting regions (divertor strips). :l
+
+{nlaunch_total N} emits N particles per event in total, apportioned over
+elements in proportion to s_i (stratified source sampling: weights carry
+the physical flux, weak sources are represented without a cutoff). Elements expecting at least one particle emit exactly their own
+source each event; elements below one particle per event fire
+probabilistically with the global weight S_total/N, which keeps the
+expectation exactly unbiased. Total emission is conserved for any N, so N
+is purely a cost/statistics knob. Suited to whole-machine walls. :l,ule
+
+The weighted modes ({nlaunch}, {nlaunch_total}) require
+"fix particle/weight"_fix_particle_weight.html.
+
+NOTE: an earlier {source_thresh} keyword (skip elements whose source
+strength falls below a cutoff) was removed: it censored real emission and
+made the total source depend on the cutoff value. Decks using it now stop
+with an error; use {nlaunch_total} instead.
+
+[Restrictions:]
+
+Part of the OPENEDGE package. Requires explicit surface elements.
+{nlaunch_total} cannot be combined with {perspecies yes} or {n}.
+
+[Related commands:]
+
+"fix emit/surf"_fix_emit_surf.html, "compute
+surface/physical/sputter"_compute_surface_physical_sputter.html, "fix
+particle/weight"_fix_particle_weight.html
+
+[Default:]
+
+model = thermal, nevery = 1, flux_index = 1, flux_thresh = 0, normal = no,
+perspecies = no.
