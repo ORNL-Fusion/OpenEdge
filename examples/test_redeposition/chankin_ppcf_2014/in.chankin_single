@@ -50,7 +50,7 @@ fix                 pw particle/weight
 # redeposition physics; nemit 50 kept as default for back-compat.
 variable            nemit index 50
 fix                 femit surface/emit/source tungstenSource wall constant ${flux} &
-                    perspecies no model thompson ${EbW} nevery ${nemit}
+                    perspecies no model ${emodel} ${epar} nevery ${nemit}
 fix                 fchem volume/chem/adas 1 W auto
 
 variable            dt equal 5e-9

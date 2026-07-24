@@ -10,7 +10,9 @@ variable            Bmag  index 5.3          # T  (ITER on-axis, Chankin)
 variable            alpha index 3.0          # deg, B-to-surface grazing angle
 variable            TeV   index 100.0        # eV
 variable            ne    index 1e20         # m^-3
-variable            EbW   index 8.68         # eV, W surface binding (Thompson)
+variable            emodel index thompson      # emission energy model:
+                                               #   thompson <Ub_eV> | fixed_energy <E_eV>
+variable            epar  index 8.68           # Ub (thompson) or E0 (fixed_energy), eV
 variable            flux  index 1e22         # m^-2 s^-1 sputtered-W source
 variable            nrun  index 20000
 variable            tag   index base          # output/dump suffix (p-scan)
@@ -63,9 +65,10 @@ compute             cgeom nearest_surf/grid all wall dist surfid nx ny nz
 # sheath spatial = distributed MPS/DS E(d) (Coulette-Manfredi), the Chankin
 # model. In 3D push_boris_3d applies this per-particle; the thin-sheet 'boundary'
 # barrier and its near-wall/reflect counters are 2D-only, so use spatial here.
+variable            sdmax index 0.0            # sheath extent [m]; 0 = auto (5 rho_i)
 global              pusher plasma pd mode boris subcycles 10 &
                     bad_dt_check yes bad_dt_limit 0.5 &
-                    sheath ${smode} geom cgeom mD_amu 2.0 dump no
+                    sheath ${smode} geom cgeom mD_amu 2.0 dmax ${sdmax} dump no
 
 fix                 pw particle/weight
 # NOTE nemit>1 pre-advances inserted particles by xi*nemit*dt of free flight
@@ -75,7 +78,7 @@ fix                 pw particle/weight
 variable            nemit index 50
 variable            orbit index 0              # 1 = Fig-3 orbit mode: launch the
                                                # atoms in particles.dat, no emission
-if "${orbit} == 1" then "read_particles particles.dat 0" else "fix femit surface/emit/source tungstenSource wall constant ${flux} perspecies no model thompson ${EbW} nevery ${nemit}"
+if "${orbit} == 1" then "read_particles particles.dat 0" else "fix femit surface/emit/source tungstenSource wall constant ${flux} perspecies no model ${emodel} ${epar} nevery ${nemit}"
 fix                 fchem volume/chem/adas 1 W auto
 
 variable            dt equal 5e-9
