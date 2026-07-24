@@ -124,6 +124,11 @@ def main():
                    "RustBCA O->W (user-generated; database/surface/O_on_W.h5)")
         import_bca(f, "w_on_w", f"{bca}/74_on_74.h5",
                    "RustBCA W->W (user-generated; database/surface/74_on_74.h5)")
+        bca2 = "/Users/42d/OpenEdge_/database/surface"
+        import_bca(f, "b_on_b", f"{bca2}/B_on_B.h5",
+                   "BCA B->B (user-generated; OpenEdge_ database/surface/B_on_B.h5)")
+        import_bca(f, "d_on_c", f"{bca2}/D_on_C.h5",
+                   "BCA D->C (user-generated; OpenEdge_ database/surface/D_on_C.h5)")
     print(f"wrote sputter tables to {path}")
 
 
