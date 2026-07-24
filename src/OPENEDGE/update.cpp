@@ -102,9 +102,10 @@ inline double sheath_auto_dmax(double te_eV, double ti_eV, double ne_m3,
   // former rho_i*tan(alpha_from_normal) factor diverged at grazing incidence
   // (tan 88deg ~ 28) and engulfed the whole domain in "sheath".
   (void)alpha_deg;
-  double d_max = std::max(5.0 * rho_i, 10.0 * lambdaD);
-  if (user_ceiling > 0.0) d_max = std::min(d_max, user_ceiling);
-  return d_max;
+  // user_ceiling (global pusher sheath dmax) > 0 sets the extent explicitly
+  // (e.g. to cover the long MPS tail at grazing incidence); 0 = auto.
+  if (user_ceiling > 0.0) return user_ceiling;
+  return std::max(5.0 * rho_i, 10.0 * lambdaD);
 }
 
 inline void grad_from_fix(const FixBackground *pd, const std::vector<double> &field,
