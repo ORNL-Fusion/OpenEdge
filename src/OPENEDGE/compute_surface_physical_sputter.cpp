@@ -756,7 +756,12 @@ void ComputeSurfacePhysicalSputter::load_iead_if_requested()
   iead_W.reset();
   iead_per_proj.clear();
 
-  if (iead_arg.empty() || iead_arg == "none") return;
+  // IEAD convolution is ON by default ("auto"): yields are integrated over
+  // the sheath-rotated ion energy-angle distribution instead of being
+  // evaluated at the mean impact (E, 90-alpha_B). Opt out with `iead none`.
+  // Missing database files fall back with a warning below.
+  if (iead_arg.empty()) iead_arg = "auto";
+  if (iead_arg == "none") return;
 
   // Decide which tables we need based on projectile_elements (filled by
   // resolve_projectile_tables for the api_new path) or fall back to a
