@@ -245,7 +245,11 @@ void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int /*isurf*/,
 
     Eckstein::SputterParams p;
     p.Es = r->sp_Es; p.Eth = r->sp_Eth; p.Q = r->sp_Q; p.ETF = r->sp_ETF;
-    double Y = Eckstein::sputter_yield(E_in_eV, theta_in_deg, p);
+    // Prefer the angle-resolved TRIM/BCA table (processes.h5
+    // /surface/sputter/<pair>) over the analytic Eckstein fit.
+    double Y = (r->sp_tbl >= 0)
+        ? sput_tables[r->sp_tbl].yield(E_in_eV, theta_in_deg)
+        : Eckstein::sputter_yield(E_in_eV, theta_in_deg, p);
     if (Y <= 0.0) continue;
 
     int nemit = (int) Y;                         // floor(Y)
@@ -879,6 +883,7 @@ void SurfReactSurfacePWI::readfile(char *fname)
         error->all(FLERR, str);
       }
       r->sp_Es = p.Es; r->sp_Eth = p.Eth; r->sp_Q = p.Q; r->sp_ETF = p.ETF;
+      r->sp_tbl = load_or_get_sputter_table(word);
       r->prob = 0.0;
 
     } else {
@@ -914,6 +919,50 @@ void SurfReactSurfacePWI::readfile(char *fname)
    but any BCA-generated file on the same (E, theta, q) grid layout works).
    Returns index into trim_tables, or -1 on failure.
 ------------------------------------------------------------------------- */
+
+int SurfReactSurfacePWI::load_or_get_sputter_table(const char *name)
+{
+  std::string pair_lower(name);
+  for (auto &c : pair_lower)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  auto it = sput_index.find(pair_lower);
+  if (it != sput_index.end()) return it->second;
+
+  int idx = -1;
+  std::string processes_path = resolve_processes_file();
+  if (!processes_path.empty()) {
+    ProcessLibrary lib;
+    lib.open(processes_path, world, error);
+    if (lib.is_open()) {
+      ProcessLibrary::TrimSputterTable t;
+      if (lib.load_trim_sputter(pair_lower, t)) {
+        idx = static_cast<int>(sput_tables.size());
+        sput_tables.push_back(std::move(t));
+        if (comm->me == 0) {
+          char msg[256];
+          snprintf(msg, sizeof(msg),
+                   "surf_react surface/pwi: loaded sputter yield table '%s' "
+                   "(%d x %d) from database/processes.h5\n",
+                   pair_lower.c_str(), sput_tables[idx].NE,
+                   sput_tables[idx].NTHETA);
+          if (screen)  fputs(msg, screen);
+          if (logfile) fputs(msg, logfile);
+        }
+      }
+    }
+  }
+  if (idx < 0) {
+    char msg[384];
+    snprintf(msg, sizeof(msg),
+             "no angle/energy sputter table for '%s' in processes.h5 -- "
+             "using the ANALYTIC Eckstein/Yamamura model (unreliable at "
+             "grazing incidence; add tables with "
+             "tools/converters/add_sputter_tables.py)", pair_lower.c_str());
+    error->warning(FLERR, msg);
+  }
+  sput_index[pair_lower] = idx;
+  return idx;
+}
 
 int SurfReactSurfacePWI::load_or_get_trim_table(const char *name)
 {

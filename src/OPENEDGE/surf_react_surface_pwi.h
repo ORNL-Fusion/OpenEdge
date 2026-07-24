@@ -25,6 +25,7 @@ SurfReactStyle(surface/pwi,SurfReactSurfacePWI)
 #define SPARTA_SURF_REACT_SURFACE_PWI_H
 
 #include "surf_react.h"
+#include "process_library.h"
 #include "reflection_tables.h"
 #include <map>
 #include <string>
@@ -56,6 +57,7 @@ class SurfReactSurfacePWI : public SurfReact {
     // product species with a Thompson energy. Not part of the reflect/absorb
     // first-to-fire lottery.
     double sp_Es, sp_Eth, sp_Q, sp_ETF;  // Eckstein sputter params (type==SPUTTER)
+    int sp_tbl;                          // index into sput_tables, -1 = analytic
     char *id;
   };
 
@@ -95,6 +97,10 @@ class SurfReactSurfacePWI : public SurfReact {
   // the incident pweight. pweight_ewhich = edvec index of the pweight custom
   // (-1 if fix particle/weight is absent).
   int pweight_ewhich;
+  std::vector<ProcessLibrary::TrimSputterTable> sput_tables;
+  std::map<std::string,int> sput_index;
+  int load_or_get_sputter_table(const char *name);
+
   void emit_sputtered(Particle::OnePart *&ip, int isurf, double *norm,
                       double E_in_eV, double theta_in_deg);
 

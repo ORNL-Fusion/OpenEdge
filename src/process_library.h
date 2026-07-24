@@ -103,6 +103,26 @@ class ProcessLibrary {
   bool load_trim_reflection(const std::string &pair,
                             TrimReflectionTable &out);
 
+  // Angle-resolved sputter yield table from /surface/sputter/<pair>/
+  // {E [eV], theta [deg from surface normal], Y [NE x NTHETA] atoms/ion}.
+  // Sources: TRIM.SP (IPP 9/132) or BCA codes (RustBCA/FTridyn) via
+  // tools/converters/add_sputter_tables.py.
+  struct TrimSputterTable {
+    std::vector<double> E;       // [NE], eV, ascending
+    std::vector<double> theta;   // [NTHETA], deg from normal, ascending
+    std::vector<double> Y;       // [NE*NTHETA]
+    int NE = 0, NTHETA = 0;
+    bool valid() const {
+      return NE >= 2 && NTHETA >= 2 &&
+             static_cast<int>(Y.size()) == NE * NTHETA;
+    }
+    // Bilinear lookup: linear in log(E), linear in theta, both clamped
+    // to the grid (no extrapolation past the last angle -> no analytic
+    // grazing-angle cliff).
+    double yield(double E_eV, double theta_deg) const;
+  };
+  bool load_trim_sputter(const std::string &pair, TrimSputterTable &out);
+
   // Per-line photon-emission coefficient from /volume/pec/<elem>/<id>/<line>/
   // (coefficient = 2D log10 table, temperature + density = log10 grids).
   struct PecTable {

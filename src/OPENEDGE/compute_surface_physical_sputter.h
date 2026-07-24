@@ -12,6 +12,7 @@ ComputeStyle(surface/physical/sputter,ComputeSurfacePhysicalSputter)
 #define SPARTA_COMPUTE_SURFACE_PHYSICAL_SPUTTER_H
 
 #include "compute.h"
+#include "process_library.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -93,6 +94,10 @@ class ComputeSurfacePhysicalSputter : public Compute {
   // as flat doubles to avoid dragging Eckstein::SputterParams into the header).
   std::vector<double> per_proj_Z1, per_proj_M1, per_proj_Z2, per_proj_M2;
   std::vector<double> per_proj_Es, per_proj_Eth, per_proj_Q, per_proj_ETF;
+  // Per-projectile angle-resolved TRIM/BCA yield tables from
+  // database/processes.h5 /surface/sputter/<proj>_on_<target>; preferred
+  // over the analytic Eckstein fit when present.
+  std::vector<ProcessLibrary::TrimSputterTable> per_proj_sput_tbl;
 
   void resolve_projectile_tables(const FixBackground *pd);
 

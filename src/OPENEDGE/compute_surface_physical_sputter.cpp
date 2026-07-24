@@ -622,6 +622,51 @@ void ComputeSurfacePhysicalSputter::resolve_projectile_tables(const FixBackgroun
     error->all(FLERR, msg.c_str());
   }
 
+  // Prefer angle-resolved TRIM/BCA yield tables from processes.h5 when
+  // present (/surface/sputter/<proj>_on_<target>); the analytic Eckstein
+  // fit above stays as the fallback for pairs without a table.
+  per_proj_sput_tbl.assign(N, ProcessLibrary::TrimSputterTable{});
+  {
+    const std::string processes_path = resolve_processes_file();
+    if (!processes_path.empty()) {
+      ProcessLibrary lib;
+      lib.open(processes_path, world, error);
+      if (lib.is_open()) {
+        for (size_t i = 0; i < N; i++) {
+          std::string pair = projectile_elements[i] + "_on_" + target_element;
+          for (auto &c : pair)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+          if (lib.load_trim_sputter(pair, per_proj_sput_tbl[i]) &&
+              comm->me == 0) {
+            char msg[256];
+            snprintf(msg, sizeof(msg),
+                     "compute surface/physical/sputter: loaded sputter yield "
+                     "table '%s' (%d x %d) from processes.h5\n",
+                     pair.c_str(), per_proj_sput_tbl[i].NE,
+                     per_proj_sput_tbl[i].NTHETA);
+            if (screen)  fputs(msg, screen);
+            if (logfile) fputs(msg, logfile);
+          }
+        }
+      }
+    }
+  }
+  // Loudly flag pairs without angle/energy-resolved tables: the analytic
+  // Eckstein-Bohdansky x Yamamura fallback collapses at grazing incidence
+  // (theta -> 90 deg), which silently kills erosion on field-tangent walls.
+  for (size_t i = 0; i < N; i++) {
+    if (!per_proj_sput_tbl[i].valid()) {
+      char msg[384];
+      snprintf(msg, sizeof(msg),
+               "no angle/energy sputter table for '%s_on_%s' in "
+               "processes.h5 -- using the ANALYTIC Eckstein/Yamamura model "
+               "(unreliable at grazing incidence; add tables with "
+               "tools/converters/add_sputter_tables.py)",
+               projectile_elements[i].c_str(), target_element.c_str());
+      error->warning(FLERR, msg);
+    }
+  }
+
   // Optional Us override (Allain 2003): preserve Eckstein Eth/Es ratio per
   // pair, scale to user-supplied U_s. Lets a single deck knob match Allain's
   // measured Li surface-binding range without editing the data table.
@@ -1766,23 +1811,28 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
 
         if (api_new && s < static_cast<int>(slot_to_table.size()) &&
             slot_to_table[s] >= 0) {
-          // Per-slot Eckstein: pick coefficients by the projectile element
-          // that populates plasma slot s (set at init by
-          // resolve_projectile_tables()).
+          // Per-slot yields: prefer the angle-resolved TRIM/BCA table for
+          // this projectile element; fall back to the analytic Eckstein
+          // fit (coefficients resolved at init).
           const int ti = slot_to_table[s];
           Eckstein::SputterParams p;
           p.Z1 = per_proj_Z1[ti];  p.M1 = per_proj_M1[ti];
           p.Z2 = per_proj_Z2[ti];  p.M2 = per_proj_M2[ti];
           p.Es = per_proj_Es[ti];  p.Eth = per_proj_Eth[ti];
           p.Q  = per_proj_Q[ti];   p.ETF = per_proj_ETF[ti];
+          const ProcessLibrary::TrimSputterTable &st = per_proj_sput_tbl[ti];
+          auto pair_yield = [&](double e_eV, double th_deg) {
+            return st.valid() ? st.yield(e_eV, th_deg)
+                              : Eckstein::sputter_yield(e_eV, th_deg, p);
+          };
           if (use_iead) {
             ys = tbl->convolve_yield(
                 tau_local, psi_local, z_inc, te_eV,
                 [&](double e_eV, double th_deg) {
-                  return Eckstein::sputter_yield(e_eV, th_deg, p);
+                  return pair_yield(e_eV, th_deg);
                 });
           } else {
-            ys = Eckstein::sputter_yield(E, theta_deg, p);
+            ys = pair_yield(E, theta_deg);
           }
         } else {
           if (use_iead) {

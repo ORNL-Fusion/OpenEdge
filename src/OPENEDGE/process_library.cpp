@@ -254,6 +254,86 @@ bool ProcessLibrary::load_trim_reflection(const std::string &pair,
 }
 
 // ------------------------------------------------------------------------
+// load_trim_sputter()
+// ------------------------------------------------------------------------
+double ProcessLibrary::TrimSputterTable::yield(double E_eV,
+                                               double theta_deg) const
+{
+  if (!valid()) return 0.0;
+  const double le = std::log(std::min(std::max(E_eV, E.front()), E.back()));
+  const double a  = std::min(std::max(theta_deg, theta.front()), theta.back());
+  int ie = int(std::lower_bound(E.begin(), E.end(), std::exp(le)) - E.begin());
+  int ia = int(std::lower_bound(theta.begin(), theta.end(), a) - theta.begin());
+  if (ie <= 0) ie = 1;
+  if (ie >= NE) ie = NE - 1;
+  if (ia <= 0) ia = 1;
+  if (ia >= NTHETA) ia = NTHETA - 1;
+  const double le1 = std::log(E[ie-1]), le2 = std::log(E[ie]);
+  const double a1 = theta[ia-1], a2 = theta[ia];
+  const double te = (le2 != le1) ? (le - le1) / (le2 - le1) : 0.0;
+  const double ta = (a2 != a1) ? (a - a1) / (a2 - a1) : 0.0;
+  auto at = [&](int i, int j) { return Y[size_t(i) * NTHETA + j]; };
+  double y = (1-te)*(1-ta)*at(ie-1,ia-1) + te*(1-ta)*at(ie,ia-1)
+           + (1-te)*ta*at(ie-1,ia) + te*ta*at(ie,ia);
+  return (std::isfinite(y) && y > 0.0) ? y : 0.0;
+}
+
+bool ProcessLibrary::load_trim_sputter(const std::string &pair,
+                                       TrimSputterTable &out)
+{
+  if (!opened_) return false;
+  out = TrimSputterTable{};
+
+  int present = 0;
+  const std::string grp = "/surface/sputter/" + pair;
+  if (me_ == 0) {
+    try {
+      H5ErrGuard _h5err;
+      H5::H5File f(path_, H5F_ACC_RDONLY);
+      if (H5Lexists(f.getId(), grp.c_str(), H5P_DEFAULT) > 0 &&
+          H5Lexists(f.getId(), (grp + "/Y").c_str(), H5P_DEFAULT) > 0) {
+        auto read1 = [&](const std::string &p, std::vector<double> &v,
+                         int &dim_out) {
+          H5::DataSet d = f.openDataSet(p);
+          hsize_t dim[1] = {0};
+          d.getSpace().getSimpleExtentDims(dim, nullptr);
+          dim_out = static_cast<int>(dim[0]);
+          v.resize(dim[0]);
+          d.read(v.data(), H5::PredType::NATIVE_DOUBLE);
+        };
+        read1(grp + "/E", out.E, out.NE);
+        read1(grp + "/theta", out.theta, out.NTHETA);
+        H5::DataSet d = f.openDataSet(grp + "/Y");
+        hsize_t dims[2] = {0, 0};
+        d.getSpace().getSimpleExtentDims(dims, nullptr);
+        if (static_cast<int>(dims[0]) == out.NE &&
+            static_cast<int>(dims[1]) == out.NTHETA) {
+          out.Y.resize(size_t(out.NE) * out.NTHETA);
+          d.read(out.Y.data(), H5::PredType::NATIVE_DOUBLE);
+          present = 1;
+        }
+      }
+    } catch (const H5::Exception &) {
+      present = 0;
+    }
+  }
+
+  MPI_Bcast(&present, 1, MPI_INT, 0, comm_);
+  if (!present) return false;
+  int dims2[2] = {out.NE, out.NTHETA};
+  MPI_Bcast(dims2, 2, MPI_INT, 0, comm_);
+  out.NE = dims2[0]; out.NTHETA = dims2[1];
+  auto bcast_vec = [&](std::vector<double> &v, size_t n) {
+    if (me_ != 0) v.resize(n);
+    if (n > 0) MPI_Bcast(v.data(), static_cast<int>(n), MPI_DOUBLE, 0, comm_);
+  };
+  bcast_vec(out.E, out.NE);
+  bcast_vec(out.theta, out.NTHETA);
+  bcast_vec(out.Y, size_t(out.NE) * out.NTHETA);
+  return true;
+}
+
+// ------------------------------------------------------------------------
 // load_pec_line()
 // ------------------------------------------------------------------------
 bool ProcessLibrary::load_pec_line(const std::string &elem,
