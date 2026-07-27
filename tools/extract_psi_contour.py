@@ -46,10 +46,14 @@ def read_equilibrium(path: Path):
         psib = float(f["equilibrium/psib"][()])
         psi_axis_hint = (float(f["equilibrium/psi_axis"][()])
                          if "equilibrium/psi_axis" in f else None)
+        axis_rz_hint = ((float(f["equilibrium/rmagx"][()]),
+                         float(f["equilibrium/zmagx"][()]))
+                        if "equilibrium/rmagx" in f
+                        and "equilibrium/zmagx" in f else None)
     assert psi.shape == (len(z), len(r)), (
         f"psi.shape {psi.shape} != (nZ={len(z)}, nR={len(r)}); "
         f"plasma.h5 layout differs from compute_plasma_fields.cpp convention")
-    return r, z, psi, psib, psi_axis_hint
+    return r, z, psi, psib, psi_axis_hint, axis_rz_hint
 
 
 def _axis_index(psi: np.ndarray, axis_is_max: bool) -> tuple[int, int]:
@@ -70,9 +74,12 @@ def psi_norm_grid(psi: np.ndarray, psib: float,
 
     Returns (psin, psi_axis_used, axis_is_max).
     """
-    if psi_axis_hint is not None and psi_axis_hint > psib:
-        axis_is_max = True
-        psi_axis = float(np.nanmax(psi))
+    if psi_axis_hint is not None:
+        # Trust the stored on-axis psi directly. EFIT psi maps can have
+        # vacuum-region extrema at the grid corners, so the global
+        # min/max of psi is not a reliable stand-in for the axis value.
+        axis_is_max = psi_axis_hint > psib
+        psi_axis = float(psi_axis_hint)
     else:
         axis_is_max = False
         psi_axis = float(np.nanmin(psi))
@@ -125,8 +132,20 @@ def write_surf_axi(out: Path, R_Z_pts: np.ndarray):
     layout (SPARTA x = Z, y = R).
 
     R_Z_pts: (N, 2) array where column 0 = R, column 1 = Z.
+
+    The loop is written CLOCKWISE in the (Z, R) plane. SPARTA's 2D line
+    normal is z-hat x (segment direction) — i.e. to the left of travel —
+    so a CW loop has normals pointing AWAY from the enclosed region. That
+    is the correct orientation for this surface's purpose: a core-absorb
+    hole inside the (CCW) vessel wall, with the flow domain outside the
+    contour. A CCW core loop conflicts with the wall's cell marking and
+    aborts read_surf with "Cell type mis-match".
     """
     pts_ZR = np.column_stack([R_Z_pts[:, 1], R_Z_pts[:, 0]])   # (Z, R)
+    x, y = pts_ZR[:, 0], pts_ZR[:, 1]
+    area = 0.5 * float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y))
+    if area > 0.0:
+        pts_ZR = pts_ZR[::-1]
     n = len(pts_ZR)
     with out.open("w") as f:
         f.write("# SPARTA surface file (axi layout: cols are Z, R)\n")
@@ -193,10 +212,13 @@ def write_core_surf_from_plasma_h5(plasma_h5: Path,
         If given, write a PNG showing the selected contour overlaid on
         psi_norm.  Useful for a quick visual check.
     """
-    r, z, psi, psib, psi_axis_hint = read_equilibrium(plasma_h5)
+    r, z, psi, psib, psi_axis_hint, axis_rz_hint = read_equilibrium(plasma_h5)
     psin, psi_axis, axis_is_max = psi_norm_grid(psi, psib, psi_axis_hint)
-    iZ_ax, iR_ax = _axis_index(psi, axis_is_max)
-    R_ax = float(r[iR_ax]); Z_ax = float(z[iZ_ax])
+    if axis_rz_hint is not None:
+        R_ax, Z_ax = axis_rz_hint
+    else:
+        iZ_ax, iR_ax = _axis_index(psi, axis_is_max)
+        R_ax = float(r[iR_ax]); Z_ax = float(z[iZ_ax])
 
     fig, ax = plt.subplots()
     RR, ZZ = np.meshgrid(r, z)
@@ -257,7 +279,7 @@ def main(argv=None) -> int:
                    help="Optional PNG showing the contour on a psi_norm map")
     args = p.parse_args(argv)
 
-    r, z, psi, psib, psi_axis_hint = read_equilibrium(args.plasma_h5)
+    r, z, psi, psib, psi_axis_hint, axis_rz_hint = read_equilibrium(args.plasma_h5)
     psin, psi_axis, axis_is_max = psi_norm_grid(psi, psib, psi_axis_hint)
     print(f"psi_axis = {psi_axis:+.4e}  psib = {psib:+.4e}  "
           f"(axis is psi {'MAX' if axis_is_max else 'MIN'})", file=sys.stderr)
@@ -266,8 +288,11 @@ def main(argv=None) -> int:
 
     # Locate the magnetic axis (R, Z of psi_axis) as a point the target contour
     # should enclose.
-    iZ_ax, iR_ax = _axis_index(psi, axis_is_max)
-    R_ax = float(r[iR_ax]); Z_ax = float(z[iZ_ax])
+    if axis_rz_hint is not None:
+        R_ax, Z_ax = axis_rz_hint
+    else:
+        iZ_ax, iR_ax = _axis_index(psi, axis_is_max)
+        R_ax = float(r[iR_ax]); Z_ax = float(z[iZ_ax])
     print(f"magnetic axis ~ (R={R_ax:.3f}, Z={Z_ax:.3f})", file=sys.stderr)
 
     # Extract contour paths with matplotlib.  The returned QuadContourSet has

@@ -328,7 +328,16 @@ def _read_geqdsk_bfield(gfile: Path):
     zs = np.linspace(zmin, zmax, ny)
     r2d, z2d = np.meshgrid(rs, zs)
 
-    psi_arr = data.get("psi", data.get("psirz", None))
+    # freeqdsk's GEQDSKFile supports [] but (in newer versions) not .get
+    def _lookup(d, *keys, default=None):
+        for k in keys:
+            try:
+                return d[k]
+            except (KeyError, TypeError, IndexError):
+                continue
+        return default
+
+    psi_arr = _lookup(data, "psi", "psirz")
     if psi_arr is None:
         raise RuntimeError("GEQDSK does not contain psi/psirz array")
     flux2d = np.array(psi_arr, dtype=np.float64).reshape((ny, nx))
@@ -353,13 +362,19 @@ def _read_geqdsk_bfield(gfile: Path):
     br = -dpsidZ / safe_r
     bz =  dpsidR / safe_r
     bt = (float(data["bcentr"]) * float(data["rcentr"])) / safe_r
-    psib = float(data.get("sibdry", data.get("ssibry", 0.0)))
+    psib = float(_lookup(data, "sibdry", "ssibry", default=0.0))
     return {
         "r": rs, "z": zs, "br": br, "bt": bt, "bz": bz,
         "equ_r": rs.copy(), "equ_z": zs.copy(), "equ_psi": flux2d,
         "btf": float(data["bcentr"]),
         "rtf": float(data["rcentr"]),
         "psib": psib,
+        # Magnetic-axis location/value from the GEQDSK. EFIT psi maps can
+        # have vacuum-region extrema at the grid corners, so downstream
+        # axis detection must not rely on the global min/max of psi.
+        "psi_axis": float(_lookup(data, "simagx", "simag", default=0.0)),
+        "rmagx": float(_lookup(data, "rmagx", "rmaxis", default=0.0)),
+        "zmagx": float(_lookup(data, "zmagx", "zmaxis", default=0.0)),
     }
 
 
@@ -1658,6 +1673,9 @@ def convert_solps_to_openedge(
         f.create_dataset("equilibrium/btf",  data=float(equ_dict["btf"]))
         f.create_dataset("equilibrium/rtf",  data=float(equ_dict["rtf"]))
         f.create_dataset("equilibrium/psib", data=float(equ_dict["psib"]))
+        for key in ("psi_axis", "rmagx", "zmagx"):
+            if key in equ_dict:
+                f.create_dataset(f"equilibrium/{key}", data=float(equ_dict[key]))
 
         # Multi-ion species metadata. Per-species plasma fields live on
         # the EIRENE triangulation under /mesh/ions/.
