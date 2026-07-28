@@ -266,6 +266,106 @@ def write_core_surf_from_plasma_h5(plasma_h5: Path,
         plt.close(fig)
 
 
+def write_core_surf_from_mesh(plasma_h5: Path,
+                              out_path: Path,
+                              min_seg: float = 0.0,
+                              verbose: bool = False) -> None:
+    """Extract the inner (core) boundary loop of the B2/EIRENE plasma mesh
+    in plasma.h5 and write it as a SPARTA core-absorb surface (axi layout).
+
+    Unlike the psi-contour variant above, this traces the exact curve where
+    the SOLPS plasma data ends around the confined core (the B2 grid's core
+    cut), so the absorbing boundary coincides with the edge of valid plasma
+    data and no vacuum-floor shell is left between them.
+    """
+    import h5py
+    from collections import defaultdict
+
+    with h5py.File(plasma_h5, "r") as f:
+        vr = f["mesh/vtx_r"][:]
+        vz = f["mesh/vtx_z"][:]
+        tris = f["mesh/triangles"][:]
+        ci = f["mesh/cell_index"][:]
+        rmagx = (float(f["equilibrium/rmagx"][()])
+                 if "equilibrium/rmagx" in f else None)
+        zmagx = (float(f["equilibrium/zmagx"][()])
+                 if "equilibrium/zmagx" in f else None)
+
+    tri = tris[ci >= 0]
+
+    # Boundary edges of the plasma-covered triangulation = edges used by
+    # exactly one triangle.
+    count = defaultdict(int)
+    for a, b, c in tri:
+        for e in ((a, b), (b, c), (c, a)):
+            count[(min(e), max(e))] += 1
+    bedges = [e for e, n in count.items() if n == 1]
+
+    # Walk boundary edges into closed loops.
+    nbr = defaultdict(list)
+    for a, b in bedges:
+        nbr[a].append(b)
+        nbr[b].append(a)
+    unused = set(bedges)
+    loops = []
+    while unused:
+        a0, b0 = next(iter(unused))
+        loop = [a0, b0]
+        unused.discard((a0, b0))
+        while True:
+            prev, cur = loop[-2], loop[-1]
+            nxt = [v for v in nbr[cur]
+                   if v != prev and (min(cur, v), max(cur, v)) in unused]
+            if not nxt:
+                break
+            loop.append(nxt[0])
+            unused.discard((min(cur, nxt[0]), max(cur, nxt[0])))
+            if nxt[0] == loop[0]:
+                break
+        if loop[0] == loop[-1] and len(loop) > 4:
+            loops.append(loop[:-1])
+
+    if not loops:
+        raise RuntimeError(f"no closed boundary loops found in {plasma_h5}")
+
+    def encloses_axis(loop):
+        if rmagx is None:
+            return False
+        x = vr[loop]; y = vz[loop]
+        inside = False
+        j = len(loop) - 1
+        for i in range(len(loop)):
+            if (y[i] > zmagx) != (y[j] > zmagx):
+                xin = (x[j] - x[i]) * (zmagx - y[i]) / (y[j] - y[i]) + x[i]
+                if rmagx < xin:
+                    inside = not inside
+            j = i
+        return inside
+
+    core = [lp for lp in loops if encloses_axis(lp)]
+    if core:
+        # smallest loop enclosing the axis = the core cut (the outer wall
+        # boundary also encloses the axis)
+        loop = min(core, key=len)
+    else:
+        loop = min(loops, key=len)
+
+    path = np.column_stack([vr[loop], vz[loop]])   # (R, Z)
+    n_raw = len(path)
+    if min_seg > 0.0:
+        path = _decimate_contour(path, min_seg)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    write_surf_axi(out_path, path)
+    if verbose:
+        print(f"[core.surf] mesh inner boundary -> {len(path)} vertices "
+              f"(of {n_raw} boundary vertices, {len(loops)} loops found), "
+              f"R in [{path[:,0].min():.3f}, {path[:,0].max():.3f}], "
+              f"Z in [{path[:,1].min():.3f}, {path[:,1].max():.3f}] "
+              f"-> {out_path}",
+              file=sys.stderr)
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
         description=__doc__,
