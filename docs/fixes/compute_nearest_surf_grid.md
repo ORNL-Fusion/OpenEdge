@@ -39,3 +39,10 @@ near-wall ionisation profile.
 - `src/OPENEDGE/compute_nearest_surf_grid.{h,cpp}`
 - See `docs/fixes/sheath.md` for the consumer side that uses
   `nearest_surf` to locate the sheath edge per cell.
+
+## Grid adaptation
+
+The wall geometry is static but the grid is not: `fix adapt` reallocates the
+per-cell arrays (via `grid->notify_changed()`) and the mover re-invokes this
+compute each step, so distances/normals are recomputed automatically after
+refinement. Safe to combine with the sheath model and `fix adapt`.
