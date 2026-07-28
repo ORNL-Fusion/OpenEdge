@@ -22,6 +22,7 @@
 #include "domain.h"
 #include "openedge_geom.h"
 #include "mixture.h"
+#include "grain_material.h"
 #include "random_knuth.h"
 #include "random_mars.h"
 #include <algorithm>
@@ -65,11 +66,17 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   heatflux_scale(1.0),
   rocket_eta(0.0),
+  mat_(nullptr),
+  twall_K_(300.0),
+  heating_mode_(0),
+  ion_mass_amu_(2.0),
+  dq_custom_(-1),
   evap_atoms_local_(0.0),
   pd_(nullptr),
   emit_imix(-1),
   random(nullptr)
 {
+  strcpy(mat_name_, "Li");
   scalar_flag = 1;
   global_freq = 1;
 
@@ -107,6 +114,30 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
       emit_imix = particle->find_mixture(arg[i+1]);
       if (emit_imix < 0)
         error->all(FLERR,"Fix evaporation: unknown emit_into mixture ID");
+      i += 2;
+    } else if (strcmp(arg[i], "material") == 0) {
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'material'");
+      if (strlen(arg[i+1]) >= sizeof(mat_name_))
+        error->all(FLERR,"Fix evaporation: material name too long");
+      strcpy(mat_name_, arg[i+1]);
+      i += 2;
+    } else if (strcmp(arg[i], "twall_K") == 0) {
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'twall_K'");
+      twall_K_ = atof(arg[i+1]);
+      if (!std::isfinite(twall_K_) || twall_K_ < 0.0)
+        error->all(FLERR,"Fix evaporation: twall_K must be finite and >= 0");
+      i += 2;
+    } else if (strcmp(arg[i], "heating") == 0) {
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'heating'");
+      if      (strcmp(arg[i+1], "flux") == 0) heating_mode_ = 0;
+      else if (strcmp(arg[i+1], "oml") == 0)  heating_mode_ = 1;
+      else error->all(FLERR,"Fix evaporation: heating must be 'flux' or 'oml'");
+      i += 2;
+    } else if (strcmp(arg[i], "ion_mass_amu") == 0) {
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'ion_mass_amu'");
+      ion_mass_amu_ = atof(arg[i+1]);
+      if (!std::isfinite(ion_mass_amu_) || ion_mass_amu_ <= 0.0)
+        error->all(FLERR,"Fix evaporation: ion_mass_amu must be > 0");
       i += 2;
     } else {
       char msg[256];
@@ -160,6 +191,24 @@ void FixDropletEvaporate::init()
     error->all(FLERR,
       "Fix evaporation: background fix must be style background");
   pd_->init();
+
+  // Resolve the grain material (registry + `material` command overrides).
+  mat_ = grain_material_find(mat_name_);
+  if (!mat_) {
+    char msg[128];
+    snprintf(msg, sizeof(msg),
+             "Fix evaporation: unknown material '%s'", mat_name_);
+    error->all(FLERR, msg);
+  }
+  if (mat_->rho <= 0.0 || mat_->cp <= 0.0 || mat_->mass_amu <= 0.0 ||
+      mat_->hvap_J_mol <= 0.0 || mat_->antoine_b >= 0.0)
+    error->all(FLERR,
+      "Fix evaporation: material is missing rho/cp/mass_amu/hvap_J_mol/"
+      "antoine coefficients (define them with the material command)");
+
+  // OML heating uses the grain's OML charge when fix droplet/charge is
+  // active (custom vector registered by that fix); else chi defaults.
+  dq_custom_ = particle->find_custom((char *) "droplet_charge");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -230,11 +279,17 @@ void FixDropletEvaporate::evap_half(double dt_half)
 void FixDropletEvaporate::droplet_evaporation_model(int idrop,
                                         const double dt_half)
 {
-  const double AM   = 1.15225e-26;   // Li atom mass [kg] (6.94 amu)
-  const double Rho  = 534.0;         // kg/m^3
-  const double Cp   = 4200.0;        // J/kg-K
-  const double DHm  = 1.47e+05;      // Li heat of vaporization [J/mol]
-  const double AN   = 6.022e+23;     // 1/mol
+  // Material properties from the grain-material registry (default Li,
+  // selectable per fix with `material NAME`, tunable with the material
+  // command). Values resolved/validated in init().
+  const double AM   = mat_->mass_amu * 1.66053906660e-27;  // atom mass [kg]
+  const double Rho  = mat_->rho;          // kg/m^3
+  const double Cp   = mat_->cp;           // J/kg-K
+  const double DHm  = mat_->hvap_J_mol;   // heat of vaporization [J/mol]
+  const double Eps  = mat_->emissivity;   // total emissivity [-]
+  const double AN   = 6.022e+23;          // 1/mol
+  const double SB   = 5.670374419e-8;     // Stefan-Boltzmann [W/m^2/K^4]
+  const double Tw4  = twall_K_*twall_K_*twall_K_*twall_K_;
   const double DT   = dt_half;
 
   // Snapshot droplet state. After spawn_evap_atoms() the Particle::particles
@@ -252,28 +307,64 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
   OpenEdge::sparta_to_RZ(xs, domain->dimension, domain->axisymmetric, R, Z,
                          pd_->column_x0, pd_->column_y0);
 
-  // Heat-flux vector at droplet position. When plasma.h5 carries q_par /
-  // q_perp (mesh-level or regular grid), interp2D routes through the
-  // appropriate path inside fix background. Otherwise read the default.
-  double q_par  = pd_->default_q_par;
-  double q_perp = pd_->default_q_perp;
-  if (pd_->has_qheatflux) {
-    // Always pass the regular-grid field handle: interp2D() routes to the
-    // mesh-native counterpart via mesh_field_for() when plasma.h5 is
-    // mesh-based. Passing the mesh_* array directly bypasses that routing
-    // and falls through to the (empty) regular-grid path -> returns 0.
-    if (!pd_->mesh_q_par.empty() || !pd_->q_par.empty())
-      q_par  = pd_->interp2D(pd_->q_par,  R, Z, ip->icell);
-    if (!pd_->mesh_q_perp.empty() || !pd_->q_perp.empty())
-      q_perp = pd_->interp2D(pd_->q_perp, R, Z, ip->icell);
+  double Qs = 0.0;
+  if (heating_mode_ == 0) {
+    // Legacy mode: prescribed heat-flux field from plasma.h5. When the
+    // file carries q_par/q_perp, interp2D routes to the mesh-native
+    // counterpart; otherwise the fix-background defaults apply.
+    double q_par  = pd_->default_q_par;
+    double q_perp = pd_->default_q_perp;
+    if (pd_->has_qheatflux) {
+      if (!pd_->mesh_q_par.empty() || !pd_->q_par.empty())
+        q_par  = pd_->interp2D(pd_->q_par,  R, Z, ip->icell);
+      if (!pd_->mesh_q_perp.empty() || !pd_->q_perp.empty())
+        q_perp = pd_->interp2D(pd_->q_perp, R, Z, ip->icell);
+    }
+    // A sphere in a directional flux intercepts q*piR^2 = (1/4) q * 4piR^2;
+    // the model applies Qs over the full surface, so bake the 1/4 in here.
+    Qs = 0.25 * std::sqrt(q_par*q_par + q_perp*q_perp);
+  } else {
+    // OML mode: electron/ion collection heating from LOCAL ne/Te/Ti
+    // (DUSTT Eqs. 26-27 style, simplified). This is the physically
+    // correct volumetric heating for a grain immersed in plasma — q_par
+    // is a field-line target flux, near zero across most of the SOL
+    // volume where grains actually fly.
+    const double QE = 1.602176634e-19;
+    const double ME = 9.1093837015e-31;
+    const double MI = ion_mass_amu_ * 1.66053906660e-27;
+    const double Te = std::max(pd_->interp2D(pd_->temp_e, R, Z, ip->icell), 0.0);
+    const double Ti = std::max(pd_->interp2D(pd_->temp_i, R, Z, ip->icell), 0.0);
+    const double ne = std::max(pd_->interp2D(pd_->dens_e, R, Z, ip->icell), 0.0);
+    const double ni = pd_->dens_i.empty()
+      ? ne : std::max(pd_->interp2D(pd_->dens_i, R, Z, ip->icell), 0.0);
+    if (ne > 0.0 && Te > 0.0) {
+      // Normalized floating potential chi = e*phi/Te (<= 0). Use the OML
+      // charge from fix droplet/charge when present; else the canonical
+      // hydrogenic floating value chi ~ -2.5.
+      double chi = -2.5;
+      if (dq_custom_ >= 0) {
+        const int ew = particle->ewhich[dq_custom_];
+        if (ew >= 0) {
+          const double Zd = particle->edvec[ew][idrop];
+          const double r_c = (radius > 1.0e-9) ? radius : 1.0e-9;
+          const double phi_V = Zd * QE / (4.0 * MY_PI * 8.8541878128e-12 * r_c);
+          if (std::isfinite(phi_V) && phi_V < 0.0 && Te > 0.0)
+            chi = std::max(phi_V / Te, -20.0);
+        }
+      }
+      // One-sided thermal fluxes (per unit grain surface).
+      const double Ge = 0.25 * ne * std::sqrt(8.0*QE*Te/(MY_PI*ME))
+                        * std::exp(chi);                       // repelled e-
+      const double Gi = (Ti > 0.0)
+        ? 0.25 * ni * std::sqrt(8.0*QE*Ti/(MY_PI*MI)) * (1.0 - chi*Te/std::max(Ti,1e-30))
+        : 0.0;                                                 // OML-attracted ions
+      // Sheath-transmitted energies (zeta_e = zeta_i = 2.5, DUSTT) plus
+      // ion surface-recombination energy (hydrogenic 13.6 eV).
+      const double Ee = 2.5 * Te;
+      const double Ei = 2.5 * std::max(Ti, 0.0) + (-chi) * Te + 13.6;
+      Qs = QE * (Ge * Ee + Gi * Ei);
+    }
   }
-  // |q_plasma| from the stored components. A sphere in a uniform
-  // directional flux intercepts q·πR² = (1/4)·q·(4πR²), so the
-  // surface-averaged flux driving the energy balance is |q|/4. The
-  // model below applies Qs across the full 4πR² surface (3/(ρ·Cp·R)
-  // factor), so bake the 1/4 in here. heatflux_scale stays as a user
-  // knob for calibration.
-  double Qs = 0.25 * std::sqrt(q_par*q_par + q_perp*q_perp);
   if (!std::isfinite(Qs) || Qs < 0.0) Qs = 0.0;
   Qs *= heatflux_scale;
 
@@ -286,15 +377,11 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
       gTeZ = pd_->interp2D(pd_->grad_te_z, R, Z, ip->icell);
   }
 
-  if (Qs <= 0.0) {
-    Particle::OnePart *ip_w = &particle->particles[idrop];
-    ip_w->radius = radius;
-    ip_w->temp   = TK;
-    ip_w->mass   = mass;
-    return;
-  }
+  // NOTE: no early-return on Qs <= 0 — a grain in vacuum (real q_par is 0
+  // outside the SOLPS mesh) still evaporates and cools radiatively.
 
-  const double a1 = 5.055, b1 = -8023.0, xm1 = 6.939;
+  const double a1 = mat_->antoine_a, b1 = mat_->antoine_b;
+  const double xm1 = mat_->mass_amu;
   const double max_dT = 25.0;       // K, local explicit substep limiter
   const double max_dR_frac = 0.02;  // limit radius loss in one substep
   const int max_substeps = 10000;
@@ -317,9 +404,27 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
       error->one(FLERR,"Fix evaporation: invalid evaporation flux");
 
     const double dRdt = -AM * Gevap_atoms / Rho;
-    const double HF   = Qs - Gevap_atoms * (DHm / AN);
+    // Energy balance per unit surface: plasma heating - radiative cooling
+    // (emissivity * sigma * (T^4 - Twall^4)) - evaporative (latent) cooling.
+    // Radiation is negligible for liquid Li (~kW/m^2 at 1000 K, eps~0.1)
+    // but is a LEADING term for boron (~MW/m^2 at 2300 K, eps~0.8).
+    const double q_rad = Eps * SB * (T_new*T_new*T_new*T_new - Tw4);
+    const double HF   = Qs - q_rad - Gevap_atoms * (DHm / AN);
     const double r_safe = (R_new > 1.0e-20) ? R_new : 1.0e-20;
-    const double dTdt = (3.0 / (Rho * Cp * r_safe)) * HF;
+    // Melting as apparent heat capacity: spread the latent heat of fusion
+    // over a +-dTm band around Tmelt so the grain pauses there while
+    // absorbing/releasing h_melt. No per-particle melt-fraction state
+    // needed; adequate for micron grains whose h_melt << h_vap.
+    double Cp_eff = Cp;
+    if (mat_->tmelt_K > 0.0 && mat_->hmelt_J_mol > 0.0) {
+      const double dTm = 20.0;   // K, half-width of the melting band
+      if (std::fabs(T_new - mat_->tmelt_K) < dTm) {
+        const double hmelt_J_kg = mat_->hmelt_J_mol
+                                  / (mat_->mass_amu * 1.0e-3);
+        Cp_eff += hmelt_J_kg / (2.0 * dTm);
+      }
+    }
+    const double dTdt = (3.0 / (Rho * Cp_eff * r_safe)) * HF;
     if (!std::isfinite(dRdt) || !std::isfinite(dTdt))
       error->one(FLERR,"Fix evaporation: invalid evaporation rate");
 

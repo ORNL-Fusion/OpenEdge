@@ -16,6 +16,7 @@
 
 #ifdef FIX_CLASS
 FixStyle(droplet/drag,FixDropletDrag)
+FixStyle(grain/drag,FixDropletDrag)
 #else
 #ifndef SPARTA_FIX_DROPLET_DRAG_H
 #define SPARTA_FIX_DROPLET_DRAG_H
@@ -50,8 +51,9 @@ class FixDropletDrag : public Fix {
 
   double A_background      = 2.0;
   double Z_background      = 1.0;
-  double rho_d             = 534.0;
+  double rho_d             = 534.0;   // overridden by `material NAME`
   double alpha_E           = 1.26;
+  char   mat_name_[16]     = "";      // optional grain material
 
   double chi_coulomb       = 0.0;
   double delta_ite         = 1.0;

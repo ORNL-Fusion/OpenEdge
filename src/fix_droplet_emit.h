@@ -15,6 +15,7 @@
 #ifdef FIX_CLASS
 
 FixStyle(droplet/emit,FixDropletEmit)
+FixStyle(grain/emit,FixDropletEmit)
 
 #else
 

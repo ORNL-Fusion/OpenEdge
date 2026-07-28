@@ -1,0 +1,43 @@
+# =====================================================================
+# Boron grain smoke test: single-size B powder in a uniform plasma.
+#
+# Exercises the grain material table (material B), OML heating from
+# local ne/Te/Ti, radiative cooling, the melting band at 2349 K and
+# sublimation mass loss. Expected behavior for 25 um grains in a
+# ne=1e19, Te=Ti=30 eV background: heat at ~5e5 K/s, pause briefly at
+# the melting point, then plateau near ~3000 K where sublimation +
+# radiation balance OML heating, losing ~4% radius over 10 ms.
+# =====================================================================
+
+seed        12345
+dimension   2
+boundary    o o p
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0
+
+create_box  -0.5 0.5  -0.5 0.5  -0.05 0.05
+create_grid 20 20 1
+balance_grid rcb cell
+
+species     bgrain.species bgrain
+mixture     grains bgrain frac 1.0 nrho 1 temp 300 vstream 0 0 0
+
+# uniform plasma background (Te/Ti in eV)
+fix pd background constant &
+    te 30.0 ne 1.0e19 ti 30.0 ni 1.0e19 upar 0.0 bz 2.0 static yes
+
+# grains: drag+gravity, OML charging, heat/ablate — all boron
+create_particles grains n 4
+fix fdrag   droplet/drag 1 2.0 1 background pd gravity 0 -9.8 0 &
+            model epstein material B mixture grains
+fix fcharge droplet/charge 1 background pd ion_mass_amu 2.0 &
+            thermionic yes material B mixture grains
+fix fevap   droplet/evaporate 1 grains background pd &
+            heating oml ion_mass_amu 2.0 material B
+
+timestep    1.0e-6
+dump dgr particle all 100 output/grains id x y radius temp
+shell mkdir output
+stats 1000
+stats_style step np f_fevap
+run 10000

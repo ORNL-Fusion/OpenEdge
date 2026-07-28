@@ -18,6 +18,7 @@
 #ifdef FIX_CLASS
 
 FixStyle(droplet/charge,FixDropletCharge)
+FixStyle(grain/charge,FixDropletCharge)
 FixStyle(droplet_charge,FixDropletCharge)
 
 #else
@@ -54,6 +55,9 @@ class FixDropletCharge : public Fix {
   int    thermionic_on    =  0;
   double richardson_A     =  1.2e6;
   double work_function_eV =  2.9;
+  char   mat_name_[16]    = "";   // optional grain material (init() applies)
+  int    wf_set_          = 0;    // explicit keyword overrides material
+  int    ra_set_          = 0;
 
   // Optional mixture filter. -1 = no filter. >= 0 = only species in this
   // mixture's groups are charged.

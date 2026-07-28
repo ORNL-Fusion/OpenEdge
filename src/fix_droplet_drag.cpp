@@ -5,6 +5,7 @@
 
 #include "fix_droplet_drag.h"
 #include "fix_background.h"
+#include "grain_material.h"
 #include "update.h"
 #include "grid.h"
 #include "particle.h"
@@ -80,6 +81,12 @@ FixDropletDrag::FixDropletDrag(SPARTA *sparta, int narg, char **arg)
       imix = particle->find_mixture(arg[iarg+1]);
       if (imix < 0) error->all(FLERR, "fix drag: unknown mixture ID");
       iarg += 2;
+    } else if (strcmp(arg[iarg], "material") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "fix drag: missing material name");
+      if (strlen(arg[iarg+1]) >= sizeof(mat_name_))
+        error->all(FLERR, "fix drag: material name too long");
+      strcpy(mat_name_, arg[iarg+1]);
+      iarg += 2;
     } else {
       char msg[200];
       snprintf(msg, sizeof(msg), "fix drag: unknown keyword '%s'", arg[iarg]);
@@ -122,6 +129,15 @@ void FixDropletDrag::init()
   pd_ = dynamic_cast<FixBackground *>(modify->fix[ifix]);
   if (!pd_)
     error->all(FLERR, "fix drag: background fix must be style background");
+
+  // Optional grain material: overrides the legacy hardcoded Li density
+  // used in the Epstein frequency (rho_d = 534 kg/m^3).
+  if (mat_name_[0]) {
+    const GrainMaterial *mat = grain_material_find(mat_name_);
+    if (!mat || mat->rho <= 0.0)
+      error->all(FLERR, "fix drag: unknown material or material has no rho");
+    rho_d = mat->rho;
+  }
   pd_->init();
 }
 
