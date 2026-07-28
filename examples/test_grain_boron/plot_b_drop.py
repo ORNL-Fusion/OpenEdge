@@ -11,6 +11,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 
 ROOT = Path(__file__).resolve().parent
 WEST = ROOT / ".." / "test_west_cases" / "axi_1p5MW_plasma_bkg" / "input"
@@ -80,13 +81,14 @@ def main():
                            alpha=0.5, label=f"B ({len(Bn)})")
 
     vmax = max(max(g for _, _, g in t) for t in traj.values())
-    vmax = max(vmax, 1.0)
+    vmax = max(vmax, 1e21)
+    norm = LogNorm(vmin=vmax * 1e-8, vmax=vmax)
     for t in traj.values():
         a = np.array(t)
-        sc = ax.scatter(a[:, 0], a[:, 1], c=a[:, 2] / 1e21, s=4,
-                        cmap="viridis", vmin=0.0, vmax=vmax / 1e21, zorder=5)
+        sc = ax.scatter(a[:, 0], a[:, 1], c=np.maximum(a[:, 2], vmax * 1e-8),
+                        s=4, cmap="viridis", norm=norm, zorder=5)
     cb = fig.colorbar(sc, ax=ax, shrink=0.8)
-    cb.set_label(r"$\Gamma_{evap}$ [$10^{21}$ atoms m$^{-2}$ s$^{-1}$]")
+    cb.set_label(r"$\Gamma_{evap}$ [atoms m$^{-2}$ s$^{-1}$]")
 
     ax.set_aspect("equal"); ax.set_xlabel("R [m]"); ax.set_ylabel("Z [m]")
     ax.set_title(f"WEST boron drop — step {step}\n"
@@ -98,5 +100,51 @@ def main():
     print("wrote", out, f"| {len(traj)} grains, B={len(Bn)}, B+={len(Bp)}")
 
 
+def plot_density():
+    """2D map of the time-averaged total-B density from output/b_dens."""
+    L = (ROOT / "output" / "b_dens").read_text().splitlines()
+    idx = [i for i, l in enumerate(L) if l.startswith("ITEM: TIMESTEP")]
+    i = idx[-1]
+    step = int(L[i + 1])
+    a = next(m for m in range(i, len(L)) if L[m].startswith("ITEM: CELLS"))
+    end = next((m for m in range(a + 1, len(L)) if L[m].startswith("ITEM:")), len(L))
+    rows = [r.split() for r in L[a + 1:end] if r.strip()]
+    Zc = np.array([float(r[1]) for r in rows])
+    Rc = np.array([float(r[2]) for r in rows])
+    v  = np.array([float(r[3]) for r in rows])
+
+    # deck grid: 200 x 150 over Z [-1, 0.85], R [0, 3.25]
+    nx, ny = 200, 150
+    ix = np.clip(((Zc + 1.0) / (1.85 / nx)).astype(int), 0, nx - 1)
+    iy = np.clip((Rc / (3.25 / ny)).astype(int), 0, ny - 1)
+    img = np.full((ny, nx), np.nan); cnt = np.zeros((ny, nx))
+    for a_, b_, val in zip(iy, ix, v):
+        img[a_, b_] = (0.0 if np.isnan(img[a_, b_]) else img[a_, b_]) + val
+        cnt[a_, b_] += 1
+    img = np.where(cnt > 0, img / np.maximum(cnt, 1), np.nan)
+
+    W = surf_loop(WEST / "wall_fine.surf")
+    C = surf_loop(WEST / "core.surf")
+    Zg = np.linspace(-1.0, 0.85, nx + 1)
+    Rg = np.linspace(0.0, 3.25, ny + 1)
+    vmax = np.nanmax(img)
+    fig, ax = plt.subplots(figsize=(6.0, 8.5))
+    pm = ax.pcolormesh(0.5*(Rg[:-1]+Rg[1:]), 0.5*(Zg[:-1]+Zg[1:]), img.T,
+                       norm=LogNorm(vmin=max(vmax*1e-4, 1e8), vmax=vmax),
+                       cmap="viridis", shading="auto")
+    ax.plot(W[:, 0], W[:, 1], "-", color="0.2", lw=1.3)
+    ax.plot(C[:, 0], C[:, 1], "--", color="w", lw=1.0)
+    ax.set_xlim(W[:, 0].min() - 0.05, W[:, 0].max() + 0.05)
+    ax.set_ylim(W[:, 1].min() - 0.05, W[:, 1].max() + 0.05)
+    ax.set_aspect("equal"); ax.set_xlabel("R [m]"); ax.set_ylabel("Z [m]")
+    ax.set_title(f"Total B density — step {step}", fontsize=11)
+    fig.colorbar(pm, ax=ax, label=r"$n_B$ [m$^{-3}$]")
+    plt.tight_layout()
+    out = ROOT / "b_west_density.png"
+    plt.savefig(out, dpi=130)
+    print("wrote", out, f"| step {step} | n_B max = {vmax:.3e} m^-3")
+
+
 if __name__ == "__main__":
     main()
+    plot_density()

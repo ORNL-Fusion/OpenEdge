@@ -1,3 +1,0 @@
-# Boron powder grain (25 um radius, solid, cold start)
-# ID Molwt(amu) Molmass(kg) RotDof RotRel VibDof VibRel VibTemp(K) specwt charge radius(m) temp(K)
-bgrain 9.2e15 1.531e-10 0 0 0 0 0 1 0 2.5e-5 300.0
