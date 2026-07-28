@@ -138,7 +138,8 @@ database/iead/IEAD_REGENERATE.md
 # internal
 examples/test_mpex_45deg/
 
-examples/test_st40_li_dropper/input/plasma_st40_solps.h5
+# plasma_st40_solps.h5 is committed (tsurf_emission precedent) so
+# the case runs from a fresh clone without the SOLPS source data
 examples/test_st40_li_dropper/output/
 examples/test_st40_li_dropper/.claude/
 examples/test_st40_li_dropper/*.png
