@@ -143,3 +143,4 @@ examples/test_mpex_45deg/
 examples/test_st40_li_dropper/output/
 examples/test_st40_li_dropper/.claude/
 examples/test_st40_li_dropper/*.png
+examples/test_tsurf_emission/jeremy_cases_generated*/
