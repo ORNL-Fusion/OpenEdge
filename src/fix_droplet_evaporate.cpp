@@ -460,5 +460,14 @@ void FixDropletEvaporate::spawn_evap_atoms(int idrop, double area,
     double x[3] = {xs[0], xs[1], xs[2]};
     int newid = MAXSMALLINT * random->uniform();
     particle->add_particle(newid, isp, icell_ip, x, v, 0.0, 0.0);
+
+    // Notify update_custom subscribers so per-particle attributes (pweight
+    // for fix particle/weight, etc.) are initialized on the new vapor
+    // particle — without this, grid/weighted tallies see zero weight for
+    // all evaporated (and subsequently ionised) atoms.
+    if (modify->n_update_custom) {
+      double zero_v[3] = {0.0, 0.0, 0.0};
+      modify->update_custom(particle->nlocal - 1, 0.0, 0.0, 0.0, zero_v);
+    }
   }
 }

@@ -372,7 +372,20 @@ void FixForceThermal::kick_half(double dt_half)
     const int isp = p.ispecies;
     const double Z = species[isp].charge;
     if (Z == 0.0) continue;  // skip neutrals
-    if (ne_vec && ne_vec[ip] < ne_min_) continue;  // collisionless region
+
+    // Collisionality gate on FRESH local ne. The cached pc_ne value can be
+    // up to pcache_nevery steps stale — or absent entirely when the plasma
+    // cache is off, which silently disabled this gate. An ion that crossed
+    // the plasma edge since the last cache refresh keeps its old ne and
+    // takes exactly the unopposed vacuum-edge Z^2 kick this gate exists to
+    // prevent: velocities blow up and the mover then walks garbage cell
+    // indices (intermittent MPI-only bus errors far from the culprit).
+    // pd_interp is O(1) per particle via the cell-indexed mesh cache and
+    // returns 0 outside the plasma mesh, so vacuum is gated correctly.
+    double ne_loc = -1.0;
+    if (use_background_ && pd_) ne_loc = pd_interp(pd_->dens_e, p);
+    else if (ne_vec) ne_loc = ne_vec[ip];
+    if (ne_loc >= 0.0 && ne_loc < ne_min_) continue;  // collisionless region
 
     const double m_Z = species[isp].mass;  // kg
     if (m_Z <= 0.0) continue;

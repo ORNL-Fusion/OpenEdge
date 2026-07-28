@@ -1365,12 +1365,12 @@ template < int DIM, int SURF, int OPT > void Update::move()
   }
 
   // Per-particle charge override from fix droplet/charge (custom DOUBLE
-  // vector "droplet_charge"). Look it up once per move(); pusher reads
-  // qvec[i] in the dispatch loop and falls back to species[is].charge.
+  // vector "droplet_charge"). Cache only the ewhich INDEX, not the array
+  // pointer: add_particle (mid-move migration receives) can reallocate
+  // edvec, and a pointer captured here would dangle — intermittent MPI-only
+  // bus errors in move. Same policy as pweight below.
   const int dq_idx = particle->find_custom((char *) "droplet_charge");
-  double *qvec_drop = (dq_idx >= 0)
-    ? particle->edvec[particle->ewhich[dq_idx]]
-    : nullptr;
+  const int dq_ewhich = (dq_idx >= 0) ? particle->ewhich[dq_idx] : -1;
 
   // pweight custom (fix particle/weight) -> stamped into tally_pweight
   // before each surf_tally batch so pweight-aware surf computes can weight
@@ -1420,7 +1420,10 @@ template < int DIM, int SURF, int OPT > void Update::move()
 
       double mass = particles[i].mass;
       double charge = species[particles[i].ispecies].charge;
-      if (qvec_drop && qvec_drop[i] != 0.0) charge = qvec_drop[i];
+      if (dq_ewhich >= 0) {
+        const double qd = particle->edvec[dq_ewhich][i];
+        if (qd != 0.0) charge = qd;
+      }
       
       // apply moveperturb() to PKEEP and PINSERT since are computing xnew
       // not to PENTRY,PEXIT since are just re-computing xnew of sender
@@ -1506,7 +1509,12 @@ template < int DIM, int SURF, int OPT > void Update::move()
       // mid-move migration) or at post_move_bookkeeping, whichever comes
       // first.
 
-      if (cd_flag && pflag == PKEEP) {
+      // i < cd_nmax: particles created by end-of-step fixes (evaporate,
+      // volume/chem) AFTER fix cross_field_diffusion filled the buffer are
+      // PKEEP by the next move but can live at indices past the buffer —
+      // reading dx_cd[i] there is an out-of-bounds row-pointer deref. They
+      // get their first kick next step, same policy as PINSERT.
+      if (cd_flag && pflag == PKEEP && i < cd_nmax) {
         vkick0 = dx_cd[i][0] / dtremain;
         vkick1 = dx_cd[i][1] / dtremain;
         v[0] += vkick0;
