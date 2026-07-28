@@ -1365,12 +1365,12 @@ template < int DIM, int SURF, int OPT > void Update::move()
   }
 
   // Per-particle charge override from fix droplet/charge (custom DOUBLE
-  // vector "droplet_charge"). Look it up once per move(); pusher reads
-  // qvec[i] in the dispatch loop and falls back to species[is].charge.
+  // vector "droplet_charge"). Cache only the ewhich INDEX, not the array
+  // pointer: add_particle (mid-move migration receives) can reallocate
+  // edvec, and a pointer captured here would dangle — intermittent MPI-only
+  // bus errors in move. Same policy as pweight below.
   const int dq_idx = particle->find_custom((char *) "droplet_charge");
-  double *qvec_drop = (dq_idx >= 0)
-    ? particle->edvec[particle->ewhich[dq_idx]]
-    : nullptr;
+  const int dq_ewhich = (dq_idx >= 0) ? particle->ewhich[dq_idx] : -1;
 
   // pweight custom (fix particle/weight) -> stamped into tally_pweight
   // before each surf_tally batch so pweight-aware surf computes can weight
@@ -1420,7 +1420,10 @@ template < int DIM, int SURF, int OPT > void Update::move()
 
       double mass = particles[i].mass;
       double charge = species[particles[i].ispecies].charge;
-      if (qvec_drop && qvec_drop[i] != 0.0) charge = qvec_drop[i];
+      if (dq_ewhich >= 0) {
+        const double qd = particle->edvec[dq_ewhich][i];
+        if (qd != 0.0) charge = qd;
+      }
       
       // apply moveperturb() to PKEEP and PINSERT since are computing xnew
       // not to PENTRY,PEXIT since are just re-computing xnew of sender
@@ -1506,7 +1509,12 @@ template < int DIM, int SURF, int OPT > void Update::move()
       // mid-move migration) or at post_move_bookkeeping, whichever comes
       // first.
 
-      if (cd_flag && pflag == PKEEP) {
+      // i < cd_nmax: particles created by end-of-step fixes (evaporate,
+      // volume/chem) AFTER fix cross_field_diffusion filled the buffer are
+      // PKEEP by the next move but can live at indices past the buffer —
+      // reading dx_cd[i] there is an out-of-bounds row-pointer deref. They
+      // get their first kick next step, same policy as PINSERT.
+      if (cd_flag && pflag == PKEEP && i < cd_nmax) {
         vkick0 = dx_cd[i][0] / dtremain;
         vkick1 = dx_cd[i][1] / dtremain;
         v[0] += vkick0;
@@ -2171,6 +2179,49 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 for (m = 0; m < nsurf_tally; m++)
                       slist_active[m]->surf_tally(dtremain,minsurf,icell,reaction,
                                                                     &iorig,ipart,jpart);
+
+              // ---- DEBUG: post-collision wall-side audit ----------------
+              // Flag events where surf_collide / surf_react leaves the
+              // particle behind the wall normal (likely cause of visible
+              // leaks in axi runs with full chemistry). Rate-limited;
+              // remove once the underlying surface model is fixed.
+              {
+                static int wall_leak_count = 0;
+                constexpr int wall_leak_max  = 200;
+                constexpr double dxn_thresh  = -1.0e-10;  // 0.1 nm behind wall
+                if (ipart && wall_leak_count < wall_leak_max) {
+                  const double *snorm = (DIM == 3) ? tri->norm : line->norm;
+                  double sref0, sref1, sref2;
+                  if (DIM == 3) {
+                    sref0 = (tri->p1[0]+tri->p2[0]+tri->p3[0])/3.0;
+                    sref1 = (tri->p1[1]+tri->p2[1]+tri->p3[1])/3.0;
+                    sref2 = (tri->p1[2]+tri->p2[2]+tri->p3[2])/3.0;
+                  } else {
+                    sref0 = 0.5*(line->p1[0]+line->p2[0]);
+                    sref1 = 0.5*(line->p1[1]+line->p2[1]);
+                    sref2 = 0.0;
+                  }
+                  const double dxn =
+                    (x[0]-sref0)*snorm[0] + (x[1]-sref1)*snorm[1] +
+                    (DIM == 3 ? (x[2]-sref2)*snorm[2] : 0.0);
+                  const double vdotn =
+                    v[0]*snorm[0] + v[1]*snorm[1] +
+                    (DIM == 3 ? v[2]*snorm[2] : 0.0);
+                  if (dxn < dxn_thresh) {
+                    FILE *fp = screen ? screen : stdout;
+                    fprintf(fp,
+                      "[wall-leak] step=" BIGINT_FORMAT " proc=%d pid=%d "
+                      "surf=%d dx.n=%.3e v.n=%.3e jpart=%d\n",
+                      ntimestep, me, particles[i].id, minsurf,
+                      dxn, vdotn, jpart ? 1 : 0);
+                    wall_leak_count++;
+                    if (wall_leak_count == wall_leak_max)
+                      fprintf(fp, "[wall-leak] suppressing further events "
+                                  "on proc %d (cap=%d)\n", me, wall_leak_max);
+                  }
+                }
+              }
+              // ---- END DEBUG -------------------------------------------
               }
 
               // stuck_iterate = consecutive iterations particle is immobile
@@ -2306,8 +2357,42 @@ template < int DIM, int SURF, int OPT > void Update::move()
           if (DIM == 3) x[2] = xnew[2];
           if (DIM == 1) {
             if (x[1] < lo[1] || x[1] > hi[1]) {
-              particles[i].flag = PDISCARD;
-              naxibad++;
+              // Particle ended outside its current cell after axi_remap.
+              // Try to rehome via id_find_child instead of silently
+              // discarding: most of these are charged ions whose Boris
+              // gyromotion crossed a cell boundary the linear cell-cross
+              // check missed.
+              int newcell = grid->id_find_child(0,0,
+                                domain->boxlo,domain->boxhi,x);
+              int rehomed = 0;
+              if (newcell >= 0) {
+                if (SURF && cells[newcell].nsplit > 1 &&
+                    cells[newcell].nsurf >= 0) {
+                  newcell = split2d(newcell,x);
+                }
+                // Accept only if the new cell is on the FLUID side of the
+                // wall (volume > 0); a vacuum cell means the particle
+                // slipped through wall.surf during a partial Boris step.
+                if (newcell >= 0 && cinfo[newcell].volume > 0.0) {
+                  icell = newcell;
+                  if (cells[newcell].proc != me)
+                    particles[i].flag = PDONE;
+                  rehomed = 1;
+                }
+              }
+              // Genuine escape: reflect specularly off the exited cell
+              // boundary (approximates the wall hit the linear check
+              // missed; conserves mass). naxibad now counts recoveries.
+              if (!rehomed) {
+                if (x[1] < lo[1]) {
+                  x[1] = lo[1];
+                  if (v[1] < 0.0) v[1] = -v[1];
+                } else if (x[1] > hi[1]) {
+                  x[1] = hi[1];
+                  if (v[1] > 0.0) v[1] = -v[1];
+                }
+                naxibad++;
+              }
               break;
             }
           }
