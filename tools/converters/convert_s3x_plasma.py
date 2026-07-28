@@ -226,6 +226,8 @@ def interpolate_and_save_plasma_field(
     gfile=None,
     config_file=None,
     geometry="cart",
+    heatflux="none",
+    sheath_gamma=7.0,
 ):
     """
     Convert SOLEDGE3X plasma/mesh data to OpenEdge-style HDF5.
@@ -633,6 +635,23 @@ def interpolate_and_save_plasma_field(
             f.create_dataset('mesh/e_z', data=mesh_e_z)
             f.create_dataset('mesh/e_t', data=mesh_e_t)
             f.create_dataset('mesh/pob', data=mesh_pob)
+            if heatflux == "sheath":
+                # Sheath-limited parallel heat flux estimate from the
+                # per-cell plasma state (SOLEDGE3X snapshots carry no heat
+                # flux directly): q_par = gamma_sh * n_e * c_s * e * T_e,
+                # c_s = sqrt(e (Te + Ti)/m_i). Consumed by fix
+                # grain/ablate heating=flux; the OML heating mode does
+                # not need it.
+                _QE = 1.602176634e-19
+                _mi = ion_mass_amu[main_k] * 1.66053906660e-27
+                _cs = np.sqrt(_QE * (np.maximum(mesh_temp_e, 0.0)
+                                     + np.maximum(mesh_temp_i, 0.0)) / _mi)
+                _qp = sheath_gamma * np.maximum(mesh_dens_e, 0.0) * _cs \
+                      * _QE * np.maximum(mesh_temp_e, 0.0)
+                f.create_dataset('mesh/q_par', data=_qp)
+                f.create_dataset('mesh/q_perp', data=np.zeros_like(_qp))
+                print(f"mesh/q_par written (sheath-limited, gamma="
+                      f"{sheath_gamma}): peak {_qp.max():.3e} W/m^2")
             f.create_dataset('mesh/ions/dens', data=mesh_dens_i_all)
             f.create_dataset('mesh/ions/temp', data=mesh_temp_i_all)
             f.create_dataset('mesh/ions/parr_flow', data=mesh_flow_i_par_all)
@@ -684,6 +703,10 @@ def _build_parser():
                    help="Optional GEQDSK override for B-field (fallback path).")
     p.add_argument("--equ-file", type=str, default=None,
                    help="Optional .equ override for B-field (fallback path).")
+    p.add_argument("--heatflux", choices=["none", "sheath"], default="none",
+                   help="write mesh/q_par as the sheath-limited estimate "
+                        "gamma*ne*cs*e*Te (SOLEDGE snapshots carry no flux)")
+    p.add_argument("--sheath-gamma", type=float, default=7.0)
     p.add_argument("--geometry", choices=["cart", "axi"], default="cart",
                    help="SPARTA wall.surf slot layout. cart (default): "
                         "x=R, y=Z; pairs with 'boundary o o p'. axi: "
@@ -708,6 +731,8 @@ def main():
         equ_file=args.equ_file,
         gfile=args.gfile,
         geometry=args.geometry,
+        heatflux=args.heatflux,
+        sheath_gamma=args.sheath_gamma,
     )
 
 

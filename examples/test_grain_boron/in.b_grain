@@ -36,7 +36,7 @@ fix fevap   droplet/evaporate 1 grains background pd &
             heating oml ion_mass_amu 2.0 material B
 
 timestep    1.0e-6
-dump dgr particle all 100 output/grains id x y radius temp
+dump dgr particle all 100 output/grains id x y z radius temp
 shell mkdir output
 stats 1000
 stats_style step np f_fevap
