@@ -1,0 +1,19 @@
+# Li ionization/recombination chain to Li3+ (kinetic, ADAS scd/acd).
+Li --> Li+
+I A 1.0 0.0 0.0 0.0 0.0
+
+Li+ --> Li
+R A 1.0 0.0 0.0 0.0 0.0
+
+Li+ --> Li2+
+I A 1.0 0.0 0.0 0.0 0.0
+
+Li2+ --> Li+
+R A 1.0 0.0 0.0 0.0 0.0
+
+Li2+ --> Li3+
+I A 1.0 0.0 0.0 0.0 0.0
+
+Li3+ --> Li2+
+R A 1.0 0.0 0.0 0.0 0.0
+

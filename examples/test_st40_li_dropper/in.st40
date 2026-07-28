@@ -1,0 +1,128 @@
+# =====================================================================
+# ST40 (Tokamak Energy) — Li powder dropper, OpenEdge
+# Grains fall from a top dropper, evaporate to Li vapor, ionise up to
+# Li3+ and follow field lines through the SOLPS-13589 background.
+# Axisymmetric mode (boundary o ao p): x = Z [m], y = R [m], ylo = axis.
+# Surf files and dumps are in (Z, R).
+# =====================================================================
+
+# dt is set by the Li kinetics (the fastest species tracked): neutral flight
+# ~3 mm/step and ion streaming ~1 cm per Boris sub-step (< 1 cell). Droplets
+# are insensitive (drag is an exact exponential update; evaporation
+# sub-steps internally), so one small global dt is both the accurate and
+# the SPARTA-idiomatic choice — SPARTA has no per-species timestep.
+variable    dt        equal 2.0e-6
+variable    nsteps    equal 50000
+variable    ndump     equal 500
+variable    nemit     equal 200       # emit a grain batch every nemit steps
+variable    npergroup equal 20        # grains per emit batch
+
+shell       mkdir output
+
+seed        12345
+dimension   2
+boundary    o ao p
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0e14
+timestep    ${dt}
+
+create_box  -1.0 1.0  0.0 1.05  -0.05 0.05
+
+
+
+create_grid 130 72 1
+balance_grid rcb cell
+global      weight cell radius        # annular (axi) cell volumes
+
+# ---- species + mixtures ---------------------------------------------
+species     input/droplet.species droplet
+species     input/li.species      Li Li+ Li2+ Li3+
+# mixtures are species lists only here: grain count/speed are explicit in
+# droplet/emit, and evaporate emits vapor mass-conservingly at the grain
+# temperature — mixture nrho/temp/vstream would be ignored.
+
+
+mixture     droplet droplet frac 1.0
+mixture     livapor Li      frac 1.0
+mixture     allLi Li Li+ Li2+ Li3+
+
+# ---- geometry --------------------------------------------------------
+read_surf   input/st40_wall_axi.surf group wall particle check
+read_surf   input/st40_core.surf group core     # core absorb (mesh inner boundary)
+
+group dropper surf id <> 40 41       # ids printed by build_geometry.py
+
+surf_collide vac  vanish
+surf_modify  wall collide vac
+surf_modify  core collide vac
+
+# ---- frozen SOLPS background (plasma + B + psi embedded) -------------
+
+fix pd background file input/plasma_st40_solps.h5 static yes
+
+
+
+# NOTE: the WEST decks also add sheath physics to the pusher
+# (compute nearest_surf/grid + `sheath boundary geom cgeom mD_amu 2.0`).
+# That is OFF here: the per-grid cgeom arrays go stale when fix adapt
+# refines the grid mid-run and the pusher then reads them -> bus error
+# (known OpenEdge bug). Re-enable sheath only in runs without fix adapt.
+
+# Li ion pusher (axi requires mode boris). Expect ONE
+# "|q/m|*|B|*dt_sub is large" warning when the first Li+ appears: with
+# subcycles 10 the gyro-ROTATION is deliberately unresolved (resolving it
+# needs ~2000 subcycles). Boris keeps v_par and |v_perp| exact, so the
+# error is bounded at the ~1 mm gyroradius (< cell); parallel streaming
+# (~1 cm per sub-step) is what dt is sized for.
+
+
+
+global      pusher plasma pd mode boris &
+            subcycles 10 bad_dt_check yes bad_dt_limit 0.5
+
+# ---- forces on Li ions: same physics as test_west_cases --------------
+# Coulomb collisions (friction/slowing on the D background), anomalous
+# cross-field diffusion, and ion+electron thermal-gradient forces.
+variable    Dperp index 0.1
+fix fcd     cross_field_diffusion 1 background pd D_perp ${Dperp}
+fix fcoul   coulomb/background 1 background pd 2.0 1.0
+fix fth     force/thermal 1 background pd ion_thermal yes elec_thermal yes
+
+# ---- LPD chain: emit grains -> drag/gravity -> evaporate -> ionise ---
+fix fdrop   grain/emit droplet dropper nevery ${nemit} n ${npergroup} &
+            perspecies no normal no vmin 2.0 vmax 6.0 angle cosine
+
+# gravity given as physical (gR, gZ, gphi)
+fix fdrag   grain/drag   1 2.0 1 background pd gravity 0 -9.8 0 model epstein material Li
+fix fcharge grain/charge 1 background pd ion_mass_amu 2.0 thermionic no mixture droplet material Li
+
+# OML heating from local ne/Te/Ti (grains fly through the SOL volume,
+# where the field-parallel target flux q_par is near zero)
+fix fevap   grain/ablate 1 droplet background pd &
+            heatflux/scale 1.0 rocket_eta 0.5 emit_into livapor &
+            heating oml ion_mass_amu 2.0 material Li
+            
+            
+fix fchem   volume/chem/adas 1 Li input/li.reactions output summary
+
+# ---- diagnostics -----------------------------------------------------
+# particles: type 1 = grain, 2 = Li, 3 = Li+, 4 = Li2+, 5 = Li3+ (x=Z, y=R)
+dump dpart particle all ${ndump} output/state id type x y z vx vy vz radius temp
+
+# total-Li density n_Li [m^-3], time-averaged, dumped at steps 1000/2000
+fix     fpw particle/weight
+compute cli grid/weighted all allLi nrho_w
+
+fix     fli ave/grid all 100 100 10000 c_cli[1] ave one
+dump    dgrid grid all 10000 output/li_dens id xc yc f_fli
+
+# adaptive refinement around Li (vapor + ions): value style keys on n_Li,
+# so cells holding only grains are untouched (must come after ave/grid)
+fix     fadapt adapt 2000 all refine value c_cli[1] 5.0e15 1.0e14 maxlevel 3
+# NOTE: no `fix balance` here — re-owning cells after fix adapt refinement
+# leaves stale neighbor/ghost links (known OpenEdge bug: particles crossing
+# those faces dereference garbage cell ids -> intermittent MPI bus errors).
+
+stats       ${ndump}
+stats_style step cpu np
+run         ${nsteps}
