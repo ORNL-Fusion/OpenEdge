@@ -774,7 +774,19 @@ void FixBackground::load_plasma_h5()
     fprintf(screen, "[background] Reading %s\n", plasma_path.c_str());
 
   H5::Exception::dontPrint();
-  H5::H5File file(plasma_path, H5F_ACC_RDONLY);
+  // H5::FileIException does not derive from std::exception — an unguarded
+  // constructor kills the run with a raw libc++abi terminate when the
+  // file is missing/unreadable. Fail with a proper error instead.
+  H5::H5File file;
+  try {
+    file.openFile(plasma_path, H5F_ACC_RDONLY);
+  } catch (const H5::Exception &) {
+    char msg[512];
+    snprintf(msg, sizeof(msg),
+             "fix background: cannot open plasma file '%s' "
+             "(missing or not a readable HDF5 file)", plasma_path.c_str());
+    error->all(FLERR, msg);
+  }
 
   auto read1D = [&](const std::string &name, std::vector<double> &out) {
     H5::DataSet ds = file.openDataSet(name);

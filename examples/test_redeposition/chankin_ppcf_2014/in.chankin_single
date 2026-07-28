@@ -7,6 +7,9 @@ variable            alpha index 3.0
 variable            TeV   index 100.0
 variable            ne    index 1e20
 variable            EbW   index 8.68
+variable            emodel index thompson      # emission energy model:
+                                               #   thompson <Ub_eV> | fixed_energy <E_eV>
+variable            epar  index 8.68           # Ub (thompson) or E0 (fixed_energy), eV
 variable            flux  index 1e22
 variable            nrun  index 20000
 variable            tag   index fuss
