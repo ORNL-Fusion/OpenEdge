@@ -37,9 +37,10 @@ surf_modify  core collide vac
 fix pd      background file input/plasma_st40_solps.h5 static yes
 global      pcache_nevery 10
 
-# no sheath here (conflicts with fix adapt) and no fix balance after adapt
+compute     cgeom nearest_surf/grid all wall dist surfid nx ny nz
 global      pusher plasma pd mode boris &
-            subcycles 10 bad_dt_check yes bad_dt_limit 0.5
+            subcycles 10 bad_dt_check yes bad_dt_limit 0.5 &
+            sheath boundary geom cgeom mD_amu 2.0
 
 variable    Dperp index 0.1
 fix fcd     cross_field_diffusion 1 background pd D_perp ${Dperp}

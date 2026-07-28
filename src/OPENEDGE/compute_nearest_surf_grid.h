@@ -37,6 +37,7 @@ class ComputeNearestSurfGrid : public Compute {
   int nvalue;
   int *value;
   int computed_once;           // 1 after first compute (static geometry cache)
+  cellint stamp_id0_ = -1;     // first-cell id at last reallocate
 
   enum {DIST,SURFID,NX,NY,NZ,SURFIDX};
 };

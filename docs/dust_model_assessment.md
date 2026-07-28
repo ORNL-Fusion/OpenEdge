@@ -148,6 +148,12 @@ Closed since this assessment was written:
 - `grain/*` style aliases; grain sources deduplicated into `src/`
 - docs/fixes/*.md rewritten against actual syntax
 
+Resolved 2026-07-28 (late): sheath + fix adapt now work together — fix adapt
+already reallocates per-grid computes via grid->notify_changed(), and the
+mover now re-invokes the sheath geometry compute per step so it recomputes
+after refinement instead of silently switching off. The earlier "bus error"
+was the fix-balance-after-adapt bug, not sheath.
+
 Still open (lower priority):
 - T-dependent material properties (Cp(T), emissivity(T))
 - flow-shifted OML ion current in charging (F_Gamma(u))

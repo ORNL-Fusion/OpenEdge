@@ -1379,6 +1379,16 @@ template < int DIM, int SURF, int OPT > void Update::move()
   const int pw_idx = particle->find_custom((char *) "pweight");
   const int pw_ewhich = (pw_idx >= 0) ? particle->ewhich[pw_idx] : -1;
 
+  // Sheath geometry compute: fix adapt reallocates per-grid computes
+  // (grid->notify_changed), zeroing midx_grid and invalidating its static
+  // cache. Re-evaluate before this move reads it, else the sheath model
+  // silently switches off after the first grid adaptation. The call
+  // no-ops whenever the cached geometry is still valid.
+  if (sheath_flag && sheath_geom_cidx >= 0) {
+    Compute *cg_sh = modify->compute[sheath_geom_cidx];
+    if (cg_sh) cg_sh->compute_per_grid();
+  }
+
   // one or more loops over particles
   // first iteration = all my particles
   // subsequent iterations = received particles

@@ -205,7 +205,11 @@ void ComputeNearestSurfGrid::compute_per_grid()
 
 void ComputeNearestSurfGrid::reallocate()
 {
-  if (grid->nlocal == nglocal) return;
+  // Change detection: cell count AND first-cell id (a balance/migration
+  // can relabel cells while keeping nlocal equal on a rank).
+  const cellint id0 = (grid->nlocal > 0 && grid->cells) ? grid->cells[0].id : -1;
+  if (grid->nlocal == nglocal && id0 == stamp_id0_) return;
+  stamp_id0_ = id0;
   memory->destroy(vector_grid);
   memory->destroy(array_grid);
   memory->destroy(midx_grid);
