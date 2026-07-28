@@ -76,6 +76,9 @@ class FixDropletEmit : public FixEmit {
   double magVelocity;
   int user_speed_range;
   double vmin, vmax;
+  double nweight_;          // real grains per macro-grain (grain_nweight)
+  int nw_custom_;           // custom index, -1 = feature off
+  void stamp_nweight(int);
   int angle_cosine;   // 0 = uniform-in-theta (default), 1 = Knudsen cosine
 
   // copies of data from other classes

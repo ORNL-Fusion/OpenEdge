@@ -260,7 +260,11 @@ double ProcessLibrary::TrimSputterTable::yield(double E_eV,
                                                double theta_deg) const
 {
   if (!valid()) return 0.0;
-  const double le = std::log(std::min(std::max(E_eV, E.front()), E.back()));
+  // Below the table's lowest energy = below threshold -> no sputtering
+  // (clamping upward would fabricate yield near/below threshold for
+  // sparse tables, e.g. d_on_w starting at 250 eV).
+  if (E_eV < E.front()) return 0.0;
+  const double le = std::log(std::min(E_eV, E.back()));
   const double a  = std::min(std::max(theta_deg, theta.front()), theta.back());
   int ie = int(std::lower_bound(E.begin(), E.end(), std::exp(le)) - E.begin());
   int ia = int(std::lower_bound(theta.begin(), theta.end(), a) - theta.begin());

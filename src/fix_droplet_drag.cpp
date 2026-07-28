@@ -81,6 +81,12 @@ FixDropletDrag::FixDropletDrag(SPARTA *sparta, int narg, char **arg)
       imix = particle->find_mixture(arg[iarg+1]);
       if (imix < 0) error->all(FLERR, "fix drag: unknown mixture ID");
       iarg += 2;
+    } else if (strcmp(arg[iarg], "coulomb/self") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR, "fix drag: coulomb/self yes|no");
+      if      (strcmp(arg[iarg+1], "yes") == 0) self_consistent_ = 1;
+      else if (strcmp(arg[iarg+1], "no")  == 0) self_consistent_ = 0;
+      else error->all(FLERR, "fix drag: coulomb/self must be yes or no");
+      iarg += 2;
     } else if (strcmp(arg[iarg], "material") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "fix drag: missing material name");
       if (strlen(arg[iarg+1]) >= sizeof(mat_name_))
@@ -129,6 +135,11 @@ void FixDropletDrag::init()
   pd_ = dynamic_cast<FixBackground *>(modify->fix[ifix]);
   if (!pd_)
     error->all(FLERR, "fix drag: background fix must be style background");
+
+  dq_custom_ = particle->find_custom((char *) "droplet_charge");
+  if (self_consistent_ && dq_custom_ < 0 && comm->me == 0)
+    error->warning(FLERR, "fix drag: coulomb/self without fix grain/charge - "
+                   "chi falls back to 0 (collection drag only)");
 
   // Optional grain material: overrides the legacy hardcoded Li density
   // used in the Epstein frequency (rho_d = 534 kg/m^3).
@@ -215,7 +226,44 @@ void FixDropletDrag::kick_half(double dt_half)
           const double dv1 = p.v[1] - upar[1];
           const double dv2 = p.v[2] - upar[2];
           const double u   = std::sqrt(dv0*dv0 + dv1*dv1 + dv2*dv2) / vth_i;
-          nuE *= coulomb_multiplier(u);
+          if (!self_consistent_) {
+            nuE *= coulomb_multiplier(u);
+          } else {
+            // Per-particle chi/delta/lnLambda from the OML charge and the
+            // local plasma (DUSTT ion-drag closure, Hutchinson-fit lnL).
+            const double QE   = update->echarge;
+            const double EPS0 = 8.8541878128e-12;
+            const double Te_eV = std::max(pd_->interp2D(pd_->temp_e, R, Z, p.icell), 0.0);
+            const double ne    = std::max(pd_->interp2D(pd_->dens_e, R, Z, p.icell), 0.0);
+            double chi = 0.0;
+            if (dq_custom_ >= 0 && Te_eV > 0.0) {
+              const int ew = particle->ewhich[dq_custom_];
+              if (ew >= 0) {
+                const double Zd   = particle->edvec[ew][ip];
+                const double r_c  = std::max(rd, 1.0e-9);
+                const double phiV = Zd * QE / (4.0 * MY_PI * EPS0 * r_c);
+                if (std::isfinite(phiV) && phiV < 0.0)
+                  chi = std::min(-phiV / Te_eV, 20.0);
+              }
+            }
+            const double delta = (Te_eV > 0.0)
+              ? std::max(Ti_eV / Te_eV, 1.0e-6) : 1.0;
+            double lnlam = 0.0;
+            if (ne > 0.0 && Te_eV > 0.0 && chi > 0.0) {
+              const double TiJ  = Ti_eV * QE;
+              const double TeJ  = Te_eV * QE;
+              const double mve2 = TiJ * (3.0 + 2.0*u*u);
+              const double b90  = rd * chi * TeJ / mve2;
+              const double lamD = std::sqrt(EPS0 * TeJ / (ne * QE * QE));
+              const double lams = lamD / std::sqrt(1.0 + 3.0*TeJ/mve2);
+              const double eta  = 1.0 + (rd/lams)
+                                  * (1.0 + std::sqrt(Te_eV/(6.0*Ti_eV)));
+              lnlam = 0.5 * std::log((b90*b90 + (eta*lams)*(eta*lams))
+                                     / (b90*b90 + rd*rd));
+              if (!(lnlam > 0.0)) lnlam = 0.0;
+            }
+            nuE *= coulomb_multiplier(u, chi, delta, lnlam);
+          }
         } else nuE = 0.0;
       }
     }
@@ -266,9 +314,15 @@ double FixDropletDrag::epstein_nu(double Ni, double Ti_eV, double rd_m) const
 
 double FixDropletDrag::coulomb_multiplier(double u) const
 {
+  return coulomb_multiplier(u, chi_coulomb, delta_ite, ln_lambda_coulomb);
+}
+
+double FixDropletDrag::coulomb_multiplier(double u, double chi, double delta,
+                                          double lnlam) const
+{
   const double sqrt_pi    = std::sqrt(MY_PI);
   const double ueff       = std::max(u, 1.0e-8);
-  const double chi_over_d = chi_coulomb / std::max(delta_ite, 1.0e-12);
+  const double chi_over_d = chi / std::max(delta, 1.0e-12);
   const double e2         = std::exp(-ueff * ueff);
   const double erf_u      = std::erf(ueff);
 
@@ -280,7 +334,7 @@ double FixDropletDrag::coulomb_multiplier(double u) const
   const double xi_coll = cp * (ca + cb);
 
   const double Y      = erf_u - (2.0 * ueff / sqrt_pi) * e2;
-  const double xi_orb = 2.0 * chi_over_d * chi_over_d * ln_lambda_coulomb
+  const double xi_orb = 2.0 * chi_over_d * chi_over_d * lnlam
                         * (Y / ueff);
 
   const double xi = xi_coll + xi_orb;

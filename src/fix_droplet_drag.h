@@ -54,6 +54,8 @@ class FixDropletDrag : public Fix {
   double rho_d             = 534.0;   // overridden by `material NAME`
   double alpha_E           = 1.26;
   char   mat_name_[16]     = "";      // optional grain material
+  int    self_consistent_  = 0;       // coulomb/self: per-particle chi/delta/lnL
+  int    dq_custom_        = -1;      // droplet_charge custom index
 
   double chi_coulomb       = 0.0;
   double delta_ite         = 1.0;
@@ -70,6 +72,8 @@ class FixDropletDrag : public Fix {
   void kick_half(double dt_half);
   double epstein_nu(double Ni, double Ti_eV, double rd_m) const;
   double coulomb_multiplier(double u) const;
+  double coulomb_multiplier(double u, double chi, double delta,
+                            double lnlam) const;
 };
 
 }

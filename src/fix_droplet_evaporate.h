@@ -70,6 +70,7 @@ class FixDropletEvaporate : public Fix {
   int heating_mode_;
   double ion_mass_amu_;   // background ion mass for the OML ion flux
   int dq_custom_;         // droplet_charge custom index (-1 = none)
+  int nw_custom_;         // grain_nweight custom index (-1 = none)
   void end_of_step() override;
   void start_of_step() override;
 

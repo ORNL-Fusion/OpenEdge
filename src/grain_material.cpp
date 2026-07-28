@@ -1,5 +1,5 @@
 /* ----------------------------------------------------------------------
-   OpenEdge - grain material registry + `material` input command.
+   OpenEdge: grain material registry + `material` input command.
    See grain_material.h for usage.
 ------------------------------------------------------------------------- */
 
@@ -34,9 +34,9 @@ using namespace SPARTA_NS;
 
 static std::vector<GrainMaterial> registry = {
   { "Li", 534.0, 4200.0, 6.94, 1.47e5, 5.055, -8023.0,
-    0.10, 2.9, 1.2e6, 453.7, 3.0e3 },
+    0.10, 2.9, 1.2e6, 453.7, 3.0e3, 0.0 },
   { "B", 2340.0, 2000.0, 10.81, 5.65e5, 8.64, -32030.0,
-    0.80, 4.45, 1.2e6, 2349.0, 5.02e4 },
+    0.80, 4.45, 1.2e6, 2349.0, 5.02e4, 1.0e9 },
 };
 
 const GrainMaterial *SPARTA_NS::grain_material_find(const char *name)
@@ -57,7 +57,7 @@ GrainMaterial *SPARTA_NS::grain_material_define(const char *name)
   m.antoine_a = 0.0; m.antoine_b = 0.0;
   m.emissivity = 0.0;
   m.work_function_eV = -1.0; m.richardson_A = 1.2e6;
-  m.tmelt_K = -1.0; m.hmelt_J_mol = 0.0;
+  m.tmelt_K = -1.0; m.hmelt_J_mol = 0.0; m.tensile_Pa = 0.0;
   registry.push_back(m);
   return &registry.back();
 }
@@ -90,6 +90,7 @@ void MaterialCmd::command(int narg, char **arg)
     else if (strcmp(key, "richardson_A") == 0)     m->richardson_A = v;
     else if (strcmp(key, "tmelt_K") == 0)          m->tmelt_K = v;
     else if (strcmp(key, "hmelt_J_mol") == 0)      m->hmelt_J_mol = v;
+    else if (strcmp(key, "tensile_Pa") == 0)       m->tensile_Pa = v;
     else {
       char msg[128];
       snprintf(msg, sizeof(msg), "material: unknown keyword '%s'", key);

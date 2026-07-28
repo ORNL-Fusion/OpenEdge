@@ -1,52 +1,26 @@
-# `fix droplet/drag` — drag force on droplets
+# fix grain/drag (droplet/drag)
 
-Adds Epstein (free-molecular) or Coulomb-collisional drag to each
-droplet, plus optional gravity. The drag force is applied as a
-velocity update per timestep using the local plasma flow and
-temperature from `fix background`.
+Epstein (free-molecular) drag toward the background parallel flow, exact
+exponential integrator, gravity folded in.
 
-## Syntax
+    fix ID grain/drag Nevery A_bg Z_bg background PD [keywords]
 
-```
-fix ID droplet/drag <Nevery> <Z_bg> <A_bg> background <plasma_fix> \
-    [model epstein|coulomb] \
-    [coulomb/chi <chi>] [coulomb/delta <delta>] [coulomb/lnlambda <ll>] \
-    [gravity <gx> <gy> <gz>] \
-    [radius <r>] [mass <m>] [temp <T>]
-```
+Keywords:
 
-| arg | meaning | default |
-|---|---|---|
-| `Z_bg, A_bg` | background ion charge + mass (amu) | required positional |
-| `background <fix_id>` | plasma source for $\rho, T, V_\|$ | required |
-| `model epstein` | free-molecular drag (mean free path ≫ droplet) | default |
-| `model coulomb` | charged-particle pickup with three tuning constants | optional |
-| `gravity <gx> <gy> <gz>` | extra body-force in physical (R, Z, φ) coords | `0 0 0` |
-| `coulomb/chi`, `coulomb/delta`, `coulomb/lnlambda` | Coulomb-mode parameters | model-specific |
+- `gravity gx gy gz` — physical (R, Z, phi) components; mapped to SPARTA
+  slots internally (do not combine with `fix gravity`).
+- `model epstein|coulomb` — Coulomb adds the ion-drag multiplier
+  (collection + orbit terms).
+- `coulomb/self yes|no` — compute chi, delta = Ti/Te and lnLambda per
+  particle from the OML charge (`grain/charge`) and local plasma
+  (DUSTT closure, Hutchinson-fit lnLambda). Without it the three
+  constants below are used.
+- `coulomb/chi V`, `coulomb/delta V`, `coulomb/lnlambda V` — manual values
+  (defaults 0 / 1 / 10).
+- `material NAME` — grain density for the Epstein frequency (default: the
+  legacy hardcoded Li 534 kg/m³).
+- `mass|radius|temp V` — seed values for particles missing attributes.
+- `mixture ID` — restrict to a mixture (default: all particles).
 
-## Physics
-
-**Epstein drag** — Northrup–Stannard form for a sphere in a flowing
-collisionless plasma:
-
-$$
-\mathbf{F}_d = -\frac{8}{3}\sqrt{\tfrac{2\pi m_i T_i}{\pi}}
-              \, n_i\, r^2\, (\mathbf{v}_d - \mathbf{V}_\|).
-$$
-
-**Coulomb drag** — used when the droplet is strongly charged so the
-Yukawa-screened cross-section dominates. The three constants
-$(\chi, \delta, \ln\Lambda)$ pick between standard parametrisations
-(Khrapak vs. Khrapak-Morfill, screening mode).
-
-## Example
-
-```
-fix pd    background file plasma.h5 static yes
-fix fdrag droplet/drag 1 1 2.0 background pd model epstein gravity 0 -9.81 0
-```
-
-## Files
-
-- `src/OPENEDGE/fix_droplet_drag.{h,cpp}`
-- See `examples/test_droplet_drag` for the validation case.
+nu_E = alpha_E·rho_gas·v_th,i/(rho_d·R); update
+v = u_par + (v − u_par − g/nu)·exp(−nu·dt) + g/nu (unconditionally stable).

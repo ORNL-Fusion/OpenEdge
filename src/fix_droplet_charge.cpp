@@ -5,6 +5,8 @@
 #include "fix_droplet_charge.h"
 #include "fix_background.h"
 #include "grain_material.h"
+#include "random_knuth.h"
+#include "random_mars.h"
 #include "update.h"
 #include "grid.h"
 #include "particle.h"
@@ -137,13 +139,17 @@ void FixDropletCharge::init()
   // Optional grain material: supplies thermionic work function and
   // Richardson constant unless the explicit keywords overrode them.
   if (mat_name_[0]) {
-    const GrainMaterial *mat = grain_material_find(mat_name_);
-    if (!mat)
+    mat_ = grain_material_find(mat_name_);
+    if (!mat_)
       error->all(FLERR, "fix droplet/charge: unknown material");
-    if (!wf_set_ && mat->work_function_eV > 0.0)
-      work_function_eV = mat->work_function_eV;
-    if (!ra_set_ && mat->richardson_A > 0.0)
-      richardson_A = mat->richardson_A;
+    if (!wf_set_ && mat_->work_function_eV > 0.0)
+      work_function_eV = mat_->work_function_eV;
+    if (!ra_set_ && mat_->richardson_A > 0.0)
+      richardson_A = mat_->richardson_A;
+  }
+  if (!random_) {
+    random_ = new RanKnuth(update->ranmaster->uniform());
+    random_->reset(comm->me + 1, comm->me, 100);
   }
 
   if (qcustom < 0)
@@ -284,5 +290,57 @@ void FixDropletCharge::apply_charge_update()
     if (!std::isfinite(zd)) continue;
 
     qvec[ip] = zd;
+
+    // Electrostatic disruption (DUSTT): critical potential
+    // phi* = beta * sqrt(F_t[dyne/cm^2]) * R_d[um] volts. Solids only
+    // (tensile_Pa = 0 disables; e.g. liquid Li). Splits are deferred to
+    // after the loop: add_particle reallocates edvec/particles.
+    if (mat_ && mat_->tensile_Pa > 0.0) {
+      const double phistar = breakup_beta_
+        * std::sqrt(10.0 * mat_->tensile_Pa) * (rd * 1.0e6);
+      if (std::fabs(phi_s) > phistar) split_list_.push_back(ip);
+    }
+  }
+
+  if (!split_list_.empty()) {
+    const int nw_custom = particle->find_custom((char *) "grain_nweight");
+    const double gamma = std::pow(2.0, -1.0/3.0);
+    for (int ip : split_list_) {
+      Particle::OnePart &p = particle->particles[ip];
+      if (!(p.radius > 0.0) || !(p.mass > 0.0)) continue;
+      // fragment kinematics: two equal halves, gamma = 2^(-1/3) radius
+      // (exactly mass-conserving), small isotropic separation kick
+      double kick[3];
+      const double th = 2.0 * MY_PI * random_->uniform();
+      kick[0] = 0.1 * std::cos(th); kick[1] = 0.1 * std::sin(th); kick[2] = 0.0;
+      double xnew[3] = {p.x[0], p.x[1], p.x[2]};
+      double vnew[3] = {p.v[0] + kick[0], p.v[1] + kick[1], p.v[2] + kick[2]};
+      const double m_half = 0.5 * p.mass;
+      const double r_frag = gamma * p.radius;
+      const double t_frag = p.temp;
+      const int    isp    = p.ispecies;
+      const int    icell  = p.icell;
+      int newid = MAXSMALLINT * random_->uniform();
+      particle->add_particle(newid, isp, icell, xnew, vnew, 0.0, 0.0);
+      if (modify->n_update_custom) {
+        double zv[3] = {0.0, 0.0, 0.0};
+        modify->update_custom(particle->nlocal - 1, 0.0, 0.0, 0.0, zv);
+      }
+      // re-fetch everything after add_particle (reallocation)
+      Particle::OnePart &pn = particle->particles[particle->nlocal - 1];
+      Particle::OnePart &po = particle->particles[ip];
+      pn.radius = r_frag; pn.mass = m_half; pn.temp = t_frag;
+      po.radius = r_frag; po.mass = m_half;
+      po.v[0] -= kick[0]; po.v[1] -= kick[1]; po.v[2] -= kick[2];
+      double *qv = particle->edvec[particle->ewhich[qcustom]];
+      qv[particle->nlocal - 1] = 0.5 * qv[ip];
+      qv[ip] *= 0.5;
+      if (nw_custom >= 0) {
+        double *nwv = particle->edvec[particle->ewhich[nw_custom]];
+        nwv[particle->nlocal - 1] = nwv[ip];
+      }
+      ++nbreak_;
+    }
+    split_list_.clear();
   }
 }

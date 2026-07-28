@@ -27,6 +27,7 @@ FixStyle(droplet_charge,FixDropletCharge)
 #define SPARTA_FIX_DROPLET_CHARGE_H
 
 #include "fix.h"
+#include <vector>
 #include <string>
 
 namespace SPARTA_NS {
@@ -58,6 +59,11 @@ class FixDropletCharge : public Fix {
   char   mat_name_[16]    = "";   // optional grain material (init() applies)
   int    wf_set_          = 0;    // explicit keyword overrides material
   int    ra_set_          = 0;
+  const struct GrainMaterial *mat_ = nullptr;
+  class RanKnuth *random_ = nullptr;
+  double breakup_beta_    = 0.1;  // DUSTT electrostatic-disruption beta
+  bigint nbreak_          = 0;
+  std::vector<int> split_list_;
 
   // Optional mixture filter. -1 = no filter. >= 0 = only species in this
   // mixture's groups are charged.

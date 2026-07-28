@@ -132,3 +132,24 @@ linear in 1/T with slope ~−29000 K).
 4. Melting/solid-sublimation branch.
 5. Grain weighting for real drop rates.
 6. Self-consistent ion drag; breakup; wall interaction — after first B runs.
+
+
+## 6. Status update (2026-07-28, evening)
+
+Closed since this assessment was written:
+- material table (`material` command; Li, B built-ins) — §4.2
+- radiative cooling, OML heating option, melting band — §4.3, §4.4
+- grain statistical weighting (`grain/emit nweight` -> `grain_nweight`) — §4.6
+- self-consistent Coulomb ion drag (`grain/drag coulomb/self`) — DUSTT
+  closure with Hutchinson-fit lnLambda
+- electrostatic breakup (DUSTT critical potential; `tensile_Pa`)
+- grain-wall restitution (`surf_collide grainbounce`)
+- emit midpoint hack removed (positions uniform along segments)
+- `grain/*` style aliases; grain sources deduplicated into `src/`
+- docs/fixes/*.md rewritten against actual syntax
+
+Still open (lower priority):
+- T-dependent material properties (Cp(T), emissivity(T))
+- flow-shifted OML ion current in charging (F_Gamma(u))
+- grain sputtering as a mass-loss channel; vapor shielding
+- 3D support in grain/ablate; per-size grain distributions in emit

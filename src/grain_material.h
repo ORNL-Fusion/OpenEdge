@@ -1,5 +1,5 @@
 /* ----------------------------------------------------------------------
-   OpenEdge - grain (dust/droplet/powder) material property registry.
+   OpenEdge: grain material registry — dust/droplet/powder properties.
 
    One place for the solid/liquid material data consumed by the grain
    physics fixes (droplet/evaporate, droplet/drag, droplet/charge, ...).
@@ -40,6 +40,7 @@ struct GrainMaterial {
   double richardson_A;     // Richardson constant [A m^-2 K^-2]
   double tmelt_K;          // melting temperature [K]
   double hmelt_J_mol;      // latent heat of fusion [J/mol]
+  double tensile_Pa;       // tensile strength [Pa]; 0 = no breakup
 };
 
 // Find by name (case-sensitive). Returns nullptr if unknown.

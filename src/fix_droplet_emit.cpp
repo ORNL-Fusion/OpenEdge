@@ -74,6 +74,8 @@ FixDropletEmit::FixDropletEmit(SPARTA *sparta, int narg, char **arg) :
   magVelocity = 0.0;
   user_speed_range = 0;
   vmin = vmax = 0.0;
+  nweight_ = 1.0;
+  nw_custom_ = -1;
   angle_cosine = 0;
 
   nrho_custom_flag = temp_custom_flag = vstream_custom_flag =
@@ -714,7 +716,6 @@ void FixDropletEmit::perform_task_onepass()
             rn = random->uniform();
             p1 = &tasks[i].path[0];
             p2 = &tasks[i].path[3];
-            rn =0.5;
             x[0] = p1[0] + rn * (p2[0]-p1[0]);
             x[1] = p1[1] + rn * (p2[1]-p1[1]);
             x[2] = 0.0;
@@ -809,6 +810,7 @@ void FixDropletEmit::perform_task_onepass()
           if (nfix_update_custom)
             modify->update_custom(particle->nlocal-1,temp_thermal,
                                   temp_rot,temp_vib,vstream);
+          stamp_nweight(particle->nlocal-1);
         }
 
         nsingle += nactual;
@@ -852,7 +854,6 @@ void FixDropletEmit::perform_task_onepass()
           double x1 = 0.5 * (p1[0] + p2[0]);
           double x2 = 0.5 * (p1[1] + p2[1]);
           // printf("Midpoint: x=%f y=%f\n",x1,x2);
-          rn=0.5;
           x[0] = p1[0] + rn * (p2[0]-p1[0]);
           x[1] = p1[1] + rn * (p2[1]-p1[1]);
           x[2] = 0.0;
@@ -954,6 +955,7 @@ void FixDropletEmit::perform_task_onepass()
         if (nfix_update_custom)
           modify->update_custom(particle->nlocal-1,temp_thermal,
                                temp_rot,temp_vib,vstream);
+          stamp_nweight(particle->nlocal-1);
       }
 
       nsingle += nactual;
@@ -1079,7 +1081,6 @@ void FixDropletEmit::perform_task_twopass()
             rn = random->uniform();
             p1 = &tasks[i].path[0];
             p2 = &tasks[i].path[3];
-            rn =0.5;
             x[0] = p1[0] + rn * (p2[0]-p1[0]);
             x[1] = p1[1] + rn * (p2[1]-p1[1]);
             x[2] = 0.0;
@@ -1174,6 +1175,7 @@ void FixDropletEmit::perform_task_twopass()
           if (nfix_update_custom)
             modify->update_custom(particle->nlocal-1,temp_thermal,
                                   temp_rot,temp_vib,vstream);
+          stamp_nweight(particle->nlocal-1);
         }
 
         nsingle += nactual;
@@ -1202,7 +1204,6 @@ void FixDropletEmit::perform_task_twopass()
           rn = random->uniform();
           p1 = &tasks[i].path[0];
           p2 = &tasks[i].path[3];
-          rn = 0.5;
           x[0] = p1[0] + rn * (p2[0]-p1[0]);
           x[1] = p1[1] + rn * (p2[1]-p1[1]);
           x[2] = 0.0;
@@ -1298,6 +1299,7 @@ void FixDropletEmit::perform_task_twopass()
         if (nfix_update_custom)
           modify->update_custom(particle->nlocal-1,temp_thermal,
                                temp_rot,temp_vib,vstream);
+          stamp_nweight(particle->nlocal-1);
       }
 
       nsingle += nactual;
@@ -1791,6 +1793,16 @@ void FixDropletEmit::options2(int narg, char **arg)
     // Uniform per-emit speed sampling in [vmin, vmax]. Bypasses the
     // mixture-temperature Maxwellian; angular spread still uses
     // incidentAngle if set, else uniform [0, 90 deg) about the normal.
+    if (strcmp(arg[iarg], "nweight") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: nweight <N>");
+      nweight_ = input->numeric(FLERR, arg[iarg+1]);
+      if (nweight_ <= 0.0) error->all(FLERR,"fix emit/droplet: nweight must be > 0");
+      nw_custom_ = particle->find_custom((char *) "grain_nweight");
+      if (nw_custom_ < 0)
+        nw_custom_ = particle->add_custom((char *) "grain_nweight",DOUBLE,0);
+      iarg += 2;
+      continue;
+    }
     if (strcmp(arg[iarg], "vmin") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: vmin <m/s>");
       vmin = atof(arg[iarg+1]);
@@ -1828,4 +1840,18 @@ void FixDropletEmit::options2(int narg, char **arg)
     if (consumed <= 0) error->all(FLERR,"Illegal fix emit/droplet option");
     iarg += consumed;
   }
+}
+
+/* ----------------------------------------------------------------------
+   stamp grain_nweight on a newly emitted grain (real grains per
+   macro-grain). No-op unless the nweight keyword was used. edvec is
+   re-fetched per call: add_particle can reallocate it.
+------------------------------------------------------------------------- */
+
+void FixDropletEmit::stamp_nweight(int i)
+{
+  if (nw_custom_ < 0) return;
+  const int ew = particle->ewhich[nw_custom_];
+  if (ew < 0) return;
+  particle->edvec[ew][i] = nweight_;
 }

@@ -71,6 +71,7 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
   heating_mode_(0),
   ion_mass_amu_(2.0),
   dq_custom_(-1),
+  nw_custom_(-1),
   evap_atoms_local_(0.0),
   pd_(nullptr),
   emit_imix(-1),
@@ -209,6 +210,7 @@ void FixDropletEvaporate::init()
   // OML heating uses the grain's OML charge when fix droplet/charge is
   // active (custom vector registered by that fix); else chi defaults.
   dq_custom_ = particle->find_custom((char *) "droplet_charge");
+  nw_custom_ = particle->find_custom((char *) "grain_nweight");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -458,9 +460,18 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
   if (!std::isfinite(T_new) || T_new < 0.0)
     error->one(FLERR,"Fix evaporation: particle temperature dropped below 0 K");
 
-  // Tally cumulative real Li atoms evaporated from this droplet over the
-  // half-step. Each macro-particle = 1 real droplet (specwt=1 expected).
-  evap_atoms_local_ += evap_atoms_step;
+  // grain_nweight: one macro-grain represents nw real grains (set by
+  // grain/emit nweight). Scales the atom tally and the vapor source;
+  // per-grain trajectory/heating physics is unscaled.
+  double nw = 1.0;
+  if (nw_custom_ >= 0) {
+    const int ew = particle->ewhich[nw_custom_];
+    if (ew >= 0) {
+      const double v = particle->edvec[ew][idrop];
+      if (v > 0.0) nw = v;
+    }
+  }
+  evap_atoms_local_ += evap_atoms_step * nw;
 
   // Rocket-force kick (in-place velocity update via fresh pointer).
   if (rocket_eta > 0.0 && m_new > 0.0 && evap_atoms_step > 0.0) {
@@ -491,7 +502,7 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
   // Must precede the final ip-> write (spawn may realloc the particle array).
   if (emit_imix >= 0 && evap_atoms_step > 0.0 && radius > 0.0) {
     const double area = 4.0 * MY_PI * radius * radius;
-    const double Gevap_emit = evap_atoms_step / (area * DT);
+    const double Gevap_emit = nw * evap_atoms_step / (area * DT);
     const double T_emit = std::max(1.0, 0.5 * (TK + T_new));
     spawn_evap_atoms(idrop, area, Gevap_emit, T_emit, dt_half);
   }
