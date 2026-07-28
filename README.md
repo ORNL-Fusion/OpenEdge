@@ -43,15 +43,21 @@ Set `Kokkos_ARCH_*` to your GPU (`AMPERE80`, `HOPPER90`, `VOLTA70`,
 CPU (MPI):
 
 ```bash
-cd OpenEdge/examples/test_west_axi
-mpirun -np 8 ../../../buildOpenEdge/src/spa_mpi -in in.west
+cd OpenEdge/examples/test_west_cases/axi_1p5MW_plasma_bkg
+mpirun -np 8 ../../../../buildOpenEdge/src/spa_mpi -in in.axi_west_emission
 ```
 
 GPU (Kokkos + CUDA, one rank per GPU):
 
 ```bash
-mpirun -np 1 ../../../buildOpenEdge_gpu/src/spa_mpi \
-    -k on g 1 -sf kk -in in.west
+mpirun -np 1 ../../../../buildOpenEdge_gpu/src/spa_mpi \
+    -k on g 1 -sf kk -in in.axi_west_emission
+```
+
+Quick sanity check of the whole suite:
+
+```bash
+./regression/run_regression.sh --exe path/to/spa_mpi
 ```
 
 Outputs (log, dumps, surface tallies) land in the case directory. See
