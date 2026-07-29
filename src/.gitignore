@@ -104,3 +104,8 @@
 /remap3d.cpp
 /remap3d.h
 /spafftsettings.h
+
+/python_compat.h
+/python_impl.cpp
+/python_impl.h
+/python_utils.h

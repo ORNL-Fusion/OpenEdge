@@ -24,8 +24,6 @@
 #include "input.h"
 #include "memory.h"
 #include "error.h"
-#include "spatype.h"
-
 
 using namespace SPARTA_NS;
 
@@ -110,7 +108,7 @@ DumpTally::DumpTally(SPARTA *sparta, int narg, char **arg) :
     else if (vtype[i] == INT) strcat(format_default,"%d ");
     else if (vtype[i] == BIGINT) strcat(format_default,BIGINT_FORMAT " ");
     else if (vtype[i] == UINT) strcat(format_default,"%u ");
-    else if (vtype[i] == BIGUINT) strcat(format_default,"%" PRIu64 " ");
+    else if (vtype[i] == BIGUINT) strcat(format_default,BIGUINT_FORMAT " ");
     else if (vtype[i] == STRING) strcat(format_default,"%s ");
     vformat[i] = NULL;
   }

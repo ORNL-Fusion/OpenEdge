@@ -41,8 +41,6 @@ class ComputeSurfCollisionTally : public Compute {
 
  protected:
   int groupbit,imix,nvalue;
-  int allgroup;
-  int include_reactions;
   int *which;
 
   int ntally;              // # of surfs I have tallied for

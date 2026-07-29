@@ -39,14 +39,12 @@ ComputeSurfCollisionTally::ComputeSurfCollisionTally(SPARTA *sparta, int narg, c
   int igroup = surf->find_group(arg[2]);
   if (igroup < 0) error->all(FLERR,"Compute surf/collision/tally group ID does not exist");
   groupbit = surf->bitmask[igroup];
-  allgroup = (strcmp(arg[2],"all") == 0);
 
   imix = particle->find_mixture(arg[3]);
   if (imix < 0) error->all(FLERR,"Compute surf/collision/tally mixture ID does not exist");
 
   nvalue = narg - 4;
   which = new int[nvalue];
-  include_reactions = 0;
 
   // process input values
 
@@ -66,21 +64,8 @@ ComputeSurfCollisionTally::ComputeSurfCollisionTally(SPARTA *sparta, int narg, c
     else if (strcmp(arg[iarg],"vx/post") == 0) which[nvalue++] = VXPOST;
     else if (strcmp(arg[iarg],"vy/post") == 0) which[nvalue++] = VYPOST;
     else if (strcmp(arg[iarg],"vz/post") == 0) which[nvalue++] = VZPOST;
-    else break;
+    else error->all(FLERR,"Invalid value for compute surf/collision/tally");
     iarg++;
-  }
-
-  // optional keywords
-
-  while (iarg < narg) {
-    if (strcmp(arg[iarg],"reactions") == 0) {
-      if (iarg+2 > narg)
-        error->all(FLERR,"Invalid compute surf/collision/tally optional keyword");
-      if (strcmp(arg[iarg+1],"yes") == 0) include_reactions = 1;
-      else if (strcmp(arg[iarg+1],"no") == 0) include_reactions = 0;
-      else error->all(FLERR,"Invalid compute surf/collision/tally optional keyword");
-      iarg += 2;
-    } else error->all(FLERR,"Invalid value or optional keyword for compute surf/collision/tally");
   }
 
   // setup
@@ -161,16 +146,14 @@ void ComputeSurfCollisionTally::surf_tally(double dtremain, int isurf,
   // this compute only tallies collisions that do not induce a reaction
   // reactions can be tallied by compute surf/reaction/tally command
 
-  if (reaction && !include_reactions) return;
+  if (reaction) return;
 
   // skip if isurf not in surface group
 
-  if (!allgroup) {
-    if (dim == 2) {
-      if (!(lines[isurf].mask & groupbit)) return;
-    } else {
-      if (!(tris[isurf].mask & groupbit)) return;
-    }
+  if (dim == 2) {
+    if (!(lines[isurf].mask & groupbit)) return;
+  } else {
+    if (!(tris[isurf].mask & groupbit)) return;
   }
 
   // skip if particle species not in mixture group
@@ -195,12 +178,10 @@ void ComputeSurfCollisionTally::surf_tally(double dtremain, int isurf,
       else vec[m] = ubuf(tris[isurf].id).d;
       break;
     case ID:
-      if (ip) vec[m] = ubuf(ip->id).d;
-      else vec[m] = ubuf(iorig->id).d;
+      vec[m] = ubuf(ip->id).d;
       break;
     case TYPE:
-      if (ip) vec[m] = ubuf(ip->ispecies+1).d;
-      else vec[m] = ubuf(iorig->ispecies+1).d;
+      vec[m] = ubuf(ip->ispecies+1).d;
       break;
     case XC:
       vec[m] = iorig->x[0];
@@ -224,13 +205,13 @@ void ComputeSurfCollisionTally::surf_tally(double dtremain, int isurf,
       vec[m] = iorig->v[2];
       break;
     case VXPOST:
-      vec[m] = ip ? ip->v[0] : iorig->v[0];
+      vec[m] = ip->v[0];
       break;
     case VYPOST:
-      vec[m] = ip ? ip->v[1] : iorig->v[1];
+      vec[m] = ip->v[1];
       break;
     case VZPOST:
-      vec[m] = ip ? ip->v[2] : iorig->v[2];
+      vec[m] = ip->v[2];
       break;
     }
   }

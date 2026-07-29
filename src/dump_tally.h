@@ -76,28 +76,6 @@ class DumpTally : public Dump {
   FnPtrPack *pack_choice;              // ptrs to pack functions
 
   void pack_compute(int);
-
-  // union data struct for packing 32-bit and 64-bit ints into double bufs
-  // this avoids aliasing issues by having 3 pointers (double,int,uint)
-  //   to same buf memory
-  // constructor for 32-bit int or uint prevents compiler
-  //   from possibly calling the double constructor when passed an int/uint
-  // copy to a double *buf:
-  //   buf[m++] = ubuf(foo).d, where foo is a 32-bit or 64-bit int or uint
-  // copy from a double *buf:
-  //   foo = (int) ubuf(buf[m++]).i or foo = (uint64_t) ubuf(buf[m++]).u
-  //   the cast prevents compiler warnings about possible truncation
-
-  union ubuf {
-    double d;
-    int64_t i;
-    uint64_t u;
-    ubuf(double arg) : d(arg) {}
-    ubuf(int64_t arg) : i(arg) {}
-    ubuf(int arg) : i(arg) {}
-    ubuf(uint64_t arg) : u(arg) {}
-    ubuf(uint32_t arg) : u(arg) {}
-  };
 };
 
 }
