@@ -7,6 +7,7 @@
 https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
+#include <cmath>
 #include "math.h"
 #include "surf_react_mpex.h"
 #include "input.h"

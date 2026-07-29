@@ -12,6 +12,7 @@
    See the README file in the top-level SPARTA directory.
 ------------------------------------------------------------------------- */
 
+#include <cmath>
 #include "math.h"
 #include "stdlib.h"
 #include "string.h"

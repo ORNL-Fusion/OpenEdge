@@ -10,6 +10,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #ifndef SPARTA_UPDATE_H
 #define SPARTA_UPDATE_H
 
+#include <cmath>
 #include "math.h"
 #include "pointers.h"
 

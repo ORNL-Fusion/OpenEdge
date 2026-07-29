@@ -6,6 +6,8 @@
     https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
+#include <cmath>
+#include <algorithm>
 #include "stdlib.h"
 #include "string.h"
 #include <unistd.h>

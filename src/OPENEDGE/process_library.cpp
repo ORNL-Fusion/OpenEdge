@@ -19,6 +19,8 @@
    receive the same data.
 ------------------------------------------------------------------------- */
 
+#include <cmath>
+#include <algorithm>
 #include "process_library.h"
 
 #include <H5Cpp.h>

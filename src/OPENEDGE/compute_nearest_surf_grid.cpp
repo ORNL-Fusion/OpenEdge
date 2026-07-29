@@ -6,6 +6,7 @@
    compute or fix that needs cell-local wall geometry.
 ------------------------------------------------------------------------- */
 
+#include <cmath>
 #include "compute_nearest_surf_grid.h"
 
 #include <cstring>

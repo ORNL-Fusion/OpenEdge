@@ -7,6 +7,7 @@
 https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
+#include <cmath>
 #include "stdlib.h"
 #include "string.h"
 #include "fix_droplet_emit.h"

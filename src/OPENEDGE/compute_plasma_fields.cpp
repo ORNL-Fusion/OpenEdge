@@ -7,6 +7,8 @@
 https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
+#include <cmath>
+#include <algorithm>
 #include "string.h"
 #include "compute_plasma_fields.h"
 #include "fix_background.h"

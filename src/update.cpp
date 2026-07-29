@@ -7,6 +7,7 @@
 https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
+#include <cmath>
 #include "spatype.h"
 #include "mpi.h"
 #include "math.h"
