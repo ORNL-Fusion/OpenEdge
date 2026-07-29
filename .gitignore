@@ -19,7 +19,9 @@ examples/**/*.png
 
 # Regression test artifacts
 examples/*/regression.log
+examples/*/*/regression.log
 examples/*/in.*.regression
+examples/*/*/in.*.regression
 examples/test_iead/in.iead_alpha*
 examples/test_iead/particles_alpha*.dat
 examples/test_iead/wall.surf

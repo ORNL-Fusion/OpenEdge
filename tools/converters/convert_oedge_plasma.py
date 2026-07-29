@@ -162,12 +162,23 @@ def read_oedge_nc(nc_file: Path) -> dict:
     else:
         pot = np.zeros_like(kes)
 
-    # Parallel flow is sometimes pre-scaled by QTIM; undo if present.
+    # DIVIMP stores KVHS internally as v*QTIM, but some OUT/netCDF exports
+    # already undo the scaling. Decide by Mach number: divide by QTIM only
+    # if the raw field is far below sonic (i.e. still carries the QTIM
+    # factor); an already-physical field caps at |M| ~ 1.
     qtim = None
     if "QTIM" in ds.variables:
         qtim = float(ds.variables["QTIM"][:])
-        if qtim > 0.0:
+        crmb_amu = float(ds.variables["CRMB"][:]) if "CRMB" in ds.variables else 2.0
+        cs = np.sqrt(1.602176634e-19 * np.maximum(ktebs + ktibs, 0.1)
+                     / (crmb_amu * 1.66053906660e-27))
+        mach_raw = float(np.nanmax(np.abs(kvhs) / cs))
+        if qtim > 0.0 and mach_raw < 1.0e-3:
             kvhs = kvhs / qtim
+        elif mach_raw > 100.0:
+            raise ValueError(
+                f"KVHS max Mach = {mach_raw:.3g}: neither raw nor QTIM-scaled "
+                "interpretation is physical - inspect the netCDF")
 
     # Native polygon geometry.
     korpg  = np.asarray(ds.variables["KORPG"][:])
