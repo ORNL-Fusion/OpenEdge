@@ -76,7 +76,8 @@ def main() -> int:
         if git_show(up, args.old, f) != oe.read_bytes():
             local_mod.add(f)
 
-    safe = sorted(u_mod - local_mod)
+    # local_missing = base files OpenEdge deliberately removed; never restore
+    safe = sorted(u_mod - local_mod - local_missing)
     newf = sorted(u_new)
     dele = sorted(f for f in u_del if f not in local_mod and (ROOT / f).exists())
     conflict = sorted((u_mod | u_del) & local_mod)

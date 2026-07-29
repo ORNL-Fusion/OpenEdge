@@ -141,6 +141,7 @@ void FixEmitFace::init()
   // copies of class data before invoking parent init() and count_task()
 
   dimension = domain->dimension;
+  axisymmetric = domain->axisymmetric;
   fnum = update->fnum;
   dt = update->dt;
 
@@ -185,7 +186,7 @@ void FixEmitFace::init()
 
   double *vstream = particle->mixture[imix]->vstream;
 
-  if (domain->axisymmetric && faces[YHI] && vstream[1] != 0.0)
+  if (axisymmetric && faces[YHI] && vstream[1] != 0.0)
     error->all(FLERR,"Cannot use fix emit on axisymmetric yhi "
                "if streaming velocity has a y-component");
 
@@ -230,18 +231,26 @@ void FixEmitFace::grid_changed()
   create_tasks();
 
   // if Np > 0, nper = # of insertions per task
-  // set nthresh so as to achieve exactly Np insertions
-  // tasks > tasks_with_no_extra need to insert 1 extra particle
+  // integer part of Np is distributed deterministically:
+  //   set nthresh so as to achieve exactly npint insertions
+  //   tasks > tasks_with_no_extra need to insert 1 extra particle
+  // fractional part of Np is spread stochastically across all tasks:
+  //   each task inserts npremain_pertask + random extra particle on average
   // NOTE: currently setting same # of insertions per task
   //       could instead weight by cell face area
 
-  if (np > 0) {
+  if (np > 0.0) {
     int all,nupto,tasks_with_no_extra;
+    int npint = static_cast<int> (np);
     MPI_Allreduce(&ntask,&all,1,MPI_INT,MPI_SUM,world);
     if (all) {
-      npertask = np / all;
-      tasks_with_no_extra = all - (np % all);
-    } else npertask = tasks_with_no_extra = 0;
+      npertask = npint / all;
+      tasks_with_no_extra = all - (npint % all);
+      npremain_pertask = (np - npint) / all;
+    } else {
+      npertask = tasks_with_no_extra = 0;
+      npremain_pertask = 0.0;
+    }
 
     MPI_Scan(&ntask,&nupto,1,MPI_INT,MPI_SUM,world);
     if (tasks_with_no_extra < nupto-ntask) nthresh = 0;
@@ -401,7 +410,7 @@ void FixEmitFace::create_task(int icell)
       if (dimension == 3)
         area = (cells[icell].hi[1]-cells[icell].lo[1]) *
           (cells[icell].hi[2]-cells[icell].lo[2]);
-      else if (domain->axisymmetric)
+      else if (axisymmetric)
         area = (cells[icell].hi[1]*cells[icell].hi[1] -
                 cells[icell].lo[1]*cells[icell].lo[1])*MY_PI;
       else area = cells[icell].hi[1]-cells[icell].lo[1];
@@ -409,7 +418,7 @@ void FixEmitFace::create_task(int icell)
       if (dimension == 3)
         area = (cells[icell].hi[0]-cells[icell].lo[0]) *
           (cells[icell].hi[2]-cells[icell].lo[2]);
-      else if (domain->axisymmetric)
+      else if (axisymmetric)
         area = 2.0*MY_PI*cells[icell].hi[1] *
           (cells[icell].hi[0]-cells[icell].lo[0]);
       else area = cells[icell].hi[0]-cells[icell].lo[0];
@@ -545,7 +554,10 @@ void FixEmitFace::perform_task_onepass()
         nactual = 0;
         for (int m = 0; m < ninsert; m++) {
           x[0] = lo[0] + random->uniform() * (hi[0]-lo[0]);
-          x[1] = lo[1] + random->uniform() * (hi[1]-lo[1]);
+          if (axisymmetric)
+            x[1] = sqrt(lo[1]*lo[1] +
+                        random->uniform() * (hi[1]*hi[1]-lo[1]*lo[1]));
+          else x[1] = lo[1] + random->uniform() * (hi[1]-lo[1]);
           if (dimension == 3) x[2] = lo[2] + random->uniform() * (hi[2]-lo[2]);
           else x[2] = 0.0;
 
@@ -586,12 +598,14 @@ void FixEmitFace::perform_task_onepass()
       }
 
     } else {
-      if (np == 0) {
+      if (np == 0.0) {
         ntarget = prefactor*tasks[i].ntarget + random->uniform();
         ninsert = static_cast<int> (ntarget);
       } else {
         ninsert = npertask;
         if (i >= nthresh) ninsert++;
+        if (npremain_pertask > 0.0)
+          ninsert += static_cast<int> (npremain_pertask + random->uniform());
       }
 
       nactual = 0;
@@ -603,7 +617,10 @@ void FixEmitFace::perform_task_onepass()
         scosine = indot / vscale[isp];
 
         x[0] = lo[0] + random->uniform() * (hi[0]-lo[0]);
-        x[1] = lo[1] + random->uniform() * (hi[1]-lo[1]);
+        if (axisymmetric)
+          x[1] = sqrt(lo[1]*lo[1] +
+                      random->uniform() * (hi[1]*hi[1]-lo[1]*lo[1]));
+        else x[1] = lo[1] + random->uniform() * (hi[1]-lo[1]);
         if (dimension == 3) x[2] = lo[2] + random->uniform() * (hi[2]-lo[2]);
         else x[2] = 0.0;
 
@@ -707,12 +724,14 @@ void FixEmitFace::perform_task_twopass()
         ninsert_values[i][isp] = ninsert;
       }
     } else {
-      if (np == 0) {
+      if (np == 0.0) {
         ntarget = prefactor*tasks[i].ntarget + random->uniform();
         ninsert = static_cast<int> (ntarget);
       } else {
         ninsert = npertask;
         if (i >= nthresh) ninsert++;
+        if (npremain_pertask > 0.0)
+          ninsert += static_cast<int> (npremain_pertask + random->uniform());
       }
       ninsert_values[i][0] = ninsert;
     }
@@ -746,7 +765,10 @@ void FixEmitFace::perform_task_twopass()
         nactual = 0;
         for (int m = 0; m < ninsert; m++) {
           x[0] = lo[0] + random->uniform() * (hi[0]-lo[0]);
-          x[1] = lo[1] + random->uniform() * (hi[1]-lo[1]);
+          if (axisymmetric)
+            x[1] = sqrt(lo[1]*lo[1] +
+                        random->uniform() * (hi[1]*hi[1]-lo[1]*lo[1]));
+          else x[1] = lo[1] + random->uniform() * (hi[1]-lo[1]);
           if (dimension == 3) x[2] = lo[2] + random->uniform() * (hi[2]-lo[2]);
           else x[2] = 0.0;
 
@@ -798,7 +820,10 @@ void FixEmitFace::perform_task_twopass()
         scosine = indot / vscale[isp];
 
         x[0] = lo[0] + random->uniform() * (hi[0]-lo[0]);
-        x[1] = lo[1] + random->uniform() * (hi[1]-lo[1]);
+        if (axisymmetric)
+          x[1] = sqrt(lo[1]*lo[1] +
+                      random->uniform() * (hi[1]*hi[1]-lo[1]*lo[1]));
+        else x[1] = lo[1] + random->uniform() * (hi[1]-lo[1]);
         if (dimension == 3) x[2] = lo[2] + random->uniform() * (hi[2]-lo[2]);
         else x[2] = 0.0;
 
@@ -1160,8 +1185,8 @@ int FixEmitFace::option(int narg, char **arg)
 {
   if (strcmp(arg[0],"n") == 0) {
     if (2 > narg) error->all(FLERR,"Illegal fix emit/face command");
-    np = atoi(arg[1]);
-    if (np <= 0) error->all(FLERR,"Illegal fix emit/face command");
+    np = atof(arg[1]);
+    if (np <= 0.0) error->all(FLERR,"Illegal fix emit/face command");
     return 2;
   }
 

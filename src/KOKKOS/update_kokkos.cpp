@@ -88,7 +88,9 @@ UpdateKokkos::UpdateKokkos(SPARTA *sparta) : Update(sparta),
   sc_kk_piston_copy{VAL_2(KKCopy<SurfCollidePistonKokkos>(sparta))},
   sc_kk_transparent_copy{VAL_2(KKCopy<SurfCollideTransparentKokkos>(sparta))},
   blist_active_copy{VAL_2(KKCopy<ComputeBoundaryKokkos>(sparta))},
-  slist_active_copy{VAL_2(KKCopy<ComputeSurfKokkos>(sparta))}
+  slist_active_copy{VAL_2(KKCopy<ComputeSurfKokkos>(sparta))},
+  tmp_compute_boundary_kk(sparta),
+  tmp_compute_surf_kk(sparta)
 {
 
   // use 1D view for scalars to reduce GPU memory operations
@@ -140,6 +142,9 @@ UpdateKokkos::~UpdateKokkos()
 
   grid_kk_copy.uncopy();
   domain_kk_copy.uncopy();
+
+  tmp_compute_boundary_kk.uncopy = 1;
+  tmp_compute_surf_kk.uncopy = 1;
 
   for (int i=0; i<KOKKOS_MAX_SURF_COLL_PER_TYPE; i++) {
     sc_kk_specular_copy[i].uncopy();
@@ -530,8 +535,10 @@ void UpdateKokkos::run(int nsteps)
       timer->stamp(TIME_OUTPUT);
     }
   }
-  sparta->kokkos->auto_sync = 1;
 
+  modify->post_run();
+
+  sparta->kokkos->auto_sync = 1;
   particle_kk->sync(Host,ALL_MASK);
 }
 
@@ -2636,6 +2643,14 @@ void UpdateKokkos::tally_set(bigint ntimestep)
       compute_boundary_kk->pre_boundary_tally();
       blist_active_copy[i].copy(compute_boundary_kk);
     }
+  } else {
+    for (int i = 0; i < KOKKOS_MAX_BLIST; i++) {
+
+      // use temporary to avoid the copy getting stale leading to an issue
+      //  with view reference counting
+
+      blist_active_copy[i].copy(&tmp_compute_boundary_kk);
+    }
   }
 
   if (nsurf_tally > KOKKOS_MAX_SLIST)
@@ -2650,6 +2665,14 @@ void UpdateKokkos::tally_set(bigint ntimestep)
         error->all(FLERR,"Kokkos does not (yet) support compute surf/collision/tally or compute surf/reaction/tally");
       compute_surf_kk->pre_surf_tally();
       slist_active_copy[i].copy(compute_surf_kk);
+    }
+  } else {
+    for (int i = 0; i < KOKKOS_MAX_SLIST; i++) {
+
+      // use temporary to avoid the copy getting stale leading to an issue
+      //  with view reference counting
+
+      slist_active_copy[i].copy(&tmp_compute_surf_kk);
     }
   }
 

@@ -70,6 +70,8 @@ FixEmitSurf::FixEmitSurf(SPARTA *sparta, int narg, char **arg) :
   subsonic = 0;
   subsonic_style = NOSUBSONIC;
   subsonic_warning = 0;
+  twopass = 0;
+  max_npoint = 0;
 
   nrho_custom_flag = temp_custom_flag = vstream_custom_flag =
     speed_custom_flag = fractions_custom_flag = 0;
@@ -111,17 +113,20 @@ FixEmitSurf::FixEmitSurf(SPARTA *sparta, int narg, char **arg) :
   activecell = NULL;
 
   dimension = domain->dimension;
+  axisymmetric = domain->axisymmetric;
 
   // create instance of Cut2d,Cut3d for geometry calculations
 
   if (dimension == 3) cut3d = new Cut3d(sparta);
-  else cut2d = new Cut2d(sparta,domain->axisymmetric);
+  else cut2d = new Cut2d(sparta,axisymmetric);
 }
 
 /* ---------------------------------------------------------------------- */
 
 FixEmitSurf::~FixEmitSurf()
 {
+  if (copymode) return;
+
   delete [] npstr;
 
   delete [] nrho_custom_id;
@@ -131,13 +136,16 @@ FixEmitSurf::~FixEmitSurf()
   delete [] fractions_custom_id;
   memory->destroy(cummulative_custom);
 
-  for (int i = 0; i < ntaskmax; i++) {
-    delete [] tasks[i].ntargetsp;
-    delete [] tasks[i].vscale;
-    delete [] tasks[i].path;
-    delete [] tasks[i].fracarea;
+  if (tasks) {
+    for (int i = 0; i < ntaskmax; i++) {
+      delete [] tasks[i].ntargetsp;
+      delete [] tasks[i].vscale;
+      delete [] tasks[i].path;
+      delete [] tasks[i].fracarea;
+    }
+    memory->sfree(tasks);
   }
-  memory->sfree(tasks);
+
   memory->destroy(activecell);
 
   // deallocate Cut2d,Cut3d
@@ -198,18 +206,7 @@ void FixEmitSurf::init()
   // if used, reallocate ntargetsp and vscale for each task
   // b/c nspecies count of mixture may have changed
 
-  if (perspecies) {
-    for (int i = 0; i < ntask; i++) {
-      delete [] tasks[i].ntargetsp;
-      tasks[i].ntargetsp = new double[nspecies];
-    }
-  }
-  if (subsonic_style == PONLY) {
-    for (int i = 0; i < ntask; i++) {
-      delete [] tasks[i].vscale;
-      tasks[i].vscale = new double[nspecies];
-    }
-  }
+  realloc_nspecies();
 
   // check variable for npmode = VARIABLE
 
@@ -333,7 +330,7 @@ void FixEmitSurf::grid_changed()
   create_tasks();
 
   // if custom fractions requested and perspecies = 0,
-  // setup cummulaitve_custom array for nlocal surfs
+  // setup cummulative_custom array for nlocal surfs
 
   if (fractions_custom_flag && !perspecies) {
     int nslocal = surf->nlocal;
@@ -389,7 +386,7 @@ void FixEmitSurf::custom_surf_changed()
 
 void FixEmitSurf::create_task(int icell)
 {
-  int i,m,isurf,isp,npoint,isplit,subcell;
+  int i,m,isurf,isp,npoint,isplit,subcell,ispecies;
   double indot,area,areaone,ntargetsp;
   double *normal,*p1,*p2,*p3,*path;
   double cpath[36],delta[3],e1[3],e2[3];
@@ -444,7 +441,12 @@ void FixEmitSurf::create_task(int icell)
     // if requested, override mixture properties with custom per-surf attributes
 
     if (nrho_custom_flag) nrho = nrho_custom[isurf];
-    if (temp_custom_flag) temp_thermal_custom = temp_custom[isurf];
+    if (temp_custom_flag) {
+      temp_thermal_custom = temp_custom[isurf];
+      if (temp_thermal_custom <= 0.0)
+        error->one(FLERR,
+                   "Custom temperature for fix emit/surf must be greater than 0.0");
+    }
     if (vstream_custom_flag) vstream = vstream_custom[isurf];
     if (speed_custom_flag) magvstream = speed_custom[isurf];
     if (fractions_custom_flag) fraction = fractions_custom[isurf];
@@ -460,6 +462,13 @@ void FixEmitSurf::create_task(int icell)
     else {
       isplit = cells[icell].isplit;
       subcell = sinfo[isplit].csplits[i];
+
+      // subcell = -1 if the line did not end up in a polygon
+      // see create_surfmap() in cut2d/cut3d
+      // skip the surface in this case
+
+      if (subcell < 0) continue;
+
       tasks[ntask].pcell = sinfo[isplit].csubs[subcell];
     }
 
@@ -478,6 +487,8 @@ void FixEmitSurf::create_task(int icell)
       npoint = cut2d->clip_external(p1,p2,lo,hi,cpath);
       if (npoint < 2) continue;
 
+      max_npoint = 2;
+
       tasks[ntask].npoint = 2;
       delete [] tasks[ntask].path;
       tasks[ntask].path = new double[6];
@@ -492,7 +503,7 @@ void FixEmitSurf::create_task(int icell)
       // axisymmetric "area" of line segment = surf area of truncated cone
       // PI (y1+y2) sqrt( (y1-y2)^2 + (x1-x2)^2) )
 
-      if (domain->axisymmetric) {
+      if (axisymmetric) {
         double sqrtarg = (path[1]-path[4])*(path[1]-path[4]) +
           (path[0]-path[3])*(path[0]-path[3]);
         area = MY_PI * (path[1]+path[4]) * sqrt(sqrtarg);
@@ -524,6 +535,8 @@ void FixEmitSurf::create_task(int icell)
       p3 = tris[isurf].p3;
       npoint = cut3d->clip_external(p1,p2,p3,lo,hi,cpath);
       if (npoint < 3) continue;
+
+      max_npoint = MAX(max_npoint,npoint);
 
       tasks[ntask].npoint = npoint;
       delete [] tasks[ntask].path;
@@ -559,6 +572,15 @@ void FixEmitSurf::create_task(int icell)
       MathExtra::norm3(tasks[ntask].tan1);
       MathExtra::cross3(tris[isurf].norm,tasks[ntask].tan1,tasks[ntask].tan2);
       MathExtra::norm3(tasks[ntask].tan2);
+    }
+
+    if (temp_custom_flag) {
+      vscale = tasks[ntask].vscale;
+      for (m = 0; m < nspecies; m++) {
+        ispecies = particle->mixture[imix]->species[m];
+        vscale[m] = sqrt(2.0 * update->boltz * temp_thermal_custom /
+                         particle->species[ispecies].mass);
+      }
     }
 
     // set ntarget and ntargetsp via mol_inflow()
@@ -611,6 +633,18 @@ void FixEmitSurf::create_task(int icell)
 ------------------------------------------------------------------------- */
 
 void FixEmitSurf::perform_task()
+{
+  if (!twopass) perform_task_onepass();
+  else perform_task_twopass();
+}
+
+/* ----------------------------------------------------------------------
+   perform insertion in one pass thru tasks
+   this is simpler, somewhat faster code
+   but uses random #s differently than Kokkos, so insertions are different
+------------------------------------------------------------------------- */
+
+void FixEmitSurf::perform_task_onepass()
 {
   int i,m,n,pcell,isurf,ninsert,nactual,isp,ispecies,ntri,id;
   double indot,scosine,rn,ntarget,vr,alpha,beta;
@@ -676,7 +710,7 @@ void FixEmitSurf::perform_task()
     magvstream = tasks[i].magvstream;
     vstream = tasks[i].vstream;
 
-    if (subsonic_style == PONLY) vscale = tasks[i].vscale;
+    if (subsonic_style == PONLY || temp_custom_flag) vscale = tasks[i].vscale;
     else vscale = particle->mixture[imix]->vscale;
     if (normalflag) indot = magvstream;
     else indot = vstream[0]*normal[0] + vstream[1]*normal[1] + vstream[2]*normal[2];
@@ -698,6 +732,9 @@ void FixEmitSurf::perform_task()
             rn = random->uniform();
             p1 = &tasks[i].path[0];
             p2 = &tasks[i].path[3];
+            if (axisymmetric && p1[1] != p2[1])
+              rn = (sqrt(p1[1]*p1[1] + rn*(p2[1]*p2[1]-p1[1]*p1[1])) - p1[1]) /
+                (p2[1]-p1[1]);
             x[0] = p1[0] + rn * (p2[0]-p1[0]);
             x[1] = p1[1] + rn * (p2[1]-p1[1]);
             x[2] = 0.0;
@@ -809,6 +846,9 @@ void FixEmitSurf::perform_task()
           rn = random->uniform();
           p1 = &tasks[i].path[0];
           p2 = &tasks[i].path[3];
+          if (axisymmetric && p1[1] != p2[1])
+            rn = (sqrt(p1[1]*p1[1] + rn*(p2[1]*p2[1]-p1[1]*p1[1])) - p1[1]) /
+              (p2[1]-p1[1]);
           x[0] = p1[0] + rn * (p2[0]-p1[0]);
           x[1] = p1[1] + rn * (p2[1]-p1[1]);
           x[2] = 0.0;
@@ -889,6 +929,315 @@ void FixEmitSurf::perform_task()
     }
   }
 }
+
+/* ----------------------------------------------------------------------
+   perform insertion the way Kokkos does in two passes thru tasks
+   this uses random #s the same as Kokkos, for easier debugging
+------------------------------------------------------------------------- */
+
+void FixEmitSurf::perform_task_twopass()
+{
+  int i,m,n,pcell,isurf,ninsert,nactual,isp,ispecies,ntri,id;
+  double indot,scosine,rn,ntarget,vr,alpha,beta;
+  double beta_un,normalized_distbn_fn,theta,erot,evib;
+  double vnmag,vamag,vbmag;
+  double *normal,*p1,*p2,*p3,*atan,*btan,*vstream,*vscale;
+  double x[3],v[3],e1[3],e2[3];
+  Particle::OnePart *p;
+
+  double dt = update->dt;
+  int *species = particle->mixture[imix]->species;
+
+  // if subsonic, re-compute particle inflow counts for each task
+  // also computes current per-task temp_thermal and vstream
+
+  if (subsonic) subsonic_inflow();
+
+  // if npmode = VARIABLE, set npcurrent to variable evaluation
+
+  double npcurrent;
+  if (npmode == VARIABLE) {
+    npcurrent = input->variable->compute_equal(npvar);
+    if (npcurrent <= 0.0) error->all(FLERR,"Fix emit/surf Np <= 0.0");
+  }
+
+  // insert particles for each task = cell/surf pair
+  // ntarget/ninsert is either perspecies or for all species
+  // for one particle:
+  //   x = random position with overlap of surf with cell
+  //   v = randomized thermal velocity + vstream
+  //       if normalflag, mag of vstream is applied to surf normal dir
+  //       first stage: normal dimension (normal)
+  //       second stage: parallel dimensions (tan1,tan2)
+
+  // double while loop until randomized particle velocity meets 2 criteria
+  // inner do-while loop:
+  //   v = vstream-component + vthermal is into simulation box
+  //   see Bird 1994, p 425
+  // outer do-while loop:
+  //   shift Maxwellian distribution by stream velocity component
+  //   see Bird 1994, p 259, eq 12.5
+
+  Surf::Line *lines = surf->lines;
+  Surf::Tri *tris = surf->tris;
+
+  int nsurf_tally = update->nsurf_tally;
+  Compute **slist_active = update->slist_active;
+
+  int nfix_update_custom = modify->n_update_custom;
+
+  int ninsert_dim1 = perspecies ? nspecies : 1;
+  int** ninsert_values;
+  memory->create(ninsert_values, ntask, ninsert_dim1, "fix_emit_face:ninsert");
+
+  for (int i = 0; i < ntask; i++) {
+    if (perspecies) {
+      for (isp = 0; isp < nspecies; isp++) {
+        ntarget = tasks[i].ntargetsp[isp]+random->uniform();
+        ninsert = static_cast<int> (ntarget);
+        ninsert_values[i][isp] = ninsert;
+      }
+    } else {
+      // set ntarget for insertion mode FLOW, CONSTANT, or VARIABLE
+      // for FLOW: ntarget is already set within task
+      // for CONSTANT or VARIABLE: task narget is fraction of its surf's area
+      //   scale fraction by np or npcurrent (variable evaluation)
+      // ninsert = rounded-down (ntarget + random number)
+
+      if (npmode == FLOW) ntarget = tasks[i].ntarget;
+      else if (npmode == CONSTANT) ntarget = np * tasks[i].ntarget;
+      else if (npmode == VARIABLE) ntarget = npcurrent * tasks[i].ntarget;
+      ninsert = static_cast<int> (ntarget + random->uniform());
+      ninsert_values[i][0] = ninsert;
+    }
+  }
+
+  for (i = 0; i < ntask; i++) {
+    pcell = tasks[i].pcell;
+    isurf = tasks[i].isurf;
+    if (isurf >= surf->nlocal) error->one(FLERR,"BAD surf index\n");
+    if (dimension == 2) normal = lines[isurf].norm;
+    else normal = tris[isurf].norm;
+    atan = tasks[i].tan1;
+    btan = tasks[i].tan2;
+
+    temp_thermal = tasks[i].temp_thermal;
+    temp_rot = tasks[i].temp_rot;
+    temp_vib = tasks[i].temp_vib;
+    magvstream = tasks[i].magvstream;
+    vstream = tasks[i].vstream;
+
+    if (subsonic_style == PONLY || temp_custom_flag) vscale = tasks[i].vscale;
+    else vscale = particle->mixture[imix]->vscale;
+    if (normalflag) indot = magvstream;
+    else indot = vstream[0]*normal[0] + vstream[1]*normal[1] + vstream[2]*normal[2];
+
+    // perspecies yes
+
+    if (perspecies) {
+      for (isp = 0; isp < nspecies; isp++) {
+        ispecies = species[isp];
+        ninsert = ninsert_values[i][isp];
+        scosine = indot / vscale[isp];
+
+        // loop over ninsert for each species
+
+        nactual = 0;
+        for (m = 0; m < ninsert; m++) {
+          if (dimension == 2) {
+            rn = random->uniform();
+            p1 = &tasks[i].path[0];
+            p2 = &tasks[i].path[3];
+            if (axisymmetric && p1[1] != p2[1])
+              rn = (sqrt(p1[1]*p1[1] + rn*(p2[1]*p2[1]-p1[1]*p1[1])) - p1[1]) /
+                (p2[1]-p1[1]);
+            x[0] = p1[0] + rn * (p2[0]-p1[0]);
+            x[1] = p1[1] + rn * (p2[1]-p1[1]);
+            x[2] = 0.0;
+          } else {
+            rn = random->uniform();
+            ntri = tasks[i].npoint - 2;
+            for (n = 0; n < ntri; n++)
+              if (rn < tasks[i].fracarea[n]) break;
+            p1 = &tasks[i].path[0];
+            p2 = &tasks[i].path[3*(n+1)];
+            p3 = &tasks[i].path[3*(n+2)];
+            MathExtra::sub3(p2,p1,e1);
+            MathExtra::sub3(p3,p1,e2);
+            alpha = random->uniform();
+            beta = random->uniform();
+            if (alpha+beta > 1.0) {
+              alpha = 1.0 - alpha;
+              beta = 1.0 - beta;
+            }
+            x[0] = p1[0] + alpha*e1[0] + beta*e2[0];
+            x[1] = p1[1] + alpha*e1[1] + beta*e2[1];
+            x[2] = p1[2] + alpha*e1[2] + beta*e2[2];
+          }
+
+          if (region && !region->match(x)) continue;
+
+          do {
+            do beta_un = (6.0*random->uniform() - 3.0);
+            while (beta_un + scosine < 0.0);
+            normalized_distbn_fn = 2.0 * (beta_un + scosine) /
+              (scosine + sqrt(scosine*scosine + 2.0)) *
+              exp(0.5 + (0.5*scosine)*(scosine-sqrt(scosine*scosine + 2.0)) -
+                  beta_un*beta_un);
+          } while (normalized_distbn_fn < random->uniform());
+
+          if (normalflag) vnmag = beta_un*vscale[isp] + magvstream;
+          else vnmag = beta_un*vscale[isp] + indot;
+
+          theta = MY_2PI * random->uniform();
+          vr = vscale[isp] * sqrt(-log(random->uniform()));
+          if (normalflag) {
+            vamag = vr * sin(theta);
+            vbmag = vr * cos(theta);
+          } else {
+            vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
+            vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+          }
+
+          v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
+          v[1] = vnmag*normal[1] + vamag*atan[1] + vbmag*btan[1];
+          v[2] = vnmag*normal[2] + vamag*atan[2] + vbmag*btan[2];
+
+          erot = particle->erot(ispecies,temp_rot,random);
+          evib = particle->evib(ispecies,temp_vib,random);
+          id = MAXSMALLINT*random->uniform();
+
+          particle->add_particle(id,ispecies,pcell,x,v,erot,evib);
+          nactual++;
+
+          p = &particle->particles[particle->nlocal-1];
+          p->flag = PSURF + 1 + isurf;
+          p->dtremain = dt * random->uniform();
+
+          if (nsurf_tally)
+            for (int k = 0; k < nsurf_tally; k++)
+              slist_active[k]->surf_tally(p->dtremain,isurf,pcell,0,NULL,p,NULL);
+
+          // if using per-surf custom attributes,
+          // temps/vstream already set to custom attributes in create_task
+
+          if (nfix_update_custom)
+            modify->update_custom(particle->nlocal-1,temp_thermal,
+                                  temp_rot,temp_vib,vstream);
+        }
+
+        nsingle += nactual;
+      }
+
+    // perspecies no
+
+    } else {
+      ninsert = ninsert_values[i][0];
+
+      // loop over ninsert for all species
+      // use cummulative fractions to assign species for each insertion
+      // if requested, override cummulative from mixture with cummulative for isurf
+
+      if (fractions_custom_flag) cummulative = cummulative_custom[isurf];
+
+      nactual = 0;
+      for (int m = 0; m < ninsert; m++) {
+        rn = random->uniform();
+        isp = 0;
+        while (cummulative[isp] < rn) isp++;
+        ispecies = species[isp];
+        scosine = indot / vscale[isp];
+
+        if (dimension == 2) {
+          rn = random->uniform();
+          p1 = &tasks[i].path[0];
+          p2 = &tasks[i].path[3];
+          if (axisymmetric && p1[1] != p2[1])
+            rn = (sqrt(p1[1]*p1[1] + rn*(p2[1]*p2[1]-p1[1]*p1[1])) - p1[1]) /
+              (p2[1]-p1[1]);
+          x[0] = p1[0] + rn * (p2[0]-p1[0]);
+          x[1] = p1[1] + rn * (p2[1]-p1[1]);
+          x[2] = 0.0;
+        } else {
+          rn = random->uniform();
+          ntri = tasks[i].npoint - 2;
+          for (n = 0; n < ntri; n++)
+            if (rn < tasks[i].fracarea[n]) break;
+          p1 = &tasks[i].path[0];
+          p2 = &tasks[i].path[3*(n+1)];
+          p3 = &tasks[i].path[3*(n+2)];
+          MathExtra::sub3(p2,p1,e1);
+          MathExtra::sub3(p3,p1,e2);
+          alpha = random->uniform();
+          beta = random->uniform();
+          if (alpha+beta > 1.0) {
+            alpha = 1.0 - alpha;
+            beta = 1.0 - beta;
+          }
+          x[0] = p1[0] + alpha*e1[0] + beta*e2[0];
+          x[1] = p1[1] + alpha*e1[1] + beta*e2[1];
+          x[2] = p1[2] + alpha*e1[2] + beta*e2[2];
+        }
+
+        if (region && !region->match(x)) continue;
+
+        do {
+          do {
+            beta_un = (6.0*random->uniform() - 3.0);
+          } while (beta_un + scosine < 0.0);
+          normalized_distbn_fn = 2.0 * (beta_un + scosine) /
+            (scosine + sqrt(scosine*scosine + 2.0)) *
+            exp(0.5 + (0.5*scosine)*(scosine-sqrt(scosine*scosine + 2.0)) -
+                beta_un*beta_un);
+        } while (normalized_distbn_fn < random->uniform());
+
+        if (normalflag) vnmag = beta_un*vscale[isp] + magvstream;
+        else vnmag = beta_un*vscale[isp] + indot;
+
+        theta = MY_2PI * random->uniform();
+        vr = vscale[isp] * sqrt(-log(random->uniform()));
+        if (normalflag) {
+          vamag = vr * sin(theta);
+          vbmag = vr * cos(theta);
+        } else {
+          vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
+          vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+        }
+
+        v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
+        v[1] = vnmag*normal[1] + vamag*atan[1] + vbmag*btan[1];
+        v[2] = vnmag*normal[2] + vamag*atan[2] + vbmag*btan[2];
+
+        erot = particle->erot(ispecies,temp_rot,random);
+        evib = particle->evib(ispecies,temp_vib,random);
+        id = MAXSMALLINT*random->uniform();
+
+        particle->add_particle(id,ispecies,pcell,x,v,erot,evib);
+        nactual++;
+
+        p = &particle->particles[particle->nlocal-1];
+        p->flag = PSURF + 1 + isurf;
+        p->dtremain = dt * random->uniform();
+
+        if (nsurf_tally)
+          for (int k = 0; k < nsurf_tally; k++)
+            slist_active[k]->surf_tally(p->dtremain,isurf,pcell,0,NULL,p,NULL);
+
+        // temps/vstream already set to custom attributes in create_task
+        // if per-surf custom attributes are being used
+
+        if (nfix_update_custom)
+          modify->update_custom(particle->nlocal-1,temp_thermal,
+                               temp_rot,temp_vib,vstream);
+      }
+
+      nsingle += nactual;
+    }
+  }
+
+  memory->destroy(ninsert_values);
+}
+
 
 /* ----------------------------------------------------------------------
    recalculate task properties based on subsonic BC
@@ -1171,7 +1520,7 @@ void FixEmitSurf::grow_task()
       tasks[i].ntargetsp = NULL;
   }
 
-  if (subsonic_style == PONLY) {
+  if (subsonic_style == PONLY || temp_custom_flag) {
     for (int i = oldmax; i < ntaskmax; i++)
       tasks[i].vscale = new double[nspecies];
   } else {
@@ -1182,6 +1531,26 @@ void FixEmitSurf::grow_task()
   for (int i = oldmax; i < ntaskmax; i++) {
     tasks[i].path = NULL;
     tasks[i].fracarea = NULL;
+  }
+}
+
+/* ----------------------------------------------------------------------
+   reallocate nspecies arrays
+------------------------------------------------------------------------- */
+
+void FixEmitSurf::realloc_nspecies()
+{
+  if (perspecies) {
+    for (int i = 0; i < ntask; i++) {
+      delete [] tasks[i].ntargetsp;
+      tasks[i].ntargetsp = new double[nspecies];
+    }
+  }
+  if (subsonic_style == PONLY || temp_custom_flag) {
+    for (int i = 0; i < ntask; i++) {
+      delete [] tasks[i].vscale;
+      tasks[i].vscale = new double[nspecies];
+    }
   }
 }
 
@@ -1200,8 +1569,9 @@ int FixEmitSurf::option(int narg, char **arg)
       npstr = new char[n];
       strcpy(npstr,&arg[1][2]);
     } else {
-      np = atoi(arg[1]);
-      if (np == 0) npmode = FLOW;
+      np = atof(arg[1]);
+      if (np < 0.0) error->all(FLERR,"Illegal fix emit/surf command");
+      if (np == 0.0) npmode = FLOW;
       else npmode = CONSTANT;
     }
     return 2;
@@ -1229,6 +1599,11 @@ int FixEmitSurf::option(int narg, char **arg)
       nsubsonic = psubsonic / (update->boltz * tsubsonic);
     }
     return 3;
+  }
+
+  if (strcmp(arg[0],"twopass") == 0) {
+    twopass = 1;
+    return 1;
   }
 
   if (strcmp(arg[0],"custom") == 0) {

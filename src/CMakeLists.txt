@@ -29,6 +29,7 @@ add_subdirectory(${SPARTA_SRC_DIR}/FFT)
 add_subdirectory(${SPARTA_SRC_DIR}/STUBS)
 add_subdirectory(${SPARTA_SRC_DIR}/OPENEDGE)
 add_subdirectory(${SPARTA_SRC_DIR}/PYTHON)
+add_subdirectory(${SPARTA_SRC_DIR}/VTK)
 # message(VERBOSE "${CMAKE_CURRENT_SOURCE_DIR}:
 # CMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}")
 # ######### END   PROCESSING PACKAGES - RECURSE COMMANDS ##########
@@ -76,10 +77,15 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${TARGET_SPARTA_LIB_LINK}
 add_executable(${TARGET_SPARTA} main.cpp)
 target_link_libraries(${TARGET_SPARTA} LINK_PRIVATE ${TARGET_SPARTA_LIB})
 target_link_libraries(${TARGET_SPARTA} LINK_PRIVATE ${HDF5_CXX_LIBRARIES})
-add_custom_command(
-  TARGET ${TARGET_SPARTA}
-  POST_BUILD
-  COMMAND size ${TARGET_SPARTA})
+# print the binary size after linking (informational). Skip when cross-
+# compiling: the command uses the bare target name, but on Windows the file is
+# spa_.exe, so `size spa_` fails the build during a MinGW64 cross-compile.
+if(NOT CMAKE_CROSSCOMPILING)
+  add_custom_command(
+    TARGET ${TARGET_SPARTA}
+    POST_BUILD
+    COMMAND size ${TARGET_SPARTA})
+endif()
 install(TARGETS ${TARGET_SPARTA} DESTINATION bin)
 # ######### END   GENERATION COMMANDS ##########
 

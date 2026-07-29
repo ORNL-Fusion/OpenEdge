@@ -58,8 +58,8 @@ read_surf           input/core.surf group core particle check
 surf_collide        coreColl vanish
 surf_modify         core collide coreColl
 
-region              rdiv_lo block -1.00 -0.30 1.90 3.20 -INF INF   # covers baffle (was -0.45: seam in density maps)
-region              rdiv_up block  0.35  0.85 1.90 3.20 -INF INF
+region              rdiv_lo block -1.00 -0.30 1.90 3.20 INF INF   # covers baffle (was -0.45: seam in density maps)
+region              rdiv_up block  0.35  0.85 1.90 3.20 INF INF
 adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
                     region rdiv_lo all iterate 5
 adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &

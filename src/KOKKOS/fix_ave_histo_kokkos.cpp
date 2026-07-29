@@ -59,6 +59,8 @@ FixAveHistoKokkos::FixAveHistoKokkos(SPARTA *spa, int narg, char **arg) :
 {
   kokkos_flag = 1;
   execution_space = Device;
+  datamask_read = EMPTY_MASK;
+  datamask_modify = EMPTY_MASK;
 
   k_stats.resize(4);
   d_stats = k_stats.view_device();
@@ -144,10 +146,12 @@ void FixAveHistoKokkos::end_of_step()
 
   // zero if first step
   if (irepeat == 0) {
+    k_stats.sync_host();
     for (int i = 0; i < 4; i++) k_stats.view_host()(i) = 0.0;
     k_stats.modify_host();
     k_stats.sync_device();
 
+    k_bin.sync_host();
     for (int i = 0; i < nbins; i++) k_bin.view_host()(i) = 0.0;
     k_bin.modify_host();
     k_bin.sync_device();
@@ -497,22 +501,30 @@ void FixAveHistoKokkos::bin_particles(
 
   this->index = index;
   int n = particle->nlocal;
+  int nmax = particle->maxlocal;
 
-  // FIXME: Kokkos version of region
-  //Region *region;
-  //if (regionflag) region = domain->regions[iregion];
+  Region *region;
+  if (regionflag) region = domain->regions[iregion];
 
-  if (regionflag)
-    error->all(FLERR,"Cannot (yet) use regionflag with fix ave/histo/kk");
+  if (!region->kokkos_flag)
+    error->all(FLERR,"KOKKOS package does not (yet) support chosen region style");
+
+  KokkosBase* regionKKBase = dynamic_cast<KokkosBase*>(region);
+
+  if (k_match.extent(0) > nmax)
+    MemKK::realloc_kokkos(k_match,"fix_ave_histo_weight:match",nmax);
+
+  regionKKBase->match_all_kokkos(k_match);
+  d_match = k_match.view_device();
 
   if (attribute == X) {
 
     if (regionflag && mixflag) {
-      //auto policy = RangePolicy<TagFixAveHisto_BinParticlesX1,DeviceType>(0, n);
-      //Kokkos::parallel_reduce(policy, *this, reducer);
+      auto policy = RangePolicy<TagFixAveHisto_BinParticlesX1,DeviceType>(0, n);
+      Kokkos::parallel_reduce(policy, *this, reducer);
     } else if (regionflag) {
-      //auto policy = RangePolicy<TagFixAveHisto_BinParticlesX2,DeviceType>(0, n);
-      //Kokkos::parallel_reduce(policy, *this, reducer);
+      auto policy = RangePolicy<TagFixAveHisto_BinParticlesX2,DeviceType>(0, n);
+      Kokkos::parallel_reduce(policy, *this, reducer);
     } else if (mixflag) {
       auto policy = RangePolicy<TagFixAveHisto_BinParticlesX3,DeviceType>(0, n);
       Kokkos::parallel_reduce(policy, *this, reducer);
@@ -524,11 +536,11 @@ void FixAveHistoKokkos::bin_particles(
   } else if (attribute == V) {
 
     if (regionflag && mixflag) {
-      //auto policy = RangePolicy<TagFixAveHisto_BinParticlesV1,DeviceType>(0, n);
-      //Kokkos::parallel_reduce(policy, *this, reducer);
+      auto policy = RangePolicy<TagFixAveHisto_BinParticlesV1,DeviceType>(0, n);
+      Kokkos::parallel_reduce(policy, *this, reducer);
     } else if (regionflag) {
-      //auto policy = RangePolicy<TagFixAveHisto_BinParticlesV2,DeviceType>(0, n);
-      //Kokkos::parallel_reduce(policy, *this, reducer);
+      auto policy = RangePolicy<TagFixAveHisto_BinParticlesV2,DeviceType>(0, n);
+      Kokkos::parallel_reduce(policy, *this, reducer);
     } else if (mixflag) {
       auto policy = RangePolicy<TagFixAveHisto_BinParticlesV3,DeviceType>(0, n);
       Kokkos::parallel_reduce(policy, *this, reducer);
@@ -551,23 +563,30 @@ void FixAveHistoKokkos::bin_particles(
 
   this->stride = stride;
   int n = particle->nlocal;
+  int nmax = particle->maxlocal;
 
   d_values = mirror_view_from_raw_host_array<double,DeviceType>(values, n, stride);
 
-  // FIXME: Kokkos version of region
-  // FIXME: Does values need to be made a view that lives on Device?
-  //Region *region;
-  //if (regionflag) region = domain->regions[iregion];
+  Region *region;
+  if (regionflag) region = domain->regions[iregion];
 
-  if (regionflag)
-    error->all(FLERR,"Cannot (yet) use regionflag with fix ave/histo/kk");
+  if (!region->kokkos_flag)
+    error->all(FLERR,"KOKKOS package does not (yet) support chosen region style");
+
+  KokkosBase* regionKKBase = dynamic_cast<KokkosBase*>(region);
+
+  if (k_match.extent(0) < nmax)
+    MemKK::realloc_kokkos(k_match,"fix_ave_histo_weight:match",nmax);
+
+  regionKKBase->match_all_kokkos(k_match);
+  d_match = k_match.view_device();
 
   if (regionflag && mixflag) {
-    //auto policy = RangePolicy<TagFixAveHisto_BinParticles1,DeviceType>(0, n);
-    //Kokkos::parallel_reduce(policy, *this, reducer);
+    auto policy = RangePolicy<TagFixAveHisto_BinParticles1,DeviceType>(0, n);
+    Kokkos::parallel_reduce(policy, *this, reducer);
   } else if (regionflag) {
-    //auto policy = RangePolicy<TagFixAveHisto_BinParticles2,DeviceType>(0, n);
-    //Kokkos::parallel_reduce(policy, *this, reducer);
+    auto policy = RangePolicy<TagFixAveHisto_BinParticles2,DeviceType>(0, n);
+    Kokkos::parallel_reduce(policy, *this, reducer);
   } else if (mixflag) {
     auto policy = RangePolicy<TagFixAveHisto_BinParticles3,DeviceType>(0, n);
     Kokkos::parallel_reduce(policy, *this, reducer);
@@ -636,17 +655,10 @@ void
 FixAveHistoKokkos::operator()(TagFixAveHisto_BinParticles1, const int i,
                               minmax_type::value_type& lminmax) const
 {
-  /*
-   * region is not Kokkos compatible
-   * If a Kokkos compatible region becomes available,
-   * this code can be recommissioned.
-   *
   const int ispecies = d_particles(i).ispecies;
-  if (region_kk->match(d_particles(i).x) && d_s2g(imix, ispecies) >= 0)
-  {
+  if (d_match(i) && d_s2g(imix, ispecies) >= 0) {
     bin_one(lminmax, d_values(i));
   }
-  */
 }
 
 /* ------------------------------------------------------------------------- */
@@ -655,16 +667,9 @@ void
 FixAveHistoKokkos::operator()(TagFixAveHisto_BinParticles2, const int i,
                               minmax_type::value_type& lminmax) const
 {
-  /*
-   * region is not Kokkos compatible.
-   * If a Kokkos compatible region becomes available,
-   * this code can be recommissioned.
-   *
-  if (region_kk->match(d_particles(i).x))
-  {
+  if (d_match(i)) {
     bin_one(lminmax, d_values(i));
   }
-  */
 }
 
 /* ------------------------------------------------------------------------- */
@@ -674,8 +679,7 @@ FixAveHistoKokkos::operator()(TagFixAveHisto_BinParticles3, const int i,
                               minmax_type::value_type& lminmax) const
 {
   const int ispecies = d_particles(i).ispecies;
-  if (d_s2g(imix, ispecies) >= 0)
-  {
+  if (d_s2g(imix, ispecies) >= 0) {
     bin_one(lminmax, d_values(i));
   }
 }
@@ -695,8 +699,7 @@ void
 FixAveHistoKokkos::operator()(TagFixAveHisto_BinGridCells1, const int i,
                               minmax_type::value_type& lminmax) const
 {
-  if (grid_kk->k_cinfo.view_device()[i].mask & groupbit)
-  {
+  if (grid_kk->k_cinfo.view_device()[i].mask & groupbit) {
     bin_one(lminmax, d_values(i));
   }
 }
@@ -716,17 +719,10 @@ void
 FixAveHistoKokkos::operator()(TagFixAveHisto_BinParticlesX1, const int i,
                               minmax_type::value_type& lminmax) const
 {
-  /*
-   * region is not Kokkos compatible
-   * If a Kokkos compatible region becomes available,
-   * this code can be recommissioned.
-   *
   const int ispecies = d_particles(i).ispecies;
-  if (region_kk->match(d_particles(i).x) && d_s2g(imix, ispecies) >= 0)
-  {
+  if (d_match(i) && d_s2g(imix, ispecies) >= 0) {
     bin_one(lminmax, d_particles(i).x[index]);
   }
-  */
 }
 
 /* ------------------------------------------------------------------------- */
@@ -735,16 +731,9 @@ void
 FixAveHistoKokkos::operator()(TagFixAveHisto_BinParticlesX2, const int i,
                               minmax_type::value_type& lminmax) const
 {
-  /*
-   * region is not Kokkos compatible
-   * If a Kokkos compatible region becomes available,
-   * this code can be recommissioned.
-   *
-  if (region_kk->match(d_particles(i).x))
-  {
+  if (d_match(i)) {
     bin_one(lminmax, d_particles(i).x[index]);
   }
-  */
 }
 
 /* ------------------------------------------------------------------------- */
@@ -754,8 +743,7 @@ FixAveHistoKokkos::operator()(TagFixAveHisto_BinParticlesX3, const int i,
                               minmax_type::value_type& lminmax) const
 {
   const int ispecies = d_particles(i).ispecies;
-  if (d_s2g(imix, ispecies) >= 0)
-  {
+  if (d_s2g(imix, ispecies) >= 0) {
     bin_one(lminmax, d_particles(i).x[index]);
   }
 }
@@ -775,17 +763,10 @@ void
 FixAveHistoKokkos::operator()(TagFixAveHisto_BinParticlesV1, const int i,
                               minmax_type::value_type& lminmax) const
 {
-  /*
-   * region is not Kokkos compatible
-   * If a Kokkos compatible region becomes available,
-   * this code can be recommissioned.
-   *
   const int ispecies = d_particles(i).ispecies;
-  if (region_kk->match(d_particles(i).x) && d_s2g(imix, ispecies) >= 0)
-  {
+  if (d_match(i) && d_s2g(imix, ispecies) >= 0) {
     bin_one(lminmax, d_particles(i).v[index]);
   }
-  */
 }
 
 /* ------------------------------------------------------------------------- */
@@ -794,16 +775,9 @@ void
 FixAveHistoKokkos::operator()(TagFixAveHisto_BinParticlesV2, const int i,
                               minmax_type::value_type& lminmax) const
 {
-  /*
-   * region is not Kokkos compatible
-   * If a Kokkos compatible region becomes available,
-   * this code can be recommissioned.
-   *
-  if (region_kk->match(d_particles(i).x))
-  {
+  if (d_match(i)) {
     bin_one(lminmax, d_particles(i).v[index]);
   }
-  */
 }
 
 /* ------------------------------------------------------------------------- */
@@ -813,8 +787,7 @@ FixAveHistoKokkos::operator()(TagFixAveHisto_BinParticlesV3, const int i,
                               minmax_type::value_type& lminmax) const
 {
   const int ispecies = d_particles(i).ispecies;
-  if (d_s2g(imix, ispecies) >= 0)
-  {
+  if (d_s2g(imix, ispecies) >= 0) {
     bin_one(lminmax, d_particles(i).v[index]);
   }
 }

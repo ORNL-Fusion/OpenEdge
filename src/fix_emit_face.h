@@ -62,9 +62,11 @@ class FixEmitFace : public FixEmit {
   };
 
  protected:
-  int imix,np,subsonic,subsonic_style,subsonic_warning;
+  int imix,subsonic,subsonic_style,subsonic_warning;
   int faces[6];
   int npertask,nthresh,twopass;
+  double np;             // # of particles to insert per step (n option, may be non-integer)
+  double npremain_pertask;  // fractional remainder of np spread stochastically per task
   double psubsonic,tsubsonic,nsubsonic;
   double tprefactor,soundspeed_mixture;
 
@@ -73,7 +75,7 @@ class FixEmitFace : public FixEmit {
 
   // copies of data from other classes
 
-  int dimension,nspecies;
+  int dimension,axisymmetric,nspecies;
   double fnum,dt;
   double *fraction,*cummulative;
 
@@ -88,7 +90,7 @@ class FixEmitFace : public FixEmit {
 
   // protected methods
 
-  virtual void create_task(int);
+  void create_task(int);
   virtual void perform_task();
   void perform_task_onepass();
   virtual void perform_task_twopass();

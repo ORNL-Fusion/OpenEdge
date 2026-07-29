@@ -30,8 +30,8 @@ surf_react          wallPWI surface/pwi wall.recycle twall 1160.0
 surf_modify         wall collide wallColl react wallPWI
 
 # ---- Static refinement near both divertors (max level 5) ----
-region              rdiv_lo block -1.4 -0.8 1.0 2.4 -INF INF
-region              rdiv_up block  0.7  1.4 1.0 2.4 -INF INF
+region              rdiv_lo block -1.4 -0.8 1.0 2.4 INF INF
+region              rdiv_up block  0.7  1.4 1.0 2.4 INF INF
 adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
                     region rdiv_lo all iterate 5
 adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
