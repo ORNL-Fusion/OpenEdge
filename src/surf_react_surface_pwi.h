@@ -39,6 +39,7 @@ class SurfReactSurfacePWI : public SurfReact {
   ~SurfReactSurfacePWI();
   void init();
   int react(Particle::OnePart *&, int, double *, Particle::OnePart *&, int &);
+  void tally_update();
   char *reactionID(int);
   double reaction_coeff(int);
   int match_reactant(char *, int);
@@ -75,6 +76,24 @@ class SurfReactSurfacePWI : public SurfReact {
   // (e.g. R=1.0 on main wall, R=0.1 on a cryopump dome).
   char *R_attr;                    // name of per-surf custom attribute, NULL if unused
   int rindex_custom;               // surf->find_custom index, -1 if R_attr unset
+
+  // per-surf areal-density ledger (sigma). When sigma_attr is set, every
+  // absorbed incident macroparticle adds +pweight/area to its species
+  // column and every sputtered atom adds -pweight/area to the sputtered
+  // species column of a per-surf custom DOUBLE array (esize = nspecies,
+  // units atoms/m^2). Deltas are accumulated locally per rank and folded
+  // into the owned custom array every sigma_nevery steps in tally_update().
+  // Explicit non-distributed surfs only.
+  char *sigma_attr;                // name of per-surf custom attribute, NULL if unused
+  int sindex_custom;               // surf->find_custom index, -1 if unset
+  int sigma_nevery;                // sync interval in steps (default 1)
+  int sigma_ncols;                 // = particle->nspecies at init
+  bigint sigma_nsurf;              // total surf count
+  double *sigma_delta;             // [nsurf*ncols] local unsynced increments
+  double *sigma_buf;               // allreduce receive buffer
+  double *sigma_area;              // per-surf element area, local index
+  void sigma_accumulate(int isurf, int isp, double datoms);
+  void sync_sigma();
 
   // reflection-table support (shared format with surf_react pmi; tables
   // from database/surface/trim/*.h5, originally EIRENE TRIM but any

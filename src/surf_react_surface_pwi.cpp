@@ -29,6 +29,7 @@
 #include "surf_react_surface_pwi.h"
 #include "input.h"
 #include "update.h"
+#include "domain.h"
 #include "comm.h"
 #include "particle.h"
 #include "modify.h"
@@ -92,6 +93,14 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   tindex_custom = -1;
   R_attr = NULL;
   rindex_custom = -1;
+  sigma_attr = NULL;
+  sindex_custom = -1;
+  sigma_nevery = 1;
+  sigma_ncols = 0;
+  sigma_nsurf = 0;
+  sigma_delta = NULL;
+  sigma_buf = NULL;
+  sigma_area = NULL;
   trim_dir.clear();
 
   // parse keyword options BEFORE reading reactions file, so that the
@@ -121,6 +130,22 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       int n = strlen(arg[iarg+1]) + 1;
       R_attr = new char[n];
       strcpy(R_attr, arg[iarg+1]);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"sigma_surf") == 0) {
+      // per-surf areal-density ledger. Creates (or reuses) a per-surf custom
+      // DOUBLE array with one column per species; absorbed particles add
+      // +pweight/area to their species column, sputtered atoms add
+      // -pweight/area to the sputtered species column.
+      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      int n = strlen(arg[iarg+1]) + 1;
+      sigma_attr = new char[n];
+      strcpy(sigma_attr, arg[iarg+1]);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"sigma_nevery") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      sigma_nevery = input->inumeric(FLERR,arg[iarg+1]);
+      if (sigma_nevery < 1)
+        error->all(FLERR,"surf_react surface/pwi sigma_nevery must be >= 1");
       iarg += 2;
     } else error->all(FLERR,"Illegal surf_react surface/pwi command");
   }
@@ -163,6 +188,10 @@ SurfReactSurfacePWI::~SurfReactSurfacePWI()
   delete random;
   delete [] twall_attr;
   delete [] R_attr;
+  delete [] sigma_attr;
+  memory->destroy(sigma_delta);
+  memory->destroy(sigma_buf);
+  memory->destroy(sigma_area);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -211,6 +240,61 @@ void SurfReactSurfacePWI::init()
       error->all(FLERR,"surf_react surface/pwi R_surf attribute must be scalar per-surf");
     surf->spread_custom(rindex_custom);
   }
+
+  // bind or create the per-surf areal-density (sigma) custom array.
+  // One column per species, units atoms/m^2 (2D planar: atoms/m^2 per m
+  // of depth; axisymmetric and 3D: true areal density). The attribute is
+  // created here (not the constructor) so nspecies is final, and reused
+  // if it already exists (e.g. from a restart file, which carries custom
+  // attributes) so sigma accumulates across restarts.
+  if (sigma_attr) {
+    if (surf->implicit)
+      error->all(FLERR,"surf_react surface/pwi sigma_surf requires explicit surfs");
+    if (surf->distributed)
+      error->all(FLERR,"surf_react surface/pwi sigma_surf does not yet support "
+                 "distributed surfs");
+
+    sigma_ncols = particle->nspecies;
+    sindex_custom = surf->find_custom(sigma_attr);
+    if (sindex_custom < 0) {
+      sindex_custom = surf->add_custom(sigma_attr, DOUBLE, sigma_ncols);
+    } else {
+      if (surf->etype[sindex_custom] != DOUBLE)
+        error->all(FLERR,"surf_react surface/pwi sigma_surf attribute must be DOUBLE");
+      if (surf->esize[sindex_custom] != sigma_ncols)
+        error->all(FLERR,"surf_react surface/pwi sigma_surf attribute must have "
+                   "one column per species");
+    }
+    surf->spread_custom(sindex_custom);
+
+    // local delta ledger + allreduce buffer, indexed by (surfID-1)*ncols + isp
+
+    sigma_nsurf = surf->nsurf;
+    bigint ntally = sigma_nsurf * (bigint) sigma_ncols;
+    if (ntally > MAXSMALLINT)
+      error->all(FLERR,"surf_react surface/pwi sigma_surf: too many surfs*species");
+    memory->destroy(sigma_delta);
+    memory->destroy(sigma_buf);
+    memory->create(sigma_delta,(int) ntally,"surf_react_pwi:sigma_delta");
+    memory->create(sigma_buf,(int) ntally,"surf_react_pwi:sigma_buf");
+    for (int i = 0; i < (int) ntally; i++) sigma_delta[i] = 0.0;
+
+    // per-surf element area, indexed by local surf index (same indexing as
+    // react()'s isurf). Mirrors compute_surf::init_normflux: line length in
+    // planar 2D, revolved area in axisymmetric, triangle area in 3D.
+
+    int nslocal = surf->nlocal + surf->nghost;
+    memory->destroy(sigma_area);
+    memory->create(sigma_area,nslocal,"surf_react_pwi:sigma_area");
+    int dim = domain->dimension;
+    int axisymmetric = domain->axisymmetric;
+    double tmp;
+    for (int i = 0; i < nslocal; i++) {
+      if (dim == 3) sigma_area[i] = surf->tri_size(i,tmp);
+      else if (axisymmetric) sigma_area[i] = surf->axi_line_size(i);
+      else sigma_area[i] = surf->line_size(i);
+    }
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -226,7 +310,7 @@ void SurfReactSurfacePWI::init()
    ip (by reference) and re-index the pweight custom.
 ------------------------------------------------------------------------- */
 
-void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int /*isurf*/,
+void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
                                          double *norm, double E_in_eV,
                                          double theta_in_deg)
 {
@@ -283,6 +367,11 @@ void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int /*isurf*/,
       nsingle++;
       tally_single[list[i]]++;
     }
+
+    // sigma ledger: nemit real-atom-weighted macroatoms of species sp left
+    // this surf element -> net erosion of the sputtered species
+    if (sindex_custom >= 0)
+      sigma_accumulate(isurf, sp, -((double) nemit) * pw_inc);
   }
 }
 
@@ -430,6 +519,13 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
         }
       case RECOMBINATION:
         {
+          // sigma ledger: incident particle retained in the wall
+          if (sindex_custom >= 0) {
+            double pw_inc = update->fnum;
+            if (pweight_ewhich >= 0)
+              pw_inc = particle->edvec[pweight_ewhich][ip - particle->particles];
+            sigma_accumulate(isurf, ip->ispecies, pw_inc);
+          }
           ip = NULL;
           return (list[i] + 1);
         }
@@ -498,6 +594,13 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
             return (list[i] + 1);
           } else {
             // pump / retain: delete incoming particle
+            // sigma ledger: retained atoms deposit on this surf element
+            if (sindex_custom >= 0) {
+              double pw_inc = update->fnum;
+              if (pweight_ewhich >= 0)
+                pw_inc = particle->edvec[pweight_ewhich][ip - particle->particles];
+              sigma_accumulate(isurf, sp_atom, pw_inc);
+            }
             ip = NULL;
             return (list[i] + 1);
           }
@@ -577,6 +680,71 @@ void SurfReactSurfacePWI::sample_cosine_velocity(double *v, double *norm,
   v[0] = speed * (sinTheta*cosPhi*tangent1[0] + sinTheta*sinPhi*tangent2[0] + cosTheta*norm[0]);
   v[1] = speed * (sinTheta*cosPhi*tangent1[1] + sinTheta*sinPhi*tangent2[1] + cosTheta*norm[1]);
   v[2] = speed * (sinTheta*cosPhi*tangent1[2] + sinTheta*sinPhi*tangent2[2] + cosTheta*norm[2]);
+}
+
+/* ----------------------------------------------------------------------
+   sigma ledger: record a net change of datoms real atoms of species isp
+   on surf element isurf (local index), as an areal density (atoms/m^2).
+   Accumulated locally; folded into the owned custom array in sync_sigma().
+------------------------------------------------------------------------- */
+
+void SurfReactSurfacePWI::sigma_accumulate(int isurf, int isp, double datoms)
+{
+  double area = sigma_area[isurf];
+  if (area <= 0.0) return;
+
+  surfint gid;
+  if (domain->dimension == 2) gid = surf->lines[isurf].id;
+  else gid = surf->tris[isurf].id;
+
+  bigint idx = ((bigint) gid - 1) * sigma_ncols + isp;
+  sigma_delta[idx] += datoms / area;
+}
+
+/* ----------------------------------------------------------------------
+   called by Update at end of every timestep (via tally_update). Every
+   sigma_nevery steps: allreduce the per-rank deltas (each impact happens
+   on exactly one rank), fold into the owned custom array, refresh the
+   local+ghost copies so dumps and future per-event reads see current sigma.
+------------------------------------------------------------------------- */
+
+void SurfReactSurfacePWI::sync_sigma()
+{
+  int n = (int) (sigma_nsurf * (bigint) sigma_ncols);
+
+  MPI_Allreduce(sigma_delta,sigma_buf,n,MPI_DOUBLE,MPI_SUM,world);
+  for (int i = 0; i < n; i++) sigma_delta[i] = 0.0;
+
+  // owned surf i on this rank is local surf m = me + i*nprocs
+  // (explicit non-distributed striding, cf. fix_surf_temp)
+
+  int me = comm->me;
+  int nprocs = comm->nprocs;
+  int dim = domain->dimension;
+  int nsown = surf->nown;
+  double **sig = surf->edarray[surf->ewhich[sindex_custom]];
+
+  surfint gid;
+  for (int i = 0; i < nsown; i++) {
+    bigint m = me + (bigint) i*nprocs;
+    if (dim == 2) gid = surf->lines[m].id;
+    else gid = surf->tris[m].id;
+    bigint base = ((bigint) gid - 1) * sigma_ncols;
+    for (int j = 0; j < sigma_ncols; j++)
+      sig[i][j] += sigma_buf[base + j];
+  }
+
+  surf->estatus[sindex_custom] = 0;
+  surf->spread_custom(sindex_custom);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void SurfReactSurfacePWI::tally_update()
+{
+  SurfReact::tally_update();
+  if (sindex_custom >= 0 && update->ntimestep % sigma_nevery == 0)
+    sync_sigma();
 }
 
 /* ---------------------------------------------------------------------- */
