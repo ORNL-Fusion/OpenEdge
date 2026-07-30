@@ -15,9 +15,11 @@ if(PKG_VTK)
   target_link_libraries(${TARGET_SPARTA_PKG_VTK} LINK_PRIVATE
                         ${TARGET_SPARTA_BUILD_MPI})
 
-  # Get Kokkos header files
-  target_link_libraries(${TARGET_SPARTA_PKG_VTK} LINK_PRIVATE
-                        ${TARGET_SPARTA_BUILD_KOKKOS})
+  # Get Kokkos header files (only when a Kokkos build target exists)
+  if(TARGET ${TARGET_SPARTA_BUILD_KOKKOS})
+    target_link_libraries(${TARGET_SPARTA_PKG_VTK} LINK_PRIVATE
+                          ${TARGET_SPARTA_BUILD_KOKKOS})
+  endif()
 
   # Get VTK header files and libraries
   target_link_libraries(${TARGET_SPARTA_PKG_VTK} LINK_PUBLIC

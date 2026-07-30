@@ -201,6 +201,15 @@ endif()
   set(BUILD_KOKKOS ON)
 endif()
 
+if(PKG_VTK)
+  # external VTK 9 library provides the writers used by dump */vtk styles
+  find_package(VTK REQUIRED COMPONENTS CommonCore CommonDataModel
+               IOLegacy IOXML)
+  set(TARGET_SPARTA_BUILD_VTK ${VTK_LIBRARIES})
+  set(TARGET_SPARTA_PKG_VTK pkg_vtk)
+  list(APPEND TARGET_SPARTA_PKGS ${TARGET_SPARTA_PKG_VTK})
+endif()
+
 if(PKG_OPENEDGE)
   set(TARGET_SPARTA_PKG_OPENEDGE pkg_openedge)
   list(APPEND TARGET_SPARTA_PKGS ${TARGET_SPARTA_PKG_OPENEDGE})

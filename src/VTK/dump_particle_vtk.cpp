@@ -28,6 +28,7 @@
 
 #include <vtkVersion.h>
 #include <vtkCellType.h>
+#include <vtkUnsignedCharArray.h>
 #include <vtkPointData.h>
 #include <vtkDoubleArray.h>
 #include <vtkLongLongArray.h>
@@ -322,7 +323,17 @@ void DumpParticleVTK::write_vtu(int n, double *mybuf)
   vtkSmartPointer<vtkUnstructuredGrid> ugrid =
     vtkSmartPointer<vtkUnstructuredGrid>::New();
   ugrid->SetPoints(points);
-  ugrid->SetCells(VTK_VERTEX,pointsCells);
+  // VTK >= 9.4: SetCells(type, cells) stores cell types as an implicit
+  // constant array, which the ASCII XML writer cannot iterate (segfault).
+  // Pass an explicit unsigned-char cell-type array instead.
+  {
+    vtkSmartPointer<vtkUnsignedCharArray> ctypes =
+      vtkSmartPointer<vtkUnsignedCharArray>::New();
+    ctypes->SetNumberOfValues(pointsCells->GetNumberOfCells());
+    ctypes->Fill(VTK_VERTEX);
+    ugrid->SetCells(ctypes,pointsCells);
+  }
+
   for (int f = 0; f < (int) myarrays.size(); f++)
     ugrid->GetPointData()->AddArray(myarrays[f]);
 
