@@ -92,6 +92,16 @@ class SurfReactSurfacePWI : public SurfReact {
   double *sigma_delta;             // [nsurf*ncols] local unsynced increments
   double *sigma_buf;               // allreduce receive buffer
   double *sigma_area;              // per-surf element area, local index
+  // optional gross-erosion debit: per sync, sigma[species] -= flux * dt,
+  // flux read per owned surf from a per-surf compute (e.g.
+  // surface/physical/sputter ... erosion_flux)
+  char *sigma_ero_id;              // compute ID, NULL if unused
+  int sigma_ero_col;               // 0 = vector_surf, >0 = array_surf column
+  char *sigma_ero_species;         // species whose sigma column is debited
+  class Compute *sigma_ero_compute;
+  int sigma_ero_isp;
+  int snet_index, sdep_index, sero_index;  // derived: _net, _dep, _ero
+  double *dep_delta, *dep_buf;     // gross-deposition ledger (positive credits)
   void sigma_accumulate(int isurf, int isp, double datoms);
   void sync_sigma();
 

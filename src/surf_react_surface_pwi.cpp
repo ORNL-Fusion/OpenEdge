@@ -33,6 +33,7 @@
 #include "comm.h"
 #include "particle.h"
 #include "modify.h"
+#include "compute.h"
 #include "surf.h"
 #include "random_mars.h"
 #include "random_knuth.h"
@@ -101,6 +102,13 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   sigma_delta = NULL;
   sigma_buf = NULL;
   sigma_area = NULL;
+  sigma_ero_id = NULL;
+  sigma_ero_col = 0;
+  sigma_ero_species = NULL;
+  sigma_ero_compute = NULL;
+  sigma_ero_isp = -1;
+  snet_index = sdep_index = sero_index = -1;
+  dep_delta = dep_buf = NULL;
   trim_dir.clear();
 
   // parse keyword options BEFORE reading reactions file, so that the
@@ -141,6 +149,18 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       sigma_attr = new char[n];
       strcpy(sigma_attr, arg[iarg+1]);
       iarg += 2;
+    } else if (strcmp(arg[iarg],"sigma_erosion") == 0) {
+      // gross-erosion debit: sigma_erosion <computeID> <col> <species>
+      // col 0 = compute's vector_surf, col N = array_surf column N
+      if (iarg+4 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      int n = strlen(arg[iarg+1]) + 1;
+      sigma_ero_id = new char[n];
+      strcpy(sigma_ero_id, arg[iarg+1]);
+      sigma_ero_col = input->inumeric(FLERR,arg[iarg+2]);
+      n = strlen(arg[iarg+3]) + 1;
+      sigma_ero_species = new char[n];
+      strcpy(sigma_ero_species, arg[iarg+3]);
+      iarg += 4;
     } else if (strcmp(arg[iarg],"sigma_nevery") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       sigma_nevery = input->inumeric(FLERR,arg[iarg+1]);
@@ -189,9 +209,13 @@ SurfReactSurfacePWI::~SurfReactSurfacePWI()
   delete [] twall_attr;
   delete [] R_attr;
   delete [] sigma_attr;
+  delete [] sigma_ero_id;
+  delete [] sigma_ero_species;
   memory->destroy(sigma_delta);
   memory->destroy(sigma_buf);
   memory->destroy(sigma_area);
+  memory->destroy(dep_delta);
+  memory->destroy(dep_buf);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -204,9 +228,10 @@ void SurfReactSurfacePWI::init()
   // pweight custom (fix particle/weight): sputtered atoms inherit the
   // incident macroparticle's pweight. -1 if fix particle/weight is absent
   // (then sputtered atoms fall back to the fnum default).
-  pweight_ewhich = -1;
-  int pw_idx = particle->find_custom((char *) "pweight");
-  if (pw_idx >= 0) pweight_ewhich = particle->ewhich[pw_idx];
+  // store the custom INDEX (stable while the attribute exists) and resolve
+  // ewhich at use time: other modules (sheath, plasma cache) add particle
+  // customs after this init, which can invalidate a cached ewhich value.
+  pweight_ewhich = particle->find_custom((char *) "pweight");
 
   // bind per-surf twall attribute if requested. Deferred to init() so the
   // attribute can be created by read_surf (via custom columns) or by
@@ -279,6 +304,27 @@ void SurfReactSurfacePWI::init()
     memory->create(sigma_buf,(int) ntally,"surf_react_pwi:sigma_buf");
     for (int i = 0; i < (int) ntally; i++) sigma_delta[i] = 0.0;
 
+    // derived scalar customs: <attr>_net (row sum incl. debits) and
+    // <attr>_dep (gross deposition: positive credits only)
+    char dname[130];
+    snprintf(dname,sizeof(dname),"%s_net",sigma_attr);
+    snet_index = surf->find_custom(dname);
+    if (snet_index < 0) snet_index = surf->add_custom(dname, DOUBLE, 0);
+    snprintf(dname,sizeof(dname),"%s_dep",sigma_attr);
+    sdep_index = surf->find_custom(dname);
+    if (sdep_index < 0) sdep_index = surf->add_custom(dname, DOUBLE, 0);
+    snprintf(dname,sizeof(dname),"%s_ero",sigma_attr);
+    sero_index = surf->find_custom(dname);
+    if (sero_index < 0) sero_index = surf->add_custom(dname, DOUBLE, 0);
+    surf->spread_custom(sero_index);
+    surf->spread_custom(snet_index);
+    surf->spread_custom(sdep_index);
+    memory->destroy(dep_delta);
+    memory->destroy(dep_buf);
+    memory->create(dep_delta,(int) sigma_nsurf,"surf_react_pwi:dep_delta");
+    memory->create(dep_buf,(int) sigma_nsurf,"surf_react_pwi:dep_buf");
+    for (int i = 0; i < (int) sigma_nsurf; i++) dep_delta[i] = 0.0;
+
     // per-surf element area, indexed by local surf index (same indexing as
     // react()'s isurf). Mirrors compute_surf::init_normflux: line length in
     // planar 2D, revolved area in axisymmetric, triangle area in 3D.
@@ -293,6 +339,25 @@ void SurfReactSurfacePWI::init()
       if (dim == 3) sigma_area[i] = surf->tri_size(i,tmp);
       else if (axisymmetric) sigma_area[i] = surf->axi_line_size(i);
       else sigma_area[i] = surf->line_size(i);
+    }
+
+    // bind the gross-erosion compute + target species column
+    sigma_ero_compute = NULL;
+    if (sigma_ero_id) {
+      int ic = modify->find_compute(sigma_ero_id);
+      if (ic < 0)
+        error->all(FLERR,"surf_react surface/pwi sigma_erosion: compute ID not found");
+      sigma_ero_compute = modify->compute[ic];
+      if (!sigma_ero_compute->per_surf_flag)
+        error->all(FLERR,"surf_react surface/pwi sigma_erosion: compute is not per-surf");
+      if (sigma_ero_col == 0 && sigma_ero_compute->size_per_surf_cols != 0)
+        error->all(FLERR,"surf_react surface/pwi sigma_erosion: compute produces an "
+                   "array; give a column number");
+      if (sigma_ero_col > 0 && sigma_ero_col > sigma_ero_compute->size_per_surf_cols)
+        error->all(FLERR,"surf_react surface/pwi sigma_erosion: column out of range");
+      sigma_ero_isp = particle->find_species(sigma_ero_species);
+      if (sigma_ero_isp < 0)
+        error->all(FLERR,"surf_react surface/pwi sigma_erosion: unknown species");
     }
   }
 }
@@ -321,7 +386,7 @@ void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
   // incident pweight (real atoms this macroparticle represents)
   double pw_inc = update->fnum;
   if (pweight_ewhich >= 0)
-    pw_inc = particle->edvec[pweight_ewhich][ip - particle->particles];
+    pw_inc = particle->edvec[particle->ewhich[pweight_ewhich]][ip - particle->particles];
 
   for (int i = 0; i < n; i++) {
     OneReaction *r = &rlist[list[i]];
@@ -362,7 +427,7 @@ void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
       if (reallocflag) ip = particle->particles + (ip - particles);
 
       if (pweight_ewhich >= 0)                    // inherit incident pweight
-        particle->edvec[pweight_ewhich][particle->nlocal-1] = pw_inc;
+        particle->edvec[particle->ewhich[pweight_ewhich]][particle->nlocal-1] = pw_inc;
 
       nsingle++;
       tally_single[list[i]]++;
@@ -523,7 +588,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
           if (sindex_custom >= 0) {
             double pw_inc = update->fnum;
             if (pweight_ewhich >= 0)
-              pw_inc = particle->edvec[pweight_ewhich][ip - particle->particles];
+              pw_inc = particle->edvec[particle->ewhich[pweight_ewhich]][ip - particle->particles];
             sigma_accumulate(isurf, ip->ispecies, pw_inc);
           }
           ip = NULL;
@@ -598,7 +663,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
             if (sindex_custom >= 0) {
               double pw_inc = update->fnum;
               if (pweight_ewhich >= 0)
-                pw_inc = particle->edvec[pweight_ewhich][ip - particle->particles];
+                pw_inc = particle->edvec[particle->ewhich[pweight_ewhich]][ip - particle->particles];
               sigma_accumulate(isurf, sp_atom, pw_inc);
             }
             ip = NULL;
@@ -699,6 +764,7 @@ void SurfReactSurfacePWI::sigma_accumulate(int isurf, int isp, double datoms)
 
   bigint idx = ((bigint) gid - 1) * sigma_ncols + isp;
   sigma_delta[idx] += datoms / area;
+  if (datoms > 0.0) dep_delta[gid - 1] += datoms / area;
 }
 
 /* ----------------------------------------------------------------------
@@ -733,6 +799,49 @@ void SurfReactSurfacePWI::sync_sigma()
     for (int j = 0; j < sigma_ncols; j++)
       sig[i][j] += sigma_buf[base + j];
   }
+
+  // gross-erosion debit: sigma[ero_species] -= flux * dt * sigma_nevery,
+  // flux [atoms/m^2/s] per owned surf from the bound per-surf compute
+  // (e.g. background-plasma sputtering of the wall feeding the W source)
+  if (sigma_ero_compute) {
+    if (sigma_ero_compute->invoked_per_surf != update->ntimestep)
+      sigma_ero_compute->compute_per_surf();
+    sigma_ero_compute->post_process_surf();
+    double debit_dt = update->dt * sigma_nevery;
+    if (sigma_ero_col == 0) {
+      double *fvec = sigma_ero_compute->vector_surf;
+      for (int i = 0; i < nsown; i++)
+        sig[i][sigma_ero_isp] -= fvec[i] * debit_dt;
+    } else {
+      double **farr = sigma_ero_compute->array_surf;
+      int icol = sigma_ero_col - 1;
+      for (int i = 0; i < nsown; i++)
+        sig[i][sigma_ero_isp] -= farr[i][icol] * debit_dt;
+    }
+  }
+
+  // derived columns: gross deposition and net (row sum)
+  MPI_Allreduce(dep_delta,dep_buf,(int) sigma_nsurf,MPI_DOUBLE,MPI_SUM,world);
+  for (int i = 0; i < (int) sigma_nsurf; i++) dep_delta[i] = 0.0;
+  double *depvec = surf->edvec[surf->ewhich[sdep_index]];
+  double *netvec = surf->edvec[surf->ewhich[snet_index]];
+  double *erovec = surf->edvec[surf->ewhich[sero_index]];
+  for (int i = 0; i < nsown; i++) {
+    bigint m = me + (bigint) i*nprocs;
+    if (dim == 2) gid = surf->lines[m].id;
+    else gid = surf->tris[m].id;
+    depvec[i] += dep_buf[gid - 1];
+    double nsum = 0.0;
+    for (int j = 0; j < sigma_ncols; j++) nsum += sig[i][j];
+    netvec[i] = nsum;
+    erovec[i] = depvec[i] - nsum;    // gross removal (positive)
+  }
+  surf->estatus[snet_index] = 0;
+  surf->estatus[sdep_index] = 0;
+  surf->estatus[sero_index] = 0;
+  surf->spread_custom(sero_index);
+  surf->spread_custom(snet_index);
+  surf->spread_custom(sdep_index);
 
   surf->estatus[sindex_custom] = 0;
   surf->spread_custom(sindex_custom);

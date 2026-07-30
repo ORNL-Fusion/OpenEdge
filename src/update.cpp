@@ -2194,10 +2194,14 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 jpart = surf->sc[line->isc]->
                   collide(ipart,dtremain,minsurf,line->norm,line->isr,reaction);
 
+              // re-fetch base unconditionally: a surf reaction may have
+              // added particles (e.g. additive sputter emission) and
+              // realloced particle->particles even when jpart is NULL
+              particles = particle->particles;
+              x = particles[i].x;
+              v = particles[i].v;
+
               if (jpart) {
-                particles = particle->particles;
-                x = particles[i].x;
-                v = particles[i].v;
                 jpart->flag = PSURF + 1 + minsurf;
                 jpart->dtremain = dtremain;
                 jpart->weight = particles[i].weight;
