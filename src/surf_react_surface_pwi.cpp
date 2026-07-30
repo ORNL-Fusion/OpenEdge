@@ -157,6 +157,13 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       sigma_ero_col.push_back(input->inumeric(FLERR,arg[iarg+2]));
       sigma_ero_species.push_back(arg[iarg+3]);
       iarg += 4;
+    } else if (strcmp(arg[iarg],"sigma_init") == 0) {
+      // initial areal density for a species (e.g. a boronization layer),
+      // applied once when the sigma attribute is first created
+      if (iarg+3 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      sigma_init_names.push_back(arg[iarg+1]);
+      sigma_init_vals.push_back(input->numeric(FLERR,arg[iarg+2]));
+      iarg += 3;
     } else if (strcmp(arg[iarg],"sigma_zone") == 0) {
       // mixing-zone areal density for surface concentrations [atoms/m^2]
       if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
@@ -299,6 +306,16 @@ void SurfReactSurfacePWI::init()
     sindex_custom = surf->find_custom(sigma_attr);
     if (sindex_custom < 0) {
       sindex_custom = surf->add_custom(sigma_attr, DOUBLE, sigma_ncols);
+      // apply initial layers (only on creation: restarts keep their state)
+      if (sigma_init_names.size()) {
+        double **sig0 = surf->edarray[surf->ewhich[sindex_custom]];
+        for (size_t k = 0; k < sigma_init_names.size(); k++) {
+          int isp = particle->find_species((char *) sigma_init_names[k].c_str());
+          if (isp < 0)
+            error->all(FLERR,"surf_react surface/pwi sigma_init: unknown species");
+          for (int i = 0; i < surf->nown; i++) sig0[i][isp] = sigma_init_vals[k];
+        }
+      }
     } else {
       if (surf->etype[sindex_custom] != DOUBLE)
         error->all(FLERR,"surf_react surface/pwi sigma_surf attribute must be DOUBLE");

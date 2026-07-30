@@ -114,6 +114,8 @@ class SurfReactSurfacePWI : public SurfReact {
   int sconc_index;                 // custom index of <attr>_conc
   int substrate_isp;               // species index of the substrate (default W)
   std::vector<int> mat_of;         // species -> material group (by element)
+  std::vector<std::string> sigma_init_names;   // species with initial sigma
+  std::vector<double> sigma_init_vals;         //   (boronization layers etc.)
   double *dep_delta, *dep_buf;     // gross-deposition ledger (positive credits)
   double mat_conc(int isurf, int isp);
   void sigma_accumulate(int isurf, int isp, double datoms);

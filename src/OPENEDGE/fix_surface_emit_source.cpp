@@ -157,6 +157,9 @@ FixSurfaceEmitSource::FixSurfaceEmitSource(SPARTA *sparta, int narg, char **arg)
   flux_thresh = 0.0;
   pweight_index = -1;
   pweight_ewhich = -1;
+  conc_attr = NULL;
+  conc_col = 0;
+  conc_index = -1;
 
   emit_model = MODEL_THERMAL;
   model_Ub = 0.0;
@@ -224,6 +227,18 @@ FixSurfaceEmitSource::~FixSurfaceEmitSource()
 void FixSurfaceEmitSource::init()
 {
   FixEmit::init();
+
+  // bind the optional concentration-multiplier custom array (created by
+  // surf_react surface/pwi at its init; both run before the first step)
+  if (conc_attr) {
+    conc_index = surf->find_custom(conc_attr);
+    if (conc_index < 0)
+      error->all(FLERR,"Fix surface/emit/source conc_scale: custom attribute not found");
+    if (surf->etype[conc_index] != 1)
+      error->all(FLERR,"Fix surface/emit/source conc_scale: attribute must be DOUBLE");
+    if (surf->esize[conc_index] < conc_col)
+      error->all(FLERR,"Fix surface/emit/source conc_scale: column out of range");
+  }
 
   if (file_mode) {
     // File mode: no compute, no flux_index, no nlaunch* paths.
@@ -329,7 +344,10 @@ double FixSurfaceEmitSource::flux_for_surface(surfint isurf)
   // owned surfaces.
   if (!flux_localghost) return 0.0;
   if (isurf < 0 || isurf >= flux_n_localghost) return 0.0;
-  return flux_localghost[isurf];
+  double f = flux_localghost[isurf];
+  if (conc_index >= 0)
+    f *= surf->edarray_local[surf->ewhich[conc_index]][isurf][conc_col-1];
+  return f;
 }
 
 /* ----------------------------------------------------------------------
@@ -1044,6 +1062,21 @@ void FixSurfaceEmitSource::grow_task()
 
 int FixSurfaceEmitSource::option(int narg, char **arg)
 {
+  if (strcmp(arg[0],"conc_scale") == 0) {
+    // multiply the per-surf flux by column <col> of a per-surf custom
+    // DOUBLE array (e.g. the surface/pwi mixing-zone concentrations):
+    // emitted flux of this material = erosion flux * local concentration
+    if (3 > narg) error->all(FLERR,"Illegal fix surface/emit/source command");
+    delete [] conc_attr;
+    int n = strlen(arg[1]) + 1;
+    conc_attr = new char[n];
+    strcpy(conc_attr, arg[1]);
+    conc_col = atoi(arg[2]);
+    if (conc_col < 1)
+      error->all(FLERR,"Fix surface/emit/source conc_scale column must be >= 1");
+    return 3;
+  }
+
   if (strcmp(arg[0],"n") == 0) {
     if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/source command");
     np = atoi(arg[1]);

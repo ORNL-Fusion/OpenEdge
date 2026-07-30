@@ -120,6 +120,11 @@ class FixSurfaceEmitSource : public FixEmit {
   int     flux_n_localghost;
   std::vector<double> flux_owned_buf;
 
+  // optional per-surf concentration multiplier on the flux (mixed layers):
+  // conc_scale <custom-array-name> <col>
+  char *conc_attr;
+  int conc_col, conc_index;
+
   // custom options for per-surf emission properties
 
   // ---- File-driven flux mode (alternative to compute-driven) ----
