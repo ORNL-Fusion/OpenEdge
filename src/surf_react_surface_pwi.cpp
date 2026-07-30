@@ -108,6 +108,9 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   sigma_ero_compute = NULL;
   sigma_ero_isp = -1;
   snet_index = sdep_index = sero_index = -1;
+  sigma_zone = 1.0e19;
+  sconc_index = -1;
+  substrate_isp = -1;
   dep_delta = dep_buf = NULL;
   trim_dir.clear();
 
@@ -161,6 +164,13 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       sigma_ero_species = new char[n];
       strcpy(sigma_ero_species, arg[iarg+3]);
       iarg += 4;
+    } else if (strcmp(arg[iarg],"sigma_zone") == 0) {
+      // mixing-zone areal density for surface concentrations [atoms/m^2]
+      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      sigma_zone = input->numeric(FLERR,arg[iarg+1]);
+      if (sigma_zone <= 0.0)
+        error->all(FLERR,"surf_react surface/pwi sigma_zone must be > 0");
+      iarg += 2;
     } else if (strcmp(arg[iarg],"sigma_nevery") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       sigma_nevery = input->inumeric(FLERR,arg[iarg+1]);
@@ -313,6 +323,14 @@ void SurfReactSurfacePWI::init()
     snprintf(dname,sizeof(dname),"%s_dep",sigma_attr);
     sdep_index = surf->find_custom(dname);
     if (sdep_index < 0) sdep_index = surf->add_custom(dname, DOUBLE, 0);
+    snprintf(dname,sizeof(dname),"%s_conc",sigma_attr);
+    sconc_index = surf->find_custom(dname);
+    if (sconc_index < 0) sconc_index = surf->add_custom(dname, DOUBLE, sigma_ncols);
+    surf->spread_custom(sconc_index);
+    if (substrate_isp < 0) {
+      substrate_isp = particle->find_species((char *) "W");
+      if (substrate_isp < 0) substrate_isp = 0;
+    }
     snprintf(dname,sizeof(dname),"%s_ero",sigma_attr);
     sero_index = surf->find_custom(dname);
     if (sero_index < 0) sero_index = surf->add_custom(dname, DOUBLE, 0);
@@ -836,6 +854,25 @@ void SurfReactSurfacePWI::sync_sigma()
     netvec[i] = nsum;
     erovec[i] = depvec[i] - nsum;    // gross removal (positive)
   }
+  // mixing-zone concentrations: c_i = max(sigma_i,0)/zone, clipped to
+  // sum <= 1; remainder is substrate. Deposits fill the zone from the top.
+  double **conc = surf->edarray[surf->ewhich[sconc_index]];
+  for (int i = 0; i < nsown; i++) {
+    double csum = 0.0;
+    for (int j = 0; j < sigma_ncols; j++) {
+      double c = sig[i][j] > 0.0 ? sig[i][j] / sigma_zone : 0.0;
+      conc[i][j] = c;
+      csum += c;
+    }
+    if (csum > 1.0) {
+      for (int j = 0; j < sigma_ncols; j++) conc[i][j] /= csum;
+      csum = 1.0;
+    }
+    conc[i][substrate_isp] += 1.0 - csum;   // substrate fills the rest
+  }
+  surf->estatus[sconc_index] = 0;
+  surf->spread_custom(sconc_index);
+
   surf->estatus[snet_index] = 0;
   surf->estatus[sdep_index] = 0;
   surf->estatus[sero_index] = 0;

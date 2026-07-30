@@ -101,6 +101,12 @@ class SurfReactSurfacePWI : public SurfReact {
   class Compute *sigma_ero_compute;
   int sigma_ero_isp;
   int snet_index, sdep_index, sero_index;  // derived: _net, _dep, _ero
+  // WallDYN-style homogeneous mixing zone: concentrations c_i of the top
+  // sigma_zone atoms/m^2, stored in per-surf custom array <attr>_conc
+  // (esize = nspecies); remainder of the zone is substrate material.
+  double sigma_zone;               // reaction-zone areal density [atoms/m^2]
+  int sconc_index;                 // custom index of <attr>_conc
+  int substrate_isp;               // species index of the substrate (default W)
   double *dep_delta, *dep_buf;     // gross-deposition ledger (positive credits)
   void sigma_accumulate(int isurf, int isp, double datoms);
   void sync_sigma();
