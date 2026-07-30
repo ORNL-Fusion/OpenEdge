@@ -59,6 +59,8 @@ class SurfReactSurfacePWI : public SurfReact {
     // first-to-fire lottery.
     double sp_Es, sp_Eth, sp_Q, sp_ETF;  // Eckstein sputter params (type==SPUTTER)
     int sp_tbl;                          // index into sput_tables, -1 = analytic
+    char *mat_id;                        // material species name for composition
+    int mat_isp;                         //   weighting via <attr>_conc, -1 = off
     char *id;
   };
 
@@ -105,9 +107,11 @@ class SurfReactSurfacePWI : public SurfReact {
   // sigma_zone atoms/m^2, stored in per-surf custom array <attr>_conc
   // (esize = nspecies); remainder of the zone is substrate material.
   double sigma_zone;               // reaction-zone areal density [atoms/m^2]
+  int sigma_feedback;              // 0 = ignore mat weights (Y,R without sigma)
   int sconc_index;                 // custom index of <attr>_conc
   int substrate_isp;               // species index of the substrate (default W)
   double *dep_delta, *dep_buf;     // gross-deposition ledger (positive credits)
+  double mat_conc(int isurf, int isp);
   void sigma_accumulate(int isurf, int isp, double datoms);
   void sync_sigma();
 

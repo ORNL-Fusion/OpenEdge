@@ -109,6 +109,7 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   sigma_ero_isp = -1;
   snet_index = sdep_index = sero_index = -1;
   sigma_zone = 1.0e19;
+  sigma_feedback = 1;
   sconc_index = -1;
   substrate_isp = -1;
   dep_delta = dep_buf = NULL;
@@ -171,6 +172,14 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       if (sigma_zone <= 0.0)
         error->all(FLERR,"surf_react surface/pwi sigma_zone must be > 0");
       iarg += 2;
+    } else if (strcmp(arg[iarg],"sigma_feedback") == 0) {
+      // yes (default): 'mat' channels weighted by surface concentrations;
+      // no: weights forced to 1 (composition feedback off, for A/B runs)
+      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      if (strcmp(arg[iarg+1],"yes") == 0) sigma_feedback = 1;
+      else if (strcmp(arg[iarg+1],"no") == 0) sigma_feedback = 0;
+      else error->all(FLERR,"surf_react surface/pwi sigma_feedback must be yes/no");
+      iarg += 2;
     } else if (strcmp(arg[iarg],"sigma_nevery") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       sigma_nevery = input->inumeric(FLERR,arg[iarg+1]);
@@ -210,6 +219,7 @@ SurfReactSurfacePWI::~SurfReactSurfacePWI()
       delete [] r->products;
       delete [] r->energy;
       delete [] r->id;
+      delete [] r->mat_id;
     }
     memory->sfree(rlist);
   }
@@ -242,6 +252,12 @@ void SurfReactSurfacePWI::init()
   // ewhich at use time: other modules (sheath, plasma cache) add particle
   // customs after this init, which can invalidate a cached ewhich value.
   pweight_ewhich = particle->find_custom((char *) "pweight");
+
+  // composition-weighted (mat) channels need the sigma mixing zone
+  for (int m = 0; m < nlist_recycle; m++)
+    if (rlist[m].active && rlist[m].mat_id && !sigma_attr)
+      error->all(FLERR,"surf_react surface/pwi: 'mat' reaction channels "
+                 "require sigma_surf (mixing-zone concentrations)");
 
   // bind per-surf twall attribute if requested. Deferred to init() so the
   // attribute can be created by read_surf (via custom columns) or by
@@ -417,6 +433,7 @@ void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
     double Y = (r->sp_tbl >= 0)
         ? sput_tables[r->sp_tbl].yield(E_in_eV, theta_in_deg)
         : Eckstein::sputter_yield(E_in_eV, theta_in_deg, p);
+    if (r->mat_isp >= 0) Y *= mat_conc(isurf, r->mat_isp);
     if (Y <= 0.0) continue;
 
     int nemit = (int) Y;                         // floor(Y)
@@ -534,6 +551,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
       }
       Reflection::View tv = trim_tables[r->trim_table].view();
       p_this = Reflection::R_N_interp(tv, E_in_eV, theta_in_deg);
+      if (r->mat_isp >= 0) p_this *= mat_conc(isurf, r->mat_isp);
     } else {
       p_this = r->prob;
     }
@@ -766,6 +784,17 @@ void SurfReactSurfacePWI::sample_cosine_velocity(double *v, double *norm,
 }
 
 /* ----------------------------------------------------------------------
+   surface concentration of material species isp at local surf isurf,
+   from the <attr>_conc custom array (1.0 if weighting inactive)
+------------------------------------------------------------------------- */
+
+double SurfReactSurfacePWI::mat_conc(int isurf, int isp)
+{
+  if (!sigma_feedback || isp < 0 || sconc_index < 0) return 1.0;
+  return surf->edarray_local[surf->ewhich[sconc_index]][isurf][isp];
+}
+
+/* ----------------------------------------------------------------------
    sigma ledger: record a net change of datoms real atoms of species isp
    on surf element isurf (local index), as an areal density (atoms/m^2).
    Accumulated locally; folded into the owned custom array in sync_sigma().
@@ -941,6 +970,11 @@ void SurfReactSurfacePWI::init_reactions()
       r->products[i] = particle->find_species(r->id_products[i]);
       if (r->products[i] < 0) { r->active = 0; break; }
     }
+    if (r->mat_id) {
+      r->mat_isp = particle->find_species(r->mat_id);
+      if (r->mat_isp < 0)
+        error->all(FLERR,"surf_react surface/pwi: unknown 'mat' species in reaction file");
+    }
   }
 
   memory->destroy(reactions);
@@ -1020,6 +1054,8 @@ void SurfReactSurfacePWI::readfile(char *fname)
         r->prob = 0.0;
         r->trim_table = -1;
         r->id = NULL;
+        r->mat_id = NULL;
+        r->mat_isp = -1;
       }
     }
 
@@ -1152,6 +1188,17 @@ void SurfReactSurfacePWI::readfile(char *fname)
       r->trim_table = it;
       r->prob = 0.0;
 
+      // optional: `mat <species>` weights this channel by the surface
+      // concentration of that material (composition-weighted reflection)
+      word = strtok(NULL, " \t\n");
+      if (word && strcmp(word,"mat") == 0) {
+        word = strtok(NULL, " \t\n");
+        if (!word) error->all(FLERR, "Missing species after 'mat' in T reaction");
+        int n2 = strlen(word) + 1;
+        r->mat_id = new char[n2];
+        strcpy(r->mat_id, word);
+      }
+
     } else if (r->type == ABSORB_REEMIT) {
       // EIRENE-style absorb-and-re-emit: catch-all after TRIM.
       // Syntax: A <R> [<f_mol>]
@@ -1199,6 +1246,17 @@ void SurfReactSurfacePWI::readfile(char *fname)
       r->sp_Es = p.Es; r->sp_Eth = p.Eth; r->sp_Q = p.Q; r->sp_ETF = p.ETF;
       r->sp_tbl = load_or_get_sputter_table(word);
       r->prob = 0.0;
+
+      // optional: `mat <species>` weights the yield by the surface
+      // concentration of that material (composition-weighted sputtering)
+      word = strtok(NULL, " \t\n");
+      if (word && strcmp(word,"mat") == 0) {
+        word = strtok(NULL, " \t\n");
+        if (!word) error->all(FLERR, "Missing species after 'mat' in S reaction");
+        int n2 = strlen(word) + 1;
+        r->mat_id = new char[n2];
+        strcpy(r->mat_id, word);
+      }
 
     } else {
       // non-TRIM: probability
