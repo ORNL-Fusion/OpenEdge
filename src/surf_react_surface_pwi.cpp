@@ -102,11 +102,7 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   sigma_delta = NULL;
   sigma_buf = NULL;
   sigma_area = NULL;
-  sigma_ero_id = NULL;
-  sigma_ero_col = 0;
-  sigma_ero_species = NULL;
-  sigma_ero_compute = NULL;
-  sigma_ero_isp = -1;
+
   snet_index = sdep_index = sero_index = -1;
   sigma_zone = 1.0e19;
   sigma_feedback = 1;
@@ -157,13 +153,9 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       // gross-erosion debit: sigma_erosion <computeID> <col> <species>
       // col 0 = compute's vector_surf, col N = array_surf column N
       if (iarg+4 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
-      int n = strlen(arg[iarg+1]) + 1;
-      sigma_ero_id = new char[n];
-      strcpy(sigma_ero_id, arg[iarg+1]);
-      sigma_ero_col = input->inumeric(FLERR,arg[iarg+2]);
-      n = strlen(arg[iarg+3]) + 1;
-      sigma_ero_species = new char[n];
-      strcpy(sigma_ero_species, arg[iarg+3]);
+      sigma_ero_id.push_back(arg[iarg+1]);
+      sigma_ero_col.push_back(input->inumeric(FLERR,arg[iarg+2]));
+      sigma_ero_species.push_back(arg[iarg+3]);
       iarg += 4;
     } else if (strcmp(arg[iarg],"sigma_zone") == 0) {
       // mixing-zone areal density for surface concentrations [atoms/m^2]
@@ -229,8 +221,6 @@ SurfReactSurfacePWI::~SurfReactSurfacePWI()
   delete [] twall_attr;
   delete [] R_attr;
   delete [] sigma_attr;
-  delete [] sigma_ero_id;
-  delete [] sigma_ero_species;
   memory->destroy(sigma_delta);
   memory->destroy(sigma_buf);
   memory->destroy(sigma_area);
@@ -347,6 +337,24 @@ void SurfReactSurfacePWI::init()
       substrate_isp = particle->find_species((char *) "W");
       if (substrate_isp < 0) substrate_isp = 0;
     }
+
+    // group species into materials by ELEMENT (strip charge-state suffix:
+    // W, W+, W2+ .. are one tungsten material; B, B+ .. one boron material)
+    mat_of.assign(sigma_ncols, 0);
+    {
+      std::vector<std::string> elems(sigma_ncols);
+      for (int j = 0; j < sigma_ncols; j++) {
+        std::string nm = particle->species[j].id;
+        size_t e = 0;
+        while (e < nm.size() && isalpha((unsigned char) nm[e])) e++;
+        elems[j] = nm.substr(0, e);
+      }
+      for (int j = 0; j < sigma_ncols; j++) {
+        mat_of[j] = j;
+        for (int k = 0; k < j; k++)
+          if (elems[k] == elems[j]) { mat_of[j] = mat_of[k]; break; }
+      }
+    }
     snprintf(dname,sizeof(dname),"%s_ero",sigma_attr);
     sero_index = surf->find_custom(dname);
     if (sero_index < 0) sero_index = surf->add_custom(dname, DOUBLE, 0);
@@ -375,23 +383,26 @@ void SurfReactSurfacePWI::init()
       else sigma_area[i] = surf->line_size(i);
     }
 
-    // bind the gross-erosion compute + target species column
-    sigma_ero_compute = NULL;
-    if (sigma_ero_id) {
-      int ic = modify->find_compute(sigma_ero_id);
+    // bind the gross-erosion computes + target species columns
+    sigma_ero_compute.clear();
+    sigma_ero_isp.clear();
+    for (size_t k = 0; k < sigma_ero_id.size(); k++) {
+      int ic = modify->find_compute((char *) sigma_ero_id[k].c_str());
       if (ic < 0)
         error->all(FLERR,"surf_react surface/pwi sigma_erosion: compute ID not found");
-      sigma_ero_compute = modify->compute[ic];
-      if (!sigma_ero_compute->per_surf_flag)
+      Compute *ce = modify->compute[ic];
+      if (!ce->per_surf_flag)
         error->all(FLERR,"surf_react surface/pwi sigma_erosion: compute is not per-surf");
-      if (sigma_ero_col == 0 && sigma_ero_compute->size_per_surf_cols != 0)
+      if (sigma_ero_col[k] == 0 && ce->size_per_surf_cols != 0)
         error->all(FLERR,"surf_react surface/pwi sigma_erosion: compute produces an "
                    "array; give a column number");
-      if (sigma_ero_col > 0 && sigma_ero_col > sigma_ero_compute->size_per_surf_cols)
+      if (sigma_ero_col[k] > 0 && sigma_ero_col[k] > ce->size_per_surf_cols)
         error->all(FLERR,"surf_react surface/pwi sigma_erosion: column out of range");
-      sigma_ero_isp = particle->find_species(sigma_ero_species);
-      if (sigma_ero_isp < 0)
+      int isp = particle->find_species((char *) sigma_ero_species[k].c_str());
+      if (isp < 0)
         error->all(FLERR,"surf_react surface/pwi sigma_erosion: unknown species");
+      sigma_ero_compute.push_back(ce);
+      sigma_ero_isp.push_back(isp);
     }
   }
 }
@@ -850,20 +861,25 @@ void SurfReactSurfacePWI::sync_sigma()
   // gross-erosion debit: sigma[ero_species] -= flux * dt * sigma_nevery,
   // flux [atoms/m^2/s] per owned surf from the bound per-surf compute
   // (e.g. background-plasma sputtering of the wall feeding the W source)
-  if (sigma_ero_compute) {
-    if (sigma_ero_compute->invoked_per_surf != update->ntimestep)
-      sigma_ero_compute->compute_per_surf();
-    sigma_ero_compute->post_process_surf();
+  for (size_t k = 0; k < sigma_ero_compute.size(); k++) {
+    Compute *ce = sigma_ero_compute[k];
+    int isp = sigma_ero_isp[k];
+    if (ce->invoked_per_surf != update->ntimestep) ce->compute_per_surf();
+    ce->post_process_surf();
     double debit_dt = update->dt * sigma_nevery;
-    if (sigma_ero_col == 0) {
-      double *fvec = sigma_ero_compute->vector_surf;
+    // concentration-limited: the background erodes material isp only in
+    // proportion to its surface concentration (owned conc array from the
+    // previous derived pass; protective deposits shield the substrate)
+    double **conck = surf->edarray[surf->ewhich[sconc_index]];
+    if (sigma_ero_col[k] == 0) {
+      double *fvec = ce->vector_surf;
       for (int i = 0; i < nsown; i++)
-        sig[i][sigma_ero_isp] -= fvec[i] * debit_dt;
+        sig[i][isp] -= fvec[i] * conck[i][isp] * debit_dt;
     } else {
-      double **farr = sigma_ero_compute->array_surf;
-      int icol = sigma_ero_col - 1;
+      double **farr = ce->array_surf;
+      int icol = sigma_ero_col[k] - 1;
       for (int i = 0; i < nsown; i++)
-        sig[i][sigma_ero_isp] -= farr[i][icol] * debit_dt;
+        sig[i][isp] -= farr[i][icol] * conck[i][isp] * debit_dt;
     }
   }
 
@@ -885,19 +901,27 @@ void SurfReactSurfacePWI::sync_sigma()
   }
   // mixing-zone concentrations: c_i = max(sigma_i,0)/zone, clipped to
   // sum <= 1; remainder is substrate. Deposits fill the zone from the top.
+  // concentrations are per MATERIAL (element): all charge states of an
+  // element pool into one c; every species column of that element carries
+  // the material concentration, so mat_conc() works with any of them
   double **conc = surf->edarray[surf->ewhich[sconc_index]];
+  int sub_mat = mat_of[substrate_isp];
   for (int i = 0; i < nsown; i++) {
+    for (int j = 0; j < sigma_ncols; j++) conc[i][j] = 0.0;
     double csum = 0.0;
-    for (int j = 0; j < sigma_ncols; j++) {
-      double c = sig[i][j] > 0.0 ? sig[i][j] / sigma_zone : 0.0;
-      conc[i][j] = c;
-      csum += c;
-    }
+    for (int j = 0; j < sigma_ncols; j++)
+      if (sig[i][j] > 0.0) {
+        double c = sig[i][j] / sigma_zone;
+        conc[i][mat_of[j]] += c;
+        csum += c;
+      }
     if (csum > 1.0) {
       for (int j = 0; j < sigma_ncols; j++) conc[i][j] /= csum;
       csum = 1.0;
     }
-    conc[i][substrate_isp] += 1.0 - csum;   // substrate fills the rest
+    conc[i][sub_mat] += 1.0 - csum;         // substrate fills the rest
+    for (int j = 0; j < sigma_ncols; j++)   // broadcast material c to
+      if (mat_of[j] != j) conc[i][j] = conc[i][mat_of[j]];  // all its species
   }
   surf->estatus[sconc_index] = 0;
   surf->spread_custom(sconc_index);

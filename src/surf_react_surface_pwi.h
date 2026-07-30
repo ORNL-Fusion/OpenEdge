@@ -97,11 +97,14 @@ class SurfReactSurfacePWI : public SurfReact {
   // optional gross-erosion debit: per sync, sigma[species] -= flux * dt,
   // flux read per owned surf from a per-surf compute (e.g.
   // surface/physical/sputter ... erosion_flux)
-  char *sigma_ero_id;              // compute ID, NULL if unused
-  int sigma_ero_col;               // 0 = vector_surf, >0 = array_surf column
-  char *sigma_ero_species;         // species whose sigma column is debited
-  class Compute *sigma_ero_compute;
-  int sigma_ero_isp;
+  // repeatable: one binding per eroded target material; each debit is
+  // scaled by that material's surface concentration (protective layers
+  // shield the substrate)
+  std::vector<std::string> sigma_ero_id;       // compute IDs
+  std::vector<int> sigma_ero_col;              // 0 = vector, >0 = array col
+  std::vector<std::string> sigma_ero_species;  // debited species names
+  std::vector<class Compute *> sigma_ero_compute;
+  std::vector<int> sigma_ero_isp;
   int snet_index, sdep_index, sero_index;  // derived: _net, _dep, _ero
   // WallDYN-style homogeneous mixing zone: concentrations c_i of the top
   // sigma_zone atoms/m^2, stored in per-surf custom array <attr>_conc
@@ -110,6 +113,7 @@ class SurfReactSurfacePWI : public SurfReact {
   int sigma_feedback;              // 0 = ignore mat weights (Y,R without sigma)
   int sconc_index;                 // custom index of <attr>_conc
   int substrate_isp;               // species index of the substrate (default W)
+  std::vector<int> mat_of;         // species -> material group (by element)
   double *dep_delta, *dep_buf;     // gross-deposition ledger (positive credits)
   double mat_conc(int isurf, int isp);
   void sigma_accumulate(int isurf, int isp, double datoms);
