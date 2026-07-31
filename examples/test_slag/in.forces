@@ -1,0 +1,16 @@
+# Forces & transport for charged W in the WEST background (included by in.slag)
+
+# geometry for the sheath model: distance/normal to nearest plate element
+compute             cgeom nearest_surf/grid all plate dist surfid nx ny nz
+
+# Boris pusher with sheath boundary kick (background B + E)
+global              pusher plasma pd mode boris &
+                    subcycles 10 bad_dt_check yes bad_dt_limit 0.5 &
+                    sheath boundary geom cgeom mD_amu 2.0 &
+                    dump no
+
+# cross-field diffusion, Coulomb drag, Braginskii thermal-gradient forces
+variable            Dperp index 0.1
+fix                 fcd cross_field_diffusion 1 background pd D_perp ${Dperp}
+fix                 fcoul coulomb/background 1 background pd 2.0 1.0
+fix                 fth force/thermal 1 background pd ion_thermal yes elec_thermal yes
