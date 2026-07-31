@@ -209,6 +209,98 @@ def _build_ion_metadata(ion_inds, ion_metadata=None):
 
 
 
+def _load_zone_native(config_file, data_file, ref_file):
+    """Zone-native SOLEDGE3X loader (fluid-neutral runs: no meshEIRENE.h5,
+    no /triangles in the snapshot). Builds a triangulation from the zone
+    quads (2 tris per quad, chi>0 penalized cells dropped) and returns the
+    same intermediates the /triangles path produces. Zone corner coords are
+    normalized: R = R0 + a0*x, Z = a0*z (R0/a0 from mesh.h5)."""
+    with h5py.File(ref_file, 'r') as ref:
+        n0 = float(ref['/n0'][...]); T0 = float(ref['/T0'][...])
+        c0 = float(ref['/c0'][...]); B0 = float(ref['/B0'][...])
+
+    mesh = h5py.File(config_file, 'r')
+    data = h5py.File(data_file, 'r')
+    R0m = float(mesh['R0'][0]); a0m = float(mesh['a0'][0])
+    nz_zones = int(mesh['NZones'][0])
+
+    # ion metadata from species_raptorX.txt (row 0 = electrons)
+    spfile = os.path.join(os.path.dirname(ref_file), 'species_raptorX.txt')
+    rows = [l.split() for l in open(spfile) if l.strip()]
+    ions = rows[1:]
+    ion_names = [f"{r[0]}+" if int(r[2]) == 1 else f"{r[0]}{int(r[2])}+" for r in ions]
+    ion_mass_amu = np.array([float(r[1]) for r in ions])
+    ion_charge_state_z = np.array([int(r[2]) for r in ions], dtype=np.int32)
+    nion = len(ions)
+
+    vidx = {}
+    vr, vz, tris, zc = [], [], [], []
+
+    def vid(r, z):
+        key = (round(float(r), 9), round(float(z), 9))
+        if key not in vidx:
+            vidx[key] = len(vr); vr.append(float(r)); vz.append(float(z))
+        return vidx[key]
+
+    for z in range(1, nz_zones + 1):
+        R = R0m + a0m * mesh[f'zone{z}/Rcorners'][:, :, 0]
+        Z = a0m * mesh[f'zone{z}/Zcorners'][:, :, 0]
+        chi = mesh[f'zone{z}/chi'][:, :, 0]
+        ni, nj = R.shape[0] - 1, R.shape[1] - 1
+        for i in range(ni):
+            for j in range(nj):
+                if chi[i, j] > 0.5:
+                    continue
+                v00 = vid(R[i, j], Z[i, j]); v10 = vid(R[i+1, j], Z[i+1, j])
+                v01 = vid(R[i, j+1], Z[i, j+1]); v11 = vid(R[i+1, j+1], Z[i+1, j+1])
+                tris.append((v00, v10, v11)); zc.append((z, i, j))
+                tris.append((v00, v11, v01)); zc.append((z, i, j))
+
+    ntri = len(tris)
+    print(f"Zone-native SOLEDGE load: {nz_zones} zones -> {ntri} triangles, {len(vr)} vertices")
+
+    def zfield(z, path):
+        a = data[f'zone{z}/{path}'][:, :, 0]
+        return a[2:-2, 2:-2]                      # strip 2 ghost layers
+
+    cache = {}
+    for z in range(1, nz_zones + 1):
+        ne = zfield(z, 'spec0/n'); te = zfield(z, 'spec0/T')
+        per = []
+        for sp in range(1, nion + 1):
+            n = zfield(z, f'spec{sp}/n'); T = zfield(z, f'spec{sp}/T')
+            G = zfield(z, f'spec{sp}/G')
+            per.append((n, T, G))
+        Br = mesh[f'zone{z}/Br'][:, :, 0]; Bz = mesh[f'zone{z}/Bz'][:, :, 0]
+        Bt = mesh[f'zone{z}/Bphi'][:, :, 0]
+        cache[z] = (ne, te, per, Br, Bz, Bt)
+
+    dens_e = np.empty(ntri); temp_e = np.empty(ntri)
+    d_all = np.zeros((nion, ntri)); t_all = np.zeros((nion, ntri)); u_all = np.zeros((nion, ntri))
+    br = np.empty(ntri); bz = np.empty(ntri); bt = np.empty(ntri)
+    for k, (z, i, j) in enumerate(zc):
+        ne, te, per, Br, Bz, Bt = cache[z]
+        dens_e[k] = ne[i, j] * n0; temp_e[k] = te[i, j] * T0
+        br[k] = Br[i, j] * B0; bz[k] = Bz[i, j] * B0; bt[k] = Bt[i, j] * B0
+        for sp in range(nion):
+            n, T, G = per[sp]
+            d_all[sp, k] = n[i, j] * n0
+            t_all[sp, k] = T[i, j] * T0
+            u_all[sp, k] = (G[i, j] / max(abs(n[i, j]), 1e-30)) * c0
+
+    mesh.close(); data.close()
+    return dict(
+        Rk=np.array(vr), Zk=np.array(vz),
+        tri_knots=np.array(tris, dtype=np.int64).T,
+        dens_e_tri=dens_e, temp_e_tri=temp_e,
+        dens_i_all=d_all, temp_i_all=t_all, flow_i_par_all=u_all,
+        tri_br=br, tri_bz=bz, tri_bt=bt,
+        ion_names=ion_names, ion_mass_amu=ion_mass_amu,
+        ion_charge_state_z=ion_charge_state_z,
+        ion_inds=list(range(1, nion + 1)),
+    )
+
+
 def interpolate_and_save_plasma_field(
     ref_file,
     mesh_file,
@@ -287,11 +379,23 @@ def interpolate_and_save_plasma_field(
                 "Could not read wall geometry from mesh files, and no wall_file fallback was provided."
             )
 
-    # Mesh (triangles + knots)
-    with h5py.File(mesh_file, 'r') as mesh_eirene:
-        tri_knots = mesh_eirene['/triangles/tri_knots'][...] - 1  # 0-based
-        Rk = mesh_eirene['/knots/R'][...] / 100.0
-        Zk = mesh_eirene['/knots/Z'][...] / 100.0
+    # Zone-native fallback: fluid-neutral runs carry no meshEIRENE.h5 and
+    # no /triangles group in the plasma snapshot (NeutralModel = 2).
+    zone_native = not (mesh_file and os.path.exists(mesh_file))
+    if not zone_native:
+        with h5py.File(data_file, 'r') as _d:
+            zone_native = 'triangles' not in _d
+    zn = None
+    if zone_native:
+        zn = _load_zone_native(config_file, data_file, ref_file)
+        Rk, Zk = zn['Rk'], zn['Zk']
+        tri_knots = zn['tri_knots']
+    else:
+        # Mesh (triangles + knots)
+        with h5py.File(mesh_file, 'r') as mesh_eirene:
+            tri_knots = mesh_eirene['/triangles/tri_knots'][...] - 1  # 0-based
+            Rk = mesh_eirene['/knots/R'][...] / 100.0
+            Zk = mesh_eirene['/knots/Z'][...] / 100.0
 
     points = np.vstack((Rk, Zk)).T
     triangle_points = np.array([points[tri] for tri in tri_knots.T])
@@ -307,7 +411,10 @@ def interpolate_and_save_plasma_field(
     # All values end up interpolated / averaged onto mesh vertices later.
     tri_br_src = tri_bz_src = tri_bt_src = None
     equ_r_src = equ_z_src = equ_br_src = equ_bz_src = equ_bt_src = None
-    if gfile is not None:
+    if zone_native:
+        tri_br_src, tri_bz_src, tri_bt_src = zn['tri_br'], zn['tri_bz'], zn['tri_bt']
+        print("B-field from SOLEDGE zones (cell-centered, x B0)")
+    elif gfile is not None:
         from convert_solps_plasma import _read_geqdsk_bfield
         equ_r_src, equ_z_src, equ_br_src, equ_bt_src, equ_bz_src = _read_geqdsk_bfield(gfile)
         print(f"B-field from GEQDSK: {gfile}")
@@ -337,7 +444,17 @@ def interpolate_and_save_plasma_field(
     )
 
     # Species data
-    with h5py.File(data_file, 'r') as data:
+    if zone_native:
+        temp_e_tri = zn['temp_e_tri']; dens_e_tri = zn['dens_e_tri']
+        ion_inds = zn['ion_inds']; nion = len(ion_inds)
+        mesh_dens_i_all = zn['dens_i_all']
+        mesh_temp_i_all = zn['temp_i_all']
+        mesh_flow_i_par_all = zn['flow_i_par_all']
+        ion_names = zn['ion_names']
+        ion_mass_amu = zn['ion_mass_amu']
+        ion_charge_state_z = zn['ion_charge_state_z']
+    else:
+      with h5py.File(data_file, 'r') as data:
         spec_inds = _find_species_indices(data)
         if not spec_inds:
             raise RuntimeError("No /triangles/spec* groups found in plasma file")
