@@ -171,7 +171,8 @@ def main():
         # compound B(c_B)W(1-c_B) targets -> per-species 3D tables
         # (skipped with a note while the generation runs are in flight)
         import os
-        for base in ("d_on_bw", "o_on_bw", "b_on_bw", "w_on_bw"):
+        for base in ("d_on_bw", "o_on_bw", "b_on_bw", "w_on_bw",
+                     "d_on_ow", "o_on_ow", "w_on_ow"):
             src = f"{bca3}/{base}.h5"
             if os.path.exists(src):
                 import_bca_compound(f, base, src,
