@@ -1,0 +1,96 @@
+/* OpenEdge — custom styling on top of pydata-sphinx-theme */
+
+:root {
+  --oe-primary: #b3273a;      /* plasma-red */
+  --oe-primary-dark: #7f1a28;
+  --oe-accent:  #ff9f1c;      /* hot-edge orange */
+  --oe-ink:     #1a1f2b;
+}
+
+html[data-theme="light"] {
+  --pst-color-primary:        var(--oe-primary);
+  --pst-color-secondary:      var(--oe-accent);
+  --pst-color-link:           var(--oe-primary);
+  --pst-color-link-hover:     var(--oe-primary-dark);
+  --pst-color-inline-code:    #7f1a28;
+  --pst-heading-color:        var(--oe-ink);
+}
+
+html[data-theme="dark"] {
+  --pst-color-primary:        #ff6b80;
+  --pst-color-secondary:      var(--oe-accent);
+  --pst-color-link:           #ff99a8;
+  --pst-color-link-hover:     var(--oe-accent);
+}
+
+/* Landing page hero */
+.oe-hero {
+  padding: 2.4rem 0 1.8rem;
+  border-bottom: 1px solid var(--pst-color-border);
+  margin-bottom: 2rem;
+}
+.oe-hero h1 {
+  font-size: 2.6rem;
+  margin: 0 0 0.4rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.oe-hero .oe-tagline {
+  font-size: 1.15rem;
+  color: var(--pst-color-text-muted);
+  margin: 0 0 1.1rem;
+  max-width: 52rem;
+}
+.oe-hero .oe-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+.oe-hero .oe-badge {
+  display: inline-block;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-radius: 4px;
+  background: var(--pst-color-surface);
+  border: 1px solid var(--pst-color-border);
+  color: var(--pst-color-text-base);
+}
+.oe-hero .oe-badge.primary {
+  background: var(--oe-primary);
+  color: white;
+  border-color: var(--oe-primary);
+}
+
+/* Feature cards — sphinx-design grid-item-card overrides */
+.bd-content .sd-card {
+  border-radius: 8px;
+  transition: transform 0.08s ease, box-shadow 0.12s ease;
+}
+.bd-content .sd-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+}
+.bd-content .sd-card-title {
+  font-weight: 600;
+}
+
+/* Make inline code a bit more distinct */
+code.literal {
+  padding: 0.08rem 0.32rem;
+  border-radius: 3px;
+  font-size: 0.88em;
+}
+
+/* Thicker / clearer section headings */
+.bd-article h2 {
+  margin-top: 2rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--pst-color-border);
+}
+
+/* Announcement banner spacing */
+.bd-header-announcement {
+  font-size: 0.9rem;
+}
