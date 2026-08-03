@@ -129,15 +129,69 @@ velocity along `+normal`. Converters (`convert_solps_plasma.py`,
 `convert_s3x_plasma.py`) emit wall.surf with that orientation; no
 `invert` on the corresponding `read_surf`.
 
+## Areal-density surface state
+
+The mixed-material surface model tracks per-surf, per-species **areal
+densities** ("adens") in a homogeneous **reaction zone**, from which
+**reaction-zone concentrations** c_i = δ_i/δ_TOT are derived each
+sync; the remainder of the zone is **bulk** (substrate) material.
+
+```
+surf_react ID surface/pwi <reactions_file> ... \
+    adens_surf <attr> \
+    [adens_init <species> <atoms/m^2>] ... \
+    [rzone <atoms/m^2>] \
+    [adens_erosion <computeID> <col> <species> [noconc]] ... \
+    [conc_feedback yes|no] [adens_nevery <N>]
+```
+
+- **`adens_surf <attr>`** — create/reuse the per-surf DOUBLE array
+  (one column per species, atoms/m^2). Retained particles credit their
+  species column (**influx**); sputtered atoms debit the sputtered
+  species column (**erosion flux**). Derived customs: `<attr>_net`,
+  `<attr>_dep`, `<attr>_ero`, `<attr>_conc`.
+- **`adens_init <species> <val>`** — initial areal density (e.g. a
+  boronization layer), applied once at attribute creation.
+- **`rzone <val>`** — reaction-zone total areal density used to derive
+  concentrations. WallDYN specifies the same quantity as a thickness
+  (`RZoneWidth`, Å) converted through the mixture density
+  1/n_tot = Σ c_i/n_i; here it is the areal density directly.
+- **`adens_erosion <computeID> <col> <species> [noconc]`** — debit the
+  named species by a background-driven gross-erosion flux from a
+  per-surf compute (e.g. `surface/physical/sputter ... erosion_flux`).
+  Debits are concentration-limited (scaled by the eroded material's
+  reaction-zone concentration) unless `noconc` is given — use `noconc`
+  when the compute already evaluates composition-resolved (compound)
+  yield tables, otherwise the concentration is double-counted.
+- **`conc_feedback yes|no`** — `no` freezes composition feedback:
+  `mat` weights become 1 and compound tables evaluate at their c=1
+  endpoint (fresh lead-element surface). For A/B comparisons.
+- **`adens_nevery <N>`** — sync interval for folding per-rank deltas
+  into the owned array (default 1).
+
+Charge states pool into one **material** per element (W, W+, W2+ …
+share one inventory; concentrations are pooled *before* clipping at
+zero, so redeposited-ion credits cancel neutral-column debits — see
+2026-08-03 fix). Sputter (`S`) reaction channels accept
+`mat <species>` (linear concentration weighting of a pure-pair yield)
+or `conc <species>` (composition coordinate of a 3D compound table —
+no linear rescaling; the table carries the composition dependence).
+
 ## Related
 
 - `database/processes.h5` — source of TRIM reflection tables. Rebuild
   with `database/ingest/build_processes_h5.py` after ingesting new
-  TRIM output.
+  TRIM output. Sputter tables (2D pure-pair and 3D compound
+  `<proj>_on_<mix>_<elem>` with a `C` composition axis) live under
+  `/surface/sputter/`; ingest with
+  `tools/converters/add_sputter_tables.py`.
 - `fix surface/emit/recycle` — thermal-return channel that complements
   the TRIM reflect path on the same wall group. `surface/pwi` handles
   the fast-reflection probability; `emit/recycle` handles the
   Bohm-flux-driven thermal return.
-- `compute surface/physical/sputter` — sputter yield diagnostic on the same
-  surfaces (analytic Eckstein for now; TRIM sputter migration
-  pending).
+- `fix surface/emit/source ... conc_scale <attr>_conc <col>` — emission
+  scaled by a reaction-zone concentration column. Drop `conc_scale`
+  when the driving compute is compound-mode (already c-weighted).
+- `compute surface/physical/sputter` — background-driven gross-erosion
+  flux on the same surfaces; supports 2D tables, IEAD convolution, and
+  compound mode (`compound <mix> conc <attr> <species>`).

@@ -1,0 +1,86 @@
+# Compound-target (B/W mixing zone) variant of slag_w.recycle.
+# S channels use 3D Y(E,theta,c_B) tables from RustBCA compound targets;
+# 'conc B' keys the lookup to the local mixing-zone boron fraction (the
+# composition dependence is inside the table -- no linear 'mat' weight).
+# T reflection channels keep the pure-pair tables + 'mat' weighting until
+# compound reflection tables are ingested (PLAN week 2).
+W --> W
+T w_on_w mat W
+W --> W
+A 0.0
+W --> W
+S w_on_bw_w conc B
+W --> B
+S w_on_bw_b conc B
+W+ --> W
+T w_on_w mat W
+W+ --> W
+A 0.0
+W+ --> W
+S w_on_bw_w conc B
+W+ --> B
+S w_on_bw_b conc B
+W2+ --> W
+T w_on_w mat W
+W2+ --> W
+A 0.0
+W2+ --> W
+S w_on_bw_w conc B
+W2+ --> B
+S w_on_bw_b conc B
+W3+ --> W
+T w_on_w mat W
+W3+ --> W
+A 0.0
+W3+ --> W
+S w_on_bw_w conc B
+W3+ --> B
+S w_on_bw_b conc B
+B --> B
+T b_on_b mat B
+B --> B
+A 0.0
+B --> W
+S b_on_bw_w conc B
+B --> B
+S b_on_bw_b conc B
+B+ --> B
+T b_on_b mat B
+B+ --> B
+A 0.0
+B+ --> W
+S b_on_bw_w conc B
+B+ --> B
+S b_on_bw_b conc B
+B2+ --> B
+T b_on_b mat B
+B2+ --> B
+A 0.0
+B2+ --> W
+S b_on_bw_w conc B
+B2+ --> B
+S b_on_bw_b conc B
+B3+ --> B
+T b_on_b mat B
+B3+ --> B
+A 0.0
+B3+ --> W
+S b_on_bw_w conc B
+B3+ --> B
+S b_on_bw_b conc B
+B4+ --> B
+T b_on_b mat B
+B4+ --> B
+A 0.0
+B4+ --> W
+S b_on_bw_w conc B
+B4+ --> B
+S b_on_bw_b conc B
+B5+ --> B
+T b_on_b mat B
+B5+ --> B
+A 0.0
+B5+ --> W
+S b_on_bw_w conc B
+B5+ --> B
+S b_on_bw_b conc B

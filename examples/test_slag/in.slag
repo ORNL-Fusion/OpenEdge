@@ -29,8 +29,8 @@ group               caps surf id 6745:7864
 
 surf_collide        pcoll diffuse 300.0 1.0
 surf_react          pwi surface/pwi input/slag_w.recycle twall 773.15 &
-                    sigma_surf sigma sigma_init B 4e14 sigma_zone 1e14 &
-                    sigma_erosion cpmi 0 W sigma_erosion cpmiB 0 B
+                    adens_surf adens adens_init B 4e14 rzone 1e14 &
+                    adens_erosion cpmi 0 W adens_erosion cpmiB 0 B
 surf_modify         plate collide pcoll react pwi
 
 surf_collide        svanish vanish
@@ -53,10 +53,10 @@ compute             cpmiB surface/physical/sputter plate background pd &
 fix                 pw particle/weight
 fix                 femit surface/emit/source wSource plate cpmi perspecies no &
                     nlaunch_total 10 model thompson 4.34 nevery 50 &
-                    conc_scale sigma_conc 1
+                    conc_scale adens_conc 1
 fix                 femitB surface/emit/source bSource plate cpmiB perspecies no &
                     nlaunch_total 10 model thompson 5.73 nevery 50 &
-                    conc_scale sigma_conc 5
+                    conc_scale adens_conc 5
 
 # W ionization/recombination in the background plasma (ADAS rates)
 fix                 fchem volume/chem/adas 1 W auto
@@ -68,18 +68,18 @@ timestep            1e-9
 stats               200
 stats_style         step cpu np nscoll nsreact
 
-# run 0 so surf_react init() creates the "sigma" custom attribute,
-# then the dump can reference s_sigma columns
+# run 0 so surf_react init() creates the "adens" custom attribute,
+# then the dump can reference s_adens columns
 run                 0 post no
 
-#dump                dsig surf plate 500 output/slag_sigma.*.dump &
-#                    id s_sigma[1] s_sigma[2] s_sigma[3] s_sigma[4] s_sigma[5] s_sigma[6] s_sigma[7] s_sigma[8] s_sigma[9] s_sigma[10] c_cpmi c_cpmiB s_sigma_conc[1] s_sigma_conc[5]
+dump                dsig surf plate 50000 output/slag_adens.*.dump &
+                    id s_adens[1] s_adens[2] s_adens[3] s_adens[4] s_adens[5] s_adens[6] s_adens[7] s_adens[8] s_adens[9] s_adens[10] c_cpmi c_cpmiB s_adens_conc[1] s_adens_conc[5]
 
 # native VTK output: particles as points, grid cells as voxels, surfs as tris
-#dump                dpvtk particle/vtk all 500 output/slag.particle.*.vtu id type x y z
-#dump                dgvtk grid/vtk all 500 output/slag.grid.*.vtu id proc vol
-#dump                dsvtk surf/vtk plate 500 output/slag.surf.*.vtu id s_sigma_net s_sigma_dep s_sigma_ero s_sigma_conc[1] s_sigma_conc[5] c_cpmi c_cpmiB
+#dump                dpvtk particle/vtk all 5000 output/slag.particle.*.vtu id type x y z
+#dump                dgvtk grid/vtk all 5000 output/slag.grid.*.vtu id proc vol
+dump                dsvtk surf/vtk plate 50000 output/slag.surf.*.vtu id s_adens_net s_adens_dep s_adens_ero s_adens_conc[1] s_adens_conc[5] c_cpmi c_cpmiB
 
-dump 10 particle all 1000 output/state id type x y z #vx vy vz
+#dump 10 particle all 1000 output/state id type x y z #vx vy vz
 
-run                 20000
+run                 200000
