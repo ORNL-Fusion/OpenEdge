@@ -111,6 +111,39 @@ def import_bca(f, pair, path, source):
     write_grid(f, pair, E, A, Y, source)
 
 
+# surface binding energies [eV] stamped as Es_eV on compound tables so the
+# C++ side can Thompson-sample without an eckstein_sputter_data.h entry
+ES_EV = {"b": 5.77, "w": 8.9, "o": 2.58, "c": 7.37, "be": 3.32}
+
+
+def import_bca_compound(f, base, path, source):
+    """Import a compound-target file (E, A, C, spyld_<Elem>...) as one 3D
+    table per emitted species: /surface/sputter/<base>_<elem>/{E,theta,C,Y}
+    with Y shaped (NC, NE, NTHETA)."""
+    with h5py.File(path, "r") as b:
+        E = b["E"][:]; A = b["A"][:]; C = b["C"][:]
+        species = [k for k in b if k.startswith("spyld_")]
+        for k in species:
+            elem = k.split("_", 1)[1].lower()
+            Y = np.clip(b[k][:], 0.0, None)
+            name = f"{base}_{elem}"
+            g = f.require_group(f"surface/sputter/{name}")
+            for d in ("E", "theta", "C", "Y"):
+                if d in g:
+                    del g[d]
+            g.create_dataset("E", data=np.asarray(E, float))
+            g.create_dataset("theta", data=np.asarray(A, float))
+            g.create_dataset("C", data=np.asarray(C, float))
+            g.create_dataset("Y", data=np.asarray(Y, float))
+            g.attrs["source"] = source
+            g.attrs["units"] = ("E: eV; theta: deg from surface normal; "
+                                "C: lead-element atomic fraction; Y: atoms/ion")
+            if elem in ES_EV:
+                g.attrs["Es_eV"] = ES_EV[elem]
+            print(f"  {name}: Y{Y.shape}  E=[{E[0]:g}..{E[-1]:g}] eV "
+                  f"C=[{C[0]:g}..{C[-1]:g}]")
+
+
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else \
         "/Users/42d/OpenEdge/database/processes.h5"
@@ -135,6 +168,16 @@ def main():
         for pair in ("d_on_b", "o_on_b", "b_on_w", "w_on_b"):
             import_bca(f, pair, f"{bca3}/{pair}.h5",
                        f"RustBCA 2.8.4 {pair} (database/surface/{pair}.h5)")
+        # compound B(c_B)W(1-c_B) targets -> per-species 3D tables
+        # (skipped with a note while the generation runs are in flight)
+        import os
+        for base in ("d_on_bw", "o_on_bw", "b_on_bw", "w_on_bw"):
+            src = f"{bca3}/{base}.h5"
+            if os.path.exists(src):
+                import_bca_compound(f, base, src,
+                    f"RustBCA 2.8.4 compound {base} (database/surface/{base}.h5)")
+            else:
+                print(f"  {base}: {src} not found, skipped")
     print(f"wrote sputter tables to {path}")
 
 
