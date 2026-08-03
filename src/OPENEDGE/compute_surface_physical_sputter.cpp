@@ -75,7 +75,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
     // Listed keywords start the option loop below. Anything not in this
     // set is treated as a positional surface.h5 path (legacy).
     static const char *kws[] = {
-        "target", "projectiles",
+        "target", "projectiles", "compound", "conc",
         "projectile_slots", "static", "mass_amu",
         "nflux_species", "incident_angle_species", "incident_energy_species",
         "sputter_yield_species", "sputter_flux_species",
@@ -252,6 +252,20 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       target_element = std::string(arg[iarg+1]);
       api_new = 1;
       iarg += 2;
+    } else if (strcmp(arg[iarg],"compound") == 0) {
+      // compound <mix>: use 3D composition-axis tables named
+      // <proj>_on_<mix>_<target> (e.g. mix bw, target W -> d_on_bw_w)
+      if (iarg+1 >= narg) error->all(FLERR,"compound needs mix name (e.g. bw)");
+      compound_mix = std::string(arg[iarg+1]);
+      api_new = 1;
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"conc") == 0) {
+      // conc <attr> <species>: per-surf custom array + species column that
+      // supplies the composition coordinate for compound tables
+      if (iarg+2 >= narg) error->all(FLERR,"conc needs <attr> <species>");
+      conc_attr = std::string(arg[iarg+1]);
+      conc_species_name = std::string(arg[iarg+2]);
+      iarg += 3;
     } else if (strcmp(arg[iarg],"projectiles") == 0) {
       if (iarg+1 >= narg)
         error->all(FLERR,"projectiles needs comma-separated element list or 'all'");
@@ -327,6 +341,20 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
     } else {
       error->all(FLERR,"Invalid compute surface/physical/sputter value");
     }
+  }
+
+  // compound-mode validation: needs the conc coordinate, the element-aware
+  // API, and none of the paths the composition axis doesn't cover
+  if (!compound_mix.empty() || !conc_attr.empty()) {
+    if (compound_mix.empty() || conc_attr.empty())
+      error->all(FLERR,"compute surface/physical/sputter: compound and conc "
+                 "must be given together");
+    if (target_element.empty() || projectile_elements.empty())
+      error->all(FLERR,"compute surface/physical/sputter: compound requires "
+                 "target + projectiles");
+    if (has_impurity)
+      error->all(FLERR,"compute surface/physical/sputter: compound is not "
+                 "supported with the virtual impurity path");
   }
 
   nvalue = static_cast<int>(which_tmp.size());
@@ -615,7 +643,9 @@ void ComputeSurfacePhysicalSputter::resolve_projectile_tables(const FixBackgroun
     per_proj_Es[i] = p.Es;   per_proj_Eth[i] = p.Eth;
     per_proj_Q[i]  = p.Q;    per_proj_ETF[i] = p.ETF;
   }
-  if (!missing.empty()) {
+  if (!missing.empty() && compound_mix.empty()) {
+    // compound mode never falls back to the analytic fit, so absent
+    // Eckstein entries are only fatal for pure-target mode
     const std::string msg =
         "compute surface/physical/sputter: missing Eckstein entries: " + missing +
         " (add to src/eckstein_sputter_data.h or drop from projectiles list)";
@@ -633,13 +663,26 @@ void ComputeSurfacePhysicalSputter::resolve_projectile_tables(const FixBackgroun
       lib.open(processes_path, world, error);
       if (lib.is_open()) {
         for (size_t i = 0; i < N; i++) {
-          std::string pair = projectile_elements[i] + "_on_" + target_element;
+          // compound mode reads <proj>_on_<mix>_<target> (3D, C axis);
+          // pure mode keeps <proj>_on_<target>
+          std::string pair = compound_mix.empty()
+              ? projectile_elements[i] + "_on_" + target_element
+              : projectile_elements[i] + "_on_" + compound_mix + "_" +
+                target_element;
           for (auto &c : pair)
             c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
           if (lib.load_trim_sputter(pair, per_proj_sput_tbl[i]) &&
               comm->me == 0) {
             char msg[256];
-            snprintf(msg, sizeof(msg),
+            if (per_proj_sput_tbl[i].NC > 0)
+              snprintf(msg, sizeof(msg),
+                       "compute surface/physical/sputter: loaded compound "
+                       "sputter yield table '%s' (%d c x %d x %d) from "
+                       "processes.h5\n",
+                       pair.c_str(), per_proj_sput_tbl[i].NC,
+                       per_proj_sput_tbl[i].NE, per_proj_sput_tbl[i].NTHETA);
+            else
+              snprintf(msg, sizeof(msg),
                      "compute surface/physical/sputter: loaded sputter yield "
                      "table '%s' (%d x %d) from processes.h5\n",
                      pair.c_str(), per_proj_sput_tbl[i].NE,
@@ -651,11 +694,28 @@ void ComputeSurfacePhysicalSputter::resolve_projectile_tables(const FixBackgroun
       }
     }
   }
+  // Compound mode: the 3D tables ARE the physics -- no analytic fallback,
+  // so a missing or 2D table is fatal, not a warning.
+  if (!compound_mix.empty()) {
+    for (size_t i = 0; i < N; i++) {
+      if (!per_proj_sput_tbl[i].valid() || per_proj_sput_tbl[i].NC <= 0) {
+        char msg[384];
+        snprintf(msg, sizeof(msg),
+                 "compute surface/physical/sputter: compound mode needs a 3D "
+                 "table '%s_on_%s_%s' (with C axis) in processes.h5 -- ingest "
+                 "with tools/converters/add_sputter_tables.py",
+                 projectile_elements[i].c_str(), compound_mix.c_str(),
+                 target_element.c_str());
+        error->all(FLERR, msg);
+      }
+    }
+  }
+
   // Loudly flag pairs without angle/energy-resolved tables: the analytic
   // Eckstein-Bohdansky x Yamamura fallback collapses at grazing incidence
   // (theta -> 90 deg), which silently kills erosion on field-tangent walls.
   for (size_t i = 0; i < N; i++) {
-    if (!per_proj_sput_tbl[i].valid()) {
+    if (compound_mix.empty() && !per_proj_sput_tbl[i].valid()) {
       char msg[384];
       snprintf(msg, sizeof(msg),
                "no angle/energy sputter table for '%s_on_%s' in "
@@ -1206,6 +1266,8 @@ void ComputeSurfacePhysicalSputter::init()
         "background <fix_id> (HDF5 file mode not supported)");
 
   cache_valid = 0;
+  slices_valid = 0;
+  conc_index = -1;
 
   try {
     load_plasma();
@@ -1444,7 +1506,14 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
   const double ME  = 9.1093837015e-31;   // electron mass [kg]
 
   invoked_per_surf = update->ntimestep;
-  if (static_cache && cache_valid) return;
+  const bool compound = !compound_mix.empty();
+  if (static_cache && cache_valid) {
+    // compound mode: plasma-side slices are frozen, but the composition
+    // coordinate is live -- re-interpolate the cached per-c yields at the
+    // current per-surf concentration on every invocation
+    if (compound && slices_valid) assemble_compound_outputs();
+    return;
+  }
   if (nvalue == 1) {
     for (int i = 0; i < nsown; i++) vector_surf[i] = 0.0;
   } else {
@@ -1459,6 +1528,20 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
 
   const int ns = has_multi_ion ? nspec : 1;
   std::vector<double> gamma_n(ns,0.0), angle_deg(ns,0.0), energy_eV(ns,0.0), yld(ns,0.0), sput_flux(ns,0.0);
+
+  if (compound) {
+    slice_nc = 0;
+    for (const auto &t : per_proj_sput_tbl)
+      slice_nc = std::max(slice_nc, t.NC);
+    cs_ns = ns;
+    cs_gamma.assign(size_t(nsown)*ns, 0.0);
+    cs_angle.assign(size_t(nsown)*ns, 0.0);
+    cs_energy.assign(size_t(nsown)*ns, 0.0);
+    cs_ybar.assign(size_t(nsown)*ns*slice_nc, 0.0);
+    cs_area.assign(nsown, 0.0);
+    cs_active.assign(nsown, 0);
+    slices_valid = 0;
+  }
 
   // Yield dispatch: analytic Eckstein or HDF5 table.
   Eckstein::SputterParams eck_p;
@@ -1830,7 +1913,25 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
             return st.valid() ? st.yield(e_eV, th_deg)
                               : Eckstein::sputter_yield(e_eV, th_deg, p);
           };
-          if (use_iead) {
+          if (compound) {
+            // one IEAD convolution (or mean-impact evaluation) per table
+            // composition grid point; live-c interpolation happens in
+            // assemble_compound_outputs()
+            for (int ic = 0; ic < st.NC; ic++) {
+              const double cv = st.C[ic];
+              double yb;
+              if (use_iead)
+                yb = tbl->convolve_yield(
+                    tau_local, psi_local, z_inc, te_eV,
+                    [&](double e_eV, double th_deg) {
+                      return st.yield(e_eV, th_deg, cv);
+                    });
+              else
+                yb = st.yield(E, theta_deg, cv);
+              cs_ybar[(size_t(i)*ns + s)*slice_nc + ic] = yb;
+            }
+            ys = 0.0;
+          } else if (use_iead) {
             ys = tbl->convolve_yield(
                 tau_local, psi_local, z_inc, te_eV,
                 [&](double e_eV, double th_deg) {
@@ -1853,6 +1954,12 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
         yld[s] = ys;
         sput_flux[s] = g * ys;
         sput_total += sput_flux[s];
+      }
+
+      if (compound) {
+        cs_gamma[size_t(i)*ns + s]  = gamma_n[s];
+        cs_angle[size_t(i)*ns + s]  = angle_deg[s];
+        cs_energy[size_t(i)*ns + s] = energy_eV[s];
       }
     }
 
@@ -1930,6 +2037,13 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
       const double cz = e1x*e2y - e1y*e2x;
       ring_area = 0.5 * std::sqrt(cx*cx + cy*cy + cz*cz);
     }
+    if (compound) {
+      // outputs are assembled from the cached slices + live concentration
+      cs_area[i] = ring_area;
+      cs_active[i] = 1;
+      continue;
+    }
+
     const double sput_rate = sput_total * ring_area;
 
     if (nvalue == 1) {
@@ -1968,6 +2082,116 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
   }
 
   if (static_cache) cache_valid = 1;
+
+  if (compound) {
+    slices_valid = 1;
+    assemble_compound_outputs();
+  }
+}
+
+/* ----------------------------------------------------------------------
+   Compound mode, cheap pass: interpolate the cached per-composition yield
+   slices at each surf element's live mixing-zone concentration and fill
+   the output vector/array. Runs every invocation (the concentration
+   evolves even when the plasma is static).
+------------------------------------------------------------------------- */
+
+void ComputeSurfacePhysicalSputter::assemble_compound_outputs()
+{
+  // resolve the concentration custom lazily: surf_react surface/pwi
+  // creates <attr>_conc in its init(), which can run after ours
+  if (conc_index < 0) {
+    conc_index = surf->find_custom((char *) conc_attr.c_str());
+    if (conc_index >= 0) {
+      conc_isp = particle->find_species((char *) conc_species_name.c_str());
+      if (conc_isp < 0)
+        error->all(FLERR,"compute surface/physical/sputter: unknown conc species");
+      if (surf->esize[conc_index] <= conc_isp)
+        error->all(FLERR,"compute surface/physical/sputter: conc attribute "
+                   "has fewer columns than the species index");
+    }
+  }
+  if (conc_index < 0)
+    error->all(FLERR,"compute surface/physical/sputter: conc attribute not "
+               "found (surf_react surface/pwi sigma_surf must create it "
+               "before this compute is invoked)");
+  double **conc = surf->edarray[surf->ewhich[conc_index]];
+
+  auto clean = [](double x) {
+    return (std::fabs(x) < 1.0e-200 || !std::isfinite(x)) ? 0.0 : x;
+  };
+
+  const int ns = cs_ns;
+  std::vector<double> yld(ns,0.0), sput_flux(ns,0.0);
+
+  for (int i = 0; i < nsown; i++) {
+    if (!cs_active[i]) {
+      if (nvalue == 1) vector_surf[i] = 0.0;
+      else for (int j = 0; j < nvalue; j++) array_surf[i][j] = 0.0;
+      continue;
+    }
+    const double cval = conc[i][conc_isp];
+    double sput_total = 0.0;
+    for (int s = 0; s < ns; s++) {
+      double y = 0.0;
+      if (s < static_cast<int>(slot_to_table.size()) && slot_to_table[s] >= 0) {
+        const ProcessLibrary::TrimSputterTable &st =
+            per_proj_sput_tbl[slot_to_table[s]];
+        const double *yb = &cs_ybar[(size_t(i)*ns + s)*slice_nc];
+        if (st.NC == 1) {
+          y = yb[0];
+        } else if (st.NC > 1) {
+          const double cc =
+              std::min(std::max(cval, st.C.front()), st.C.back());
+          int ic = int(std::lower_bound(st.C.begin(), st.C.end(), cc) -
+                       st.C.begin());
+          if (ic <= 0) ic = 1;
+          if (ic >= st.NC) ic = st.NC - 1;
+          const double t = (st.C[ic] != st.C[ic-1])
+              ? (cc - st.C[ic-1]) / (st.C[ic] - st.C[ic-1]) : 0.0;
+          y = (1.0 - t)*yb[ic-1] + t*yb[ic];
+        }
+      }
+      yld[s] = y;
+      sput_flux[s] = cs_gamma[size_t(i)*ns + s] * y;
+      sput_total += sput_flux[s];
+    }
+    const double sput_rate = sput_total * cs_area[i];
+
+    if (nvalue == 1) {
+      double out = 0.0;
+      if (which[0] == SPUTTER_FLUX_TOTAL) out = sput_total;
+      else if (which[0] == SPUTTER_RATE_TOTAL) out = sput_rate;
+      else {
+        const int slot = which_species[0] - 1;
+        if (slot >= 0 && slot < ns) {
+          if (which[0] == NFLUX_SPECIES) out = cs_gamma[size_t(i)*ns + slot];
+          else if (which[0] == INCIDENT_ANGLE_SPECIES) out = cs_angle[size_t(i)*ns + slot];
+          else if (which[0] == INCIDENT_ENERGY_SPECIES) out = cs_energy[size_t(i)*ns + slot];
+          else if (which[0] == SPUTTER_YIELD_SPECIES) out = yld[slot];
+          else if (which[0] == SPUTTER_FLUX_SPECIES) out = sput_flux[slot];
+        }
+      }
+      vector_surf[i] = clean(out);
+    } else {
+      for (int j = 0; j < nvalue; j++) {
+        double out = 0.0;
+        if (which[j] == SPUTTER_FLUX_TOTAL) out = sput_total;
+        else if (which[j] == SPUTTER_RATE_TOTAL) out = sput_rate;
+        else {
+          const int slot = which_species[j] - 1;
+          if (slot >= 0 && slot < ns) {
+            if (which[j] == NFLUX_SPECIES) out = cs_gamma[size_t(i)*ns + slot];
+            else if (which[j] == INCIDENT_ANGLE_SPECIES) out = cs_angle[size_t(i)*ns + slot];
+            else if (which[j] == INCIDENT_ENERGY_SPECIES) out = cs_energy[size_t(i)*ns + slot];
+            else if (which[j] == SPUTTER_YIELD_SPECIES) out = yld[slot];
+            else if (which[j] == SPUTTER_FLUX_SPECIES) out = sput_flux[slot];
+          }
+        }
+        array_surf[i][j] = clean(out);
+      }
+    }
+  }
 }
 
 /* ---------------------------------------------------------------------- */

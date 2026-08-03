@@ -61,6 +61,9 @@ class SurfReactSurfacePWI : public SurfReact {
     int sp_tbl;                          // index into sput_tables, -1 = analytic
     char *mat_id;                        // material species name for composition
     int mat_isp;                         //   weighting via <attr>_conc, -1 = off
+    char *conc_id;                       // species whose <attr>_conc is the
+    int conc_isp;                        //   composition coordinate of a 3D
+                                         //   (compound-target) sputter table
     char *id;
   };
 
@@ -79,13 +82,15 @@ class SurfReactSurfacePWI : public SurfReact {
   char *R_attr;                    // name of per-surf custom attribute, NULL if unused
   int rindex_custom;               // surf->find_custom index, -1 if R_attr unset
 
-  // per-surf areal-density ledger (sigma). When sigma_attr is set, every
-  // absorbed incident macroparticle adds +pweight/area to its species
-  // column and every sputtered atom adds -pweight/area to the sputtered
-  // species column of a per-surf custom DOUBLE array (esize = nspecies,
-  // units atoms/m^2). Deltas are accumulated locally per rank and folded
-  // into the owned custom array every sigma_nevery steps in tally_update().
-  // Explicit non-distributed surfs only.
+  // per-surf areal densities (WallDYN terminology: adens; deck keyword
+  // adens_surf, legacy alias sigma_surf). When sigma_attr is set, every
+  // retained incident macroparticle adds +pweight/area to its species
+  // column (influx) and every sputtered atom adds -pweight/area to the
+  // sputtered species column (erosion flux) of a per-surf custom DOUBLE
+  // array (esize = nspecies, units atoms/m^2). Deltas are accumulated
+  // locally per rank and folded into the owned custom array every
+  // adens_nevery steps in tally_update(). Explicit non-distributed
+  // surfs only.
   char *sigma_attr;                // name of per-surf custom attribute, NULL if unused
   int sindex_custom;               // surf->find_custom index, -1 if unset
   int sigma_nevery;                // sync interval in steps (default 1)
@@ -103,14 +108,17 @@ class SurfReactSurfacePWI : public SurfReact {
   std::vector<std::string> sigma_ero_id;       // compute IDs
   std::vector<int> sigma_ero_col;              // 0 = vector, >0 = array col
   std::vector<std::string> sigma_ero_species;  // debited species names
+  std::vector<int> sigma_ero_noconc;           // 1 = flux already c-weighted
   std::vector<class Compute *> sigma_ero_compute;
   std::vector<int> sigma_ero_isp;
   int snet_index, sdep_index, sero_index;  // derived: _net, _dep, _ero
-  // WallDYN-style homogeneous mixing zone: concentrations c_i of the top
-  // sigma_zone atoms/m^2, stored in per-surf custom array <attr>_conc
-  // (esize = nspecies); remainder of the zone is substrate material.
-  double sigma_zone;               // reaction-zone areal density [atoms/m^2]
-  int sigma_feedback;              // 0 = ignore mat weights (Y,R without sigma)
+  // WallDYN-style homogeneous reaction zone (deck keyword rzone, legacy
+  // alias sigma_zone): concentrations c_i of the top rzone atoms/m^2,
+  // stored in per-surf custom array <attr>_conc (esize = nspecies);
+  // remainder of the zone is substrate (bulk) material. WallDYN gives the
+  // same quantity as a thickness RZoneWidth [A]; ours is areal density.
+  double sigma_zone;               // reaction-zone total areal density [atoms/m^2]
+  int sigma_feedback;              // 0 = ignore mat weights (Y,R without feedback)
   int sconc_index;                 // custom index of <attr>_conc
   int substrate_isp;               // species index of the substrate (default W)
   std::vector<int> mat_of;         // species -> material group (by element)
@@ -120,6 +128,7 @@ class SurfReactSurfacePWI : public SurfReact {
   double mat_conc(int isurf, int isp);
   void sigma_accumulate(int isurf, int isp, double datoms);
   void sync_sigma();
+  void derive_sigma_conc();   // owned sigma -> owned <attr>_conc + spread
 
   // reflection-table support (shared format with surf_react pmi; tables
   // from database/surface/trim/*.h5, originally EIRENE TRIM but any

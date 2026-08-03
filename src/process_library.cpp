@@ -258,10 +258,9 @@ bool ProcessLibrary::load_trim_reflection(const std::string &pair,
 // ------------------------------------------------------------------------
 // load_trim_sputter()
 // ------------------------------------------------------------------------
-double ProcessLibrary::TrimSputterTable::yield(double E_eV,
-                                               double theta_deg) const
+double ProcessLibrary::TrimSputterTable::slice_yield(int ic, double E_eV,
+                                                     double theta_deg) const
 {
-  if (!valid()) return 0.0;
   // Below the table's lowest energy = below threshold -> no sputtering
   // (clamping upward would fabricate yield near/below threshold for
   // sparse tables, e.g. d_on_w starting at 250 eV).
@@ -278,10 +277,33 @@ double ProcessLibrary::TrimSputterTable::yield(double E_eV,
   const double a1 = theta[ia-1], a2 = theta[ia];
   const double te = (le2 != le1) ? (le - le1) / (le2 - le1) : 0.0;
   const double ta = (a2 != a1) ? (a - a1) / (a2 - a1) : 0.0;
-  auto at = [&](int i, int j) { return Y[size_t(i) * NTHETA + j]; };
+  const size_t off = size_t(ic) * NE * NTHETA;
+  auto at = [&](int i, int j) { return Y[off + size_t(i) * NTHETA + j]; };
   double y = (1-te)*(1-ta)*at(ie-1,ia-1) + te*(1-ta)*at(ie,ia-1)
            + (1-te)*ta*at(ie-1,ia) + te*ta*at(ie,ia);
   return (std::isfinite(y) && y > 0.0) ? y : 0.0;
+}
+
+double ProcessLibrary::TrimSputterTable::yield(double E_eV,
+                                               double theta_deg) const
+{
+  if (!valid()) return 0.0;
+  return slice_yield(0, E_eV, theta_deg);
+}
+
+double ProcessLibrary::TrimSputterTable::yield(double E_eV, double theta_deg,
+                                               double c) const
+{
+  if (!valid()) return 0.0;
+  if (NC <= 1) return slice_yield(0, E_eV, theta_deg);
+  const double cc = std::min(std::max(c, C.front()), C.back());
+  int ic = int(std::lower_bound(C.begin(), C.end(), cc) - C.begin());
+  if (ic <= 0) ic = 1;
+  if (ic >= NC) ic = NC - 1;
+  const double c1 = C[ic-1], c2 = C[ic];
+  const double tc = (c2 != c1) ? (cc - c1) / (c2 - c1) : 0.0;
+  return (1.0 - tc) * slice_yield(ic-1, E_eV, theta_deg)
+       + tc * slice_yield(ic, E_eV, theta_deg);
 }
 
 bool ProcessLibrary::load_trim_sputter(const std::string &pair,
@@ -309,14 +331,36 @@ bool ProcessLibrary::load_trim_sputter(const std::string &pair,
         };
         read1(grp + "/E", out.E, out.NE);
         read1(grp + "/theta", out.theta, out.NTHETA);
+        // optional composition axis -> Y is [NC x NE x NTHETA]
+        if (H5Lexists(f.getId(), (grp + "/C").c_str(), H5P_DEFAULT) > 0)
+          read1(grp + "/C", out.C, out.NC);
         H5::DataSet d = f.openDataSet(grp + "/Y");
-        hsize_t dims[2] = {0, 0};
-        d.getSpace().getSimpleExtentDims(dims, nullptr);
-        if (static_cast<int>(dims[0]) == out.NE &&
-            static_cast<int>(dims[1]) == out.NTHETA) {
-          out.Y.resize(size_t(out.NE) * out.NTHETA);
-          d.read(out.Y.data(), H5::PredType::NATIVE_DOUBLE);
-          present = 1;
+        if (out.NC > 0) {
+          hsize_t dims[3] = {0, 0, 0};
+          d.getSpace().getSimpleExtentDims(dims, nullptr);
+          if (static_cast<int>(dims[0]) == out.NC &&
+              static_cast<int>(dims[1]) == out.NE &&
+              static_cast<int>(dims[2]) == out.NTHETA) {
+            out.Y.resize(size_t(out.NC) * out.NE * out.NTHETA);
+            d.read(out.Y.data(), H5::PredType::NATIVE_DOUBLE);
+            present = 1;
+          }
+        } else {
+          hsize_t dims[2] = {0, 0};
+          d.getSpace().getSimpleExtentDims(dims, nullptr);
+          if (static_cast<int>(dims[0]) == out.NE &&
+              static_cast<int>(dims[1]) == out.NTHETA) {
+            out.Y.resize(size_t(out.NE) * out.NTHETA);
+            d.read(out.Y.data(), H5::PredType::NATIVE_DOUBLE);
+            present = 1;
+          }
+        }
+        if (present) {
+          H5::Group g = f.openGroup(grp);
+          if (g.attrExists("Es_eV")) {
+            H5::Attribute a = g.openAttribute("Es_eV");
+            a.read(H5::PredType::NATIVE_DOUBLE, &out.Es);
+          }
         }
       }
     } catch (const H5::Exception &) {
@@ -326,16 +370,18 @@ bool ProcessLibrary::load_trim_sputter(const std::string &pair,
 
   MPI_Bcast(&present, 1, MPI_INT, 0, comm_);
   if (!present) return false;
-  int dims2[2] = {out.NE, out.NTHETA};
-  MPI_Bcast(dims2, 2, MPI_INT, 0, comm_);
-  out.NE = dims2[0]; out.NTHETA = dims2[1];
+  int dims3[3] = {out.NE, out.NTHETA, out.NC};
+  MPI_Bcast(dims3, 3, MPI_INT, 0, comm_);
+  out.NE = dims3[0]; out.NTHETA = dims3[1]; out.NC = dims3[2];
+  MPI_Bcast(&out.Es, 1, MPI_DOUBLE, 0, comm_);
   auto bcast_vec = [&](std::vector<double> &v, size_t n) {
     if (me_ != 0) v.resize(n);
     if (n > 0) MPI_Bcast(v.data(), static_cast<int>(n), MPI_DOUBLE, 0, comm_);
   };
   bcast_vec(out.E, out.NE);
   bcast_vec(out.theta, out.NTHETA);
-  bcast_vec(out.Y, size_t(out.NE) * out.NTHETA);
+  if (out.NC > 0) bcast_vec(out.C, out.NC);
+  bcast_vec(out.Y, size_t(out.NC > 0 ? out.NC : 1) * out.NE * out.NTHETA);
   return true;
 }
 

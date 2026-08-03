@@ -101,6 +101,30 @@ class ComputeSurfacePhysicalSputter : public Compute {
 
   void resolve_projectile_tables(const FixBackground *pd);
 
+  // Compound-target (mixed-material) mode:
+  //   compound <mix> conc <attr> <species>
+  // Tables become /surface/sputter/<proj>_on_<mix>_<target> with a
+  // composition axis C (3D tables mandatory -- no analytic fallback).
+  // The expensive pass (plasma sampling + IEAD convolution) runs once
+  // per table composition grid point and is cached per surf element;
+  // every invocation then just interpolates the cached yield slices at
+  // the live per-surf concentration <attr>[<species>] (the mixing-zone
+  // array maintained by surf_react surface/pwi). This keeps `static
+  // yes` semantics: static refers to the plasma, not the composition.
+  std::string compound_mix;        // table infix, e.g. "bw"; empty = pure mode
+  std::string conc_attr;           // per-surf custom array name (e.g. sigma_conc)
+  std::string conc_species_name;   // species whose column is the c coordinate
+  int conc_index = -1;             // surf custom index, resolved lazily
+  int conc_isp = -1;               // species index, resolved lazily
+  int slices_valid = 0;
+  int slice_nc = 0;                // max NC across projectile tables
+  int cs_ns = 0;                   // species-slot count at slice build time
+  std::vector<double> cs_gamma, cs_angle, cs_energy;  // [nsown*cs_ns]
+  std::vector<double> cs_ybar;     // [nsown*cs_ns*slice_nc] per-c yields
+  std::vector<double> cs_area;     // [nsown] axisymmetric ring area
+  std::vector<char> cs_active;     // [nsown] in group + in plasma domain
+  void assemble_compound_outputs();
+
   // IEAD lookup — when active, replaces Y(<E>, <theta>) with the
   // distribution-weighted < Y > = sum_{Et,theta} Y(Et*Z*Te, theta) f(...).
   // `iead_arg` is the user token from the input deck:

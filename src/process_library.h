@@ -107,19 +107,32 @@ class ProcessLibrary {
   // {E [eV], theta [deg from surface normal], Y [NE x NTHETA] atoms/ion}.
   // Sources: TRIM.SP (IPP 9/132) or BCA codes (RustBCA/FTridyn) via
   // tools/converters/add_sputter_tables.py.
+  // Optional composition axis (mixed-material targets): a C dataset
+  // [NC] of atomic fractions of the table's lead element makes Y 3D
+  // [NC x NE x NTHETA]; NC == 0 marks a plain 2D pure-pair table. An
+  // Es_eV attribute carries the emitted species' surface binding energy
+  // so compound tables need no Eckstein catalog entry.
   struct TrimSputterTable {
     std::vector<double> E;       // [NE], eV, ascending
     std::vector<double> theta;   // [NTHETA], deg from normal, ascending
-    std::vector<double> Y;       // [NE*NTHETA]
-    int NE = 0, NTHETA = 0;
+    std::vector<double> C;       // [NC], atomic fraction, ascending; empty = 2D
+    std::vector<double> Y;       // [NE*NTHETA] or [NC*NE*NTHETA]
+    int NE = 0, NTHETA = 0, NC = 0;
+    double Es = 0.0;             // eV, 0 = not provided
     bool valid() const {
       return NE >= 2 && NTHETA >= 2 &&
-             static_cast<int>(Y.size()) == NE * NTHETA;
+             static_cast<int>(Y.size()) == (NC > 0 ? NC : 1) * NE * NTHETA;
     }
     // Bilinear lookup: linear in log(E), linear in theta, both clamped
     // to the grid (no extrapolation past the last angle -> no analytic
-    // grazing-angle cliff).
+    // grazing-angle cliff). 3D tables add linear interpolation in the
+    // composition c, clamped to the C grid; the 2-arg form reads the
+    // first composition slice.
     double yield(double E_eV, double theta_deg) const;
+    double yield(double E_eV, double theta_deg, double c) const;
+   private:
+    double slice_yield(int ic, double E_eV, double theta_deg) const;
+   public:
   };
   bool load_trim_sputter(const std::string &pair, TrimSputterTable &out);
 

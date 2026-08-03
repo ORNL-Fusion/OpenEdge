@@ -139,51 +139,68 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       R_attr = new char[n];
       strcpy(R_attr, arg[iarg+1]);
       iarg += 2;
-    } else if (strcmp(arg[iarg],"sigma_surf") == 0) {
-      // per-surf areal-density ledger. Creates (or reuses) a per-surf custom
-      // DOUBLE array with one column per species; absorbed particles add
-      // +pweight/area to their species column, sputtered atoms add
-      // -pweight/area to the sputtered species column.
+    } else if (strcmp(arg[iarg],"adens_surf") == 0 ||
+               strcmp(arg[iarg],"sigma_surf") == 0) {
+      // WallDYN-style areal-density accounting (adens = areal density).
+      // Creates (or reuses) a per-surf custom DOUBLE array with one column
+      // per species [atoms/m^2]; retained particles add +pweight/area to
+      // their species column (influx), sputtered atoms add -pweight/area
+      // to the sputtered species column (erosion flux).
+      // sigma_* keyword spellings are accepted as legacy aliases.
       if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       int n = strlen(arg[iarg+1]) + 1;
       sigma_attr = new char[n];
       strcpy(sigma_attr, arg[iarg+1]);
       iarg += 2;
-    } else if (strcmp(arg[iarg],"sigma_erosion") == 0) {
-      // gross-erosion debit: sigma_erosion <computeID> <col> <species>
-      // col 0 = compute's vector_surf, col N = array_surf column N
+    } else if (strcmp(arg[iarg],"adens_erosion") == 0 ||
+               strcmp(arg[iarg],"sigma_erosion") == 0) {
+      // background gross-erosion flux: adens_erosion <computeID> <col>
+      // <species> [noconc]. col 0 = compute's vector_surf, col N =
+      // array_surf column N. noconc: skip the concentration-limiting
+      // factor -- for computes that already fold the composition in
+      // (compound-table mode).
       if (iarg+4 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       sigma_ero_id.push_back(arg[iarg+1]);
       sigma_ero_col.push_back(input->inumeric(FLERR,arg[iarg+2]));
       sigma_ero_species.push_back(arg[iarg+3]);
       iarg += 4;
-    } else if (strcmp(arg[iarg],"sigma_init") == 0) {
+      if (iarg < narg && strcmp(arg[iarg],"noconc") == 0) {
+        sigma_ero_noconc.push_back(1);
+        iarg++;
+      } else sigma_ero_noconc.push_back(0);
+    } else if (strcmp(arg[iarg],"adens_init") == 0 ||
+               strcmp(arg[iarg],"sigma_init") == 0) {
       // initial areal density for a species (e.g. a boronization layer),
-      // applied once when the sigma attribute is first created
+      // applied once when the areal-density attribute is first created
       if (iarg+3 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       sigma_init_names.push_back(arg[iarg+1]);
       sigma_init_vals.push_back(input->numeric(FLERR,arg[iarg+2]));
       iarg += 3;
-    } else if (strcmp(arg[iarg],"sigma_zone") == 0) {
-      // mixing-zone areal density for surface concentrations [atoms/m^2]
+    } else if (strcmp(arg[iarg],"rzone") == 0 ||
+               strcmp(arg[iarg],"sigma_zone") == 0) {
+      // reaction-zone total areal density [atoms/m^2] for surface
+      // concentrations (WallDYN's RZoneWidth is the same quantity given
+      // as a thickness in Angstrom; ours is the areal density directly)
       if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       sigma_zone = input->numeric(FLERR,arg[iarg+1]);
       if (sigma_zone <= 0.0)
-        error->all(FLERR,"surf_react surface/pwi sigma_zone must be > 0");
+        error->all(FLERR,"surf_react surface/pwi rzone must be > 0");
       iarg += 2;
-    } else if (strcmp(arg[iarg],"sigma_feedback") == 0) {
-      // yes (default): 'mat' channels weighted by surface concentrations;
-      // no: weights forced to 1 (composition feedback off, for A/B runs)
+    } else if (strcmp(arg[iarg],"conc_feedback") == 0 ||
+               strcmp(arg[iarg],"sigma_feedback") == 0) {
+      // yes (default): 'mat' channels weighted by reaction-zone
+      // concentrations; no: weights forced to 1 (feedback off, A/B runs)
       if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       if (strcmp(arg[iarg+1],"yes") == 0) sigma_feedback = 1;
       else if (strcmp(arg[iarg+1],"no") == 0) sigma_feedback = 0;
-      else error->all(FLERR,"surf_react surface/pwi sigma_feedback must be yes/no");
+      else error->all(FLERR,"surf_react surface/pwi conc_feedback must be yes/no");
       iarg += 2;
-    } else if (strcmp(arg[iarg],"sigma_nevery") == 0) {
+    } else if (strcmp(arg[iarg],"adens_nevery") == 0 ||
+               strcmp(arg[iarg],"sigma_nevery") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       sigma_nevery = input->inumeric(FLERR,arg[iarg+1]);
       if (sigma_nevery < 1)
-        error->all(FLERR,"surf_react surface/pwi sigma_nevery must be >= 1");
+        error->all(FLERR,"surf_react surface/pwi adens_nevery must be >= 1");
       iarg += 2;
     } else error->all(FLERR,"Illegal surf_react surface/pwi command");
   }
@@ -219,6 +236,7 @@ SurfReactSurfacePWI::~SurfReactSurfacePWI()
       delete [] r->energy;
       delete [] r->id;
       delete [] r->mat_id;
+      delete [] r->conc_id;
     }
     memory->sfree(rlist);
   }
@@ -250,11 +268,11 @@ void SurfReactSurfacePWI::init()
   // customs after this init, which can invalidate a cached ewhich value.
   pweight_ewhich = particle->find_custom((char *) "pweight");
 
-  // composition-weighted (mat) channels need the sigma mixing zone
+  // composition-weighted (mat/conc) channels need the sigma mixing zone
   for (int m = 0; m < nlist_recycle; m++)
-    if (rlist[m].active && rlist[m].mat_id && !sigma_attr)
-      error->all(FLERR,"surf_react surface/pwi: 'mat' reaction channels "
-                 "require sigma_surf (mixing-zone concentrations)");
+    if (rlist[m].active && (rlist[m].mat_id || rlist[m].conc_id) && !sigma_attr)
+      error->all(FLERR,"surf_react surface/pwi: 'mat'/'conc' reaction channels "
+                 "require adens_surf (reaction-zone concentrations)");
 
   // bind per-surf twall attribute if requested. Deferred to init() so the
   // attribute can be created by read_surf (via custom columns) or by
@@ -297,9 +315,9 @@ void SurfReactSurfacePWI::init()
   // attributes) so sigma accumulates across restarts.
   if (sigma_attr) {
     if (surf->implicit)
-      error->all(FLERR,"surf_react surface/pwi sigma_surf requires explicit surfs");
+      error->all(FLERR,"surf_react surface/pwi adens_surf requires explicit surfs");
     if (surf->distributed)
-      error->all(FLERR,"surf_react surface/pwi sigma_surf does not yet support "
+      error->all(FLERR,"surf_react surface/pwi adens_surf does not yet support "
                  "distributed surfs");
 
     sigma_ncols = particle->nspecies;
@@ -312,15 +330,15 @@ void SurfReactSurfacePWI::init()
         for (size_t k = 0; k < sigma_init_names.size(); k++) {
           int isp = particle->find_species((char *) sigma_init_names[k].c_str());
           if (isp < 0)
-            error->all(FLERR,"surf_react surface/pwi sigma_init: unknown species");
+            error->all(FLERR,"surf_react surface/pwi adens_init: unknown species");
           for (int i = 0; i < surf->nown; i++) sig0[i][isp] = sigma_init_vals[k];
         }
       }
     } else {
       if (surf->etype[sindex_custom] != DOUBLE)
-        error->all(FLERR,"surf_react surface/pwi sigma_surf attribute must be DOUBLE");
+        error->all(FLERR,"surf_react surface/pwi adens_surf attribute must be DOUBLE");
       if (surf->esize[sindex_custom] != sigma_ncols)
-        error->all(FLERR,"surf_react surface/pwi sigma_surf attribute must have "
+        error->all(FLERR,"surf_react surface/pwi adens_surf attribute must have "
                    "one column per species");
     }
     surf->spread_custom(sindex_custom);
@@ -378,6 +396,10 @@ void SurfReactSurfacePWI::init()
     surf->spread_custom(sero_index);
     surf->spread_custom(snet_index);
     surf->spread_custom(sdep_index);
+
+    // seed the concentration array from the current sigma so the first
+    // debit/emission read (before the first sync) sees the initial layer
+    derive_sigma_conc();
     memory->destroy(dep_delta);
     memory->destroy(dep_buf);
     memory->create(dep_delta,(int) sigma_nsurf,"surf_react_pwi:dep_delta");
@@ -406,18 +428,18 @@ void SurfReactSurfacePWI::init()
     for (size_t k = 0; k < sigma_ero_id.size(); k++) {
       int ic = modify->find_compute((char *) sigma_ero_id[k].c_str());
       if (ic < 0)
-        error->all(FLERR,"surf_react surface/pwi sigma_erosion: compute ID not found");
+        error->all(FLERR,"surf_react surface/pwi adens_erosion: compute ID not found");
       Compute *ce = modify->compute[ic];
       if (!ce->per_surf_flag)
-        error->all(FLERR,"surf_react surface/pwi sigma_erosion: compute is not per-surf");
+        error->all(FLERR,"surf_react surface/pwi adens_erosion: compute is not per-surf");
       if (sigma_ero_col[k] == 0 && ce->size_per_surf_cols != 0)
-        error->all(FLERR,"surf_react surface/pwi sigma_erosion: compute produces an "
+        error->all(FLERR,"surf_react surface/pwi adens_erosion: compute produces an "
                    "array; give a column number");
       if (sigma_ero_col[k] > 0 && sigma_ero_col[k] > ce->size_per_surf_cols)
-        error->all(FLERR,"surf_react surface/pwi sigma_erosion: column out of range");
+        error->all(FLERR,"surf_react surface/pwi adens_erosion: column out of range");
       int isp = particle->find_species((char *) sigma_ero_species[k].c_str());
       if (isp < 0)
-        error->all(FLERR,"surf_react surface/pwi sigma_erosion: unknown species");
+        error->all(FLERR,"surf_react surface/pwi adens_erosion: unknown species");
       sigma_ero_compute.push_back(ce);
       sigma_ero_isp.push_back(isp);
     }
@@ -458,10 +480,22 @@ void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
     p.Es = r->sp_Es; p.Eth = r->sp_Eth; p.Q = r->sp_Q; p.ETF = r->sp_ETF;
     // Prefer the angle-resolved TRIM/BCA table (processes.h5
     // /surface/sputter/<pair>) over the analytic Eckstein fit.
-    double Y = (r->sp_tbl >= 0)
-        ? sput_tables[r->sp_tbl].yield(E_in_eV, theta_in_deg)
-        : Eckstein::sputter_yield(E_in_eV, theta_in_deg, p);
-    if (r->mat_isp >= 0) Y *= mat_conc(isurf, r->mat_isp);
+    // 3D compound-target tables encode the composition dependence
+    // themselves: evaluate at the local mixing-zone concentration of the
+    // `conc` species and skip the linear `mat` rescaling. With
+    // sigma_feedback off, mat_conc() returns 1.0 = the c=1 endpoint
+    // (fresh lead-element surface).
+    double Y;
+    const bool compound = (r->sp_tbl >= 0 && sput_tables[r->sp_tbl].NC > 0);
+    if (compound) {
+      double c = (r->conc_isp >= 0) ? mat_conc(isurf, r->conc_isp) : 1.0;
+      Y = sput_tables[r->sp_tbl].yield(E_in_eV, theta_in_deg, c);
+    } else {
+      Y = (r->sp_tbl >= 0)
+          ? sput_tables[r->sp_tbl].yield(E_in_eV, theta_in_deg)
+          : Eckstein::sputter_yield(E_in_eV, theta_in_deg, p);
+      if (r->mat_isp >= 0) Y *= mat_conc(isurf, r->mat_isp);
+    }
     if (Y <= 0.0) continue;
 
     int nemit = (int) Y;                         // floor(Y)
@@ -886,17 +920,20 @@ void SurfReactSurfacePWI::sync_sigma()
     double debit_dt = update->dt * sigma_nevery;
     // concentration-limited: the background erodes material isp only in
     // proportion to its surface concentration (owned conc array from the
-    // previous derived pass; protective deposits shield the substrate)
+    // previous derived pass; protective deposits shield the substrate).
+    // noconc bindings skip the factor: their compute already evaluated
+    // the yield at the local composition (compound tables).
     double **conck = surf->edarray[surf->ewhich[sconc_index]];
+    const int noconc = sigma_ero_noconc[k];
     if (sigma_ero_col[k] == 0) {
       double *fvec = ce->vector_surf;
       for (int i = 0; i < nsown; i++)
-        sig[i][isp] -= fvec[i] * conck[i][isp] * debit_dt;
+        sig[i][isp] -= fvec[i] * (noconc ? 1.0 : conck[i][isp]) * debit_dt;
     } else {
       double **farr = ce->array_surf;
       int icol = sigma_ero_col[k] - 1;
       for (int i = 0; i < nsown; i++)
-        sig[i][isp] -= farr[i][icol] * conck[i][isp] * debit_dt;
+        sig[i][isp] -= farr[i][icol] * (noconc ? 1.0 : conck[i][isp]) * debit_dt;
     }
   }
 
@@ -916,21 +953,51 @@ void SurfReactSurfacePWI::sync_sigma()
     netvec[i] = nsum;
     erovec[i] = depvec[i] - nsum;    // gross removal (positive)
   }
-  // mixing-zone concentrations: c_i = max(sigma_i,0)/zone, clipped to
-  // sum <= 1; remainder is substrate. Deposits fill the zone from the top.
-  // concentrations are per MATERIAL (element): all charge states of an
-  // element pool into one c; every species column of that element carries
-  // the material concentration, so mat_conc() works with any of them
+  derive_sigma_conc();
+
+  surf->estatus[snet_index] = 0;
+  surf->estatus[sdep_index] = 0;
+  surf->estatus[sero_index] = 0;
+  surf->spread_custom(sero_index);
+  surf->spread_custom(snet_index);
+  surf->spread_custom(sdep_index);
+
+  surf->estatus[sindex_custom] = 0;
+  surf->spread_custom(sindex_custom);
+}
+
+/* ----------------------------------------------------------------------
+   mixing-zone concentrations: c_i = max(sigma_i,0)/zone, clipped to
+   sum <= 1; remainder is substrate. Deposits fill the zone from the top.
+   concentrations are per MATERIAL (element): all charge states of an
+   element pool into one c; every species column of that element carries
+   the material concentration, so mat_conc() works with any of them.
+   Called from sync_sigma() every sync, and once at init() so the very
+   first debit/emission read sees the initial (e.g. boronized) surface
+   instead of an all-zero conc array.
+------------------------------------------------------------------------- */
+
+void SurfReactSurfacePWI::derive_sigma_conc()
+{
+  double **sig = surf->edarray[surf->ewhich[sindex_custom]];
   double **conc = surf->edarray[surf->ewhich[sconc_index]];
+  int nsown = surf->nown;
   int sub_mat = mat_of[substrate_isp];
   for (int i = 0; i < nsown; i++) {
     for (int j = 0; j < sigma_ncols; j++) conc[i][j] = 0.0;
+    // pool each material's columns BEFORE clipping: charge states share
+    // one inventory, and redeposited-ion credits (B+ columns) must cancel
+    // the neutral column's erosion debit. Clipping per column instead let
+    // c stay at 1 while the summed inventory went negative, so the
+    // concentration-limited debit never shut off (unbounded negative
+    // sigma at high-redeposition elements).
+    for (int j = 0; j < sigma_ncols; j++)
+      conc[i][mat_of[j]] += sig[i][j] / sigma_zone;
     double csum = 0.0;
     for (int j = 0; j < sigma_ncols; j++)
-      if (sig[i][j] > 0.0) {
-        double c = sig[i][j] / sigma_zone;
-        conc[i][mat_of[j]] += c;
-        csum += c;
+      if (mat_of[j] == j) {
+        if (conc[i][j] < 0.0) conc[i][j] = 0.0;
+        csum += conc[i][j];
       }
     if (csum > 1.0) {
       for (int j = 0; j < sigma_ncols; j++) conc[i][j] /= csum;
@@ -942,16 +1009,6 @@ void SurfReactSurfacePWI::sync_sigma()
   }
   surf->estatus[sconc_index] = 0;
   surf->spread_custom(sconc_index);
-
-  surf->estatus[snet_index] = 0;
-  surf->estatus[sdep_index] = 0;
-  surf->estatus[sero_index] = 0;
-  surf->spread_custom(sero_index);
-  surf->spread_custom(snet_index);
-  surf->spread_custom(sdep_index);
-
-  surf->estatus[sindex_custom] = 0;
-  surf->spread_custom(sindex_custom);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1015,6 +1072,11 @@ void SurfReactSurfacePWI::init_reactions()
       r->mat_isp = particle->find_species(r->mat_id);
       if (r->mat_isp < 0)
         error->all(FLERR,"surf_react surface/pwi: unknown 'mat' species in reaction file");
+    }
+    if (r->conc_id) {
+      r->conc_isp = particle->find_species(r->conc_id);
+      if (r->conc_isp < 0)
+        error->all(FLERR,"surf_react surface/pwi: unknown 'conc' species in reaction file");
     }
   }
 
@@ -1097,6 +1159,8 @@ void SurfReactSurfacePWI::readfile(char *fname)
         r->id = NULL;
         r->mat_id = NULL;
         r->mat_isp = -1;
+        r->conc_id = NULL;
+        r->conc_isp = -1;
       }
     }
 
@@ -1276,27 +1340,46 @@ void SurfReactSurfacePWI::readfile(char *fname)
       // yield Y(E,theta) is evaluated per event in emit_sputtered().
       word = strtok(NULL, " \t\n");
       if (!word) error->all(FLERR, "Missing Eckstein entry name in S recycle reaction");
+      r->sp_tbl = load_or_get_sputter_table(word);
       Eckstein::SputterParams p;
-      if (!Eckstein::lookup_sputter(word, p)) {
+      if (Eckstein::lookup_sputter(word, p)) {
+        r->sp_Es = p.Es; r->sp_Eth = p.Eth; r->sp_Q = p.Q; r->sp_ETF = p.ETF;
+      } else if (r->sp_tbl >= 0 && sput_tables[r->sp_tbl].Es > 0.0) {
+        // no catalog entry, but the table carries the emitted species'
+        // surface binding energy (compound tables); analytic fallback
+        // params stay zero -- the table always overrides them.
+        r->sp_Es = sput_tables[r->sp_tbl].Es;
+        r->sp_Eth = r->sp_Q = r->sp_ETF = 0.0;
+      } else {
         char str[256];
         snprintf(str, sizeof(str),
-                 "surf_react surface/pwi: unknown eckstein sputter entry '%s' "
-                 "(check eckstein_sputter_data.h)", word);
+                 "surf_react surface/pwi: sputter entry '%s' not in "
+                 "eckstein_sputter_data.h and no processes.h5 table with "
+                 "an Es_eV attribute", word);
         error->all(FLERR, str);
       }
-      r->sp_Es = p.Es; r->sp_Eth = p.Eth; r->sp_Q = p.Q; r->sp_ETF = p.ETF;
-      r->sp_tbl = load_or_get_sputter_table(word);
       r->prob = 0.0;
 
       // optional: `mat <species>` weights the yield by the surface
-      // concentration of that material (composition-weighted sputtering)
-      word = strtok(NULL, " \t\n");
-      if (word && strcmp(word,"mat") == 0) {
-        word = strtok(NULL, " \t\n");
-        if (!word) error->all(FLERR, "Missing species after 'mat' in S reaction");
-        int n2 = strlen(word) + 1;
-        r->mat_id = new char[n2];
-        strcpy(r->mat_id, word);
+      // concentration of that material (composition-weighted sputtering);
+      // `conc <species>` names the concentration that is the composition
+      // coordinate of a 3D compound-target table (no yield rescaling)
+      while ((word = strtok(NULL, " \t\n"))) {
+        if (strcmp(word,"mat") == 0) {
+          word = strtok(NULL, " \t\n");
+          if (!word) error->all(FLERR, "Missing species after 'mat' in S reaction");
+          int n2 = strlen(word) + 1;
+          r->mat_id = new char[n2];
+          strcpy(r->mat_id, word);
+        } else if (strcmp(word,"conc") == 0) {
+          word = strtok(NULL, " \t\n");
+          if (!word) error->all(FLERR, "Missing species after 'conc' in S reaction");
+          int n2 = strlen(word) + 1;
+          r->conc_id = new char[n2];
+          strcpy(r->conc_id, word);
+        } else {
+          error->all(FLERR, "Unknown keyword in S reaction (expect mat/conc)");
+        }
       }
 
     } else {
@@ -1353,7 +1436,16 @@ int SurfReactSurfacePWI::load_or_get_sputter_table(const char *name)
         sput_tables.push_back(std::move(t));
         if (comm->me == 0) {
           char msg[256];
-          snprintf(msg, sizeof(msg),
+          if (sput_tables[idx].NC > 0)
+            snprintf(msg, sizeof(msg),
+                     "surf_react surface/pwi: loaded compound sputter yield "
+                     "table '%s' (%d c x %d x %d, Es=%.2f eV) from "
+                     "database/processes.h5\n",
+                     pair_lower.c_str(), sput_tables[idx].NC,
+                     sput_tables[idx].NE, sput_tables[idx].NTHETA,
+                     sput_tables[idx].Es);
+          else
+            snprintf(msg, sizeof(msg),
                    "surf_react surface/pwi: loaded sputter yield table '%s' "
                    "(%d x %d) from database/processes.h5\n",
                    pair_lower.c_str(), sput_tables[idx].NE,
