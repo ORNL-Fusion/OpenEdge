@@ -202,9 +202,23 @@ endif()
 endif()
 
 if(PKG_VTK)
-  # external VTK 9 library provides the writers used by dump */vtk styles
-  find_package(VTK REQUIRED COMPONENTS CommonCore CommonDataModel
-               IOLegacy IOXML)
+  # external VTK provides the writers used by dump */vtk styles.
+  # VTK >= 8.90 uses unprefixed component names (CommonCore); older
+  # distro VTK (e.g. Ubuntu 20.04's 7.1) prefixes them (vtkCommonCore)
+  # and its config FATAL_ERRORs on unknown components even when QUIET,
+  # so probe the version first with no components, then branch.
+  find_package(VTK QUIET)
+  if(VTK_VERSION VERSION_LESS "8.90")
+    find_package(VTK REQUIRED COMPONENTS vtkCommonCore vtkCommonDataModel
+                 vtkIOLegacy vtkIOXML)
+    # VTK 7 libraries carry no INTERFACE include dirs; the vtk dump
+    # headers are reached from the main target too (style_dump.h), so
+    # the includes must be visible directory-wide, not package-private
+    include_directories(${VTK_INCLUDE_DIRS})
+  else()
+    find_package(VTK REQUIRED COMPONENTS CommonCore CommonDataModel
+                 IOLegacy IOXML)
+  endif()
   set(TARGET_SPARTA_BUILD_VTK ${VTK_LIBRARIES})
   set(TARGET_SPARTA_PKG_VTK pkg_vtk)
   list(APPEND TARGET_SPARTA_PKGS ${TARGET_SPARTA_PKG_VTK})

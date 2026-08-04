@@ -34,10 +34,20 @@ if(PKG_VTK)
   target_include_directories(${TARGET_SPARTA_PKG_VTK}
                              PRIVATE ${SPA_INCLUDE_DIRS})
 
+  # VTK 7 exports plain library names without attached include dirs
+  # (VTK 9 imported targets carry them); add them explicitly there
+  if(VTK_VERSION VERSION_LESS "8.90")
+    target_include_directories(${TARGET_SPARTA_PKG_VTK}
+                               PRIVATE ${VTK_INCLUDE_DIRS})
+  endif()
+
   # VTK 9 module system requires autoinit so the IO writer object factories
-  # register at load time; without this the XML/legacy writers produce no output
-  vtk_module_autoinit(TARGETS ${TARGET_SPARTA_PKG_VTK}
-                      MODULES ${TARGET_SPARTA_BUILD_VTK})
+  # register at load time; without this the XML/legacy writers produce no
+  # output. VTK 7 has no such command (and needs no autoinit for writers).
+  if(COMMAND vtk_module_autoinit)
+    vtk_module_autoinit(TARGETS ${TARGET_SPARTA_PKG_VTK}
+                        MODULES ${TARGET_SPARTA_BUILD_VTK})
+  endif()
 
   install(TARGETS ${TARGET_SPARTA_PKG_VTK}
           DESTINATION lib/sparta/${SPARTA_MACHINE}/pkgs)

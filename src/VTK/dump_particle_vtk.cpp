@@ -20,6 +20,7 @@
 #include "mpi.h"
 #include "string.h"
 #include "stdlib.h"
+#include <vtkVersionMacros.h>
 #include "dump_particle_vtk.h"
 #include "update.h"
 #include "domain.h"
@@ -325,13 +326,18 @@ void DumpParticleVTK::write_vtu(int n, double *mybuf)
   ugrid->SetPoints(points);
   // VTK >= 9.4: SetCells(type, cells) stores cell types as an implicit
   // constant array, which the ASCII XML writer cannot iterate (segfault).
-  // Pass an explicit unsigned-char cell-type array instead.
+  // Pass an explicit unsigned-char cell-type array there. VTK 7 predates
+  // both the bug and the (array, cells) overload: use the classic call.
   {
+#if VTK_MAJOR_VERSION >= 9
     vtkSmartPointer<vtkUnsignedCharArray> ctypes =
       vtkSmartPointer<vtkUnsignedCharArray>::New();
     ctypes->SetNumberOfValues(pointsCells->GetNumberOfCells());
     ctypes->Fill(VTK_VERTEX);
     ugrid->SetCells(ctypes,pointsCells);
+#else
+    ugrid->SetCells(VTK_VERTEX, pointsCells);
+#endif
   }
 
   for (int f = 0; f < (int) myarrays.size(); f++)

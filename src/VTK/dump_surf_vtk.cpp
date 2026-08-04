@@ -15,6 +15,7 @@
 #include "mpi.h"
 #include "string.h"
 #include "stdlib.h"
+#include <vtkVersionMacros.h>
 #include "dump_surf_vtk.h"
 #include "surf.h"
 #include "update.h"
@@ -285,13 +286,18 @@ void DumpSurfVTK::write_vtk(int n, double *mybuf)
   ugrid->SetPoints(points);
   // VTK >= 9.4: SetCells(type, cells) stores cell types as an implicit
   // constant array, which the ASCII XML writer cannot iterate (segfault).
-  // Pass an explicit unsigned-char cell-type array instead.
+  // Pass an explicit unsigned-char cell-type array there. VTK 7 predates
+  // both the bug and the (array, cells) overload: use the classic call.
   {
+#if VTK_MAJOR_VERSION >= 9
     vtkSmartPointer<vtkUnsignedCharArray> ctypes =
       vtkSmartPointer<vtkUnsignedCharArray>::New();
     ctypes->SetNumberOfValues(cellArray->GetNumberOfCells());
     ctypes->Fill(dimension == 3 ? VTK_TRIANGLE : VTK_LINE);
     ugrid->SetCells(ctypes,cellArray);
+#else
+    ugrid->SetCells(dimension == 3 ? VTK_TRIANGLE : VTK_LINE, cellArray);
+#endif
   }
 
   for (int f = 0; f < (int) myarrays.size(); f++)
@@ -362,13 +368,18 @@ void DumpSurfVTK::write_vtu(int n, double *mybuf)
   ugrid->SetPoints(points);
   // VTK >= 9.4: SetCells(type, cells) stores cell types as an implicit
   // constant array, which the ASCII XML writer cannot iterate (segfault).
-  // Pass an explicit unsigned-char cell-type array instead.
+  // Pass an explicit unsigned-char cell-type array there. VTK 7 predates
+  // both the bug and the (array, cells) overload: use the classic call.
   {
+#if VTK_MAJOR_VERSION >= 9
     vtkSmartPointer<vtkUnsignedCharArray> ctypes =
       vtkSmartPointer<vtkUnsignedCharArray>::New();
     ctypes->SetNumberOfValues(cellArray->GetNumberOfCells());
     ctypes->Fill(dimension == 3 ? VTK_TRIANGLE : VTK_LINE);
     ugrid->SetCells(ctypes,cellArray);
+#else
+    ugrid->SetCells(dimension == 3 ? VTK_TRIANGLE : VTK_LINE, cellArray);
+#endif
   }
 
   for (int f = 0; f < (int) myarrays.size(); f++)
