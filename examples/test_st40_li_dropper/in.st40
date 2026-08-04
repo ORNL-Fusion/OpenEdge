@@ -1,10 +1,13 @@
 # ST40 Li powder dropper — axisymmetric (x = Z, y = R), SOLPS-13589 background
+# THIS FILE IS THE CANONICAL DECK — edit directly; the notebook only runs it.
+# Emitter follows Erin's measured IPD S(t), shot 14457 via input/srate.deck
+# (regenerate with make_srate.py when the source data changes; see PLAN.md).
+# Sim clock: t_sim = 0 at shot t = -200 ms (shot_t = t_sim - 0.2 s).
 
 variable    dt        equal 2.0e-6
-variable    nsteps    equal 150000
-variable    ndump     equal 500
+variable    nsteps    equal 250000
+variable    ndump     equal 2500
 variable    nemit     equal 200
-variable    npergroup equal 20
 
 shell       mkdir output
 
@@ -24,7 +27,7 @@ species     input/droplet.species droplet
 species     input/li.species      Li Li+ Li2+ Li3+
 mixture     droplet droplet frac 1.0
 mixture     livapor Li      frac 1.0
-mixture     allLi Li Li+ Li2+ Li3+
+mixture     allLi Li Li+ Li2+ Li3+ group SELF   # own group per species
 
 read_surf   input/st40_wall_axi.surf group wall particle check
 read_surf   input/st40_core.surf group core
@@ -38,8 +41,12 @@ fix pd      background file input/plasma_st40_solps.h5 static yes
 global      pcache_nevery 10
 
 compute     cgeom nearest_surf/grid all wall dist surfid nx ny nz
+# subcycles 50: dt_sub 4e-8 s -> omega_c*dt_sub ~ 1.4 (Li+) .. 4.3 (Li3+),
+# vs 7..22 at 10. Full gyro-resolution of Li3+ would need ~200+; parallel
+# motion + drifts (what our transport uses) are fine at ~1. hybrid/GCA mode
+# is not available in axisymmetric domains.
 global      pusher plasma pd mode boris &
-            subcycles 10 bad_dt_check yes bad_dt_limit 0.5 &
+            subcycles 50 bad_dt_check yes bad_dt_limit 0.5 &
             sheath boundary geom cgeom mD_amu 2.0
 
 variable    Dperp index 0.1
@@ -47,8 +54,15 @@ fix fcd     cross_field_diffusion 1 background pd D_perp ${Dperp}
 fix fcoul   coulomb/background 1 background pd 2.0 1.0
 fix fth     force/thermal 1 background pd ion_thermal yes elec_thermal yes
 
-fix fdrop   grain/emit droplet dropper nevery ${nemit} n ${npergroup} &
-            perspecies no normal no vmin 2.0 vmax 6.0 angle cosine
+# grains/event follows Erin's S(t): staircase variable from make_srate.py
+include     input/srate.deck
+
+# v0 1.0-1.5 m/s at the port: free-fall from the light gate ~0.07 m above
+# (constrained by the measured 360-375 ms gate->plasma transit)
+fix fdrop   grain/emit droplet dropper nevery ${nemit} n v_srate nweight ${nweight} &
+            perspecies no normal no vmin 1.0 vmax 1.5 incidentAngle 0
+# incidentAngle 0 = collimated stream along the port normal (~17 deg off
+# vertical from the dome tilt) — a drop tube, not a cosine spray
 fix fdrag   grain/drag   1 2.0 1 background pd gravity 0 -9.8 0 model epstein material Li
 # NB: fix drag gravity is input as (gR gZ gphi) in axi mode, NOT sparta (x y z)
 fix fcharge grain/charge 1 background pd ion_mass_amu 2.0 thermionic no mixture droplet material Li
@@ -60,14 +74,18 @@ fix fevap   grain/ablate 1 droplet background pd &
 fix fchem   volume/chem/adas 1 Li input/li.reactions output summary
 
 # type 1 = grain, 2 = Li, 3 = Li+, 4 = Li2+, 5 = Li3+
-dump dpart  particle all ${ndump} output/state id type x y z vx vy vz radius temp
+#dump dpart  particle all ${ndump} output/state id type x y z vx vy vz radius temp
 
 fix     fpw particle/weight
+# allLi uses group SELF, so c_cli[1..4] = Li, Li+, Li2+, Li3+
 compute cli grid/weighted all allLi nrho_w
-fix     fli ave/grid all 100 100 10000 c_cli[1] ave one
-dump    dgrid grid all 10000 output/li_dens id xc yc f_fli
-fix     fadapt adapt 2000 all refine value c_cli[1] 5.0e15 1.0e14 maxlevel 3
+fix     fli ave/grid all 10 1000 10000 c_cli[1] c_cli[2] c_cli[3] c_cli[4] ave one
+dump    dgrid grid all 10000 output/li_dens id xc yc f_fli[1] f_fli[2] f_fli[3] f_fli[4]
+
+# per-species macroparticle counts in the stats -> log.openedge time history
+# (mixture/group syntax: "droplet" alone is ambiguous, it is also a mixture)
+compute cnt count droplet/default allLi/Li allLi/Li+ allLi/Li2+ allLi/Li3+
 
 stats       ${ndump}
-stats_style step cpu np
+stats_style step cpu np c_cnt[1] c_cnt[2] c_cnt[3] c_cnt[4] c_cnt[5]
 run         ${nsteps}

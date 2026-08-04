@@ -149,3 +149,4 @@ examples/test_st40_li_dropper/*.png
 examples/test_tsurf_emission/jeremy_cases_generated*/
 # Per-test READMEs are local-only notes
 examples/test_*/README.md
+examples/test_st40_li_dropper/*.html

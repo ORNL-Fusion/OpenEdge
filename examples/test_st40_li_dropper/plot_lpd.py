@@ -93,40 +93,114 @@ def main():
     print("wrote", out, "| last step", step, "|", counts)
 
 
-def plot_density():
-    """2D map of the time-averaged total-Li density from output/li_dens."""
-    step, hdr, rows = snapshots(ROOT / "output" / "li_dens")[-1]
-    xc, yc, dv = hdr.index("xc"), hdr.index("yc"), len(hdr) - 1
-    Zc = np.array([float(r[xc]) for r in rows])
-    Rc = np.array([float(r[yc]) for r in rows])
-    n = np.array([float(r[dv]) for r in rows])
+def plot_density(step=None):
+    """Per-species Li density maps from output/li_dens.
 
-    # uniform 130 x 72 grid over Z [-1, 1], R [0, 1.05]
+    New-format dumps carry 4 columns (Li, Li+, Li2+, Li3+) -> 5 panels
+    including the total; legacy single-column dumps plot the total only.
+    step=None picks the frame with the highest total Li inventory (the
+    pulse peak) — the last frame is usually the post-pulse decay.
+    """
+    snaps = snapshots(ROOT / "output" / "li_dens")
+    ncols = len(snaps[0][1]) - 3                      # id xc yc + data cols
+    labels = (["Li", "Li$^+$", "Li$^{2+}$", "Li$^{3+}$"][:ncols]
+              if ncols > 1 else [])
+    totals = [(s, sum(sum(float(v) for v in r[3:]) for r in rows))
+              for s, hdr, rows in snaps]
+    if step is None:
+        step = max(totals, key=lambda t: t[1])[0]
+        print("frames (step, total):",
+              [(s, f"{t:.2e}") for s, t in totals[-8:]], "-> plotting", step)
+    step, hdr, rows = next(s for s in snaps if s[0] == step)
+
+    Zc = np.array([float(r[1]) for r in rows])
+    Rc = np.array([float(r[2]) for r in rows])
+    data = np.array([[float(v) for v in r[3:]] for r in rows])  # (ncell, ncols)
+
     nx, ny = 130, 72
     ix = np.clip(((Zc + 1.0) / (2.0 / nx)).astype(int), 0, nx - 1)
     iy = np.clip((Rc / (1.05 / ny)).astype(int), 0, ny - 1)
-    img = np.full((ny, nx), np.nan)
-    cnt = np.zeros((ny, nx))
-    for i, j, v in zip(iy, ix, n):
-        img[i, j] = (0.0 if np.isnan(img[i, j]) else img[i, j]) + v
-        cnt[i, j] += 1
-    img = np.where(cnt > 0, img / np.maximum(cnt, 1), np.nan)
 
-    Zg = np.linspace(-1.0, 1.0, nx + 1)
+    def grid(v):
+        img = np.full((ny, nx), np.nan)
+        cnt = np.zeros((ny, nx))
+        for i, j, val in zip(iy, ix, v):
+            img[i, j] = (0.0 if np.isnan(img[i, j]) else img[i, j]) + val
+            cnt[i, j] += 1
+        return np.where(cnt > 0, img / np.maximum(cnt, 1), np.nan)
+
+    fields = [(lab, grid(data[:, k])) for k, lab in enumerate(labels)]
+    fields.append(("total Li", grid(data.sum(axis=1))))
+
+    vmax = max(np.nanmax(img) for _, img in fields)
+    norm = LogNorm(vmin=max(vmax * 1e-4, 1e10), vmax=vmax)  # shared scale
     Rg = np.linspace(0.0, 1.05, ny + 1)
-    vmax = np.nanmax(img)
-    fig, ax = plt.subplots(figsize=(4.2, 6.5))
-    pm = ax.pcolormesh(0.5 * (Rg[:-1] + Rg[1:]), 0.5 * (Zg[:-1] + Zg[1:]), img.T,
-                       norm=LogNorm(vmin=max(vmax * 1e-4, 1e10), vmax=vmax),
-                       cmap="viridis", shading="auto")
-    draw_vessel(ax)
-    ax.set_aspect("equal"); ax.set_xlabel("R [m]"); ax.set_ylabel("Z [m]")
-    ax.set_title(f"Total Li density — step {step}", fontsize=10)
-    fig.colorbar(pm, ax=ax, label=r"$n_{Li}$ [m$^{-3}$]")
-    plt.tight_layout()
+    Zg = np.linspace(-1.0, 1.0, nx + 1)
+    n = len(fields)
+    fig, axes = plt.subplots(1, n, figsize=(2.6 * n, 6.0), sharey=True)
+    axes = np.atleast_1d(axes)
+    for ax, (lab, img) in zip(axes, fields):
+        pm = ax.pcolormesh(0.5 * (Rg[:-1] + Rg[1:]), 0.5 * (Zg[:-1] + Zg[1:]),
+                           img.T, norm=norm, cmap="viridis", shading="auto")
+        draw_vessel(ax)
+        ax.set_aspect("equal")
+        ax.set_xlabel("R [m]")
+        ax.set_title(lab, fontsize=10)
+    axes[0].set_ylabel("Z [m]")
+    shot_ms = step * 2.0e-6 * 1e3 - 200.0
+    fig.suptitle(f"Li density — step {step} (shot {shot_ms:+.0f} ms)",
+                 fontsize=11, y=0.98)
+    cb = fig.colorbar(pm, ax=list(axes), shrink=0.8, pad=0.02)
+    cb.set_label(r"$n$ [m$^{-3}$]")
     out = ROOT / "st40_li_density.png"
+    plt.savefig(out, dpi=120, bbox_inches="tight")
+    print("wrote", out, f"| step {step} | n max = {vmax:.3e} m^-3")
+
+
+def plot_history(logfile=None):
+    """Per-species inventory vs time from the stats block in log.openedge.
+
+    Needs stats_style step cpu np c_cnt[1..5] (grain, Li, Li+, Li2+, Li3+).
+    Time axis is shot time (matches Erin's IPD plots): sim starts at
+    shot -200 ms, the powder's in-vessel flight time — Li appears near 0.
+    """
+    path = Path(logfile) if logfile else ROOT / "log.openedge"
+    rows = []
+    for l in path.read_text().splitlines():
+        p = l.split()
+        if len(p) == 8:
+            try:
+                rows.append([float(v) for v in p])
+            except ValueError:
+                pass
+    if not rows:
+        print(f"no 8-column stats lines in {path} — run with the c_cnt "
+              "stats_style first")
+        return
+    a = np.array(rows)
+    t = a[:, 0] * 2.0e-6 * 1e3 - 200.0        # shot time [ms]
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.4, 6.0), sharex=True)
+    ax1.plot(t, a[:, 3], color="0.35", lw=1.4, label="grain")
+    ax1.set_ylabel("grain macroparticles")
+    ax1.legend(fontsize=8)
+    for lab, y, c in [("Li", a[:, 4], "red"), ("Li$^+$", a[:, 5], "limegreen"),
+                      ("Li$^{2+}$", a[:, 6], "seagreen"),
+                      ("Li$^{3+}$", a[:, 7], "darkgreen")]:
+        ax2.plot(t, y, color=c, lw=1.2, label=lab)
+    ax2.set_ylabel("Li macroparticles")
+    ax2.set_xlabel("shot time [ms]")
+    ax2.legend(fontsize=8)
+    for ax in (ax1, ax2):
+        ax.grid(alpha=0.25)
+        ax.axvline(0.0, color="0.6", lw=0.8, ls="--")
+    ax1.text(0.0, ax1.get_ylim()[1] * 0.95, "  first Li at plasma",
+             fontsize=7, color="0.4", va="top")
+    ax1.set_title("species inventory vs time  (t < 0: powder in flight)",
+                  fontsize=11)
+    plt.tight_layout()
+    out = ROOT / "st40_li_history.png"
     plt.savefig(out, dpi=120)
-    print("wrote", out, f"| step {step} | n_Li max = {vmax:.3e} m^-3")
+    print("wrote", out, f"| {len(rows)} stats samples")
 
 
 if __name__ == "__main__":
