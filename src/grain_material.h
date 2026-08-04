@@ -30,7 +30,9 @@ namespace SPARTA_NS {
 struct GrainMaterial {
   char name[16];
   double rho;              // solid/liquid mass density [kg/m^3]
-  double cp;               // specific heat [J/kg/K]
+  double cp;               // specific heat [J/kg/K] (liquid, or single-phase)
+  double cp_solid;         // specific heat below tmelt_K [J/kg/K]; <= 0
+                           //  falls back to cp (legacy single-cp behavior)
   double mass_amu;         // atomic mass [amu]
   double hvap_J_mol;       // latent heat of evaporation/sublimation [J/mol]
   double antoine_a;        // log10 p_sat[atm] = a + b/T  (b < 0; the
@@ -45,6 +47,15 @@ struct GrainMaterial {
 
 // Find by name (case-sensitive). Returns nullptr if unknown.
 const GrainMaterial *grain_material_find(const char *name);
+
+// Phase-aware specific heat: cp_solid below the melt when provided,
+// cp otherwise. Materials without cp_solid keep the single-cp behavior.
+inline double grain_material_cp(const GrainMaterial *m, double T_K)
+{
+  if (m->cp_solid > 0.0 && m->tmelt_K > 0.0 && T_K < m->tmelt_K)
+    return m->cp_solid;
+  return m->cp;
+}
 
 // Find-or-create a mutable entry (used by the material command).
 GrainMaterial *grain_material_define(const char *name);

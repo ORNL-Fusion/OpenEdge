@@ -35,13 +35,14 @@ using namespace SPARTA_NS;
 // built via a function: gcc (<=9 at least) rejects initializer_list
 // aggregate init with a char-array member that clang accepts
 static GrainMaterial make_entry(const char *nm, double rho, double cp,
-    double mass, double hvap, double aa, double ab, double em,
+    double cps, double mass, double hvap, double aa, double ab, double em,
     double wf, double ra, double tm, double hm, double tp)
 {
   GrainMaterial m;
   strncpy(m.name, nm, sizeof(m.name) - 1);
   m.name[sizeof(m.name) - 1] = '\0';
-  m.rho = rho; m.cp = cp; m.mass_amu = mass; m.hvap_J_mol = hvap;
+  m.rho = rho; m.cp = cp; m.cp_solid = cps;
+  m.mass_amu = mass; m.hvap_J_mol = hvap;
   m.antoine_a = aa; m.antoine_b = ab; m.emissivity = em;
   m.work_function_eV = wf; m.richardson_A = ra; m.tmelt_K = tm;
   m.hmelt_J_mol = hm; m.tensile_Pa = tp;
@@ -51,9 +52,11 @@ static GrainMaterial make_entry(const char *nm, double rho, double cp,
 static std::vector<GrainMaterial> make_registry()
 {
   std::vector<GrainMaterial> v;
-  v.push_back(make_entry("Li", 534.0, 4200.0, 6.94, 1.47e5, 5.055,
+  // Li cp 4200 = liquid; cp_solid 3580 = solid near room T (24.86 J/mol/K)
+  v.push_back(make_entry("Li", 534.0, 4200.0, 3580.0, 6.94, 1.47e5, 5.055,
                          -8023.0, 0.10, 2.9, 1.2e6, 453.7, 3.0e3, 0.0));
-  v.push_back(make_entry("B", 2340.0, 2000.0, 10.81, 5.65e5, 8.64,
+  // B cp 2000 is already the high-T solid value; cp_solid 0 -> single cp
+  v.push_back(make_entry("B", 2340.0, 2000.0, 0.0, 10.81, 5.65e5, 8.64,
                          -32030.0, 0.80, 4.45, 1.2e6, 2349.0, 5.02e4, 1.0e9));
   return v;
 }
@@ -75,6 +78,7 @@ GrainMaterial *SPARTA_NS::grain_material_define(const char *name)
   strncpy(m.name, name, sizeof(m.name) - 1);
   // sentinel defaults so a partially-specified new material errors loudly
   m.rho = m.cp = m.mass_amu = m.hvap_J_mol = -1.0;
+  m.cp_solid = 0.0;   // 0 = use cp for both phases
   m.antoine_a = 0.0; m.antoine_b = 0.0;
   m.emissivity = 0.0;
   m.work_function_eV = -1.0; m.richardson_A = 1.2e6;
@@ -102,6 +106,7 @@ void MaterialCmd::command(int narg, char **arg)
     const double v = input->numeric(FLERR, arg[i + 1]);
     if      (strcmp(key, "rho") == 0)              m->rho = v;
     else if (strcmp(key, "cp") == 0)               m->cp = v;
+    else if (strcmp(key, "cp_solid") == 0)         m->cp_solid = v;
     else if (strcmp(key, "mass_amu") == 0)         m->mass_amu = v;
     else if (strcmp(key, "hvap_J_mol") == 0)       m->hvap_J_mol = v;
     else if (strcmp(key, "antoine_a") == 0)        m->antoine_a = v;

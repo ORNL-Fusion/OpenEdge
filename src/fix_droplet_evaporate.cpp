@@ -286,7 +286,6 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
   // command). Values resolved/validated in init().
   const double AM   = mat_->mass_amu * 1.66053906660e-27;  // atom mass [kg]
   const double Rho  = mat_->rho;          // kg/m^3
-  const double Cp   = mat_->cp;           // J/kg-K
   const double DHm  = mat_->hvap_J_mol;   // heat of vaporization [J/mol]
   const double Eps  = mat_->emissivity;   // total emissivity [-]
   const double AN   = 6.022e+23;          // 1/mol
@@ -417,7 +416,7 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
     // over a +-dTm band around Tmelt so the grain pauses there while
     // absorbing/releasing h_melt. No per-particle melt-fraction state
     // needed; adequate for micron grains whose h_melt << h_vap.
-    double Cp_eff = Cp;
+    double Cp_eff = grain_material_cp(mat_, T_new);   // solid vs liquid cp
     if (mat_->tmelt_K > 0.0 && mat_->hmelt_J_mol > 0.0) {
       const double dTm = 20.0;   // K, half-width of the melting band
       if (std::fabs(T_new - mat_->tmelt_K) < dTm) {
