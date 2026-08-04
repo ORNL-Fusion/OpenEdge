@@ -1,7 +1,7 @@
 # ST40 Li powder dropper — axisymmetric (x = Z, y = R), SOLPS-13589 background
 
 variable    dt        equal 2.0e-6
-variable    nsteps    equal 50000
+variable    nsteps    equal 150000
 variable    ndump     equal 500
 variable    nemit     equal 200
 variable    npergroup equal 20
@@ -28,7 +28,7 @@ mixture     allLi Li Li+ Li2+ Li3+
 
 read_surf   input/st40_wall_axi.surf group wall particle check
 read_surf   input/st40_core.surf group core
-group dropper surf id <> 40 41       # ids from build_geometry.py
+group dropper surf id <> 15 16       # upper-dome IPD location per ST40 team
 
 surf_collide vac  vanish
 surf_modify  wall collide vac
@@ -50,9 +50,12 @@ fix fth     force/thermal 1 background pd ion_thermal yes elec_thermal yes
 fix fdrop   grain/emit droplet dropper nevery ${nemit} n ${npergroup} &
             perspecies no normal no vmin 2.0 vmax 6.0 angle cosine
 fix fdrag   grain/drag   1 2.0 1 background pd gravity 0 -9.8 0 model epstein material Li
+# NB: fix drag gravity is input as (gR gZ gphi) in axi mode, NOT sparta (x y z)
 fix fcharge grain/charge 1 background pd ion_mass_amu 2.0 thermionic no mixture droplet material Li
+# rocket_eta 0: 50 um Li grains are isothermal (conduction time ~60 us), so
+# evaporation is isotropic and the -grad(Te) recoil kick does not apply
 fix fevap   grain/ablate 1 droplet background pd &
-            heatflux/scale 1.0 rocket_eta 0.5 emit_into livapor &
+            heatflux/scale 1.0 rocket_eta 0.0 emit_into livapor &
             heating oml ion_mass_amu 2.0 material Li
 fix fchem   volume/chem/adas 1 Li input/li.reactions output summary
 

@@ -17,7 +17,7 @@ from matplotlib.colors import LogNorm
 ROOT = Path(__file__).resolve().parent
 
 # wall line ids of the Li dropper segments (printed by build_geometry.py)
-DROPPER_IDS = (40, 41)
+DROPPER_IDS = (15, 16)
 
 SPECIES = {1: "grain", 2: "Li", 3: "Li$^+$", 4: "Li$^{2+}$", 5: "Li$^{3+}$"}
 

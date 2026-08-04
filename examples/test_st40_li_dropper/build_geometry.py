@@ -13,8 +13,9 @@ the surf file is written with (x, y) = (Z, R) and CCW enforced in that plane
 (normals into the vessel).
 
 The Li powder dropper is not a separate surface: the deck groups the wall
-segments near the top (Z ~ 0.56 m, R ~ 0.66-0.74 m); this script prints their
-line ids for `group dropper surf id <> lo hi` in in.st40.
+segments on the upper dome (Z ~ 0.83-0.86 m, R ~ 0.47-0.55 m, per the ST40
+team); this script prints their line ids for `group dropper surf id <> lo hi`
+in in.st40.
 """
 from __future__ import annotations
 from pathlib import Path
@@ -26,9 +27,10 @@ ROOT = Path(__file__).resolve().parent
 INPUT_DAT = Path("/Users/42d/Downloads/13589/run_dir/input.dat")
 WALL_SURF = ROOT / "input" / "st40_wall_axi.surf"
 
-# Physical location of the Li-powder-dropper wall segments (top of vessel).
-DROP_Z = 0.5484          # m (EIRENE wall top shelf)
-DROP_R = (0.650, 0.740)  # m
+# Physical location of the Li-powder-dropper wall segments (per ST40 team:
+# slanted upper-dome section, not the Z=0.5484 top shelf).
+DROP_Z = (0.830, 0.857)  # m
+DROP_R = (0.465, 0.550)  # m
 
 FLOAT = re.compile(r"[-+]?\d+\.\d+E[+-]\d+")
 
@@ -124,9 +126,8 @@ def main(input_dat: Path | str = INPUT_DAT):
     for i in range(n):
         z1, r1 = pts[i]
         z2, r2 = pts[(i + 1) % n]
-        if (abs(z1 - DROP_Z) < 2e-3 and abs(z2 - DROP_Z) < 2e-3
-                and DROP_R[0] - 1e-3 <= min(r1, r2)
-                and max(r1, r2) <= DROP_R[1] + 1e-3):
+        zm, rm = 0.5 * (z1 + z2), 0.5 * (r1 + r2)
+        if DROP_Z[0] <= zm <= DROP_Z[1] and DROP_R[0] <= rm <= DROP_R[1]:
             ids.append(i + 1)
     if ids:
         print(f"  dropper segments (Z~{DROP_Z}, R in {DROP_R}): "
