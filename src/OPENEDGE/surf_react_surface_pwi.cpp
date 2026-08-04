@@ -104,6 +104,12 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   sigma_area = NULL;
 
   snet_index = sdep_index = sero_index = -1;
+  strata_K = 0;
+  strata_minthick = 0.5;
+  rough_dm = 0.0;
+  strata_index = -1;
+  strata_ncols = 0;
+  nmat = 0;
   sigma_zone = 1.0e19;
   sigma_feedback = 1;
   sconc_index = -1;
@@ -195,6 +201,75 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       else if (strcmp(arg[iarg+1],"no") == 0) sigma_feedback = 0;
       else error->all(FLERR,"surf_react surface/pwi conc_feedback must be yes/no");
       iarg += 2;
+    } else if (strcmp(arg[iarg],"roughness_dm") == 0) {
+      // mean surface angle delta_m [deg]: yields evaluated at
+      // theta_eff = max(0, theta - delta_m)
+      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      rough_dm = input->numeric(FLERR,arg[iarg+1]);
+      if (rough_dm < 0.0 || rough_dm >= 90.0)
+        error->all(FLERR,"surf_react surface/pwi roughness_dm must be in [0,90)");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"strata") == 0) {
+      // opt-in Lagrangian strata stack: `strata <K>` with K = max
+      // strata per element (per MATERIAL composition). Absent = the
+      // homogeneous reaction-zone model, completely unchanged.
+      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      strata_K = input->inumeric(FLERR,arg[iarg+1]);
+      if (strata_K < 2 || strata_K > 64)
+        error->all(FLERR,"surf_react surface/pwi strata K must be in 2..64");
+      iarg += 2;
+      // optional: minthick <Angstrom> — lower for compressed-timescale
+      // test configs whose artificial layers are sub-Angstrom
+      if (iarg+1 < narg && strcmp(arg[iarg],"minthick") == 0) {
+        strata_minthick = input->numeric(FLERR,arg[iarg+1]);
+        if (strata_minthick <= 0.0)
+          error->all(FLERR,"surf_react surface/pwi strata minthick must be > 0");
+        iarg += 2;
+      }
+    } else if (strcmp(arg[iarg],"adens_implant") == 0) {
+      // background implantation + retention saturation (see header)
+      if (iarg+3 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      imp_species.push_back(arg[iarg+1]);
+      iarg += 2;
+      if (strcmp(arg[iarg],"compute") == 0) {
+        if (iarg+3 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+        imp_mode.push_back(0);
+        imp_comp_id.push_back(arg[iarg+1]);
+        imp_col.push_back(input->inumeric(FLERR,arg[iarg+2]));
+        imp_flux.push_back(0.0);
+        iarg += 3;
+      } else if (strcmp(arg[iarg],"const") == 0) {
+        if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+        imp_mode.push_back(1);
+        imp_comp_id.push_back("");
+        imp_col.push_back(0);
+        imp_flux.push_back(input->numeric(FLERR,arg[iarg+1]));
+        iarg += 2;
+      } else error->all(FLERR,"adens_implant needs compute <ID> <col> or const <flux>");
+      imp_rcoef.push_back(0.0);
+      imp_cmax.push_back(-1.0);
+      imp_alpha.push_back(100.0);
+      imp_depth.push_back(0.0);
+      while (iarg+1 < narg) {
+        if      (strcmp(arg[iarg],"rcoef") == 0) { imp_rcoef.back() = input->numeric(FLERR,arg[iarg+1]); iarg += 2; }
+        else if (strcmp(arg[iarg],"cmax")  == 0) { imp_cmax.back()  = input->numeric(FLERR,arg[iarg+1]); iarg += 2; }
+        else if (strcmp(arg[iarg],"alpha") == 0) { imp_alpha.back() = input->numeric(FLERR,arg[iarg+1]); iarg += 2; }
+        else if (strcmp(arg[iarg],"depth") == 0) { imp_depth.back() = input->numeric(FLERR,arg[iarg+1]); iarg += 2; }
+        else break;
+      }
+      if (imp_cmax.back() <= 0.0)
+        error->all(FLERR,"adens_implant requires cmax <c_sat> (physics "
+                   "choice, no default; ~0.1 for D in W at wall temps)");
+    } else if (strcmp(arg[iarg],"strata_dens") == 0) {
+      // solid number density override for a material:
+      // strata_dens <species> <atoms/m^3>  (repeatable; any charge state
+      // of the material selects it). Defaults are built in per element.
+      if (iarg+3 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      strata_dens_names.push_back(arg[iarg+1]);
+      strata_dens_vals.push_back(input->numeric(FLERR,arg[iarg+2]));
+      if (strata_dens_vals.back() <= 0.0)
+        error->all(FLERR,"surf_react surface/pwi strata_dens must be > 0");
+      iarg += 3;
     } else if (strcmp(arg[iarg],"adens_nevery") == 0 ||
                strcmp(arg[iarg],"sigma_nevery") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
@@ -397,6 +472,80 @@ void SurfReactSurfacePWI::init()
     surf->spread_custom(snet_index);
     surf->spread_custom(sdep_index);
 
+    // opt-in strata stack: build per-material bookkeeping and initial
+    // stacks (substrate + adens_init layers) BEFORE the first conc
+    // derivation so consumers see the stratified surface from step 0
+    if (strata_K > 0) {
+      // material roots (mat_of[j] == j) and species->material index
+      std::vector<int> roots;
+      for (int j = 0; j < sigma_ncols; j++)
+        if (mat_of[j] == j) roots.push_back(j);
+      nmat = (int) roots.size();
+      mat_root_of.assign(sigma_ncols, 0);
+      for (int j = 0; j < sigma_ncols; j++)
+        for (int m = 0; m < nmat; m++)
+          if (mat_of[j] == roots[m]) { mat_root_of[j] = m; break; }
+
+      // solid number densities by element symbol [atoms/m^3]
+      mat_dens.assign(nmat, 6.3e28);
+      for (int m = 0; m < nmat; m++) {
+        std::string nm = particle->species[roots[m]].id;
+        size_t e = 0;
+        while (e < nm.size() && isalpha((unsigned char) nm[e])) e++;
+        std::string el = nm.substr(0, e);
+        if      (el == "W")  mat_dens[m] = 6.306e28;
+        else if (el == "B")  mat_dens[m] = 1.32e29;
+        else if (el == "O")  mat_dens[m] = 4.29e28;
+        else if (el == "C")  mat_dens[m] = 1.13e29;
+        else if (el == "Li") mat_dens[m] = 4.63e28;
+        else if (el == "Be") mat_dens[m] = 1.23e29;
+        else if (comm->me == 0)
+          error->warning(FLERR,"surf_react surface/pwi strata: unknown "
+                         "element solid density, using 6.3e28 m^-3 "
+                         "(override with strata_dens)");
+      }
+      // deck overrides win over the built-in element defaults
+      for (size_t k = 0; k < strata_dens_names.size(); k++) {
+        int isp = particle->find_species((char *) strata_dens_names[k].c_str());
+        if (isp < 0)
+          error->all(FLERR,"surf_react surface/pwi strata_dens: unknown species");
+        mat_dens[mat_root_of[isp]] = strata_dens_vals[k];
+      }
+
+      strata_ncols = 4 + strata_K * (2 + nmat);
+      int sub_m = mat_root_of[substrate_isp];
+
+      strata_state.assign(surf->nown, SurfaceElementState(nmat, strata_K));
+      // deck minthick is in Angstrom (documented); internal state is SI
+      for (auto &st : strata_state) st.min_thickness = strata_minthick * 1.0e-10;
+      char sname[130];
+      snprintf(sname,sizeof(sname),"%s_strata",sigma_attr);
+      strata_index = surf->find_custom(sname);
+      bool fresh = (strata_index < 0);
+      if (fresh) strata_index = surf->add_custom(sname, DOUBLE, strata_ncols);
+      double **sb = surf->edarray[surf->ewhich[strata_index]];
+      if (fresh) {
+        for (int i = 0; i < surf->nown; i++) {
+          // semi-infinite substrate (1 mm) + initial deposited layers
+          strata_state[i].init_substrate(1.0e-3, mat_dens[sub_m], sub_m);
+          for (size_t k = 0; k < sigma_init_names.size(); k++) {
+            int isp = particle->find_species((char *) sigma_init_names[k].c_str());
+            if (isp < 0) continue;
+            int m = mat_root_of[isp];
+            strata_state[i].deposit(m, sigma_init_vals[k], mat_dens[m]);
+          }
+          for (int c = 0; c < strata_ncols; c++) sb[i][c] = 0.0;
+          strata_state[i].pack(sb[i]);
+        }
+      } else {
+        // restart: rebuild stacks from the persisted custom
+        for (int i = 0; i < surf->nown; i++)
+          strata_state[i].unpack(sb[i]);
+      }
+      surf->estatus[strata_index] = 0;
+      surf->spread_custom(strata_index);
+    }
+
     // seed the concentration array from the current sigma so the first
     // debit/emission read (before the first sync) sees the initial layer
     derive_sigma_conc();
@@ -443,6 +592,25 @@ void SurfReactSurfacePWI::init()
       sigma_ero_compute.push_back(ce);
       sigma_ero_isp.push_back(isp);
     }
+
+    // bind the implantation sources (task 5)
+    imp_compute.assign(imp_species.size(), (Compute *) NULL);
+    imp_isp.assign(imp_species.size(), -1);
+    for (size_t k = 0; k < imp_species.size(); k++) {
+      int isp = particle->find_species((char *) imp_species[k].c_str());
+      if (isp < 0)
+        error->all(FLERR,"surf_react surface/pwi adens_implant: species not "
+                   "in the species list (add it, e.g. D, even if never spawned)");
+      imp_isp[k] = isp;
+      if (imp_mode[k] == 0) {
+        int ic = modify->find_compute((char *) imp_comp_id[k].c_str());
+        if (ic < 0)
+          error->all(FLERR,"surf_react surface/pwi adens_implant: compute ID not found");
+        imp_compute[k] = modify->compute[ic];
+        if (!imp_compute[k]->per_surf_flag)
+          error->all(FLERR,"surf_react surface/pwi adens_implant: compute is not per-surf");
+      }
+    }
   }
 }
 
@@ -486,14 +654,16 @@ void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
     // sigma_feedback off, mat_conc() returns 1.0 = the c=1 endpoint
     // (fresh lead-element surface).
     double Y;
+    const double theta_eff =
+        (theta_in_deg > rough_dm) ? theta_in_deg - rough_dm : 0.0;
     const bool compound = (r->sp_tbl >= 0 && sput_tables[r->sp_tbl].NC > 0);
     if (compound) {
       double c = (r->conc_isp >= 0) ? mat_conc(isurf, r->conc_isp) : 1.0;
-      Y = sput_tables[r->sp_tbl].yield(E_in_eV, theta_in_deg, c);
+      Y = sput_tables[r->sp_tbl].yield(E_in_eV, theta_eff, c);
     } else {
       Y = (r->sp_tbl >= 0)
-          ? sput_tables[r->sp_tbl].yield(E_in_eV, theta_in_deg)
-          : Eckstein::sputter_yield(E_in_eV, theta_in_deg, p);
+          ? sput_tables[r->sp_tbl].yield(E_in_eV, theta_eff)
+          : Eckstein::sputter_yield(E_in_eV, theta_eff, p);
       if (r->mat_isp >= 0) Y *= mat_conc(isurf, r->mat_isp);
     }
     if (Y <= 0.0) continue;
@@ -612,8 +782,19 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
         trim_precomputed = true;
       }
       Reflection::View tv = trim_tables[r->trim_table].view();
-      p_this = Reflection::R_N_interp(tv, E_in_eV, theta_in_deg);
-      if (r->mat_isp >= 0) p_this *= mat_conc(isurf, r->mat_isp);
+      if (r->refl_tbl >= 0) {
+        // composition-resolved reflection coefficient R(E,theta,c) at the
+        // local concentration; roughness shift applied consistently
+        const double th_eff =
+            (theta_in_deg > rough_dm) ? theta_in_deg - rough_dm : 0.0;
+        double cval = (r->conc_isp >= 0) ? mat_conc(isurf, r->conc_isp) : 1.0;
+        p_this = sput_tables[r->refl_tbl].yield(E_in_eV, th_eff, cval);
+        if (p_this < 0.0) p_this = 0.0;
+        if (p_this > 1.0) p_this = 1.0;
+      } else {
+        p_this = Reflection::R_N_interp(tv, E_in_eV, theta_in_deg);
+        if (r->mat_isp >= 0) p_this *= mat_conc(isurf, r->mat_isp);
+      }
     } else {
       p_this = r->prob;
     }
@@ -907,6 +1088,22 @@ void SurfReactSurfacePWI::sync_sigma()
     bigint base = ((bigint) gid - 1) * sigma_ncols;
     for (int j = 0; j < sigma_ncols; j++)
       sig[i][j] += sigma_buf[base + j];
+
+    // strata stack: apply this sync's particle-impact net per MATERIAL
+    // (charge states pool). Positive net -> surface deposition (low-E
+    // redeposition sticks at the top); negative -> preferential
+    // erosion, bounded by what the stack actually exposes.
+    if (strata_K > 0) {
+      for (int mm = 0; mm < nmat; mm++) {
+        double net = 0.0;
+        for (int j = 0; j < sigma_ncols; j++)
+          if (mat_root_of[j] == mm) net += sigma_buf[base + j];
+        if (net > 0.0)
+          strata_state[i].deposit(mm, net, mat_dens[mm]);
+        else if (net < 0.0)
+          strata_state[i].erode_species(mm, -net);
+      }
+    }
   }
 
   // gross-erosion debit: sigma[ero_species] -= flux * dt * sigma_nevery,
@@ -927,13 +1124,21 @@ void SurfReactSurfacePWI::sync_sigma()
     const int noconc = sigma_ero_noconc[k];
     if (sigma_ero_col[k] == 0) {
       double *fvec = ce->vector_surf;
-      for (int i = 0; i < nsown; i++)
-        sig[i][isp] -= fvec[i] * (noconc ? 1.0 : conck[i][isp]) * debit_dt;
+      for (int i = 0; i < nsown; i++) {
+        double d = fvec[i] * (noconc ? 1.0 : conck[i][isp]) * debit_dt;
+        sig[i][isp] -= d;
+        if (strata_K > 0 && d > 0.0)
+          strata_state[i].erode_species(mat_root_of[isp], d);
+      }
     } else {
       double **farr = ce->array_surf;
       int icol = sigma_ero_col[k] - 1;
-      for (int i = 0; i < nsown; i++)
-        sig[i][isp] -= farr[i][icol] * (noconc ? 1.0 : conck[i][isp]) * debit_dt;
+      for (int i = 0; i < nsown; i++) {
+        double d = farr[i][icol] * (noconc ? 1.0 : conck[i][isp]) * debit_dt;
+        sig[i][isp] -= d;
+        if (strata_K > 0 && d > 0.0)
+          strata_state[i].erode_species(mat_root_of[isp], d);
+      }
     }
   }
 
@@ -953,6 +1158,37 @@ void SurfReactSurfacePWI::sync_sigma()
     netvec[i] = nsum;
     erovec[i] = depvec[i] - nsum;    // gross removal (positive)
   }
+  // background implantation + retention saturation (task 5)
+  for (size_t k = 0; k < imp_species.size(); k++) {
+    int isp = imp_isp[k];
+    double debit_dt = update->dt * sigma_nevery;
+    double **conck = surf->edarray[surf->ewhich[sconc_index]];
+    double *fvec = NULL; double **farr = NULL; int icol = 0;
+    if (imp_mode[k] == 0) {
+      Compute *ce = imp_compute[k];
+      if (ce->invoked_per_surf != update->ntimestep) ce->compute_per_surf();
+      ce->post_process_surf();
+      if (imp_col[k] == 0) fvec = ce->vector_surf;
+      else { farr = ce->array_surf; icol = imp_col[k] - 1; }
+    }
+    for (int i = 0; i < nsown; i++) {
+      double flux = (imp_mode[k] == 1) ? imp_flux[k]
+                    : (fvec ? fvec[i] : farr[i][icol]);
+      if (flux <= 0.0) continue;
+      double cD = conck[i][isp];
+      double turnon = 0.5 * (tanh(imp_alpha[k] * (cD - imp_cmax[k])) + 1.0);
+      double dimp = flux * (1.0 - imp_rcoef[k]) * (1.0 - turnon) * debit_dt;
+      if (dimp <= 0.0) continue;
+      sig[i][isp] += dimp;
+      if (strata_K > 0) {
+        if (imp_depth[k] > 0.0)
+          strata_state[i].add_implanted(mat_root_of[isp], imp_depth[k], dimp);
+        else
+          strata_state[i].deposit(mat_root_of[isp], dimp, mat_dens[mat_root_of[isp]]);
+      }
+    }
+  }
+
   derive_sigma_conc();
 
   surf->estatus[snet_index] = 0;
@@ -983,6 +1219,32 @@ void SurfReactSurfacePWI::derive_sigma_conc()
   double **conc = surf->edarray[surf->ewhich[sconc_index]];
   int nsown = surf->nown;
   int sub_mat = mat_of[substrate_isp];
+
+  // strata mode: the stack is the source of truth for concentrations.
+  // Serve the atom-weighted composition of the top `rzone` worth of
+  // material (areal -> depth via the local surface density), compact,
+  // and pack into the <attr>_strata custom for dumps/restart. The
+  // pooled-sigma derivation below stays as the legacy (2-layer) path.
+  if (strata_K > 0) {
+    double **sb = surf->edarray[surf->ewhich[strata_index]];
+    for (int i = 0; i < nsown; i++) {
+      SurfaceElementState &st = strata_state[i];
+      st.compact_layers();
+      double dens = st.surface_density();
+      if (dens <= 0.0) dens = mat_dens[mat_root_of[substrate_isp]];
+      double depth = sigma_zone / dens;            // [m], factor-free SI
+      std::vector<double> comp = st.get_surface_composition(depth);
+      for (int j = 0; j < sigma_ncols; j++)
+        conc[i][j] = comp[mat_root_of[j]];
+      for (int c = 0; c < strata_ncols; c++) sb[i][c] = 0.0;
+      st.pack(sb[i]);
+    }
+    surf->estatus[strata_index] = 0;
+    surf->spread_custom(strata_index);
+    surf->estatus[sconc_index] = 0;
+    surf->spread_custom(sconc_index);
+    return;
+  }
   for (int i = 0; i < nsown; i++) {
     for (int j = 0; j < sigma_ncols; j++) conc[i][j] = 0.0;
     // pool each material's columns BEFORE clipping: charge states share
@@ -1161,6 +1423,7 @@ void SurfReactSurfacePWI::readfile(char *fname)
         r->mat_isp = -1;
         r->conc_id = NULL;
         r->conc_isp = -1;
+        r->refl_tbl = -1;
       }
     }
 
@@ -1293,15 +1556,37 @@ void SurfReactSurfacePWI::readfile(char *fname)
       r->trim_table = it;
       r->prob = 0.0;
 
-      // optional: `mat <species>` weights this channel by the surface
-      // concentration of that material (composition-weighted reflection)
-      word = strtok(NULL, " \t\n");
-      if (word && strcmp(word,"mat") == 0) {
-        word = strtok(NULL, " \t\n");
-        if (!word) error->all(FLERR, "Missing species after 'mat' in T reaction");
-        int n2 = strlen(word) + 1;
-        r->mat_id = new char[n2];
-        strcpy(r->mat_id, word);
+      // optional keywords:
+      //   mat <species>   linear concentration weighting of the pure R
+      //   conc <species> rtable <name>   composition-resolved reflection:
+      //     probability from the 3D R(E,theta,c) table <name> at the local
+      //     concentration of <species> (no linear rescale); the outgoing
+      //     energy/angle spectrum is still sampled from the pure TRIM
+      //     table (documented approximation: outgoing distributions are
+      //     far less composition-sensitive than the coefficient)
+      while ((word = strtok(NULL, " \t\n"))) {
+        if (strcmp(word,"mat") == 0) {
+          word = strtok(NULL, " \t\n");
+          if (!word) error->all(FLERR, "Missing species after 'mat' in T reaction");
+          int n2 = strlen(word) + 1;
+          r->mat_id = new char[n2];
+          strcpy(r->mat_id, word);
+        } else if (strcmp(word,"conc") == 0) {
+          word = strtok(NULL, " \t\n");
+          if (!word) error->all(FLERR, "Missing species after 'conc' in T reaction");
+          int n2 = strlen(word) + 1;
+          r->conc_id = new char[n2];
+          strcpy(r->conc_id, word);
+        } else if (strcmp(word,"rtable") == 0) {
+          word = strtok(NULL, " \t\n");
+          if (!word) error->all(FLERR, "Missing table name after 'rtable' in T reaction");
+          r->refl_tbl = load_or_get_sputter_table(word);
+          if (r->refl_tbl < 0 || sput_tables[r->refl_tbl].NC <= 0)
+            error->all(FLERR, "T reaction rtable needs a 3D R(E,theta,c) "
+                       "table in processes.h5");
+        } else {
+          error->all(FLERR, "Unknown keyword in T reaction (expect mat/conc/rtable)");
+        }
       }
 
     } else if (r->type == ABSORB_REEMIT) {

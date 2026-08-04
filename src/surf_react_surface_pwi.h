@@ -27,6 +27,7 @@ SurfReactStyle(surface/pwi,SurfReactSurfacePWI)
 #include "surf_react.h"
 #include "process_library.h"
 #include "reflection_tables.h"
+#include "surf_state_multilayer.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -64,6 +65,11 @@ class SurfReactSurfacePWI : public SurfReact {
     char *conc_id;                       // species whose <attr>_conc is the
     int conc_isp;                        //   composition coordinate of a 3D
                                          //   (compound-target) sputter table
+    int refl_tbl;                        // T channel: 3D R(E,theta,c) table
+                                         //   overriding the reflection
+                                         //   probability (outgoing spectrum
+                                         //   still sampled from the pure
+                                         //   TRIM table), -1 = off
     char *id;
   };
 
@@ -117,6 +123,12 @@ class SurfReactSurfacePWI : public SurfReact {
   // stored in per-surf custom array <attr>_conc (esize = nspecies);
   // remainder of the zone is substrate (bulk) material. WallDYN gives the
   // same quantity as a thickness RZoneWidth [A]; ours is areal density.
+  // surface-roughness yield correction (Schmid PSI review / Cupak
+  // Appl.Surf.Sci. 570 (2021)): roughness flattens the angular
+  // dependence of Y; pragmatic whole-device recipe is to evaluate
+  // yields at theta_eff = max(0, theta - delta_m), delta_m = mean
+  // surface angle (~20 deg for rough W). 0 = smooth (off).
+  double rough_dm;                 // [deg from normal]
   double sigma_zone;               // reaction-zone total areal density [atoms/m^2]
   int sigma_feedback;              // 0 = ignore mat weights (Y,R without feedback)
   int sconc_index;                 // custom index of <attr>_conc
@@ -129,6 +141,48 @@ class SurfReactSurfacePWI : public SurfReact {
   void sigma_accumulate(int isurf, int isp, double datoms);
   void sync_sigma();
   void derive_sigma_conc();   // owned sigma -> owned <attr>_conc + spread
+
+  // Lagrangian strata stack (opt-in `strata <K>`): per-owned-element
+  // multilayer state per MATERIAL (charge states pool; W, W+, ... are
+  // one tungsten column in the stack). Deposition pushes strata,
+  // erosion pops preferentially, concentrations served to all
+  // consumers come from the top `rzone` worth of the stack. The adens
+  // per-species columns keep accumulating as the balance ledger;
+  // stack-vs-ledger agreement is a closure check.
+  // DATA-LAYOUT POLICY (2026-08-04): the CANONICAL state is the flat
+  // per-surf custom <attr>_strata (plain doubles, width 4+K*(2+nmat))
+  // -- that is what MPI/dumps/restart and any future Kokkos port see.
+  // The std::vector stack below is rank-local host working memory
+  // rebuilt from pack()/unpack(); cold path (once per sync over owned
+  // elements), matching this file's existing std::vector usage for
+  // table caches. Strict flat-buffer-only rewrite = optional cleanup.
+  int strata_K;                        // 0 = off (legacy 2-layer path)
+  double strata_minthick;              // min stratum thickness [A]
+  int strata_index;                    // custom index of <attr>_strata
+  int strata_ncols;                    // 4 + K*(2+nmat)
+  int nmat;                            // number of material roots
+  std::vector<int> mat_root_of;        // species col -> material idx
+  std::vector<double> mat_dens;        // material solid density [atoms/m^3]
+  // deck overrides: strata_dens <species> <atoms/m^3> (repeatable);
+  // built-in element defaults (W, B, O, C, Li, Be) used otherwise
+  std::vector<std::string> strata_dens_names;
+  std::vector<double> strata_dens_vals;
+  std::vector<SurfaceElementState> strata_state;   // [surf->nown]
+
+  // background implantation + retention saturation (task 5):
+  //   adens_implant <species> compute <ID> <col> | const <flux_m2s>
+  //                 [rcoef <R0>] [cmax <c_sat>] [alpha <a>] [depth <m>]
+  // Per sync: implanted = flux * (1-R0) * (1-turnon) * dt with the
+  // WallDYN-style switch turnon = 0.5*(tanh(alpha*(c - c_sat)) + 1),
+  // credited to the species' adens column and (strata mode) implanted
+  // at `depth` via add_implanted(). rcoef/depth are deck constants in
+  // v1; binding the compute's mean-E/angle columns to evaluate the 3D
+  // R and depth tables live is the documented follow-up.
+  std::vector<std::string> imp_species, imp_comp_id;
+  std::vector<int> imp_mode;            // 0 = compute col, 1 = const
+  std::vector<int> imp_col, imp_isp;
+  std::vector<double> imp_flux, imp_rcoef, imp_cmax, imp_alpha, imp_depth;
+  std::vector<class Compute *> imp_compute;
 
   // reflection-table support (shared format with surf_react pmi; tables
   // from database/surface/trim/*.h5, originally EIRENE TRIM but any
