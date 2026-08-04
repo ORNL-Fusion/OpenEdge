@@ -252,6 +252,14 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       target_element = std::string(arg[iarg+1]);
       api_new = 1;
       iarg += 2;
+    } else if (strcmp(arg[iarg],"roughness_dm") == 0) {
+      // mean surface angle delta_m [deg]: yields evaluated at
+      // theta_eff = max(0, theta - delta_m) (Cupak ASS 570 (2021))
+      if (iarg+1 >= narg) error->all(FLERR,"roughness_dm needs value [deg]");
+      rough_dm = atof(arg[iarg+1]);
+      if (rough_dm < 0.0 || rough_dm >= 90.0)
+        error->all(FLERR,"roughness_dm must be in [0,90)");
+      iarg += 2;
     } else if (strcmp(arg[iarg],"compound") == 0) {
       // compound <mix>: use 3D composition-axis tables named
       // <proj>_on_<mix>_<target> (e.g. mix bw, target W -> d_on_bw_w)
@@ -1550,9 +1558,10 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
     eck_p.Es = eck_Es; eck_p.Eth = eck_Eth; eck_p.Q = eck_Q; eck_p.ETF = eck_ETF;
   }
   auto yield_lookup = [&](double E_eV, double a_deg) -> double {
+    const double a = (a_deg > rough_dm) ? a_deg - rough_dm : 0.0;
     if (eckstein_mode)
-      return Eckstein::sputter_yield(E_eV, a_deg, eck_p);
-    return interp_yield(E_eV, a_deg);
+      return Eckstein::sputter_yield(E_eV, a, eck_p);
+    return interp_yield(E_eV, a);
   };
 
   auto clean = [](double x) {
@@ -1910,8 +1919,9 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
           p.Q  = per_proj_Q[ti];   p.ETF = per_proj_ETF[ti];
           const ProcessLibrary::TrimSputterTable &st = per_proj_sput_tbl[ti];
           auto pair_yield = [&](double e_eV, double th_deg) {
-            return st.valid() ? st.yield(e_eV, th_deg)
-                              : Eckstein::sputter_yield(e_eV, th_deg, p);
+            const double th = (th_deg > rough_dm) ? th_deg - rough_dm : 0.0;
+            return st.valid() ? st.yield(e_eV, th)
+                              : Eckstein::sputter_yield(e_eV, th, p);
           };
           if (compound) {
             // one IEAD convolution (or mean-impact evaluation) per table
@@ -1924,10 +1934,13 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
                 yb = tbl->convolve_yield(
                     tau_local, psi_local, z_inc, te_eV,
                     [&](double e_eV, double th_deg) {
-                      return st.yield(e_eV, th_deg, cv);
+                      const double th =
+                          (th_deg > rough_dm) ? th_deg - rough_dm : 0.0;
+                      return st.yield(e_eV, th, cv);
                     });
               else
-                yb = st.yield(E, theta_deg, cv);
+                yb = st.yield(E, (theta_deg > rough_dm) ?
+                              theta_deg - rough_dm : 0.0, cv);
               cs_ybar[(size_t(i)*ns + s)*slice_nc + ic] = yb;
             }
             ys = 0.0;

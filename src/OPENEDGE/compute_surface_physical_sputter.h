@@ -73,6 +73,8 @@ class ComputeSurfacePhysicalSputter : public Compute {
   int proj_slot_lo, proj_slot_hi;
   // legacy option kept for input compatibility
   double mass_amu;
+  // roughness correction: yields evaluated at max(0, theta - rough_dm)
+  double rough_dm = 0.0;
 
   // Element-aware multi-projectile API (post-2026-04-21):
   //   target W projectiles O,B
