@@ -142,6 +142,25 @@ def import_bca_compound(f, base, path, source):
                 g.attrs["Es_eV"] = ES_EV[elem]
             print(f"  {name}: Y{Y.shape}  E=[{E[0]:g}..{E[-1]:g}] eV "
                   f"C=[{C[0]:g}..{C[-1]:g}]")
+        # composition-resolved reflection coefficient as a 3D table
+        # (T-channel `rtable` override; probability only, outgoing
+        # spectrum stays with the pure TRIM table)
+        if "rfyld" in b:
+            R = np.clip(b["rfyld"][:], 0.0, 1.0)
+            name = f"{base}_refl"
+            g = f.require_group(f"surface/sputter/{name}")
+            for d in ("E", "theta", "C", "Y"):
+                if d in g:
+                    del g[d]
+            g.create_dataset("E", data=np.asarray(E, float))
+            g.create_dataset("theta", data=np.asarray(A, float))
+            g.create_dataset("C", data=np.asarray(C, float))
+            g.create_dataset("Y", data=np.asarray(R, float))
+            g.attrs["source"] = source
+            g.attrs["units"] = ("E: eV; theta: deg from surface normal; "
+                                "C: lead-element atomic fraction; "
+                                "Y: particle reflection coefficient")
+            print(f"  {name}: R{R.shape}")
 
 
 def main():
