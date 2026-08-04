@@ -867,6 +867,13 @@ def convert_solps_to_openedge(
     except Exception as _e:
         print(f"WARNING: could not read po from balance.nc: {_e}")
     if po_data is None:
+        # Fallback: modern SOLPS-ITER b2fstate carries po directly.
+        try:
+            po_data = b2f_extract("po", b2fstate_file)
+            print("po read from b2fstate (balance.nc absent)")
+        except Exception as _e:
+            print(f"note: no po in b2fstate either ({_e})")
+    if po_data is None:
         print("WARNING: no electric potential po found — E = 0 in plasma.h5")
         po_data = np.zeros_like(ne)
 
