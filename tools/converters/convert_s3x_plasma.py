@@ -218,6 +218,7 @@ def _load_zone_native(config_file, data_file, ref_file):
     with h5py.File(ref_file, 'r') as ref:
         n0 = float(ref['/n0'][...]); T0 = float(ref['/T0'][...])
         c0 = float(ref['/c0'][...]); B0 = float(ref['/B0'][...])
+        phi0 = _read_scalar(ref, '/phi0', T0)   # potential norm [V]
 
     mesh = h5py.File(config_file, 'r')
     data = h5py.File(data_file, 'r')
@@ -266,6 +267,13 @@ def _load_zone_native(config_file, data_file, ref_file):
     cache = {}
     for z in range(1, nz_zones + 1):
         ne = zfield(z, 'spec0/n'); te = zfield(z, 'spec0/T')
+        # electrostatic potential (zone-level, only nonzero when the
+        # SOLEDGE3X run solved the drift/vorticity model)
+        phi = zfield(z, 'PHI') if f'zone{z}/PHI' in data else None
+        # fluid-neutral atomic D density (Nspec1 = element 1 = D in
+        # fluid-neutral runs; used as the impurity-CX partner density)
+        nn = zfield(z, 'Nspec1/n') if f'zone{z}/Nspec1/n' in data else None
+        tn = zfield(z, 'Nspec1/T') if f'zone{z}/Nspec1/T' in data else None
         per = []
         for sp in range(1, nion + 1):
             n = zfield(z, f'spec{sp}/n'); T = zfield(z, f'spec{sp}/T')
@@ -273,15 +281,24 @@ def _load_zone_native(config_file, data_file, ref_file):
             per.append((n, T, G))
         Br = mesh[f'zone{z}/Br'][:, :, 0]; Bz = mesh[f'zone{z}/Bz'][:, :, 0]
         Bt = mesh[f'zone{z}/Bphi'][:, :, 0]
-        cache[z] = (ne, te, per, Br, Bz, Bt)
+        cache[z] = (ne, te, per, Br, Bz, Bt, phi, nn, tn)
 
     dens_e = np.empty(ntri); temp_e = np.empty(ntri)
     d_all = np.zeros((nion, ntri)); t_all = np.zeros((nion, ntri)); u_all = np.zeros((nion, ntri))
     br = np.empty(ntri); bz = np.empty(ntri); bt = np.empty(ntri)
+    pob = np.zeros(ntri)
+    nn_tri = np.zeros(ntri)
+    tn_tri = np.zeros(ntri)
     for k, (z, i, j) in enumerate(zc):
-        ne, te, per, Br, Bz, Bt = cache[z]
+        ne, te, per, Br, Bz, Bt, phi, nn, tn = cache[z]
         dens_e[k] = ne[i, j] * n0; temp_e[k] = te[i, j] * T0
         br[k] = Br[i, j] * B0; bz[k] = Bz[i, j] * B0; bt[k] = Bt[i, j] * B0
+        if phi is not None:
+            pob[k] = phi[i, j] * phi0
+        if nn is not None:
+            nn_tri[k] = max(nn[i, j], 0.0) * n0
+        if tn is not None:
+            tn_tri[k] = max(tn[i, j], 0.0) * T0
         for sp in range(nion):
             n, T, G = per[sp]
             d_all[sp, k] = n[i, j] * n0
@@ -294,7 +311,8 @@ def _load_zone_native(config_file, data_file, ref_file):
         tri_knots=np.array(tris, dtype=np.int64).T,
         dens_e_tri=dens_e, temp_e_tri=temp_e,
         dens_i_all=d_all, temp_i_all=t_all, flow_i_par_all=u_all,
-        tri_br=br, tri_bz=bz, tri_bt=bt,
+        tri_br=br, tri_bz=bz, tri_bt=bt, pob_tri=pob,
+        dens_n_tri=nn_tri, temp_n_tri=tn_tri,
         ion_names=ion_names, ion_mass_amu=ion_mass_amu,
         ion_charge_state_z=ion_charge_state_z,
         ion_inds=list(range(1, nion + 1)),
@@ -320,6 +338,7 @@ def interpolate_and_save_plasma_field(
     geometry="cart",
     heatflux="none",
     sheath_gamma=7.0,
+    efield="auto",
 ):
     """
     Convert SOLEDGE3X plasma/mesh data to OpenEdge-style HDF5.
@@ -604,22 +623,49 @@ def interpolate_and_save_plasma_field(
                 mesh_grad_ti_r, mesh_grad_ti_z]:
         arr[~np.isfinite(arr)] = 0.0
 
-    # Electric field on the mesh. SOLEDGE3X stores per-zone PHI under
-    # /zone{N}/PHI in the plasma snapshot, but resampling that onto the
-    # EIRENE triangle mesh + differentiating is a bigger refactor.
-    # For now write zeros as a placeholder so plasma.h5 carries the
-    # dataset (fix_background then knows "mesh E is present but zero"
-    # — which is equivalent to the old Boltzmann-scaled-ne path from
-    # a zero potential). A proper implementation reads zone*/PHI,
-    # resamples onto centroids, computes grad, negates. TODO.
-    mesh_e_r = np.zeros(mesh_tri.shape[0], dtype=np.float64)
-    mesh_e_z = np.zeros(mesh_tri.shape[0], dtype=np.float64)
-    mesh_e_t = np.zeros(mesh_tri.shape[0], dtype=np.float64)
-    # pob (plasma potential) set to zero for now. TODO: resample
-    # /zone*/PHI from plasmaFinal onto the triangulation.
+    # Electric field on the mesh: E = -grad(phi), e_t = 0 (axisym).
+    # Priority: (1) real SOLEDGE3X potential zone*/PHI when the run
+    # solved the drift/vorticity model (zone-native path carries it as
+    # pob_tri); (2) --efield 3te fallback: the standard sheath-limited
+    # SOL estimate phi = Lambda*Te/e with Lambda=3 (ERO convention),
+    # so E = -3*grad(Te) [Te in eV -> phi in V]; (3) zeros.
+    # fluid-neutral D density (zone-native only; zeros otherwise). CX
+    # partner density for fix volume/chem/adas impurity channels.
+    mesh_dens_n = np.zeros(mesh_tri.shape[0], dtype=np.float64)
+    if zone_native and zn.get('dens_n_tri') is not None:
+        mesh_dens_n = np.nan_to_num(
+            np.asarray(zn['dens_n_tri'], dtype=np.float64), nan=0.0)
+        print(f"mesh/dens_n (fluid-neutral D): max {mesh_dens_n.max():.3g} "
+              f"m^-3, nonzero {int((mesh_dens_n > 0).sum())}/{mesh_dens_n.size}")
+    mesh_temp_n = np.zeros(mesh_tri.shape[0], dtype=np.float64)
+    if zone_native and zn.get('temp_n_tri') is not None:
+        mesh_temp_n = np.nan_to_num(
+            np.asarray(zn['temp_n_tri'], dtype=np.float64), nan=0.0)
     mesh_pob = np.zeros(mesh_tri.shape[0], dtype=np.float64)
-    print("WARNING: SOLEDGE3X converter writes E=0 and pob=0 on the mesh "
-          "(zone/PHI resampling not yet implemented).")
+    if efield != "zero" and zone_native and zn.get('pob_tri') is not None:
+        mesh_pob = np.nan_to_num(
+            np.asarray(zn['pob_tri'], dtype=np.float64), nan=0.0)
+    if np.abs(mesh_pob).max() > 0.0:
+        print(f"mesh/pob from SOLEDGE zone*/PHI: "
+              f"[{mesh_pob.min():.3g}, {mesh_pob.max():.3g}] V")
+    elif efield == "3te":
+        mesh_pob = 3.0 * mesh_temp_e
+        print("mesh/pob from phi=3*Te/e fallback (SOLEDGE PHI absent or "
+              f"all-zero): [{mesh_pob.min():.3g}, {mesh_pob.max():.3g}] V")
+    else:
+        print("WARNING: mesh E=0 and pob=0 (SOLEDGE PHI absent or "
+              "all-zero; rerun with --efield 3te for the phi=3Te/e "
+              "presheath estimate).")
+    if np.abs(mesh_pob).max() > 0.0:
+        gR, gZ = _tri_lsq_gradient(mesh_pob)
+        gR[~np.isfinite(gR)] = 0.0
+        gZ[~np.isfinite(gZ)] = 0.0
+        mesh_e_r = -gR
+        mesh_e_z = -gZ
+    else:
+        mesh_e_r = np.zeros(mesh_tri.shape[0], dtype=np.float64)
+        mesh_e_z = np.zeros(mesh_tri.shape[0], dtype=np.float64)
+    mesh_e_t = np.zeros(mesh_tri.shape[0], dtype=np.float64)
     if mesh_tri.shape[0] != mesh_dens_e.size:
         raise RuntimeError("mesh/triangles count does not match SOLEDGE plasma triangle count")
 
@@ -752,6 +798,8 @@ def interpolate_and_save_plasma_field(
             f.create_dataset('mesh/e_z', data=mesh_e_z)
             f.create_dataset('mesh/e_t', data=mesh_e_t)
             f.create_dataset('mesh/pob', data=mesh_pob)
+            f.create_dataset('mesh/dens_n', data=mesh_dens_n)
+            f.create_dataset('mesh/temp_n', data=mesh_temp_n)
             if heatflux == "sheath":
                 # Sheath-limited parallel heat flux estimate from the
                 # per-cell plasma state (SOLEDGE3X snapshots carry no heat
@@ -820,6 +868,11 @@ def _build_parser():
                    help="Optional GEQDSK override for B-field (fallback path).")
     p.add_argument("--equ-file", type=str, default=None,
                    help="Optional .equ override for B-field (fallback path).")
+    p.add_argument("--efield", choices=["auto", "3te", "zero"], default="auto",
+                   help="mesh/pob and E=-grad(phi): auto = real zone*/PHI "
+                        "when nonzero else zeros; 3te = fall back to the "
+                        "phi=3*Te/e presheath estimate when PHI is absent "
+                        "or all-zero; zero = force zeros")
     p.add_argument("--heatflux", choices=["none", "sheath"], default="none",
                    help="write mesh/q_par as the sheath-limited estimate "
                         "gamma*ne*cs*e*Te (SOLEDGE snapshots carry no flux)")
@@ -850,6 +903,7 @@ def main():
         geometry=args.geometry,
         heatflux=args.heatflux,
         sheath_gamma=args.sheath_gamma,
+        efield=args.efield,
     )
 
 

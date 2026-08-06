@@ -109,6 +109,11 @@ def import_bca(f, pair, path, source):
     with h5py.File(path, "r") as b:
         E = b["E"][:]; A = b["A"][:]; Y = b["spyld"][:]
     write_grid(f, pair, E, A, Y, source)
+    # emitted species = target element ("x_on_y" -> y): stamp Es so the
+    # C++ S-channel can Thompson-sample from the table (no Eckstein entry)
+    tgt = pair.rsplit("_on_", 1)[-1].lower()
+    if tgt in ES_EV:
+        f[f"surface/sputter/{pair}"].attrs["Es_eV"] = ES_EV[tgt]
 
 
 # surface binding energies [eV] stamped as Es_eV on compound tables so the
@@ -168,8 +173,8 @@ def main():
         "/Users/42d/OpenEdge/database/processes.h5"
     bca = "/Users/42d/Projects/code/OpenEdge/database/surface"
     with h5py.File(path, "r+") as f:
-        write(f, "d_on_w", D_E, D_Y,
-              "TRIM.SP, Eckstein IPP 9/132 (2002) p.211")
+        import_bca(f, "d_on_w", "/Users/42d/OpenEdge/database/surface/d_on_w.h5",
+                   "RustBCA d_on_w (generate_openedge_pairs.py, 2026-08-04)")
         write(f, "n_on_w", N_E, N_Y,
               "TRIM.SP, Eckstein IPP 9/132 (2002) p.221")
         import_bca(f, "o_on_w", f"{bca}/O_on_W.h5",
