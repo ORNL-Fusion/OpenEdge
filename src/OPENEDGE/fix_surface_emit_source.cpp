@@ -48,14 +48,40 @@ namespace {
   // 1 eV in joules
   constexpr double EV_TO_J = 1.602176634e-19;
 
-  // Thompson sputtered-atom energy distribution
-  //   f(E) = 2·E·U_b/(E+U_b)^3,  E in [0,∞)
-  // Closed-form inverse CDF: with u = (U_b/(E+U_b))^2 ~ U(0,1),
-  //   E = U_b · (1/sqrt(u) - 1).
-  inline double sample_thompson_energy(double Ub_eV, RanKnuth *rng) {
-    double u = rng->uniform();
-    if (u <= 0.0) u = 1.0e-12;            // guard against 1/sqrt(0)
-    return Ub_eV * (1.0 / std::sqrt(u) - 1.0);
+  // Thompson sputtered-atom energy distribution, truncated form of
+  // Mellet PPCF 59 (2017) eq. (10) / Guterl NME 27 (2021) eq. (2.2):
+  //   f(E) ~ E/(E+U_b)^3 * [1 - sqrt((E+U_b)/(Emax+U_b))],  E in [0,Emax]
+  // U_b is the SURFACE BINDING energy (W: 8.68 eV; spectrum peaks at
+  // U_b/2). Emax is the kinematic cutoff (Guterl: ~2*Te for low-Z
+  // projectiles; Mellet/Mousel: gamma*<E_imp>*((m1+2m2)/(2m1+m2))^6).
+  // Emax<=0 recovers the classic unbounded Thompson, whose ~1/E^2 tail
+  // puts ~1e-4 of atoms above 100*U_b (keV-scale ballistic flyers) --
+  // production decks should set emax.
+  // Sampling: f(E) = 2*E*U_b/(E+U_b)^3 has CDF F(E) = (E/(E+U_b))^2,
+  // so the exact inverse transform is E = U_b*sqrt(v)/(1-sqrt(v)) with
+  // v ~ U(0,1) (v ~ U(0,vmax), vmax = (Emax/(Emax+U_b))^2 for the
+  // sharp-truncated proposal). NOTE: the previous transform
+  // E = U_b*(1/sqrt(u)-1) inverted 1-F of f ~ 1/(E+U_b)^3 -- it
+  // dropped the leading factor E and sampled a much softer spectrum
+  // (median 0.41*U_b instead of 2.41*U_b). Rejection weight
+  // 1-sqrt((E+U_b)/(Emax+U_b)) is the Mellet smooth-cutoff factor.
+  inline double sample_thompson_energy(double Ub_eV, double Emax_eV,
+                                       RanKnuth *rng) {
+    if (Emax_eV <= 0.0) {
+      double v = rng->uniform();
+      if (v > 1.0 - 1.0e-12) v = 1.0 - 1.0e-12;   // tail guard
+      const double s = std::sqrt(v);
+      return Ub_eV * s / (1.0 - s);
+    }
+    const double rmax = Emax_eV / (Emax_eV + Ub_eV);
+    const double vmax = rmax * rmax;
+    for (int it = 0; it < 1000; it++) {
+      const double s = std::sqrt(rng->uniform() * vmax);
+      const double E = Ub_eV * s / (1.0 - s);
+      const double w = 1.0 - std::sqrt((E + Ub_eV) / (Emax_eV + Ub_eV));
+      if (rng->uniform() < w) return E;
+    }
+    return 0.5 * Ub_eV;                   // unreachable in practice
   }
 
   // Thermal flux energy: cos-weighted Maxwell flux through a surface gives
@@ -163,6 +189,7 @@ FixSurfaceEmitSource::FixSurfaceEmitSource(SPARTA *sparta, int narg, char **arg)
 
   emit_model = MODEL_THERMAL;
   model_Ub = 0.0;
+  model_Emax = 0.0;
   model_cos_n = 1.0;
   model_E_fixed = 0.0;
   model_tsurf_name = NULL;
@@ -858,7 +885,7 @@ void FixSurfaceEmitSource::perform_task()
             double E_eV;
             double cos_n_local = 1.0;
             if (emit_model == MODEL_THOMPSON) {
-              E_eV = sample_thompson_energy(model_Ub, random);
+              E_eV = sample_thompson_energy(model_Ub, model_Emax, random);
               cos_n_local = model_cos_n;
             } else if (emit_model == MODEL_FIXED_ENERGY) {
               E_eV = model_E_fixed;
@@ -980,7 +1007,7 @@ void FixSurfaceEmitSource::perform_task()
           double E_eV;
           double cos_n_local = 1.0;
           if (emit_model == MODEL_THOMPSON) {
-            E_eV = sample_thompson_energy(model_Ub, random);
+            E_eV = sample_thompson_energy(model_Ub, model_Emax, random);
             cos_n_local = model_cos_n;
           } else if (emit_model == MODEL_FIXED_ENERGY) {
             E_eV = model_E_fixed;
@@ -1157,12 +1184,19 @@ int FixSurfaceEmitSource::option(int narg, char **arg)
         error->all(FLERR,"Fix surface/emit/source: model thompson Ub must be > 0");
       emit_model = MODEL_THOMPSON;
       int consumed = 3;
-      // optional cos_n <n>
-      if (consumed + 1 < narg && strcmp(arg[consumed],"cos_n") == 0) {
-        model_cos_n = atof(arg[consumed+1]);
-        if (model_cos_n <= 0.0)
-          error->all(FLERR,"Fix surface/emit/source: model thompson cos_n must be > 0");
-        consumed += 2;
+      // optional keywords in any order: cos_n <n>, emax <eV>
+      while (consumed + 1 < narg) {
+        if (strcmp(arg[consumed],"cos_n") == 0) {
+          model_cos_n = atof(arg[consumed+1]);
+          if (model_cos_n <= 0.0)
+            error->all(FLERR,"Fix surface/emit/source: model thompson cos_n must be > 0");
+          consumed += 2;
+        } else if (strcmp(arg[consumed],"emax") == 0) {
+          model_Emax = atof(arg[consumed+1]);
+          if (model_Emax <= model_Ub)
+            error->all(FLERR,"Fix surface/emit/source: model thompson emax must be > Ub");
+          consumed += 2;
+        } else break;
       }
       return consumed;
     }

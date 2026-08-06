@@ -47,6 +47,7 @@ class FixSurfaceEmitSource : public FixEmit {
   int emit_model;            // one of EmitModel
   double model_Ub;           // surface binding energy [eV] (thompson)
   double model_cos_n;        // angular cos^n exponent (thompson; default 1)
+  double model_Emax;         // Thompson high-E cutoff [eV] (0 = unbounded)
   double model_E_fixed;      // fixed emission energy [eV] (fixed_energy)
   char *model_tsurf_name;    // custom-attribute name (thermal_tsurf)
   int model_tsurf_index;     // surf->find_custom(...) index (resolved in init)

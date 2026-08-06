@@ -56,17 +56,21 @@ enum{INT,DOUBLE};                        // match surf.cpp custom-attribute type
 // Thompson sputtered-atom energy with the recoil (max-transferable) cutoff:
 //   f(E) proportional to E/(E+Ub)^3 * [1 - sqrt((E+Ub)/(Emax+Ub))],  0<=E<=Emax
 // where Emax = gamma*E_in - Ub is the maximum ejection energy (gamma = the
-// binary energy-transfer factor 4 M1 M2/(M1+M2)^2). Rejection-sampled off the
-// pure-Thompson inverse CDF E = Ub(1/sqrt(u)-1); efficient since the Thompson
-// peak (~Ub/2) sits far below Emax for divertor impact energies.
+// binary energy-transfer factor 4 M1 M2/(M1+M2)^2).
+// Proposal = sharp-truncated Thompson via its exact inverse CDF: f has
+// CDF F(E) = (E/(E+Ub))^2, so E = Ub*s/(1-s) with s = sqrt(v),
+// v ~ U(0, vmax), vmax = (Emax/(Emax+Ub))^2; then rejection with the
+// smooth-cutoff factor. NOTE: the old proposal E = Ub(1/sqrt(u)-1)
+// inverted 1-F of f ~ 1/(E+Ub)^3 (missing the leading E) and biased
+// emission energies soft (median 0.41*Ub instead of ~2.4*Ub).
 static inline double pwi_sample_thompson(double Ub_eV, double Emax_eV,
                                          RanKnuth *rng) {
   double denom = Emax_eV + Ub_eV;
+  double rmax = Emax_eV / denom;
+  double vmax = rmax * rmax;
   for (int it = 0; it < 64; it++) {
-    double u = rng->uniform();
-    if (u <= 0.0) u = 1.0e-12;
-    double E = Ub_eV * (1.0 / sqrt(u) - 1.0);
-    if (E > Emax_eV) continue;                       // recoil cutoff
+    double s = sqrt(rng->uniform() * vmax);
+    double E = Ub_eV * s / (1.0 - s);
     if (rng->uniform() < 1.0 - sqrt((E + Ub_eV) / denom)) return E;
   }
   return 0.5 * Emax_eV;                              // rare fallback
