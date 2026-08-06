@@ -35,9 +35,22 @@ surf_react ID surface/pwi <reactions_file> \
 |---|---|---|---|
 | `T` | TRIM reflect (E, θ -> reflection probability + outgoing energy + direction from processes.h5) | 1 | 1 |
 | `A` | absorb + re-emit (probability `R`; optional f_mol for atom → molecule partition) | 1 | 1 |
+| `S` | additive (self-)sputter: yield Y(E, θ) from the named table; products launched with a Thompson spectrum (below) | 1 | 0–n |
 | `E` | exchange (1 → 1, deterministic species swap) | 1 | 1 |
 | `D` | dissociation (1 → 2, shared KE absorbs bond energy) | 1 | 2 |
 | `R` | recombination / pure absorb (no re-emit) | 1 | 0 |
+
+### Sputter-product energies (`S` channel)
+
+Sputtered atoms are launched with the truncated Thompson spectrum
+`f(E) ∝ E/(E+Es)³ · [1 − √((E+Es)/(Emax+Es))]` where `Es` is the
+**full surface binding energy** read from the table's `Es_eV` attribute
+(W: 8.68 eV) and `Emax = γ·E_in − Es` is the per-impact kinematic
+cutoff (γ = 4·M₁M₂/(M₁+M₂)², so fast impacts eject a harder tail than
+slow ones — no user knob needed). The spectrum peaks at `Es/2`
+automatically; see the "Thompson: `Ub` is the FULL surface binding
+energy" section of `surface_emit_source.md` for why the inserted value
+must never be pre-halved.
 
 Channels are evaluated **in order listed in the file, per reactant
 species**; the first to cross a uniform random draw fires. So the

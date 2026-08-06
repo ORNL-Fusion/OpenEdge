@@ -31,19 +31,28 @@ keyword = {flux_index} or {n} or {nlaunch} or {nlaunch_total} or {flux_thresh} o
   {nevery} value = Ne = emit every Ne steps (default 1)
   {perspecies} value = {yes} or {no}
   {normal} value = {yes} or {no} = launch along the element normal
-  {model} values = {thermal} or {thermal_tsurf name} or {thompson Ub \[cos_n n\]} or {fixed_energy E}
+  {model} values = {thermal} or {thermal_tsurf name} or {thompson Ub \[cos_n n\] \[emax E\]} or {fixed_energy E}
     thermal = half-Maxwellian at the task temperature (default)
     thermal_tsurf = half-Maxwellian at the per-element surface temperature
       stored in custom attribute {name} (deg C)
-    thompson = Thompson energy distribution with surface binding energy Ub (eV);
-      optional cos_n exponent for the angular distribution (default 1 = cosine)
+    thompson = Thompson energy distribution f(E) ~ E/(E+Ub)^3 with Ub the
+      FULL surface binding energy in eV (W: 8.68, NOT 4.34 -- the spectrum
+      peaks at Ub/2 automatically, so the "atoms come off near half the
+      binding energy" rule is the OUTPUT of using the full Ub, never a
+      halved input). Optional cos_n exponent for the angular distribution
+      (default 1 = cosine). Optional emax = high-energy cutoff in eV with
+      the smooth roll-off factor 1-sqrt((E+Ub)/(emax+Ub)) of Mellet PPCF
+      59 (2017) eq. 10; physically emax ~ gamma*E_inc - Ub (Guterl NME 27
+      (2021) uses ~2*Te). STRONGLY recommended: without emax the ~1/E^2
+      Thompson tail emits ~1e-4 of atoms above 100*Ub (keV-scale
+      ballistic flyers).
     fixed_energy = monoenergetic launch at E (eV); cosine angular distribution :pre
 
 [Examples:]
 
 compute cpmiO surface/physical/sputter wall background pd target W projectiles O erosion_flux
 fix femit surface/emit/source tungstenSource wall cpmiO perspecies no &
-    nlaunch_total 200 model thompson 4.4 nevery 100 :pre
+    nlaunch_total 200 model thompson 8.68 emax 80 nevery 100 :pre
 
 [Description:]
 
