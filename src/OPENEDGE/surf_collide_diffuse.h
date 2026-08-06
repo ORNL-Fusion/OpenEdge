@@ -40,6 +40,7 @@ class SurfCollideDiffuse : public SurfCollide {
 
 
  protected:
+  int gca_on_index = -2;   // -2 = not yet looked up
   double acc;                // surface accomodation coeff
   double vx,vy,vz;           // translational velocity of surface
   double wx,wy,wz;           // angular velocity of surface

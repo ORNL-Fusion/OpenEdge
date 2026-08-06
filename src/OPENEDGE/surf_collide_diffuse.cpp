@@ -187,6 +187,18 @@ collide(Particle::OnePart *&ip, double &,
     }
   }
 
+  // Invalidate persistent guiding-center (GCA) custom state for any
+  // surviving/created particle: velocities changed here, so stored
+  // v_par/mu/X are stale (mirror of the surf_collide_toroidal fix).
+  {
+    if (gca_on_index < -1) gca_on_index = particle->find_custom((char *) "gca_on");
+    if (gca_on_index >= 0) {
+      double *gon = particle->edvec[particle->ewhich[gca_on_index]];
+      if (ip) gon[ip - particle->particles] = 0.0;
+      if (jp) gon[jp - particle->particles] = 0.0;
+    }
+  }
+
   // call any fixes with a surf_react() method
   // they may reset j to -1, e.g. fix ambipolar
   //   in which case newly created j is deleted

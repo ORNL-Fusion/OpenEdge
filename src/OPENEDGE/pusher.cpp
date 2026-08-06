@@ -1557,6 +1557,9 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
     //                     wanted over Boris-with-subcycles.
     if (pusher_gca_integrator == 1) {
       GCAPusher::push_gca(qm, dt, mass, E, B, gradBmag_cart, gca);
+    } else if (pusher_gca_integrator == 2) {
+      GCAPusher::push_gca_rk2(qm, dt, mass, E, B, Bmag, gradBmag_cart,
+                              kappa_cart, curlb_cart, gca);
     } else {
       GCAPusher::push_gca_rk4(qm, dt, mass, E, B, Bmag, gradBmag_cart,
                               kappa_cart, curlb_cart, gca);
@@ -1581,6 +1584,16 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
       (omega_c * dt * static_cast<double>(update->ntimestep)) / two_pi;
     double rand_u = phase_turns - std::floor(phase_turns);
     GCAPusher::gca_to_particle(gca, B, mass, rand_u, xnew, v);
+    // Pure-GCA mode: advect the particle AT the guiding center (no gyro
+    // offset). The offset only matters for surface-impact geometry; with
+    // it, particles whose GC sits within rho_L of a periodic cap jitter
+    // across it every step (cap ping-pong). Velocity keeps the full
+    // reconstruction for diagnostics and Boris handoff.
+    if (pusher_mode == PUSHER_GCA) {
+      xnew[0] = gca.X[0];
+      xnew[1] = gca.X[1];
+      xnew[2] = gca.X[2];
+    }
   } else {
     // --- Boris path (with subcycling) ---
     const int nsub = (charge != 0.0 && pusher_subcycles > 0) ? pusher_subcycles : 1;
@@ -1770,6 +1783,7 @@ void Pusher::global_keyword(int narg, char **arg, int &iarg)
       if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pusher gca_integrator");
       if (strcmp(arg[iarg+1], "rk4") == 0)         pusher_gca_integrator = 0;
       else if (strcmp(arg[iarg+1], "simple") == 0) pusher_gca_integrator = 1;
+      else if (strcmp(arg[iarg+1], "rk2") == 0)    pusher_gca_integrator = 2;
       else error->all(FLERR, "global pusher gca_integrator must be rk4 or simple");
       iarg += 2;
     } else if (strcmp(arg[iarg], "dump") == 0) {

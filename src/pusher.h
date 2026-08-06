@@ -59,7 +59,7 @@ class Pusher : protected Pointers {
   double pusher_bad_dt_limit;
   double pusher_gca_switch;
   double pusher_boris_near;     // force Boris when |dist to sheath_geom surf| < this (m); 0 = off
-  int    pusher_gca_integrator; // 0 = RK4 (default), 1 = simple (single-stage leapfrog, no curvature)
+  int    pusher_gca_integrator; // 0 = RK4 (default), 1 = simple (no curvature), 2 = rk2 (midpoint, full RHS)
 
   int gca_x_custom;
   int gca_y_custom;
@@ -493,6 +493,35 @@ inline void push_gca_rk4(double qm, double dt, double mass,
   for (int i = 0; i < 3; ++i)
     state.X[i] = y[i] + (k1[i] + 2.0*k2[i] + 2.0*k3[i] + k4[i]) / 6.0;
   state.v_par = y[3] + (k1[3] + 2.0*k2[3] + 2.0*k3[3] + k4[3]) / 6.0;
+}
+
+/* ---------------------------------------------------------------------- */
+// RK2 (midpoint) integrator on the same full-Littlejohn RHS as RK4.
+// Two RHS evaluations per step: half the algebra of RK4, retains the
+// curvature/curl(b) physics that `simple` drops. Fields frozen over dt
+// (same assumption as RK4). Good default for tokamak-edge work when
+// RK4 cost matters.
+/* ---------------------------------------------------------------------- */
+
+inline void push_gca_rk2(double qm, double dt, double mass,
+                          const double E[3], const double B[3],
+                          double Bmag, const double gradBmag[3],
+                          const double kappa[3], const double curl_b[3],
+                          GCAState &state)
+{
+  double y[4] = {state.X[0], state.X[1], state.X[2], state.v_par};
+
+  auto eval_rhs = [&](const double yy[4]) -> GCARhs {
+    return gca_rhs(qm, mass, yy[3], state.mu, E, B, Bmag, gradBmag, kappa, curl_b);
+  };
+
+  GCARhs r1 = eval_rhs(y);
+  double ymid[4] = {y[0] + 0.5*dt*r1.dXdt[0], y[1] + 0.5*dt*r1.dXdt[1],
+                    y[2] + 0.5*dt*r1.dXdt[2], y[3] + 0.5*dt*r1.dvpar_dt};
+  GCARhs r2 = eval_rhs(ymid);
+
+  for (int i = 0; i < 3; ++i) state.X[i] = y[i] + dt * r2.dXdt[i];
+  state.v_par = y[3] + dt * r2.dvpar_dt;
 }
 
 /* ---------------------------------------------------------------------- */

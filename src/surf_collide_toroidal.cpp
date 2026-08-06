@@ -15,6 +15,7 @@
 #include "stdlib.h"
 #include "string.h"
 #include "surf_collide_toroidal.h"
+#include "particle.h"
 #include "error.h"
 
 using namespace SPARTA_NS;
@@ -83,6 +84,19 @@ collide(Particle::OnePart *&ip, double &, int, double *, int, int &)
   v[0] = vxold * cos_d - vyold * sin_d;
   v[1] = vxold * sin_d + vyold * cos_d;
 
+
+  // The hybrid/GCA pusher stores persistent guiding-center state in
+  // particle custom attributes; a cap rotation moves the particle but
+  // not that stored state, leaving the guiding center outside the wedge
+  // (symptom: cap ping-pong, Nscoll ~ N every step). Invalidate the
+  // state so the pusher re-initializes it from the rotated particle.
+  {
+    if (gca_on_index < -1) gca_on_index = particle->find_custom((char *) "gca_on");
+    if (gca_on_index >= 0) {
+      double *gon = particle->edvec[particle->ewhich[gca_on_index]];
+      gon[ip - particle->particles] = 0.0;
+    }
+  }
   nsingle++;
 
   return NULL;
