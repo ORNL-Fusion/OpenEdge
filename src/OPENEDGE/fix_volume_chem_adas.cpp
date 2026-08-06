@@ -1489,6 +1489,35 @@ double FixVolumeChemAdas::memory_usage()
    precompute lambdas once per (cell, species) and reuse them across all
    particles of that species in the cell.
 ------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   neutral-D density [m^-3] at the center of icell, from the (first)
+   FixBackground provider's mesh/dens_n. 0.0 when absent -> impurity CX
+   channel stays inert (correct for plasma files without fluid neutrals).
+------------------------------------------------------------------------- */
+
+double FixVolumeChemAdas::neutral_dens_at_cell(int icell)
+{
+  if (!nn_pd_resolved) {
+    nn_pd_resolved = 1;
+    nn_pd = nullptr;
+    for (int i = 0; i < modify->nfix; i++) {
+      FixBackground *cand = dynamic_cast<FixBackground *>(modify->fix[i]);
+      if (cand) { nn_pd = cand; break; }
+    }
+  }
+  if (!nn_pd || !nn_pd->has_neutral_dens()) return 0.0;
+  Grid::ChildCell *cells = grid->cells;
+  double xc[3];
+  xc[0] = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
+  xc[1] = 0.5 * (cells[icell].lo[1] + cells[icell].hi[1]);
+  xc[2] = 0.5 * (cells[icell].lo[2] + cells[icell].hi[2]);
+  double R = 0.0, Z = 0.0;
+  OpenEdge::sparta_to_RZ(xc, domain->dimension, domain->axisymmetric,
+                         R, Z, nn_pd->column_x0, nn_pd->column_y0);
+  return std::max(0.0, nn_pd->interp2D(nn_pd->dens_n, R, Z, icell));
+}
+
 void FixVolumeChemAdas::compute_species_lambdas(int isp, double Te_eV, double ne_m3,
                                                   double Ti_eV, int icell,
                                                   double *lambda_out, int *ridx_map_out,
@@ -1511,6 +1540,7 @@ void FixVolumeChemAdas::compute_species_lambdas(int isp, double Te_eV, double ne
     const size_t q = static_cast<size_t>(std::max(0.0, species[isp].charge));
 
     double rate_log10_cm3s = -INFINITY;
+    double dens_partner = ne_m3;
     if (r->type == IONIZATION) {
       if (q >= static_cast<size_t>(atomic_number)) continue;
       if (atomic_number == 1 && q == 0) {
@@ -1526,10 +1556,13 @@ void FixVolumeChemAdas::compute_species_lambdas(int isp, double Te_eV, double ne
                           rate_log10_cm3s, ReactionType::Recombination);
     } else if (r->type == EXCHANGE) {
       if (atomic_number == 1 && Ti_eV > 0.0) {
-        // HYDHEL H.3 3.1.8 (D-D+ resonant CX).
+        // HYDHEL H.3 3.1.8 (D-D+ resonant CX). Partner = D+ (~ne).
         rate_log10_cm3s = log10_sigmav_cx_hh_cm3s(Ti_eV, 1.5 * Ti_eV);
       } else {
-        // Impurity-H CX: keep ADAS CCD.
+        // Impurity-H CX (ADAS CCD): partner is the NEUTRAL D atom, not
+        // the electrons -- lambda must scale with n_D0 (mesh/dens_n).
+        dens_partner = neutral_dens_at_cell(icell);
+        if (dens_partner <= 0.0) continue;
         const size_t cx_row = (q > 0) ? (q - 1) : 0;
         interpolateRateData(atomic_number, cx_row, icell, logTe, logne_cm,
                             rate_log10_cm3s, ReactionType::ChargeExchange);
@@ -1548,7 +1581,7 @@ void FixVolumeChemAdas::compute_species_lambdas(int isp, double Te_eV, double ne
     }
 
     if (!std::isfinite(rate_log10_cm3s)) continue;
-    const double lam = computeReactionLambda(rate_log10_cm3s, dt_chem, ne_m3);
+    const double lam = computeReactionLambda(rate_log10_cm3s, dt_chem, dens_partner);
     if (lam <= 0.0) continue;
 
     lambda_out[nchan_out] = lam;
@@ -1621,6 +1654,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
       const size_t q = static_cast<size_t>(std::max(0.0, species[isp].charge));
 
       double rate_log10_cm3s = -INFINITY;
+      double dens_partner = ne_m3;
 
       if (r->type == IONIZATION) {
         if (q >= static_cast<size_t>(atomic_number)) continue;
@@ -1645,7 +1679,9 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
           const double E_atom_eV = 0.5 * m_atom * v2p / eV_to_J_local;
           rate_log10_cm3s = log10_sigmav_cx_hh_cm3s(Ti_eV, E_atom_eV);
         } else {
-          // Impurity-H CX: keep ADAS CCD.
+          // Impurity-H CX (ADAS CCD): partner = NEUTRAL D (mesh/dens_n).
+          dens_partner = neutral_dens_at_cell(icell);
+          if (dens_partner <= 0.0) continue;
           const size_t cx_row = (q > 0) ? (q - 1) : 0;
           interpolateRateData(atomic_number, cx_row, icell, logTe, logne_cm,
                               rate_log10_cm3s, ReactionType::ChargeExchange);
@@ -1667,7 +1703,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
 
       if (!std::isfinite(rate_log10_cm3s)) continue;
 
-      const double lam = computeReactionLambda(rate_log10_cm3s, dt_chem, ne_m3);
+      const double lam = computeReactionLambda(rate_log10_cm3s, dt_chem, dens_partner);
       if (lam <= 0.0) continue;
 
       lambda[nchan] = lam;

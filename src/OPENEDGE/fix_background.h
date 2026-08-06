@@ -68,6 +68,11 @@ class FixBackground : public Fix {
   //      Indexing: field[iz * nr + ir]
   std::vector<double> dens_e, temp_e;
   std::vector<double> dens_i, temp_i;
+  // fluid-neutral D density [m^-3] (mesh/dens_n, optional; used by
+  // fix volume/chem/adas as the impurity-CX partner density)
+  std::vector<double> dens_n;
+  std::vector<double> temp_n;
+  bool has_neutral_dens() const { return !mesh_nn.empty(); }
   std::vector<double> parr_flow, parr_flow_r, parr_flow_t, parr_flow_z;
   std::vector<double> grad_te_r, grad_te_t, grad_te_z;
   std::vector<double> grad_ti_r, grad_ti_t, grad_ti_z;
@@ -111,6 +116,8 @@ class FixBackground : public Fix {
   std::vector<int> mesh_tri;       // (ntri*3) vertex indices
   std::vector<int> mesh_cell_idx;  // (ntri) cell index per triangle
   std::vector<double> mesh_ne, mesh_te, mesh_ti, mesh_ni, mesh_upar;
+  std::vector<double> mesh_nn;
+  std::vector<double> mesh_tn;
   // Precomputed gradients on the B2 mesh (converter writes these).
   // Consumers query via mesh_cell_at(R, Z) + mesh_grad_*_{r,z}[cell].
   std::vector<double> mesh_grad_te_r, mesh_grad_te_z;

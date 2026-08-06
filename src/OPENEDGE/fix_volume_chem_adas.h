@@ -301,6 +301,14 @@ protected:
     // the rate-table interpolation across all particles of this species in
     // the cell. Returns nchan = 0 if no valid channels (caller skips).
     // `lambda_out` and `ridx_map_out` must be sized >= 16.
+    // Neutral-D density at a cell center from the FixBackground provider
+    // (mesh/dens_n). Partner density for impurity-H CX (ccd channel):
+    // W^q+ + D0 -> W^(q-1)+ + D+. Returns 0 when no neutral data exists,
+    // which disables the channel (safe for pre-dens_n plasma files).
+    double neutral_dens_at_cell(int icell);
+    class FixBackground *nn_pd = nullptr;
+    int nn_pd_resolved = 0;
+
     void compute_species_lambdas(int isp, double Te_eV, double ne_m3,
                                   double Ti_eV, int icell,
                                   double *lambda_out, int *ridx_map_out,

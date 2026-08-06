@@ -427,6 +427,8 @@ void FixBackground::reload()
     bcast_grad(mesh_grad_ti_z);
     bcast_grad(mesh_q_par);
     bcast_grad(mesh_q_perp);
+    bcast_grad(mesh_nn);
+    bcast_grad(mesh_tn);
     bcast_grad(mesh_e_r);
     bcast_grad(mesh_e_z);
     bcast_grad(mesh_e_t);
@@ -662,6 +664,8 @@ void FixBackground::clear_loaded_data()
   mesh_tri.clear();
   mesh_cell_idx.clear();
   mesh_ne.clear();
+  mesh_nn.clear();
+  mesh_tn.clear();
   mesh_wall_face_area.clear();
   has_mesh_wall_face_area = 0;
   wall_flux = WallFluxData{};
@@ -1114,6 +1118,8 @@ void FixBackground::load_plasma_h5()
     read1D_mesh_opt("mesh/grad_ti_z", mesh_grad_ti_z);
     if (hasDataset("mesh/q_par"))  { read1D_mesh("mesh/q_par",  mesh_q_par);  has_qheatflux = 1; }
     if (hasDataset("mesh/q_perp")) { read1D_mesh("mesh/q_perp", mesh_q_perp); has_qheatflux = 1; }
+    read1D_mesh_opt("mesh/dens_n", mesh_nn);
+    read1D_mesh_opt("mesh/temp_n", mesh_tn);
     read1D_mesh_opt("mesh/e_r", mesh_e_r);
     read1D_mesh_opt("mesh/e_z", mesh_e_z);
     read1D_mesh_opt("mesh/e_t", mesh_e_t);
@@ -1654,6 +1660,8 @@ const std::vector<double> *FixBackground::mesh_field_for(const std::vector<doubl
 {
   if (!has_mesh) return nullptr;
   if (&field == &dens_e) return &mesh_ne;
+  if (&field == &dens_n) return &mesh_nn;
+  if (&field == &temp_n) return &mesh_tn;
   if (&field == &temp_e) return &mesh_te;
   if (&field == &dens_i) return &mesh_ni;
   if (&field == &temp_i) return &mesh_ti;
