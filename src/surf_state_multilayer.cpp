@@ -173,8 +173,11 @@ void SurfaceElementState::erode_surface(double thickness)
 
 void SurfaceElementState::compact_layers()
 {
-  // Merge thin layers
-  int i = 0;
+  // Merge thin BURIED layers only (start at 1): the TOP stratum is the
+  // growing surface and must accumulate from zero toward min_thickness --
+  // compacting it dissolves continuous fine deposition into the substrate
+  // and no stratum can ever nucleate.
+  int i = 1;
   while (i < static_cast<int>(layers.size()) - 1) {
     if (layers[i].thickness < min_thickness) {
       SurfaceLayer &a = layers[i];
