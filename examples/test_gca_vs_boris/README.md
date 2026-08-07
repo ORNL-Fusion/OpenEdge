@@ -41,7 +41,33 @@ grad|B|, curvature, and curl(b̂).
 | dt | 5 × 10⁻¹⁰ s (no subcycling — `ω_c·dt ≈ 0.048` per step keeps cumulative phase error small at marginal trapping) |
 | Run length | 600 000 steps (300 µs ≈ 6 bounce periods) |
 | Boris | `subcycles 1`, `gca_switch 1e12` (forces Boris branch) |
-| GCA | `subcycles 1`, `gca_switch 2.5`  (hybrid GCA above ρ_L/L_B = 0.4) |
+| GCA | `subcycles 1`, `gca_switch 2.5` (hybrid GCA above ρ_L/L_B = 0.4), selectable RK2/RK4 integrator |
+
+## GCA integrators
+
+The full Littlejohn GCA path keeps both midpoint RK2 and RK4:
+
+```text
+global pusher ... gca_integrator rk2
+global pusher ... gca_integrator rk4
+```
+
+- `rk2` evaluates the full RHS twice using the explicit midpoint method.
+- `rk4` evaluates the same full RHS four times and remains the C++ default for
+  backward compatibility.
+- `simple` remains available as a reduced one-stage update, but omits the
+  full B-star curvature/curl(b) terms.
+
+All three currently sample E, B, and their derivatives once at the beginning
+of the timestep and freeze those fields during the integration stages. Thus
+RK2 halves the Littlejohn RHS algebra relative to RK4; it does not halve mesh
+field queries. Compare the two on the same orbit before choosing the production
+timestep.
+
+On the current CPU build, a 2,000,000-step single-particle check measured
+0.777 s of Move time for RK2 and 0.824 s for RK4 (about 5.7% lower for RK2).
+The endpoint dumps were byte-identical at the configured dump precision. This
+is a focused kernel check, not a promise of the same whole-application speedup.
 
 ## Files
 
@@ -50,7 +76,7 @@ grad|B|, curvature, and curl(b̂).
 | `make_khan_plasma_h5.py` | Writes `khan_plasma.h5` from the analytical Khan ψ map. |
 | `khan_plasma.h5` | Synthetic plasma file (regenerate with the helper). |
 | `in.boris` | Pure Boris reference (huge gca_switch, 100 subcycles). |
-| `in.gca` | Hybrid Boris/GCA (gca_switch 2.5, 10 subcycles fallback). |
+| `in.gca` | Hybrid Boris/GCA with command-line-selectable RK2 or RK4. |
 | `input/source.single` | One H+ at (Z, R, φ) = (0, 1.09, 0). |
 | `input/plasma.species` | Single-line H+ species table. |
 | `plot_trajectories.py` | Reads both dumps + khan_plasma.h5 equilibrium, writes 3 PNGs to `output/`. |
@@ -62,17 +88,23 @@ cd /home/cloud/OpenEdge/examples/test_gca_vs_boris
 python3 make_khan_plasma_h5.py             # one-time, regenerates khan_plasma.h5
 source /opt/intel/oneapi/setvars.sh --force
 mpirun -np 1 /home/cloud/buildOpenEdge/src/spa_mpi -in in.boris
-mpirun -np 1 /home/cloud/buildOpenEdge/src/spa_mpi -in in.gca
-python3 plot_trajectories.py
+mpirun -np 1 /home/cloud/buildOpenEdge/src/spa_mpi \
+  -var gcaIntegrator rk2 -in in.gca
+mpirun -np 1 /home/cloud/buildOpenEdge/src/spa_mpi \
+  -var gcaIntegrator rk4 -in in.gca
+python3 plot_trajectories.py --gca-dump traj.gca.rk2 --tag rk2
+python3 plot_trajectories.py --gca-dump traj.gca.rk4 --tag rk4
 ```
 
 ## Generated figures
 
 Written to `output/`:
 
-- `boris_vs_gca.png` — (R, Z) trajectory + R(t), Z(t), |v|(t).
-- `boris_vs_gca_gc.png` — guiding-center (R, Z), R_gc(t), Δμ/μ₀ [ppm], Δ|v|/|v₀| [ppm].
-- `boris_vs_gca_rhoL_over_LB.png` — ρ_L / L_B(t) with the switch threshold.
+- `traj.gca.rk2` and `traj.gca.rk4` — raw particle trajectories for the two
+  full-GCA integrators.
+- `boris_vs_gca_<tag>.png` — (R, Z) trajectory + R(t), Z(t), |v|(t).
+- `boris_vs_gca_gc_<tag>.png` — guiding-center (R, Z), R_gc(t), Δμ/μ₀ [ppm], Δ|v|/|v₀| [ppm].
+- `boris_vs_gca_rhoL_over_LB_<tag>.png` — ρ_L / L_B(t) with the switch threshold.
 
 ## Pass criterion
 

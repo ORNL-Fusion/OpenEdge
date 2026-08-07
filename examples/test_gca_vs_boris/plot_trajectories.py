@@ -16,6 +16,7 @@ in cylindrical components (B_R, B_phi, B_Z); cross products and inner products a
 done in cylindrical (R, phi, Z).
 """
 
+import argparse
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -186,10 +187,20 @@ def fmt_range(arr):
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Compare a Boris trajectory with one selectable GCA dump")
+    parser.add_argument(
+        "--gca-dump", default="traj.gca.rk2",
+        help="GCA dump basename in output/ (default: traj.gca.rk2)")
+    parser.add_argument(
+        "--tag", default="rk2",
+        help="suffix for generated figure names (default: rk2)")
+    args = parser.parse_args()
+
     base   = os.path.dirname(__file__)
     outdir = os.path.join(base, "output")
     boris  = read_sparta_dump(os.path.join(outdir, "traj.boris"))
-    gca    = read_sparta_dump(os.path.join(outdir, "traj.gca"))
+    gca    = read_sparta_dump(os.path.join(outdir, args.gca_dump))
 
     R_b, Z_b, _, vR_b, vphi_b, vZ_b = cyl_from_cart(boris)
     R_g, Z_g, _, vR_g, vphi_g, vZ_g = cyl_from_cart(gca)
@@ -239,8 +250,9 @@ def main():
     fig.suptitle(r"Boris vs.\ GCA hybrid pusher — single H$^+$ in Khan tokamak field",
                  fontsize=18)
     fig.tight_layout()
-    save(fig, "boris_vs_gca", outdir)
-    print(f"Wrote {os.path.join(outdir, 'boris_vs_gca.{png,pdf}')}")
+    figure1 = f"boris_vs_gca_{args.tag}"
+    save(fig, figure1, outdir)
+    print(f"Wrote {os.path.join(outdir, figure1 + '.{png,pdf}')}")
     print(f"  Boris: {len(boris['t'])} frames, R range {fmt_range(R_b)}")
     print(f"  GCA:   {len(gca['t'])} frames, R range {fmt_range(R_g)}")
 
@@ -294,8 +306,9 @@ def main():
 
     fig2.suptitle("Guiding-center diagnostics", fontsize=18)
     fig2.tight_layout()
-    save(fig2, "boris_vs_gca_gc", outdir)
-    print(f"Wrote {os.path.join(outdir, 'boris_vs_gca_gc.{png,pdf}')}")
+    figure2 = f"boris_vs_gca_gc_{args.tag}"
+    save(fig2, figure2, outdir)
+    print(f"Wrote {os.path.join(outdir, figure2 + '.{png,pdf}')}")
 
     # ---------------------------------------------------------------- Figure 3: rho_L / L_B
     fig3, ax3 = plt.subplots(1, 1, figsize=(11, 5))
@@ -308,8 +321,9 @@ def main():
     ax3.set_title("GCA validity diagnostic")
     ax3.legend(frameon=False)
     fig3.tight_layout()
-    save(fig3, "boris_vs_gca_rhoL_over_LB", outdir)
-    print(f"Wrote {os.path.join(outdir, 'boris_vs_gca_rhoL_over_LB.{png,pdf}')}")
+    figure3 = f"boris_vs_gca_rhoL_over_LB_{args.tag}"
+    save(fig3, figure3, outdir)
+    print(f"Wrote {os.path.join(outdir, figure3 + '.{png,pdf}')}")
 
     n = min(len(Rgc_b), len(Rgc_g))
     rms_gc = np.sqrt(np.mean((Rgc_b[:n] - Rgc_g[:n])**2 +
