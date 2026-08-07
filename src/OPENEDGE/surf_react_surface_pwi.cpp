@@ -539,6 +539,10 @@ void SurfReactSurfacePWI::init()
             strata_state[i].deposit(m, sigma_init_vals[k], mat_dens[m]);
           }
           for (int c = 0; c < strata_ncols; c++) sb[i][c] = 0.0;
+          // cap the stack at max_layers BEFORE packing: with several
+          // adens_init layers the fresh stack can exceed K and pack()
+          // would write past the row (heap corruption, F2)
+          strata_state[i].compact_layers();
           strata_state[i].pack(sb[i]);
         }
       } else {
@@ -675,6 +679,18 @@ void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
     int nemit = (int) Y;                         // floor(Y)
     if (random->uniform() < Y - nemit) nemit++;  // + Bernoulli(frac Y)
     if (nemit == 0) continue;
+    if (nemit > 20) {                            // corrupt table / bad E guard
+      static int warned = 0;
+      if (!warned) {
+        warned = 1;
+        char msg[128];
+        snprintf(msg, sizeof(msg),
+                 "surface/pwi: sputter yield %.1f clamped to 20 "
+                 "(suspect table entry)", Y);
+        error->warning(FLERR, msg);
+      }
+      nemit = 20;
+    }
 
     int sp = r->products[0];                     // sputtered species (neutral W)
     double mass = particle->species[sp].mass;
@@ -1116,8 +1132,10 @@ void SurfReactSurfacePWI::sync_sigma()
   for (size_t k = 0; k < sigma_ero_compute.size(); k++) {
     Compute *ce = sigma_ero_compute[k];
     int isp = sigma_ero_isp[k];
-    if (ce->invoked_per_surf != update->ntimestep) ce->compute_per_surf();
-    ce->post_process_surf();
+    if (ce->invoked_per_surf != update->ntimestep) {
+      ce->compute_per_surf();
+      ce->post_process_surf();
+    }
     double debit_dt = update->dt * sigma_nevery;
     // concentration-limited: the background erodes material isp only in
     // proportion to its surface concentration (owned conc array from the
@@ -1170,8 +1188,10 @@ void SurfReactSurfacePWI::sync_sigma()
     double *fvec = NULL; double **farr = NULL; int icol = 0;
     if (imp_mode[k] == 0) {
       Compute *ce = imp_compute[k];
-      if (ce->invoked_per_surf != update->ntimestep) ce->compute_per_surf();
-      ce->post_process_surf();
+      if (ce->invoked_per_surf != update->ntimestep) {
+        ce->compute_per_surf();
+        ce->post_process_surf();
+      }
       if (imp_col[k] == 0) fvec = ce->vector_surf;
       else { farr = ce->array_surf; icol = imp_col[k] - 1; }
     }

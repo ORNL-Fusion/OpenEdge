@@ -54,16 +54,14 @@ static const SputterDataEntry EIRENE_SPUTTER_TABLE[] = {
   {"Ar_on_Be",   18,   39.9480,    4,    9.0120,  3.380,   53.7600,    2.8600,    36842.000},
   {"Kr_on_Be",   36,   83.7980,    4,    9.0120,  3.380,   80.7000,    5.0100,   167016.000},
 
-  // Boron pairs: Yamamura-analytic PLACEHOLDERS (Es_B = 5.73 eV; Eth from
-  // Es/(gamma(1-gamma)) or heavy-ion scaling; Q interpolated from
-  // neighboring-Z fits; ETF = Thomas-Fermi). Replace with RustBCA-derived
-  // tables (seed task: composition-resolved rates).
-  {"D_on_B",     1,    2.0140,    5,   10.8110,  5.730,   23.2000,    0.1200,      361.000},
-  {"O_on_B",     8,   15.9990,    5,   10.8110,  5.730,   56.0000,    1.2500,     8022.000},
-  {"B_on_B",     5,   10.8110,    5,   10.8110,  5.730,   41.0000,    0.6500,     3717.000},
+  {"Xe_on_Be",   54,  131.2930,    4,    9.0120,  3.380,  103.2800,    6.8100,   423799.000},
+
+  // W-B cross pairs: Yamamura-analytic PLACEHOLDERS (replace with
+  // RustBCA-derived tables). NOTE: D_on_B / O_on_B / B_on_B are NOT
+  // duplicated here -- the fitted entries in the *_on_B block below are
+  // the authoritative ones (lookup_sputter is first-match).
   {"B_on_W",     5,   10.8110,   74,  183.8400,  8.680,   48.0000,    0.7500,    54520.000},
   {"W_on_B",    74,  183.8400,    5,   10.8110,  5.730,   70.0000,    2.5000,   927000.000},
-  {"Xe_on_Be",   54,  131.2930,    4,    9.0120,  3.380,  103.2800,    6.8100,   423799.000},
   {"H_on_B",    1,    1.0080,    5,   10.8100,  5.730,   23.1400,    0.0500,      333.000},
   {"D_on_B",    1,    2.0140,    5,   10.8100,  5.730,   21.5600,    0.0800,      361.000},
   {"T_on_B",    1,    3.0160,    5,   10.8100,  5.730,   23.4600,    0.1100,      389.000},

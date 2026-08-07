@@ -261,6 +261,8 @@ bool ProcessLibrary::load_trim_reflection(const std::string &pair,
 double ProcessLibrary::TrimSputterTable::slice_yield(int ic, double E_eV,
                                                      double theta_deg) const
 {
+  // precondition: caller has checked valid() -- both public yield()
+  // overloads do; this private path assumes loaded tables
   // Below the table's lowest energy = below threshold -> no sputtering
   // (clamping upward would fabricate yield near/below threshold for
   // sparse tables, e.g. d_on_w starting at 250 eV).
