@@ -40,6 +40,8 @@ class FixBalance : public Fix {
   int me,nprocs;
   double thresh;
   int bstyle,rcbwt,rcbflip;
+  int emptyweight_auto;
+  double emptyweight;
   char eligible[4];
   double last,my_timer_cost;
 
@@ -53,6 +55,7 @@ class FixBalance : public Fix {
   class RCB *rcb;
 
   double imbalance_factor(double &);
+  double empty_cell_weight();
   void timer_cost();
   void timer_cell_weights(double *&);
 };

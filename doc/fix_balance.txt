@@ -23,10 +23,11 @@ bstyle = {random} or {proc} or {rcb} :l
   {rcb} args = weight
     weight = {cell} or {part} or {time} :pre
 zero or more keyword/value(s) pairs may be appended :l
-keyword = {axes} or {flip} :l
+keyword = {axes} or {flip} or {emptyweight} :l
   {axes} value = dims
     dims = string with any of "x", "y", or "z" characters in it
-  {flip} value = yes or no :pre
+  {flip} value = yes or no
+  {emptyweight} value = {auto} or a positive number :pre
 :ule
 
 [Examples:]
@@ -150,7 +151,7 @@ image.
 
 :line
 
-The optional keywords {axes} and {flip} only apply to the {rcb}
+The optional keywords {axes}, {flip}, and {emptyweight} only apply to the {rcb}
 style.  Otherwise they are ignored.
 
 The {axes} keyword allows limiting the partitioning created by the RCB
@@ -168,6 +169,15 @@ new owner of each grid cell is a different processor than the previous
 owner, at least when more than a few processors are used.  This will
 insure all particle and grid data moves to new processors, fully
 exercising the rebalancing code.
+
+The {emptyweight} keyword sets the weight assigned to a cell with no
+particles when {weight} is {part} or {time}.  Its default is 0.1, which
+preserves the standard SPARTA behavior.  A positive numeric value sets
+the weight directly.  The {auto} value is useful for sparse-marker
+OpenEdge simulations whose number of grid cells is much larger than
+their number of particles.  It scales the total empty-cell weight with
+the live-particle population, so empty cells regularize the RCB
+partition without overwhelming the particle weights.
 
 :line
 

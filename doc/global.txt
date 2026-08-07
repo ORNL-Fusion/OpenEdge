@@ -13,7 +13,7 @@ global command :h3
 global keyword values ... :pre
 
 one or more keyword/value pairs :ulb,l
-keyword = {fnum} or {nrho} or {vstream} or {temp} or {field} or {efield} or {bfield} or {surfs} or {surfgrid} or {surfmax} or {splitmax} or {surftally} or {gridcut} or {comm/sort} or {comm/style} or {weight} or {particle/reorder} or {mem/limit} or {boris_subcycles} or {boris_dump} or {boris_dump_every} or {boris_bad_dt_check} or {boris_bad_dt_limit} :l
+keyword = {fnum} or {nrho} or {vstream} or {temp} or {field} or {efield} or {bfield} or {surfs} or {surfgrid} or {surfmax} or {splitmax} or {surftally} or {gridcut} or {comm/sort} or {comm/style} or {weight} or {particle/reorder} or {mem/limit} or {pusher} or {boris_subcycles} or {boris_dump} or {boris_dump_every} or {boris_bad_dt_check} or {boris_bad_dt_limit} :l
   {fnum} value = ratio
     ratio = Fnum ratio of physical particles to simulation particles
   {nrho} value = density
@@ -86,6 +86,22 @@ keyword = {fnum} or {nrho} or {vstream} or {temp} or {field} or {efield} or {bfi
     bytes = limit extra particle memory to this amount (in MBytes)
   {optmove} value = yes or no
     yes/no = use optimized particle move if yes, else use regular move :pre
+  {pusher} values = one or more pusher keyword/value pairs
+    pusher keyword = {mode}, {plasma}, {subcycles}, {gca_switch},
+                     {boris_near}, {gca_integrator}, {dump}, {dump_every},
+                     {bad_dt_check}, {bad_dt_limit}, or {sheath}
+      {mode} value = {boris}, {hybrid}, or {gca}
+      {plasma} value = compute or fix ID providing plasma fields
+      {subcycles} value = positive integer
+      {gca_switch} value = positive GCA validity factor
+      {boris_near} value = non-negative distance
+      {gca_integrator} value = {rk2}, {rk4}, or {simple}
+      {dump} value = yes or no
+      {dump_every} value = positive integer
+      {bad_dt_check} value = yes or no
+      {bad_dt_limit} value = positive number
+      {sheath} value = {off}, {kick}, {spatial}, or {boundary}, followed by
+                       optional {geom} ID, {mD_amu} mass, and {dmax} distance :pre
   {boris_subcycles} value = N
     N = number of Boris substeps per particle move timestep (N > 0)
   {boris_dump} value = yes or no
@@ -112,6 +128,8 @@ global efield grid 1 0
 global bfield grid 2 0 :pre
 global boris_subcycles 20
 global boris_bad_dt_check yes boris_bad_dt_limit 0.1 :pre
+global pusher plasma pd mode gca gca_integrator rk2
+global pusher plasma pd mode gca gca_integrator rk4 :pre
 
 [Description:]
 
@@ -220,6 +238,24 @@ available:
 - {boris_bad_dt_check} and {boris_bad_dt_limit} enable a runtime
   warning if the substep is too large, using
   |q/m|*|B|*dt_sub > limit.
+
+The {pusher} keyword is the hierarchical OpenEdge interface for Boris,
+hybrid Boris/GCA, and pure guiding-center motion.  The {plasma} value
+must identify either a compute plasma/fields command or a fix background
+command.  Pure {gca} mode always uses GCA when a non-zero magnetic field
+and charged particle are present.  {hybrid} mode uses {gca_switch} to
+select between Boris and GCA from the Larmor-radius to magnetic-gradient
+scale ratio.  {boris_near} can force the Boris path within the specified
+distance of the configured sheath geometry.
+
+The {gca_integrator} value selects the guiding-center time integrator.
+{rk4} evaluates the full Littlejohn B-star RHS four times and is the
+backward-compatible default.  {rk2} uses the explicit midpoint method
+and evaluates the same full RHS twice.  {simple} uses a reduced one-stage
+update without the full curvature/curl(b) correction.  In the current
+CPU implementation, E, B, and their derivatives are sampled once and
+frozen over the timestep for all stages.  Thus RK2 halves the full-RHS
+algebra relative to RK4, but not the number of mesh-field queries.
 
 When using {bfield} with the {grid} style, an update frequency of 0
 means field values are computed once at run start and then re-used for

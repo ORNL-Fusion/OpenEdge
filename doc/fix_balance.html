@@ -34,11 +34,12 @@
 </PRE>
 <LI>zero or more keyword/value(s) pairs may be appended 
 
-<LI>keyword = <I>axes</I> or <I>flip</I> 
+<LI>keyword = <I>axes</I> or <I>flip</I> or <I>emptyweight</I>
 
 <PRE>  <I>axes</I> value = dims
     dims = string with any of "x", "y", or "z" characters in it
-  <I>flip</I> value = yes or no 
+  <I>flip</I> value = yes or no
+  <I>emptyweight</I> value = <I>auto</I> or a positive number
 </PRE>
 
 </UL>
@@ -163,7 +164,7 @@ image.
 </CENTER>
 <HR>
 
-<P>The optional keywords <I>axes</I> and <I>flip</I> only apply to the <I>rcb</I>
+<P>The optional keywords <I>axes</I>, <I>flip</I>, and <I>emptyweight</I> only apply to the <I>rcb</I>
 style.  Otherwise they are ignored.
 </P>
 <P>The <I>axes</I> keyword allows limiting the partitioning created by the RCB
@@ -181,6 +182,15 @@ new owner of each grid cell is a different processor than the previous
 owner, at least when more than a few processors are used.  This will
 insure all particle and grid data moves to new processors, fully
 exercising the rebalancing code.
+</P>
+<P>The <I>emptyweight</I> keyword sets the weight assigned to a cell with no
+particles when <I>weight</I> is <I>part</I> or <I>time</I>.  Its default is 0.1, which
+preserves the standard SPARTA behavior.  A positive numeric value sets
+the weight directly.  The <I>auto</I> value is useful for sparse-marker
+OpenEdge simulations whose number of grid cells is much larger than
+their number of particles.  It scales the total empty-cell weight with
+the live-particle population, so empty cells regularize the RCB
+partition without overwhelming the particle weights.
 </P>
 <HR>
 

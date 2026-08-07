@@ -40,6 +40,19 @@ enum{CELL,PARTICLE,TIME};
 
 #define ZEROPARTICLE 0.1
 
+namespace {
+int parent_particle_count(int icell, Grid::ChildCell *cells,
+                          Grid::ChildInfo *cinfo, Grid::SplitInfo *sinfo)
+{
+  if (cells[icell].nsplit == 1) return cinfo[icell].count;
+  int count = 0;
+  const int nsplit = cells[icell].nsplit;
+  int *csubs = sinfo[cells[icell].isplit].csubs;
+  for (int i = 0; i < nsplit; ++i) count += cinfo[csubs[i]].count;
+  return count;
+}
+}
+
 /* ---------------------------------------------------------------------- */
 
 FixBalance::FixBalance(SPARTA *sparta, int narg, char **arg) :
@@ -78,6 +91,8 @@ FixBalance::FixBalance(SPARTA *sparta, int narg, char **arg) :
 
   strcpy(eligible,"xyz");
   rcbflip = 0;
+  emptyweight_auto = 0;
+  emptyweight = ZEROPARTICLE;
 
   while (iarg < narg) {
     if (strcmp(arg[iarg],"axes") == 0) {
@@ -101,6 +116,17 @@ FixBalance::FixBalance(SPARTA *sparta, int narg, char **arg) :
       if (strcmp(arg[iarg+1],"yes") == 0) rcbflip = 1;
       else if (strcmp(arg[iarg+1],"no") == 0) rcbflip = 0;
       else error->all(FLERR,"Illegal fix balance command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"emptyweight") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal fix balance command");
+      if (strcmp(arg[iarg+1],"auto") == 0) {
+        emptyweight_auto = 1;
+      } else {
+        emptyweight = atof(arg[iarg+1]);
+        if (emptyweight <= 0.0)
+          error->all(FLERR,"Fix balance emptyweight must be auto or > 0");
+        emptyweight_auto = 0;
+      }
       iarg += 2;
     } else error->all(FLERR,"Illegal fix balance command");
   }
@@ -251,12 +277,13 @@ void FixBalance::end_of_step()
       if (!particle->sorted) particle->sort();
       memory->create(wt,nglocal,"balance:wt");
       int n;
+      const double zero_weight = empty_cell_weight();
       nbalance = 0;
       for (int icell = 0; icell < nglocal; icell++) {
         if (cells[icell].nsplit <= 0) continue;
-        n = cinfo[icell].count;
+        n = parent_particle_count(icell, cells, cinfo, grid->sinfo);
         if (n) wt[nbalance++] = n;
-        else wt[nbalance++] = ZEROPARTICLE;
+        else wt[nbalance++] = zero_weight;
       }
     } else if (rcbwt == TIME) {
       memory->create(wt,nglocal,"balance:wt");
@@ -380,6 +407,34 @@ double FixBalance::compute_vector(int i)
 
 /* -------------------------------------------------------------------- */
 
+double FixBalance::empty_cell_weight()
+{
+  if (!emptyweight_auto) return emptyweight;
+
+  // Sparse OpenEdge marker runs can have O(10^2) particles on O(10^5)
+  // parent cells. The stock 0.1 empty-cell floor then outweighs all real
+  // particles and makes `rcb part` behave like `rcb cell`. In auto mode,
+  // empty parents collectively carry one virtual particle plus 25% of the
+  // live-particle weight. That is enough regularization to avoid handing a
+  // rank nearly the whole empty grid without drowning out sparse markers.
+  bigint nparent_local = 0;
+  Grid::ChildCell *cells = grid->cells;
+  for (int icell = 0; icell < grid->nlocal; ++icell)
+    if (cells[icell].nsplit > 0) nparent_local++;
+  bigint nparent_global = 0;
+  MPI_Allreduce(&nparent_local, &nparent_global, 1, MPI_SPARTA_BIGINT,
+                MPI_SUM, world);
+  bigint nparticle_local = particle->nlocal;
+  bigint nparticle_global = 0;
+  MPI_Allreduce(&nparticle_local, &nparticle_global, 1, MPI_SPARTA_BIGINT,
+                MPI_SUM, world);
+  const double empty_total = 1.0 + 0.25 * nparticle_global;
+  return nparent_global > 0
+      ? empty_total / static_cast<double>(nparent_global) : 1.0;
+}
+
+/* -------------------------------------------------------------------- */
+
 void FixBalance::timer_cost()
 {
   // my_timer_cost = CPU time for relevant timers since last invocation
@@ -389,6 +444,7 @@ void FixBalance::timer_cost()
   my_timer_cost += timer->array[TIME_SORT];
   my_timer_cost += timer->array[TIME_COLLIDE];
   my_timer_cost += timer->array[TIME_MODIFY];
+  my_timer_cost += timer->array[TIME_PCACHE];
 
   // last = time up to this point
 
@@ -418,26 +474,25 @@ void FixBalance::timer_cell_weights(double* &weight)
   Grid::ChildInfo *cinfo = grid->cinfo;
   int nglocal = grid->nlocal;
 
-  double localwt_total = 0.0;
-  if (nglocal) localwt_total = my_timer_cost/nglocal;
-  if (nglocal && localwt_total <= 0.0) error->one(FLERR,"Balance weight <= 0.0");
+  if (nglocal && my_timer_cost <= 0.0)
+    error->one(FLERR,"Balance weight <= 0.0");
 
   if (!particle->sorted) particle->sort();
   double wttotal = 0;
   int nbalance = 0;
   double* localwt;
+  const double zero_weight = empty_cell_weight();
   memory->create(localwt,nglocal,"imbalance_time:localwt");
   for (int icell = 0; icell < nglocal; icell++) {
-    localwt[icell] = 0.0;
     if (cells[icell].nsplit <= 0) continue;
-    int n = cinfo[icell].count;
-    if (n) localwt[nbalance++] = n;
-    else localwt[nbalance++] = ZEROPARTICLE;
-    wttotal += localwt[nbalance-1];
+    const int n = parent_particle_count(icell, cells, cinfo, grid->sinfo);
+    localwt[nbalance] = n ? n : zero_weight;
+    wttotal += localwt[nbalance];
+    nbalance++;
   }
 
-  for (int icell = 0; icell < nglocal; icell++)
-    weight[icell] = my_timer_cost*localwt[icell]/wttotal;
+  for (int i = 0; i < nbalance; i++)
+    weight[i] = my_timer_cost*localwt[i]/wttotal;
 
   memory->destroy(localwt);
 }

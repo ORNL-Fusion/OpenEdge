@@ -40,6 +40,19 @@ enum{CELL,PARTICLE,TIME};
 
 #define ZEROPARTICLE 0.1
 
+namespace {
+int parent_particle_count(int icell, Grid::ChildCell *cells,
+                          Grid::ChildInfo *cinfo, Grid::SplitInfo *sinfo)
+{
+  if (cells[icell].nsplit == 1) return cinfo[icell].count;
+  int count = 0;
+  const int nsplit = cells[icell].nsplit;
+  int *csubs = sinfo[cells[icell].isplit].csubs;
+  for (int i = 0; i < nsplit; ++i) count += cinfo[csubs[i]].count;
+  return count;
+}
+}
+
 /* ---------------------------------------------------------------------- */
 
 BalanceGrid::BalanceGrid(SPARTA *sparta) : Pointers(sparta) {
@@ -317,7 +330,7 @@ void BalanceGrid::command(int narg, char **arg, int outflag)
       nbalance = 0;
       for (int icell = 0; icell < nglocal; icell++) {
         if (cells[icell].nsplit <= 0) continue;
-        n = cinfo[icell].count;
+        n = parent_particle_count(icell, cells, cinfo, grid->sinfo);
         if (n) wt[nbalance++] = n;
         else {
           wt[nbalance++] = ZEROPARTICLE;
@@ -574,6 +587,7 @@ void BalanceGrid::timer_cell_weights(double* &weight)
   cost += timer->array[TIME_SORT];
   cost += timer->array[TIME_COLLIDE];
   cost += timer->array[TIME_MODIFY];
+  cost += timer->array[TIME_PCACHE];
 
   // localwt = weight assigned to each owned grid cell
   // just return if no time yet tallied
@@ -592,9 +606,7 @@ void BalanceGrid::timer_cell_weights(double* &weight)
   Grid::ChildInfo *cinfo = grid->cinfo;
   int nglocal = grid->nlocal;
 
-  double localwt_total = 0.0;
-  if (nglocal) localwt_total = cost/nglocal;
-  if (nglocal && localwt_total <= 0.0) error->one(FLERR,"Balance weight <= 0.0");
+  if (nglocal && cost <= 0.0) error->one(FLERR,"Balance weight <= 0.0");
 
   if (!particle->sorted) particle->sort();
   double wttotal = 0;
@@ -602,18 +614,15 @@ void BalanceGrid::timer_cell_weights(double* &weight)
   double* localwt;
   memory->create(localwt,nglocal,"imbalance_time:localwt");
   for (int icell = 0; icell < nglocal; icell++) {
-    localwt[icell] = 0.0;
     if (cells[icell].nsplit <= 0) continue;
-    int n = cinfo[icell].count;
-    if (n) localwt[nbalance++] = n;
-    else {
-      localwt[nbalance++] = ZEROPARTICLE;
-    }
-    wttotal += localwt[nbalance-1];
+    const int n = parent_particle_count(icell, cells, cinfo, grid->sinfo);
+    localwt[nbalance] = n ? n : ZEROPARTICLE;
+    wttotal += localwt[nbalance];
+    nbalance++;
   }
 
-  for (int icell = 0; icell < nglocal; icell++)
-    weight[icell] = cost*localwt[icell]/wttotal;
+  for (int i = 0; i < nbalance; i++)
+    weight[i] = cost*localwt[i]/wttotal;
 
   memory->destroy(localwt);
 
