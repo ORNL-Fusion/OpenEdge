@@ -25,8 +25,10 @@ class FixBackground : public Fix {
  public:
   FixBackground(class SPARTA *, int, char **);
   ~FixBackground();
-  int  setmask();
-  void init();
+  int  setmask() override;
+  void init() override;
+  void setup() override;
+  void post_run() override;
 
   // Invalidate cell_mesh_cell when SPARTA re-migrates cells (adapt/balance).
   // Matches the SPARTA pattern used by FixEmit (gridmigrate=1 + full rebuild
@@ -45,20 +47,31 @@ class FixBackground : public Fix {
   // stencil/mesh path for legacy callers (icell = -1) and for fields that
   // live only on the regular (rvals,zvals) grid.
   double interp2D(const std::vector<double> &field, double R, double Z,
-                  int icell = -1) const;
+                  int icell = -1, int iparticle = -1) const;
+  // strict hinted mesh-cell lookup (no extrapolation halo); -1 outside
+  int mesh_cell_for(double R, double Z, int icell = -1,
+                    int iparticle = -1) const;
   void   bfield_at(double R, double Z, double &Br, double &Bz, double &Bt,
-                   int icell = -1) const;
+                   int icell = -1, int iparticle = -1) const;
   // Cylindrical-derivative B query for the GCA pusher: returns Br/Bz/Bt
   // along with dB/dR, dB/dZ in the same MagneticFieldFileDataParams shape
-  // ComputePlasmaFields produces. Equilibrium-derivative branch when
-  // has_equ; falls back to mesh / regular-grid (finite differences).
-  MagneticFieldFileDataParams query_bfield_at_point(const double xyz[3]) const;
+  // ComputePlasmaFields produces. Existing callers retain mesh-first
+  // behavior. GCA passes prefer_equilibrium=true so a loaded equilibrium
+  // supplies the smooth derivatives required by the guiding-center RHS;
+  // mesh / regular-grid data remain the fallback.
+  MagneticFieldFileDataParams query_bfield_at_point(const double xyz[3],
+                                                      int icell = -1,
+                                                      int iparticle = -1,
+                                                      bool prefer_equilibrium = false) const;
   // Cylindrical E-field at particle position, from mesh/e_{r,z,t}.
   // Returns true and (ER,EZ,Et) if mesh E-field is loaded and the point
   // sits inside the mesh footprint; false otherwise (out variables zeroed).
   bool query_efield_at_point(const double xyz[3],
-                             double &ER, double &EZ, double &Et) const;
+                             double &ER, double &EZ, double &Et,
+                             int icell = -1, int iparticle = -1) const;
   double psi_norm_at(double R, double Z) const;
+  bool psi_norm_gradient_at(double R, double Z,
+                            double &dpsi_dR, double &dpsi_dZ) const;
 
   // ---- Plasma grid ----
   int nr, nz;
@@ -194,6 +207,10 @@ class FixBackground : public Fix {
   std::vector<double> mesh_tri_rmin, mesh_tri_rmax, mesh_tri_zmin, mesh_tri_zmax;
   std::vector<double> mapped_cr, mapped_cz;
   std::vector<int> mapped_idx;
+  // Triangle adjacency, three entries per triangle. Slot k is the
+  // neighbour across the edge opposite vertex k, or -1 at boundaries and
+  // non-manifold edges. Used only as an exact warm-start walk.
+  std::vector<int> mesh_tri_neighbor;
   int hash_nr, hash_nz;
   double hash_rmin, hash_zmin, hash_dr, hash_dz;
   std::vector<std::vector<int>> hash_grid;
@@ -205,7 +222,16 @@ class FixBackground : public Fix {
   // build_cell_mesh_index(). Cleared by grid_changed() (SPARTA's migration
   // hook) and by reload(). Stamp fields (cell_mesh_stamp_n / _id) provide
   // a belt-and-suspenders check in cache_plasma_particles.
-  std::vector<int> cell_mesh_cell;
+  mutable std::vector<int> cell_mesh_cell;
+  // Exact warm-start hint for point queries. The hinted triangle is always
+  // checked against the current (R,Z); a miss falls back to the original
+  // hash search, so this cache does not approximate the sampled field.
+  mutable std::vector<int> cell_mesh_tri;
+  // memo of the last resolved point query (same particle+position across
+  // consecutive per-field interp2D calls)
+  mutable int memo_ip = -1;
+  mutable double memo_R = 0.0, memo_Z = 0.0;
+  mutable int memo_tri = -1;
   void build_cell_mesh_index();
   bigint cell_mesh_stamp_id;   // grid->cells[0].id when cache was built
   int    cell_mesh_stamp_n;    // grid->nlocal when cache was built
@@ -215,6 +241,8 @@ class FixBackground : public Fix {
 
   // ---- Configuration ----
   int is_static;                   // 1 = never reload
+  int mesh_triangle_cache;         // 1 = validate/reuse particle/cell tri hints
+  int mesh_lookup_diagnostics;     // 1 = print cache/load summary after run
   int source_mode;                 // 0=file, 1=constant
   std::string plasma_path;
   std::string equ_path;
@@ -235,7 +263,12 @@ class FixBackground : public Fix {
   void load_equilibrium();
   void derive_bfield_from_equ();
   void build_mesh_index();
-  int find_mesh_triangle(double R, double Z) const;
+  bool point_in_mesh_triangle(int tri, double R, double Z,
+                              double edge_margin) const;
+  int find_mesh_triangle_hash(double R, double Z, bool track) const;
+  int walk_mesh_triangle(int start, double R, double Z, int &nhops) const;
+  int find_mesh_triangle(double R, double Z, int icell = -1,
+                         int iparticle = -1) const;
   int find_nearest_mapped_triangle(double R, double Z, double max_dist) const;
   const std::vector<double> *mesh_field_for(const std::vector<double> &field) const;
 
@@ -250,6 +283,20 @@ class FixBackground : public Fix {
   double const_epar;
   double const_br, const_bz, const_bt;
   int const_has_bfield;
+
+  int mesh_tri_custom;
+  mutable bigint mesh_hint_hits;
+  mutable bigint mesh_particle_hint_hits;
+  mutable bigint mesh_cell_hint_hits;
+  mutable bigint mesh_neighbor_walk_hits;
+  mutable bigint mesh_hash_searches;
+  mutable bigint mesh_outside_queries;
+  // Source selected by query_bfield_at_point(). These counters make the
+  // GCA equilibrium-first policy directly visible in normal diagnostics.
+  mutable bigint bfield_mesh_queries;
+  mutable bigint bfield_equilibrium_queries;
+  mutable bigint bfield_regular_queries;
+  mutable bigint bfield_preference_fallbacks;
 };
 
 }

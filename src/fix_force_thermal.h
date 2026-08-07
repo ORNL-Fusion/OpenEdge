@@ -91,7 +91,6 @@ class FixForceThermal : public Fix {
   int have_ion_thermal_;
   CollGridSrc srcGradTiR_, srcGradTiZ_;
   double beta_i_;  // coefficient (default 2.6)
-  double ne_min_;      // thermal force off below this ne [m^-3]
 
   // electron thermal force
   int have_elec_thermal_;
@@ -103,9 +102,9 @@ class FixForceThermal : public Fix {
   void refresh_compute_src(CollGridSrc &S);
   double read_src(const CollGridSrc &S, int ip, int icell) const;
   void particle_rz(const class Particle::OnePart &p, double &R, double &Z) const;
-  void pd_bfield_sparta(const class Particle::OnePart &p,
+  void pd_bfield_sparta(const class Particle::OnePart &p, int iparticle,
                         double &B0, double &B1, double &B2) const;
-  double pd_interp(const std::vector<double> &field,
+  double pd_interp(const std::vector<double> &field, int iparticle,
                    const class Particle::OnePart &p) const;
   double pd_grad(const std::vector<double> &mesh_grad,
                  const std::vector<double> &regular_grad,

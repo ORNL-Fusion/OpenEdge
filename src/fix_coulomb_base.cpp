@@ -361,12 +361,12 @@ void FixCoulombBase::nanbu_collisions_cell(int icell, int np)
     double *vB = pB.v;
     const double Te_eV = std::max(
       use_background_
-        ? 0.5 * (pd_interp(pd_->temp_e, pA) + pd_interp(pd_->temp_e, pB))
+        ? 0.5 * (pd_interp(pd_->temp_e, idxA, pA) + pd_interp(pd_->temp_e, idxB, pB))
         : 0.5 * (read_src(srcTe_, idxA, icell) + read_src(srcTe_, idxB, icell)),
       0.0);
     const double ne = std::max(
       use_background_
-        ? 0.5 * (pd_interp(pd_->dens_e, pA) + pd_interp(pd_->dens_e, pB))
+        ? 0.5 * (pd_interp(pd_->dens_e, idxA, pA) + pd_interp(pd_->dens_e, idxB, pB))
         : 0.5 * (read_src(srcNe_, idxA, icell) + read_src(srcNe_, idxB, icell)),
       0.0);
     const double lnLambda = compute_coulomb_log(ne, Te_eV);
@@ -498,18 +498,18 @@ void FixCoulombBase::nanbu_background_cell(int icell, int np)
     if (species[isp].charge == 0.0) continue;
 
     const Particle::OnePart &part = particles[idx];
-    double Te_eV   = use_background_ ? std::max(pd_interp(pd_->temp_e, part), 0.0)
+    double Te_eV   = use_background_ ? std::max(pd_interp(pd_->temp_e, idx, part), 0.0)
                                       : std::max(read_src(srcTe_, idx, icell), 0.0);
-    double ne      = use_background_ ? std::max(pd_interp(pd_->dens_e, part), 0.0)
+    double ne      = use_background_ ? std::max(pd_interp(pd_->dens_e, idx, part), 0.0)
                                       : std::max(read_src(srcNe_, idx, icell), 0.0);
-    double Ti_eV   = use_background_ ? std::max(pd_interp(pd_->temp_i, part), 0.0)
+    double Ti_eV   = use_background_ ? std::max(pd_interp(pd_->temp_i, idx, part), 0.0)
                                       : std::max(read_src(srcTi_bg_, idx, icell), 0.0);
-    double Ni_bg   = use_background_ ? std::max(pd_interp(pd_->dens_i, part), 0.0)
+    double Ni_bg   = use_background_ ? std::max(pd_interp(pd_->dens_i, idx, part), 0.0)
                                       : std::max(read_src(srcNi_bg_, idx, icell), 0.0);
-    double Vpar_bg = use_background_ ? pd_interp(pd_->parr_flow, part)
+    double Vpar_bg = use_background_ ? pd_interp(pd_->parr_flow, idx, part)
                                       : read_src(srcVpar_bg_, idx, icell);
     double Bx = 0.0, By = 0.0, Bz = 0.0;
-    if (use_background_) pd_bfield_sparta(part, Bx, By, Bz);
+    if (use_background_) pd_bfield_sparta(part, idx, Bx, By, Bz);
     else {
       Bx = read_src(srcBx_, idx, icell);
       By = read_src(srcBy_, idx, icell);
@@ -793,19 +793,20 @@ void FixCoulombBase::particle_rz(const Particle::OnePart &p,
 
 /* ---------------------------------------------------------------------- */
 
-double FixCoulombBase::pd_interp(const std::vector<double> &field,
+double FixCoulombBase::pd_interp(const std::vector<double> &field, int iparticle,
                                const Particle::OnePart &p) const
 {
   if (!pd_) return 0.0;
   double R, Z;
   particle_rz(p, R, Z);
-  return pd_->interp2D(field, R, Z, p.icell);
+  return pd_->interp2D(field, R, Z, p.icell, iparticle);
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixCoulombBase::pd_bfield_sparta(const Particle::OnePart &p,
-                                    double &Bx, double &By, double &Bz) const
+                                     int iparticle, double &Bx,
+                                     double &By, double &Bz) const
 {
   Bx = By = Bz = 0.0;
   if (!pd_ || !pd_->has_bfield) return;
@@ -814,7 +815,7 @@ void FixCoulombBase::pd_bfield_sparta(const Particle::OnePart &p,
   particle_rz(p, R, Z);
 
   double Br = 0.0, Bz_cyl = 0.0, Bt = 0.0;
-  pd_->bfield_at(R, Z, Br, Bz_cyl, Bt, p.icell);
+  pd_->bfield_at(R, Z, Br, Bz_cyl, Bt, p.icell, iparticle);
 
   double phi = 0.0;
   if (domain->dimension == 3) phi = std::atan2(p.x[1], p.x[0]);

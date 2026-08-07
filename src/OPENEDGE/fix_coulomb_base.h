@@ -123,9 +123,9 @@ class FixCoulombBase : public Fix {
   double read_src(const CollGridSrc &S, int ip, int icell) const;
   void parse_compute_src(const char *tok, CollGridSrc &dst, const char *label);
   void particle_rz(const class Particle::OnePart &p, double &R, double &Z) const;
-  void pd_bfield_sparta(const class Particle::OnePart &p,
+  void pd_bfield_sparta(const class Particle::OnePart &p, int iparticle,
                         double &Bx, double &By, double &Bz) const;
-  double pd_interp(const std::vector<double> &field,
+  double pd_interp(const std::vector<double> &field, int iparticle,
                    const class Particle::OnePart &p) const;
 
   // core Nanbu algorithm

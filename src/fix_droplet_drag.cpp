@@ -197,7 +197,7 @@ void FixDropletDrag::kick_half(double dt_half)
     const double Vpar  =          pd_->interp2D(pd_->parr_flow, R, Z, p.icell);
     double Br = 0.0, Bz = 0.0, Bt = 0.0;
     if (pd_->has_bfield || !pd_->mesh_tri_br.empty())
-      pd_->bfield_at(R, Z, Br, Bz, Bt, p.icell);
+      pd_->bfield_at(R, Z, Br, Bz, Bt, p.icell, ip);
 
     const double rd = p.radius;
     double nuE = 0.0;

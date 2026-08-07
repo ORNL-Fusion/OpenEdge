@@ -133,6 +133,7 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
                  strcmp(arg[iarg], "D_perp") != 0 &&
                  strcmp(arg[iarg], "bohm") != 0 &&
                  strcmp(arg[iarg], "pinch") != 0 &&
+                 strcmp(arg[iarg], "pinch_psi") != 0 &&
                  strcmp(arg[iarg], "gradient_pinch") != 0) {
         error->all(FLERR,
           "fix cross_diffusion bohm: in background mode only 'scale VAL' is allowed");
@@ -145,6 +146,12 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
         bohm_scale_ = input->numeric(FLERR, arg[iarg++]);
       }
 
+    } else if (strcmp(arg[iarg], "pinch_psi") == 0) {
+      iarg++;
+      if (iarg >= narg)
+        error->all(FLERR, "fix cross_diffusion pinch_psi: need V [m/s]");
+      v_pinch_psi_ = input->numeric(FLERR, arg[iarg++]);
+      have_psi_pinch_ = 1;
     } else if (strcmp(arg[iarg], "pinch") == 0) {
       iarg++;
       if (iarg + 2 > narg)
@@ -169,6 +176,7 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
                  strcmp(arg[iarg], "D_perp") != 0 &&
                  strcmp(arg[iarg], "bohm") != 0 &&
                  strcmp(arg[iarg], "pinch") != 0 &&
+                 strcmp(arg[iarg], "pinch_psi") != 0 &&
                  strcmp(arg[iarg], "gradient_pinch") != 0) {
         error->all(FLERR,
           "fix cross_diffusion gradient_pinch: in background mode only Cp is required");
@@ -370,7 +378,7 @@ void FixCrossFieldDiffusion::start_of_step()
 
     const int icell = p.icell;
     double B0, B1, B2;
-    if (use_background_) pd_bfield_sparta(p, B0, B1, B2);
+    if (use_background_) pd_bfield_sparta(p, ip, B0, B1, B2);
     else if (use_const_) {
       B0 = Bconst_[0];
       B1 = Bconst_[1];
@@ -388,7 +396,7 @@ void FixCrossFieldDiffusion::start_of_step()
     if (diff_model_ == DIFF_CONST) {
       D_local = D_perp_;
     } else if (diff_model_ == DIFF_BOHM) {
-      const double Te_eV = use_background_ ? std::max(pd_interp(pd_->temp_e, p), 0.0)
+      const double Te_eV = use_background_ ? std::max(pd_interp(pd_->temp_e, ip, p), 0.0)
                                             : std::max(read_src(srcTe_, ip, icell), 0.0);
       D_local = bohm_scale_ * Te_eV / (16.0 * Bmag);
     }
@@ -459,9 +467,45 @@ void FixCrossFieldDiffusion::start_of_step()
       }
     }
 
+    // flux-surface-normal pinch (SOLEDGE3X vPinch convention: the
+    // physical velocity v * grad(psiN)/|grad(psiN)|, v < 0 = toward the
+    // magnetic axis). Mirrors computeVperp.f90, where vpinch enters the
+    // perpendicular advection along the psi direction.
+    if (have_psi_pinch_ && use_background_ && pd_ && !pd_->psirz.empty()) {
+      double Rp = 0.0, Zp = 0.0;
+      OpenEdge::sparta_to_RZ(p.x, dim, domain->axisymmetric, Rp, Zp,
+                             pd_->column_x0, pd_->column_y0);
+      double gR = 0.0, gZ = 0.0;
+      const bool have_gradient = pd_->psi_norm_gradient_at(Rp, Zp, gR, gZ);
+      const double gm = std::sqrt(gR * gR + gZ * gZ);
+      if (have_gradient && gm > 1.0e-12) {
+        const double vr = v_pinch_psi_ * gR / gm;   // major-R component
+        const double vz = v_pinch_psi_ * gZ / gm;   // Z component
+        if (dim == 2) {
+          double dxs0, dxs1, dxs2_unused;
+          OpenEdge::RZphi_force_to_sparta(vr, vz, 0.0,
+                                          dim, domain->axisymmetric, 0.0,
+                                          dxs0, dxs1, dxs2_unused);
+          dx[ip][0] += dxs0 * dt;
+          dx[ip][1] += dxs1 * dt;
+        } else {
+          const double rx = p.x[0] - (pd_ ? pd_->column_x0 : 0.0);
+          const double ry = p.x[1] - (pd_ ? pd_->column_y0 : 0.0);
+          const double Rc = std::sqrt(rx * rx + ry * ry);
+          if (Rc > 1.0e-20) {
+            const double cphi = rx / Rc;
+            const double sphi = ry / Rc;
+            dx[ip][0] += vr * cphi * dt;
+            dx[ip][1] += vr * sphi * dt;
+          }
+          dx[ip][2] += vz * dt;
+        }
+      }
+    }
+
     // gradient-driven pinch
     if (have_grad_pinch_ && D_local > 0.0) {
-      const double ne_loc = use_background_ ? std::max(pd_interp(pd_->dens_e, p), 1.0e10)
+      const double ne_loc = use_background_ ? std::max(pd_interp(pd_->dens_e, ip, p), 1.0e10)
                                              : std::max(read_src(srcNe_, ip, icell), 1.0e10);
       double gNeR, gNeZ;
       if (use_background_) {
@@ -658,19 +702,21 @@ void FixCrossFieldDiffusion::particle_rz(const Particle::OnePart &p,
 
 /* ---------------------------------------------------------------------- */
 
-double FixCrossFieldDiffusion::pd_interp(const std::vector<double> &field,
+double FixCrossFieldDiffusion::pd_interp(const std::vector<double> &field, int iparticle,
                                     const Particle::OnePart &p) const
 {
   if (!pd_) return 0.0;
   double R, Z;
   particle_rz(p, R, Z);
-  return pd_->interp2D(field, R, Z, p.icell);
+  return pd_->interp2D(field, R, Z, p.icell, iparticle);
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixCrossFieldDiffusion::pd_bfield_sparta(const Particle::OnePart &p,
-                                         double &B0, double &B1, double &B2) const
+                                              int iparticle,
+                                              double &B0, double &B1,
+                                              double &B2) const
 {
   B0 = B1 = B2 = 0.0;
   if (!pd_ || !pd_->has_bfield) return;
@@ -679,7 +725,7 @@ void FixCrossFieldDiffusion::pd_bfield_sparta(const Particle::OnePart &p,
   particle_rz(p, R, Z);
 
   double Br = 0.0, Bz = 0.0, Bt = 0.0;
-  pd_->bfield_at(R, Z, Br, Bz, Bt, p.icell);
+  pd_->bfield_at(R, Z, Br, Bz, Bt, p.icell, iparticle);
 
   // Decompose physical (Br, Bz, Bt) onto SPARTA's (B0, B1, B2) slot layout.
   double phi = 0.0;

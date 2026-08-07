@@ -4,7 +4,9 @@
    Read once, shared by all fixes/computes that need background plasma.
 
    Usage:
-     fix ID background file plasma.h5 [equilibrium file.equ] [static yes]
+     fix ID background file plasma.h5 [equilibrium file.equ] [static yes|no]
+                       [mesh_triangle_cache yes|no]
+                       [mesh_lookup_diagnostics yes|no]
      fix ID background constant [r_bounds rmin rmax] [z_bounds zmin zmax]
                          [ne val] [te val] [ni val] [ti val]
                          [parr_flow val] [parr_flow_r val] [parr_flow_t val]
@@ -29,13 +31,16 @@
 #include "input.h"
 #include "modify.h"
 #include "openedge_geom.h"
+#include "particle.h"
 
 #include <H5Cpp.h>
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 
 using namespace SPARTA_NS;
 
@@ -75,6 +80,19 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
   default_q_par  = 50.0e6;
   default_q_perp = 0.0;
   is_static = 0;
+  mesh_triangle_cache = 1;
+  mesh_lookup_diagnostics = 0;
+  mesh_tri_custom = -1;
+  mesh_hint_hits = 0;
+  mesh_particle_hint_hits = 0;
+  mesh_cell_hint_hits = 0;
+  mesh_neighbor_walk_hits = 0;
+  mesh_hash_searches = 0;
+  mesh_outside_queries = 0;
+  bfield_mesh_queries = 0;
+  bfield_equilibrium_queries = 0;
+  bfield_regular_queries = 0;
+  bfield_preference_fallbacks = 0;
   source_mode = -1;
   generation = 0;
   equ_jm = equ_km = 0;
@@ -128,6 +146,20 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
       if (strcmp(arg[iarg + 1], "yes") == 0) is_static = 1;
       else if (strcmp(arg[iarg + 1], "no") == 0) is_static = 0;
       else error->all(FLERR, "fix background: static must be yes or no");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "mesh_triangle_cache") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix background: mesh_triangle_cache needs yes/no");
+      if (strcmp(arg[iarg + 1], "yes") == 0) mesh_triangle_cache = 1;
+      else if (strcmp(arg[iarg + 1], "no") == 0) mesh_triangle_cache = 0;
+      else error->all(FLERR, "fix background: mesh_triangle_cache must be yes or no");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "mesh_lookup_diagnostics") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix background: mesh_lookup_diagnostics needs yes/no");
+      if (strcmp(arg[iarg + 1], "yes") == 0) mesh_lookup_diagnostics = 1;
+      else if (strcmp(arg[iarg + 1], "no") == 0) mesh_lookup_diagnostics = 0;
+      else error->all(FLERR, "fix background: mesh_lookup_diagnostics must be yes or no");
       iarg += 2;
     } else if (strcmp(arg[iarg], "rz_axes") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "fix background: rz_axes needs axi|planar");
@@ -210,11 +242,27 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
     error->all(FLERR, "fix background: r_bounds requires rmax > rmin");
   if (const_has_z_bounds && const_zmax <= const_zmin)
     error->all(FLERR, "fix background: z_bounds requires zmax > zmin");
+
+  // A custom per-particle integer is the native SPARTA mechanism for state
+  // that must survive particle sorting, cloning, and MPI migration. Store
+  // triangle+1 so SPARTA's zero-initialized custom value means "no hint".
+  // Include the fix ID in the name so multiple background meshes cannot
+  // accidentally share triangle indices.
+  if (mesh_triangle_cache) {
+    const std::string hint_name = std::string("oe_mesh_tri_") + id;
+    mesh_tri_custom = particle->find_custom((char *) hint_name.c_str());
+    if (mesh_tri_custom < 0)
+      mesh_tri_custom = particle->add_custom((char *) hint_name.c_str(), 0, 0);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
 
-FixBackground::~FixBackground() {}
+FixBackground::~FixBackground()
+{
+  if (copy || copymode) return;
+  if (mesh_tri_custom >= 0) particle->remove_custom(mesh_tri_custom);
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -231,6 +279,128 @@ void FixBackground::init()
   if (generation > 0 && is_static) return;
 
   reload();
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixBackground::setup()
+{
+  mesh_hint_hits = 0;
+  mesh_particle_hint_hits = 0;
+  mesh_cell_hint_hits = 0;
+  mesh_neighbor_walk_hits = 0;
+  mesh_hash_searches = 0;
+  mesh_outside_queries = 0;
+  bfield_mesh_queries = 0;
+  bfield_equilibrium_queries = 0;
+  bfield_regular_queries = 0;
+  bfield_preference_fallbacks = 0;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixBackground::post_run()
+{
+  if (!mesh_lookup_diagnostics) return;
+
+  bigint lookup_local[10] = {mesh_hint_hits, mesh_particle_hint_hits,
+                             mesh_cell_hint_hits, mesh_neighbor_walk_hits,
+                             mesh_hash_searches, mesh_outside_queries,
+                             bfield_mesh_queries, bfield_equilibrium_queries,
+                             bfield_regular_queries,
+                             bfield_preference_fallbacks};
+  bigint lookup_all[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  MPI_Allreduce(lookup_local, lookup_all, 10, MPI_SPARTA_BIGINT, MPI_SUM, world);
+
+  const bigint np_local = particle->nlocal;
+  bigint np_sum = 0, np_min = 0, np_max = 0;
+  MPI_Allreduce(&np_local, &np_sum, 1, MPI_SPARTA_BIGINT, MPI_SUM, world);
+  MPI_Allreduce(&np_local, &np_min, 1, MPI_SPARTA_BIGINT, MPI_MIN, world);
+  MPI_Allreduce(&np_local, &np_max, 1, MPI_SPARTA_BIGINT, MPI_MAX, world);
+
+  std::vector<int> cell_count(grid->nlocal, 0);
+  std::vector<int> parent_count(grid->nlocal, 0);
+  int hot_local = 0;
+  int hot_parent_local = 0;
+  int occupied_parent_local = 0;
+  double vmax_local = 0.0;
+  int vmax_index_local = -1;
+  for (int i = 0; i < particle->nlocal; ++i) {
+    const Particle::OnePart &p = particle->particles[i];
+    if (p.icell >= 0 && p.icell < grid->nlocal) {
+      hot_local = std::max(hot_local, ++cell_count[p.icell]);
+      int parent = p.icell;
+      const Grid::ChildCell &c = grid->cells[p.icell];
+      if (c.nsplit <= 0 && c.isplit >= 0 && grid->sinfo)
+        parent = grid->sinfo[c.isplit].icell;
+      if (parent >= 0 && parent < grid->nlocal)
+        hot_parent_local = std::max(hot_parent_local, ++parent_count[parent]);
+    }
+    const double speed = std::sqrt(p.v[0]*p.v[0] + p.v[1]*p.v[1] + p.v[2]*p.v[2]);
+    if (speed > vmax_local) {
+      vmax_local = speed;
+      vmax_index_local = i;
+    }
+  }
+  for (int count : parent_count)
+    if (count > 0) occupied_parent_local++;
+  int hot_max = 0, hot_parent_max = 0, occupied_parent_sum = 0;
+  struct { double value; int rank; } vmax_in{vmax_local, comm->me},
+                                     vmax_out{0.0, 0};
+  MPI_Allreduce(&hot_local, &hot_max, 1, MPI_INT, MPI_MAX, world);
+  MPI_Allreduce(&hot_parent_local, &hot_parent_max, 1, MPI_INT, MPI_MAX, world);
+  MPI_Allreduce(&occupied_parent_local, &occupied_parent_sum, 1, MPI_INT,
+                MPI_SUM, world);
+  MPI_Allreduce(&vmax_in, &vmax_out, 1, MPI_DOUBLE_INT, MPI_MAXLOC, world);
+  int vmax_meta[2] = {-1, -1};
+  double vmax_state[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  if (comm->me == vmax_out.rank && vmax_index_local >= 0) {
+    const Particle::OnePart &p = particle->particles[vmax_index_local];
+    vmax_meta[0] = p.id;
+    vmax_meta[1] = p.ispecies;
+    for (int k = 0; k < 3; ++k) {
+      vmax_state[k] = p.x[k];
+      vmax_state[k+3] = p.v[k];
+    }
+  }
+  MPI_Bcast(vmax_meta, 2, MPI_INT, vmax_out.rank, world);
+  MPI_Bcast(vmax_state, 6, MPI_DOUBLE, vmax_out.rank, world);
+
+  if (comm->me == 0) {
+    const bigint attempts = lookup_all[0] + lookup_all[4];
+    const double hit_pct = attempts ? 100.0 * lookup_all[0] / attempts : 0.0;
+    auto report = [&](FILE *fp) {
+      if (!fp) return;
+      fprintf(fp,
+              "[background/perf] mesh triangle particle/cell/hash/outside = "
+              BIGINT_FORMAT "/" BIGINT_FORMAT "/" BIGINT_FORMAT "/" BIGINT_FORMAT
+              "  hit=%.2f%%  walked=" BIGINT_FORMAT "\n",
+              lookup_all[1], lookup_all[2], lookup_all[4], lookup_all[5],
+              hit_pct, lookup_all[3]);
+      fprintf(fp,
+              "[background/perf] B source mesh/equilibrium/grid/fallback = "
+              BIGINT_FORMAT "/" BIGINT_FORMAT "/" BIGINT_FORMAT "/"
+              BIGINT_FORMAT "\n",
+              lookup_all[6], lookup_all[7], lookup_all[8], lookup_all[9]);
+      fprintf(fp,
+              "[background/perf] particles/rank avg/min/max = %.2f/"
+              BIGINT_FORMAT "/" BIGINT_FORMAT
+              "  hottest_subcell/parent=%d/%d  occupied_parents=%d"
+              "  vmax=%.6e m/s\n",
+              static_cast<double>(np_sum) / comm->nprocs,
+              np_min, np_max, hot_max, hot_parent_max,
+              occupied_parent_sum, vmax_out.value);
+      if (vmax_meta[1] >= 0)
+        fprintf(fp,
+                "[background/perf] vmax particle rank/id/species=%d/%d/%d"
+                "  x=(%.6e,%.6e,%.6e) v=(%.6e,%.6e,%.6e)\n",
+                vmax_out.rank, vmax_meta[0], vmax_meta[1],
+                vmax_state[0], vmax_state[1], vmax_state[2],
+                vmax_state[3], vmax_state[4], vmax_state[5]);
+    };
+    report(screen);
+    report(logfile);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -560,6 +730,13 @@ void FixBackground::reload()
   // Mesh triangles may have changed — drop any cell-indexed cache so the
   // next cache_plasma_particles call rebuilds from the new hash grid.
   cell_mesh_cell.clear();
+  cell_mesh_tri.clear();
+  memo_ip = -1; memo_tri = -1;
+  if (mesh_tri_custom >= 0 && particle->ewhich[mesh_tri_custom] >= 0) {
+    int *hints = particle->eivec[particle->ewhich[mesh_tri_custom]];
+    if (hints && particle->nlocal > 0)
+      std::fill(hints, hints + particle->nlocal, 0);
+  }
 
   generation++;
 
@@ -687,6 +864,7 @@ void FixBackground::clear_loaded_data()
   mapped_cr.clear();
   mapped_cz.clear();
   mapped_idx.clear();
+  mesh_tri_neighbor.clear();
   hash_grid.clear();
   valid_mask.clear();
 }
@@ -1488,6 +1666,44 @@ void FixBackground::build_mesh_index()
     }
   }
 
+  // Build triangle adjacency once at load time. A warm lookup can then
+  // follow the edge indicated by a negative barycentric coordinate instead
+  // of restarting in the spatial hash. Non-manifold edges are deliberately
+  // left disconnected so the original hash traversal remains the arbiter.
+  mesh_tri_neighbor.assign(static_cast<size_t>(mesh_ntri) * 3, -1);
+  struct EdgeOwner {
+    int tri0 = -1, side0 = -1;
+    int tri1 = -1, side1 = -1;
+    bool ambiguous = false;
+  };
+  std::unordered_map<uint64_t, EdgeOwner> edge_owner;
+  edge_owner.reserve(static_cast<size_t>(mesh_ntri) * 2);
+  for (int t = 0; t < mesh_ntri; ++t) {
+    const int v[3] = {mesh_tri[3*t], mesh_tri[3*t+1], mesh_tri[3*t+2]};
+    for (int side = 0; side < 3; ++side) {
+      const int va = v[(side + 1) % 3];
+      const int vb = v[(side + 2) % 3];
+      const uint32_t lo = static_cast<uint32_t>(std::min(va, vb));
+      const uint32_t hi = static_cast<uint32_t>(std::max(va, vb));
+      const uint64_t key = (static_cast<uint64_t>(lo) << 32) | hi;
+      EdgeOwner &owner = edge_owner[key];
+      if (owner.tri0 < 0) {
+        owner.tri0 = t;
+        owner.side0 = side;
+      } else if (owner.tri1 < 0 && !owner.ambiguous) {
+        owner.tri1 = t;
+        owner.side1 = side;
+        mesh_tri_neighbor[3*owner.tri0 + owner.side0] = t;
+        mesh_tri_neighbor[3*t + side] = owner.tri0;
+      } else {
+        owner.ambiguous = true;
+        mesh_tri_neighbor[3*owner.tri0 + owner.side0] = -1;
+        if (owner.tri1 >= 0)
+          mesh_tri_neighbor[3*owner.tri1 + owner.side1] = -1;
+      }
+    }
+  }
+
   if (mesh_tri_rmin.empty()) return;
 
   hash_rmin = *std::min_element(mesh_tri_rmin.begin(), mesh_tri_rmin.end());
@@ -1516,10 +1732,35 @@ void FixBackground::build_mesh_index()
 
 /* ---------------------------------------------------------------------- */
 
-int FixBackground::find_mesh_triangle(double R, double Z) const
+bool FixBackground::point_in_mesh_triangle(int t, double R, double Z,
+                                           double edge_margin) const
+{
+  if (t < 0 || t >= mesh_ntri || 3*t + 2 >= static_cast<int>(mesh_tri.size()))
+    return false;
+
+  const int v0 = mesh_tri[t*3+0];
+  const int v1 = mesh_tri[t*3+1];
+  const int v2 = mesh_tri[t*3+2];
+  const double r0 = mesh_vtx_r[v0], z0 = mesh_vtx_z[v0];
+  const double r1 = mesh_vtx_r[v1], z1 = mesh_vtx_z[v1];
+  const double r2 = mesh_vtx_r[v2], z2 = mesh_vtx_z[v2];
+  const double d = (r1-r0)*(z2-z0) - (r2-r0)*(z1-z0);
+  if (std::fabs(d) < 1.0e-30) return false;
+  const double a = ((R-r0)*(z2-z0) - (r2-r0)*(Z-z0)) / d;
+  const double b = ((r1-r0)*(Z-z0) - (R-r0)*(z1-z0)) / d;
+  return a > edge_margin && b > edge_margin &&
+         (a+b) < 1.0-edge_margin;
+}
+
+/* ---------------------------------------------------------------------- */
+
+int FixBackground::find_mesh_triangle_hash(double R, double Z,
+                                            bool track) const
 {
   if (!has_mesh || mesh_ntri <= 0 || mesh_tri.empty()) return -1;
   if (hash_nr <= 0 || hash_nz <= 0 || hash_grid.empty()) return -1;
+
+  if (track) mesh_hash_searches++;
 
   // Query outside the hash-grid bbox: no triangle can match there anyway
   // (all triangle bboxes are inside the hash grid by construction), so
@@ -1527,7 +1768,10 @@ int FixBackground::find_mesh_triangle(double R, double Z) const
   // linear scan that always returns -1.
   const int ir = static_cast<int>((R - hash_rmin) / hash_dr);
   const int iz = static_cast<int>((Z - hash_zmin) / hash_dz);
-  if (ir < 0 || ir >= hash_nr || iz < 0 || iz >= hash_nz) return -1;
+  if (ir < 0 || ir >= hash_nr || iz < 0 || iz >= hash_nz) {
+    if (track) mesh_outside_queries++;
+    return -1;
+  }
 
   const auto &candidates = hash_grid[iz * hash_nr + ir];
   for (int t : candidates) {
@@ -1543,7 +1787,118 @@ int FixBackground::find_mesh_triangle(double R, double Z) const
     const double b = ((r1-r0)*(Z-z0) - (R-r0)*(z1-z0)) / d;
     if (a >= -1.0e-10 && b >= -1.0e-10 && (a+b) <= 1.0+1.0e-10) return t;
   }
+  if (track) mesh_outside_queries++;
   return -1;
+}
+
+/* ----------------------------------------------------------------------
+   Walk from a validated prior triangle through shared edges. A result is
+   returned only for a point strictly inside a triangle. Points within the
+   original lookup tolerance of an edge return -1 so hash-order tie breaking
+   stays byte-for-byte compatible with the uncached path.
+------------------------------------------------------------------------- */
+
+int FixBackground::walk_mesh_triangle(int start, double R, double Z,
+                                      int &nhops) const
+{
+  nhops = 0;
+  if (start < 0 || start >= mesh_ntri ||
+      mesh_tri_neighbor.size() != static_cast<size_t>(mesh_ntri) * 3)
+    return -1;
+
+  constexpr int max_hops = 16;
+  constexpr double edge_margin = 1.0e-12;
+  constexpr double hash_tolerance = 1.0e-10;
+  int visited[max_hops + 1];
+  int nvisited = 0;
+  int t = start;
+
+  for (int hop = 0; hop <= max_hops; ++hop) {
+    for (int k = 0; k < nvisited; ++k)
+      if (visited[k] == t) return -1;
+    visited[nvisited++] = t;
+
+    const int v0 = mesh_tri[3*t];
+    const int v1 = mesh_tri[3*t+1];
+    const int v2 = mesh_tri[3*t+2];
+    const double r0 = mesh_vtx_r[v0], z0 = mesh_vtx_z[v0];
+    const double r1 = mesh_vtx_r[v1], z1 = mesh_vtx_z[v1];
+    const double r2 = mesh_vtx_r[v2], z2 = mesh_vtx_z[v2];
+    const double d = (r1-r0)*(z2-z0) - (r2-r0)*(z1-z0);
+    if (std::fabs(d) < 1.0e-30) return -1;
+
+    const double w1 = ((R-r0)*(z2-z0) - (r2-r0)*(Z-z0)) / d;
+    const double w2 = ((r1-r0)*(Z-z0) - (R-r0)*(z1-z0)) / d;
+    const double w0 = 1.0 - w1 - w2;
+    if (w0 > edge_margin && w1 > edge_margin && w2 > edge_margin) {
+      nhops = hop;
+      return t;
+    }
+
+    // The original hash accepts this point by tolerance, but it lies too
+    // close to an edge for a cached triangle to preserve hash candidate
+    // ordering. Let the hash path decide it.
+    if (w0 >= -hash_tolerance && w1 >= -hash_tolerance &&
+        w2 >= -hash_tolerance)
+      return -1;
+
+    int side = 0;
+    double wmin = w0;
+    if (w1 < wmin) { wmin = w1; side = 1; }
+    if (w2 < wmin) { side = 2; }
+    const int next = mesh_tri_neighbor[3*t + side];
+    if (next < 0 || next >= mesh_ntri) return -1;
+    t = next;
+  }
+  return -1;
+}
+
+/* ----------------------------------------------------------------------
+   Exact warm-start mesh lookup. A cached triangle is accepted only when
+   the current point is strictly inside it. Points close to a shared edge
+   deliberately use the original hash traversal so triangle tie-breaking,
+   and therefore sampled fields, remain unchanged.
+------------------------------------------------------------------------- */
+
+int FixBackground::find_mesh_triangle(double R, double Z, int icell,
+                                      int iparticle) const
+{
+  int *particle_hints = nullptr;
+  if (mesh_triangle_cache && mesh_tri_custom >= 0 && iparticle >= 0 &&
+      iparticle < particle->nlocal && particle->ewhich[mesh_tri_custom] >= 0)
+    particle_hints = particle->eivec[particle->ewhich[mesh_tri_custom]];
+
+  int particle_tri = -1;
+  if (particle_hints) particle_tri = particle_hints[iparticle] - 1;
+  int nhops = 0;
+  const int particle_walk = walk_mesh_triangle(particle_tri, R, Z, nhops);
+  if (particle_walk >= 0) {
+    mesh_hint_hits++;
+    mesh_particle_hint_hits++;
+    if (nhops > 0) mesh_neighbor_walk_hits++;
+    if (particle_hints) particle_hints[iparticle] = particle_walk + 1;
+    return particle_walk;
+  }
+
+  const bool have_cell_hint = mesh_triangle_cache && icell >= 0 &&
+      icell < static_cast<int>(cell_mesh_tri.size());
+  if (have_cell_hint) {
+    const int tri = cell_mesh_tri[icell];
+    const int cell_walk = (tri != particle_tri)
+        ? walk_mesh_triangle(tri, R, Z, nhops) : -1;
+    if (cell_walk >= 0) {
+      mesh_hint_hits++;
+      mesh_cell_hint_hits++;
+      if (nhops > 0) mesh_neighbor_walk_hits++;
+      if (particle_hints) particle_hints[iparticle] = cell_walk + 1;
+      return cell_walk;
+    }
+  }
+
+  const int tri = find_mesh_triangle_hash(R, Z, true);
+  if (particle_hints) particle_hints[iparticle] = tri + 1;
+  if (have_cell_hint) cell_mesh_tri[icell] = tri;
+  return tri;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1593,6 +1948,7 @@ void FixBackground::build_cell_mesh_index()
 {
   const int nglocal = grid->nlocal;
   cell_mesh_cell.assign(nglocal, -1);
+  cell_mesh_tri.assign(nglocal, -1);
   cell_mesh_stamp_n = nglocal;
   cell_mesh_stamp_id = (nglocal > 0 && grid->cells) ? grid->cells[0].id : -1;
   if (!has_mesh || nglocal == 0 || mesh_cell_idx.empty()) return;
@@ -1637,10 +1993,15 @@ void FixBackground::build_cell_mesh_index()
     // which is what we want physically (no plasma → no reactions). The
     // O(N_triangles) linear-scan fallback would dominate the rebuild cost
     // when adapt/balance fires frequently.
-    const int tri = find_mesh_triangle(R, Z);
+    // Cache construction is not a runtime point query, so do not include
+    // these searches in the post-run hint/hash diagnostics.
+    const int tri = find_mesh_triangle_hash(R, Z, false);
     if (tri >= 0 && tri < ncell_idx) {
       const int cell = mesh_cell_idx[tri];
-      if (cell >= 0 && cell < mesh_ncell) cell_mesh_cell[icell] = cell;
+      if (cell >= 0 && cell < mesh_ncell) {
+        cell_mesh_cell[icell] = cell;
+        cell_mesh_tri[icell] = tri;
+      }
     }
   }
 }
@@ -1650,6 +2011,8 @@ void FixBackground::build_cell_mesh_index()
 void FixBackground::grid_changed()
 {
   cell_mesh_cell.clear();
+  cell_mesh_tri.clear();
+  memo_ip = -1; memo_tri = -1;
   cell_mesh_stamp_n  = -1;
   cell_mesh_stamp_id = -1;
 }
@@ -1676,23 +2039,25 @@ const std::vector<double> *FixBackground::mesh_field_for(const std::vector<doubl
 /* ---------------------------------------------------------------------- */
 
 double FixBackground::interp2D(const std::vector<double> &field,
-                                double R, double Z, int icell) const
+                                double R, double Z, int icell,
+                                int iparticle) const
 {
   if (const std::vector<double> *mesh_field = mesh_field_for(field)) {
-    // Fast path: O(1) lookup when the caller knows the SPARTA cell and
-    // the cell-indexed cache is built. Skips the hash-grid triangle
-    // search entirely. Used by fix thermal_force / cross_diffusion /
-    // coll_nanbu per-particle loops.
-    if (icell >= 0 && icell < static_cast<int>(cell_mesh_cell.size())) {
-      const int mc = cell_mesh_cell[icell];
+    // exact sampling: triangle containing (R,Z) via the warm-start
+    // search; outside the mesh footprint fall through to the stencil
+    // (no nearest-neighbor extrapolation)
+    int tri;
+    if (iparticle >= 0 && iparticle == memo_ip &&
+        R == memo_R && Z == memo_Z) {
+      tri = memo_tri;
+    } else {
+      tri = find_mesh_triangle(R, Z, icell, iparticle);
+      memo_ip = iparticle; memo_R = R; memo_Z = Z; memo_tri = tri;
+    }
+    if (tri >= 0 && tri < static_cast<int>(mesh_cell_idx.size())) {
+      const int mc = mesh_cell_idx[tri];
       if (mc >= 0 && mc < static_cast<int>(mesh_field->size()))
         return (*mesh_field)[mc];
-      // icell maps to no-mesh-cell (-1): fall through to stencil. Same
-      // behaviour as the R,Z path when mesh_cell_at returns -1.
-    } else {
-      const int cell = mesh_cell_at(R, Z);
-      if (cell >= 0 && cell < static_cast<int>(mesh_field->size()))
-        return (*mesh_field)[cell];
     }
   }
 
@@ -1717,9 +2082,30 @@ double FixBackground::interp2D(const std::vector<double> &field,
 
 /* ---------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   mesh cell of the triangle containing (R,Z); -1 outside the footprint
+   (no extrapolation — contrast mesh_cell_at's max_dist fallback)
+------------------------------------------------------------------------- */
+
+int FixBackground::mesh_cell_for(double R, double Z, int icell,
+                                 int iparticle) const
+{
+  int tri;
+  if (iparticle >= 0 && iparticle == memo_ip && R == memo_R && Z == memo_Z) {
+    tri = memo_tri;
+  } else {
+    tri = find_mesh_triangle(R, Z, icell, iparticle);
+    memo_ip = iparticle; memo_R = R; memo_Z = Z; memo_tri = tri;
+  }
+  if (tri < 0 || tri >= static_cast<int>(mesh_cell_idx.size())) return -1;
+  return mesh_cell_idx[tri];
+}
+
+/* ---------------------------------------------------------------------- */
+
 void FixBackground::bfield_at(double R, double Z,
                                double &Br_out, double &Bz_out,
-                               double &Bt_out, int icell) const
+                               double &Bt_out, int icell, int iparticle) const
 {
   // Mesh-native B from plasma.h5 mesh/vtx_b* (vertex-averaged per
   // triangle) takes precedence when loaded. New converters emit B only
@@ -1727,7 +2113,7 @@ void FixBackground::bfield_at(double R, double Z,
   // populated only by derive_bfield_from_equ() and the constant-profile
   // fallback.
   if (!mesh_tri_br.empty()) {
-    const int tri = find_mesh_triangle(R, Z);
+    const int tri = find_mesh_triangle(R, Z, icell, iparticle);
     if (tri >= 0 && tri < static_cast<int>(mesh_tri_br.size())) {
       Br_out = mesh_tri_br[tri];
       Bz_out = mesh_tri_bz[tri];
@@ -1744,18 +2130,17 @@ void FixBackground::bfield_at(double R, double Z,
 
 /* ----------------------------------------------------------------------
    Cylindrical-derivative B query (mirrors
-   ComputePlasmaFields::query_bfield_at_point). Branch order:
-     1. mesh-native B (per-triangle vertex average) — no derivatives
-     2. regular-grid br/bz/bt with finite-difference derivatives
-     3. equilibrium ψ analytic derivatives
-   For GCA smoothness, prefer the equilibrium branch when has_equ is
-   set: derive_bfield_from_equ() also writes br/bz/bt on the regular
-   grid, which would otherwise short-circuit branch 2 with finite-
-   difference noise.
+   ComputePlasmaFields::query_bfield_at_point). Existing callers use the
+   historical mesh -> equilibrium -> regular-grid order. GCA explicitly
+   requests equilibrium first because mesh-native B has no spatial
+   derivatives. If equilibrium data are unavailable or invalid, the
+   historical order is used as a fallback.
 ------------------------------------------------------------------------- */
 
 MagneticFieldFileDataParams
-FixBackground::query_bfield_at_point(const double xyz[3]) const
+FixBackground::query_bfield_at_point(const double xyz[3], int icell,
+                                     int iparticle,
+                                     bool prefer_equilibrium) const
 {
   MagneticFieldFileDataParams B{};
 
@@ -1766,23 +2151,22 @@ FixBackground::query_bfield_at_point(const double xyz[3]) const
   B.r = R;
   B.z = Z;
 
-  // 1. Mesh-native B (per-triangle vertex average) — no derivatives.
-  if (!mesh_tri_br.empty()) {
-    const int tri = find_mesh_triangle(R, Z);
+  // Mesh-native B (per-triangle vertex average) — no derivatives.
+  if (!prefer_equilibrium && !mesh_tri_br.empty()) {
+    const int tri = find_mesh_triangle(R, Z, icell, iparticle);
     if (tri >= 0 && tri < static_cast<int>(mesh_tri_br.size())) {
       B.br = mesh_tri_br[tri];
       B.bz = mesh_tri_bz[tri];
       B.bt = mesh_tri_bt[tri];
       B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+      bfield_mesh_queries++;
       return B;
     }
     // outside mesh footprint: fall through.
   }
 
-  // 3. Equilibrium analytic derivatives — preferred over branch 2 when
-  // available because derive_bfield_from_equ() populates br/bz/bt from
-  // the same ψ map, so branch 2 would just be a noisier finite-difference
-  // version of the same physics.
+  // Equilibrium analytic derivatives. GCA reaches this before mesh data;
+  // historical callers reach it only after a mesh miss.
   if (has_equ && equ_jm >= 3 && equ_km >= 3 && !psirz.empty() && R > 1.0e-10) {
     const int jm = equ_jm;
     const int km = equ_km;
@@ -1838,11 +2222,19 @@ FixBackground::query_bfield_at_point(const double xyz[3]) const
         B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr + B.bz*B.dBz_dr) / B.Bmag;
         B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz + B.bz*B.dBz_dz) / B.Bmag;
       }
+      bfield_equilibrium_queries++;
       return B;
     }
   }
 
-  // 2. Regular-grid bilinear with finite-difference derivatives.
+  // The explicitly preferred source was unusable. Retry once with the
+  // historical mesh -> equilibrium -> regular-grid policy.
+  if (prefer_equilibrium) {
+    bfield_preference_fallbacks++;
+    return query_bfield_at_point(xyz, icell, iparticle, false);
+  }
+
+  // Regular-grid bilinear with finite-difference derivatives.
   if (has_bfield && !br.empty() && nr >= 2 && nz >= 2) {
     const double dr = rvals[1] - rvals[0];
     const double dz = zvals[1] - zvals[0];
@@ -1880,6 +2272,7 @@ FixBackground::query_bfield_at_point(const double xyz[3]) const
         B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr + B.bz*B.dBz_dr) / B.Bmag;
         B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz + B.bz*B.dBz_dz) / B.Bmag;
       }
+      bfield_regular_queries++;
       return B;
     }
   }
@@ -1895,7 +2288,8 @@ FixBackground::query_bfield_at_point(const double xyz[3]) const
    no separate fix efield/grid wiring is needed.
 ------------------------------------------------------------------------- */
 bool FixBackground::query_efield_at_point(const double xyz[3],
-                                          double &ER, double &EZ, double &Et) const
+                                          double &ER, double &EZ, double &Et,
+                                          int icell, int iparticle) const
 {
   ER = EZ = Et = 0.0;
   if (mesh_e_r.empty() || mesh_e_z.empty() || mesh_e_t.empty()) return false;
@@ -1905,7 +2299,7 @@ bool FixBackground::query_efield_at_point(const double xyz[3],
   double R, Z;
   OpenEdge::sparta_to_RZ(xyz, dim, axi, R, Z, column_x0, column_y0);
 
-  const int tri = find_mesh_triangle(R, Z);
+  const int tri = find_mesh_triangle(R, Z, icell, iparticle);
   if (tri < 0) return false;
   const int ncell = static_cast<int>(mesh_e_r.size());
   int cell = tri;
@@ -1923,10 +2317,13 @@ bool FixBackground::query_efield_at_point(const double xyz[3],
 
 double FixBackground::psi_norm_at(double R, double Z) const
 {
-  if (!has_equ || psirz.empty()) return 1.0;
+  if (!has_equ || equ_jm < 2 || equ_km < 2 ||
+      equ_r.size() < 2 || equ_z.size() < 2 ||
+      psirz.size() < static_cast<size_t>(equ_jm * equ_km)) return 1.0;
 
-  double dr_eq = equ_r[1] - equ_r[0];
-  double dz_eq = equ_z[1] - equ_z[0];
+  const double dr_eq = equ_r[1] - equ_r[0];
+  const double dz_eq = equ_z[1] - equ_z[0];
+  if (std::abs(dr_eq) < 1.0e-30 || std::abs(dz_eq) < 1.0e-30) return 1.0;
 
   double Rc = std::min(std::max(R, equ_r.front()), equ_r.back());
   double Zc = std::min(std::max(Z, equ_z.front()), equ_z.back());
@@ -1944,4 +2341,51 @@ double FixBackground::psi_norm_at(double R, double Z) const
   double denom = psib - psi_axis;
   if (std::abs(denom) < 1e-30) return 1.0;
   return (psi - psi_axis) / denom;
+}
+
+/* ----------------------------------------------------------------------
+   exact gradient of the bilinear psiN interpolant used by psi_norm_at
+------------------------------------------------------------------------- */
+
+bool FixBackground::psi_norm_gradient_at(double R, double Z,
+                                          double &dpsi_dR,
+                                          double &dpsi_dZ) const
+{
+  dpsi_dR = dpsi_dZ = 0.0;
+  if (!has_equ || equ_jm < 2 || equ_km < 2 ||
+      equ_r.size() < 2 || equ_z.size() < 2 ||
+      psirz.size() < static_cast<size_t>(equ_jm * equ_km)) return false;
+
+  const double dr_eq = equ_r[1] - equ_r[0];
+  const double dz_eq = equ_z[1] - equ_z[0];
+  const double denom = psib - psi_axis;
+  if (std::abs(dr_eq) < 1.0e-30 || std::abs(dz_eq) < 1.0e-30 ||
+      std::abs(denom) < 1.0e-30) return false;
+
+  const bool clamp_R = R < equ_r.front() || R > equ_r.back();
+  const bool clamp_Z = Z < equ_z.front() || Z > equ_z.back();
+  const double Rc = std::min(std::max(R, equ_r.front()), equ_r.back());
+  const double Zc = std::min(std::max(Z, equ_z.front()), equ_z.back());
+
+  const double fi = (Rc - equ_r.front()) / dr_eq;
+  const double fj = (Zc - equ_z.front()) / dz_eq;
+  const int i0 = std::max(0, std::min(static_cast<int>(fi), equ_jm - 2));
+  const int j0 = std::max(0, std::min(static_cast<int>(fj), equ_km - 2));
+  const double s = std::max(0.0, std::min(1.0, fi - i0));
+  const double t = std::max(0.0, std::min(1.0, fj - j0));
+
+  const double p00 = psirz[j0 * equ_jm + i0];
+  const double p10 = psirz[j0 * equ_jm + i0 + 1];
+  const double p01 = psirz[(j0 + 1) * equ_jm + i0];
+  const double p11 = psirz[(j0 + 1) * equ_jm + i0 + 1];
+
+  // psi_norm_at clamps outside the equilibrium rectangle, so its exact
+  // derivative is zero in a coordinate that was clamped.
+  if (!clamp_R)
+    dpsi_dR = ((1.0 - t) * (p10 - p00) + t * (p11 - p01)) /
+               (dr_eq * denom);
+  if (!clamp_Z)
+    dpsi_dZ = ((1.0 - s) * (p01 - p00) + s * (p11 - p10)) /
+               (dz_eq * denom);
+  return true;
 }

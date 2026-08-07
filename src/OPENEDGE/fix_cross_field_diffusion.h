@@ -23,6 +23,7 @@
           {bfield BxSRC BySRC BzSRC | background FIXID | bfield_const BX BY BZ} \
           [D_perp VAL | bohm [TeSRC in source-token mode] [scale VAL]] \
           [pinch Vr Vz] \
+          [pinch_psi V] \
           [gradient_pinch Cp [neSRC gradNeR_SRC gradNeZ_SRC in source-token mode]]
 
     Example (direct background path):
@@ -107,6 +108,8 @@ class FixCrossFieldDiffusion : public Fix {
 
   // constant pinch velocity (cylindrical R, Z components) [m/s]
   int have_pinch_;
+  int have_psi_pinch_ = 0;
+  double v_pinch_psi_ = 0.0;   // flux-surface-normal pinch [m/s], <0 = inward
   double v_pinch_R_;
   double v_pinch_Z_;
 
@@ -121,9 +124,9 @@ class FixCrossFieldDiffusion : public Fix {
   void refresh_compute_src(CollGridSrc &S);
   double read_src(const CollGridSrc &S, int ip, int icell) const;
   void particle_rz(const class Particle::OnePart &p, double &R, double &Z) const;
-  void pd_bfield_sparta(const class Particle::OnePart &p,
+  void pd_bfield_sparta(const class Particle::OnePart &p, int iparticle,
                         double &B0, double &B1, double &B2) const;
-  double pd_interp(const std::vector<double> &field,
+  double pd_interp(const std::vector<double> &field, int iparticle,
                    const class Particle::OnePart &p) const;
 };
 
