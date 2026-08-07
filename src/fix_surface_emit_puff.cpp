@@ -41,6 +41,14 @@ enum{FLOW,CONSTANT};
 FixSurfaceEmitPuff::FixSurfaceEmitPuff(SPARTA *sparta, int narg, char **arg) :
   FixEmit(sparta, narg, arg)
 {
+  // Emission tasks cache per-grid pcell indices; gridmigrate=1 puts this
+  // fix in Modify::list_pergrid so Grid::notify_changed() invokes
+  // grid_changed() -> create_tasks() after mid-run balance/adapt
+  // migrations. Without it, stale task pcell values made post-balance
+  // emissions insert particles with old (wrong or ghost/out-of-range)
+  // cell indices -> silent mis-binning and downstream segfaults.
+  gridmigrate = 1;
+
   // Usage: fix ID emit/surf/puff mixture group [keyword args]
   if (narg < 4) error->all(FLERR,"Illegal fix surface/emit/puff command");
 

@@ -51,6 +51,14 @@ namespace {
 FixSurfaceEmitRecycle::FixSurfaceEmitRecycle(SPARTA *sparta, int narg, char **arg) :
   FixEmit(sparta, narg, arg)
 {
+  // Emission tasks cache per-grid pcell indices; gridmigrate=1 puts this
+  // fix in Modify::list_pergrid so Grid::notify_changed() invokes
+  // grid_changed() -> create_tasks() after mid-run balance/adapt
+  // migrations. Without it, stale task pcell values made post-balance
+  // emissions insert particles with old (wrong or ghost/out-of-range)
+  // cell indices -> silent mis-binning and downstream segfaults.
+  gridmigrate = 1;
+
   // Usage: fix ID emit/surf/recycle mix group plasma_fix_ID
   //              [mass <amu>] [R <val>] [twall <K>]
   if (narg < 5) error->all(FLERR,"Illegal fix surface/emit/recycle command");
@@ -480,6 +488,8 @@ void FixSurfaceEmitRecycle::create_task(int icell)
 
     tasks[ntask].vscale_molec = 0.0;
     tasks[ntask].ntarget = 0.0;
+    tasks[ntask].sin_alpha = 1.0;
+    tasks[ntask].sin_alpha_generation = -1;
 
     // Topological wall->plasma-cell lookup (EIRENE-style):
     // Owning B2 cell for this SPARTA wall surface. Three strategies,
@@ -602,18 +612,27 @@ double FixSurfaceEmitRecycle::emission_rate_per_surface(int itask)
   if (cs_arg <= 0.0) return 0.0;
   const double cs = std::sqrt(cs_arg);
 
-  double sin_alpha = 1.0;
-  if (plasma->has_bfield) {
-    double Br, Bz, Bt;
-    plasma->bfield_at(R, Z, Br, Bz, Bt, tasks[itask].icell);
-    const double Bmag = std::sqrt(Br*Br + Bz*Bz + Bt*Bt);
-    if (Bmag > 0.0) {
-      const double proj = Br * tasks[itask].inward[0]
-                        + Bz * tasks[itask].inward[1];
-      sin_alpha = std::fabs(proj) / Bmag;
-      if (sin_alpha > 1.0) sin_alpha = 1.0;
+  // The task midpoint and normal are static between grid_changed() calls,
+  // and FixBackground::generation changes on every plasma reload. Cache the
+  // projection once per task/generation instead of repeating an unstructured
+  // triangle search for every wall task on every timestep.
+  if (tasks[itask].sin_alpha_generation != plasma->generation) {
+    double sin_alpha = 1.0;
+    if (plasma->has_bfield) {
+      double Br, Bz, Bt;
+      plasma->bfield_at(R, Z, Br, Bz, Bt, tasks[itask].icell);
+      const double Bmag = std::sqrt(Br*Br + Bz*Bz + Bt*Bt);
+      if (Bmag > 0.0) {
+        const double proj = Br * tasks[itask].inward[0]
+                          + Bz * tasks[itask].inward[1];
+        sin_alpha = std::fabs(proj) / Bmag;
+        if (sin_alpha > 1.0) sin_alpha = 1.0;
+      }
     }
+    tasks[itask].sin_alpha = sin_alpha;
+    tasks[itask].sin_alpha_generation = plasma->generation;
   }
+  const double sin_alpha = tasks[itask].sin_alpha;
 
   // Surface area used in the flux calculation, in preference order:
   //  (1) Per-wall-segment aggregated area mesh/wall_surf_area[isurf] —
