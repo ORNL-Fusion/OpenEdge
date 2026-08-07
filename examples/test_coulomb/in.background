@@ -5,15 +5,15 @@
 # background D+ plasma (Ti=2 eV, Vpar=0, Ni=1e17 m^-3) using the Nanbu
 # binary collision algorithm with virtual Maxwellian partners.
 #
-# Expected result: C3+ temperature relaxes exponentially toward the
-# background Ti=2 eV on the Spitzer cross-species equipartition timescale
-# (~9 us with these parameters).
+# Expected result: C3+ temperature relaxes toward the background Ti=2 eV
+# on the NRL cross-species equipartition timescale (~33 us initially,
+# shrinking as T falls).
 #
 # Binary particle-particle collisions are negligible (fnum=1, very low
 # simulation density) -- only background collisions matter.
 #
 # Usage:
-#     mpirun -np 4 spa_mpi -in in.nanbu_slowdown
+#     mpirun -np 4 spa_mpi -in in.background
 ################################################################################
 
 # ---- Physical parameters (constant uniform plasma in eV / m^-3 / m/s) ----
@@ -32,7 +32,7 @@ global          gridcut 0.0 comm/sort yes
 global          fnum 1
 global          move no
 
-shell           mkdir -p output
+shell           mkdir output
 
 # Domain: 1 cm^3 cube
 create_box      0.0 0.01 0.0 0.01 0.0 0.01
@@ -67,14 +67,14 @@ create_particles impurity n 5000
 compute         ctemp grid all species temp
 compute         Tavg reduce ave c_ctemp[1]
 
-# Particle tracks (sample every 1000 steps)
-#dump            dpart particle all 1000 output/particles id type x y z vx vy vz
-#dump_modify     dpart first yes
+# Particle tracks (sample every 100 steps = 1 us)
+dump            dpart particle all 100 output/particles_slowdown id type x y z vx vy vz
+dump_modify     dpart first yes
 
 # ---- Time integration ----
 timestep        1.0e-8
 stats           500
 stats_style     step cpu np c_Tavg
 
-# ---- Run ----
-run             1000
+# ---- Run: 5000 steps = 50 us ~ 5.5 tau_eq ----
+run             5000

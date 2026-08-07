@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
-"""Plot droplet trajectories from case.outer in the (R, Z) plane."""
+"""Plot droplet trajectories from output/case.outer in the (R, Z) plane.
 
+Exits 0 on PASS, 1 on FAIL (for regression use).
+"""
+
+import sys
 from pathlib import Path
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
+
+N_DROPLETS = 3
+R0_MM = (1.5, 2.5, 3.5)        # launch radii from droplet.species
+BOX = (-3.8, 3.8, 0.0, 5.7)    # xlo xhi ylo yhi
 
 
 def parse_dump(path):
@@ -54,7 +64,7 @@ def parse_wall(path):
 
 def main():
     base = Path(__file__).resolve().parent
-    data = parse_dump(base / "case.outer")
+    data = parse_dump(base / "output" / "case.outer")
     wall = parse_wall(base / "wall.surf")
 
     # axi slot layout: x = Z (axial), y = R (radial)
@@ -95,15 +105,26 @@ def main():
         r0_per_id[pid] = pos[0] if pos.size else 0.0
     ids = sorted(ids, key=lambda p: r0_per_id[p])
 
+    # color scale stretched over the actual r/r0 range so small mass loss
+    # is still visible (falls back to (0, 1) for full evaporation)
+    frac_by_id = {}
+    fmin = 1.0
     for pid in ids:
         m = data["id"] == pid
         r_series = data["radius"][m]
-        r0 = r0_per_id[pid]
-        frac = np.where(r_series > 0, r_series / r0, np.nan)
+        frac = np.where(r_series > 0, r_series / r0_per_id[pid], np.nan)
+        frac_by_id[pid] = frac
+        fmin = min(fmin, np.nanmin(frac))
+    span = max(1.0 - fmin, 1e-6)
+    norm = plt.Normalize(fmin - 0.05 * span, 1.0)
+
+    for pid in ids:
+        m = data["id"] == pid
+        frac = frac_by_id[pid]
         R_seg = R_dr[m]; Z_seg = Z_dr[m]
         pts = np.column_stack([R_seg, Z_seg]).reshape(-1, 1, 2)
         segs = np.concatenate([pts[:-1], pts[1:]], axis=1)
-        lc = LineCollection(segs, cmap=cmap, norm=plt.Normalize(0, 1), lw=2.0)
+        lc = LineCollection(segs, cmap=cmap, norm=norm, lw=2.0)
         lc.set_array(frac[:-1])
         ax.add_collection(lc)
 
@@ -112,7 +133,9 @@ def main():
         m = data["id"] == pid
         r0 = r0_per_id[pid]
         r_end = data["radius"][m][-1]
-        legend_lines.append(f"drop {k+1}: {r0*1e3:.1f} mm $\\rightarrow$ {r_end*1e3:.2f} mm")
+        dm = (r_end / r0) ** 3 - 1.0
+        legend_lines.append(f"drop {k+1}: {r0*1e3:.3f} $\\rightarrow$ {r_end*1e3:.4f} mm "
+                            f"($\\Delta m$ {dm*100:+.2f}%)")
 
     cb = fig.colorbar(lc, ax=ax, shrink=0.85)
     cb.set_label(r"$r(t) / r_0$")
@@ -139,10 +162,32 @@ def main():
             bbox=dict(facecolor="white", edgecolor="0.6", alpha=0.9),
             verticalalignment="bottom", horizontalalignment="right")
 
-    out = base / "trajs.png"
+    out = base / "output" / "trajs.png"
     fig.savefig(out, bbox_inches="tight")
     print(f"wrote {out}")
 
+    # pass/fail: 3 droplets with the expected launch radii, shrinking
+    # monotonically, staying inside the domain box
+    failed = False
+    r0_sim = sorted(r0_per_id[p] * 1e3 for p in ids)
+    ok = len(ids) == N_DROPLETS and np.allclose(r0_sim, R0_MM, rtol=1e-6)
+    failed |= not ok
+    print(f"  launch radii {[f'{r:.2f}' for r in r0_sim]} mm "
+          f"(expect {R0_MM}) {'ok' if ok else 'FAIL'}")
+    for k, pid in enumerate(ids):
+        m = data["id"] == pid
+        r = data["radius"][m]
+        ok = bool(np.all(np.diff(r) <= 1e-12))
+        failed |= not ok
+        print(f"  drop {k+1} radius monotonic non-increasing "
+              f"({r[0]*1e3:.3f} -> {r[-1]*1e3:.4f} mm) {'ok' if ok else 'FAIL'}")
+    inside = (np.all(Z_dr >= BOX[0]) and np.all(Z_dr <= BOX[1])
+              and np.all(R_dr >= BOX[2]) and np.all(R_dr <= BOX[3]))
+    failed |= not inside
+    print(f"  all positions inside domain {'ok' if inside else 'FAIL'}")
+    print("PASS" if not failed else "FAIL")
+    return 1 if failed else 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

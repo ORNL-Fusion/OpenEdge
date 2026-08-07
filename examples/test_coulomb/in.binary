@@ -9,14 +9,14 @@
 # temperature (~7.5 eV) on the Spitzer cross-species equipartition timescale.
 #
 # Physical density: N*fnum/V = 10000*1e7/1e-6 = 1e17 m^-3
-# With T~7.5 eV, n~5e16 per species, lnL~13:  tau_eq ~ 90-100 us
-# At dt=1e-8 s and 400000 steps (4000 us), several tau of thermalization is visible.
+# With these parameters, n~5e16 per species, lnL~13:  tau_eq ~ 365 us (NRL)
+# At dt=1e-8 s and 400000 steps (4000 us), ~11 tau of thermalization is visible.
 #
 # Momentum is conserved exactly per pair; total kinetic energy
 # is approximately conserved (small fluctuations from stochastic scatter).
 #
 # Usage:
-#     mpirun -np 4 spa_mpi -in in.nanbu_thermalize
+#     mpirun -np 4 spa_mpi -in in.binary
 ################################################################################
 
 # ---- Physical parameters (Te/ne only, for the Coulomb log) ----
@@ -32,7 +32,7 @@ global          gridcut 0.0 comm/sort yes
 global          fnum 1.0e07
 global          move no
 
-shell           mkdir -p output
+shell           mkdir output
 
 # Domain: 1 cm^3 cube
 create_box      0.0 0.01 0.0 0.01 0.0 0.01
@@ -67,13 +67,14 @@ compute         ctemp grid all species temp
 compute         Tavg_1 reduce ave c_ctemp[1]
 compute         Tavg_2 reduce ave c_ctemp[2]
 
-# Particle tracks (sample every 1000 steps)
-#dump            dpart particle all 10000 output/particles id type x y z vx vy vz
+# Particle tracks (sample every 10000 steps = 100 us)
+dump            dpart particle all 10000 output/particles_thermalize id type x y z vx vy vz
+dump_modify     dpart first yes
 
 # ---- Time integration ----
 timestep        1.0e-8
 stats           5000
 stats_style     step cpu np c_Tavg_1 c_Tavg_2
 
-# ---- Run ----
-run             1000
+# ---- Run: 400000 steps = 4000 us ~ 40 tau_eq ----
+run             400000

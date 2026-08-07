@@ -2,20 +2,33 @@
 """
 Analysis script for Nanbu Coulomb collision thermalization test.
 
-Reads particle dump files from output/particles.* and checks:
+Reads particle dump files from output/particles_thermalize* and checks:
   1. D+ (hot) and C3+ (cold) relax toward common equilibrium temperature
-  2. Relaxation matches Spitzer cross-species equipartition timescale
+  2. Relaxation matches the NRL cross-species equipartition rate
   3. Total momentum is conserved (exact per pair)
   4. Total kinetic energy is approximately conserved
+
+Exits 0 on PASS, 1 on FAIL (for regression use).
 
 Usage:
     python3 plot_thermalization.py
 """
 
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
 import sys
+
+# ---------- Pass/fail thresholds ----------
+RMS_TOL    = 0.10    # rms |T_sim - T_ode| / (T_D0 - T_C0), per species
+TEQ_TOL    = 0.10    # final |T_D - T_C| / (T_D0 - T_C0)
+KE_TOL     = 0.02    # max |dKE/KE_0|
+P_TOL      = 1e-3    # max |p - p0| / p_thermal
+GAP_RATIO  = (2.0, 5.0)  # sim/NRL gap e-fold ratio; ~3.5 is the correct
+                         # kinetic value (weak D+ self-collisions leave D
+                         # non-Maxwellian, slowing exchange below NRL)
 
 # ---------- Physical constants ----------
 e_charge = 1.602176634e-19      # C
@@ -87,11 +100,11 @@ def load_all_dumps(outdir="output"):
     """Load particle dumps — handles both single file and per-step files."""
     outpath = Path(outdir)
 
-    single = outpath / "particles"
+    single = outpath / "particles_thermalize"
     if single.exists():
         return parse_dump_file(single)
 
-    files = sorted(outpath.glob("particles.*"),
+    files = sorted(outpath.glob("particles_thermalize.*"),
                    key=lambda p: int(p.suffix[1:]))
     if not files:
         print(f"ERROR: No particle dump files found in {outdir}/")
@@ -122,20 +135,37 @@ def coulomb_log(ne, Te_eV):
 
 def spitzer_cross_species_tau(Ta_eV, Tb_eV, ma, mb, Za, Zb, nb, lnL):
     """
-    Cross-species energy equipartition time (NRL Plasma Formulary, SI).
+    Cross-species energy equipartition time (NRL Plasma Formulary):
 
-        tau_ab = 3 sqrt(2 pi) (4 pi eps0)^2 ma mb
-                 / (8 nb Za^2 Zb^2 e^4 lnL)
-                 * (kTa/ma + kTb/mb)^(3/2)
+        nu_eq = 1.8e-19 sqrt(ma mb) Za^2 Zb^2 nb lnL
+                / (ma Tb + mb Ta)^(3/2)      [m in g, n in cm^-3, T in eV]
 
-    Returns time [s] for species a to equilibrate with species b.
+    Inputs SI (kg, m^-3); returns time [s] for species a to equilibrate
+    with species b.
     """
-    kTa = Ta_eV * e_charge
-    kTb = Tb_eV * e_charge
-    numerator = 3.0 * np.sqrt(2.0 * np.pi) * (4.0 * np.pi * eps0)**2 * ma * mb
-    denominator = 8.0 * nb * Za**2 * Zb**2 * e_charge**4 * lnL
-    v_term = (kTa / ma + kTb / mb)**1.5
-    return numerator / denominator * v_term
+    ma_g, mb_g = ma * 1e3, mb * 1e3
+    nb_cm3 = nb * 1e-6
+    nu = (1.8e-19 * np.sqrt(ma_g * mb_g) * Za**2 * Zb**2 * nb_cm3 * lnL
+          / (ma_g * Tb_eV + mb_g * Ta_eV)**1.5)
+    return 1.0 / nu
+
+
+def thermalize_ode(TD0, TC0, t, n_C3p, lnL):
+    """Two-temperature relaxation with T-dependent NRL tau.
+
+    dT_D/dt = -(T_D - T_C)/tau_DC; T_C follows from energy conservation
+    (equal particle counts): T_D + T_C = TD0 + TC0.
+    """
+    TD = np.empty_like(t)
+    TC = np.empty_like(t)
+    TD[0], TC[0] = TD0, TC0
+    for i in range(1, len(t)):
+        tau = spitzer_cross_species_tau(TD[i-1], TC[i-1], m_Dp, m_C3p,
+                                        Z_Dp, Z_C3p, n_C3p, lnL)
+        dT = (t[i] - t[i-1]) * (TD[i-1] - TC[i-1]) / tau
+        TD[i] = TD[i-1] - dT
+        TC[i] = TC[i-1] + dT * N_Dp / N_C3p
+    return TD, TC
 
 
 # ---------- Main ----------
@@ -204,29 +234,28 @@ def main():
     print(f"T_D+  (t={times_us[-1]:.0f}us): {T_Dp_eV[-1]:.2f} eV")
     print(f"T_C3+ (t={times_us[-1]:.0f}us): {T_C3p_eV[-1]:.2f} eV")
 
-    # Conservation checks
+    # Conservation checks. Momentum is gated on drift from t=0: the initial
+    # net |p| is finite-N sampling noise (~sqrt(3) p_th), not an error.
     KE_rel = (KE_arr - KE_arr[0]) / KE_arr[0]
-    p_mag  = np.sqrt(px_arr**2 + py_arr**2 + pz_arr**2)
     p_thermal = np.sqrt(N_Dp * m_Dp * kB * T_Dp_arr[0] +
                         N_C3p * m_C3p * kB * T_C3p_arr[0])
-    p_rel = p_mag / p_thermal
+    p_drift = np.sqrt((px_arr - px_arr[0])**2 +
+                      (py_arr - py_arr[0])**2 +
+                      (pz_arr - pz_arr[0])**2)
+    p_rel = p_drift / p_thermal
 
     print(f"\n--- Conservation ---")
     print(f"dKE/KE:  max |dKE/KE| = {np.max(np.abs(KE_rel)):.2e},  "
           f"final = {KE_rel[-1]:.2e}")
-    print(f"|p|/p_th: max = {np.max(p_rel):.2e},  final = {p_rel[-1]:.2e}")
+    print(f"|p-p0|/p_th: max = {np.max(p_rel):.2e},  final = {p_rel[-1]:.2e}")
 
-    # Analytical relaxation (exponential with characteristic tau)
-    # Energy conservation: N_Dp*(3/2)kT_Dp + N_C3p*(3/2)kT_C3p = const
-    # For equal particle counts: T_eq weighted by energy sharing
+    # Analytical relaxation: two-temperature ODE with T-dependent NRL tau
     E_total = N_Dp * T_Dp_eV[0] + N_C3p * T_C3p_eV[0]
     T_eq_eV = E_total / (N_Dp + N_C3p)
-    DT_Dp  = T_Dp_eV[0]  - T_eq_eV
-    DT_C3p = T_C3p_eV[0] - T_eq_eV
-    t_fine    = np.linspace(0, times[-1], 500)
+    t_fine    = np.linspace(0, times[-1], 4000)
     t_fine_us = t_fine * 1e6
-    T_Dp_ana  = T_eq_eV + DT_Dp  * np.exp(-t_fine / tau_s)
-    T_C3p_ana = T_eq_eV + DT_C3p * np.exp(-t_fine / tau_s)
+    T_Dp_ana, T_C3p_ana = thermalize_ode(T_Dp_eV[0], T_C3p_eV[0],
+                                         t_fine, n_C3p, lnL)
 
     # ---- Plots ----
     fig, axes = plt.subplots(2, 2, figsize=(12, 9))
@@ -236,7 +265,7 @@ def main():
     ax.plot(times_us, T_Dp_eV, "r-", lw=1.5, label="D+ (hot)")
     ax.plot(times_us, T_C3p_eV, "b-", lw=1.5, label="C3+ (cold)")
     ax.plot(t_fine_us, T_Dp_ana, "r:", lw=1.5, alpha=0.7,
-            label=f"Spitzer (tau={tau_s_us:.1f} us)")
+            label=f"NRL ODE (tau0={tau_s_us:.1f} us)")
     ax.plot(t_fine_us, T_C3p_ana, "b:", lw=1.5, alpha=0.7)
     ax.axhline(T_eq_eV, color="k", ls="--", lw=0.8, label=f"T_eq = {T_eq_eV:.1f} eV")
     ax.set_xlabel("Time [us]")
@@ -256,11 +285,11 @@ def main():
 
     # (c) Momentum conservation
     ax = axes[1, 0]
-    ax.plot(times_us, px_arr, label="px")
-    ax.plot(times_us, py_arr, label="py")
-    ax.plot(times_us, pz_arr, label="pz")
+    ax.plot(times_us, px_arr - px_arr[0], label="dpx")
+    ax.plot(times_us, py_arr - py_arr[0], label="dpy")
+    ax.plot(times_us, pz_arr - pz_arr[0], label="dpz")
     ax.set_xlabel("Time [us]")
-    ax.set_ylabel("Total momentum [kg m/s]")
+    ax.set_ylabel("Momentum drift from t=0 [kg m/s]")
     ax.set_title("Momentum conservation")
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
@@ -302,8 +331,45 @@ def main():
     plt.tight_layout()
     plt.savefig("thermalization.png", dpi=150)
     print(f"\nPlot saved to thermalization.png")
-    plt.show()
+
+    # Gap e-folding time vs NRL (expected ratio ~3.5, see README)
+    gap = T_Dp_eV - T_C3p_eV
+    mask = gap > 0.1 * gap[0]
+    tau_sim = -1.0 / np.polyfit(times[mask], np.log(gap[mask]), 1)[0]
+    gap_a = T_Dp_ana - T_C3p_ana
+    mask_a = gap_a > 0.1 * gap_a[0]
+    tau_nrl = -1.0 / np.polyfit(t_fine[mask_a], np.log(gap_a[mask_a]), 1)[0]
+    print(f"\ngap e-folding: sim {tau_sim*1e6:.0f} us vs NRL {tau_nrl*1e6:.0f} us "
+          f"(ratio {tau_sim/tau_nrl:.2f})")
+
+    # ---- Pass/fail ----
+    scale   = T_Dp_eV[0] - T_C3p_eV[0]
+    TD_ode  = np.interp(times, t_fine, T_Dp_ana)
+    TC_ode  = np.interp(times, t_fine, T_C3p_ana)
+    rms_D   = float(np.sqrt(np.mean((T_Dp_eV  - TD_ode)**2))) / scale
+    rms_C   = float(np.sqrt(np.mean((T_C3p_eV - TC_ode)**2))) / scale
+    dT_fin  = abs(T_Dp_eV[-1] - T_C3p_eV[-1]) / scale
+
+    checks = [
+        ("T_D+  rms vs NRL ODE", rms_D,                       RMS_TOL),
+        ("T_C3+ rms vs NRL ODE", rms_C,                       RMS_TOL),
+        ("final T_D+ - T_C3+",   dT_fin,                      TEQ_TOL),
+        ("KE conservation",      float(np.max(np.abs(KE_rel))), KE_TOL),
+        ("momentum drift |p-p0|/p_th", float(np.max(p_rel)),  P_TOL),
+    ]
+    failed = False
+    for name, val, tol in checks:
+        ok = val < tol
+        failed |= not ok
+        print(f"  {name}: {val:.2e} (tol {tol}) {'ok' if ok else 'FAIL'}")
+    ratio = tau_sim / tau_nrl
+    ok = GAP_RATIO[0] < ratio < GAP_RATIO[1]
+    failed |= not ok
+    print(f"  gap e-fold sim/NRL ratio: {ratio:.2f} (band {GAP_RATIO}) "
+          f"{'ok' if ok else 'FAIL'}")
+    print("PASS" if not failed else "FAIL")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

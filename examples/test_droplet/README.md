@@ -14,18 +14,27 @@ charging against a SOLPS-derived plasma background.
 | `source` | Launch-state particle dump (3 droplets at same R/Z/v). |
 | `plasma.h5` | Mesh-only plasma: D+ + Ne0–Ne10+ + Li0–Li3+, plus equilibrium. Generated from `/home/cloud/li/v0_1` via `convert_solps_plasma.py`. |
 | `wall.surf` | OpenEdge axi-oriented wall geometry (line endpoints in `(Z, R)`). |
-| `plot_trajectories.py` | Post-process: reads `case.outer`, renders `trajs.png`. |
+| `plot_trajectories.py` | Post-process: reads `output/case.outer`, renders `output/trajs.png`; PASS/FAIL exit code. |
 
 ## Run
 
 ```bash
-source /opt/intel/oneapi/setvars.sh --force
-mpirun -np 4 /home/cloud/buildOpenEdge/src/spa_mpi -in in.droplet_emission
+mpirun -np 4 ~/build_oe/src/spa_mac_mpi -in in.droplet_emission
 python3 plot_trajectories.py
 ```
 
-Expected: `case.outer` trajectory dump + `trajs.png` with the (R, Z)
-arc plus radius(t) and T(t) panels.
+All run products land in `output/` (gitignored). The deck runs up to
+`N = time/dt = 1e6` steps but a halt fix ends it when every droplet is
+gone; with the current drag/charge model the three droplets return to
+the wall within ~28 ms (surf reaction deletes them), having lost only
+~0.05% radius — mm-scale Li at 773 K spends its first ~0.1 s heating
+before strong evaporation, so the flight ends in the heat-up phase.
+
+## Pass criteria (enforced by the script, exit 0/1)
+
+- three droplets present with launch radii 1.5 / 2.5 / 3.5 mm
+- each radius monotonically non-increasing
+- all trajectory points inside the domain box
 
 ## Regenerating `plasma.h5`
 

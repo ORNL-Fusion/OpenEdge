@@ -29,8 +29,6 @@ mixture drops_1 drop_1 frac 1.0
 mixture drops_2 drop_2 frac 1.0
 mixture drops_3 drop_3 frac 1.0
 
-variable pmass particle mass
-
 read_surf           wall.surf invert group surfID particle check
 surf_collide        wallColModel  diffuse ${temp_droplet} 1.0
 surf_react          wallReact global 1. .0
@@ -40,7 +38,7 @@ fix    pd background file plasma.h5 static yes
 
 read_particles source 1
 
-#dump dtraj particle all ${Ndump} case.outer id type x y z vx vy vz v_pmass temp radius
+dump dtraj particle all ${Ndump} output/case.outer id type x y z vx vy vz temp radius
 
 fix fevap_1 droplet/evaporate 1 drops_1 background pd heatflux/scale 2.0 rocket_eta 0.5
 fix fevap_2 droplet/evaporate 1 drops_2 background pd heatflux/scale 2.0 rocket_eta 0.5
@@ -60,4 +58,4 @@ variable Nd equal ${Ndump}*2
 fix 31 halt ${Nd} v_npart <= 0
 
 stats ${Ndump}
-run 1000
+run ${N}

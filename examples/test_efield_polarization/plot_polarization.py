@@ -13,9 +13,15 @@ into `figs_polarization/`.
 """
 
 import math
+import sys
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
+
+# pass/fail thresholds (fraction of E0/B0 drift amplitude)
+RMS_TOL    = 0.05   # rms of gyro-averaged vy - theory
+OFFSET_TOL = 0.01   # mean systematic offset
+DISP_TOL   = 0.05   # max |y - y_theory| / max|y_theory|
 
 
 def parse_dump(path):
@@ -119,6 +125,26 @@ def main():
 
     print(f"wrote figures to {outdir}")
 
+    # pass/fail: compare gyro-averaged drift and displacement to theory
+    amp = E0 / B0
+    sl = slice(2 * Ngyro, -2 * Ngyro)
+    rms    = float(np.sqrt(np.mean((vy_smooth[sl] - vth_smooth[sl]) ** 2))) / amp
+    offset = abs(float(np.mean(vy_smooth[sl] - vth_smooth[sl]))) / amp
+    disp   = float(np.max(np.abs(y - y_gc_theory))) / float(np.max(np.abs(y_gc_theory)))
+
+    checks = [
+        ("vy rms vs theory",    rms,    RMS_TOL),
+        ("vy mean offset",      offset, OFFSET_TOL),
+        ("y displacement error", disp,  DISP_TOL),
+    ]
+    failed = False
+    for name, val, tol in checks:
+        ok = val < tol
+        failed |= not ok
+        print(f"  {name}: {val:.4f} (tol {tol}) {'ok' if ok else 'FAIL'}")
+    print("PASS" if not failed else "FAIL")
+    return 1 if failed else 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

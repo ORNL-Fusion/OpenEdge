@@ -2,19 +2,28 @@
 """
 Analysis script for Nanbu background collision slowing-down test.
 
-Reads particle dump files from output/particles.* and checks:
+Reads particle dump files from output/particles_slowdown* and checks:
   1. C3+ temperature relaxes toward background D+ temperature (2 eV)
-  2. Relaxation matches Spitzer cross-species equipartition timescale
+  2. Relaxation matches the NRL cross-species equipartition rate
+     (T-dependent tau, integrated as an ODE)
   3. Speed distribution evolves from 10 eV Maxwellian toward 2 eV
+
+Exits 0 on PASS, 1 on FAIL (for regression use).
 
 Usage:
     python3 plot_slowdown.py
 """
 
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
 import sys
+
+# ---------- Pass/fail thresholds ----------
+RMS_TOL   = 0.10   # rms |T_sim - T_ode| / (T0 - T_bg)
+FINAL_TOL = 0.15   # |T_final_sim - T_final_ode| / (T0 - T_bg)
 
 # ---------- Physical constants ----------
 e_charge = 1.602176634e-19      # C
@@ -83,11 +92,11 @@ def load_all_dumps(outdir="output"):
     """Load particle dumps — handles both single file and per-step files."""
     outpath = Path(outdir)
 
-    single = outpath / "particles"
+    single = outpath / "particles_slowdown"
     if single.exists():
         return parse_dump_file(single)
 
-    files = sorted(outpath.glob("particles.*"),
+    files = sorted(outpath.glob("particles_slowdown.*"),
                    key=lambda p: int(p.suffix[1:]))
     if not files:
         print(f"ERROR: No particle dump files found in {outdir}/")
@@ -118,20 +127,29 @@ def coulomb_log(ne, Te_eV):
 
 def spitzer_cross_species_tau(Ta_eV, Tb_eV, ma, mb, Za, Zb, nb, lnL):
     """
-    Cross-species energy equipartition time (NRL Plasma Formulary, SI).
+    Cross-species energy equipartition time (NRL Plasma Formulary):
 
-        tau_ab = 3 sqrt(2 pi) (4 pi eps0)^2 ma mb
-                 / (8 nb Za^2 Zb^2 e^4 lnL)
-                 * (kTa/ma + kTb/mb)^(3/2)
+        nu_eq = 1.8e-19 sqrt(ma mb) Za^2 Zb^2 nb lnL
+                / (ma Tb + mb Ta)^(3/2)      [m in g, n in cm^-3, T in eV]
 
-    Returns time [s] for species a to equilibrate with species b.
+    Inputs SI (kg, m^-3); returns time [s] for species a to equilibrate
+    with species b.
     """
-    kTa = Ta_eV * e_charge
-    kTb = Tb_eV * e_charge
-    numerator = 3.0 * np.sqrt(2.0 * np.pi) * (4.0 * np.pi * eps0)**2 * ma * mb
-    denominator = 8.0 * nb * Za**2 * Zb**2 * e_charge**4 * lnL
-    v_term = (kTa / ma + kTb / mb)**1.5
-    return numerator / denominator * v_term
+    ma_g, mb_g = ma * 1e3, mb * 1e3
+    nb_cm3 = nb * 1e-6
+    nu = (1.8e-19 * np.sqrt(ma_g * mb_g) * Za**2 * Zb**2 * nb_cm3 * lnL
+          / (ma_g * Tb_eV + mb_g * Ta_eV)**1.5)
+    return 1.0 / nu
+
+
+def relax_ode(T0_eV, Tb_eV, ma, mb, Za, Zb, nb, lnL, t):
+    """Integrate dT/dt = -(T - Tb)/tau(T) with T-dependent NRL tau."""
+    T = np.empty_like(t)
+    T[0] = T0_eV
+    for i in range(1, len(t)):
+        tau = spitzer_cross_species_tau(T[i-1], Tb_eV, ma, mb, Za, Zb, nb, lnL)
+        T[i] = T[i-1] - (t[i] - t[i-1]) * (T[i-1] - Tb_eV) / tau
+    return T
 
 
 # ---------- Main ----------
@@ -177,12 +195,11 @@ def main():
     print(f"T_C3+ (t={times_us[-1]:.0f}us): {T_C3p_eV[-1]:.2f} eV")
     print(f"Target T_bg:             {Ti_bg:.2f} eV")
 
-    # Analytical relaxation: exponential decay toward background T
-    # dT/dt = -(T - T_bg) / tau  =>  T(t) = T_bg + (T0 - T_bg) * exp(-t/tau)
-    DT0 = T_C3p_eV[0] - Ti_bg
-    t_fine    = np.linspace(0, times[-1], 500)
+    # Analytical relaxation: dT/dt = -(T - T_bg)/tau(T), NRL tau
+    t_fine    = np.linspace(0, times[-1], 2000)
     t_fine_us = t_fine * 1e6
-    T_ana     = Ti_bg + DT0 * np.exp(-t_fine / tau_s)
+    T_ana = relax_ode(T_C3p_eV[0], Ti_bg, m_C3p, m_Dp, Z_C3p, Z_Dp,
+                      ni_bg, lnL, t_fine)
 
     # ---- Plots ----
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -191,7 +208,7 @@ def main():
     ax = axes[0]
     ax.plot(times_us, T_C3p_eV, "b-", lw=1.5, label="C3+ (simulation)")
     ax.plot(t_fine_us, T_ana, "r:", lw=1.5, alpha=0.7,
-            label=f"Spitzer (tau={tau_s_us:.1f} us)")
+            label=f"NRL ODE (tau0={tau_s_us:.1f} us)")
     ax.axhline(Ti_bg, color="k", ls="--", lw=0.8,
                label=f"T_bg = {Ti_bg:.1f} eV")
     ax.set_xlabel("Time [us]")
@@ -235,8 +252,25 @@ def main():
     plt.tight_layout()
     plt.savefig("slowdown.png", dpi=150)
     print(f"\nPlot saved to slowdown.png")
-    plt.show()
+
+    # ---- Pass/fail ----
+    T_ode = np.interp(times, t_fine, T_ana)
+    scale = T_C3p_eV[0] - Ti_bg
+    rms   = float(np.sqrt(np.mean((T_C3p_eV - T_ode)**2))) / scale
+    final = abs(T_C3p_eV[-1] - T_ode[-1]) / scale
+
+    checks = [
+        ("T(t) rms vs NRL ODE", rms,   RMS_TOL),
+        ("final T error",       final, FINAL_TOL),
+    ]
+    failed = False
+    for name, val, tol in checks:
+        ok = val < tol
+        failed |= not ok
+        print(f"  {name}: {val:.4f} (tol {tol}) {'ok' if ok else 'FAIL'}")
+    print("PASS" if not failed else "FAIL")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
