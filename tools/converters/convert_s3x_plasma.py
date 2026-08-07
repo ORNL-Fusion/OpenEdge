@@ -274,6 +274,10 @@ def _load_zone_native(config_file, data_file, ref_file):
         # fluid-neutral runs; used as the impurity-CX partner density)
         nn = zfield(z, 'Nspec1/n') if f'zone{z}/Nspec1/n' in data else None
         tn = zfield(z, 'Nspec1/T') if f'zone{z}/Nspec1/T' in data else None
+        # per-element fluid-neutral densities (NspecE = element E)
+        nn_elt = [zfield(z, f'Nspec{e}/n')
+                  if f'zone{z}/Nspec{e}/n' in data else None
+                  for e in range(1, 10) if f'zone{z}/Nspec{e}' in data]
         per = []
         for sp in range(1, nion + 1):
             n = zfield(z, f'spec{sp}/n'); T = zfield(z, f'spec{sp}/T')
@@ -281,7 +285,7 @@ def _load_zone_native(config_file, data_file, ref_file):
             per.append((n, T, G))
         Br = mesh[f'zone{z}/Br'][:, :, 0]; Bz = mesh[f'zone{z}/Bz'][:, :, 0]
         Bt = mesh[f'zone{z}/Bphi'][:, :, 0]
-        cache[z] = (ne, te, per, Br, Bz, Bt, phi, nn, tn)
+        cache[z] = (ne, te, per, Br, Bz, Bt, phi, nn, tn, nn_elt)
 
     dens_e = np.empty(ntri); temp_e = np.empty(ntri)
     d_all = np.zeros((nion, ntri)); t_all = np.zeros((nion, ntri)); u_all = np.zeros((nion, ntri))
@@ -289,8 +293,10 @@ def _load_zone_native(config_file, data_file, ref_file):
     pob = np.zeros(ntri)
     nn_tri = np.zeros(ntri)
     tn_tri = np.zeros(ntri)
+    nelt = max(len(c[9]) for c in cache.values())
+    nn_elt_tri = np.zeros((nelt, ntri))
     for k, (z, i, j) in enumerate(zc):
-        ne, te, per, Br, Bz, Bt, phi, nn, tn = cache[z]
+        ne, te, per, Br, Bz, Bt, phi, nn, tn, nn_elt = cache[z]
         dens_e[k] = ne[i, j] * n0; temp_e[k] = te[i, j] * T0
         br[k] = Br[i, j] * B0; bz[k] = Bz[i, j] * B0; bt[k] = Bt[i, j] * B0
         if phi is not None:
@@ -299,6 +305,9 @@ def _load_zone_native(config_file, data_file, ref_file):
             nn_tri[k] = max(nn[i, j], 0.0) * n0
         if tn is not None:
             tn_tri[k] = max(tn[i, j], 0.0) * T0
+        for e, ne_e in enumerate(nn_elt):
+            if ne_e is not None:
+                nn_elt_tri[e, k] = max(ne_e[i, j], 0.0) * n0
         for sp in range(nion):
             n, T, G = per[sp]
             d_all[sp, k] = n[i, j] * n0
@@ -313,6 +322,7 @@ def _load_zone_native(config_file, data_file, ref_file):
         dens_i_all=d_all, temp_i_all=t_all, flow_i_par_all=u_all,
         tri_br=br, tri_bz=bz, tri_bt=bt, pob_tri=pob,
         dens_n_tri=nn_tri, temp_n_tri=tn_tri,
+        dens_n_elt_tri=nn_elt_tri,
         ion_names=ion_names, ion_mass_amu=ion_mass_amu,
         ion_charge_state_z=ion_charge_state_z,
         ion_inds=list(range(1, nion + 1)),
@@ -623,12 +633,13 @@ def interpolate_and_save_plasma_field(
                 mesh_grad_ti_r, mesh_grad_ti_z]:
         arr[~np.isfinite(arr)] = 0.0
 
-    # Electric field on the mesh: E = -grad(phi), e_t = 0 (axisym).
-    # Priority: (1) real SOLEDGE3X potential zone*/PHI when the run
-    # solved the drift/vorticity model (zone-native path carries it as
-    # pob_tri); (2) --efield 3te fallback: the standard sheath-limited
-    # SOL estimate phi = Lambda*Te/e with Lambda=3 (ERO convention),
-    # so E = -3*grad(Te) [Te in eV -> phi in V]; (3) zeros.
+    # Electric field on the mesh. Priority: (1) E = -grad(phi) from the
+    # real SOLEDGE3X potential zone*/PHI when the run solved the
+    # drift/vorticity model (pob_tri); (2) parallel Ohm's-law field
+    # E_par = -grad_par(pe)/(e ne) - 0.71 grad_par(Te)/e, written as the
+    # field-aligned vector E_par*b_hat so ExB is identically zero —
+    # this is the presheath field implicit in any no-drift fluid run;
+    # (3) --efield zero.
     # fluid-neutral D density (zone-native only; zeros otherwise). CX
     # partner density for fix volume/chem/adas impurity channels.
     mesh_dens_n = np.zeros(mesh_tri.shape[0], dtype=np.float64)
@@ -637,6 +648,22 @@ def interpolate_and_save_plasma_field(
             np.asarray(zn['dens_n_tri'], dtype=np.float64), nan=0.0)
         print(f"mesh/dens_n (fluid-neutral D): max {mesh_dens_n.max():.3g} "
               f"m^-3, nonzero {int((mesh_dens_n > 0).sum())}/{mesh_dens_n.size}")
+    # per-element fluid-neutral densities (dens_n_D/_O/_W ...), element
+    # order = first appearance in the ion list
+    mesh_dens_n_elt = {}
+    if zone_native and zn.get('dens_n_elt_tri') is not None:
+        _elts = []
+        for _n in zn['ion_names']:
+            _e = re.sub(r'[+\-\d]+$', '', _n)
+            if _e not in _elts: _elts.append(_e)
+        for _k, _e in enumerate(_elts):
+            _arr = np.asarray(zn['dens_n_elt_tri'])
+            if _k < _arr.shape[0]:
+                mesh_dens_n_elt[_e] = np.nan_to_num(
+                    np.asarray(_arr[_k], dtype=np.float64), nan=0.0)
+                print(f"mesh/dens_n_{_e}: max {mesh_dens_n_elt[_e].max():.3g} "
+                      f"m^-3, nonzero "
+                      f"{int((mesh_dens_n_elt[_e] > 0).sum())}/{_arr.shape[1]}")
     mesh_temp_n = np.zeros(mesh_tri.shape[0], dtype=np.float64)
     if zone_native and zn.get('temp_n_tri') is not None:
         mesh_temp_n = np.nan_to_num(
@@ -645,27 +672,51 @@ def interpolate_and_save_plasma_field(
     if efield != "zero" and zone_native and zn.get('pob_tri') is not None:
         mesh_pob = np.nan_to_num(
             np.asarray(zn['pob_tri'], dtype=np.float64), nan=0.0)
+    ntri_m = mesh_tri.shape[0]
+    mesh_e_r = np.zeros(ntri_m, dtype=np.float64)
+    mesh_e_z = np.zeros(ntri_m, dtype=np.float64)
+    mesh_e_t = np.zeros(ntri_m, dtype=np.float64)
     if np.abs(mesh_pob).max() > 0.0:
         print(f"mesh/pob from SOLEDGE zone*/PHI: "
               f"[{mesh_pob.min():.3g}, {mesh_pob.max():.3g}] V")
-    elif efield == "3te":
-        mesh_pob = 3.0 * mesh_temp_e
-        print("mesh/pob from phi=3*Te/e fallback (SOLEDGE PHI absent or "
-              f"all-zero): [{mesh_pob.min():.3g}, {mesh_pob.max():.3g}] V")
-    else:
-        print("WARNING: mesh E=0 and pob=0 (SOLEDGE PHI absent or "
-              "all-zero; rerun with --efield 3te for the phi=3Te/e "
-              "presheath estimate).")
-    if np.abs(mesh_pob).max() > 0.0:
         gR, gZ = _tri_lsq_gradient(mesh_pob)
         gR[~np.isfinite(gR)] = 0.0
         gZ[~np.isfinite(gZ)] = 0.0
         mesh_e_r = -gR
         mesh_e_z = -gZ
+    elif efield != "zero" and tri_br_src is not None:
+        # Ohm's-law parallel field from electron force balance (the same
+        # closure a no-drift fluid run uses implicitly). Te in eV so
+        # gradients are directly V/m; axisym -> b.grad = bR dR + bZ dZ.
+        bmag = np.sqrt(tri_br_src**2 + tri_bz_src**2 + tri_bt_src**2)
+        bmag = np.where(bmag > 0.0, bmag, 1.0)
+        bR_h, bZ_h, bT_h = (tri_br_src / bmag, tri_bz_src / bmag,
+                            tri_bt_src / bmag)
+        gpR, gpZ = _tri_lsq_gradient(mesh_dens_e * mesh_temp_e)
+        for arr in (gpR, gpZ):
+            arr[~np.isfinite(arr)] = 0.0
+        ne_safe = np.maximum(mesh_dens_e, 1.0e14)
+        e_par = (-(bR_h * gpR + bZ_h * gpZ) / ne_safe
+                 - 0.71 * (bR_h * mesh_grad_te_r + bZ_h * mesh_grad_te_z))
+        e_par[~np.isfinite(e_par) | (mesh_dens_e <= 0.0)] = 0.0
+        mesh_e_r = e_par * bR_h
+        mesh_e_z = e_par * bZ_h
+        mesh_e_t = e_par * bT_h
+        pct = np.percentile(np.abs(e_par), [50, 95, 99.9])
+        print(f"mesh E from Ohm E_par (PHI absent): |E_par| median "
+              f"{pct[0]:.3g}, p95 {pct[1]:.3g}, p99.9 {pct[2]:.3g} V/m")
+        # sign check: in strong-flow regions the presheath field should
+        # accelerate ions toward the target, i.e. e*E_par along u_par
+        strong = np.abs(mesh_parr_flow) > 1.0e4
+        if strong.any():
+            agree = np.sign(e_par[strong]) == np.sign(mesh_parr_flow[strong])
+            print(f"  E_par/u_par same-sign in strong-flow triangles: "
+                  f"{100.0*agree.mean():.0f}% ({int(strong.sum())} tris)")
+    elif efield != "zero":
+        print("WARNING: mesh E=0 (PHI absent and no per-triangle B for "
+              "the Ohm E_par fallback).")
     else:
-        mesh_e_r = np.zeros(mesh_tri.shape[0], dtype=np.float64)
-        mesh_e_z = np.zeros(mesh_tri.shape[0], dtype=np.float64)
-    mesh_e_t = np.zeros(mesh_tri.shape[0], dtype=np.float64)
+        print("mesh E=0 (--efield zero).")
     if mesh_tri.shape[0] != mesh_dens_e.size:
         raise RuntimeError("mesh/triangles count does not match SOLEDGE plasma triangle count")
 
@@ -800,6 +851,8 @@ def interpolate_and_save_plasma_field(
             f.create_dataset('mesh/pob', data=mesh_pob)
             f.create_dataset('mesh/dens_n', data=mesh_dens_n)
             f.create_dataset('mesh/temp_n', data=mesh_temp_n)
+            for _e, _arr in mesh_dens_n_elt.items():
+                f.create_dataset(f'mesh/dens_n_{_e}', data=_arr)
             if heatflux == "sheath":
                 # Sheath-limited parallel heat flux estimate from the
                 # per-cell plasma state (SOLEDGE3X snapshots carry no heat
@@ -868,10 +921,11 @@ def _build_parser():
                    help="Optional GEQDSK override for B-field (fallback path).")
     p.add_argument("--equ-file", type=str, default=None,
                    help="Optional .equ override for B-field (fallback path).")
-    p.add_argument("--efield", choices=["auto", "3te", "zero"], default="auto",
-                   help="mesh/pob and E=-grad(phi): auto = real zone*/PHI "
-                        "when nonzero else zeros; 3te = fall back to the "
-                        "phi=3*Te/e presheath estimate when PHI is absent "
+    p.add_argument("--efield", choices=["auto", "zero"], default="auto",
+                   help="mesh E field: auto = E=-grad(phi) from real "
+                        "zone*/PHI when nonzero, else the field-aligned "
+                        "Ohm E_par = -grad_par(pe)/(e ne) - 0.71 "
+                        "grad_par(Te)/e (presheath field, zero ExB) "
                         "or all-zero; zero = force zeros")
     p.add_argument("--heatflux", choices=["none", "sheath"], default="none",
                    help="write mesh/q_par as the sheath-limited estimate "
