@@ -9,6 +9,7 @@
                                       from a fix's grid or particle array.
      GCAPusher::push_gca        — simplified GCA (no curvature term).
      GCAPusher::gca_rhs         — full Littlejohn RHS with B* correction.
+     GCAPusher::push_gca_rk2    — midpoint RK2 on top of gca_rhs.
      GCAPusher::push_gca_rk4    — RK4 integrator on top of gca_rhs.
      GCAPusher::init_from_particle / gca_to_particle — GC ↔ particle.
 
@@ -45,6 +46,7 @@ class Pusher : protected Pointers {
   ~Pusher();
 
   enum PusherMode { PUSHER_BORIS = 0, PUSHER_HYBRID = 1, PUSHER_GCA = 2 };
+  enum GCAIntegrator { GCA_RK4 = 0, GCA_SIMPLE = 1, GCA_RK2 = 2 };
 
   // ---- State (was on Update) -----------------------------------------
   int pusher_mode;
@@ -59,7 +61,7 @@ class Pusher : protected Pointers {
   double pusher_bad_dt_limit;
   double pusher_gca_switch;
   double pusher_boris_near;     // force Boris when |dist to sheath_geom surf| < this (m); 0 = off
-  int    pusher_gca_integrator; // 0 = RK4 (default), 1 = simple (no curvature), 2 = rk2 (midpoint, full RHS)
+  int    pusher_gca_integrator; // GCAIntegrator; RK4 remains C++ default
 
   int gca_x_custom;
   int gca_y_custom;
@@ -89,6 +91,7 @@ class Pusher : protected Pointers {
   std::vector<SheathElemCache> sheath_cache;
   int sheath_cache_enabled;   // 1 = static fix-background plasma -> cache ok
   void build_sheath_cache_entry(int midx, SheathElemCache &C);
+  void build_sheath_cache_entry_3d(int midx, SheathElemCache &C);
 
   // Per-step spatial-sheath diagnostics (verify the field is non-zero and
   // that particles actually see it). Reset in Update::move() each step,
