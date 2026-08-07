@@ -1923,7 +1923,7 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
 ------------------------------------------------------------------------- */
 
 MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
-    const double xyz[3]) const
+    const double xyz[3], bool prefer_equilibrium) const
 {
   MagneticFieldFileDataParams B{};
 
@@ -1950,7 +1950,7 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
   // populated; gradient fields are not computed here since the mesh
   // carries point values only. Consumers that need dB/dR, dB/dZ should
   // fall through to the regular-grid or equilibrium branch instead.
-  if (!plasma_data.mesh_tri_br.empty()) {
+  if (!prefer_equilibrium && !plasma_data.mesh_tri_br.empty()) {
     double R, Z;
     OpenEdge::sparta_to_RZ(xyz, domain->dimension, domain->axisymmetric, R, Z,
                            plasma_data.column_x0, plasma_data.column_y0);
@@ -1965,7 +1965,7 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
     // outside mesh footprint: fall through to grid / equ branches.
   }
 
-  if (!magnetic_data.r.empty() && !magnetic_data.z.empty()) {
+  if (!prefer_equilibrium && !magnetic_data.r.empty() && !magnetic_data.z.empty()) {
     BilinearStencil s = makeStencilAtPoint(xyz, magnetic_data.r, magnetic_data.z);
     if (!s.valid) return B;
 
@@ -1983,20 +1983,23 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
     return B;
   }
 
-  if (!has_equilibrium || equ_data.jm < 3 || equ_data.km < 3) return B;
+  if (!has_equilibrium || equ_data.jm < 3 || equ_data.km < 3)
+    return prefer_equilibrium ? query_bfield_at_point(xyz, false) : B;
 
   const int dim = domain->dimension;
   double R, Z;
   OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, R, Z,
                          plasma_data.column_x0, plasma_data.column_y0);
-  if (R < 1.0e-10) return B;
+  if (R < 1.0e-10)
+    return prefer_equilibrium ? query_bfield_at_point(xyz, false) : B;
 
   const EquilibriumData &equ = equ_data;
   const int jm = equ.jm;
   const int km = equ.km;
   const double dr = equ.r[1] - equ.r[0];
   const double dz = equ.z[1] - equ.z[0];
-  if (dr <= 0.0 || dz <= 0.0) return B;
+  if (dr <= 0.0 || dz <= 0.0)
+    return prefer_equilibrium ? query_bfield_at_point(xyz, false) : B;
 
   double fj = (R - equ.r[0]) / dr;
   double fk = (Z - equ.z[0]) / dz;

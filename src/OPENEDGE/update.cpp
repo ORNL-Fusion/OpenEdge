@@ -122,7 +122,10 @@ inline void grad_from_fix(const FixBackground *pd, const std::vector<double> &fi
   d_dz = (pd->interp2D(field, R, Z + dZ) - pd->interp2D(field, R, Z - dZ)) / (2.0 * dZ);
 }
 
-inline PlasmaFileParams query_plasma_from_fix(const FixBackground *pd, const double xyz[3], int dim, int axi)
+// icell (when >= 0) routes mesh-field lookups through FixBackground's
+// O(1) cell-indexed cache instead of per-field triangle searches.
+inline PlasmaFileParams query_plasma_from_fix(const FixBackground *pd, const double xyz[3], int dim, int axi,
+                                              int icell = -1)
 {
   PlasmaFileParams P{};
   if (!pd) return P;
@@ -130,34 +133,35 @@ inline PlasmaFileParams query_plasma_from_fix(const FixBackground *pd, const dou
   double R, Z;
   xyz_to_rz(xyz, dim, axi, R, Z);
 
-  P.temp_e = pd->interp2D(pd->temp_e, R, Z);
-  P.dens_e = pd->interp2D(pd->dens_e, R, Z);
-  P.temp_i = pd->interp2D(pd->temp_i, R, Z);
-  P.dens_i = pd->interp2D(pd->dens_i, R, Z);
-  P.parr_flow = pd->interp2D(pd->parr_flow, R, Z);
-  P.parr_flow_r = pd->interp2D(pd->parr_flow_r, R, Z);
-  P.parr_flow_t = pd->interp2D(pd->parr_flow_t, R, Z);
-  P.parr_flow_z = pd->interp2D(pd->parr_flow_z, R, Z);
-  P.grad_temp_e_r = pd->interp2D(pd->grad_te_r, R, Z);
-  P.grad_temp_e_t = pd->interp2D(pd->grad_te_t, R, Z);
-  P.grad_temp_e_z = pd->interp2D(pd->grad_te_z, R, Z);
-  P.grad_temp_i_r = pd->interp2D(pd->grad_ti_r, R, Z);
-  P.grad_temp_i_t = pd->interp2D(pd->grad_ti_t, R, Z);
-  P.grad_temp_i_z = pd->interp2D(pd->grad_ti_z, R, Z);
-  P.epar = pd->interp2D(pd->epar, R, Z);
+  P.temp_e = pd->interp2D(pd->temp_e, R, Z, icell);
+  P.dens_e = pd->interp2D(pd->dens_e, R, Z, icell);
+  P.temp_i = pd->interp2D(pd->temp_i, R, Z, icell);
+  P.dens_i = pd->interp2D(pd->dens_i, R, Z, icell);
+  P.parr_flow = pd->interp2D(pd->parr_flow, R, Z, icell);
+  P.parr_flow_r = pd->interp2D(pd->parr_flow_r, R, Z, icell);
+  P.parr_flow_t = pd->interp2D(pd->parr_flow_t, R, Z, icell);
+  P.parr_flow_z = pd->interp2D(pd->parr_flow_z, R, Z, icell);
+  P.grad_temp_e_r = pd->interp2D(pd->grad_te_r, R, Z, icell);
+  P.grad_temp_e_t = pd->interp2D(pd->grad_te_t, R, Z, icell);
+  P.grad_temp_e_z = pd->interp2D(pd->grad_te_z, R, Z, icell);
+  P.grad_temp_i_r = pd->interp2D(pd->grad_ti_r, R, Z, icell);
+  P.grad_temp_i_t = pd->interp2D(pd->grad_ti_t, R, Z, icell);
+  P.grad_temp_i_z = pd->interp2D(pd->grad_ti_z, R, Z, icell);
+  P.epar = pd->interp2D(pd->epar, R, Z, icell);
   grad_from_fix(pd, pd->dens_e, R, Z, P.grad_dens_e_r, P.grad_dens_e_z);
   P.grad_dens_e_t = 0.0;
   return P;
 }
 
 inline MagneticFieldFileDataParams query_bfield_from_fix(const FixBackground *pd,
-                                                         const double xyz[3], int dim, int axi)
+                                                         const double xyz[3], int dim, int axi,
+                                                         int icell = -1, int iparticle = -1)
 {
   MagneticFieldFileDataParams B{};
   if (!pd || !pd->has_bfield) return B;
 
   xyz_to_rz(xyz, dim, axi, B.r, B.z);
-  pd->bfield_at(B.r, B.z, B.br, B.bz, B.bt);
+  pd->bfield_at(B.r, B.z, B.br, B.bz, B.bt, icell, iparticle);
   B.Bmag = std::sqrt(B.br * B.br + B.bt * B.bt + B.bz * B.bz);
   return B;
 }
@@ -1033,11 +1037,8 @@ void Update::cache_plasma_particles()
       const PdStencil2D st = make_pd_stencil(pd, R, Z);
       int mesh_cell;
       if (pd->has_mesh && need_plasma) {
-        if (cmc && icell_p >= 0 && icell_p < cmc_size) {
-          mesh_cell = cmc[icell_p];
-        } else {
-          mesh_cell = pd->mesh_cell_at(R, Z);
-        }
+        // exact hinted lookup at the particle position (no extrapolation)
+        mesh_cell = pd->mesh_cell_for(R, Z, icell_p, i);
       } else {
         mesh_cell = -1;
       }
@@ -1094,7 +1095,7 @@ void Update::cache_plasma_particles()
         // Route through bfield_at() so mesh-native B (mesh_tri_b*) is
         // picked up on mesh-only plasma.h5 runs; the stencil path only
         // hits the empty regular-grid arrays and would return zero.
-        pd->bfield_at(R, Z, bf.br, bf.bz, bf.bt, particles[i].icell);
+        pd->bfield_at(R, Z, bf.br, bf.bz, bf.bt, particles[i].icell, i);
         bf.Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
       }
     }
@@ -1133,28 +1134,35 @@ void Update::cache_plasma_particles()
       const double rmag = std::sqrt(rx*rx + ry*ry);
       double ex = 0.0, ey = 0.0, ez = 0.0;
       const double Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
+      // E: background mesh vector E (presheath) when available, else the
+      // epar projection along B
+      double Er_c = 0.0, Ez_c = 0.0, Et_c = 0.0;
+      bool have_e = false;
+      if (write_e) {
+        have_e = pd->query_efield_at_point(x, Er_c, Ez_c, Et_c, icell_p, i);
+        if (!have_e && Bmag > 1.0e-30 && pf.epar != 0.0) {
+          Er_c = pf.epar * bf.br / Bmag;
+          Et_c = pf.epar * bf.bt / Bmag;
+          Ez_c = pf.epar * bf.bz / Bmag;
+          have_e = true;
+        }
+      }
       if (rmag > 1.0e-20 && dim == 3) {
         const double cphi = rx / rmag, sphi = ry / rmag;
         bx = bf.br * cphi - bf.bt * sphi;
         by = bf.br * sphi + bf.bt * cphi;
-        if (write_e && Bmag > 1.0e-30 && pf.epar != 0.0) {
-          const double Er = pf.epar * bf.br / Bmag;
-          const double Et = pf.epar * bf.bt / Bmag;
-          const double Ezv = pf.epar * bf.bz / Bmag;
-          ex = Er * cphi - Et * sphi;
-          ey = Er * sphi + Et * cphi;
-          ez = Ezv;
+        if (have_e) {
+          ex = Er_c * cphi - Et_c * sphi;
+          ey = Er_c * sphi + Et_c * cphi;
+          ez = Ez_c;
         }
       } else {
         bx = bf.br;
         by = (dim == 3) ? 0.0 : bf.bz;
-        if (write_e && Bmag > 1.0e-30 && pf.epar != 0.0) {
-          const double Er = pf.epar * bf.br / Bmag;
-          const double Et = pf.epar * bf.bt / Bmag;
-          const double Ezv = pf.epar * bf.bz / Bmag;
-          ex = Er;
-          ey = (dim == 3) ? 0.0 : Ezv;
-          ez = (dim == 3) ? Ezv : Et;
+        if (have_e) {
+          ex = Er_c;
+          ey = (dim == 3) ? 0.0 : Ez_c;
+          ez = (dim == 3) ? Ez_c : Et_c;
         }
       }
       bz = (dim == 3) ? bf.bz : bf.bt;
@@ -2125,7 +2133,14 @@ template < int DIM, int SURF, int OPT > void Update::move()
               // energy for sputtering. Applied in both kick mode and
               // boundary mode (boundary mode adds the outbound barrier in
               // the pusher; this is its inbound half).
-              if ((sheath_kick || sheath_boundary) && sheath_flag &&
+              // Material walls only: periodic (toroidal) caps are virtual
+              // boundaries with no sheath, and kicking on every transit
+              // pumps the cap-normal velocity without bound.
+              const int kick_isc = (DIM == 3) ? tri->isc : line->isc;
+              const bool kick_material_wall = (kick_isc < 0) ||
+                  (strcmp(surf->sc[kick_isc]->style, "toroidal") != 0);
+              if (kick_material_wall &&
+                  (sheath_kick || sheath_boundary) && sheath_flag &&
                   sheath_geom_cidx >= 0 &&
                   (pusher->pusher_plasma_cidx >= 0 || pusher->pusher_plasma_fidx >= 0)) {
                 // Get surface normal (outward, toward plasma)
@@ -2142,7 +2157,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 }
                 if (cp || pd) {
                   PlasmaFileParams sk_pf = cp ? cp->query_plasma_at_point(x)
-                                              : query_plasma_from_fix(pd, x, DIM == 2 ? 2 : 3, domain->axisymmetric);
+                                              : query_plasma_from_fix(pd, x, DIM == 2 ? 2 : 3, domain->axisymmetric, icell);
                   const double sk_te = sk_pf.temp_e;
                   const double sk_ti = sk_pf.temp_i;
                   if (sk_te > 0.0) {
@@ -2187,6 +2202,8 @@ template < int DIM, int SURF, int OPT > void Update::move()
               if (nsurf_tally)
                 memcpy(&iorig,&particles[i],sizeof(Particle::OnePart));
 
+              const int nlocal_precollide = particle->nlocal;
+
               if (DIM == 3)
                 jpart = surf->sc[tri->isc]->
                   collide(ipart,dtremain,minsurf,tri->norm,tri->isr,reaction);
@@ -2205,6 +2222,20 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 jpart->flag = PSURF + 1 + minsurf;
                 jpart->dtremain = dtremain;
                 jpart->weight = particles[i].weight;
+                pstop++;
+              }
+
+              // additive reaction products (sputter emission) must fly
+              // like jpart: born mid-move (possibly in a ghost cell), they
+              // need the move's completion paths to settle ownership.
+              // Never append them to mlist directly — compress_migrate
+              // requires ascending indices.
+              for (int inew = nlocal_precollide; inew < particle->nlocal;
+                   inew++) {
+                if (particles[inew].flag != PKEEP) continue;  // skips jpart
+                particles[inew].flag = PSURF + 1 + minsurf;
+                particles[inew].dtremain = dtremain;
+                particles[inew].weight = particles[i].weight;
                 pstop++;
               }
 
@@ -2684,6 +2715,12 @@ post_move_bookkeeping:
       }
 
       particles[i].icell = icell;
+
+      // safety net: a particle may not end the move in a foreign-owned
+      // cell; flag stragglers PDONE (mirrors the INTERIOR owner check)
+      if (particles[i].flag == PKEEP && icell >= 0 &&
+          cells[icell].proc != me)
+        particles[i].flag = PDONE;
 
       if (particles[i].flag != PKEEP) {
         mlist[nmigrate++] = i;
@@ -3361,12 +3398,15 @@ void Update::global(int narg, char **arg)
     // Charged-particle pusher (Boris full-orbit or Boris/GCA hybrid) +
     // optional sheath overlay. Single hierarchical keyword:
     //
-    //   global pusher mode boris|hybrid
+    //   global pusher mode boris|hybrid|gca
     //                 [subcycles N]
     //                 [plasma <ID>]            (compute plasma/fields or fix background)
     //                 [gca_switch <factor>]
     //                 [boris_near <m>]        (force Boris when |dist to sheath_geom surf| < m; 0 = off)
-    //                 [gca_integrator rk4|simple]   (rk4 = 4-stage default; simple = 1-stage leapfrog, ~4x cheaper, no curvature)
+    //                 [gca_integrator rk2|rk4|simple]
+    //                   (rk4 = 4 full-RHS stages and the backward-compatible
+    //                    default; rk2 = 2 full-RHS midpoint stages; simple =
+    //                    reduced 1-stage update without curvature/curl(b))
     //                 [dump yes|no] [dump_every N]
     //                 [bad_dt_check yes|no] [bad_dt_limit <max>]
     //                 [sheath off|kick|spatial

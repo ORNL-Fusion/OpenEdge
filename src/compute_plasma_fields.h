@@ -170,7 +170,10 @@ class ComputePlasmaFields : public Compute {
 
   // Point-query API: interpolate background data at arbitrary (x,y,z)
   PlasmaFileParams query_plasma_at_point(const double xyz[3]) const;
-  MagneticFieldFileDataParams query_bfield_at_point(const double xyz[3]) const;
+  // Existing callers use mesh/grid-first data. GCA requests the smooth
+  // equilibrium field and its derivatives when one is available.
+  MagneticFieldFileDataParams query_bfield_at_point(
+      const double xyz[3], bool prefer_equilibrium = false) const;
 
   // Reload plasma background from file (for coupling: re-reads HDF5 and re-interpolates)
   void reload_plasma();
