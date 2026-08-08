@@ -322,6 +322,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   sheath_kick = 0;
   sheath_boundary = 0;
   sheath_paid_custom = -1;
+  sheath_bank_custom = -1;
   tally_pweight = 1.0;
 
   plasma_cache_flag = 0;
@@ -584,6 +585,17 @@ void Update::init()
     if (sheath_paid_custom < 0)
       // type 0 = INT (enum{INT,DOUBLE}), size 0 = per-particle scalar.
       sheath_paid_custom = particle->add_custom((char *) "sheath_paid", 0, 0);
+  }
+
+  // Spatial mode: per-particle net-energy ledger. The potential impulse is
+  // conservative within a move, but the nearest wall element (and its phi
+  // profile) can change between moves, leaving a small circulation; cap the
+  // lifetime net gain at Z e phi_tot, the most a sheath can give an ion.
+  sheath_bank_custom = -1;
+  if (sheath_flag && !sheath_kick && !sheath_boundary) {
+    sheath_bank_custom = particle->find_custom((char *) "sheath_bank");
+    if (sheath_bank_custom < 0)
+      sheath_bank_custom = particle->add_custom((char *) "sheath_bank", 1, 0);
   }
 
   // Register per-particle plasma cache vectors.
@@ -1139,7 +1151,9 @@ void Update::cache_plasma_particles()
       double Er_c = 0.0, Ez_c = 0.0, Et_c = 0.0;
       bool have_e = false;
       if (write_e) {
-        have_e = pd->query_efield_at_point(x, Er_c, Ez_c, Et_c, icell_p, i);
+        // pd is null on the compute plasma/fields path; E then comes from
+        // the epar projection below (cp fills pf.epar from its mesh E)
+        have_e = pd && pd->query_efield_at_point(x, Er_c, Ez_c, Et_c, icell_p, i);
         if (!have_e && Bmag > 1.0e-30 && pf.epar != 0.0) {
           Er_c = pf.epar * bf.br / Bmag;
           Et_c = pf.epar * bf.bt / Bmag;

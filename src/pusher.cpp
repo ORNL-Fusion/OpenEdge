@@ -645,6 +645,10 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
 
   const double Brhs[3] = {B[0], B[2], B[1]};
 
+  // spatial-mode lifetime energy ledger (see registration in Update::init)
+  double *sh_bank_vec = (update->sheath_bank_custom >= 0)
+    ? particle->edvec[particle->ewhich[update->sheath_bank_custom]] : nullptr;
+
   for (int isub = 0; isub < nsub; isub++) {
 
     if (pusher_bad_dt_check && !pusher_bad_dt_warned) {
@@ -701,13 +705,33 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
             sh_coeffs, std::max(d_old, 0.0));
         const double phi_new = SheathModels::sheath_phi_at_distance(
             sh_coeffs, std::max(d_new, 0.0));
-        const double dKE_J =
+        double dKE_J =
             std::fabs(charge) * update->echarge * (phi_new - phi_old);
+        // lifetime ledger cap: net energy given may never exceed Z e phi_tot
+        if (sh_bank_vec && dKE_J > 0.0) {
+          const double room =
+              std::fabs(charge) * update->echarge * sh_phi_total
+              - sh_bank_vec[i];
+          if (dKE_J > room) dKE_J = (room > 0.0) ? room : 0.0;
+        }
         if (dKE_J != 0.0) {
           const double s2 = vn*vn + 2.0*dKE_J/mass;
-          const double vn_new = (s2 >= 0.0)
-              ? ((vn >= 0.0) ? std::sqrt(s2) : -std::sqrt(s2))
-              : -vn;   // turning point: elastic reflection
+          double vn_new;
+          if (s2 >= 0.0) {
+            vn_new = (vn >= 0.0) ? std::sqrt(s2) : -std::sqrt(s2);
+            if (sh_bank_vec) sh_bank_vec[i] += dKE_J;
+          } else {
+            // turning point: elastic reflection. Bounce the ledger AND the
+            // position back to d_old — the climb to d_new was never paid
+            // for, so keeping it would let the ion descend from unpaid
+            // height and pump energy on every bounce.
+            vn_new = -vn;
+            sh_d_cur = d_old;
+            if (!axi) {
+              xcur[0] -= (d_new - d_old) * sh_nR;
+              xcur[1] -= (d_new - d_old) * sh_nZ;
+            }
+          }
           const double dvn = vn_new - vn;
           vrhs[0] += dvn * sh_nR;
           vrhs[2] += dvn * sh_nZ;
@@ -1053,6 +1077,13 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
                     update->sheath_mD_amu, 0.0);
   }
 
+  // spatial-mode lifetime energy ledger + total potential for its cap
+  double *sh_bank_vec = (update->sheath_bank_custom >= 0)
+    ? particle->edvec[particle->ewhich[update->sheath_bank_custom]] : nullptr;
+  double sh_phi_tot_sp = 0.0;
+  if (sh_active && sh_bank_vec)
+    sh_phi_tot_sp = SheathModels::sheath_phi_at_distance(sh_coeffs, 0.0);
+
   // --- Sheath BOUNDARY mode: sub-grid potential barrier (prompt redep) ---
   // 3D port of the push_boris_2d barrier impulse: an outbound ion with
   // wall-normal KE below Z e phi_total reflects (cannot escape the sheath
@@ -1205,14 +1236,32 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
             sh_coeffs, std::max(d_old, 0.0));
         const double phi_new = SheathModels::sheath_phi_at_distance(
             sh_coeffs, std::max(d_new, 0.0));
-        const double dKE_J =
+        double dKE_J =
             std::fabs(charge) * update->echarge * (phi_new - phi_old);
+        // lifetime ledger cap: net energy given may never exceed Z e phi_tot
+        if (sh_bank_vec && dKE_J > 0.0) {
+          const double room =
+              std::fabs(charge) * update->echarge * sh_phi_tot_sp
+              - sh_bank_vec[i];
+          if (dKE_J > room) dKE_J = (room > 0.0) ? room : 0.0;
+        }
         if (dKE_J != 0.0) {
           const double vn = vcur[0]*sh_nx + vcur[1]*sh_ny + vcur[2]*sh_nz;
           const double s2 = vn*vn + 2.0*dKE_J/mass;
-          const double vn_new = (s2 >= 0.0)
-              ? ((vn >= 0.0) ? std::sqrt(s2) : -std::sqrt(s2))
-              : -vn;   // turning point: elastic reflection
+          double vn_new;
+          if (s2 >= 0.0) {
+            vn_new = (vn >= 0.0) ? std::sqrt(s2) : -std::sqrt(s2);
+            if (sh_bank_vec) sh_bank_vec[i] += dKE_J;
+          } else {
+            // turning point: elastic reflection. Bounce the position back
+            // to d_old — the climb to d_new was never paid for, so keeping
+            // it would let the ion descend from unpaid height and pump
+            // energy on every bounce.
+            vn_new = -vn;
+            xcur[0] -= (d_new - d_old) * sh_nx;
+            xcur[1] -= (d_new - d_old) * sh_ny;
+            xcur[2] -= (d_new - d_old) * sh_nz;
+          }
           const double dvn = vn_new - vn;
           vcur[0] += dvn * sh_nx;
           vcur[1] += dvn * sh_ny;

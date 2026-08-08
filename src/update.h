@@ -163,6 +163,8 @@ struct SurfHit2D {
   int sheath_boundary;         // 1 = sub-grid sheath-as-boundary (impact kick
                                //     + outbound potential-barrier reflection)
   int sheath_paid_custom;      // per-particle int "sheath_paid" flag index
+  int sheath_bank_custom;      // per-particle double net sheath-energy ledger
+                               //     (spatial mode: lifetime gain <= Z e phi_tot)
 
   // Incident macroparticle weight (pweight custom) for the surf collision
   // currently being tallied. surf_tally() receives the incident particle as
