@@ -119,6 +119,7 @@ class FixSurfaceEmitSource : public FixEmit {
   // disagree under MPI and flux_for_surface() returns 0.)
   double *flux_localghost;
   int     flux_n_localghost;
+  int     flux_spread_valid;   // 1 = spread flux is current (static upstream)
   std::vector<double> flux_owned_buf;
 
   // optional per-surf concentration multiplier on the flux (mixed layers):

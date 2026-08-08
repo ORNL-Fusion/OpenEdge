@@ -226,6 +226,7 @@ FixSurfaceEmitSource::FixSurfaceEmitSource(SPARTA *sparta, int narg, char **arg)
 
   flux_localghost = NULL;
   flux_n_localghost = 0;
+  flux_spread_valid = 0;
 
   dimension = domain->dimension;
   if (dimension == 3) cut3d = new Cut3d(sparta);
@@ -431,10 +432,12 @@ void FixSurfaceEmitSource::grid_changed()
 {
   create_tasks();
 
-  // task layout changed: invalidate cached source strengths
+  // task layout changed: invalidate cached source strengths and the
+  // spread flux (surf local+ghost layout may have changed)
   task_source_cached = 0;
   cached_task_source.clear();
   cached_source_total = 0.0;
+  flux_spread_valid = 0;
 
   // for mode CONSTANT, set per-task ntarget to area fraction
   if (npmode != FLOW) {
@@ -649,10 +652,21 @@ void FixSurfaceEmitSource::perform_task()
   Compute *c = NULL;
   if (!file_mode && !const_mode) {
     c = modify->compute[iflux];
-    c->compute_per_surf();
-    // spread per-rank-owned flux into a globally-replicated vector indexed
-    // by global isurf — canonical SPARTA pattern (Surf::spread_own2local)
-    spread_flux(c);
+    // static upstream: compute_per_surf() early-returns once cached, but the
+    // global spread (nsurf-sized reduce) is the expensive part at scale —
+    // skip both once the frozen flux is spread. Re-armed by grid_changed();
+    // all transitions are collective so ranks stay in lockstep.
+    auto *cpmi_s = dynamic_cast<ComputeSurfacePhysicalSputter *>(c);
+    const bool flux_frozen = cpmi_s && cpmi_s->is_static_cached() &&
+                             flux_spread_valid &&
+                             flux_n_localghost == surf->nlocal + surf->nghost;
+    if (!flux_frozen) {
+      c->compute_per_surf();
+      // spread per-rank-owned flux into a globally-replicated vector indexed
+      // by global isurf — canonical SPARTA pattern (Surf::spread_own2local)
+      spread_flux(c);
+      flux_spread_valid = 1;
+    }
   }
 
   // resolve per-surf Tsurf vector for thermal_tsurf model
