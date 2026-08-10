@@ -15,7 +15,8 @@ Alias: {recycle} (legacy style name, retained for back-compat).
 surf_react ID wall_pwi infile \
   [twall Twall | twall_surf attr_name] \
   [trim_dir path] \
-  [R_surf attr_name] :pre
+  [R_surf attr_name] \
+  [ehist file nbins emax_eV every] :pre
 
 ID = user-assigned name for the surface reaction model :ulb,l
 infile = file listing per-channel surface reactions :l
@@ -23,9 +24,18 @@ zero or more keyword/value pairs may be appended :l
   {twall} Twall = scalar wall temperature in Kelvin (for re-emission Maxwellians and rovib)
   {twall_surf} attr_name = name of a per-surf custom attribute (SPARTA custom surf) carrying per-element wall temperature
   {trim_dir} path = directory containing BCA reflection tables as HDF5 (required if any T-type reaction is used)
-  {R_surf} attr_name = name of a per-surf custom attribute carrying per-element recycling coefficient R (overrides the R value in A-type reactions) :pre
+  {R_surf} attr_name = name of a per-surf custom attribute carrying per-element recycling coefficient R (overrides the R value in A-type reactions)
+  {ehist} file nbins emax_eV every = tally impact energy and angle histograms to file: nbins energy bins from 0 to emax_eV (overflow in last bin), fixed 5-degree angle bins, appended every N steps :pre
 
 :ule
+
+The {ehist} keyword records pweight-weighted histograms of the incident
+energy and incident angle (from the surface normal) of every particle
+impact on the reacting surfaces, split into all impacts and impacts that
+sputtered at least one atom. Blocks are appended to the file every {every}
+steps and reset, so each block is a time window; sum blocks for cumulative
+spectra. Lines are "E <bin_center_eV> <w_all> <w_sput>" and
+"A <bin_center_deg> <w_all> <w_sput>", preceded by a "# step ..." header.
 
 [Examples:]
 
