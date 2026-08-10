@@ -209,8 +209,19 @@ class SurfReactSurfacePWI : public SurfReact {
   std::map<std::string,int> sput_index;
   int load_or_get_sputter_table(const char *name);
 
-  void emit_sputtered(Particle::OnePart *&ip, int isurf, double *norm,
-                      double E_in_eV, double theta_in_deg);
+  int emit_sputtered(Particle::OnePart *&ip, int isurf, double *norm,
+                     double E_in_eV, double theta_in_deg);
+
+  // ehist: pweight-weighted incident (E,theta) histograms of wall impacts,
+  // all impacts vs impacts that sputtered; windowed blocks appended to
+  // ehist_file every ehist_every steps
+  static const int EHIST_NANG = 18;       // 5-degree angle bins, 0-90
+  char *ehist_file;
+  int ehist_nbin, ehist_every;
+  double ehist_emax;
+  double *ehist_all, *ehist_sput, *ahist_all, *ahist_sput;
+  void ehist_accumulate(double E_eV, double theta_deg, double pw, int sput);
+  void ehist_write();
 
   void init_reactions();
   void readfile(char *);

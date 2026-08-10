@@ -120,6 +120,9 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   substrate_isp = -1;
   dep_delta = dep_buf = NULL;
   trim_dir.clear();
+  ehist_file = NULL;
+  ehist_all = ehist_sput = ahist_all = ahist_sput = NULL;
+  ehist_nbin = 0; ehist_every = 0; ehist_emax = 0.0;
 
   // parse keyword options BEFORE reading reactions file, so that the
   // reaction parser can resolve `T <table_name>` entries against
@@ -149,6 +152,22 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       R_attr = new char[n];
       strcpy(R_attr, arg[iarg+1]);
       iarg += 2;
+    } else if (strcmp(arg[iarg],"ehist") == 0) {
+      // impact histograms: ehist <file> <nbins_E> <emax_eV> <every>
+      if (iarg+5 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      int n = strlen(arg[iarg+1]) + 1;
+      ehist_file = new char[n];
+      strcpy(ehist_file,arg[iarg+1]);
+      ehist_nbin = input->inumeric(FLERR,arg[iarg+2]);
+      ehist_emax = input->numeric(FLERR,arg[iarg+3]);
+      ehist_every = input->inumeric(FLERR,arg[iarg+4]);
+      if (ehist_nbin < 1 || ehist_emax <= 0.0 || ehist_every < 1)
+        error->all(FLERR,"surf_react surface/pwi ehist: bad parameters");
+      ehist_all = new double[ehist_nbin]();
+      ehist_sput = new double[ehist_nbin]();
+      ahist_all = new double[EHIST_NANG]();
+      ahist_sput = new double[EHIST_NANG]();
+      iarg += 5;
     } else if (strcmp(arg[iarg],"adens_surf") == 0 ||
                strcmp(arg[iarg],"sigma_surf") == 0) {
       // WallDYN-style areal-density accounting (adens = areal density).
@@ -325,6 +344,11 @@ SurfReactSurfacePWI::~SurfReactSurfacePWI()
   delete [] twall_attr;
   delete [] R_attr;
   delete [] sigma_attr;
+  delete [] ehist_file;
+  delete [] ehist_all;
+  delete [] ehist_sput;
+  delete [] ahist_all;
+  delete [] ahist_sput;
   memory->destroy(sigma_delta);
   memory->destroy(sigma_buf);
   memory->destroy(sigma_area);
@@ -635,12 +659,13 @@ void SurfReactSurfacePWI::init()
    ip (by reference) and re-index the pweight custom.
 ------------------------------------------------------------------------- */
 
-void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
-                                         double *norm, double E_in_eV,
-                                         double theta_in_deg)
+int SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
+                                        double *norm, double E_in_eV,
+                                        double theta_in_deg)
 {
   int n = reactions[ip->ispecies].n;
-  if (n == 0) return;
+  if (n == 0) return 0;
+  int nemit_total = 0;
   int *list = reactions[ip->ispecies].list;
 
   // incident pweight (real atoms this macroparticle represents)
@@ -702,6 +727,7 @@ void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
     double Emax = gamma * E_in_eV - p.Es;
     if (Emax <= 0.0) continue;                   // incident too soft to eject
 
+    nemit_total += nemit;
     for (int k = 0; k < nemit; k++) {
       double E_eV = pwi_sample_thompson(p.Es, Emax, random);  // Ub, cutoff
       double x[3], v[3];
@@ -725,6 +751,7 @@ void SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
     if (sindex_custom >= 0)
       sigma_accumulate(isurf, sp, -((double) nemit) * pw_inc);
   }
+  return nemit_total;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -773,7 +800,13 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
   // Additive self-sputtering: emit sputtered atoms BEFORE the reflect/absorb
   // lottery (uses the intact incident state). May add particles and thus
   // re-point ip (handled by reference).
-  emit_sputtered(ip, isurf, norm, E_in_eV, theta_in_deg);
+  int nsput = emit_sputtered(ip, isurf, norm, E_in_eV, theta_in_deg);
+  if (ehist_file) {
+    double pw_hist = update->fnum;
+    if (pweight_ewhich >= 0)
+      pw_hist = particle->edvec[particle->ewhich[pweight_ewhich]][ip - particle->particles];
+    ehist_accumulate(E_in_eV, theta_in_deg, pw_hist, nsput > 0);
+  }
 
   OneReaction *r;
 
@@ -1304,6 +1337,8 @@ void SurfReactSurfacePWI::tally_update()
   SurfReact::tally_update();
   if (sindex_custom >= 0 && update->ntimestep % sigma_nevery == 0)
     sync_sigma();
+  if (ehist_file && ehist_every > 0 &&
+      update->ntimestep % ehist_every == 0) ehist_write();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -2001,3 +2036,64 @@ int SurfReactSurfacePWI::readone(char *line1, char *line2, int &n1, int &n2)
   n2 = strlen(line2) + 1;
   return 0;
 }
+
+/* ----------------------------------------------------------------------
+   ehist: accumulate one wall impact into the (E,theta) histograms
+------------------------------------------------------------------------- */
+
+void SurfReactSurfacePWI::ehist_accumulate(double E_eV, double theta_deg,
+                                           double pw, int sput)
+{
+  int ie = (int) (E_eV / ehist_emax * ehist_nbin);
+  if (ie < 0) ie = 0;
+  if (ie >= ehist_nbin) ie = ehist_nbin - 1;   // overflow -> last bin
+  int ia = (int) (theta_deg / 5.0);
+  if (ia < 0) ia = 0;
+  if (ia >= EHIST_NANG) ia = EHIST_NANG - 1;
+  ehist_all[ie] += pw;
+  ahist_all[ia] += pw;
+  if (sput) {
+    ehist_sput[ie] += pw;
+    ahist_sput[ia] += pw;
+  }
+}
+
+/* ----------------------------------------------------------------------
+   ehist: reduce across ranks, append a windowed block, reset local bins
+------------------------------------------------------------------------- */
+
+void SurfReactSurfacePWI::ehist_write()
+{
+  int ntot = 2*ehist_nbin + 2*EHIST_NANG;
+  double *loc = new double[ntot];
+  double *glob = new double[ntot];
+  for (int i = 0; i < ehist_nbin; i++) {
+    loc[i] = ehist_all[i];
+    loc[ehist_nbin+i] = ehist_sput[i];
+  }
+  for (int i = 0; i < EHIST_NANG; i++) {
+    loc[2*ehist_nbin+i] = ahist_all[i];
+    loc[2*ehist_nbin+EHIST_NANG+i] = ahist_sput[i];
+  }
+  MPI_Reduce(loc,glob,ntot,MPI_DOUBLE,MPI_SUM,0,world);
+  if (comm->me == 0) {
+    FILE *fp = fopen(ehist_file,"a");
+    if (fp) {
+      fprintf(fp,"# step %ld nbin %d emax %g nang %d dang 5\n",
+              (long) update->ntimestep, ehist_nbin, ehist_emax, EHIST_NANG);
+      for (int i = 0; i < ehist_nbin; i++)
+        fprintf(fp,"E %g %.6e %.6e\n",
+                (i+0.5)*ehist_emax/ehist_nbin, glob[i], glob[ehist_nbin+i]);
+      for (int i = 0; i < EHIST_NANG; i++)
+        fprintf(fp,"A %g %.6e %.6e\n",
+                (i+0.5)*5.0, glob[2*ehist_nbin+i],
+                glob[2*ehist_nbin+EHIST_NANG+i]);
+      fclose(fp);
+    }
+  }
+  for (int i = 0; i < ehist_nbin; i++) ehist_all[i] = ehist_sput[i] = 0.0;
+  for (int i = 0; i < EHIST_NANG; i++) ahist_all[i] = ahist_sput[i] = 0.0;
+  delete [] loc;
+  delete [] glob;
+}
+
