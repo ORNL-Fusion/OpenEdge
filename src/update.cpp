@@ -561,16 +561,18 @@ void Update::init()
   // guiding-center custom particle attributes). Body in pusher.cpp.
   pusher->init();
 
-  // Enable the spatial-sheath per-wall-element coefficient cache only when
-  // the sheath E-field is applied in the pusher (spatial mode, not kick)
-  // and the plasma is a static fix background — the only case where the
-  // per-element coefficients are truly invariant across steps. Any other
-  // plasma source keeps the per-particle path.
+  // Enable the spatial-sheath per-wall-element coefficient cache when the
+  // sheath E-field is applied in the pusher (spatial mode, not kick) and
+  // the plasma is a fix background. The background can only change at run
+  // init (FixBackground::reload fires from init only), and the cache is
+  // cleared right here each init — so the per-element coefficients are
+  // invariant for the duration of any run segment, static or not. Any
+  // other plasma source keeps the per-particle path.
   pusher->sheath_cache_enabled = 0;
   pusher->sheath_cache.clear();
   if (sheath_flag && !sheath_kick && pusher->pusher_plasma_fidx >= 0) {
     auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher->pusher_plasma_fidx]);
-    if (pd && pd->is_static) pusher->sheath_cache_enabled = 1;
+    if (pd) pusher->sheath_cache_enabled = 1;
   }
   // Escape hatch to force the per-particle sheath path (A/B validation
   // and benchmarking): set OE_NO_SHEATH_CACHE in the environment.
