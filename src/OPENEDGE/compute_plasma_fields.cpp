@@ -42,7 +42,8 @@ enum {
   VR, VT, VZ, VX, VY,
   TI, TE, NI, NE, PARRFLOW, EPAR,
   GRAD_TE_R, GRAD_TE_T, GRAD_TE_Z, GRAD_TI_R, GRAD_TI_T, GRAD_TI_Z,
-  GRAD_NE_R, GRAD_NE_Z
+  GRAD_NE_R, GRAD_NE_Z,
+  GRAD_TE_MAG, SEPDIST
 };
 
 /* ---------------------------------------------------------------------- */
@@ -228,6 +229,8 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
     else if (strcmp(arg[iarg],"grad_ti_z")==0) value[iv] = GRAD_TI_Z;
     else if (strcmp(arg[iarg],"grad_ne_r")==0) value[iv] = GRAD_NE_R;
     else if (strcmp(arg[iarg],"grad_ne_z")==0) value[iv] = GRAD_NE_Z;
+    else if (strcmp(arg[iarg],"grad_te_mag")==0) value[iv] = GRAD_TE_MAG;
+    else if (strcmp(arg[iarg],"sepdist")==0)   value[iv] = SEPDIST;
     else error->all(FLERR,"Illegal plasma/fields value");
   }
 
@@ -322,6 +325,7 @@ void ComputePlasmaFields::init()
       error->all(FLERR, msg);
     }
     auto *pd = dynamic_cast<FixBackground*>(modify->fix[ifix]);
+    bg_fix_ = pd;
     if (!pd)
       error->all(FLERR,
         "compute plasma/fields: background fix must be style background");
@@ -913,6 +917,23 @@ void ComputePlasmaFields::compute_per_grid()
         case GRAD_TI_Z: vout = P.grad_temp_i_z; break;
         case GRAD_NE_R: vout = P.grad_dens_e_r; break;
         case GRAD_NE_Z: vout = P.grad_dens_e_z; break;
+        case GRAD_TE_MAG:
+          vout = std::sqrt(P.grad_temp_e_r*P.grad_temp_e_r +
+                           P.grad_temp_e_z*P.grad_temp_e_z);
+          break;
+        case SEPDIST: {
+          // |psiN - 1| at the cell center: adapt_grid `thresh less` on this
+          // refines a separatrix-following band
+          const Grid::ChildCell &cc = cells[icell];
+          const double xyzc[3] = {0.5*(cc.lo[0]+cc.hi[0]),
+                                  0.5*(cc.lo[1]+cc.hi[1]),
+                                  (dim==3) ? 0.5*(cc.lo[2]+cc.hi[2]) : 0.0};
+          double Rc2, Zc2;
+          OpenEdge::sparta_to_RZ(xyzc, dim, domain->axisymmetric, Rc2, Zc2,
+                                 plasma_data.column_x0, plasma_data.column_y0);
+          vout = bg_fix_ ? std::fabs(bg_fix_->psi_norm_at(Rc2, Zc2) - 1.0)
+                         : 1.0e30;
+          break; }
         default:        vout = 0.0; break;
       }
       if (nvalue == 1) vector_grid[icell] = vout;

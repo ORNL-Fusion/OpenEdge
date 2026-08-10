@@ -150,7 +150,10 @@ struct MagneticFieldFileDataParams {
   double dBmag_dr, dBmag_dz;
 };
 
+class FixBackground;
+
 class ComputePlasmaFields : public Compute {
+  FixBackground *bg_fix_ = nullptr;   // background provider (background mode)
  public:
   ComputePlasmaFields(class SPARTA *, int, char **);
   ~ComputePlasmaFields();
