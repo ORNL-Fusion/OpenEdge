@@ -34,6 +34,13 @@ class ComputeSurfacePhysicalSputter : public Compute {
   // Consumers can use this to skip re-deriving downstream quantities.
   bool is_static_cached() const { return static_cache && cache_valid; }
 
+  // Like is_static_cached(), but false in compound mode: there the cached
+  // yields are re-interpolated at the live per-surf concentration every
+  // invocation, so downstream flux is never frozen.
+  bool flux_is_frozen() const {
+    return static_cache && cache_valid && compound_mix.empty();
+  }
+
  protected:
   enum {
     NFLUX_SPECIES,

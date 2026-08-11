@@ -657,7 +657,7 @@ void FixSurfaceEmitSource::perform_task()
     // skip both once the frozen flux is spread. Re-armed by grid_changed();
     // all transitions are collective so ranks stay in lockstep.
     auto *cpmi_s = dynamic_cast<ComputeSurfacePhysicalSputter *>(c);
-    const bool flux_frozen = cpmi_s && cpmi_s->is_static_cached() &&
+    const bool flux_frozen = cpmi_s && cpmi_s->flux_is_frozen() &&
                              flux_spread_valid &&
                              flux_n_localghost == surf->nlocal + surf->nghost;
     if (!flux_frozen) {
@@ -703,7 +703,7 @@ void FixSurfaceEmitSource::perform_task()
     auto *cpmi = (file_mode || const_mode) ? NULL
                                             : dynamic_cast<ComputeSurfacePhysicalSputter *>(c);
     const bool upstream_static = file_mode || const_mode ||
-                                 (cpmi && cpmi->is_static_cached());
+                                 (cpmi && cpmi->flux_is_frozen());
 
     if (upstream_static && task_source_cached &&
         static_cast<int>(cached_task_source.size()) == ntask) {

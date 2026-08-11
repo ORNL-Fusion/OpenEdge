@@ -75,7 +75,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
     // Listed keywords start the option loop below. Anything not in this
     // set is treated as a positional surface.h5 path (legacy).
     static const char *kws[] = {
-        "target", "projectiles", "compound", "conc",
+        "target", "projectiles", "compound", "conc", "roughness_dm",
         "projectile_slots", "static", "mass_amu",
         "nflux_species", "incident_angle_species", "incident_energy_species",
         "sputter_yield_species", "sputter_flux_species",
