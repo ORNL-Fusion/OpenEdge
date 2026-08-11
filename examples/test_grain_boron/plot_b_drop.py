@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
 ROOT = Path(__file__).resolve().parent
-WEST = ROOT / ".." / "test_west_cases" / "input"
+WEST = ROOT / ".." / "test_west" / "input"
 
 # boron sublimation flux (matches grain_material.cpp: log10 p[atm] = a+b/T)
 A_ANT, B_ANT, M_AMU = 8.64, -32030.0, 10.81

@@ -3,7 +3,7 @@
 # (Afonin et al., Nucl. Fusion 63 (2023) 126057: IPD injection at
 # R = 2.6 m, Z = 0.7 m, d = 150 um B powder falling vertically).
 #
-# Background: the test_west_cases 1.5 MW SOLEDGE-EIRENE plasma.
+# Background: the test_west 1.5 MW SOLEDGE-EIRENE plasma.
 # Grains: material B — OML heating, radiative cooling, melting band,
 # sublimation; vapor spawned as kinetic B atoms, ionised to B+ (ADAS).
 # Axisymmetric mode: x = Z [m], y = R [m]; B sticks where it lands
@@ -38,9 +38,9 @@ mixture     bvapor B frac 1.0
 mixture     allB B B+
 
 # ---- geometry (WEST wall + core absorb, axi layout) ------------------
-read_surf   ../test_west_cases/input/wall_fine.surf &
+read_surf   ../test_west/input/wall_fine.surf &
             group wall particle check
-read_surf   ../test_west_cases/input/core.surf group core
+read_surf   ../test_west/input/core.surf group core
 
 # IPD dropper = top-shelf wall segments at Z = 0.749, R 2.57-2.63
 # (Afonin injection point R_inj = 2.6 m); ids from wall_fine.surf
@@ -51,7 +51,7 @@ surf_modify  wall collide vac
 surf_modify  core collide vac
 
 # ---- WEST SOLEDGE background ----------------------------------------
-fix pd background file ../test_west_cases/input/plasma.h5 &
+fix pd background file ../test_west/input/plasma.h5 &
     static yes
 global      pcache_nevery 10
 
