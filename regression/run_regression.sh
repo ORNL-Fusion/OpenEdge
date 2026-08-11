@@ -80,18 +80,8 @@ declare -a TESTS=(
   "grain_boron_west|test_grain_boron|in.b_west_drop|../test_west/input/plasma.h5"
   "west_axi_emission|test_west|in.axi_west_emission|input/plasma.h5"
   "constant_flux|test_constant_flux|in.constant_flux|"
-  "diii_d_neutrals_axi|test_diii_d_neutrals_axi|in.diii_d_neutrals_axi|"
   "pusher_gca|test_gca_vs_boris|in.gca|"
   "pusher_boris|test_gca_vs_boris|in.boris|"
-  "slab_cx|test_neutral_slab|in.slab_cx|input/plasma_cx.h5"
-  "slab_cx_0d|test_neutral_slab|in.slab_cx_0d|"
-  "slab_diss|test_neutral_slab|in.slab_diss|"
-  "slab_iz|test_neutral_slab|in.slab_iz|"
-  "slab_recycle|test_neutral_slab|in.slab_recycle|"
-  "redep_naujoks_single|test_redeposition/naujoks_nf_1996|in.naujoks_single|"
-  "redep_naujoks_multi|test_redeposition/naujoks_nf_1996|in.naujoks_multi|"
-  "redep_chankin_single|test_redeposition/chankin_ppcf_2014|in.chankin_single|"
-  "redep_chankin_multi|test_redeposition/chankin_ppcf_2014|in.chankin_multi|"
 )
 
 # -----------------------------------------------------------------------

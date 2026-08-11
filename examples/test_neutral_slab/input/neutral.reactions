@@ -1,4 +1,0 @@
-# Ionization-only reactions for 1-D slab verification.
-# D + e -> D+ + 2e   (ADAS SCD89 H, Z=1)
-D --> D+
-I A 1.0 0.0 0.0 0.0 0.0

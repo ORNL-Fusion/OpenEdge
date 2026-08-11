@@ -150,3 +150,9 @@ examples/test_tsurf_emission/jeremy_cases_generated*/
 # Per-test READMEs are local-only notes
 examples/test_*/README.md
 examples/test_st40_li_dropper/*.html
+
+# local-only cases (neutral transport WIP + slag R&D)
+examples/test_neutral_slab/
+examples/test_diii_d_neutrals_axi/
+examples/test_redeposition/
+examples/test_slag/
