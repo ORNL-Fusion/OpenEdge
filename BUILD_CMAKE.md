@@ -46,6 +46,11 @@ cmake -C /path/to/<NAME>.cmake /path/to/sparta/cmake
   * Whether to enable the SPARTA KOKKOS package.
 * PKG_MPI_STUBS
   * Whether to enable the SPARTA MPI_STUBS package.
+* PKG_OPENEDGE
+  * Whether to enable the OpenEdge package (required for OpenEdge builds).
+* PKG_VTK
+  * Whether to enable the VTK dump package (`grid/vtk`, `surf/vtk`,
+    `particle/vtk` styles). Requires an external VTK >= 7.1.
 
 ## Third Party Library (TPL) options
 * BUILD_KOKKOS
