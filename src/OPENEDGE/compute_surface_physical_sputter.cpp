@@ -131,6 +131,8 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
   mass_amu = 2.0;  // default: deuterium (used for Bohm sound speed)
   static_cache = 0;
   cache_valid = 0;
+  files_loaded = 0;
+  last_bg_generation = -1;
   has_impurity = 0;
   imp_mass_amu = 0.0;
   imp_frac = 0.0;
@@ -589,7 +591,9 @@ void ComputeSurfacePhysicalSputter::load_plasma_from_fix(const FixBackground *pd
 
   // New target/projectiles API: build per-projectile Eckstein table set and
   // map plasma ion slots to the correct table via /ion_species/elements.
-  if (api_new) resolve_projectile_tables(pd);
+  // yield tables depend on the species list, not plasma values — resolve
+  // once; plasma reloads (sweep rungs) reuse them
+  if (api_new && !files_loaded) resolve_projectile_tables(pd);
 }
 
 /* ----------------------------------------------------------------------
@@ -1273,17 +1277,35 @@ void ComputeSurfacePhysicalSputter::init()
         "compute surface/physical/sputter: target/projectiles API requires "
         "background <fix_id> (HDF5 file mode not supported)");
 
-  cache_valid = 0;
-  slices_valid = 0;
   conc_index = -1;
 
-  try {
-    load_plasma();
-  } catch (const std::exception& e) {
-    error->all(FLERR, e.what());
-  } catch (...) {
-    error->all(FLERR, "compute surface/physical/sputter failed reading plasma file");
+  // SPARTA convention: heavy data loads once; init() only re-wires.
+  // Plasma slices and yield caches refresh only when the upstream
+  // background actually reloaded (fix bumps `generation`), so repeated
+  // run blocks on a static background cost nothing here.
+  FixBackground *bgfix = nullptr;
+  if (!background_fix_id.empty()) {
+    int ifix = modify->find_fix(background_fix_id.c_str());
+    if (ifix >= 0) bgfix = dynamic_cast<FixBackground *>(modify->fix[ifix]);
   }
+  const bool plasma_stale = !files_loaded ||
+      (bgfix && bgfix->generation != last_bg_generation);
+
+  if (plasma_stale) {
+    cache_valid = 0;
+    slices_valid = 0;
+    try {
+      load_plasma();
+    } catch (const std::exception& e) {
+      error->all(FLERR, e.what());
+    } catch (...) {
+      error->all(FLERR, "compute surface/physical/sputter failed reading plasma file");
+    }
+    // read generation after load_plasma: it may init() the fix and bump it
+    last_bg_generation = bgfix ? bgfix->generation : 0;
+  }
+
+  if (!files_loaded) {
 
   // Load B-field from separate file if not already available.
   // In background mode we stay file-free unless the user explicitly
@@ -1394,6 +1416,9 @@ void ComputeSurfacePhysicalSputter::init()
       error->all(FLERR, e.what());
     }
   }
+
+  files_loaded = 1;
+  }  // end one-time file loads
 
   if (!has_bfield)
     error->all(FLERR,

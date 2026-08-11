@@ -59,6 +59,8 @@ class ComputeSurfacePhysicalSputter : public Compute {
   int nsown;
   int static_cache;
   int cache_valid;
+  int files_loaded;        // one-time file loads done (SPARTA ctor-load convention)
+  int last_bg_generation;  // background fix generation at last plasma copy
   int *which;
   int *which_species;   // 1-based species slot for species-specific outputs
   std::string plasma_path;
