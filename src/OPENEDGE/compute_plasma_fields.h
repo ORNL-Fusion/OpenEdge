@@ -40,10 +40,6 @@ struct PlasmaFileData{
   // Optional heat flux stored inside plasma.h5 (q_mag dataset).
   bool has_qmag = false;
   std::vector<std::vector<double>> q_mag;
-  // Optional B-field stored inside plasma.h5 (br, bt, bz datasets).
-  // When present these override the separate bfield.h5 for mag_arr.
-  bool has_bfield = false;
-  std::vector<std::vector<double>> br, bt, bz;
   // Optional mesh triangulation from plasma.h5 (SOLPS cell data)
   bool has_mesh = false;
   int mesh_nvtx = 0, mesh_ntri = 0, mesh_ncell = 0;
@@ -114,6 +110,7 @@ struct PlasmaFileParams {
 struct EquilibriumData {
   int jm = 0, km = 0;                          // grid dimensions (R, Z)
   double btf = 0.0, rtf = 0.0, psib = 0.0;     // toroidal field params
+  double psi_axis = 0.0;                       // psi at magnetic axis (for psiN)
   std::vector<double> r, z;                      // 1D coordinate arrays [m]
   std::vector<std::vector<double>> psi;          // ψ(Z,R) on grid [km x jm]
 };
@@ -126,15 +123,7 @@ struct MagneticGeometry {
   double Bmag;        // |B|
 };
 
-// Structs for magnetic field data and parameters
-struct MagneticFieldFileData {
-  std::vector<double> r;   
-  std::vector<double> z;  
-  std::vector<std::vector<double>> br;
-  std::vector<std::vector<double>> bt;
-  std::vector<std::vector<double>> bz;
-};
-
+// Per-point B-field sample (+ derivatives where the source provides them)
 struct MagneticFieldFileDataParams {
   double br;
   double bt;
@@ -182,6 +171,10 @@ class ComputePlasmaFields : public Compute {
   void reload_plasma();
   void reload_plasma(const std::string &new_plasma_path);
 
+  // psiN from this compute's own equilibrium copy (any input mode).
+  // Returns 1e30 when no valid equilibrium is loaded.
+  double psi_norm_from_equ(double R, double Z) const;
+
 PlasmaFileParams *plasma_arr;   // size = grid->nlocal
 PlasmaFileData plasma_data;
 void broadcastPlasmaData(PlasmaFileData& data);
@@ -201,11 +194,6 @@ std::vector<double> ion_parr_flow_t_grid;
 std::vector<double> ion_parr_flow_z_grid;
 
 MagneticFieldFileDataParams *mag_arr;
-MagneticFieldFileData magnetic_data;
-  void broadcastMagneticData(MagneticFieldFileData& data);
-MagneticFieldFileData readMagneticFieldFileData(const std::string& filePath);
-MagneticFieldFileDataParams bilinearInterpolationMagneticField(
-    int icell, const MagneticFieldFileData &data);
 PlasmaFileParams bilinearInterpolationPlasma(
     int icell, const PlasmaFileData &data);
 int findMeshTriangle(const PlasmaFileData &data, double r, double z) const;
@@ -232,8 +220,8 @@ protected:
   InputMode input_mode = MODE_FILE;
 
 int nglocal,groupbit;
+int sample_stale;   // grid changed since per-cell arrays were sampled (adapt/balance)
 std::string plasmaStatePath;
-std::string magneticFieldsPath;
 std::string background_fix_id;  // fix ID for background mode
 double bconst[3];
 double econst[3];
@@ -256,7 +244,6 @@ int analytic_use_y0;
 int nvalue;        // number of requested outputs (columns)
 int *value;        // which outputs (enum)
 std::vector<BilinearStencil> plasma_stencil;
-std::vector<BilinearStencil> magnetic_stencil;
   BilinearStencil makeStencilAtPoint(
       const double xyz[3],
       const std::vector<double> &r_vals,

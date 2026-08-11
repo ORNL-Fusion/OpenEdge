@@ -102,9 +102,10 @@ class FixBackground : public Fix {
   double default_q_par;   // W/m^2 fallback when has_qheatflux=0 (50e6)
   double default_q_perp;  // W/m^2 fallback when has_qheatflux=0 (0)
 
-  // ---- Magnetic field on plasma grid ----
+  // ---- Magnetic field availability ----
+  // true when ANY B source is loaded: mesh vtx_b*, equilibrium psi, or
+  // constant scalars. bfield_at() dispatches in that priority order.
   int has_bfield;
-  std::vector<double> br, bz, bt;
 
   // ---- Multi-ion species data ----
   int nion;
@@ -261,7 +262,10 @@ class FixBackground : public Fix {
   void load_plasma_h5();
   void load_constant_profile();
   void load_equilibrium();
-  void derive_bfield_from_equ();
+  // pointwise psi-derived B (Br,-Bz,Bt) from the loaded equilibrium;
+  // false when no usable equilibrium
+  bool equ_bfield_at(double R, double Z,
+                     double &Br_out, double &Bz_out, double &Bt_out) const;
   void build_mesh_index();
   bool point_in_mesh_triangle(int tri, double R, double Z,
                               double edge_margin) const;

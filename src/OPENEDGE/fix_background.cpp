@@ -461,11 +461,6 @@ void FixBackground::reload()
     grad_ti_t.resize(grid_n);
     grad_ti_z.resize(grid_n);
     epar.resize(grid_n);
-    if (has_bfield) {
-      br.resize(grid_n);
-      bz.resize(grid_n);
-      bt.resize(grid_n);
-    }
     if (nion > 0) {
       ion_charge_z.resize(nion);
       ion_mass_amu.resize(nion);
@@ -538,11 +533,6 @@ void FixBackground::reload()
     } else q_perp.clear();
   }
 
-  if (has_bfield) {
-    MPI_Bcast(br.data(), grid_n, MPI_DOUBLE, 0, world);
-    MPI_Bcast(bz.data(), grid_n, MPI_DOUBLE, 0, world);
-    MPI_Bcast(bt.data(), grid_n, MPI_DOUBLE, 0, world);
-  }
 
   if (nion > 0) {
     MPI_Bcast(ion_charge_z.data(), nion, MPI_INT, 0, world);
@@ -719,10 +709,8 @@ void FixBackground::reload()
     } catch (const std::exception &e) {
       error->all(FLERR, e.what());
     }
-    // Derive B-field if not already in plasma.h5
-    if (!has_bfield) {
-      derive_bfield_from_equ();
-    }
+    // Equilibrium now serves B directly through bfield_at()/equ_bfield_at()
+    if (!has_bfield && has_equ) has_bfield = 1;
   }
 
   if (has_mesh) build_mesh_index();
@@ -755,11 +743,11 @@ void FixBackground::reload()
         fprintf(screen, "mesh %d tri / %d cell / %d vtx, ",
                 mesh_ntri, mesh_ncell, mesh_nvtx);
       }
-      // bfield source: "grid" = legacy regular-grid br/bz datasets;
-      // "mesh" = per-vertex mesh/vtx_b* from the new converters; "no" = neither.
+      // bfield source: mesh per-vertex vtx_b*, equilibrium psi, constant
+      // scalars, or none (the legacy regular-grid raster is gone)
       const char *bf_src =
-          has_bfield ? "grid"
-          : (!mesh_tri_br.empty() ? "mesh" : "no");
+          !mesh_tri_br.empty() ? "mesh"
+          : (has_equ ? "equ" : (const_has_bfield ? "const" : "no"));
       fprintf(screen,
         "%d ion species, bfield=%s, equ=%s, gen=%d\n",
         nion, bf_src,
@@ -823,9 +811,6 @@ void FixBackground::clear_loaded_data()
   q_par.clear();
   q_perp.clear();
   has_qheatflux = 0;
-  br.clear();
-  bz.clear();
-  bt.clear();
   ion_charge_z.clear();
   ion_mass_amu.clear();
   ion_names.clear();
@@ -933,12 +918,8 @@ void FixBackground::load_constant_profile()
   grad_ti_z.assign(n, const_grad_ti_z);
   epar.assign(n, const_epar);
 
+  // constant-B scalars are consumed directly by bfield_at()/query_bfield_*
   has_bfield = const_has_bfield;
-  if (has_bfield) {
-    br.assign(n, const_br);
-    bz.assign(n, const_bz);
-    bt.assign(n, const_bt);
-  }
 
   if (screen) {
     fprintf(screen,
@@ -1574,55 +1555,6 @@ void FixBackground::load_equilibrium()
       equ_jm, equ_km, btf, rtf, psib, psi_axis);
 }
 
-/* ---------------------------------------------------------------------- */
-
-void FixBackground::derive_bfield_from_equ()
-{
-  if (!has_equ || nr == 0 || nz == 0) return;
-
-  size_t n = static_cast<size_t>(nz) * nr;
-  br.resize(n);
-  bz.resize(n);
-  bt.resize(n);
-
-  double dr_eq = equ_r[1] - equ_r[0];
-  double dz_eq = equ_z[1] - equ_z[0];
-
-  auto interp_psi = [&](double R, double Z) -> double {
-    double fi = (R - equ_r.front()) / dr_eq;
-    double fj = (Z - equ_z.front()) / dz_eq;
-    int i0 = std::max(0, std::min((int)fi, equ_jm - 2));
-    int j0 = std::max(0, std::min((int)fj, equ_km - 2));
-    double s = std::max(0.0, std::min(1.0, fi - i0));
-    double t = std::max(0.0, std::min(1.0, fj - j0));
-    return (1-s)*(1-t)*psirz[j0*equ_jm+i0] + s*(1-t)*psirz[j0*equ_jm+i0+1]
-         + (1-s)*t*psirz[(j0+1)*equ_jm+i0] + s*t*psirz[(j0+1)*equ_jm+i0+1];
-  };
-
-  double eps = 1e-4;
-  for (int iz = 0; iz < nz; iz++) {
-    for (int ir = 0; ir < nr; ir++) {
-      double R = rvals[ir];
-      double Z = zvals[iz];
-      size_t idx = static_cast<size_t>(iz) * nr + ir;
-
-      if (R < 0.01) { br[idx] = bz[idx] = bt[idx] = 0.0; continue; }
-
-      double dpsi_dz = (interp_psi(R, Z + eps) - interp_psi(R, Z - eps)) / (2.0 * eps);
-      br[idx] = -dpsi_dz / R;
-
-      double dpsi_dr = (interp_psi(R + eps, Z) - interp_psi(R - eps, Z)) / (2.0 * eps);
-      bz[idx] = dpsi_dr / R;
-
-      bt[idx] = btf * rtf / R;
-    }
-  }
-
-  has_bfield = 1;
-
-  if (comm->me == 0 && screen)
-    fprintf(screen, "  B-field derived from equilibrium on %d x %d grid\n", nr, nz);
-}
 
 /* ---------------------------------------------------------------------- */
 
@@ -2108,10 +2040,9 @@ void FixBackground::bfield_at(double R, double Z,
                                double &Bt_out, int icell, int iparticle) const
 {
   // Mesh-native B from plasma.h5 mesh/vtx_b* (vertex-averaged per
-  // triangle) takes precedence when loaded. New converters emit B only
-  // on the unstructured mesh; the regular-grid br/bz/bt arrays are
-  // populated only by derive_bfield_from_equ() and the constant-profile
-  // fallback.
+  // triangle) takes precedence when loaded. Fallbacks: equilibrium
+  // psi-derived B, then the constant-profile scalars, then zero.
+  // (The legacy regular-grid br/bz/bt raster is gone.)
   if (!mesh_tri_br.empty()) {
     const int tri = find_mesh_triangle(R, Z, icell, iparticle);
     if (tri >= 0 && tri < static_cast<int>(mesh_tri_br.size())) {
@@ -2120,12 +2051,55 @@ void FixBackground::bfield_at(double R, double Z,
       Bt_out = mesh_tri_bt[tri];
       return;
     }
-    // outside the mesh footprint: fall through to regular-grid / zero.
+    // outside the mesh footprint: fall through to equilibrium / constant.
   }
 
-  Br_out = interp2D(br, R, Z, icell);
-  Bz_out = interp2D(bz, R, Z, icell);
-  Bt_out = interp2D(bt, R, Z, icell);
+  if (equ_bfield_at(R, Z, Br_out, Bz_out, Bt_out)) return;
+
+  if (const_has_bfield) {
+    Br_out = const_br;
+    Bz_out = const_bz;
+    Bt_out = const_bt;
+    return;
+  }
+
+  Br_out = Bz_out = Bt_out = 0.0;
+}
+
+/* ----------------------------------------------------------------------
+   pointwise psi-derived B from the loaded equilibrium:
+   Br = -1/R dpsi/dZ, Bz = 1/R dpsi/dR, Bt = btf*rtf/R.
+   Returns false when no usable equilibrium is loaded.
+------------------------------------------------------------------------- */
+
+bool FixBackground::equ_bfield_at(double R, double Z,
+                                  double &Br_out, double &Bz_out,
+                                  double &Bt_out) const
+{
+  if (!has_equ || equ_jm < 3 || equ_km < 3 || R < 1.0e-10 ||
+      psirz.size() < static_cast<size_t>(equ_jm * equ_km)) return false;
+
+  const double dr_eq = equ_r[1] - equ_r[0];
+  const double dz_eq = equ_z[1] - equ_z[0];
+  if (std::abs(dr_eq) < 1.0e-30 || std::abs(dz_eq) < 1.0e-30) return false;
+
+  const double Rc = std::min(std::max(R, equ_r.front()), equ_r.back());
+  const double Zc = std::min(std::max(Z, equ_z.front()), equ_z.back());
+  int jc = static_cast<int>(std::round((Rc - equ_r.front()) / dr_eq));
+  int kc = static_cast<int>(std::round((Zc - equ_z.front()) / dz_eq));
+  jc = std::max(1, std::min(jc, equ_jm - 2));
+  kc = std::max(1, std::min(kc, equ_km - 2));
+
+  const double dR = equ_r[jc+1] - equ_r[jc-1];
+  const double dZ = equ_z[kc+1] - equ_z[kc-1];
+  const double dpsi_dR = (psirz[kc*equ_jm + jc+1] - psirz[kc*equ_jm + jc-1]) / dR;
+  const double dpsi_dZ = (psirz[(kc+1)*equ_jm + jc] - psirz[(kc-1)*equ_jm + jc]) / dZ;
+
+  const double invR = 1.0 / R;
+  Br_out = -dpsi_dZ * invR;
+  Bz_out = dpsi_dR * invR;
+  Bt_out = btf * rtf * invR;
+  return true;
 }
 
 /* ----------------------------------------------------------------------
@@ -2234,47 +2208,11 @@ FixBackground::query_bfield_at_point(const double xyz[3], int icell,
     return query_bfield_at_point(xyz, icell, iparticle, false);
   }
 
-  // Regular-grid bilinear with finite-difference derivatives.
-  if (has_bfield && !br.empty() && nr >= 2 && nz >= 2) {
-    const double dr = rvals[1] - rvals[0];
-    const double dz = zvals[1] - zvals[0];
-    if (dr > 0.0 && dz > 0.0) {
-      const double Rc = std::min(std::max(R, rvals.front()), rvals.back());
-      const double Zc = std::min(std::max(Z, zvals.front()), zvals.back());
-      const double fi = (Rc - rvals.front()) / dr;
-      const double fj = (Zc - zvals.front()) / dz;
-      const int ir0 = std::max(0, std::min((int)fi, nr - 2));
-      const int iz0 = std::max(0, std::min((int)fj, nz - 2));
-      const double s = std::max(0.0, std::min(1.0, fi - ir0));
-      const double t = std::max(0.0, std::min(1.0, fj - iz0));
-      const size_t k00 = static_cast<size_t>(iz0) * nr + ir0;
-      const size_t k10 = k00 + 1;
-      const size_t k01 = k00 + nr;
-      const size_t k11 = k01 + 1;
-
-      auto interp = [&](const std::vector<double> &f) {
-        return (1-s)*(1-t)*f[k00] + s*(1-t)*f[k10]
-             + (1-s)*t*f[k01] + s*t*f[k11];
-      };
-      auto grad_r = [&](const std::vector<double> &f) {
-        return ((1-t)*(f[k10]-f[k00]) + t*(f[k11]-f[k01])) / dr;
-      };
-      auto grad_z = [&](const std::vector<double> &f) {
-        return ((1-s)*(f[k01]-f[k00]) + s*(f[k11]-f[k10])) / dz;
-      };
-
-      B.br = interp(br); B.bz = interp(bz); B.bt = interp(bt);
-      B.dBr_dr = grad_r(br); B.dBr_dz = grad_z(br);
-      B.dBt_dr = grad_r(bt); B.dBt_dz = grad_z(bt);
-      B.dBz_dr = grad_r(bz); B.dBz_dz = grad_z(bz);
-      B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
-      if (B.Bmag > 0.0) {
-        B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr + B.bz*B.dBz_dr) / B.Bmag;
-        B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz + B.bz*B.dBz_dz) / B.Bmag;
-      }
-      bfield_regular_queries++;
-      return B;
-    }
+  // Constant-B decks: uniform field, all spatial derivatives zero.
+  if (const_has_bfield) {
+    B.br = const_br; B.bz = const_bz; B.bt = const_bt;
+    B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+    return B;
   }
 
   return B;

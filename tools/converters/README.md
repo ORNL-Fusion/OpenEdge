@@ -1,8 +1,9 @@
 # OpenEdge Plasma/B-field Converters
 
-Scripts to convert edge-plasma simulation output into the HDF5 format
-(`plasma.h5` + `bfield.h5`) expected by OpenEdge's
-`compute plasma/fields file` command.
+Scripts to convert edge-plasma simulation output into the `plasma.h5`
+HDF5 format consumed by `fix background`. B-fields travel inside
+plasma.h5 (`mesh/vtx_b*` on the unstructured mesh plus the embedded
+`/equilibrium` group) — the legacy standalone `bfield.h5` raster is gone.
 
 ## Available converters
 
@@ -12,8 +13,6 @@ Scripts to convert edge-plasma simulation output into the HDF5 format
 | `convert_oedge_plasma.py` | OEDGE/DIVIMP (`.nc`) | Reads OEDGE NetCDF background file. Requires a companion `.equ` equilibrium file for B-field reconstruction. |
 | `convert_s3x_plasma.py` | SOLEDGE3X (HDF5) | Reads SOLEDGE3X triangle-based mesh/data files. |
 | `convert_solps_heatflux.py` | SOLPS-ITER | Extracts wall heat flux from SOLPS face-centred fluxes. |
-| `geqdsk2bfield_h5.py` | G-EQDSK equilibrium | Converts a G-EQDSK file to `bfield.h5`. |
-| `gen_bfield_sweep.py` | single equilibrium | Generates time-dependent B-field sequence via rigid radial shifts of ψ. |
 | `gen_plasma_sweep.py` | single plasma.h5 | Generates plasma parameter sweeps. |
 | `create_surf_from_solps.py` | SOLPS mesh | Extracts wall geometry from SOLPS mesh for SPARTA surface files. |
 
@@ -40,16 +39,6 @@ Scripts to convert edge-plasma simulation output into the HDF5 format
 | `ions/temp` | `(nspec, nz, nr)` | Per-species ion temperature |
 | `ions/parr_flow*` | `(nspec, nz, nr)` | Per-species parallel flow + components |
 
-### `bfield.h5`
-
-| Dataset | Shape | Description |
-|---------|-------|-------------|
-| `r` | `(nr,)` | R coordinates [m] |
-| `z` | `(nz,)` | Z coordinates [m] |
-| `br` | `(nz, nr)` | Radial B-field [T] |
-| `bt` | `(nz, nr)` | Toroidal B-field [T] |
-| `bz` | `(nz, nr)` | Vertical B-field [T] |
-
 ## Quick-start examples
 
 ### SOLPS-ITER
@@ -57,7 +46,7 @@ Scripts to convert edge-plasma simulation output into the HDF5 format
 ```bash
 python convert_solps_plasma.py /path/to/solps_run \
     --equ-file equilibrium.equ \
-    --plasma-out plasma.h5 --bfield-out bfield.h5 \
+    --plasma-out plasma.h5 \
     --nr 300 --nz 300 --plot
 ```
 
@@ -66,7 +55,7 @@ python convert_solps_plasma.py /path/to/solps_run \
 ```bash
 python convert_oedge_plasma.py d3d-204953-bkg-v25.nc \
     --equ-file 204953_3000.x16.equ \
-    --plasma-out plasma.h5 --bfield-out bfield.h5 \
+    --plasma-out plasma.h5 \
     --nr 300 --nz 300 --plot
 ```
 
@@ -85,20 +74,12 @@ interpolate_and_save_plasma_field(
     data_file="plasmaFinal.h5",           # plasma solution
     wall_file=None,                       # optional external wall
     plasma_out="plasma.h5",
-    bfield_out="bfield.h5",
     nR=200, nZ=200,
     main_ion_spec=1,
     use_mesh_wall=True,
     wall_sparta_file="wall.txt",          # optional SPARTA wall output
     debug_plot_file="soledge_fields.png",
 )
-```
-
-### G-EQDSK only (B-field)
-
-```bash
-python geqdsk2bfield_h5.py g123456.01000 \
-    --out bfield.h5 --nr 300 --nz 300
 ```
 
 ## Dependencies

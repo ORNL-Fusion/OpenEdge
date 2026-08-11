@@ -15,7 +15,6 @@ compute <ID> surface/physical/sputter <surf_group> background <plasma_fix_ID> \
     [mass_amu <val>] \
     [static yes|no] \
     [impurity <mass_amu> <frac> <Zmax> <f1> ... <fZmax>] \
-    [bfield <file.h5>] [equilibrium <file.equ>] \
     [iead auto|<file.h5>|none] \
     erosion_flux | erosion_rate | \
     nflux_species <slot|all> | incident_angle_species <slot|all> | \

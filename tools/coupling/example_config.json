@@ -5,12 +5,10 @@
     "openedge_template_script": "/home/cloud/OpenEdge/examples/test_solps_coupling/in.solps_coupling_baseline",
     "openedge_binary": "/home/cloud/buildOpenEdge/src/spa_mpi",
     "plasma_h5": "/home/cloud/OpenEdge/examples/test_solps_coupling/plasma_coupled.h5",
-    "bfield_h5": "/home/cloud/OpenEdge/examples/test_evaporation/input/bfield.h5",
-
     "n_coupling_steps": 3,
     "n_oe_steps": 100,
     "n_solps_steps": 2,
-    "dt_oe": 1e-5,
+    "dt_oe": 1e-05,
     "relaxation_alpha": 0.5,
     "mpi_np_openedge": 1,
     "mpi_np_solps": 1

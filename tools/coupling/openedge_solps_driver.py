@@ -742,7 +742,6 @@ def run_coupling(config):
     mpi_np_solps     = config.get('mpi_np_solps', 1)
     mpi_np_warmup    = config.get('mpi_np_warmup', mpi_np_solps)
     plasma_h5_path   = config.get('plasma_h5', os.path.join(oe_run_dir, 'plasma.h5'))
-    bfield_h5_path   = config.get('bfield_h5', '')
     solps_run_script = config.get('solps_run_script', '')
     coupled_dir      = config.get('coupled_dir', '')
     equ_file         = config.get('equ_file', None)  # auto-find in baserun if None

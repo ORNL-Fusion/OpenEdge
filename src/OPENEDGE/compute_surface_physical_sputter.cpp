@@ -81,7 +81,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
         "sputter_yield_species", "sputter_flux_species",
         "sputter_flux_total", "sputter_rate_total",
         "erosion_flux", "erosion_rate",
-        "bfield", "equilibrium", "background", "boundary", "impurity",
+        "background", "boundary", "impurity",
         "iead",
         "debug_interp",
         nullptr};
@@ -133,6 +133,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
   cache_valid = 0;
   files_loaded = 0;
   last_bg_generation = -1;
+  bg_fix = NULL;
   has_impurity = 0;
   imp_mass_amu = 0.0;
   imp_frac = 0.0;
@@ -294,14 +295,6 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       if (projectile_elements.empty())
         error->all(FLERR,"projectiles list is empty");
       api_new = 1;
-      iarg += 2;
-    } else if (strcmp(arg[iarg],"bfield") == 0) {
-      if (iarg+1 >= narg) error->all(FLERR,"bfield needs HDF5 file path");
-      bfield_path = std::string(arg[iarg+1]);
-      iarg += 2;
-    } else if (strcmp(arg[iarg],"equilibrium") == 0) {
-      if (iarg+1 >= narg) error->all(FLERR,"equilibrium needs .equ file path");
-      equ_path = std::string(arg[iarg+1]);
       iarg += 2;
     } else if (strcmp(arg[iarg],"background") == 0) {
       if (iarg+1 >= narg) error->all(FLERR,"background needs fix ID");
@@ -531,9 +524,7 @@ void ComputeSurfacePhysicalSputter::load_plasma_from_fix(const FixBackground *pd
   parr_flow_r = pd->parr_flow_r;
   parr_flow_t = pd->parr_flow_t;
   parr_flow_z = pd->parr_flow_z;
-  br = pd->br;
-  bz = pd->bz;
-  bt = pd->bt;
+  // B is queried through the fix (mesh/equilibrium/constant) at sample time
   has_bfield = pd->has_bfield;
   has_temp = (!temp_e.empty() && !temp_i.empty()) ? 1 : 0;
 
@@ -1288,6 +1279,7 @@ void ComputeSurfacePhysicalSputter::init()
     int ifix = modify->find_fix(background_fix_id.c_str());
     if (ifix >= 0) bgfix = dynamic_cast<FixBackground *>(modify->fix[ifix]);
   }
+  bg_fix = bgfix;
   const bool plasma_stale = !files_loaded ||
       (bgfix && bgfix->generation != last_bg_generation);
 
@@ -1307,57 +1299,6 @@ void ComputeSurfacePhysicalSputter::init()
 
   if (!files_loaded) {
 
-  // Load B-field from separate file if not already available.
-  // In background mode we stay file-free unless the user explicitly
-  // supplies a bfield path override.
-  int bfield_user_specified = !bfield_path.empty();
-  if (background_fix_id.empty() && !has_bfield && bfield_path.empty() && !plasma_path.empty()) {
-    std::string dir = plasma_path;
-    size_t slash = dir.find_last_of('/');
-    if (slash != std::string::npos)
-      bfield_path = dir.substr(0, slash + 1) + "bfield.h5";
-    else
-      bfield_path = "bfield.h5";
-  }
-  if (!has_bfield && !bfield_path.empty()) {
-    try {
-      H5::H5File bf(bfield_path, H5F_ACC_RDONLY);
-      auto read1D_bf = [&](const std::string& name, std::vector<double>& out) {
-        H5::DataSet ds = bf.openDataSet(name);
-        H5::DataSpace sp = ds.getSpace();
-        hsize_t d0;
-        sp.getSimpleExtentDims(&d0);
-        out.resize(static_cast<size_t>(d0));
-        ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
-      };
-      auto read2D_bf = [&](const std::string& name, std::vector<double>& out,
-                           int nr_bf, int nz_bf) {
-        H5::DataSet ds = bf.openDataSet(name);
-        H5::DataSpace sp = ds.getSpace();
-        hsize_t dims[2];
-        sp.getSimpleExtentDims(dims);
-        if (static_cast<int>(dims[0]) != nz_bf || static_cast<int>(dims[1]) != nr_bf)
-          throw std::runtime_error("bfield HDF5 shape mismatch with plasma grid");
-        out.resize(static_cast<size_t>(dims[0]*dims[1]));
-        ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
-      };
-      std::vector<double> r_bf, z_bf;
-      read1D_bf("r", r_bf);
-      read1D_bf("z", z_bf);
-      if (static_cast<int>(r_bf.size()) != nr || static_cast<int>(z_bf.size()) != nz)
-        throw std::runtime_error("bfield r/z grid size does not match plasma grid");
-      read2D_bf("br", br, nr, nz);
-      if (H5Lexists(bf.getId(), "bt", H5P_DEFAULT) > 0)
-        read2D_bf("bt", bt, nr, nz);
-      read2D_bf("bz", bz, nr, nz);
-      has_bfield = (!br.empty() && !bz.empty());
-    } catch (...) {
-      // If user explicitly specified bfield path, this is a fatal error
-      if (bfield_user_specified)
-        error->all(FLERR, "compute surface/physical/sputter: failed reading bfield file");
-      // Otherwise auto-detect failed silently — bfield not available
-    }
-  }
 
   if (!eckstein_mode) {
     try {
@@ -1408,22 +1349,13 @@ void ComputeSurfacePhysicalSputter::init()
     }
   }
 
-  // Derive B-field from equilibrium file if still missing
-  if (!has_bfield && !equ_path.empty()) {
-    try {
-      load_bfield_from_equ();
-    } catch (const std::exception& e) {
-      error->all(FLERR, e.what());
-    }
-  }
-
   files_loaded = 1;
   }  // end one-time file loads
 
   if (!has_bfield)
     error->all(FLERR,
-      "compute surface/physical/sputter: need B-field via plasma HDF5 (br/bz), "
-      "bfield HDF5, or equilibrium keyword");
+      "compute surface/physical/sputter: need a B-field — use a background "
+      "fix with mesh B (mesh/vtx_b*), an equilibrium, or constant br/bz/bt");
 
   distributed = surf->distributed;
   if (!firstflag) return;
@@ -1676,16 +1608,14 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
 
     // B-field at surface centroid (cylindrical components). Prefer the
     // per-triangle B from fix background (mesh-native plasma.h5); fall
-    // back to interp2D on the legacy regular-grid br/bz/bt arrays.
+    // back to the fix's query (mesh -> equilibrium -> constant).
     double br_loc = 0.0, bt_loc = 0.0, bz_loc = 0.0;
     if (!mesh_tri_br.empty() && tri_idx >= 0 && tri_idx < mesh_ntri) {
       br_loc = mesh_tri_br[tri_idx];
       bz_loc = mesh_tri_bz[tri_idx];
       bt_loc = mesh_tri_bt.empty() ? 0.0 : mesh_tri_bt[tri_idx];
-    } else {
-      br_loc = interp2D(br, r, z);
-      bt_loc = bt.empty() ? 0.0 : interp2D(bt, r, z);
-      bz_loc = interp2D(bz, r, z);
+    } else if (bg_fix) {
+      bg_fix->bfield_at(r, z, br_loc, bz_loc, bt_loc);
     }
     // Prefer the smooth /wall_flux/ B-field (IDW K=3 over the same
     // source samples used for gamma and Te/Ti) when available. Otherwise
@@ -2230,141 +2160,6 @@ void ComputeSurfacePhysicalSputter::assemble_compound_outputs()
       }
     }
   }
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeSurfacePhysicalSputter::load_bfield_from_equ()
-{
-  // Read SOLPS/EQDSK-style equilibrium file and derive B-field on the
-  // plasma (R,Z) grid.
-  //
-  //   Br = -(1/R) dpsi/dZ
-  //   Bz =  (1/R) dpsi/dR
-  //   Bt =  btf * rtf / R
-
-  std::ifstream ifs(equ_path);
-  if (!ifs.good())
-    throw std::runtime_error(
-        std::string("compute surface/physical/sputter: cannot open equilibrium '")
-        + equ_path + "'");
-  std::string text((std::istreambuf_iterator<char>(ifs)),
-                    std::istreambuf_iterator<char>());
-  ifs.close();
-
-  auto parse_int = [&](const char *name) -> int {
-    size_t pos = text.find(std::string(name));
-    while (pos != std::string::npos) {
-      size_t eq = text.find('=', pos);
-      if (eq != std::string::npos && eq - pos < 20) {
-        int val = atoi(text.c_str() + eq + 1);
-        if (val > 0) return val;
-      }
-      pos = text.find(std::string(name), pos + 1);
-    }
-    return 0;
-  };
-  auto parse_double = [&](const char *name) -> double {
-    size_t pos = text.find(std::string(name));
-    if (pos != std::string::npos) {
-      size_t eq = text.find('=', pos);
-      if (eq != std::string::npos) return atof(text.c_str() + eq + 1);
-    }
-    return 0.0;
-  };
-  auto read_floats_after = [&](const std::string &marker, int n,
-                               std::vector<double> &out) {
-    size_t pos = text.find(marker);
-    if (pos == std::string::npos)
-      throw std::runtime_error("cannot find '" + marker + "' in " + equ_path);
-    pos += marker.size();
-    out.clear();
-    out.reserve(n);
-    const char *c = text.c_str() + pos;
-    const char *end = text.c_str() + text.size();
-    while ((int)out.size() < n && c < end) {
-      while (c < end && !std::isdigit(*c) && *c!='+' && *c!='-' && *c!='.') c++;
-      if (c >= end) break;
-      char *endp;
-      double val = strtod(c, &endp);
-      if (endp > c) { out.push_back(val); c = endp; }
-      else c++;
-    }
-    if ((int)out.size() < n)
-      throw std::runtime_error("not enough values after '" + marker + "'");
-  };
-
-  int jm = parse_int("jm");
-  int km = parse_int("km");
-  if (jm < 2 || km < 2)
-    throw std::runtime_error("cannot parse jm/km from equilibrium");
-
-  double btf = parse_double("btf");
-  double rtf = parse_double("rtf");
-  double psib = parse_double("psib");
-
-  std::vector<double> r_eq, z_eq, psi_raw;
-  read_floats_after("r(1:jm);", jm, r_eq);
-  read_floats_after("z(1:km);", km, z_eq);
-  read_floats_after("((psi(j,k)-psib,j=1,jm),k=1,km)", jm * km, psi_raw);
-
-  std::vector<double> psi(jm * km);
-  for (int i = 0; i < jm * km; i++) psi[i] = psi_raw[i] + psib;
-
-  double dr_eq = r_eq[1] - r_eq[0];
-  double dz_eq = z_eq[1] - z_eq[0];
-
-  if (comm->me == 0) {
-    char msg[256];
-    snprintf(msg, sizeof(msg),
-             "surface/physical/sputter: deriving B-field from equilibrium %s "
-             "(jm=%d km=%d btf=%.3f rtf=%.3f)",
-             equ_path.c_str(), jm, km, btf, rtf);
-    if (screen) fprintf(screen, "%s\n", msg);
-    if (logfile) fprintf(logfile, "%s\n", msg);
-  }
-
-  // Bilinear interpolation on equilibrium grid
-  auto interp_psi = [&](double R, double Z) -> double {
-    double fi = (R - r_eq.front()) / dr_eq;
-    double fj = (Z - z_eq.front()) / dz_eq;
-    int i0 = std::max(0, std::min((int)fi, jm - 2));
-    int j0 = std::max(0, std::min((int)fj, km - 2));
-    double s = fi - i0, t = fj - j0;
-    s = std::max(0.0, std::min(1.0, s));
-    t = std::max(0.0, std::min(1.0, t));
-    return (1-s)*(1-t)*psi[j0*jm+i0] + s*(1-t)*psi[j0*jm+i0+1]
-         + (1-s)*t*psi[(j0+1)*jm+i0] + s*t*psi[(j0+1)*jm+i0+1];
-  };
-
-  // Compute Br, Bz, Bt on the plasma (nr x nz) grid
-  br.resize(static_cast<size_t>(nz) * nr);
-  bz.resize(static_cast<size_t>(nz) * nr);
-  bt.resize(static_cast<size_t>(nz) * nr);
-
-  double eps = 1e-4;  // finite-difference step (m)
-  for (int iz = 0; iz < nz; iz++) {
-    for (int ir = 0; ir < nr; ir++) {
-      double R = rvals[ir];
-      double Z = zvals[iz];
-      size_t idx = static_cast<size_t>(iz) * nr + ir;
-
-      if (R < 0.01) { br[idx] = bz[idx] = bt[idx] = 0.0; continue; }
-
-      // Br = -(1/R) dpsi/dZ
-      double dpsi_dz = (interp_psi(R, Z + eps) - interp_psi(R, Z - eps)) / (2.0 * eps);
-      br[idx] = -dpsi_dz / R;
-
-      // Bz = (1/R) dpsi/dR
-      double dpsi_dr = (interp_psi(R + eps, Z) - interp_psi(R - eps, Z)) / (2.0 * eps);
-      bz[idx] = dpsi_dr / R;
-
-      // Bt = btf * rtf / R
-      bt[idx] = btf * rtf / R;
-    }
-  }
-
-  has_bfield = 1;
 }
 
 /* ---------------------------------------------------------------------- */

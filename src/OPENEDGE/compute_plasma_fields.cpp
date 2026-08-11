@@ -245,6 +245,7 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
 
   plasma_arr = NULL;
   mag_arr    = NULL;
+  sample_stale = 0;
 
 
 }
@@ -273,6 +274,21 @@ ComputePlasmaFields::~ComputePlasmaFields()
 }
 
 /* ---------------------------------------------------------------------- */
+
+// psi at the magnetic axis = grid extremum farthest from the boundary value.
+// File-mode readers only store the psi grid (EFIT's simag is not carried),
+// so derive it; background mode copies the fix's psi_axis directly.
+static void derive_psi_axis(EquilibriumData &e)
+{
+  if (e.jm < 2 || e.km < 2 || e.psi.empty()) return;
+  double best = e.psib, bestd = 0.0;
+  for (int k = 0; k < e.km; k++)
+    for (int j = 0; j < e.jm; j++) {
+      const double d = std::fabs(e.psi[k][j] - e.psib);
+      if (d > bestd) { bestd = d; best = e.psi[k][j]; }
+    }
+  e.psi_axis = best;
+}
 
 void ComputePlasmaFields::init()
 {
@@ -360,13 +376,8 @@ void ComputePlasmaFields::init()
     plasma_data.grad_temp_i_t = flat2vv(pd->grad_ti_t);
     plasma_data.grad_temp_i_z = flat2vv(pd->grad_ti_z);
 
-    // B-field from fix
-    if (pd->has_bfield) {
-      plasma_data.br = flat2vv(pd->br);
-      plasma_data.bz = flat2vv(pd->bz);
-      plasma_data.bt = flat2vv(pd->bt);
-      plasma_data.has_bfield = true;
-    }
+    // B comes from the fix's mesh/equilibrium/constant sources at query
+    // time — the legacy regular-grid raster copy is gone.
 
     // Mesh data from fix
     if (pd->has_mesh) {
@@ -436,6 +447,7 @@ void ComputePlasmaFields::init()
       equ_data.btf = pd->btf;
       equ_data.rtf = pd->rtf;
       equ_data.psib = pd->psib;
+      equ_data.psi_axis = pd->psi_axis;
       equ_data.r = pd->equ_r;
       equ_data.z = pd->equ_z;
       // Convert flat psirz to 2D
@@ -453,15 +465,15 @@ void ComputePlasmaFields::init()
   } else if (input_mode == MODE_FILE) {
     if (me == 0) {
       plasma_data = readPlasmaFileData(plasmaStatePath);
-      if (!magneticFieldsPath.empty())
-        magnetic_data = readMagneticFieldFileData(magneticFieldsPath);
       if (has_equilibrium) {
         equ_data = readEquilibriumFile(equilibriumPath);
+        derive_psi_axis(equ_data);
       } else {
         // No explicit equilibrium <file> keyword — try to pick up an
         // embedded /equilibrium group from plasma.h5.
         if (readEquilibriumFromPlasmaH5(plasmaStatePath, equ_data)) {
           has_equilibrium = 1;
+          derive_psi_axis(equ_data);
           if (screen)
             fprintf(screen,
               "compute plasma/fields: loaded embedded equilibrium "
@@ -474,41 +486,18 @@ void ComputePlasmaFields::init()
     // broadcastEquilibriumData below.
     MPI_Bcast(&has_equilibrium, 1, MPI_INT, 0, world);
     broadcastPlasmaData(plasma_data);
-    if (!magneticFieldsPath.empty())
-      broadcastMagneticData(magnetic_data);
     if (has_equilibrium)
       broadcastEquilibriumData(equ_data);
 
-    // Populate magnetic_data from the B-field embedded in plasma.h5
-    // (br/bt/bz datasets the SOLPS / SOLEDGE3X / OEDGE converters write
-    // directly into plasma.h5). Same r/z grid as plasma_data, so the
-    // bilinear stencils line up.
-    const bool plasma_has_B =
-      !plasma_data.br.empty() && !plasma_data.bt.empty() &&
-      !plasma_data.bz.empty();
-    if (plasma_has_B) {
-      magnetic_data.r = plasma_data.r;
-      magnetic_data.z = plasma_data.z;
-      magnetic_data.br = plasma_data.br;
-      magnetic_data.bt = plasma_data.bt;
-      magnetic_data.bz = plasma_data.bz;
-    } else if (!has_equilibrium) {
-      // No B-field source available — hard error so we don't run with
-      // a silently-zero B field. Typical fix: regenerate plasma.h5 with
-      // the current converter (which embeds br/bt/bz), or pass
-      // `equilibrium <file.equ>` on the compute plasma/fields line.
+    // Legacy raster-B removed: file-mode B comes from the equilibrium.
+    if (!has_equilibrium) {
       char msg[512];
       snprintf(msg, sizeof(msg),
-        "compute plasma/fields: %s has no br/bt/bz datasets and no "
-        "equilibrium file was provided. Re-run the converter to embed "
-        "the B-field, or add `equilibrium <file>` to the compute line.",
+        "compute plasma/fields: no B-field source for %s — add "
+        "`equilibrium <file>` to the compute line or use a background "
+        "fix with mesh B (mesh/vtx_b*).",
         plasmaStatePath.c_str());
       error->all(FLERR, msg);
-    } else if (comm->me == 0) {
-      error->warning(FLERR,
-        "compute plasma/fields: plasma.h5 has no embedded B-field; "
-        "falling back to equilibrium-derived B. For best accuracy, "
-        "regenerate plasma.h5 with a converter that writes br/bt/bz.");
     }
   }
 
@@ -516,19 +505,13 @@ void ComputePlasmaFields::init()
   // (shared by MODE_FILE and MODE_BACKGROUND)
   if (input_mode == MODE_FILE || input_mode == MODE_BACKGROUND) {
     precomputeStencils(plasma_data.r, plasma_data.z, plasma_stencil);
-    if (!magnetic_data.r.empty())
-      precomputeStencils(magnetic_data.r, magnetic_data.z, magnetic_stencil);
-    else
-      magnetic_stencil.clear();
 
     for (int icell = 0; icell < ncells; ++icell) {
       if (!(cinfo[icell].mask & groupbit)) continue;
       if (cells[icell].nsplit < 1)         continue;
       plasma_arr[icell] = bilinearInterpolationPlasma(icell, plasma_data);
 
-      if (!magnetic_data.r.empty()) {
-        mag_arr[icell] = bilinearInterpolationMagneticField(icell, magnetic_data);
-      } else if (has_equilibrium) {
+      if (has_equilibrium) {
         double xyz[3] = {
           0.5 * (cells[icell].lo[0] + cells[icell].hi[0]),
           0.5 * (cells[icell].lo[1] + cells[icell].hi[1]),
@@ -585,6 +568,7 @@ void ComputePlasmaFields::init()
       if (input_mode == MODE_FILE && !equilibriumPath.empty()) {
         if (me == 0)
           equ_data = readEquilibriumFile(equilibriumPath);
+        derive_psi_axis(equ_data);
         broadcastEquilibriumData(equ_data);
       }
       memory->create(geom_arr, ncells, "plasma/fields:geom_arr");
@@ -605,7 +589,6 @@ void ComputePlasmaFields::init()
 
   } else if (input_mode == MODE_CONSTANT) {
     plasma_stencil.clear();
-    magnetic_stencil.clear();
     for (int icell = 0; icell < ncells; ++icell) {
       PlasmaFileParams p{};
       p.dens_e = neconst;
@@ -637,7 +620,6 @@ void ComputePlasmaFields::init()
     }
   } else {
     plasma_stencil.clear();
-    magnetic_stencil.clear();
     const double x0_use = analytic_use_x0 ? analytic_x0 : 0.5 * (domain->boxlo[0] + domain->boxhi[0]);
     const double y0_use = analytic_use_y0 ? analytic_y0 : 0.5 * (domain->boxlo[1] + domain->boxhi[1]);
     const double r0_use = (analytic_r0 > 0.0) ? analytic_r0 : 1.0e-12;
@@ -682,6 +664,20 @@ void ComputePlasmaFields::init()
       mag_arr[icell] = b;
     }
   }
+
+  // sepdist needs a psi map: fail loudly at init instead of silently
+  // reporting 0 (would blanket-refine under adapt_grid `thresh less`)
+  for (int iv = 0; iv < nvalue; ++iv) {
+    if (value[iv] == SEPDIST &&
+        (!has_equilibrium || equ_data.jm < 2 || equ_data.km < 2 ||
+         std::fabs(equ_data.psib - equ_data.psi_axis) < 1e-30))
+      error->all(FLERR,
+        "compute plasma/fields: sepdist requires an equilibrium psi map — "
+        "add `equilibrium <file>` or use a background/plasma.h5 with an "
+        "embedded equilibrium group");
+  }
+
+  sample_stale = 0;
 }
 
 
@@ -705,33 +701,15 @@ void ComputePlasmaFields::reload_plasma()
   if (me == 0) plasma_data = readPlasmaFileData(plasmaStatePath);
   broadcastPlasmaData(plasma_data);
 
-  // Re-read magnetic field if provided separately (legacy bfield.h5 path).
-  if (!magneticFieldsPath.empty()) {
-    if (me == 0) magnetic_data = readMagneticFieldFileData(magneticFieldsPath);
-    broadcastMagneticData(magnetic_data);
-  } else if (!plasma_data.br.empty() && !plasma_data.bt.empty() &&
-             !plasma_data.bz.empty()) {
-    // Refresh embedded B-field from the (possibly new) plasma.h5.
-    magnetic_data.r = plasma_data.r;
-    magnetic_data.z = plasma_data.z;
-    magnetic_data.br = plasma_data.br;
-    magnetic_data.bt = plasma_data.bt;
-    magnetic_data.bz = plasma_data.bz;
-  }
-
   // Recompute stencils (grid may not have changed, but R/Z grids in file might)
   precomputeStencils(plasma_data.r, plasma_data.z, plasma_stencil);
-  if (!magnetic_data.r.empty())
-    precomputeStencils(magnetic_data.r, magnetic_data.z, magnetic_stencil);
 
-  // Re-interpolate onto grid cells
+  // Re-interpolate onto grid cells (B refreshes via the equilibrium/mesh
+  // query paths; the legacy raster refresh is gone)
   for (int icell = 0; icell < ncells; ++icell) {
     if (!(cinfo[icell].mask & groupbit)) continue;
     if (cells[icell].nsplit < 1)         continue;
     plasma_arr[icell] = bilinearInterpolationPlasma(icell, plasma_data);
-
-    if (!magnetic_data.r.empty())
-      mag_arr[icell] = bilinearInterpolationMagneticField(icell, magnetic_data);
   }
 
   // Update multi-ion species data
@@ -791,6 +769,12 @@ void ComputePlasmaFields::reload_plasma(const std::string &new_plasma_path)
 void ComputePlasmaFields::compute_per_grid()
 {
   invoked_per_grid = update->ntimestep;
+
+  // grid changed (adapt refine / balance) since the per-cell arrays were
+  // sampled: re-run init() to rebuild + resample before indexing them.
+  // init() clears the flag; its reallocate() call no-ops (sizes now match).
+  if (sample_stale) init();
+
   constexpr double eQ = 1.602176634e-19;
   constexpr double tiny = 1.0e-30;
 
@@ -808,6 +792,18 @@ void ComputePlasmaFields::compute_per_grid()
 
     const PlasmaFileParams &P = plasma_arr[icell];
     const MagneticFieldFileDataParams &B = mag_arr[icell];
+
+    // cell centroid in SPARTA coords and cylindrical (R,Z) — shared by the
+    // mesh-E lookup, 3D toroidal rotation, and sepdist below
+    const Grid::ChildCell &cell = cells[icell];
+    const double xyz_c[3] = {
+      0.5 * (cell.lo[0] + cell.hi[0]),
+      0.5 * (cell.lo[1] + cell.hi[1]),
+      (dim == 3) ? 0.5 * (cell.lo[2] + cell.hi[2]) : 0.0
+    };
+    double cell_Rc, cell_Zc;
+    OpenEdge::sparta_to_RZ(xyz_c, dim, domain->axisymmetric, cell_Rc, cell_Zc,
+                           plasma_data.column_x0, plasma_data.column_y0);
 
     // Base components are cylindrical (r, t, z).
     const double Br = B.br;
@@ -827,16 +823,7 @@ void ComputePlasmaFields::compute_per_grid()
         !plasma_data.mesh_e_r.empty()) {
       // Look up the mesh cell for this SPARTA cell centroid and read
       // stored E components directly.
-      const Grid::ChildCell &cell = cells[icell];
-      const double xyz_c[3] = {
-        0.5 * (cell.lo[0] + cell.hi[0]),
-        0.5 * (cell.lo[1] + cell.hi[1]),
-        (dim == 3) ? 0.5 * (cell.lo[2] + cell.hi[2]) : 0.0
-      };
-      double Rc, Zc;
-      OpenEdge::sparta_to_RZ(xyz_c, dim, domain->axisymmetric, Rc, Zc,
-                             plasma_data.column_x0, plasma_data.column_y0);
-      const int tri = findNearestMappedTriangle(plasma_data, Rc, Zc, 0.1);
+      const int tri = findNearestMappedTriangle(plasma_data, cell_Rc, cell_Zc, 0.1);
       int mcell = -1;
       if (tri >= 0 && tri < static_cast<int>(plasma_data.mesh_cell_idx.size()))
         mcell = plasma_data.mesh_cell_idx[tri];
@@ -858,12 +845,7 @@ void ComputePlasmaFields::compute_per_grid()
     //   2D axi (native):   x=Z, y=R, z=phi  -> Bx=Bz, By=Br, Bz=Bt
     //   3D Cartesian:      Br/Bt rotated by phi at this cell's centroid
     double phi = 0.0;
-    if (dim == 3) {
-      const Grid::ChildCell &cell = cells[icell];
-      const double x = 0.5 * (cell.lo[0] + cell.hi[0]);
-      const double y = 0.5 * (cell.lo[1] + cell.hi[1]);
-      phi = std::atan2(y, x);
-    }
+    if (dim == 3) phi = std::atan2(xyz_c[1], xyz_c[0]);
     double Bx, By, Bzz, Ex, Ey, Ezz, Vx, Vy, Vzz;
     OpenEdge::RZphi_force_to_sparta(Br, Bzv, Bt, dim, domain->axisymmetric,
                                      phi, Bx, By, Bzz);
@@ -918,22 +900,16 @@ void ComputePlasmaFields::compute_per_grid()
         case GRAD_NE_R: vout = P.grad_dens_e_r; break;
         case GRAD_NE_Z: vout = P.grad_dens_e_z; break;
         case GRAD_TE_MAG:
+          // poloidal-plane |grad Te| by design (refinement criterion);
+          // the toroidal component grad_te_t is deliberately excluded
           vout = std::sqrt(P.grad_temp_e_r*P.grad_temp_e_r +
                            P.grad_temp_e_z*P.grad_temp_e_z);
           break;
-        case SEPDIST: {
+        case SEPDIST:
           // |psiN - 1| at the cell center: adapt_grid `thresh less` on this
-          // refines a separatrix-following band
-          const Grid::ChildCell &cc = cells[icell];
-          const double xyzc[3] = {0.5*(cc.lo[0]+cc.hi[0]),
-                                  0.5*(cc.lo[1]+cc.hi[1]),
-                                  (dim==3) ? 0.5*(cc.lo[2]+cc.hi[2]) : 0.0};
-          double Rc2, Zc2;
-          OpenEdge::sparta_to_RZ(xyzc, dim, domain->axisymmetric, Rc2, Zc2,
-                                 plasma_data.column_x0, plasma_data.column_y0);
-          vout = bg_fix_ ? std::fabs(bg_fix_->psi_norm_at(Rc2, Zc2) - 1.0)
-                         : 1.0e30;
-          break; }
+          // refines a separatrix-following band. init() guarantees a psi map.
+          vout = std::fabs(psi_norm_from_equ(cell_Rc, cell_Zc) - 1.0);
+          break;
         default:        vout = 0.0; break;
       }
       if (nvalue == 1) vector_grid[icell] = vout;
@@ -953,6 +929,10 @@ void ComputePlasmaFields::reallocate() {
   memory->destroy(vector_grid);
   memory->destroy(array_grid);
   nglocal = grid->nlocal;
+  // per-cell sampled arrays (plasma_arr/mag_arr/geom_arr) are still sized
+  // for the old cell set — flag for re-sampling on next compute_per_grid()
+  // (adapt_grid refine calls reallocate() then re-invokes the compute)
+  sample_stale = 1;
   if (nvalue == 1) {
     memory->create(vector_grid, nglocal, "plasma/fields:vector_grid");
   } else {
@@ -960,6 +940,35 @@ void ComputePlasmaFields::reallocate() {
   }
 }
 
+
+/* ----------------------------------------------------------------------
+   normalized psi from this compute's own equilibrium copy (any input mode)
+------------------------------------------------------------------------- */
+
+double ComputePlasmaFields::psi_norm_from_equ(double R, double Z) const
+{
+  if (!has_equilibrium || equ_data.jm < 2 || equ_data.km < 2) return 1.0e30;
+  const double denom = equ_data.psib - equ_data.psi_axis;
+  if (std::fabs(denom) < 1e-30) return 1.0e30;
+
+  const double dr = equ_data.r[1] - equ_data.r[0];
+  const double dz = equ_data.z[1] - equ_data.z[0];
+  if (std::fabs(dr) < 1e-30 || std::fabs(dz) < 1e-30) return 1.0e30;
+
+  const double Rc = std::min(std::max(R, equ_data.r.front()), equ_data.r.back());
+  const double Zc = std::min(std::max(Z, equ_data.z.front()), equ_data.z.back());
+  const double fi = (Rc - equ_data.r.front()) / dr;
+  const double fj = (Zc - equ_data.z.front()) / dz;
+  const int i0 = std::max(0, std::min((int)fi, equ_data.jm - 2));
+  const int j0 = std::max(0, std::min((int)fj, equ_data.km - 2));
+  const double s = std::max(0.0, std::min(1.0, fi - i0));
+  const double t = std::max(0.0, std::min(1.0, fj - j0));
+
+  const double psi =
+      (1-s)*(1-t)*equ_data.psi[j0][i0]   + s*(1-t)*equ_data.psi[j0][i0+1]
+    + (1-s)*t*equ_data.psi[j0+1][i0]     + s*t*equ_data.psi[j0+1][i0+1];
+  return (psi - equ_data.psi_axis) / denom;
+}
 
 /* ----------------------------------------------------------------------
    memory usage of local grid-based array
@@ -1449,54 +1458,6 @@ void ComputePlasmaFields::broadcastPlasmaData(PlasmaFileData& data) {
     }
 }
 
-
-/*----------------------------------------------------------------------
-   broadcast magnetic field data
-------------------------------------------------------------------------- */
-
-void ComputePlasmaFields::broadcastMagneticData(MagneticFieldFileData& data) {
-  int me = comm->me;
-
-  // Broadcast sizes of 1D vectors (e.g., r and z for the magnetic field)
-  int r_size = data.r.size();
-  int z_size = data.z.size();
-  MPI_Bcast(&r_size, 1, MPI_INT, 0, world);
-  MPI_Bcast(&z_size, 1, MPI_INT, 0, world);
-
-  // Resize vectors on non-root processes
-  if (me != 0) {
-      data.r.resize(r_size);
-      data.z.resize(z_size);
-  }
-
-  // Broadcast 1D vector data (r and z)
-  MPI_Bcast(data.r.data(), r_size, MPI_DOUBLE, 0, world);
-  MPI_Bcast(data.z.data(), z_size, MPI_DOUBLE, 0, world);
-
-  // Broadcast 2D vectors (e.g., br, bt, bz)
-  auto broadcast2DVector = [&](std::vector<std::vector<double>>& vec) {
-      int dim1 = vec.size();
-      int dim2 = dim1 ? vec[0].size() : 0;
-
-      MPI_Bcast(&dim1, 1, MPI_INT, 0, world);
-      MPI_Bcast(&dim2, 1, MPI_INT, 0, world);
-
-      // Resize the outer vector and each inner vector on non-root processes
-      if (me != 0) {
-          vec.resize(dim1, std::vector<double>(dim2));
-      }
-
-      for (int i = 0; i < dim1; ++i) {
-          MPI_Bcast(vec[i].data(), dim2, MPI_DOUBLE, 0, world);
-      }
-  };
-
-  // Broadcast the magnetic field components
-  broadcast2DVector(data.br);
-  broadcast2DVector(data.bt);
-  broadcast2DVector(data.bz);
-}
-
 /*----------------------------------------------------------------------
    bilinear interpolation of plasma data at cell center
 ------------------------------------------------------------------------- */
@@ -1639,41 +1600,6 @@ bool ComputePlasmaFields::meshLookupPlasma(
   OpenEdge::sparta_to_RZ(xc, dim, domain->axisymmetric, r, z,
                          data.column_x0, data.column_y0);
   return meshLookupPlasmaAtPoint(data, r, z, P);
-}
-
-
-/*---------------------------------
-  Bilinear interpolation plasma
------------------------------------*/
-
-MagneticFieldFileDataParams
-ComputePlasmaFields::bilinearInterpolationMagneticField(
-    int icell, const MagneticFieldFileData &data)
-{
-  MagneticFieldFileDataParams B{};  // all zeros
-  if (icell < 0 || icell >= static_cast<int>(magnetic_stencil.size())) return B;
-  const BilinearStencil &s = magnetic_stencil[icell];
-  if (!s.valid) return B;
-
-  B.br = interpField2D(data.br, s);
-  B.bt = interpField2D(data.bt, s);
-  B.bz = interpField2D(data.bz, s);
-
-  // Compute gradients of each B component using the existing stencil
-  gradField2D(data.br, s, B.dBr_dr, B.dBr_dz);
-  gradField2D(data.bt, s, B.dBt_dr, B.dBt_dz);
-  gradField2D(data.bz, s, B.dBz_dr, B.dBz_dz);
-
-  // |B| and grad(|B|) via chain rule
-  B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
-  if (B.Bmag > 0.0) {
-    B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr + B.bz*B.dBz_dr) / B.Bmag;
-    B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz + B.bz*B.dBz_dz) / B.Bmag;
-  } else {
-    B.dBmag_dr = 0.0;
-    B.dBmag_dz = 0.0;
-  }
-  return B;
 }
 
 double ComputePlasmaFields::interpField3DFlat(
@@ -1986,33 +1912,36 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
     // outside mesh footprint: fall through to grid / equ branches.
   }
 
-  if (!prefer_equilibrium && !magnetic_data.r.empty() && !magnetic_data.z.empty()) {
-    BilinearStencil s = makeStencilAtPoint(xyz, magnetic_data.r, magnetic_data.z);
-    if (!s.valid) return B;
-
-    B.br = interpField2D(magnetic_data.br, s);
-    B.bt = interpField2D(magnetic_data.bt, s);
-    B.bz = interpField2D(magnetic_data.bz, s);
-    gradField2D(magnetic_data.br, s, B.dBr_dr, B.dBr_dz);
-    gradField2D(magnetic_data.bt, s, B.dBt_dr, B.dBt_dz);
-    gradField2D(magnetic_data.bz, s, B.dBz_dr, B.dBz_dz);
-    B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
-    if (B.Bmag > 0.0) {
-      B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr + B.bz*B.dBz_dr) / B.Bmag;
-      B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz + B.bz*B.dBz_dz) / B.Bmag;
+  // Equilibrium psi-derived B with analytic derivatives. Footprint-checked:
+  // points outside the equilibrium rectangle must not use edge-extrapolated
+  // psi stencils — they fall back to the mesh (GCA) or zero instead.
+  const int dim = domain->dimension;
+  bool equ_usable = has_equilibrium && equ_data.jm >= 3 && equ_data.km >= 3;
+  double R = 0.0, Z = 0.0;
+  if (equ_usable) {
+    OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, R, Z,
+                           plasma_data.column_x0, plasma_data.column_y0);
+    equ_usable = R >= 1.0e-10 &&
+                 R >= equ_data.r.front() && R <= equ_data.r.back() &&
+                 Z >= equ_data.z.front() && Z <= equ_data.z.back();
+  }
+  if (!equ_usable) {
+    if (prefer_equilibrium) {
+      // GCA caller with no usable smooth field here: retry the mesh /
+      // constant path, whose B carries no spatial derivatives — grad-B
+      // and mirror terms are zero there. Warn once.
+      static int warned = 0;
+      if (!warned && comm->me == 0) {
+        warned = 1;
+        error->warning(FLERR,
+          "compute plasma/fields: GCA requested equilibrium B derivatives "
+          "but none are usable at some query points — grad-B/mirror terms "
+          "are zero where mesh/constant B is used instead");
+      }
+      return query_bfield_at_point(xyz, false);
     }
     return B;
   }
-
-  if (!has_equilibrium || equ_data.jm < 3 || equ_data.km < 3)
-    return prefer_equilibrium ? query_bfield_at_point(xyz, false) : B;
-
-  const int dim = domain->dimension;
-  double R, Z;
-  OpenEdge::sparta_to_RZ(xyz, dim, domain->axisymmetric, R, Z,
-                         plasma_data.column_x0, plasma_data.column_y0);
-  if (R < 1.0e-10)
-    return prefer_equilibrium ? query_bfield_at_point(xyz, false) : B;
 
   const EquilibriumData &equ = equ_data;
   const int jm = equ.jm;
@@ -2070,62 +1999,6 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
     B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz + B.bz*B.dBz_dz) / B.Bmag;
   }
   return B;
-}
-
-/* ----------------------------------------------------------------------
-   read magnetic field data from file
-------------------------------------------------------------------------- */
-MagneticFieldFileData ComputePlasmaFields::readMagneticFieldFileData(const std::string& filePath) {
-  printf("Reading magnetic field data from file: %s\n", filePath.c_str());
-    MagneticFieldFileData data; // Initialize an empty MagneticFieldFileData struct
-    try {
-        H5::H5File file(filePath, H5F_ACC_RDONLY);
-        
-        auto read1DDataSet = [&file](const std::string& datasetPath) {
-            H5::DataSet ds = file.openDataSet(datasetPath);
-            H5::DataSpace space = ds.getSpace();
-            std::vector<hsize_t> dims(1);
-            space.getSimpleExtentDims(dims.data(), NULL);
-            
-            std::vector<double> data(dims[0]);
-            ds.read(data.data(), H5::PredType::NATIVE_DOUBLE);
-            return data;
-        };
-        
-        auto read2DDataSet = [&file](const std::string& datasetPath) {
-            H5::DataSet ds = file.openDataSet(datasetPath);
-            H5::DataSpace space = ds.getSpace();
-            std::vector<hsize_t> dims(2);
-            space.getSimpleExtentDims(dims.data(), NULL);
-            
-            std::vector<std::vector<double>> data(dims[0], std::vector<double>(dims[1]));
-            std::vector<double> rawData(dims[0] * dims[1]);
-            ds.read(rawData.data(), H5::PredType::NATIVE_DOUBLE);
-            
-            for (hsize_t i = 0; i < dims[0]; ++i) {
-                for (hsize_t j = 0; j < dims[1]; ++j) {
-                    data[i][j] = rawData[i * dims[1] + j];
-                }
-            }
-            return data;
-        };
-        
-        // Read the required datasets
-        data.r = read1DDataSet("r");
-        data.z = read1DDataSet("z");
-        data.br = read2DDataSet("br");
-        data.bz = read2DDataSet("bz");
-        data.bt = read2DDataSet("bt");
-        file.close();
-    } catch (const H5::Exception& e) {
-        printf("Error reading magnetic field file file: %s\n", e.getCDetailMsg());
-        throw;  // Re-throw the exception to handle it outside
-    } catch (const std::exception& e) {
-        printf("Error: %s\n", e.what());
-        throw;
-    }
-    printf("Finished reading magnetic field data from file: %s\n", filePath.c_str());
-    return data;
 }
 
 /* ----------------------------------------------------------------------
@@ -2303,6 +2176,7 @@ void ComputePlasmaFields::broadcastEquilibriumData(EquilibriumData &data) {
   MPI_Bcast(&data.btf, 1, MPI_DOUBLE, 0, world);
   MPI_Bcast(&data.rtf, 1, MPI_DOUBLE, 0, world);
   MPI_Bcast(&data.psib, 1, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&data.psi_axis, 1, MPI_DOUBLE, 0, world);
   if (me != 0) {
     data.r.resize(data.jm);
     data.z.resize(data.km);

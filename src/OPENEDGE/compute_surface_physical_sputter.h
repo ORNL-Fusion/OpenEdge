@@ -65,8 +65,6 @@ class ComputeSurfacePhysicalSputter : public Compute {
   int *which_species;   // 1-based species slot for species-specific outputs
   std::string plasma_path;
   std::string surface_path;
-  std::string bfield_path;
-  std::string equ_path;
   std::string background_fix_id;  // ID of fix background (if used)
 
   // Eckstein analytic sputter mode (no surface HDF5 table).
@@ -172,7 +170,9 @@ class ComputeSurfacePhysicalSputter : public Compute {
   double column_x0 = 0.0, column_y0 = 0.0;
   std::vector<double> rvals,zvals;
   std::vector<double> dens_i,temp_e,temp_i,parr_flow,parr_flow_r,parr_flow_t,parr_flow_z;
-  std::vector<double> br,bt,bz;
+  // B at surfaces comes from mesh_tri_b*/wall_flux samples or, in
+  // background mode, from bg_fix->bfield_at() (mesh/equilibrium/constant)
+  class FixBackground *bg_fix;
   std::vector<double> ions_dens,ions_temp,ions_parr_flow,ions_parr_flow_r,ions_parr_flow_t,ions_parr_flow_z;
   std::vector<int> ion_charge_state_z;
   int has_multi_ion;
@@ -235,7 +235,6 @@ class ComputeSurfacePhysicalSputter : public Compute {
   void rebuild_mesh_cache();
   void load_surface_data();
   void load_boundary();
-  void load_bfield_from_equ();
   void load_mesh();
 
   // Precomputed mapped-triangle centroids for nearest-neighbor fallback

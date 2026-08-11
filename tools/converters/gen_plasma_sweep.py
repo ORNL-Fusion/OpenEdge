@@ -75,12 +75,13 @@ def convert_soledge_dirs(soledge_dirs, times, ref_file, outdir,
                 sys.exit(1)
 
         plasma_out = os.path.join(outdir, f'plasma_t{i}.h5')
-        bfield_out = os.path.join(outdir, f'bfield_t{i}.h5')
 
         print(f"\n--- Snapshot {i}: t={t:.3f} s from {sdir} ---")
+        # legacy bfield_t*.h5 raster output retired; B travels in
+        # plasma_t*.h5 mesh/vtx_b* + the embedded equilibrium
         s2oe(
             ref, mesh, bfield, data, None,
-            plasma_out, bfield_out,
+            plasma_out, None,
             nR=nR, nZ=nZ, main_ion_spec=main_ion_spec,
             use_mesh_wall=True,
         )
