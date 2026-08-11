@@ -465,10 +465,10 @@ void ComputePlasmaFields::init()
   } else if (input_mode == MODE_FILE) {
     if (me == 0) {
       plasma_data = readPlasmaFileData(plasmaStatePath);
-      if (has_equilibrium) {
+      if (has_equilibrium && !equilibriumPath.empty()) {
         equ_data = readEquilibriumFile(equilibriumPath);
         derive_psi_axis(equ_data);
-      } else {
+      } else if (!has_equilibrium) {
         // No explicit equilibrium <file> keyword — try to pick up an
         // embedded /equilibrium group from plasma.h5.
         if (readEquilibriumFromPlasmaH5(plasmaStatePath, equ_data)) {
@@ -930,14 +930,20 @@ void ComputePlasmaFields::reallocate() {
   memory->destroy(array_grid);
   nglocal = grid->nlocal;
   // per-cell sampled arrays (plasma_arr/mag_arr/geom_arr) are still sized
-  // for the old cell set — flag for re-sampling on next compute_per_grid()
-  // (adapt_grid refine calls reallocate() then re-invokes the compute)
+  // for the old cell set. Re-sample immediately: the pusher reads mag_arr
+  // every step, so deferring to the next compute_per_grid() leaves an
+  // out-of-bounds window after adapt/balance. init()'s own reallocate()
+  // call no-ops (sizes match once nglocal is updated below).
   sample_stale = 1;
   if (nvalue == 1) {
     memory->create(vector_grid, nglocal, "plasma/fields:vector_grid");
   } else {
     memory->create(array_grid, nglocal, nvalue, "plasma/fields:array_grid");
   }
+  // plasma_arr non-NULL means we were fully initialized before this grid
+  // change — re-sample now. NULL means we're inside the first init()'s own
+  // reallocate() call; that init() finishes the sampling itself.
+  if (plasma_arr) init();
 }
 
 

@@ -81,7 +81,7 @@ def convert_soledge_dirs(soledge_dirs, times, ref_file, outdir,
         # plasma_t*.h5 mesh/vtx_b* + the embedded equilibrium
         s2oe(
             ref, mesh, bfield, data, None,
-            plasma_out, None,
+            plasma_out,
             nR=nR, nZ=nZ, main_ion_spec=main_ion_spec,
             use_mesh_wall=True,
         )
