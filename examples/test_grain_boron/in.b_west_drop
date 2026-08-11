@@ -10,11 +10,11 @@
 # (recycling 0 in Afonin) so all surfaces vanish-absorb.
 # =====================================================================
 
-variable    dt        equal 1.0e-6
-variable    nsteps    equal 200000
-variable    ndump     equal 2000
-variable    nemit     equal 20000     # grain batch cadence (every 20 ms)
-variable    npergroup equal 5
+variable    dt        index 1.0e-6
+variable    nsteps    index 200000
+variable    ndump     index 2000
+variable    nemit     index 20000     # grain batch cadence (every 20 ms)
+variable    npergroup index 5
 
 shell       mkdir output
 
@@ -53,11 +53,15 @@ surf_modify  core collide vac
 # ---- WEST SOLEDGE background ----------------------------------------
 fix pd background file ../test_west/input/plasma.h5 &
     static yes
-global      pcache_nevery 10
 
-# B+ pusher (axi requires mode boris)
+# B+ pusher; subcycles 25: dt_sub 4e-8 -> omega_c*dt_sub ~ 1.3 (B+)
 global      pusher plasma pd mode boris &
-            subcycles 10 bad_dt_check yes bad_dt_limit 0.5
+            subcycles 25 bad_dt_check yes bad_dt_limit 0.5
+
+# B+ transport forces (D_perp/pinch match the S3X background)
+fix fcd     cross_field_diffusion 1 background pd D_perp 0.3 pinch_psi -0.6
+fix fcoul   coulomb/background 1 background pd 2.0 1.0
+fix fth     force/thermal 1 background pd ion_thermal yes elec_thermal yes
 
 # ---- grain chain: drop -> fall/drag -> charge -> ablate --------------
 fix fdrop   grain/emit grains dropper nevery ${nemit} n ${npergroup} &
