@@ -1,11 +1,10 @@
 # WEST axisymmetric W: O-on-W sputter -> Boris -> ADAS W+..W10+ -> PWI wall.
 # Short runs: -var nwarm 20000 -var ndiag 5000  (statistics: -var n)
 
-variable            n index 200             # launches per emission event, split
-                                            # over ALL eroding elements
-                                            # (stratified source: weights carry
-                                            # the flux, no threshold)
-variable            emitEvery equal 100
+variable            nLo index 6             # markers/step per band (stratified
+variable            nUp index 3             # source; flux carried by weights)
+variable            nLfs index 2
+variable            nHfs index 1            # 0 inserted if HFS flux is truly zero
 variable            nwarm index 100000
 variable            ndiag index 10000
 variable            navge equal v_ndiag/100
@@ -44,15 +43,18 @@ mixture             tungstenSource  W18+ frac 0.
 mixture             tungstenSource  W19+ frac 0.
 mixture             tungstenSource  W20+ frac 0.
 
-read_surf           input/wall_fine.surf invert group wall particle check
+# NOTE no 'invert': this converter output is already wound with normals into
+# the plasma (the diGenova-era wall needed invert; check flow volume ~26 m^3,
+# not ~36, whenever the wall file is regenerated)
+read_surf           input/wall_fine.surf group wall particle check
 variable            TwallK  equal 773.15
-variable            TbindW  equal 4.*11600.
-surf_collide        wallColl diffuse ${TbindW} 1.0
-surf_react          wallPWI surface/pwi input/wall.recycle twall ${TwallK}
+surf_collide        wallColl diffuse ${TwallK} 1.0
+surf_react          wallPWI surface/pwi input/wall.recycle twall ${TwallK} &
+                    ehist state/wall_ehist.dat 100 1000 ${ndiag}
 surf_modify         wall collide wallColl react wallPWI
 
 read_surf           input/core.surf group core particle check
-surf_collide        coreColl vanish
+surf_collide        coreColl specular
 surf_modify         core collide coreColl
 
 region              rdiv_lo block -1.00 -0.30 1.90 3.20 INF INF   # covers baffle (was -0.45: seam in density maps)
@@ -64,17 +66,19 @@ adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
 balance_grid        rcb cell
 
 fix                 pd background file input/plasma.h5 static yes
-global              pcache_nevery 100
 
 compute             cgeom nearest_surf/grid all wall dist surfid nx ny nz
+# sheath: -var sheathmode off|kick|spatial|boundary (boundary = pre-Aug validation)
+variable            sheathmode index spatial
+variable            subcycles index 2
 global              pusher plasma pd mode boris &
-                    subcycles 10 bad_dt_check yes bad_dt_limit 0.5 &
-                    sheath boundary geom cgeom mD_amu 2.0 &
+                    subcycles ${subcycles} bad_dt_check yes bad_dt_limit 0.5 &
+                    sheath ${sheathmode} geom cgeom mD_amu 2.0 &
                     dump no
 
-# Forces 
-variable            Dperp index 0.1
-fix                 fcd cross_field_diffusion 1 background pd D_perp ${Dperp}
+# Forces (D_perp/pinch match the S3X run: D0=0.3, vPinch=-0.6)
+variable            Dperp index 0.3
+fix                 fcd cross_field_diffusion 1 background pd D_perp ${Dperp} pinch_psi -0.6
 
 fix                 fcoul coulomb/background 1 background pd 2.0 1.0
 
@@ -88,13 +92,27 @@ compute cpmiO surface/physical/sputter wall background pd &
 
 fix pw particle/weight
 
-fix femit surface/emit/source tungstenSource wall cpmiO perspecies no &
-                    nlaunch_total ${n} &
-                    model thompson 4.4 nevery ${emitEvery}
+# stratified source: four disjoint wall bands, one shared flux compute.
+# thompson arg = FULL binding energy (W 8.68, never half)
+region rhfs block -1.00 0.85 0.00 1.90 INF INF     # inner column
+region rlfs block -0.30 0.35 1.90 3.25 INF INF     # outer midplane/antenna
+group  sdiv_lo surf region rdiv_lo center
+group  sdiv_up surf region rdiv_up center
+group  shfs    surf region rhfs    center
+group  slfs    surf region rlfs    center
+fix femitLo  surface/emit/source tungstenSource sdiv_lo cpmiO perspecies no &
+                    nlaunch_total ${nLo} model thompson 8.68 emax 80 nevery 1
+fix femitUp  surface/emit/source tungstenSource sdiv_up cpmiO perspecies no &
+                    nlaunch_total ${nUp} model thompson 8.68 emax 80 nevery 1
+fix femitLfs surface/emit/source tungstenSource slfs cpmiO perspecies no &
+                    nlaunch_total ${nLfs} model thompson 8.68 emax 80 nevery 1
+fix femitHfs surface/emit/source tungstenSource shfs cpmiO perspecies no &
+                    nlaunch_total ${nHfs} model thompson 8.68 emax 80 nevery 1
 
 fix fchem volume/chem/adas 1 W auto
 
-variable            dt equal 5e-9
+# dt 2e-8 slag-proven with subcycles 2 (gyro resolved in the mover substeps)
+variable            dt index 2e-8
 timestep            ${dt}
 stats               500
 
@@ -120,7 +138,7 @@ stats_style         step cpu np c_cwNtot &
                     c_cwN6 c_cwN7 c_cwN8 c_cwN9 c_cwN10 c_cwN15 c_cwN20
 
 fix                 fadapt adapt 500 all refine particle 8 2 maxlevel 5
-fix                 fbal balance 1000 1.1 rcb part
+fix                 fbal balance 200 1.1 rcb part    # -> rcb time after warmup
 
 dump                dovito particle all ${nvito} state/ovito.D${Dperp}.dump &
                     id type x y z
@@ -129,36 +147,36 @@ run                 ${nwarm}
 write_restart       state/warmup.D${Dperp}.restart
 
 unfix               fadapt
+unfix               fbal
+fix                 fbal balance 1000 1.1 rcb time
 reset_timestep      0
 
+# one grid dump: total W (f_fwgrid) + neutral W (f_fw0) densities
 compute cwtot grid/weighted all allW nrho_w
 fix     fwgrid ave/grid all ${navge} 100 ${ndiag} c_cwtot[1] ave one
-dump    dwgrid grid all ${ndiag} state/grid.dens.west.D${Dperp} &
-                    id xc yc xlo ylo xhi yhi f_fwgrid
-
 mixture neutralW W group w0
 compute cwneut grid/weighted all neutralW nrho_w
 fix     fw0 ave/grid all ${navge} 100 ${ndiag} c_cwneut[1] ave one
-dump    dw0 grid all ${ndiag} state/ndens0.west.D${Dperp} &
-                    id xc yc c_cgeom[1] f_fw0
+dump    dwgrid grid all ${ndiag} state/grid.dens.west.D${Dperp} &
+                    id xc yc xlo ylo xhi yhi f_fwgrid f_fw0
 
 compute cero surface/physical/sputter wall background pd &
                     target W projectiles O &
                     mass_amu 2.01410177811 static yes &
                     erosion_flux erosion_rate
-compute cdep surf/weighted wall allW nflux nflux_incident
-fix     fdep ave/surf wall ${navge} 100 ${ndiag} c_cdep[1] c_cdep[2]
-dump    dwflux surf wall ${ndiag} state/wall.flux.west.D${Dperp} &
-                    id v1x v1y v2x v2y c_cero[1] c_cero[2] f_fdep[1] f_fdep[2]
+#compute cdep surf/weighted wall allW nflux nflux_incident
+#fix     fdep ave/surf wall ${navge} 100 ${ndiag} c_cdep[1] c_cdep[2]
+#dump    dwflux surf wall ${ndiag} state/wall.flux.west.D${Dperp} &
+#                    id v1x v1y v2x v2y c_cero[1] c_cero[2] f_fdep[1] f_fdep[2]
 
-compute closs surf/weighted core allW nflux
-fix     floss ave/surf core ${navge} 100 ${ndiag} c_closs[1]
-dump    dcore surf core ${ndiag} state/core.flux.west.D${Dperp} &
-                    id v1x v1y v2x v2y f_floss
+#compute closs surf/weighted core allW nflux
+#fix     floss ave/surf core ${navge} 100 ${ndiag} c_closs[1]
+#dump    dcore surf core ${ndiag} state/core.flux.west.D${Dperp} &
+#                    id v1x v1y v2x v2y f_floss
 
-compute cimpact impact/energy wall allW 48 1.0 3000.0 log
-fix     fimpact ave/time ${navge} 100 ${ndiag} c_cimpact mode vector ave one &
-                    file state/impact.hist.west.D${Dperp}
+#compute cimpact impact/energy wall allW 48 1.0 3000.0 log
+#fix     fimpact ave/time ${navge} 100 ${ndiag} c_cimpact mode vector ave one &
+#                    file state/impact.hist.west.D${Dperp}
 
-dump 10 particle all 1000 state/state_ax id type x y z
+
 run                 ${ndiag}

@@ -3,3 +3,4 @@ log.*
 state*
 output/
 PLAN.md
+analysis.ipynb.bak-*
