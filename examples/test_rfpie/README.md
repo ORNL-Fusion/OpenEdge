@@ -87,6 +87,4 @@ resolution.
 
 The DC case is the quantitatively cleaner starting point. With nonzero RF,
 the present sputter source averages yield over instantaneous sinusoidal wall
-voltages. It does not reproduce the bimodal kinetic IEDF reported by hPIC2;
-that will require an IEDF table or a resolved kinetic sheath model.
-
+voltages. 
