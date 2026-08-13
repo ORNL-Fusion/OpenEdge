@@ -14,9 +14,7 @@ The first model is deliberately explicit:
   31 mm case domain. Density is shape-preserving; `Te` uses a smooth
   even-polynomial fit. Slope-matched tails exist beyond the measured edge but
   are unused in this domain;
-- ion temperature: uniform `Ti = 0.05 eV`, the explicit hPIC2 assumption used
-  for the RF PIE sheath study by Caughman et al., IEEE TPS 52 (2024),
-  DOI `10.1109/TPS.2024.3374252`. This is an assumption, not an LP measurement;
+
 - source: He-on-W sputter yield from RustBCA installed in OpenEdge
   `processes.h5`, with Thompson W emission (`Us = 8.68 eV`, `Emax = 80 eV`);
 - target voltage: the target remains one watertight surface and each
