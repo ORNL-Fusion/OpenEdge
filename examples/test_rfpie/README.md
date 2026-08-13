@@ -1,8 +1,7 @@
 # RFPIE tungsten sputtering in OpenEdge
 
 This is a clean OpenEdge reconstruction of the RFPIE target case. It uses the
-original RFPIE CAD and Langmuir-probe measurements as provenance, but none of
-the old GITR/FTRIDYN surface tables or GITR transport setup.
+original RFPIE CAD and Langmuir-probe measurements as provenance.
 
 The first model is deliberately explicit:
 
