@@ -43,7 +43,9 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 case = Path.cwd()
 if not (case / 'case_config.json').exists():
-    case = Path('openedge/rfpie_w').resolve()
+    case = Path('examples/test_rfpie').resolve()
+process_path = case.parents[1] / 'database/processes.h5'
+assert process_path.exists(), f'Missing OpenEdge process database: {process_path}'
 cfg = json.loads((case / 'case_config.json').read_text())
 summary = json.loads((case / 'input/geometry_summary.json').read_text())
 
@@ -235,16 +237,14 @@ if vrf != 0 and period/dt < 20:
     markdown("""
 ## 4. RustBCA He-on-W yield and implied W source
 
-The notebook reads the case-local RustBCA artifact. OpenEdge reads the same
-arrays after they are installed as `/surface/sputter/he_on_w/{E,theta,Y}` in
-`database/processes.h5`.
+The notebook and OpenEdge both read the installed RustBCA table at
+`/surface/sputter/he_on_w/{E,theta,Y}` in `database/processes.h5`.
 """),
     code("""
-table_path = case/'input/he_on_w.h5'
-assert table_path.exists(), 'Run scripts/build_he_on_w.py first'
-with h5py.File(table_path, 'r') as h5:
-    Eaxis = h5['E'][:]; Aaxis = h5['A'][:]; Y = h5['spyld'][:]
-    table_source = h5.attrs.get('source', '')
+with h5py.File(process_path, 'r') as h5:
+    table = h5['surface/sputter/he_on_w']
+    Eaxis = table['E'][:]; Aaxis = table['theta'][:]; Y = table['Y'][:]
+    table_source = table.attrs.get('source', '')
 print(table_source, 'shape=', Y.shape, 'Y range=', (Y.min(),Y.max()))
 
 fig, ax = plt.subplots(1,2,figsize=(11,4),constrained_layout=True)
@@ -292,9 +292,6 @@ duration and a simple W flight time explains which charge states can develop.
 The coefficients below are exactly the OpenADAS tables used by OpenEdge.
 """),
     code("""
-process_path=case/'input/processes.rfpie.h5'
-if not process_path.exists():
-    process_path=Path('/Users/42d/OpenEdge/database/processes.h5')
 with h5py.File(process_path,'r') as h5:
     scd=h5['volume/rates/scd/w/coefficient'][:]
     scd_te=h5['volume/rates/scd/w/temperature'][:]

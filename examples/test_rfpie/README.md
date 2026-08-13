@@ -49,14 +49,14 @@ the collision geometry.
 From this directory, with the OpenEdge Python environment active:
 
 ```sh
-python scripts/build_geometry.py
-python scripts/build_plasma.py
-python scripts/build_he_on_w.py
-python scripts/install_he_on_w.py /Users/42d/OpenEdge/database/processes.h5
-python scripts/build_notebook.py
 jupyter nbconvert --to notebook --execute --inplace rfpie_w.ipynb
 python scripts/check_case.py
 ```
+
+The checked-in `database/processes.h5` already contains the RustBCA He-on-W
+yield table used by the case. To regenerate that table during database
+development, run `scripts/build_he_on_w.py` followed by
+`scripts/install_he_on_w.py ../../database/processes.h5`.
 
 Open `rfpie_w.ipynb` before running transport. It checks the raw and reconstructed
 plasma, the CAD-to-SI conversion, target tiles/voltage waveform, RustBCA yield,

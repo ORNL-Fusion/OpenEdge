@@ -12,6 +12,7 @@ import numpy as np
 
 
 CASE_DIR = Path(__file__).resolve().parents[1]
+PROCESS_DATABASE = CASE_DIR.parents[1] / "database/processes.h5"
 
 
 def require(condition: bool, message: str) -> None:
@@ -70,10 +71,12 @@ def main() -> None:
         require(steps_per_rf >= 20,
                 "time-resolved RF transport needs at least 20 steps per RF period")
 
-    with h5py.File(CASE_DIR / "input/he_on_w.h5", "r") as h5:
-        energy = h5["E"][:]
-        angle = h5["A"][:]
-        sputter_yield = h5["spyld"][:]
+    require(PROCESS_DATABASE.exists(), f"missing {PROCESS_DATABASE}")
+    with h5py.File(PROCESS_DATABASE, "r") as h5:
+        table = h5["surface/sputter/he_on_w"]
+        energy = table["E"][:]
+        angle = table["theta"][:]
+        sputter_yield = table["Y"][:]
         require(sputter_yield.shape == (len(energy), len(angle)),
                 "He-on-W RustBCA table shape mismatch")
         require(np.all(np.isfinite(sputter_yield)) and np.all(sputter_yield >= 0),
