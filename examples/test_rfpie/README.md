@@ -69,7 +69,7 @@ diagnostics from `output/rfpie_w_density.*.dump`.
 After building OpenEdge with the RF sheath patch:
 
 ```sh
-/Users/42d/build_oe/src/spa_mac_mpi -in in.rfpie_w
+time mpirun -np 4 /Users/42d/build_oe/src/spa_mac_mpi -in in.rfpie_w
 ```
 
 Defaults are `Vdc=-500 V`, `Vrf=0`, and 64 phase samples. Edit
@@ -93,17 +93,3 @@ the present sputter source averages yield over instantaneous sinusoidal wall
 voltages. It does not reproduce the bimodal kinetic IEDF reported by hPIC2;
 that will require an IEDF table or a resolved kinetic sheath model.
 
-## Meaning of `sheath boundary`
-
-It is the potential jump between the quasineutral plasma and the material
-surface collapsed onto a zero-thickness sheet. In this case it is attached
-only to `target` triangles through `cgeom`. An outbound W ion must climb
-`Z e (phi_float + max(0,-Vwall(t)))`; it is reflected if its wall-normal
-kinetic energy is too small and otherwise is decelerated once. The sputter
-compute independently uses the identical tile waveform for the incident He+
-energy because background He is a field, not a population of kinetic particles.
-
-This is a suitable first RF option for sputtering and prompt redeposition. A
-spatial RF sheath would additionally need a defensible time-dependent width and
-potential profile; simply scaling the existing floating-sheath profile to a
-500 V target is not yet physically self-consistent.
