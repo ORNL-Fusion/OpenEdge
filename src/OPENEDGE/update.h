@@ -162,8 +162,12 @@ struct SurfHit2D {
   int sheath_kick;             // 1 = apply sheath as velocity kick at wall
   int sheath_boundary;         // 1 = sub-grid sheath-as-boundary (impact kick
                                //     + outbound potential-barrier reflection)
+  char *sheath_waveform_attr;  // target-surface DOUBLE[3]: Vdc,Vrf,phase
+  int sheath_waveform_custom;  // resolved surface custom index
+  double sheath_frequency_hz;  // sinusoid frequency [Hz]
   int sheath_paid_custom;      // per-particle int "sheath_paid" flag index
   int sheath_bank_custom;      // per-particle double net sheath-energy ledger
+  int sheath_phiprev_custom;   // per-particle sheath phi reference (phi+1; 0 = unset)
                                //     (spatial mode: lifetime gain <= Z e phi_tot)
 
   // Incident macroparticle weight (pweight custom) for the surf collision

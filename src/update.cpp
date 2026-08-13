@@ -321,8 +321,12 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   sheath_dmax = 0.0;
   sheath_kick = 0;
   sheath_boundary = 0;
+  sheath_waveform_attr = NULL;
+  sheath_waveform_custom = -1;
+  sheath_frequency_hz = 0.0;
   sheath_paid_custom = -1;
   sheath_bank_custom = -1;
+  sheath_phiprev_custom = -1;
   tally_pweight = 1.0;
 
   plasma_cache_flag = 0;
@@ -358,6 +362,7 @@ Update::~Update()
   delete [] blist_active;
   delete [] dlist_surfcollide;
   delete [] sheath_geom_cid;
+  delete [] sheath_waveform_attr;
   delete pusher;
   memory->destroy(dx_cd);
   // psi_r_grid, psi_z_grid, psi_rz are owned by fix_reflect_psi, not freed here
@@ -561,6 +566,25 @@ void Update::init()
   // guiding-center custom particle attributes). Body in pusher.cpp.
   pusher->init();
 
+  // A tile waveform is currently a target-local, zero-thickness boundary
+  // potential.  Spread its owned values so nearest-surface indices in the
+  // mover can address local and ghost elements uniformly.
+  sheath_waveform_custom = -1;
+  if (sheath_waveform_attr) {
+    if (!sheath_boundary)
+      error->all(FLERR,
+        "global pusher sheath waveform currently requires sheath boundary");
+    sheath_waveform_custom = surf->find_custom(sheath_waveform_attr);
+    if (sheath_waveform_custom < 0)
+      error->all(FLERR,"global pusher sheath waveform attribute not found");
+    if (surf->etype[sheath_waveform_custom] != 1 ||
+        surf->esize[sheath_waveform_custom] != 3)
+      error->all(FLERR,
+        "global pusher sheath waveform attribute must be "
+        "DOUBLE[3] = [Vdc,Vrf_peak,phase_rad]");
+    surf->spread_custom(sheath_waveform_custom);
+  }
+
   // Enable the spatial-sheath per-wall-element coefficient cache when the
   // sheath E-field is applied in the pusher (spatial mode, not kick) and
   // the plasma is a fix background. The background can only change at run
@@ -598,6 +622,17 @@ void Update::init()
     sheath_bank_custom = particle->find_custom((char *) "sheath_bank");
     if (sheath_bank_custom < 0)
       sheath_bank_custom = particle->add_custom((char *) "sheath_bank", 1, 0);
+  }
+
+  // Spatial mode: per-particle phi reference so a reference-element switch
+  // between moves is charged as work instead of re-seeding the potential
+  // for free (the pump that filled the bank cap for band-dwelling ions).
+  // Stored as phi+1 V; 0 = unset (newborn / newly ionized).
+  sheath_phiprev_custom = -1;
+  if (sheath_flag && !sheath_kick && !sheath_boundary) {
+    sheath_phiprev_custom = particle->find_custom((char *) "sheath_phiprev");
+    if (sheath_phiprev_custom < 0)
+      sheath_phiprev_custom = particle->add_custom((char *) "sheath_phiprev", 1, 0);
   }
 
   // Register per-particle plasma cache vectors.

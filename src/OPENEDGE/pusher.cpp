@@ -153,6 +153,24 @@ inline double sheath_auto_dmax(double te_eV, double ti_eV, double ne_m3,
   return std::max(5.0 * rho_i, 10.0 * lambdaD);
 }
 
+// Additional attracting potential drop carried by a target surface tile.
+// The custom array is [Vdc, Vrf_peak, phase_rad], with wall voltage measured
+// relative to the local quasineutral plasma.  Only negative wall voltage adds
+// to the present floating-sheath boundary model.
+inline double sheath_waveform_drop(Update *update, Surf *surf, int midx)
+{
+  const int idx = update->sheath_waveform_custom;
+  if (idx < 0 || midx < 0 || midx >= surf->nlocal + surf->nghost)
+    return 0.0;
+  double **wave = surf->edarray_local[surf->ewhich[idx]];
+  if (!wave) return 0.0;
+  const double now = update->time +
+      (update->ntimestep - update->time_last_update) * update->dt;
+  const double vwall = wave[midx][0] + wave[midx][1] *
+      std::sin(2.0*M_PI*update->sheath_frequency_hz*now + wave[midx][2]);
+  return std::max(0.0, -vwall);
+}
+
 }  // namespace
 
 /* ----------------------------------------------------------------------
@@ -476,6 +494,7 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
   double sh_d0_sign = 0.0;
   double sh_phi_total = 0.0;                 // total sheath potential [V]
   int    sh_active = 0;
+  int    sh_midx = -1;
   SheathModels::SheathEmagCoeffs sh_coeffs;
 
   if (update->sheath_flag && !update->sheath_kick && update->sheath_geom_cidx >= 0 &&
@@ -509,6 +528,7 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
       }
 
       if (midx >= 0 && sheath_cache_enabled) {
+        sh_midx = midx;
         // ---- Cached path (static fix-background plasma) ----
         const int nsurf_all = surf->nlocal + surf->nghost;
         if ((int) sheath_cache.size() != nsurf_all)
@@ -526,6 +546,7 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
           }
         }
       } else if (midx >= 0) {
+        sh_midx = midx;
         // ---- Per-particle fallback (compute plasma or non-static fix):
         //      evaluate geometry, plasma, B and the coefficients at the
         //      particle position, as before. ----
@@ -584,6 +605,9 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
       }
     }
   }
+
+  if (update->sheath_boundary && sh_active)
+    sh_phi_total += sheath_waveform_drop(update, surf, sh_midx);
 
   // Per-particle: which side of the wall is the particle on? One dot
   // product, always recomputed. The signed distance seeds the running
@@ -648,6 +672,21 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
   // spatial-mode lifetime energy ledger (see registration in Update::init)
   double *sh_bank_vec = (update->sheath_bank_custom >= 0)
     ? particle->edvec[particle->ewhich[update->sheath_bank_custom]] : nullptr;
+  // phi reference from the previous move (stored phi+1; 0 = unset, e.g.
+  // newly ionized): pays element/profile switches between moves instead
+  // of re-seeding the potential for free
+  double *sh_phiprev_vec = (update->sheath_phiprev_custom >= 0)
+    ? particle->edvec[particle->ewhich[update->sheath_phiprev_custom]] : nullptr;
+  int sh_phi_pending = 0;
+  double sh_phi_ref = 0.0;
+  if (sh_phiprev_vec) {
+    if (sh_active && !update->sheath_boundary) {
+      if (sh_phiprev_vec[i] > 0.0) {
+        sh_phi_ref = sh_phiprev_vec[i] - 1.0;
+        sh_phi_pending = 1;
+      }
+    } else sh_phiprev_vec[i] = 1.0;   // out of band: known phi = 0
+  }
 
   for (int isub = 0; isub < nsub; isub++) {
 
@@ -701,8 +740,12 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
       const double d_new = d_old + vn * dt_sub;
       sh_d_cur = d_new;
       if (std::min(d_old, d_new) < sh_d_max) {
-        const double phi_old = SheathModels::sheath_phi_at_distance(
+        const double phi_old_geo = SheathModels::sheath_phi_at_distance(
             sh_coeffs, std::max(d_old, 0.0));
+        // first engagement this move: phi_old = last move's stored phi, so
+        // a reference-element switch is charged as work, not a free teleport
+        const double phi_old = sh_phi_pending ? sh_phi_ref : phi_old_geo;
+        sh_phi_pending = 0;
         const double phi_new = SheathModels::sheath_phi_at_distance(
             sh_coeffs, std::max(d_new, 0.0));
         double dKE_J =
@@ -744,7 +787,11 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
           sheath_diag_esum += emag_diag;
           if (emag_diag > sheath_diag_emax) sheath_diag_emax = emag_diag;
         }
-      }
+        // remember phi at the endpoint for next move's reference payment
+        if (sh_phiprev_vec)
+          sh_phiprev_vec[i] = 1.0 + SheathModels::sheath_phi_at_distance(
+              sh_coeffs, std::max(sh_d_cur, 0.0));
+      } else if (sh_phiprev_vec) sh_phiprev_vec[i] = 1.0;
     }
 
     if (pusher_dump_flag && (update->ntimestep % pusher_dump_every == 0) && i == 0) {
@@ -878,6 +925,7 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
   double sh_te = 0.0, sh_ti = 0.0, sh_ne = 0.0;
   double sh_bmag = 0.0, sh_alpha_deg = 90.0;
   int sh_active = 0;
+  int sh_midx = -1;
   int sh_from_cache = 0;   // d_max/coeffs taken from the per-element cache
   double sh_d_max = 0.0;
   SheathModels::SheathEmagCoeffs sh_coeffs;
@@ -931,6 +979,7 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
       }
 
       if (midx >= 0) {
+        sh_midx = midx;
         // Use RAW triangle/line normal directly from the surface element,
         // not the per-cell flipped version.  This avoids normal sign flips
         // in split cells where the cell center is on the opposite side of
@@ -1083,6 +1132,21 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
   double sh_phi_tot_sp = 0.0;
   if (sh_active && sh_bank_vec)
     sh_phi_tot_sp = SheathModels::sheath_phi_at_distance(sh_coeffs, 0.0);
+  // phi reference from the previous move (stored phi+1; 0 = unset, e.g.
+  // newly ionized): pays element/profile switches between moves instead
+  // of re-seeding the potential for free
+  double *sh_phiprev_vec = (update->sheath_phiprev_custom >= 0)
+    ? particle->edvec[particle->ewhich[update->sheath_phiprev_custom]] : nullptr;
+  int sh_phi_pending = 0;
+  double sh_phi_ref = 0.0;
+  if (sh_phiprev_vec) {
+    if (sh_active && !update->sheath_kick && !update->sheath_boundary) {
+      if (sh_phiprev_vec[i] > 0.0) {
+        sh_phi_ref = sh_phiprev_vec[i] - 1.0;
+        sh_phi_pending = 1;
+      }
+    } else sh_phiprev_vec[i] = 1.0;   // out of band: known phi = 0
+  }
 
   // --- Sheath BOUNDARY mode: sub-grid potential barrier (prompt redep) ---
   // 3D port of the push_boris_2d barrier impulse: an outbound ion with
@@ -1096,7 +1160,8 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
   if (update->sheath_boundary && sh_active && sh_d0_sign > 0.0 &&
       sh_d0 <= sh_d_max) {
     const double sh_phi_total =
-        SheathModels::sheath_phi_at_distance(sh_coeffs, 0.0);
+        SheathModels::sheath_phi_at_distance(sh_coeffs, 0.0) +
+        sheath_waveform_drop(update, surf, sh_midx);
     if (sh_phi_total > 0.0) {
       int *paid_vec = (update->sheath_paid_custom >= 0)
         ? particle->eivec[particle->ewhich[update->sheath_paid_custom]] : nullptr;
@@ -1232,8 +1297,12 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
       + (xcur[1] - sh_sref[1]) * sh_ny
       + (xcur[2] - sh_sref[2]) * sh_nz;
       if (std::min(d_old, d_new) < sh_d_max) {
-        const double phi_old = SheathModels::sheath_phi_at_distance(
+        const double phi_old_geo = SheathModels::sheath_phi_at_distance(
             sh_coeffs, std::max(d_old, 0.0));
+        // first engagement this move: phi_old = last move's stored phi, so
+        // a reference-element switch is charged as work, not a free teleport
+        const double phi_old = sh_phi_pending ? sh_phi_ref : phi_old_geo;
+        sh_phi_pending = 0;
         const double phi_new = SheathModels::sheath_phi_at_distance(
             sh_coeffs, std::max(d_new, 0.0));
         double dKE_J =
@@ -1245,6 +1314,7 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
               - sh_bank_vec[i];
           if (dKE_J > room) dKE_J = (room > 0.0) ? room : 0.0;
         }
+        double sh_d_fin = d_new;
         if (dKE_J != 0.0) {
           const double vn = vcur[0]*sh_nx + vcur[1]*sh_ny + vcur[2]*sh_nz;
           const double s2 = vn*vn + 2.0*dKE_J/mass;
@@ -1261,6 +1331,7 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
             xcur[0] -= (d_new - d_old) * sh_nx;
             xcur[1] -= (d_new - d_old) * sh_ny;
             xcur[2] -= (d_new - d_old) * sh_nz;
+            sh_d_fin = d_old;
           }
           const double dvn = vn_new - vn;
           vcur[0] += dvn * sh_nx;
@@ -1273,7 +1344,11 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
           sheath_diag_esum += emag_diag;
           if (emag_diag > sheath_diag_emax) sheath_diag_emax = emag_diag;
         }
-      }
+        // remember phi at the endpoint for next move's reference payment
+        if (sh_phiprev_vec)
+          sh_phiprev_vec[i] = 1.0 + SheathModels::sheath_phi_at_distance(
+              sh_coeffs, std::max(sh_d_fin, 0.0));
+      } else if (sh_phiprev_vec) sh_phiprev_vec[i] = 1.0;
     }
 
     if (pusher_dump_flag && (update->ntimestep % pusher_dump_every == 0) && i == 0) {
@@ -2143,6 +2218,19 @@ void Pusher::global_keyword(int narg, char **arg, int &iarg)
           if (update->sheath_dmax < 0.0)
             error->all(FLERR, "global pusher sheath dmax must be >= 0");
           iarg += 2;
+        } else if (strcmp(arg[iarg], "waveform") == 0) {
+          if (iarg + 2 >= narg)
+            error->all(FLERR,
+              "global pusher sheath waveform needs <surface_attr> <frequency_hz>");
+          delete [] update->sheath_waveform_attr;
+          int n = strlen(arg[iarg+1]) + 1;
+          update->sheath_waveform_attr = new char[n];
+          strcpy(update->sheath_waveform_attr, arg[iarg+1]);
+          update->sheath_frequency_hz = input->numeric(FLERR, arg[iarg+2]);
+          if (update->sheath_frequency_hz < 0.0)
+            error->all(FLERR,
+              "global pusher sheath waveform frequency must be >= 0");
+          iarg += 3;
         } else break;
       }
       if (update->sheath_flag && !update->sheath_geom_cid)

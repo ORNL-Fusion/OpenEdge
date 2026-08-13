@@ -418,6 +418,12 @@ void FixBackground::reload()
     error->one(FLERR, e.what());
   }
 
+  // File loading clears carrier-derived state first.  Preserve a magnetic
+  // field supplied explicitly on the fix command (br/bz/bt): bfield_at()
+  // already uses these scalars as its final fallback, and consumers must see
+  // the matching capability flag during their init().
+  if (const_has_bfield) has_bfield = 1;
+
   // Broadcast plasma grid dimensions
   MPI_Bcast(&nr, 1, MPI_INT, 0, world);
   MPI_Bcast(&nz, 1, MPI_INT, 0, world);

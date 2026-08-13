@@ -77,6 +77,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
     static const char *kws[] = {
         "target", "projectiles", "compound", "conc", "roughness_dm",
         "projectile_slots", "static", "mass_amu",
+        "sheath_waveform",
         "nflux_species", "incident_angle_species", "incident_energy_species",
         "sputter_yield_species", "sputter_flux_species",
         "sputter_flux_total", "sputter_rate_total",
@@ -129,6 +130,9 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
   proj_slot_lo = 2;
   proj_slot_hi = std::numeric_limits<int>::max();
   mass_amu = 2.0;  // default: deuterium (used for Bohm sound speed)
+  sheath_waveform_index = -1;
+  sheath_frequency_hz = 0.0;
+  sheath_phase_samples = 0;
   static_cache = 0;
   cache_valid = 0;
   files_loaded = 0;
@@ -198,6 +202,18 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       mass_amu = atof(arg[iarg+1]);
       if (mass_amu < 0.0) error->all(FLERR,"mass_amu must be >= 0");
       iarg += 2;
+    } else if (strcmp(arg[iarg],"sheath_waveform") == 0) {
+      if (iarg+3 >= narg)
+        error->all(FLERR,
+          "sheath_waveform needs <surface_attr> <frequency_hz> <phase_samples>");
+      sheath_waveform_attr = std::string(arg[iarg+1]);
+      sheath_frequency_hz = atof(arg[iarg+2]);
+      sheath_phase_samples = atoi(arg[iarg+3]);
+      if (sheath_frequency_hz < 0.0)
+        error->all(FLERR,"sheath_waveform frequency must be >= 0");
+      if (sheath_phase_samples < 1)
+        error->all(FLERR,"sheath_waveform phase_samples must be >= 1");
+      iarg += 4;
     } else if (strcmp(arg[iarg],"wall_flux_cutoff") == 0) {
       if (iarg+1 >= narg) error->all(FLERR,"wall_flux_cutoff needs value [m]");
       wall_flux_cutoff = atof(arg[iarg+1]);
@@ -359,6 +375,11 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       error->all(FLERR,"compute surface/physical/sputter: compound is not "
                  "supported with the virtual impurity path");
   }
+  if (!sheath_waveform_attr.empty() &&
+      (!compound_mix.empty() || has_impurity))
+    error->all(FLERR,
+      "compute surface/physical/sputter: sheath_waveform currently supports "
+      "pure target/projectile tables only (no compound or virtual impurity)");
 
   nvalue = static_cast<int>(which_tmp.size());
   if (nvalue == 0) error->all(FLERR,"No outputs requested for compute surface/physical/sputter");
@@ -373,7 +394,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
   if (nvalue == 1) size_per_surf_cols = 0;
   else size_per_surf_cols = nvalue;
   surf_tally_flag = 0;
-  timeflag = 0;
+  timeflag = (!sheath_waveform_attr.empty() && sheath_phase_samples == 1);
 
   dimension = domain->dimension;
   firstflag = 1;
@@ -823,7 +844,15 @@ void ComputeSurfacePhysicalSputter::load_iead_if_requested()
   // the sheath-rotated ion energy-angle distribution instead of being
   // evaluated at the mean impact (E, 90-alpha_B). Opt out with `iead none`.
   // Missing database files fall back with a warning below.
-  if (iead_arg.empty()) iead_arg = "auto";
+  // A phase-averaged tile waveform must average Y(E) itself.  The current
+  // IEAD tables already contain a separate sheath convolution and cannot be
+  // combined consistently with that extra phase dimension yet.
+  if (!sheath_waveform_attr.empty()) {
+    if (iead_arg.empty()) iead_arg = "none";
+    if (iead_arg != "none")
+      error->all(FLERR,
+        "compute surface/physical/sputter: sheath_waveform requires iead none");
+  } else if (iead_arg.empty()) iead_arg = "auto";
   if (iead_arg == "none") return;
 
   // Decide which tables we need based on projectile_elements (filled by
@@ -1352,6 +1381,27 @@ void ComputeSurfacePhysicalSputter::init()
   files_loaded = 1;
   }  // end one-time file loads
 
+  sheath_waveform_index = -1;
+  if (!sheath_waveform_attr.empty()) {
+    sheath_waveform_index = surf->find_custom(
+        (char *) sheath_waveform_attr.c_str());
+    if (sheath_waveform_index < 0)
+      error->all(FLERR,
+        "compute surface/physical/sputter: sheath_waveform surface attribute not found");
+    if (surf->etype[sheath_waveform_index] != 1 ||
+        surf->esize[sheath_waveform_index] != 3)
+      error->all(FLERR,
+        "compute surface/physical/sputter: sheath_waveform attribute must be "
+        "DOUBLE[3] = [Vdc,Vrf_peak,phase_rad]");
+    if (sheath_phase_samples == 1 && static_cache) {
+      if (comm->me == 0)
+        error->warning(FLERR,
+          "sheath_waveform with one phase sample is time resolved; disabling static cache");
+      static_cache = 0;
+      cache_valid = 0;
+    }
+  }
+
   if (!has_bfield)
     error->all(FLERR,
       "compute surface/physical/sputter: need a B-field — use a background "
@@ -1490,6 +1540,10 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
   Surf::Tri *tris = distributed ? surf->mytris : surf->tris;
   const int me = comm->me;
   const int nprocs = comm->nprocs;
+  double **sheath_waveform = (sheath_waveform_index >= 0) ?
+      surf->edarray[surf->ewhich[sheath_waveform_index]] : nullptr;
+  const double sim_time = update->time +
+      (update->ntimestep - update->time_last_update) * update->dt;
 
   const int ns = has_multi_ion ? nspec : 1;
   std::vector<double> gamma_n(ns,0.0), angle_deg(ns,0.0), energy_eV(ns,0.0), yld(ns,0.0), sput_flux(ns,0.0);
@@ -1845,8 +1899,26 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
       const double ti_ratio = ti_eV / std::max(te_eV, 1.0e-30);
       const double psi_over_Te = 0.5 *
         std::log(mi_over_me_bg / (2.0 * M_PI * (1.0 + ti_ratio)));
-      double E = 2.0 * ti_eV +
+      const double E_floating = 2.0 * ti_eV +
                  static_cast<double>(z_inc) * psi_over_Te * te_eV;
+      auto impact_energy = [&](int iphase) -> double {
+        if (!sheath_waveform) return E_floating;
+        const double vdc = sheath_waveform[i][0];
+        const double vrf = sheath_waveform[i][1];
+        const double phase0 = sheath_waveform[i][2];
+        const double phase = (sheath_phase_samples == 1) ?
+          2.0*M_PI*sheath_frequency_hz*sim_time + phase0 :
+          2.0*M_PI*static_cast<double>(iphase) /
+            static_cast<double>(sheath_phase_samples) + phase0;
+        const double vwall = vdc + vrf*std::sin(phase);
+        // Negative wall voltage is an additional attracting drop.  The
+        // existing floating-sheath term remains the minimum model.
+        return E_floating + static_cast<double>(z_inc)*std::max(0.0,-vwall);
+      };
+      const int nphase = sheath_waveform ? sheath_phase_samples : 1;
+      double E = 0.0;
+      for (int ip = 0; ip < nphase; ++ip) E += impact_energy(ip);
+      E /= static_cast<double>(nphase);
       energy_eV[s] = E;
 
       if (in_projectile_slots(s+1)) {
@@ -1905,6 +1977,10 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
                 [&](double e_eV, double th_deg) {
                   return pair_yield(e_eV, th_deg);
                 });
+          } else if (sheath_waveform) {
+            for (int ip = 0; ip < nphase; ++ip)
+              ys += pair_yield(impact_energy(ip), theta_deg);
+            ys /= static_cast<double>(nphase);
           } else {
             ys = pair_yield(E, theta_deg);
           }
@@ -1915,6 +1991,10 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
                 [&](double e_eV, double th_deg) {
                   return yield_lookup(e_eV, th_deg);
                 });
+          } else if (sheath_waveform) {
+            for (int ip = 0; ip < nphase; ++ip)
+              ys += yield_lookup(impact_energy(ip), theta_deg);
+            ys /= static_cast<double>(nphase);
           } else {
             ys = yield_lookup(E, theta_deg);
           }

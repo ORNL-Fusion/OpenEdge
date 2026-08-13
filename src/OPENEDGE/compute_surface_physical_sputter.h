@@ -83,6 +83,15 @@ class ComputeSurfacePhysicalSputter : public Compute {
   // roughness correction: yields evaluated at max(0, theta - rough_dm)
   double rough_dm = 0.0;
 
+  // Optional target-tile voltage waveform.  The named per-surface DOUBLE
+  // array has three columns [Vdc, Vrf_peak, phase_rad], with voltage relative
+  // to the local quasineutral plasma.  One phase sample is time resolved;
+  // more than one averages the nonlinear sputter yield over an RF cycle.
+  std::string sheath_waveform_attr;
+  int sheath_waveform_index = -1;
+  double sheath_frequency_hz = 0.0;
+  int sheath_phase_samples = 0;
+
   // Element-aware multi-projectile API (post-2026-04-21):
   //   target W projectiles O,B
   // Resolves one Eckstein entry (or surface HDF5 table) per projectile
