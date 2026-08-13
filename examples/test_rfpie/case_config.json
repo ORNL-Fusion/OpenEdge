@@ -1,0 +1,48 @@
+{
+  "geometry": {
+    "source_domain_stl": "cad/sim_domain.stl",
+    "source_target_stl": "cad/exposed_tungsten_sample.stl",
+    "stl_length_to_m": 0.001,
+    "target_face_radial_rings": 5
+  },
+  "plasma": {
+    "source_lp_data": "experimental_data/lp/data.txt",
+    "source_lp_position_unit": "cm",
+    "source_lp_workbook": "experimental_data/lp/dlp_katie_22_9_19.xlsx",
+    "radial_points": 161,
+    "axial_points": 121,
+    "r_max_m": 0.031,
+    "z_min_m": -0.0002,
+    "z_max_m": 0.0600,
+    "density_floor_m3": 1.0e15,
+    "density_tail_scale_bounds_m": [0.001, 0.100],
+    "temperature_even_polynomial_order": 2,
+    "temperature_asymptote_eV": 5.0,
+    "temperature_tail_scale_bounds_m": [0.001, 0.100],
+    "ti_eV": 0.05,
+    "bz_t": 0.1
+  },
+  "target_sheath": {
+    "vdc_v": -500.0,
+    "vrf_v": 0.0,
+    "frequency_hz": 13560000.0,
+    "phase_rad": 0.0,
+    "phase_samples": 64
+  },
+  "transport": {
+    "grid_cells": [64, 64, 96],
+    "timestep_s": 2.0e-8,
+    "pusher_subcycles": 2,
+    "d_perp_m2_s": 0.1,
+    "run_steps": 10000,
+    "nlaunch_total": 100,
+    "population_control_every_steps": 200,
+    "max_markers_per_cell_species": 200,
+    "balance_switch_steps": 1000,
+    "balance_part_every_steps": 200,
+    "balance_time_every_steps": 1000,
+    "diagnostic_every_steps": 1000,
+    "diagnostic_sample_every_steps": 10,
+    "axis_average_radius_m": 0.003
+  }
+}
