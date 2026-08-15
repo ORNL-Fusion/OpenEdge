@@ -1,6 +1,6 @@
 # OpenEdge
 
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
+[![License: GPL-2.0](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-orange.svg)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-green.svg)
 
@@ -55,7 +55,7 @@ including the GPU build.
 CPU (MPI):
 
 ```bash
-cd OpenEdge/examples/test_west_cases/axi_1p5MW_plasma_bkg
+cd OpenEdge/examples/workflows/west_impurity_transport
 mpirun -np 8 ../../../../buildOpenEdge/src/spa_mpi -in in.axi_west_emission
 ```
 
@@ -73,7 +73,7 @@ Quick sanity check of the whole suite:
 ```
 
 Outputs (log, dumps, surface tallies) land in the case directory. See
-each `examples/*/README.md` for case-specific post-processing.
+each leaf `README.md` under `examples/` for case-specific post-processing.
 
 ### Requirements
 
@@ -90,5 +90,5 @@ converters, performance, migration guides. Start at
 
 ## License
 
-[GPL-3.0](LICENSE), inherited from SPARTA. See [LICENSE](LICENSE) for
+[GPL-2.0](LICENSE), following SPARTA. See [LICENSE](LICENSE) for
 details.

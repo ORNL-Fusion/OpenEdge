@@ -1,0 +1,25 @@
+OpenEdge — attribution and third-party notices
+==============================================
+
+OpenEdge is a derivative work of SPARTA:
+
+  SPARTA — Stochastic PArallel Rarefied-gas Time-accurate Analyzer
+  Copyright (2014) Sandia Corporation. Under the terms of Contract
+  DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government
+  retains certain rights in this software.
+  https://sparta.github.io
+  Distributed under the GNU General Public License (see LICENSE.SPARTA
+  for the license text as distributed with SPARTA).
+
+Vendored SPARTA base version: see the SPARTA_BASE file (currently: 912c9e16).
+SPARTA source files retain their original copyright and license headers.
+OpenEdge modifications and additions (the OPENEDGE package, the
+plasma-edge fixes/computes at the src root, converters, and this manual)
+are Copyright (C) 2023-2026 Abdourahmane Diaw, Oak Ridge National
+Laboratory, distributed under the GNU General Public License (see
+LICENSE).
+
+Portions of the OpenEdge manual's core-command pages are adapted from
+the SPARTA manual (Plimpton, Gallis et al., Sandia National
+Laboratories), distributed with SPARTA under the same license; each
+adapted page carries an attribution comment.
