@@ -28,8 +28,8 @@ nb["cells"] = [
 
 Run this notebook before transport. It checks what OpenEdge will actually see:
 the probe-derived He plasma, SI geometry, per-tile DC/RF waveform, RustBCA
-He-on-W data, and the resulting sputtered-W source. The old GITR surface data
-are intentionally not used.
+He-on-W data, and the resulting sputtered-W source. Legacy surface data from the
+original case are intentionally not used.
 """),
     code("""
 from pathlib import Path
