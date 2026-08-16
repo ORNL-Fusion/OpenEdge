@@ -17,6 +17,7 @@
 #include "modify.h"
 #include "cut2d.h"
 #include "cut3d.h"
+#include "surf_collide_vanish.h"
 #include "input.h"
 #include "comm.h"
 #include "random_knuth.h"
@@ -32,7 +33,7 @@ using namespace SPARTA_NS;
 using namespace MathConst;
 
 enum{PKEEP,PINSERT,PDONE,PDISCARD,PENTRY,PEXIT,PSURF};
-enum{FLOW,CONSTANT};
+enum{FLOW,CONSTANT,SLAVE};
 
 #define DELTATASK 256
 
@@ -67,6 +68,8 @@ FixSurfaceEmitPuff::FixSurfaceEmitPuff(SPARTA *sparta, int narg, char **arg) :
   normalflag = 0;
   stop_at_np = 0;
   stop_latched = 0;
+  slave_R = slave_gamma = 0.0;
+  slave_scstr = NULL;
 
   int iarg = 4;
   options(narg-iarg,&arg[iarg]);
@@ -75,8 +78,9 @@ FixSurfaceEmitPuff::FixSurfaceEmitPuff(SPARTA *sparta, int narg, char **arg) :
     error->all(FLERR,"Fix emit/surf/puff requires surface elements");
   if (surf->implicit)
     error->all(FLERR,"Fix emit/surf/puff not allowed for implicit surfaces");
-  if (npmode == CONSTANT && perspecies)
-    error->all(FLERR,"Cannot use fix surface/emit/puff n > 0 with perspecies yes");
+  if (npmode != FLOW && perspecies)
+    error->all(FLERR,"Cannot use fix surface/emit/puff n > 0 or slave "
+               "with perspecies yes");
 
   tasks = NULL;
   ntask = ntaskmax = 0;
@@ -93,6 +97,7 @@ FixSurfaceEmitPuff::~FixSurfaceEmitPuff()
   if (copymode) return;
 
   delete [] npstr;
+  delete [] slave_scstr;
 
   for (int i = 0; i < ntaskmax; i++) {
     delete [] tasks[i].ntargetsp;
@@ -133,6 +138,29 @@ void FixSurfaceEmitPuff::init()
       delete [] tasks[i].ntargetsp;
       tasks[i].ntargetsp = new double[nspecies];
     }
+  }
+
+  // SLAVE mode: resolve vanish collide IDs and baseline their cumulative
+  // absorbed weights (cum only advances during moves, so re-init is safe)
+  if (npmode == SLAVE) {
+    slave_sc.clear();
+    char *copy = new char[strlen(slave_scstr)+1];
+    strcpy(copy,slave_scstr);
+    char *tok = strtok(copy,",");
+    while (tok) {
+      int isc = surf->find_collide(tok);
+      if (isc < 0)
+        error->all(FLERR,"Fix surface/emit/puff slave collide ID not found");
+      SurfCollideVanish *scv = dynamic_cast<SurfCollideVanish *>(surf->sc[isc]);
+      if (!scv)
+        error->all(FLERR,"Fix surface/emit/puff slave collide is not style vanish");
+      slave_sc.push_back(scv);
+      tok = strtok(NULL,",");
+    }
+    delete [] copy;
+    slave_lastread.resize(slave_sc.size());
+    for (size_t k = 0; k < slave_sc.size(); k++)
+      slave_lastread[k] = slave_sc[k]->escaped_weight();
   }
 
   grid_changed();
@@ -339,6 +367,24 @@ void FixSurfaceEmitPuff::perform_task()
     cap_remaining = stop_at_np - nt_global;
   }
 
+  // SLAVE mode: total macroparticles to emit this window. Escaped-weight
+  // deltas are collected on every rank (collide tallies are rank-local),
+  // summed once globally; the one-step lag is inherent (emission happens
+  // at start-of-step, absorption during the previous move).
+  double slave_ntarget_total = 0.0;
+  if (npmode == SLAVE) {
+    double dsum_local = 0.0;
+    for (size_t k = 0; k < slave_sc.size(); k++) {
+      double cur = slave_sc[k]->escaped_weight();
+      dsum_local += cur - slave_lastread[k];
+      slave_lastread[k] = cur;
+    }
+    double escaped_atoms = 0.0;
+    MPI_Allreduce(&dsum_local,&escaped_atoms,1,MPI_DOUBLE,MPI_SUM,world);
+    slave_ntarget_total = (slave_R * escaped_atoms +
+                           slave_gamma * update->dt * nevery) / update->fnum;
+  }
+
   int i,m,n,pcell,isurf,ninsert,nactual,isp,ispecies,ntri,id;
   double indot,scosine,rn,ntarget,vr,alpha,beta;
   double beta_un,normalized_distbn_fn,theta,erot,evib;
@@ -392,6 +438,9 @@ void FixSurfaceEmitPuff::perform_task()
         if (perspecies) tasks[i].ntargetsp[isp] = nsp;
       }
       ntarget = ntarget_all;
+    } else if (npmode == SLAVE) {
+      // SLAVE: flux-closure total distributed across tasks by area fraction
+      ntarget = slave_ntarget_total * tasks[i].ntarget;
     } else {
       // CONSTANT: n N means N particles per step distributed across tasks by
       // area fraction (tasks[i].ntarget was set in grid_changed()).
@@ -402,9 +451,7 @@ void FixSurfaceEmitPuff::perform_task()
     if (perspecies) {
       for (isp = 0; isp < nspecies; isp++) {
         ispecies = species[isp];
-        // FLOW: per-species count already weighted by mol_inflow; CONSTANT: split by fraction
-        double ntarget_sp = (npmode == FLOW) ? tasks[i].ntargetsp[isp]
-                                             : ntarget * fraction[isp];
+        double ntarget_sp = ntarget * fraction[isp];
         ninsert = static_cast<int>(ntarget_sp + random->uniform());
         if (cap_remaining >= 0) {
           bigint slot = cap_remaining - static_cast<bigint>(nsingle);
@@ -635,6 +682,22 @@ int FixSurfaceEmitPuff::option(int narg, char **arg)
     else if (strcmp(arg[1],"no") == 0) normalflag = 0;
     else error->all(FLERR,"Illegal fix surface/emit/puff command");
     return 2;
+  }
+
+  if (strcmp(arg[0],"slave") == 0) {
+    // slave R Gamma_ext scID1[,scID2,...] : emit R x (weight absorbed by the
+    // listed vanish collides last window) + Gamma_ext [atoms/s] external feed
+    if (4 > narg) error->all(FLERR,"Illegal fix surface/emit/puff command");
+    slave_R = atof(arg[1]);
+    slave_gamma = atof(arg[2]);
+    if (slave_R < 0.0 || slave_gamma < 0.0)
+      error->all(FLERR,"fix surface/emit/puff slave R and Gamma must be >= 0");
+    delete [] slave_scstr;
+    int n = strlen(arg[3]) + 1;
+    slave_scstr = new char[n];
+    strcpy(slave_scstr,arg[3]);
+    npmode = SLAVE;
+    return 4;
   }
 
   if (strcmp(arg[0],"stop_at_np") == 0) {

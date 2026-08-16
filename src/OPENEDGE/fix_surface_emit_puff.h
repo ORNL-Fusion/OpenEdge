@@ -27,6 +27,7 @@ FixStyle(surface/emit/puff,FixSurfaceEmitPuff)
 #include "fix_emit.h"
 #include "surf.h"
 #include "grid.h"
+#include <vector>
 
 namespace SPARTA_NS {
 
@@ -44,8 +45,17 @@ class FixSurfaceEmitPuff : public FixEmit {
 
   // Per-step emission count (CONSTANT mode). `n 0` means FLOW mode:
   // use mixture nrho / temp and surf-inflow formula, same as plain emit/surf.
-  int npmode, np;   // npmode = FLOW, CONSTANT
+  int npmode, np;   // npmode = FLOW, CONSTANT, SLAVE
   char *npstr;      // unused; reserved for future VARIABLE mode
+
+  // SLAVE mode: two-term flux closure. Injected atoms per emission window =
+  // Gamma_ext * dt * nevery + R * (real-atom weight absorbed by the listed
+  // vanish collides since last emission). R=0 reduces to a pure external
+  // source; velocity/species sampling still comes from the mixture.
+  double slave_R, slave_gamma;
+  char *slave_scstr;                          // comma-separated vanish collide IDs
+  std::vector<class SurfCollideVanish *> slave_sc;
+  std::vector<double> slave_lastread;         // per-collide cum weight at last read
 
   // Optional emit-count cap: stops emitting exactly after `stop_at_np`
   // particles have been launched (summed across ranks and steps). Uses the

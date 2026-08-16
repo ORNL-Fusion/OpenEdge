@@ -55,6 +55,7 @@
 #include "random_knuth.h"
 #include "random_mars.h"
 #include "update.h"
+#include "pusher.h"
 #include "fix_background.h"
 #include "openedge_geom.h"
 
@@ -548,6 +549,27 @@ void FixCoulombBase::nanbu_background_cell(int icell, int np)
     double m_test = species[isp].mass;
     double q_test = species[isp].charge * echarge;
 
+    // GCA-valid particles: scatter the MATERIALIZED physical velocity,
+    // then re-project (v_par, mu) back into the GC state — the stored
+    // state is the truth and the raw v may hold a chord or a stale
+    // reconstruction. (Batch pattern: materialize -> collide -> sync.)
+    double v_gc[3];
+    bool gc_part = false;
+    if (update->pusher && m_test > 0.0) {
+      const double qm_l = q_test / m_test;
+      const double Bv_l[3] = {Bx, By, Bz};
+      const double ph = std::fmod(
+          particles[idx].id * 0.6180339887498949 +
+          (double) update->ntimestep * 0.3819660112501051, 1.0);
+      MaterializedOrbit mo =
+          update->pusher->materialize_orbit(idx, Bv_l, qm_l, m_test, ph);
+      if (mo.valid) {
+        v_gc[0] = mo.v[0]; v_gc[1] = mo.v[1]; v_gc[2] = mo.v[2];
+        v = v_gc;
+        gc_part = true;
+      }
+    }
+
     // sample virtual partner velocity from Maxwellian
     double vpar  = Vpar_bg + box_muller() * v_thermal;
     double vp1   = box_muller() * v_thermal;
@@ -631,6 +653,11 @@ void FixCoulombBase::nanbu_background_cell(int icell, int np)
     v[0] -= m_bg_frac * dg0;
     v[1] -= m_bg_frac * dg1;
     v[2] -= m_bg_frac * dg2;
+
+    if (gc_part) {
+      const double Bv_l[3] = {Bx, By, Bz};
+      update->pusher->sync_gc_velocity(idx, v, Bv_l, m_test);
+    }
   }
 }
 

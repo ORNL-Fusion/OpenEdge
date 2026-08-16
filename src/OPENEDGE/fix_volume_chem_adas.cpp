@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include "fix_volume_chem_adas.h"
 #include "update.h"
+#include "pusher.h"
 #include "grid.h"
 #include "particle.h"
 #include "memory.h"
@@ -1940,6 +1941,12 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
     dellist.push_back(ip_index);
     return 1;
   }
+
+  // species/charge change invalidates the stored guiding-center state
+  // (q/m-dependent v_par and mu are meaningless across the swap; the
+  // pusher re-inits from the resampled v on the next step)
+  if (update->pusher)
+    update->pusher->invalidate_gc(ip_index, Pusher::GC_INVAL_SPECIES);
 
   // Assign first product
   ip->ispecies = rchosen->products[0];

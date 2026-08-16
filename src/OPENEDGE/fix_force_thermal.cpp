@@ -34,6 +34,7 @@
 #include "modify.h"
 #include "particle.h"
 #include "update.h"
+#include "pusher.h"
 #include "fix_background.h"
 #include "openedge_geom.h"
 
@@ -409,6 +410,15 @@ void FixForceThermal::kick_half(double dt_half)
     }
 
     if (a_par == 0.0) continue;
+
+    // GCA-valid particles carry v_par in the stored GC state — a raw v
+    // kick would be discarded at the next reconstruction. The force is
+    // parallel by construction, so it maps exactly onto the GC v_par.
+    // apply_parallel_impulse refuses (false) for Boris-mode/invalid
+    // particles, which then take the plain kick below.
+    if (update->pusher &&
+        update->pusher->apply_parallel_impulse(ip, a_par * dt_half))
+      continue;
 
     // apply half-kick along bhat in SPARTA coordinates
     p.v[0] += a_par * bhat0 * dt_half;
