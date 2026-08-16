@@ -1,0 +1,68 @@
+# One-to-one benchmark of the grain chain against DUSTT
+# [Pigarov et al., Phys. Plasmas 12, 122508 (2005)]: single 1 um Li
+# grain in a uniform D plasma, 2D axisymmetric (x=Z, y=R).
+# Runs (see run.sh):
+#   drag   : upar 2e4 along B=Z, from rest -> OML charge Eq.(3-5) +
+#            ion friction Eq.(16) accelerate the grain (chain gate)
+#   efield : no flow, uniform E_Z -> F_E = Z_d e E (Eq. 18)
+#   free   : no fixes, toroidal launch -> phi(t), R(t) kinematics
+#            (Eq. 11-14 centrifugal geometry via axi_remap)
+
+seed                20260814
+dimension           2
+boundary            o ao p
+global              gridcut 0.0 comm/sort no
+global              fnum 1
+global              phi_track yes
+
+create_box          -1.0 2.0 0.0 10.0 -0.5 0.5
+create_grid         6 20 1
+balance_grid        rcb part
+
+species             input/grain.species grain
+mixture             grains grain frac 1.0
+
+variable tag        index drag
+variable src        index grain.rest
+variable upar       index 0.0
+variable nn         index 0.0
+variable tn         index 0.0
+variable nel        index 1.0e19
+variable dosee      index no
+variable tev        index 10.0
+variable zfix       index 0.0     # nonzero -> fixed_charge vacuum mode
+variable ez         index 0.0
+variable dofix      index 1
+variable dt         index 1e-6
+variable nsteps     index 1000
+variable dfreq      index 20
+
+read_particles      input/${src} 0
+
+fix pd background constant static yes bz 1.0 &
+                   ne ${nel} ni ${nel} te ${tev} ti 10.0 &
+                   nn ${nn} tn ${tn} upar ${upar} ez ${ez}
+
+# grains are unmagnetized: boris mode + skip = pure advection by mover
+global pusher plasma pd mode boris skip grains
+
+# charge always on (no force by itself; supplies p_particulate_charge);
+# drag gated so the free-kinematics run is force-free.
+# nevery 1, A_bg 2 (D), Z_bg 1; no gravity (isolate plasma forces)
+if "${zfix} == 0.0" then &
+  "fix fchg particulate/charge 1 background pd ion_mass_amu 2.0 thermionic no see ${dosee} mixture grains material Li" &
+else &
+  "fix fchg particulate/charge 1 background pd fixed_charge ${zfix} mixture grains material Li"
+
+if "${dofix} == 1" then &
+  "fix fdrag particulate/drag 1 2.0 1 background pd model dustt2005 coulomb/self yes material Li mixture grains"
+
+dump dpart particle all ${dfreq} output/traj.${tag} id type x y z vx vy vz &
+     p_particulate_charge p_phi_unwrap
+dump_modify dpart first yes
+dump_modify dpart format float %.14g
+
+timestep            ${dt}
+stats               500
+stats_style         step cpu np
+run                 ${nsteps}

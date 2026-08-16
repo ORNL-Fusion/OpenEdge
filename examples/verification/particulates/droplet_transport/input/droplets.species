@@ -1,0 +1,5 @@
+# Species data
+# ID    Molwt(amu)             Molmass(kg)            RotDof RotRel VibDof VibRel VibTemp(K) specwt charge radius(m) temp(K)
+drop_1  4.546262896442158e+21  7.549247146576273e-06  0  0.0  0  0.0  0.0  1.0  0.0  1.5e-3  773.15
+drop_2  2.104751340945444e+22  3.495021827118645e-05  0  0.0  0  0.0  0.0  1.0  0.0  2.5e-3  773.15
+drop_3  5.775437679554298e+22  9.590339893613564e-05  0  0.0  0  0.0  0.0  1.0  0.0  3.5e-3  773.15
