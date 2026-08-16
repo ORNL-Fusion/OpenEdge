@@ -24,7 +24,7 @@ No keyword arguments. Single-instance per simulation.
   Each weighted-emit fix overwrites this at the time the particle is
   added to the simulation, recording how many real particles per second
   this Monte-Carlo particle represents.
-- Survives migration / sort / split / coalesce — SPARTA's custom-attr
+- Survives migration / sort / split / coalesce — the custom-attribute
   machinery follows the particle.
 
 ## Example

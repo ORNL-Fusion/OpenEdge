@@ -308,6 +308,22 @@ double ProcessLibrary::TrimSputterTable::yield(double E_eV, double theta_deg,
        + tc * slice_yield(ic, E_eV, theta_deg);
 }
 
+double ProcessLibrary::TrimSputterTable::yield_at_T(double E_eV,
+                                                    double theta_deg,
+                                                    double T_K) const
+{
+  if (!valid()) return 0.0;
+  if (NT <= 1) return slice_yield(0, E_eV, theta_deg);
+  const double tt = std::min(std::max(T_K, Tax.front()), Tax.back());
+  int it = int(std::lower_bound(Tax.begin(), Tax.end(), tt) - Tax.begin());
+  if (it <= 0) it = 1;
+  if (it >= NT) it = NT - 1;
+  const double t1 = Tax[it-1], t2 = Tax[it];
+  const double f = (t2 != t1) ? (tt - t1) / (t2 - t1) : 0.0;
+  return (1.0 - f) * slice_yield(it-1, E_eV, theta_deg)
+       + f * slice_yield(it, E_eV, theta_deg);
+}
+
 bool ProcessLibrary::load_trim_sputter(const std::string &pair,
                                        TrimSputterTable &out)
 {
@@ -333,17 +349,21 @@ bool ProcessLibrary::load_trim_sputter(const std::string &pair,
         };
         read1(grp + "/E", out.E, out.NE);
         read1(grp + "/theta", out.theta, out.NTHETA);
-        // optional composition axis -> Y is [NC x NE x NTHETA]
+        // optional composition axis -> Y is [NC x NE x NTHETA];
+        // optional temperature axis (Kelvin) -> Y is [NT x NE x NTHETA]
         if (H5Lexists(f.getId(), (grp + "/C").c_str(), H5P_DEFAULT) > 0)
           read1(grp + "/C", out.C, out.NC);
+        else if (H5Lexists(f.getId(), (grp + "/T").c_str(), H5P_DEFAULT) > 0)
+          read1(grp + "/T", out.Tax, out.NT);
         H5::DataSet d = f.openDataSet(grp + "/Y");
-        if (out.NC > 0) {
+        if (out.NC > 0 || out.NT > 0) {
+          const int nlead = out.NC > 0 ? out.NC : out.NT;
           hsize_t dims[3] = {0, 0, 0};
           d.getSpace().getSimpleExtentDims(dims, nullptr);
-          if (static_cast<int>(dims[0]) == out.NC &&
+          if (static_cast<int>(dims[0]) == nlead &&
               static_cast<int>(dims[1]) == out.NE &&
               static_cast<int>(dims[2]) == out.NTHETA) {
-            out.Y.resize(size_t(out.NC) * out.NE * out.NTHETA);
+            out.Y.resize(size_t(nlead) * out.NE * out.NTHETA);
             d.read(out.Y.data(), H5::PredType::NATIVE_DOUBLE);
             present = 1;
           }
@@ -372,9 +392,10 @@ bool ProcessLibrary::load_trim_sputter(const std::string &pair,
 
   MPI_Bcast(&present, 1, MPI_INT, 0, comm_);
   if (!present) return false;
-  int dims3[3] = {out.NE, out.NTHETA, out.NC};
-  MPI_Bcast(dims3, 3, MPI_INT, 0, comm_);
-  out.NE = dims3[0]; out.NTHETA = dims3[1]; out.NC = dims3[2];
+  int dims4[4] = {out.NE, out.NTHETA, out.NC, out.NT};
+  MPI_Bcast(dims4, 4, MPI_INT, 0, comm_);
+  out.NE = dims4[0]; out.NTHETA = dims4[1]; out.NC = dims4[2];
+  out.NT = dims4[3];
   MPI_Bcast(&out.Es, 1, MPI_DOUBLE, 0, comm_);
   auto bcast_vec = [&](std::vector<double> &v, size_t n) {
     if (me_ != 0) v.resize(n);
@@ -383,7 +404,8 @@ bool ProcessLibrary::load_trim_sputter(const std::string &pair,
   bcast_vec(out.E, out.NE);
   bcast_vec(out.theta, out.NTHETA);
   if (out.NC > 0) bcast_vec(out.C, out.NC);
-  bcast_vec(out.Y, size_t(out.NC > 0 ? out.NC : 1) * out.NE * out.NTHETA);
+  if (out.NT > 0) bcast_vec(out.Tax, out.NT);
+  bcast_vec(out.Y, size_t(out.nlead()) * out.NE * out.NTHETA);
   return true;
 }
 

@@ -14,8 +14,7 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(droplet/emit,FixDropletEmit)
-FixStyle(grain/emit,FixDropletEmit)
+FixStyle(particulate/emit,FixDropletEmit)
 
 #else
 
@@ -73,12 +72,22 @@ class FixDropletEmit : public FixEmit {
   char *npstr;
   int user_mag_velocity;
   double incidentAngle;
+  double cone_half;
+  // fixed launch axis (dir keyword): Cartesian (R,Z,phi) input, slot-frame
+  // orthonormal (axis, t1, t2) built in init(); 0 = launch about surf normal
+  int dirflag_ = 0;
+  double dir_input_[3] = {0.0, 0.0, 0.0};
+  double dir_n_[3] = {0.0, 0.0, 0.0};
+  double dir_t1_[3] = {0.0, 0.0, 0.0};
+  double dir_t2_[3] = {0.0, 0.0, 0.0};
   double magVelocity;
   int user_speed_range;
+  int planar_flag;
   double vmin, vmax;
   double nweight_;          // real grains per macro-grain (grain_nweight)
   int nw_custom_;           // custom index, -1 = feature off
   void stamp_nweight(int);
+  void sample_tangent(double, double, double &, double &);
   int angle_cosine;   // 0 = uniform-in-theta (default), 1 = Knudsen cosine
 
   // copies of data from other classes

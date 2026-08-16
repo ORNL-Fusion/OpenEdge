@@ -1,6 +1,6 @@
 # `fix surface/emit/recycle` — wall-recycling neutral source
 
-Launches neutrals from SPARTA wall surfaces at a rate equal to the local
+Launches neutrals from wall surfaces at a rate equal to the local
 plasma Bohm wall flux × a total recycling coefficient. Mirrors the
 physics of EIRENE strata 1–5 (SOLPS recycling strata) but driven purely
 from the B2 plasma state (ne, Te, Ti) and geometry — no EIRENE output
@@ -22,7 +22,7 @@ fix <ID> surface/emit/recycle <mixture> <group> <plasma_fix_ID> \
   in the mixture.
 - **`twall_species`** — optional per-species overrides. Consumes
   `<sp> <T>` pairs until a recognised next keyword (or end of args).
-  A named species must exist both in SPARTA's species table and in the
+  A named species must exist both in the species table and in the
   mixture; otherwise init errors out. Species in the mixture not named
   here fall back to the scalar `twall`.
 
@@ -45,7 +45,7 @@ Stangeby (2000) ch. 2:
 with `sin(α_B)` the geometric projection of B onto the wall inward
 normal.
 
-## Emission rate per SPARTA task
+## Emission rate per emission task
 
 A *task* is the unit of work: one wall surface in one cell after
 `adapt_grid` refinement.
@@ -84,16 +84,16 @@ the thermal-return channel.
 
 ```
 [surface/emit/recycle] tasks=N, mapped=M (P%)
-[surface/emit/recycle] Bohm-flux rate (raw SPARTA segment area, sin_alpha=1) = X /s
+[surface/emit/recycle] Bohm-flux rate (raw segment area, sin_alpha=1) = X /s
 [surface/emit/recycle] Bohm-flux rate (B2-aggregated surf_area, sin_alpha=1) = Y /s [USING THIS]
 [surface/emit/recycle] wall mapping (global): K unique B2 cells, A m^2 of T total face area (P%)
 ```
 
-- Both rates are MPI-global. "raw SPARTA segment area" uses
-  `tasks[i].area` (the cone-frustum `2π·R·L` in SPARTA axi mode, the
+- Both rates are MPI-global. "raw segment area" uses
+  `tasks[i].area` (the cone-frustum `2π·R·L` in axisymmetric mode, the
   per-radian poloidal length in 2D Cart). "B2-aggregated surf_area" is
   the formula above and what the runtime uses. They should agree within
-  the geometric mismatch between the SPARTA wall mesh and the B2
+  the geometric mismatch between the wall mesh and the B2
   boundary cells.
 - "wall mapping" sums `mesh_wall_face_area[c]` over **dominant** cells
   only — under-reports when many B2 cells per segment, since
@@ -112,16 +112,16 @@ cell owns it. Three paths, tried in order:
 2. **Geographic fallback** — nearest B2 boundary cell by centroid
    distance, restricted to cells with `wall_face_area > 0`. Triggered
    when (1) is unavailable.
-3. **Raw SPARTA area** — last-resort emission using `tasks[i].area`
+3. **Raw segment area** — last-resort emission using `tasks[i].area`
    (with no `area_share`) when neither (1) nor (2) is available. Only
-   correct when SPARTA wall and B2 boundary coincide exactly.
+   correct when the wall mesh and B2 boundary coincide exactly.
 
 ## Wall-normal convention
 
 **Unified 2026-04-21.** Every OpenEdge surface fix —
 `fix emit/surf`, `fix surface/emit/puff`, `fix surface/emit/recycle`,
 `fix surface/emit/source`, `surf_collide diffuse`,
-`surf_react surface/pwi` — now uses the **SPARTA canonical** convention:
+`surf_react surface/pwi` — now uses the **canonical surface-normal** convention:
 wall normals point INTO the fluid (plasma), and emission /
 outgoing-reflection velocity is along `+normal`.
 

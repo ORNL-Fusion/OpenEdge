@@ -72,6 +72,9 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
   ion_mass_amu_(2.0),
   dq_custom_(-1),
   nw_custom_(-1),
+  heating_q_custom_(-1),
+  debye_ratio_custom_(-1),
+  oml_weight_custom_(-1),
   evap_atoms_local_(0.0),
   pd_(nullptr),
   emit_imix(-1),
@@ -104,6 +107,13 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
       if (!std::isfinite(heatflux_scale) || heatflux_scale < 0.0)
         error->all(FLERR,"Fix evaporation: heatflux/scale must be finite and >= 0");
       i += 2;
+    } else if (strcmp(arg[i], "alpha_e") == 0) {
+      // evaporation/accommodation coefficient on the Hertz-Knudsen flux
+      if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'alpha_e'");
+      alpha_e_ = atof(arg[i+1]);
+      if (!std::isfinite(alpha_e_) || alpha_e_ <= 0.0 || alpha_e_ > 1.0)
+        error->all(FLERR,"Fix evaporation: alpha_e must be in (0,1]");
+      i += 2;
     } else if (strcmp(arg[i], "rocket_eta") == 0) {
       if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'rocket_eta'");
       rocket_eta = atof(arg[i+1]);
@@ -132,7 +142,8 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
       if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'heating'");
       if      (strcmp(arg[i+1], "flux") == 0) heating_mode_ = 0;
       else if (strcmp(arg[i+1], "oml") == 0)  heating_mode_ = 1;
-      else error->all(FLERR,"Fix evaporation: heating must be 'flux' or 'oml'");
+      else if (strcmp(arg[i+1], "auto") == 0) heating_mode_ = 2;
+      else error->all(FLERR,"Fix evaporation: heating must be 'flux', 'oml', or 'auto'");
       i += 2;
     } else if (strcmp(arg[i], "ion_mass_amu") == 0) {
       if (i+1 >= narg) error->all(FLERR,"Fix evaporation: missing value for 'ion_mass_amu'");
@@ -153,6 +164,16 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
     double seed = comm->me + 1;
     random->reset(seed, comm->me, 100);
   }
+
+  heating_q_custom_ = particle->find_custom((char *) "droplet_heating_q");
+  if (heating_q_custom_ < 0)
+    heating_q_custom_ = particle->add_custom((char *) "droplet_heating_q", 1, 0);
+  debye_ratio_custom_ = particle->find_custom((char *) "droplet_a_over_lambdaD");
+  if (debye_ratio_custom_ < 0)
+    debye_ratio_custom_ = particle->add_custom((char *) "droplet_a_over_lambdaD", 1, 0);
+  oml_weight_custom_ = particle->find_custom((char *) "droplet_oml_weight");
+  if (oml_weight_custom_ < 0)
+    oml_weight_custom_ = particle->add_custom((char *) "droplet_oml_weight", 1, 0);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -209,7 +230,7 @@ void FixDropletEvaporate::init()
 
   // OML heating uses the grain's OML charge when fix droplet/charge is
   // active (custom vector registered by that fix); else chi defaults.
-  dq_custom_ = particle->find_custom((char *) "droplet_charge");
+  dq_custom_ = particle->find_custom((char *) "particulate_charge");
   nw_custom_ = particle->find_custom((char *) "grain_nweight");
 }
 
@@ -308,37 +329,28 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
   OpenEdge::sparta_to_RZ(xs, domain->dimension, domain->axisymmetric, R, Z,
                          pd_->column_x0, pd_->column_y0);
 
-  double Qs = 0.0;
-  if (heating_mode_ == 0) {
-    // Legacy mode: prescribed heat-flux field from plasma.h5. When the
-    // file carries q_par/q_perp, interp2D routes to the mesh-native
-    // counterpart; otherwise the fix-background defaults apply.
-    double q_par  = pd_->default_q_par;
-    double q_perp = pd_->default_q_perp;
-    if (pd_->has_qheatflux) {
-      if (!pd_->mesh_q_par.empty() || !pd_->q_par.empty())
-        q_par  = pd_->interp2D(pd_->q_par,  R, Z, ip->icell);
-      if (!pd_->mesh_q_perp.empty() || !pd_->q_perp.empty())
-        q_perp = pd_->interp2D(pd_->q_perp, R, Z, ip->icell);
-    }
-    // A sphere in a directional flux intercepts q*piR^2 = (1/4) q * 4piR^2;
-    // the model applies Qs over the full surface, so bake the 1/4 in here.
-    Qs = 0.25 * std::sqrt(q_par*q_par + q_perp*q_perp);
-  } else {
-    // OML mode: electron/ion collection heating from LOCAL ne/Te/Ti
-    // (DUSTT Eqs. 26-27 style, simplified). This is the physically
-    // correct volumetric heating for a grain immersed in plasma — q_par
-    // is a field-line target flux, near zero across most of the SOL
-    // volume where grains actually fly.
-    const double QE = 1.602176634e-19;
-    const double ME = 9.1093837015e-31;
-    const double MI = ion_mass_amu_ * 1.66053906660e-27;
-    const double Te = std::max(pd_->interp2D(pd_->temp_e, R, Z, ip->icell), 0.0);
-    const double Ti = std::max(pd_->interp2D(pd_->temp_i, R, Z, ip->icell), 0.0);
-    const double ne = std::max(pd_->interp2D(pd_->dens_e, R, Z, ip->icell), 0.0);
-    const double ni = pd_->dens_i.empty()
-      ? ne : std::max(pd_->interp2D(pd_->dens_i, R, Z, ip->icell), 0.0);
-    if (ne > 0.0 && Te > 0.0) {
+  const double QE = 1.602176634e-19;
+  const double ME = 9.1093837015e-31;
+  const double MI = ion_mass_amu_ * 1.66053906660e-27;
+  const double EPS0 = 8.8541878128e-12;
+  const double Te = std::max(pd_->interp2D(pd_->temp_e, R, Z, ip->icell), 0.0);
+  const double Ti = std::max(pd_->interp2D(pd_->temp_i, R, Z, ip->icell), 0.0);
+  const double ne = std::max(pd_->interp2D(pd_->dens_e, R, Z, ip->icell), 0.0);
+  const double ni = pd_->dens_i.empty()
+    ? ne : std::max(pd_->interp2D(pd_->dens_i, R, Z, ip->icell), 0.0);
+
+  double q_par  = pd_->default_q_par;
+  double q_perp = pd_->default_q_perp;
+  if (pd_->has_qheatflux) {
+    if (!pd_->mesh_q_par.empty() || !pd_->q_par.empty())
+      q_par = pd_->interp2D(pd_->q_par, R, Z, ip->icell);
+    if (!pd_->mesh_q_perp.empty() || !pd_->q_perp.empty())
+      q_perp = pd_->interp2D(pd_->q_perp, R, Z, ip->icell);
+  }
+  const double Qflux = 0.25 * std::sqrt(q_par*q_par + q_perp*q_perp);
+
+  double Qoml = 0.0;
+  if (ne > 0.0 && Te > 0.0) {
       // Normalized floating potential chi = e*phi/Te (<= 0). Use the OML
       // charge from fix droplet/charge when present; else the canonical
       // hydrogenic floating value chi ~ -2.5.
@@ -363,11 +375,38 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
       // ion surface-recombination energy (hydrogenic 13.6 eV).
       const double Ee = 2.5 * Te;
       const double Ei = 2.5 * std::max(Ti, 0.0) + (-chi) * Te + 13.6;
-      Qs = QE * (Ge * Ee + Gi * Ei);
-    }
+      Qoml = QE * (Ge * Ee + Gi * Ei);
   }
+
+  double a_over_lambdaD = 0.0;
+  if (ne > 0.0 && Te > 0.0) {
+    const double lambdaD = std::sqrt(EPS0 * Te / (ne * QE));
+    if (lambdaD > 0.0 && std::isfinite(lambdaD))
+      a_over_lambdaD = radius / lambdaD;
+  }
+
+  double oml_weight = 0.0;
+  if (heating_mode_ == 1) {
+    oml_weight = 1.0;
+  } else if (heating_mode_ == 2) {
+    if (a_over_lambdaD > 1.0)
+      error->one(FLERR,
+        "Fix evaporation heating auto: a/lambda_D > 1 requires a "
+        "finite-sheath collection model; choose an explicit heating model");
+    if (a_over_lambdaD > 0.0) oml_weight = 1.0;
+  }
+  double Qs = (1.0 - oml_weight) * Qflux + oml_weight * Qoml;
   if (!std::isfinite(Qs) || Qs < 0.0) Qs = 0.0;
   Qs *= heatflux_scale;
+
+  auto store_custom = [&](int custom, double value) {
+    if (custom < 0) return;
+    const int ew = particle->ewhich[custom];
+    if (ew >= 0) particle->edvec[ew][idrop] = value;
+  };
+  store_custom(heating_q_custom_, Qs);
+  store_custom(debye_ratio_custom_, a_over_lambdaD);
+  store_custom(oml_weight_custom_, oml_weight);
 
   // grad_Te at particle position (for rocket-force direction).
   double gTeR = 0.0, gTeZ = 0.0;
@@ -400,7 +439,7 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
     // Antoine + Hertz-Knudsen flux.
     const double vpres1 = 760.0 * std::pow(10.0, a1 + b1/T_new);      // mmHg
     const double Gevap_atoms =
-      1.0e4 * 3.513e22 * vpres1 / std::sqrt(xm1 * T_new);
+      alpha_e_ * 1.0e4 * 3.513e22 * vpres1 / std::sqrt(xm1 * T_new);
     if (!std::isfinite(Gevap_atoms) || Gevap_atoms < 0.0)
       error->one(FLERR,"Fix evaporation: invalid evaporation flux");
 

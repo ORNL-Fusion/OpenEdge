@@ -99,13 +99,13 @@ skipped:
   from a cell-centered override.
 - A pure-neutral deck still needs a cache activator such as
   `global pusher plasma <ID>`.
-- Reactions whose required species are missing from the SPARTA species
+- Reactions whose required species are missing from the deck's species
   table are skipped at init.
 
 ## Truncated charge-state ladders
 
 If a reactions file lists ionization/recombination for charge states
-beyond the species defined in SPARTA (e.g. deck has `W0..W10+` but the
+beyond the species defined in the deck (e.g. deck has `W0..W10+` but the
 file continues `W10+ -> W11+`), the runtime silently skips those
 reactions — `find_species` returns −1, the reaction is marked inactive,
 particles can't climb past the highest defined charge state. The init

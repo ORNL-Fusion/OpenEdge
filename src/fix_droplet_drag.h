@@ -15,8 +15,7 @@
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
-FixStyle(droplet/drag,FixDropletDrag)
-FixStyle(grain/drag,FixDropletDrag)
+FixStyle(particulate/drag,FixDropletDrag)
 #else
 #ifndef SPARTA_FIX_DROPLET_DRAG_H
 #define SPARTA_FIX_DROPLET_DRAG_H
@@ -43,19 +42,18 @@ class FixDropletDrag : public Fix {
   double g_input_[3] = {0.0, 0.0, 0.0};
 
  protected:
-  enum DragModel { DRAG_EPSTEIN = 0, DRAG_COULOMB = 1 };
-  int drag_model = DRAG_EPSTEIN;
-
   std::string plasma_fix_id_;
   FixBackground *pd_ = nullptr;
 
   double A_background      = 2.0;
   double Z_background      = 1.0;
   double rho_d             = 534.0;   // overridden by `material NAME`
-  double alpha_E           = 1.26;
   char   mat_name_[16]     = "";      // optional grain material
-  int    self_consistent_  = 0;       // coulomb/self: per-particle chi/delta/lnL
-  int    dq_custom_        = -1;      // droplet_charge custom index
+  int    self_consistent_  = 1;       // coulomb/self: per-particle chi/delta/lnL
+  int    efield_on_        = 1;       // DUSTT F_E = Z_d e E (efield yes|no)
+  int    neutrals_on_      = 1;       // DUSTT F_fric,n (neutral mass =
+                                      //  A_bg amu; auto-off without data)
+  int    dq_custom_        = -1;      // particulate_charge custom index
 
   double chi_coulomb       = 0.0;
   double delta_ite         = 1.0;
@@ -70,7 +68,7 @@ class FixDropletDrag : public Fix {
   int imix = -1;
 
   void kick_half(double dt_half);
-  double epstein_nu(double Ni, double Ti_eV, double rd_m) const;
+  double ion_drag_nu(double Ni, double Ti_eV, double rd_m) const;
   double coulomb_multiplier(double u) const;
   double coulomb_multiplier(double u, double chi, double delta,
                             double lnlam) const;

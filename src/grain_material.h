@@ -43,6 +43,8 @@ struct GrainMaterial {
   double tmelt_K;          // melting temperature [K]
   double hmelt_J_mol;      // latent heat of fusion [J/mol]
   double tensile_Pa;       // tensile strength [Pa]; 0 = no breakup
+  double see_delta_m;      // secondary-emission max yield [-]; 0 = no SEE data
+  double see_E_m_eV;       // incident energy at max yield [eV]
 };
 
 // Find by name (case-sensitive). Returns nullptr if unknown.

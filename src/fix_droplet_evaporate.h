@@ -26,8 +26,7 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(droplet/evaporate,FixDropletEvaporate)
-FixStyle(grain/ablate,FixDropletEvaporate)
+FixStyle(particulate/thermal,FixDropletEvaporate)
 
 #else
 
@@ -53,6 +52,7 @@ class FixDropletEvaporate : public Fix {
 
   double heatflux_scale;  // multiplier on |q| (default 1.0)
   double rocket_eta;      // asymmetry parameter for rocket force [0,1]
+  double alpha_e_ = 1.0;   // HKL evaporation/accommodation coefficient
 
  protected:
   int imix;
@@ -64,13 +64,14 @@ class FixDropletEvaporate : public Fix {
   const struct GrainMaterial *mat_;
   double twall_K_;        // wall temperature for radiative cooling [K]
 
-  // Heating model: 0 = prescribed |q| from plasma.h5 (legacy, target-flux
-  // style), 1 = OML electron/ion collection from local ne/Te/Ti (DUSTT
-  // style) — the physically right channel for grains immersed in plasma.
+  // Heating model: 0 = prescribed |q|, 1 = OML collection, 2 = adaptive.
   int heating_mode_;
   double ion_mass_amu_;   // background ion mass for the OML ion flux
-  int dq_custom_;         // droplet_charge custom index (-1 = none)
+  int dq_custom_;         // particulate_charge custom index (-1 = none)
   int nw_custom_;         // grain_nweight custom index (-1 = none)
+  int heating_q_custom_;
+  int debye_ratio_custom_;
+  int oml_weight_custom_;
   void end_of_step() override;
   void start_of_step() override;
 

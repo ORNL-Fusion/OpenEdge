@@ -46,7 +46,7 @@ Gradient_pinch in this mode uses per-particle finite differences on
 - **3D**: two perpendicular directions via Gram-Schmidt orthogonalisation
   of `b̂`.
 
-Particles that diffuse outside the SPARTA domain have their step
+Particles that diffuse outside the simulation domain have their step
 reverted on the next check (no loss from diffusion alone; wall
 collisions still apply normally).
 

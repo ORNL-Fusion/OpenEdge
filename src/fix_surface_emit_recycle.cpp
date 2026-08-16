@@ -268,7 +268,7 @@ void FixSurfaceEmitRecycle::grid_changed()
     diag_printed = 1;
     printf("[emit/surf/recycle] tasks=%d, mapped=%d (%.1f%%)\n",
            n_total, n_ok, 100.0 * n_ok / std::max(1, n_total));
-    printf("[emit/surf/recycle] Bohm-flux rate (raw SPARTA segment area, "
+    printf("[emit/surf/recycle] Bohm-flux rate (raw segment area, "
            "sin_alpha=1) = %.3e /s\n", sum_rate);
     if (plasma->has_mesh_wall_surf_cell &&
         !plasma->mesh_wall_surf_area.empty()) {

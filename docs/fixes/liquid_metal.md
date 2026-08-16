@@ -11,7 +11,7 @@ three pieces:
 | `fix surface/emit/source` | Consumes the evap / adatom / sputter computes to launch Li atoms. |
 
 The strip solver is the Fortran code by Sergey Smolentsev (UCLA),
-ported into `src/OPENEDGE/liquid_metal_strip.h` (no SPARTA dependency
+ported into `src/OPENEDGE/liquid_metal_strip.h` (no framework dependency
 — callable standalone from `tools/lm/run_strip.cpp`).
 
 ## `fix surface/state/lm`
@@ -37,11 +37,10 @@ fix ID surface/state/lm <surf_group> <Nevery> <hf_source> [<hf_arg> ...] \
 | `target`        | `<file.h5> <leg>`           | precomputed q_target.h5 with `inner` / `outer` / `iu` / `ou` group |
 | `solps_b2pl`    | `<ld_tg_*.dat>`             | SOLPS b2plot target loading file (Wtot column 5) |
 
-`solps_b2pl` is the path used in the validated lower-divertor coupling
-case — it also picks up `gamma_D` from the same file so adatom flux
-computes correctly. See
-`examples/test_solps_coupling/coupled_test/openedge/in.coupled` for a
-two-leg deployment.
+`solps_b2pl` is the path used in the lower-divertor coupling workflow. It also
+picks up `gamma_D` from the same file so the adatom flux computes correctly.
+The two-leg pattern is shown below; the complete coupled case is maintained as
+local WIP rather than as a supported public example.
 
 ### Per-surf customs written
 
@@ -51,7 +50,7 @@ two-leg deployment.
 | `h_lm`         | film thickness [m]               |
 | `Gamma_D_lm`   | incident D⁺ flux at surf [m⁻²·s⁻¹] (zero unless `hf_source` carries it) |
 
-These are SPARTA per-surf custom attributes, accessible from any
+These are per-surf custom attributes, accessible from any
 compute / dump as `s_<name>`.
 
 ### Multi-leg setup
@@ -156,12 +155,12 @@ dump d_surf surf all 1 output/surf_fluxes.txt id v1x v1y v2x v2y \
     c_cpmiLi c_cevap c_cadat s_Tsurf_lm s_Gamma_D_lm
 ```
 
-Validated against the standalone Smolentsev strip solver
+Verified against the standalone Smolentsev strip solver
 (`tools/lm/run_strip`) on both legs of the SOLPS coupling case:
 $\Gamma_\mathrm{evap}$ matches to $0.00\,\%$, $\Gamma_\mathrm{ad}$ to
 $\le 0.3\,\%$ on every wetted surf.
 
-```{figure} ../_static/figures/lm_validation_solps.png
+```{figure} ../_static/figures/lm_verification_solps.png
 :alt: OpenEdge vs standalone strip-solver comparison on inner / outer divertor legs
 :width: 100%
 
@@ -177,8 +176,8 @@ custom values from `dump surf`.
 
 | file | role |
 |------|------|
-| `src/OPENEDGE/liquid_metal_strip.h` | standalone Smolentsev solver (no SPARTA dep) |
-| `src/OPENEDGE/fix_surface_state_lm.{h,cpp}` | SPARTA fix wrapper |
+| `src/OPENEDGE/liquid_metal_strip.h` | standalone Smolentsev solver (standalone) |
+| `src/OPENEDGE/fix_surface_state_lm.{h,cpp}` | fix wrapper |
 | `src/OPENEDGE/compute_surface_chemical_evaporation.{h,cpp}` | Antoine + HK |
 | `src/OPENEDGE/compute_surface_chemical_adatom.{h,cpp}` | Arrhenius |
 | `tools/lm/run_strip.cpp` | C++ standalone driver for the solver |

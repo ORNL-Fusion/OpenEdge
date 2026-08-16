@@ -40,7 +40,7 @@ fix ID background constant \
 | `constant` | declare the plasma analytically — useful for unit tests and benchmarks |
 
 `column_axis` applies only to 3D Cartesian runs. It controls the
-SPARTA-to-cylindrical mapping `R = sqrt((x - x0)^2 + (y - y0)^2)` used
+Cartesian-to-cylindrical mapping `R = sqrt((x - x0)^2 + (y - y0)^2)` used
 for every plasma / B-field / sputter query. Default `(0, 0)` preserves
 SOLPS / SOLEDGE3X behavior where the simulation box is centered on the
 column. Use it for linear-device cases (MPEX, proto-lite) whose box is

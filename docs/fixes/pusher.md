@@ -1,151 +1,78 @@
 # `global pusher`
 
-## Description
-
-This global command configures the charged-particle pusher used by
-OpenEdge. It selects Boris full-orbit or Boris/GCA hybrid motion and
-can also enable a sheath overlay on top of the base pusher.
-
-It replaces the older `global boris_*`, `global gca`,
-`global bfield_compute`, and `global sheath` controls with one command
-tree.
+Configure the charged-particle pusher: full-orbit Boris, guiding-center
+(GCA), or the hybrid mode that switches between them per particle. An
+optional sheath model accelerates ions toward absorbing surfaces.
 
 ## Syntax
 
-```
-global pusher mode boris|hybrid \
-              [subcycles N] \
-              [plasma <compute-or-fix-ID>] \
-              [gca_switch <factor>] \
-              [dump yes|no] [dump_every N] \
-              [bad_dt_check yes|no] [bad_dt_limit <max>] \
-              [sheath off|kick|spatial \
-                      [geom <nearest_surf/grid-ID>] \
-                      [mD_amu <amu>]]
+```text
+global pusher mode boris|hybrid|gca \
+    [plasma ID] [skip MIXTURE_ID] [subcycles N] \
+    [gca_switch F] [gca_integrator rk4|rk2|simple] \
+    [boris_near M [rhoL]] [gc_wall a0|flux] [switch_log FILE] \
+    [bad_dt_check yes|no] [bad_dt_limit MAX] \
+    [dump yes|no] [dump_every N] \
+    [sheath off|kick|spatial|boundary [geom ID] [mD_amu M] \
+            [dmax D] [waveform ATTR FREQ_HZ]]
 ```
 
-Multiple `global pusher ...` lines accumulate; each call processes its
-own keywords and leaves the others at their current value.
+## Modes
+
+- `boris` integrates the full gyro-orbit with the Boris rotation. Use it
+  when the gyroradius is resolved or gyro-phase physics matters.
+- `gca` integrates the guiding center (drifts, mirror force, parallel
+  dynamics) and is orders of magnitude cheaper when the gyroradius is far
+  below the resolved scales.
+- `hybrid` selects per particle: GCA where the local gyroradius is small
+  against the cell size and Boris elsewhere. `gca_switch F` sets the
+  switching threshold (gyroradius relative to the local cell scale).
+
+Particles in the `skip` mixture bypass the pusher entirely — use this for
+finite-size particulates, whose forces come from the particulate fixes.
 
 ## Keywords
 
-- **`mode boris|hybrid`** (default `boris`) —
-  - `boris`: full-orbit Boris pusher.
-  - `hybrid`: Boris/GCA hybrid. Particles run as full Boris orbits
-    when the local field is well-resolved; switch to a GCA push when
-    `ρ_L > L_B / gca_switch` (i.e. when the orbit can't be resolved
-    on the timestep). GCA uses RK4 with Littlejohn corrections.
-- **`subcycles N`** (default 1) — velocity/position substeps per move.
-  Typical values: 1 for ballistic neutrals (no charged push), 5 for
-  kick-only sheath, 50–500 for spatial sheath profiles.
-- **`plasma <ID>`** — upstream provider for B (always) plus Te/ne for
-  sheath/diagnostics. Either a `compute plasma/fields` or a
-  `fix background`. Activates the per-particle plasma cache
-  (`pcache`) — required for any deck where downstream fixes (e.g.
-  `fix volume/chem/adas`) need per-particle Te/ne/Ti.
-- **`gca_switch <factor>`** (default 2.5) — GCA-vs-Boris switching
-  threshold for hybrid mode. Larger factor → GCA fires earlier (more
-  particles use GCA). Ignored when `mode boris`.
-- **`dump yes|no`**, **`dump_every N`** — debug trace of E/B at each
-  pusher call. Off by default. Useful for unit tests / single-particle
-  validation.
-- **`bad_dt_check yes|no`** (default yes), **`bad_dt_limit <max>`**
-  (default 0.5) — warn once when `|q/m|·|B|·dt_sub` exceeds the limit
-  (i.e. when the Larmor period is poorly resolved on the subcycle).
+- `plasma ID` names the plasma/field provider (a `fix background`).
+- `subcycles N` sub-steps the orbit integration each move (default 1).
+- `gca_integrator` selects the guiding-center integrator: `rk4` (default,
+  4-stage), `rk2` (midpoint), or `simple` (1-stage, no curvature/curl-b
+  terms — cheapest, for scoping only).
+- `boris_near M` forces full-orbit Boris within distance `M` (meters) of
+  the sheath-geometry surfaces; append `rhoL` to interpret `M` as a
+  multiple of the local gyroradius instead. `0` disables.
+- `gc_wall a0|flux` chooses how a guiding center is tested against walls:
+  `a0` uses the guiding-center point; `flux` accounts for the gyro-averaged
+  flux surface of the orbit (default used by the supported cases).
+- `switch_log FILE` records hybrid mode switches for diagnostics.
+- `bad_dt_check yes` guards against integration steps that exceed
+  `bad_dt_limit` (fraction of a gyro/drift period) and subdivides them.
+- `dump yes` + `dump_every N` write pusher diagnostic trajectories.
 
-## Sheath sub-tree
+## Sheath model
 
+- `off` — no sheath.
+- `kick` — impulse model: the ion receives the sheath energy at the wall.
+- `spatial` — the sheath potential is applied as a spatially resolved
+  impulse over the sheath width.
+- `boundary` — the sheath acts as a boundary layer at absorbing surfaces
+  (the standard choice for the supported cases).
+
+`geom ID` must name a `compute nearest_surf/grid` that provides per-cell
+wall distance and normals; it is required for every mode except `off`.
+`mD_amu` sets the background-ion mass (default 2.0). The sheath extent
+and potential are set automatically — `dmax = max(5 L_MPS, 10 lambda_D)`
+with a Bohm floating-wall potential, using a combined Coulette–Manfredi
+near-wall profile with a Borodkina tail. `dmax D` overrides the extent.
+`waveform ATTR FREQ_HZ` drives the wall potential from a per-surface
+attribute at the given frequency (RF-biased surfaces).
+
+## Example
+
+```text
+compute cgeom nearest_surf/grid all wall dist surfid nx ny nz
+global pusher mode hybrid plasma pd skip particulates \
+       gca_switch 2.5 gca_integrator rk4 \
+       bad_dt_check yes bad_dt_limit 0.5 \
+       gc_wall flux sheath boundary geom cgeom mD_amu 2.0
 ```
-sheath off|kick|spatial \
-       [geom <nearest_surf/grid-ID>] \
-       [mD_amu <amu>]
-```
-
-- **`sheath off`** (default) — no sheath overlay.
-- **`sheath kick`** — velocity boost at wall collision (recommended
-  for IEAD / impact-energy diagnostics).
-- **`sheath spatial`** — sheath E-field integrated per Boris subcycle
-  along the approach to the wall.
-- **`geom <ID>`** — `compute nearest_surf/grid` providing per-cell
-  distance to nearest wall, outward normal, surface index. Required
-  when sheath is on.
-- **`mD_amu <amu>`** (default D = 2.014) — background ion mass for
-  Bohm sound speed and Debye length.
-
-The plasma source for the sheath comes from the pusher's `plasma`
-keyword — there is no separate sheath plasma. Internal scales
-(`dmax`, `pot_mult`, model blend) are computed automatically; see
-[`sheath.md`](sheath.md) for the physics details.
-
-## Default settings
-
-```
-mode boris
-subcycles 1
-plasma   <none — pcache disabled>
-gca_switch 2.5
-dump no
-dump_every 1
-bad_dt_check yes
-bad_dt_limit 0.1
-sheath off
-mD_amu 2.014
-```
-
-## Examples
-
-Pure-neutral run with plasma cache only:
-
-```
-fix    pd background constant temp_e 20 dens_e 1e19
-global pusher plasma pd
-```
-
-No `mode` keyword is needed here. The default is `boris`, but with no
-charged particles the push is a no-op. The `plasma pd` keyword is what
-activates the per-particle plasma cache.
-
-IEAD run with sheath kick:
-
-```
-fix     pd background file plasma.h5 static yes
-compute cgeom nearest_surf/grid all wall dist nx ny nz surfid
-global  pusher mode boris plasma pd subcycles 5 \
-               sheath kick geom cgeom
-```
-
-Spatial sheath profile:
-
-```
-compute cplasma plasma/fields all file plasma.h5 ...
-compute cgeom   nearest_surf/grid all wall dist nx ny nz surfid
-global  pusher mode boris plasma cplasma subcycles 100 \
-               sheath spatial geom cgeom
-```
-
-Boris/GCA hybrid for impurity transport:
-
-```
-compute cplasma plasma/fields all file plasma.h5 ...
-global  pusher mode hybrid plasma cplasma subcycles 50 \
-               gca_switch 2.5
-```
-
-## Notes
-
-- Use `mode boris` when the gyro-motion is directly resolved on the
-  timestep.
-- Use `mode hybrid` when some charged particles transition between
-  well-resolved and under-resolved gyro-motion during the run.
-- Attach `plasma <ID>` whenever downstream OpenEdge models need the
-  per-particle plasma cache.
-
-## Related
-
-- [`sheath.md`](sheath.md) — sheath physics details (kick vs. spatial,
-  model blend, Boltzmann ne correction, prepare/evaluate split).
-- `compute nearest_surf/grid` — per-cell wall geometry (required when
-  sheath is on).
-- `compute plasma/fields` / `fix background` — plasma providers.
-- [`volume_chem_adas.md`](volume_chem_adas.md) — ionization/recombination
-  consumer of the per-particle pcache filled by the pusher.

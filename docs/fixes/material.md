@@ -1,7 +1,7 @@
 # material command
 
-Define or override a grain material consumed by grain/ablate, grain/drag
-and grain/charge (built-ins: Li, B).
+Define or override a grain material consumed by particulate/thermal, particulate/drag
+and particulate/charge (built-ins: Li, B).
 
     material NAME key value [key value ...]
 

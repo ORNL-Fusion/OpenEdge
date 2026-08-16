@@ -1,6 +1,6 @@
 # `compute grid` — per-cell DSMC moments
 
-OpenEdge's `compute grid` matches SPARTA upstream's
+OpenEdge's `compute grid` matches the base
 [`compute grid` API](https://sparta.github.io/doc/compute_grid.html)
 exactly — same 22 value keywords (`n`, `nrho`, `nfrac`, `mass`,
 `massrho`, `massfrac`, `u`, `v`, `w`, `usq`, `vsq`, `wsq`, `ke`,
@@ -19,7 +19,7 @@ cell on the next sort/move.
 
 ## Syntax
 
-See the [SPARTA upstream
+See the [base
 documentation](https://sparta.github.io/doc/compute_grid.html) for
 the full API and value-keyword reference. There are no OpenEdge-
 specific keywords or behavioural differences beyond the patch above.

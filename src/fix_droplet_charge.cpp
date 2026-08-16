@@ -59,6 +59,27 @@ FixDropletCharge::FixDropletCharge(SPARTA *sparta, int narg, char **arg) :
       if (ion_mass_amu <= 0.0)
         error->all(FLERR, "fix droplet/charge: ion_mass_amu must be > 0");
       iarg += 2;
+    } else if (strcmp(arg[iarg], "fixed_charge") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix droplet/charge: fixed_charge <Zd>");
+      fixed_zd_ = input->numeric(FLERR, arg[iarg+1]);
+      fixed_mode_ = 1;
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "validity") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix droplet/charge: validity warn|error|no");
+      if      (strcmp(arg[iarg+1], "warn")  == 0) validity_mode = 1;
+      else if (strcmp(arg[iarg+1], "error") == 0) validity_mode = 2;
+      else if (strcmp(arg[iarg+1], "no")    == 0) validity_mode = 0;
+      else error->all(FLERR, "fix droplet/charge: validity warn|error|no");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "see") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix droplet/charge: see yes|no");
+      if      (strcmp(arg[iarg+1], "yes") == 0) see_on = 1;
+      else if (strcmp(arg[iarg+1], "no")  == 0) see_on = 0;
+      else error->all(FLERR, "fix droplet/charge: see must be yes or no");
+      iarg += 2;
     } else if (strcmp(arg[iarg], "thermionic") == 0) {
       if      (strcmp(arg[iarg+1], "yes") == 0) thermionic_on = 1;
       else if (strcmp(arg[iarg+1], "no")  == 0) thermionic_on = 0;
@@ -99,11 +120,11 @@ FixDropletCharge::FixDropletCharge(SPARTA *sparta, int narg, char **arg) :
     }
   }
 
-  // Register the per-particle "droplet_charge" custom DOUBLE vector here
+  // Register the per-particle "particulate_charge" custom DOUBLE vector here
   // (constructor) so it exists at dump-command parse time.
-  qcustom = particle->find_custom((char *) "droplet_charge");
+  qcustom = particle->find_custom((char *) "particulate_charge");
   if (qcustom < 0)
-    qcustom = particle->add_custom((char *) "droplet_charge", 1, 0);
+    qcustom = particle->add_custom((char *) "particulate_charge", 1, 0);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -147,13 +168,18 @@ void FixDropletCharge::init()
     if (!ra_set_ && mat_->richardson_A > 0.0)
       richardson_A = mat_->richardson_A;
   }
+  if (see_on && comm->me == 0)
+    error->warning(FLERR, "fix droplet/charge: see yes is EXPERIMENTAL "
+                   "(Sternglass electron-impact channel only; no IIEE/"
+                   "backscattering, no positive-potential branch, no "
+                   "heat-balance coupling)");
   if (!random_) {
     random_ = new RanKnuth(update->ranmaster->uniform());
     random_->reset(comm->me + 1, comm->me, 100);
   }
 
   if (qcustom < 0)
-    qcustom = particle->find_custom((char *) "droplet_charge");
+    qcustom = particle->find_custom((char *) "particulate_charge");
 }
 
 void FixDropletCharge::start_of_step()
@@ -175,7 +201,7 @@ double FixDropletCharge::memory_usage() { return 0.0; }
 bool FixDropletCharge::solve_phi_oml(double Te_eV, double Ti_eV,
                                      double ne_m3, double ni_m3,
                                      double Td_K, double rd_m,
-                                     double &phi_V) const
+                                     double u_mach, double &phi_V) const
 {
   if (!(Te_eV > 0.0) || !(Ti_eV > 0.0) || !(ne_m3 > 0.0) || !(ni_m3 > 0.0)
       || !(rd_m > 0.0))
@@ -191,8 +217,6 @@ bool FixDropletCharge::solve_phi_oml(double Te_eV, double Ti_eV,
 
   const double Ce = qe * area_coll * ne_m3 *
                     std::sqrt(8.0 * (Te_eV * qe) / (MY_PI * me));
-  const double Ci = qe * area_coll * ni_m3 *
-                    std::sqrt(8.0 * (Ti_eV * qe) / (MY_PI * mi));
 
   auto thermionic_current = [&]() -> double {
     if (!thermionic_on) return 0.0;
@@ -206,9 +230,53 @@ bool FixDropletCharge::solve_phi_oml(double Te_eV, double Ti_eV,
   };
   const double Ith = thermionic_current();
 
+  // Secondary electron emission (see yes): Sternglass yield
+  //   delta(E) = 7.4 delta_m (E/E_m) exp(-2 sqrt(E/E_m))
+  // flux-averaged over the incident Maxwellian, <delta>(Te) =
+  //   int delta(E) E e^{-E/Te} dE / Te^2  (64-pt trapezoid, 0..30 Te).
+  // Emitted secondaries leave the grain: electron collection scales by
+  // (1 - <delta>), clamped >= 0 (space-charge-limited regime is out of
+  // scope, as is the positive-potential branch it can drive).
+  double see_frac = 0.0;
+  if (see_on && mat_ && mat_->see_delta_m > 0.0 && mat_->see_E_m_eV > 0.0) {
+    const double dm = mat_->see_delta_m, em = mat_->see_E_m_eV;
+    const int NQ = 256;
+    const double emax = 30.0 * Te_eV, de = emax / NQ;
+    double num = 0.0;
+    for (int k = 0; k < NQ; k++) {
+      const double E = (k + 0.5) * de;
+      num += 7.4 * dm * (E / em) * std::exp(-2.0 * std::sqrt(E / em))
+             * E * std::exp(-E / Te_eV) * de;
+    }
+    see_frac = std::min(num / (Te_eV * Te_eV), 1.0);
+    if (see_frac > 0.95 && !see_sat_warned_) {
+      see_sat_warned_ = 1;
+      if (comm->me == 0)
+        error->warning(FLERR, "fix droplet/charge: SEE yield near/above "
+                       "unity — the negative-potential OML branch is "
+                       "outside its validity range (positive-potential/"
+                       "space-charge model not implemented)");
+    }
+  }
+
+  // DUSTT flow-dependent OML ion collection [Pigarov PoP 12, 122508,
+  // Eq. 4]: J_i = n_i sigma_d e v_Ti F_G(u, a), a = -phi/Ti,
+  //   F_G = [u + 1/(2u) + a/u] erf(u) + exp(-u^2)/sqrt(pi)
+  // (normalized so F_G(0,a) = 2(1+a)/sqrt(pi): the stationary limit
+  // reproduces the classic Ci*(1 - phi/Ti) exactly). Below U_SMALL the
+  // closed form cancels catastrophically — use the analytic limit.
+  const double Ci_f = qe * area_coll * ni_m3 *
+                      std::sqrt(2.0 * (Ti_eV * qe) / mi);
+  auto f_gamma = [](double u, double a) -> double {
+    const double sqrt_pi = std::sqrt(MY_PI);
+    const double U_SMALL = 1.0e-3;
+    if (u < U_SMALL) return 2.0 * (1.0 + a) / sqrt_pi;
+    return (u + 0.5/u + a/u) * std::erf(u)
+           + std::exp(-u*u) / sqrt_pi;
+  };
   auto f = [&](double phi) -> double {
-    const double Ie = -Ce * std::exp(phi / Te_eV);
-    const double Ii =  Ci * (1.0 - phi / Ti_eV);
+    const double Ie = -Ce * (1.0 - see_frac) * std::exp(phi / Te_eV);
+    const double Ii =  Ci_f * std::max(f_gamma(u_mach, -phi / Ti_eV), 0.0);
     return Ie + Ii + Ith;
   };
 
@@ -234,7 +302,7 @@ bool FixDropletCharge::solve_phi_oml(double Te_eV, double Ti_eV,
     mid = 0.5 * (lo + hi);
     const double fm = f(mid);
     if (!std::isfinite(fm)) return false;
-    if (std::fabs(fm) <= 1.0e-10 * std::max(1.0, std::fabs(Ci + Ith))) break;
+    if (std::fabs(fm) <= 1.0e-10 * std::max(1.0, std::fabs(Ci_f + Ith))) break;
     if (flo * fm <= 0.0) { hi = mid; fhi = fm; }
     else                 { lo = mid; flo = fm; }
     if (std::fabs(hi - lo) <= 1.0e-10 * std::max(1.0, std::fabs(mid))) break;
@@ -273,6 +341,10 @@ void FixDropletCharge::apply_charge_update()
     const double Td_K = (p.temp   > 0.0) ? p.temp   : seed_temp;
     if (!(rd > 0.0)) continue;
 
+    // fixed_charge mode: stamp and skip the OML solve entirely (vacuum
+    // force tests; charging-sensitivity studies)
+    if (fixed_mode_) { qvec[ip] = fixed_zd_; continue; }
+
     double R = 0.0, Z = 0.0;
     OpenEdge::sparta_to_RZ(p.x, dim, axi, R, Z,
                            pd_->column_x0, pd_->column_y0);
@@ -282,14 +354,71 @@ void FixDropletCharge::apply_charge_update()
     const double Ni = std::max(pd_->interp2D(pd_->dens_i, R, Z, p.icell), 0.0);
     if (!(Te > 0.0) || !(Ti > 0.0) || !(Ne > 0.0) || !(Ni > 0.0)) continue;
 
+    // DUSTT Mach number for the flow-dependent ion current:
+    // u = |V_i - v| / v_Ti with V_i the parallel flow along bhat
+    double u_mach = 0.0;
+    {
+      const double Vpar = pd_->interp2D(pd_->parr_flow, R, Z, p.icell);
+      double Br = 0.0, Bz = 0.0, Bt = 0.0;
+      if (pd_->has_bfield || !pd_->mesh_tri_br.empty())
+        pd_->bfield_at(R, Z, Br, Bz, Bt, p.icell, ip);
+      const double Bn = std::sqrt(Br*Br + Bt*Bt + Bz*Bz);
+      double up[3] = {0.0, 0.0, 0.0};
+      if (Bn > 1.0e-12) {
+        double phit = 0.0;
+        if (dim == 3) phit = std::atan2(p.x[1], p.x[0]);
+        OpenEdge::RZphi_force_to_sparta(Vpar*(Br/Bn), Vpar*(Bz/Bn),
+                                        Vpar*(Bt/Bn), dim, axi, phit,
+                                        up[0], up[1], up[2]);
+      }
+      const double vti = std::sqrt(2.0 * (Ti * qe) /
+                                   (ion_mass_amu * update->proton_mass));
+      if (vti > 0.0) {
+        const double d0 = p.v[0]-up[0], d1 = p.v[1]-up[1], d2 = p.v[2]-up[2];
+        u_mach = std::sqrt(d0*d0 + d1*d1 + d2*d2) / vti;
+      }
+    }
     double phi_s = 0.0;
-    if (!solve_phi_oml(Te, Ti, Ne, Ni, Td_K, rd, phi_s)) continue;
+    if (!solve_phi_oml(Te, Ti, Ne, Ni, Td_K, rd, u_mach, phi_s)) continue;
 
     const double qd_coulomb = 4.0 * MY_PI * eps0 * rd * phi_s;
     const double zd         = qd_coulomb / qe;
     if (!std::isfinite(zd)) continue;
 
     qvec[ip] = zd;
+
+    // OML validity monitor (Referee 1: OML needs R_d << lambda_D,
+    // rho_e). Tracks the worst R_d/lambda_D and R_d/rho_e seen; warn
+    // fires once per run at R_d > lambda_D, error aborts. No silent
+    // OML/probe blending — a probe-limited model is the planned upgrade.
+    if (validity_mode > 0) {
+      const double eps0v = 8.8541878128e-12;
+      const double lamD = std::sqrt(eps0v * (Te * qe) / (Ne * qe * qe));
+      const double rl = rd / lamD;
+      if (rl > val_max_rl_) val_max_rl_ = rl;
+      double Brv = 0.0, Bzv = 0.0, Btv = 0.0;
+      if (pd_->has_bfield || !pd_->mesh_tri_br.empty())
+        pd_->bfield_at(R, Z, Brv, Bzv, Btv, p.icell, ip);
+      const double Bm = std::sqrt(Brv*Brv + Bzv*Bzv + Btv*Btv);
+      if (Bm > 0.0) {
+        const double rho_e = std::sqrt((Te * qe) * update->electron_mass)
+                             / (qe * Bm);
+        const double rr = rd / rho_e;
+        if (rr > val_max_re_) val_max_re_ = rr;
+      }
+      if (rl > 1.0) {
+        val_nviol_++;
+        if (validity_mode == 2)
+          error->one(FLERR, "fix droplet/charge: OML validity violated "
+                     "(R_d > lambda_D; validity error requested)");
+        if (!val_warned_ && comm->me == 0) {
+          val_warned_ = 1;
+          error->warning(FLERR, "fix droplet/charge: R_d > lambda_D — "
+                         "OML charging is outside its validity range "
+                         "(probe-limited model not yet implemented)");
+        }
+      }
+    }
 
     // Electrostatic disruption (DUSTT): critical potential
     // phi* = beta * sqrt(F_t[dyne/cm^2]) * R_d[um] volts. Solids only

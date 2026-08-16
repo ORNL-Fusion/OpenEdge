@@ -16,7 +16,7 @@
 
 #ifdef SURF_COLLIDE_CLASS
 
-SurfCollideStyle(grainbounce,SurfCollideGrainBounce)
+SurfCollideStyle(particulate/bounce,SurfCollideGrainBounce)
 
 #else
 

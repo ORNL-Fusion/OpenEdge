@@ -15,7 +15,7 @@ fix ID surface/emit/puff mixture group \
     [perspecies yes|no] [region <rID>]
 ```
 
-- **`mixture`** — SPARTA mixture ID for the emitted species.
+- **`mixture`** — mixture ID for the emitted species.
 - **`group`** — surface group ID to emit from (use `group surf ...` to
   pre-select the divertor or puff location).
 - **`n <N_per_step>`** — emit exactly `N` particles per step (CONSTANT

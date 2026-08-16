@@ -1,6 +1,6 @@
 # `surf_collide diffuse` — diffuse wall scatter (with per-species T_wall)
 
-OpenEdge's `surf_collide diffuse` extends SPARTA upstream's diffuse
+OpenEdge's `surf_collide diffuse` extends the base diffuse
 model with a `twall_species` keyword: each species can carry its own
 re-emission temperature. This matters for hydrogenic recycling, where
 atomic D should desorb at the Franck–Condon temperature

@@ -1,35 +1,28 @@
-# `fix bfield/particle` — per-particle B-field source
+# `fix bfield/particle`
 
-Per-particle variant of [`fix bfield/grid`](bfield_grid.md). Pulls
-three B-field components from per-particle sources (typically
-particle-style variables) and exposes them to the pusher via SPARTA's
-`field_particle` slot. Useful for benchmarks where each test particle
-carries its own analytic B (e.g. an idealised tokamak field set by a
-variable rather than a converter).
+Set the magnetic field seen by the pusher from per-particle variables.
+This is the idealized-field harness used by the verification cases
+(analytic fields with a known solution); production runs take their field
+from `fix background`.
 
 ## Syntax
 
-```
-fix ID bfield/particle <BxSrc> <BySrc> <BzSrc>
+```text
+fix ID bfield/particle Bx By Bz
 ```
 
-Each `*Src` is `v_<varname>` (particle-style variable) or `NULL` to
-skip that axis.
+`Bx`, `By`, `Bz` name particle-style variables (referenced without the
+`v_` prefix) evaluated per particle each step, in Tesla and internal
+(x, y, z) slot order. Use `NULL` to leave a component unset (zero).
 
 ## Example
 
+```text
+variable Bx particle 0.0
+variable By particle 0.0
+variable Bz particle 1.0
+fix fb bfield/particle Bx By Bz
 ```
-variable Bx0 particle 0.0
-variable By0 particle 0.0
-variable Bz0 particle 1.0
-fix fbp bfield/particle v_Bx0 v_By0 v_Bz0
-```
 
-For production runs with a real plasma background, prefer
-`fix bfield/grid` (cell-resolution) or
-`global bfield_compute <plasma_fields_id>` (point-query, equilibrium-
-derived).
-
-## Files
-
-- `src/OPENEDGE/fix_bfield_particle.{h,cpp}`
+See `examples/verification/efield_polarization` for a complete case with
+pass/fail gates.

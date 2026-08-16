@@ -5,7 +5,7 @@ native potential at converter time (SOLPS `po`, SOLEDGE3X `zone*/PHI`,
 OEDGE `osmns_efpara`). The converter computes `E = −∇ϕ` on the
 B2 / SOLEDGE3X triangulation mesh and writes `/mesh/e_r, /mesh/e_z, /mesh/e_t`.
 
-`compute plasma/fields` then reads those per-cell values at the SPARTA cell
+`compute plasma/fields` then reads those per-cell values at the grid cell
 centroid (via `findNearestMappedTriangle`) and emits `er`, `et`, `ez`, `ex`,
 `ey` output columns.
 

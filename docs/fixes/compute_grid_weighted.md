@@ -1,6 +1,6 @@
 # `compute grid/weighted` — per-particle-weighted grid moments
 
-Identical in scope to SPARTA's `compute grid` but uses each particle's
+Identical in scope to the base `compute grid` but uses each particle's
 per-particle weight `pweight` (set by `fix particle/weight`) in place
 of the global `fnum`. Required for source-driven cases where emission
 rates vary across the wall — without the weighted compute, density
@@ -30,7 +30,7 @@ weighting explicit. Each column is computed per mixture group.
 | `pxrho_w`, `pyrho_w`, `pzrho_w` | $W \sum p_i\, m_i\, v_{\alpha,i} / V$ |
 | `kerho_w` | $W \sum \tfrac{1}{2} p_i\, m_i\, v_i^2 / V$ |
 
-Here $p_i \equiv \texttt{pweight}_i$, $W$ is the SPARTA cell weight
+Here $p_i \equiv \texttt{pweight}_i$, $W$ is the cell weight
 `cinfo[icell].weight`, and $V$ is the cell volume.
 
 ### Mean / intensive (per-particle moments)

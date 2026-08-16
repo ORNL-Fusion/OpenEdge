@@ -72,8 +72,10 @@ FixDropletEmit::FixDropletEmit(SPARTA *sparta, int narg, char **arg) :
 
   // If not provided by input, sample launch angle per emitted particle.
   incidentAngle = -1.0;
+  cone_half = -1.0;
   magVelocity = 0.0;
   user_speed_range = 0;
+  planar_flag = 0;
   vmin = vmax = 0.0;
   nweight_ = 1.0;
   nw_custom_ = -1;
@@ -96,6 +98,8 @@ FixDropletEmit::FixDropletEmit(SPARTA *sparta, int narg, char **arg) :
     error->all(FLERR,"Fix emit/dropletrequires surface elements");
   if (surf->implicit)
     error->all(FLERR,"Fix emit/dropletnot allowed for implicit surfaces");
+  if (planar_flag && domain->dimension != 2)
+    error->all(FLERR,"fix emit/droplet: planar yes requires dimension 2");
   if ((npmode == CONSTANT || npmode == VARIABLE) && perspecies)
     error->all(FLERR,"Cannot use fix emit/dropletwith n a constant or variable "
                "with perspecies yes");
@@ -175,6 +179,40 @@ void FixDropletEmit::init()
   nspecies = particle->mixture[imix]->nspecies;
   fraction = particle->mixture[imix]->fraction;
   cummulative = particle->mixture[imix]->cummulative;
+
+  // fixed launch axis (dir keyword): map Cartesian (R, Z, phi) input to
+  // SPARTA slots and build an orthonormal frame (axis, t1, t2) reused in
+  // place of (normal, tan1, tan2) at every emission
+  if (dirflag_) {
+    const int dim = domain->dimension;
+    const int axi = domain->axisymmetric;
+    if (dim == 2 && axi) {          // slots (Z, R, phi)
+      dir_n_[0] = dir_input_[1]; dir_n_[1] = dir_input_[0];
+      dir_n_[2] = dir_input_[2];
+    } else {                        // 2D-cart (R, Z, phi) and 3D Cartesian
+      dir_n_[0] = dir_input_[0]; dir_n_[1] = dir_input_[1];
+      dir_n_[2] = dir_input_[2];
+    }
+    const double dn = std::sqrt(dir_n_[0]*dir_n_[0] + dir_n_[1]*dir_n_[1] +
+                                dir_n_[2]*dir_n_[2]);
+    dir_n_[0] /= dn; dir_n_[1] /= dn; dir_n_[2] /= dn;
+    if (planar_flag && dim == 2) {
+      if (std::fabs(dir_n_[2]) > 1.0e-12)
+        error->all(FLERR,"fix emit/droplet: planar yes requires dir dphi = 0");
+      dir_t1_[0] = dir_n_[1];
+      dir_t1_[1] = -dir_n_[0];
+      dir_t1_[2] = 0.0;
+      MathExtra::norm3(dir_t1_);
+      dir_t2_[0] = dir_t2_[1] = 0.0;
+      dir_t2_[2] = 1.0;
+    } else {
+      double ref[3] = {1.0, 0.0, 0.0};
+      if (std::fabs(dir_n_[0]) > 0.9) { ref[0] = 0.0; ref[1] = 1.0; }
+      MathExtra::cross3(dir_n_, ref, dir_t1_);
+      MathExtra::norm3(dir_t1_);
+      MathExtra::cross3(dir_n_, dir_t1_, dir_t2_);
+    }
+  }
 
   // subsonic prefactor
 
@@ -687,6 +725,11 @@ void FixDropletEmit::perform_task_onepass()
     else normal = tris[isurf].norm;
     atan = tasks[i].tan1;
     btan = tasks[i].tan2;
+    if (dirflag_) {   // fixed launch axis replaces the surface-normal frame
+      normal = dir_n_;
+      atan = dir_t1_;
+      btan = dir_t2_;
+    }
 
     temp_thermal = tasks[i].temp_thermal;
     temp_rot = tasks[i].temp_rot;
@@ -764,12 +807,13 @@ void FixDropletEmit::perform_task_onepass()
               : magVelocity;
             double inc;
             if      (incidentAngle >= 0.0) inc = incidentAngle * MY_PI / 180.0;
+            else if (cone_half >= 0.0)
+              inc = std::acos(1.0 - random->uniform()*(1.0 - std::cos(cone_half*MY_PI/180.0)));
             else if (angle_cosine)         inc = std::asin(std::sqrt(random->uniform()));
             else                           inc = 0.5 * MY_PI * random->uniform();
             vnmag = mag_v * cos(inc);
             const double vt = mag_v * sin(inc);
-            vamag = vt * sin(theta);
-            vbmag = vt * cos(theta);
+            sample_tangent(vt,theta,vamag,vbmag);
             if (!normalflag) {
               vnmag += MathExtra::dot3(vstream,normal);
               vamag += MathExtra::dot3(vstream,atan);
@@ -777,14 +821,14 @@ void FixDropletEmit::perform_task_onepass()
             }
           } else {
             vr = vscale[isp] * sqrt(-log(random->uniform()));
-            if (normalflag) {
-              vamag = vr * sin(theta);
-              vbmag = vr * cos(theta);
-            } else {
-              vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
-              vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+            sample_tangent(vr,theta,vamag,vbmag);
+            if (!normalflag) {
+              vamag += MathExtra::dot3(vstream,atan);
+              vbmag += MathExtra::dot3(vstream,btan);
             }
           }
+
+          if (planar_flag) vbmag = 0.0;
 
           v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
           v[1] = vnmag*normal[1] + vamag*atan[1] + vbmag*btan[1];
@@ -904,12 +948,13 @@ void FixDropletEmit::perform_task_onepass()
             : magVelocity;
           double inc;
           if      (incidentAngle >= 0.0) inc = incidentAngle * MY_PI / 180.0;
+          else if (cone_half >= 0.0)
+            inc = std::acos(1.0 - random->uniform()*(1.0 - std::cos(cone_half*MY_PI/180.0)));
           else if (angle_cosine)         inc = std::asin(std::sqrt(random->uniform()));
           else                           inc = 0.5 * MY_PI * random->uniform();
           vnmag = mag_v * cos(inc);
           const double vt = mag_v * sin(inc);
-          vamag = vt * sin(theta);
-          vbmag = vt * cos(theta);
+          sample_tangent(vt,theta,vamag,vbmag);
           if (!normalflag) {
             vnmag += MathExtra::dot3(vstream,normal);
             vamag += MathExtra::dot3(vstream,atan);
@@ -917,14 +962,14 @@ void FixDropletEmit::perform_task_onepass()
           }
         } else {
           vr = vscale[isp] * sqrt(-log(random->uniform()));
-          if (normalflag) {
-            vamag = vr * sin(theta);
-            vbmag = vr * cos(theta);
-          } else {
-            vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
-            vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+          sample_tangent(vr,theta,vamag,vbmag);
+          if (!normalflag) {
+            vamag += MathExtra::dot3(vstream,atan);
+            vbmag += MathExtra::dot3(vstream,btan);
           }
         }
+
+        if (planar_flag) vbmag = 0.0;
 
         v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
         v[1] = vnmag*normal[1] + vamag*atan[1] + vbmag*btan[1];
@@ -1054,6 +1099,11 @@ void FixDropletEmit::perform_task_twopass()
     else normal = tris[isurf].norm;
     atan = tasks[i].tan1;
     btan = tasks[i].tan2;
+    if (dirflag_) {   // fixed launch axis replaces the surface-normal frame
+      normal = dir_n_;
+      atan = dir_t1_;
+      btan = dir_t2_;
+    }
 
     temp_thermal = tasks[i].temp_thermal;
     temp_rot = tasks[i].temp_rot;
@@ -1129,12 +1179,13 @@ void FixDropletEmit::perform_task_twopass()
               : magVelocity;
             double inc;
             if      (incidentAngle >= 0.0) inc = incidentAngle * MY_PI / 180.0;
+            else if (cone_half >= 0.0)
+              inc = std::acos(1.0 - random->uniform()*(1.0 - std::cos(cone_half*MY_PI/180.0)));
             else if (angle_cosine)         inc = std::asin(std::sqrt(random->uniform()));
             else                           inc = 0.5 * MY_PI * random->uniform();
             vnmag = mag_v * cos(inc);
             const double vt = mag_v * sin(inc);
-            vamag = vt * sin(theta);
-            vbmag = vt * cos(theta);
+            sample_tangent(vt,theta,vamag,vbmag);
             if (!normalflag) {
               vnmag += MathExtra::dot3(vstream,normal);
               vamag += MathExtra::dot3(vstream,atan);
@@ -1142,14 +1193,14 @@ void FixDropletEmit::perform_task_twopass()
             }
           } else {
             vr = vscale[isp] * sqrt(-log(random->uniform()));
-            if (normalflag) {
-              vamag = vr * sin(theta);
-              vbmag = vr * cos(theta);
-            } else {
-              vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
-              vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+            sample_tangent(vr,theta,vamag,vbmag);
+            if (!normalflag) {
+              vamag += MathExtra::dot3(vstream,atan);
+              vbmag += MathExtra::dot3(vstream,btan);
             }
           }
+
+          if (planar_flag) vbmag = 0.0;
 
           v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
           v[1] = vnmag*normal[1] + vamag*atan[1] + vbmag*btan[1];
@@ -1253,12 +1304,13 @@ void FixDropletEmit::perform_task_twopass()
             : magVelocity;
           double inc;
           if      (incidentAngle >= 0.0) inc = incidentAngle * MY_PI / 180.0;
+          else if (cone_half >= 0.0)
+            inc = std::acos(1.0 - random->uniform()*(1.0 - std::cos(cone_half*MY_PI/180.0)));
           else if (angle_cosine)         inc = std::asin(std::sqrt(random->uniform()));
           else                           inc = 0.5 * MY_PI * random->uniform();
           vnmag = mag_v * cos(inc);
           const double vt = mag_v * sin(inc);
-          vamag = vt * sin(theta);
-          vbmag = vt * cos(theta);
+          sample_tangent(vt,theta,vamag,vbmag);
           if (!normalflag) {
             vnmag += MathExtra::dot3(vstream,normal);
             vamag += MathExtra::dot3(vstream,atan);
@@ -1266,14 +1318,14 @@ void FixDropletEmit::perform_task_twopass()
           }
         } else {
           vr = vscale[isp] * sqrt(-log(random->uniform()));
-          if (normalflag) {
-            vamag = vr * sin(theta);
-            vbmag = vr * cos(theta);
-          } else {
-            vamag = vr * sin(theta) + MathExtra::dot3(vstream,atan);
-            vbmag = vr * cos(theta) + MathExtra::dot3(vstream,btan);
+          sample_tangent(vr,theta,vamag,vbmag);
+          if (!normalflag) {
+            vamag += MathExtra::dot3(vstream,atan);
+            vbmag += MathExtra::dot3(vstream,btan);
           }
         }
+
+        if (planar_flag) vbmag = 0.0;
 
         v[0] = vnmag*normal[0] + vamag*atan[0] + vbmag*btan[0];
         v[1] = vnmag*normal[1] + vamag*atan[1] + vbmag*btan[1];
@@ -1791,6 +1843,48 @@ void FixDropletEmit::options2(int narg, char **arg)
       continue;
     }
 
+    // Cone launch: polar angle sampled uniform-in-solid-angle within
+    // [0, half-angle] about the surface normal. Overridden by a fixed
+    // incidentAngle; overrides angle cosine/uniform.
+    if (strcmp(arg[iarg], "cone") == 0) {
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: cone <half-angle deg>");
+      cone_half = atof(arg[iarg+1]);
+      if (!std::isfinite(cone_half) || cone_half < 0.0 || cone_half > 90.0)
+        error->all(FLERR,"Illegal fix emit/droplet: cone half-angle must be in [0, 90] degrees");
+      iarg += 2;
+      continue;
+    }
+
+    // Launch-axis override: cone/angle sampling about a fixed direction
+    // instead of the surface normal (a gravity-fed dropper injects
+    // vertically regardless of the port face orientation). Input in
+    // Cartesian (R, Z, phi) like fix drag gravity, mapped to slots.
+    if (strcmp(arg[iarg], "dir") == 0) {
+      if (iarg + 3 >= narg)
+        error->all(FLERR,"Illegal fix emit/droplet: dir <dR dZ dphi>");
+      dir_input_[0] = input->numeric(FLERR, arg[iarg+1]);
+      dir_input_[1] = input->numeric(FLERR, arg[iarg+2]);
+      dir_input_[2] = input->numeric(FLERR, arg[iarg+3]);
+      const double dn = std::sqrt(dir_input_[0]*dir_input_[0] +
+                                  dir_input_[1]*dir_input_[1] +
+                                  dir_input_[2]*dir_input_[2]);
+      if (!(dn > 0.0))
+        error->all(FLERR,"fix emit/droplet: dir vector must be non-zero");
+      dirflag_ = 1;
+      iarg += 4;
+      continue;
+    }
+
+    if (strcmp(arg[iarg], "planar") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR,"Illegal fix emit/droplet: planar yes|no");
+      if      (strcmp(arg[iarg+1], "yes") == 0) planar_flag = 1;
+      else if (strcmp(arg[iarg+1], "no")  == 0) planar_flag = 0;
+      else error->all(FLERR,"Illegal fix emit/droplet: planar yes|no");
+      iarg += 2;
+      continue;
+    }
+
     // Uniform per-emit speed sampling in [vmin, vmax]. Bypasses the
     // mixture-temperature Maxwellian; angular spread still uses
     // incidentAngle if set, else uniform [0, 90 deg) about the normal.
@@ -1840,6 +1934,18 @@ void FixDropletEmit::options2(int narg, char **arg)
     int consumed = option(narg - iarg, &arg[iarg]);
     if (consumed <= 0) error->all(FLERR,"Illegal fix emit/droplet option");
     iarg += consumed;
+  }
+}
+
+void FixDropletEmit::sample_tangent(double vt, double theta,
+                                    double &va, double &vb)
+{
+  if (planar_flag) {
+    va = (random->uniform() < 0.5) ? -vt : vt;
+    vb = 0.0;
+  } else {
+    va = vt * sin(theta);
+    vb = vt * cos(theta);
   }
 }
 

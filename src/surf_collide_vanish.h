@@ -32,19 +32,28 @@ class SurfCollideVanish : public SurfCollide {
   SurfCollideVanish(class SPARTA *, int, char **);
   SurfCollideVanish(class SPARTA *sparta) : SurfCollide(sparta) {} // needed for Kokkos
   virtual ~SurfCollideVanish();
+  void init();
   Particle::OnePart *collide(Particle::OnePart *&, double &,
                              int, double *, int, int &);
 
+  // cumulative real-atom weight absorbed by this collide (local to rank);
+  // consumers (fix surface/emit/puff slave mode) take deltas between reads
+  double escaped_weight() const { return wsum_cum; }
+
  protected:
   int me;
+  int pweight_index;
+  double wsum_cum;
   int logflag;
+  int tallyflag;
   FILE *logfp;
   char *logfile;
   std::unordered_map<long long,long long> surf_hit_counts;
+  std::unordered_map<long long,double> surf_wsums;
 
   void open_logfile();
   void close_logfile();
-  void log_event(Particle::OnePart *, int, double *);
+  void log_event(Particle::OnePart *, int, double *, double);
   void write_counts_file();
 };
 

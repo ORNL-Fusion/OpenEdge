@@ -37,9 +37,9 @@ fix fcore reflect/psi geqdsk efit.geqdsk background pd \
 
 `fix reflect/psi` is an **alternative** to building an explicit
 `core.surf` segment from `convert_solps_plasma.py --core-out`. The
-explicit-surface path is preferred when it works (cleaner SPARTA
+explicit-surface path is preferred when it works (cleaner
 geometry); use `fix reflect/psi` when the ψ contour clips into the
-divertor wall and SPARTA's flood-fill won't accept a combined
+divertor wall and the grid flood-fill won't accept a combined
 `wall.surf` + `core.surf` (the well-known
 `Cell type mis-match when marking on self` error).
 

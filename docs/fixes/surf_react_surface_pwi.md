@@ -1,7 +1,7 @@
 # `surf_react surface/pwi` — wall plasma–wall interactions
 
 TRIM-backed reflection, absorb-and-re-emit, and dissociation reactions at
-SPARTA wall surfaces. Reads reflection data from the consolidated
+wall surfaces. Reads reflection data from the consolidated
 `database/processes.h5` (`/surface/reflection/<proj>_on_<target>/`) so no
 per-pair files need to live beside the deck.
 
