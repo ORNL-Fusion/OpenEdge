@@ -10,6 +10,7 @@ drag and gravity, ablate into Li, and feed Li charge-state transport.
 |---|---|
 | `in.openedge` | Canonical OpenEdge deck |
 | `input/` | Plasma, wall, species, chemistry, and measured source history |
+| `input/plasma_st40_solps.h5` | SOLPS-13589 background — not in git (`examples/**/input/*.h5` is repo-ignored); regenerate with `tools/converters/convert_solps_plasma.py` from the SOLPS-13589 run |
 | `scripts/analysis.ipynb` | Case inspection and result analysis |
 | `scripts/build_geometry.py` | Rebuild the axisymmetric wall and dropper segment |
 | `scripts/make_srate.py` | Rebuild the time-dependent powder source deck |
