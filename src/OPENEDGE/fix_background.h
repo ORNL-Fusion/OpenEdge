@@ -285,8 +285,14 @@ class FixBackground : public Fix {
   double const_grad_te_r, const_grad_te_t, const_grad_te_z;
   double const_grad_ti_r, const_grad_ti_t, const_grad_ti_z;
   double const_epar;
+  double const_e_r, const_e_t, const_e_z;   // uniform cylindrical E (er/ez/et)
+  int const_has_efield;
+  double const_dens_n, const_temp_n;        // uniform neutrals (nn/tn, eV)
+  int const_has_neutrals;
   double const_br, const_bz, const_bt;
   int const_has_bfield;
+  double const_bcart[3];   // uniform Cartesian B (3D tilted-field decks)
+  int const_has_bcart;
 
   int mesh_tri_custom;
   mutable bigint mesh_hint_hits;

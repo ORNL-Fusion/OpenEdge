@@ -1881,6 +1881,8 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
   MagneticFieldFileDataParams B{};
 
   if (input_mode == MODE_CONSTANT || input_mode == MODE_ANALYTIC) {
+    B.derivatives_valid = (input_mode == MODE_CONSTANT);  // uniform: grads exactly 0
+    B.axisymmetric_source = true;   // cylindrical constants
     B.br = bconst[0];
     B.bt = bconst[1];
     B.bz = bconst[2];
@@ -1986,6 +1988,8 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
   const double invR = 1.0 / R;
   const double invR2 = invR * invR;
 
+  B.derivatives_valid = true;   // equilibrium psi-map: analytic derivatives
+  B.axisymmetric_source = true;
   B.r = R;
   B.z = Z;
   B.br = -dpsi_dZ * invR;

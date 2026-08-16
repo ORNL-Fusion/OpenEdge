@@ -137,6 +137,16 @@ struct MagneticFieldFileDataParams {
   // |B| and its gradient
   double Bmag;
   double dBmag_dr, dBmag_dz;
+  // True when the gradient entries above are trustworthy: equilibrium
+  // psi-map (analytic derivatives) or a constant field (exactly zero).
+  // False for mesh/grid point values with no gradients — the GCA
+  // selector must not read those zeros as a valid uniform field.
+  bool derivatives_valid;
+  // True when the source is axisymmetric (d/dphi = 0): equilibrium,
+  // cylindrical constants, R-Z mesh. False for bcart (uniform CARTESIAN
+  // field) — the cylindrical curvature/curl formulas (-bphi^2/R terms)
+  // are INVALID there and blow up near the column axis.
+  bool axisymmetric_source;
 };
 
 class FixBackground;

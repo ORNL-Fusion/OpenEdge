@@ -164,16 +164,20 @@ GCARhs gca_rhs(double qm, double mass, double v_par, double mu,
   ExB[1] = E[2]*bhat[0] - E[0]*bhat[2];
   ExB[2] = E[0]*bhat[1] - E[1]*bhat[0];
 
-  // grad-B drift
+  // grad-B drift enters the bracket as B·v_gradB = (mu/(qB))(B x grad|B|);
+  // an extra 1/|B| here undercounted the drift (fixed with pusher.h).
+  // NOTE: the RK stages in this Kokkos port still use frozen fields — the
+  // CPU stage-resampling fix (Pusher::sample_gca_fields functor) is NOT
+  // ported; revalidate against validation/pushers/orbit before enabling Kokkos GCA.
   const double gradB_coeff = mu / (mass * Omega);
   double BxgradB[3];
   BxgradB[0] = B[1]*gradBmag[2] - B[2]*gradBmag[1];
   BxgradB[1] = B[2]*gradBmag[0] - B[0]*gradBmag[2];
   BxgradB[2] = B[0]*gradBmag[1] - B[1]*gradBmag[0];
 
-  rhs.dXdt[0] = invBstar_par * (v_par * Bstar[0] + ExB[0] + gradB_coeff * BxgradB[0] * invB);
-  rhs.dXdt[1] = invBstar_par * (v_par * Bstar[1] + ExB[1] + gradB_coeff * BxgradB[1] * invB);
-  rhs.dXdt[2] = invBstar_par * (v_par * Bstar[2] + ExB[2] + gradB_coeff * BxgradB[2] * invB);
+  rhs.dXdt[0] = invBstar_par * (v_par * Bstar[0] + ExB[0] + gradB_coeff * BxgradB[0]);
+  rhs.dXdt[1] = invBstar_par * (v_par * Bstar[1] + ExB[1] + gradB_coeff * BxgradB[1]);
+  rhs.dXdt[2] = invBstar_par * (v_par * Bstar[2] + ExB[2] + gradB_coeff * BxgradB[2]);
 
   double force[3];
   force[0] = -(mu / mass) * gradBmag[0] + qm * E[0];

@@ -330,9 +330,10 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   tally_pweight = 1.0;
 
   plasma_cache_flag = 0;
-  pcache_per_cell_mesh = 1;
   pcache_need_mask = 0;
   pcache_nevery = 1;
+  phi_track = 0;
+  phi_custom = -1;
   pc_te_custom = pc_ti_custom = pc_ne_custom = pc_ni_custom = -1;
   pc_vpar_custom = -1;
   pc_bx_custom = pc_by_custom = pc_bz_custom = -1;
@@ -511,14 +512,29 @@ void Update::init()
     bperturbflag = 1;
   }
 
-  // Resolve per-particle sheath geometry compute and plasma provider IDs
-  if (sheath_flag) {
+  // Resolve the pusher's skip mixture (dust grains bypass the pusher)
+  pusher->resolve_skip_species();
+
+  // Resolve per-particle sheath geometry compute and plasma provider IDs.
+  // The geometry compute is also needed by the pusher's boris_near shell,
+  // which must work with the sheath off (Stage A bare-handoff tests).
+  if (sheath_geom_cid &&
+      (sheath_flag || pusher->pusher_boris_near > 0.0 ||
+       pusher->pusher_gc_wall_flux)) {
     sheath_geom_cidx = modify->find_compute(sheath_geom_cid);
     if (sheath_geom_cidx < 0)
       error->all(FLERR,"global sheath: geometry compute ID not found");
     if (!modify->compute[sheath_geom_cidx]->per_grid_flag)
       error->all(FLERR,"global sheath: geometry compute must be per-grid");
-
+    // fail CLOSED: group filtering and the sheath cache both require the
+    // nearest_surf/grid type — a failed downstream dynamic_cast must not
+    // silently turn the sheath permissive
+    if (!dynamic_cast<ComputeNearestSurfGrid *>(
+            modify->compute[sheath_geom_cidx]))
+      error->all(FLERR,
+                 "global sheath: geometry compute must be style nearest_surf/grid");
+  }
+  if (sheath_flag) {
     pusher->pusher_plasma_cidx = modify->find_compute(pusher->pusher_plasma_cid);
     pusher->pusher_plasma_fidx = -1;
     if (pusher->pusher_plasma_cidx >= 0) {
@@ -685,8 +701,17 @@ void Update::init()
   // active fix styles. Any consumer not on this list will fall back to the
   // full cache below (set in the unrecognized-style branch).
   pcache_need_mask = 0;
+  pcache_nevery = 1;
   if (plasma_cache_flag) {
     int recognized = 0;
+    // auto-derive the cache refresh cadence: min nevery over the fixes
+    // that actually read the cache; anything unrecognized (or the sheath)
+    // forces every-step refresh.
+    int cad = 0;                 // 0 = no consumer seen yet
+    auto note_cad = [&cad](int n) {
+      if (n < 1) n = 1;
+      cad = (cad == 0) ? n : (n < cad ? n : cad);
+    };
     for (int ifix = 0; ifix < modify->nfix; ifix++) {
       const char *s = modify->fix[ifix]->style;
       if (strcmp(s,"volume/chem/adas") == 0 || strcmp(s,"volume/chem/adas/kk") == 0) {
@@ -699,6 +724,7 @@ void Update::init()
         if (fchem && fchem->needs_cx_fields()) {
           pcache_need_mask |= PCACHE_TI | PCACHE_VPAR | PCACHE_BFIELD;
         }
+        note_cad(modify->fix[ifix]->nevery);
         recognized = 1;
       } else if (strcmp(s,"force/thermal") == 0) {
         // In background mode the fix interpolates from FixBackground
@@ -707,6 +733,7 @@ void Update::init()
             dynamic_cast<FixForceThermal *>(modify->fix[ifix]);
         if (!ftf || ftf->needs_pcache()) {
           pcache_need_mask |= PCACHE_BFIELD | PCACHE_GRAD_TE | PCACHE_GRAD_TI;
+          note_cad(modify->fix[ifix]->nevery);
         }
         recognized = 1;
       } else if (strcmp(s,"coulomb/binary") == 0 ||
@@ -719,6 +746,7 @@ void Update::init()
         if (!fcb || fcb->needs_pcache()) {
           pcache_need_mask |= PCACHE_TE | PCACHE_NE | PCACHE_TI | PCACHE_NI |
                               PCACHE_VPAR | PCACHE_BFIELD;
+          note_cad(modify->fix[ifix]->nevery);
         }
         recognized = 1;
       } else if (strcmp(s,"cross_field_diffusion") == 0) {
@@ -731,10 +759,12 @@ void Update::init()
           if (fcd && fcd->needs_grad_ne()) {
             pcache_need_mask |= PCACHE_NE | PCACHE_GRAD_NE;
           }
+          note_cad(modify->fix[ifix]->nevery);
         }
         recognized = 1;
       } else if (strcmp(s,"efield/particle") == 0) {
         pcache_need_mask |= PCACHE_EFIELD;
+        note_cad(modify->fix[ifix]->nevery);
         recognized = 1;
       }
     }
@@ -743,11 +773,24 @@ void Update::init()
     // require the PCACHE_BFIELD write slot.
     if (sheath_flag && sheath_geom_cidx >= 0) {
       pcache_need_mask |= PCACHE_TE | PCACHE_NE | PCACHE_TI;
+      note_cad(1);
     }
     // Backward compat: if no recognized consumer was found but the cache
     // is enabled (some user-defined fix may read pc_* via particle vars),
     // fall back to filling everything to avoid silently starving a reader.
-    if (!recognized) pcache_need_mask = PCACHE_ALL;
+    if (!recognized) {
+      pcache_need_mask = PCACHE_ALL;
+      note_cad(1);
+    }
+    pcache_nevery = (cad == 0) ? 1 : cad;
+    if (comm->me == 0 && pcache_nevery > 1) {
+      char msg[128];
+      snprintf(msg, sizeof(msg),
+               "pcache: auto refresh cadence every %d steps "
+               "(slowest cache consumer)\n", pcache_nevery);
+      if (screen)  fputs(msg, screen);
+      if (logfile) fputs(msg, logfile);
+    }
   }
 
   // moveperturb method is set if external field perturbs particle motion
@@ -1045,11 +1088,10 @@ void Update::cache_plasma_particles()
   // Cell-indexed mesh cache: build once per (grid_changed | reload) and
   // share across all particles on this rank. Dominant pcache-loop saving
   // when the mesh is loaded — replaces a per-particle triangle spatial
-  // search with an O(1) array load by particles[i].icell. Fallback to the
-  // per-particle mesh_cell_at() path stays in place for the
-  // `pcache_per_cell_mesh no` validation mode.
-  const bool use_cell_mesh_cache =
-      (pd && pd->has_mesh && pcache_per_cell_mesh);
+  // search with an O(1) warm-start by particles[i].icell; the final
+  // lookup is exact at the particle position either way (validated by
+  // the probe_background gates).
+  const bool use_cell_mesh_cache = (pd && pd->has_mesh);
   if (use_cell_mesh_cache) {
     // Invalidate when the grid changes. Two stamps catch the common cases:
     //  - nlocal differs → adapt added/removed cells
@@ -1446,11 +1488,11 @@ template < int DIM, int SURF, int OPT > void Update::move()
   }
 
   // Per-particle charge override from fix droplet/charge (custom DOUBLE
-  // vector "droplet_charge"). Cache only the ewhich INDEX, not the array
+  // vector "particulate_charge"). Cache only the ewhich INDEX, not the array
   // pointer: add_particle (mid-move migration receives) can reallocate
   // edvec, and a pointer captured here would dangle — intermittent MPI-only
   // bus errors in move. Same policy as pweight below.
-  const int dq_idx = particle->find_custom((char *) "droplet_charge");
+  const int dq_idx = particle->find_custom((char *) "particulate_charge");
   const int dq_ewhich = (dq_idx >= 0) ? particle->ewhich[dq_idx] : -1;
 
   // pweight custom (fix particle/weight) -> stamped into tally_pweight
@@ -1465,7 +1507,10 @@ template < int DIM, int SURF, int OPT > void Update::move()
   // cache. Re-evaluate before this move reads it, else the sheath model
   // silently switches off after the first grid adaptation. The call
   // no-ops whenever the cached geometry is still valid.
-  if (sheath_flag && sheath_geom_cidx >= 0) {
+  // (also needed by the pusher's boris_near shell with the sheath off)
+  if ((sheath_flag || pusher->pusher_boris_near > 0.0 ||
+       pusher->pusher_gc_wall_flux) &&
+      sheath_geom_cidx >= 0) {
     Compute *cg_sh = modify->compute[sheath_geom_cidx];
     if (cg_sh) cg_sh->compute_per_grid();
   }
@@ -1618,6 +1663,16 @@ template < int DIM, int SURF, int OPT > void Update::move()
           xnew[2] += dx_cd[i][2];
         }
         has_kick = 1;
+        // GCA-state particles: shift the STORED guiding center by the
+        // same displacement — otherwise the pusher restores the pre-kick
+        // GC next step and the diffusion silently reverts. This is a
+        // position operator, not a velocity collision (no-op for
+        // Boris-mode/invalid particles).
+        {
+          double dgc[3] = {dx_cd[i][0], dx_cd[i][1],
+                           (DIM == 3) ? dx_cd[i][2] : 0.0};
+          pusher->apply_gc_displacement(i, dgc);
+        }
       }
 
       // Psi-based core boundary: check if xnew is inside the core
@@ -2179,6 +2234,14 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 }
               }
 
+              // A1 axi: a GCA particle reaches the wall on its GC chord —
+              // swap in the flux-weighted physical gyro velocity at first
+              // passage before the sheath kick and collide (3D samples
+              // pre-step in the pusher; the axi retrace contract
+              // xnew = x + dtremain*v forbids carrying it in v there)
+              if (DIM != 3 && pusher && pusher->pusher_gc_wall_flux)
+                pusher->materialize_impact_velocity(i, icell, minsurf, v);
+
               // --- Sheath kick: apply sheath energy as velocity boost at wall ---
               // Inbound sheath impact-energy boost: sets the wall impact
               // energy for sputtering. Applied in both kick mode and
@@ -2188,8 +2251,19 @@ template < int DIM, int SURF, int OPT > void Update::move()
               // boundaries with no sheath, and kicking on every transit
               // pumps the cap-normal velocity without bound.
               const int kick_isc = (DIM == 3) ? tri->isc : line->isc;
-              const bool kick_material_wall = (kick_isc < 0) ||
+              bool kick_material_wall = (kick_isc < 0) ||
                   (strcmp(surf->sc[kick_isc]->style, "toroidal") != 0);
+              // the sheath lives ONLY on surfaces in the sheath geometry
+              // group (the actually-intersected face decides): an escape
+              // collector or core boundary carries no wall sheath
+              if (kick_material_wall && sheath_geom_cidx >= 0) {
+                auto *csg_k = dynamic_cast<ComputeNearestSurfGrid *>(
+                    modify->compute[sheath_geom_cidx]);
+                if (csg_k) {
+                  const int smask_k = (DIM == 3) ? tri->mask : line->mask;
+                  if (!(smask_k & csg_k->sgroupbit)) kick_material_wall = false;
+                }
+              }
               if (kick_material_wall &&
                   (sheath_kick || sheath_boundary) && sheath_flag &&
                   sheath_geom_cidx >= 0 &&
@@ -2207,11 +2281,16 @@ template < int DIM, int SURF, int OPT > void Update::move()
                   pd = dynamic_cast<FixBackground *>(modify->fix[pusher->pusher_plasma_fidx]);
                 }
                 if (cp || pd) {
+                  // unified evaluator first (CM base + RF waveform at the
+                  // exact collision time); inline floating-potential
+                  // fallback for non-cached plasma sources
+                  const double phi_uni =
+                      pusher->sheath_phi_wall(minsurf, dt - dtremain);
                   PlasmaFileParams sk_pf = cp ? cp->query_plasma_at_point(x)
                                               : query_plasma_from_fix(pd, x, DIM == 2 ? 2 : 3, domain->axisymmetric, icell);
                   const double sk_te = sk_pf.temp_e;
                   const double sk_ti = sk_pf.temp_i;
-                  if (sk_te > 0.0) {
+                  if (phi_uni >= 0.0 || sk_te > 0.0) {
                     constexpr double QE_kick = 1.602176634e-19;
                     constexpr double ME_kick = 9.1093837015e-31;
                     constexpr double AMU_kick = 1.66053906660e-27;
@@ -2220,10 +2299,14 @@ template < int DIM, int SURF, int OPT > void Update::move()
                     const double mD_kg = sheath_mD_amu * AMU_kick;
 
                     // Floating potential: phi = 0.5*ln(mD/(2*pi*me)/(1+Ti/Te)) * Te (eV)
-                    const double ti_ratio = (sk_ti > 0.0) ? (sk_ti / sk_te) : 0.0;
-                    const double phi_float_mult =
-                      0.5 * std::log(mD_kg / (2.0 * PI_kick * ME_kick) / (1.0 + ti_ratio));
-                    const double phi_eV = std::max(phi_float_mult, 0.0) * sk_te;
+                    const double ti_ratio =
+                      (sk_te > 0.0 && sk_ti > 0.0) ? (sk_ti / sk_te) : 0.0;
+                    const double phi_float_mult = (sk_te > 0.0)
+                      ? 0.5 * std::log(mD_kg / (2.0 * PI_kick * ME_kick) / (1.0 + ti_ratio))
+                      : 0.0;
+                    const double phi_eV = (phi_uni >= 0.0)
+                      ? phi_uni
+                      : std::max(phi_float_mult, 0.0) * sk_te;
 
                     // Particle charge and mass (from species table, not particle struct)
                     const int isp = particles[i].ispecies;
@@ -2470,7 +2553,9 @@ template < int DIM, int SURF, int OPT > void Update::move()
         //   flag as PDONE so new proc won't move it more on this step
 
         if (outface == INTERIOR) {
-          if (DIM == 1) axi_remap(xnew,v);
+          if (DIM == 1) axi_remap(xnew,v,
+              (phi_track && phi_custom >= 0)
+                ? &particle->edvec[particle->ewhich[phi_custom]][i] : NULL);
           x[0] = xnew[0];
           x[1] = xnew[1];
           if (DIM == 3) x[2] = xnew[2];
@@ -2531,7 +2616,9 @@ template < int DIM, int SURF, int OPT > void Update::move()
         x[0] += frac * (xnew[0]-x[0]);
         x[1] += frac * (xnew[1]-x[1]);
         if (DIM != 2) x[2] += frac * (xnew[2]-x[2]);
-        if (DIM == 1) axi_remap(x,v);
+        if (DIM == 1) axi_remap(x,v,
+            (phi_track && phi_custom >= 0)
+              ? &particle->edvec[particle->ewhich[phi_custom]][i] : NULL);
 
         if (outface == XLO) x[0] = lo[0];
         else if (outface == XHI) x[0] = hi[0];
@@ -3431,20 +3518,27 @@ void Update::global(int narg, char **arg)
       iarg += 2;
     }
     // OpenEdge additions
-    else if (strcmp(arg[iarg], "pcache_nevery") == 0) {
+    else if (strcmp(arg[iarg], "phi_track") == 0) {
+      // unwrapped toroidal angle for mover-advected particles in axi:
+      // per-remap accumulation of dphi = atan2(z, y) into the
+      // "phi_unwrap" custom (DUSTT-style 2D3V + phi trajectories;
+      // synthetic-camera projection without a 3D mesh). Pure-GCA ions
+      // bypass the remap — their toroidal motion lives in p_gca_z.
       if (iarg + 1 >= narg)
-        error->all(FLERR, "Illegal global pcache_nevery command");
-      pcache_nevery = input->inumeric(FLERR, arg[iarg + 1]);
-      if (pcache_nevery <= 0)
-        error->all(FLERR, "Illegal global pcache_nevery command");
+        error->all(FLERR, "Illegal global phi_track command");
+      if (strcmp(arg[iarg + 1], "yes") == 0) phi_track = 1;
+      else if (strcmp(arg[iarg + 1], "no") == 0) phi_track = 0;
+      else error->all(FLERR, "Illegal global phi_track command");
+      if (phi_track) {
+        const int custom_double = 1;   // Particle::add_custom type code
+        phi_custom = particle->find_custom((char *) "phi_unwrap");
+        if (phi_custom < 0)
+          phi_custom = particle->add_custom((char *) "phi_unwrap",
+                                            custom_double, 0);
+      }
       iarg += 2;
 
-    } else if (strcmp(arg[iarg], "pcache_per_cell_mesh") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR, "Illegal global pcache_per_cell_mesh command");
-      if (strcmp(arg[iarg + 1], "yes") == 0) pcache_per_cell_mesh = 1;
-      else if (strcmp(arg[iarg + 1], "no") == 0) pcache_per_cell_mesh = 0;
-      else error->all(FLERR, "Illegal global pcache_per_cell_mesh command");
-      iarg += 2;
+
 
     // Charged-particle pusher (Boris full-orbit or Boris/GCA hybrid) +
     // optional sheath overlay. Single hierarchical keyword:

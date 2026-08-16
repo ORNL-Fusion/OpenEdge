@@ -33,6 +33,22 @@
 
 namespace SPARTA_NS {
 
+namespace GCAPusher { struct GCAFields; }
+
+// Value-like materialization of a stored guiding-center state: physical
+// position ON the gyro-circle and the velocity at that phase. The API
+// never mutates particle storage — callers decide what to apply (the
+// non-terminal-vanish episode is the cautionary case for silent writes).
+struct MaterializedOrbit {
+  double x[3];       // physical position ON the gyro-circle
+  double v[3];       // velocity at that phase
+  double xtrace[3];  // trace start the mover will use (the stored GC)
+  double B[3];       // field sample the materialization used
+  double phase;      // gyrophase in [0,1) turns
+  int icell;         // cell ownership; -1 = NOT rehomed (PLAN contract)
+  bool valid;
+};
+
 /* ===================================================================
    Pusher class — owns all pusher state and dispatch.
    Update has a single Pusher* member and calls into it from move()
@@ -47,6 +63,14 @@ class Pusher : protected Pointers {
 
   enum PusherMode { PUSHER_BORIS = 0, PUSHER_HYBRID = 1, PUSHER_GCA = 2 };
   enum GCAIntegrator { GCA_RK4 = 0, GCA_SIMPLE = 1, GCA_RK2 = 2 };
+  // Sheath transit state (per-particle custom "sheath_paid"):
+  //   OUTSIDE -> ARMED on band entry; ARMED -> APPLIED when the escape
+  //   deceleration fires; back to OUTSIDE only on verified band exit.
+  //   Elastic sub-barrier REFLECTION deliberately keeps ARMED: it is the
+  //   confinement mechanism and must re-fire on every outbound attempt —
+  //   marking it APPLIED would let a below-barrier ion leak out at full
+  //   energy on its next gyro-outbound excursion.
+  enum SheathTransit { SH_OUTSIDE = 0, SH_ARMED = 1, SH_APPLIED = 2 };
 
   // ---- State (was on Update) -----------------------------------------
   int pusher_mode;
@@ -60,15 +84,30 @@ class Pusher : protected Pointers {
   int pusher_bad_dt_warned;
   double pusher_bad_dt_limit;
   double pusher_gca_switch;
-  double pusher_boris_near;     // force Boris when |dist to sheath_geom surf| < this (m); 0 = off
+  double pusher_boris_near;     // Boris shell size: metres, or k with `rhoL` units; 0 = off
+  int    pusher_boris_near_rhol; // 1 = boris_near is k, shell = k*rho_L per particle
+  char  *switch_log_file;       // per-rank GCA<->Boris switch event log (CSV); NULL = off
+  FILE  *switch_log_fp;
+  int    pusher_gc_wall_flux;   // A1: flux-weighted gyrophase at GC wall arrival
+  char  *pusher_skip_mix;       // mixture whose species bypass the pusher
+                                // (dust grains: unmagnetized, forces live in
+                                // the grain fixes); NULL = push everything
+  int   *pusher_skip_flag;      // per-species resolution of skip_mix
   int    pusher_gca_integrator; // GCAIntegrator; RK4 remains C++ default
+  void   resolve_skip_species();  // called from Update::init
 
   int gca_x_custom;
   int gca_y_custom;
   int gca_z_custom;
   int gca_vpar_custom;
   int gca_mu_custom;
-  int gca_on_custom;
+  // Orbit state, split (one flag cannot carry three meanings):
+  //   gca_mode  — branch that integrated last step (0 = Boris, 1 = GCA)
+  //   gca_valid — stored (X, v_par, mu) trustworthy
+  //   gca_chi   — gyroangle accumulated while in Boris residence
+  int gca_mode_custom;
+  int gca_valid_custom;
+  int gca_chi_custom;
 
   // ---- Spatial-sheath per-wall-element coefficient cache -------------
   // The Coulette-Manfredi sheath coefficients (and the geometry, plasma,
@@ -115,6 +154,41 @@ class Pusher : protected Pointers {
   void push_hybrid_3d(int i, int icell, double dt,
                       double *x, double *v, double *xnew,
                       double charge, double mass);
+  bool sample_gca_fields(const double *xpos, int icell, int i,
+                         GCAPusher::GCAFields &F);
+  void register_gca_custom();
+  void log_switch(int id, int oldmode, int newmode, const char *reason,
+                  double d_start, double d_end, double d_sw,
+                  double e_pre, double e_post, int replay);
+
+  // ---- Orbit-state API (Stage B prerequisite) ------------------------
+  // Reasons for invalidate_gc (extend as operators land)
+  enum GCInvalidate { GC_INVAL_COLLISION = 1, GC_INVAL_IONIZE = 2,
+                      GC_INVAL_CX = 3, GC_INVAL_SPECIES = 4,
+                      GC_INVAL_BOUNDARY = 5 };
+  MaterializedOrbit materialize_orbit(int i, const double B[3], double qm,
+                                      double mass, double phase01);
+  // A1 at the collision site (axi only): overwrite v_io with the
+  // flux-weighted physical gyro velocity of a wall-crossing GCA
+  // particle; invalidates the GC state. No-op (false) otherwise.
+  bool materialize_impact_velocity(int i, int icell, int midx,
+                                   double *v_io);
+  // sync_gc_velocity REQUIRES a currently-valid GC state (velocity-only
+  // operators must not resurrect stale positions); sync_gc_phase_space
+  // is a full re-init and always establishes validity. apply_* refuse
+  // (return false) on invalid state.
+  bool sync_gc_velocity(int i, const double *v, const double B[3],
+                        double mass);
+  bool sync_gc_phase_space(int i, const double *x, const double *v,
+                           const double B[3], double qm, double mass);
+  bool apply_parallel_impulse(int i, double dvpar);
+  bool apply_gc_displacement(int i, const double *dx);
+  void invalidate_gc(int i, int reason);
+  // Unified sheath wall potential for surface element midx at the exact
+  // event time (t_offset seconds into the current step): Coulette-
+  // Manfredi base + RF waveform, from the per-element cache. Returns
+  // < 0 when no cached sheath is available (caller falls back).
+  double sheath_phi_wall(int midx, double t_offset);
 };
 
 }  // namespace SPARTA_NS
@@ -193,12 +267,26 @@ struct GCAState {
   double mu;        // magnetic moment (adiabatic invariant) [J/T]
 };
 
+// Field bundle for the GCA RHS, in SPARTA slot coordinates.
+// Filled by Pusher::sample_gca_fields at the k1 position and again at
+// each RK stage position (stage resampling).
+struct GCAFields {
+  double E[3];
+  double B[3];
+  double Bmag;
+  double gradBmag[3];
+  double kappa[3];
+  double curl_b[3];
+  bool derivs_valid;   // gradients trustworthy (equilibrium/constant source)
+  bool e_valid;        // E entries are a real sample (zero is a VALID value)
+};
+
 /* ---------------------------------------------------------------------- */
 // Initialize GCA state from full particle state
 // B[3] is the local magnetic field in Cartesian coords
 /* ---------------------------------------------------------------------- */
 inline GCAState init_from_particle(const double x[3], const double v[3],
-                                   double mass, const double B[3])
+                                   double mass, double qm, const double B[3])
 {
   GCAState s;
   const double Bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
@@ -209,6 +297,15 @@ inline GCAState init_from_particle(const double x[3], const double v[3],
 
   if (Bmag > 0.0) {
     const double bhat[3] = {B[0]/Bmag, B[1]/Bmag, B[2]/Bmag};
+    // first-order guiding center: X = x + (v x bhat)/Omega_signed —
+    // identifying X with x displaces the GC by a full rho_L and biases
+    // near-wall statistics (see gca_to_particle, the inverse map)
+    const double Om = qm * Bmag;
+    if (std::fabs(Om) > 0.0) {
+      s.X[0] += (v[1]*bhat[2] - v[2]*bhat[1]) / Om;
+      s.X[1] += (v[2]*bhat[0] - v[0]*bhat[2]) / Om;
+      s.X[2] += (v[0]*bhat[1] - v[1]*bhat[0]) / Om;
+    }
     s.v_par = v[0]*bhat[0] + v[1]*bhat[1] + v[2]*bhat[2];
 
     // v_perp^2 = |v|^2 - v_par^2
@@ -315,8 +412,26 @@ inline void push_gca(double qm, double dt, double mass,
 // Reconstructs v_perp with a random gyrophase angle.
 // Requires a uniform random number phi in [0, 2*pi).
 /* ---------------------------------------------------------------------- */
+// perpendicular unit basis for a given bhat — MUST stay identical to the
+// construction gca_to_particle uses (the A1 flux sampler weights phases
+// in this exact basis)
+inline void gca_perp_basis(const double bhat[3], double e1[3], double e2[3])
+{
+  double ref[3];
+  if (std::fabs(bhat[0]) < 0.9) { ref[0] = 1.0; ref[1] = 0.0; ref[2] = 0.0; }
+  else                          { ref[0] = 0.0; ref[1] = 1.0; ref[2] = 0.0; }
+  e1[0] = bhat[1]*ref[2] - bhat[2]*ref[1];
+  e1[1] = bhat[2]*ref[0] - bhat[0]*ref[2];
+  e1[2] = bhat[0]*ref[1] - bhat[1]*ref[0];
+  const double m1 = std::sqrt(e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2]);
+  e1[0] /= m1; e1[1] /= m1; e1[2] /= m1;
+  e2[0] = bhat[1]*e1[2] - bhat[2]*e1[1];
+  e2[1] = bhat[2]*e1[0] - bhat[0]*e1[2];
+  e2[2] = bhat[0]*e1[1] - bhat[1]*e1[0];
+}
+
 inline void gca_to_particle(const GCAState &state, const double B[3],
-                            double mass, double rand_uniform,
+                            double mass, double qm, double rand_uniform,
                             double x[3], double v[3])
 {
   x[0] = state.X[0];
@@ -336,26 +451,8 @@ inline void gca_to_particle(const GCAState &state, const double B[3],
   // v_perp from mu: v_perp = sqrt(2 * mu * B / m)
   const double vperp = std::sqrt(2.0 * state.mu * Bmag / mass);
 
-  // Build two perpendicular unit vectors e1, e2 to bhat
   double e1[3], e2[3];
-  // Pick a vector not parallel to bhat
-  double ref[3];
-  if (std::fabs(bhat[0]) < 0.9) {
-    ref[0] = 1.0; ref[1] = 0.0; ref[2] = 0.0;
-  } else {
-    ref[0] = 0.0; ref[1] = 1.0; ref[2] = 0.0;
-  }
-  // e1 = bhat x ref (then normalize)
-  e1[0] = bhat[1]*ref[2] - bhat[2]*ref[1];
-  e1[1] = bhat[2]*ref[0] - bhat[0]*ref[2];
-  e1[2] = bhat[0]*ref[1] - bhat[1]*ref[0];
-  const double e1mag = std::sqrt(e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2]);
-  e1[0] /= e1mag; e1[1] /= e1mag; e1[2] /= e1mag;
-
-  // e2 = bhat x e1
-  e2[0] = bhat[1]*e1[2] - bhat[2]*e1[1];
-  e2[1] = bhat[2]*e1[0] - bhat[0]*e1[2];
-  e2[2] = bhat[0]*e1[1] - bhat[1]*e1[0];
+  gca_perp_basis(bhat, e1, e2);
 
   // Random gyrophase
   const double phi = 2.0 * M_PI * rand_uniform;
@@ -364,6 +461,17 @@ inline void gca_to_particle(const GCAState &state, const double B[3],
   v[0] = state.v_par * bhat[0] + vperp * (cp * e1[0] + sp * e2[0]);
   v[1] = state.v_par * bhat[1] + vperp * (cp * e1[1] + sp * e2[1]);
   v[2] = state.v_par * bhat[2] + vperp * (cp * e1[2] + sp * e2[2]);
+
+  // place the particle ON the gyro-circle about X (inverse of the
+  // first-order init): x = X - (v x bhat)/Omega_signed. Without this the
+  // materialized orbit is centered rho_L away from the stored GC in a
+  // phase-dependent direction, which biases near-wall impact statistics.
+  const double Om = qm * Bmag;
+  if (std::fabs(Om) > 0.0) {
+    x[0] -= (v[1]*bhat[2] - v[2]*bhat[1]) / Om;
+    x[1] -= (v[2]*bhat[0] - v[0]*bhat[2]) / Om;
+    x[2] -= (v[0]*bhat[1] - v[1]*bhat[0]) / Om;
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -426,18 +534,21 @@ inline GCARhs gca_rhs(double qm, double mass, double v_par, double mu,
   ExB[1] = E[2]*bhat[0] - E[0]*bhat[2];
   ExB[2] = E[0]*bhat[1] - E[1]*bhat[0];
 
-  // (μ / (m Ω)) * (B × ∇|B|) / B = (μ / (q B²)) * (B × ∇|B|)
+  // grad-B drift enters the bracket as B·v_∇B = (μ/(qB)) (B × ∇|B|);
+  // gradB_coeff = μ/(mΩ) = μ/(qB)
   const double gradB_coeff = mu / (mass * Omega);
   double BxgradB[3];
   BxgradB[0] = B[1]*gradBmag[2] - B[2]*gradBmag[1];
   BxgradB[1] = B[2]*gradBmag[0] - B[0]*gradBmag[2];
   BxgradB[2] = B[0]*gradBmag[1] - B[1]*gradBmag[0];
 
-  // dX/dt = v_par * B*/B*_par + (1/B*_par) * [E×b̂ + (μ/(mΩ))(B×∇|B|)/B]
-  // The last term reduces to the grad-B drift.
-  rhs.dXdt[0] = invBstar_par * (v_par * Bstar[0] + ExB[0] + gradB_coeff * BxgradB[0] * invB);
-  rhs.dXdt[1] = invBstar_par * (v_par * Bstar[1] + ExB[1] + gradB_coeff * BxgradB[1] * invB);
-  rhs.dXdt[2] = invBstar_par * (v_par * Bstar[2] + ExB[2] + gradB_coeff * BxgradB[2] * invB);
+  // dX/dt = v_par * B*/B*_par + (1/B*_par) * [E×b̂ + (μ/(qB))(B×∇|B|)]
+  // Every bracket term carries velocity·B units (E×b̂ = B·v_ExB); an
+  // earlier version multiplied the grad-B entry by an extra 1/|B|,
+  // undercounting that drift by a factor |B|.
+  rhs.dXdt[0] = invBstar_par * (v_par * Bstar[0] + ExB[0] + gradB_coeff * BxgradB[0]);
+  rhs.dXdt[1] = invBstar_par * (v_par * Bstar[1] + ExB[1] + gradB_coeff * BxgradB[1]);
+  rhs.dXdt[2] = invBstar_par * (v_par * Bstar[2] + ExB[2] + gradB_coeff * BxgradB[2]);
 
   // dv_par/dt = (B*/B*_par) · [-(μ/m)∇|B| + (q/m)E]
   // = (1/B*_par) * B* · [-(μ/m)∇|B| + qm*E]
@@ -454,42 +565,48 @@ inline GCARhs gca_rhs(double qm, double mass, double v_par, double mu,
 /* ---------------------------------------------------------------------- */
 // RK4 integrator for the full GCA equations with B* correction.
 //
-// E, B, gradBmag, kappa, curl_b are assumed constant over dt
-// (valid since fields are cell-based and don't change within a timestep).
-// Only X and v_par evolve through the RK stages.
+// fields_at(X, F) overwrites F with fields sampled at stage position X,
+// leaving F untouched where sampling fails (frozen k1 fallback). Stage
+// resampling keeps -mu*grad|B| and q*E energy-consistent across the
+// step; frozen-field stages produced a secular energy drift.
 /* ---------------------------------------------------------------------- */
 
+template <class FieldEval>
 inline void push_gca_rk4(double qm, double dt, double mass,
-                          const double E[3], const double B[3],
-                          double Bmag, const double gradBmag[3],
-                          const double kappa[3], const double curl_b[3],
-                          GCAState &state)
+                          const GCAFields &F1, GCAState &state,
+                          FieldEval fields_at)
 {
   // y = (X[0], X[1], X[2], v_par) — 4-component state
   double y[4] = {state.X[0], state.X[1], state.X[2], state.v_par};
 
-  auto eval_rhs = [&](const double yy[4]) -> GCARhs {
-    // Fields are constant over the cell, so just use the same E, B, etc.
-    return gca_rhs(qm, mass, yy[3], state.mu, E, B, Bmag, gradBmag, kappa, curl_b);
+  auto eval_rhs = [&](const double yy[4], const GCAFields &F) -> GCARhs {
+    return gca_rhs(qm, mass, yy[3], state.mu, F.E, F.B, F.Bmag,
+                   F.gradBmag, F.kappa, F.curl_b);
   };
 
   // k1
-  GCARhs r1 = eval_rhs(y);
+  GCARhs r1 = eval_rhs(y, F1);
   double k1[4] = {dt * r1.dXdt[0], dt * r1.dXdt[1], dt * r1.dXdt[2], dt * r1.dvpar_dt};
 
   // k2
   double y2[4] = {y[0]+0.5*k1[0], y[1]+0.5*k1[1], y[2]+0.5*k1[2], y[3]+0.5*k1[3]};
-  GCARhs r2 = eval_rhs(y2);
+  GCAFields F2 = F1;
+  fields_at(y2, F2);
+  GCARhs r2 = eval_rhs(y2, F2);
   double k2[4] = {dt * r2.dXdt[0], dt * r2.dXdt[1], dt * r2.dXdt[2], dt * r2.dvpar_dt};
 
   // k3
   double y3[4] = {y[0]+0.5*k2[0], y[1]+0.5*k2[1], y[2]+0.5*k2[2], y[3]+0.5*k2[3]};
-  GCARhs r3 = eval_rhs(y3);
+  GCAFields F3 = F1;
+  fields_at(y3, F3);
+  GCARhs r3 = eval_rhs(y3, F3);
   double k3[4] = {dt * r3.dXdt[0], dt * r3.dXdt[1], dt * r3.dXdt[2], dt * r3.dvpar_dt};
 
   // k4
   double y4[4] = {y[0]+k3[0], y[1]+k3[1], y[2]+k3[2], y[3]+k3[3]};
-  GCARhs r4 = eval_rhs(y4);
+  GCAFields F4 = F1;
+  fields_at(y4, F4);
+  GCARhs r4 = eval_rhs(y4, F4);
   double k4[4] = {dt * r4.dXdt[0], dt * r4.dXdt[1], dt * r4.dXdt[2], dt * r4.dvpar_dt};
 
   // Combine: y_new = y + (k1 + 2*k2 + 2*k3 + k4) / 6
@@ -501,27 +618,28 @@ inline void push_gca_rk4(double qm, double dt, double mass,
 /* ---------------------------------------------------------------------- */
 // RK2 (midpoint) integrator on the same full-Littlejohn RHS as RK4.
 // Two RHS evaluations per step: half the algebra of RK4, retains the
-// curvature/curl(b) physics that `simple` drops. Fields frozen over dt
-// (same assumption as RK4). Good default for tokamak-edge work when
-// RK4 cost matters.
+// curvature/curl(b) physics that `simple` drops. Midpoint fields are
+// resampled via fields_at (same contract as push_gca_rk4).
 /* ---------------------------------------------------------------------- */
 
+template <class FieldEval>
 inline void push_gca_rk2(double qm, double dt, double mass,
-                          const double E[3], const double B[3],
-                          double Bmag, const double gradBmag[3],
-                          const double kappa[3], const double curl_b[3],
-                          GCAState &state)
+                          const GCAFields &F1, GCAState &state,
+                          FieldEval fields_at)
 {
   double y[4] = {state.X[0], state.X[1], state.X[2], state.v_par};
 
-  auto eval_rhs = [&](const double yy[4]) -> GCARhs {
-    return gca_rhs(qm, mass, yy[3], state.mu, E, B, Bmag, gradBmag, kappa, curl_b);
+  auto eval_rhs = [&](const double yy[4], const GCAFields &F) -> GCARhs {
+    return gca_rhs(qm, mass, yy[3], state.mu, F.E, F.B, F.Bmag,
+                   F.gradBmag, F.kappa, F.curl_b);
   };
 
-  GCARhs r1 = eval_rhs(y);
+  GCARhs r1 = eval_rhs(y, F1);
   double ymid[4] = {y[0] + 0.5*dt*r1.dXdt[0], y[1] + 0.5*dt*r1.dXdt[1],
                     y[2] + 0.5*dt*r1.dXdt[2], y[3] + 0.5*dt*r1.dvpar_dt};
-  GCARhs r2 = eval_rhs(ymid);
+  GCAFields Fmid = F1;
+  fields_at(ymid, Fmid);
+  GCARhs r2 = eval_rhs(ymid, Fmid);
 
   for (int i = 0; i < 3; ++i) state.X[i] = y[i] + dt * r2.dXdt[i];
   state.v_par = y[3] + dt * r2.dvpar_dt;

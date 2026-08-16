@@ -183,7 +183,6 @@ struct SurfHit2D {
 
   // Reuse mesh_cell_at() result across particles in the same SPARTA cell.
   // Default 1 (faster); set to 0 for per-particle lookups when validating.
-  int pcache_per_cell_mesh;
   int pc_te_custom, pc_ti_custom, pc_ne_custom, pc_ni_custom;
   int pc_vpar_custom;
   int pc_bx_custom, pc_by_custom, pc_bz_custom;
@@ -207,13 +206,12 @@ struct SurfHit2D {
     PCACHE_ALL     = (1 << 10) - 1
   };
   int pcache_need_mask;
-  // Populate the per-particle plasma cache only every N steps. Default 1
-  // (every step). When all cache consumers fire at a coarser cadence
-  // (e.g. volume/chem/adas nevery=10 and no Boris/sheath), setting
-  // `global pcache_nevery 10` cuts the dominant per-step pcache cost
-  // by the same factor. Stale cache between refreshes is fine for plasma
-  // quantities whose spatial scale (~1 mm SOL width) far exceeds the
-  // particle displacement over N steps (~70 µm for 2 eV D at dt=5 ns).
+  // Refresh cadence of the per-particle plasma cache, AUTO-DERIVED in
+  // init() as the min nevery over the fixes that actually read the cache
+  // (1 whenever the sheath or an unrecognized consumer is active). Coarse
+  // consumers (e.g. volume/chem/adas nevery=100) skip the dominant
+  // per-step sampling loop on the off steps; staleness is bounded by the
+  // slowest consumer that reads it, never by a user knob.
   int pcache_nevery;
   void cache_plasma_particles();
 
@@ -432,7 +430,10 @@ static double dist_point_tri(const double p[3], const double a[3],
   // input x at end of linear move (x = xold + dt*v)
   // change x[1] = sqrt(x[1]^2 + x[2]^2), x[2] = 0.0
   // change vy,vz by rotation into axisymmetric plane
-  inline void axi_remap(double *x, double *v) {
+  // dphi (optional): accumulate the signed toroidal rotation of this
+  // remap (phi_track unwrapped-angle diagnostic; sub-step exact since
+  // every segment remap adds its own arc)
+  inline void axi_remap(double *x, double *v, double *dphi = NULL) {
     double ynew = x[1];
     double znew = x[2];
     x[1] = sqrt(ynew*ynew + znew*znew);
@@ -443,7 +444,11 @@ static double dist_point_tri(const double p[3], const double a[3],
     double vz = v[2];
     v[1] = vy*rn + vz*wn;
     v[2] = -vy*wn + vz*rn;
+    if (dphi) *dphi += atan2(znew, ynew);
   };
+
+  int phi_track;               // 1 = accumulate phi_unwrap custom in axi
+  int phi_custom;              // particle custom index of "phi_unwrap"
 
   typedef void (Update::*FnPtr)();
   FnPtr moveptr;             // ptr to move method

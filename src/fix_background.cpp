@@ -110,8 +110,14 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
   const_grad_te_r = const_grad_te_t = const_grad_te_z = 0.0;
   const_grad_ti_r = const_grad_ti_t = const_grad_ti_z = 0.0;
   const_epar = 0.0;
+  const_e_r = const_e_t = const_e_z = 0.0;
+  const_dens_n = const_temp_n = 0.0;
+  const_has_neutrals = 0;
+  const_has_efield = 0;
   const_br = const_bz = const_bt = 0.0;
   const_has_bfield = 0;
+  const_bcart[0] = const_bcart[1] = const_bcart[2] = 0.0;
+  const_has_bcart = 0;
   column_x0 = column_y0 = 0.0;
 
   int iarg = 2;
@@ -189,6 +195,21 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
     } else if (strcmp(arg[iarg], "ti") == 0 || strcmp(arg[iarg], "temp_i") == 0) {
       parse_scalar(const_temp_i, arg[iarg]);
       const_has_temp_i = 1;
+    } else if (strcmp(arg[iarg], "nn") == 0 || strcmp(arg[iarg], "dens_n") == 0) {
+      parse_scalar(const_dens_n, arg[iarg]);
+      const_has_neutrals = 1;
+    } else if (strcmp(arg[iarg], "tn") == 0 || strcmp(arg[iarg], "temp_n") == 0) {
+      parse_scalar(const_temp_n, arg[iarg]);
+      const_has_neutrals = 1;
+    } else if (strcmp(arg[iarg], "er") == 0) {
+      parse_scalar(const_e_r, arg[iarg]);
+      const_has_efield = 1;
+    } else if (strcmp(arg[iarg], "et") == 0) {
+      parse_scalar(const_e_t, arg[iarg]);
+      const_has_efield = 1;
+    } else if (strcmp(arg[iarg], "ez") == 0) {
+      parse_scalar(const_e_z, arg[iarg]);
+      const_has_efield = 1;
     } else if (strcmp(arg[iarg], "parr_flow") == 0 || strcmp(arg[iarg], "upar") == 0) {
       parse_scalar(const_parr_flow, arg[iarg]);
     } else if (strcmp(arg[iarg], "parr_flow_r") == 0 || strcmp(arg[iarg], "upar_r") == 0) {
@@ -220,6 +241,16 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
     } else if (strcmp(arg[iarg], "bt") == 0) {
       parse_scalar(const_bt, arg[iarg]);
       const_has_bfield = 1;
+    } else if (strcmp(arg[iarg], "bcart") == 0) {
+      // uniform CARTESIAN B — br/bt/bz constants rotate with phi in 3D
+      // and cannot express a tilted uniform field
+      if (iarg + 3 >= narg)
+        error->all(FLERR, "fix background: bcart needs Bx By Bz");
+      const_bcart[0] = input->numeric(FLERR, arg[iarg + 1]);
+      const_bcart[1] = input->numeric(FLERR, arg[iarg + 2]);
+      const_bcart[2] = input->numeric(FLERR, arg[iarg + 3]);
+      const_has_bcart = 1;
+      iarg += 4;
     } else if (strcmp(arg[iarg], "column_axis") == 0) {
       if (iarg + 2 >= narg)
         error->all(FLERR, "fix background: column_axis needs x0 y0");
@@ -422,7 +453,7 @@ void FixBackground::reload()
   // field supplied explicitly on the fix command (br/bz/bt): bfield_at()
   // already uses these scalars as its final fallback, and consumers must see
   // the matching capability flag during their init().
-  if (const_has_bfield) has_bfield = 1;
+  if (const_has_bfield || const_has_bcart) has_bfield = 1;
 
   // Broadcast plasma grid dimensions
   MPI_Bcast(&nr, 1, MPI_INT, 0, world);
@@ -705,6 +736,11 @@ void FixBackground::reload()
     MPI_Bcast(psirz.data(), equ_n, MPI_DOUBLE, 0, world);
     MPI_Bcast(&psi_axis, 1, MPI_DOUBLE, 0, world);
     MPI_Bcast(&psib, 1, MPI_DOUBLE, 0, world);
+    // btf/rtf are read from /equilibrium on rank 0 only; without these
+    // two, every other rank served B_phi = btf*rtf/R = 0 (poloidal-only
+    // field) — rank-count-dependent trajectories on multi-rank runs.
+    MPI_Bcast(&btf, 1, MPI_DOUBLE, 0, world);
+    MPI_Bcast(&rtf, 1, MPI_DOUBLE, 0, world);
     has_equ = 1;
   }
 
@@ -923,9 +959,13 @@ void FixBackground::load_constant_profile()
   grad_ti_t.assign(n, const_grad_ti_t);
   grad_ti_z.assign(n, const_grad_ti_z);
   epar.assign(n, const_epar);
+  if (const_has_neutrals) {
+    dens_n.assign(n, const_dens_n);
+    temp_n.assign(n, const_temp_n);
+  }
 
   // constant-B scalars are consumed directly by bfield_at()/query_bfield_*
-  has_bfield = const_has_bfield;
+  has_bfield = const_has_bfield || const_has_bcart;
 
   if (screen) {
     fprintf(screen,
@@ -2131,6 +2171,31 @@ FixBackground::query_bfield_at_point(const double xyz[3], int icell,
   B.r = R;
   B.z = Z;
 
+  // Uniform CARTESIAN B (bcart): returned as position-dependent
+  // cylindrical components so the downstream phi-rotation reconstructs
+  // the uniform Cartesian field exactly. |B| gradients vanish, so the
+  // derivative entries (zero) are valid.
+  if (const_has_bcart) {
+    if (dim == 3) {
+      const double rx = xyz[0] - column_x0, ry = xyz[1] - column_y0;
+      const double rxy = std::sqrt(rx*rx + ry*ry);
+      double cphi = 1.0, sphi = 0.0;
+      if (rxy > 1.0e-20) { cphi = rx / rxy; sphi = ry / rxy; }
+      B.br =  const_bcart[0]*cphi + const_bcart[1]*sphi;
+      B.bt = -const_bcart[0]*sphi + const_bcart[1]*cphi;
+      B.bz =  const_bcart[2];
+    } else {
+      // 2D: slot-frame identity (x, y, out-of-plane)
+      B.br = const_bcart[0]; B.bz = const_bcart[1]; B.bt = const_bcart[2];
+    }
+    B.Bmag = std::sqrt(const_bcart[0]*const_bcart[0] +
+                       const_bcart[1]*const_bcart[1] +
+                       const_bcart[2]*const_bcart[2]);
+    B.derivatives_valid = true;
+    B.axisymmetric_source = false;   // Cartesian field: d/dphi != 0
+    return B;
+  }
+
   // Mesh-native B (per-triangle vertex average) — no derivatives.
   if (!prefer_equilibrium && !mesh_tri_br.empty()) {
     const int tri = find_mesh_triangle(R, Z, icell, iparticle);
@@ -2139,6 +2204,7 @@ FixBackground::query_bfield_at_point(const double xyz[3], int icell,
       B.bz = mesh_tri_bz[tri];
       B.bt = mesh_tri_bt[tri];
       B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+      B.axisymmetric_source = true;
       bfield_mesh_queries++;
       return B;
     }
@@ -2202,6 +2268,8 @@ FixBackground::query_bfield_at_point(const double xyz[3], int icell,
         B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr + B.bz*B.dBz_dr) / B.Bmag;
         B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz + B.bz*B.dBz_dz) / B.Bmag;
       }
+      B.derivatives_valid = true;   // equilibrium psi-map: analytic derivatives
+      B.axisymmetric_source = true;
       bfield_equilibrium_queries++;
       return B;
     }
@@ -2214,10 +2282,12 @@ FixBackground::query_bfield_at_point(const double xyz[3], int icell,
     return query_bfield_at_point(xyz, icell, iparticle, false);
   }
 
-  // Constant-B decks: uniform field, all spatial derivatives zero.
+  // Constant-B decks: uniform field, all spatial derivatives exactly zero.
   if (const_has_bfield) {
     B.br = const_br; B.bz = const_bz; B.bt = const_bt;
     B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+    B.derivatives_valid = true;
+    B.axisymmetric_source = true;
     return B;
   }
 
@@ -2236,6 +2306,10 @@ bool FixBackground::query_efield_at_point(const double xyz[3],
                                           int icell, int iparticle) const
 {
   ER = EZ = Et = 0.0;
+  if (const_has_efield) {   // constant mode: uniform cylindrical E
+    ER = const_e_r; EZ = const_e_z; Et = const_e_t;
+    return true;
+  }
   if (mesh_e_r.empty() || mesh_e_z.empty() || mesh_e_t.empty()) return false;
 
   const int dim = domain->dimension;
