@@ -1,13 +1,9 @@
 
-# Generated test artifacts and example outputs
-examples/*/output/
-examples/*/output_*/
-examples/*/log.openedge
-examples/*/source
-examples/*/nohup.out
-examples/*/run.log
-examples/*/*.bak
-examples/*/*.bak.*
+# Generated verification/workflow artifacts and example outputs
+examples/**/output/
+examples/**/output_*/
+examples/**/nohup.out
+examples/**/run.log
 examples/**/*.bak
 examples/**/*.bak.*
 examples/**/dump.*
@@ -18,18 +14,10 @@ examples/**/*.png
 **/.DS_Store
 
 # Regression test artifacts
-examples/*/regression.log
-examples/*/*/regression.log
-examples/*/in.*.regression
-examples/*/*/in.*.regression
-examples/test_iead/in.iead_alpha*
-examples/test_iead/particles_alpha*.dat
-examples/test_iead/wall.surf
-examples/test_tsurf_emission/output/
-examples/test_tsurf_emission/log.*
-examples/test_tsurf_emission/*.swp
-examples/test_efield_polarization/state
-examples/test_efield_polarization/figs_polarization/
+examples/**/regression.log
+examples/**/in.*.regression
+examples/verification/efield_polarization/state
+examples/verification/efield_polarization/figs_polarization/
 
 # Local run/test artifacts — confined to examples/ and the repo root
 # so they don't eat SPARTA base files like src/dump.h / src/log.cpp.
@@ -78,17 +66,17 @@ src/STUBS/*.a
 # Package install backup files
 *.sparta_orig
 
-# Large test data (downloaded via ./download_data.sh)
-examples/*/input/*.h5
-!examples/test_tsurf_emission/input/plasma.h5
-examples/*/input/*.equ
-examples/*/input/*.stl
-examples/*/input/data/*.h5
-examples/*/input/data/*.equ
-examples/*/input/geometry/*.stl
-examples/*/input/geometry/*.surf
-examples/*/input/geometry/*.obj
-examples/*/*.equ
+# Large example data (generated or downloaded separately)
+examples/**/input/*.h5
+!examples/workflows/particulates/cat_liquid_metal_divertor/input/plasma_*.h5
+examples/**/input/*.equ
+examples/**/input/*.stl
+examples/**/input/data/*.h5
+examples/**/input/data/*.equ
+examples/**/input/geometry/*.stl
+examples/**/input/geometry/*.surf
+examples/**/input/geometry/*.obj
+examples/**/*.equ
 openedge-testdata-*.tar.gz
 PSI2026/
 
@@ -101,25 +89,15 @@ PSI2026/
 database/ingest/*
 !database/ingest/adas.py
 
-# WIP test cases (not ready for public repo)
+# Local research cases that are not ready for the public repository.
+# Important WIP should also be backed up: ignored files can be removed by
+# `git clean -fdX`.
 examples/wip/
-examples/test_iead/
-examples/test_reclycling/
-examples/test_d3d_mateja/
-examples/test_d3d_walldyn/
-examples/test_west_3d/
-examples/test_west_timedep/
-examples/test_liquid_metal/
-examples/test_eirene/
-examples/test_diii_d_neutrals/
-examples/_test_west_ciraolo/
 
-# Per-test READMEs and reference PDFs (keep local, any depth)
-examples/test_*/README.md
-examples/test_*/**/README.md
-examples/test_*/*.pdf
-examples/test_*/**/*.pdf
-examples/test_iead/
+# Private notes and reference material. Public case documentation belongs in
+# README.md; use these explicit local suffixes for files that should not ship.
+examples/**/NOTES.local.md
+examples/**/*.local.pdf
 
 # Sphinx build output
 /docs/_build/
@@ -129,30 +107,17 @@ examples/test_iead/
 # anything inside this directory is ignored by the compiler too.
 src/OPENEDGE/wip/
 
-# Stray nested WarpX clones (use ~/WarpX/ instead)
-examples/test_iead/WarpX/
-
 # Local Claude Code memory / context file (kept untracked)
 CLAUDE.md
 
 # Local planning / regeneration notes (kept on disk, not pushed)
 database/iead/IEAD_REGENERATE.md
 
-# internal
-examples/test_mpex_45deg/
+# Personal plans / TODOs / working notes — never committed (see notes/README.md)
+/notes/
 
-# plasma_st40_solps.h5 is committed (tsurf_emission precedent) so
-# the case runs from a fresh clone without the SOLPS source data
-examples/test_st40_li_dropper/output/
-examples/test_st40_li_dropper/.claude/
-examples/test_st40_li_dropper/*.png
-examples/test_tsurf_emission/jeremy_cases_generated*/
-# Per-test READMEs are local-only notes
-examples/test_*/README.md
-examples/test_st40_li_dropper/*.html
 
-# local-only cases (neutral transport WIP + slag R&D)
-examples/test_neutral_slab/
-examples/test_diii_d_neutrals_axi/
-examples/test_redeposition/
-examples/test_slag/
+# Device backgrounds intentionally retained with the public workflows.
+examples/workflows/particulates/st40_lithium_powder_dropper/*.html
+examples/workflows/particulates/cat_liquid_metal_divertor/generated/
+examples/workflows/particulates/cat_liquid_metal_divertor/jeremy_cases_generated*/

@@ -19,15 +19,11 @@ set(SPARTA_MACHINE
 
 if(SPARTA_ENABLE_TESTING)
   set(SPARTA_ENABLED_TEST_SUITES
-      # OpenEdge test cases
-      "test_coulomb"
-      "test_diii_d_neutrals"
-      "test_droplet"
-      "test_efield_polarization"
-      "test_gravity"
-      "test_ionization_recombination"
-      "test_neutral_slab"
-      "test_west_axi")
+      # Small public verification suites. Larger scientific workflows are run
+      # explicitly or through regression/run_regression.sh.
+      "verification/collisions/coulomb"
+      "verification/efield_polarization"
+      "verification/ionization_recombination")
 
   set(SPARTA_DISABLED_TESTS "")
 
