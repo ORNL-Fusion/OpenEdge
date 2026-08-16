@@ -1,7 +1,7 @@
 # Author: Abdourahmane Diaw (diawa @ornl.gov, Oak Ridge National Laboratory)
 # Copyright (c) 2023-2026 Oak Ridge National Laboratory.
-# License: GPL-3.0-or-later. The full license text is available at:
-#   - https://github.com/diawabdou/OpenEdge/blob/main/LICENSE
+# License: GPL-2.0, following SPARTA. The full license text is available at:
+#   - https://github.com/ORNL-Fusion/OpenEdge/blob/main/LICENSE
 
 """Li atomic-emission flux models for the CAT liquid-metal divertor workflow.
 
