@@ -1,0 +1,162 @@
+# WEST axisymmetric tungsten transport.
+variable            nLo index 6
+variable            nUp index 3
+variable            nLfs index 2
+variable            nHfs index 1
+variable            nwarm index 8000
+variable            ndiag index 2000
+variable            navge equal v_ndiag/100
+variable            nvito index 5000
+
+# Domain
+seed                12345
+dimension           2
+boundary            o ao p
+global              gridcut 0.0 comm/sort no
+shell               mkdir output
+
+create_box          -1.00 0.85 0.0 3.25 -0.05 0.05
+create_grid         200 150 1
+balance_grid        rcb cell
+
+# Species
+species input/atoms.species W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+ W11+ W12+ W13+ W14+ W15+ W16+ W17+ W18+ W19+ W20+
+mixture             tungstenSource  W    frac 1.
+mixture             tungstenSource  W+   frac 0.
+mixture             tungstenSource  W2+  frac 0.
+mixture             tungstenSource  W3+  frac 0.
+mixture             tungstenSource  W4+  frac 0.
+mixture             tungstenSource  W5+  frac 0.
+mixture             tungstenSource  W6+  frac 0.
+mixture             tungstenSource  W7+  frac 0.
+mixture             tungstenSource  W8+  frac 0.
+mixture             tungstenSource  W9+  frac 0.
+mixture             tungstenSource  W10+ frac 0.
+mixture             tungstenSource  W11+ frac 0.
+mixture             tungstenSource  W12+ frac 0.
+mixture             tungstenSource  W13+ frac 0.
+mixture             tungstenSource  W14+ frac 0.
+mixture             tungstenSource  W15+ frac 0.
+mixture             tungstenSource  W16+ frac 0.
+mixture             tungstenSource  W17+ frac 0.
+mixture             tungstenSource  W18+ frac 0.
+mixture             tungstenSource  W19+ frac 0.
+mixture             tungstenSource  W20+ frac 0.
+
+# Geometry; wall normals already face the plasma.
+read_surf           input/wall_fine.surf group wall particle check
+variable            TwallK  equal 773.15
+surf_collide        wallColl diffuse ${TwallK} 1.0
+surf_react          wallPWI surface/pwi input/wall.recycle twall ${TwallK} &
+                    ehist output/wall_ehist.dat 100 1000 ${ndiag}
+surf_modify         wall collide wallColl react wallPWI
+
+read_surf           input/core.surf group core particle check
+surf_collide        coreColl specular
+surf_modify         core collide coreColl
+
+region              rdiv_lo block -1.00 -0.30 1.90 3.20 INF INF
+region              rdiv_up block  0.35  0.85 1.90 3.20 INF INF
+adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
+                    region rdiv_lo all iterate 5
+adapt_grid          all refine surf wall 0.001 maxlevel 5 cells 2 2 1 &
+                    region rdiv_up all iterate 5
+balance_grid        rcb cell
+
+# Plasma and transport
+fix                 pd background file input/plasma.h5 static yes
+
+compute             cgeom nearest_surf/grid all wall dist surfid nx ny nz
+variable            sheathmode index spatial
+variable            subcycles index 2
+global              pusher plasma pd mode boris &
+                    subcycles ${subcycles} bad_dt_check yes bad_dt_limit 0.5 &
+                    sheath ${sheathmode} geom cgeom mD_amu 2.0 &
+                    dump no
+
+variable            Dperp index 0.3
+fix                 fcd cross_field_diffusion 1 background pd D_perp ${Dperp} pinch_psi -0.6
+
+fix                 fcoul coulomb/background 1 background pd 2.0 1.0
+fix                 fth force/thermal 1 background pd ion_thermal yes elec_thermal yes
+
+compute cpmiO surface/physical/sputter wall background pd &
+                    target W projectiles O &
+                    mass_amu 2.01410177811 static yes &
+                    erosion_flux
+
+fix pw particle/weight
+
+# Source
+region rhfs block -1.00 0.85 0.00 1.90 INF INF
+region rlfs block -0.30 0.35 1.90 3.25 INF INF
+group  sdiv_lo surf region rdiv_lo center
+group  sdiv_up surf region rdiv_up center
+group  shfs    surf region rhfs    center
+group  slfs    surf region rlfs    center
+fix femitLo  surface/emit/source tungstenSource sdiv_lo cpmiO perspecies no &
+                    nlaunch_total ${nLo} model thompson 8.68 emax 80 nevery 1
+fix femitUp  surface/emit/source tungstenSource sdiv_up cpmiO perspecies no &
+                    nlaunch_total ${nUp} model thompson 8.68 emax 80 nevery 1
+fix femitLfs surface/emit/source tungstenSource slfs cpmiO perspecies no &
+                    nlaunch_total ${nLfs} model thompson 8.68 emax 80 nevery 1
+fix femitHfs surface/emit/source tungstenSource shfs cpmiO perspecies no &
+                    nlaunch_total ${nHfs} model thompson 8.68 emax 80 nevery 1
+
+fix fchem volume/chem/adas 1 W auto
+
+# Diagnostics
+variable            dt index 2e-8
+timestep            ${dt}
+stats               500
+
+mixture allW W W+ W2+ W3+ W4+ W5+ W6+ W7+ W8+ W9+ W10+ W11+ W12+ W13+ W14+ W15+ W16+ W17+ W18+ W19+ W20+ group wsum
+compute cwn    grid/weighted all allW n_w
+compute cwNtot reduce sum c_cwn[1]
+compute cwsp   grid/weighted all species n_w
+compute cwN0  reduce sum c_cwsp[1]
+compute cwN1  reduce sum c_cwsp[2]
+compute cwN2  reduce sum c_cwsp[3]
+compute cwN3  reduce sum c_cwsp[4]
+compute cwN4  reduce sum c_cwsp[5]
+compute cwN5  reduce sum c_cwsp[6]
+compute cwN6  reduce sum c_cwsp[7]
+compute cwN7  reduce sum c_cwsp[8]
+compute cwN8  reduce sum c_cwsp[9]
+compute cwN9  reduce sum c_cwsp[10]
+compute cwN10 reduce sum c_cwsp[11]
+compute cwN15 reduce sum c_cwsp[16]
+compute cwN20 reduce sum c_cwsp[21]
+stats_style         step cpu np c_cwNtot &
+                    c_cwN0 c_cwN1 c_cwN2 c_cwN3 c_cwN4 c_cwN5 &
+                    c_cwN6 c_cwN7 c_cwN8 c_cwN9 c_cwN10 c_cwN15 c_cwN20
+
+fix                 fadapt adapt 500 all refine particle 8 2 maxlevel 5
+fix                 fbal balance 200 1.1 rcb part
+
+dump                dovito particle all ${nvito} output/ovito.D${Dperp}.dump &
+                    id type x y z
+
+# Run
+run                 ${nwarm}
+write_restart       output/warmup.D${Dperp}.restart
+
+unfix               fadapt
+unfix               fbal
+fix                 fbal balance 1000 1.1 rcb time
+reset_timestep      0
+
+compute cwtot grid/weighted all allW nrho_w
+fix     fwgrid ave/grid all ${navge} 100 ${ndiag} c_cwtot[1] ave one
+mixture neutralW W group w0
+compute cwneut grid/weighted all neutralW nrho_w
+fix     fw0 ave/grid all ${navge} 100 ${ndiag} c_cwneut[1] ave one
+dump    dwgrid grid all ${ndiag} output/grid.dens.west.D${Dperp} &
+                    id xc yc xlo ylo xhi yhi f_fwgrid f_fw0
+
+compute cero surface/physical/sputter wall background pd &
+                    target W projectiles O &
+                    mass_amu 2.01410177811 static yes &
+                    erosion_flux erosion_rate
+
+run                 ${ndiag}

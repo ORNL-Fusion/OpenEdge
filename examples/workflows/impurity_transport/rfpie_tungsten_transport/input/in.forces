@@ -1,0 +1,15 @@
+# Geometry provider for the target-local thin sheath boundary.
+compute             cgeom nearest_surf/grid all target dist surfid nx ny nz
+
+# "boundary" is a sub-grid potential sheet.  The floating sheath plus the
+# instantaneous target bias is paid once by an outbound W ion; ions without
+# enough wall-normal energy reflect back to the target (prompt redeposition).
+global              pusher plasma pd mode boris &
+                    subcycles 2 bad_dt_check yes bad_dt_limit 0.5 &
+                    sheath boundary geom cgeom mD_amu 4.002602 dmax 5.0e-4 &
+                    waveform sheath ${rffreq} dump no
+
+variable            Dperp index 0.1
+fix                 fcd cross_field_diffusion 1 background pd D_perp ${Dperp}
+fix                 fcoul coulomb/background 1 background pd 4.002602 1.0
+fix                 fth force/thermal 1 background pd ion_thermal yes elec_thermal yes

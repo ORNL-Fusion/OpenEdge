@@ -1,0 +1,91 @@
+# RFPIE: He+ sputtering of a DC/RF-biased tungsten target and W0..W4+ transport
+
+# Domain
+seed                104729
+dimension           3
+global              gridcut 0.0 comm/sort no
+boundary            o o o
+
+create_box          -0.0301 0.0301 -0.0301 0.0301 -0.0002 0.0600
+variable            nx index 64
+variable            ny index 64
+variable            nz index 96
+create_grid         ${nx} ${ny} ${nz}
+balance_grid        rcb cell
+
+# Species and geometry
+global              fnum 1.0e10
+global              surfmax 5000
+species             input/atoms.species W W+ W2+ W3+ W4+
+mixture             wSource W frac 1.0
+mixture             wDiag W W+ W2+ W3+ W4+ group SELF
+
+variable            targetfile index input/target.surf
+read_surf           ${targetfile} custom sheath float 3 &
+                    group tungsten particle check
+variable            geomgroups index input/geometry_groups.inc
+include             ${geomgroups}
+
+surf_collide        absorb vanish
+surf_modify         target_body collide absorb
+surf_modify         target collide absorb
+
+# Plasma and source
+variable            plasmafile index input/plasma_he.h5
+fix                 pd background file ${plasmafile} static yes bz 0.1
+
+variable            rffreq index 1.356e7
+variable            phase_samples index 64
+variable            pmi_static index yes
+compute             cpmi surface/physical/sputter target background pd &
+                    target W projectiles He mass_amu 4.002602 &
+                    static ${pmi_static} sheath_waveform sheath ${rffreq} ${phase_samples} &
+                    erosion_flux
+
+fix                 pw particle/weight
+variable            popnmax index 200
+if "${popnmax} > 0" then "fix fpop population/control 200 ${popnmax}"
+variable            diagevery index 1000
+variable            diagsample index 10
+variable            diagnrepeat index 100
+compute             cWdens grid/weighted all wDiag nrho_w
+fix                 fWdens ave/grid all ${diagsample} ${diagnrepeat} ${diagevery} &
+                    c_cWdens[*] ave one
+variable            nlaunch index 100
+if "${nlaunch} > 0" then "fix femit surface/emit/source wSource target cpmi perspecies no nlaunch_total ${nlaunch} model thompson 8.68 emax 80 nevery 1"
+
+# Transport
+fix                 fchem volume/chem/adas 1 W auto
+variable            balpartevery index 200
+variable            baltimeevery index 1000
+fix                 fbal balance ${balpartevery} 1.1 rcb part emptyweight auto
+
+include             input/in.forces
+
+variable            dt index 2.0e-8
+timestep            ${dt}
+stats               1000
+stats_style         step cpu np nscoll nsreact
+
+# Diagnostics
+variable            runsteps index 10000
+variable            balswitch index 1000
+variable            mainsteps equal v_runsteps-v_balswitch
+variable            outdir index output
+shell               mkdir ${outdir}
+print               "dt_s=${dt} run_steps=${runsteps} nx=${nx} ny=${ny} nz=${nz} nlaunch=${nlaunch} diagevery=${diagevery}" &
+                    file ${outdir}/run_settings.txt screen no
+variable            stateevery index 1000
+variable            dumpevery index 5000
+dump                dstate particle all ${stateevery} ${outdir}/rfpie_w.*.dump &
+                    id type x y z vx vy vz p_pweight
+dump                dWgrid grid all ${diagevery} ${outdir}/rfpie_w_density.*.dump &
+                    id xc yc zc vol f_fWdens[*]
+dump                dsurf surf target ${dumpevery} ${outdir}/target.*.dump &
+                    id c_cpmi
+
+# Run
+run                 0 post no
+if "${balswitch} > 0" then "run ${balswitch}" "unfix fbal" &
+                    "fix fbal balance ${baltimeevery} 1.1 rcb time emptyweight 0.1"
+run                 ${mainsteps}
