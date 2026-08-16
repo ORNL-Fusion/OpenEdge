@@ -67,8 +67,15 @@ coefficient used during a run. Layout:
   reactions/                                             # catalog of reaction types
 /surface/
   reflection/<proj>_on_<target>/                         # TRIM reflection moments
-  sputter/<proj>_on_<target>/{E, theta}                  # sputter axes (yields TBA)
+  sputter/<proj>_on_<target>/{E, theta, Y}               # TRIM/RustBCA yield tables
+  sputter/<proj>_on_li/{T, E, theta, Y, Y_raw, R_N}      # liquid-Li pairs carry a
+                                                        #   temperature axis (298-713 K,
+                                                        #   RustBCA, Allain-calibrated;
+                                                        #   d/he/li/ne projectiles)
 ```
+
+Importers: `tools/converters/add_sputter_tables.py` (E,theta pairs) and
+`tools/converters/add_liquid_li_tables.py` (T-dependent liquid-Li set).
 
 ### Consumers (runtime reads — all from `processes.h5`)
 
@@ -78,9 +85,15 @@ coefficient used during a run. Layout:
   at `database/ingest/reactions/<elem>.reactions` only fires when the
   catalog is absent.
 - `surf_react surface/pwi` — `/surface/reflection/<pair>`.
-- `compute surface/physical/sputter` — analytic Eckstein coefficients
-  from `src/eckstein_sputter_data.h` (compiled in). Does *not* read
-  any HDF5 yield table at runtime in the `target`/`projectiles` API.
+- `compute surface/physical/sputter` — prefers the angle-resolved
+  TRIM/RustBCA tables from `/surface/sputter/<pair>`; pairs without a
+  table fall back to the analytic Eckstein coefficients compiled in
+  from `src/eckstein_sputter_data.h`. Tables with a `T` axis are
+  interpolated at the face temperature given by the `tsurf` keyword
+  (a custom per-surf vector, Kelvin); without `tsurf` they evaluate
+  at the coldest slice (room-temperature/solid data).
+- `surf_react surface/pwi` — also reads `/surface/sputter/<pair>`
+  (including the T axis, via `twall`/`twall_surf`) for re-emission.
 - `compute photon_emissivity/grid` — `/volume/pec/<elem>/<id>/<line>/`
   (via `ProcessLibrary::load_pec_line`).
 
