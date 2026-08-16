@@ -1,0 +1,4 @@
+# He+ for the hybrid wall-handoff verification (5 eV, |B| = 1 T:
+# rho_L ~ 0.46 mm, T_gyro ~ 0.26 us).
+# ID    Molwt(amu)  Molmass(kg)         RotDof RotRel VibDof VibRel VibTemp(K) specwt charge
+He+     4.002602    6.6464731e-27       0      0.0    0      0.0    0.0        1.0    1.0

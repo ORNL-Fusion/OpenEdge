@@ -1,6 +1,0 @@
-# B ionization/recombination (kinetic, ADAS scd/acd element b).
-B --> B+
-I A 1.0 0.0 0.0 0.0 0.0
-
-B+ --> B
-R A 1.0 0.0 0.0 0.0 0.0

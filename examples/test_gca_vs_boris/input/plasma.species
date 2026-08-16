@@ -1,5 +1,0 @@
-# Single proton (H+) for the Khan-orbit pusher validation.
-# Khan et al. (2012) use unit charge / unit mass ions; H+ at B = 1 T
-# gives ω_c = 9.578e7 rad/s, matching the paper's normalization.
-# ID    Molwt(amu)  Molmass(kg)         RotDof RotRel VibDof VibRel VibTemp(K) specwt charge
-H+      1.00794     1.6726219236951e-27 0      0.0    0      0.0    0.0        1.0    1.0

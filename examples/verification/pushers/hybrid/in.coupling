@@ -1,0 +1,56 @@
+# Stage C (PLAN.md): operator coupling to the GC state. He+ mid-box,
+# uniform B = -z (parallel/perpendicular cleanly split), no surfaces.
+# One operator is dialed up per run via its magnitude variable:
+#   -var gradte  G   -> fix force/thermal   (parallel drift)
+#   -var dperp   D   -> fix cross_field_diffusion (perp MSD)
+#   -var nicoul  Ni  -> fix coulomb/background   (v_par diffusion)
+# Reference: -var pmode hybrid -var gswitch 1e30 (pure Boris).
+
+seed                20260813
+dimension           3
+boundary            o o o
+global              gridcut 0.0 comm/sort no
+global              fnum 1
+
+create_box          -0.03 0.03 -0.03 0.03 -0.002 0.06
+create_grid         12 12 12
+balance_grid        rcb part
+
+species             input/he.species He+
+mixture             ions He+ frac 1.0
+
+variable pmode      index gca
+variable gswitch    index 2.5
+variable subc       index 1
+variable dt         index 1e-8
+variable nsteps     index 2000
+variable dfreq      index 50
+variable tag        index c
+variable gradte     index 0.0
+variable dperp      index 0.0
+variable nicoul     index 1.0
+
+read_particles      input/source.b_in 0
+
+# nicoul feeds dens_i, which sets the coulomb/background collision rate
+fix pd background constant static yes bz -1.0 &
+                   ne 1.0e18 te 5.0 ti 5.0 ni ${nicoul} &
+                   grad_te_z ${gradte}
+
+global pusher plasma pd mode ${pmode} gca_switch ${gswitch} &
+       gca_integrator rk4 subcycles ${subc} &
+       bad_dt_check yes bad_dt_limit 0.5
+
+fix fth  force/thermal 1 background pd ion_thermal no elec_thermal yes
+fix fcd  cross_field_diffusion 1 background pd D_perp ${dperp}
+fix fcb  coulomb/background 1 background pd 2.0 1.0
+
+dump dpart particle all ${dfreq} output/traj.${tag} id type x y z vx vy vz &
+     p_gca_x p_gca_y p_gca_z p_gca_vpar p_gca_mu &
+     p_gca_mode p_gca_valid p_gca_chi
+dump_modify dpart first yes
+
+timestep            ${dt}
+stats               2000
+stats_style         step cpu np
+run                 ${nsteps}

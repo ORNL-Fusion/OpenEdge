@@ -1,9 +1,0 @@
-.DS_Store
-regression.log
-case.*
-case_*.outer
-log.openedge
-output/
-trajs.png
-state.*
-tmp.all.surf

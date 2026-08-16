@@ -1,4 +1,0 @@
-# Boron powder grain, d = 150 um (Afonin NF 2023 baseline), solid, cold.
-# mass = 4/3 pi (7.5e-5)^3 * 2340 kg/m^3 = 4.136e-9 kg
-# ID Molwt(amu) Molmass(kg) RotDof RotRel VibDof VibRel VibTemp(K) specwt charge radius(m) temp(K)
-bgrain 2.49e17 4.136e-9 0 0 0 0 0 1 0 7.5e-5 300.0

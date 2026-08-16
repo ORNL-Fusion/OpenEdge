@@ -12,7 +12,8 @@
 #    --np N          Number of MPI ranks (default: 4)
 #    --exe PATH      Path to the sparta binary (default: auto-detect)
 #    --filter PAT    Only run tests matching glob pattern
-#    --nsteps N      Override run steps for all tests (default: 1000)
+#    --nsteps N      Requested smoke-test steps (default: 1000). Workflow
+#                    cases are always capped at 1000 steps.
 #    --verbose       Show full output on failure
 # -----------------------------------------------------------------------
 
@@ -30,6 +31,7 @@ NP=4
 EXE=""
 FILTER="*"
 NSTEPS=1000
+WORKFLOW_MAX_STEPS=1000
 VERBOSE=0
 
 while [[ $# -gt 0 ]]; do
@@ -69,29 +71,47 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 #  skipped (e.g. git-ignored plasma files that need regeneration).
 # -----------------------------------------------------------------------
 declare -a TESTS=(
-  "gravity|test_gravity|in.gravity3d|"
-  "ionization_recombination|test_ionization_recombination|in.ionization_recombination|"
-  "efield_polarization|test_efield_polarization|in.input|"
-  "coulomb_background|test_coulomb|in.background|"
-  "coulomb_binary|test_coulomb|in.binary|"
-  "droplet_emission|test_droplet|in.droplet_emission|"
-  "tsurf_emission|test_tsurf_emission|in.tsurf_emission|input/plasma.h5"
-  "st40_li_dropper|test_st40_li_dropper|in.st40|input/plasma_st40_solps.h5"
-  "grain_boron_west|test_grain_boron|in.b_west_drop|../test_west/input/plasma.h5"
-  "west_axi_emission|test_west|in.axi_west_emission|input/plasma.h5"
-  "constant_flux|test_constant_flux|in.constant_flux|"
-  "pusher_gca|test_gca_vs_boris|in.gca|"
-  "pusher_boris|test_gca_vs_boris|in.boris|"
+  "ionization_recombination|verification/ionization_recombination|in.ionization_recombination|"
+  "efield_polarization|verification/efield_polarization|in.input|"
+  "coulomb_background|verification/collisions/coulomb|in.background|"
+  "coulomb_binary|verification/collisions/coulomb|in.binary|"
+  "particulate_dustt|verification/particulates/dustt|in.grain|"
+  "pusher_gca|verification/pushers/orbit|in.gca|"
+  "pusher_boris|verification/pushers/orbit|in.boris|"
+  "constant_flux|verification/surface_emission/constant_flux|in.constant_flux|"
+  "lithium_droplet_transport|workflows/particulates/lithium_droplet_transport|in.openedge|"
+  "west_boron_powder_dropper|workflows/particulates/west_boron_powder_dropper|in.openedge|../../impurity_transport/west_tungsten_transport/input/plasma.h5"
+  "cat_liquid_metal_divertor|workflows/particulates/cat_liquid_metal_divertor|in.openedge|input/plasma_attached.h5"
+  "west_tungsten_transport|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5"
+  "rfpie_tungsten_transport|workflows/impurity_transport/rfpie_tungsten_transport|in.openedge|input/plasma_he.h5"
 )
 
 # -----------------------------------------------------------------------
-#  Temporary input with overridden step count (replaces every `run` line)
+#  Temporary input with a bounded total step count. Initialization `run 0`
+#  commands are preserved; multiple advancing runs share the requested budget.
 # -----------------------------------------------------------------------
 make_regression_input() {
   local infile="$1"
   local nsteps="$2"
   local tmpfile="${infile}.regression"
-  sed -E "s/^run[[:space:]]+.+/run                 ${nsteps}/" "$infile" > "$tmpfile"
+  local nruns
+  nruns=$(awk '$1 == "run" && $2 != "0" { n++ } END { print n + 0 }' "$infile")
+  awk -v total="$nsteps" -v nruns="$nruns" '
+    BEGIN { remaining = total; seen = 0 }
+    $1 == "run" && $2 != "0" {
+      seen++
+      if (seen < nruns) {
+        later = nruns - seen
+        steps = (remaining > later) ? 1 : 0
+      } else {
+        steps = remaining
+      }
+      remaining -= steps
+      printf "run                 %d\n", steps
+      next
+    }
+    { print }
+  ' "$infile" > "$tmpfile"
   echo "$tmpfile"
 }
 
@@ -141,7 +161,11 @@ for entry in "${TESTS[@]}"; do
   fi
 
   mkdir -p "$dir/output" 2>/dev/null || true
-  tmpinput=$(make_regression_input "$dir/$infile" "$NSTEPS")
+  case_nsteps=$NSTEPS
+  if [[ "$testdir" == workflows/* && $case_nsteps -gt $WORKFLOW_MAX_STEPS ]]; then
+    case_nsteps=$WORKFLOW_MAX_STEPS
+  fi
+  tmpinput=$(make_regression_input "$dir/$infile" "$case_nsteps")
 
   logfile="$dir/regression.log"
   ok=1

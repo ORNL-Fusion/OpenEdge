@@ -1,7 +1,0 @@
-# Run artifacts
-log.*
-state*
-output/
-PLAN.md
-analysis.ipynb.bak-*
-input/plasma.h5
