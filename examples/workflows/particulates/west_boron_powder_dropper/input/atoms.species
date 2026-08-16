@@ -1,0 +1,4 @@
+# atomic B vapor + B+ ion (10.81 amu = 1.7949e-26 kg)
+# ID Molwt(amu) Molmass(kg) RotDOF RotRel VibDOF VibRel VibTemp(K) speciesWt charge
+B    10.81   1.7949e-26   0  0.0  0  0.0  0.0  1.0  0.0
+B+   10.81   1.7949e-26   0  0.0  0  0.0  0.0  1.0  1.0

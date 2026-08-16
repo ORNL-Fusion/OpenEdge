@@ -1,0 +1,73 @@
+# WEST boron powder injection; axisymmetric slots are x=Z, y=R, z=phi.
+variable    dt        index 1.0e-6
+variable    nsteps    index 200000
+variable    ndump     index 2000
+variable    nemit     index 20000
+variable    npergroup index 5
+
+shell       mkdir output
+
+seed        12345
+dimension   2
+boundary    o ao p
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0e14
+timestep    ${dt}
+
+create_box  -1.00 0.85 0.0 3.25 -0.05 0.05
+create_grid 200 150 1
+balance_grid rcb cell
+global      weight cell radius
+
+# Species
+species     input/grains.species bgrain
+species     input/atoms.species B B+
+mixture     grains bgrain frac 1.0
+mixture     bvapor B frac 1.0
+mixture     allB B B+
+
+# Geometry
+read_surf   ../../impurity_transport/west_tungsten_transport/input/wall_fine.surf &
+            group wall particle check
+read_surf   ../../impurity_transport/west_tungsten_transport/input/core.surf group core
+
+group dropper surf id <> 463 473
+
+surf_collide vac vanish
+surf_modify  wall collide vac
+surf_modify  core collide vac
+
+# Plasma and transport
+fix pd background file ../../impurity_transport/west_tungsten_transport/input/plasma.h5 &
+    static yes
+
+global      pusher plasma pd mode boris &
+            subcycles 25 bad_dt_check yes bad_dt_limit 0.5
+
+fix fcd     cross_field_diffusion 1 background pd D_perp 0.3 pinch_psi -0.6
+fix fcoul   coulomb/background 1 background pd 2.0 1.0
+fix fth     force/thermal 1 background pd ion_thermal yes elec_thermal yes
+
+# Powder source
+fix fdrop   particulate/emit grains dropper nevery ${nemit} n ${npergroup} &
+            perspecies no normal no vmin 0.5 vmax 1.5 angle cosine
+
+fix fdrag   particulate/drag 1 2.0 1 background pd gravity 0 -9.8 0 &
+            model dustt2005 coulomb/self yes material B mixture grains
+fix fcharge particulate/charge 1 background pd ion_mass_amu 2.0 &
+            thermionic yes material B mixture grains
+fix fevap   particulate/thermal 1 grains background pd &
+            heating oml ion_mass_amu 2.0 material B emit_into bvapor
+fix fchem   volume/chem/adas 1 B input/b.reactions output summary
+
+# Diagnostics and run
+dump dpart particle all ${ndump} output/state id type x y z vx vy vz radius temp
+
+fix     fpw particle/weight
+compute cb  grid/weighted all allB nrho_w
+fix     fb  ave/grid all 100 100 10000 c_cb[1] ave one
+dump    dgrid grid all 100000 output/b_dens id xc yc f_fb
+
+stats       ${ndump}
+stats_style step cpu np f_fevap
+run         ${nsteps}
