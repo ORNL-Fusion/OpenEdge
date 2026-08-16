@@ -116,12 +116,14 @@ class ProcessLibrary {
     std::vector<double> E;       // [NE], eV, ascending
     std::vector<double> theta;   // [NTHETA], deg from normal, ascending
     std::vector<double> C;       // [NC], atomic fraction, ascending; empty = 2D
-    std::vector<double> Y;       // [NE*NTHETA] or [NC*NE*NTHETA]
-    int NE = 0, NTHETA = 0, NC = 0;
+    std::vector<double> Tax;     // [NT], Kelvin, ascending; empty = no T axis
+    std::vector<double> Y;       // [(NC|NT|1)*NE*NTHETA]
+    int NE = 0, NTHETA = 0, NC = 0, NT = 0;
     double Es = 0.0;             // eV, 0 = not provided
+    int nlead() const { return NC > 0 ? NC : (NT > 0 ? NT : 1); }
     bool valid() const {
       return NE >= 2 && NTHETA >= 2 &&
-             static_cast<int>(Y.size()) == (NC > 0 ? NC : 1) * NE * NTHETA;
+             static_cast<int>(Y.size()) == nlead() * NE * NTHETA;
     }
     // Bilinear lookup: linear in log(E), linear in theta, both clamped
     // to the grid (no extrapolation past the last angle -> no analytic
@@ -130,6 +132,9 @@ class ProcessLibrary {
     // first composition slice.
     double yield(double E_eV, double theta_deg) const;
     double yield(double E_eV, double theta_deg, double c) const;
+    // temperature-axis lookup (liquid-metal tables): linear in T between
+    // bracketing slices, clamped at the grid ends. T_K in Kelvin.
+    double yield_at_T(double E_eV, double theta_deg, double T_K) const;
    private:
     double slice_yield(int ic, double E_eV, double theta_deg) const;
    public:

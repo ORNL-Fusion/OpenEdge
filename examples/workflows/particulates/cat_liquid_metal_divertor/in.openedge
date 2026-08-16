@@ -1,0 +1,89 @@
+variable    case index attached detached
+shell       mkdir output
+
+label       case_loop
+shell       mkdir output/${case}
+
+# Domain
+seed        12345
+dimension   2
+boundary    o ao p
+global      gridcut 0.0 comm/sort no
+global      fnum 1e+14
+timestep    5e-05
+
+create_box  -3.8 3.8 0.0 5.7 -0.05 0.05
+create_grid 500 500 1
+balance_grid rcb cell
+global      weight cell radius
+
+# Species and geometry
+species     input/droplets.species droplet
+mixture     droplet droplet frac 1.0 nrho 1.0e19 temp 300.0 vstream 0.0 0.0 0.0
+
+read_surf input/wall.surf invert group wall particle check
+group div_inner surf id <> 165 223
+group div_outer surf id <> 256 397
+
+surf_collide vac vanish
+surf_modify  wall collide vac
+
+# Plasma and surface state
+fix pd background file input/plasma_${case}.h5 static yes
+
+fix flm_outer surface/state/lm div_outer 1 solps_b2pl input/ld_tg_o_${case}.dat &
+           h0 5.0e-3 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350.0 &
+           static yes csv output/${case}/surface_state_outer.csv
+fix flm_inner surface/state/lm div_inner 1 solps_b2pl input/ld_tg_i_${case}.dat &
+           h0 5.0e-3 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350.0 &
+           static yes csv output/${case}/surface_state_inner.csv
+
+# Surface sources
+compute cevap_outer surface/chemical/evaporation div_outer tsurf Tsurf_lm sticking 1
+compute cadat_outer surface/chemical/adatom div_outer tsurf Tsurf_lm dp_flux s_Gamma_D_lm
+compute cpmiLi_outer surface/physical/sputter div_outer background pd &
+               target Li projectiles D,Ne,Li tsurf Tsurf_lm iead auto static yes &
+               projectile_slots 1 14 erosion_flux sputter_flux_species all
+
+compute cevap_inner surface/chemical/evaporation div_inner tsurf Tsurf_lm sticking 1
+compute cadat_inner surface/chemical/adatom div_inner tsurf Tsurf_lm dp_flux s_Gamma_D_lm
+compute cpmiLi_inner surface/physical/sputter div_inner background pd &
+               target Li projectiles D,Ne,Li tsurf Tsurf_lm iead auto static yes &
+               projectile_slots 1 14 erosion_flux sputter_flux_species all
+
+# Droplets
+fix fdrop_outer particulate/emit droplet div_outer nevery 10 n 2 perspecies no &
+                normal no vmin 0.1 vmax 2.0 angle cosine planar yes
+fix fdrop_inner particulate/emit droplet div_inner nevery 10 n 2 perspecies no &
+                normal no vmin 0.1 vmax 2.0 angle cosine planar yes
+
+fix fcharge particulate/charge   1 background pd ion_mass_amu 2.0 thermionic no mixture droplet
+fix fdrag   particulate/drag     1 2.0 1 background pd model dustt2005 coulomb/lnlambda 10 &
+                             gravity 0 -9.8 0 mixture droplet material Li
+fix fevap   particulate/thermal 1 droplet background pd heating oml &
+                              heatflux/scale 1.0 rocket_eta 0.5
+
+fix devap_tot ave/time 100 1 100 f_fevap file output/${case}/droplet_evap_total.csv
+
+# Diagnostics
+dump dpart particle all 10 output/${case}/dump.txt id type x y z vx vy vz radius temp &
+     p_droplet_heating_q p_droplet_a_over_lambdaD p_droplet_oml_weight
+
+dump dsurf_outer surf div_outer 100 output/${case}/surf_flux_outer.* &
+     id v1x v1y v2x v2y c_cevap_outer c_cadat_outer c_cpmiLi_outer[*] &
+     s_Tsurf_lm s_Gamma_D_lm
+dump dsurf_inner surf div_inner 100 output/${case}/surf_flux_inner.* &
+     id v1x v1y v2x v2y c_cevap_inner c_cadat_inner c_cpmiLi_inner[*] &
+     s_Tsurf_lm s_Gamma_D_lm
+
+# Run
+stats       100
+run         100
+
+unfix fdrop_outer
+unfix fdrop_inner
+run         10000
+
+clear
+next        case
+jump        SELF case_loop

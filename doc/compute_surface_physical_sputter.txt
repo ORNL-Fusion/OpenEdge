@@ -1,0 +1,75 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+compute surface/physical/sputter command :h3
+
+[Syntax:]
+
+compute ID surface/physical/sputter group-ID background fix-ID keyword values ... :pre
+
+ID is documented in the "compute"_compute.html command :ulb,l
+surface/physical/sputter = style name of this compute :l
+group-ID = group ID of surface elements to operate on :l
+background fix-ID = "fix background"_fix_background.html supplying the plasma :l
+zero or more keyword/value pairs may be appended :l
+keyword = {target} or {projectiles} or {tsurf} or {us} or {compound} or {conc} or {roughness_dm} or {projectile_slots} or {static} or {mass_amu} or {iead} or {sheath_waveform} or {erosion_flux} or {sputter_flux_species} or {nflux_species} or {incident_angle_species} or {incident_energy_species} or {sputter_yield_species} or {sputter_flux_total} or {sputter_rate_total} or {erosion_rate} :l
+  {target} value = element of the wall material (e.g. W, Li, B)
+  {projectiles} value = comma-separated projectile elements, or {all}
+    (every ion element in the plasma background)
+  {tsurf} value = name of a custom per-surf vector holding the surface
+    temperature in Kelvin; enables temperature interpolation of
+    T-dependent yield tables (see below)
+  {us} value = surface binding energy override in eV for the analytic
+    fallback (Eth rescaled to preserve threshold ratios)
+  {compound} value = mixed-material mode, table name component
+  {conc} value = custom per-surf array with live surface composition
+  {roughness_dm} value = grazing-angle shift in degrees for rough surfaces
+  {static} value = {yes} or {no} = compute yields once per background
+    generation ({yes}) or every invocation ({no})
+  {mass_amu} value = background ion mass in amu for the sheath energy model
+  {iead} value = ion energy-angle distribution table set or {none} :pre
+:ule
+
+[Examples:]
+
+compute cpmi surface/physical/sputter plate background pd &
+        target W projectiles all static yes erosion_flux
+compute cpmiLi surface/physical/sputter div_outer background pd &
+        target Li projectiles D,Ne,Li tsurf Tsurf_lm iead none static yes &
+        projectile_slots 1 14 erosion_flux sputter_flux_species all :pre
+
+[Description:]
+
+Compute the physical-sputtering erosion of the surface elements in the
+group by the ions of the plasma background: per-projectile incident
+fluxes, impact energies and angles (Chankin sheath model), sputter
+yields, and gross erosion fluxes.
+
+Yields are taken from angle-resolved TRIM/RustBCA tables in
+processes.h5 (/surface/sputter/<projectile>_on_<target>) when present;
+pairs without a table fall back to the analytic Eckstein fit.
+
+Yield tables may carry a temperature axis (dataset {T}, Kelvin), e.g.
+the liquid-lithium tables where sputtering is strongly enhanced on hot
+surfaces.  With the {tsurf} keyword the yield is interpolated linearly
+in temperature at each face's current value of the named custom vector
+(clamped to the table range).  Without {tsurf} a T-dependent table
+evaluates at its coldest slice, which is the room-temperature (solid)
+data -- decks that do not model surface heating need no change.
+
+[Restrictions:]
+
+Requires the OPENEDGE package and a "fix background"_fix_background.html.
+The {tsurf} custom vector must exist by the first evaluation of the
+compute (it may be created by a fix defined after this compute).
+
+[Related commands:]
+
+"fix background"_fix_background.html,
+"compute surface/chemical/evaporation"_compute_surface_chemical_evaporation.html,
+"surf_react surface/pwi"_surf_react_surface_pwi.html

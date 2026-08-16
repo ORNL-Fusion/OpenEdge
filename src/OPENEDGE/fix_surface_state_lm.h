@@ -73,6 +73,8 @@ class FixSurfaceStateLm : public Fix {
   char *target_file;    // path to target_heatflux.h5
   char *target_leg;     // "outer" or "inner"
   std::vector<double> tgt_s;       // arc length [m] (shifted so [0]=0)
+  double solps_x0 = 0.0;           // L-Lsep of strip origin (file xmin);
+                                   // L-Lsep = tgt_s + solps_x0
   std::vector<double> tgt_q;       // heat flux [W/m²]
   std::vector<double> tgt_gamma;   // D+ flux [m⁻²s⁻¹]
   std::vector<double> tgt_R;       // R [m] at each tgt_s (Rclfc)

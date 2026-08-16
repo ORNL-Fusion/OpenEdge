@@ -489,7 +489,8 @@ void FixSurfaceStateLm::write_strip_csv()
       error->warning(FLERR, "fix surface/state/lm: cannot open csv path");
     return;
   }
-  fprintf(fp, "s_m,R_m,Z_m,Tsurf_C,h_m,Wtot_Wm2,Gamma_D_m2s,Gamma_evap_m2s\n");
+  fprintf(fp, "s_m,L_Lsep_m,R_m,Z_m,Tsurf_C,h_m,Wtot_Wm2,Gamma_D_m2s,"
+              "Gamma_evap_m2s\n");
 
   const int Nx_sm = strip.Nx;
   const int ntgt = static_cast<int>(tgt_s.size());
@@ -518,8 +519,8 @@ void FixSurfaceStateLm::write_strip_csv()
     const double Tn = strip.Tsurf_dim[n];
     const double hn = strip.h_dim[n];
     const double En = strip.evap_flux[n];
-    fprintf(fp, "%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e\n",
-            s_phys, Rn, Zn, Tn, hn, Wn, Gn, En);
+    fprintf(fp, "%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e\n",
+            s_phys, s_phys + solps_x0, Rn, Zn, Tn, hn, Wn, Gn, En);
   }
   fclose(fp);
   if (comm->me == 0)
@@ -609,15 +610,30 @@ void FixSurfaceStateLm::build_geometry_map()
       double R_surf, Z_surf;
       if (axi_local) { Z_surf = pts[k].r; R_surf = pts[k].z; }
       else           { R_surf = pts[k].r; Z_surf = pts[k].z; }
-      int kbest = 0;
+      // continuous projection onto the SOLPS target polyline. Nearest-
+      // POINT snapping quantizes every surf onto the coarse SOLPS
+      // stations (e.g. 36), staircasing Tsurf/Gamma along a finer wall.
       double dbest = 1.0e30;
-      for (int j = 0; j < npts_solps; j++) {
-        double dR = R_surf - tgt_R[j];
-        double dZ = Z_surf - tgt_Z[j];
-        double d2 = dR * dR + dZ * dZ;
-        if (d2 < dbest) { dbest = d2; kbest = j; }
+      double s_solps = tgt_s[0];
+      for (int j = 0; j < npts_solps - 1; j++) {
+        const double dr = tgt_R[j + 1] - tgt_R[j];
+        const double dz = tgt_Z[j + 1] - tgt_Z[j];
+        const double L2 = dr * dr + dz * dz;
+        double t = 0.0;
+        if (L2 > 0.0) {
+          t = ((R_surf - tgt_R[j]) * dr + (Z_surf - tgt_Z[j]) * dz) / L2;
+          if (t < 0.0) t = 0.0;
+          if (t > 1.0) t = 1.0;
+        }
+        const double pr = tgt_R[j] + t * dr;
+        const double pz = tgt_Z[j] + t * dz;
+        const double d2 = (R_surf - pr) * (R_surf - pr) +
+                          (Z_surf - pz) * (Z_surf - pz);
+        if (d2 < dbest) {
+          dbest = d2;
+          s_solps = tgt_s[j] + t * (tgt_s[j + 1] - tgt_s[j]);
+        }
       }
-      double s_solps = tgt_s[kbest];
       double frac = s_solps / s_max;
       int ix = 1 + (int)(frac * (strip.Nx - 1) + 0.5);
       if (ix < 1) ix = 1;
@@ -1122,8 +1138,10 @@ void FixSurfaceStateLm::load_solps_b2pl()
       error->one(FLERR, msg);
     }
 
-    // shift x so tgt_s[0] = 0 (matches strip's relative-arc convention)
+    // shift x so tgt_s[0] = 0 (matches strip's relative-arc convention);
+    // keep the offset so outputs can report Jeremy's L-Lsep coordinate
     double xmin = xs.front();
+    solps_x0 = xmin;
     int npts = (int)xs.size();
     tgt_s.resize(npts);
     tgt_q.resize(npts);
@@ -1169,4 +1187,5 @@ void FixSurfaceStateLm::load_solps_b2pl()
   MPI_Bcast(tgt_gamma.data(), npts, MPI_DOUBLE, 0, world);
   MPI_Bcast(tgt_R.data(), npts, MPI_DOUBLE, 0, world);
   MPI_Bcast(tgt_Z.data(), npts, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&solps_x0, 1, MPI_DOUBLE, 0, world);
 }

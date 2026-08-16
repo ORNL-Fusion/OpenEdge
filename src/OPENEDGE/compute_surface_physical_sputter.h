@@ -133,6 +133,9 @@ class ComputeSurfacePhysicalSputter : public Compute {
   std::string conc_attr;           // per-surf custom array name (e.g. sigma_conc)
   std::string conc_species_name;   // species whose column is the c coordinate
   int conc_index = -1;             // surf custom index, resolved lazily
+  std::string tsurf_attr;          // surf custom vector, T_surf [K], for
+                                   // T-dependent yield tables
+  int tsurf_index = -1;            // resolved lazily; -1 = coldest slice
   int conc_isp = -1;               // species index, resolved lazily
   int slices_valid = 0;
   int slice_nc = 0;                // max NC across projectile tables

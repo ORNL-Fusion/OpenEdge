@@ -75,7 +75,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
     // Listed keywords start the option loop below. Anything not in this
     // set is treated as a positional surface.h5 path (legacy).
     static const char *kws[] = {
-        "target", "projectiles", "compound", "conc", "roughness_dm",
+        "target", "projectiles", "compound", "conc", "tsurf", "roughness_dm",
         "projectile_slots", "static", "mass_amu",
         "sheath_waveform",
         "nflux_species", "incident_angle_species", "incident_energy_species",
@@ -227,6 +227,13 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       if (iarg+1 >= narg) error->all(FLERR,"us needs value [eV]");
       target_us = atof(arg[iarg+1]);
       if (target_us <= 0.0) error->all(FLERR,"us must be > 0");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"tsurf") == 0) {
+      // Per-face surface temperature (surf custom vector, Kelvin) fed to
+      // T-dependent yield tables; without it a T table evaluates at its
+      // coldest slice (room-temperature/solid data).
+      if (iarg+1 >= narg) error->all(FLERR,"tsurf needs custom surf name");
+      tsurf_attr = arg[iarg+1];
       iarg += 2;
     } else if (strcmp(arg[iarg],"nflux_species") == 0) {
       if (iarg+1 >= narg) error->all(FLERR,"nflux_species needs slot or all");
@@ -705,6 +712,15 @@ void ComputeSurfacePhysicalSputter::resolve_projectile_tables(const FixBackgroun
                        "processes.h5\n",
                        pair.c_str(), per_proj_sput_tbl[i].NC,
                        per_proj_sput_tbl[i].NE, per_proj_sput_tbl[i].NTHETA);
+            else if (per_proj_sput_tbl[i].NT > 0)
+              snprintf(msg, sizeof(msg),
+                       "compute surface/physical/sputter: loaded T-dependent "
+                       "sputter yield table '%s' (%d T x %d x %d, %g-%g K) "
+                       "from processes.h5\n",
+                       pair.c_str(), per_proj_sput_tbl[i].NT,
+                       per_proj_sput_tbl[i].NE, per_proj_sput_tbl[i].NTHETA,
+                       per_proj_sput_tbl[i].Tax.front(),
+                       per_proj_sput_tbl[i].Tax.back());
             else
               snprintf(msg, sizeof(msg),
                      "compute surface/physical/sputter: loaded sputter yield "
@@ -1579,6 +1595,17 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
     return (std::fabs(x) < 1.0e-200 || !std::isfinite(x)) ? 0.0 : x;
   };
 
+  // per-face surface temperature for T-dependent yield tables (lazy
+  // resolve: the custom vector may be created by a fix after this compute)
+  if (!tsurf_attr.empty() && tsurf_index < 0) {
+    tsurf_index = surf->find_custom((char *) tsurf_attr.c_str());
+    if (tsurf_index < 0)
+      error->all(FLERR, "compute surface/physical/sputter: tsurf custom "
+                 "surf attribute not found");
+  }
+  double *tsurf_vec = (tsurf_index >= 0) ?
+      surf->edvec[surf->ewhich[tsurf_index]] : nullptr;
+
   for (int i = 0; i < nsown; i++) {
     int m = distributed ? i : me + i*nprocs;
     const int in_group = (dimension == 2) ? (lines[m].mask & groupbit) : (tris[m].mask & groupbit);
@@ -1945,9 +1972,12 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
           p.Es = per_proj_Es[ti];  p.Eth = per_proj_Eth[ti];
           p.Q  = per_proj_Q[ti];   p.ETF = per_proj_ETF[ti];
           const ProcessLibrary::TrimSputterTable &st = per_proj_sput_tbl[ti];
+          // T-dependent tables: interpolate at the face temperature when
+          // tsurf is given; tface 0 clamps to the coldest slice
+          const double tface = tsurf_vec ? tsurf_vec[i] : 0.0;
           auto pair_yield = [&](double e_eV, double th_deg) {
             const double th = (th_deg > rough_dm) ? th_deg - rough_dm : 0.0;
-            return st.valid() ? st.yield(e_eV, th)
+            return st.valid() ? st.yield_at_T(e_eV, th, tface)
                               : Eckstein::sputter_yield(e_eV, th, p);
           };
           if (compound) {

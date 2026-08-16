@@ -220,7 +220,10 @@ class SurfReactSurfacePWI : public SurfReact {
   int ehist_nbin, ehist_every;
   double ehist_emax;
   double *ehist_all, *ehist_sput, *ahist_all, *ahist_sput;
-  void ehist_accumulate(double E_eV, double theta_deg, double pw, int sput);
+  double **ehist_z;                       // [nspecies][nbin] per-species impact E
+  int ehist_nsp;
+  void ehist_accumulate(double E_eV, double theta_deg, double pw, int sput,
+                        int isp);
   void ehist_write();
 
   void init_reactions();

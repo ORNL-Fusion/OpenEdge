@@ -122,6 +122,7 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   trim_dir.clear();
   ehist_file = NULL;
   ehist_all = ehist_sput = ahist_all = ahist_sput = NULL;
+  ehist_z = NULL; ehist_nsp = 0;
   ehist_nbin = 0; ehist_every = 0; ehist_emax = 0.0;
 
   // parse keyword options BEFORE reading reactions file, so that the
@@ -167,6 +168,13 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       ehist_sput = new double[ehist_nbin]();
       ahist_all = new double[EHIST_NANG]();
       ahist_sput = new double[EHIST_NANG]();
+      // per-species impact-E histograms (species must be defined first)
+      ehist_nsp = particle->nspecies;
+      if (ehist_nsp > 0) {
+        ehist_z = new double*[ehist_nsp];
+        for (int k = 0; k < ehist_nsp; k++)
+          ehist_z[k] = new double[ehist_nbin]();
+      }
       iarg += 5;
     } else if (strcmp(arg[iarg],"adens_surf") == 0 ||
                strcmp(arg[iarg],"sigma_surf") == 0) {
@@ -349,6 +357,10 @@ SurfReactSurfacePWI::~SurfReactSurfacePWI()
   delete [] ehist_sput;
   delete [] ahist_all;
   delete [] ahist_sput;
+  if (ehist_z) {
+    for (int k = 0; k < ehist_nsp; k++) delete [] ehist_z[k];
+    delete [] ehist_z;
+  }
   memory->destroy(sigma_delta);
   memory->destroy(sigma_buf);
   memory->destroy(sigma_area);
@@ -690,9 +702,18 @@ int SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
     const double theta_eff =
         (theta_in_deg > rough_dm) ? theta_in_deg - rough_dm : 0.0;
     const bool compound = (r->sp_tbl >= 0 && sput_tables[r->sp_tbl].NC > 0);
+    const bool ttable   = (r->sp_tbl >= 0 && sput_tables[r->sp_tbl].NT > 0);
     if (compound) {
       double c = (r->conc_isp >= 0) ? mat_conc(isurf, r->conc_isp) : 1.0;
       Y = sput_tables[r->sp_tbl].yield(E_in_eV, theta_eff, c);
+    } else if (ttable) {
+      // temperature-axis table (liquid-metal): evaluate at the element's
+      // wall temperature (twall_surf custom if bound, else scalar twall).
+      double twall_eff = twall;
+      if (tindex_custom >= 0)
+        twall_eff = surf->edvec_local[tindex_custom][isurf];
+      Y = sput_tables[r->sp_tbl].yield_at_T(E_in_eV, theta_eff, twall_eff);
+      if (r->mat_isp >= 0) Y *= mat_conc(isurf, r->mat_isp);
     } else {
       Y = (r->sp_tbl >= 0)
           ? sput_tables[r->sp_tbl].yield(E_in_eV, theta_eff)
@@ -805,7 +826,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
     double pw_hist = update->fnum;
     if (pweight_ewhich >= 0)
       pw_hist = particle->edvec[particle->ewhich[pweight_ewhich]][ip - particle->particles];
-    ehist_accumulate(E_in_eV, theta_in_deg, pw_hist, nsput > 0);
+    ehist_accumulate(E_in_eV, theta_in_deg, pw_hist, nsput > 0, ip->ispecies);
   }
 
   OneReaction *r;
@@ -841,7 +862,9 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
         const double th_eff =
             (theta_in_deg > rough_dm) ? theta_in_deg - rough_dm : 0.0;
         double cval = (r->conc_isp >= 0) ? mat_conc(isurf, r->conc_isp) : 1.0;
-        p_this = sput_tables[r->refl_tbl].yield(E_in_eV, th_eff, cval);
+        p_this = (sput_tables[r->refl_tbl].NT > 0)
+            ? sput_tables[r->refl_tbl].yield_at_T(E_in_eV, th_eff, twall_eff)
+            : sput_tables[r->refl_tbl].yield(E_in_eV, th_eff, cval);
         if (p_this < 0.0) p_this = 0.0;
         if (p_this > 1.0) p_this = 1.0;
       } else {
@@ -1780,7 +1803,15 @@ int SurfReactSurfacePWI::load_or_get_sputter_table(const char *name)
         sput_tables.push_back(std::move(t));
         if (comm->me == 0) {
           char msg[256];
-          if (sput_tables[idx].NC > 0)
+          if (sput_tables[idx].NT > 0)
+            snprintf(msg, sizeof(msg),
+                     "surf_react surface/pwi: loaded T-dependent sputter "
+                     "yield table '%s' (%d T x %d x %d, %g-%g K) from "
+                     "database/processes.h5\n",
+                     pair_lower.c_str(), sput_tables[idx].NT,
+                     sput_tables[idx].NE, sput_tables[idx].NTHETA,
+                     sput_tables[idx].Tax.front(), sput_tables[idx].Tax.back());
+          else if (sput_tables[idx].NC > 0)
             snprintf(msg, sizeof(msg),
                      "surf_react surface/pwi: loaded compound sputter yield "
                      "table '%s' (%d c x %d x %d, Es=%.2f eV) from "
@@ -2042,7 +2073,7 @@ int SurfReactSurfacePWI::readone(char *line1, char *line2, int &n1, int &n2)
 ------------------------------------------------------------------------- */
 
 void SurfReactSurfacePWI::ehist_accumulate(double E_eV, double theta_deg,
-                                           double pw, int sput)
+                                           double pw, int sput, int isp)
 {
   int ie = (int) (E_eV / ehist_emax * ehist_nbin);
   if (ie < 0) ie = 0;
@@ -2056,6 +2087,7 @@ void SurfReactSurfacePWI::ehist_accumulate(double E_eV, double theta_deg,
     ehist_sput[ie] += pw;
     ahist_sput[ia] += pw;
   }
+  if (ehist_z && isp >= 0 && isp < ehist_nsp) ehist_z[isp][ie] += pw;
 }
 
 /* ----------------------------------------------------------------------
@@ -2064,7 +2096,8 @@ void SurfReactSurfacePWI::ehist_accumulate(double E_eV, double theta_deg,
 
 void SurfReactSurfacePWI::ehist_write()
 {
-  int ntot = 2*ehist_nbin + 2*EHIST_NANG;
+  int nz = (ehist_z) ? ehist_nsp*ehist_nbin : 0;
+  int ntot = 2*ehist_nbin + 2*EHIST_NANG + nz;
   double *loc = new double[ntot];
   double *glob = new double[ntot];
   for (int i = 0; i < ehist_nbin; i++) {
@@ -2075,6 +2108,10 @@ void SurfReactSurfacePWI::ehist_write()
     loc[2*ehist_nbin+i] = ahist_all[i];
     loc[2*ehist_nbin+EHIST_NANG+i] = ahist_sput[i];
   }
+  int off = 2*ehist_nbin + 2*EHIST_NANG;
+  for (int k = 0; k < ehist_nsp && ehist_z; k++)
+    for (int i = 0; i < ehist_nbin; i++)
+      loc[off + k*ehist_nbin + i] = ehist_z[k][i];
   MPI_Reduce(loc,glob,ntot,MPI_DOUBLE,MPI_SUM,0,world);
   if (comm->me == 0) {
     FILE *fp = fopen(ehist_file,"a");
@@ -2088,11 +2125,23 @@ void SurfReactSurfacePWI::ehist_write()
         fprintf(fp,"A %g %.6e %.6e\n",
                 (i+0.5)*5.0, glob[2*ehist_nbin+i],
                 glob[2*ehist_nbin+EHIST_NANG+i]);
+      // per-species impact-E rows; skip species with no weight this window
+      for (int k = 0; k < ehist_nsp && ehist_z; k++) {
+        double tot = 0.0;
+        for (int i = 0; i < ehist_nbin; i++) tot += glob[off + k*ehist_nbin + i];
+        if (tot <= 0.0) continue;
+        for (int i = 0; i < ehist_nbin; i++)
+          fprintf(fp,"S %s %g %.6e\n", particle->species[k].id,
+                  (i+0.5)*ehist_emax/ehist_nbin, glob[off + k*ehist_nbin + i]);
+      }
       fclose(fp);
     }
   }
   for (int i = 0; i < ehist_nbin; i++) ehist_all[i] = ehist_sput[i] = 0.0;
   for (int i = 0; i < EHIST_NANG; i++) ahist_all[i] = ahist_sput[i] = 0.0;
+  if (ehist_z)
+    for (int k = 0; k < ehist_nsp; k++)
+      for (int i = 0; i < ehist_nbin; i++) ehist_z[k][i] = 0.0;
   delete [] loc;
   delete [] glob;
 }
