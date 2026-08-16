@@ -1,0 +1,19 @@
+# Li on boronized ST40 wall — minimal sticking model with a re-emission
+# knob. A <R>: R = 0 sticks (ledger credit only); raise R for thermal
+# re-emission scans (returns as neutral Li, half-Maxwellian at twall).
+
+Li --> Li
+A 0.0
+
+Li+ --> Li
+A 0.0
+
+Li2+ --> Li
+A 0.0
+
+Li3+ --> Li
+A 0.0
+
+# grains stick too (unlisted species would diffuse-bounce off wallc)
+droplet --> Li
+A 0.0

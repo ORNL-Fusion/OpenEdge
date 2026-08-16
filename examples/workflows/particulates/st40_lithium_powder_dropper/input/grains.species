@@ -1,0 +1,3 @@
+# Li powder grain (droplet macroparticle)
+# ID Molwt(amu) Molmass(kg) RotDof RotRel VibDof VibRel VibTemp(K) specwt charge radius(m) temp(K)
+droplet 1.683801072756355e+17 2.796017461694916e-10 0 0 0 0 0 1 0 5e-05 293.15
