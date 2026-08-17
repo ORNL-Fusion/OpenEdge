@@ -2085,6 +2085,23 @@ void FixBackground::bfield_at(double R, double Z,
                                double &Br_out, double &Bz_out,
                                double &Bt_out, int icell, int iparticle) const
 {
+  // Uniform Cartesian B (bcart) takes precedence, mirroring
+  // query_bfield_at_point(). The (R, Z) interface carries no phi, so
+  // the 3D rotation is impossible here: 2D uses the slot-frame
+  // identity; 3D bcart consumers must use the xyz-aware query — error
+  // out rather than silently return zero field.
+  if (const_has_bcart) {
+    if (domain->dimension == 3)
+      error->one(FLERR,
+                 "Fix background: constant bcart is not available through "
+                 "the (R,Z) field interface in 3D; use a cylindrical "
+                 "constant bfield or a mesh/equilibrium field");
+    Br_out = const_bcart[0];
+    Bz_out = const_bcart[1];
+    Bt_out = const_bcart[2];
+    return;
+  }
+
   // Mesh-native B from plasma.h5 mesh/vtx_b* (vertex-averaged per
   // triangle) takes precedence when loaded. Fallbacks: equilibrium
   // psi-derived B, then the constant-profile scalars, then zero.
