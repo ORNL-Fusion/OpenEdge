@@ -301,10 +301,14 @@ def _read_equilibrium_bfield(equ_file: Path):
     br = -grad_z / safe_r
     bz = grad_r / safe_r
     bt = (btf * rtf) / safe_r
+    # psi at the magnetic axis: grid extremum farthest from the boundary
+    # value (same rule as derive_psi_axis in compute_plasma_fields.cpp;
+    # works for the boundary-referenced psi-psib map .equ files store)
+    psi_axis = float(psi.flat[np.abs(psi - psib).argmax()])
     return {
         "r": r, "z": z, "br": br, "bt": bt, "bz": bz,
         "equ_r": r.copy(), "equ_z": z.copy(), "equ_psi": psi,
-        "btf": btf, "rtf": rtf, "psib": psib,
+        "btf": btf, "rtf": rtf, "psib": psib, "psi_axis": psi_axis,
     }
 
 
@@ -355,12 +359,17 @@ def _read_geqdsk_bfield(gfile: Path):
     bz =  dpsidR / safe_r
     bt = (float(data["bcentr"]) * float(data["rcentr"])) / safe_r
     psib = float(data.get("sibdry", data.get("ssibry", 0.0)))
+    # magnetic-axis psi: take EFIT's exact value when present, else the
+    # grid extremum farthest from psib (derive_psi_axis rule)
+    psi_axis = data.get("simagx", data.get("ssimag", data.get("simag")))
+    if psi_axis is None:
+        psi_axis = flux2d.flat[np.abs(flux2d - psib).argmax()]
     return {
         "r": rs, "z": zs, "br": br, "bt": bt, "bz": bz,
         "equ_r": rs.copy(), "equ_z": zs.copy(), "equ_psi": flux2d,
         "btf": float(data["bcentr"]),
         "rtf": float(data["rcentr"]),
-        "psib": psib,
+        "psib": psib, "psi_axis": float(psi_axis),
     }
 
 
@@ -1672,6 +1681,12 @@ def convert_solps_to_openedge(
         f.create_dataset("equilibrium/btf",  data=float(equ_dict["btf"]))
         f.create_dataset("equilibrium/rtf",  data=float(equ_dict["rtf"]))
         f.create_dataset("equilibrium/psib", data=float(equ_dict["psib"]))
+        f.create_dataset("equilibrium/psi_axis",
+                         data=float(equ_dict.get(
+                             "psi_axis",
+                             np.asarray(equ_dict["equ_psi"]).flat[
+                                 np.abs(np.asarray(equ_dict["equ_psi"])
+                                        - float(equ_dict["psib"])).argmax()])))
 
         # Multi-ion species metadata. Per-species plasma fields live on
         # the EIRENE triangulation under /mesh/ions/.
