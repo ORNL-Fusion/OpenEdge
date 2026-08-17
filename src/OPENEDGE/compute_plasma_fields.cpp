@@ -1915,6 +1915,7 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
       B.bz = plasma_data.mesh_tri_bz[tri];
       B.bt = plasma_data.mesh_tri_bt[tri];
       B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+      B.axisymmetric_source = true;   // mirror FixBackground mesh branch
       return B;
     }
     // outside mesh footprint: fall through to grid / equ branches.

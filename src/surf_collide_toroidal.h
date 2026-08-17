@@ -26,7 +26,6 @@ class SurfCollideToroidal : public SurfCollide {
                              int, double *, int, int &);
 
  private:
-  int gca_on_index = -2;   // -2 = not yet looked up
   double dphi_rad;      // wedge angle in radians
   double cos_dphi;      // cos(dphi)
   double sin_dphi;      // sin(dphi)
