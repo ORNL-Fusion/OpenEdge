@@ -240,7 +240,7 @@ def _read_equilibrium_bfield(equ_file: Path):
     Returns a dict with:
       r, z, br, bt, bz         — regular-grid fields for interpolation
       equ_r, equ_z, equ_psi    — raw .equ arrays
-      btf, rtf, psib           — toroidal-field params + boundary psi
+      btf, rtf, psib, psi_axis — toroidal-field params + boundary/axis psi
     Everything in equ_* is what gets embedded into plasma.h5 under
     /equilibrium so downstream consumers don't need the .equ file at
     run time.
@@ -304,6 +304,8 @@ def _read_equilibrium_bfield(equ_file: Path):
         "r": r, "z": z, "br": br, "bt": bt, "bz": bz,
         "equ_r": r.copy(), "equ_z": z.copy(), "equ_psi": psi,
         "btf": btf, "rtf": rtf, "psib": psib,
+        # map extremum farthest from psib (derive_psi_axis rule)
+        "psi_axis": float(psi.flat[np.abs(psi - psib).argmax()]),
     }
 
 
