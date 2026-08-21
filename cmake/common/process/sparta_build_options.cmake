@@ -208,6 +208,19 @@ if(PKG_VTK)
   # and its config FATAL_ERRORs on unknown components even when QUIET,
   # so probe the version first with no components, then branch.
   find_package(VTK QUIET)
+  if(NOT VTK_FOUND)
+    message(FATAL_ERROR
+      "PKG_VTK is ON but find_package(VTK) could not locate a VTK CMake "
+      "config anywhere on CMAKE_PREFIX_PATH (this is a common gap with "
+      "distro-packaged VTK, e.g. Ubuntu's libvtk*-dev, which often doesn't "
+      "install a discoverable VTKConfig.cmake/vtk-config.cmake). Point "
+      "CMake at it explicitly, e.g. -DVTK_DIR=/usr/lib/cmake/vtk-9.1 "
+      "(find yours with: find / -iname 'vtk-config.cmake' or "
+      "'VTKConfig.cmake' 2>/dev/null), or disable with -DPKG_VTK=OFF. "
+      "(Leaving this unfound previously fell through to a confusing "
+      "'Cannot specify link libraries for target LINK_PRIVATE' error much "
+      "later in src/VTK/CMakeLists.txt.)")
+  endif()
   if(VTK_VERSION VERSION_LESS "8.90")
     find_package(VTK REQUIRED COMPONENTS vtkCommonCore vtkCommonDataModel
                  vtkIOLegacy vtkIOXML)
@@ -218,6 +231,15 @@ if(PKG_VTK)
   else()
     find_package(VTK REQUIRED COMPONENTS CommonCore CommonDataModel
                  IOLegacy IOXML)
+  endif()
+  if(NOT VTK_FOUND OR NOT VTK_LIBRARIES)
+    message(FATAL_ERROR
+      "PKG_VTK is ON: the initial VTK version probe succeeded (found "
+      "version ${VTK_VERSION}) but re-running find_package(VTK REQUIRED "
+      "COMPONENTS ...) for the matching component set did not populate "
+      "VTK_LIBRARIES. Your VTK install may be missing one of the required "
+      "components (CommonCore CommonDataModel IOLegacy IOXML, or the "
+      "vtk-prefixed names on VTK<8.90).")
   endif()
   set(TARGET_SPARTA_BUILD_VTK ${VTK_LIBRARIES})
   set(TARGET_SPARTA_PKG_VTK pkg_vtk)

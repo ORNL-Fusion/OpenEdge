@@ -1,6 +1,16 @@
 if(PKG_VTK)
   # ######### BEGIN TARGET_SPARTA_PKG_VTK ##########
 
+  if(NOT TARGET_SPARTA_PKG_VTK)
+    message(FATAL_ERROR
+      "PKG_VTK is ON here but TARGET_SPARTA_PKG_VTK is unset -- the "
+      "PKG_VTK block in cmake/common/process/sparta_build_options.cmake "
+      "(which sets it) must have been skipped or failed. That file now "
+      "has an earlier, clearer check for this; if you're hitting this "
+      "message it should have fired first -- check the full configure "
+      "log above for a VTK-related FATAL_ERROR before this point.")
+  endif()
+
   file(
     GLOB SPARTA_PKG_VTK_SRC_FILES
     LIST_DIRECTORIES false
