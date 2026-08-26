@@ -67,6 +67,67 @@ class ParticleKokkos : public Particle {
   KOKKOS_INLINE_FUNCTION
   void copy_custom_kokkos(int, int) const;
 
+  // OpenEdge: device-side access to the custom particle attributes for
+  // classes that are not ParticleKokkos members (e.g. Kokkos surface
+  // reactions spawning sputtered particles). Plain-old-data handle safe
+  // to memcpy into a KKCopy'd functor. Build with device_custom() AFTER
+  // sync(Device,CUSTOM_MASK); rebuild whenever the particle arrays may
+  // have grown (custom views are reallocated by grow_custom).
+
+  struct DeviceCustom {
+    int nivec, niarray, ndvec, ndarray;
+    DAT::tdual_int_1d k_eicol, k_edcol;
+    tdual_struct_tdual_int_1d_1d k_eivec;
+    tdual_struct_tdual_float_1d_1d k_edvec;
+    tdual_struct_tdual_int_2d_1d k_eiarray;
+    tdual_struct_tdual_float_2d_1d k_edarray;
+
+    // zero every custom field of newly created particle i
+
+    KOKKOS_INLINE_FUNCTION
+    void zero_all(int i) const {
+      int m,ncol;
+      for (m = 0; m < nivec; m++)
+        k_eivec.view_device()[m].k_view.view_device()[i] = 0;
+      for (m = 0; m < niarray; m++)
+        for (ncol = 0; ncol < k_eicol.view_device()[m]; ncol++)
+          k_eiarray.view_device()[m].k_view.view_device()(i,ncol) = 0;
+      for (m = 0; m < ndvec; m++)
+        k_edvec.view_device()[m].k_view.view_device()[i] = 0.0;
+      for (m = 0; m < ndarray; m++)
+        for (ncol = 0; ncol < k_edcol.view_device()[m]; ncol++)
+          k_edarray.view_device()[m].k_view.view_device()(i,ncol) = 0.0;
+    }
+
+    // read/write one custom double vector (slot = particle->ewhich[index],
+    // e.g. the pweight attribute of fix particle/weight)
+
+    KOKKOS_INLINE_FUNCTION
+    double get_dvec(int slot, int i) const {
+      return k_edvec.view_device()[slot].k_view.view_device()[i];
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void set_dvec(int slot, int i, double value) const {
+      k_edvec.view_device()[slot].k_view.view_device()[i] = value;
+    }
+  };
+
+  DeviceCustom device_custom() {
+    DeviceCustom c;
+    c.nivec = ncustom_ivec;
+    c.niarray = ncustom_iarray;
+    c.ndvec = ncustom_dvec;
+    c.ndarray = ncustom_darray;
+    c.k_eicol = k_eicol;
+    c.k_edcol = k_edcol;
+    c.k_eivec = k_eivec;
+    c.k_edvec = k_edvec;
+    c.k_eiarray = k_eiarray;
+    c.k_edarray = k_edarray;
+    return c;
+  }
+
 #ifndef SPARTA_KOKKOS_EXACT
   typedef typename Kokkos::Random_XorShift64_Pool<DeviceType>::generator_type rand_type;
 

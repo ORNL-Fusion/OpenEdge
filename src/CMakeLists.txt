@@ -2,6 +2,11 @@
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+# CMake builds require C++17, so always select the standard-library hash-map
+# implementation.  The fallback branch includes the obsolete
+# <tr1/unordered_map> header and is retained only for legacy GNU Make builds.
+add_compile_definitions(SPARTA_MAP)
+
 # ######### START SETUP COMMANDS ##########
 # GLOB together all source files
 file(

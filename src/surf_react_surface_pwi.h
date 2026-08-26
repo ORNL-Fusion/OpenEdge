@@ -37,10 +37,11 @@ namespace SPARTA_NS {
 class SurfReactSurfacePWI : public SurfReact {
  public:
   SurfReactSurfacePWI(class SPARTA *, int, char **);
-  ~SurfReactSurfacePWI();
-  void init();
+  SurfReactSurfacePWI(class SPARTA *sparta) : SurfReact(sparta) {} // needed for Kokkos
+  virtual ~SurfReactSurfacePWI();
+  virtual void init();
   int react(Particle::OnePart *&, int, double *, Particle::OnePart *&, int &);
-  void tally_update();
+  virtual void tally_update();
   char *reactionID(int);
   double reaction_coeff(int);
   int match_reactant(char *, int);

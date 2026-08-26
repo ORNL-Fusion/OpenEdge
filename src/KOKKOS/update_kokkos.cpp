@@ -23,6 +23,7 @@
 #include "pusher.h"
 #include "compute_plasma_fields_kokkos.h"
 #include "compute_nearest_surf_grid.h"
+#include "fix_background.h"
 #include "sheath_models.h"
 #include "surf.h"
 #include "math_const.h"
@@ -288,37 +289,35 @@ void UpdateKokkos::init()
 
   // OpenEdge Phase B: mesh-triangulation B (defaults off).
   oe_has_mesh_b = 0;
+  oe_has_mesh_e = 0;
   oe_mesh_ntri = 0;
   oe_mesh_hash_nr = oe_mesh_hash_nz = 0;
   oe_mesh_hash_rmin = oe_mesh_hash_zmin = 0.0;
   oe_mesh_hash_dr = oe_mesh_hash_dz = 1.0;
 
-  // OpenEdge Phase D: sheath spatial-mode cache (defaults off).
-  oe_has_sheath_spatial = 0;
+  // OpenEdge Phase D: sheath spatial-mode data (defaults off).
+  oe_sheath_provider = 0;
+  oe_sheath_sgroupbit = 0;
   oe_sheath_mD_amu = sheath_mD_amu;
+  oe_sheath_dmax_user = sheath_dmax;
+  oe_col_x0 = oe_col_y0 = 0.0;
+  oe_has_mesh_plasma = 0;
+  oe_has_sheath_customs = 0;
 
-  // OpenEdge Phase C: GCA persistent state binding (defaults off).
-  // Activated at the same site that binds the plasma compute, when the
-  // pusher is in hybrid mode and the custom attrs were registered by
-  // Pusher::init() on the host side.
-  oe_has_gca_state = 0;
-  oe_pusher_gca_switch = pusher->pusher_gca_switch;
-  if (pusher->pusher_mode == Pusher::PUSHER_HYBRID &&
-      pusher->gca_x_custom >= 0 && pusher->gca_y_custom >= 0 &&
-      pusher->gca_z_custom >= 0 && pusher->gca_vpar_custom >= 0 &&
-      pusher->gca_mu_custom >= 0 && pusher->gca_mode_custom >= 0 &&
-      pusher->gca_valid_custom >= 0 && pusher->gca_chi_custom >= 0) {
-    auto *pkk = (ParticleKokkos*) particle;
-    d_oe_gca_x    = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_x_custom]].k_view.d_view;
-    d_oe_gca_y    = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_y_custom]].k_view.d_view;
-    d_oe_gca_z    = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_z_custom]].k_view.d_view;
-    d_oe_gca_vpar = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_vpar_custom]].k_view.d_view;
-    d_oe_gca_mu   = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_mu_custom]].k_view.d_view;
-    d_oe_gca_mode  = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_mode_custom]].k_view.d_view;
-    d_oe_gca_valid = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_valid_custom]].k_view.d_view;
-    d_oe_gca_chi   = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_chi_custom]].k_view.d_view;
-    oe_has_gca_state = 1;
-  }
+  // OpenEdge: unported pusher/sheath modes fail loudly instead of
+  // silently diverging. The old device hybrid/GCA port (oe_hybrid3d)
+  // encoded physics since removed from the CPU pusher (pre-selector
+  // sheath force; switching without the Boris shell / hysteresis /
+  // trial-replay) and was deleted 2026-08-26. Kick/boundary sheath modes
+  // fire host-side machinery the Kokkos mover never calls (decision
+  // 2026-08-25: spatial is the production mode; do not port).
+  if (oe_pusher_subcycles > 0 &&
+      pusher->pusher_mode != Pusher::PUSHER_BORIS)
+    error->all(FLERR,"Pusher mode hybrid/gca is not supported with Kokkos; "
+               "use global pusher mode boris");
+  if (sheath_flag && (sheath_kick || sheath_boundary))
+    error->all(FLERR,"Sheath kick/boundary modes are not supported with "
+               "Kokkos; use sheath spatial");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -454,12 +453,40 @@ void UpdateKokkos::run(int nsteps)
       oe_has_mesh_b      = 1;
     }
 
-    // Phase D: build per-cell sheath spatial-mode cache once at run() setup.
-    // Static-plasma assumption: cache is not refreshed per step. Triggered
-    // only when `global pusher ... sheath spatial geom <ID>` is configured
-    // (sheath_flag=1 && sheath_kick=0 && sheath_geom_cidx resolved).
-    if (sheath_flag && !sheath_kick && sheath_geom_cidx >= 0)
-      build_oe_sheath_cache();
+  }
+
+  // OpenEdge: fix-background plasma provider (static SOLPS/SOLEDGE3X
+  // file, e.g. the WEST monoblock deck): build the device mesh B/E views
+  // directly from the fix so the Boris pusher runs on the device for
+  // these decks too (previously oe_boris3d was silently skipped and ions
+  // moved ballistically)
+
+  else if (oe_pusher_subcycles > 0 && pusher->pusher_plasma_fidx >= 0)
+    build_oe_mesh_from_fix();
+
+  // Phase D: build the spatial-mode sheath data once at run() setup
+  // (per-element cache for fix provider, per-cell plasma for compute
+  // provider). Static-plasma assumption: not refreshed per step.
+  // Triggered only when `global pusher ... sheath spatial geom <ID>` is
+  // configured. Outside the compute-provider block so fix-background
+  // decks get it too.
+
+  if (oe_pusher_subcycles > 0 &&
+      sheath_flag && !sheath_kick && sheath_geom_cidx >= 0)
+    build_oe_sheath_cache();
+
+  // OpenEdge: per-species pusher bypass (dust grains advect ballistically
+  // even when charged — their forces live in the grain fixes; mirrors the
+  // pusher_skip_flag check at the top of the CPU Boris kernels)
+
+  d_oe_pusher_skip = DAT::t_int_1d();
+  if (oe_pusher_subcycles > 0 && pusher->pusher_skip_flag) {
+    const int nspecies = particle->nspecies;
+    d_oe_pusher_skip = DAT::t_int_1d("oe_pusher_skip",nspecies);
+    auto h_skip = Kokkos::create_mirror_view(d_oe_pusher_skip);
+    for (int s = 0; s < nspecies; s++)
+      h_skip(s) = pusher->pusher_skip_flag[s];
+    Kokkos::deep_copy(d_oe_pusher_skip,h_skip);
   }
 
   // cellweightflag = 1 if grid-based particle weighting is ON
@@ -489,6 +516,39 @@ void UpdateKokkos::run(int nsteps)
     if (n_start_of_step) {
       modify->start_of_step();
       timer->stamp(TIME_MODIFY);
+    }
+
+    // cache plasma fields at particle positions for host-side consumers
+    // (fix volume/chem/adas etc.), same cadence and code path as the CPU
+    // mover. The query machinery (fix background mesh interpolation,
+    // sheath Boltzmann correction) is host-resident: sync particles to
+    // the host, fill the per-particle custom vectors there, and mark
+    // them stale on the device. Device-side port = later optimization.
+
+    if (plasma_cache_flag &&
+        (pcache_nevery <= 1 || ntimestep % pcache_nevery == 0)) {
+      particle_kk->sync(Host,PARTICLE_MASK|CUSTOM_MASK);
+      cache_plasma_particles();
+      particle_kk->modify(Host,CUSTOM_MASK);
+      timer->stamp(TIME_PCACHE);
+    }
+
+    // upload cross-field diffusion displacements (filled on the host by
+    // fix cross_field_diffusion at start_of_step) for the device mover
+
+    if (cd_flag && cd_nmax > 0) {
+      if ((int) d_dx_cd.extent(0) < cd_nmax) {
+        d_dx_cd = DAT::t_float_2d_lr(Kokkos::view_alloc("update:dx_cd",
+                    Kokkos::WithoutInitializing),cd_nmax,3);
+        h_dx_cd = Kokkos::create_mirror_view(d_dx_cd);
+      }
+      for (int p = 0; p < cd_nmax; p++) {
+        h_dx_cd(p,0) = dx_cd[p][0];
+        h_dx_cd(p,1) = dx_cd[p][1];
+        h_dx_cd(p,2) = dx_cd[p][2];
+      }
+      Kokkos::deep_copy(d_dx_cd,h_dx_cd);
+      timer->stamp(TIME_PCACHE);
     }
 
     // move particles
@@ -733,6 +793,23 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
 
     while (h_retry()) {
 
+      // OpenEdge Phase D: (re)bind the spatial-sheath custom device views
+      // each attempt — particle growth (retry, react) reallocates the
+      // underlying dual views. The kernel writes bank/phiprev; they are
+      // marked device-modified after the particle loop below, and
+      // backup()/restore() snapshot them so a react/retry replay does not
+      // double-apply the potential impulse.
+      oe_has_sheath_customs = 0;
+      if (oe_sheath_provider && sheath_bank_custom >= 0 &&
+          sheath_phiprev_custom >= 0) {
+        particle_kk->sync(Device,CUSTOM_MASK);
+        d_oe_sheath_bank = particle_kk->k_edvec.h_view[
+            particle->ewhich[sheath_bank_custom]].k_view.d_view;
+        d_oe_sheath_phiprev = particle_kk->k_edvec.h_view[
+            particle->ewhich[sheath_phiprev_custom]].k_view.d_view;
+        oe_has_sheath_customs = 1;
+      }
+
       if (surf->nsr && sparta->kokkos->react_retry_flag)
         backup();
 
@@ -798,6 +875,8 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
     }
 
     particle_kk->modify(Device,PARTICLE_MASK);
+    if (oe_has_sheath_customs)
+      particle_kk->modify(Device,CUSTOM_MASK);
     d_particles = t_particle_1d(); // destroy reference to reduce memory use
 
     k_mlist.modify_device();
@@ -964,6 +1043,9 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   int icell,icell_original,outface,bflag,nflag,pflag,itmp;
   int side,minsurf,nsurf,cflag,isurf,exclude,stuck_iterate;
   double dtremain,frac,newfrac,param,minparam,rnew,dtsurf,tc,tmp;
+  // cross-field diffusion kick bookkeeping, same semantics as update.cpp
+  double vkick0 = 0.0, vkick1 = 0.0, vkick2 = 0.0;
+  int has_kick = 0;
   double xnew[3],xhold[3],xc[3],vc[3],minxc[3],minvc[3];
   double *x,*v;
   Surf::Tri *tri;
@@ -1004,15 +1086,12 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   if (DIM < 3) xnew[2] = 0.0;
   if (pflag == PKEEP) {
     dtremain = dt;
-    // OpenEdge: dispatch to hybrid Boris/GCA when mode==hybrid, else Boris
-    if (DIM == 3 && oe_pusher_subcycles > 0 && d_oe_plasma_compute.data()) {
+    // OpenEdge: device Boris mover (hybrid/GCA errors out at init)
+    if (DIM == 3 && oe_pusher_subcycles > 0 && (d_oe_plasma_compute.data() || oe_has_mesh_b)) {
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
-      if (oe_pusher_mode == 1)
-        oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
-      else
-        oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
     } else {
       xnew[0] = x[0] + dtremain*v[0];
       xnew[1] = x[1] + dtremain*v[1];
@@ -1023,17 +1102,35 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
       } else if (fstyle == PFIELD) field_per_particle(i,particle_i.icell,dtremain,xnew,v);
       else if (fstyle == GFIELD) field_per_grid(i,particle_i.icell,dtremain,xnew,v);
     }
+
+    // apply cross-field diffusion displacement (if active), same
+    // policy as the CPU mover: PKEEP only, indices past the buffer get
+    // their first kick next step. Kick goes into v AND xnew so the
+    // traced chord xnew = x + dtremain*v stays exact; stripped again at
+    // the first velocity-transforming event or post-move bookkeeping.
+
+    if (cd_flag && i < cd_nmax && i < (int) d_dx_cd.extent(0)) {
+      vkick0 = d_dx_cd(i,0) / dtremain;
+      vkick1 = d_dx_cd(i,1) / dtremain;
+      v[0] += vkick0;
+      v[1] += vkick1;
+      xnew[0] += d_dx_cd(i,0);
+      xnew[1] += d_dx_cd(i,1);
+      if (DIM == 3) {
+        vkick2 = d_dx_cd(i,2) / dtremain;
+        v[2] += vkick2;
+        xnew[2] += d_dx_cd(i,2);
+      }
+      has_kick = 1;
+    }
   } else if (pflag == PINSERT) {
     dtremain = particle_i.dtremain;
-    // OpenEdge: same hybrid/Boris dispatch for newly inserted particles
-    if (DIM == 3 && oe_pusher_subcycles > 0 && d_oe_plasma_compute.data()) {
+    // OpenEdge: same Boris dispatch for newly inserted particles
+    if (DIM == 3 && oe_pusher_subcycles > 0 && (d_oe_plasma_compute.data() || oe_has_mesh_b)) {
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
-      if (oe_pusher_mode == 1)
-        oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
-      else
-        oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
     } else {
       xnew[0] = x[0] + dtremain*v[0];
       xnew[1] = x[1] + dtremain*v[1];
@@ -1504,6 +1601,41 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
             v[2] = minvc[2];
           }
 
+          // strip the cross-field kick BEFORE the collision model so
+          // PWI physics never sees the phantom kick velocity; if the
+          // stripped velocity no longer points at the surface, treat as
+          // a graze: no collision physics, continue with own velocity
+          // (same semantics as update.cpp)
+
+          if (has_kick) {
+            v[0] -= vkick0;
+            v[1] -= vkick1;
+            if (DIM == 3) v[2] -= vkick2;
+            has_kick = 0;
+
+            const double *nrm_k = (DIM == 3) ? tri->norm : line->norm;
+            if (v[0]*nrm_k[0] + v[1]*nrm_k[1] + v[2]*nrm_k[2] >= 0.0) {
+              dtremain *= 1.0 - minparam*frac;
+              if (minparam == 0.0) stuck_iterate++;
+              else stuck_iterate = 0;
+              if (stuck_iterate >= MAXSTUCK) {
+                particle_i.flag = PDISCARD;
+                if (ATOMIC_REDUCTION == 1)
+                  Kokkos::atomic_inc(&d_nstuck());
+                else if (ATOMIC_REDUCTION == 0)
+                  d_nstuck()++;
+                else
+                  reduce.nstuck++;
+                break;
+              }
+              xnew[0] = x[0] + dtremain*v[0];
+              xnew[1] = x[1] + dtremain*v[1];
+              if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+              exclude = minsurf;
+              continue;
+            }
+          }
+
           // perform surface collision using surface collision model
           // surface chemistry may destroy particle or create new one
           // must update particle's icell to current icell so that
@@ -1915,6 +2047,14 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
       particle_i.flag = PEXIT;
       particle_i.dtremain = dtremain;
       d_entryexit() = 1;
+      // strip the cross-field kick before migrating mid-move: the
+      // receiver rebuilds xnew = x + dtremain*v and cannot strip later
+      if (has_kick) {
+        v[0] -= vkick0;
+        v[1] -= vkick1;
+        if (DIM == 3) v[2] -= vkick2;
+        has_kick = 0;
+      }
       break;
     }
 
@@ -1925,6 +2065,13 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
       particle_i.flag = PENTRY;
       particle_i.dtremain = dtremain;
       d_entryexit() = 1;
+      // same mid-move migration strip as the PEXIT case above
+      if (has_kick) {
+        v[0] -= vkick0;
+        v[1] -= vkick1;
+        if (DIM == 3) v[2] -= vkick2;
+        has_kick = 0;
+      }
       break;
     }
 
@@ -1957,6 +2104,17 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   // update particle's grid cell
   // if particle flag set, add particle to migrate list
   // if discarding, migration will delete particle
+
+  // strip the cross-field diffusion kick now that this step's move is
+  // complete: the kick models a position random walk, not heating
+  // (same as update.cpp post_move_bookkeeping)
+
+  if (has_kick &&
+      (particle_i.flag == PKEEP || particle_i.flag == PDONE)) {
+    v[0] -= vkick0;
+    v[1] -= vkick1;
+    if (DIM == 3) v[2] -= vkick2;
+  }
 
   particle_i.icell = icell;
 
@@ -2098,24 +2256,239 @@ int UpdateKokkos::split2d(int icell, double *x) const
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   OpenEdge Phase D: build the per-cell sheath spatial-mode cache on host.
-   Mirrors what CPU pusher.cpp:566-705 computes per Boris call, but does it
-   once per run() (static plasma) and stores per-cell rather than recomputing
-   per particle. Layout: 13 cols documented in update_kokkos.h.
-
-   Looks up the nearest surface element from compute_nearest_surf_grid,
-   reads cell-center plasma + B from compute_plasma_fields, computes the
-   Chodura angle and the physics-derived d_max engagement gate. Pure host
-   code — feeds a DualView mirrored to device.
-
-   No sheath_kick gating here: kick mode fires at wall-collision time
-   (separate code path), so a kick-mode deck never enters this builder.
+   OpenEdge: build the device mesh B/E views directly from FixBackground
+   (static SOLPS/SOLEDGE3X plasma file). Mirrors the ComputePlasmaFields-
+   Kokkos upload: per-tri fields, per-tri bounding boxes, CSR spatial
+   hash. E components live per mesh CELL in the fix; flattened here to
+   per-tri via mesh_cell_idx so the same device point-query serves both.
+   Plasma te/ti/ne are flattened the same way for the spatial-sheath
+   per-particle fallback (CPU interp2D's mesh branch is tri-constant via
+   mesh_cell_idx, so this reproduces it exactly).
 ------------------------------------------------------------------------- */
+
+void UpdateKokkos::build_oe_mesh_from_fix()
+{
+  oe_has_mesh_b = 0;
+  oe_has_mesh_e = 0;
+  oe_has_mesh_plasma = 0;
+  if (pusher->pusher_plasma_fidx < 0) return;
+  FixBackground *pd =
+    dynamic_cast<FixBackground*>(modify->fix[pusher->pusher_plasma_fidx]);
+  if (!pd || !pd->has_mesh) return;
+  const int nvtx = pd->mesh_nvtx;
+  const int ntri = pd->mesh_ntri;
+  if (nvtx <= 0 || ntri <= 0) return;
+  if ((int) pd->mesh_tri_br.size() != ntri) return;
+
+  oe_dim = domain->dimension;
+  oe_axisymmetric = domain->axisymmetric;
+
+  d_oe_mesh_vtx_r    = DAT::t_float_1d("oe_mesh_vtx_r",nvtx);
+  d_oe_mesh_vtx_z    = DAT::t_float_1d("oe_mesh_vtx_z",nvtx);
+  d_oe_mesh_tri      = DAT::t_int_1d("oe_mesh_tri",ntri*3);
+  d_oe_mesh_tri_br   = DAT::t_float_1d("oe_mesh_tri_br",ntri);
+  d_oe_mesh_tri_bz   = DAT::t_float_1d("oe_mesh_tri_bz",ntri);
+  d_oe_mesh_tri_bt   = DAT::t_float_1d("oe_mesh_tri_bt",ntri);
+  d_oe_mesh_tri_rmin = DAT::t_float_1d("oe_mesh_tri_rmin",ntri);
+  d_oe_mesh_tri_rmax = DAT::t_float_1d("oe_mesh_tri_rmax",ntri);
+  d_oe_mesh_tri_zmin = DAT::t_float_1d("oe_mesh_tri_zmin",ntri);
+  d_oe_mesh_tri_zmax = DAT::t_float_1d("oe_mesh_tri_zmax",ntri);
+
+  auto h_vtx_r    = Kokkos::create_mirror_view(d_oe_mesh_vtx_r);
+  auto h_vtx_z    = Kokkos::create_mirror_view(d_oe_mesh_vtx_z);
+  auto h_tri      = Kokkos::create_mirror_view(d_oe_mesh_tri);
+  auto h_tri_br   = Kokkos::create_mirror_view(d_oe_mesh_tri_br);
+  auto h_tri_bz   = Kokkos::create_mirror_view(d_oe_mesh_tri_bz);
+  auto h_tri_bt   = Kokkos::create_mirror_view(d_oe_mesh_tri_bt);
+  auto h_tri_rmin = Kokkos::create_mirror_view(d_oe_mesh_tri_rmin);
+  auto h_tri_rmax = Kokkos::create_mirror_view(d_oe_mesh_tri_rmax);
+  auto h_tri_zmin = Kokkos::create_mirror_view(d_oe_mesh_tri_zmin);
+  auto h_tri_zmax = Kokkos::create_mirror_view(d_oe_mesh_tri_zmax);
+
+  double mesh_rmin = 1.0e30, mesh_rmax = -1.0e30;
+  double mesh_zmin = 1.0e30, mesh_zmax = -1.0e30;
+  for (int i = 0; i < nvtx; i++) {
+    h_vtx_r(i) = pd->mesh_vtx_r[i];
+    h_vtx_z(i) = pd->mesh_vtx_z[i];
+    mesh_rmin = std::min(mesh_rmin,pd->mesh_vtx_r[i]);
+    mesh_rmax = std::max(mesh_rmax,pd->mesh_vtx_r[i]);
+    mesh_zmin = std::min(mesh_zmin,pd->mesh_vtx_z[i]);
+    mesh_zmax = std::max(mesh_zmax,pd->mesh_vtx_z[i]);
+  }
+  for (int t = 0; t < ntri; t++) {
+    const int v0 = pd->mesh_tri[3*t+0];
+    const int v1 = pd->mesh_tri[3*t+1];
+    const int v2 = pd->mesh_tri[3*t+2];
+    h_tri(3*t+0) = v0;
+    h_tri(3*t+1) = v1;
+    h_tri(3*t+2) = v2;
+    h_tri_br(t)  = pd->mesh_tri_br[t];
+    h_tri_bz(t)  = pd->mesh_tri_bz[t];
+    h_tri_bt(t)  = pd->mesh_tri_bt[t];
+    h_tri_rmin(t) = std::min(pd->mesh_vtx_r[v0],
+                    std::min(pd->mesh_vtx_r[v1],pd->mesh_vtx_r[v2]));
+    h_tri_rmax(t) = std::max(pd->mesh_vtx_r[v0],
+                    std::max(pd->mesh_vtx_r[v1],pd->mesh_vtx_r[v2]));
+    h_tri_zmin(t) = std::min(pd->mesh_vtx_z[v0],
+                    std::min(pd->mesh_vtx_z[v1],pd->mesh_vtx_z[v2]));
+    h_tri_zmax(t) = std::max(pd->mesh_vtx_z[v0],
+                    std::max(pd->mesh_vtx_z[v1],pd->mesh_vtx_z[v2]));
+  }
+
+  Kokkos::deep_copy(d_oe_mesh_vtx_r,h_vtx_r);
+  Kokkos::deep_copy(d_oe_mesh_vtx_z,h_vtx_z);
+  Kokkos::deep_copy(d_oe_mesh_tri,h_tri);
+  Kokkos::deep_copy(d_oe_mesh_tri_br,h_tri_br);
+  Kokkos::deep_copy(d_oe_mesh_tri_bz,h_tri_bz);
+  Kokkos::deep_copy(d_oe_mesh_tri_bt,h_tri_bt);
+  Kokkos::deep_copy(d_oe_mesh_tri_rmin,h_tri_rmin);
+  Kokkos::deep_copy(d_oe_mesh_tri_rmax,h_tri_rmax);
+  Kokkos::deep_copy(d_oe_mesh_tri_zmin,h_tri_zmin);
+  Kokkos::deep_copy(d_oe_mesh_tri_zmax,h_tri_zmax);
+
+  // CSR spatial hash: bin triangles by bounding-box overlap
+
+  const int nr = 256, nz = 256;
+  const double dr = (mesh_rmax - mesh_rmin) / nr;
+  const double dz = (mesh_zmax - mesh_zmin) / nz;
+  if (dr > 0.0 && dz > 0.0) {
+    const int nbins = nr*nz;
+    std::vector<std::vector<int>> bins(nbins);
+    for (int t = 0; t < ntri; t++) {
+      int j0 = (int) ((h_tri_rmin(t) - mesh_rmin) / dr);
+      int j1 = (int) ((h_tri_rmax(t) - mesh_rmin) / dr);
+      int k0 = (int) ((h_tri_zmin(t) - mesh_zmin) / dz);
+      int k1 = (int) ((h_tri_zmax(t) - mesh_zmin) / dz);
+      j0 = std::max(0,std::min(nr-1,j0));
+      j1 = std::max(0,std::min(nr-1,j1));
+      k0 = std::max(0,std::min(nz-1,k0));
+      k1 = std::max(0,std::min(nz-1,k1));
+      for (int k = k0; k <= k1; k++)
+        for (int j = j0; j <= j1; j++)
+          bins[k*nr + j].push_back(t);
+    }
+    std::vector<int> offset(nbins+1,0);
+    for (int b = 0; b < nbins; b++)
+      offset[b+1] = offset[b] + (int) bins[b].size();
+    const int ntotal = offset[nbins];
+
+    d_oe_hash_offset  = DAT::t_int_1d("oe_hash_offset",nbins+1);
+    d_oe_hash_entries = DAT::t_int_1d("oe_hash_entries",ntotal);
+    auto h_offset  = Kokkos::create_mirror_view(d_oe_hash_offset);
+    auto h_entries = Kokkos::create_mirror_view(d_oe_hash_entries);
+    for (int b = 0; b <= nbins; b++) h_offset(b) = offset[b];
+    int k = 0;
+    for (int b = 0; b < nbins; b++)
+      for (int t : bins[b]) h_entries(k++) = t;
+    Kokkos::deep_copy(d_oe_hash_offset,h_offset);
+    Kokkos::deep_copy(d_oe_hash_entries,h_entries);
+
+    oe_mesh_hash_rmin = mesh_rmin;
+    oe_mesh_hash_zmin = mesh_zmin;
+    oe_mesh_hash_dr   = dr;
+    oe_mesh_hash_dz   = dz;
+    oe_mesh_hash_nr   = nr;
+    oe_mesh_hash_nz   = nz;
+  } else {
+    oe_mesh_hash_nr = oe_mesh_hash_nz = 0;   // brute-force device fallback
+  }
+
+  oe_mesh_ntri = ntri;
+  oe_has_mesh_b = 1;
+
+  // E-field: per mesh CELL in the fix (cylindrical E_R, E_Z, E_t),
+  // flattened to per-tri via mesh_cell_idx
+
+  const int ncellE = (int) pd->mesh_e_r.size();
+  if (ncellE > 0 && (int) pd->mesh_e_z.size() == ncellE &&
+      (int) pd->mesh_e_t.size() == ncellE) {
+    d_oe_mesh_tri_er = DAT::t_float_1d("oe_mesh_tri_er",ntri);
+    d_oe_mesh_tri_ez = DAT::t_float_1d("oe_mesh_tri_ez",ntri);
+    d_oe_mesh_tri_et = DAT::t_float_1d("oe_mesh_tri_et",ntri);
+    auto h_er = Kokkos::create_mirror_view(d_oe_mesh_tri_er);
+    auto h_ez = Kokkos::create_mirror_view(d_oe_mesh_tri_ez);
+    auto h_et = Kokkos::create_mirror_view(d_oe_mesh_tri_et);
+    const bool have_map = ((int) pd->mesh_cell_idx.size() == ntri);
+    for (int t = 0; t < ntri; t++) {
+      int c = have_map ? pd->mesh_cell_idx[t] : t;
+      if (c < 0 || c >= ncellE) c = (t < ncellE) ? t : 0;
+      h_er(t) = pd->mesh_e_r[c];
+      h_ez(t) = pd->mesh_e_z[c];
+      h_et(t) = pd->mesh_e_t[c];
+    }
+    Kokkos::deep_copy(d_oe_mesh_tri_er,h_er);
+    Kokkos::deep_copy(d_oe_mesh_tri_ez,h_ez);
+    Kokkos::deep_copy(d_oe_mesh_tri_et,h_et);
+    oe_has_mesh_e = 1;
+  }
+
+  // Plasma te/ti/ne per mesh CELL -> per-tri, for the spatial-sheath
+  // per-particle fallback (wall elements whose centroid falls outside
+  // the plasma-mesh footprint).
+
+  const int ncellP = (int) pd->mesh_te.size();
+  if (ncellP > 0 && (int) pd->mesh_ti.size() == ncellP &&
+      (int) pd->mesh_ne.size() == ncellP) {
+    d_oe_mesh_tri_te = DAT::t_float_1d("oe_mesh_tri_te",ntri);
+    d_oe_mesh_tri_ti = DAT::t_float_1d("oe_mesh_tri_ti",ntri);
+    d_oe_mesh_tri_ne = DAT::t_float_1d("oe_mesh_tri_ne",ntri);
+    auto h_te = Kokkos::create_mirror_view(d_oe_mesh_tri_te);
+    auto h_ti = Kokkos::create_mirror_view(d_oe_mesh_tri_ti);
+    auto h_ne = Kokkos::create_mirror_view(d_oe_mesh_tri_ne);
+    const bool have_map = ((int) pd->mesh_cell_idx.size() == ntri);
+    for (int t = 0; t < ntri; t++) {
+      int c = have_map ? pd->mesh_cell_idx[t] : t;
+      if (c < 0 || c >= ncellP) c = (t < ncellP) ? t : 0;
+      h_te(t) = pd->mesh_te[c];
+      h_ti(t) = pd->mesh_ti[c];
+      h_ne(t) = pd->mesh_ne[c];
+    }
+    Kokkos::deep_copy(d_oe_mesh_tri_te,h_te);
+    Kokkos::deep_copy(d_oe_mesh_tri_ti,h_ti);
+    Kokkos::deep_copy(d_oe_mesh_tri_ne,h_ne);
+    oe_has_mesh_plasma = 1;
+  }
+
+  if (comm->me == 0 && screen)
+    fprintf(screen,"  [kokkos] mesh B/E bound from fix background: "
+            "%d tris, E-field %s, plasma %s\n",ntri,
+            oe_has_mesh_e ? "yes" : "no",
+            oe_has_mesh_plasma ? "yes" : "no");
+}
+
+/* ----------------------------------------------------------------------
+   OpenEdge Phase D (rev 2): build the spatial-mode sheath data on host.
+
+   CPU-parity design (2026-08-26). The CPU pusher engages the sheath per
+   PARTICLE: nearest-surf element for the particle's cell from
+   compute nearest_surf/grid, refined against the cell's own csurfs by
+   particle distance; geometry (raw normal + centroid) comes from the
+   CHOSEN element; the plasma-derived Coulette-Manfredi coefficients and
+   d_max come from a per-ELEMENT cache built once at the element centroid
+   (fix-background static plasma) or per-particle (compute provider).
+   The old per-CELL device cache froze geometry + plasma at the
+   cell-center-nearest element, used the removed tan(alpha) d_max formula
+   and missed the CM fit's 90-alpha convention — the prime suspect for
+   the soft PWI impact ladder in gate 6.
+
+   Here:
+   - k_oe_midx_gcell: the compute's per-cell nearest element (all
+     providers); refined per particle on the device.
+   - fix provider: k_oe_sheath_elem, one row per surf element in the
+     sheath group, built by calling the CPU builder
+     Pusher::build_sheath_cache_entry_3d directly — plasma/B queries and
+     coefficient prep are byte-identical to the CPU cache.
+   - compute provider: k_oe_sheath_cellplasma (te,ti,ne,br,bt,bz per
+     cell); the device derives alpha/d_max/coefficients per particle the
+     way the CPU per-particle path does.
+------------------------------------------------------------------------- */
+
 void UpdateKokkos::build_oe_sheath_cache()
 {
-  oe_has_sheath_spatial = 0;
+  oe_sheath_provider = 0;
   if (!sheath_flag || sheath_kick) return;
   if (sheath_geom_cidx < 0) return;
+  if (domain->dimension != 3) return;   // device mover is 3D-only
 
   Compute *cg = modify->compute[sheath_geom_cidx];
   auto *csg = dynamic_cast<ComputeNearestSurfGrid*>(cg);
@@ -2124,11 +2497,23 @@ void UpdateKokkos::build_oe_sheath_cache()
     cg->compute_per_grid();
     cg->invoked_flag |= INVOKED_PER_GRID;
   }
+  oe_sheath_sgroupbit = csg->sgroupbit;
 
-  // Plasma provider: prefer ComputePlasmaFields (matches CPU pusher).
-  // FixBackground point-query fallback would require host-side bfield_at()
-  // calls per cell — not wired in this first cut. Decks that use the
-  // bench (test_west_axi) drive sheath via compute plasma/fields.
+  // Per-cell nearest-surf element map. The compute writes parent cells;
+  // the device resolves sub-cell -> parent itself, so a straight copy of
+  // the local-cell array is enough.
+  const int ng = grid->nlocal;
+  k_oe_midx_gcell = DAT::tdual_int_1d("oe_midx_gcell",ng);
+  {
+    auto h_midx = k_oe_midx_gcell.h_view;
+    for (int icell = 0; icell < ng; icell++)
+      h_midx(icell) = csg->midx_grid[icell];
+  }
+  k_oe_midx_gcell.modify_host();
+  k_oe_midx_gcell.sync_device();
+  d_oe_midx_gcell = k_oe_midx_gcell.d_view;
+
+  // Plasma provider resolution, same order as the CPU pusher.
   ComputePlasmaFields *cp = nullptr;
   if (pusher->pusher_plasma_cidx >= 0) {
     Compute *cp_base = modify->compute[pusher->pusher_plasma_cidx];
@@ -2138,138 +2523,138 @@ void UpdateKokkos::build_oe_sheath_cache()
       cp_base->invoked_flag |= INVOKED_PER_GRID;
     }
   }
-  if (!cp || !cp->plasma_arr || !cp->mag_arr) return;
+  if (cp && (!cp->plasma_arr || !cp->mag_arr)) cp = nullptr;
 
-  const int ng = grid->nlocal;
-  const int dim = domain->dimension;
-  const int ncols = 13;
-  // csg->sgroupbit not needed in this first cut: no per-particle
-  // nearest-face refinement, only cell-center midx_grid lookup.
-
-  k_oe_sheath_cell = DAT::tdual_float_2d_lr("oe_sheath_cell", ng, ncols);
-  d_oe_sheath_cell = k_oe_sheath_cell.d_view;
-  auto h_cache = k_oe_sheath_cell.h_view;
-
-  oe_sheath_mD_amu = sheath_mD_amu;
+  FixBackground *pd = nullptr;
+  if (!cp && pusher->pusher_plasma_fidx >= 0)
+    pd = dynamic_cast<FixBackground*>(modify->fix[pusher->pusher_plasma_fidx]);
+  if (!cp && !pd) return;
 
   Grid::ChildCell *cells = grid->cells;
-  Surf::Line *lines = surf->lines;
-  Surf::Tri  *tris  = surf->tris;
 
-  int n_active = 0;
-  for (int icell = 0; icell < ng; icell++) {
-    for (int c = 0; c < ncols; c++) h_cache(icell, c) = 0.0;
+  if (pd) {
 
-    // Resolve to parent cell when in a sub-cell (compute skips sub-cells).
-    int gcell = icell;
-    if (cells[icell].nsplit <= 0 && cells[icell].isplit >= 0)
-      gcell = grid->sinfo[cells[icell].isplit].icell;
+    // ---- fix-background provider: per-ELEMENT coefficient cache ----
 
-    int midx = csg->midx_grid[gcell];
-    if (midx < 0) continue;
+    if (!pusher->sheath_cache_enabled)
+      error->all(FLERR,"OE_NO_SHEATH_CACHE is not supported with Kokkos "
+                 "(the device sheath consumes the per-element cache)");
 
-    // Per-cell sheath cache uses the cell-center-nearest surface from the
-    // compute. Per-particle nearest-face refinement (the inner loop in
-    // CPU pusher.cpp:598-622 that picks among csurfs) is NOT replicated
-    // here — that refinement matters only for thin-slab cells where the
-    // cell center is between two faces. The bench deck does not have
-    // such cells, so we skip the cost.
+    oe_col_x0 = pd->column_x0;
+    oe_col_y0 = pd->column_y0;
 
-    double nx, ny, nz;
-    double srefx, srefy, srefz;
-    if (dim == 2) {
-      Surf::Line *ln = &lines[midx];
-      nx = ln->norm[0]; ny = ln->norm[1]; nz = 0.0;
-      srefx = 0.5*(ln->p1[0] + ln->p2[0]);
-      srefy = 0.5*(ln->p1[1] + ln->p2[1]);
-      srefz = 0.0;
-    } else {
-      Surf::Tri *tr = &tris[midx];
-      nx = tr->norm[0]; ny = tr->norm[1]; nz = tr->norm[2];
-      srefx = (tr->p1[0] + tr->p2[0] + tr->p3[0]) / 3.0;
-      srefy = (tr->p1[1] + tr->p2[1] + tr->p3[1]) / 3.0;
-      srefz = (tr->p1[2] + tr->p2[2] + tr->p3[2]) / 3.0;
+    const int nsurf_all = surf->nlocal + surf->nghost;
+    const int ncols = 12;
+    k_oe_sheath_elem = DAT::tdual_float_2d_lr("oe_sheath_elem",
+                                              nsurf_all,ncols);
+    auto h_elem = k_oe_sheath_elem.h_view;
+    Surf::Tri *tris = surf->tris;
+
+    int n_group = 0, n_active = 0;
+    for (int m = 0; m < nsurf_all; m++) {
+      for (int c = 0; c < ncols; c++) h_elem(m,c) = 0.0;
+      if (!(tris[m].mask & oe_sheath_sgroupbit)) continue;
+      n_group++;
+      Pusher::SheathElemCache C;
+      C.state = 0;
+      pusher->build_sheath_cache_entry_3d(m,C);
+      if (C.state != 1) continue;
+      const SheathModels::SheathEmagCoeffs &cf = C.coeffs;
+      h_elem(m,0)  = 1.0;
+      h_elem(m,1)  = C.d_max;
+      h_elem(m,2)  = C.phi_total;
+      h_elem(m,3)  = cf.lambdaD_m;
+      h_elem(m,4)  = cf.lmps_m;
+      h_elem(m,5)  = cf.inv_lD;
+      h_elem(m,6)  = cf.inv_lmps;
+      h_elem(m,7)  = cf.K1_scaled;
+      h_elem(m,8)  = cf.K2;
+      h_elem(m,9)  = cf.phi_cm_slow_eV;
+      h_elem(m,10) = cf.phi_cm_fast_eV;
+      h_elem(m,11) = cf.e_slow_at_anchor_vpm;
+      n_active++;
     }
-    const double nmag = std::sqrt(nx*nx + ny*ny + nz*nz);
-    if (nmag <= 0.0) continue;
-    nx /= nmag; ny /= nmag; nz /= nmag;
 
-    const double te = cp->plasma_arr[gcell].temp_e;
-    const double ti = cp->plasma_arr[gcell].temp_i;
-    const double ne = cp->plasma_arr[gcell].dens_e;
-    if (!(te > 0.0) || !(ne > 0.0)) continue;
+    k_oe_sheath_elem.modify_host();
+    k_oe_sheath_elem.sync_device();
+    d_oe_sheath_elem = k_oe_sheath_elem.d_view;
+    oe_sheath_provider = 1;
 
-    // Cylindrical (br, bt, bz) → Cartesian at the surface reference point,
-    // matching the per-particle CPU treatment in pusher.cpp:677-689.
-    const double br = cp->mag_arr[gcell].br;
-    const double bt = cp->mag_arr[gcell].bt;
-    const double bz = cp->mag_arr[gcell].bz;
-    const double rmag = std::sqrt(srefx*srefx + srefy*srefy);
-    double bvec[3];
-    if (rmag > 1.0e-20) {
-      const double cphi = srefx / rmag, sphi = srefy / rmag;
-      bvec[0] = br * cphi - bt * sphi;
-      bvec[1] = br * sphi + bt * cphi;
-      bvec[2] = bz;
-    } else {
-      bvec[0] = br; bvec[1] = 0.0; bvec[2] = bz;
+    // CLAUDE.md MPI trap: collectives on every rank, printf gated only.
+    // MAX, not SUM: with non-distributed surfs every rank builds the
+    // same replicated element list, so a SUM would inflate by nranks.
+    int ncnt[2] = {n_group,n_active}, gcnt[2];
+    MPI_Allreduce(ncnt,gcnt,2,MPI_INT,MPI_MAX,world);
+    if (comm->me == 0 && screen)
+      fprintf(screen,"OpenEdge Phase D: per-element sheath cache — "
+              "%d of %d group elements active (provider=fix)\n",
+              gcnt[1],gcnt[0]);
+
+  } else {
+
+    // ---- compute provider: per-cell raw plasma; derived per particle ----
+
+    oe_col_x0 = cp->plasma_data.column_x0;
+    oe_col_y0 = cp->plasma_data.column_y0;
+
+    const int ncols = 6;
+    k_oe_sheath_cellplasma = DAT::tdual_float_2d_lr("oe_sheath_cellplasma",
+                                                    ng,ncols);
+    auto h_cpl = k_oe_sheath_cellplasma.h_view;
+    int n_active = 0;
+    for (int icell = 0; icell < ng; icell++) {
+      int gcell = icell;
+      if (cells[icell].nsplit <= 0 && cells[icell].isplit >= 0)
+        gcell = grid->sinfo[cells[icell].isplit].icell;
+      h_cpl(icell,0) = cp->plasma_arr[gcell].temp_e;
+      h_cpl(icell,1) = cp->plasma_arr[gcell].temp_i;
+      h_cpl(icell,2) = cp->plasma_arr[gcell].dens_e;
+      h_cpl(icell,3) = cp->mag_arr[gcell].br;
+      h_cpl(icell,4) = cp->mag_arr[gcell].bt;
+      h_cpl(icell,5) = cp->mag_arr[gcell].bz;
+      if (h_cpl(icell,0) > 0.0 && h_cpl(icell,2) > 0.0) n_active++;
     }
-    const double bmag = std::sqrt(bvec[0]*bvec[0] + bvec[1]*bvec[1] + bvec[2]*bvec[2]);
-    if (!(bmag > 0.0)) continue;
 
-    double nvec[3] = {nx, ny, nz};
-    SheathModels::ChoduraMetrics cm =
-      SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
-    const double alpha_deg = cm.alpha_deg;
+    k_oe_sheath_cellplasma.modify_host();
+    k_oe_sheath_cellplasma.sync_device();
+    d_oe_sheath_cellplasma = k_oe_sheath_cellplasma.d_view;
+    oe_sheath_provider = 2;
 
-    // sheath_auto_dmax replicated from pusher.cpp anonymous-namespace
-    // helper; identical formula. Couldn't include pusher.cpp here without
-    // pulling the whole class.
-    constexpr double QE_LOC   = 1.602176634e-19;
-    constexpr double AMU_LOC  = 1.66053906660e-27;
-    constexpr double EPS0_LOC = 8.8541878128e-12;
-    const double mD_kg = std::max(sheath_mD_amu * AMU_LOC, 1.0e-99);
-    const double lambdaD = std::sqrt(EPS0_LOC * std::max(te, 1.0e-12)
-                                     / (std::max(ne, 1.0e-60) * QE_LOC));
-    const double cs = std::sqrt(std::max(te + ti, 0.0) * QE_LOC / (2.0 * mD_kg));
-    const double omega_ci = QE_LOC * std::max(std::fabs(bmag), 1.0e-20) / mD_kg;
-    const double rho_i = cs / std::max(omega_ci, 1.0e-99);
-    const double alpha_n_rad = std::max(0.0, std::min(90.0, alpha_deg)) * M_PI / 180.0;
-    const double tan_an = std::min(std::max(std::fabs(std::tan(alpha_n_rad)),
-                                            1.0e-3), 30.0);
-    const double L_MPS = rho_i * tan_an;
-    const double d_max = std::max(5.0 * L_MPS, 10.0 * lambdaD);
-
-    h_cache(icell, 0)  = nx;       h_cache(icell, 1)  = ny;     h_cache(icell, 2)  = nz;
-    h_cache(icell, 3)  = srefx;    h_cache(icell, 4)  = srefy;  h_cache(icell, 5)  = srefz;
-    h_cache(icell, 6)  = te;       h_cache(icell, 7)  = ti;     h_cache(icell, 8)  = ne;
-    h_cache(icell, 9)  = bmag;
-    h_cache(icell, 10) = alpha_deg;
-    h_cache(icell, 11) = d_max;
-    h_cache(icell, 12) = 1.0;
-    n_active++;
+    int ncnt[2] = {ng,n_active}, gcnt[2];
+    MPI_Allreduce(ncnt,gcnt,2,MPI_INT,MPI_SUM,world);
+    if (comm->me == 0 && screen)
+      fprintf(screen,"OpenEdge Phase D: per-cell sheath plasma — "
+              "%d of %d cells with te,ne > 0 globally (provider=compute)\n",
+              gcnt[1],gcnt[0]);
   }
-
-  k_oe_sheath_cell.modify_host();
-  k_oe_sheath_cell.sync_device();
-  d_oe_sheath_cell = k_oe_sheath_cell.d_view;
-  oe_has_sheath_spatial = 1;
-
-  // CLAUDE.md MPI trap: Allreduce must be called on every rank — gate
-  // only the printf, not the collective.
-  int n_active_global = 0, ng_global = 0;
-  MPI_Allreduce(&n_active, &n_active_global, 1, MPI_INT, MPI_SUM, world);
-  MPI_Allreduce(&ng,       &ng_global,       1, MPI_INT, MPI_SUM, world);
-  if (comm->me == 0 && screen)
-    fprintf(screen, "OpenEdge Phase D: sheath spatial cache built — "
-            "%d / %d cells active globally\n",
-            n_active_global, ng_global);
 }
 
 /* ----------------------------------------------------------------------
-   OpenEdge: device-callable Boris 3D pusher.
-   Reads B directly from plasma compute device view (bypass field fixes).
-   No sheath E-field in this version — added incrementally.
+   OpenEdge: device-callable Boris 3D pusher — mirror of CPU
+   Pusher::push_boris_3d for the device-supported paths (mode boris,
+   spatial-mode sheath, mesh/equilibrium/cell-center B, mesh E):
+
+   - B is point-queried ONCE at the start position and frozen across
+     subcycles (the CPU caches B the same way).
+   - E (mesh -grad phi) is re-queried per subcycle at the current position.
+   - Spatial sheath, CPU-parity rev 2 (2026-08-26): per-particle nearest
+     element (cell map + csurfs refinement by particle distance), geometry
+     from the CHOSEN tri (raw normal + centroid), Coulette-Manfredi
+     coefficients from the per-element cache (fix provider) or prepared
+     per particle (compute provider / footprint fallback). Applied as the
+     CPU's energy-consistent potential impulse AFTER each position update
+     — dKE = Z e [phi(d_new) - phi(d_old)], phi clamped at the wall, with
+     the per-particle phi reference (sheath_phiprev) and lifetime bank cap
+     (sheath_bank) customs and elastic reflection at turning points. The
+     old per-subcycle sheath E-force (removed from the CPU as
+     non-conservative) is gone.
+   - Per-subcycle guard: an in-cell wall hit clips xnew to the
+     intersection point; a cell exit bails to the outer move loop — both
+     as on the CPU.
+   NOTE: cylindrical->Cartesian rotations here are about the origin; the
+   CPU rotates about (column_x0, column_y0). The production decks carry
+   no column offset (0,0); build_oe_sheath_cache still records
+   oe_col_x0/y0 for the compute-provider rotation below.
 ------------------------------------------------------------------------- */
 
 KOKKOS_INLINE_FUNCTION
@@ -2277,8 +2662,11 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
                                double *x, double *v, double *xnew,
                                double charge, double mass) const
 {
-  // Neutrals: pure advection
-  if (charge == 0.0) {
+  // Dust grains (skip mixture) and neutrals: pure advection — grain
+  // forces (gravity, drag, ablation) live in the grain fixes
+  if (charge == 0.0 ||
+      (d_oe_pusher_skip.data() &&
+       d_oe_pusher_skip(d_particles[i].ispecies))) {
     xnew[0] = x[0] + v[0] * dt_full;
     xnew[1] = x[1] + v[1] * dt_full;
     xnew[2] = x[2] + v[2] * dt_full;
@@ -2292,47 +2680,15 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
   double xcur[3] = {x[0], x[1], x[2]};
   double vcur[3] = {v[0], v[1], v[2]};
 
-  // Phase D: read this cell's sheath cache once before the subcycle loop.
-  // Replicates CPU pusher.cpp:566-736 prefetch — Te, Ti, ne, B, alpha,
-  // surface normal & ref point are invariant during subcycling.
-  bool sh_active = false;
-  double sh_nx = 0.0, sh_ny = 0.0, sh_nz = 0.0;
-  double sh_srefx = 0.0, sh_srefy = 0.0, sh_srefz = 0.0;
-  double sh_te = 0.0, sh_ti = 0.0, sh_ne = 0.0;
-  double sh_bmag = 0.0, sh_alpha = 0.0, sh_dmax = 0.0;
-  double sh_d0_sign = 0.0;
-  if (oe_has_sheath_spatial && d_oe_sheath_cell.data()
-      && icell >= 0 && icell < (int)d_oe_sheath_cell.extent(0)
-      && d_oe_sheath_cell(icell, 12) > 0.5) {
-    sh_nx    = d_oe_sheath_cell(icell, 0);
-    sh_ny    = d_oe_sheath_cell(icell, 1);
-    sh_nz    = d_oe_sheath_cell(icell, 2);
-    sh_srefx = d_oe_sheath_cell(icell, 3);
-    sh_srefy = d_oe_sheath_cell(icell, 4);
-    sh_srefz = d_oe_sheath_cell(icell, 5);
-    sh_te    = d_oe_sheath_cell(icell, 6);
-    sh_ti    = d_oe_sheath_cell(icell, 7);
-    sh_ne    = d_oe_sheath_cell(icell, 8);
-    sh_bmag  = d_oe_sheath_cell(icell, 9);
-    sh_alpha = d_oe_sheath_cell(icell, 10);
-    sh_dmax  = d_oe_sheath_cell(icell, 11);
-    sh_active = true;
-    // d0_sign locks which side of the wall the particle started on.
-    // Once set, only apply E-field while the particle stays on that side
-    // (matches CPU pusher.cpp:711-718; prevents reverse-field deceleration
-    // and outward ejection on overshoot).
-    const double d0 = (xcur[0] - sh_srefx) * sh_nx
-                    + (xcur[1] - sh_srefy) * sh_ny
-                    + (xcur[2] - sh_srefz) * sh_nz;
-    sh_d0_sign = (d0 >= 0.0) ? 1.0 : -1.0;
-  }
+  // Sub-cell -> parent (the geom compute and csurfs live on the parent)
+  int gcell = icell;
+  if (d_cells[icell].nsplit <= 0 && d_cells[icell].isplit >= 0)
+    gcell = d_sinfo[d_cells[icell].isplit].icell;
 
-  for (int isub = 0; isub < nsub; isub++) {
-    double E[3] = {0.0, 0.0, 0.0};
-    double B[3] = {0.0, 0.0, 0.0};
-
-    // Per-particle B point-query (matches CPU dispatch order):
-    //   mesh > equilibrium > cell-center fallback.
+  // --- B point-query once at the start position (CPU caches B the same
+  //     way); dispatch mesh > equilibrium > cell-center columns ---
+  double B_cached[3] = {0.0, 0.0, 0.0};
+  {
     bool got_B = false;
     if (oe_has_mesh_b) {
       got_B = MeshKokkos::query_bfield_at_point(
@@ -2345,59 +2701,275 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
           oe_mesh_hash_rmin, oe_mesh_hash_zmin,
           oe_mesh_hash_dr,   oe_mesh_hash_dz,
           oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri,
-          B);
+          B_cached);
     }
     if (!got_B && oe_has_equilibrium) {
       EquilibriumKokkos::query_bfield_at_point(
           xcur, oe_dim, oe_axisymmetric,
           d_oe_equ_r, d_oe_equ_z, d_oe_equ_psi,
           oe_equ_btf, oe_equ_rtf, oe_equ_jm, oe_equ_km,
-          B);
+          B_cached);
       got_B = true;
     }
     if (!got_B && d_oe_plasma_compute.data() && oe_bx_col >= 0) {
-      B[0] = d_oe_plasma_compute(icell, oe_bx_col);
-      B[1] = d_oe_plasma_compute(icell, oe_by_col);
-      B[2] = d_oe_plasma_compute(icell, oe_bz_col);
+      B_cached[0] = d_oe_plasma_compute(icell, oe_bx_col);
+      B_cached[1] = d_oe_plasma_compute(icell, oe_by_col);
+      B_cached[2] = d_oe_plasma_compute(icell, oe_bz_col);
+    }
+  }
+
+  // --- Sheath prefetch: per-particle element choice + CM coefficients ---
+  bool sh_active = false;
+  double sh_nx = 0.0, sh_ny = 0.0, sh_nz = 0.0;
+  double sh_sref[3] = {0.0, 0.0, 0.0};
+  double sh_dmax = 0.0;
+  SheathModelsKokkos::CMCoeffs sh_c = {};
+
+  if (oe_sheath_provider && gcell >= 0 &&
+      gcell < (int) d_oe_midx_gcell.extent(0)) {
+    int midx = d_oe_midx_gcell(gcell);
+
+    // Refine against the parent cell's own surfs: nearest plane to the
+    // PARTICLE (mirrors CPU pusher.cpp — fixes wrong-face selection when
+    // a thin slab intersects one cell).
+    const int nsurf_cell = d_cells[gcell].nsurf;
+    if (nsurf_cell > 0) {
+      auto csurfs_begin = d_csurfs.row_map(gcell);
+      double best_d = 1.0e20;
+      int best_m = -1;
+      for (int m = 0; m < nsurf_cell; m++) {
+        const int ms = d_csurfs.entries(csurfs_begin + m);
+        if (!(d_tris[ms].mask & oe_sheath_sgroupbit)) continue;
+        const double dpl = Kokkos::fabs(
+            (x[0]-d_tris[ms].p1[0])*d_tris[ms].norm[0] +
+            (x[1]-d_tris[ms].p1[1])*d_tris[ms].norm[1] +
+            (x[2]-d_tris[ms].p1[2])*d_tris[ms].norm[2]);
+        if (dpl < best_d) { best_d = dpl; best_m = ms; }
+      }
+      if (best_m >= 0) midx = best_m;
     }
 
-    // Phase D: per-subcycle sheath E-field via Coulette-Manfredi at the
-    // particle's current distance from the wall. Gated on plasma-side
-    // start (sh_d0_sign > 0) and physics-derived d_max engagement window.
-    if (sh_active && sh_d0_sign > 0.0) {
-      const double d_raw = (xcur[0] - sh_srefx) * sh_nx
-                         + (xcur[1] - sh_srefy) * sh_ny
-                         + (xcur[2] - sh_srefz) * sh_nz;
-      if (d_raw > 0.0 && d_raw < sh_dmax) {
-        SheathModelsKokkos::BorodkinaSheathResult sr =
-          SheathModelsKokkos::coulette_manfredi_sheath_at_distance(
-            d_raw, sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha,
-            oe_sheath_mD_amu, 0.0);
-        // E points INTO the wall (along -n) — unified inward-normal
-        // convention from the 2026-04-21 emit/surf overhaul.
-        E[0] -= sr.emag_vpm * sh_nx;
-        E[1] -= sr.emag_vpm * sh_ny;
-        E[2] -= sr.emag_vpm * sh_nz;
+    if (midx >= 0) {
+      // Geometry from the chosen element: RAW normal + centroid (raw, not
+      // per-cell flipped — avoids sign flips in split cells; CPU-identical)
+      sh_nx = d_tris[midx].norm[0];
+      sh_ny = d_tris[midx].norm[1];
+      sh_nz = d_tris[midx].norm[2];
+      const double nmag = Kokkos::sqrt(sh_nx*sh_nx + sh_ny*sh_ny + sh_nz*sh_nz);
+      if (nmag > 0.0) { sh_nx /= nmag; sh_ny /= nmag; sh_nz /= nmag; }
+      sh_sref[0] = (d_tris[midx].p1[0]+d_tris[midx].p2[0]+d_tris[midx].p3[0])/3.0;
+      sh_sref[1] = (d_tris[midx].p1[1]+d_tris[midx].p2[1]+d_tris[midx].p3[1])/3.0;
+      sh_sref[2] = (d_tris[midx].p1[2]+d_tris[midx].p2[2]+d_tris[midx].p3[2])/3.0;
+
+      if (oe_sheath_provider == 1 && d_oe_sheath_elem.data() &&
+          midx < (int) d_oe_sheath_elem.extent(0) &&
+          d_oe_sheath_elem(midx,0) > 0.5) {
+        // Per-element cache: coefficients CPU-identical by construction
+        // (rows built on host by Pusher::build_sheath_cache_entry_3d).
+        sh_dmax           = d_oe_sheath_elem(midx,1);
+        sh_c.phi_total_eV = d_oe_sheath_elem(midx,2);
+        sh_c.lambdaD_m    = d_oe_sheath_elem(midx,3);
+        sh_c.lmps_m       = d_oe_sheath_elem(midx,4);
+        sh_c.inv_lD       = d_oe_sheath_elem(midx,5);
+        sh_c.inv_lmps     = d_oe_sheath_elem(midx,6);
+        sh_c.K1_scaled    = d_oe_sheath_elem(midx,7);
+        sh_c.K2           = d_oe_sheath_elem(midx,8);
+        sh_c.phi_slow_eV  = d_oe_sheath_elem(midx,9);
+        sh_c.phi_fast_eV  = d_oe_sheath_elem(midx,10);
+        sh_c.e_anchor_vpm = d_oe_sheath_elem(midx,11);
+        sh_active = true;
+      } else {
+        // Per-particle path: compute provider (cell plasma), or a
+        // fix-provider element whose centroid had no plasma — the CPU
+        // then queries at the particle position; the mesh scalar query
+        // below is its device twin (tri-constant, like interp2D's mesh
+        // branch).
+        double te = 0.0, ti = 0.0, ne = 0.0;
+        double bvec[3] = {0.0, 0.0, 0.0};
+        if (oe_sheath_provider == 2 && d_oe_sheath_cellplasma.data() &&
+            icell < (int) d_oe_sheath_cellplasma.extent(0)) {
+          te = d_oe_sheath_cellplasma(icell,0);
+          ti = d_oe_sheath_cellplasma(icell,1);
+          ne = d_oe_sheath_cellplasma(icell,2);
+          // cell-center cylindrical B rotated at the particle position
+          // about the column axis (CPU pusher.cpp compute-provider path)
+          const double br = d_oe_sheath_cellplasma(icell,3);
+          const double bt = d_oe_sheath_cellplasma(icell,4);
+          const double bz = d_oe_sheath_cellplasma(icell,5);
+          const double rx = x[0] - oe_col_x0, ry = x[1] - oe_col_y0;
+          const double rmag = Kokkos::sqrt(rx*rx + ry*ry);
+          if (rmag > 1.0e-20) {
+            const double cphi = rx / rmag, sphi = ry / rmag;
+            bvec[0] = br * cphi - bt * sphi;
+            bvec[1] = br * sphi + bt * cphi;
+            bvec[2] = bz;
+          } else { bvec[0] = br; bvec[1] = 0.0; bvec[2] = bz; }
+        } else if (oe_sheath_provider == 1 && oe_has_mesh_plasma) {
+          double P[3];
+          if (MeshKokkos::query_scalars_at_point(
+                x, oe_dim, oe_axisymmetric,
+                d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
+                d_oe_mesh_tri_te, d_oe_mesh_tri_ti, d_oe_mesh_tri_ne,
+                d_oe_hash_offset, d_oe_hash_entries,
+                oe_mesh_hash_rmin, oe_mesh_hash_zmin,
+                oe_mesh_hash_dr,   oe_mesh_hash_dz,
+                oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri, P)) {
+            te = P[0]; ti = P[1]; ne = P[2];
+          }
+          // B at the particle: the start-position point query above —
+          // the CPU fallback queries the same point through the fix.
+          bvec[0] = B_cached[0]; bvec[1] = B_cached[1]; bvec[2] = B_cached[2];
+        }
+
+        if (te > 0.0 && ne > 0.0) {
+          const double bmag = Kokkos::sqrt(bvec[0]*bvec[0] + bvec[1]*bvec[1]
+                                         + bvec[2]*bvec[2]);
+          double alpha_deg = 90.0;
+          if (bmag > 0.0) {
+            const double nvec[3] = {sh_nx, sh_ny, sh_nz};
+            SheathModelsKokkos::ChoduraMetrics cm =
+              SheathModelsKokkos::chodura_metrics(0.0, 1.0, bvec, nvec);
+            alpha_deg = cm.alpha_deg;
+          }
+          sh_dmax = SheathModelsKokkos::auto_dmax(te, ti, ne, bmag, alpha_deg,
+                                                  oe_sheath_mD_amu,
+                                                  oe_sheath_dmax_user);
+          sh_c = SheathModelsKokkos::prepare_coulette_manfredi(
+                     te, ti, ne, bmag, alpha_deg, oe_sheath_mD_amu, 0.0);
+          sh_active = true;
+        }
       }
     }
+  }
+
+  // Spatial-mode customs: lifetime energy bank (cap) and phi reference
+  // (pays element/profile switches between moves). Mirrors CPU
+  // pusher.cpp pre-loop block; customs absent -> same as CPU null vecs.
+  const bool have_bank =
+      oe_has_sheath_customs && i < (int) d_oe_sheath_bank.extent(0);
+  const bool have_phiprev =
+      oe_has_sheath_customs && i < (int) d_oe_sheath_phiprev.extent(0);
+  double sh_phi_tot_sp = 0.0;
+  if (sh_active && have_bank)
+    sh_phi_tot_sp = SheathModelsKokkos::phi_at_distance(sh_c, 0.0);
+  int sh_phi_pending = 0;
+  double sh_phi_ref = 0.0;
+  if (have_phiprev) {
+    if (sh_active) {
+      if (d_oe_sheath_phiprev(i) > 0.0) {
+        sh_phi_ref = d_oe_sheath_phiprev(i) - 1.0;
+        sh_phi_pending = 1;
+      }
+    } else d_oe_sheath_phiprev(i) = 1.0;   // out of band: known phi = 0
+  }
+
+  for (int isub = 0; isub < nsub; isub++) {
+    double E[3] = {0.0, 0.0, 0.0};
+    double B[3] = {B_cached[0], B_cached[1], B_cached[2]};
+
+    // Background mesh E-field (E = -grad phi from the plasma file), per
+    // subcycle at the current position; the query converts cylindrical
+    // (E_R, E_Z, E_t) to SPARTA slot order internally. Matches the CPU
+    // pusher's per-subcycle query_efield_at_point.
+    if (oe_has_mesh_e) {
+      double Emesh[3] = {0.0, 0.0, 0.0};
+      if (MeshKokkos::query_bfield_at_point(
+            xcur, oe_dim, oe_axisymmetric,
+            d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
+            d_oe_mesh_tri_er, d_oe_mesh_tri_ez, d_oe_mesh_tri_et,
+            d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
+            d_oe_mesh_tri_zmin, d_oe_mesh_tri_zmax,
+            d_oe_hash_offset, d_oe_hash_entries,
+            oe_mesh_hash_rmin, oe_mesh_hash_zmin,
+            oe_mesh_hash_dr,   oe_mesh_hash_dz,
+            oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri,
+            Emesh)) {
+        E[0] += Emesh[0];
+        E[1] += Emesh[1];
+        E[2] += Emesh[2];
+      }
+    }
+
+    // Spatial-mode sheath is applied AFTER the position update below as
+    // an energy-consistent potential impulse, not as an E-field force
+    // here — same reasoning as the CPU (the old per-subcycle force was
+    // non-conservative and pumped energy on gyro-dips behind the plane).
+
+    double xold[3] = {xcur[0], xcur[1], xcur[2]};
 
     BorisGridKokkos::push_velocity(qm, dt_sub, E, B, vcur);
     xcur[0] += vcur[0] * dt_sub;
     xcur[1] += vcur[1] * dt_sub;
     xcur[2] += vcur[2] * dt_sub;
 
-    // Per-subcycle surface crossing guard (3D only, nsub > 1)
-    // Uses existing d_csurfs and d_tris from base SPARTA
-    if (nsub > 1) {
-      int gcell = icell;
-      if (d_cells[icell].nsplit <= 0 && d_cells[icell].isplit >= 0)
-        gcell = d_sinfo[d_cells[icell].isplit].icell;
+    // Spatial-mode sheath: exact work of the sheath potential over this
+    // subcycle's normal displacement, dKE = Z e [phi(d_new) - phi(d_old)],
+    // phi clamped to phi(0) for d <= 0. Outbound ions that cannot climb
+    // the remaining potential reflect elastically at the turning point.
+    // Line-for-line port of CPU pusher.cpp push_boris_3d.
+    if (sh_active) {
+      const double d_old =
+        (xold[0] - sh_sref[0]) * sh_nx
+      + (xold[1] - sh_sref[1]) * sh_ny
+      + (xold[2] - sh_sref[2]) * sh_nz;
+      const double d_new =
+        (xcur[0] - sh_sref[0]) * sh_nx
+      + (xcur[1] - sh_sref[1]) * sh_ny
+      + (xcur[2] - sh_sref[2]) * sh_nz;
+      if (Kokkos::fmin(d_old, d_new) < sh_dmax) {
+        const double phi_old_geo = SheathModelsKokkos::phi_at_distance(
+            sh_c, Kokkos::fmax(d_old, 0.0));
+        const double phi_old = sh_phi_pending ? sh_phi_ref : phi_old_geo;
+        sh_phi_pending = 0;
+        const double phi_new = SheathModelsKokkos::phi_at_distance(
+            sh_c, Kokkos::fmax(d_new, 0.0));
+        double dKE_J =
+            Kokkos::fabs(charge) * oe_echarge * (phi_new - phi_old);
+        // lifetime ledger cap: net energy given may never exceed Z e phi_tot
+        if (have_bank && dKE_J > 0.0) {
+          const double room =
+              Kokkos::fabs(charge) * oe_echarge * sh_phi_tot_sp
+              - d_oe_sheath_bank(i);
+          if (dKE_J > room) dKE_J = (room > 0.0) ? room : 0.0;
+        }
+        double sh_d_fin = d_new;
+        if (dKE_J != 0.0) {
+          const double vn = vcur[0]*sh_nx + vcur[1]*sh_ny + vcur[2]*sh_nz;
+          const double s2 = vn*vn + 2.0*dKE_J/mass;
+          double vn_new;
+          if (s2 >= 0.0) {
+            vn_new = (vn >= 0.0) ? Kokkos::sqrt(s2) : -Kokkos::sqrt(s2);
+            if (have_bank) d_oe_sheath_bank(i) += dKE_J;
+          } else {
+            // turning point: elastic reflection; bounce the position back
+            // to d_old (the climb to d_new was never paid for)
+            vn_new = -vn;
+            xcur[0] -= (d_new - d_old) * sh_nx;
+            xcur[1] -= (d_new - d_old) * sh_ny;
+            xcur[2] -= (d_new - d_old) * sh_nz;
+            sh_d_fin = d_old;
+          }
+          const double dvn = vn_new - vn;
+          vcur[0] += dvn * sh_nx;
+          vcur[1] += dvn * sh_ny;
+          vcur[2] += dvn * sh_nz;
+        }
+        // remember phi at the endpoint for next move's reference payment
+        if (have_phiprev)
+          d_oe_sheath_phiprev(i) = 1.0 + SheathModelsKokkos::phi_at_distance(
+              sh_c, Kokkos::fmax(sh_d_fin, 0.0));
+      } else if (have_phiprev) d_oe_sheath_phiprev(i) = 1.0;
+    }
 
-      int nsurf_cell = d_cells[gcell].nsurf;
+    // Per-subcycle guards (3D, nsub > 1), mirroring the CPU:
+    // (a) in-cell wall hit — clip xnew to the intersection point so the
+    //     outer move loop sees a trajectory that touches the wall
+    //     exactly (critical for grazing divertor geometry);
+    // (b) cell exit — bail so the outer loop handles migration and the
+    //     neighbor cell's surface checks on the remaining chord.
+    if (nsub > 1) {
+      const int nsurf_cell = d_cells[gcell].nsurf;
       if (nsurf_cell > 0) {
-        double xold[3] = {xcur[0] - vcur[0]*dt_sub,
-                          xcur[1] - vcur[1]*dt_sub,
-                          xcur[2] - vcur[2]*dt_sub};
         auto csurfs_begin = d_csurfs.row_map(gcell);
         for (int m = 0; m < nsurf_cell; m++) {
           int isurf = d_csurfs.entries(csurfs_begin + m);
@@ -2407,232 +2979,27 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
                 xold, xcur,
                 d_tris[isurf].p1, d_tris[isurf].p2, d_tris[isurf].p3,
                 d_tris[isurf].norm, xc, param, side)) {
-            // Surface crossing detected — stop subcycling
             v[0] = vcur[0]; v[1] = vcur[1]; v[2] = vcur[2];
-            xnew[0] = xcur[0]; xnew[1] = xcur[1]; xnew[2] = xcur[2];
+            xnew[0] = xc[0]; xnew[1] = xc[1]; xnew[2] = xc[2];
             return;
           }
         }
+      }
+      // half-open [lo, hi): a particle exactly at hi has left the cell
+      const double *clo = d_cells[gcell].lo;
+      const double *chi = d_cells[gcell].hi;
+      if (xcur[0] < clo[0] || xcur[0] >= chi[0] ||
+          xcur[1] < clo[1] || xcur[1] >= chi[1] ||
+          xcur[2] < clo[2] || xcur[2] >= chi[2]) {
+        v[0] = vcur[0]; v[1] = vcur[1]; v[2] = vcur[2];
+        xnew[0] = xcur[0]; xnew[1] = xcur[1]; xnew[2] = xcur[2];
+        return;
       }
     }
   }
 
   v[0] = vcur[0]; v[1] = vcur[1]; v[2] = vcur[2];
   xnew[0] = xcur[0]; xnew[1] = xcur[1]; xnew[2] = xcur[2];
-}
-
-/* ----------------------------------------------------------------------
-   OpenEdge Phase C3: device-callable hybrid Boris/GCA dispatcher.
-   Mirrors the no-sheath core of CPU Pusher::push_hybrid_3d:
-     - reads B + grad|B| + kappa + curl(b_hat) at particle position
-       (equilibrium psi map preferred; mesh and cell-center fall-throughs
-       give B-only and so disable the GCA branch for that particle).
-     - per-particle decision: GCA when rho_L < L_B / pusher_gca_switch,
-       else subcycled Boris fallback.
-     - persistent GCA state read/written through C2 device views.
-   Sheath E-field stays out of this port — Phase D.
-------------------------------------------------------------------------- */
-
-KOKKOS_INLINE_FUNCTION
-void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt_full,
-                                double *x, double *v, double *xnew,
-                                double charge, double mass) const
-{
-  // Neutrals: pure advection
-  if (charge == 0.0) {
-    xnew[0] = x[0] + v[0] * dt_full;
-    xnew[1] = x[1] + v[1] * dt_full;
-    xnew[2] = x[2] + v[2] * dt_full;
-    return;
-  }
-
-  const double qm = (charge * oe_echarge) / mass;
-  const double qm_abs = Kokkos::fabs(qm);
-
-  // --- Read B + (optionally) grad|B|, kappa, curl(b_hat) ---
-  double E[3] = {0.0, 0.0, 0.0};
-  double B[3] = {0.0, 0.0, 0.0};
-  double gradBmag[3] = {0.0, 0.0, 0.0};
-  double kappa[3]    = {0.0, 0.0, 0.0};
-  double curl_b[3]   = {0.0, 0.0, 0.0};
-
-  bool have_grad = false;
-  if (oe_has_equilibrium) {
-    have_grad = EquilibriumKokkos::query_bfield_grad_at_point(
-        x, oe_dim, oe_axisymmetric,
-        d_oe_equ_r, d_oe_equ_z, d_oe_equ_psi,
-        oe_equ_btf, oe_equ_rtf, oe_equ_jm, oe_equ_km,
-        B, gradBmag, kappa, curl_b);
-  }
-  bool got_B = have_grad;
-  if (!got_B && oe_has_mesh_b) {
-    got_B = MeshKokkos::query_bfield_at_point(
-        x, oe_dim, oe_axisymmetric,
-        d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
-        d_oe_mesh_tri_br, d_oe_mesh_tri_bz, d_oe_mesh_tri_bt,
-        d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
-        d_oe_mesh_tri_zmin, d_oe_mesh_tri_zmax,
-        d_oe_hash_offset, d_oe_hash_entries,
-        oe_mesh_hash_rmin, oe_mesh_hash_zmin,
-        oe_mesh_hash_dr,   oe_mesh_hash_dz,
-        oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri,
-        B);
-  }
-  if (!got_B && d_oe_plasma_compute.data() && oe_bx_col >= 0) {
-    B[0] = d_oe_plasma_compute(icell, oe_bx_col);
-    B[1] = d_oe_plasma_compute(icell, oe_by_col);
-    B[2] = d_oe_plasma_compute(icell, oe_bz_col);
-  }
-
-  // Phase D: read this cell's sheath cache once. Mirrors the CPU
-  // pusher.cpp:1104-1221 hybrid-mode sheath block (which precedes the
-  // GCA-vs-Boris switching decision).
-  bool sh_active = false;
-  double sh_nx = 0.0, sh_ny = 0.0, sh_nz = 0.0;
-  double sh_srefx = 0.0, sh_srefy = 0.0, sh_srefz = 0.0;
-  double sh_te = 0.0, sh_ti = 0.0, sh_ne = 0.0;
-  double sh_bmag = 0.0, sh_alpha = 0.0, sh_dmax = 0.0;
-  double sh_d0_sign = 0.0;
-  if (oe_has_sheath_spatial && d_oe_sheath_cell.data()
-      && icell >= 0 && icell < (int)d_oe_sheath_cell.extent(0)
-      && d_oe_sheath_cell(icell, 12) > 0.5) {
-    sh_nx    = d_oe_sheath_cell(icell, 0);
-    sh_ny    = d_oe_sheath_cell(icell, 1);
-    sh_nz    = d_oe_sheath_cell(icell, 2);
-    sh_srefx = d_oe_sheath_cell(icell, 3);
-    sh_srefy = d_oe_sheath_cell(icell, 4);
-    sh_srefz = d_oe_sheath_cell(icell, 5);
-    sh_te    = d_oe_sheath_cell(icell, 6);
-    sh_ti    = d_oe_sheath_cell(icell, 7);
-    sh_ne    = d_oe_sheath_cell(icell, 8);
-    sh_bmag  = d_oe_sheath_cell(icell, 9);
-    sh_alpha = d_oe_sheath_cell(icell, 10);
-    sh_dmax  = d_oe_sheath_cell(icell, 11);
-    sh_active = true;
-    const double d0 = (x[0] - sh_srefx) * sh_nx
-                    + (x[1] - sh_srefy) * sh_ny
-                    + (x[2] - sh_srefz) * sh_nz;
-    sh_d0_sign = (d0 >= 0.0) ? 1.0 : -1.0;
-
-    // Pre-evaluate sheath E at initial particle position. This is what
-    // the GCA branch sees (single E used during the whole RK4 step). The
-    // Boris-fallback branch overrides it per subcycle below.
-    if (sh_d0_sign > 0.0) {
-      const double d_raw = (x[0] - sh_srefx) * sh_nx
-                         + (x[1] - sh_srefy) * sh_ny
-                         + (x[2] - sh_srefz) * sh_nz;
-      if (d_raw > 0.0 && d_raw < sh_dmax) {
-        SheathModelsKokkos::BorodkinaSheathResult sr =
-          SheathModelsKokkos::coulette_manfredi_sheath_at_distance(
-            d_raw, sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha,
-            oe_sheath_mD_amu, 0.0);
-        E[0] -= sr.emag_vpm * sh_nx;
-        E[1] -= sr.emag_vpm * sh_ny;
-        E[2] -= sr.emag_vpm * sh_nz;
-      }
-    }
-  }
-
-  const double Bmag = Kokkos::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
-  const double gradBmag_mag = Kokkos::sqrt(gradBmag[0]*gradBmag[0]
-                                         + gradBmag[1]*gradBmag[1]
-                                         + gradBmag[2]*gradBmag[2]);
-
-  // --- Decide GCA vs Boris fallback per particle ---
-  bool use_gca = false;
-  if (have_grad && Bmag > 0.0 && qm_abs > 0.0 && oe_has_gca_state) {
-    const double bhx = B[0]/Bmag, bhy = B[1]/Bmag, bhz = B[2]/Bmag;
-    double v_perp = 0.0;
-    if (d_oe_gca_valid(i) > 0.5) {
-      const double mu_eff = (d_oe_gca_mu(i) > 0.0) ? d_oe_gca_mu(i) : 0.0;
-      const double vperp2 = (2.0 * mu_eff * Bmag) / mass;
-      v_perp = (vperp2 > 0.0) ? Kokkos::sqrt(vperp2) : 0.0;
-    } else {
-      const double v_par = v[0]*bhx + v[1]*bhy + v[2]*bhz;
-      const double v2 = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
-      double vperp2 = v2 - v_par*v_par;
-      if (vperp2 < 0.0) vperp2 = 0.0;
-      v_perp = Kokkos::sqrt(vperp2);
-    }
-    const double rho_L = GCAPusherKokkos::larmor_radius(v_perp, qm_abs, Bmag);
-    const double L_B   = GCAPusherKokkos::grad_b_length(Bmag, gradBmag_mag);
-    if (rho_L > 0.0)
-      use_gca = (rho_L < L_B / oe_pusher_gca_switch);
-  }
-
-  if (use_gca) {
-    GCAPusherKokkos::GCAState st;
-    if (d_oe_gca_valid(i) > 0.5) {
-      st.X[0]  = d_oe_gca_x(i);
-      st.X[1]  = d_oe_gca_y(i);
-      st.X[2]  = d_oe_gca_z(i);
-      st.v_par = d_oe_gca_vpar(i);
-      st.mu    = (d_oe_gca_mu(i) > 0.0) ? d_oe_gca_mu(i) : 0.0;
-    } else {
-      st = GCAPusherKokkos::init_from_particle(x, v, mass, B);
-    }
-    GCAPusherKokkos::push_gca_rk4(qm, dt_full, mass, E, B, Bmag,
-                                  gradBmag, kappa, curl_b, st);
-    d_oe_gca_x(i)    = st.X[0];
-    d_oe_gca_y(i)    = st.X[1];
-    d_oe_gca_z(i)    = st.X[2];
-    d_oe_gca_vpar(i) = st.v_par;
-    d_oe_gca_mu(i)   = st.mu;
-    d_oe_gca_mode(i)  = 1.0;
-    d_oe_gca_valid(i) = 1.0;
-    d_oe_gca_chi(i)   = 0.0;
-
-    // Reconstruct full v from GC state for diagnostics + Boris fallback.
-    // Phase derived from particle ID alone (deterministic, no ntimestep
-    // capture from device). Slightly different from CPU's id+omega*dt
-    // mixing, but adequate for orbit shape + future Boris fallback.
-    const double phi_golden = 0.6180339887498949;
-    const double pid = static_cast<double>(d_particles(i).id);
-    double phase_turns = pid * phi_golden;
-    const double rand_u = phase_turns - Kokkos::floor(phase_turns);
-    GCAPusherKokkos::gca_to_particle(st, B, mass, rand_u, xnew, v);
-  } else {
-    if (oe_has_gca_state) {
-      d_oe_gca_mode(i) = 0.0;
-      d_oe_gca_valid(i) = 0.0;
-      d_oe_gca_chi(i) += qm_abs * Bmag * dt_full;
-    }
-    const int nsub = (oe_pusher_subcycles > 0) ? oe_pusher_subcycles : 1;
-    const double dt_sub = dt_full / static_cast<double>(nsub);
-    double xcur[3] = {x[0], x[1], x[2]};
-    double vcur[3] = {v[0], v[1], v[2]};
-    for (int s = 0; s < nsub; s++) {
-      // Per-subcycle E: keep whatever was set above (incl. baseline
-      // sheath at x), then refresh sheath at the current position.
-      double E_sub[3] = {E[0], E[1], E[2]};
-      if (sh_active && sh_d0_sign > 0.0) {
-        // Overwrite the baseline sheath contribution with one evaluated
-        // at xcur. (Baseline above was at x; here we evaluate at xcur
-        // each subcycle for the same physical reason as oe_boris3d.)
-        // Strip the baseline first by re-zeroing the sheath term, then
-        // re-add at xcur. Simpler: re-evaluate from a clean E.
-        E_sub[0] = 0.0; E_sub[1] = 0.0; E_sub[2] = 0.0;
-        const double d_raw = (xcur[0] - sh_srefx) * sh_nx
-                           + (xcur[1] - sh_srefy) * sh_ny
-                           + (xcur[2] - sh_srefz) * sh_nz;
-        if (d_raw > 0.0 && d_raw < sh_dmax) {
-          SheathModelsKokkos::BorodkinaSheathResult sr =
-            SheathModelsKokkos::coulette_manfredi_sheath_at_distance(
-              d_raw, sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha,
-              oe_sheath_mD_amu, 0.0);
-          E_sub[0] -= sr.emag_vpm * sh_nx;
-          E_sub[1] -= sr.emag_vpm * sh_ny;
-          E_sub[2] -= sr.emag_vpm * sh_nz;
-        }
-      }
-      BorisGridKokkos::push_velocity(qm, dt_sub, E_sub, B, vcur);
-      xcur[0] += vcur[0] * dt_sub;
-      xcur[1] += vcur[1] * dt_sub;
-      xcur[2] += vcur[2] * dt_sub;
-    }
-    v[0] = vcur[0]; v[1] = vcur[1]; v[2] = vcur[2];
-    xnew[0] = xcur[0]; xnew[1] = xcur[1]; xnew[2] = xcur[2];
-  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -2699,6 +3066,24 @@ void UpdateKokkos::backup()
 
   Kokkos::deep_copy(d_particles_backup,d_particles);
 
+  // OpenEdge Phase D: the move kernel writes the spatial-sheath customs
+  // (bank/phiprev); snapshot them so a react/retry replay starts from
+  // the pre-attempt state instead of double-applying the impulse ledger.
+  if (oe_has_sheath_customs) {
+    if (d_oe_sheath_bank_backup.extent(0) != d_oe_sheath_bank.extent(0))
+      d_oe_sheath_bank_backup = DAT::t_float_1d(
+          Kokkos::view_alloc("update:sheath_bank_backup",
+                             Kokkos::WithoutInitializing),
+          d_oe_sheath_bank.extent(0));
+    if (d_oe_sheath_phiprev_backup.extent(0) != d_oe_sheath_phiprev.extent(0))
+      d_oe_sheath_phiprev_backup = DAT::t_float_1d(
+          Kokkos::view_alloc("update:sheath_phiprev_backup",
+                             Kokkos::WithoutInitializing),
+          d_oe_sheath_phiprev.extent(0));
+    Kokkos::deep_copy(d_oe_sheath_bank_backup,d_oe_sheath_bank);
+    Kokkos::deep_copy(d_oe_sheath_phiprev_backup,d_oe_sheath_phiprev);
+  }
+
   if (surf->nsc > 0) {
     int nspec,ndiff,npist;
     nspec = ndiff = npist = 0;
@@ -2724,6 +3109,13 @@ void UpdateKokkos::restore()
   ParticleKokkos* particle_kk = (ParticleKokkos*) particle;
   Kokkos::deep_copy(particle_kk->k_particles.view_device(),d_particles_backup);
   d_particles = particle_kk->k_particles.view_device();
+
+  // OpenEdge Phase D: roll the spatial-sheath customs back with the
+  // particles (see backup()).
+  if (oe_has_sheath_customs) {
+    Kokkos::deep_copy(d_oe_sheath_bank,d_oe_sheath_bank_backup);
+    Kokkos::deep_copy(d_oe_sheath_phiprev,d_oe_sheath_phiprev_backup);
+  }
 
   if (surf->nsc > 0) {
     int nspec,ndiff,npist;

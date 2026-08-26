@@ -20,6 +20,19 @@ namespace OpenEdge {
 // KOKKOS axi/planar path is separate and already flagged unsupported).
 extern bool oe_force_axi_rz;
 
+// nvcc emits both host and device variants of KOKKOS_INLINE_FUNCTION helpers.
+// The override above intentionally exists only on the host; referencing it in
+// the device variant is ill-formed.  Device paths use their explicit
+// axisymmetric flag, matching the documented Kokkos limitation.
+KOKKOS_INLINE_FUNCTION
+bool use_axi_rz(bool axisymmetric) {
+#if defined(__CUDA_ARCH__)
+  return axisymmetric;
+#else
+  return axisymmetric || oe_force_axi_rz;
+#endif
+}
+
 // Maps a SPARTA position (xyz from particle->x or surf line endpoint) to
 // physical cylindrical (R, Z). Three SPARTA modes:
 //   2D Cartesian (legacy):  x[0]=R, x[1]=Z              (R, Z) = (x, y)
@@ -38,7 +51,7 @@ KOKKOS_INLINE_FUNCTION
 void sparta_to_RZ(const double *xyz, int dim, bool axisymmetric,
                   double &R, double &Z,
                   double x0 = 0.0, double y0 = 0.0) {
-  if (axisymmetric || oe_force_axi_rz) {   // x = Z (axis), y = R (radial)
+  if (use_axi_rz(axisymmetric)) {   // x = Z (axis), y = R (radial)
     Z = xyz[0];
     R = xyz[1];
   } else if (dim == 2) {         // 2D Cartesian (legacy)
@@ -59,7 +72,7 @@ KOKKOS_INLINE_FUNCTION
 void RZphi_force_to_sparta(double FR, double FZ, double Fphi,
                            int dim, bool axisymmetric, double phi,
                            double &fx, double &fy, double &fz) {
-  if (axisymmetric || oe_force_axi_rz) {   // SPARTA slots: x=Z, y=R, z=phi
+  if (use_axi_rz(axisymmetric)) {   // SPARTA slots: x=Z, y=R, z=phi
     fx = FZ;
     fy = FR;
     fz = Fphi;
@@ -81,7 +94,7 @@ void RZphi_force_to_sparta(double FR, double FZ, double Fphi,
 KOKKOS_INLINE_FUNCTION
 void sparta_v_to_RZphi(const double *v, int dim, bool axisymmetric,
                        double phi, double &vR, double &vZ, double &vphi) {
-  if (axisymmetric || oe_force_axi_rz) {
+  if (use_axi_rz(axisymmetric)) {
     vZ = v[0];
     vR = v[1];
     vphi = v[2];

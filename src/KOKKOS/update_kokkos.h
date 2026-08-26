@@ -95,6 +95,11 @@ class UpdateKokkos : public Update {
   t_line_1d d_lines;
   t_tri_1d d_tris;
   t_particle_1d d_particles;
+
+  // cross-field diffusion displacements (host fix -> device mover);
+  // mirrors Update::dx_cd, uploaded each step in run()
+  DAT::t_float_2d_lr d_dx_cd;
+  DAT::t_float_2d_lr::HostMirror h_dx_cd;
   t_species_1d d_species;  // OpenEdge: species data for charge/mass lookup
 
   // Base SPARTA field perturbation (fstyle)
@@ -141,40 +146,70 @@ class UpdateKokkos : public Update {
   int    oe_mesh_ntri;
   int    oe_has_mesh_b;
 
-  // OpenEdge Phase C: persistent GCA state on device. Bound to the
-  // ParticleKokkos custom-attribute device views at init time (mode=hybrid).
-  DAT::t_float_1d d_oe_gca_x;
-  DAT::t_float_1d d_oe_gca_y;
-  DAT::t_float_1d d_oe_gca_z;
-  DAT::t_float_1d d_oe_gca_vpar;
-  DAT::t_float_1d d_oe_gca_mu;
-  DAT::t_float_1d d_oe_gca_mode;
-  DAT::t_float_1d d_oe_gca_valid;
-  DAT::t_float_1d d_oe_gca_chi;
-  int oe_has_gca_state;
-  double oe_pusher_gca_switch;
+  // OpenEdge: background mesh E-field (E = -grad phi from the plasma
+  // file), flattened per-tri like the B views; consumed by oe_boris3d
+  int    oe_has_mesh_e;
+  DAT::t_float_1d d_oe_mesh_tri_er, d_oe_mesh_tri_ez, d_oe_mesh_tri_et;
 
-  // OpenEdge: Boris config
+  // build the device mesh B/E views directly from FixBackground for
+  // decks whose plasma provider is the fix (static SOLPS/SOLEDGE3X file)
+  void build_oe_mesh_from_fix();
+
+  // OpenEdge: Boris config. Hybrid/GCA (oe_pusher_mode != 0) is NOT
+  // supported on the device — the old oe_hybrid3d port encoded physics
+  // since removed from the CPU pusher (pre-selector sheath force, old
+  // switching without the Boris shell / trial-replay) and was deleted
+  // 2026-08-26; UpdateKokkos::init() errors out instead.
   int oe_pusher_subcycles;
-  int oe_pusher_mode;     // 0=Boris, 1=hybrid Boris/GCA (Pusher::PUSHER_*)
+  int oe_pusher_mode;     // Pusher::PUSHER_* (must be 0 = Boris under Kokkos)
   double oe_echarge;
+  // per-species pusher bypass (global pusher ... skip <mixture>): dust
+  // grains advect ballistically even when charged, as on the CPU
+  DAT::t_int_1d d_oe_pusher_skip;
 
-  // OpenEdge Phase D: per-cell sheath spatial-mode cache.
-  // Layout per cell: 13 columns
-  //   [0..2]  nx, ny, nz        — outward surface normal (unit, raw from Surf)
-  //   [3..5]  srefx, srefy, srefz — reference point on nearest surface
-  //   [6..8]  te, ti, ne        — cell-center plasma at the surface
-  //   [9]    bmag                — cell-center |B| (cylindrical → Cartesian)
-  //   [10]   alpha_deg          — Chodura angle between B and normal (deg)
-  //   [11]   d_max              — sheath engagement cut-off (m)
-  //   [12]   active             — 1.0 if cell has a valid sheath, 0.0 otherwise
-  // Built on host once per run() in build_oe_sheath_cache(), mirrored
-  // device-side for O(1) lookup-by-icell inside oe_boris3d / oe_hybrid3d.
-  // Static-plasma assumption: rebuilt only at run() setup; not per step.
-  DAT::tdual_float_2d_lr k_oe_sheath_cell;
-  DAT::t_float_2d_lr     d_oe_sheath_cell;
-  int    oe_has_sheath_spatial;
+  // OpenEdge Phase D (rev 2, CPU-parity): spatial-mode sheath data.
+  //
+  // Fix-background provider (production monoblock deck): per-ELEMENT
+  // coefficient cache, the device mirror of the CPU per-element cache
+  // (Pusher::build_sheath_cache_entry_3d builds each row on the host, so
+  // plasma/B queries and coefficient prep are CPU-identical). One row per
+  // surf element:
+  //   [0]  state (1 = active; 0 = inactive: no te/ne/B at the centroid)
+  //   [1]  d_max            — engagement cut-off (m), from sheath_auto_dmax
+  //   [2]  phi_total_eV  [3] lambdaD_m  [4] lmps_m  [5] inv_lD
+  //   [6]  inv_lmps  [7] K1_scaled  [8] K2  [9] phi_slow_eV
+  //   [10] phi_fast_eV  [11] e_anchor_vpm
+  // Compute provider: per-cell raw plasma (te, ti, ne, br, bt, bz); the
+  // derived quantities are computed per particle on the device exactly as
+  // the CPU per-particle path does.
+  DAT::tdual_float_2d_lr k_oe_sheath_elem;
+  DAT::t_float_2d_lr     d_oe_sheath_elem;
+  DAT::tdual_float_2d_lr k_oe_sheath_cellplasma;
+  DAT::t_float_2d_lr     d_oe_sheath_cellplasma;
+  // per-cell nearest-surf element from the sheath geom compute
+  // (ComputeNearestSurfGrid::midx_grid), refined per particle on device
+  // against the cell's csurfs — mirrors CPU pusher.cpp refinement.
+  DAT::tdual_int_1d      k_oe_midx_gcell;
+  DAT::t_int_1d          d_oe_midx_gcell;
+  int    oe_sheath_provider;   // 0 = none, 1 = fix (per-element), 2 = compute (per-cell)
+  int    oe_sheath_sgroupbit;  // surf group mask of the sheath geom compute
   double oe_sheath_mD_amu;
+  double oe_sheath_dmax_user;  // global pusher sheath dmax (0 = auto)
+  double oe_col_x0, oe_col_y0; // column axis for cyl->Cartesian rotations
+  // fix-provider per-particle fallback plasma (te/ti/ne flattened per
+  // mesh tri, same layout as the E views) for wall elements whose
+  // centroid sits outside the plasma-mesh footprint (CPU falls back to a
+  // per-particle query there).
+  DAT::t_float_1d d_oe_mesh_tri_te, d_oe_mesh_tri_ti, d_oe_mesh_tri_ne;
+  int    oe_has_mesh_plasma;
+  // per-particle customs of the spatial-mode potential impulse
+  // (sheath_bank / sheath_phiprev), rebound each move() attempt; the
+  // _backup twins snapshot them across a react/retry replay
+  DAT::t_float_1d d_oe_sheath_bank;
+  DAT::t_float_1d d_oe_sheath_phiprev;
+  DAT::t_float_1d d_oe_sheath_bank_backup;
+  DAT::t_float_1d d_oe_sheath_phiprev_backup;
+  int    oe_has_sheath_customs;
   void build_oe_sheath_cache();
 
   KKCopy<GridKokkos> grid_kk_copy;
@@ -271,15 +306,6 @@ class UpdateKokkos : public Update {
   void oe_boris3d(int i, int icell, double dt_full,
                   double *x, double *v, double *xnew,
                   double charge, double mass) const;
-
-  // OpenEdge: device-callable hybrid Boris/GCA dispatcher (Phase C3).
-  // Per-particle: chooses GCA when rho_L < L_B / pusher_gca_switch,
-  // falls back to subcycled Boris otherwise. Reads/writes the
-  // persistent GCA state (gca_x/y/z/vpar/mu/on) bound by Phase C2.
-  KOKKOS_INLINE_FUNCTION
-  void oe_hybrid3d(int i, int icell, double dt_full,
-                   double *x, double *v, double *xnew,
-                   double charge, double mass) const;
 
   KOKKOS_INLINE_FUNCTION
   int split3d(int, double*) const;

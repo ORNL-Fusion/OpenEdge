@@ -13,8 +13,6 @@ compute <ID> surface/physical/sputter <surf_group> background <plasma_fix_ID> \
     target <wall_elem> \
     projectiles <elem_list|all> \
     [mass_amu <val>] \
-    [incidence poloidal|full3d|directed3d] \
-    [visibility <custom_surf_vector>] \
     [static yes|no] \
     [impurity <mass_amu> <frac> <Zmax> <f1> ... <fZmax>] \
     [iead auto|<file.h5>|none] \
@@ -38,22 +36,6 @@ compute <ID> surface/physical/sputter <surf_group> background <plasma_fix_ID> \
   instance.
 - **`mass_amu <val>`** — background main-ion mass (amu). Used only for
   the sheath sound speed + Chankin impact energy. Default: 2.0 (D⁺).
-- **`incidence poloidal|full3d|directed3d`** — magnetic projection used
-  for the incident flux and geometric impact angle. `poloidal` is the
-  backward-compatible default and evaluates `|Br nr + Bz nz|/|B|`.
-  `full3d` evaluates `|B·n|/|B|`, including toroidal surface tilt.
-  `directed3d` is one-sided: it uses each ion slot's signed parallel flow
-  and evaluates `max(0, -sign(u∥) B̂·n)` for an outward wall normal.
-  Thus a face tilted away from the arriving field-aligned ions receives
-  zero direct source. Use `directed3d` for non-axisymmetric castellated
-  targets when the background contains signed `ions/parr_flow` data.
-- **`visibility <custom_surf_vector>`** — optional static field-line
-  visibility fraction in `[0,1]` for each surface element. The compute
-  multiplies every direct incident-flux channel by this value (`0` = fully
-  shadowed, `1` = visible). The attribute must be a floating-point custom
-  per-surface vector defined before the compute is initialized. This option
-  is intended for a periodic, flow-directed offline ray trace; it is off by
-  default.
 - **`iead auto|<path>|none`** — fold the per-cell ion energy/angle
   distribution into the yield instead of evaluating Eckstein at the
   mean impact `Y(<E>, <θ>)`. `auto` resolves
@@ -138,8 +120,7 @@ For each (plasma slot `s`, wall surface `m`):
   through the axi-aware `OpenEdge::sparta_to_RZ` helper.
 - Bohm flux `Γ_s = n_s · c_s · sin(α_B)`, with
   `c_s = √((Te+Ti)/m_bg)` (`m_bg` = `mass_amu`) and `sin(α_B)` the
-  selected B-field projection onto the wall normal. In `directed3d`
-  mode, signed per-species `u∥` selects only the incoming field direction.
+  B-field projection onto the wall inward normal.
 - Impact energy from Chankin 2014 eq. (4) (sheath drop + 2·Ti); impact
   angle from the B-field geometry.
 - Sputter yield via the per-element Eckstein coefficient set indexed by
@@ -148,37 +129,6 @@ For each (plasma slot `s`, wall surface `m`):
   still returned in `nflux_species`/`incident_*` diagnostic columns.
 - Erosion contribution `Y_s · Γ_s`, summed across slots and the virtual
   impurity channel into `erosion_flux`.
-
-### Offline visibility-mask interface
-
-A ray tracer can hand a static mask to OpenEdge through the standard
-custom-surface file format. The first non-comment line is `<N> 1`, followed
-by exactly `N` rows of `<global_surf_id> <visibility_fraction>`:
-
-```text
-# field_visibility.dat
-9358 1
-1 1.0
-2 0.0
-...
-```
-
-Load it after all surfaces and groups have been read, but before the compute
-is first initialized:
-
-```text
-custom surf create field_visible float 0 &
-            file input/field_visibility.dat 1 field_visible
-compute cpmi surface/physical/sputter wactive background pd \
-            target W projectiles D,O incidence directed3d \
-            visibility field_visible static yes erosion_flux
-```
-
-For reproducibility, the ray-trace sidecar should record the geometry and
-plasma SHA-256 hashes, periodic pitch/transform, start-point epsilon, maximum
-trace distance/wrap count, and flow/B convention. Its diagnostic CSV should
-include at least `surf_id`, centroid, outward normal, local B, `u_parallel`,
-`Bhat_dot_n`, visibility, first occluder ID, distance, and periodic wraps.
 
 ## Internals
 
@@ -256,12 +206,6 @@ Two tables are shipped:
   `<E>/Z·Te` ≈ φ̂_tot ≈ 2.86 is mass-independent).
 
 ## Known limits
-
-- **Direct incidence is not line-of-sight visibility.** `directed3d`
-  rejects an outward-facing local field direction, but it does not trace
-  the upstream field line through neighboring triangles. A separate
-  periodic visibility mask, supplied with `visibility`, is required to
-  represent geometric occlusion by an upstream monoblock.
 
 - **Eckstein-only per-projectile dispatch.** Yields use analytic
   Eckstein from `src/OPENEDGE/eckstein_sputter_data.h`. Per-pair TRIM

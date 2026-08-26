@@ -138,6 +138,13 @@ void SurfCollidePistonKokkos::pre_collide()
         sr_type_list[n] = 1;
         sr_map[n] = nprob;
         nprob++;
+      } else if (strcmp(surf->sr[n]->style,"surface/pwi") == 0 ||
+                 strcmp(surf->sr[n]->style,"surface/pwi/kk") == 0) {
+        // PWI reactions are dispatched only by the diffuse collider;
+        // tolerate the style here so PWI on diffuse walls can coexist
+        // with piston boundaries (device aborts if actually dispatched)
+        sr_type_list[n] = 2;
+        sr_map[n] = 0;
       } else {
         error->all(FLERR,"Unknown Kokkos surface reaction method");
       }

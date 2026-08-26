@@ -330,6 +330,10 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
 
 SurfReactSurfacePWI::~SurfReactSurfacePWI()
 {
+  // Kokkos KKCopy shallow copy: base state is owned by the host original;
+  // freeing it here would double-free the reaction tables
+  if (copy) return;
+
   if (rlist) {
     for (int i = 0; i < maxlist_recycle; i++) {
       OneReaction *r = &rlist[i];
