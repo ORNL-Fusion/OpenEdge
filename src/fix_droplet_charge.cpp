@@ -471,5 +471,8 @@ void FixDropletCharge::apply_charge_update()
       ++nbreak_;
     }
     split_list_.clear();
+    // fragments are appended outside the per-cell lists; see the same note
+    // in FixDropletEvaporate::spawn_evap_atoms()
+    particle->sorted = 0;
   }
 }

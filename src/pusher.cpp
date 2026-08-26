@@ -572,7 +572,8 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
       gcell = grid->sinfo[cells_tmp[icell].isplit].icell;
 
     auto *csg = dynamic_cast<ComputeNearestSurfGrid *>(cg);
-    if (csg) {
+    // stale post-rebalance cell index: skip rather than read past midx_grid
+    if (csg && gcell >= 0 && gcell < csg->nglocal) {
       int midx = csg->midx_grid[gcell];
       // Refine midx when the parent cell holds multiple surface segments
       // (e.g. near corners); pick the one closest to the PARTICLE.
@@ -1029,7 +1030,8 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
 
     // Get nearest surface element index from geometry compute
     auto *csg = dynamic_cast<ComputeNearestSurfGrid *>(cg);
-    if (csg) {
+    // stale post-rebalance cell index: skip rather than read past midx_grid
+    if (csg && gcell >= 0 && gcell < csg->nglocal) {
       int midx = csg->midx_grid[gcell];
 
       // When the parent cell contains surface elements, refine midx by
@@ -1853,7 +1855,10 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
       Grid::ChildCell *cells_bn = grid->cells;
       if (cells_bn[icell].nsplit <= 0 && cells_bn[icell].isplit >= 0)
         gcell_bn = grid->sinfo[cells_bn[icell].isplit].icell;
-      midx_bn = csg_bn->midx_grid[gcell_bn];
+      // stale post-rebalance cell index: leave midx_bn unset rather than
+      // read past midx_grid
+      if (gcell_bn >= 0 && gcell_bn < csg_bn->nglocal)
+        midx_bn = csg_bn->midx_grid[gcell_bn];
     }
   }
   // SIGNED plane distance (positive = plasma side along the surf

@@ -1273,87 +1273,94 @@ void Update::cache_plasma_particles()
 
     // Boltzmann ne correction: ne_local = ne_upstream * exp(-phi/Te)
     // where phi = sheath potential drop at particle distance from wall
-    if (csg && pf.temp_e > 0.0 && pf.dens_e > 0.0) {
+    // Safety net: bound icell before touching cells[]. A particle appended
+    // after the last sort can survive a rebalance holding a pre-balance
+    // index; the emitting fixes clear Particle::sorted to prevent that.
+    if (csg && pf.temp_e > 0.0 && pf.dens_e > 0.0 &&
+        particles[i].icell >= 0 &&
+        particles[i].icell < grid->nlocal + grid->nghost) {
       int icell = particles[i].icell;
       int gcell = icell;
       if (cells[icell].nsplit <= 0 && cells[icell].isplit >= 0)
         gcell = grid->sinfo[cells[icell].isplit].icell;
 
-      int midx = csg->midx_grid[gcell];
+      if (gcell >= 0 && gcell < csg->nglocal) {
+        int midx = csg->midx_grid[gcell];
 
-      // refine to nearest surface at particle position (same as pusher)
-      Grid::ChildCell *pc = &cells[gcell];
-      if (pc->nsurf > 0) {
-        const int sbit = csg->sgroupbit;
-        surfint *cs = pc->csurfs;
-        double best_d = 1.0e20;
-        int best_m = -1;
-        for (int j = 0; j < pc->nsurf; j++) {
-          int m = static_cast<int>(cs[j]);
-          double d;
-          if (dim == 2) {
-            if (!(surf->lines[m].mask & sbit)) continue;
-            Surf::Line *ln = &surf->lines[m];
-            d = std::fabs((x[0]-ln->p1[0])*ln->norm[0] +
-                          (x[1]-ln->p1[1])*ln->norm[1]);
-          } else {
-            if (!(surf->tris[m].mask & sbit)) continue;
-            Surf::Tri *tr = &surf->tris[m];
-            d = std::fabs((x[0]-tr->p1[0])*tr->norm[0] +
-                          (x[1]-tr->p1[1])*tr->norm[1] +
-                          (x[2]-tr->p1[2])*tr->norm[2]);
+        // refine to nearest surface at particle position (same as pusher)
+        Grid::ChildCell *pc = &cells[gcell];
+        if (pc->nsurf > 0) {
+          const int sbit = csg->sgroupbit;
+          surfint *cs = pc->csurfs;
+          double best_d = 1.0e20;
+          int best_m = -1;
+          for (int j = 0; j < pc->nsurf; j++) {
+            int m = static_cast<int>(cs[j]);
+            double d;
+            if (dim == 2) {
+              if (!(surf->lines[m].mask & sbit)) continue;
+              Surf::Line *ln = &surf->lines[m];
+              d = std::fabs((x[0]-ln->p1[0])*ln->norm[0] +
+                            (x[1]-ln->p1[1])*ln->norm[1]);
+            } else {
+              if (!(surf->tris[m].mask & sbit)) continue;
+              Surf::Tri *tr = &surf->tris[m];
+              d = std::fabs((x[0]-tr->p1[0])*tr->norm[0] +
+                            (x[1]-tr->p1[1])*tr->norm[1] +
+                            (x[2]-tr->p1[2])*tr->norm[2]);
+            }
+            if (d < best_d) { best_d = d; best_m = m; }
           }
-          if (d < best_d) { best_d = d; best_m = m; }
-        }
-        if (best_m >= 0) midx = best_m;
-      }
-
-      if (midx >= 0) {
-        // get surface normal and reference point
-        double sh_nx, sh_ny, sh_nz;
-        double sref[3];
-        if (dim == 2) {
-          Surf::Line *ln = &surf->lines[midx];
-          sh_nx = ln->norm[0]; sh_ny = ln->norm[1]; sh_nz = 0.0;
-          sref[0] = 0.5*(ln->p1[0]+ln->p2[0]);
-          sref[1] = 0.5*(ln->p1[1]+ln->p2[1]);
-          sref[2] = 0.0;
-        } else {
-          Surf::Tri *tr = &surf->tris[midx];
-          sh_nx = tr->norm[0]; sh_ny = tr->norm[1]; sh_nz = tr->norm[2];
-          sref[0] = (tr->p1[0]+tr->p2[0]+tr->p3[0]) / 3.0;
-          sref[1] = (tr->p1[1]+tr->p2[1]+tr->p3[1]) / 3.0;
-          sref[2] = (tr->p1[2]+tr->p2[2]+tr->p3[2]) / 3.0;
+          if (best_m >= 0) midx = best_m;
         }
 
-        const double d_particle = std::fabs(
-          (x[0]-sref[0])*sh_nx + (x[1]-sref[1])*sh_ny + (x[2]-sref[2])*sh_nz);
+        if (midx >= 0) {
+          // get surface normal and reference point
+          double sh_nx, sh_ny, sh_nz;
+          double sref[3];
+          if (dim == 2) {
+            Surf::Line *ln = &surf->lines[midx];
+            sh_nx = ln->norm[0]; sh_ny = ln->norm[1]; sh_nz = 0.0;
+            sref[0] = 0.5*(ln->p1[0]+ln->p2[0]);
+            sref[1] = 0.5*(ln->p1[1]+ln->p2[1]);
+            sref[2] = 0.0;
+          } else {
+            Surf::Tri *tr = &surf->tris[midx];
+            sh_nx = tr->norm[0]; sh_ny = tr->norm[1]; sh_nz = tr->norm[2];
+            sref[0] = (tr->p1[0]+tr->p2[0]+tr->p3[0]) / 3.0;
+            sref[1] = (tr->p1[1]+tr->p2[1]+tr->p3[1]) / 3.0;
+            sref[2] = (tr->p1[2]+tr->p2[2]+tr->p3[2]) / 3.0;
+          }
 
-        const double te = pf.temp_e;
-        const double ti = pf.temp_i;
-        const double ne = pf.dens_e;
-        const double bmag = std::sqrt(bx*bx + by*by + bz*bz);
+          const double d_particle = std::fabs(
+            (x[0]-sref[0])*sh_nx + (x[1]-sref[1])*sh_ny + (x[2]-sref[2])*sh_nz);
 
-        double alpha_deg = 90.0;
-        if (bmag > 0.0) {
-          double bvec[3] = {bx, by, bz};
-          double nvec[3] = {sh_nx, sh_ny, sh_nz};
-          SheathModels::ChoduraMetrics cm =
-            SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
-          alpha_deg = cm.alpha_deg;
-        }
+          const double te = pf.temp_e;
+          const double ti = pf.temp_i;
+          const double ne = pf.dens_e;
+          const double bmag = std::sqrt(bx*bx + by*by + bz*bz);
 
-        const double d_max = sheath_auto_dmax(te, ti, ne, bmag, alpha_deg,
-                                              sheath_mD_amu, sheath_dmax);
-        if (d_particle > 0.0 && d_particle < d_max) {
-          SheathModels::BorodkinaSheathResult sr =
-            SheathModels::coulette_manfredi_sheath_at_distance(
-              d_particle, te, ti, ne, bmag,
-              alpha_deg, sheath_mD_amu, 0.0);
+          double alpha_deg = 90.0;
+          if (bmag > 0.0) {
+            double bvec[3] = {bx, by, bz};
+            double nvec[3] = {sh_nx, sh_ny, sh_nz};
+            SheathModels::ChoduraMetrics cm =
+              SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
+            alpha_deg = cm.alpha_deg;
+          }
 
-          // Boltzmann: ne_local = ne * exp(-phi/Te), phi = esheath_eV (positive)
-          if (sr.esheath_eV > 0.0 && te > 0.0) {
-            ne_vec[i] = ne * std::exp(-sr.esheath_eV / te);
+          const double d_max = sheath_auto_dmax(te, ti, ne, bmag, alpha_deg,
+                                                sheath_mD_amu, sheath_dmax);
+          if (d_particle > 0.0 && d_particle < d_max) {
+            SheathModels::BorodkinaSheathResult sr =
+              SheathModels::coulette_manfredi_sheath_at_distance(
+                d_particle, te, ti, ne, bmag,
+                alpha_deg, sheath_mD_amu, 0.0);
+
+            // Boltzmann: ne_local = ne * exp(-phi/Te), phi = esheath_eV (positive)
+            if (sr.esheath_eV > 0.0 && te > 0.0) {
+              ne_vec[i] = ne * std::exp(-sr.esheath_eV / te);
+            }
           }
         }
       }

@@ -1156,6 +1156,7 @@ void FixVolumeChemAdas::end_of_step_no_average()
     if (nfix_update_custom_local)
       modify->update_custom(particle->nlocal - 1, 0.0, 0.0, 0.0, zero_v);
   }
+  if (!deferred_particles.empty()) particle->sorted = 0;
 
   // Mode A: optional stop-when-exhausted across the global source-species pool.
   // Only required when non-source-species particles remain (e.g. impurities);

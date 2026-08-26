@@ -624,4 +624,9 @@ void FixDropletEvaporate::spawn_evap_atoms(int idrop, double area,
       modify->update_custom(particle->nlocal - 1, 0.0, 0.0, 0.0, zero_v);
     }
   }
+
+  // The appended atoms are not in the per-cell lists. Without this, a later
+  // fix balance trusts sorted==1, skips its re-sort, and leaves them behind
+  // holding pre-balance cell indices.
+  particle->sorted = 0;
 }

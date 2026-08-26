@@ -30,9 +30,10 @@ class ComputeNearestSurfGrid : public Compute {
  public:
   int *midx_grid;           // nearest-surface array index per cell
   int sgroupbit;            // surface group bitmask (for particle-level refinement)
+  int nglocal;              // midx_grid extent; consumers must bounds-check
+                            // cell indices that may be stale after a rebalance
 
  protected:
-  int nglocal;
   int groupbit;
   int nvalue;
   int *value;
