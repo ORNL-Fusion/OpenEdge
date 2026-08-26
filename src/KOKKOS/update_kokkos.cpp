@@ -304,6 +304,18 @@ void UpdateKokkos::init()
   oe_has_mesh_plasma = 0;
   oe_has_sheath_customs = 0;
 
+  // Spatial-sheath engagement diagnostics (device twins of the CPU
+  // sheath_diag_* counters; `global pusher ... dump yes` enables them).
+  oe_sheath_diag = (pusher->pusher_dump_flag &&
+                    sheath_flag && !sheath_kick) ? 1 : 0;
+  if (oe_sheath_diag) {
+    d_oe_shd_counts = DAT::t_int_1d("oe_shd_counts",3);
+    d_oe_shd_esum = Kokkos::View<double*,DeviceType>("oe_shd_esum",2);
+  }
+  // Per-particle sheath trace (parity debugging): OE_SHEATH_TRACE_ID=<id>
+  oe_trace_id = getenv("OE_SHEATH_TRACE_ID")
+    ? atol(getenv("OE_SHEATH_TRACE_ID")) : -1;
+
   // OpenEdge: unported pusher/sheath modes fail loudly instead of
   // silently diverging. The old device hybrid/GCA port (oe_hybrid3d)
   // encoded physics since removed from the CPU pusher (pre-selector
@@ -647,6 +659,12 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
   }
 
   h_error_flag() = 0;
+
+  // OpenEdge: reset the spatial-sheath engagement diagnostics for this step
+  if (oe_sheath_diag) {
+    Kokkos::deep_copy(d_oe_shd_counts,0);
+    Kokkos::deep_copy(d_oe_shd_esum,0.0);
+  }
 
   // move/migrate iterations
 
@@ -1006,6 +1024,32 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
   nscheck_running += nscheck_one;
   nscollide_running += nscollide_one;
   surf->nreact_running += surf->nreact_one;
+
+  // OpenEdge: spatial-sheath engagement diagnostics — same format and
+  // gating as the CPU print at the end of Update::move().
+  if (oe_sheath_diag && (ntimestep % pusher->pusher_dump_every == 0)) {
+    auto h_cnt = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
+                                                     d_oe_shd_counts);
+    auto h_es  = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
+                                                     d_oe_shd_esum);
+    long loc[3] = {(long)h_cnt(0),(long)h_cnt(1),(long)h_cnt(2)};
+    long glob[3] = {0,0,0};
+    double es_loc = h_es(0), es_glob = 0.0;
+    double em_loc = h_es(1), em_glob = 0.0;
+    MPI_Reduce(loc,glob,3,MPI_LONG,MPI_SUM,0,world);
+    MPI_Reduce(&es_loc,&es_glob,1,MPI_DOUBLE,MPI_SUM,0,world);
+    MPI_Reduce(&em_loc,&em_glob,1,MPI_DOUBLE,MPI_MAX,0,world);
+    if (comm->me == 0) {
+      FILE *fp = screen ? screen : logfile;
+      if (fp) {
+        const double emean = glob[1] > 0 ? es_glob / glob[1] : 0.0;
+        fprintf(fp, "  [kk] sheath step " BIGINT_FORMAT " [spatial]: "
+                "near-wall=%ld engaged=%ld turnrefl=%ld "
+                "|E_sheath| mean=%.3e max=%.3e V/m\n",
+                ntimestep, glob[0], glob[1], glob[2], emean, em_glob);
+      }
+    }
+  }
 
   if (nsurf_tally) {
     for (int m = 0; m < nsurf_tally; m++) {
@@ -2724,6 +2768,7 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
   double sh_sref[3] = {0.0, 0.0, 0.0};
   double sh_dmax = 0.0;
   SheathModelsKokkos::CMCoeffs sh_c = {};
+  int sh_midx_dbg = -1, sh_cache_dbg = 0;
 
   if (oe_sheath_provider && gcell >= 0 &&
       gcell < (int) d_oe_midx_gcell.extent(0)) {
@@ -2750,6 +2795,7 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
     }
 
     if (midx >= 0) {
+      sh_midx_dbg = midx;
       // Geometry from the chosen element: RAW normal + centroid (raw, not
       // per-cell flipped — avoids sign flips in split cells; CPU-identical)
       sh_nx = d_tris[midx].norm[0];
@@ -2778,6 +2824,7 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
         sh_c.phi_fast_eV  = d_oe_sheath_elem(midx,10);
         sh_c.e_anchor_vpm = d_oe_sheath_elem(midx,11);
         sh_active = true;
+        sh_cache_dbg = 1;
       } else {
         // Per-particle path: compute provider (cell plasma), or a
         // fix-provider element whose centroid had no plasma — the CPU
@@ -2841,6 +2888,18 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
       }
     }
   }
+
+  if (oe_sheath_diag && sh_active)
+    Kokkos::atomic_inc(&d_oe_shd_counts(0));
+
+  const bool sh_trace =
+      (oe_trace_id >= 0 && (long) d_particles[i].id == oe_trace_id);
+  if (sh_trace)
+    printf("SHTRACE kk  step %lld id %ld pre: active=%d cache=%d midx=%d "
+           "dmax=%.9e n=(%.9e,%.9e,%.9e) sref=(%.9e,%.9e,%.9e)\n",
+           (long long) ntimestep, oe_trace_id, (int) sh_active, sh_cache_dbg,
+           sh_midx_dbg, sh_dmax, sh_nx, sh_ny, sh_nz,
+           sh_sref[0], sh_sref[1], sh_sref[2]);
 
   // Spatial-mode customs: lifetime energy bank (cap) and phi reference
   // (pays element/profile switches between moves). Mirrors CPU
@@ -2925,6 +2984,12 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
             sh_c, Kokkos::fmax(d_new, 0.0));
         double dKE_J =
             Kokkos::fabs(charge) * oe_echarge * (phi_new - phi_old);
+        if (sh_trace)
+          printf("SHTRACE kk  step %lld sub %d eng: d_old=%.9e d_new=%.9e "
+                 "phi_old=%.9e phi_new=%.9e dKE=%.9e bank=%.9e\n",
+                 (long long) ntimestep, isub, d_old, d_new,
+                 phi_old, phi_new, dKE_J,
+                 have_bank ? d_oe_sheath_bank(i) : -1.0);
         // lifetime ledger cap: net energy given may never exceed Z e phi_tot
         if (have_bank && dKE_J > 0.0) {
           const double room =
@@ -2948,11 +3013,20 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
             xcur[1] -= (d_new - d_old) * sh_ny;
             xcur[2] -= (d_new - d_old) * sh_nz;
             sh_d_fin = d_old;
+            if (oe_sheath_diag)
+              Kokkos::atomic_inc(&d_oe_shd_counts(2));
           }
           const double dvn = vn_new - vn;
           vcur[0] += dvn * sh_nx;
           vcur[1] += dvn * sh_ny;
           vcur[2] += dvn * sh_nz;
+          if (oe_sheath_diag) {
+            Kokkos::atomic_inc(&d_oe_shd_counts(1));
+            const double emag_diag = SheathModelsKokkos::emag_at_distance(
+                sh_c, Kokkos::fmax(Kokkos::fmin(d_old, d_new), 0.0));
+            Kokkos::atomic_add(&d_oe_shd_esum(0), emag_diag);
+            Kokkos::atomic_max(&d_oe_shd_esum(1), emag_diag);
+          }
         }
         // remember phi at the endpoint for next move's reference payment
         if (have_phiprev)

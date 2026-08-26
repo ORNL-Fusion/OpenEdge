@@ -634,7 +634,13 @@ void Update::init()
   // profile) can change between moves, leaving a small circulation; cap the
   // lifetime net gain at Z e phi_tot, the most a sheath can give an ion.
   sheath_bank_custom = -1;
-  if (sheath_flag && !sheath_kick && !sheath_boundary) {
+  // A/B diagnostic switch: OE_SHEATH_NO_LEDGER disables the spatial-mode
+  // bank/phiprev customs on BOTH the CPU and Kokkos paths (the movers
+  // handle absent vectors: geometric phi_old, no lifetime cap).
+  const int sheath_no_ledger = getenv("OE_SHEATH_NO_LEDGER") != nullptr;
+  if (sheath_no_ledger && comm->me == 0 && screen)
+    fprintf(screen,"OE_SHEATH_NO_LEDGER: spatial-sheath bank/phiprev customs disabled\n");
+  if (!sheath_no_ledger && sheath_flag && !sheath_kick && !sheath_boundary) {
     sheath_bank_custom = particle->find_custom((char *) "sheath_bank");
     if (sheath_bank_custom < 0)
       sheath_bank_custom = particle->add_custom((char *) "sheath_bank", 1, 0);
@@ -645,7 +651,7 @@ void Update::init()
   // for free (the pump that filled the bank cap for band-dwelling ions).
   // Stored as phi+1 V; 0 = unset (newborn / newly ionized).
   sheath_phiprev_custom = -1;
-  if (sheath_flag && !sheath_kick && !sheath_boundary) {
+  if (!sheath_no_ledger && sheath_flag && !sheath_kick && !sheath_boundary) {
     sheath_phiprev_custom = particle->find_custom((char *) "sheath_phiprev");
     if (sheath_phiprev_custom < 0)
       sheath_phiprev_custom = particle->add_custom((char *) "sheath_phiprev", 1, 0);
@@ -2942,9 +2948,9 @@ post_move_bookkeeping:
         else
           // Spatial mode: report the per-subcycle E-field seen by particles.
           fprintf(fp, "  sheath step " BIGINT_FORMAT " [spatial]: "
-                  "near-wall=%ld engaged=%ld  |E_sheath| mean=%.3e "
-                  "max=%.3e V/m\n",
-                  ntimestep, glob[0], glob[1], emean, emax_glob);
+                  "near-wall=%ld engaged=%ld turnrefl=%ld "
+                  "|E_sheath| mean=%.3e max=%.3e V/m\n",
+                  ntimestep, glob[0], glob[1], glob[2], emean, emax_glob);
       }
     }
 

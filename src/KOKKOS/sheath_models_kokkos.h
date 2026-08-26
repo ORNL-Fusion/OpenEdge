@@ -201,6 +201,31 @@ CMCoeffs prepare_coulette_manfredi(double te_eV, double ti_eV,
 }
 
 /* ----------------------------------------------------------------------
+   Exact port of the CM branch of SheathModels::sheath_emag_at_distance
+   — |E|(d) in V/m. Used only for the sheath engagement diagnostics
+   (same "equivalent field" the CPU impulse reports).
+------------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+double emag_at_distance(const CMCoeffs &c, double dist_m)
+{
+  const double d = Kokkos::fmax(dist_m, 0.0);
+  const double s = d * c.inv_lD;
+  const double e_slow_cm = c.phi_slow_eV * c.K1_scaled * c.inv_lD *
+                           Kokkos::exp(-c.K1_scaled * s);
+  const double e_fast    = c.phi_fast_eV * c.K2 * c.inv_lD *
+                           Kokkos::exp(-c.K2 * s);
+  if (s <= S_BLEND_START()) return Kokkos::fabs(e_slow_cm + e_fast);
+  const double d_past_anchor = (s - S_BLEND_START()) * c.lambdaD_m;
+  const double e_slow_mps =
+      c.e_anchor_vpm * Kokkos::exp(-d_past_anchor * c.inv_lmps);
+  const double blend = (s >= S_BLEND_END()) ? 1.0
+                     : (s - S_BLEND_START()) / (S_BLEND_END() - S_BLEND_START());
+  const double e_slow = (1.0 - blend) * e_slow_cm + blend * e_slow_mps;
+  return Kokkos::fabs(e_slow + e_fast);
+}
+
+/* ----------------------------------------------------------------------
    Exact port of the Coulette-Manfredi branch of
    SheathModels::sheath_phi_at_distance: positive potential drop [V] at
    distance d from the wall, with the blended Chodura tail past s = 60.

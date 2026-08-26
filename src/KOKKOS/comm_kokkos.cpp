@@ -137,7 +137,12 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
   k_nsend.modify_host();
   k_nsend.sync_device();
 
-  particle_kk->sync(Device,PARTICLE_MASK);
+  // OpenEdge: pack_custom_kokkos reads the custom device views — sync
+  // them too, not just the particle structs
+  if (ncustom)
+    particle_kk->sync(Device,PARTICLE_MASK|CUSTOM_MASK);
+  else
+    particle_kk->sync(Device,PARTICLE_MASK);
   grid_kk->sync(Device,CELL_MASK);
 
   d_cells = grid_kk->k_cells.view_device();
@@ -191,11 +196,28 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
 
   particle->grow(nrecv);
 
+  // OpenEdge BUGFIX (2026-08-26, gate-6 sheath parity): grow() above can
+  // REALLOCATE the particle and custom views, but particle_kk_copy (whose
+  // captured views unpack_custom_kokkos writes through) was copied at the
+  // top of this function. The unpack kernel then wrote the received
+  // particles' custom attributes into the orphaned old allocations and
+  // the live arrays kept grow's zero-fill — migrating particles lost all
+  // persistent custom state (the spatial-sheath phiprev/bank ledgers,
+  // plasma cache, pweight) whenever a grow coincided with a migration.
+  // Refresh the functor copy after grow so it captures the live views.
+  if (ncustom) {
+    particle_kk->update_class_variables();
+    particle_kk_copy.copy(particle_kk);
+  }
+
   // perform irregular communication
   // if no custom attributes, append recv particles directly to particle list
   // else receive into rbuf, unpack particles one by one via unpack_custom()
 
-  particle_kk->sync(Device,PARTICLE_MASK);
+  if (ncustom)
+    particle_kk->sync(Device,PARTICLE_MASK|CUSTOM_MASK);
+  else
+    particle_kk->sync(Device,PARTICLE_MASK);
   d_particles = particle_kk->k_particles.view_device();
 
   if (gpu_aware_flag && !ncustom) {
@@ -228,7 +250,12 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
 
   }
 
-  particle_kk->modify(Device,PARTICLE_MASK);
+  // OpenEdge: the unpack kernel also wrote the received particles'
+  // custom attributes on the device — mark them modified too
+  if (ncustom)
+    particle_kk->modify(Device,PARTICLE_MASK|CUSTOM_MASK);
+  else
+    particle_kk->modify(Device,PARTICLE_MASK);
   d_particles = t_particle_1d(); // destroy reference to reduce memory use
   d_plist = {};
 

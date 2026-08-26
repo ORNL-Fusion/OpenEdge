@@ -1199,6 +1199,7 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
     + (xcur[1] - sh_sref[1]) * sh_ny
     + (xcur[2] - sh_sref[2]) * sh_nz;
     sh_d0_sign = (sh_d0 >= 0.0) ? 1.0 : -1.0;
+    sheath_diag_nactive++;   // 3D near-wall count (2D counts in its own block)
   }
 
   // Physics-derived sheath cut-off distance and Coulette-Manfredi
@@ -1213,6 +1214,18 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
                     sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
                     update->sheath_mD_amu, 0.0);
   }
+
+  // Per-particle sheath trace (parity debugging): OE_SHEATH_TRACE_ID=<id>
+  static const long sh_trace_id =
+      getenv("OE_SHEATH_TRACE_ID") ? atol(getenv("OE_SHEATH_TRACE_ID")) : -1;
+  const bool sh_trace =
+      (sh_trace_id >= 0 && (long) particle->particles[i].id == sh_trace_id);
+  if (sh_trace)
+    printf("SHTRACE cpu step %lld id %ld pre: active=%d cache=%d midx=%d "
+           "dmax=%.9e n=(%.9e,%.9e,%.9e) sref=(%.9e,%.9e,%.9e)\n",
+           (long long) update->ntimestep, sh_trace_id, sh_active,
+           sh_from_cache, sh_midx, sh_d_max, sh_nx, sh_ny, sh_nz,
+           sh_sref[0], sh_sref[1], sh_sref[2]);
 
   // spatial-mode lifetime energy ledger + total potential for its cap
   double *sh_bank_vec = (update->sheath_bank_custom >= 0)
@@ -1406,6 +1419,11 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
             sh_coeffs, std::max(d_new, 0.0));
         double dKE_J =
             std::fabs(charge) * update->echarge * (phi_new - phi_old);
+        if (sh_trace)
+          printf("SHTRACE cpu step %lld sub %d eng: d_old=%.9e d_new=%.9e "
+                 "phi_old=%.9e phi_new=%.9e dKE=%.9e bank=%.9e\n",
+                 (long long) update->ntimestep, isub, d_old, d_new,
+                 phi_old, phi_new, dKE_J, sh_bank_vec ? sh_bank_vec[i] : -1.0);
         // lifetime ledger cap: net energy given may never exceed Z e phi_tot
         if (sh_bank_vec && dKE_J > 0.0) {
           const double room =
@@ -1431,6 +1449,7 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
             xcur[1] -= (d_new - d_old) * sh_ny;
             xcur[2] -= (d_new - d_old) * sh_nz;
             sh_d_fin = d_old;
+            sheath_diag_nreflect++;   // spatial-mode turning point
           }
           const double dvn = vn_new - vn;
           vcur[0] += dvn * sh_nx;

@@ -211,6 +211,14 @@ class UpdateKokkos : public Update {
   DAT::t_float_1d d_oe_sheath_phiprev_backup;
   int    oe_has_sheath_customs;
   void build_oe_sheath_cache();
+  // Spatial-sheath engagement diagnostics (device twins of the CPU
+  // sheath_diag_* counters; gated on `global pusher ... dump yes`).
+  // [0]=nactive (moves with a live sheath) [1]=nengage (subcycles with a
+  // nonzero impulse) [2]=nreflect (turning-point reflections)
+  int    oe_sheath_diag;
+  DAT::t_int_1d d_oe_shd_counts;
+  Kokkos::View<double*, DeviceType> d_oe_shd_esum;   // [0]=sum|E| [1]=max|E|
+  long   oe_trace_id;   // OE_SHEATH_TRACE_ID per-particle trace (-1 = off)
 
   KKCopy<GridKokkos> grid_kk_copy;
   KKCopy<DomainKokkos> domain_kk_copy;
