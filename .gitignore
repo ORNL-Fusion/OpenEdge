@@ -121,3 +121,8 @@ database/iead/IEAD_REGENERATE.md
 examples/workflows/particulates/st40_lithium_powder_dropper/*.html
 examples/workflows/particulates/cat_liquid_metal_divertor/generated/
 examples/workflows/particulates/cat_liquid_metal_divertor/jeremy_cases_generated*/
+
+# Local planning/status notes — never tracked
+/GPU_PORTING*
+/*_TOLERANCES.md
+/*handoff*.md
