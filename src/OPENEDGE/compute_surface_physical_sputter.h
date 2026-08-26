@@ -80,6 +80,13 @@ class ComputeSurfacePhysicalSputter : public Compute {
   int proj_slot_lo, proj_slot_hi;
   // legacy option kept for input compatibility
   double mass_amu;
+  // Magnetic incidence model: 0=poloidal (legacy), 1=full3d magnitude,
+  // 2=directed3d one-sided using signed species u_parallel.
+  int incidence_mode;
+  // Optional static field-line visibility fraction [0,1] from a custom
+  // per-surface DOUBLE vector (typically produced by an offline ray trace).
+  std::string visibility_attr;
+  int visibility_index = -1;
   // roughness correction: yields evaluated at max(0, theta - rough_dm)
   double rough_dm = 0.0;
 

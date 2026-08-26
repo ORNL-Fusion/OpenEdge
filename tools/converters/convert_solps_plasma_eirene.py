@@ -324,16 +324,25 @@ def _read_geqdsk_bfield(gfile: Path):
     with gfile.open("r", encoding="utf-8", errors="ignore") as f:
         data = geqdsk.read(f)
 
-    nx, ny = int(data["nx"]), int(data["ny"])
-    rmin = float(data["rleft"])
-    rmax = rmin + float(data["rdim"])
-    zmin = float(data["zmid"]) - float(data["zdim"]) / 2.0
-    zmax = float(data["zmid"]) + float(data["zdim"]) / 2.0
+    def _get(key, default=None):
+        # freeqdsk < 0.4 returns a dict; newer returns a GEQDSKFile object
+        if hasattr(data, "get"):
+            return data.get(key, default)
+        try:
+            return data[key]
+        except Exception:
+            return getattr(data, key, default)
+
+    nx, ny = int(_get("nx")), int(_get("ny"))
+    rmin = float(_get("rleft"))
+    rmax = rmin + float(_get("rdim"))
+    zmin = float(_get("zmid")) - float(_get("zdim")) / 2.0
+    zmax = float(_get("zmid")) + float(_get("zdim")) / 2.0
     rs = np.linspace(rmin, rmax, nx)
     zs = np.linspace(zmin, zmax, ny)
     r2d, z2d = np.meshgrid(rs, zs)
 
-    psi_arr = data.get("psi", data.get("psirz", None))
+    psi_arr = _get("psi", _get("psirz", None))
     if psi_arr is None:
         raise RuntimeError("GEQDSK does not contain psi/psirz array")
     flux2d = np.array(psi_arr, dtype=np.float64).reshape((ny, nx))
@@ -357,18 +366,18 @@ def _read_geqdsk_bfield(gfile: Path):
     # case where gyromotion looks reversed, double-check this block first.
     br = -dpsidZ / safe_r
     bz =  dpsidR / safe_r
-    bt = (float(data["bcentr"]) * float(data["rcentr"])) / safe_r
-    psib = float(data.get("sibdry", data.get("ssibry", 0.0)))
+    bt = (float(_get("bcentr")) * float(_get("rcentr"))) / safe_r
+    psib = float(_get("sibdry", _get("ssibry", 0.0)) or 0.0)
     # magnetic-axis psi: take EFIT's exact value when present, else the
     # grid extremum farthest from psib (derive_psi_axis rule)
-    psi_axis = data.get("simagx", data.get("ssimag", data.get("simag")))
+    psi_axis = _get("simagx", _get("ssimag", _get("simag")))
     if psi_axis is None:
         psi_axis = flux2d.flat[np.abs(flux2d - psib).argmax()]
     return {
         "r": rs, "z": zs, "br": br, "bt": bt, "bz": bz,
         "equ_r": rs.copy(), "equ_z": zs.copy(), "equ_psi": flux2d,
-        "btf": float(data["bcentr"]),
-        "rtf": float(data["rcentr"]),
+        "btf": float(_get("bcentr")),
+        "rtf": float(_get("rcentr")),
         "psib": psib, "psi_axis": float(psi_axis),
     }
 

@@ -8,8 +8,13 @@
 
     Derived from fix_surface_emit_source but stripped of:
       iflux / flux_index / flux_thresh / source_thresh
-      nlaunch / nlaunch_total modes (pweight-weighted launches)
+      nlaunch per-surf mode
       ComputeSurfacePhysicalSputter dependency
+    nlaunch_total N (SLAVE mode only): emit exactly N markers per window,
+    each with pweight = injected_atoms/N (same weighting convention as
+    fix surface/emit/source), instead of atoms/fnum markers of weight fnum.
+    Decouples marker statistics from fnum so physical (unboosted) rates
+    still emit smoothly. Requires fix particle/weight.
     Use fix_surface_emit_source when your emission is driven by a per-surf PMI
     flux compute; use this fix when you want a fixed puff rate (in particles
     per step) from a predefined puff surface.
@@ -53,6 +58,10 @@ class FixSurfaceEmitPuff : public FixEmit {
   // vanish collides since last emission). R=0 reduces to a pure external
   // source; velocity/species sampling still comes from the mixture.
   double slave_R, slave_gamma;
+  // nlaunch_total mode (SLAVE only): fixed marker count per window with
+  // pweight = atoms/N, emit/source-style. 0 = legacy fnum weighting.
+  int nlaunch_total_mode, nlaunch_total;
+  int pweight_index, pweight_ewhich;
   char *slave_scstr;                          // comma-separated vanish collide IDs
   std::vector<class SurfCollideVanish *> slave_sc;
   std::vector<double> slave_lastread;         // per-collide cum weight at last read

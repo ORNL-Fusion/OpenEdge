@@ -1,4 +1,4 @@
-# Migration cookbook: 2D-Cart → SPARTA native axisymmetric
+# Migration cookbook: 2D-Cart → native axisymmetric
 
 Moving a legacy `2D-Cart-mis-named-axi` test to true axi. Pilot was
 `test_diii_d_neutrals` (commit history from 2026-04-19 → 2026-04-20).
@@ -8,7 +8,7 @@ Moving a legacy `2D-Cart-mis-named-axi` test to true axi. Pilot was
 - **Axi**: `test_diii_d_neutrals` (pilot)
 - **Cart 2D (legacy, awaiting migration)**: `test_west_axi`,
   `test_west_neutrals`, `test_west_timedep`, `test_d3d_walldyn`,
-  `test_d3d_mateja`, `test_evaporation`, `test_solps_coupling`,
+  `test_d3d_mateja`, `test_evaporation`, `wip/solps_coupling`,
   `test_gca`, `test_neutral_transport`
 - **3D Cart (unaffected)**: `test_west_3d`, etc.
 - **True 1D slab (unaffected)**: `test_slab_stangeby2000`
@@ -47,7 +47,7 @@ python3 tools/converters/convert_solps_plasma.py <SOLPS_RUN> \
   `equilibrium <file>` keyword and any `bfield.h5` arg — the mesh-only
   `plasma.h5` carries everything.
 - All B-field / E-field source columns from `compute plasma/fields` stay
-  named `bx by bz` — the compute projects to the right SPARTA slots
+  named `bx by bz` — the compute projects to the right storage slots
   automatically (commit dd6a746).
 
 ### 3. Re-tune `fnum`

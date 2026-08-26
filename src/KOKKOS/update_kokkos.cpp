@@ -75,6 +75,7 @@ enum{NOFIELD,CFIELD,PFIELD,GFIELD};             // several files
 
 #define VAL_1(X) X
 #define VAL_2(X) VAL_1(X), VAL_1(X)
+#define VAL_3(X) VAL_2(X), VAL_1(X)
 
 /* ---------------------------------------------------------------------- */
 
@@ -88,7 +89,7 @@ UpdateKokkos::UpdateKokkos(SPARTA *sparta) : Update(sparta),
   sc_kk_piston_copy{VAL_2(KKCopy<SurfCollidePistonKokkos>(sparta))},
   sc_kk_transparent_copy{VAL_2(KKCopy<SurfCollideTransparentKokkos>(sparta))},
   blist_active_copy{VAL_2(KKCopy<ComputeBoundaryKokkos>(sparta))},
-  slist_active_copy{VAL_2(KKCopy<ComputeSurfKokkos>(sparta))},
+  slist_active_copy{VAL_3(KKCopy<ComputeSurfKokkos>(sparta))},
   tmp_compute_boundary_kk(sparta),
   tmp_compute_surf_kk(sparta)
 {
@@ -305,14 +306,17 @@ void UpdateKokkos::init()
   if (pusher->pusher_mode == Pusher::PUSHER_HYBRID &&
       pusher->gca_x_custom >= 0 && pusher->gca_y_custom >= 0 &&
       pusher->gca_z_custom >= 0 && pusher->gca_vpar_custom >= 0 &&
-      pusher->gca_mu_custom >= 0 && pusher->gca_on_custom >= 0) {
+      pusher->gca_mu_custom >= 0 && pusher->gca_mode_custom >= 0 &&
+      pusher->gca_valid_custom >= 0 && pusher->gca_chi_custom >= 0) {
     auto *pkk = (ParticleKokkos*) particle;
     d_oe_gca_x    = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_x_custom]].k_view.d_view;
     d_oe_gca_y    = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_y_custom]].k_view.d_view;
     d_oe_gca_z    = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_z_custom]].k_view.d_view;
     d_oe_gca_vpar = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_vpar_custom]].k_view.d_view;
     d_oe_gca_mu   = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_mu_custom]].k_view.d_view;
-    d_oe_gca_on   = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_on_custom]].k_view.d_view;
+    d_oe_gca_mode  = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_mode_custom]].k_view.d_view;
+    d_oe_gca_valid = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_valid_custom]].k_view.d_view;
+    d_oe_gca_chi   = pkk->k_edvec.h_view[particle->ewhich[pusher->gca_chi_custom]].k_view.d_view;
     oe_has_gca_state = 1;
   }
 }
@@ -2539,7 +2543,7 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt_full,
   if (have_grad && Bmag > 0.0 && qm_abs > 0.0 && oe_has_gca_state) {
     const double bhx = B[0]/Bmag, bhy = B[1]/Bmag, bhz = B[2]/Bmag;
     double v_perp = 0.0;
-    if (d_oe_gca_on(i) > 0.5) {
+    if (d_oe_gca_valid(i) > 0.5) {
       const double mu_eff = (d_oe_gca_mu(i) > 0.0) ? d_oe_gca_mu(i) : 0.0;
       const double vperp2 = (2.0 * mu_eff * Bmag) / mass;
       v_perp = (vperp2 > 0.0) ? Kokkos::sqrt(vperp2) : 0.0;
@@ -2558,7 +2562,7 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt_full,
 
   if (use_gca) {
     GCAPusherKokkos::GCAState st;
-    if (d_oe_gca_on(i) > 0.5) {
+    if (d_oe_gca_valid(i) > 0.5) {
       st.X[0]  = d_oe_gca_x(i);
       st.X[1]  = d_oe_gca_y(i);
       st.X[2]  = d_oe_gca_z(i);
@@ -2574,7 +2578,9 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt_full,
     d_oe_gca_z(i)    = st.X[2];
     d_oe_gca_vpar(i) = st.v_par;
     d_oe_gca_mu(i)   = st.mu;
-    d_oe_gca_on(i)   = 1.0;
+    d_oe_gca_mode(i)  = 1.0;
+    d_oe_gca_valid(i) = 1.0;
+    d_oe_gca_chi(i)   = 0.0;
 
     // Reconstruct full v from GC state for diagnostics + Boris fallback.
     // Phase derived from particle ID alone (deterministic, no ntimestep
@@ -2586,7 +2592,11 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt_full,
     const double rand_u = phase_turns - Kokkos::floor(phase_turns);
     GCAPusherKokkos::gca_to_particle(st, B, mass, rand_u, xnew, v);
   } else {
-    if (oe_has_gca_state) d_oe_gca_on(i) = 0.0;
+    if (oe_has_gca_state) {
+      d_oe_gca_mode(i) = 0.0;
+      d_oe_gca_valid(i) = 0.0;
+      d_oe_gca_chi(i) += qm_abs * Bmag * dt_full;
+    }
     const int nsub = (oe_pusher_subcycles > 0) ? oe_pusher_subcycles : 1;
     const double dt_sub = dt_full / static_cast<double>(nsub);
     double xcur[3] = {x[0], x[1], x[2]};
@@ -2627,7 +2637,6 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt_full,
 
 /* ---------------------------------------------------------------------- */
 
-void UpdateKokkos::bounce_set(bigint ntimestep)
 void UpdateKokkos::tally_set(bigint ntimestep)
 {
   Update::tally_set(ntimestep);
@@ -2654,7 +2663,7 @@ void UpdateKokkos::tally_set(bigint ntimestep)
   }
 
   if (nsurf_tally > KOKKOS_MAX_SLIST)
-    error->all(FLERR,"Kokkos currently only supports two instances of compute surface");
+    error->all(FLERR,"Kokkos currently only supports three instances of compute surface");
 
   if (nsurf_tally) {
     for (i = 0; i < nsurf_tally; i++) {

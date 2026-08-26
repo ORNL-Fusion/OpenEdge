@@ -1,30 +1,26 @@
 ---
 myst:
   html_meta:
-    "description": "OpenEdge — a plasma–material interaction package for SPARTA"
+    "description": "OpenEdge — kinetic plasma-edge and plasma-material interaction simulation"
 ---
 
 # OpenEdge
 
-OpenEdge is a plasma-material interaction package for the
-[SPARTA DSMC framework](https://sparta.github.io/). It extends SPARTA
-with fusion-edge plasma backgrounds, impurity transport, sheath and
-surface-interaction models, neutral chemistry, liquid-metal models, and
-coupling utilities for outer-loop workflows.
+OpenEdge is a kinetic plasma-edge and plasma-material interaction code.
+It combines prescribed plasma backgrounds with charged and neutral particle
+transport, sheath physics, atomic processes, plasma-wall interactions,
+particulate models, liquid-metal models, and coupling utilities.
 
 ## Description
 
-OpenEdge is a SPARTA *package* — it reuses SPARTA's input script,
-particle / grid / surface infrastructure, and MPI + Kokkos parallelism.
-This manual documents only what OpenEdge adds on top. For base commands
-(`species`, `create_box`, `create_particles`, `read_surf`, `run`,
-`dump`, `fix balance`, …) see the
-[SPARTA manual](https://sparta.github.io/doc/Manual.html).
+This manual is the user reference for OpenEdge. It documents both the core
+input language (`species`, `create_box`, `create_particles`, `read_surf`,
+`run`, `dump`, and related commands) and the OpenEdge physics commands. A
+separate manual is not required to build or run a supported OpenEdge case.
 
-In practice, read this manual the same way you would read the SPARTA
-manual: SPARTA owns the base grammar and simulation loop, while
-OpenEdge adds new `fix`, `compute`, `global`, converter, and coupling
-features on top of that base.
+OpenEdge uses the open-source SPARTA particle, mesh, surface, MPI, and Kokkos
+runtime as its foundation. That implementation provenance matters for
+licensing and citation, but it is not a second user interface.
 
 ## Package summary
 
@@ -45,8 +41,8 @@ OpenEdge currently adds the following major capability groups:
 
 ## Input-script style
 
-OpenEdge input decks should be read as SPARTA input decks with
-OpenEdge-specific additions. A typical setup has the form
+An OpenEdge input deck is an ordered sequence of commands. A typical setup
+has the form
 
 ```text
 read_grid ...
@@ -63,18 +59,17 @@ fix ... surface/emit/recycle ...
 run ...
 ```
 
-The documentation follows that same style where possible:
+The command pages follow the same structure:
 
-- command names are written in SPARTA grammar (`fix background`,
-  `fix volume/chem/adas`, `global pusher`)
+- command names use their exact OpenEdge input form (`fix background`,
+  `fix volume/chem/adas`, and `global pusher`)
 - syntax blocks show the exact input form first
 - sections after syntax explain behavior, restrictions, defaults, and
   examples
 
 ## Build
 
-OpenEdge must be built out-of-source as a SPARTA package
-(`-DPKG_OPENEDGE=ON`).
+OpenEdge must be built out of source with `-DPKG_OPENEDGE=ON`.
 
 ::::{tab-set}
 
@@ -106,8 +101,8 @@ The binary is `~/buildOpenEdge/src/spa_mpi` (or `spa_kokkos_cuda`).
 
 - **Tokamak edge impurity transport** with a plasma background loaded
   from converter-generated `plasma.h5`.
-- **Wall recycling and PMI/PWI studies** with OpenEdge wall fixes
-  attached to SPARTA surface groups.
+- **Wall recycling and PMI/PWI studies** with OpenEdge wall models
+  attached to selected surface groups.
 - **Neutral-source closure and source-term generation** for coupled
   SOLPS or Gkeyll workflows.
 - **Liquid-metal plasma-facing component studies** with evaporation and
@@ -137,8 +132,10 @@ Cartesian for full-vessel runs or non-axisymmetric features.
 
 ## Manual organization
 
-The remainder of this manual is grouped by command family and data path:
+The remainder of this manual is grouped by input-language and physics family:
 
+- **Core commands** documents domain, grid, surface, particle, control-flow,
+  run, and output commands used by OpenEdge decks.
 - **Fixes** documents runtime models attached through `fix`.
 - **Computes** documents OpenEdge field, geometry, and diagnostic
   computes.
@@ -146,31 +143,36 @@ The remainder of this manual is grouped by command family and data path:
   models.
 - **Globals** documents shared runtime controls such as `global pusher`.
 - **Input data** documents converter outputs and common file formats.
-- **Coupling** documents the library API and external-driver workflow.
 - **Performance** collects notes on scalability and grid strategy.
 
 ## Citing OpenEdge
 
-If you use OpenEdge in published work, please cite the two methods
-papers *(to be added)* and the SPARTA reference. A BibTeX snippet will
-appear here once the companion papers are finalised.
+If you use OpenEdge in published work, cite the OpenEdge methods papers
+*(to be added)* and the foundational runtime reference. A BibTeX snippet
+will appear here once the companion papers are finalised.
+
+```{toctree}
+:caption: Core input language
+:maxdepth: 2
+
+manual_index
+```
 
 ```{toctree}
 :caption: Fixes
 :maxdepth: 1
 
 fixes/background
-fixes/bfield_grid
-fixes/bfield_particle
 fixes/coulomb_background
 fixes/coulomb_binary
 fixes/cross_field_diffusion
-fixes/droplet_charge
-fixes/droplet_drag
-fixes/droplet_emit
-fixes/droplet_evaporate
-fixes/droplet_viscous
-fixes/efield_grid
+fixes/material
+particulate
+fixes/particulate_charge
+fixes/particulate_drag
+fixes/particulate_emit
+fixes/particulate_thermal
+fixes/bfield_particle
 fixes/efield_particle
 fixes/force_gravity
 fixes/force_thermal
@@ -200,6 +202,7 @@ fixes/volume_emissivity
 :maxdepth: 1
 
 fixes/surf_collide_diffuse
+fixes/surf_collide_particulate_bounce
 fixes/surf_react_surface_pwi
 ```
 
@@ -221,15 +224,9 @@ database_schema
 ```
 
 ```{toctree}
-:caption: Coupling
-:maxdepth: 1
-
-coupling/library_api
-```
-
-```{toctree}
 :caption: Performance
 :maxdepth: 1
 
 performance/grid_refinement
+migration/axi_cookbook
 ```

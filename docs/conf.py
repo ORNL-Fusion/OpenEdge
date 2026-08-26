@@ -59,12 +59,6 @@ html_theme_options = {
     "use_edit_page_button": False,
     "collapse_navigation": False,
     "navigation_with_keys": True,
-    "external_links": [
-        {
-            "name": "SPARTA Manual",
-            "url": "https://sparta.github.io/doc/Manual.html",
-        },
-    ],
     "header_links_before_dropdown": 6,
     "navbar_align": "left",
     "navbar_end": ["theme-switcher", "navbar-icon-links"],

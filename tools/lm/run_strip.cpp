@@ -8,7 +8,7 @@
 // Usage:
 //   ./run_strip ld_tg_o.dat out.csv [key=value ...]
 //
-// Knobs (key=value, all optional; defaults match the test_solps_coupling deck):
+// Knobs (key=value, all optional; defaults match the liquid-metal coupling workflow):
 //   h0=1e-3     U0=0.5      Bs=0.5      alpha=5        width=0.05
 //   Tin=600     Nx=201      Ny=51       evap=1
 //   m_ion_amu=2.014   (deuterium plasma; for adatom Bohm flux)

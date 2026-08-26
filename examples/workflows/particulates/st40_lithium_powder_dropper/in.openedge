@@ -1,11 +1,14 @@
 # ST40 Li powder dropper: shot 14449 source in a SOLPS-13589 background.
-variable    dt        equal 2.0e-6
+variable    dt        index 2.0e-6
 # demo length: 0.5 s of shot time — grains fall in and the Li plume
 # establishes. The full 14449 source history needs nsteps 2500000 (5 s).
-variable    nsteps    equal 250000
-variable    ndump     equal 25000
-variable    nemit     equal 200
-variable    balswitch index 1500000
+variable    nsteps    index 250000
+variable    ndump     index 25000
+variable    nemit     index 200
+# Use particle-count balancing for the first 60% of either the demo or a
+# command-line-overridden full run, then switch to time balancing.
+variable    balswitch equal floor(0.6*v_nsteps)
+variable    nrest     equal v_nsteps-v_balswitch
 variable    outdir    index output
 
 shell       mkdir ${outdir}
@@ -100,5 +103,4 @@ stats_style step cpu np nscoll nsreact c_cnt[1] c_cnt[2] c_cnt[3] c_cnt[4] c_cnt
 run         ${balswitch}
 unfix       fbal
 fix fbal    balance 1000 1.1 rcb time
-variable    nrest equal ${nsteps}-${balswitch}
 run         ${nrest}

@@ -70,9 +70,15 @@ FixSurfaceEmitPuff::FixSurfaceEmitPuff(SPARTA *sparta, int narg, char **arg) :
   stop_latched = 0;
   slave_R = slave_gamma = 0.0;
   slave_scstr = NULL;
+  nlaunch_total_mode = 0;
+  nlaunch_total = 0;
+  pweight_index = pweight_ewhich = -1;
 
   int iarg = 4;
   options(narg-iarg,&arg[iarg]);
+
+  if (nlaunch_total_mode && npmode != SLAVE)
+    error->all(FLERR,"fix surface/emit/puff nlaunch_total requires slave mode");
 
   if (!surf->exist)
     error->all(FLERR,"Fix emit/surf/puff requires surface elements");
@@ -118,6 +124,14 @@ void FixSurfaceEmitPuff::init()
   FixEmit::init();
 
   fnum = update->fnum;
+
+  if (nlaunch_total_mode) {
+    pweight_index = particle->find_custom((char *) "pweight");
+    if (pweight_index < 0)
+      error->all(FLERR,"fix surface/emit/puff nlaunch_total requires "
+                 "fix particle/weight (pweight custom attribute)");
+    pweight_ewhich = particle->ewhich[pweight_index];
+  }
 
   nspecies = particle->mixture[imix]->nspecies;
   fraction = particle->mixture[imix]->fraction;
@@ -372,6 +386,7 @@ void FixSurfaceEmitPuff::perform_task()
   // summed once globally; the one-step lag is inherent (emission happens
   // at start-of-step, absorption during the previous move).
   double slave_ntarget_total = 0.0;
+  double slave_w_emit = 0.0;
   if (npmode == SLAVE) {
     double dsum_local = 0.0;
     for (size_t k = 0; k < slave_sc.size(); k++) {
@@ -381,8 +396,17 @@ void FixSurfaceEmitPuff::perform_task()
     }
     double escaped_atoms = 0.0;
     MPI_Allreduce(&dsum_local,&escaped_atoms,1,MPI_DOUBLE,MPI_SUM,world);
-    slave_ntarget_total = (slave_R * escaped_atoms +
-                           slave_gamma * update->dt * nevery) / update->fnum;
+    double atoms_total = slave_R * escaped_atoms +
+                         slave_gamma * update->dt * nevery;
+    if (nlaunch_total_mode) {
+      // emit/source-style weighting: exactly nlaunch_total markers per
+      // window, each carrying atoms_total/N physical atoms (pweight)
+      if (atoms_total <= 0.0) return;
+      slave_ntarget_total = static_cast<double>(nlaunch_total);
+      slave_w_emit = atoms_total / static_cast<double>(nlaunch_total);
+    } else {
+      slave_ntarget_total = atoms_total / update->fnum;
+    }
   }
 
   int i,m,n,pcell,isurf,ninsert,nactual,isp,ispecies,ntri,id;
@@ -637,6 +661,12 @@ void FixSurfaceEmitPuff::perform_task()
         if (nfix_update_custom)
           modify->update_custom(particle->nlocal-1,temp_thermal,
                                 temp_rot,temp_vib,vstream);
+
+        // nlaunch_total mode: stamp the physical weight AFTER update_custom
+        // (fix particle/weight defaults new markers to fnum). Re-fetch
+        // edvec each write: add_particle may have grown the custom arrays.
+        if (nlaunch_total_mode)
+          particle->edvec[pweight_ewhich][particle->nlocal-1] = slave_w_emit;
       }
       nsingle += nactual;
     }
@@ -701,6 +731,15 @@ int FixSurfaceEmitPuff::option(int narg, char **arg)
     strcpy(slave_scstr,arg[3]);
     npmode = SLAVE;
     return 4;
+  }
+
+  if (strcmp(arg[0],"nlaunch_total") == 0) {
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/puff command");
+    nlaunch_total = atoi(arg[1]);
+    if (nlaunch_total <= 0)
+      error->all(FLERR,"fix surface/emit/puff nlaunch_total must be > 0");
+    nlaunch_total_mode = 1;
+    return 2;
   }
 
   if (strcmp(arg[0],"stop_at_np") == 0) {

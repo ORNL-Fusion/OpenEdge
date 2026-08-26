@@ -18,6 +18,7 @@
 #include "eckstein_sputter.h"
 #include "iead_table.h"
 #include "database_paths.h"
+#include "surface_incidence.h"
 
 #include <H5Cpp.h>
 #include <algorithm>
@@ -76,7 +77,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
     // set is treated as a positional surface.h5 path (legacy).
     static const char *kws[] = {
         "target", "projectiles", "compound", "conc", "tsurf", "roughness_dm",
-        "projectile_slots", "static", "mass_amu",
+        "projectile_slots", "static", "mass_amu", "incidence", "visibility",
         "sheath_waveform",
         "nflux_species", "incident_angle_species", "incident_energy_species",
         "sputter_yield_species", "sputter_flux_species",
@@ -130,6 +131,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
   proj_slot_lo = 2;
   proj_slot_hi = std::numeric_limits<int>::max();
   mass_amu = 2.0;  // default: deuterium (used for Bohm sound speed)
+  incidence_mode = 0;  // legacy poloidal projection
   sheath_waveform_index = -1;
   sheath_frequency_hz = 0.0;
   sheath_phase_samples = 0;
@@ -196,6 +198,24 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       if (strcmp(arg[iarg+1],"yes") == 0) static_cache = 1;
       else if (strcmp(arg[iarg+1],"no") == 0) static_cache = 0;
       else error->all(FLERR,"static must be yes or no");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"incidence") == 0) {
+      if (iarg+1 >= narg)
+        error->all(FLERR,"incidence needs poloidal|full3d|directed3d");
+      if (strcmp(arg[iarg+1],"poloidal") == 0 ||
+          strcmp(arg[iarg+1],"legacy") == 0)
+        incidence_mode = 0;
+      else if (strcmp(arg[iarg+1],"full3d") == 0)
+        incidence_mode = 1;
+      else if (strcmp(arg[iarg+1],"directed3d") == 0)
+        incidence_mode = 2;
+      else
+        error->all(FLERR,"incidence must be poloidal, full3d, or directed3d");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"visibility") == 0) {
+      if (iarg+1 >= narg)
+        error->all(FLERR,"visibility needs a custom per-surf vector name");
+      visibility_attr = arg[iarg+1];
       iarg += 2;
     } else if (strcmp(arg[iarg],"mass_amu") == 0) {
       if (iarg+1 >= narg) error->all(FLERR,"mass_amu needs value");
@@ -1423,6 +1443,42 @@ void ComputeSurfacePhysicalSputter::init()
       "compute surface/physical/sputter: need a B-field — use a background "
       "fix with mesh B (mesh/vtx_b*), an equilibrium, or constant br/bz/bt");
 
+  visibility_index = -1;
+  if (!visibility_attr.empty()) {
+    visibility_index = surf->find_custom((char *) visibility_attr.c_str());
+    if (visibility_index < 0)
+      error->all(FLERR,
+        "compute surface/physical/sputter: visibility custom surf attribute not found");
+    if (surf->etype[visibility_index] != 1 || surf->esize[visibility_index] != 0)
+      error->all(FLERR,
+        "compute surface/physical/sputter: visibility attribute must be a DOUBLE vector");
+  }
+
+  if (comm->me == 0) {
+    const char *name = (incidence_mode == 0) ? "poloidal" :
+                       (incidence_mode == 1) ? "full3d" : "directed3d";
+    if (screen) fprintf(screen,"PMI magnetic incidence: %s\n",name);
+    if (logfile) fprintf(logfile,"PMI magnetic incidence: %s\n",name);
+    if (!visibility_attr.empty()) {
+      if (screen) fprintf(screen,"PMI field-line visibility: s_%s\n",
+                          visibility_attr.c_str());
+      if (logfile) fprintf(logfile,"PMI field-line visibility: s_%s\n",
+                           visibility_attr.c_str());
+    }
+  }
+  if (incidence_mode == 2) {
+    auto has_nonzero = [](const std::vector<double> &v) {
+      return std::any_of(v.begin(),v.end(),[](double x) {
+        return std::isfinite(x) && x != 0.0;
+      });
+    };
+    if (!has_nonzero(mesh_ions_upar) && !has_nonzero(mesh_upar) &&
+        !has_nonzero(ions_parr_flow) && !has_nonzero(parr_flow))
+      error->warning(FLERR,
+        "compute surface/physical/sputter: directed3d incidence has no "
+        "nonzero signed parallel-flow data; direct incident flux will be zero");
+  }
+
   distributed = surf->distributed;
   if (!firstflag) return;
   firstflag = 0;
@@ -1605,11 +1661,17 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
   }
   double *tsurf_vec = (tsurf_index >= 0) ?
       surf->edvec[surf->ewhich[tsurf_index]] : nullptr;
+  double *visibility_vec = (visibility_index >= 0) ?
+      surf->edvec[surf->ewhich[visibility_index]] : nullptr;
 
   for (int i = 0; i < nsown; i++) {
     int m = distributed ? i : me + i*nprocs;
     const int in_group = (dimension == 2) ? (lines[m].mask & groupbit) : (tris[m].mask & groupbit);
     if (!in_group) continue;
+
+    double visibility = visibility_vec ? visibility_vec[i] : 1.0;
+    if (!std::isfinite(visibility)) visibility = 0.0;
+    visibility = std::min(1.0,std::max(0.0,visibility));
 
     // Surface element centroid in cylindrical (R,Z). Helper picks the
     // SPARTA slot mapping (Cart 2D x=R, axi 2D x=Z, 3D Cartesian).
@@ -1740,17 +1802,14 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
         if (have_bt) bt_loc = bt_sum / wsum;
       }
     }
-    const double bmag = std::sqrt(br_loc*br_loc + bt_loc*bt_loc + bz_loc*bz_loc);
-
-    // B-field incidence angle on wall surface.
-    // Use only poloidal field (Br, Bz) dotted with the poloidal surface
-    // normal (nr, nz).  The toroidal field Bt is tangent to flux surfaces
-    // and does not drive particles into the wall.  Including Bt would
-    // create a spurious dependence on the toroidal triangulation angle.
-    const double bp_dot_n = br_loc * nr_surf + bz_loc * nz_surf;
-    double sin_alpha = 0.0;
-    if (bmag > 0.0)
-      sin_alpha = std::fabs(bp_dot_n) / bmag;
+    const auto incidence_model =
+      static_cast<OpenEdge::SurfaceIncidenceMode>(incidence_mode);
+    // Preserve the axisymmetric projection separately.  A /wall_flux/
+    // scatter is normal flux on its source 2D wall; non-legacy modes map
+    // that flux to the actual 3D face by the ratio of the two projections.
+    const double legacy_sin_alpha = OpenEdge::surface_incidence_sine(
+      OpenEdge::SurfaceIncidenceMode::POLOIDAL,
+      br_loc, bt_loc, bz_loc, nr_surf, nt_surf, nz_surf, 0.0);
 
     // Per-species density/temperature lookup
     auto species_plasma = [&](int s, double &ni, double &ti) {
@@ -1772,6 +1831,31 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
         ni = interp2D(dens_i, r, z);
         if (!temp_i.empty()) ti = interp2D(temp_i, r, z);
       }
+    };
+
+    // Signed parallel velocity is positive along B. Prefer the per-ion
+    // value, then fall back to the bulk/main-ion value. This sign is what
+    // distinguishes a face tilted toward the arriving ions from one tilted
+    // away from them in directed3d mode.
+    auto bulk_parallel_flow = [&]() -> double {
+      if (mesh_cell >= 0) {
+        if (mesh_cell < static_cast<int>(mesh_upar.size()))
+          return mesh_upar[mesh_cell];
+      } else if (!parr_flow.empty()) {
+        return interp2D(parr_flow, r, z);
+      }
+      return 0.0;
+    };
+    auto species_parallel_flow = [&](int s) -> double {
+      if (mesh_cell >= 0) {
+        if (mesh_nion > 0 && s < mesh_nion && !mesh_ions_upar.empty()) {
+          const size_t off = static_cast<size_t>(s) * mesh_ncell + mesh_cell;
+          if (off < mesh_ions_upar.size()) return mesh_ions_upar[off];
+        }
+      } else if (has_multi_ion && s < nspec && !ions_parr_flow.empty()) {
+        return interp3D(ions_parr_flow, s, r, z);
+      }
+      return bulk_parallel_flow();
     };
 
     std::fill(gamma_n.begin(), gamma_n.end(), 0.0);
@@ -1841,6 +1925,11 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
       species_plasma(s, ni, ti);
       if (ni <= 0.0) continue;
 
+      const double upar_s = species_parallel_flow(s);
+      const double sin_alpha = OpenEdge::surface_incidence_sine(
+        incidence_model, br_loc, bt_loc, bz_loc,
+        nr_surf, nt_surf, nz_surf, upar_s);
+
       const int z_inc = (s >= 0 && s < static_cast<int>(ion_charge_state_z.size())) ?
         std::max(1,ion_charge_state_z[s]) : 1;
       const double te_eV = (std::isfinite(te_loc) && te_loc > 0.0) ? te_loc : 0.0;
@@ -1852,6 +1941,8 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
       // of Y(E,theta), so the smoothness gain dominates the accuracy hit.
       const double ti_for_E = wf_te_ti_ok ? ti_bulk : ti;
       const double ti_eV = (std::isfinite(ti_for_E) && ti_for_E > 0.0) ? ti_for_E : 0.0;
+      const double cs_arg = (te_eV + ti_eV) * QE / (mass_amu * AMU);
+      const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
 
       // Per-species wall-face flux. When /wall_flux/ is present in
       // plasma.h5, query the scatter at the segment centroid (R, Z)
@@ -1892,19 +1983,26 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
         }
         if (wsum > 0.0) {
           const double gw = gsum / wsum;
-          g = (gw > 0.0) ? gw : 0.0;     // outflow only feeds sputter
+          if (gw > 0.0) {
+            if (incidence_mode == 0) {
+              g = gw;
+            } else if (legacy_sin_alpha > 1.0e-12) {
+              g = gw * sin_alpha / legacy_sin_alpha;
+            } else {
+              // The source wall has zero axisymmetric projection, so its
+              // normal-flux sample cannot be rescaled. Reconstruct locally.
+              g = ni * cs * sin_alpha;
+            }
+          }
         } else {
           // No source within cutoff: fall back to Bohm if we have it.
-          const double cs_arg = (te_eV + ti_eV) * QE / (mass_amu * AMU);
-          const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
           g = ni * cs * sin_alpha;
         }
       } else {
         // Legacy Bohm: cs = sqrt((Te + Ti) / mi); Stangeby ch. 2.
-        const double cs_arg = (te_eV + ti_eV) * QE / (mass_amu * AMU);
-        const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
         g = ni * cs * sin_alpha;
       }
+      g *= visibility;
       gamma_n[s] = g;
 
       // alpha_B = grazing angle from surface plane (diagnostic output).
@@ -2044,6 +2142,9 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
     // Virtual background impurity sputtering (not in plasma.h5)
     // Uses n_e from the plasma to synthesize impurity density at each wall element.
     if (has_impurity) {
+      const double impurity_sin_alpha = OpenEdge::surface_incidence_sine(
+        incidence_model, br_loc, bt_loc, bz_loc,
+        nr_surf, nt_surf, nz_surf, bulk_parallel_flow());
       // Get n_e and Te, Ti at this wall element
       double ne_loc = 0.0;
       if (mesh_cell >= 0) {
@@ -2079,11 +2180,11 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
           const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
 
           // Bohm flux
-          const double g_imp = n_imp * cs * sin_alpha;
+          const double g_imp = n_imp * cs * impurity_sin_alpha * visibility;
 
           // Sputter yield: analytic Eckstein or HDF5 table.
           // Yamamura theta measured from the surface normal (see main loop).
-          const double cos_theta = std::min(1.0, std::max(0.0, sin_alpha));
+          const double cos_theta = std::min(1.0, std::max(0.0, impurity_sin_alpha));
           const double theta_imp_deg = std::acos(cos_theta) * 180.0 / M_PI;
           const double ys = yield_lookup(E_eck, theta_imp_deg);
           sput_total += g_imp * ys;

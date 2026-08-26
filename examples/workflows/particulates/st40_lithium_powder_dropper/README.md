@@ -22,8 +22,15 @@ drag and gravity, ablate into Li, and feed Li charge-state transport.
 mpirun -np 4 /path/to/spa_mpi -in in.openedge
 ```
 
-The deck runs a 0.5 s demo slice of the shot (`nsteps 250000`); for the
-full 5 s source history run with `-var nsteps 2500000`.
+The deck runs a 0.5 s demo slice of the shot (`nsteps 250000`). It uses
+particle-count load balancing for the first 60% of the requested duration,
+then switches to time-based balancing. For the full 5 s source history, use:
+
+```sh
+mpirun -np 4 /path/to/spa_mpi -var nsteps 2500000 -in in.openedge
+```
+
+The balance-switch step scales with the requested duration automatically.
 
 The source timing follows shot 14449, while transport uses a fixed background
 from shot 13589. The case is therefore suitable for qualitative plume and

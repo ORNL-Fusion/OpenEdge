@@ -929,6 +929,24 @@ void FixVolumeChemAdas::post_run()
       "    CX: " BIGINT_FORMAT "\n"
       "    dissoc: " BIGINT_FORMAT "\n",
       id, atomic_number, nlist, nall, nI, nR, nE, nD);
+    for (int i = 0; i < nlist; i++) {
+      if (global_tally[i] == 0) continue;
+      OneReaction *r = &rlist[i];
+      const char *tag = (r->type == IONIZATION)    ? "I:ioniz"  :
+                         (r->type == RECOMBINATION) ? "R:recomb" :
+                         (r->type == EXCHANGE)      ? "E:CX"     :
+                         (r->type == DISSOCIATION)  ? "D:dissoc" : "?";
+      if (r->nproduct == 2)
+        fprintf(fp, "    reaction %s --> %s + %s [%s]: " BIGINT_FORMAT "\n",
+                r->id_reactants[0], r->id_products[0], r->id_products[1],
+                tag, global_tally[i]);
+      else if (r->nproduct == 1)
+        fprintf(fp, "    reaction %s --> %s [%s]: " BIGINT_FORMAT "\n",
+                r->id_reactants[0], r->id_products[0], tag, global_tally[i]);
+      else
+        fprintf(fp, "    reaction %s [%s]: " BIGINT_FORMAT "\n",
+                r->id_reactants[0], tag, global_tally[i]);
+    }
   };
   print_block(screen);
   print_block(logfile);

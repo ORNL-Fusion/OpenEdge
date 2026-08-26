@@ -17,7 +17,7 @@ surface/physical/sputter = style name of this compute :l
 group-ID = group ID of surface elements to operate on :l
 background fix-ID = "fix background"_fix_background.html supplying the plasma :l
 zero or more keyword/value pairs may be appended :l
-keyword = {target} or {projectiles} or {tsurf} or {us} or {compound} or {conc} or {roughness_dm} or {projectile_slots} or {static} or {mass_amu} or {iead} or {sheath_waveform} or {erosion_flux} or {sputter_flux_species} or {nflux_species} or {incident_angle_species} or {incident_energy_species} or {sputter_yield_species} or {sputter_flux_total} or {sputter_rate_total} or {erosion_rate} :l
+keyword = {target} or {projectiles} or {tsurf} or {us} or {compound} or {conc} or {roughness_dm} or {projectile_slots} or {static} or {mass_amu} or {incidence} or {visibility} or {iead} or {sheath_waveform} or {erosion_flux} or {sputter_flux_species} or {nflux_species} or {incident_angle_species} or {incident_energy_species} or {sputter_yield_species} or {sputter_flux_total} or {sputter_rate_total} or {erosion_rate} :l
   {target} value = element of the wall material (e.g. W, Li, B)
   {projectiles} value = comma-separated projectile elements, or {all}
     (every ion element in the plasma background)
@@ -32,6 +32,12 @@ keyword = {target} or {projectiles} or {tsurf} or {us} or {compound} or {conc} o
   {static} value = {yes} or {no} = compute yields once per background
     generation ({yes}) or every invocation ({no})
   {mass_amu} value = background ion mass in amu for the sheath energy model
+  {incidence} value = {poloidal}, {full3d}, or {directed3d}; the default
+    {poloidal} preserves the legacy axisymmetric B projection, {full3d}
+    includes toroidal B and surface tilt, and {directed3d} additionally
+    uses signed per-ion parallel flow to retain only incoming flux
+  {visibility} value = custom floating-point per-surf vector containing a
+    static field-line visibility fraction from 0 (shadowed) to 1 (visible)
   {iead} value = ion energy-angle distribution table set or {none} :pre
 :ule
 

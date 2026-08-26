@@ -11,7 +11,7 @@ plasma.h5 (`mesh/vtx_b*` on the unstructured mesh plus the embedded
 |--------|-----------|-------------|
 | `convert_solps_plasma.py` | SOLPS-ITER (`b2fgmtry`, `b2fstate`) | Reads SOLPS binary-text files directly (no quixote). Outputs plasma + B-field + multi-ion species + Eirene triangular mesh. |
 | `convert_oedge_plasma.py` | OEDGE/DIVIMP (`.nc`) | Reads OEDGE NetCDF background file. Requires a companion `.equ` equilibrium file for B-field reconstruction. |
-| `convert_s3x_plasma.py` | SOLEDGE3X (HDF5) | Reads SOLEDGE3X triangle-based mesh/data files. |
+| `convert_s3x_plasma.py` | SOLEDGE3X (HDF5) | Reads SOLEDGE3X zone/triangle data and native staggered wall fluxes. |
 | `convert_solps_heatflux.py` | SOLPS-ITER | Extracts wall heat flux from SOLPS face-centred fluxes. |
 | `gen_plasma_sweep.py` | single plasma.h5 | Generates plasma parameter sweeps. |
 | `create_surf_from_solps.py` | SOLPS mesh | Extracts wall geometry from SOLPS mesh for SPARTA surface files. |
@@ -38,6 +38,8 @@ plasma.h5 (`mesh/vtx_b*` on the unstructured mesh plus the embedded
 | `ions/dens` | `(nspec, nz, nr)` | Per-species ion density |
 | `ions/temp` | `(nspec, nz, nr)` | Per-species ion temperature |
 | `ions/parr_flow*` | `(nspec, nz, nr)` | Per-species parallel flow + components |
+| `wall_flux/gamma_i` | `(nspec, nwall)` | Native per-species particle flux into the source wall [m⁻² s⁻¹] |
+| `wall_flux/r,z` | `(nwall,)` | Wall-flux sample positions [m] |
 
 ## Quick-start examples
 
@@ -61,26 +63,24 @@ python convert_oedge_plasma.py d3d-204953-bkg-v25.nc \
 
 ### SOLEDGE3X
 
-The SOLEDGE3X converter is called as a library function rather than a
-CLI tool.  It requires four HDF5 input files from a SOLEDGE3X run:
+Pass the SOLEDGE3X run directory to the CLI. A fluid-neutral run can be
+converted directly from `mesh.h5`, `metric_raptorX.h5`, `plasmaFinal.h5`,
+and `refParam_raptorX.h5`; no SOLEDGE3X post-treatment package is required.
 
-```python
-from convert_s3x_plasma import interpolate_and_save_plasma_field
-
-interpolate_and_save_plasma_field(
-    ref_file="refParam_raptorX.h5",       # reference parameters
-    mesh_file="meshEIRENE.h5",            # Eirene triangular mesh
-    bfield_file="mesh_raptorX.h5",        # B-field on mesh
-    data_file="plasmaFinal.h5",           # plasma solution
-    wall_file=None,                       # optional external wall
-    plasma_out="plasma.h5",
-    nR=200, nZ=200,
-    main_ion_spec=1,
-    use_mesh_wall=True,
-    wall_sparta_file="wall.txt",          # optional SPARTA wall output
-    debug_plot_file="soledge_fields.png",
-)
+```bash
+python convert_s3x_plasma.py /path/to/s3x_run \
+    --plasma-snapshot plasmaFinal.h5 \
+    --plasma-out plasma.h5 \
+    --wall-out wall.surf \
+    --wall-flux required
 ```
+
+With `--wall-flux auto` (the default), the converter extracts
+`zone*/spec*/fluxn/{psi,theta}` on plasma/material interfaces, removes the
+SOLEDGE3X face metric using `metric_raptorX.h5`, and writes the common
+`/wall_flux` schema. `required` makes missing face-flux inputs an error;
+`off` disables extraction. Face midpoints are projected onto the exact
+source wall before OpenEdge maps them onto its own surface geometry.
 
 ## Dependencies
 

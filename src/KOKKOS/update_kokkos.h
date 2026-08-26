@@ -1,7 +1,7 @@
 /* ----------------------------------------------------------------------
    OpenEdge extension of SPARTA UpdateKokkos.
    Adds Boris/GCA pusher support with separate E-field and B-field fixes.
-   Replaces src/KOKKOS/update_kokkos.h when PKG_OPENEDGE is ON.
+   This file is the canonical Kokkos update implementation.
 ------------------------------------------------------------------------- */
 
 #ifndef SPARTA_UPDATE_KOKKOS_H
@@ -28,7 +28,7 @@ namespace SPARTA_NS {
 #define KOKKOS_MAX_SURF_COLL_PER_TYPE 2
 #define KOKKOS_MAX_TOT_SURF_COLL 10
 #define KOKKOS_MAX_BLIST 2
-#define KOKKOS_MAX_SLIST 2
+#define KOKKOS_MAX_SLIST 3
 
 struct s_UPDATE_REDUCE {
   int ntouch_one,nexit_one,nboundary_one,
@@ -148,7 +148,9 @@ class UpdateKokkos : public Update {
   DAT::t_float_1d d_oe_gca_z;
   DAT::t_float_1d d_oe_gca_vpar;
   DAT::t_float_1d d_oe_gca_mu;
-  DAT::t_float_1d d_oe_gca_on;
+  DAT::t_float_1d d_oe_gca_mode;
+  DAT::t_float_1d d_oe_gca_valid;
+  DAT::t_float_1d d_oe_gca_chi;
   int oe_has_gca_state;
   double oe_pusher_gca_switch;
 

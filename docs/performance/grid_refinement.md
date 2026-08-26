@@ -164,7 +164,7 @@ fix fadapt adapt 200 all refine particle 500 0 maxlevel 5 cells 2 2 1
 fix fbal   balance 500 1.1 rcb part
 ```
 
-SPARTA errors out with *"Fix adapt must come after fix ave/grid"* if the
+The code errors out with *"Fix adapt must come after fix ave/grid"* if the
 ordering is wrong. `fix adapt` invalidates any cell-to-value mapping
 every time it refines, so the `ave/grid` fixes must already be set up to
 hear about it.
