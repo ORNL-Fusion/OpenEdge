@@ -298,6 +298,8 @@ void UpdateKokkos::init()
   // OpenEdge Phase D: sheath spatial-mode data (defaults off).
   oe_sheath_provider = 0;
   oe_sheath_sgroupbit = 0;
+  oe_sheath_stamp_n = -1;
+  oe_sheath_stamp_id = (cellint) -1;
   oe_sheath_mD_amu = sheath_mD_amu;
   oe_sheath_dmax_user = sheath_dmax;
   oe_col_x0 = oe_col_y0 = 0.0;
@@ -536,6 +538,31 @@ void UpdateKokkos::run(int nsteps)
     // sheath Boltzmann correction) is host-resident: sync particles to
     // the host, fill the per-particle custom vectors there, and mark
     // them stale on the device. Device-side port = later optimization.
+
+    // OpenEdge BUGFIX (2026-08-26, gate-6 "Bug F"): fix balance
+    // re-decomposes the grid mid-run (every 200 steps in the monoblock
+    // deck). The spatial-sheath maps built at run() setup are indexed by
+    // LOCAL cell id (d_oe_midx_gcell, d_oe_sheath_cellplasma) and went
+    // STALE after every rebalance — near-wall ions then looked up wrong
+    // elements/geometry, a fraction lost their sheath pull, and a
+    // deep-dwelling high-charge population accumulated (+24-42% Np,
+    // ladder-tail excess; absent at 1 rank where balance is a no-op,
+    // growing with rank count). Rebuild the cache when the
+    // decomposition stamps change. The CPU pusher is immune: it reads
+    // the live compute per particle-move.
+    if (oe_sheath_provider) {
+      const int nloc_stamp = grid->nlocal;
+      const cellint fid_stamp = (nloc_stamp > 0 && grid->cells)
+        ? grid->cells[0].id : (cellint) -1;
+      // CLAUDE.md MPI trap: the stamps are per-rank and a rebalance can
+      // change them on a SUBSET of ranks, but build_oe_sheath_cache()
+      // contains collectives — make the rebuild decision collective.
+      int need = (nloc_stamp != oe_sheath_stamp_n ||
+                  fid_stamp != oe_sheath_stamp_id) ? 1 : 0;
+      int need_any = 0;
+      MPI_Allreduce(&need,&need_any,1,MPI_INT,MPI_MAX,world);
+      if (need_any) build_oe_sheath_cache();
+    }
 
     if (plasma_cache_flag &&
         (pcache_nevery <= 1 || ntimestep % pcache_nevery == 0)) {
@@ -2537,10 +2564,11 @@ void UpdateKokkos::build_oe_sheath_cache()
   Compute *cg = modify->compute[sheath_geom_cidx];
   auto *csg = dynamic_cast<ComputeNearestSurfGrid*>(cg);
   if (!csg) return;
-  if (!(cg->invoked_flag & INVOKED_PER_GRID)) {
-    cg->compute_per_grid();
-    cg->invoked_flag |= INVOKED_PER_GRID;
-  }
+  // ALWAYS recompute: this builder also runs after a fix-balance
+  // re-decomposition, where a stale invoked_flag would hand back
+  // pre-balance midx values for the new local cell numbering.
+  cg->compute_per_grid();
+  cg->invoked_flag |= INVOKED_PER_GRID;
   oe_sheath_sgroupbit = csg->sgroupbit;
 
   // Per-cell nearest-surf element map. The compute writes parent cells;
@@ -2671,6 +2699,11 @@ void UpdateKokkos::build_oe_sheath_cache()
               "%d of %d cells with te,ne > 0 globally (provider=compute)\n",
               gcnt[1],gcnt[0]);
   }
+
+  // decomposition stamps for the mid-run rebuild check in run()
+  oe_sheath_stamp_n = grid->nlocal;
+  oe_sheath_stamp_id = (grid->nlocal > 0 && grid->cells)
+    ? grid->cells[0].id : (cellint) -1;
 }
 
 /* ----------------------------------------------------------------------

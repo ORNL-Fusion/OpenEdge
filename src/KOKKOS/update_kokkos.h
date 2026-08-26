@@ -193,6 +193,11 @@ class UpdateKokkos : public Update {
   DAT::t_int_1d          d_oe_midx_gcell;
   int    oe_sheath_provider;   // 0 = none, 1 = fix (per-element), 2 = compute (per-cell)
   int    oe_sheath_sgroupbit;  // surf group mask of the sheath geom compute
+  // decomposition stamps: fix balance re-decomposes the grid mid-run
+  // (every 200 steps in the monoblock deck), which invalidates every
+  // local-cell-indexed map; run() rebuilds the cache when these change
+  int     oe_sheath_stamp_n;
+  cellint oe_sheath_stamp_id;
   double oe_sheath_mD_amu;
   double oe_sheath_dmax_user;  // global pusher sheath dmax (0 = auto)
   double oe_col_x0, oe_col_y0; // column axis for cyl->Cartesian rotations
