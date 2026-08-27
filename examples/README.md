@@ -1,5 +1,31 @@
 # OpenEdge examples
 
+## Running a case
+
+CPU (MPI):
+
+```bash
+cd examples/workflows/west_impurity_transport
+mpirun -np 8 /path/to/build/src/spa_mpi -in in.axi_west_emission
+```
+
+GPU (Kokkos + CUDA, one rank per GPU; backend under active
+development/validation — see the top-level README):
+
+```bash
+mpirun -np 1 /path/to/build_gpu/src/spa_mpi \
+    -k on g 1 -sf kk -in in.axi_west_emission
+```
+
+Quick sanity check of the whole suite:
+
+```bash
+./regression/run_regression.sh --exe /path/to/spa_mpi
+```
+
+Outputs (log, dumps, surface tallies) land in the case directory. See
+each leaf `README.md` for case-specific post-processing.
+
 The public examples are organized by purpose. Each leaf directory is intended
 to be runnable on its own and normally contains an `in.*` deck plus its input
 data, checks, or plotting scripts.
