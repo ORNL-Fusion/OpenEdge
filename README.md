@@ -1,8 +1,15 @@
 # OpenEdge
 
-[![License: GPL-2.0](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
-![C++17](https://img.shields.io/badge/C%2B%2B-17-orange.svg)
-![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-green.svg)
+[![License: GPL-2.0](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](LICENSE)
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-orange.svg)](BUILD_CMAKE.md)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-green.svg)](BUILD_CMAKE.md)
+[![GPU](https://img.shields.io/badge/GPU-Kokkos%20%2F%20CUDA-76B900.svg)](BUILD_CMAKE.md)
+
+<!-- TODO(badges): once CI, hosted docs, and a DOI exist, adopt the
+     WarpX-style row (build status, docs, DOI, discussions):
+     https://github.com/BLAST-WarpX/warpx -->
+
+
 
 A kinetic transport package for plasma-material and plasma-wall interactions.
 
