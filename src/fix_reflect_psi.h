@@ -71,7 +71,6 @@ class FixReflectPsi : public Fix {
   std::vector<double> psirz_;   // [nh * nw], row-major [z][r]
 
   // Interpolation
-  double psi_norm_at_point(double R, double Z) const;
 
   // File readers
   void read_equ_file(const std::string &path);

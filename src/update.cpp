@@ -410,8 +410,8 @@ void Update::set_units(const char *style)
 
 void Update::init()
 {
-  // init the Update class if performing a run, else just return
-  // only set first_update if a run is being performed
+  // init the Update class if borisorming a run, else just return
+  // only set first_update if a run is being borisormed
 
   if (runflag == 0) return;
   first_update = 1;
@@ -2056,7 +2056,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
             // find 1st surface hit via minparam
             // skip collisions with previous surf, but not for axisymmetric
             // not considered collision if 2 params are tied and one INSIDE surf
-            // if collision occurs, perform collision with surface model
+            // if collision occurs, borisorm collision with surface model
             // reset x,v,xnew,dtremain and continue single particle trajectory
 
             cflag = 0;
@@ -2225,7 +2225,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 }
               }
 
-              // perform surface collision using surface collision model
+              // borisorm surface collision using surface collision model
               // surface chemistry may destroy particle or create new one
               // must update particle's icell to current icell so that
               //   if jpart is created, it will be added to correct cell
@@ -2536,7 +2536,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 nstuck++;
               }
 
-            } // END of cflag if section that performed collision
+            } // END of cflag if section that borisormed collision
 
             // no collision, so restore saved xnew if changed it above
 
@@ -2893,7 +2893,7 @@ post_move_bookkeeping:
 
     // if gridcut >= 0.0, check if another iteration of move is required
     // only the case if some particle flag = PENTRY/PEXIT
-    //   in which case perform particle migration
+    //   in which case pusher_Bororm particle migration
     // if not, move is done and final particle comm will occur in run()
     // if iterating, reset pstart/pstop and extend migration list if necessary
 
@@ -3167,7 +3167,7 @@ void Update::collide_react_reset()
 }
 
 /* ----------------------------------------------------------------------
-   update cumulative counters for tallying surface collisions/reactions
+   update cummulative counters for tallying surface collisions/reactions
    done at end of each timestep
    done within individual SurfCollide and SurfReact instances
 ------------------------------------------------------------------------- */
@@ -3390,7 +3390,7 @@ void Update::global(int narg, char **arg)
     } 
       // --------------- E field ----------------
     else if (strcmp(arg[iarg],"efield") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal global command");
+      if (iarg+1 > narg) error->all(FLERR,"Illegal global command");
 
       if (strcmp(arg[iarg+1],"none") == 0) {
         efstyle = NOFIELD;
@@ -3423,7 +3423,7 @@ void Update::global(int narg, char **arg)
 
     // --------------- B field ----------------
     else if (strcmp(arg[iarg],"bfield") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal global command");
+      if (iarg+1 > narg) error->all(FLERR,"Illegal global command");
 
       if (strcmp(arg[iarg+1],"none") == 0) {
         bfstyle = NOFIELD;

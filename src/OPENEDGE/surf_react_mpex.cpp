@@ -252,7 +252,11 @@ char *SurfReactMpex::reactionID(int m)
 
 double SurfReactMpex::reaction_coeff(int m)
 {
-  return rlist[m].coeff[1];
+  // compute surf etot expects J/event of chemical energy. Wall recycling
+  // has no chemical energy budget (KE change is captured via velocities);
+  // returning coeff[1] (~1) added ~1 J/event scaled by fnum/dt = spurious
+  // wall power. Same fix as surf_react_surface_pwi::reaction_coeff.
+  return 0.0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -535,26 +539,3 @@ int SurfReactMpex::readone(char *line1, char *line2, int &n1, int &n2)
    create thompson scattering data
 ------------------------------------------------------------------------- */
 
-double SurfReactMpex::random_energy_thompson(double ub, double te){
-    /*
-    Generate a random number 'e' from a Thompson distribution function F(e, ub, emax).
-    The distribution is given by F(e, ub, emax) = const * e / (e + ub)**3, for 0 < e < emax.
-    The constant is calculated as const = ub / (0.5 * 1./(emax/ub+1.)**2 - 1./(emax/ub+1.) + 0.5).
-    
-    :param ub: The parameter UB in the distribution.
-    :param emax: The maximum value of e (EMAX).
-    :return: A random number 'e' from the Thompson distribution.
-    */
-    double emax = 3.0 * te ;  
-    double emu = 1.0 / (emax / ub + 1.0);
-    double betad2 = 1.0 / (emu * emu - emu - emu + 1.0);
-
-    // generate random number
-    double r = random->uniform();
-    double arg = r / betad2;
-
-    double energy_sample = ub / ( 1.0 - std::sqrt(arg)) - ub;
-
-    return energy_sample;
-
-}

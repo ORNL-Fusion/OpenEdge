@@ -2235,7 +2235,7 @@ void FixVolumeChemAdas::readfile(char *fname)
     // check that reactant/product counts are consistent with type
 
    if (r->type == IONIZATION) {
-      if (r->nreactant != 1 || (r->nproduct != 1 && r->nproduct != 1)) {
+      if (r->nreactant != 1 || r->nproduct != 1) {
         print_reaction(copy1,copy2);
         error->all(FLERR,"Invalid ionization reaction");
       }

@@ -2376,22 +2376,6 @@ bool Pusher::sync_gc_velocity(int i, const double *v, const double B[3],
   return true;
 }
 
-bool Pusher::sync_gc_phase_space(int i, const double *x, const double *v,
-                                 const double B[3], double qm, double mass)
-{
-  // full re-init: always legal, establishes validity
-  if (gca_x_custom < 0) return false;
-  const double Bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
-  if (Bmag <= 0.0) return false;
-  GCAPusher::GCAState g = GCAPusher::init_from_particle(x, v, mass, qm, B);
-  particle->edvec[particle->ewhich[gca_x_custom]][i] = g.X[0];
-  particle->edvec[particle->ewhich[gca_y_custom]][i] = g.X[1];
-  particle->edvec[particle->ewhich[gca_z_custom]][i] = g.X[2];
-  particle->edvec[particle->ewhich[gca_vpar_custom]][i] = g.v_par;
-  particle->edvec[particle->ewhich[gca_mu_custom]][i] = g.mu;
-  particle->edvec[particle->ewhich[gca_valid_custom]][i] = 1.0;
-  return true;
-}
 
 bool Pusher::apply_parallel_impulse(int i, double dvpar)
 {

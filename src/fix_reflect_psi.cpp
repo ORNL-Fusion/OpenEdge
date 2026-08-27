@@ -147,7 +147,18 @@ void FixReflectPsi::load_from_background(const std::string &fix_id)
 
 /* ---------------------------------------------------------------------- */
 
-FixReflectPsi::~FixReflectPsi() {}
+FixReflectPsi::~FixReflectPsi()
+{
+  // init() hands Update raw pointers into fix-owned vectors; clear them
+  // so an unfix followed by another run cannot reflect through dangling
+  // storage
+  if (update && update->psi_reflect_flag) {
+    update->psi_reflect_flag = 0;
+    update->psi_r_grid = nullptr;
+    update->psi_z_grid = nullptr;
+    update->psi_rz = nullptr;
+  }
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -285,42 +296,3 @@ void FixReflectPsi::read_equ_file(const std::string &path)
     }
 }
 
-/* ---------------------------------------------------------------------- */
-
-double FixReflectPsi::psi_norm_at_point(double R, double Z) const
-{
-  if (r_grid_.empty() || z_grid_.empty() || psirz_.empty()) return 1.0;
-
-  double Rc = std::min(std::max(R, r_grid_.front()), r_grid_.back());
-  double Zc = std::min(std::max(Z, z_grid_.front()), z_grid_.back());
-
-  auto bracket_index = [](const std::vector<double> &grid, double x) {
-    if (x <= grid.front()) return 0;
-    if (x >= grid.back()) return static_cast<int>(grid.size()) - 2;
-    auto it = std::upper_bound(grid.begin(), grid.end(), x);
-    int idx = static_cast<int>(it - grid.begin()) - 1;
-    if (idx < 0) idx = 0;
-    if (idx > static_cast<int>(grid.size()) - 2)
-      idx = static_cast<int>(grid.size()) - 2;
-    return idx;
-  };
-
-  int i = bracket_index(r_grid_, Rc);
-  int j = bracket_index(z_grid_, Zc);
-
-  double dr = r_grid_[i+1] - r_grid_[i];
-  double dz = z_grid_[j+1] - z_grid_[j];
-  if (std::abs(dr) < 1e-30 || std::abs(dz) < 1e-30) return 1.0;
-
-  double t = (Rc - r_grid_[i]) / dr;
-  double u = (Zc - z_grid_[j]) / dz;
-  t = std::min(std::max(t, 0.0), 1.0);
-  u = std::min(std::max(u, 0.0), 1.0);
-
-  double psi = (1-t)*(1-u)*psirz_[j*nw_+i]     + t*(1-u)*psirz_[j*nw_+i+1]
-             + (1-t)*u*psirz_[(j+1)*nw_+i] + t*u*psirz_[(j+1)*nw_+i+1];
-
-  double dpsi = psib_ - psi_axis_;
-  if (std::abs(dpsi) < 1e-30) return 1.0;
-  return (psi - psi_axis_) / dpsi;
-}

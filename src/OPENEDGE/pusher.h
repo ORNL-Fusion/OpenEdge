@@ -174,13 +174,11 @@ class Pusher : protected Pointers {
   bool materialize_impact_velocity(int i, int icell, int midx,
                                    double *v_io);
   // sync_gc_velocity REQUIRES a currently-valid GC state (velocity-only
-  // operators must not resurrect stale positions); sync_gc_phase_space
+  // operators must not resurrect stale positions); (sync_gc_phase_space was removed 2026-08-27, unused)
   // is a full re-init and always establishes validity. apply_* refuse
   // (return false) on invalid state.
   bool sync_gc_velocity(int i, const double *v, const double B[3],
                         double mass);
-  bool sync_gc_phase_space(int i, const double *x, const double *v,
-                           const double B[3], double qm, double mass);
   bool apply_parallel_impulse(int i, double dvpar);
   bool apply_gc_displacement(int i, const double *dx);
   void invalidate_gc(int i, int reason);

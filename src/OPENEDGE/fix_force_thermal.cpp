@@ -546,14 +546,6 @@ void FixForceThermal::particle_rz(const Particle::OnePart &p,
 
 /* ---------------------------------------------------------------------- */
 
-double FixForceThermal::pd_interp(const std::vector<double> &field, int iparticle,
-                                  const Particle::OnePart &p) const
-{
-  if (!pd_) return 0.0;
-  double R, Z;
-  particle_rz(p, R, Z);
-  return pd_->interp2D(field, R, Z, p.icell, iparticle);
-}
 
 /* ---------------------------------------------------------------------- */
 

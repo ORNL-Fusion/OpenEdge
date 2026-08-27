@@ -12,7 +12,6 @@
 
     Key operations:
       - add_implanted(): deposit atoms at a given depth
-      - erode_surface(): remove material from the top
       - compact_layers(): merge thin layers, cap at max_layers
       - get_surface_composition(): depth-averaged composition query
 ------------------------------------------------------------------------- */
@@ -83,7 +82,6 @@ struct SurfaceElementState {
 
   // Erode material from the surface
   // thickness: amount to remove [m]
-  void erode_surface(double thickness);
 
   // Merge thin layers and cap at max_layers
   void compact_layers();
@@ -93,7 +91,6 @@ struct SurfaceElementState {
   std::vector<double> get_surface_composition(double depth) const;
 
   // Get total thickness of all layers
-  double total_thickness() const;
 
   // Get number of atoms in top layer (for sputtering decisions)
   double surface_density() const;
@@ -106,41 +103,8 @@ struct SurfaceElementState {
   int unpack(const double *buf);
 
   // Return the buffer size needed for pack()
-  int pack_size() const;
 };
 
-// Manager for per-surface-element multilayer states
-// Handles allocation, MPI synchronization, and restart I/O
-class SurfStateMultilayer {
- public:
-  SurfStateMultilayer(int nspecies, int max_layers = MAX_LAYERS_DEFAULT);
-  ~SurfStateMultilayer();
-
-  // Initialize states for nsurf surface elements
-  void allocate(int nsurf);
-
-  // Initialize all elements with uniform substrate
-  void init_substrate(double thickness, double density, int substrate_species);
-
-  // Access element state
-  SurfaceElementState &operator[](int isurf) { return states[isurf]; }
-  const SurfaceElementState &operator[](int isurf) const { return states[isurf]; }
-
-  int size() const { return static_cast<int>(states.size()); }
-
-  // Species name registry
-  void set_species_names(const std::vector<std::string> &names);
-  const std::vector<std::string> &get_species_names() const { return species_names; }
-
-  // Compact all element states
-  void compact_all();
-
- private:
-  int nspecies;
-  int max_layers;
-  std::vector<SurfaceElementState> states;
-  std::vector<std::string> species_names;
-};
 
 }
 

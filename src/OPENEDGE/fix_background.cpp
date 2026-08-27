@@ -2001,36 +2001,9 @@ int FixBackground::find_mesh_triangle(double R, double Z, int icell,
 
 /* ---------------------------------------------------------------------- */
 
-int FixBackground::find_nearest_mapped_triangle(double R, double Z, double max_dist) const
-{
-  const double max_d2 = max_dist * max_dist;
-  double best_d2 = max_d2;
-  int best = -1;
-  for (int i = 0; i < static_cast<int>(mapped_idx.size()); i++) {
-    const double dr = mapped_cr[i] - R;
-    const double dz = mapped_cz[i] - Z;
-    const double d2 = dr*dr + dz*dz;
-    if (d2 < best_d2) {
-      best_d2 = d2;
-      best = mapped_idx[i];
-    }
-  }
-  return best;
-}
 
 /* ---------------------------------------------------------------------- */
 
-int FixBackground::mesh_cell_at(double R, double Z, double max_dist) const
-{
-  if (!has_mesh || mesh_ncell <= 0 || mesh_cell_idx.empty()) return -1;
-  int tri = find_mesh_triangle(R, Z);
-  if (tri < 0 || tri >= static_cast<int>(mesh_cell_idx.size()) || mesh_cell_idx[tri] < 0)
-    tri = find_nearest_mapped_triangle(R, Z, max_dist);
-  if (tri < 0 || tri >= static_cast<int>(mesh_cell_idx.size())) return -1;
-  const int cell = mesh_cell_idx[tri];
-  if (cell < 0 || cell >= mesh_ncell) return -1;
-  return cell;
-}
 
 /* ----------------------------------------------------------------------
    Build per-SPARTA-cell mesh-cell index at cell centroids. Populates

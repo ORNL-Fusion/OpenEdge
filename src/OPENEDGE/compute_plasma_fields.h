@@ -181,8 +181,6 @@ class ComputePlasmaFields : public Compute {
       const double xyz[3], bool prefer_equilibrium = false) const;
 
   // Reload plasma background from file (for coupling: re-reads HDF5 and re-interpolates)
-  void reload_plasma();
-  void reload_plasma(const std::string &new_plasma_path);
 
   // psiN from this compute's own equilibrium copy (any input mode).
   // Returns 1e30 when no valid equilibrium is loaded.
@@ -190,8 +188,6 @@ class ComputePlasmaFields : public Compute {
 
 PlasmaFileParams *plasma_arr;   // size = grid->nlocal
 PlasmaFileData plasma_data;
-void broadcastPlasmaData(PlasmaFileData& data);
-PlasmaFileData readPlasmaFileData(const std::string& path);
 int nion_species = 0;
 std::vector<double> ion_mass_amu;
 std::vector<int> ion_charge_state_z;
@@ -199,12 +195,6 @@ std::vector<int> ion_spec_index;
 std::vector<std::string> ion_names;
 // Pre-interpolated per-grid multi-ion fields: flat [nlocal * nion]
 // Layout: icell*nion + ispec
-std::vector<double> ion_dens_grid;
-std::vector<double> ion_temp_grid;
-std::vector<double> ion_parr_flow_grid;
-std::vector<double> ion_parr_flow_r_grid;
-std::vector<double> ion_parr_flow_t_grid;
-std::vector<double> ion_parr_flow_z_grid;
 
 MagneticFieldFileDataParams *mag_arr;
 PlasmaFileParams bilinearInterpolationPlasma(
@@ -217,16 +207,8 @@ bool meshLookupPlasmaAtPoint(const PlasmaFileData &data, double r, double z,
 
 // Equilibrium-based magnetic geometry (exact ψ derivatives)
 EquilibriumData equ_data;
-MagneticGeometry *geom_arr;   // size = nlocal, precomputed per cell
 int has_equilibrium;           // 1 if equilibrium file was loaded
-std::string equilibriumPath;
 
-EquilibriumData readEquilibriumFile(const std::string &path);
-bool readEquilibriumFromPlasmaH5(const std::string &plasma_h5_path,
-                                  EquilibriumData &data);
-void broadcastEquilibriumData(EquilibriumData &data);
-void computeMagneticGeometry(int icell, const EquilibriumData &equ,
-                             MagneticGeometry &geom);
 
 protected:
   enum InputMode { MODE_FILE=0, MODE_CONSTANT, MODE_ANALYTIC, MODE_BACKGROUND };
@@ -234,7 +216,6 @@ protected:
 
 int nglocal,groupbit;
 int sample_stale;   // grid changed since per-cell arrays were sampled (adapt/balance)
-std::string plasmaStatePath;
 std::string background_fix_id;  // fix ID for background mode
 double bconst[3];
 double econst[3];

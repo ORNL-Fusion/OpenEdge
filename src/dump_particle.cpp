@@ -463,6 +463,19 @@ int DumpParticle::count()
         Particle::Species *species = particle->species;
         Particle::OnePart *p;
         double *v;
+        for (i = 0; i < nlocal; i++) {
+          p = &particles[i];
+          v = p->v;
+          dchoose[i] = 0.5 * species[p->ispecies].mass *
+            (v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+        }
+        ptr = dchoose;
+        nstride = 1;
+
+      } else if (thresh_array[ithresh] == KE) {
+        Particle::Species *species = particle->species;
+        Particle::OnePart *p;
+        double *v;
         double mvv2e = update->mvv2e;
         for (i = 0; i < nlocal; i++) {
           p = &particles[i];
@@ -486,7 +499,7 @@ int DumpParticle::count()
         int index = custom[field2index[i]];
         if (particle->etype[index] == INT) {
           ptrstyle = INT;
-          if (particle->esize[index] == 0) {
+          if (particle->etype[index] == 0) {
             iptr = particle->eivec[particle->ewhich[index]];
             nstride = 1;
           } else {
@@ -496,7 +509,7 @@ int DumpParticle::count()
             nstride = particle->esize[index];
           }
         } else {
-          if (particle->esize[index] == 0) {
+          if (particle->etype[index] == 0) {
             ptr = particle->edvec[particle->ewhich[index]];
             nstride = 1;
           } else {

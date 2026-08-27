@@ -198,144 +198,6 @@ void FixSurfaceEmitRecycle::grid_changed()
     tasks[i].area_share = (s >= 0 && s < nsurf_global && area_sum[s] > 0.0) ?
                           tasks[i].area / area_sum[s] : 0.0;
   }
-  // DBG: how many tasks got a valid cached plasma cell?
-  int n_ok_me = 0, n_total_me = ntask;
-  double sum_rate_me = 0.0;
-  for (int i = 0; i < ntask; i++) {
-    if (tasks[i].plasma_cell >= 0) {
-      n_ok_me++;
-      const int c = tasks[i].plasma_cell;
-      const double ne = plasma->mesh_ne[c];
-      const double te = plasma->mesh_te[c];
-      const double ti = plasma->mesh_ti.empty() ? te : plasma->mesh_ti[c];
-      if (ne > 0 && te > 0) {
-        constexpr double QEL = 1.602176634e-19;
-        constexpr double AMUL = 1.66053906660e-27;
-        const double cs = std::sqrt((te + ti) * QEL / (mass_amu * AMUL));
-        sum_rate_me += 0.5 * R_recycle * ne * cs * tasks[i].area;
-      }
-    }
-  }
-  int n_ok, n_total;
-  double sum_rate;
-  MPI_Allreduce(&n_ok_me, &n_ok, 1, MPI_INT, MPI_SUM, world);
-  MPI_Allreduce(&n_total_me, &n_total, 1, MPI_INT, MPI_SUM, world);
-  MPI_Allreduce(&sum_rate_me, &sum_rate, 1, MPI_DOUBLE, MPI_SUM, world);
-
-  // Diagnostic Bohm-flux rate using the SAME formula the runtime emit
-  // uses (mesh_wall_surf_area[isurf] * area_share). Every rank
-  // participates in the Allreduce — otherwise rank 0 calls it alone and
-  // deadlocks the others on the next collective.
-  double bohm_b2_global = 0.0;
-  if (plasma->has_mesh_wall_surf_cell &&
-      !plasma->mesh_wall_surf_area.empty()) {
-    double bohm_b2 = 0.0;
-    for (int i = 0; i < ntask; i++) {
-      const int c = tasks[i].plasma_cell;
-      const int s = static_cast<int>(tasks[i].isurf);
-      if (c < 0 || c >= plasma->mesh_ncell) continue;
-      if (s < 0 || s >= static_cast<int>(plasma->mesh_wall_surf_area.size()))
-        continue;
-      const double ne = plasma->mesh_ne[c];
-      const double te = plasma->mesh_te[c];
-      const double ti = plasma->mesh_ti.empty() ? te : plasma->mesh_ti[c];
-      const double ti_eff = std::isfinite(ti) && ti > 0.0 ? ti : te;
-      const double cs_a = (te + ti_eff) * QE / (mass_amu * AMU);
-      if (ne > 0.0 && cs_a > 0.0) {
-        bohm_b2 += 0.5 * R_recycle * ne * std::sqrt(cs_a) *
-                   plasma->mesh_wall_surf_area[s] * tasks[i].area_share;
-      }
-    }
-    MPI_Allreduce(&bohm_b2, &bohm_b2_global, 1, MPI_DOUBLE, MPI_SUM, world);
-  }
-
-  // Global view of wall->B2 mapping: aggregate per-cell task area across
-  // all ranks so the summary reflects what every rank sees, not just
-  // rank 0's RCB partition.
-  std::vector<double> cell_area_global;
-  if (plasma->has_mesh_wall_face_area) {
-    std::vector<double> cell_area_me(plasma->mesh_ncell, 0.0);
-    for (int i = 0; i < ntask; i++) {
-      const int c = tasks[i].plasma_cell;
-      if (c >= 0 && c < plasma->mesh_ncell) cell_area_me[c] += tasks[i].area;
-    }
-    cell_area_global.assign(plasma->mesh_ncell, 0.0);
-    MPI_Allreduce(cell_area_me.data(), cell_area_global.data(),
-                  plasma->mesh_ncell, MPI_DOUBLE, MPI_SUM, world);
-  }
-
-  if (comm->me == 0 && !diag_printed) {
-    diag_printed = 1;
-    printf("[emit/surf/recycle] tasks=%d, mapped=%d (%.1f%%)\n",
-           n_total, n_ok, 100.0 * n_ok / std::max(1, n_total));
-    printf("[emit/surf/recycle] Bohm-flux rate (raw segment area, "
-           "sin_alpha=1) = %.3e /s\n", sum_rate);
-    if (plasma->has_mesh_wall_surf_cell &&
-        !plasma->mesh_wall_surf_area.empty()) {
-      printf("[emit/surf/recycle] Bohm-flux rate (B2-aggregated surf_area, "
-             "sin_alpha=1) = %.3e /s  [USING THIS]\n", bohm_b2_global);
-    } else if (plasma->has_mesh_wall_face_area) {
-      printf("[emit/surf/recycle] Bohm-flux rate (per-cell face_area path) "
-             "= %.3e /s  [USING THIS]\n", bohm_b2_global);
-    } else {
-      printf("[emit/surf/recycle] (no mesh wall area data — using raw "
-             "SPARTA-surface-area Bohm-flux)\n");
-    }
-
-    // Summarize task-to-cell mapping: how many unique cells, what
-    // fraction of the wall-face budget is picked up, regional bucketing.
-    if (plasma->has_mesh_wall_face_area) {
-      const int nx = 96; const int nxp = nx + 2;   // SOLPS nx+2 stride
-      double budget_all = 0.0;
-      for (size_t k = 0; k < plasma->mesh_wall_face_area.size(); k++)
-        budget_all += plasma->mesh_wall_face_area[k];
-
-      int mapped_cells = 0;
-      double budget_mapped = 0.0;
-      int n_iy1=0, n_iyny=0, n_ix1=0, n_ixnx=0;
-      for (int c = 0; c < plasma->mesh_ncell; c++) {
-        if (cell_area_global[c] <= 0.0) continue;
-        mapped_cells++;
-        budget_mapped += plasma->mesh_wall_face_area[c];
-        const int iy = c / nxp;
-        const int ix = c - iy * nxp;
-        if (iy == 1)    n_iy1++;
-        if (iy == 36)   n_iyny++;
-        if (ix == 1)    n_ix1++;
-        if (ix == nx)   n_ixnx++;
-      }
-      printf("[emit/surf/recycle] wall mapping (global): %d unique B2 cells, "
-             "%.2f m^2 of %.2f total face area (%.1f%%)\n",
-             mapped_cells, budget_mapped, budget_all,
-             100.0 * budget_mapped / std::max(1e-30, budget_all));
-      printf("[emit/surf/recycle] regional breakdown: iy=1 (lower target) "
-             "%d cells, iy=ny (upper target) %d cells, ix=1 (inner) %d "
-             "cells, ix=nx (outer) %d cells\n",
-             n_iy1, n_iyny, n_ix1, n_ixnx);
-
-      // top 10 by summed task area (global)
-      std::vector<std::pair<double,int>> cell_rank;
-      for (int c = 0; c < plasma->mesh_ncell; c++)
-        if (cell_area_global[c] > 0.0)
-          cell_rank.emplace_back(cell_area_global[c], c);
-      std::sort(cell_rank.begin(), cell_rank.end(),
-                std::greater<std::pair<double,int>>());
-      const int ntop = std::min<int>(10, cell_rank.size());
-      printf("[emit/surf/recycle] top %d mapped cells "
-             "(iy,ix ne[m^-3] Te[eV] Ti[eV] face[m^2]):\n", ntop);
-      for (int k = 0; k < ntop; k++) {
-        const int c = cell_rank[k].second;
-        const int iy = c / nxp;
-        const int ix = c - iy * nxp;
-        const double ne = plasma->mesh_ne[c];
-        const double te = plasma->mesh_te[c];
-        const double ti = plasma->mesh_ti.empty() ? te : plasma->mesh_ti[c];
-        const double fa = plasma->mesh_wall_face_area[c];
-        printf("[emit/surf/recycle]   (iy=%2d,ix=%2d)  ne=%.2e  Te=%5.2f  "
-               "Ti=%5.2f  face=%.3e\n", iy, ix, ne, te, ti, fa);
-      }
-    }
-  }
 }
 
 /* ----------------------------------------------------------------------
@@ -670,7 +532,9 @@ double FixSurfaceEmitRecycle::emission_rate_per_surface(int itask)
   const int icell = tasks[itask].icell;
   const double wcell = (icell >= 0) ? grid->cinfo[icell].weight : 1.0;
   const double inv_wcell = (wcell > 0.0) ? 1.0 / wcell : 1.0;
-  return dot_N * update->dt * inv_wcell / fnum;
+  // scale by nevery: firing every N steps must inject N steps of flux
+  // (matches fix_surface_emit_source; was under-counting by 1/nevery)
+  return dot_N * update->dt * nevery * inv_wcell / fnum;
 }
 
 /* ----------------------------------------------------------------------
@@ -721,11 +585,6 @@ void FixSurfaceEmitRecycle::perform_task()
 
     ninsert = static_cast<int>(ntarget + random->uniform());
     // Bootstrap: at step 1 the halt-on-zero-particles check in update.cpp
-    // fires if no rank emitted, which happens when stochastic rounding
-    // rolls 0 for every task (typical for small per-task ntarget spread
-    // over many MPI ranks). Force at least one particle per active task
-    // on step 1 so the simulation can start.
-    if (update->ntimestep == 1 && ninsert == 0) ninsert = 1;
     if (ninsert <= 0) continue;
 
     nactual = 0;

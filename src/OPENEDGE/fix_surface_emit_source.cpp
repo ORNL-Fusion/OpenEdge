@@ -353,20 +353,6 @@ void FixSurfaceEmitSource::init()
 
 /* ---------------------------------------------------------------------- */
 
-int FixSurfaceEmitSource::local_isurf_index(surfint isurf) const
-{
-  if (surf->distributed) {
-    if (isurf < 0 || isurf >= surf->nown) return -1;
-    return static_cast<int>(isurf);
-  }
-
-  int me = comm->me;
-  int nprocs = comm->nprocs;
-  if ((isurf % nprocs) != me) return -1;
-  int ilocal = static_cast<int>(isurf / nprocs);
-  if (ilocal < 0 || ilocal >= surf->nown) return -1;
-  return ilocal;
-}
 
 /* ---------------------------------------------------------------------- */
 

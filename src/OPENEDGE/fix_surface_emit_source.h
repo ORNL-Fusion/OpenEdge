@@ -169,7 +169,6 @@ class FixSurfaceEmitSource : public FixEmit {
  private:
   void create_task(int);
   void grow_task();
-  int local_isurf_index(surfint) const;
   double flux_for_surface(surfint);
   void spread_flux(class Compute *);
 

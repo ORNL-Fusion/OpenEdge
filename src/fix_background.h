@@ -142,11 +142,9 @@ class FixBackground : public Fix {
   std::vector<double> mesh_nn;
   std::vector<double> mesh_tn;
   // Precomputed gradients on the B2 mesh (converter writes these).
-  // Consumers query via mesh_cell_at(R, Z) + mesh_grad_*_{r,z}[cell].
   std::vector<double> mesh_grad_te_r, mesh_grad_te_z;
   std::vector<double> mesh_grad_ti_r, mesh_grad_ti_z;
   // Per-cell heat-flux components on the EIRENE mesh. Same semantics as
-  // q_par/q_perp above. Consumers query via mesh_cell_at(R,Z) then
   // mesh_q_par[cell] / mesh_q_perp[cell]. Empty => regular-grid fallback
   // (q_par / q_perp), then default_q_{par,perp}.
   std::vector<double> mesh_q_par, mesh_q_perp;
@@ -224,7 +222,6 @@ class FixBackground : public Fix {
   int hash_nr, hash_nz;
   double hash_rmin, hash_zmin, hash_dr, hash_dz;
   std::vector<std::vector<int>> hash_grid;
-  int mesh_cell_at(double R, double Z, double max_dist=0.05) const;
 
   // ---- Cell-indexed mesh-cell cache ----
   // cell_mesh_cell[icell] = unstructured-mesh cell index at the centroid of
@@ -282,7 +279,6 @@ class FixBackground : public Fix {
   int walk_mesh_triangle(int start, double R, double Z, int &nhops) const;
   int find_mesh_triangle(double R, double Z, int icell = -1,
                          int iparticle = -1) const;
-  int find_nearest_mapped_triangle(double R, double Z, double max_dist) const;
   const std::vector<double> *mesh_field_for(const std::vector<double> &field) const;
 
   // ---- Constant-mode configuration ----

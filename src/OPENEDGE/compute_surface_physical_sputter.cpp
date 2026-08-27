@@ -425,7 +425,6 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
 
   dimension = domain->dimension;
   firstflag = 1;
-  debug_interp = 0;
   distributed = 0;
   nsown = 0;
   vector_surf = nullptr;

@@ -417,7 +417,9 @@ void FixSurfaceEmitPuff::perform_task()
   double x[3],v[3],e1[3],e2[3];
   Particle::OnePart *p;
 
-  const double dt = update->dt;
+  // nevery steps of flux per firing (matches emit_source and the
+  // slave Gamma_ext term above; was under-counting by 1/nevery)
+  const double dt = update->dt * nevery;
   int *species = particle->mixture[imix]->species;
 
   Surf::Line *lines = surf->lines;

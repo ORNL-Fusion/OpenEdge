@@ -8,7 +8,7 @@
     fix cross_diffusion: anomalous perpendicular diffusion and
     convective pinch for impurity ions.
 
-    Position displacement applied at END_OF_STEP (after Boris push).
+    Position displacement applied at START_OF_STEP (before the Boris push).
 
     Diffusion:
       2D: single perpendicular direction in poloidal plane
