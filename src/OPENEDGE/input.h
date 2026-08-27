@@ -20,6 +20,12 @@ class Input : protected Pointers {
   int narg;                    // # of command args
   char **arg;                  // parsed args for command
   class Variable *variable;    // defined variables
+  int line_num;                // line number of current command,
+                               // maintained for the library interface
+  char *line;                  // input line currently being processed, so an
+                               // error can echo it as "Last command: ..."
+                               // (public, as in LAMMPS); NULL before the
+                               // first command
 
   Input(class SPARTA *, int, char **);
   ~Input();
@@ -40,7 +46,7 @@ class Input : protected Pointers {
   int me;                      // proc ID
   char *command;               // ptr to current command
   int maxarg;                  // max # of args in arg
-  char *line,*copy,*work;      // input line & copy and work string
+  char *copy,*work;            // copy and work strings
   int maxline,maxcopy,maxwork; // max lengths of char strings
   int echo_screen;             // 0 = no, 1 = yes
   int echo_log;                // 0 = no, 1 = yes
@@ -54,6 +60,7 @@ class Input : protected Pointers {
 
   void parse();                          // parse an input text line
   char *nextword(char *, char **);       // find next word in string with quotes
+  int numtriple(char *);                 // count number of triple quotes
   void reallocate(char *&, int &, int);  // reallocate a char string
   int execute_command();                 // execute a single command
 
@@ -67,6 +74,7 @@ class Input : protected Pointers {
   void next_command();
   void partition();
   void print();
+  void python();
   void quit();
   void shell();
   void variable_command();
@@ -105,7 +113,6 @@ class Input : protected Pointers {
   void undump();
   void unfix();
   void units();
-  void weight();
 };
 
 }

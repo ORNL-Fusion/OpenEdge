@@ -715,7 +715,7 @@ int SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
       // wall temperature (twall_surf custom if bound, else scalar twall).
       double twall_eff = twall;
       if (tindex_custom >= 0)
-        twall_eff = surf->edvec_local[tindex_custom][isurf];
+        twall_eff = surf->edvec_local[surf->ewhich[tindex_custom]][isurf];
       Y = sput_tables[r->sp_tbl].yield_at_T(E_in_eV, theta_eff, twall_eff);
       if (r->mat_isp >= 0) Y *= mat_conc(isurf, r->mat_isp);
     } else {
@@ -797,7 +797,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
   // (pass-through / zero-reset).
   double twall_eff = twall;
   if (tindex_custom >= 0)
-    twall_eff = surf->edvec_local[tindex_custom][isurf];
+    twall_eff = surf->edvec_local[surf->ewhich[tindex_custom]][isurf];
 
   // Incident impact (E, theta) at the wall. The incident velocity here
   // already includes the sheath boundary energy boost (the mover kicks v
@@ -975,7 +975,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
           // polyatomic products via species DOFs).
           double R_rec;
           if (rindex_custom >= 0) {
-            R_rec = surf->edvec_local[rindex_custom][isurf];
+            R_rec = surf->edvec_local[surf->ewhich[rindex_custom]][isurf];
             if (R_rec < 0.0) R_rec = 0.0;
             if (R_rec > 1.0) R_rec = 1.0;
           } else {

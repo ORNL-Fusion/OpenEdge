@@ -36,7 +36,8 @@ using namespace SPARTA_NS;
 // aggregate init with a char-array member that clang accepts
 static GrainMaterial make_entry(const char *nm, double rho, double cp,
     double cps, double mass, double hvap, double aa, double ab, double em,
-    double wf, double ra, double tm, double hm, double tp)
+    double wf, double ra, double tm, double hm, double tp,
+    double sdm = 0.0, double sem = 0.0)
 {
   GrainMaterial m;
   strncpy(m.name, nm, sizeof(m.name) - 1);
@@ -46,6 +47,7 @@ static GrainMaterial make_entry(const char *nm, double rho, double cp,
   m.antoine_a = aa; m.antoine_b = ab; m.emissivity = em;
   m.work_function_eV = wf; m.richardson_A = ra; m.tmelt_K = tm;
   m.hmelt_J_mol = hm; m.tensile_Pa = tp;
+  m.see_delta_m = sdm; m.see_E_m_eV = sem;
   return m;
 }
 
@@ -54,10 +56,12 @@ static std::vector<GrainMaterial> make_registry()
   std::vector<GrainMaterial> v;
   // Li cp 4200 = liquid; cp_solid 3580 = solid near room T (24.86 J/mol/K)
   v.push_back(make_entry("Li", 534.0, 4200.0, 3580.0, 6.94, 1.47e5, 5.055,
-                         -8023.0, 0.10, 2.9, 1.2e6, 453.7, 3.0e3, 0.0));
+                         -8023.0, 0.10, 2.9, 1.2e6, 453.7, 3.0e3, 0.0,
+                         0.5, 85.0));
   // B cp 2000 is already the high-T solid value; cp_solid 0 -> single cp
   v.push_back(make_entry("B", 2340.0, 2000.0, 0.0, 10.81, 5.65e5, 8.64,
-                         -32030.0, 0.80, 4.45, 1.2e6, 2349.0, 5.02e4, 1.0e9));
+                         -32030.0, 0.80, 4.45, 1.2e6, 2349.0, 5.02e4, 1.0e9,
+                         1.2, 150.0));
   return v;
 }
 

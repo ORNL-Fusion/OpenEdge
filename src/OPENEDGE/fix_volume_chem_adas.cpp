@@ -1310,7 +1310,14 @@ void FixVolumeChemAdas::spawn_volume_recombination()
         Ti_eV = pf.temp_i;
         vpar  = pf.parr_flow;
         MagneticFieldFileDataParams bf = cp->query_bfield_at_point(xc);
-        bx = bf.br;  by = bf.bt;  bz = bf.bz;
+        // cylindrical (Br,Bz,Bt) -> SPARTA slots (the drift velocity
+        // derived below goes straight into dp.v, so slot order matters;
+        // the old direct copy put Bt in slot y — swapped drifts)
+        const double phi_c = (dim == 3)
+            ? std::atan2(xc[1] - cp->plasma_data.column_y0,
+                         xc[0] - cp->plasma_data.column_x0) : 0.0;
+        OpenEdge::RZphi_force_to_sparta(bf.br, bf.bz, bf.bt, dim, axi,
+                                        phi_c, bx, by, bz);
       } else {
         double R = 0.0, Z = 0.0;
         OpenEdge::sparta_to_RZ(xc, dim, axi, R, Z,
@@ -1324,7 +1331,12 @@ void FixVolumeChemAdas::spawn_volume_recombination()
         if (pd->has_bfield) {
           double Br = 0.0, Bz_ = 0.0, Bt = 0.0;
           pd->bfield_at(R, Z, Br, Bz_, Bt, icell);
-          bx = Br; by = Bt; bz = Bz_;
+          // cylindrical -> SPARTA slots (see compute branch above)
+          const double phi_c = (dim == 3)
+              ? std::atan2(xc[1] - pd->column_y0,
+                           xc[0] - pd->column_x0) : 0.0;
+          OpenEdge::RZphi_force_to_sparta(Br, Bz_, Bt, dim, axi,
+                                          phi_c, bx, by, bz);
         }
       }
       if (Te_eV <= 0.0 || ne_m3 <= 0.0 || ni_m3 <= 0.0) continue;

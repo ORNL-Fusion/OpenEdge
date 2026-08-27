@@ -918,6 +918,8 @@ void FixBackground::clear_loaded_data()
   dens_e.clear();
   temp_e.clear();
   dens_i.clear();
+  dens_n.clear();
+  temp_n.clear();
   temp_i.clear();
   parr_flow.clear();
   parr_flow_r.clear();

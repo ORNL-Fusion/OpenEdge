@@ -40,7 +40,7 @@ class SurfCollideDiffuse : public SurfCollide {
 
 
  protected:
-  double acc;                // surface accomodation coeff
+  double acc;                // surface accommodation coeff
   double vx,vy,vz;           // translational velocity of surface
   double wx,wy,wz;           // angular velocity of surface
   double px,py,pz;           // point to rotate surface around

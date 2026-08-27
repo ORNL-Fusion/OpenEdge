@@ -45,7 +45,7 @@ enum{SIMPLE};
 SurfReactMpex::SurfReactMpex(SPARTA *sparta, int narg, char **arg) :
   SurfReact(sparta, narg, arg)
 {
-  if (narg != 3) error->all(FLERR,"Illegal surf_react prob command");
+  if (narg != 3) error->all(FLERR,"Illegal surf_react mpex command");
 
   // initialize reaction data structs
 

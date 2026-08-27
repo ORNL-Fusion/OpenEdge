@@ -23,7 +23,7 @@ using namespace SPARTA_NS;
 FixEfieldParticle::FixEfieldParticle(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
-  if (narg != 5) error->all(FLERR,"Illegal fix field/particle command");
+  if (narg != 5) error->all(FLERR,"Illegal fix efield/particle command");
 
   int ncols = 0;
 
@@ -95,23 +95,23 @@ void FixEfieldParticle::init()
   if (axstr) {
     axvar = input->variable->find(axstr);
     if (axvar < 0)
-      error->all(FLERR,"Variable name for fix field/particle does not exist");
+      error->all(FLERR,"Variable name for fix efield/particle does not exist");
     if (!input->variable->particle_style(axvar))
-      error->all(FLERR,"Variable for fix field/particle is invalid style");
+      error->all(FLERR,"Variable for fix efield/particle is invalid style");
   }
   if (aystr) {
     ayvar = input->variable->find(aystr);
     if (ayvar < 0)
-      error->all(FLERR,"Variable name for fix field/particle does not exist");
+      error->all(FLERR,"Variable name for fix efield/particle does not exist");
     if (!input->variable->particle_style(ayvar))
-      error->all(FLERR,"Variable for fix field/particle is invalid style");
+      error->all(FLERR,"Variable for fix efield/particle is invalid style");
   }
   if (azstr) {
     azvar = input->variable->find(azstr);
     if (azvar < 0)
-      error->all(FLERR,"Variable name for fix field/particle does not exist");
+      error->all(FLERR,"Variable name for fix efield/particle does not exist");
     if (!input->variable->particle_style(azvar))
-      error->all(FLERR,"Variable for fix field/particle is invalid style");
+      error->all(FLERR,"Variable for fix efield/particle is invalid style");
   }
 
   // set initial particle values to zero in case dump is performed at step 0

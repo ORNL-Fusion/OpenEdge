@@ -1181,7 +1181,10 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
             sh_alpha_deg = cm.alpha_deg;
           }
 
-          sh_active = (sh_te > 0.0 && sh_ne > 0.0);
+          // require B > 0 like the 2D fallback and the cache builders:
+          // with B = 0, sheath_auto_dmax's rho_i blows up and a spurious
+          // alpha = 90 sheath would engulf the whole domain
+          sh_active = (sh_bmag > 0.0);
         }
       }
     }
@@ -2155,20 +2158,20 @@ void Pusher::init()
   // must resolve the gyroperiod for fallback particles (bad_dt_check).
 
   if (!pusher_plasma_cid)
-    error->all(FLERR,"global gca requires plasma provider ID");
+    error->all(FLERR,"global pusher plasma requires a provider ID");
   pusher_plasma_cidx = modify->find_compute(pusher_plasma_cid);
   pusher_plasma_fidx = -1;
   if (pusher_plasma_cidx >= 0) {
     if (!modify->compute[pusher_plasma_cidx]->per_grid_flag)
-      error->all(FLERR,"global gca: plasma compute must be per-grid");
+      error->all(FLERR,"global pusher plasma: compute must be per-grid");
   } else {
     pusher_plasma_fidx = modify->find_fix(pusher_plasma_cid);
     if (pusher_plasma_fidx < 0)
-      error->all(FLERR,"global gca: plasma provider ID not found");
+      error->all(FLERR,"global pusher plasma: provider ID not found");
     auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
     if (!pd)
       error->all(FLERR,
-                 "global gca: plasma fix provider must be style background");
+                 "global pusher plasma: fix provider must be style background");
   }
 
   // GCA needs smooth B-field derivatives (grad|B|, curvature, curl(b̂))
@@ -2598,7 +2601,7 @@ void Pusher::global_keyword(int narg, char **arg, int &iarg)
         } else break;
       }
       if (update->sheath_flag && !update->sheath_geom_cid)
-        error->all(FLERR, "global pusher sheath kick|spatial requires geom <ID>");
+        error->all(FLERR, "global pusher sheath kick|boundary|spatial requires geom <ID>");
     } else break;  // next keyword belongs to a different global option
   }
 }

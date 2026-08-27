@@ -85,7 +85,12 @@ class FixBackground : public Fix {
   // fix volume/chem/adas as the impurity-CX partner density)
   std::vector<double> dens_n;
   std::vector<double> temp_n;
-  bool has_neutral_dens() const { return !mesh_nn.empty(); }
+  bool has_neutral_dens() const {
+    // mesh-resident OR constant-mode (nn keyword fills the dens_n
+    // vector on the synthetic grid) — the old mesh-only test made the
+    // documented `nn` keyword unable to activate the impurity-CX channel
+    return !mesh_nn.empty() || !dens_n.empty();
+  }
   std::vector<double> parr_flow, parr_flow_r, parr_flow_t, parr_flow_z;
   std::vector<double> grad_te_r, grad_te_t, grad_te_z;
   std::vector<double> grad_ti_r, grad_ti_t, grad_ti_z;
