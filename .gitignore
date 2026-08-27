@@ -68,7 +68,12 @@ src/STUBS/*.a
 
 # Large example data (generated or downloaded separately)
 examples/**/input/*.h5
-!examples/workflows/particulates/cat_liquid_metal_divertor/input/plasma_*.h5
+!examples/verification/particulates/droplet_transport/input/plasma.h5
+!examples/workflows/impurity_transport/rfpie_tungsten_transport/input/plasma_he.h5
+!examples/workflows/impurity_transport/west_tungsten_transport/input/plasma.h5
+!examples/workflows/particulates/cat_liquid_metal_divertor/input/plasma_attached.h5
+!examples/workflows/particulates/cat_liquid_metal_divertor/input/plasma_detached.h5
+!examples/workflows/particulates/st40_lithium_powder_dropper/input/plasma_st40_solps.h5
 examples/**/input/*.equ
 examples/**/input/*.stl
 examples/**/input/data/*.h5

@@ -79,7 +79,7 @@ declare -a TESTS=(
   "pusher_gca|verification/pushers/orbit|in.gca|"
   "pusher_boris|verification/pushers/orbit|in.boris|"
   "constant_flux|verification/surface_emission/constant_flux|in.constant_flux|"
-  "lithium_droplet_transport|workflows/particulates/lithium_droplet_transport|in.openedge|"
+  "droplet_transport|verification/particulates/droplet_transport|in.openedge|input/plasma.h5"
   "west_boron_powder_dropper|workflows/particulates/west_boron_powder_dropper|in.openedge|../../impurity_transport/west_tungsten_transport/input/plasma.h5"
   "cat_liquid_metal_divertor|workflows/particulates/cat_liquid_metal_divertor|in.openedge|input/plasma_attached.h5"
   "west_tungsten_transport|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5"

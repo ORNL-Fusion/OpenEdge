@@ -1,5 +1,4 @@
 output/
-input/plasma_*.h5
 input/_old*/
 scripts/*.png
 log.*
