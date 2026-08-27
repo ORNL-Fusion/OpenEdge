@@ -50,6 +50,55 @@ namespace OpenEdge { bool oe_force_axi_rz = false; }
 
 namespace {
 enum { PLASMA_SOURCE_FILE = 0, PLASMA_SOURCE_CONSTANT = 1 };
+
+struct RegularGridStencil {
+  int j = 0, k = 0;
+  double fr = 0.0, fz = 0.0;
+  double dr = 0.0, dz = 0.0;
+};
+
+bool make_regular_grid_stencil(const std::vector<double> &r,
+                               const std::vector<double> &z,
+                               double R, double Z,
+                               RegularGridStencil &s)
+{
+  if (r.size() < 2 || z.size() < 2 || r.back() <= r.front() ||
+      z.back() <= z.front()) return false;
+
+  const double Rc = std::min(std::max(R, r.front()), r.back());
+  const double Zc = std::min(std::max(Z, z.front()), z.back());
+  auto ir = std::upper_bound(r.begin(), r.end(), Rc);
+  auto iz = std::upper_bound(z.begin(), z.end(), Zc);
+  s.j = std::max(0, std::min(static_cast<int>(ir - r.begin()) - 1,
+                             static_cast<int>(r.size()) - 2));
+  s.k = std::max(0, std::min(static_cast<int>(iz - z.begin()) - 1,
+                             static_cast<int>(z.size()) - 2));
+  s.dr = r[s.j + 1] - r[s.j];
+  s.dz = z[s.k + 1] - z[s.k];
+  if (s.dr <= 0.0 || s.dz <= 0.0) return false;
+  s.fr = (Rc - r[s.j]) / s.dr;
+  s.fz = (Zc - z[s.k]) / s.dz;
+  return true;
+}
+
+void sample_regular_map(const std::vector<double> &field, int nr,
+                        const RegularGridStencil &s,
+                        double &value, double &d_dR, double &d_dZ)
+{
+  const size_t i00 = static_cast<size_t>(s.k) * nr + s.j;
+  const size_t i10 = i00 + 1;
+  const size_t i01 = static_cast<size_t>(s.k + 1) * nr + s.j;
+  const size_t i11 = i01 + 1;
+  const double f00 = field[i00], f10 = field[i10];
+  const double f01 = field[i01], f11 = field[i11];
+  const double lower = (1.0 - s.fr) * f00 + s.fr * f10;
+  const double upper = (1.0 - s.fr) * f01 + s.fr * f11;
+  value = (1.0 - s.fz) * lower + s.fz * upper;
+  d_dR = ((1.0 - s.fz) * (f10 - f00) +
+          s.fz * (f11 - f01)) / s.dr;
+  d_dZ = ((1.0 - s.fr) * (f01 - f00) +
+          s.fr * (f11 - f10)) / s.dz;
+}
 }
 
 /* ---------------------------------------------------------------------- */
@@ -440,13 +489,28 @@ void FixBackground::reload()
 {
   clear_loaded_data();
 
-  try {
-    if (comm->me == 0) {
+  std::string load_error;
+  if (comm->me == 0) {
+    try {
       if (source_mode == PLASMA_SOURCE_FILE) load_plasma_h5();
       else load_constant_profile();
+    } catch (const H5::Exception &e) {
+      load_error = "fix background: HDF5 error while reading plasma file '" +
+                   plasma_path + "': " + e.getDetailMsg();
+    } catch (const std::exception &e) {
+      load_error = e.what();
+    } catch (...) {
+      load_error = "fix background: unknown error while reading plasma file '" +
+                   plasma_path + "'";
     }
-  } catch (const std::exception &e) {
-    error->one(FLERR, e.what());
+  }
+
+  int load_error_size = static_cast<int>(load_error.size());
+  MPI_Bcast(&load_error_size, 1, MPI_INT, 0, world);
+  if (load_error_size) {
+    if (comm->me != 0) load_error.resize(load_error_size);
+    MPI_Bcast(&load_error[0], load_error_size, MPI_CHAR, 0, world);
+    error->all(FLERR, load_error.c_str());
   }
 
   // File loading clears carrier-derived state first.  Preserve a magnetic
@@ -469,6 +533,11 @@ void FixBackground::reload()
   // Psi map broadcast flag (0 = not loaded from plasma.h5)
   int has_psi_map = (has_equ && !psirz.empty()) ? 1 : 0;
   MPI_Bcast(&has_psi_map, 1, MPI_INT, 0, world);
+  int has_equ_bmaps = (has_psi_map &&
+                       equ_br.size() == psirz.size() &&
+                       equ_bt.size() == psirz.size() &&
+                       equ_bz.size() == psirz.size()) ? 1 : 0;
+  MPI_Bcast(&has_equ_bmaps, 1, MPI_INT, 0, world);
 
   // Equilibrium grid dims (independent of the regular-grid nr/nz — for
   // mesh-only plasma.h5 the regular grid is absent but the equilibrium
@@ -530,6 +599,11 @@ void FixBackground::reload()
       equ_r.resize(equ_jm);
       equ_z.resize(equ_km);
       psirz.resize(static_cast<size_t>(equ_jm) * equ_km);
+      if (has_equ_bmaps) {
+        equ_br.resize(static_cast<size_t>(equ_jm) * equ_km);
+        equ_bt.resize(static_cast<size_t>(equ_jm) * equ_km);
+        equ_bz.resize(static_cast<size_t>(equ_jm) * equ_km);
+      }
     }
   }
 
@@ -734,6 +808,12 @@ void FixBackground::reload()
     MPI_Bcast(equ_r.data(), equ_jm, MPI_DOUBLE, 0, world);
     MPI_Bcast(equ_z.data(), equ_km, MPI_DOUBLE, 0, world);
     MPI_Bcast(psirz.data(), equ_n, MPI_DOUBLE, 0, world);
+    if (has_equ_bmaps) {
+      MPI_Bcast(equ_br.data(), equ_n, MPI_DOUBLE, 0, world);
+      MPI_Bcast(equ_bt.data(), equ_n, MPI_DOUBLE, 0, world);
+      MPI_Bcast(equ_bz.data(), equ_n, MPI_DOUBLE, 0, world);
+      has_bfield = 1;
+    }
     MPI_Bcast(&psi_axis, 1, MPI_DOUBLE, 0, world);
     MPI_Bcast(&psib, 1, MPI_DOUBLE, 0, world);
     // btf/rtf are read from /equilibrium on rank 0 only; without these
@@ -863,6 +943,9 @@ void FixBackground::clear_loaded_data()
   equ_r.clear();
   equ_z.clear();
   psirz.clear();
+  equ_br.clear();
+  equ_bt.clear();
+  equ_bz.clear();
   mesh_vtx_r.clear();
   mesh_vtx_z.clear();
   mesh_tri.clear();
@@ -979,6 +1062,13 @@ void FixBackground::load_constant_profile()
 
 void FixBackground::load_plasma_h5()
 {
+  std::ifstream probe(plasma_path, std::ios::in | std::ios::binary);
+  if (!probe.is_open())
+    throw std::runtime_error(
+      "fix background: cannot open plasma file '" + plasma_path +
+      "' (file does not exist or is not readable)");
+  probe.close();
+
   if (screen)
     fprintf(screen, "[background] Reading %s\n", plasma_path.c_str());
 
@@ -990,11 +1080,9 @@ void FixBackground::load_plasma_h5()
   try {
     file.openFile(plasma_path, H5F_ACC_RDONLY);
   } catch (const H5::Exception &) {
-    char msg[512];
-    snprintf(msg, sizeof(msg),
-             "fix background: cannot open plasma file '%s' "
-             "(missing or not a readable HDF5 file)", plasma_path.c_str());
-    error->all(FLERR, msg);
+    throw std::runtime_error(
+      "fix background: cannot open plasma file '" + plasma_path +
+      "' (not a readable HDF5 file)");
   }
 
   auto read1D = [&](const std::string &name, std::vector<double> &out) {
@@ -1110,6 +1198,35 @@ void FixBackground::load_plasma_h5()
       psirz.assign(static_cast<size_t>(equ_jm) * equ_km, 0.0);
       dspsi.read(psirz.data(), H5::PredType::NATIVE_DOUBLE);
 
+      const bool any_bmap = hasDataset("equilibrium/br") ||
+                            hasDataset("equilibrium/bt") ||
+                            hasDataset("equilibrium/bz");
+      const bool all_bmaps = hasDataset("equilibrium/br") &&
+                             hasDataset("equilibrium/bt") &&
+                             hasDataset("equilibrium/bz");
+      if (any_bmap && !all_bmaps)
+        throw std::runtime_error(
+          "Embedded equilibrium B maps must provide br, bt, and bz together");
+      if (all_bmaps) {
+        const size_t equ_n = static_cast<size_t>(equ_jm) * equ_km;
+        auto read_bmap = [&](const std::string &name,
+                             std::vector<double> &out) {
+          H5::DataSet ds = file.openDataSet(name);
+          H5::DataSpace dsp = ds.getSpace();
+          hsize_t bdims[2] = {0, 0};
+          dsp.getSimpleExtentDims(bdims);
+          if (static_cast<int>(bdims[0]) != equ_km ||
+              static_cast<int>(bdims[1]) != equ_jm)
+            throw std::runtime_error("Shape mismatch in " + name);
+          out.assign(equ_n, 0.0);
+          ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
+        };
+        read_bmap("equilibrium/br", equ_br);
+        read_bmap("equilibrium/bt", equ_bt);
+        read_bmap("equilibrium/bz", equ_bz);
+        has_bfield = 1;
+      }
+
       double btf_val = 0.0, rtf_val = 0.0, psib_val = 0.0;
       read_scalar("equilibrium/btf",  btf_val);
       read_scalar("equilibrium/rtf",  rtf_val);
@@ -1135,8 +1252,9 @@ void FixBackground::load_plasma_h5()
       if (screen)
         fprintf(screen,
                 "[background] loaded embedded equilibrium "
-                "(jm=%d km=%d psi_axis=%.6e psib=%.6e)\n",
-                equ_jm, equ_km, psi_axis, psib);
+                "(jm=%d km=%d psi_axis=%.6e psib=%.6e B=%s)\n",
+                equ_jm, equ_km, psi_axis, psib,
+                equ_br.empty() ? "psi-derived" : "native-map");
     }
   }
 
@@ -2130,7 +2248,8 @@ void FixBackground::bfield_at(double R, double Z,
 }
 
 /* ----------------------------------------------------------------------
-   pointwise psi-derived B from the loaded equilibrium:
+   pointwise B from the loaded equilibrium. Native br/bt/bz maps take
+   precedence; legacy files fall back to
    Br = -1/R dpsi/dZ, Bz = 1/R dpsi/dR, Bt = btf*rtf/R.
    Returns false when no usable equilibrium is loaded.
 ------------------------------------------------------------------------- */
@@ -2139,8 +2258,25 @@ bool FixBackground::equ_bfield_at(double R, double Z,
                                   double &Br_out, double &Bz_out,
                                   double &Bt_out) const
 {
-  if (!has_equ || equ_jm < 3 || equ_km < 3 || R < 1.0e-10 ||
-      psirz.size() < static_cast<size_t>(equ_jm * equ_km)) return false;
+  if (!has_equ || R < 1.0e-10) return false;
+
+  const size_t equ_n = static_cast<size_t>(equ_jm) * equ_km;
+  if (equ_jm >= 2 && equ_km >= 2 && equ_br.size() == equ_n &&
+      equ_bt.size() == equ_n && equ_bz.size() == equ_n) {
+    RegularGridStencil stencil;
+    if (!make_regular_grid_stencil(equ_r, equ_z, R, Z, stencil))
+      return false;
+    double unused_dR = 0.0, unused_dZ = 0.0;
+    sample_regular_map(equ_br, equ_jm, stencil, Br_out,
+                       unused_dR, unused_dZ);
+    sample_regular_map(equ_bt, equ_jm, stencil, Bt_out,
+                       unused_dR, unused_dZ);
+    sample_regular_map(equ_bz, equ_jm, stencil, Bz_out,
+                       unused_dR, unused_dZ);
+    return true;
+  }
+
+  if (equ_jm < 3 || equ_km < 3 || psirz.size() < equ_n) return false;
 
   const double dr_eq = equ_r[1] - equ_r[0];
   const double dz_eq = equ_z[1] - equ_z[0];
@@ -2228,11 +2364,37 @@ FixBackground::query_bfield_at_point(const double xyz[3], int icell,
     // outside mesh footprint: fall through.
   }
 
-  // Equilibrium analytic derivatives. GCA reaches this before mesh data;
+  // Smooth equilibrium field. Native maps retain the source convention and
+  // provide exact derivatives of the bilinear interpolant. Legacy files use
+  // psi-derived analytic derivatives. GCA reaches this before mesh data;
   // historical callers reach it only after a mesh miss.
   if (has_equ && equ_jm >= 3 && equ_km >= 3 && !psirz.empty() && R > 1.0e-10) {
     const int jm = equ_jm;
     const int km = equ_km;
+    const size_t equ_n = static_cast<size_t>(jm) * km;
+    if (equ_br.size() == equ_n && equ_bt.size() == equ_n &&
+        equ_bz.size() == equ_n) {
+      RegularGridStencil stencil;
+      if (make_regular_grid_stencil(equ_r, equ_z, R, Z, stencil)) {
+        sample_regular_map(equ_br, jm, stencil, B.br,
+                           B.dBr_dr, B.dBr_dz);
+        sample_regular_map(equ_bt, jm, stencil, B.bt,
+                           B.dBt_dr, B.dBt_dz);
+        sample_regular_map(equ_bz, jm, stencil, B.bz,
+                           B.dBz_dr, B.dBz_dz);
+        B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+        if (B.Bmag > 0.0) {
+          B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr +
+                        B.bz*B.dBz_dr) / B.Bmag;
+          B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz +
+                        B.bz*B.dBz_dz) / B.Bmag;
+        }
+        B.derivatives_valid = true;
+        B.axisymmetric_source = true;
+        bfield_equilibrium_queries++;
+        return B;
+      }
+    }
     const double dr = equ_r[1] - equ_r[0];
     const double dz = equ_z[1] - equ_z[0];
     if (dr > 0.0 && dz > 0.0) {

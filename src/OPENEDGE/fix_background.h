@@ -122,6 +122,10 @@ class FixBackground : public Fix {
   double btf, rtf, psib, psi_axis;
   std::vector<double> equ_r, equ_z;
   std::vector<double> psirz;       // [km * jm], row-major [z][r]
+  // Optional native equilibrium B maps on the same [z][r] grid.  These
+  // preserve source-code field conventions exactly and take precedence over
+  // psi-gradient + btf*rtf/R reconstruction when present.
+  std::vector<double> equ_br, equ_bt, equ_bz;
 
   // ---- Mesh triangulation (from plasma.h5/mesh group) ----
   int has_mesh;

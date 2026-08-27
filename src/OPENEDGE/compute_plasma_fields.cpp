@@ -290,6 +290,94 @@ static void derive_psi_axis(EquilibriumData &e)
   e.psi_axis = best;
 }
 
+struct EquilibriumMapStencil {
+  int j = 0, k = 0;
+  double fr = 0.0, fz = 0.0;
+  double dr = 0.0, dz = 0.0;
+};
+
+static bool equilibrium_map_shape_ok(
+    const std::vector<std::vector<double>> &field, int km, int jm)
+{
+  if (static_cast<int>(field.size()) != km) return false;
+  for (int k = 0; k < km; ++k)
+    if (static_cast<int>(field[k].size()) != jm) return false;
+  return true;
+}
+
+static bool equilibrium_has_native_b(const EquilibriumData &equ)
+{
+  return equ.jm >= 2 && equ.km >= 2 &&
+         equilibrium_map_shape_ok(equ.br, equ.km, equ.jm) &&
+         equilibrium_map_shape_ok(equ.bt, equ.km, equ.jm) &&
+         equilibrium_map_shape_ok(equ.bz, equ.km, equ.jm);
+}
+
+static bool make_equilibrium_map_stencil(const EquilibriumData &equ,
+                                         double R, double Z,
+                                         EquilibriumMapStencil &s)
+{
+  if (equ.r.size() < 2 || equ.z.size() < 2 ||
+      equ.r.back() <= equ.r.front() || equ.z.back() <= equ.z.front())
+    return false;
+  const double Rc = std::min(std::max(R, equ.r.front()), equ.r.back());
+  const double Zc = std::min(std::max(Z, equ.z.front()), equ.z.back());
+  auto ir = std::upper_bound(equ.r.begin(), equ.r.end(), Rc);
+  auto iz = std::upper_bound(equ.z.begin(), equ.z.end(), Zc);
+  s.j = std::max(0, std::min(static_cast<int>(ir - equ.r.begin()) - 1,
+                             equ.jm - 2));
+  s.k = std::max(0, std::min(static_cast<int>(iz - equ.z.begin()) - 1,
+                             equ.km - 2));
+  s.dr = equ.r[s.j + 1] - equ.r[s.j];
+  s.dz = equ.z[s.k + 1] - equ.z[s.k];
+  if (s.dr <= 0.0 || s.dz <= 0.0) return false;
+  s.fr = (Rc - equ.r[s.j]) / s.dr;
+  s.fz = (Zc - equ.z[s.k]) / s.dz;
+  return true;
+}
+
+static void sample_equilibrium_map(
+    const std::vector<std::vector<double>> &field,
+    const EquilibriumMapStencil &s,
+    double &value, double &d_dR, double &d_dZ)
+{
+  const double f00 = field[s.k][s.j];
+  const double f10 = field[s.k][s.j + 1];
+  const double f01 = field[s.k + 1][s.j];
+  const double f11 = field[s.k + 1][s.j + 1];
+  const double lower = (1.0 - s.fr) * f00 + s.fr * f10;
+  const double upper = (1.0 - s.fr) * f01 + s.fr * f11;
+  value = (1.0 - s.fz) * lower + s.fz * upper;
+  d_dR = ((1.0 - s.fz) * (f10 - f00) +
+          s.fz * (f11 - f01)) / s.dr;
+  d_dZ = ((1.0 - s.fr) * (f01 - f00) +
+          s.fr * (f11 - f10)) / s.dz;
+}
+
+static bool sample_native_equilibrium_b(const EquilibriumData &equ,
+                                        double R, double Z,
+                                        MagneticFieldFileDataParams &B)
+{
+  if (!equilibrium_has_native_b(equ)) return false;
+  EquilibriumMapStencil stencil;
+  if (!make_equilibrium_map_stencil(equ, R, Z, stencil)) return false;
+  B.r = R;
+  B.z = Z;
+  sample_equilibrium_map(equ.br, stencil, B.br, B.dBr_dr, B.dBr_dz);
+  sample_equilibrium_map(equ.bt, stencil, B.bt, B.dBt_dr, B.dBt_dz);
+  sample_equilibrium_map(equ.bz, stencil, B.bz, B.dBz_dr, B.dBz_dz);
+  B.Bmag = std::sqrt(B.br*B.br + B.bt*B.bt + B.bz*B.bz);
+  if (B.Bmag > 0.0) {
+    B.dBmag_dr = (B.br*B.dBr_dr + B.bt*B.dBt_dr +
+                  B.bz*B.dBz_dr) / B.Bmag;
+    B.dBmag_dz = (B.br*B.dBr_dz + B.bt*B.dBt_dz +
+                  B.bz*B.dBz_dz) / B.Bmag;
+  }
+  B.derivatives_valid = true;
+  B.axisymmetric_source = true;
+  return true;
+}
+
 void ComputePlasmaFields::init()
 {
   reallocate();
@@ -455,6 +543,23 @@ void ComputePlasmaFields::init()
       for (int k = 0; k < pd->equ_km; k++)
         for (int j = 0; j < pd->equ_jm; j++)
           equ_data.psi[k][j] = pd->psirz[k * pd->equ_jm + j];
+      const size_t equ_n = static_cast<size_t>(pd->equ_jm) * pd->equ_km;
+      if (pd->equ_br.size() == equ_n && pd->equ_bt.size() == equ_n &&
+          pd->equ_bz.size() == equ_n) {
+        equ_data.br.assign(pd->equ_km,
+                           std::vector<double>(pd->equ_jm, 0.0));
+        equ_data.bt.assign(pd->equ_km,
+                           std::vector<double>(pd->equ_jm, 0.0));
+        equ_data.bz.assign(pd->equ_km,
+                           std::vector<double>(pd->equ_jm, 0.0));
+        for (int k = 0; k < pd->equ_km; ++k)
+          for (int j = 0; j < pd->equ_jm; ++j) {
+            const size_t idx = static_cast<size_t>(k) * pd->equ_jm + j;
+            equ_data.br[k][j] = pd->equ_br[idx];
+            equ_data.bt[k][j] = pd->equ_bt[idx];
+            equ_data.bz[k][j] = pd->equ_bz[idx];
+          }
+      }
     }
 
     if (me == 0 && screen)
@@ -1921,7 +2026,8 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
     // outside mesh footprint: fall through to grid / equ branches.
   }
 
-  // Equilibrium psi-derived B with analytic derivatives. Footprint-checked:
+  // Smooth equilibrium B with derivatives. Native maps preserve the source
+  // convention; legacy files fall back to psi reconstruction. Footprint-checked:
   // points outside the equilibrium rectangle must not use edge-extrapolated
   // psi stencils — they fall back to the mesh (GCA) or zero instead.
   const int dim = domain->dimension;
@@ -1953,6 +2059,8 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
   }
 
   const EquilibriumData &equ = equ_data;
+  if (sample_native_equilibrium_b(equ, R, Z, B)) return B;
+
   const int jm = equ.jm;
   const int km = equ.km;
   const double dr = equ.r[1] - equ.r[0];
@@ -1989,7 +2097,7 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
   const double invR = 1.0 / R;
   const double invR2 = invR * invR;
 
-  B.derivatives_valid = true;   // equilibrium psi-map: analytic derivatives
+  B.derivatives_valid = true;   // legacy equilibrium psi-map derivatives
   B.axisymmetric_source = true;
   B.r = R;
   B.z = Z;
@@ -2171,9 +2279,41 @@ bool ComputePlasmaFields::readEquilibriumFromPlasmaH5(
       for (int j = 0; j < data.jm; ++j)
         data.psi[k][j] = flat[k * data.jm + j];
 
+    const bool any_bmap = hasGroup("equilibrium/br") ||
+                          hasGroup("equilibrium/bt") ||
+                          hasGroup("equilibrium/bz");
+    const bool all_bmaps = hasGroup("equilibrium/br") &&
+                           hasGroup("equilibrium/bt") &&
+                           hasGroup("equilibrium/bz");
+    if (any_bmap && !all_bmaps)
+      throw std::runtime_error(
+        "Embedded equilibrium B maps must provide br, bt, and bz together");
+    if (all_bmaps) {
+      auto read2D = [&](const std::string &name,
+                        std::vector<std::vector<double>> &out) {
+        H5::DataSet ds = file.openDataSet(name);
+        H5::DataSpace map_space = ds.getSpace();
+        hsize_t map_dims[2] = {0, 0};
+        map_space.getSimpleExtentDims(map_dims);
+        if (static_cast<int>(map_dims[0]) != data.km ||
+            static_cast<int>(map_dims[1]) != data.jm)
+          throw std::runtime_error("Shape mismatch in " + name);
+        std::vector<double> map_flat(map_dims[0] * map_dims[1]);
+        ds.read(map_flat.data(), H5::PredType::NATIVE_DOUBLE);
+        out.assign(data.km, std::vector<double>(data.jm, 0.0));
+        for (int k = 0; k < data.km; ++k)
+          for (int j = 0; j < data.jm; ++j)
+            out[k][j] = map_flat[static_cast<size_t>(k) * data.jm + j];
+      };
+      read2D("equilibrium/br", data.br);
+      read2D("equilibrium/bt", data.bt);
+      read2D("equilibrium/bz", data.bz);
+    }
+
     data.btf  = readScalar("equilibrium/btf");
     data.rtf  = readScalar("equilibrium/rtf");
     data.psib = readScalar("equilibrium/psib");
+    data.psi_axis = readScalar("equilibrium/psi_axis");
     return true;
   } catch (H5::Exception &) {
     return false;
@@ -2188,6 +2328,8 @@ void ComputePlasmaFields::broadcastEquilibriumData(EquilibriumData &data) {
   MPI_Bcast(&data.rtf, 1, MPI_DOUBLE, 0, world);
   MPI_Bcast(&data.psib, 1, MPI_DOUBLE, 0, world);
   MPI_Bcast(&data.psi_axis, 1, MPI_DOUBLE, 0, world);
+  int has_native_b = (me == 0 && equilibrium_has_native_b(data)) ? 1 : 0;
+  MPI_Bcast(&has_native_b, 1, MPI_INT, 0, world);
   if (me != 0) {
     data.r.resize(data.jm);
     data.z.resize(data.km);
@@ -2199,6 +2341,22 @@ void ComputePlasmaFields::broadcastEquilibriumData(EquilibriumData &data) {
   }
   for (int k = 0; k < data.km; ++k)
     MPI_Bcast(data.psi[k].data(), data.jm, MPI_DOUBLE, 0, world);
+  if (has_native_b) {
+    if (me != 0) {
+      data.br.assign(data.km, std::vector<double>(data.jm));
+      data.bt.assign(data.km, std::vector<double>(data.jm));
+      data.bz.assign(data.km, std::vector<double>(data.jm));
+    }
+    for (int k = 0; k < data.km; ++k) {
+      MPI_Bcast(data.br[k].data(), data.jm, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.bt[k].data(), data.jm, MPI_DOUBLE, 0, world);
+      MPI_Bcast(data.bz[k].data(), data.jm, MPI_DOUBLE, 0, world);
+    }
+  } else if (me != 0) {
+    data.br.clear();
+    data.bt.clear();
+    data.bz.clear();
+  }
 }
 
 void ComputePlasmaFields::computeMagneticGeometry(
@@ -2218,42 +2376,66 @@ void ComputePlasmaFields::computeMagneticGeometry(
 
   const int jm = equ.jm;
   const int km = equ.km;
-  if (jm < 3 || km < 3) return;
-
-  const double dr = equ.r[1] - equ.r[0];
-  const double dz = equ.z[1] - equ.z[0];
-  if (dr <= 0.0 || dz <= 0.0) return;
-
-  double fj = (R - equ.r[0]) / dr;
-  double fk = (Z - equ.z[0]) / dz;
-  int jc = static_cast<int>(std::round(fj));
-  int kc = static_cast<int>(std::round(fk));
-  jc = std::max(1, std::min(jc, jm - 2));
-  kc = std::max(1, std::min(kc, km - 2));
-
-  const double dR = equ.r[jc+1] - equ.r[jc-1];
-  const double dZ = equ.z[kc+1] - equ.z[kc-1];
-  const double dpsi_dR = (equ.psi[kc][jc+1] - equ.psi[kc][jc-1]) / dR;
-  const double dpsi_dZ = (equ.psi[kc+1][jc] - equ.psi[kc-1][jc]) / dZ;
-
-  const double dR1 = equ.r[jc+1] - equ.r[jc];
-  const double dR0 = equ.r[jc] - equ.r[jc-1];
-  const double dZ1 = equ.z[kc+1] - equ.z[kc];
-  const double dZ0 = equ.z[kc] - equ.z[kc-1];
-
-  const double d2psi_dR2 = 2.0 * (equ.psi[kc][jc+1] / (dR1*(dR1+dR0))
-                                 - equ.psi[kc][jc] / (dR1*dR0)
-                                 + equ.psi[kc][jc-1] / (dR0*(dR1+dR0)));
-  const double d2psi_dZ2 = 2.0 * (equ.psi[kc+1][jc] / (dZ1*(dZ1+dZ0))
-                                 - equ.psi[kc][jc] / (dZ1*dZ0)
-                                 + equ.psi[kc-1][jc] / (dZ0*(dZ1+dZ0)));
-  const double d2psi_dRdZ = (equ.psi[kc+1][jc+1] - equ.psi[kc+1][jc-1]
-                            - equ.psi[kc-1][jc+1] + equ.psi[kc-1][jc-1]) / (dR * dZ);
-
   const double invR = 1.0 / R;
-  const double BR = -dpsi_dZ * invR;
-  const double BZ = dpsi_dR * invR;
-  const double Bphi = equ.btf * equ.rtf * invR;
+  double BR = 0.0, Bphi = 0.0, BZ = 0.0;
+  double dBR_dR2 = 0.0, dBR_dZ2 = 0.0;
+  double dBZ_dR2 = 0.0, dBZ_dZ2 = 0.0;
+  double dBphi_dR = 0.0, dBphi_dZ = 0.0;
+
+  MagneticFieldFileDataParams native_B{};
+  if (sample_native_equilibrium_b(equ, R, Z, native_B)) {
+    BR = native_B.br;
+    Bphi = native_B.bt;
+    BZ = native_B.bz;
+    dBR_dR2 = native_B.dBr_dr;
+    dBR_dZ2 = native_B.dBr_dz;
+    dBZ_dR2 = native_B.dBz_dr;
+    dBZ_dZ2 = native_B.dBz_dz;
+    dBphi_dR = native_B.dBt_dr;
+    dBphi_dZ = native_B.dBt_dz;
+  } else {
+    if (jm < 3 || km < 3 || equ.psi.empty()) return;
+    const double dr = equ.r[1] - equ.r[0];
+    const double dz = equ.z[1] - equ.z[0];
+    if (dr <= 0.0 || dz <= 0.0) return;
+
+    const double fj = (R - equ.r[0]) / dr;
+    const double fk = (Z - equ.z[0]) / dz;
+    int jc = static_cast<int>(std::round(fj));
+    int kc = static_cast<int>(std::round(fk));
+    jc = std::max(1, std::min(jc, jm - 2));
+    kc = std::max(1, std::min(kc, km - 2));
+
+    const double dR = equ.r[jc+1] - equ.r[jc-1];
+    const double dZ = equ.z[kc+1] - equ.z[kc-1];
+    const double dpsi_dR = (equ.psi[kc][jc+1] - equ.psi[kc][jc-1]) / dR;
+    const double dpsi_dZ = (equ.psi[kc+1][jc] - equ.psi[kc-1][jc]) / dZ;
+    const double dR1 = equ.r[jc+1] - equ.r[jc];
+    const double dR0 = equ.r[jc] - equ.r[jc-1];
+    const double dZ1 = equ.z[kc+1] - equ.z[kc];
+    const double dZ0 = equ.z[kc] - equ.z[kc-1];
+    const double d2psi_dR2 =
+      2.0 * (equ.psi[kc][jc+1] / (dR1*(dR1+dR0))
+             - equ.psi[kc][jc] / (dR1*dR0)
+             + equ.psi[kc][jc-1] / (dR0*(dR1+dR0)));
+    const double d2psi_dZ2 =
+      2.0 * (equ.psi[kc+1][jc] / (dZ1*(dZ1+dZ0))
+             - equ.psi[kc][jc] / (dZ1*dZ0)
+             + equ.psi[kc-1][jc] / (dZ0*(dZ1+dZ0)));
+    const double d2psi_dRdZ =
+      (equ.psi[kc+1][jc+1] - equ.psi[kc+1][jc-1]
+       - equ.psi[kc-1][jc+1] + equ.psi[kc-1][jc-1]) / (dR * dZ);
+    const double invR2 = invR * invR;
+    BR = -dpsi_dZ * invR;
+    BZ = dpsi_dR * invR;
+    Bphi = equ.btf * equ.rtf * invR;
+    dBR_dR2 = dpsi_dZ * invR2 - d2psi_dRdZ * invR;
+    dBR_dZ2 = -d2psi_dZ2 * invR;
+    dBZ_dR2 = -dpsi_dR * invR2 + d2psi_dR2 * invR;
+    dBZ_dZ2 = d2psi_dRdZ * invR;
+    dBphi_dR = -equ.btf * equ.rtf * invR2;
+    dBphi_dZ = 0.0;
+  }
 
   const double Bmag = std::sqrt(BR*BR + Bphi*Bphi + BZ*BZ);
   if (Bmag <= 0.0) return;
@@ -2263,14 +2445,6 @@ void ComputePlasmaFields::computeMagneticGeometry(
   const double bR = BR * invBmag;
   const double bphi = Bphi * invBmag;
   const double bZ = BZ * invBmag;
-
-  const double invR2 = invR * invR;
-  const double dBR_dR2 = dpsi_dZ * invR2 - d2psi_dRdZ * invR;
-  const double dBR_dZ2 = -d2psi_dZ2 * invR;
-  const double dBZ_dR2 = -dpsi_dR * invR2 + d2psi_dR2 * invR;
-  const double dBZ_dZ2 = d2psi_dRdZ * invR;
-  const double dBphi_dR = -equ.btf * equ.rtf * invR2;
-  const double dBphi_dZ = 0.0;
 
   geom.gradBmag[0] = (BR * dBR_dR2 + Bphi * dBphi_dR + BZ * dBZ_dR2) * invBmag;
   geom.gradBmag[1] = 0.0;

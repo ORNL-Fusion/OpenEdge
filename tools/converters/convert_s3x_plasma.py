@@ -51,8 +51,10 @@ def _read_scalar(h5obj, key, default=None):
 
 def _wall_and_config_from_mesh(mesh_file, ref_file):
     """
-    Read wall + config (r,z,psi,psisep) from a SOLEDGE mesh/config file and
-    rescale to physical coordinates using the same logic as getWallInfo().
+    Read wall + config (r,z,psi,Br,Bz,Bphi,psisep) from a SOLEDGE
+    mesh/config file and rescale coordinates using the same logic as
+    getWallInfo().  The /config/B* arrays are already in tesla (unlike the
+    zone-local B arrays, which are normalized by B0), so do not rescale them.
     """
     with h5py.File(ref_file, "r") as ref, h5py.File(mesh_file, "r") as mesh:
         wall_is_absolute_coords = False
@@ -75,11 +77,19 @@ def _wall_and_config_from_mesh(mesh_file, ref_file):
             raise RuntimeError("Invalid wall arrays in mesh file")
 
         have_cfg = all(k in mesh for k in ["/config/r", "/config/z", "/config/psi"])
-        r2d = z2d = psi2d = psisep = psicore = None
+        r2d = z2d = psi2d = None
+        br2d = bz2d = bt2d = None
+        psisep = psicore = None
         if have_cfg:
             r2d = np.asarray(mesh["/config/r"][...], dtype=np.float64)
             z2d = np.asarray(mesh["/config/z"][...], dtype=np.float64)
             psi2d = np.asarray(mesh["/config/psi"][...], dtype=np.float64)
+            have_cfg_b = all(k in mesh for k in
+                             ["/config/Br", "/config/Bz", "/config/Bphi"])
+            if have_cfg_b:
+                br2d = np.asarray(mesh["/config/Br"][...], dtype=np.float64)
+                bz2d = np.asarray(mesh["/config/Bz"][...], dtype=np.float64)
+                bt2d = np.asarray(mesh["/config/Bphi"][...], dtype=np.float64)
             if "/config/psisep1" in mesh:
                 psisep = float(np.asarray(mesh["/config/psisep1"][...]).reshape(-1)[0])
             if "/config/psicore" in mesh:
@@ -103,7 +113,8 @@ def _wall_and_config_from_mesh(mesh_file, ref_file):
             rwall = np.concatenate([rwall, rwall[:1]])
             zwall = np.concatenate([zwall, zwall[:1]])
 
-        return rwall, zwall, r2d, z2d, psi2d, psisep, psicore
+        return (rwall, zwall, r2d, z2d, psi2d,
+                br2d, bz2d, bt2d, psisep, psicore)
 
 
 def _write_sparta_surface_polyline(path, rvals, zvals, title="surface geometry",
@@ -395,6 +406,7 @@ def interpolate_and_save_plasma_field(
     # Optional fallback to wall_file only if explicitly provided.
     Rwall = Zwall = None
     r2d_cfg = z2d_cfg = psi2d_cfg = None
+    br2d_cfg = bz2d_cfg = bt2d_cfg = None
     psisep_cfg = psicore_cfg = None
     if use_mesh_wall:
         # Try mesh.h5 (carries /config/psi in SOLEDGE3X layouts) first, then
@@ -405,7 +417,10 @@ def interpolate_and_save_plasma_field(
         candidates.extend([bfield_file, mesh_file, data_file])
         for candidate in candidates:
             try:
-                Rwall, Zwall, r2d_cfg, z2d_cfg, psi2d_cfg, psisep_cfg, psicore_cfg = _wall_and_config_from_mesh(candidate, ref_file)
+                (Rwall, Zwall, r2d_cfg, z2d_cfg, psi2d_cfg,
+                 br2d_cfg, bz2d_cfg, bt2d_cfg,
+                 psisep_cfg, psicore_cfg) = \
+                    _wall_and_config_from_mesh(candidate, ref_file)
                 print(f"Using wall/config geometry from mesh file: {candidate}")
                 break
             except Exception:
@@ -855,14 +870,21 @@ def interpolate_and_save_plasma_field(
         # datasets are written; /config/psi is handed to /equilibrium/
         # directly on its native grid.
         with h5py.File(plasma_out_file, 'w') as f:
-            # /equilibrium from SOLEDGE /config/{r, z, psi} written verbatim
-            # on its native grid — no resampling. SOLEDGE3X does not expose
-            # btf/rtf, so those are omitted (OpenEdge reads them optionally).
+            # /equilibrium from SOLEDGE /config/{r,z,psi,Br,Bz,Bphi}, written
+            # on its native grid without resampling.  Preserve the exact
+            # vector field instead of approximating Bphi by btf*rtf/R or
+            # reconstructing a convention-dependent Bpol from psi.
             if psi2d_cfg is not None and r2d_cfg is not None and z2d_cfg is not None:
                 if r2d_cfg.ndim == 1 and z2d_cfg.ndim == 1:
                     equ_r = np.asarray(r2d_cfg, dtype=np.float64)
                     equ_z = np.asarray(z2d_cfg, dtype=np.float64)
                     equ_psi = np.asarray(psi2d_cfg, dtype=np.float64)
+                    equ_br = (None if br2d_cfg is None else
+                              np.asarray(br2d_cfg, dtype=np.float64))
+                    equ_bz = (None if bz2d_cfg is None else
+                              np.asarray(bz2d_cfg, dtype=np.float64))
+                    equ_bt = (None if bt2d_cfg is None else
+                              np.asarray(bt2d_cfg, dtype=np.float64))
                 else:
                     # SOLEDGE3X /config/{r, z, psi} are 2D meshgrid-style
                     # arrays. Detect which axis varies with R vs Z by looking
@@ -876,6 +898,12 @@ def interpolate_and_save_plasma_field(
                         equ_r = np.asarray(r2d_cfg[0, :], dtype=np.float64)
                         equ_z = np.asarray(z2d_cfg[:, 0], dtype=np.float64)
                         equ_psi = np.asarray(psi2d_cfg, dtype=np.float64)
+                        equ_br = (None if br2d_cfg is None else
+                                  np.asarray(br2d_cfg, dtype=np.float64))
+                        equ_bz = (None if bz2d_cfg is None else
+                                  np.asarray(bz2d_cfg, dtype=np.float64))
+                        equ_bt = (None if bt2d_cfg is None else
+                                  np.asarray(bt2d_cfg, dtype=np.float64))
                     elif r_varies_cols and not r_varies_rows:
                         # Column 0 sweeps R -> r axis is r2d[:,0], z axis is
                         # z2d[0,:], psi is (iR, iZ) and needs transposing to
@@ -883,6 +911,12 @@ def interpolate_and_save_plasma_field(
                         equ_r = np.asarray(r2d_cfg[:, 0], dtype=np.float64)
                         equ_z = np.asarray(z2d_cfg[0, :], dtype=np.float64)
                         equ_psi = np.asarray(psi2d_cfg, dtype=np.float64).T
+                        equ_br = (None if br2d_cfg is None else
+                                  np.asarray(br2d_cfg, dtype=np.float64).T)
+                        equ_bz = (None if bz2d_cfg is None else
+                                  np.asarray(bz2d_cfg, dtype=np.float64).T)
+                        equ_bt = (None if bt2d_cfg is None else
+                                  np.asarray(bt2d_cfg, dtype=np.float64).T)
                     else:
                         raise RuntimeError(
                             "convert_s3x_plasma: cannot determine R/Z axis "
@@ -891,11 +925,44 @@ def interpolate_and_save_plasma_field(
                 f.create_dataset('equilibrium/r',    data=equ_r)
                 f.create_dataset('equilibrium/z',    data=equ_z)
                 f.create_dataset('equilibrium/psi',  data=equ_psi)
+                expected_shape = (equ_z.size, equ_r.size)
+                if equ_psi.shape != expected_shape:
+                    raise RuntimeError(
+                        "convert_s3x_plasma: equilibrium/psi shape "
+                        f"{equ_psi.shape} does not match (nz,nr)="
+                        f"{expected_shape}")
+                have_equ_b = equ_br is not None and equ_bz is not None \
+                             and equ_bt is not None
+                if have_equ_b:
+                    for name, values in (("br", equ_br), ("bt", equ_bt),
+                                         ("bz", equ_bz)):
+                        if values.shape != expected_shape:
+                            raise RuntimeError(
+                                "convert_s3x_plasma: equilibrium/"
+                                f"{name} shape {values.shape} does not match "
+                                f"(nz,nr)={expected_shape}")
+                        f.create_dataset(f'equilibrium/{name}', data=values)
+                    f['equilibrium'].attrs['b_source'] = \
+                        'SOLEDGE3X /config/{Br,Bphi,Bz}, native tesla'
                 if psisep_cfg is not None and np.isfinite(psisep_cfg):
                     f.create_dataset('equilibrium/psib', data=np.float64(psisep_cfg))
                 if psicore_cfg is not None and np.isfinite(psicore_cfg):
+                    # psicore is the core-boundary reference, not generally
+                    # psi at the magnetic axis.  Select the grid extremum on
+                    # the same side of psib as psicore.
+                    if psisep_cfg is not None and np.isfinite(psisep_cfg):
+                        if psicore_cfg > psisep_cfg:
+                            psi_axis_cfg = float(np.nanmax(equ_psi))
+                        else:
+                            psi_axis_cfg = float(np.nanmin(equ_psi))
+                    else:
+                        psi_axis_cfg = float(psicore_cfg)
                     f.create_dataset('equilibrium/psi_axis',
-                                      data=np.float64(psicore_cfg))
+                                      data=np.float64(psi_axis_cfg))
+                    f['equilibrium'].attrs['psi_axis_source'] = \
+                        'extremum of SOLEDGE3X /config/psi selected by psicore vs psib'
+                    print(f"equilibrium psi_axis={psi_axis_cfg:.9g} "
+                          f"(psicore reference={psicore_cfg:.9g})")
 
             # Multi-ion metadata.
             sdt = h5py.string_dtype(encoding='utf-8')

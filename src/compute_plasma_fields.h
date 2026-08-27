@@ -106,13 +106,16 @@ struct PlasmaFileParams {
   double epar;    // parallel ambipolar E-field [V/m], 0 if not computed
 };
 
-// Equilibrium (ψ) data from .equ file for exact magnetic geometry
+// Equilibrium data for exact magnetic geometry. Native B maps, when present,
+// preserve the source code's field convention and take precedence over the
+// legacy psi-gradient reconstruction.
 struct EquilibriumData {
   int jm = 0, km = 0;                          // grid dimensions (R, Z)
   double btf = 0.0, rtf = 0.0, psib = 0.0;     // toroidal field params
   double psi_axis = 0.0;                       // psi at magnetic axis (for psiN)
   std::vector<double> r, z;                      // 1D coordinate arrays [m]
   std::vector<std::vector<double>> psi;          // ψ(Z,R) on grid [km x jm]
+  std::vector<std::vector<double>> br, bt, bz;   // native B(Z,R) [T]
 };
 
 // Per-cell precomputed magnetic geometry from equilibrium
