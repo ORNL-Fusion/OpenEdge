@@ -5,9 +5,8 @@
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-green.svg)](BUILD_CMAKE.md)
 [![GPU](https://img.shields.io/badge/GPU-Kokkos%20%2F%20CUDA%20(beta)-76B900.svg)](BUILD_CMAKE.md)
 
-<!-- TODO(badges): once CI, hosted docs, and a DOI exist, adopt the
-     WarpX-style row (build status, docs, DOI, discussions):
-     https://github.com/BLAST-WarpX/warpx -->
+<!-- TODO(badges): add build-status, docs, and DOI badges once CI,
+     hosted documentation, and a Zenodo DOI exist. -->
 
 A kinetic transport package for plasma-material and plasma-wall
 interactions, built on [SPARTA](https://sparta.github.io).
