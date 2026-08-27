@@ -1,10 +1,55 @@
 # Compiling and installing OpenEdge
 
 OpenEdge is built with the CMake build system it inherits from SPARTA.
-The executable is named `spa_<SPARTA_MACHINE>` (e.g. `spa_kokkos_omp`,
-`spa_kokkos_cuda_perlmutter`). Note: the CMake option names keep their
-upstream `SPARTA_*` / `PKG_*` / `BUILD_*` prefixes — those are the real
-knobs; only the project content differs.
+The executable is named `spa_<SPARTA_MACHINE>` (e.g. `spa_mpi`,
+`spa_kokkos_omp`, `spa_kokkos_cuda_perlmutter`). Note: the CMake option
+names keep their upstream `SPARTA_*` / `PKG_*` / `BUILD_*` prefixes —
+those are the real knobs; only the project content differs.
+
+## Requirements
+
+- CMake >= 3.18, C++17 compiler (GCC, Clang, ICC)
+- HDF5 with C++ bindings (`+MPI` for distributed runs)
+- MPI (OpenMPI or MPICH)
+- VTK >= 7.1 (optional, only for `-DPKG_VTK=ON`)
+
+## Quick recipes
+
+CPU build (MPI):
+
+```bash
+git clone https://github.com/ORNL-Fusion/OpenEdge.git
+mkdir buildOpenEdge && cd buildOpenEdge
+cmake -C ../OpenEdge/cmake/presets/mpi.cmake ../OpenEdge/cmake -DPKG_OPENEDGE=ON
+make -j$(nproc)
+# -> ./src/spa_mpi
+```
+
+GPU build (Kokkos + CUDA — note: the GPU backend is under active
+development and validation, see the README status note):
+
+```bash
+mkdir buildOpenEdge_gpu && cd buildOpenEdge_gpu
+cmake -C ../OpenEdge/cmake/presets/kokkos_cuda.cmake ../OpenEdge/cmake \
+    -DPKG_OPENEDGE=ON -DPKG_KOKKOS=ON \
+    -DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON
+make -j$(nproc)
+```
+
+Set `Kokkos_ARCH_*` to your GPU (`AMPERE80`, `HOPPER90`, `VOLTA70`,
+`PASCAL60`).
+
+Optional VTK output (enables the `grid/vtk`, `surf/vtk`, and
+`particle/vtk` dump styles, for ParaView/VisIt):
+
+```bash
+cmake -C ../OpenEdge/cmake/presets/mpi.cmake ../OpenEdge/cmake \
+    -DPKG_OPENEDGE=ON -DPKG_VTK=ON
+```
+
+Requires an external VTK installation (>= 7.1; both pre- and
+post-8.90 component naming are handled). Works with any preset,
+including the GPU build.
 
 ```bash
 cd /path/to/openedge
