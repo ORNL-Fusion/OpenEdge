@@ -18,7 +18,7 @@ studies and PMI / PWI workflows.
 ## Highlights
 
 - **Surface interactions**: sputtering, reflection, recycling, areal-density
-  ledgers and strata for evolving wall composition (RustBCA/TRIM/Eckstein data).
+  ledgers and strata for evolving wall composition ([RustBCA](https://github.com/lcpp-org/RustBCA)/TRIM/Eckstein data).
 - **Volume chemistry**: ADAS ionisation, recombination, and charge
   exchange; dissociation.
 - **Plasma backgrounds**: SOLPS / SOLEDGE3X mesh fields and equilibria,
