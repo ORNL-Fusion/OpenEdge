@@ -71,6 +71,12 @@ class FixForceThermalKokkos : public FixForceThermal, public KokkosBase {
   int hash_nr_, hash_nz_, ntri_;
   int dim_, axisym_;
   int use_gradte_, use_gradti_;
+  // equilibrium fallback for mesh-miss B (matches host bfield_at chain)
+  int has_equ_;
+  DAT::t_float_1d d_equ_r, d_equ_z;
+  DAT::t_float_2d_lr d_equ_psi;
+  double equ_btf_, equ_rtf_;
+  int equ_jm_, equ_km_;
 
   // kick scalars
   double dt_half_, echarge_, alpha_e_k_, beta_i_k_;

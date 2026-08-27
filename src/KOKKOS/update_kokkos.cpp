@@ -2572,15 +2572,49 @@ void UpdateKokkos::build_oe_mesh_from_fix()
       upload_cells(pd->mesh_grad_ti_z,"oe_meshcell_gtiz",d_oe_meshcell_gtiz);
   }
 
+  // Equilibrium psi map from the fix: the CPU bfield_at chain is
+  // mesh -> equilibrium -> const; the mover's device dispatch already
+  // implements mesh-miss -> equilibrium (it was only ever bound from
+  // the compute provider before). Binding it here closes a documented
+  // divergence: outside-footprint particles moved ballistically on
+  // device while the CPU used equilibrium B (gate 9a fthcmp finding).
+
+  if (pd->has_equ && pd->equ_jm > 1 && pd->equ_km > 1 &&
+      (int) pd->psirz.size() >= pd->equ_jm * pd->equ_km &&
+      (int) pd->equ_r.size() >= pd->equ_jm &&
+      (int) pd->equ_z.size() >= pd->equ_km) {
+    const int jm = pd->equ_jm, km = pd->equ_km;
+    d_oe_equ_r   = DAT::t_float_1d("oe_equ_r",jm);
+    d_oe_equ_z   = DAT::t_float_1d("oe_equ_z",km);
+    d_oe_equ_psi = DAT::t_float_2d_lr("oe_equ_psi",km,jm);
+    auto h_r   = Kokkos::create_mirror_view(d_oe_equ_r);
+    auto h_z   = Kokkos::create_mirror_view(d_oe_equ_z);
+    auto h_psi = Kokkos::create_mirror_view(d_oe_equ_psi);
+    for (int j = 0; j < jm; j++) h_r(j) = pd->equ_r[j];
+    for (int k = 0; k < km; k++) h_z(k) = pd->equ_z[k];
+    for (int k = 0; k < km; k++)
+      for (int j = 0; j < jm; j++)
+        h_psi(k,j) = pd->psirz[(size_t)k*jm + j];
+    Kokkos::deep_copy(d_oe_equ_r,h_r);
+    Kokkos::deep_copy(d_oe_equ_z,h_z);
+    Kokkos::deep_copy(d_oe_equ_psi,h_psi);
+    oe_equ_btf = pd->btf;
+    oe_equ_rtf = pd->rtf;
+    oe_equ_jm  = jm;
+    oe_equ_km  = km;
+    oe_has_equilibrium = 1;
+  }
+
   if (comm->me == 0 && screen)
     fprintf(screen,"  [kokkos] mesh B/E bound from fix background: "
             "%d tris, E-field %s, plasma %s, drag %s, gradTe %s, "
-            "gradTi %s\n",ntri,
+            "gradTi %s, equ-fallback %s\n",ntri,
             oe_has_mesh_e ? "yes" : "no",
             oe_has_mesh_plasma ? "yes" : "no",
             oe_has_mesh_drag ? "yes" : "no",
             oe_has_mesh_gradte ? "yes" : "no",
-            oe_has_mesh_gradti ? "yes" : "no");
+            oe_has_mesh_gradti ? "yes" : "no",
+            oe_has_equilibrium ? "yes" : "no");
 }
 
 /* ----------------------------------------------------------------------

@@ -177,6 +177,17 @@ void FixCoulombBackgroundKokkos::end_of_step()
   hash_nz_   = update_kk->oe_mesh_hash_nz;
   ntri_      = update_kk->oe_mesh_ntri;
 
+  has_equ_ = update_kk->oe_has_equilibrium;
+  if (has_equ_) {
+    d_equ_r   = update_kk->d_oe_equ_r;
+    d_equ_z   = update_kk->d_oe_equ_z;
+    d_equ_psi = update_kk->d_oe_equ_psi;
+    equ_btf_  = update_kk->oe_equ_btf;
+    equ_rtf_  = update_kk->oe_equ_rtf;
+    equ_jm_   = update_kk->oe_equ_jm;
+    equ_km_   = update_kk->oe_equ_km;
+  }
+
   dtc_     = update->dt * nevery;
   echarge_ = update->echarge;
   eps0_    = update->epsilon_0;
@@ -230,12 +241,16 @@ void FixCoulombBackgroundKokkos::operator()(TagFixCoulombBg,
   }
 
   double B[3] = {0.0,0.0,0.0};
-  MeshKokkos::query_bfield_at_point(
+  const bool gotB = MeshKokkos::query_bfield_at_point(
       p.x, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
       d_tri_br, d_tri_bz, d_tri_bt,
       d_tri_rmin, d_tri_rmax, d_tri_zmin, d_tri_zmax,
       d_hash_off, d_hash_ent, hash_rmin_, hash_zmin_,
       hash_dr_, hash_dz_, hash_nr_, hash_nz_, ntri_, B);
+  if (!gotB && has_equ_)
+    EquilibriumKokkos::query_bfield_at_point(
+        p.x, dim_, axisym_, d_equ_r, d_equ_z, d_equ_psi,
+        equ_btf_, equ_rtf_, equ_jm_, equ_km_, B);
   const double Bx = B[0], By = B[1], Bz = B[2];
 
   if (Ni_bg <= 0.0 || Ti_eV <= 0.0) return;

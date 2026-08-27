@@ -81,6 +81,12 @@ class FixCoulombBackgroundKokkos : public FixCoulombBackground,
   double hash_rmin_, hash_zmin_, hash_dr_, hash_dz_;
   int hash_nr_, hash_nz_, ntri_;
   int dim_, axisym_;
+  // equilibrium fallback for mesh-miss B (matches host bfield_at chain)
+  int has_equ_;
+  DAT::t_float_1d d_equ_r, d_equ_z;
+  DAT::t_float_2d_lr d_equ_psi;
+  double equ_btf_, equ_rtf_;
+  int equ_jm_, equ_km_;
 
   // scalars for the kernel
   double dtc_, echarge_, eps0_, mbg_, qbg_;

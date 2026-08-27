@@ -9,6 +9,8 @@
 #include "fix_force_thermal_kokkos.h"
 
 #include <cstdlib>
+#include <cmath>
+#include <vector>
 
 #include "comm.h"
 #include "domain.h"
@@ -177,12 +179,37 @@ void FixForceThermalKokkos::kick_device(double dt_half)
   hash_nz_   = update_kk->oe_mesh_hash_nz;
   ntri_      = update_kk->oe_mesh_ntri;
 
+  has_equ_ = update_kk->oe_has_equilibrium;
+  if (has_equ_) {
+    d_equ_r   = update_kk->d_oe_equ_r;
+    d_equ_z   = update_kk->d_oe_equ_z;
+    d_equ_psi = update_kk->d_oe_equ_psi;
+    equ_btf_  = update_kk->oe_equ_btf;
+    equ_rtf_  = update_kk->oe_equ_rtf;
+    equ_jm_   = update_kk->oe_equ_jm;
+    equ_km_   = update_kk->oe_equ_km;
+  }
+
   dt_half_   = dt_half;
   echarge_   = update->echarge;
   alpha_e_k_ = alpha_e_;
   beta_i_k_  = beta_i_;
 
   const int nlocal = particle->nlocal;
+
+  // OE_FTH_COMPARE: parity microscope — snapshot v, run the device
+  // kernel, then recompute the host kick from the snapshot and print
+  // the first mismatching particles with their inputs. Host-visible
+  // OpenMP backend only; strictly a debugging aid.
+  const bool compare = getenv("OE_FTH_COMPARE") != nullptr;
+  std::vector<double> vpre;
+  if (compare) {
+    particle_kk->sync(Host,PARTICLE_MASK);
+    vpre.resize(3*(size_t)nlocal);
+    for (int i = 0; i < nlocal; i++)
+      for (int c = 0; c < 3; c++)
+        vpre[3*(size_t)i+c] = particle->particles[i].v[c];
+  }
 
   copymode = 1;
   Kokkos::parallel_for(
@@ -191,6 +218,71 @@ void FixForceThermalKokkos::kick_device(double dt_half)
   copymode = 0;
 
   particle_kk->modify(Device,PARTICLE_MASK);
+
+  if (compare) {
+    particle_kk->sync(Host,PARTICLE_MASK);
+    Particle::OnePart *parts = particle->particles;
+    Particle::Species *specs = particle->species;
+    static int nprinted = 0;
+    for (int i = 0; i < nlocal && nprinted < 12; i++) {
+      const int isp = parts[i].ispecies;
+      const double Z = specs[isp].charge;
+      if (Z == 0.0) continue;
+      const double m_Z = specs[isp].mass;
+      if (m_Z <= 0.0) continue;
+      // host-side kick from the snapshot (mirror of the CPU kick_half)
+      double B0,B1,B2;
+      pd_bfield_sparta(parts[i], i, B0, B1, B2);
+      const double Bmag = sqrt(B0*B0+B1*B1+B2*B2);
+      double vh[3] = {vpre[3*(size_t)i], vpre[3*(size_t)i+1],
+                      vpre[3*(size_t)i+2]};
+      if (Bmag >= 1.0e-20) {
+        const double ib = 1.0/Bmag;
+        const double bh[3] = {B0*ib, B1*ib, B2*ib};
+        const double phi_p = (domain->dimension == 3)
+            ? atan2(parts[i].x[1], parts[i].x[0]) : 0.0;
+        double bR, bZc, bphi;
+        OpenEdge::sparta_v_to_RZphi(bh, domain->dimension,
+                                    domain->axisymmetric, phi_p,
+                                    bR, bZc, bphi);
+        double a_par = 0.0;
+        const double Z2 = Z*Z;
+        if (have_ion_thermal_) {
+          const double gr = pd_grad(pd_->mesh_grad_ti_r, pd_->grad_ti_r, parts[i]);
+          const double gz = pd_grad(pd_->mesh_grad_ti_z, pd_->grad_ti_z, parts[i]);
+          a_par += beta_i_ * Z2 * update->echarge * (gr*bR + gz*bZc) / m_Z;
+        }
+        if (have_elec_thermal_) {
+          const double gr = pd_grad(pd_->mesh_grad_te_r, pd_->grad_te_r, parts[i]);
+          const double gz = pd_grad(pd_->mesh_grad_te_z, pd_->grad_te_z, parts[i]);
+          a_par += alpha_e_ * Z2 * update->echarge * (gr*bR + gz*bZc) / m_Z;
+        }
+        if (a_par != 0.0)
+          for (int c = 0; c < 3; c++) vh[c] += a_par * bh[c] * dt_half;
+      }
+      double dmax = 0.0;
+      for (int c = 0; c < 3; c++) {
+        const double d = fabs(parts[i].v[c] - vh[c]);
+        if (d > dmax) dmax = d;
+      }
+      const double vscale = fabs(vh[0])+fabs(vh[1])+fabs(vh[2])+1.0;
+      if (dmax > 1e-9 * vscale) {
+        const int mc_dbg = (parts[i].icell >= 0 &&
+            parts[i].icell < (int) pd_->cell_mesh_cell.size())
+              ? pd_->cell_mesh_cell[parts[i].icell] : -2;
+        fprintf(screen,
+          "[fthcmp] step " BIGINT_FORMAT " i=%d id=%d icell=%d mc=%d "
+          "x=(%.6g,%.6g,%.6g) Bhost=(%.6g,%.6g,%.6g) dmax=%.3e "
+          "vdev=(%.9g,%.9g,%.9g) vhost=(%.9g,%.9g,%.9g)\n",
+          update->ntimestep, i, parts[i].id, parts[i].icell, mc_dbg,
+          parts[i].x[0], parts[i].x[1], parts[i].x[2],
+          B0, B1, B2, dmax,
+          parts[i].v[0], parts[i].v[1], parts[i].v[2],
+          vh[0], vh[1], vh[2]);
+        nprinted++;
+      }
+    }
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -211,12 +303,16 @@ void FixForceThermalKokkos::operator()(TagFixForceThermal,
   if (m_Z <= 0.0) return;
 
   double B[3] = {0.0,0.0,0.0};
-  MeshKokkos::query_bfield_at_point(
+  const bool gotB = MeshKokkos::query_bfield_at_point(
       p.x, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
       d_tri_br, d_tri_bz, d_tri_bt,
       d_tri_rmin, d_tri_rmax, d_tri_zmin, d_tri_zmax,
       d_hash_off, d_hash_ent, hash_rmin_, hash_zmin_,
       hash_dr_, hash_dz_, hash_nr_, hash_nz_, ntri_, B);
+  if (!gotB && has_equ_)
+    EquilibriumKokkos::query_bfield_at_point(
+        p.x, dim_, axisym_, d_equ_r, d_equ_z, d_equ_psi,
+        equ_btf_, equ_rtf_, equ_jm_, equ_km_, B);
   const double Bmag =
       Kokkos::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
   if (Bmag < 1.0e-20) return;
