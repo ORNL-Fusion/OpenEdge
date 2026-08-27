@@ -476,6 +476,61 @@ bool query_scalars_at_point(
   return true;
 }
 
+/* ===================================================================
+   Bare triangle locator: same CSR-hash containment search as the two
+   query functions above, returning the TRI INDEX so callers can fetch
+   arbitrary per-tri fields (gate 9: coulomb drag + thermal force read
+   te/ti/ne/ni/upar and the grad-T fields at the particle position).
+   Returns -1 outside the meshed footprint — callers treat that as the
+   CPU's "fall through to the (empty) structured grid" = 0.
+   =================================================================== */
+
+KOKKOS_INLINE_FUNCTION
+int locate_tri_at_point(
+    const double xyz[3], int dim, int axisymmetric,
+    const DAT::t_float_1d &mesh_vtx_r,
+    const DAT::t_float_1d &mesh_vtx_z,
+    const DAT::t_int_1d &mesh_tri,
+    const DAT::t_int_1d &hash_offset,
+    const DAT::t_int_1d &hash_entries,
+    double hash_rmin, double hash_zmin,
+    double hash_dr,   double hash_dz,
+    int hash_nr, int hash_nz, int ntri)
+{
+  if (ntri <= 0) return -1;
+
+  double R, Z;
+  if (axisymmetric)      { Z = xyz[0]; R = xyz[1]; }
+  else if (dim == 2)     { R = xyz[0]; Z = xyz[1]; }
+  else                   { R = Kokkos::sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]);
+                           Z = xyz[2]; }
+
+  if (hash_nr <= 0 || hash_nz <= 0 || hash_dr <= 0.0 || hash_dz <= 0.0)
+    return -1;
+  const int ir = static_cast<int>((R - hash_rmin) / hash_dr);
+  const int iz = static_cast<int>((Z - hash_zmin) / hash_dz);
+  if (ir < 0 || ir >= hash_nr || iz < 0 || iz >= hash_nz) return -1;
+
+  const int b   = iz * hash_nr + ir;
+  const int beg = hash_offset(b);
+  const int end = hash_offset(b + 1);
+  for (int k = beg; k < end; k++) {
+    const int t = hash_entries(k);
+    const int v0 = mesh_tri(3*t+0);
+    const int v1 = mesh_tri(3*t+1);
+    const int v2 = mesh_tri(3*t+2);
+    const double r0 = mesh_vtx_r(v0), z0 = mesh_vtx_z(v0);
+    const double r1 = mesh_vtx_r(v1), z1 = mesh_vtx_z(v1);
+    const double r2 = mesh_vtx_r(v2), z2 = mesh_vtx_z(v2);
+    const double d  = (r1-r0)*(z2-z0) - (r2-r0)*(z1-z0);
+    if (Kokkos::fabs(d) < 1e-30) continue;
+    const double a  = ((R-r0)*(z2-z0) - (r2-r0)*(Z-z0)) / d;
+    const double bb = ((r1-r0)*(Z-z0) - (R-r0)*(z1-z0)) / d;
+    if (a >= -1e-10 && bb >= -1e-10 && (a+bb) <= 1.0+1e-10) return t;
+  }
+  return -1;
+}
+
 }  // namespace MeshKokkos
 }  // namespace SPARTA_NS
 

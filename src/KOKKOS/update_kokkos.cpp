@@ -304,6 +304,9 @@ void UpdateKokkos::init()
   oe_sheath_dmax_user = sheath_dmax;
   oe_col_x0 = oe_col_y0 = 0.0;
   oe_has_mesh_plasma = 0;
+  oe_has_mesh_drag = 0;
+  oe_has_mesh_gradte = 0;
+  oe_has_mesh_gradti = 0;
   oe_has_sheath_customs = 0;
 
   // Spatial-sheath engagement diagnostics (device twins of the CPU
@@ -2520,11 +2523,49 @@ void UpdateKokkos::build_oe_mesh_from_fix()
     oe_has_mesh_plasma = 1;
   }
 
+  // OpenEdge gate 9: per-cell -> per-tri flattening for the device
+  // coulomb drag (ni, upar) and thermal force (grad-T) fixes. Same
+  // mesh_cell_idx mapping as te/ti/ne so the device point-query
+  // reproduces interp2D's mesh branch exactly.
+
+  {
+    auto flatten = [&](const std::vector<double> &src, const char *label,
+                       DAT::t_float_1d &dst) -> int {
+      const int nc = (int) src.size();
+      if (nc <= 0) return 0;
+      dst = DAT::t_float_1d(std::string(label),ntri);
+      auto h = Kokkos::create_mirror_view(dst);
+      const bool have_map = ((int) pd->mesh_cell_idx.size() == ntri);
+      for (int t = 0; t < ntri; t++) {
+        int c = have_map ? pd->mesh_cell_idx[t] : t;
+        if (c < 0 || c >= nc) c = (t < nc) ? t : 0;
+        h(t) = src[c];
+      }
+      Kokkos::deep_copy(dst,h);
+      return 1;
+    };
+    const int have_ni   = flatten(pd->mesh_ni,  "oe_mesh_tri_ni",
+                                  d_oe_mesh_tri_ni);
+    const int have_upar = flatten(pd->mesh_upar,"oe_mesh_tri_upar",
+                                  d_oe_mesh_tri_upar);
+    oe_has_mesh_drag = (have_ni && have_upar);
+    oe_has_mesh_gradte =
+      flatten(pd->mesh_grad_te_r,"oe_mesh_tri_gter",d_oe_mesh_tri_gter) &&
+      flatten(pd->mesh_grad_te_z,"oe_mesh_tri_gtez",d_oe_mesh_tri_gtez);
+    oe_has_mesh_gradti =
+      flatten(pd->mesh_grad_ti_r,"oe_mesh_tri_gtir",d_oe_mesh_tri_gtir) &&
+      flatten(pd->mesh_grad_ti_z,"oe_mesh_tri_gtiz",d_oe_mesh_tri_gtiz);
+  }
+
   if (comm->me == 0 && screen)
     fprintf(screen,"  [kokkos] mesh B/E bound from fix background: "
-            "%d tris, E-field %s, plasma %s\n",ntri,
+            "%d tris, E-field %s, plasma %s, drag %s, gradTe %s, "
+            "gradTi %s\n",ntri,
             oe_has_mesh_e ? "yes" : "no",
-            oe_has_mesh_plasma ? "yes" : "no");
+            oe_has_mesh_plasma ? "yes" : "no",
+            oe_has_mesh_drag ? "yes" : "no",
+            oe_has_mesh_gradte ? "yes" : "no",
+            oe_has_mesh_gradti ? "yes" : "no");
 }
 
 /* ----------------------------------------------------------------------

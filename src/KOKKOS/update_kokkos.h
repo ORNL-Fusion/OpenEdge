@@ -151,6 +151,18 @@ class UpdateKokkos : public Update {
   int    oe_has_mesh_e;
   DAT::t_float_1d d_oe_mesh_tri_er, d_oe_mesh_tri_ez, d_oe_mesh_tri_et;
 
+  // OpenEdge gate 9: per-tri ion density + parallel flow (coulomb drag)
+  // and grad-T fields (thermal force), flattened like te/ti/ne. The
+  // device fix kernels bind these via friendship.
+  int    oe_has_mesh_drag;    // ni + upar present
+  int    oe_has_mesh_gradte;  // grad_te_r/z present
+  int    oe_has_mesh_gradti;  // grad_ti_r/z present
+  DAT::t_float_1d d_oe_mesh_tri_ni, d_oe_mesh_tri_upar;
+  DAT::t_float_1d d_oe_mesh_tri_gter, d_oe_mesh_tri_gtez;
+  DAT::t_float_1d d_oe_mesh_tri_gtir, d_oe_mesh_tri_gtiz;
+  friend class FixCoulombBackgroundKokkos;
+  friend class FixForceThermalKokkos;
+
   // build the device mesh B/E views directly from FixBackground for
   // decks whose plasma provider is the fix (static SOLPS/SOLEDGE3X file)
   void build_oe_mesh_from_fix();
