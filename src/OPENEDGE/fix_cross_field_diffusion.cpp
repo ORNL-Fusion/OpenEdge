@@ -5,7 +5,7 @@
     Oak Ridge National Laboratory
     https://github.com/ORNL-Fusion/OpenEdge
 
-    fix cross_diffusion: anomalous perpendicular diffusion and
+    fix cross_field_diffusion: anomalous perpendicular diffusion and
     convective pinch for impurity ions.
 
     Position displacement applied at START_OF_STEP (before the Boris push).
@@ -76,7 +76,7 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
 
   if (narg < 5)
     error->all(FLERR,
-      "Illegal fix cross_diffusion command "
+      "Illegal fix cross_field_diffusion command "
       "(need: Nevery {bfield BxSRC BySRC BzSRC | background FIXID})");
 
   int iarg = 2;
@@ -87,24 +87,24 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
   if (strcmp(arg[iarg], "background") == 0) {
     iarg++;
     if (iarg >= narg)
-      error->all(FLERR, "fix cross_diffusion: background needs a fix ID");
+      error->all(FLERR, "fix cross_field_diffusion: background needs a fix ID");
     use_background_ = 1;
     plasma_fix_id_ = arg[iarg++];
   } else if (strcmp(arg[iarg], "bfield_const") == 0) {
     // uniform B in SPARTA slot order — analytic verification cases
     iarg++;
     if (iarg + 3 > narg)
-      error->all(FLERR, "fix cross_diffusion: bfield_const needs BX BY BZ");
+      error->all(FLERR, "fix cross_field_diffusion: bfield_const needs BX BY BZ");
     use_const_ = 1;
     Bconst_[0] = input->numeric(FLERR, arg[iarg++]);
     Bconst_[1] = input->numeric(FLERR, arg[iarg++]);
     Bconst_[2] = input->numeric(FLERR, arg[iarg++]);
   } else {
     if (strcmp(arg[iarg++], "bfield") != 0)
-      error->all(FLERR, "fix cross_diffusion: missing 'bfield' keyword");
+      error->all(FLERR, "fix cross_field_diffusion: missing 'bfield' keyword");
     if (iarg + 3 > narg)
       error->all(FLERR,
-        "Illegal fix cross_diffusion command "
+        "Illegal fix cross_field_diffusion command "
         "(need: Nevery bfield BxSRC BySRC BzSRC)");
     parse_compute_src(arg[iarg++], srcBx_, "Bx");
     parse_compute_src(arg[iarg++], srcBy_, "By");
@@ -117,17 +117,17 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
     if (strcmp(arg[iarg], "D_perp") == 0) {
       iarg++;
       if (iarg >= narg)
-        error->all(FLERR, "fix cross_diffusion D_perp: need value");
+        error->all(FLERR, "fix cross_field_diffusion D_perp: need value");
       D_perp_ = input->numeric(FLERR, arg[iarg++]);
       if (D_perp_ < 0.0)
-        error->all(FLERR, "fix cross_diffusion: D_perp must be >= 0");
+        error->all(FLERR, "fix cross_field_diffusion: D_perp must be >= 0");
       diff_model_ = DIFF_CONST;
 
     } else if (strcmp(arg[iarg], "bohm") == 0) {
       iarg++;
       if (!use_background_) {
         if (iarg >= narg)
-          error->all(FLERR, "fix cross_diffusion bohm: need TeSRC");
+          error->all(FLERR, "fix cross_field_diffusion bohm: need TeSRC");
         parse_compute_src(arg[iarg++], srcTe_, "Te");
       } else if (iarg < narg && strcmp(arg[iarg], "scale") != 0 &&
                  strcmp(arg[iarg], "D_perp") != 0 &&
@@ -136,7 +136,7 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
                  strcmp(arg[iarg], "pinch_psi") != 0 &&
                  strcmp(arg[iarg], "gradient_pinch") != 0) {
         error->all(FLERR,
-          "fix cross_diffusion bohm: in background mode only 'scale VAL' is allowed");
+          "fix cross_field_diffusion bohm: in background mode only 'scale VAL' is allowed");
       }
       diff_model_ = DIFF_BOHM;
 
@@ -149,13 +149,13 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
     } else if (strcmp(arg[iarg], "pinch_psi") == 0) {
       iarg++;
       if (iarg >= narg)
-        error->all(FLERR, "fix cross_diffusion pinch_psi: need V [m/s]");
+        error->all(FLERR, "fix cross_field_diffusion pinch_psi: need V [m/s]");
       v_pinch_psi_ = input->numeric(FLERR, arg[iarg++]);
       have_psi_pinch_ = 1;
     } else if (strcmp(arg[iarg], "pinch") == 0) {
       iarg++;
       if (iarg + 2 > narg)
-        error->all(FLERR, "fix cross_diffusion pinch: need Vr Vz");
+        error->all(FLERR, "fix cross_field_diffusion pinch: need Vr Vz");
       v_pinch_R_ = input->numeric(FLERR, arg[iarg++]);
       v_pinch_Z_ = input->numeric(FLERR, arg[iarg++]);
       have_pinch_ = 1;
@@ -163,12 +163,12 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
     } else if (strcmp(arg[iarg], "gradient_pinch") == 0) {
       iarg++;
       if (iarg >= narg)
-        error->all(FLERR, "fix cross_diffusion gradient_pinch: need Cp");
+        error->all(FLERR, "fix cross_field_diffusion gradient_pinch: need Cp");
       C_p_ = input->numeric(FLERR, arg[iarg++]);
       if (!use_background_) {
         if (iarg + 3 > narg)
           error->all(FLERR,
-            "fix cross_diffusion gradient_pinch: need Cp neSRC gradNeR_SRC gradNeZ_SRC");
+            "fix cross_field_diffusion gradient_pinch: need Cp neSRC gradNeR_SRC gradNeZ_SRC");
         parse_compute_src(arg[iarg++], srcNe_, "Ne");
         parse_compute_src(arg[iarg++], srcGradNeR_, "gradNeR");
         parse_compute_src(arg[iarg++], srcGradNeZ_, "gradNeZ");
@@ -179,21 +179,21 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
                  strcmp(arg[iarg], "pinch_psi") != 0 &&
                  strcmp(arg[iarg], "gradient_pinch") != 0) {
         error->all(FLERR,
-          "fix cross_diffusion gradient_pinch: in background mode only Cp is required");
+          "fix cross_field_diffusion gradient_pinch: in background mode only Cp is required");
       }
       have_grad_pinch_ = 1;
 
     } else {
       char msg[200];
       snprintf(msg, sizeof(msg),
-               "fix cross_diffusion: unknown keyword '%s'", arg[iarg]);
+               "fix cross_field_diffusion: unknown keyword '%s'", arg[iarg]);
       error->all(FLERR, msg);
     }
   }
 
   if (diff_model_ == DIFF_NONE && !have_pinch_ && !have_grad_pinch_)
     error->all(FLERR,
-      "fix cross_diffusion: at least one of D_perp, bohm, pinch, or "
+      "fix cross_field_diffusion: at least one of D_perp, bohm, pinch, or "
       "gradient_pinch must be specified");
 }
 
@@ -250,19 +250,19 @@ void FixCrossFieldDiffusion::init()
       if (S.icompute < 0) {
         char msg[200];
         snprintf(msg, sizeof(msg),
-                 "fix cross_diffusion: compute '%s' for %s not found",
+                 "fix cross_field_diffusion: compute '%s' for %s not found",
                  S.cid, label);
         error->all(FLERR, msg);
       }
       Compute *c = modify->compute[S.icompute];
       if (c->per_grid_flag == 0)
-        error->all(FLERR, "fix cross_diffusion: compute must be per-grid");
+        error->all(FLERR, "fix cross_field_diffusion: compute must be per-grid");
       if (c->size_per_grid_cols == 0)
-        error->all(FLERR, "fix cross_diffusion: compute has no per-grid array");
+        error->all(FLERR, "fix cross_field_diffusion: compute has no per-grid array");
       if (S.col < 1 || S.col > c->size_per_grid_cols) {
         char msg[200];
         snprintf(msg, sizeof(msg),
-                 "fix cross_diffusion: column %d for compute '%s' (%s) "
+                 "fix cross_field_diffusion: column %d for compute '%s' (%s) "
                  "out of range [1..%d]",
                  S.col, S.cid, label, c->size_per_grid_cols);
         error->all(FLERR, msg);
@@ -274,16 +274,16 @@ void FixCrossFieldDiffusion::init()
       if (S.ipcustom < 0) {
         char msg[200];
         snprintf(msg, sizeof(msg),
-                 "fix cross_diffusion: particle custom '%s' for %s not found",
+                 "fix cross_field_diffusion: particle custom '%s' for %s not found",
                  S.pname, label);
         error->all(FLERR, msg);
       }
       if (particle->etype[S.ipcustom] != DOUBLE)
         error->all(FLERR,
-          "fix cross_diffusion: particle custom source must be floating point");
+          "fix cross_field_diffusion: particle custom source must be floating point");
       if (particle->esize[S.ipcustom] != 0)
         error->all(FLERR,
-          "fix cross_diffusion: particle custom source must be a vector");
+          "fix cross_field_diffusion: particle custom source must be a vector");
       S.ipwhich = particle->ewhich[S.ipcustom];
     }
   };
@@ -293,14 +293,14 @@ void FixCrossFieldDiffusion::init()
     if (ifix < 0) {
       char msg[200];
       snprintf(msg, sizeof(msg),
-               "fix cross_diffusion: background fix '%s' not found",
+               "fix cross_field_diffusion: background fix '%s' not found",
                plasma_fix_id_.c_str());
       error->all(FLERR, msg);
     }
     pd_ = dynamic_cast<FixBackground *>(modify->fix[ifix]);
     if (!pd_)
       error->all(FLERR,
-        "fix cross_diffusion: background fix must be style background");
+        "fix cross_field_diffusion: background fix must be style background");
     pd_->init();
   } else if (!use_const_) {
     bind(srcBx_, "Bx");
@@ -593,7 +593,7 @@ void FixCrossFieldDiffusion::parse_compute_src(const char *tok, CollGridSrc &dst
   if (!tok || !*tok) {
     char msg[128];
     snprintf(msg, sizeof(msg),
-             "fix cross_diffusion: empty token for %s", label);
+             "fix cross_field_diffusion: empty token for %s", label);
     error->all(FLERR, msg);
   }
 
@@ -605,7 +605,7 @@ void FixCrossFieldDiffusion::parse_compute_src(const char *tok, CollGridSrc &dst
 
     if (!lb || !rb || rb <= lb + 1)
       error->all(FLERR,
-        "fix cross_diffusion: use c_ID[col] syntax for compute sources");
+        "fix cross_field_diffusion: use c_ID[col] syntax for compute sources");
 
     int idlen = static_cast<int>(lb - name);
     dst.cid = new char[idlen + 1];
@@ -615,7 +615,7 @@ void FixCrossFieldDiffusion::parse_compute_src(const char *tok, CollGridSrc &dst
 
     if (dst.col <= 0)
       error->all(FLERR,
-        "fix cross_diffusion: compute column must be >= 1");
+        "fix cross_field_diffusion: compute column must be >= 1");
     return;
   }
 
@@ -628,7 +628,7 @@ void FixCrossFieldDiffusion::parse_compute_src(const char *tok, CollGridSrc &dst
   }
 
   error->all(FLERR,
-    "fix cross_diffusion: source must be c_ID[col] or p_name");
+    "fix cross_field_diffusion: source must be c_ID[col] or p_name");
 }
 
 /* ---------------------------------------------------------------------- */

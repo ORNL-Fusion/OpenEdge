@@ -573,7 +573,7 @@ void FixSurfaceEmitRecycle::perform_task()
   for (i = 0; i < ntask; i++) {
     pcell = tasks[i].pcell;
     isurf = tasks[i].isurf;
-    if (isurf >= surf->nlocal) error->one(FLERR,"BAD surf index");
+    if (isurf >= surf->nlocal) error->one(FLERR,"Fix surface/emit/recycle: task surf index out of range");
 
     if (dimension == 2) normal = lines[isurf].norm;
     else normal = tris[isurf].norm;

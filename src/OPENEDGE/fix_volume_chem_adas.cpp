@@ -393,7 +393,11 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
       //                         the first encountered particle's pcache and
       //                         reuse for all subsequent particles of that
       //                         species in the same cell. ~10x cheaper for
-      //                         dense impurities; identical physics in cells
+      //                         dense impurities; NOTE: cell mode evaluates the
+      //                         resonant-CX channel at the fluid mean energy
+      //                         (1.5*Ti) instead of each particle's kinetic
+      //                         energy - an approximation, not identical
+      //                         physics, for that channel in cells
       //                         where Te/ne don't vary across particles
       //                         (i.e., away from sheath cells).
       if (iarg + 1 >= narg)

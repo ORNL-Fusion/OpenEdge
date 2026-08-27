@@ -7,7 +7,7 @@
 
     Tracks composition depth profiles on surface elements as a stack
     of thin layers.  Each layer has a thickness, bulk density, and
-    per-species fractional composition.  Used by surf_react_pmi_bca to
+    per-species fractional composition.  Used by surf_react_surface_pwi to
     update the surface state after BCA ion-surface interactions.
 
     Key operations:

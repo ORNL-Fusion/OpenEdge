@@ -5,7 +5,7 @@
     Oak Ridge National Laboratory
     https://github.com/ORNL-Fusion/OpenEdge
 
-    fix thermal_force: Braginskii thermal forces on impurity ions.
+    fix force/thermal: Braginskii thermal forces on impurity ions.
 
     Per-particle parallel acceleration:
       a_par = (beta_i * Z^2 * e * grad_par(Ti)
@@ -60,7 +60,7 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
 
   if (narg < 5)
     error->all(FLERR,
-      "Illegal fix thermal_force command "
+      "Illegal fix force/thermal command "
       "(need: Nevery {bfield BxSRC BySRC BzSRC | background FIXID})");
 
   int iarg = 2;
@@ -69,15 +69,15 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
   if (strcmp(arg[iarg], "background") == 0) {
     iarg++;
     if (iarg >= narg)
-      error->all(FLERR, "fix thermal_force: background needs a fix ID");
+      error->all(FLERR, "fix force/thermal: background needs a fix ID");
     use_background_ = 1;
     plasma_fix_id_ = arg[iarg++];
   } else {
     if (strcmp(arg[iarg++], "bfield") != 0)
-      error->all(FLERR, "fix thermal_force: missing 'bfield' keyword");
+      error->all(FLERR, "fix force/thermal: missing 'bfield' keyword");
     if (iarg + 3 > narg)
       error->all(FLERR,
-        "Illegal fix thermal_force command "
+        "Illegal fix force/thermal command "
         "(need: Nevery bfield BxSRC BySRC BzSRC)");
     parse_compute_src(arg[iarg++], srcBx_, "Bx");
     parse_compute_src(arg[iarg++], srcBy_, "By");
@@ -100,14 +100,14 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
       if (!use_background_) {
         if (iarg + 2 > narg)
           error->all(FLERR,
-            "fix thermal_force ion_thermal: need gradTiR_SRC gradTiZ_SRC");
+            "fix force/thermal ion_thermal: need gradTiR_SRC gradTiZ_SRC");
         parse_compute_src(arg[iarg++], srcGradTiR_, "gradTiR");
         parse_compute_src(arg[iarg++], srcGradTiZ_, "gradTiZ");
       } else if (iarg < narg &&
                  strcmp(arg[iarg], "ion_thermal") != 0 &&
                  strcmp(arg[iarg], "elec_thermal") != 0) {
         error->all(FLERR,
-          "fix thermal_force ion_thermal: in background mode use only yes/no");
+          "fix force/thermal ion_thermal: in background mode use only yes/no");
       }
 
     } else if (strcmp(arg[iarg], "elec_thermal") == 0) {
@@ -123,27 +123,27 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
       if (!use_background_) {
         if (iarg + 2 > narg)
           error->all(FLERR,
-            "fix thermal_force elec_thermal: need gradTeR_SRC gradTeZ_SRC");
+            "fix force/thermal elec_thermal: need gradTeR_SRC gradTeZ_SRC");
         parse_compute_src(arg[iarg++], srcGradTeR_, "gradTeR");
         parse_compute_src(arg[iarg++], srcGradTeZ_, "gradTeZ");
       } else if (iarg < narg &&
                  strcmp(arg[iarg], "ion_thermal") != 0 &&
                  strcmp(arg[iarg], "elec_thermal") != 0) {
         error->all(FLERR,
-          "fix thermal_force elec_thermal: in background mode use only yes/no");
+          "fix force/thermal elec_thermal: in background mode use only yes/no");
       }
 
     } else {
       char msg[200];
       snprintf(msg, sizeof(msg),
-               "fix thermal_force: unknown keyword '%s'", arg[iarg]);
+               "fix force/thermal: unknown keyword '%s'", arg[iarg]);
       error->all(FLERR, msg);
     }
   }
 
   if (!have_ion_thermal_ && !have_elec_thermal_)
     error->all(FLERR,
-      "fix thermal_force: at least one of ion_thermal or "
+      "fix force/thermal: at least one of ion_thermal or "
       "elec_thermal must be specified");
 }
 
@@ -193,19 +193,19 @@ void FixForceThermal::init()
       if (S.icompute < 0) {
         char msg[200];
         snprintf(msg, sizeof(msg),
-                 "fix thermal_force: compute '%s' for %s not found",
+                 "fix force/thermal: compute '%s' for %s not found",
                  S.cid, label);
         error->all(FLERR, msg);
       }
       Compute *c = modify->compute[S.icompute];
       if (c->per_grid_flag == 0)
-        error->all(FLERR, "fix thermal_force: compute must be per-grid");
+        error->all(FLERR, "fix force/thermal: compute must be per-grid");
       if (c->size_per_grid_cols == 0)
-        error->all(FLERR, "fix thermal_force: compute has no per-grid array");
+        error->all(FLERR, "fix force/thermal: compute has no per-grid array");
       if (S.col < 1 || S.col > c->size_per_grid_cols) {
         char msg[200];
         snprintf(msg, sizeof(msg),
-                 "fix thermal_force: column %d for compute '%s' (%s) "
+                 "fix force/thermal: column %d for compute '%s' (%s) "
                  "out of range [1..%d]",
                  S.col, S.cid, label, c->size_per_grid_cols);
         error->all(FLERR, msg);
@@ -217,16 +217,16 @@ void FixForceThermal::init()
       if (S.ipcustom < 0) {
         char msg[200];
         snprintf(msg, sizeof(msg),
-                 "fix thermal_force: particle custom '%s' for %s not found",
+                 "fix force/thermal: particle custom '%s' for %s not found",
                  S.pname, label);
         error->all(FLERR, msg);
       }
       if (particle->etype[S.ipcustom] != DOUBLE)
         error->all(FLERR,
-          "fix thermal_force: particle custom source must be floating point");
+          "fix force/thermal: particle custom source must be floating point");
       if (particle->esize[S.ipcustom] != 0)
         error->all(FLERR,
-          "fix thermal_force: particle custom source must be a vector");
+          "fix force/thermal: particle custom source must be a vector");
       S.ipwhich = particle->ewhich[S.ipcustom];
     }
   };
@@ -236,14 +236,14 @@ void FixForceThermal::init()
     if (ifix < 0) {
       char msg[200];
       snprintf(msg, sizeof(msg),
-               "fix thermal_force: background fix '%s' not found",
+               "fix force/thermal: background fix '%s' not found",
                plasma_fix_id_.c_str());
       error->all(FLERR, msg);
     }
     pd_ = dynamic_cast<FixBackground *>(modify->fix[ifix]);
     if (!pd_)
       error->all(FLERR,
-        "fix thermal_force: background fix must be style background");
+        "fix force/thermal: background fix must be style background");
     pd_->init();
   } else {
     bind(srcBx_, "Bx");
@@ -435,7 +435,7 @@ void FixForceThermal::parse_compute_src(const char *tok, CollGridSrc &dst,
   if (!tok || !*tok) {
     char msg[128];
     snprintf(msg, sizeof(msg),
-             "fix thermal_force: empty token for %s", label);
+             "fix force/thermal: empty token for %s", label);
     error->all(FLERR, msg);
   }
 
@@ -447,7 +447,7 @@ void FixForceThermal::parse_compute_src(const char *tok, CollGridSrc &dst,
 
     if (!lb || !rb || rb <= lb + 1)
       error->all(FLERR,
-        "fix thermal_force: use c_ID[col] syntax for compute sources");
+        "fix force/thermal: use c_ID[col] syntax for compute sources");
 
     int idlen = static_cast<int>(lb - name);
     dst.cid = new char[idlen + 1];
@@ -457,7 +457,7 @@ void FixForceThermal::parse_compute_src(const char *tok, CollGridSrc &dst,
 
     if (dst.col <= 0)
       error->all(FLERR,
-        "fix thermal_force: compute column must be >= 1");
+        "fix force/thermal: compute column must be >= 1");
     return;
   }
 
@@ -470,7 +470,7 @@ void FixForceThermal::parse_compute_src(const char *tok, CollGridSrc &dst,
   }
 
   error->all(FLERR,
-    "fix thermal_force: source must be c_ID[col] or p_name");
+    "fix force/thermal: source must be c_ID[col] or p_name");
 }
 
 /* ---------------------------------------------------------------------- */

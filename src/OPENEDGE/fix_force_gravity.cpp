@@ -34,7 +34,7 @@ FixForceGravity::FixForceGravity(SPARTA *sparta, int narg, char **arg)
 : Fix(sparta, narg, arg)
 {
   // Expected: fix ID group-ID gravity g1 g2 g3
-  if (narg < 6)     error->all(FLERR, "Illegal fix gravity: need group-ID and 3 components (g1 g2 g3)");
+  if (narg < 6)     error->all(FLERR, "Illegal fix force/gravity: need group-ID and 3 components (g1 g2 g3)");
   
   auto parse_or_die = [&](const char *tok, const char *label) -> double {
     errno = 0;

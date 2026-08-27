@@ -816,6 +816,15 @@ void Update::init()
   if (moveperturb) perturbflag = 1;
   else perturbflag = 0;
 
+  // OpenEdge gap (upstream-SPARTA capability, kept): the rewritten mover
+  // does not currently invoke moveperturb, so `global field` is parsed
+  // but NOT applied on the CPU path. Warn instead of failing silently;
+  // re-wiring it into the ballistic advection path is a backlog item.
+  if (perturbflag && comm->me == 0)
+    error->warning(FLERR,"global field is not applied by the OpenEdge "
+                   "mover in this version - the setting is parsed but "
+                   "has no effect on particle motion");
+
 }
 
 /* ---------------------------------------------------------------------- */
