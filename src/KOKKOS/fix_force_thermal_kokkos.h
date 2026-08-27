@@ -69,6 +69,7 @@ class FixForceThermalKokkos : public FixForceThermal, public KokkosBase {
   DAT::t_int_1d d_hash_off, d_hash_ent;
   double hash_rmin_, hash_zmin_, hash_dr_, hash_dz_;
   int hash_nr_, hash_nz_, ntri_;
+  double col_x0_, col_y0_;   // FixBackground column_axis (3D)
   int dim_, axisym_;
   int use_gradte_, use_gradti_;
   // equilibrium fallback for mesh-miss B (matches host bfield_at chain)

@@ -63,14 +63,6 @@ KOKKOS_INLINE_FUNCTION constexpr double S_BLEND_END()   { return 120.0; }
 
 /* ---------------------------------------------------------------------- */
 
-// 1D effective thermal speed (not Bohm cs); see sheath_models.h.
-KOKKOS_INLINE_FUNCTION
-double vth_d_eff(double te_eV, double ti_eV, double mD_amu)
-{
-  const double m = Kokkos::fmax(mD_amu * AMU(), 1.0e-99);
-  return Kokkos::sqrt(Kokkos::fmax(te_eV + ti_eV, 0.0) * QE() / (2.0 * m));
-}
-
 /* ---------------------------------------------------------------------- */
 
 KOKKOS_INLINE_FUNCTION

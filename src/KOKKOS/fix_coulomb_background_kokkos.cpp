@@ -7,12 +7,12 @@
 
 #include "fix_coulomb_background_kokkos.h"
 
-#include <cstring>
 #include <cstdlib>
 
 #include "comm.h"
 #include "domain.h"
 #include "error.h"
+#include "fix_background.h"
 #include "grid_kokkos.h"
 #include "particle_kokkos.h"
 #include "pusher_kokkos.h"
@@ -28,7 +28,9 @@ using namespace SPARTA_NS;
 FixCoulombBackgroundKokkos::FixCoulombBackgroundKokkos(SPARTA *sparta,
                                                        int narg, char **arg) :
   FixCoulombBackground(sparta, narg, arg),
-  rand_pool(12345 + comm->me
+  // distinct base seed per OpenEdge pool (chem uses 42345): a shared
+  // base made per-thread streams identical across fixes
+  rand_pool(32345 + comm->me
 #ifdef SPARTA_KOKKOS_EXACT
             , sparta
 #endif
@@ -74,6 +76,13 @@ void FixCoulombBackgroundKokkos::init()
     device_ok = 0; why = "compute-source plasma (device is background-mesh only)";
   } else if (do_binary_) {
     device_ok = 0; why = "binary mode (device is background-drag only)";
+  } else if (pd_ && pd_->has_const_bfield()) {
+    device_ok = 0; why = "constant-B branch (device B chain is mesh/equilibrium only)";
+  } else if (pd_ && (!pd_->dens_e.empty() || !pd_->dens_i.empty())) {
+    // old plasma.h5 with a regular (R,Z) raster (or constant mode): the
+    // CPU falls back to bilinear raster interp outside the mesh
+    // footprint; the device zeroes there -> stay on the host
+    device_ok = 0; why = "structured-grid plasma raster (device is mesh-only)";
   }
 
   UpdateKokkos *update_kk = dynamic_cast<UpdateKokkos *>(update);
@@ -152,6 +161,9 @@ void FixCoulombBackgroundKokkos::end_of_step()
   d_species   = particle_kk->k_species.d_view;
   d_cinfo     = grid_kk->k_cinfo.d_view;
 
+  col_x0_ = pd_ ? pd_->column_x0 : 0.0;
+  col_y0_ = pd_ ? pd_->column_y0 : 0.0;
+
   d_vtx_r    = update_kk->d_oe_mesh_vtx_r;
   d_vtx_z    = update_kk->d_oe_mesh_vtx_z;
   d_tri      = update_kk->d_oe_mesh_tri;
@@ -227,13 +239,20 @@ void FixCoulombBackgroundKokkos::operator()(TagFixCoulombBg,
 
   // CPU guard: whole cell skipped when volume <= 0
   const int icell = p.icell;
+  if (icell < 0 || icell >= (int) d_cinfo.extent(0)) return;  // defensive
   const double volume = d_cinfo(icell).volume / d_cinfo(icell).weight;
   if (volume <= 0.0) return;
+
+  // column-axis offset (3D linear-device decks, 'column_axis x0 y0'):
+  // CPU sparta_to_RZ subtracts it in every point query; shift once so
+  // R and the cyl->Cartesian rotation both see column coordinates
+  double xq[3] = {p.x[0], p.x[1], p.x[2]};
+  if (dim_ == 3 && !axisym_) { xq[0] -= col_x0_; xq[1] -= col_y0_; }
 
   // plasma at the particle position (tri-constant, mesh branch of
   // interp2D; a miss = CPU's empty-structured-grid fallback = zeros)
   const int tri = MeshKokkos::locate_tri_at_point(
-      p.x, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
+      xq, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
       d_hash_off, d_hash_ent, hash_rmin_, hash_zmin_,
       hash_dr_, hash_dz_, hash_nr_, hash_nz_, ntri_);
 
@@ -248,7 +267,7 @@ void FixCoulombBackgroundKokkos::operator()(TagFixCoulombBg,
 
   double B[3] = {0.0,0.0,0.0};
   const bool gotB = MeshKokkos::query_bfield_at_point(
-      p.x, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
+      xq, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
       d_tri_br, d_tri_bz, d_tri_bt,
       d_tri_rmin, d_tri_rmax, d_tri_zmin, d_tri_zmax,
       d_hash_off, d_hash_ent, hash_rmin_, hash_zmin_,
@@ -258,11 +277,11 @@ void FixCoulombBackgroundKokkos::operator()(TagFixCoulombBg,
     // the CPU equ_bfield_at chain, slag b05b4687)
     if (has_equ_bmaps_)
       EquilibriumKokkos::query_bfield_native_maps(
-          p.x, dim_, axisym_, d_equ_r, d_equ_z,
+          xq, dim_, axisym_, d_equ_r, d_equ_z,
           d_equ_br, d_equ_bt, d_equ_bz, equ_jm_, equ_km_, B);
     else
       EquilibriumKokkos::query_bfield_at_point(
-          p.x, dim_, axisym_, d_equ_r, d_equ_z, d_equ_psi,
+          xq, dim_, axisym_, d_equ_r, d_equ_z, d_equ_psi,
           equ_btf_, equ_rtf_, equ_jm_, equ_km_, B);
   }
   const double Bx = B[0], By = B[1], Bz = B[2];

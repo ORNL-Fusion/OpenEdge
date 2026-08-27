@@ -4,7 +4,6 @@
    Single header containing the device pusher kernels, mirroring
    src/OPENEDGE/pusher.h on the GPU side:
      BorisGridKokkos::push_velocity   — Boris kick-rotate-kick.
-     BorisGridKokkos::read_field      — read 3-component field from a 2D view.
      EquilibriumKokkos / MeshKokkos   — B/E/scalar point-queries.
 
    The GCAPusherKokkos namespace (old device GCA integrator) was removed
@@ -30,17 +29,9 @@
 namespace SPARTA_NS {
 
 /* ===================================================================
-   Boris kick-rotate-kick + view field extraction.
+   Boris kick-rotate-kick.
    =================================================================== */
 namespace BorisGridKokkos {
-
-KOKKOS_INLINE_FUNCTION
-void read_field(const DAT::t_float_2d_lr &d_arr, int idx, double out[3])
-{
-  out[0] = d_arr(idx, 0);
-  out[1] = d_arr(idx, 1);
-  out[2] = d_arr(idx, 2);
-}
 
 KOKKOS_INLINE_FUNCTION
 void push_velocity(double qm, double dt,

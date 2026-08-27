@@ -1,6 +1,7 @@
 /* ----------------------------------------------------------------------
    OpenEdge extension of SPARTA UpdateKokkos.
-   Adds Boris/GCA pusher support with separate E-field and B-field fixes.
+   Adds the OpenEdge Boris pusher (E/B from plasma compute or fix
+   background mesh views) and the spatial-sheath device machinery.
    This file is the canonical Kokkos update implementation.
 ------------------------------------------------------------------------- */
 
@@ -110,8 +111,8 @@ class UpdateKokkos : public Update {
   // OpenEdge: plasma compute device view (bypass field fixes)
   // Boris kernel reads B directly from compute columns
   DAT::t_float_2d_lr d_oe_plasma_compute;
+  class KokkosBase *oe_plasma_kkbase;  // live source of d_oe_plasma_compute
   int oe_bx_col, oe_by_col, oe_bz_col;  // column indices for B in compute
-  int oe_ex_col, oe_ey_col, oe_ez_col;  // column indices for E (sheath)
 
   // OpenEdge: device-resident equilibrium psi map (Phase A of pusher port).
   // Filled by binding to ComputePlasmaFieldsKokkos at init time. When
@@ -173,13 +174,12 @@ class UpdateKokkos : public Update {
   // decks whose plasma provider is the fix (static SOLPS/SOLEDGE3X file)
   void build_oe_mesh_from_fix();
 
-  // OpenEdge: Boris config. Hybrid/GCA (oe_pusher_mode != 0) is NOT
+  // OpenEdge: Boris config. Hybrid/GCA pusher modes are NOT
   // supported on the device — the old oe_hybrid3d port encoded physics
   // since removed from the CPU pusher (pre-selector sheath force, old
   // switching without the Boris shell / trial-replay) and was deleted
   // 2026-08-26; UpdateKokkos::init() errors out instead.
   int oe_pusher_subcycles;
-  int oe_pusher_mode;     // Pusher::PUSHER_* (must be 0 = Boris under Kokkos)
   double oe_echarge;
   // per-species pusher bypass (global pusher ... skip <mixture>): dust
   // grains advect ballistically even when charged, as on the CPU

@@ -31,7 +31,9 @@ enum{DISSOCIATION,EXCHANGE,RECOMBINATION,TRIM_REFLECT,ABSORB_REEMIT,SPUTTER};
 SurfReactSurfacePWIKokkos::SurfReactSurfacePWIKokkos(SPARTA *sparta, int narg,
                                                      char **arg) :
   SurfReactSurfacePWI(sparta, narg, arg),
-  rand_pool(12345 + comm->me
+  // distinct base seed per OpenEdge pool (coulomb 32345, chem 42345):
+  // a shared base made per-thread streams identical across pools
+  rand_pool(22345 + comm->me
 #ifdef SPARTA_KOKKOS_EXACT
             , sparta
 #endif
@@ -147,16 +149,17 @@ void SurfReactSurfacePWIKokkos::check_supported()
                    "and product != reactant)");
     }
 
-    // device path emits products with erot = evib = 0; reject species
-    // where the CPU would resample internal energy at twall
-    if (twall > 0.0) {
-      for (int j = 0; j < r->nproduct; j++) {
-        int sp = r->products[j];
-        if (particle->species[sp].rotdof >= 2 ||
-            particle->species[sp].vibdof >= 2)
-          error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
-                     "polyatomic products with twall accommodation");
-      }
+    // device path emits products with erot = evib = 0; the CPU
+    // resamples internal energy at twall — and at a 300 K fallback when
+    // twall is UNSET (surf_react_surface_pwi.cpp) — so molecular
+    // products diverge silently either way. Reject unconditionally.
+    for (int j = 0; j < r->nproduct; j++) {
+      int sp = r->products[j];
+      if (particle->species[sp].rotdof >= 2 ||
+          particle->species[sp].vibdof >= 2)
+        error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
+                   "polyatomic products (CPU resamples erot/evib at twall "
+                   "or its 300 K fallback; device emits 0)");
     }
   }
 }

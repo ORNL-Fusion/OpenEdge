@@ -11,6 +11,7 @@
 #include "memory.h"
 #include "error.h"
 #include "sparta_masks.h"
+#include "fix_background.h"
 
 #include <cstring>
 #include <cmath>
@@ -28,7 +29,10 @@ static constexpr double MY_2PI_LOC = 6.28318530717958647692;
 FixVolumeChemAdasKokkos::FixVolumeChemAdasKokkos(SPARTA *sparta, int narg,
                                                  char **arg) :
   FixVolumeChemAdas(sparta, narg, arg),
-  rand_pool(12345 + comm->me
+  // distinct base seed per OpenEdge pool: with the shared 12345 base the
+  // chem event-test and coulomb partner-sampling streams were identical
+  // per thread (first-draw correlation on the same particle index)
+  rand_pool(42345 + comm->me
 #ifdef SPARTA_KOKKOS_EXACT
             , sparta
 #endif
@@ -46,6 +50,7 @@ FixVolumeChemAdasKokkos::FixVolumeChemAdasKokkos(SPARTA *sparta, int narg,
   warned_fallback = 0;
   nn_stamp_n = -1;
   nn_stamp_id = (cellint) -1;
+  nn_stamp_gen = -2;
   have_cx_ = 0;
 }
 
@@ -96,6 +101,19 @@ void FixVolumeChemAdasKokkos::init()
         device_ok = 0; why = "active reaction without a product";
         break;
       }
+    }
+  }
+
+  // device_ok gates the CX need-flag MPI_Allreduce in end_of_step, and
+  // getenv() is per-rank state (a launcher can export OE_CHEM_HOST on a
+  // subset of ranks) -> make the decision comm-uniform or that
+  // collective becomes a subset collective (gate-6/8 deadlock class)
+  {
+    int ok_min = device_ok;
+    MPI_Allreduce(&device_ok, &ok_min, 1, MPI_INT, MPI_MIN, world);
+    if (ok_min < device_ok) {
+      device_ok = ok_min;
+      why = "host fallback forced on another rank";
     }
   }
 
@@ -206,6 +224,7 @@ void FixVolumeChemAdasKokkos::build_nn_cell()
 
   nn_stamp_n = ng;
   nn_stamp_id = (ng > 0 && grid->cells) ? grid->cells[0].id : (cellint) -1;
+  nn_stamp_gen = nn_pd ? nn_pd->generation : -1;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -230,11 +249,14 @@ void FixVolumeChemAdasKokkos::end_of_step()
     if (!particle->sorted) particle->sort();
     end_of_step_no_average();
     nreact_running += nreact_one;
-    particle_kk->modify(Host,PARTICLE_MASK);
+    // CUSTOM too: the base path creates particles and writes their custom
+    // attributes (pweight etc. via update_custom); marking only PARTICLE
+    // lost those writes on the next sync(Device,CUSTOM_MASK) on CUDA
+    particle_kk->modify(Host,PARTICLE_MASK|CUSTOM_MASK);
     // ModifyKokkos marks Device-modified after this call returns; push
     // the host-side changes down first so that mark is truthful (matters
     // on CUDA where host/device memories are distinct).
-    particle_kk->sync(Device,PARTICLE_MASK);
+    particle_kk->sync(Device,PARTICLE_MASK|CUSTOM_MASK);
     return;
   }
 
@@ -266,7 +288,11 @@ void FixVolumeChemAdasKokkos::end_of_step()
     const int nloc = grid->nlocal;
     const cellint fid = (nloc > 0 && grid->cells)
       ? grid->cells[0].id : (cellint) -1;
-    int need = (nloc != nn_stamp_n || fid != nn_stamp_id) ? 1 : 0;
+    // generation covers a between-runs plasma reload (reload() bumps
+    // it): the decomposition stamps alone would keep stale dens_n
+    const int gen = nn_pd ? nn_pd->generation : -1;
+    int need = (nloc != nn_stamp_n || fid != nn_stamp_id ||
+                gen != nn_stamp_gen) ? 1 : 0;
     int need_any = 0;
     MPI_Allreduce(&need,&need_any,1,MPI_INT,MPI_MAX,world);
     if (need_any) build_nn_cell();

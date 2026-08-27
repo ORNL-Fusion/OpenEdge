@@ -70,6 +70,10 @@ class FixBackground : public Fix {
                              double &ER, double &EZ, double &Et,
                              int icell = -1, int iparticle = -1) const;
   double psi_norm_at(double R, double Z) const;
+  // device-port gating: the Kokkos drag/thermal/mover B chains implement
+  // only mesh -> equilibrium -> 0; decks using the constant-B branches
+  // must stay on the host implementation
+  bool has_const_bfield() const { return const_has_bfield || const_has_bcart; }
   bool psi_norm_gradient_at(double R, double Z,
                             double &dpsi_dR, double &dpsi_dZ) const;
 

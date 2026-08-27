@@ -65,6 +65,17 @@ void FixForceThermalKokkos::init()
     device_ok = 0; why = "compute-source fields (device is background-mesh only)";
   } else if (!dynamic_cast<UpdateKokkos *>(update)) {
     device_ok = 0; why = "no UpdateKokkos (host run)";
+  } else if (pd_ && pd_->has_const_bfield()) {
+    device_ok = 0; why = "constant-B branch (device B chain is mesh/equilibrium only)";
+  } else if (pd_ &&
+             ((have_elec_thermal_ && pd_->mesh_grad_te_r.empty() &&
+               !pd_->grad_te_r.empty()) ||
+              (have_ion_thermal_ && pd_->mesh_grad_ti_r.empty() &&
+               !pd_->grad_ti_r.empty()))) {
+    // CPU pd_grad falls back to bilinear interp on the regular (R,Z)
+    // grid when mesh gradients are absent; the device contributes 0
+    // for that family -> stay on the host for raster-gradient decks
+    device_ok = 0; why = "structured-grid gradients (device is mesh-only)";
   }
 
   if (!device_ok) {
@@ -80,12 +91,33 @@ void FixForceThermalKokkos::init()
 void FixForceThermalKokkos::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
+  if (!device_ok) {
+    // host fallback must run the BASE hook, not kick_half directly:
+    // compute-source mode refreshes its per-step field caches there —
+    // bypassing it would kick with stale (init-time) fields forever
+    ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
+    particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK);
+    FixForceThermal::start_of_step();
+    particle_kk->modify(Host,PARTICLE_MASK);
+    particle_kk->sync(Device,PARTICLE_MASK);
+    return;
+  }
   kick_device(0.5 * update->dt * nevery);
 }
 
 void FixForceThermalKokkos::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
+  if (!device_ok) {
+    // base hook also re-fetches per-particle custom vectors that can be
+    // reallocated during the move (see fix_force_thermal.cpp)
+    ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
+    particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK);
+    FixForceThermal::end_of_step();
+    particle_kk->modify(Host,PARTICLE_MASK);
+    particle_kk->sync(Device,PARTICLE_MASK);
+    return;
+  }
   kick_device(0.5 * update->dt * nevery);
 }
 
@@ -125,6 +157,9 @@ void FixForceThermalKokkos::kick_device(double dt_half)
   particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK);
   d_particles = particle_kk->k_particles.view_device();
   d_species   = particle_kk->k_species.d_view;
+
+  col_x0_ = pd_ ? pd_->column_x0 : 0.0;
+  col_y0_ = pd_ ? pd_->column_y0 : 0.0;
 
   d_vtx_r    = update_kk->d_oe_mesh_vtx_r;
   d_vtx_z    = update_kk->d_oe_mesh_vtx_z;
@@ -308,9 +343,15 @@ void FixForceThermalKokkos::operator()(TagFixForceThermal,
   const double m_Z = d_species(isp).mass;
   if (m_Z <= 0.0) return;
 
+  // column-axis offset (3D linear-device decks, 'column_axis x0 y0'):
+  // CPU sparta_to_RZ subtracts it in every point query; shift once so
+  // R and the cyl->Cartesian rotation both see column coordinates
+  double xq[3] = {p.x[0], p.x[1], p.x[2]};
+  if (dim_ == 3 && !axisym_) { xq[0] -= col_x0_; xq[1] -= col_y0_; }
+
   double B[3] = {0.0,0.0,0.0};
   const bool gotB = MeshKokkos::query_bfield_at_point(
-      p.x, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
+      xq, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
       d_tri_br, d_tri_bz, d_tri_bt,
       d_tri_rmin, d_tri_rmax, d_tri_zmin, d_tri_zmax,
       d_hash_off, d_hash_ent, hash_rmin_, hash_zmin_,
@@ -320,11 +361,11 @@ void FixForceThermalKokkos::operator()(TagFixForceThermal,
     // the CPU equ_bfield_at chain, slag b05b4687)
     if (has_equ_bmaps_)
       EquilibriumKokkos::query_bfield_native_maps(
-          p.x, dim_, axisym_, d_equ_r, d_equ_z,
+          xq, dim_, axisym_, d_equ_r, d_equ_z,
           d_equ_br, d_equ_bt, d_equ_bz, equ_jm_, equ_km_, B);
     else
       EquilibriumKokkos::query_bfield_at_point(
-          p.x, dim_, axisym_, d_equ_r, d_equ_z, d_equ_psi,
+          xq, dim_, axisym_, d_equ_r, d_equ_z, d_equ_psi,
           equ_btf_, equ_rtf_, equ_jm_, equ_km_, B);
   }
   const double Bmag =
@@ -339,7 +380,7 @@ void FixForceThermalKokkos::operator()(TagFixForceThermal,
   // bhat in the cylindrical frame for the gradient dot product
   const double bhat_sparta[3] = {bhat0, bhat1, bhat2};
   const double phi_p = (dim_ == 3)
-      ? Kokkos::atan2(p.x[1], p.x[0]) : 0.0;
+      ? Kokkos::atan2(xq[1], xq[0]) : 0.0;
   double bhat_R_cyl, bhat_Z_cyl, bhat_phi_unused;
   OpenEdge::sparta_v_to_RZphi(bhat_sparta, dim_, axisym_ != 0,
                               phi_p, bhat_R_cyl, bhat_Z_cyl,

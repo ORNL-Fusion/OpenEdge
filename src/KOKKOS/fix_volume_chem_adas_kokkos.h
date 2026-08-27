@@ -100,6 +100,7 @@ class FixVolumeChemAdasKokkos : public FixVolumeChemAdas, public KokkosBase {
   DAT::t_float_1d d_nn_cell;
   int  nn_stamp_n;
   cellint nn_stamp_id;
+  int  nn_stamp_gen;              // FixBackground::generation at build
   int  have_cx_;                  // any active EXCHANGE reactions
 
   // ---- per-call bindings ----

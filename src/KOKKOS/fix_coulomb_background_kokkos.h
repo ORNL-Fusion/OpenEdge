@@ -80,6 +80,7 @@ class FixCoulombBackgroundKokkos : public FixCoulombBackground,
   DAT::t_int_1d d_hash_off, d_hash_ent;
   double hash_rmin_, hash_zmin_, hash_dr_, hash_dz_;
   int hash_nr_, hash_nz_, ntri_;
+  double col_x0_, col_y0_;   // FixBackground column_axis (3D)
   int dim_, axisym_;
   // equilibrium fallback for mesh-miss B (matches host bfield_at chain)
   int has_equ_;
@@ -92,8 +93,6 @@ class FixCoulombBackgroundKokkos : public FixCoulombBackground,
 
   // scalars for the kernel
   double dtc_, echarge_, eps0_, mbg_, qbg_;
-
-  void run_device_kernel();
 };
 
 }  // namespace SPARTA_NS

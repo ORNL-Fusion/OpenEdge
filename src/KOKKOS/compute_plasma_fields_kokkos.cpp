@@ -25,8 +25,8 @@ void ComputePlasmaFieldsKokkos::compute_per_grid()
 {
   ComputePlasmaFields::compute_per_grid();
   sync_to_device();
-  sync_equilibrium_to_device();   // idempotent; only first call allocates
-  sync_mesh_to_device();          // idempotent; only first call allocates
+  sync_equilibrium_to_device();   // uploads once; later calls early-return
+  sync_mesh_to_device();          // uploads once; later calls early-return
 }
 
 /* ----------------------------------------------------------------------
@@ -45,6 +45,10 @@ void ComputePlasmaFieldsKokkos::sync_equilibrium_to_device()
 
   const int jm = equ_data.jm;
   const int km = equ_data.km;
+
+  // equ_data is static for the run: skip the full re-mirror + H2D copy
+  // on every compute_per_grid() call once the map is up
+  if (d_has_equilibrium && d_equ_jm == jm && d_equ_km == km) return;
 
   if (d_equ_jm != jm || d_equ_km != km) {
     d_equ_r   = DAT::t_float_1d("equ_r",  jm);
@@ -92,6 +96,10 @@ void ComputePlasmaFieldsKokkos::sync_mesh_to_device()
   const int nvtx = pd.mesh_nvtx;
   const int ntri = pd.mesh_ntri;
   if (nvtx <= 0 || ntri <= 0) { d_has_mesh_b = 0; return; }
+
+  // plasma_data is static for the run: skip the full mesh re-mirror +
+  // H2D copy on every compute_per_grid() call once the views are up
+  if (d_has_mesh_b && d_mesh_ntri == ntri) return;
 
   // Allocate device views once (re-allocate if mesh changed)
   if (d_mesh_ntri != ntri) {
@@ -178,7 +186,10 @@ void ComputePlasmaFieldsKokkos::sync_mesh_to_device()
     d_mesh_hash_nr   = nr;
     d_mesh_hash_nz   = nz;
   } else {
-    d_mesh_hash_nr = d_mesh_hash_nz = 0;  // brute-force fallback on device
+    // NOTE: a degenerate hash disables mesh sampling on device entirely
+    // (locate_tri_at_point returns a miss for hash_nr <= 0, matching the
+    // CPU find_mesh_triangle_hash miss) — there is no brute-force scan
+    d_mesh_hash_nr = d_mesh_hash_nz = 0;
   }
 
   d_has_mesh_b = 1;

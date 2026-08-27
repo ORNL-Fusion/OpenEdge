@@ -379,6 +379,16 @@ void SurfReactSurfacePWI::init()
   SurfReact::init();
   init_reactions();
 
+  // PWI tallies (sigma/gid0/area/ehist) index real surface elements; a
+  // box boundary reaches collide() with isurf = -(face+1) and would
+  // index them out of bounds on both CPU and device -> reject loudly
+  for (int i = 0; i < 6; i++)
+    if (domain->surf_react[i] >= 0 &&
+        surf->sr[domain->surf_react[i]] == this)
+      error->all(FLERR,"surf_react surface/pwi cannot be assigned to a "
+                 "box boundary (bound_modify); it requires real surface "
+                 "elements");
+
   // pweight custom (fix particle/weight): sputtered atoms inherit the
   // incident macroparticle's pweight. -1 if fix particle/weight is absent
   // (then sputtered atoms fall back to the fnum default).

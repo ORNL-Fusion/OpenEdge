@@ -97,7 +97,7 @@ UpdateKokkos::UpdateKokkos(SPARTA *sparta) : Update(sparta),
 
   // use 1D view for scalars to reduce GPU memory operations
 
-  d_scalars = t_int_14("collide:scalars");
+  d_scalars = t_int_14("update:scalars");
   h_scalars = t_host_int_14("collide:scalars_mirror");
 
   d_ncomm_one     = Kokkos::subview(d_scalars,0);
@@ -273,16 +273,15 @@ void UpdateKokkos::init()
 
   // OpenEdge: Boris config — read B/E directly from plasma compute view
   oe_pusher_subcycles = pusher->pusher_subcycles;
-  oe_pusher_mode = pusher->pusher_mode;
   oe_echarge = echarge;
   oe_bx_col = oe_by_col = oe_bz_col = -1;
-  oe_ex_col = oe_ey_col = oe_ez_col = -1;
 
   // OpenEdge Phase A: equilibrium-based point-query B (defaults off).
   // Actual binding to ComputePlasmaFieldsKokkos's d_equ_* views happens
   // at the same site where d_oe_plasma_compute is bound (see below).
   oe_has_equilibrium = 0;
   oe_has_equ_bmaps = 0;
+  oe_plasma_kkbase = NULL;
   oe_equ_jm = oe_equ_km = 0;
   oe_equ_btf = oe_equ_rtf = 0.0;
   oe_dim = domain->dimension;
@@ -336,6 +335,11 @@ void UpdateKokkos::init()
   if (sheath_flag && (sheath_kick || sheath_boundary))
     error->all(FLERR,"Sheath kick/boundary modes are not supported with "
                "Kokkos; use sheath spatial");
+  // the device Boris dispatch is DIM == 3 only: a 2D/axisymmetric deck
+  // with a configured pusher would silently advect ions ballistically
+  if (oe_pusher_subcycles > 0 && domain->dimension != 3)
+    error->all(FLERR,"The Kokkos pusher is 3D-only in this version; "
+               "run 2D/axisymmetric pusher decks on the CPU build");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -424,14 +428,23 @@ void UpdateKokkos::run(int nsteps)
     KokkosBase *kk_cp = dynamic_cast<KokkosBase*>(cp);
     if (kk_cp) {
       d_oe_plasma_compute = kk_cp->d_array_grid;
+      oe_plasma_kkbase = kk_cp;
       // Column mapping from compute: bx=0, by=1, bz=2 (first 3 values)
       oe_bx_col = 0; oe_by_col = 1; oe_bz_col = 2;
+    } else if (cp) {
+      // fail loudly instead of moving ions ballistically
+      error->all(FLERR,"Kokkos pusher: plasma compute is not "
+                 "Kokkos-enabled (use the /kk variant)");
     }
 
     // Phase A: bind to the device-resident equilibrium psi map (if any)
     // for smooth point-query B inside oe_boris3d. Falls back to cell-center
     // columns when no equilibrium is loaded.
     auto *cp_pf = dynamic_cast<ComputePlasmaFieldsKokkos*>(cp);
+    if (cp_pf) {
+      oe_col_x0 = cp_pf->plasma_data.column_x0;
+      oe_col_y0 = cp_pf->plasma_data.column_y0;
+    }
     if (cp_pf && cp_pf->d_has_equilibrium) {
       d_oe_equ_r        = cp_pf->d_equ_r;
       d_oe_equ_z        = cp_pf->d_equ_z;
@@ -554,6 +567,13 @@ void UpdateKokkos::run(int nsteps)
     // growing with rank count). Rebuild the cache when the
     // decomposition stamps change. The CPU pusher is immune: it reads
     // the live compute per particle-move.
+    // rebind the compute-provider per-cell view every step: rebalance
+    // can remap local cells and the compute can reallocate
+    // d_array_grid mid-run - a view captured at run() setup then
+    // dangles (same Bug-F class as the sheath maps)
+    if (oe_plasma_kkbase)
+      d_oe_plasma_compute = oe_plasma_kkbase->d_array_grid;
+
     if (oe_sheath_provider) {
       const int nloc_stamp = grid->nlocal;
       const cellint fid_stamp = (nloc_stamp > 0 && grid->cells)
@@ -2346,14 +2366,37 @@ void UpdateKokkos::build_oe_mesh_from_fix()
   oe_has_mesh_b = 0;
   oe_has_mesh_e = 0;
   oe_has_mesh_plasma = 0;
+  // reset the full flag family, not just b/e/plasma: leftover
+  // drag/gradient/equilibrium flags from a previous run would otherwise
+  // outlive a plasma source that no longer provides them
+  oe_has_mesh_drag = 0;
+  oe_has_mesh_gradte = 0;
+  oe_has_mesh_gradti = 0;
+  oe_has_equilibrium = 0;
+  oe_has_equ_bmaps = 0;
   if (pusher->pusher_plasma_fidx < 0) return;
   FixBackground *pd =
     dynamic_cast<FixBackground*>(modify->fix[pusher->pusher_plasma_fidx]);
-  if (!pd || !pd->has_mesh) return;
+  const int have_mesh_b = pd && pd->has_mesh && pd->mesh_nvtx > 0 &&
+    pd->mesh_ntri > 0 &&
+    (int) pd->mesh_tri_br.size() == pd->mesh_ntri;
+  if (!have_mesh_b) {
+    // fail loudly instead of advecting ions ballistically: the CPU
+    // point-query chain still serves B for equilibrium-only and
+    // constant-B decks, but the device equ binding below is only built
+    // alongside a mesh, so without one the pusher would silently no-op
+    if (pd && (!pd->equ_r.empty() || pd->has_const_bfield()))
+      error->all(FLERR,"Kokkos pusher: fix background has no mesh B "
+                 "(equilibrium-only / constant-B decks are not supported "
+                 "on the device mover; use the CPU build)");
+    return;
+  }
   const int nvtx = pd->mesh_nvtx;
   const int ntri = pd->mesh_ntri;
-  if (nvtx <= 0 || ntri <= 0) return;
-  if ((int) pd->mesh_tri_br.size() != ntri) return;
+  // column-axis offset for all device point queries (also set by the
+  // sheath-cache builder, but decks without spatial sheath land here)
+  oe_col_x0 = pd->column_x0;
+  oe_col_y0 = pd->column_y0;
 
   oe_dim = domain->dimension;
   oe_axisymmetric = domain->axisymmetric;
@@ -2465,7 +2508,10 @@ void UpdateKokkos::build_oe_mesh_from_fix()
     oe_mesh_hash_nr   = nr;
     oe_mesh_hash_nz   = nz;
   } else {
-    oe_mesh_hash_nr = oe_mesh_hash_nz = 0;   // brute-force device fallback
+    // NOTE: a degenerate hash disables mesh sampling on device entirely
+    // (device tri location returns a miss for hash_nr <= 0, matching the
+    // CPU find_mesh_triangle_hash miss) — there is no brute-force scan
+    oe_mesh_hash_nr = oe_mesh_hash_nz = 0;
   }
 
   oe_mesh_ntri = ntri;
@@ -2486,10 +2532,12 @@ void UpdateKokkos::build_oe_mesh_from_fix()
     const bool have_map = ((int) pd->mesh_cell_idx.size() == ntri);
     for (int t = 0; t < ntri; t++) {
       int c = have_map ? pd->mesh_cell_idx[t] : t;
-      if (c < 0 || c >= ncellE) c = (t < ncellE) ? t : 0;
-      h_er(t) = pd->mesh_e_r[c];
-      h_ez(t) = pd->mesh_e_z[c];
-      h_et(t) = pd->mesh_e_t[c];
+      // unmapped tri: store 0 (CPU interp2D falls through to the
+      // raster / 0 for such tris; substituting cell t was wrong)
+      if (c < 0 || c >= ncellE) c = -1;
+      h_er(t) = (c < 0) ? 0.0 : pd->mesh_e_r[c];
+      h_ez(t) = (c < 0) ? 0.0 : pd->mesh_e_z[c];
+      h_et(t) = (c < 0) ? 0.0 : pd->mesh_e_t[c];
     }
     Kokkos::deep_copy(d_oe_mesh_tri_er,h_er);
     Kokkos::deep_copy(d_oe_mesh_tri_ez,h_ez);
@@ -2513,10 +2561,12 @@ void UpdateKokkos::build_oe_mesh_from_fix()
     const bool have_map = ((int) pd->mesh_cell_idx.size() == ntri);
     for (int t = 0; t < ntri; t++) {
       int c = have_map ? pd->mesh_cell_idx[t] : t;
-      if (c < 0 || c >= ncellP) c = (t < ncellP) ? t : 0;
-      h_te(t) = pd->mesh_te[c];
-      h_ti(t) = pd->mesh_ti[c];
-      h_ne(t) = pd->mesh_ne[c];
+      // unmapped tri: store 0 (CPU interp2D falls through to the
+      // raster / 0 for such tris; substituting cell t was wrong)
+      if (c < 0 || c >= ncellP) c = -1;
+      h_te(t) = (c < 0) ? 0.0 : pd->mesh_te[c];
+      h_ti(t) = (c < 0) ? 0.0 : pd->mesh_ti[c];
+      h_ne(t) = (c < 0) ? 0.0 : pd->mesh_ne[c];
     }
     Kokkos::deep_copy(d_oe_mesh_tri_te,h_te);
     Kokkos::deep_copy(d_oe_mesh_tri_ti,h_ti);
@@ -2539,7 +2589,7 @@ void UpdateKokkos::build_oe_mesh_from_fix()
       const bool have_map = ((int) pd->mesh_cell_idx.size() == ntri);
       for (int t = 0; t < ntri; t++) {
         int c = have_map ? pd->mesh_cell_idx[t] : t;
-        if (c < 0 || c >= nc) c = (t < nc) ? t : 0;
+        if (c < 0 || c >= nc) { h(t) = 0.0; continue; }  // unmapped tri: CPU falls through to raster/0
         h(t) = src[c];
       }
       Kokkos::deep_copy(dst,h);
@@ -2708,7 +2758,11 @@ void UpdateKokkos::build_oe_sheath_cache()
       cp_base->invoked_flag |= INVOKED_PER_GRID;
     }
   }
-  if (cp && (!cp->plasma_arr || !cp->mag_arr)) cp = nullptr;
+  // Do NOT null cp when plasma_arr/mag_arr are NULL: that happens
+  // per-rank (zero local cells) and this function contains
+  // collectives - nulling made the early return a SUBSET collective
+  // (the gate-6/8 deadlock class). With grid->nlocal == 0 the fill
+  // loops below iterate zero times, so keeping cp is safe.
 
   FixBackground *pd = nullptr;
   if (!cp && pusher->pusher_plasma_fidx >= 0)
@@ -2879,10 +2933,17 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
   //     way); dispatch mesh > equilibrium > cell-center columns ---
   double B_cached[3] = {0.0, 0.0, 0.0};
   {
+    // column-axis offset (3D linear-device decks): CPU point queries
+    // subtract it via sparta_to_RZ; shift once so R and the
+    // cyl->Cartesian rotation both see column coordinates
+    double xq[3] = {xcur[0], xcur[1], xcur[2]};
+    if (oe_dim == 3 && !oe_axisymmetric) {
+      xq[0] -= oe_col_x0; xq[1] -= oe_col_y0;
+    }
     bool got_B = false;
     if (oe_has_mesh_b) {
       got_B = MeshKokkos::query_bfield_at_point(
-          xcur, oe_dim, oe_axisymmetric,
+          xq, oe_dim, oe_axisymmetric,
           d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
           d_oe_mesh_tri_br, d_oe_mesh_tri_bz, d_oe_mesh_tri_bt,
           d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
@@ -2899,13 +2960,13 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
       // native maps exist (host returns false on stencil failure)
       if (oe_has_equ_bmaps) {
         got_B = EquilibriumKokkos::query_bfield_native_maps(
-            xcur, oe_dim, oe_axisymmetric,
+            xq, oe_dim, oe_axisymmetric,
             d_oe_equ_r, d_oe_equ_z,
             d_oe_equ_br, d_oe_equ_bt, d_oe_equ_bz,
             oe_equ_jm, oe_equ_km, B_cached);
       } else {
         EquilibriumKokkos::query_bfield_at_point(
-            xcur, oe_dim, oe_axisymmetric,
+            xq, oe_dim, oe_axisymmetric,
             d_oe_equ_r, d_oe_equ_z, d_oe_equ_psi,
             oe_equ_btf, oe_equ_rtf, oe_equ_jm, oe_equ_km,
             B_cached);
@@ -3010,8 +3071,12 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
           } else { bvec[0] = br; bvec[1] = 0.0; bvec[2] = bz; }
         } else if (oe_sheath_provider == 1 && oe_has_mesh_plasma) {
           double P[3];
+          double xqs[3] = {x[0], x[1], x[2]};
+          if (oe_dim == 3 && !oe_axisymmetric) {
+            xqs[0] -= oe_col_x0; xqs[1] -= oe_col_y0;
+          }
           if (MeshKokkos::query_scalars_at_point(
-                x, oe_dim, oe_axisymmetric,
+                xqs, oe_dim, oe_axisymmetric,
                 d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
                 d_oe_mesh_tri_te, d_oe_mesh_tri_ti, d_oe_mesh_tri_ne,
                 d_oe_hash_offset, d_oe_hash_entries,
@@ -3040,7 +3105,10 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
                                                   oe_sheath_dmax_user);
           sh_c = SheathModelsKokkos::prepare_coulette_manfredi(
                      te, ti, ne, bmag, alpha_deg, oe_sheath_mD_amu, 0.0);
-          sh_active = true;
+          // require B > 0 like the CPU fallback and the cache builders:
+          // with B = 0, auto_dmax's rho_i blows up and a spurious
+          // alpha = 90 sheath would engulf the whole domain
+          sh_active = (bmag > 0.0);
         }
       }
     }
@@ -3089,8 +3157,12 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
     // pusher's per-subcycle query_efield_at_point.
     if (oe_has_mesh_e) {
       double Emesh[3] = {0.0, 0.0, 0.0};
+      double xqe[3] = {xcur[0], xcur[1], xcur[2]};
+      if (oe_dim == 3 && !oe_axisymmetric) {
+        xqe[0] -= oe_col_x0; xqe[1] -= oe_col_y0;
+      }
       if (MeshKokkos::query_bfield_at_point(
-            xcur, oe_dim, oe_axisymmetric,
+            xqe, oe_dim, oe_axisymmetric,
             d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
             d_oe_mesh_tri_er, d_oe_mesh_tri_ez, d_oe_mesh_tri_et,
             d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
