@@ -54,6 +54,10 @@ typedef struct s_UPDATE_REDUCE UPDATE_REDUCE;
 template<int DIM, int SURF, int REACT, int OPT, int ATOMIC_REDUCTION>
 struct TagUpdateMove{};
 
+// OpenEdge gate 9b: device plasma-cache fill (retires the per-step
+// host pcache loop and its full particle+custom D2H/H2D round-trip)
+struct TagUpdatePcacheFill{};
+
 class UpdateKokkos : public Update {
  public:
   typedef UPDATE_REDUCE value_type;
@@ -74,6 +78,9 @@ class UpdateKokkos : public Update {
   template<int DIM, int SURF, int REACT, int OPT, int ATOMIC_REDUCTION>
   KOKKOS_INLINE_FUNCTION
   void operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>, const int&, UPDATE_REDUCE&) const;
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(TagUpdatePcacheFill, const int&) const;
 
  private:
 
@@ -173,6 +180,19 @@ class UpdateKokkos : public Update {
   // build the device mesh B/E views directly from FixBackground for
   // decks whose plasma provider is the fix (static SOLPS/SOLEDGE3X file)
   void build_oe_mesh_from_fix();
+
+  // OpenEdge gate 9b: device plasma-cache fill. Capability decided once
+  // per run() (oe_pcache_dev); the kernel samples the masked slots from
+  // the device mesh views (tri-constant scalars, mesh/equ B) and applies
+  // the sheath Boltzmann ne correction with the mover's element
+  // refinement — exact CPU cache_plasma_particles() semantics for the
+  // supported mask. Unsupported configs keep the host fill.
+  void cache_plasma_particles_device();
+  int oe_pcache_dev;    // 1 = device fill active this run
+  int oe_pc_mask;       // pcache_need_mask captured for the kernel
+  int oe_pc_csg;        // sheath Boltzmann ne correction active
+  DAT::t_float_1d d_pc_te, d_pc_ti, d_pc_ne, d_pc_ni, d_pc_vpar;
+  DAT::t_float_1d d_pc_bx, d_pc_by, d_pc_bz;
 
   // OpenEdge: Boris config. Hybrid/GCA pusher modes are NOT
   // supported on the device — the old oe_hybrid3d port encoded physics

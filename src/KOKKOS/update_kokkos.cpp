@@ -303,6 +303,9 @@ void UpdateKokkos::init()
   oe_sheath_mD_amu = sheath_mD_amu;
   oe_sheath_dmax_user = sheath_dmax;
   oe_col_x0 = oe_col_y0 = 0.0;
+  oe_pcache_dev = 0;
+  oe_pc_mask = 0;
+  oe_pc_csg = 0;
   oe_has_mesh_plasma = 0;
   oe_has_mesh_drag = 0;
   oe_has_mesh_gradte = 0;
@@ -527,6 +530,58 @@ void UpdateKokkos::run(int nsteps)
 
   // loop over timesteps
 
+
+  // OpenEdge gate 9b: decide once per run whether the plasma cache can
+  // be filled on the device. The host fill costs a full particle+custom
+  // D2H sync every step (the TIME_PCACHE bucket, ~15% at 1000x load).
+  oe_pcache_dev = 0;
+  oe_pc_csg = (sheath_flag && sheath_geom_cidx >= 0) ? 1 : 0;
+  if (plasma_cache_flag) {
+    const char *why = nullptr;
+    const int sup = PCACHE_TE | PCACHE_NE | PCACHE_TI | PCACHE_NI |
+                    PCACHE_VPAR | PCACHE_BFIELD;
+    FixBackground *pdc = nullptr;
+    if (pusher->pusher_plasma_fidx >= 0)
+      pdc = dynamic_cast<FixBackground*>(
+                modify->fix[pusher->pusher_plasma_fidx]);
+    auto okc = [&](int cidx) {
+      return cidx >= 0 && particle->ewhich[cidx] >= 0;
+    };
+    if (getenv("OE_PCACHE_HOST"))
+      why = "OE_PCACHE_HOST env override";
+    else if (domain->dimension != 3)
+      why = "2D/axisymmetric (device fill is 3D-only)";
+    else if (!oe_has_mesh_b || !oe_has_mesh_plasma)
+      why = "device mesh B/plasma views not built (fix-provider mesh decks only)";
+    else if (pcache_need_mask & ~sup)
+      why = "unsupported cache slots (gradients / E-field)";
+    else if ((pcache_need_mask & (PCACHE_NI | PCACHE_VPAR)) &&
+             !oe_has_mesh_drag)
+      why = "mesh ni/upar fields absent";
+    else if (pdc && pdc->has_const_bfield())
+      why = "constant-B branch (device B chain is mesh/equilibrium only)";
+    else if (oe_pc_csg &&
+             !(oe_sheath_provider && d_oe_midx_gcell.data()))
+      why = "sheath ne correction needs the device sheath cache";
+    else if (((pcache_need_mask & PCACHE_TE) && !okc(pc_te_custom)) ||
+             ((pcache_need_mask & PCACHE_TI) && !okc(pc_ti_custom)) ||
+             ((pcache_need_mask & PCACHE_NE) && !okc(pc_ne_custom)) ||
+             ((pcache_need_mask & PCACHE_NI) && !okc(pc_ni_custom)) ||
+             ((pcache_need_mask & PCACHE_VPAR) && !okc(pc_vpar_custom)) ||
+             ((pcache_need_mask & PCACHE_BFIELD) &&
+              !(okc(pc_bx_custom) && okc(pc_by_custom) && okc(pc_bz_custom))))
+      why = "pcache custom slots unresolved";
+    oe_pcache_dev = (why == nullptr);
+    if (comm->me == 0 && screen) {
+      if (oe_pcache_dev)
+        fprintf(screen,"  [kokkos] pcache: DEVICE fill active (mask 0x%x%s)\n",
+                pcache_need_mask,
+                oe_pc_csg ? ", sheath ne correction" : "");
+      else
+        fprintf(screen,"  [kokkos] pcache: host fill (%s)\n",why);
+    }
+  }
+
   for (int i = 0; i < nsteps; i++) {
 
     if (timer->check_timeout(i)) {
@@ -590,9 +645,13 @@ void UpdateKokkos::run(int nsteps)
 
     if (plasma_cache_flag &&
         (pcache_nevery <= 1 || ntimestep % pcache_nevery == 0)) {
-      particle_kk->sync(Host,PARTICLE_MASK|CUSTOM_MASK);
-      cache_plasma_particles();
-      particle_kk->modify(Host,CUSTOM_MASK);
+      if (oe_pcache_dev) {
+        cache_plasma_particles_device();
+      } else {
+        particle_kk->sync(Host,PARTICLE_MASK|CUSTOM_MASK);
+        cache_plasma_particles();
+        particle_kk->modify(Host,CUSTOM_MASK);
+      }
       timer->stamp(TIME_PCACHE);
     }
 
@@ -3440,4 +3499,196 @@ void UpdateKokkos::restore()
   // deallocate references to reduce memory use
 
   d_particles_backup = {};
+}
+
+/* ----------------------------------------------------------------------
+   OpenEdge gate 9b: fill the per-particle plasma-cache customs on the
+   device. Semantics mirror Update::cache_plasma_particles() for the
+   supported mask exactly: tri-constant mesh scalars (miss = 0, the CPU
+   empty-structured fallback), B through the mesh -> equilibrium chain
+   with the column-axis shift, and the sheath Boltzmann ne correction
+   (nearest group element in the parent cell, CM potential at the
+   particle's wall distance). Runs instead of the host fill — no
+   particle/custom host round-trip.
+------------------------------------------------------------------------- */
+
+void UpdateKokkos::cache_plasma_particles_device()
+{
+  const int nlocal = particle->nlocal;
+  if (nlocal == 0) return;
+
+  ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
+  particle_kk->sync(Device,PARTICLE_MASK|CUSTOM_MASK);
+  d_particles = particle_kk->k_particles.view_device();
+
+  // bind the masked custom slots fresh each call (grow_custom-safe)
+  auto edvec = [&](int cidx) -> DAT::t_float_1d {
+    return particle_kk->k_edvec.h_view[particle->ewhich[cidx]].k_view.d_view;
+  };
+  const int m = pcache_need_mask;
+  if (m & PCACHE_TE)   d_pc_te   = edvec(pc_te_custom);
+  if (m & PCACHE_TI)   d_pc_ti   = edvec(pc_ti_custom);
+  if (m & PCACHE_NE)   d_pc_ne   = edvec(pc_ne_custom);
+  if (m & PCACHE_NI)   d_pc_ni   = edvec(pc_ni_custom);
+  if (m & PCACHE_VPAR) d_pc_vpar = edvec(pc_vpar_custom);
+  if (m & PCACHE_BFIELD) {
+    d_pc_bx = edvec(pc_bx_custom);
+    d_pc_by = edvec(pc_by_custom);
+    d_pc_bz = edvec(pc_bz_custom);
+  }
+  oe_pc_mask = m;
+
+  copymode = 1;
+  Kokkos::parallel_for(
+      Kokkos::RangePolicy<DeviceType,TagUpdatePcacheFill>(0,nlocal),*this);
+  DeviceType().fence();
+  copymode = 0;
+
+  particle_kk->modify(Device,CUSTOM_MASK);
+}
+
+KOKKOS_INLINE_FUNCTION
+void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
+{
+  Particle::OnePart &p = d_particles(i);
+  const int mask = oe_pc_mask;
+
+  // column-axis shift for the (R,Z) queries; plane distances below use
+  // the raw SPARTA position (surfaces live in SPARTA coordinates)
+  double xq[3] = {p.x[0], p.x[1], p.x[2]};
+  if (oe_dim == 3 && !oe_axisymmetric) {
+    xq[0] -= oe_col_x0; xq[1] -= oe_col_y0;
+  }
+
+  // tri-constant plasma scalars (CPU mesh_cell_for at the particle
+  // position; a miss = the CPU empty-structured-grid fallback = 0)
+  double te = 0.0, ti = 0.0, ne = 0.0, ni = 0.0, vpar = 0.0;
+  const int tri = MeshKokkos::locate_tri_at_point(
+      xq, oe_dim, oe_axisymmetric,
+      d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
+      d_oe_hash_offset, d_oe_hash_entries,
+      oe_mesh_hash_rmin, oe_mesh_hash_zmin,
+      oe_mesh_hash_dr,   oe_mesh_hash_dz,
+      oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri);
+  if (tri >= 0) {
+    te = d_oe_mesh_tri_te(tri);
+    ti = d_oe_mesh_tri_ti(tri);
+    ne = d_oe_mesh_tri_ne(tri);
+    if (oe_has_mesh_drag) {
+      ni   = d_oe_mesh_tri_ni(tri);
+      vpar = d_oe_mesh_tri_upar(tri);
+    }
+  }
+
+  // B at the particle when a slot or the ne correction needs it —
+  // mesh -> equilibrium chain, Cartesian components (CPU bfield_at +
+  // rotation about the column axis)
+  double B[3] = {0.0, 0.0, 0.0};
+  if ((mask & PCACHE_BFIELD) || oe_pc_csg) {
+    bool got_B = false;
+    if (oe_has_mesh_b) {
+      got_B = MeshKokkos::query_bfield_at_point(
+          xq, oe_dim, oe_axisymmetric,
+          d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
+          d_oe_mesh_tri_br, d_oe_mesh_tri_bz, d_oe_mesh_tri_bt,
+          d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
+          d_oe_mesh_tri_zmin, d_oe_mesh_tri_zmax,
+          d_oe_hash_offset, d_oe_hash_entries,
+          oe_mesh_hash_rmin, oe_mesh_hash_zmin,
+          oe_mesh_hash_dr,   oe_mesh_hash_dz,
+          oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri, B);
+    }
+    if (!got_B && oe_has_equilibrium) {
+      if (oe_has_equ_bmaps) {
+        EquilibriumKokkos::query_bfield_native_maps(
+            xq, oe_dim, oe_axisymmetric,
+            d_oe_equ_r, d_oe_equ_z,
+            d_oe_equ_br, d_oe_equ_bt, d_oe_equ_bz,
+            oe_equ_jm, oe_equ_km, B);
+      } else {
+        EquilibriumKokkos::query_bfield_at_point(
+            xq, oe_dim, oe_axisymmetric,
+            d_oe_equ_r, d_oe_equ_z, d_oe_equ_psi,
+            oe_equ_btf, oe_equ_rtf, oe_equ_jm, oe_equ_km, B);
+      }
+    }
+  }
+
+  if (mask & PCACHE_TE)   d_pc_te(i)   = te;
+  if (mask & PCACHE_TI)   d_pc_ti(i)   = ti;
+  if (mask & PCACHE_NI)   d_pc_ni(i)   = ni;
+  if (mask & PCACHE_VPAR) d_pc_vpar(i) = vpar;
+  if (mask & PCACHE_BFIELD) {
+    d_pc_bx(i) = B[0];
+    d_pc_by(i) = B[1];
+    d_pc_bz(i) = B[2];
+  }
+
+  // Boltzmann ne correction: ne_local = ne * exp(-phi/Te), phi = the CM
+  // sheath potential at the particle's wall distance (CPU
+  // cache_plasma_particles tail; element refinement as in the mover)
+  double ne_out = ne;
+  if (oe_pc_csg && te > 0.0 && ne > 0.0) {
+    const int icell = p.icell;
+    if (icell >= 0 && icell < (int) d_cells.extent(0)) {
+      int gcell = icell;
+      if (d_cells[icell].nsplit <= 0 && d_cells[icell].isplit >= 0)
+        gcell = d_sinfo[d_cells[icell].isplit].icell;
+      if (gcell >= 0 && gcell < (int) d_oe_midx_gcell.extent(0)) {
+        int midx = d_oe_midx_gcell(gcell);
+        const int nsurf_cell = d_cells[gcell].nsurf;
+        if (nsurf_cell > 0) {
+          auto csurfs_begin = d_csurfs.row_map(gcell);
+          double best_d = 1.0e20;
+          int best_m = -1;
+          for (int mm = 0; mm < nsurf_cell; mm++) {
+            const int ms = d_csurfs.entries(csurfs_begin + mm);
+            if (!(d_tris[ms].mask & oe_sheath_sgroupbit)) continue;
+            const double dpl = Kokkos::fabs(
+                (p.x[0]-d_tris[ms].p1[0])*d_tris[ms].norm[0] +
+                (p.x[1]-d_tris[ms].p1[1])*d_tris[ms].norm[1] +
+                (p.x[2]-d_tris[ms].p1[2])*d_tris[ms].norm[2]);
+            if (dpl < best_d) { best_d = dpl; best_m = ms; }
+          }
+          if (best_m >= 0) midx = best_m;
+        }
+        if (midx >= 0) {
+          double nx = d_tris[midx].norm[0];
+          double ny = d_tris[midx].norm[1];
+          double nz = d_tris[midx].norm[2];
+          const double nmag = Kokkos::sqrt(nx*nx + ny*ny + nz*nz);
+          if (nmag > 0.0) { nx /= nmag; ny /= nmag; nz /= nmag; }
+          const double sref0 =
+            (d_tris[midx].p1[0]+d_tris[midx].p2[0]+d_tris[midx].p3[0])/3.0;
+          const double sref1 =
+            (d_tris[midx].p1[1]+d_tris[midx].p2[1]+d_tris[midx].p3[1])/3.0;
+          const double sref2 =
+            (d_tris[midx].p1[2]+d_tris[midx].p2[2]+d_tris[midx].p3[2])/3.0;
+          const double dpart = Kokkos::fabs(
+              (p.x[0]-sref0)*nx + (p.x[1]-sref1)*ny + (p.x[2]-sref2)*nz);
+
+          const double bmag =
+              Kokkos::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
+          double alpha_deg = 90.0;
+          if (bmag > 0.0) {
+            const double nvec[3] = {nx, ny, nz};
+            SheathModelsKokkos::ChoduraMetrics cm =
+              SheathModelsKokkos::chodura_metrics(0.0, 1.0, B, nvec);
+            alpha_deg = cm.alpha_deg;
+          }
+          const double d_max = SheathModelsKokkos::auto_dmax(
+              te, ti, ne, bmag, alpha_deg,
+              oe_sheath_mD_amu, oe_sheath_dmax_user);
+          if (dpart > 0.0 && dpart < d_max) {
+            SheathModelsKokkos::CMCoeffs c =
+              SheathModelsKokkos::prepare_coulette_manfredi(
+                  te, ti, ne, bmag, alpha_deg, oe_sheath_mD_amu, 0.0);
+            const double phi = SheathModelsKokkos::phi_at_distance(c, dpart);
+            if (phi > 0.0) ne_out = ne * Kokkos::exp(-phi / te);
+          }
+        }
+      }
+    }
+  }
+  if (mask & PCACHE_NE) d_pc_ne(i) = ne_out;
 }
