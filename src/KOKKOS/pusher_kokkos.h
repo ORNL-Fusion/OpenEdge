@@ -172,6 +172,83 @@ void query_bfield_at_point(
   }
 }
 
+/* ===================================================================
+   Native equilibrium B maps (slag b05b4687): when the plasma file
+   carries equ_br/bt/bz on the same [z][r] grid, the CPU equ_bfield_at
+   prefers BILINEAR interpolation of those maps over psi-derived B.
+   Device twin: cell-based upper-bound stencil with edge clamping,
+   exactly mirroring make_regular_grid_stencil + sample_regular_map.
+   =================================================================== */
+
+KOKKOS_INLINE_FUNCTION
+double bilinear_regular_map(const DAT::t_float_2d_lr &f, int k, int j,
+                            double fr, double fz)
+{
+  const double lower = (1.0 - fr) * f(k,   j) + fr * f(k,   j+1);
+  const double upper = (1.0 - fr) * f(k+1, j) + fr * f(k+1, j+1);
+  return (1.0 - fz) * lower + fz * upper;
+}
+
+KOKKOS_INLINE_FUNCTION
+bool query_bfield_native_maps(
+    const double xyz[3], int dim, int axisymmetric,
+    const DAT::t_float_1d &equ_r,
+    const DAT::t_float_1d &equ_z,
+    const DAT::t_float_2d_lr &equ_br,
+    const DAT::t_float_2d_lr &equ_bt,
+    const DAT::t_float_2d_lr &equ_bz,
+    int jm, int km,
+    double B[3])
+{
+  B[0] = 0.0; B[1] = 0.0; B[2] = 0.0;
+  if (jm < 2 || km < 2) return false;
+
+  double R, Z;
+  if (axisymmetric)      { Z = xyz[0]; R = xyz[1]; }
+  else if (dim == 2)     { R = xyz[0]; Z = xyz[1]; }
+  else                   { R = Kokkos::sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]);
+                           Z = xyz[2]; }
+  if (R < 1.0e-10) return false;
+  if (equ_r(jm-1) <= equ_r(0) || equ_z(km-1) <= equ_z(0)) return false;
+
+  const double Rc = R < equ_r(0) ? equ_r(0)
+                    : (R > equ_r(jm-1) ? equ_r(jm-1) : R);
+  const double Zc = Z < equ_z(0) ? equ_z(0)
+                    : (Z > equ_z(km-1) ? equ_z(km-1) : Z);
+
+  // std::upper_bound twin: first index with value > coordinate, minus 1
+  int lo = 0, hi = jm;
+  while (lo < hi) { const int mid = (lo+hi)/2;
+                    if (equ_r(mid) <= Rc) lo = mid+1; else hi = mid; }
+  int j = lo - 1; if (j < 0) j = 0; if (j > jm-2) j = jm-2;
+  lo = 0; hi = km;
+  while (lo < hi) { const int mid = (lo+hi)/2;
+                    if (equ_z(mid) <= Zc) lo = mid+1; else hi = mid; }
+  int k = lo - 1; if (k < 0) k = 0; if (k > km-2) k = km-2;
+
+  const double drs = equ_r(j+1) - equ_r(j);
+  const double dzs = equ_z(k+1) - equ_z(k);
+  if (drs <= 0.0 || dzs <= 0.0) return false;
+  const double fr = (Rc - equ_r(j)) / drs;
+  const double fz = (Zc - equ_z(k)) / dzs;
+
+  const double bR   = bilinear_regular_map(equ_br, k, j, fr, fz);
+  const double bphi = bilinear_regular_map(equ_bt, k, j, fr, fz);
+  const double bZ   = bilinear_regular_map(equ_bz, k, j, fr, fz);
+
+  if (axisymmetric)  { B[0] = bZ;  B[1] = bR;  B[2] = bphi; }
+  else if (dim == 2) { B[0] = bR;  B[1] = bZ;  B[2] = bphi; }
+  else {
+    const double rxy = Kokkos::sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]);
+    double cphi = 1.0, sphi = 0.0;
+    if (rxy > 1.0e-20) { cphi = xyz[0] / rxy; sphi = xyz[1] / rxy; }
+    B[0] = bR * cphi - bphi * sphi;
+    B[1] = bR * sphi + bphi * cphi;
+    B[2] = bZ;
+  }
+  return true;
+}
+
 /* ---------------------------------------------------------------------- */
 // Full point-query: B + grad|B| + κ + curl(b̂) at particle position from
 // the equilibrium ψ map. Currently unused (the old device hybrid/GCA

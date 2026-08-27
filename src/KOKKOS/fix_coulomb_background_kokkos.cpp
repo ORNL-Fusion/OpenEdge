@@ -186,6 +186,12 @@ void FixCoulombBackgroundKokkos::end_of_step()
     equ_rtf_  = update_kk->oe_equ_rtf;
     equ_jm_   = update_kk->oe_equ_jm;
     equ_km_   = update_kk->oe_equ_km;
+    has_equ_bmaps_ = update_kk->oe_has_equ_bmaps;
+    if (has_equ_bmaps_) {
+      d_equ_br = update_kk->d_oe_equ_br;
+      d_equ_bt = update_kk->d_oe_equ_bt;
+      d_equ_bz = update_kk->d_oe_equ_bz;
+    }
   }
 
   dtc_     = update->dt * nevery;
@@ -247,10 +253,18 @@ void FixCoulombBackgroundKokkos::operator()(TagFixCoulombBg,
       d_tri_rmin, d_tri_rmax, d_tri_zmin, d_tri_zmax,
       d_hash_off, d_hash_ent, hash_rmin_, hash_zmin_,
       hash_dr_, hash_dz_, hash_nr_, hash_nz_, ntri_, B);
-  if (!gotB && has_equ_)
-    EquilibriumKokkos::query_bfield_at_point(
-        p.x, dim_, axisym_, d_equ_r, d_equ_z, d_equ_psi,
-        equ_btf_, equ_rtf_, equ_jm_, equ_km_, B);
+  if (!gotB && has_equ_) {
+    // native maps preferred; no psi fallback when they exist (matches
+    // the CPU equ_bfield_at chain, slag b05b4687)
+    if (has_equ_bmaps_)
+      EquilibriumKokkos::query_bfield_native_maps(
+          p.x, dim_, axisym_, d_equ_r, d_equ_z,
+          d_equ_br, d_equ_bt, d_equ_bz, equ_jm_, equ_km_, B);
+    else
+      EquilibriumKokkos::query_bfield_at_point(
+          p.x, dim_, axisym_, d_equ_r, d_equ_z, d_equ_psi,
+          equ_btf_, equ_rtf_, equ_jm_, equ_km_, B);
+  }
   const double Bx = B[0], By = B[1], Bz = B[2];
 
   if (Ni_bg <= 0.0 || Ti_eV <= 0.0) return;

@@ -77,6 +77,8 @@ class FixForceThermalKokkos : public FixForceThermal, public KokkosBase {
   DAT::t_float_2d_lr d_equ_psi;
   double equ_btf_, equ_rtf_;
   int equ_jm_, equ_km_;
+  int has_equ_bmaps_;
+  DAT::t_float_2d_lr d_equ_br, d_equ_bt, d_equ_bz;
 
   // kick scalars
   double dt_half_, echarge_, alpha_e_k_, beta_i_k_;

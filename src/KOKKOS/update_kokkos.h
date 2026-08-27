@@ -124,6 +124,10 @@ class UpdateKokkos : public Update {
   double oe_equ_btf, oe_equ_rtf;
   int oe_equ_jm, oe_equ_km;
   int oe_has_equilibrium;
+  // native equilibrium B maps (slag b05b4687): preferred over
+  // psi-derived B when present, matching the CPU equ_bfield_at chain
+  int oe_has_equ_bmaps;
+  DAT::t_float_2d_lr d_oe_equ_br, d_oe_equ_bt, d_oe_equ_bz;
   int oe_dim, oe_axisymmetric;        // cached domain layout for point-query
 
   // OpenEdge: device-resident triangulation B (Phase B). Mesh path takes

@@ -87,6 +87,8 @@ class FixCoulombBackgroundKokkos : public FixCoulombBackground,
   DAT::t_float_2d_lr d_equ_psi;
   double equ_btf_, equ_rtf_;
   int equ_jm_, equ_km_;
+  int has_equ_bmaps_;
+  DAT::t_float_2d_lr d_equ_br, d_equ_bt, d_equ_bz;
 
   // scalars for the kernel
   double dtc_, echarge_, eps0_, mbg_, qbg_;

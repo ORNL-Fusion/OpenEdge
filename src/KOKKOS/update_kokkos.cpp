@@ -282,6 +282,7 @@ void UpdateKokkos::init()
   // Actual binding to ComputePlasmaFieldsKokkos's d_equ_* views happens
   // at the same site where d_oe_plasma_compute is bound (see below).
   oe_has_equilibrium = 0;
+  oe_has_equ_bmaps = 0;
   oe_equ_jm = oe_equ_km = 0;
   oe_equ_btf = oe_equ_rtf = 0.0;
   oe_dim = domain->dimension;
@@ -2603,6 +2604,28 @@ void UpdateKokkos::build_oe_mesh_from_fix()
     oe_equ_jm  = jm;
     oe_equ_km  = km;
     oe_has_equilibrium = 1;
+
+    // native B maps (preferred over psi-derived, slag b05b4687)
+    const size_t equ_n = (size_t) jm * km;
+    if (pd->equ_br.size() == equ_n && pd->equ_bt.size() == equ_n &&
+        pd->equ_bz.size() == equ_n) {
+      d_oe_equ_br = DAT::t_float_2d_lr("oe_equ_br",km,jm);
+      d_oe_equ_bt = DAT::t_float_2d_lr("oe_equ_bt",km,jm);
+      d_oe_equ_bz = DAT::t_float_2d_lr("oe_equ_bz",km,jm);
+      auto h_br = Kokkos::create_mirror_view(d_oe_equ_br);
+      auto h_bt = Kokkos::create_mirror_view(d_oe_equ_bt);
+      auto h_bz = Kokkos::create_mirror_view(d_oe_equ_bz);
+      for (int k = 0; k < km; k++)
+        for (int j = 0; j < jm; j++) {
+          h_br(k,j) = pd->equ_br[(size_t)k*jm + j];
+          h_bt(k,j) = pd->equ_bt[(size_t)k*jm + j];
+          h_bz(k,j) = pd->equ_bz[(size_t)k*jm + j];
+        }
+      Kokkos::deep_copy(d_oe_equ_br,h_br);
+      Kokkos::deep_copy(d_oe_equ_bt,h_bt);
+      Kokkos::deep_copy(d_oe_equ_bz,h_bz);
+      oe_has_equ_bmaps = 1;
+    }
   }
 
   if (comm->me == 0 && screen)
@@ -2871,12 +2894,23 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
           B_cached);
     }
     if (!got_B && oe_has_equilibrium) {
-      EquilibriumKokkos::query_bfield_at_point(
-          xcur, oe_dim, oe_axisymmetric,
-          d_oe_equ_r, d_oe_equ_z, d_oe_equ_psi,
-          oe_equ_btf, oe_equ_rtf, oe_equ_jm, oe_equ_km,
-          B_cached);
-      got_B = true;
+      // native B maps take precedence over psi-derived B, matching the
+      // CPU equ_bfield_at chain (slag b05b4687); no psi fallback when
+      // native maps exist (host returns false on stencil failure)
+      if (oe_has_equ_bmaps) {
+        got_B = EquilibriumKokkos::query_bfield_native_maps(
+            xcur, oe_dim, oe_axisymmetric,
+            d_oe_equ_r, d_oe_equ_z,
+            d_oe_equ_br, d_oe_equ_bt, d_oe_equ_bz,
+            oe_equ_jm, oe_equ_km, B_cached);
+      } else {
+        EquilibriumKokkos::query_bfield_at_point(
+            xcur, oe_dim, oe_axisymmetric,
+            d_oe_equ_r, d_oe_equ_z, d_oe_equ_psi,
+            oe_equ_btf, oe_equ_rtf, oe_equ_jm, oe_equ_km,
+            B_cached);
+        got_B = true;
+      }
     }
     if (!got_B && d_oe_plasma_compute.data() && oe_bx_col >= 0) {
       B_cached[0] = d_oe_plasma_compute(icell, oe_bx_col);
