@@ -158,8 +158,10 @@ class UpdateKokkos : public Update {
   int    oe_has_mesh_gradte;  // grad_te_r/z present
   int    oe_has_mesh_gradti;  // grad_ti_r/z present
   DAT::t_float_1d d_oe_mesh_tri_ni, d_oe_mesh_tri_upar;
-  DAT::t_float_1d d_oe_mesh_tri_gter, d_oe_mesh_tri_gtez;
-  DAT::t_float_1d d_oe_mesh_tri_gtir, d_oe_mesh_tri_gtiz;
+  // gradients are PER MESH CELL (host pd_grad samples the SPARTA-cell
+  // centroid's mesh cell via cell_mesh_cell, NOT the particle's tri)
+  DAT::t_float_1d d_oe_meshcell_gter, d_oe_meshcell_gtez;
+  DAT::t_float_1d d_oe_meshcell_gtir, d_oe_meshcell_gtiz;
   friend class FixCoulombBackgroundKokkos;
   friend class FixForceThermalKokkos;
 

@@ -59,7 +59,13 @@ class FixForceThermalKokkos : public FixForceThermal, public KokkosBase {
   DAT::t_int_1d d_tri;
   DAT::t_float_1d d_tri_br, d_tri_bz, d_tri_bt;
   DAT::t_float_1d d_tri_rmin, d_tri_rmax, d_tri_zmin, d_tri_zmax;
-  DAT::t_float_1d d_tri_gter, d_tri_gtez, d_tri_gtir, d_tri_gtiz;
+  // gradients: PER MESH CELL, looked up via the SPARTA-cell -> mesh-cell
+  // map (exact host pd_grad semantics: cell-centroid sampling, 0 when
+  // the centroid falls outside the mesh footprint)
+  DAT::t_float_1d d_gter_cell, d_gtez_cell, d_gtir_cell, d_gtiz_cell;
+  DAT::t_int_1d d_cell_mesh_cell;
+  int cmc_stamp_n;
+  cellint cmc_stamp_id;
   DAT::t_int_1d d_hash_off, d_hash_ent;
   double hash_rmin_, hash_zmin_, hash_dr_, hash_dz_;
   int hash_nr_, hash_nz_, ntri_;

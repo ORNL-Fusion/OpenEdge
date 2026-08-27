@@ -13,6 +13,8 @@
 #include "comm.h"
 #include "domain.h"
 #include "error.h"
+#include "fix_background.h"
+#include "grid.h"
 #include "openedge_geom.h"
 #include "particle_kokkos.h"
 #include "pusher_kokkos.h"
@@ -36,6 +38,8 @@ FixForceThermalKokkos::FixForceThermalKokkos(SPARTA *sparta, int narg,
 
   device_ok = 0;
   warned_fallback = 0;
+  cmc_stamp_n = -1;
+  cmc_stamp_id = (cellint) -1;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -131,12 +135,37 @@ void FixForceThermalKokkos::kick_device(double dt_half)
   d_tri_zmin = update_kk->d_oe_mesh_tri_zmin;
   d_tri_zmax = update_kk->d_oe_mesh_tri_zmax;
   if (use_gradte_) {
-    d_tri_gter = update_kk->d_oe_mesh_tri_gter;
-    d_tri_gtez = update_kk->d_oe_mesh_tri_gtez;
+    d_gter_cell = update_kk->d_oe_meshcell_gter;
+    d_gtez_cell = update_kk->d_oe_meshcell_gtez;
   }
   if (use_gradti_) {
-    d_tri_gtir = update_kk->d_oe_mesh_tri_gtir;
-    d_tri_gtiz = update_kk->d_oe_mesh_tri_gtiz;
+    d_gtir_cell = update_kk->d_oe_meshcell_gtir;
+    d_gtiz_cell = update_kk->d_oe_meshcell_gtiz;
+  }
+
+  // SPARTA-cell -> mesh-cell map (host pd_grad's cell_mesh_cell):
+  // refresh the host cache and re-upload when the decomposition stamps
+  // change. Per-rank stamp check is SAFE here — the upload contains no
+  // collectives (unlike build_oe_sheath_cache; see gate-6 Bug F).
+  {
+    const int nglocal = grid->nlocal;
+    const cellint fid = (nglocal > 0 && grid->cells)
+      ? grid->cells[0].id : (cellint) -1;
+    if (nglocal != cmc_stamp_n || fid != cmc_stamp_id) {
+      if ((int) pd_->cell_mesh_cell.size() != nglocal)
+        pd_->build_cell_mesh_index();
+      d_cell_mesh_cell = DAT::t_int_1d(
+          Kokkos::view_alloc("fth:cell_mesh_cell",
+                             Kokkos::WithoutInitializing),
+          nglocal > 0 ? nglocal : 1);
+      auto h = Kokkos::create_mirror_view(d_cell_mesh_cell);
+      for (int c = 0; c < nglocal; c++)
+        h(c) = (c < (int) pd_->cell_mesh_cell.size())
+                 ? pd_->cell_mesh_cell[c] : -1;
+      Kokkos::deep_copy(d_cell_mesh_cell,h);
+      cmc_stamp_n = nglocal;
+      cmc_stamp_id = fid;
+    }
   }
   d_hash_off = update_kk->d_oe_hash_offset;
   d_hash_ent = update_kk->d_oe_hash_entries;
@@ -206,24 +235,23 @@ void FixForceThermalKokkos::operator()(TagFixForceThermal,
                               phi_p, bhat_R_cyl, bhat_Z_cyl,
                               bhat_phi_unused);
 
-  // gradients at the particle position (tri-constant; a miss = 0,
-  // matching the CPU's empty-structured-grid fallback)
-  const int tri = MeshKokkos::locate_tri_at_point(
-      p.x, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
-      d_hash_off, d_hash_ent, hash_rmin_, hash_zmin_,
-      hash_dr_, hash_dz_, hash_nr_, hash_nz_, ntri_);
+  // gradients: exact host pd_grad semantics — the SPARTA cell's
+  // centroid-mapped mesh cell (constant per SPARTA cell; -1 = centroid
+  // outside the mesh footprint = 0, the empty-structured fallback)
+  const int mc = (p.icell >= 0 && p.icell < (int) d_cell_mesh_cell.extent(0))
+                   ? d_cell_mesh_cell(p.icell) : -1;
 
   double a_par = 0.0;
   const double Z2 = Z * Z;
 
-  if (use_gradti_ && tri >= 0) {
+  if (use_gradti_ && mc >= 0 && mc < (int) d_gtir_cell.extent(0)) {
     const double grad_par_Ti =
-        d_tri_gtir(tri) * bhat_R_cyl + d_tri_gtiz(tri) * bhat_Z_cyl;
+        d_gtir_cell(mc) * bhat_R_cyl + d_gtiz_cell(mc) * bhat_Z_cyl;
     a_par += beta_i_k_ * Z2 * echarge_ * grad_par_Ti / m_Z;
   }
-  if (use_gradte_ && tri >= 0) {
+  if (use_gradte_ && mc >= 0 && mc < (int) d_gter_cell.extent(0)) {
     const double grad_par_Te =
-        d_tri_gter(tri) * bhat_R_cyl + d_tri_gtez(tri) * bhat_Z_cyl;
+        d_gter_cell(mc) * bhat_R_cyl + d_gtez_cell(mc) * bhat_Z_cyl;
     a_par += alpha_e_k_ * Z2 * echarge_ * grad_par_Te / m_Z;
   }
 

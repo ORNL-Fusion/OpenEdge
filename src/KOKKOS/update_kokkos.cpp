@@ -2549,12 +2549,27 @@ void UpdateKokkos::build_oe_mesh_from_fix()
     const int have_upar = flatten(pd->mesh_upar,"oe_mesh_tri_upar",
                                   d_oe_mesh_tri_upar);
     oe_has_mesh_drag = (have_ni && have_upar);
+
+    // gradients: PER MESH CELL, direct copy — the host pd_grad consumer
+    // indexes mesh_grad_*[cell_mesh_cell[icell]] (SPARTA-cell centroid's
+    // mesh cell), so no tri flattening here
+    auto upload_cells = [&](const std::vector<double> &src,
+                            const char *label,
+                            DAT::t_float_1d &dst) -> int {
+      const int nc = (int) src.size();
+      if (nc <= 0) return 0;
+      dst = DAT::t_float_1d(std::string(label),nc);
+      auto h = Kokkos::create_mirror_view(dst);
+      for (int c = 0; c < nc; c++) h(c) = src[c];
+      Kokkos::deep_copy(dst,h);
+      return 1;
+    };
     oe_has_mesh_gradte =
-      flatten(pd->mesh_grad_te_r,"oe_mesh_tri_gter",d_oe_mesh_tri_gter) &&
-      flatten(pd->mesh_grad_te_z,"oe_mesh_tri_gtez",d_oe_mesh_tri_gtez);
+      upload_cells(pd->mesh_grad_te_r,"oe_meshcell_gter",d_oe_meshcell_gter) &&
+      upload_cells(pd->mesh_grad_te_z,"oe_meshcell_gtez",d_oe_meshcell_gtez);
     oe_has_mesh_gradti =
-      flatten(pd->mesh_grad_ti_r,"oe_mesh_tri_gtir",d_oe_mesh_tri_gtir) &&
-      flatten(pd->mesh_grad_ti_z,"oe_mesh_tri_gtiz",d_oe_mesh_tri_gtiz);
+      upload_cells(pd->mesh_grad_ti_r,"oe_meshcell_gtir",d_oe_meshcell_gtir) &&
+      upload_cells(pd->mesh_grad_ti_z,"oe_meshcell_gtiz",d_oe_meshcell_gtiz);
   }
 
   if (comm->me == 0 && screen)
