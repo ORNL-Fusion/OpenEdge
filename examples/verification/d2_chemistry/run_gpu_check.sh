@@ -6,8 +6,8 @@ set -u
 cd "$(dirname "$0")"
 EXE=${1:-}
 if [ -z "$EXE" ]; then
-  for c in $HOME/openedge-build-cuda/src/spa_kokkos_cuda \
-           $PSCRATCH/openedge-build-gpu2/src/spa_kokkos_cuda_perlmutter 2>/dev/null; do
+  for c in "$HOME/openedge-build-cuda/src/spa_kokkos_cuda" \
+           "${PSCRATCH:-/nonexistent}/openedge-build-gpu2/src/spa_kokkos_cuda_perlmutter"; do
     [ -x "$c" ] && EXE=$c && break
   done
 fi
