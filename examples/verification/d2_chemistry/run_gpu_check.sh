@@ -15,6 +15,11 @@ fi
 export OPENEDGE_ROOT=$(cd ../../.. && pwd)
 echo "exe: $EXE"
 
+# expected final np = 2x the created D2 population (every molecule
+# dissociates into two atoms over the 2000-step run)
+NP0=$(awk '/^create_particles/{print $NF}' in.d2_chem)
+NPEXP=$((2 * NP0))
+
 run() {
   env $2 "$EXE" -k on g 1 -sf kk -pk kokkos react/retry yes \
       -in in.d2_chem -log log.$1 > out.$1 2>&1
@@ -24,7 +29,8 @@ run() {
   local path=$(grep -a 'volume/chem/adas/kk' out.$1 | head -1)
   echo "== $1: complete=$done final_np=$np ionized_frac=$frac"
   echo "   $path"
-  [ "$done" = 1 ] && [ "$np" = 4000 ] && echo "   PASS" || echo "   FAIL (want complete=1, np=4000)"
+  [ "$done" = 1 ] && [ "$np" = "$NPEXP" ] && echo "   PASS" \
+    || echo "   FAIL (want complete=1, np=$NPEXP)"
 }
 run device _=1
 run hostctl OE_CHEM_HOST=1

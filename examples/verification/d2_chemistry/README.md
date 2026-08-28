@@ -6,8 +6,8 @@ second D atom with a back-to-back ~3 eV Franck-Condon kick), D
 ionization (AMJUEL H.4 2.1.5), D-D+ resonant charge exchange (HYDHEL
 H.3 3.1.8 rate + sigma*v-weighted partner sampling).
 
-Expected behavior at Te = Ti = 8 eV, ne = 1e19 m^-3: the 2000 D2
-macroparticles fully dissociate (np doubles to 4000), the D population
+Expected behavior at Te = Ti = 8 eV, ne = 1e19 m^-3: the 20000 D2
+macroparticles fully dissociate (np doubles to 40000), the D population
 partially ionizes (~18% D+ at 2000 steps), CX resamples D velocities.
 
 Run (CPU or Kokkos):
