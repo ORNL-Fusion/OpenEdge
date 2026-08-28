@@ -6,7 +6,7 @@ CPU (MPI):
 
 ```bash
 cd examples/workflows/west_impurity_transport
-mpirun -np 8 /path/to/build/src/spa_mpi -in in.axi_west_emission
+mpirun -np 8 /path/to/build/src/spa_mpi -in in.openedge
 ```
 
 GPU (Kokkos + CUDA, one rank per GPU; backend under active
@@ -14,7 +14,7 @@ development/validation — see the top-level README):
 
 ```bash
 mpirun -np 1 /path/to/build_gpu/src/spa_mpi \
-    -k on g 1 -sf kk -in in.axi_west_emission
+    -k on g 1 -sf kk -in in.openedge
 ```
 
 Quick sanity check of the whole suite:
