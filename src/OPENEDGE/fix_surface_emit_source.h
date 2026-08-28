@@ -36,7 +36,7 @@ class FixSurfaceEmitSource : public FixEmit {
   enum EmitModel { MODEL_THERMAL, MODEL_THERMAL_TSURF, MODEL_THOMPSON,
                    MODEL_FIXED_ENERGY };
 
- private:
+ protected:
   int imix,groupbit,normalflag;
 
   int npmode,np;    // npmode = FLOW,CONSTANT
@@ -166,7 +166,7 @@ class FixSurfaceEmitSource : public FixEmit {
  protected:
   virtual void perform_task();
 
- private:
+ protected:
   void create_task(int);
   void grow_task();
   double flux_for_surface(surfint);
