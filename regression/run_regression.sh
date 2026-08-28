@@ -33,6 +33,8 @@ FILTER="*"
 NSTEPS=1000
 WORKFLOW_MAX_STEPS=1000
 VERBOSE=0
+KKMODE=0
+LAUNCHER=""    # override 'mpirun -np N' (e.g. --launcher "srun -n 4")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -40,6 +42,8 @@ while [[ $# -gt 0 ]]; do
     --exe)     EXE="$2"; shift 2 ;;
     --filter)  FILTER="$2"; shift 2 ;;
     --nsteps)  NSTEPS="$2"; shift 2 ;;
+    --kk)      KKMODE=1; shift ;;
+    --launcher) LAUNCHER="$2"; shift 2 ;;
     --verbose) VERBOSE=1; shift ;;
     *)         echo "Unknown option: $1"; exit 1 ;;
   esac
@@ -58,6 +62,16 @@ if [[ -z "$EXE" ]]; then
   fi
 fi
 
+# Kokkos mode: run every case through the -sf kk path. GPU backend when
+# the binary is a CUDA build, host OpenMP backend otherwise.
+KKARGS=()
+if [[ $KKMODE -eq 1 ]]; then
+  case "$EXE" in
+    *cuda*) KKARGS=(-k on g 1 -sf kk -pk kokkos react/retry yes) ;;
+    *)      KKARGS=(-k on t 1 -sf kk -pk kokkos react/retry yes) ;;
+  esac
+fi
+
 # Source Intel MPI if available
 if [[ -f /opt/intel/oneapi/setvars.sh ]]; then
   source /opt/intel/oneapi/setvars.sh --force > /dev/null 2>&1 || true
@@ -71,13 +85,13 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 #  skipped (e.g. git-ignored plasma files that need regeneration).
 # -----------------------------------------------------------------------
 declare -a TESTS=(
-  "ionization_recombination|verification/ionization_recombination|in.ionization_recombination|"
+  "ionization_recombination|verification/ionization_recombination|in.ionization_recombination|nokk"
   "efield_polarization|verification/efield_polarization|in.input|"
   "coulomb_background|verification/collisions/coulomb|in.background|"
   "coulomb_binary|verification/collisions/coulomb|in.binary|"
-  "particulate_dustt|verification/particulates/dustt|in.grain|"
-  "pusher_gca|verification/pushers/orbit|in.gca|"
-  "pusher_boris|verification/pushers/orbit|in.boris|"
+  "particulate_dustt|verification/particulates/dustt|in.grain|nokk"
+  "pusher_gca|verification/pushers/orbit|in.gca|nokk"
+  "pusher_boris|verification/pushers/orbit|in.boris|nokk"
   "constant_flux|verification/surface_emission/constant_flux|in.constant_flux|"
   "d2_chemistry|verification/d2_chemistry|in.d2_chem|"
   "lithium_droplet_transport|workflows/particulates/lithium_droplet_transport|in.openedge|"
@@ -128,6 +142,7 @@ echo "========================================================================"
 echo "  OpenEdge Regression Tests"
 echo "  Executable: $EXE"
 echo "  MPI ranks:  $NP"
+if [[ $KKMODE -eq 1 ]]; then echo "  Kokkos:     ${KKARGS[*]}"; fi
 echo "  Steps:      $NSTEPS"
 echo "========================================================================"
 echo ""
@@ -154,9 +169,16 @@ for entry in "${TESTS[@]}"; do
     ((SKIP++))
     continue
   fi
-  if [[ -n "$requires" && ! -e "$dir/$requires" ]]; then
+  if [[ -n "$requires" && "$requires" != "nokk" && ! -e "$dir/$requires" ]]; then
     RESULTS+=("SKIP  $name  (missing $requires - regenerate it first)")
     echo "SKIP (missing data)"
+    ((SKIP++))
+    continue
+  fi
+
+  if [[ $KKMODE -eq 1 && "$requires" == "nokk" ]]; then
+    RESULTS+=("SKIP  $name  (not supported under -sf kk by design: 2D pusher / GCA)")
+    printf "%-40s SKIP (nokk)\n" "$name"
     ((SKIP++))
     continue
   fi
@@ -170,8 +192,13 @@ for entry in "${TESTS[@]}"; do
 
   logfile="$dir/regression.log"
   ok=1
-  (cd "$dir" && mpirun -np "$NP" "$EXE" -in "$(basename "$tmpinput")" \
-      -log none > "$logfile" 2>&1) || ok=0
+  if [[ -n "$LAUNCHER" ]]; then
+    (cd "$dir" && $LAUNCHER "$EXE" "${KKARGS[@]}" -in "$(basename "$tmpinput")" \
+        -log none > "$logfile" 2>&1) || ok=0
+  else
+    (cd "$dir" && mpirun -np "$NP" "$EXE" "${KKARGS[@]}" -in "$(basename "$tmpinput")" \
+        -log none > "$logfile" 2>&1) || ok=0
+  fi
   if [[ $ok -eq 1 ]] && grep -q "^ERROR" "$logfile"; then ok=0; fi
 
   if [[ $ok -eq 1 ]]; then
