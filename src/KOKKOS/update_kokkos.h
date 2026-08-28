@@ -197,6 +197,9 @@ class UpdateKokkos : public Update {
   int oe_pc_csg;        // sheath Boltzmann ne correction active
   DAT::t_float_1d d_pc_te, d_pc_ti, d_pc_ne, d_pc_ni, d_pc_vpar;
   DAT::t_float_1d d_pc_bx, d_pc_by, d_pc_bz;
+  int oe_pc_ncells;               // nlocal+nghost at fill time
+  int oe_pc_diag_warned;
+  Kokkos::View<int[6], DeviceType> d_pc_diag;
 
   // OpenEdge: Boris config. Hybrid/GCA pusher modes are NOT
   // supported on the device — the old oe_hybrid3d port encoded physics

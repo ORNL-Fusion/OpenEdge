@@ -307,6 +307,8 @@ void UpdateKokkos::init()
   oe_pc_mask = 0;
   oe_pc_csg = 0;
   oe_cd_dev = 0;
+  oe_pc_ncells = 0;
+  oe_pc_diag_warned = 0;
   oe_has_mesh_plasma = 0;
   oe_has_mesh_drag = 0;
   oe_has_mesh_gradte = 0;
@@ -2798,6 +2800,39 @@ void UpdateKokkos::build_oe_sheath_cache()
   // the device resolves sub-cell -> parent itself, so a straight copy of
   // the local-cell array is enough.
   const int ng = grid->nlocal;
+
+  // TEMP DIAG: host-side scan of the surf-index invariants the device
+  // pcache kernel guards against (OE_PC_VALIDATE=1)
+  if (getenv("OE_PC_VALIDATE")) {
+    const int ntot = surf->nlocal + surf->nghost;
+    int bad_midx = 0, bad_cs = 0;
+    int min_midx = 1<<30, max_midx = -(1<<30);
+    long long bad_cs_example = -1; int bad_cs_cell = -1, bad_midx_cell = -1;
+    for (int ic = 0; ic < ng; ic++) {
+      if (csg) {
+        const int mi = csg->midx_grid[ic];
+        if (mi < min_midx) min_midx = mi;
+        if (mi > max_midx) max_midx = mi;
+        if (mi >= ntot) { bad_midx++; if (bad_midx_cell < 0) bad_midx_cell = ic; }
+      }
+      const int nsc = grid->cells[ic].nsurf;
+      if (nsc > 0 && grid->cells[ic].csurfs) {
+        for (int j = 0; j < nsc; j++) {
+          const long long v = (long long) grid->cells[ic].csurfs[j];
+          if (v < 0 || v >= ntot) {
+            bad_cs++;
+            if (bad_cs_example < 0) { bad_cs_example = v; bad_cs_cell = ic; }
+          }
+        }
+      }
+    }
+    fprintf(stderr,"[OE_PC_VALIDATE] rank %d: ncells=%d nsurf_tot=%d "
+            "midx[min=%d max=%d bad=%d cell=%d] csurfs[bad=%d "
+            "example=%lld cell=%d]\n",
+            comm->me, ng, ntot, min_midx, max_midx, bad_midx,
+            bad_midx_cell, bad_cs, bad_cs_example, bad_cs_cell);
+  }
+
   k_oe_midx_gcell = DAT::tdual_int_1d("oe_midx_gcell",ng);
   {
     auto h_midx = k_oe_midx_gcell.h_view;
@@ -3531,6 +3566,18 @@ void UpdateKokkos::cache_plasma_particles_device()
   d_cells  = grid_kk->k_cells.view_device();
   d_sinfo  = grid_kk->k_sinfo.view_device();
   d_csurfs = grid_kk->d_csurfs;
+  // d_tris is otherwise bound only INSIDE move(): at the first fill of
+  // a run it was empty/stale, so valid surf indices dereferenced a
+  // wrong view — the actual root of the 10x cudaErrorIllegalAddress
+  if (surf->exist && oe_pc_csg) {
+    SurfKokkos *surf_kk = (SurfKokkos *) surf;
+    surf_kk->sync(Device,ALL_MASK);
+    d_tris = surf_kk->k_tris.view_device();
+  }
+  oe_pc_ncells = grid->nlocal + grid->nghost;
+  if (!d_pc_diag.data())
+    d_pc_diag = Kokkos::View<int[6], DeviceType>("oe_pc_diag");
+  Kokkos::deep_copy(d_pc_diag, 0);
 
   // bind the masked custom slots fresh each call (grow_custom-safe)
   auto edvec = [&](int cidx) -> DAT::t_float_1d {
@@ -3554,6 +3601,22 @@ void UpdateKokkos::cache_plasma_particles_device()
       Kokkos::RangePolicy<DeviceType,TagUpdatePcacheFill>(0,nlocal),*this);
   DeviceType().fence();
   copymode = 0;
+
+  // one-line diagnostic when a validity guard fired (would have been an
+  // OOB read before the guards); print once per run
+  {
+    int h[6];
+    auto hv = Kokkos::create_mirror_view(d_pc_diag);
+    Kokkos::deep_copy(hv, d_pc_diag);
+    for (int c = 0; c < 6; c++) h[c] = hv(c);
+    if ((h[0]|h[1]|h[2]|h[3]|h[4]|h[5]) && !oe_pc_diag_warned) {
+      oe_pc_diag_warned = 1;
+      fprintf(stderr,"[kokkos] pcache DIAG rank %d step " BIGINT_FORMAT
+              ": icell>=ncells %d, isplit-oob %d, (unused) %d, "
+              "csurfs-row-overrun %d, ms-oob %d, midx-oob %d\n",
+              comm->me, update->ntimestep, h[0],h[1],h[2],h[3],h[4],h[5]);
+    }
+  }
 
   particle_kk->modify(Device,CUSTOM_MASK);
 }
@@ -3641,19 +3704,40 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
   double ne_out = ne;
   if (oe_pc_csg && te > 0.0 && ne > 0.0) {
     const int icell = p.icell;
-    if (icell >= 0 && icell < (int) d_cells.extent(0)) {
+    // tight validity guards (CPU trusts these implicitly; on device a
+    // violated invariant is counted in d_pc_diag instead of an OOB read)
+    if (icell < 0 || icell >= oe_pc_ncells) {
+      if (icell >= 0) Kokkos::atomic_inc(&d_pc_diag(0));
+    } else {
       int gcell = icell;
-      if (d_cells[icell].nsplit <= 0 && d_cells[icell].isplit >= 0)
-        gcell = d_sinfo[d_cells[icell].isplit].icell;
-      if (gcell >= 0 && gcell < (int) d_oe_midx_gcell.extent(0)) {
+      if (d_cells[icell].nsplit <= 0 && d_cells[icell].isplit >= 0) {
+        const int isplit = d_cells[icell].isplit;
+        if (isplit >= (int) d_sinfo.extent(0)) {
+          Kokkos::atomic_inc(&d_pc_diag(1));
+          gcell = -1;
+        } else {
+          gcell = d_sinfo[isplit].icell;
+        }
+      }
+      if (gcell >= 0 && gcell < (int) d_oe_midx_gcell.extent(0) &&
+          gcell < oe_pc_ncells) {
         int midx = d_oe_midx_gcell(gcell);
-        const int nsurf_cell = d_cells[gcell].nsurf;
+        int nsurf_cell = d_cells[gcell].nsurf;
         if (nsurf_cell > 0) {
           auto csurfs_begin = d_csurfs.row_map(gcell);
+          if (csurfs_begin + nsurf_cell >
+              (decltype(csurfs_begin)) d_csurfs.entries.extent(0)) {
+            Kokkos::atomic_inc(&d_pc_diag(3));
+            nsurf_cell = 0;
+          }
           double best_d = 1.0e20;
           int best_m = -1;
           for (int mm = 0; mm < nsurf_cell; mm++) {
             const int ms = d_csurfs.entries(csurfs_begin + mm);
+            if (ms < 0 || ms >= (int) d_tris.extent(0)) {
+              Kokkos::atomic_inc(&d_pc_diag(4));
+              continue;
+            }
             if (!(d_tris[ms].mask & oe_sheath_sgroupbit)) continue;
             const double dpl = Kokkos::fabs(
                 (p.x[0]-d_tris[ms].p1[0])*d_tris[ms].norm[0] +
@@ -3662,6 +3746,10 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
             if (dpl < best_d) { best_d = dpl; best_m = ms; }
           }
           if (best_m >= 0) midx = best_m;
+        }
+        if (midx >= (int) d_tris.extent(0)) {
+          Kokkos::atomic_inc(&d_pc_diag(5));
+          midx = -1;
         }
         if (midx >= 0) {
           double nx = d_tris[midx].norm[0];
