@@ -388,6 +388,13 @@ void FixVolumeChemAdasKokkos::end_of_step()
     // host-side sync explicitly, run the base, mark host-modified.
     ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
     particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK|CUSTOM_MASK);
+    // Mark the host modified BEFORE the base runs: add_particle can
+    // trigger ParticleKokkos::grow(), whose realloc treats the DEVICE
+    // as authoritative (sync(Device) + modify(Device)). With the host
+    // writes still unmarked, that stomped them mid-loop on CUDA --
+    // parent transmutes vanished while partners kept spawning
+    // (exponential D2 runaway on the d2_chemistry deck).
+    particle_kk->modify(Host,PARTICLE_MASK|CUSTOM_MASK);
     nreact_one = 0;
     if (!particle->sorted) particle->sort();
     end_of_step_no_average();
