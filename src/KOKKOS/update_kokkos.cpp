@@ -3522,6 +3522,16 @@ void UpdateKokkos::cache_plasma_particles_device()
   particle_kk->sync(Device,PARTICLE_MASK|CUSTOM_MASK);
   d_particles = particle_kk->k_particles.view_device();
 
+  // rebind the grid views: a mid-run rebalance re-decomposes
+  // cells/sinfo/csurfs (the mover rebinds them per iteration; this
+  // kernel runs BEFORE the mover and would otherwise index
+  // post-balance icell values into pre-balance views — Bug-F class;
+  // caught by compute-sanitizer at 10x where fix balance first fires)
+  GridKokkos *grid_kk = (GridKokkos *) grid;
+  d_cells  = grid_kk->k_cells.view_device();
+  d_sinfo  = grid_kk->k_sinfo.view_device();
+  d_csurfs = grid_kk->d_csurfs;
+
   // bind the masked custom slots fresh each call (grow_custom-safe)
   auto edvec = [&](int cidx) -> DAT::t_float_1d {
     return particle_kk->k_edvec.h_view[particle->ewhich[cidx]].k_view.d_view;
