@@ -1,0 +1,43 @@
+################################################################################
+# D2 chemistry 0-D test: dissociation (device particle creation),
+# hydrogen AMJUEL ionization, HYDHEL resonant CX.
+################################################################################
+variable n        equal 1e19
+variable fnum     equal 1e15
+variable Tev      equal 8.0
+variable T        equal ${Tev}*11604.505
+variable dt       equal 1e-7
+variable numStep  index 2000
+
+seed              1245
+dimension         3
+boundary          p p p
+global            gridcut 0 comm/sort no
+create_box        1.8 3.22 -1 1 -0.5 0.5
+create_grid       25 25 4
+balance_grid      rcb cell
+
+global            nrho $n fnum ${fnum} temp $T
+
+species           d2.species D2 D D+
+mixture           species D2 frac 1
+mixture           species D  frac 0
+mixture           species D+ frac 0
+
+create_particles  species n 20000
+
+fix bg            background constant te ${Tev} ne $n ti ${Tev}
+global            pusher plasma bg
+
+fix fchem volume/chem/adas 1 D d.reactions output summary
+
+compute cden      grid all species nrho
+compute nD2       reduce sum c_cden[1]
+compute nD        reduce sum c_cden[2]
+compute nDp       reduce sum c_cden[3]
+
+timestep          ${dt}
+stats             200
+stats_style       step np c_nD2 c_nD c_nDp
+run               ${numStep}
+print             "D2CHEM_COMPLETE"

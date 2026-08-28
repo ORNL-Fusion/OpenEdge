@@ -94,6 +94,15 @@ class FixVolumeChemAdasKokkos : public FixVolumeChemAdas, public KokkosBase {
   DAT::t_int_1d d_react_list;     // reaction indices per species
   DAT::t_int_1d d_r_type;         // per reaction: IONIZATION/RECOMBINATION/...
   DAT::t_int_1d d_r_product0;     // first product species index
+  // A1b: hydrogen channels + two-product (dissociation) creation
+  DAT::t_int_1d d_r_style;        // ADAS / JANEV
+  DAT::t_int_1d d_r_nproduct;
+  DAT::t_int_1d d_r_product1;     // second product species (-1 = none)
+  DAT::t_int_1d d_r_ncoeff;
+  DAT::t_float_2d_lr d_r_coeff;   // JANEV ln-polynomial coefficients
+  DAT::t_int_1d d_sp_twoprod;     // per species: any active 2-product channel
+  int atomic1_;                   // atomic_number == 1 (AMJUEL/HYDHEL fits)
+  int have_two_;                  // any active two-product reaction
 
   // ---- per-cell neutral-D density for the CCD CX partner ----
   // decomposition-indexed: rebuilt when the stamps change (fix balance)
@@ -110,6 +119,10 @@ class FixVolumeChemAdasKokkos : public FixVolumeChemAdas, public KokkosBase {
   DAT::t_float_1d d_pc_bx, d_pc_by, d_pc_bz;
   DAT::t_float_1d d_pweight;
   int have_ti_, have_vpar_, have_b_, have_pweight_;
+  // newborn creation (dissociation second product; PWI device idiom)
+  ParticleKokkos::DeviceCustom custom_;
+  int pw_slot_;
+  Kokkos::View<int, DeviceType> d_new_count;
   int nglocal_;
   double dt_chem_, fnum_;
   int atomic_number_, tally_units_, output_mode_;
