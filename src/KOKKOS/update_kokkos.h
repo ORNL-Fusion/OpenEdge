@@ -104,8 +104,11 @@ class UpdateKokkos : public Update {
   t_tri_1d d_tris;
   t_particle_1d d_particles;
 
-  // cross-field diffusion displacements (host fix -> device mover);
-  // mirrors Update::dx_cd, uploaded each step in run()
+  // cross-field diffusion displacements. Host fix path: mirrors
+  // Update::dx_cd, uploaded each step in run(). Device fix path
+  // (cross_field_diffusion/kk): filled in place by the fix's kernel
+  // (oe_cd_dev = 1) and the upload is skipped.
+  int oe_cd_dev;
   DAT::t_float_2d_lr d_dx_cd;
   DAT::t_float_2d_lr::HostMirror h_dx_cd;
   t_species_1d d_species;  // OpenEdge: species data for charge/mass lookup
@@ -176,6 +179,7 @@ class UpdateKokkos : public Update {
   DAT::t_float_1d d_oe_meshcell_gtir, d_oe_meshcell_gtiz;
   friend class FixCoulombBackgroundKokkos;
   friend class FixForceThermalKokkos;
+  friend class FixCrossFieldDiffusionKokkos;
 
   // build the device mesh B/E views directly from FixBackground for
   // decks whose plasma provider is the fix (static SOLPS/SOLEDGE3X file)

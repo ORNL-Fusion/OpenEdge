@@ -306,6 +306,7 @@ void UpdateKokkos::init()
   oe_pcache_dev = 0;
   oe_pc_mask = 0;
   oe_pc_csg = 0;
+  oe_cd_dev = 0;
   oe_has_mesh_plasma = 0;
   oe_has_mesh_drag = 0;
   oe_has_mesh_gradte = 0;
@@ -658,7 +659,7 @@ void UpdateKokkos::run(int nsteps)
     // upload cross-field diffusion displacements (filled on the host by
     // fix cross_field_diffusion at start_of_step) for the device mover
 
-    if (cd_flag && cd_nmax > 0) {
+    if (cd_flag && cd_nmax > 0 && !oe_cd_dev) {
       if ((int) d_dx_cd.extent(0) < cd_nmax) {
         d_dx_cd = DAT::t_float_2d_lr(Kokkos::view_alloc("update:dx_cd",
                     Kokkos::WithoutInitializing),cd_nmax,3);

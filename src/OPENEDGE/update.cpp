@@ -755,7 +755,8 @@ void Update::init()
           note_cad(modify->fix[ifix]->nevery);
         }
         recognized = 1;
-      } else if (strcmp(s,"cross_field_diffusion") == 0) {
+      } else if (strcmp(s,"cross_field_diffusion") == 0 ||
+                 strcmp(s,"cross_field_diffusion/kk") == 0) {
         // Same background-bypass pattern. NE/GRAD_NE only matter when
         // gradient_pinch is configured (needs_grad_ne()).
         FixCrossFieldDiffusion *fcd =
