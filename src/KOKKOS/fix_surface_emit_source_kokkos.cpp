@@ -252,8 +252,14 @@ void FixSurfaceEmitSourceKokkos::perform_task()
     long long cap = (long long) ntask + 4096;
     if (nlaunch_total_mode) cap += nlaunch_total;
     else cap += particle->nlocal / 4 + 65536;
-    if (particle->nlocal + cap > particle->maxlocal)
-      particle_kk->grow((int)(particle->nlocal + cap - particle->maxlocal));
+    if (particle->nlocal + cap > particle->maxlocal) {
+      // amortize: each grow reallocates pinned host mirrors for the
+      // particle array AND every custom vector (slow); request enough
+      // headroom that grow fires O(log) times during ramp-up
+      long long req = cap;
+      if (req < particle->nlocal/2 + 16384) req = particle->nlocal/2 + 16384;
+      particle_kk->grow((int)(particle->nlocal + req - particle->maxlocal));
+    }
     const int maxlocal0 = particle->maxlocal;
     particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK|CUSTOM_MASK);
     particle_kk->modify(Host,PARTICLE_MASK|CUSTOM_MASK);
@@ -293,8 +299,11 @@ void FixSurfaceEmitSourceKokkos::perform_task()
       if (s <= 0.0) continue;
       cap += (long long)((double) nlaunch_total * s / src_total_) + 1;
     }
-    if (particle->nlocal + cap > particle->maxlocal)
-      particle_kk->grow((int)(particle->nlocal + cap - particle->maxlocal));
+    if (particle->nlocal + cap > particle->maxlocal) {
+      long long req = cap;                     // amortized (see fallback)
+      if (req < particle->nlocal/2 + 16384) req = particle->nlocal/2 + 16384;
+      particle_kk->grow((int)(particle->nlocal + req - particle->maxlocal));
+    }
   }
 
   particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK|CUSTOM_MASK);

@@ -415,8 +415,11 @@ void FixVolumeChemAdasKokkos::end_of_step()
         if (sp >= 0 && sp < (int) h_sp_twoprod_.size() &&
             h_sp_twoprod_[sp]) ncap++;
       }
-      if (particle->nlocal + ncap > particle->maxlocal)
-        particle->grow(particle->nlocal + ncap - particle->maxlocal);
+      if (particle->nlocal + ncap > particle->maxlocal) {
+        int req = ncap;                        // amortized headroom
+        if (req < particle->nlocal/2 + 16384) req = particle->nlocal/2 + 16384;
+        particle->grow(particle->nlocal + req - particle->maxlocal);
+      }
     }
     particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK|CUSTOM_MASK);
     particle_kk->modify(Host,PARTICLE_MASK|CUSTOM_MASK);
@@ -487,8 +490,11 @@ void FixVolumeChemAdasKokkos::end_of_step()
         const int sp = d_part(ii).ispecies;
         if (sp >= 0 && sp < (int) d_sp2.extent(0)) c += d_sp2(sp);
       }, ncap);
-    if (particle->nlocal + ncap > particle->maxlocal)
-      particle->grow(particle->nlocal + ncap - particle->maxlocal);
+    if (particle->nlocal + ncap > particle->maxlocal) {
+      int req = ncap;                          // amortized headroom
+      if (req < particle->nlocal/2 + 16384) req = particle->nlocal/2 + 16384;
+      particle->grow(particle->nlocal + req - particle->maxlocal);
+    }
     if (!d_new_count.data())
       d_new_count = Kokkos::View<int, DeviceType>("chem:newn");
     Kokkos::deep_copy(d_new_count, particle->nlocal);
