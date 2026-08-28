@@ -175,6 +175,18 @@ void FixVolumeChemAdasKokkos::init()
 
   // ---- decide whether the device fast path covers this configuration ----
 
+  host_two_ = 0;
+  h_sp_twoprod_.assign(particle->nspecies, 0);
+  for (int sidx = 0; sidx < particle->nspecies; sidx++) {
+    for (int i = 0; i < reactions[sidx].n; i++) {
+      const int ridx = reactions[sidx].list[i];
+      if (rlist[ridx].active && rlist[ridx].nproduct >= 2) {
+        h_sp_twoprod_[sidx] = 1;
+        host_two_ = 1;
+      }
+    }
+  }
+
   device_ok = 1;
   const char *why = nullptr;
 
@@ -387,13 +399,26 @@ void FixVolumeChemAdasKokkos::end_of_step()
     // datamask sync, and kokkos_flag=1 means no auto_sync — do the
     // host-side sync explicitly, run the base, mark host-modified.
     ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
+    // Pre-grow to the worst case BEFORE any host writes: a mid-loop
+    // add_particle -> ParticleKokkos::grow preserves only the DEVICE
+    // copy (DualView resize_on_device + a WithoutInitializing host
+    // mirror), so the entire host particle array would be replaced by
+    // uninitialized (zero-page) memory — species 0 phantoms, the
+    // deterministic exponential-D2 runaway seen on CUDA. With capacity
+    // ensured up front, no grow can fire inside the base loop.
+    if (host_two_) {
+      particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK);
+      Particle::OnePart *parts = particle->particles;
+      int ncap = 0;
+      for (int i = 0; i < particle->nlocal; i++) {
+        const int sp = parts[i].ispecies;
+        if (sp >= 0 && sp < (int) h_sp_twoprod_.size() &&
+            h_sp_twoprod_[sp]) ncap++;
+      }
+      if (particle->nlocal + ncap > particle->maxlocal)
+        particle->grow(particle->nlocal + ncap - particle->maxlocal);
+    }
     particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK|CUSTOM_MASK);
-    // Mark the host modified BEFORE the base runs: add_particle can
-    // trigger ParticleKokkos::grow(), whose realloc treats the DEVICE
-    // as authoritative (sync(Device) + modify(Device)). With the host
-    // writes still unmarked, that stomped them mid-loop on CUDA --
-    // parent transmutes vanished while partners kept spawning
-    // (exponential D2 runaway on the d2_chemistry deck).
     particle_kk->modify(Host,PARTICLE_MASK|CUSTOM_MASK);
     nreact_one = 0;
     if (!particle->sorted) particle->sort();

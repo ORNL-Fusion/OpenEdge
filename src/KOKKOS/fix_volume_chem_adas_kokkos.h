@@ -45,6 +45,7 @@ FixStyle(volume/chem/adas/kk,FixVolumeChemAdasKokkos)
 #include "kokkos_base.h"
 #include "kokkos_type.h"
 #include "particle_kokkos.h"
+#include <vector>
 #include "Kokkos_Random.hpp"
 #include "rand_pool_wrap.h"
 
@@ -102,6 +103,8 @@ class FixVolumeChemAdasKokkos : public FixVolumeChemAdas, public KokkosBase {
   DAT::t_float_2d_lr d_r_coeff;   // JANEV ln-polynomial coefficients
   DAT::t_int_1d d_sp_twoprod;     // per species: any active 2-product channel
   int atomic1_;                   // atomic_number == 1 (AMJUEL/HYDHEL fits)
+  int host_two_;                  // host twin of have_two_ (fallback pre-grow)
+  std::vector<char> h_sp_twoprod_;
   int have_two_;                  // any active two-product reaction
 
   // ---- per-cell neutral-D density for the CCD CX partner ----
