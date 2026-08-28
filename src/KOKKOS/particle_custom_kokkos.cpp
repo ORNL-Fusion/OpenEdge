@@ -159,6 +159,26 @@ void ParticleKokkos::grow_custom(int index, int nold, int nnew)
   int newsize = nold + nnew;
   if (newsize < 1) newsize = 1;
 
+  // host-preserving resize (see ParticleKokkos::grow): capture whether
+  // this vector's host copy holds unsynced writes BEFORE the sync below
+  bool host_live = false;
+  if (!sparta->kokkos->prewrap) {
+    if (etype[index] == INT)
+      host_live = (esize[index] == 0)
+        ? k_eivec.view_host()[ewhich[index]].k_view.need_sync_device()
+        : k_eiarray.view_host()[ewhich[index]].k_view.need_sync_device();
+    else
+      host_live = (esize[index] == 0)
+        ? k_edvec.view_host()[ewhich[index]].k_view.need_sync_device()
+        : k_edarray.view_host()[ewhich[index]].k_view.need_sync_device();
+  }
+  auto restore_host = [&](auto &kv) {
+    if (host_live) {
+      Kokkos::deep_copy(kv.view_host(),kv.view_device());
+      kv.clear_sync_state();
+    }
+  };
+
   if (sparta->kokkos->prewrap) {
     sync(Host,CUSTOM_MASK);
     modify(Host,CUSTOM_MASK);
@@ -170,12 +190,14 @@ void ParticleKokkos::grow_custom(int index, int nold, int nnew)
       int *ivector = eivec[ewhich[index]];
       auto k_ivector = k_eivec.view_host()[ewhich[index]].k_view;
       memoryKK->grow_kokkos(k_ivector,ivector,nold+nnew,"particle:ivector");
+      restore_host(k_ivector);
       k_eivec.view_host()[ewhich[index]].k_view = k_ivector;
       eivec[ewhich[index]] = ivector;
     } else {
       int **iarray = eiarray[ewhich[index]];
       auto k_iarray = k_eiarray.view_host()[ewhich[index]].k_view;
       memoryKK->grow_kokkos(k_iarray,iarray,nold+nnew,esize[index],"particle:iarray");
+      restore_host(k_iarray);
       k_eiarray.view_host()[ewhich[index]].k_view = k_iarray;
       eiarray[ewhich[index]] = iarray;
     }
@@ -185,12 +207,14 @@ void ParticleKokkos::grow_custom(int index, int nold, int nnew)
       double *dvector = edvec[ewhich[index]];
       auto k_dvector = k_edvec.view_host()[ewhich[index]].k_view;
       memoryKK->grow_kokkos(k_dvector,dvector,nold+nnew,"particle:dvector");
+      restore_host(k_dvector);
       k_edvec.view_host()[ewhich[index]].k_view = k_dvector;
       edvec[ewhich[index]] = dvector;
     } else {
       double **darray = edarray[ewhich[index]];
       auto k_darray = k_edarray.view_host()[ewhich[index]].k_view;
       memoryKK->grow_kokkos(k_darray,darray,nold+nnew,esize[index],"particle:darray");
+      restore_host(k_darray);
       k_edarray.view_host()[ewhich[index]].k_view = k_darray;
       edarray[ewhich[index]] = darray;
     }

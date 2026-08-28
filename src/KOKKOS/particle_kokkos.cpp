@@ -639,10 +639,23 @@ void ParticleKokkos::grow(int nextra)
   if (particles == NULL)
     MemKK::realloc_kokkos(k_particles,"particle:particles",maxlocal);
   else {
-    this->sync(Device,PARTICLE_MASK); // force resize on device
+    // Host-preserving resize. DualView::resize keeps only the DEVICE
+    // copy and hands back an UNINITIALIZED host mirror (no copy). A
+    // host-side caller that grows mid-loop (add_particle from a host
+    // fix or a Kokkos fix's host fallback) would keep writing into
+    // garbage and later push it over the device. If the host held
+    // unsynced writes, restore it after the resize and mark both sides
+    // current; otherwise the device stays authoritative as before.
+    const bool host_live = k_particles.need_sync_device();
+    this->sync(Device,PARTICLE_MASK);
     Kokkos::resize(Kokkos::view_alloc(Kokkos::WithoutInitializing),
                    k_particles,maxlocal);
-    this->modify(Device,PARTICLE_MASK); // needed for auto sync
+    if (host_live) {
+      Kokkos::deep_copy(k_particles.view_host(),k_particles.view_device());
+      k_particles.clear_sync_state();
+    } else {
+      this->modify(Device,PARTICLE_MASK); // needed for auto sync
+    }
   }
   d_particles = k_particles.view_device();
   particles = k_particles.view_host().data();

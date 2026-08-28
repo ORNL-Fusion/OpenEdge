@@ -399,28 +399,9 @@ void FixVolumeChemAdasKokkos::end_of_step()
     // datamask sync, and kokkos_flag=1 means no auto_sync — do the
     // host-side sync explicitly, run the base, mark host-modified.
     ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
-    // Pre-grow to the worst case BEFORE any host writes: a mid-loop
-    // add_particle -> ParticleKokkos::grow preserves only the DEVICE
-    // copy (DualView resize_on_device + a WithoutInitializing host
-    // mirror), so the entire host particle array would be replaced by
-    // uninitialized (zero-page) memory — species 0 phantoms, the
-    // deterministic exponential-D2 runaway seen on CUDA. With capacity
-    // ensured up front, no grow can fire inside the base loop.
-    if (host_two_) {
-      particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK);
-      Particle::OnePart *parts = particle->particles;
-      int ncap = 0;
-      for (int i = 0; i < particle->nlocal; i++) {
-        const int sp = parts[i].ispecies;
-        if (sp >= 0 && sp < (int) h_sp_twoprod_.size() &&
-            h_sp_twoprod_[sp]) ncap++;
-      }
-      if (particle->nlocal + ncap > particle->maxlocal) {
-        int req = ncap;                        // amortized headroom
-        if (req < particle->nlocal/2 + 16384) req = particle->nlocal/2 + 16384;
-        particle->grow(particle->nlocal + req - particle->maxlocal);
-      }
-    }
+    // ParticleKokkos::grow is host-preserving: the base may create
+    // particles freely; mark the host modified first so its writes are
+    // the ones grow carries across the resize.
     particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK|CUSTOM_MASK);
     particle_kk->modify(Host,PARTICLE_MASK|CUSTOM_MASK);
     nreact_one = 0;
@@ -490,11 +471,10 @@ void FixVolumeChemAdasKokkos::end_of_step()
         const int sp = d_part(ii).ispecies;
         if (sp >= 0 && sp < (int) d_sp2.extent(0)) c += d_sp2(sp);
       }, ncap);
-    if (particle->nlocal + ncap > particle->maxlocal) {
-      int req = ncap;                          // amortized headroom
-      if (req < particle->nlocal/2 + 16384) req = particle->nlocal/2 + 16384;
-      particle->grow(particle->nlocal + req - particle->maxlocal);
-    }
+    // exact capacity for the in-kernel atomic append (grow's own policy
+    // amortizes the reallocation)
+    if (particle->nlocal + ncap > particle->maxlocal)
+      particle->grow(particle->nlocal + ncap - particle->maxlocal);
     if (!d_new_count.data())
       d_new_count = Kokkos::View<int, DeviceType>("chem:newn");
     Kokkos::deep_copy(d_new_count, particle->nlocal);

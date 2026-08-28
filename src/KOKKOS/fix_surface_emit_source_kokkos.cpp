@@ -245,31 +245,9 @@ void FixSurfaceEmitSourceKokkos::perform_task()
       warned_fallback = 1;
     }
     ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
-    // pre-grow before host writes: ParticleKokkos::grow preserves only
-    // the device copy (the DualView resize trap; see the chem fallback).
-    // nlaunch_total mode has a hard bound; other modes get headroom and
-    // a tripwire below.
-    long long cap = (long long) ntask + 4096;
-    if (nlaunch_total_mode) cap += nlaunch_total;
-    else cap += particle->nlocal / 4 + 65536;
-    if (particle->nlocal + cap > particle->maxlocal) {
-      // amortize: each grow reallocates pinned host mirrors for the
-      // particle array AND every custom vector (slow); request enough
-      // headroom that grow fires O(log) times during ramp-up
-      long long req = cap;
-      if (req < particle->nlocal/2 + 16384) req = particle->nlocal/2 + 16384;
-      particle_kk->grow((int)(particle->nlocal + req - particle->maxlocal));
-    }
-    const int maxlocal0 = particle->maxlocal;
     particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK|CUSTOM_MASK);
     particle_kk->modify(Host,PARTICLE_MASK|CUSTOM_MASK);
     FixSurfaceEmitSource::perform_task();
-#ifdef SPARTA_KOKKOS_GPU
-    if (particle->maxlocal != maxlocal0)
-      error->one(FLERR,"surface/emit/source/kk host fallback: particle "
-                 "grow fired inside the emission loop (DualView host-"
-                 "buffer trap) — pre-grow headroom insufficient");
-#endif
     particle_kk->sync(Device,PARTICLE_MASK|CUSTOM_MASK);
     return;
   }
@@ -299,11 +277,9 @@ void FixSurfaceEmitSourceKokkos::perform_task()
       if (s <= 0.0) continue;
       cap += (long long)((double) nlaunch_total * s / src_total_) + 1;
     }
-    if (particle->nlocal + cap > particle->maxlocal) {
-      long long req = cap;                     // amortized (see fallback)
-      if (req < particle->nlocal/2 + 16384) req = particle->nlocal/2 + 16384;
-      particle_kk->grow((int)(particle->nlocal + req - particle->maxlocal));
-    }
+    // exact capacity for the in-kernel atomic append
+    if (particle->nlocal + cap > particle->maxlocal)
+      particle_kk->grow((int)(particle->nlocal + cap - particle->maxlocal));
   }
 
   particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK|CUSTOM_MASK);
