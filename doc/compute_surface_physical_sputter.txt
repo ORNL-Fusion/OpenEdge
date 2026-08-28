@@ -17,8 +17,15 @@ surface/physical/sputter = style name of this compute :l
 group-ID = group ID of surface elements to operate on :l
 background fix-ID = "fix background"_fix_background.html supplying the plasma :l
 zero or more keyword/value pairs may be appended :l
-keyword = {target} or {projectiles} or {tsurf} or {us} or {compound} or {conc} or {roughness_dm} or {projectile_slots} or {static} or {mass_amu} or {incidence} or {visibility} or {iead} or {sheath_waveform} or {erosion_flux} or {sputter_flux_species} or {nflux_species} or {incident_angle_species} or {incident_energy_species} or {sputter_yield_species} or {sputter_flux_total} or {sputter_rate_total} or {erosion_rate} :l
+keyword = {target} or {target_like} or {yield_scale} or {projectiles} or {tsurf} or {us} or {compound} or {conc} or {roughness_dm} or {projectile_slots} or {static} or {mass_amu} or {incidence} or {visibility} or {iead} or {sheath_waveform} or {erosion_flux} or {sputter_flux_species} or {nflux_species} or {incident_angle_species} or {incident_energy_species} or {sputter_yield_species} or {sputter_flux_total} or {sputter_rate_total} or {erosion_rate} :l
   {target} value = element of the wall material (e.g. W, Li, B)
+  {target_like} value = element whose Eckstein entries and yield tables
+    stand in for {target} when the target is a material without entries
+    of its own (e.g. a deposit species tracked by surf_react surface/pwi
+    deposit_as: target Wd target_like W); a table named after the real
+    target still takes precedence when present
+  {yield_scale} value = multiplier applied to every yield (sensitivity
+    knob for a weakly bound deposit; default 1)
   {projectiles} value = comma-separated projectile elements, or {all}
     (every ion element in the plasma background)
   {tsurf} value = name of a custom per-surf vector holding the surface

@@ -1,0 +1,34 @@
+# adens_init_file / adens_init_group test: seed a deposited-W (Wd) layer per
+# surface from a previous dump (x scale) and a uniform W layer on one surf.
+
+variable    seedfile index output/tagged.2000.dump
+variable    seedcol  index s_adens_net
+variable    scale    index 1000.0
+
+shell       mkdir output
+seed        12345
+dimension   3
+boundary    o o o
+global      gridcut 0.0 comm/sort yes
+global      fnum 1e14
+timestep    1e-6
+
+create_box  0 1 0 1 0 1
+create_grid 4 4 4
+balance_grid rcb cell
+
+species     input/w.species W Wd
+
+read_surf   input/plate.surf group plate particle check
+group       half surf id 1
+surf_collide wall diffuse 773.15 1.0
+surf_react  pwi surface/pwi input/w_plain.recycle twall 773.15 adens_surf adens &
+            rzone 1e17 strata 12 minthick 0.05 deposit_as W Wd &
+            adens_init_file ${seedfile} ${seedcol} Wd ${scale} &
+            adens_init W 5e17 adens_init_group half
+surf_modify plate collide wall react pwi
+
+run         0 post no
+dump        dsig surf plate 1 output/seed.*.dump id s_adens[*] s_adens_net &
+            s_adens_conc[*] s_adens_strata[*]
+run         0

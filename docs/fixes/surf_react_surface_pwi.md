@@ -153,6 +153,9 @@ sync; the remainder of the zone is **bulk** (substrate) material.
 surf_react ID surface/pwi <reactions_file> ... \
     adens_surf <attr> \
     [adens_init <species> <atoms/m^2>] ... \
+    [adens_init_file <file> <column> <species> <scale>] ... \
+    [adens_init_group <surf-group>] \
+    [deposit_as <element> <species>] ... \
     [rzone <atoms/m^2>] \
     [adens_erosion <computeID> <col> <species> [noconc]] ... \
     [conc_feedback yes|no] [adens_nevery <N>]
@@ -165,6 +168,35 @@ surf_react ID surface/pwi <reactions_file> ... \
   `<attr>_dep`, `<attr>_ero`, `<attr>_conc`.
 - **`adens_init <species> <val>`** — initial areal density (e.g. a
   boronization layer), applied once at attribute creation.
+- **`adens_init_file <file> <column> <species> <scale>`** — per-surface
+  initial areal density read by surf id from a `dump surf` text file
+  (the named column, e.g. `s_adens_net` of an earlier run; the last
+  snapshot in the file is used) or from a plain two-column `id value`
+  text, multiplied by `<scale>` and clipped at zero. Use it to seed a
+  realistic deposit (e.g. a µm-equivalent band shaped like a short
+  build-up run) instead of growing it. Applied once at attribute
+  creation, like `adens_init`; a run that seeds a layer therefore starts
+  fresh rather than from a restart.
+- **`adens_init_group <surf-group>`** — restrict every `adens_init` and
+  `adens_init_file` layer to the surfaces of one group (default: all
+  surfaces the reaction owns).
+- **`deposit_as <element> <species>`** — track redeposited atoms of
+  `<element>` as their own material: every retained atom whose species
+  starts with `<element>` (all charge states) is credited to the
+  `<species>` column instead of the element's own column, and erosion
+  of the element is debited from whichever of its materials is exposed
+  (split by reaction-zone concentration, so a deposit layer is consumed
+  before the bulk below it). `<species>` must be declared in the species
+  file with the element's mass and must not start with the element
+  symbol (e.g. `Wd` for W); it is never transported. Its solid density
+  is inherited from the element (override with `strata_dens`). Give it
+  its own yield with an `S ... mat <species> [yscale <f>]` channel and a
+  `compute surface/physical/sputter ... target <species> target_like
+  <element> [yield_scale <f>]` binding (`adens_erosion <ID> 0
+  <species>`), emitting the element's neutral (`fix surface/emit/source
+  ... conc_scale <attr>_conc <col>`); with equal yields the result is
+  identical to the untagged run (verified by
+  `examples/verification/surface_pwi/deposit_tagging`).
 - **`rzone <val>`** — reaction-zone total areal density used to derive
   concentrations. WallDYN specifies the same quantity as a thickness
   (`RZoneWidth`, Å) converted through the mixture density
@@ -186,9 +218,10 @@ Charge states pool into one **material** per element (W, W+, W2+ …
 share one inventory; concentrations are pooled *before* clipping at
 zero, so redeposited-ion credits cancel neutral-column debits — see
 2026-08-03 fix). Sputter (`S`) reaction channels accept
-`mat <species>` (linear concentration weighting of a pure-pair yield)
-or `conc <species>` (composition coordinate of a 3D compound table —
-no linear rescaling; the table carries the composition dependence).
+`mat <species>` (linear concentration weighting of a pure-pair yield),
+`conc <species>` (composition coordinate of a 3D compound table —
+no linear rescaling; the table carries the composition dependence) and
+`yscale <f>` (yield multiplier, e.g. a weakly bound deposit material).
 
 ## Related
 

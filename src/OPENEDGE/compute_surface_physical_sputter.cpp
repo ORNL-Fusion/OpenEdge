@@ -76,7 +76,8 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
     // Listed keywords start the option loop below. Anything not in this
     // set is treated as a positional surface.h5 path (legacy).
     static const char *kws[] = {
-        "target", "projectiles", "compound", "conc", "tsurf", "roughness_dm",
+        "target", "target_like", "yield_scale",
+        "projectiles", "compound", "conc", "tsurf", "roughness_dm",
         "projectile_slots", "static", "mass_amu", "incidence", "visibility",
         "sheath_waveform",
         "nflux_species", "incident_angle_species", "incident_energy_species",
@@ -297,6 +298,17 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       if (iarg+1 >= narg) error->all(FLERR,"target needs wall element symbol");
       target_element = std::string(arg[iarg+1]);
       api_new = 1;
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"target_like") == 0) {
+      // element whose Eckstein entries / tables stand in for `target`
+      if (iarg+1 >= narg) error->all(FLERR,"target_like needs element symbol");
+      target_like = std::string(arg[iarg+1]);
+      api_new = 1;
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"yield_scale") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"yield_scale needs value");
+      yield_scale = atof(arg[iarg+1]);
+      if (yield_scale <= 0.0) error->all(FLERR,"yield_scale must be > 0");
       iarg += 2;
     } else if (strcmp(arg[iarg],"roughness_dm") == 0) {
       // mean surface angle delta_m [deg]: yields evaluated at
@@ -680,9 +692,10 @@ void ComputeSurfacePhysicalSputter::resolve_projectile_tables(const FixBackgroun
   per_proj_Z2.assign(N, 0.0);  per_proj_M2.assign(N, 0.0);
   per_proj_Es.assign(N, 0.0);  per_proj_Eth.assign(N, 0.0);
   per_proj_Q.assign(N, 0.0);   per_proj_ETF.assign(N, 0.0);
+  const std::string eck_target = target_like.empty() ? target_element : target_like;
   std::string missing;
   for (size_t i = 0; i < N; i++) {
-    const std::string name = projectile_elements[i] + "_on_" + target_element;
+    const std::string name = projectile_elements[i] + "_on_" + eck_target;
     Eckstein::SputterParams p;
     if (!Eckstein::lookup_sputter(name.c_str(), p)) {
       if (!missing.empty()) missing += ", ";
@@ -716,14 +729,21 @@ void ComputeSurfacePhysicalSputter::resolve_projectile_tables(const FixBackgroun
         for (size_t i = 0; i < N; i++) {
           // compound mode reads <proj>_on_<mix>_<target> (3D, C axis);
           // pure mode keeps <proj>_on_<target>
-          std::string pair = compound_mix.empty()
-              ? projectile_elements[i] + "_on_" + target_element
-              : projectile_elements[i] + "_on_" + compound_mix + "_" +
-                target_element;
-          for (auto &c : pair)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-          if (lib.load_trim_sputter(pair, per_proj_sput_tbl[i]) &&
-              comm->me == 0) {
+          auto pair_for = [&](const std::string &tgt) {
+            std::string s = compound_mix.empty()
+                ? projectile_elements[i] + "_on_" + tgt
+                : projectile_elements[i] + "_on_" + compound_mix + "_" + tgt;
+            for (auto &c : s)
+              c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return s;
+          };
+          std::string pair = pair_for(target_element);
+          bool loaded = lib.load_trim_sputter(pair, per_proj_sput_tbl[i]);
+          if (!loaded && !target_like.empty()) {
+            pair = pair_for(target_like);
+            loaded = lib.load_trim_sputter(pair, per_proj_sput_tbl[i]);
+          }
+          if (loaded && comm->me == 0) {
             char msg[256];
             if (per_proj_sput_tbl[i].NC > 0)
               snprintf(msg, sizeof(msg),
@@ -846,7 +866,10 @@ void ComputeSurfacePhysicalSputter::resolve_projectile_tables(const FixBackgroun
       fprintf(screen, "%s%s",
               projectile_elements[i].c_str(),
               (i + 1 < N) ? "," : "");
-    fprintf(screen, "  (slots %d..%d mapped)\n", lo, hi);
+    fprintf(screen, "  (slots %d..%d mapped)", lo, hi);
+    if (!target_like.empty()) fprintf(screen, "  yields from %s", target_like.c_str());
+    if (yield_scale != 1.0) fprintf(screen, "  yield_scale %g", yield_scale);
+    fprintf(screen, "\n");
   }
 }
 
@@ -2127,6 +2150,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
             ys = yield_lookup(E, theta_deg);
           }
         }
+        ys *= yield_scale;
         yld[s] = ys;
         sput_flux[s] = g * ys;
         sput_total += sput_flux[s];
@@ -2186,7 +2210,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
           // Yamamura theta measured from the surface normal (see main loop).
           const double cos_theta = std::min(1.0, std::max(0.0, impurity_sin_alpha));
           const double theta_imp_deg = std::acos(cos_theta) * 180.0 / M_PI;
-          const double ys = yield_lookup(E_eck, theta_imp_deg);
+          const double ys = yield_lookup(E_eck, theta_imp_deg) * yield_scale;
           sput_total += g_imp * ys;
         }
       }
@@ -2331,6 +2355,7 @@ void ComputeSurfacePhysicalSputter::assemble_compound_outputs()
           y = (1.0 - t)*yb[ic-1] + t*yb[ic];
         }
       }
+      y *= yield_scale;
       yld[s] = y;
       sput_flux[s] = cs_gamma[size_t(i)*ns + s] * y;
       sput_total += sput_flux[s];

@@ -60,6 +60,7 @@ class SurfReactSurfacePWI : public SurfReact {
     // first-to-fire lottery.
     double sp_Es, sp_Eth, sp_Q, sp_ETF;  // Eckstein sputter params (type==SPUTTER)
     int sp_tbl;                          // index into sput_tables, -1 = analytic
+    double sp_yscale;                    // `yscale <f>`: yield multiplier (1 = off)
     char *mat_id;                        // material species name for composition
     int mat_isp;                         //   weighting via <attr>_conc, -1 = off
     char *conc_id;                       // species whose <attr>_conc is the
@@ -136,6 +137,33 @@ class SurfReactSurfacePWI : public SurfReact {
   std::vector<int> mat_of;         // species -> material group (by element)
   std::vector<std::string> sigma_init_names;   // species with initial sigma
   std::vector<double> sigma_init_vals;         //   (boronization layers etc.)
+  // adens_init_group <surfgroup>: restrict every adens_init* layer to one
+  // surf group (e.g. the deposited band) instead of the whole react group
+  char *sigma_init_group;
+  int sigma_init_bit;                          // group bitmask, 0 = all
+  // adens_init_file <file> <column> <species> <scale>: per-surface initial
+  // areal density read by surf id (a `dump surf` file with the named
+  // column, or a two-column "id value" text), times <scale>
+  std::vector<std::string> sfile_path, sfile_col, sfile_species;
+  std::vector<double> sfile_scale;
+  std::vector<int> sfile_isp;
+  std::vector<std::vector<double>> sfile_vals; // [k][surfID-1], atoms/m^2
+  void read_sigma_init_file(int k);
+  int init_layer_allowed(int iown);            // owned surf in init group?
+  void collect_init_layers(int iown,
+                           std::vector<std::pair<int,double>> &out);
+  // deposit_as <element> <species>: atoms of <element> retained by the
+  // wall are credited to the deposit material <species> (its own
+  // material root, own yield tables) instead of the substrate column;
+  // erosion of the element is then debited from whichever of its
+  // materials is exposed (stack order), see sigma_debit_element()
+  std::vector<std::string> dep_alias_elem, dep_alias_name;
+  std::vector<int> dep_alias_of;               // species col -> credited col
+  std::vector<std::vector<int>> dep_cols_of;   // species col -> debit candidates
+  inline int deposit_species(int isp) {
+    return dep_alias_of.empty() ? isp : dep_alias_of[isp];
+  }
+  void sigma_debit_element(int isurf, int isp, double datoms);
   double *dep_delta, *dep_buf;     // gross-deposition ledger (positive credits)
   double mat_conc(int isurf, int isp);
   void sigma_accumulate(int isurf, int isp, double datoms);
