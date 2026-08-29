@@ -105,6 +105,7 @@ class SurfReactSurfacePWI : public SurfReact {
   bigint sigma_nsurf;              // total surf count
   double *sigma_delta;             // [nsurf*ncols] local unsynced increments
   double *sigma_buf;               // allreduce receive buffer
+  double *sigma_comp;              // compensated-sum residual for material state
   double *sigma_area;              // per-surf element area, local index
   // optional gross-erosion debit: per sync, sigma[species] -= flux * dt,
   // flux read per owned surf from a per-surf compute (e.g.

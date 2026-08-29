@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # surf_react surface/pwi deposit tagging + seeding verification.
 #   (a) deposit_as off vs on: identical net ledger and strata thickness
-#   (b) adens_init_file x scale + adens_init_group: exact seed, strata stack
+#   (b) adens_init_file x scale + adens_init_group: exact seed, strata stack,
+#       and zero runtime net/deposition/erosion ledger before and after an
+#       otherwise inert synchronization
 #   (c) yscale on the deposit material halves its erosion
 #   (d) B-on-W compound deck still runs; target_like/yield_scale = 0.5 x cpmi
 # Exits 0 on PASS, 1 on FAIL.
@@ -91,12 +93,19 @@ check(np.all((ratio > 0.45) & (ratio < 0.62)), "deposit yscale 0.5 halves erosio
 
 # ---- (b) seeded layer --------------------------------------------------
 cS, dS = dump("output/seed.0.dump")
+cS1, dS1 = dump("output/seed.1.dump")
 seed = np.maximum(net_t, 0.0) * 1000.0
 wd_s, w_s = col(cS, dS, "s_adens[2]"), col(cS, dS, "s_adens[1]")
 print(f"(b) seed expected {seed}  got Wd {wd_s}  W {w_s}")
 check(np.isclose(wd_s[0], seed[0], rtol=1e-12) and wd_s[1] == 0.0,
       "adens_init_file x scale applied to surf 1 only (adens_init_group)")
 check(np.isclose(w_s[0], 5e17) and w_s[1] == 0.0, "uniform adens_init restricted to the group")
+for name in ("s_adens_net", "s_adens_dep", "s_adens_ero"):
+    check(np.all(col(cS, dS, name) == 0.0) and np.all(col(cS1, dS1, name) == 0.0),
+          f"initial coating excluded from runtime {name} ledger across first sync")
+check(np.allclose(col(cS1, dS1, "s_adens[1]"), w_s, rtol=0, atol=0) and
+      np.allclose(col(cS1, dS1, "s_adens[2]"), wd_s, rtol=0, atol=0),
+      "inert first sync preserves seeded material inventory")
 st = strata(cS, dS, 2)
 # the uniform W layer merges into the W substrate (same material); the Wd
 # seed stays a separate top stratum

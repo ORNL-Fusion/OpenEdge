@@ -165,7 +165,15 @@ surf_react ID surface/pwi <reactions_file> ... \
   (one column per species, atoms/m^2). Retained particles credit their
   species column (**influx**); sputtered atoms debit the sputtered
   species column (**erosion flux**). Derived customs: `<attr>_net`,
-  `<attr>_dep`, `<attr>_ero`, `<attr>_conc`.
+  `<attr>_dep`, `<attr>_ero`, `<attr>_conc`. The first three are runtime
+  ledgers: signed net change, gross deposition, and gross removal since
+  initialization. They start at zero and deliberately exclude material
+  supplied by `adens_init` or `adens_init_file`; those initial layers are
+  present in `<attr>` and `<attr>_conc` and are depleted normally. All
+  customs persist across restarts, so the ledgers continue rather than
+  being rebased. Material-state updates use compensated summation so small
+  per-sync erosion/deposition increments are retained even when an initial
+  micron-scale inventory is many orders of magnitude larger.
 - **`adens_init <species> <val>`** — initial areal density (e.g. a
   boronization layer), applied once at attribute creation.
 - **`adens_init_file <file> <column> <species> <scale>`** — per-surface

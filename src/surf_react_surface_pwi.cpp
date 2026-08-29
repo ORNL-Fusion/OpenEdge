@@ -109,6 +109,7 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   sigma_nsurf = 0;
   sigma_delta = NULL;
   sigma_buf = NULL;
+  sigma_comp = NULL;
   sigma_area = NULL;
 
   snet_index = sdep_index = sero_index = -1;
@@ -395,6 +396,7 @@ SurfReactSurfacePWI::~SurfReactSurfacePWI()
   }
   memory->destroy(sigma_delta);
   memory->destroy(sigma_buf);
+  memory->destroy(sigma_comp);
   memory->destroy(sigma_area);
   memory->destroy(dep_delta);
   memory->destroy(dep_buf);
@@ -518,12 +520,18 @@ void SurfReactSurfacePWI::init()
       error->all(FLERR,"surf_react surface/pwi sigma_surf: too many surfs*species");
     memory->destroy(sigma_delta);
     memory->destroy(sigma_buf);
+    memory->destroy(sigma_comp);
     memory->create(sigma_delta,(int) ntally,"surf_react_pwi:sigma_delta");
     memory->create(sigma_buf,(int) ntally,"surf_react_pwi:sigma_buf");
-    for (int i = 0; i < (int) ntally; i++) sigma_delta[i] = 0.0;
+    memory->create(sigma_comp,(int) ntally,"surf_react_pwi:sigma_comp");
+    for (int i = 0; i < (int) ntally; i++) {
+      sigma_delta[i] = 0.0;
+      sigma_comp[i] = 0.0;
+    }
 
-    // derived scalar customs: <attr>_net (row sum incl. debits) and
-    // <attr>_dep (gross deposition: positive credits only)
+    // derived scalar customs: runtime signed net change, gross deposition,
+    // and gross erosion.  Unlike the material-state array, these exclude
+    // adens_init/adens_init_file and persist incrementally across restarts.
     char dname[130];
     snprintf(dname,sizeof(dname),"%s_net",sigma_attr);
     snet_index = surf->find_custom(dname);
@@ -1399,6 +1407,8 @@ void SurfReactSurfacePWI::sync_sigma()
 
   MPI_Allreduce(sigma_delta,sigma_buf,n,MPI_DOUBLE,MPI_SUM,world);
   for (int i = 0; i < n; i++) sigma_delta[i] = 0.0;
+  MPI_Allreduce(dep_delta,dep_buf,(int) sigma_nsurf,MPI_DOUBLE,MPI_SUM,world);
+  for (int i = 0; i < (int) sigma_nsurf; i++) dep_delta[i] = 0.0;
 
   // owned surf i on this rank is local surf m = me + i*nprocs
   // (explicit non-distributed striding, cf. fix_surf_temp)
@@ -1408,6 +1418,9 @@ void SurfReactSurfacePWI::sync_sigma()
   int dim = domain->dimension;
   int nsown = surf->nown;
   double **sig = surf->edarray[surf->ewhich[sindex_custom]];
+  double *depvec = surf->edvec[surf->ewhich[sdep_index]];
+  double *netvec = surf->edvec[surf->ewhich[snet_index]];
+  double *erovec = surf->edvec[surf->ewhich[sero_index]];
 
   surfint gid;
   for (int i = 0; i < nsown; i++) {
@@ -1415,8 +1428,18 @@ void SurfReactSurfacePWI::sync_sigma()
     if (dim == 2) gid = surf->lines[m].id;
     else gid = surf->tris[m].id;
     bigint base = ((bigint) gid - 1) * sigma_ncols;
-    for (int j = 0; j < sigma_ncols; j++)
-      sig[i][j] += sigma_buf[base + j];
+    for (int j = 0; j < sigma_ncols; j++) {
+      const bigint idx = base + j;
+      // A micron-scale initial layer is O(1e22) atoms/m^2 while a quiet
+      // surface can change by only O(1e3--1e7) per sync.  Compensated
+      // summation retains those sub-ULP increments instead of rounding
+      // every update away independently.
+      const double y = sigma_buf[idx] - sigma_comp[idx];
+      const double old = sig[i][j];
+      const double next = old + y;
+      sigma_comp[idx] = (next - old) - y;
+      sig[i][j] = next;
+    }
 
     // strata stack: apply this sync's particle-impact net per MATERIAL
     // (charge states pool). Positive net -> surface deposition (low-E
@@ -1433,6 +1456,19 @@ void SurfReactSurfacePWI::sync_sigma()
           strata_state[i].erode_species(mm, -net);
       }
     }
+
+    // Runtime ledgers deliberately exclude adens_init/adens_init_file.
+    // The material array above is absolute state (and therefore contains
+    // an initial coating), while net/dep/ero record changes made after the
+    // run starts.  Updating incrementally also preserves that baseline
+    // across restarts because all three scalar customs are persisted.
+    double particle_net = 0.0;
+    for (int j = 0; j < sigma_ncols; j++)
+      particle_net += sigma_buf[base + j];
+    const double particle_dep = dep_buf[gid - 1];
+    netvec[i] += particle_net;
+    depvec[i] += particle_dep;
+    erovec[i] += particle_dep - particle_net;
   }
 
   // gross-erosion debit: sigma[ero_species] -= flux * dt * sigma_nevery,
@@ -1457,7 +1493,16 @@ void SurfReactSurfacePWI::sync_sigma()
       double *fvec = ce->vector_surf;
       for (int i = 0; i < nsown; i++) {
         double d = fvec[i] * (noconc ? 1.0 : conck[i][isp]) * debit_dt;
-        sig[i][isp] -= d;
+        bigint m = me + (bigint) i*nprocs;
+        surfint id = (dim == 2) ? surf->lines[m].id : surf->tris[m].id;
+        bigint idx = ((bigint) id - 1) * sigma_ncols + isp;
+        double y = -d - sigma_comp[idx];
+        double old = sig[i][isp];
+        double next = old + y;
+        sigma_comp[idx] = (next - old) - y;
+        sig[i][isp] = next;
+        netvec[i] -= d;
+        erovec[i] += d;
         if (strata_K > 0 && d > 0.0)
           strata_state[i].erode_species(mat_root_of[isp], d);
       }
@@ -1466,28 +1511,20 @@ void SurfReactSurfacePWI::sync_sigma()
       int icol = sigma_ero_col[k] - 1;
       for (int i = 0; i < nsown; i++) {
         double d = farr[i][icol] * (noconc ? 1.0 : conck[i][isp]) * debit_dt;
-        sig[i][isp] -= d;
+        bigint m = me + (bigint) i*nprocs;
+        surfint id = (dim == 2) ? surf->lines[m].id : surf->tris[m].id;
+        bigint idx = ((bigint) id - 1) * sigma_ncols + isp;
+        double y = -d - sigma_comp[idx];
+        double old = sig[i][isp];
+        double next = old + y;
+        sigma_comp[idx] = (next - old) - y;
+        sig[i][isp] = next;
+        netvec[i] -= d;
+        erovec[i] += d;
         if (strata_K > 0 && d > 0.0)
           strata_state[i].erode_species(mat_root_of[isp], d);
       }
     }
-  }
-
-  // derived columns: gross deposition and net (row sum)
-  MPI_Allreduce(dep_delta,dep_buf,(int) sigma_nsurf,MPI_DOUBLE,MPI_SUM,world);
-  for (int i = 0; i < (int) sigma_nsurf; i++) dep_delta[i] = 0.0;
-  double *depvec = surf->edvec[surf->ewhich[sdep_index]];
-  double *netvec = surf->edvec[surf->ewhich[snet_index]];
-  double *erovec = surf->edvec[surf->ewhich[sero_index]];
-  for (int i = 0; i < nsown; i++) {
-    bigint m = me + (bigint) i*nprocs;
-    if (dim == 2) gid = surf->lines[m].id;
-    else gid = surf->tris[m].id;
-    depvec[i] += dep_buf[gid - 1];
-    double nsum = 0.0;
-    for (int j = 0; j < sigma_ncols; j++) nsum += sig[i][j];
-    netvec[i] = nsum;
-    erovec[i] = depvec[i] - nsum;    // gross removal (positive)
   }
   // background implantation + retention saturation (task 5)
   for (size_t k = 0; k < imp_species.size(); k++) {
@@ -1512,7 +1549,16 @@ void SurfReactSurfacePWI::sync_sigma()
       double turnon = 0.5 * (tanh(imp_alpha[k] * (cD - imp_cmax[k])) + 1.0);
       double dimp = flux * (1.0 - imp_rcoef[k]) * (1.0 - turnon) * debit_dt;
       if (dimp <= 0.0) continue;
-      sig[i][isp] += dimp;
+      bigint m = me + (bigint) i*nprocs;
+      surfint id = (dim == 2) ? surf->lines[m].id : surf->tris[m].id;
+      bigint idx = ((bigint) id - 1) * sigma_ncols + isp;
+      double y = dimp - sigma_comp[idx];
+      double old = sig[i][isp];
+      double next = old + y;
+      sigma_comp[idx] = (next - old) - y;
+      sig[i][isp] = next;
+      netvec[i] += dimp;
+      depvec[i] += dimp;
       if (strata_K > 0) {
         if (imp_depth[k] > 0.0)
           strata_state[i].add_implanted(mat_root_of[isp], imp_depth[k], dimp);
@@ -2406,4 +2452,3 @@ void SurfReactSurfacePWI::ehist_write()
   delete [] loc;
   delete [] glob;
 }
-

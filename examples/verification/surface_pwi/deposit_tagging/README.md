@@ -11,7 +11,7 @@ plate while W self-sputtering (RustBCA `w_on_w`) erodes it.
 |---|---|---|
 | untagged / tagged | `in.tag` | with `deposit_as W Wd` the net ledger, gross erosion and strata thickness are identical; retained W lands in the `Wd` column; erosion is debited from the exposed material (bulk W only while the reaction zone fills) |
 | split | `in.tag` + `w_split.recycle` | `S w_on_w mat Wd yscale 0.5` halves the deposit's self-sputter erosion |
-| seed | `in.seed` | `adens_init_file <dump> s_adens_net Wd 1000` seeds a per-surface layer (exact x scale) and `adens_init_group` restricts both file and uniform layers to one surf; strata stack is Wd on bulk |
+| seed | `in.seed` | `adens_init_file <dump> s_adens_net Wd 1000` seeds a per-surface layer (exact x scale) and `adens_init_group` restricts both file and uniform layers to one surf; strata stack is Wd on bulk; the initial coating is excluded from the runtime net/dep/ero ledgers across the first synchronization |
 | bw | `in.bw_smoke` | B-on-W compound deck (WEST wedge) still runs with `deposit_as`; `target Wd target_like W yield_scale 0.5` equals 0.5 x the W compute |
 
 ```bash
