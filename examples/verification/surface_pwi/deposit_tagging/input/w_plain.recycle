@@ -1,0 +1,6 @@
+# W beam on a W plate: every incident W atom is retained; additive W self-
+# sputtering from the RustBCA w_on_w table, no composition weighting.
+W --> W
+A 0.0
+W --> W
+S w_on_w

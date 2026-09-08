@@ -111,6 +111,15 @@ class ComputeSurfacePhysicalSputter : public Compute {
   // Eckstein table values verbatim. Allain 2003 measured U_s = 1.0-2.5 eV
   // on liquid Li depending on chemistry/temperature.
   double target_us = 0.0;
+  // target_like <elem>: look up Eckstein parameters and yield tables
+  // under this element when `target` names a material that has no
+  // entries of its own (e.g. target Wd target_like W for a redeposited
+  // W material tracked separately by surf_react surface/pwi deposit_as).
+  // A table named after the real target still wins when present.
+  std::string target_like;
+  // yield_scale <f>: multiply every yield (sensitivity knob for a
+  // weakly bound deposit; 1 = off)
+  double yield_scale = 1.0;
   std::vector<int> slot_to_table;              // per plasma-ion slot (0-based),
                                                // index into per_proj_eck_*
                                                // or -1 if that slot is not a

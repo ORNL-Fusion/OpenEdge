@@ -1,0 +1,66 @@
+# B-on-W compound smoke (WEST wedge, thin boron layer) with the deposit
+# material Wd declared and a yield-scaled stand-in compute.  Checks that the
+# compound path still runs with deposit_as and stack-ordered erosion, and
+# that `target Wd target_like W yield_scale 0.5` equals 0.5 x the W compute.
+# Neutrals only (no pusher / ADAS): a geometry + surface-model smoke.
+
+variable    inp      string ../../../wip/slag/input
+variable    nsteps   index 500
+
+shell       mkdir output
+seed        7893
+dimension   3
+global      gridcut 0.0 comm/sort no
+boundary    o o o
+
+create_box  1.82 3.21 -0.004 0.048 -0.95 0.81
+create_grid 110 4 140
+balance_grid rcb cell
+
+global      fnum 5e9
+global      surfmax 3000
+species     ${inp}/slag.species W W+ W2+ W3+ B B+ B2+ B3+ B4+ B5+ D O Wd
+
+mixture     wSource W frac 1.0
+mixture     bSource B frac 1.0
+
+read_surf   ${inp}/west_wedge.surf group duct particle check
+group       plate surf id 1:4056
+group       caps surf id 4057:5066
+
+surf_collide pcoll diffuse 300.0 1.0
+surf_react  pwi surface/pwi ${inp}/slag_w_compound.recycle twall 773.15 &
+            adens_surf adens adens_init B 5e15 rzone 1e16 strata 12 minthick 0.05 &
+            adens_erosion cpmi 0 W noconc adens_erosion cpmiB 0 B noconc &
+            deposit_as W Wd
+surf_modify plate collide pcoll react pwi
+
+surf_collide PERIODIC toroidal 0.79
+surf_modify caps collide PERIODIC
+
+fix         pd background file ${inp}/plasma_58245.h5 static yes
+
+compute     cpmi surface/physical/sputter plate background pd &
+            target W projectiles D,O compound bw conc adens_conc B &
+            mass_amu 2.01410177811 static yes erosion_flux
+compute     cpmiB surface/physical/sputter plate background pd &
+            target B projectiles D,O compound bw conc adens_conc B &
+            mass_amu 2.01410177811 static yes erosion_flux
+compute     cpmiWd surface/physical/sputter plate background pd &
+            target Wd target_like W yield_scale 0.5 projectiles D,O &
+            compound bw conc adens_conc B &
+            mass_amu 2.01410177811 static yes erosion_flux
+fix         pw particle/weight
+fix         femit surface/emit/source wSource plate cpmi perspecies no &
+            nlaunch_total 4 model thompson 4.34 nevery 1
+fix         femitB surface/emit/source bSource plate cpmiB perspecies no &
+            nlaunch_total 4 model thompson 5.73 nevery 1
+
+timestep    1e-9
+stats       100
+stats_style step cpu np nscoll nsreact
+
+run         0 post no
+dump        dsig surf plate ${nsteps} output/bw.*.dump id s_adens_net &
+            s_adens_conc[1] s_adens_conc[5] c_cpmi c_cpmiB c_cpmiWd
+run         ${nsteps}

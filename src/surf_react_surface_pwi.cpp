@@ -44,6 +44,10 @@
 #include "error.h"
 #include "eckstein_sputter.h"
 #include "eckstein_sputter_data.h"
+#include <algorithm>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
 
 #include <stdexcept>
 #include "H5Cpp.h"
@@ -105,6 +109,7 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   sigma_nsurf = 0;
   sigma_delta = NULL;
   sigma_buf = NULL;
+  sigma_comp = NULL;
   sigma_area = NULL;
 
   snet_index = sdep_index = sero_index = -1;
@@ -118,6 +123,8 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   sigma_feedback = 1;
   sconc_index = -1;
   substrate_isp = -1;
+  sigma_init_group = NULL;
+  sigma_init_bit = 0;
   dep_delta = dep_buf = NULL;
   trim_dir.clear();
   ehist_file = NULL;
@@ -212,6 +219,31 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       if (iarg+3 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
       sigma_init_names.push_back(arg[iarg+1]);
       sigma_init_vals.push_back(input->numeric(FLERR,arg[iarg+2]));
+      iarg += 3;
+    } else if (strcmp(arg[iarg],"adens_init_group") == 0) {
+      // restrict adens_init / adens_init_file layers to one surf group
+      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      delete [] sigma_init_group;
+      int n = strlen(arg[iarg+1]) + 1;
+      sigma_init_group = new char[n];
+      strcpy(sigma_init_group, arg[iarg+1]);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"adens_init_file") == 0) {
+      // per-surface initial areal density: <file> <column> <species> <scale>
+      if (iarg+5 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      sfile_path.push_back(arg[iarg+1]);
+      sfile_col.push_back(arg[iarg+2]);
+      sfile_species.push_back(arg[iarg+3]);
+      sfile_scale.push_back(input->numeric(FLERR,arg[iarg+4]));
+      if (sfile_scale.back() <= 0.0)
+        error->all(FLERR,"surf_react surface/pwi adens_init_file scale must be > 0");
+      iarg += 5;
+    } else if (strcmp(arg[iarg],"deposit_as") == 0) {
+      // deposit_as <element> <species>: retained atoms of <element> are
+      // credited to the deposit material <species>
+      if (iarg+3 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      dep_alias_elem.push_back(arg[iarg+1]);
+      dep_alias_name.push_back(arg[iarg+2]);
       iarg += 3;
     } else if (strcmp(arg[iarg],"rzone") == 0 ||
                strcmp(arg[iarg],"sigma_zone") == 0) {
@@ -356,6 +388,7 @@ SurfReactSurfacePWI::~SurfReactSurfacePWI()
   delete [] twall_attr;
   delete [] R_attr;
   delete [] sigma_attr;
+  delete [] sigma_init_group;
   delete [] ehist_file;
   delete [] ehist_all;
   delete [] ehist_sput;
@@ -367,6 +400,7 @@ SurfReactSurfacePWI::~SurfReactSurfacePWI()
   }
   memory->destroy(sigma_delta);
   memory->destroy(sigma_buf);
+  memory->destroy(sigma_comp);
   memory->destroy(sigma_area);
   memory->destroy(dep_delta);
   memory->destroy(dep_buf);
@@ -450,17 +484,37 @@ void SurfReactSurfacePWI::init()
                  "distributed surfs");
 
     sigma_ncols = particle->nspecies;
+    if (dep_alias_elem.size() && !sigma_attr)
+      error->all(FLERR,"surf_react surface/pwi deposit_as requires adens_surf");
+    // init-layer restriction (surf group) and per-surface seed files;
+    // files are read only when the attribute is created (restarts
+    // keep their persisted state, like adens_init)
+    sigma_init_bit = 0;
+    if (sigma_init_group) {
+      int ig = surf->find_group(sigma_init_group);
+      if (ig < 0)
+        error->all(FLERR,"surf_react surface/pwi adens_init_group: unknown surf group");
+      sigma_init_bit = surf->bitmask[ig];
+    }
+    const bool sigma_fresh = (surf->find_custom(sigma_attr) < 0);
+    sfile_isp.assign(sfile_path.size(), -1);
+    sfile_vals.assign(sfile_path.size(), std::vector<double>());
+    for (size_t k = 0; k < sfile_path.size(); k++) {
+      sfile_isp[k] = particle->find_species((char *) sfile_species[k].c_str());
+      if (sfile_isp[k] < 0)
+        error->all(FLERR,"surf_react surface/pwi adens_init_file: unknown species");
+      if (sigma_fresh) read_sigma_init_file((int) k);
+    }
     sindex_custom = surf->find_custom(sigma_attr);
     if (sindex_custom < 0) {
       sindex_custom = surf->add_custom(sigma_attr, DOUBLE, sigma_ncols);
       // apply initial layers (only on creation: restarts keep their state)
-      if (sigma_init_names.size()) {
+      if (sigma_init_names.size() || sfile_path.size()) {
         double **sig0 = surf->edarray[surf->ewhich[sindex_custom]];
-        for (size_t k = 0; k < sigma_init_names.size(); k++) {
-          int isp = particle->find_species((char *) sigma_init_names[k].c_str());
-          if (isp < 0)
-            error->all(FLERR,"surf_react surface/pwi adens_init: unknown species");
-          for (int i = 0; i < surf->nown; i++) sig0[i][isp] = sigma_init_vals[k];
+        std::vector<std::pair<int,double>> layers;
+        for (int i = 0; i < surf->nown; i++) {
+          collect_init_layers(i, layers);
+          for (auto &l : layers) sig0[i][l.first] += l.second;
         }
       }
     } else {
@@ -480,12 +534,18 @@ void SurfReactSurfacePWI::init()
       error->all(FLERR,"surf_react surface/pwi sigma_surf: too many surfs*species");
     memory->destroy(sigma_delta);
     memory->destroy(sigma_buf);
+    memory->destroy(sigma_comp);
     memory->create(sigma_delta,(int) ntally,"surf_react_pwi:sigma_delta");
     memory->create(sigma_buf,(int) ntally,"surf_react_pwi:sigma_buf");
-    for (int i = 0; i < (int) ntally; i++) sigma_delta[i] = 0.0;
+    memory->create(sigma_comp,(int) ntally,"surf_react_pwi:sigma_comp");
+    for (int i = 0; i < (int) ntally; i++) {
+      sigma_delta[i] = 0.0;
+      sigma_comp[i] = 0.0;
+    }
 
-    // derived scalar customs: <attr>_net (row sum incl. debits) and
-    // <attr>_dep (gross deposition: positive credits only)
+    // derived scalar customs: runtime signed net change, gross deposition,
+    // and gross erosion.  Unlike the material-state array, these exclude
+    // adens_init/adens_init_file and persist incrementally across restarts.
     char dname[130];
     snprintf(dname,sizeof(dname),"%s_net",sigma_attr);
     snet_index = surf->find_custom(dname);
@@ -518,6 +578,39 @@ void SurfReactSurfacePWI::init()
         for (int k = 0; k < j; k++)
           if (elems[k] == elems[j]) { mat_of[j] = mat_of[k]; break; }
       }
+
+      // deposit_as aliases: every species of the aliased element credits
+      // the deposit species' column; erosion debits of that element pick
+      // among {element root, alias roots} by exposed concentration
+      dep_alias_of.clear();
+      dep_cols_of.clear();
+      if (dep_alias_elem.size()) {
+        dep_alias_of.resize(sigma_ncols);
+        dep_cols_of.resize(sigma_ncols);
+        for (int j = 0; j < sigma_ncols; j++) dep_alias_of[j] = j;
+        for (size_t k = 0; k < dep_alias_elem.size(); k++) {
+          int a = particle->find_species((char *) dep_alias_name[k].c_str());
+          if (a < 0)
+            error->all(FLERR,"surf_react surface/pwi deposit_as: unknown species");
+          if (elems[a] == dep_alias_elem[k])
+            error->all(FLERR,"surf_react surface/pwi deposit_as: the deposit "
+                       "species must not start with the element it stands "
+                       "for (use e.g. Wd for W)");
+          bool found = false;
+          for (int j = 0; j < sigma_ncols; j++)
+            if (elems[j] == dep_alias_elem[k]) { dep_alias_of[j] = a; found = true; }
+          if (!found)
+            error->all(FLERR,"surf_react surface/pwi deposit_as: no species of that element");
+        }
+        for (int j = 0; j < sigma_ncols; j++) {
+          dep_cols_of[j].push_back(mat_of[j]);
+          for (size_t k = 0; k < dep_alias_elem.size(); k++)
+            if (elems[j] == dep_alias_elem[k]) {
+              int a = particle->find_species((char *) dep_alias_name[k].c_str());
+              dep_cols_of[j].push_back(mat_of[a]);
+            }
+        }
+      }
     }
     snprintf(dname,sizeof(dname),"%s_ero",sigma_attr);
     sero_index = surf->find_custom(dname);
@@ -540,23 +633,29 @@ void SurfReactSurfacePWI::init()
         for (int m = 0; m < nmat; m++)
           if (mat_of[j] == roots[m]) { mat_root_of[j] = m; break; }
 
-      // solid number densities by element symbol [atoms/m^3]
+      // solid number densities by element symbol [atoms/m^3]; a
+      // deposit_as species stands for its aliased element
       mat_dens.assign(nmat, 6.3e28);
       for (int m = 0; m < nmat; m++) {
         std::string nm = particle->species[roots[m]].id;
         size_t e = 0;
         while (e < nm.size() && isalpha((unsigned char) nm[e])) e++;
         std::string el = nm.substr(0, e);
+        for (size_t k = 0; k < dep_alias_elem.size(); k++)
+          if (nm == dep_alias_name[k]) el = dep_alias_elem[k];
         if      (el == "W")  mat_dens[m] = 6.306e28;
         else if (el == "B")  mat_dens[m] = 1.32e29;
         else if (el == "O")  mat_dens[m] = 4.29e28;
         else if (el == "C")  mat_dens[m] = 1.13e29;
         else if (el == "Li") mat_dens[m] = 4.63e28;
         else if (el == "Be") mat_dens[m] = 1.23e29;
-        else if (comm->me == 0)
-          error->warning(FLERR,"surf_react surface/pwi strata: unknown "
-                         "element solid density, using 6.3e28 m^-3 "
-                         "(override with strata_dens)");
+        else if (comm->me == 0) {
+          char msg[160];
+          snprintf(msg,sizeof(msg),"surf_react surface/pwi strata: unknown element "
+                   "'%s' solid density, using 6.3e28 m^-3 (override with strata_dens)",
+                   el.c_str());
+          error->warning(FLERR,msg);
+        }
       }
       // deck overrides win over the built-in element defaults
       for (size_t k = 0; k < strata_dens_names.size(); k++) {
@@ -582,11 +681,11 @@ void SurfReactSurfacePWI::init()
         for (int i = 0; i < surf->nown; i++) {
           // semi-infinite substrate (1 mm) + initial deposited layers
           strata_state[i].init_substrate(1.0e-3, mat_dens[sub_m], sub_m);
-          for (size_t k = 0; k < sigma_init_names.size(); k++) {
-            int isp = particle->find_species((char *) sigma_init_names[k].c_str());
-            if (isp < 0) continue;
-            int m = mat_root_of[isp];
-            strata_state[i].deposit(m, sigma_init_vals[k], mat_dens[m]);
+          std::vector<std::pair<int,double>> layers;
+          collect_init_layers(i, layers);
+          for (auto &l : layers) {
+            int m = mat_root_of[l.first];
+            strata_state[i].deposit(m, l.second, mat_dens[m]);
           }
           for (int c = 0; c < strata_ncols; c++) sb[i][c] = 0.0;
           // cap the stack at max_layers BEFORE packing: with several
@@ -734,6 +833,7 @@ int SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
           : Eckstein::sputter_yield(E_in_eV, theta_eff, p);
       if (r->mat_isp >= 0) Y *= mat_conc(isurf, r->mat_isp);
     }
+    Y *= r->sp_yscale;
     if (Y <= 0.0) continue;
 
     int nemit = (int) Y;                         // floor(Y)
@@ -782,9 +882,10 @@ int SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
     }
 
     // sigma ledger: nemit real-atom-weighted macroatoms of species sp left
-    // this surf element -> net erosion of the sputtered species
+    // this surf element -> net erosion of the sputtered element, taken
+    // from whichever of its materials is exposed (deposit before bulk)
     if (sindex_custom >= 0)
-      sigma_accumulate(isurf, sp, -((double) nemit) * pw_inc);
+      sigma_debit_element(isurf, sp, ((double) nemit) * pw_inc);
   }
   return nemit_total;
 }
@@ -958,7 +1059,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
             double pw_inc = update->fnum;
             if (pweight_ewhich >= 0)
               pw_inc = particle->edvec[particle->ewhich[pweight_ewhich]][ip - particle->particles];
-            sigma_accumulate(isurf, ip->ispecies, pw_inc);
+            sigma_accumulate(isurf, deposit_species(ip->ispecies), pw_inc);
           }
           ip = NULL;
           return (list[i] + 1);
@@ -1033,7 +1134,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
               double pw_inc = update->fnum;
               if (pweight_ewhich >= 0)
                 pw_inc = particle->edvec[particle->ewhich[pweight_ewhich]][ip - particle->particles];
-              sigma_accumulate(isurf, sp_atom, pw_inc);
+              sigma_accumulate(isurf, deposit_species(sp_atom), pw_inc);
             }
             ip = NULL;
             return (list[i] + 1);
@@ -1148,6 +1249,166 @@ void SurfReactSurfacePWI::sigma_accumulate(int isurf, int isp, double datoms)
 }
 
 /* ----------------------------------------------------------------------
+   erosion debit of datoms (> 0) real atoms of the ELEMENT of species isp,
+   taken from whichever of the element's materials is exposed at the
+   surface: split over {element root, deposit_as aliases} in proportion
+   to their reaction-zone concentrations (stack order: a pure deposit
+   layer is consumed before the bulk below it). Without deposit_as, or
+   with feedback off, this is the plain per-species debit.
+------------------------------------------------------------------------- */
+
+void SurfReactSurfacePWI::sigma_debit_element(int isurf, int isp, double datoms)
+{
+  if (datoms <= 0.0) return;
+  if (dep_cols_of.empty() || dep_cols_of[isp].size() < 2 ||
+      !sigma_feedback || sconc_index < 0) {
+    sigma_accumulate(isurf, isp, -datoms);
+    return;
+  }
+  double *conc = surf->edarray_local[surf->ewhich[sconc_index]][isurf];
+  const std::vector<int> &cols = dep_cols_of[isp];
+  double csum = 0.0;
+  for (int c : cols) csum += (conc[c] > 0.0) ? conc[c] : 0.0;
+  if (csum <= 0.0) {
+    sigma_accumulate(isurf, isp, -datoms);
+    return;
+  }
+  for (int c : cols)
+    if (conc[c] > 0.0) sigma_accumulate(isurf, c, -datoms * conc[c] / csum);
+}
+
+/* ----------------------------------------------------------------------
+   initial layers for owned surf iown: uniform adens_init entries plus
+   per-surface adens_init_file values, both restricted to the
+   adens_init_group surf group when one is set
+------------------------------------------------------------------------- */
+
+int SurfReactSurfacePWI::init_layer_allowed(int iown)
+{
+  if (!sigma_init_bit) return 1;
+  bigint m = comm->me + (bigint) iown * comm->nprocs;
+  int mask = (domain->dimension == 2) ? surf->lines[m].mask : surf->tris[m].mask;
+  return (mask & sigma_init_bit) ? 1 : 0;
+}
+
+void SurfReactSurfacePWI::collect_init_layers(int iown,
+                                              std::vector<std::pair<int,double>> &out)
+{
+  out.clear();
+  if (!init_layer_allowed(iown)) return;
+  for (size_t k = 0; k < sigma_init_names.size(); k++) {
+    int isp = particle->find_species((char *) sigma_init_names[k].c_str());
+    if (isp < 0)
+      error->all(FLERR,"surf_react surface/pwi adens_init: unknown species");
+    out.push_back(std::make_pair(isp, sigma_init_vals[k]));
+  }
+  if (sfile_vals.empty()) return;
+  bigint m = comm->me + (bigint) iown * comm->nprocs;
+  surfint gid = (domain->dimension == 2) ? surf->lines[m].id : surf->tris[m].id;
+  for (size_t k = 0; k < sfile_vals.size(); k++) {
+    if (sfile_vals[k].empty()) continue;
+    double v = sfile_vals[k][gid - 1];
+    if (v > 0.0) out.push_back(std::make_pair(sfile_isp[k], v));
+  }
+}
+
+/* ----------------------------------------------------------------------
+   read seed file k on rank 0 and broadcast one value per surf id:
+   either a `dump surf` text file (last snapshot; column <sfile_col>,
+   surf ids from its `id` column) or a plain two-column "id value"
+   text (# comments allowed). Values are clipped at zero and scaled.
+------------------------------------------------------------------------- */
+
+void SurfReactSurfacePWI::read_sigma_init_file(int k)
+{
+  bigint nsurf = surf->nsurf;
+  std::vector<double> &vals = sfile_vals[k];
+  vals.assign((size_t) nsurf, 0.0);
+  int nread = 0;
+  if (comm->me == 0) {
+    std::ifstream in(sfile_path[k].c_str());
+    if (!in) {
+      char msg[256];
+      snprintf(msg,sizeof(msg),"surf_react surface/pwi adens_init_file: cannot open %s",
+               sfile_path[k].c_str());
+      error->one(FLERR,msg);
+    }
+    std::string line;
+    bool dump = false, in_rows = false;
+    int icol = -1, idcol = -1, ncols = 0;
+    bigint nrows = 0, irow = 0;
+    while (std::getline(in, line)) {
+      if (line.compare(0, 5, "ITEM:") == 0) {
+        dump = true;
+        in_rows = false;
+        if (line.compare(0, 21, "ITEM: NUMBER OF SURFS") == 0) {
+          std::getline(in, line);
+          nrows = (bigint) atoll(line.c_str());
+        } else if (line.compare(0, 11, "ITEM: SURFS") == 0) {
+          std::istringstream hs(line.substr(11));
+          std::string tok;
+          icol = idcol = -1; ncols = 0;
+          while (hs >> tok) {
+            if (tok == "id") idcol = ncols;
+            if (tok == sfile_col[k]) icol = ncols;
+            ncols++;
+          }
+          if (icol < 0 || idcol < 0) {
+            char msg[256];
+            snprintf(msg,sizeof(msg),"surf_react surface/pwi adens_init_file: "
+                     "column '%s' (and 'id') not found in %s",
+                     sfile_col[k].c_str(), sfile_path[k].c_str());
+            error->one(FLERR,msg);
+          }
+          // a later snapshot replaces an earlier one
+          std::fill(vals.begin(), vals.end(), 0.0);
+          nread = 0; irow = 0; in_rows = true;
+        }
+        continue;
+      }
+      if (dump && !in_rows) continue;
+      if (dump && nrows > 0 && irow >= nrows) { in_rows = false; continue; }
+      std::istringstream ls(line);
+      std::vector<double> f;
+      std::string tok;
+      while (ls >> tok) {
+        if (tok[0] == '#') break;
+        if (!tok.empty() && tok.back() == ',') tok.pop_back();
+        f.push_back(atof(tok.c_str()));
+      }
+      if (f.empty()) continue;
+      bigint id; double v;
+      if (dump) {
+        if ((int) f.size() < ncols) continue;
+        id = (bigint) f[idcol]; v = f[icol]; irow++;
+      } else {
+        if (f.size() < 2) continue;
+        id = (bigint) f[0]; v = f[1];
+      }
+      if (id < 1 || id > nsurf) {
+        char msg[256];
+        snprintf(msg,sizeof(msg),"surf_react surface/pwi adens_init_file: surf id %ld "
+                 "out of range in %s", (long) id, sfile_path[k].c_str());
+        error->one(FLERR,msg);
+      }
+      vals[id - 1] = (v > 0.0) ? v * sfile_scale[k] : 0.0;
+      nread++;
+    }
+    if (nread == 0) {
+      char msg[256];
+      snprintf(msg,sizeof(msg),"surf_react surface/pwi adens_init_file: no rows read from %s",
+               sfile_path[k].c_str());
+      error->one(FLERR,msg);
+    }
+    if (screen) fprintf(screen,"  surf_react surface/pwi: seeded %s from %s (%d surfs, x%g)\n",
+                        sfile_species[k].c_str(), sfile_path[k].c_str(), nread, sfile_scale[k]);
+    if (logfile) fprintf(logfile,"  surf_react surface/pwi: seeded %s from %s (%d surfs, x%g)\n",
+                         sfile_species[k].c_str(), sfile_path[k].c_str(), nread, sfile_scale[k]);
+  }
+  MPI_Bcast(vals.data(), (int) nsurf, MPI_DOUBLE, 0, world);
+}
+
+/* ----------------------------------------------------------------------
    called by Update at end of every timestep (via tally_update). Every
    sigma_nevery steps: allreduce the per-rank deltas (each impact happens
    on exactly one rank), fold into the owned custom array, refresh the
@@ -1160,6 +1421,8 @@ void SurfReactSurfacePWI::sync_sigma()
 
   MPI_Allreduce(sigma_delta,sigma_buf,n,MPI_DOUBLE,MPI_SUM,world);
   for (int i = 0; i < n; i++) sigma_delta[i] = 0.0;
+  MPI_Allreduce(dep_delta,dep_buf,(int) sigma_nsurf,MPI_DOUBLE,MPI_SUM,world);
+  for (int i = 0; i < (int) sigma_nsurf; i++) dep_delta[i] = 0.0;
 
   // owned surf i on this rank is local surf m = me + i*nprocs
   // (explicit non-distributed striding, cf. fix_surf_temp)
@@ -1169,6 +1432,9 @@ void SurfReactSurfacePWI::sync_sigma()
   int dim = domain->dimension;
   int nsown = surf->nown;
   double **sig = surf->edarray[surf->ewhich[sindex_custom]];
+  double *depvec = surf->edvec[surf->ewhich[sdep_index]];
+  double *netvec = surf->edvec[surf->ewhich[snet_index]];
+  double *erovec = surf->edvec[surf->ewhich[sero_index]];
 
   surfint gid;
   for (int i = 0; i < nsown; i++) {
@@ -1176,8 +1442,18 @@ void SurfReactSurfacePWI::sync_sigma()
     if (dim == 2) gid = surf->lines[m].id;
     else gid = surf->tris[m].id;
     bigint base = ((bigint) gid - 1) * sigma_ncols;
-    for (int j = 0; j < sigma_ncols; j++)
-      sig[i][j] += sigma_buf[base + j];
+    for (int j = 0; j < sigma_ncols; j++) {
+      const bigint idx = base + j;
+      // A micron-scale initial layer is O(1e22) atoms/m^2 while a quiet
+      // surface can change by only O(1e3--1e7) per sync.  Compensated
+      // summation retains those sub-ULP increments instead of rounding
+      // every update away independently.
+      const double y = sigma_buf[idx] - sigma_comp[idx];
+      const double old = sig[i][j];
+      const double next = old + y;
+      sigma_comp[idx] = (next - old) - y;
+      sig[i][j] = next;
+    }
 
     // strata stack: apply this sync's particle-impact net per MATERIAL
     // (charge states pool). Positive net -> surface deposition (low-E
@@ -1194,6 +1470,19 @@ void SurfReactSurfacePWI::sync_sigma()
           strata_state[i].erode_species(mm, -net);
       }
     }
+
+    // Runtime ledgers deliberately exclude adens_init/adens_init_file.
+    // The material array above is absolute state (and therefore contains
+    // an initial coating), while net/dep/ero record changes made after the
+    // run starts.  Updating incrementally also preserves that baseline
+    // across restarts because all three scalar customs are persisted.
+    double particle_net = 0.0;
+    for (int j = 0; j < sigma_ncols; j++)
+      particle_net += sigma_buf[base + j];
+    const double particle_dep = dep_buf[gid - 1];
+    netvec[i] += particle_net;
+    depvec[i] += particle_dep;
+    erovec[i] += particle_dep - particle_net;
   }
 
   // gross-erosion debit: sigma[ero_species] -= flux * dt * sigma_nevery,
@@ -1218,7 +1507,16 @@ void SurfReactSurfacePWI::sync_sigma()
       double *fvec = ce->vector_surf;
       for (int i = 0; i < nsown; i++) {
         double d = fvec[i] * (noconc ? 1.0 : conck[i][isp]) * debit_dt;
-        sig[i][isp] -= d;
+        bigint m = me + (bigint) i*nprocs;
+        surfint id = (dim == 2) ? surf->lines[m].id : surf->tris[m].id;
+        bigint idx = ((bigint) id - 1) * sigma_ncols + isp;
+        double y = -d - sigma_comp[idx];
+        double old = sig[i][isp];
+        double next = old + y;
+        sigma_comp[idx] = (next - old) - y;
+        sig[i][isp] = next;
+        netvec[i] -= d;
+        erovec[i] += d;
         if (strata_K > 0 && d > 0.0)
           strata_state[i].erode_species(mat_root_of[isp], d);
       }
@@ -1227,28 +1525,20 @@ void SurfReactSurfacePWI::sync_sigma()
       int icol = sigma_ero_col[k] - 1;
       for (int i = 0; i < nsown; i++) {
         double d = farr[i][icol] * (noconc ? 1.0 : conck[i][isp]) * debit_dt;
-        sig[i][isp] -= d;
+        bigint m = me + (bigint) i*nprocs;
+        surfint id = (dim == 2) ? surf->lines[m].id : surf->tris[m].id;
+        bigint idx = ((bigint) id - 1) * sigma_ncols + isp;
+        double y = -d - sigma_comp[idx];
+        double old = sig[i][isp];
+        double next = old + y;
+        sigma_comp[idx] = (next - old) - y;
+        sig[i][isp] = next;
+        netvec[i] -= d;
+        erovec[i] += d;
         if (strata_K > 0 && d > 0.0)
           strata_state[i].erode_species(mat_root_of[isp], d);
       }
     }
-  }
-
-  // derived columns: gross deposition and net (row sum)
-  MPI_Allreduce(dep_delta,dep_buf,(int) sigma_nsurf,MPI_DOUBLE,MPI_SUM,world);
-  for (int i = 0; i < (int) sigma_nsurf; i++) dep_delta[i] = 0.0;
-  double *depvec = surf->edvec[surf->ewhich[sdep_index]];
-  double *netvec = surf->edvec[surf->ewhich[snet_index]];
-  double *erovec = surf->edvec[surf->ewhich[sero_index]];
-  for (int i = 0; i < nsown; i++) {
-    bigint m = me + (bigint) i*nprocs;
-    if (dim == 2) gid = surf->lines[m].id;
-    else gid = surf->tris[m].id;
-    depvec[i] += dep_buf[gid - 1];
-    double nsum = 0.0;
-    for (int j = 0; j < sigma_ncols; j++) nsum += sig[i][j];
-    netvec[i] = nsum;
-    erovec[i] = depvec[i] - nsum;    // gross removal (positive)
   }
   // background implantation + retention saturation (task 5)
   for (size_t k = 0; k < imp_species.size(); k++) {
@@ -1273,7 +1563,16 @@ void SurfReactSurfacePWI::sync_sigma()
       double turnon = 0.5 * (tanh(imp_alpha[k] * (cD - imp_cmax[k])) + 1.0);
       double dimp = flux * (1.0 - imp_rcoef[k]) * (1.0 - turnon) * debit_dt;
       if (dimp <= 0.0) continue;
-      sig[i][isp] += dimp;
+      bigint m = me + (bigint) i*nprocs;
+      surfint id = (dim == 2) ? surf->lines[m].id : surf->tris[m].id;
+      bigint idx = ((bigint) id - 1) * sigma_ncols + isp;
+      double y = dimp - sigma_comp[idx];
+      double old = sig[i][isp];
+      double next = old + y;
+      sigma_comp[idx] = (next - old) - y;
+      sig[i][isp] = next;
+      netvec[i] += dimp;
+      depvec[i] += dimp;
       if (strata_K > 0) {
         if (imp_depth[k] > 0.0)
           strata_state[i].add_implanted(mat_root_of[isp], imp_depth[k], dimp);
@@ -1520,6 +1819,7 @@ void SurfReactSurfacePWI::readfile(char *fname)
         r->conc_id = NULL;
         r->conc_isp = -1;
         r->refl_tbl = -1;
+        r->sp_yscale = 1.0;
       }
     }
 
@@ -1758,8 +2058,15 @@ void SurfReactSurfacePWI::readfile(char *fname)
           int n2 = strlen(word) + 1;
           r->conc_id = new char[n2];
           strcpy(r->conc_id, word);
+        } else if (strcmp(word,"yscale") == 0) {
+          // yield multiplier, e.g. a weakly bound deposit material
+          word = strtok(NULL, " \t\n");
+          if (!word) error->all(FLERR, "Missing value after 'yscale' in S reaction");
+          r->sp_yscale = input->numeric(FLERR, word);
+          if (r->sp_yscale <= 0.0)
+            error->all(FLERR, "S reaction yscale must be > 0");
         } else {
-          error->all(FLERR, "Unknown keyword in S reaction (expect mat/conc)");
+          error->all(FLERR, "Unknown keyword in S reaction (expect mat/conc/yscale)");
         }
       }
 
@@ -2159,4 +2466,3 @@ void SurfReactSurfacePWI::ehist_write()
   delete [] loc;
   delete [] glob;
 }
-
