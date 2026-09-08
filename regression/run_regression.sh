@@ -75,7 +75,7 @@ declare -a TESTS=(
   "efield_polarization|verification/efield_polarization|in.input|"
   "coulomb_background|verification/collisions/coulomb|in.background|"
   "coulomb_binary|verification/collisions/coulomb|in.binary|"
-  "dustt2005_uniform_plasma|verification/particulates/dustt2005/uniform_plasma_benchmark|in.grain|"
+  "dustt2005_uniform_plasma|verification/particulates/dustt2005/uniform_plasma_benchmark|in.grain|input/grain.species"
   "dis2021_uniform_comparison|verification/particulates/dis2021/uniform_plasma_comparison|in.compare|"
   "pusher_gca|verification/pushers/orbit|in.gca|"
   "pusher_boris|verification/pushers/orbit|in.boris|"
@@ -153,6 +153,26 @@ for entry in "${TESTS[@]}"; do
     echo "SKIP (no deck)"
     ((SKIP++))
     continue
+  fi
+
+  # Some lightweight verification fixtures are generated rather than
+  # versioned.  Let a fresh checkout prepare them before applying the
+  # required-data check below (large external data still remain skips).
+  if [[ -n "$requires" && ! -e "$dir/$requires" &&
+        -f "$dir/scripts/make_input.py" ]]; then
+    generator_log="$dir/make_input.log"
+    if ! (cd "$dir" && "${PYTHON:-python3}" scripts/make_input.py \
+          > "$generator_log" 2>&1); then
+      RESULTS+=("FAIL  $name  (fixture generator failed; see make_input.log)")
+      echo "FAIL (fixture generation)"
+      ((FAIL++))
+      if [[ "$VERBOSE" -eq 1 ]]; then
+        echo "--- Last 20 lines of $generator_log ---"
+        tail -20 "$generator_log" 2>/dev/null || true
+        echo "---"
+      fi
+      continue
+    fi
   fi
   if [[ -n "$requires" && ! -e "$dir/$requires" ]]; then
     RESULTS+=("SKIP  $name  (missing $requires - regenerate it first)")
