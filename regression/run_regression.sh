@@ -94,6 +94,8 @@ declare -a TESTS=(
   "dis2021_uniform_comparison|verification/particulates/dis2021/uniform_plasma_comparison|in.compare|"
   "pusher_gca|verification/pushers/orbit|in.gca|"
   "pusher_boris|verification/pushers/orbit|in.boris|"
+  "pusher_hybrid_axiring|verification/pushers/hybrid|in.axiring|input/source.axi256"
+  "st40_core_species_boundary|workflows/particulates/st40_lithium_powder_dropper/verification/core_species_boundary|in.openedge|../../input/plasma_st40_solps_corefill.h5"
   "constant_flux|verification/surface_emission/constant_flux|in.constant_flux|"
   "d2_chemistry|verification/d2_chemistry|in.d2_chem|"
   "dustt2005_cat_transport|verification/particulates/dustt2005/cat_solps_droplet_transport|in.openedge|input/plasma.h5"
