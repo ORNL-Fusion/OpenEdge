@@ -21,6 +21,10 @@ cmake --build . -j 8
 ./run.sh /path/to/spa_mpi
 ```
 
+With no path argument, `run.sh` searches common build directories under
+`$HOME` and selects an executable that advertises the native VTK dump styles.
+An explicitly supplied executable is checked before the simulation starts.
+
 Set `NP` to exercise the same input with more MPI ranks:
 
 ```bash
