@@ -102,7 +102,7 @@ declare -a TESTS=(
   "west_boron_powder_dropper|workflows/particulates/west_boron_powder_dropper|in.openedge|../../impurity_transport/west_tungsten_transport/input/plasma.h5"
   "cat_liquid_metal_divertor|workflows/particulates/cat_liquid_metal_divertor|in.openedge|input/plasma_attached.h5"
   "west_tungsten_transport|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5"
-  "rfpie_tungsten_transport|workflows/impurity_transport/rfpie_tungsten_transport|in.openedge|input/plasma_he.h5|nokk"
+  "rfpie_tungsten_transport|workflows/impurity_transport/rfpie_tungsten_transport|in.openedge|input/plasma_he.h5"
 )
 
 # -----------------------------------------------------------------------

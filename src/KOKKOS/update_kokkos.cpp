@@ -320,6 +320,7 @@ void UpdateKokkos::init()
   oe_has_const_b = 0;
   oe_psi_on = oe_psi_action = oe_pw_slot_on = 0;
   oe_swlog_on = oe_swlog_cap = 0;
+  oe_kick_on = oe_paid_on = oe_wave_on = oe_kick_te_on = 0;
   oe_psi_imix = -1; oe_psi_nw = oe_psi_nh = 0;
   oe_psi_thr = oe_psi_axis = oe_psi_b = 0.0;
   oe_plasma_kkbase = NULL;
@@ -341,6 +342,8 @@ void UpdateKokkos::init()
   oe_sheath_sgroupbit = 0;
   oe_sheath_stamp_n = -1;
   oe_sheath_stamp_id = (cellint) -1;
+  oe_midx_stamp_n = -1;
+  oe_midx_stamp_id = (cellint) -1;
   oe_sheath_mD_amu = sheath_mD_amu;
   oe_sheath_dmax_user = sheath_dmax;
   oe_col_x0 = oe_col_y0 = 0.0;
@@ -395,9 +398,21 @@ void UpdateKokkos::init()
                 oe_swlog_cap);
     }
   }
-  if (sheath_flag && (sheath_kick || sheath_boundary))
-    error->all(FLERR,"Sheath kick/boundary modes are not supported with "
-               "Kokkos; use sheath spatial");
+  // sheath kick / boundary modes: impact kick + boundary band logic live in
+  // the move kernel / device Boris (see oe_kick_on); the spatial cache is
+  // still built for boundary mode (phi_wall per element), never for kick
+  oe_kick_on = 0;
+  if (sheath_flag && (sheath_kick || sheath_boundary) && sheath_geom_cidx >= 0 &&
+      pusher && (pusher->pusher_plasma_cidx >= 0 || pusher->pusher_plasma_fidx >= 0)) {
+    oe_kick_on = 1;
+    auto *csg0 = dynamic_cast<ComputeNearestSurfGrid*>(modify->compute[sheath_geom_cidx]);
+    if (csg0) oe_sheath_sgroupbit = csg0->sgroupbit;
+    if (comm->me == 0 && screen)
+      fprintf(screen,"  [kokkos] sheath %s mode on device (impact kick%s%s)\n",
+              sheath_boundary ? "boundary" : "kick",
+              sheath_boundary ? ", sub-grid band" : "",
+              sheath_waveform_custom >= 0 ? ", RF waveform" : "");
+  }
   // the device Boris dispatch is DIM == 3 only: a 2D/axisymmetric deck
   // with a configured pusher would silently advect ions ballistically
   // 2D/axisymmetric Boris is ported (oe_boris2d, 2026-09-08); the spatial
@@ -573,6 +588,9 @@ void UpdateKokkos::run(int nsteps)
   if (oe_pusher_subcycles > 0 &&
       sheath_flag && !sheath_kick && sheath_geom_cidx >= 0)
     build_oe_sheath_cache();
+  else if (oe_pusher_subcycles > 0 && sheath_geom_cidx >= 0 &&
+           (oe_boris_near > 0.0 || oe_gc_wall_flux))
+    bind_oe_midx_map();   // sheath off/kick: the shell still needs the wall map
 
   // OpenEdge: per-species pusher bypass (dust grains advect ballistically
   // even when charged — their forces live in the grain fixes; mirrors the
@@ -706,6 +724,17 @@ void UpdateKokkos::run(int nsteps)
       int need_any = 0;
       MPI_Allreduce(&need,&need_any,1,MPI_INT,MPI_MAX,world);
       if (need_any) build_oe_sheath_cache();
+    } else if (d_oe_midx_gcell.data() && sheath_geom_cidx >= 0 &&
+               (oe_boris_near > 0.0 || oe_gc_wall_flux)) {
+      // midx-only map (sheath off/kick): rebuild when the local grid changed
+      const int nloc_stamp = grid->nlocal;
+      const cellint fid_stamp = (nloc_stamp > 0 && grid->cells)
+        ? grid->cells[0].id : (cellint) -1;
+      int need = (nloc_stamp != oe_midx_stamp_n ||
+                  fid_stamp != oe_midx_stamp_id) ? 1 : 0;
+      int need_any = 0;
+      MPI_Allreduce(&need,&need_any,1,MPI_INT,MPI_MAX,world);
+      if (need_any) bind_oe_midx_map();
     }
 
     if (plasma_cache_flag &&
@@ -882,6 +911,30 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
       niterate++;
 
     d_particles = particle_kk->k_particles.view_device();
+
+    oe_paid_on = oe_wave_on = oe_kick_te_on = 0;
+    if (oe_kick_on) {   // sheath kick/boundary: paid state, pcache Te/Ti, RF waveform
+      if (sheath_paid_custom >= 0) {
+        particle_kk->sync(Device,CUSTOM_MASK);
+        d_oe_paid = particle_kk->k_eivec.h_view[particle->ewhich[sheath_paid_custom]].k_view.d_view;
+        oe_paid_on = 1;
+      }
+      if (pc_te_custom >= 0 && pc_ti_custom >= 0 &&
+          particle->ewhich[pc_te_custom] >= 0 && particle->ewhich[pc_ti_custom] >= 0) {
+        particle_kk->sync(Device,CUSTOM_MASK);
+        d_oe_kick_te = particle_kk->k_edvec.h_view[particle->ewhich[pc_te_custom]].k_view.d_view;
+        d_oe_kick_ti = particle_kk->k_edvec.h_view[particle->ewhich[pc_ti_custom]].k_view.d_view;
+        oe_kick_te_on = 1;
+      }
+      if (sheath_waveform_custom >= 0 && surf->exist) {
+        SurfKokkos *surf_kk_w = (SurfKokkos *) surf;
+        auto h_edarray_local = surf_kk_w->k_edarray_local.view_host();
+        const int ew = surf->ewhich[sheath_waveform_custom];
+        h_edarray_local[ew].k_view.sync_device();
+        d_oe_wave = h_edarray_local[ew].k_view.view_device();
+        oe_wave_on = 1;
+      }
+    }
 
     if (oe_psi_on) {   // fix reflect/psi: species scope table + marker weight
       d_oe_s2g = particle_kk->k_species2group.view_device();
@@ -2060,11 +2113,55 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
           ipart->icell = icell;
           dtremain *= 1.0 - minparam*frac;
 
-          if (nsurf_tally)
-            iorig = particle_i;
           int n = DIM == 3 ? tri->isc : line->isc;
           int sc_type = sc_type_list[n];
           int m = sc_map[n];
+
+          // sheath kick / boundary: accelerate through the wall potential at
+          // impact on material walls (CPU Update::move kick block). phi_uni from
+          // the per-element cache (+ RF drop) in boundary mode, else the
+          // floating-potential estimate from the particle's cached Te/Ti.
+          if (oe_kick_on) {
+            const int smask_k = (DIM == 3) ? tri->mask : line->mask;
+            const bool kick_material_wall =
+                (sc_type != 5) && (smask_k & oe_sheath_sgroupbit);
+            if (kick_material_wall) {
+              double phi_uni = -1.0;
+              if (oe_sheath_provider == 1 && d_oe_sheath_elem.data() &&
+                  minsurf < (int) d_oe_sheath_elem.extent(0) &&
+                  d_oe_sheath_elem(minsurf,0) > 0.5)
+                phi_uni = d_oe_sheath_elem(minsurf,2) + oe_wave_drop(minsurf, dt - dtremain);
+              double sk_te = 0.0, sk_ti = 0.0;
+              if (oe_kick_te_on && i < (int) d_oe_kick_te.extent(0)) {
+                sk_te = d_oe_kick_te(i); sk_ti = d_oe_kick_ti(i);
+              }
+              if (phi_uni >= 0.0 || sk_te > 0.0) {
+                const double QE_k = 1.602176634e-19, ME_k = 9.1093837015e-31;
+                const double AMU_k = 1.66053906660e-27, PI_k = 3.14159265358979323846;
+                const double mD_kg = oe_sheath_mD_amu * AMU_k;
+                const double ti_ratio = (sk_te > 0.0 && sk_ti > 0.0) ? (sk_ti / sk_te) : 0.0;
+                const double phi_float_mult = (sk_te > 0.0)
+                  ? 0.5 * log(mD_kg / (2.0 * PI_k * ME_k) / (1.0 + ti_ratio)) : 0.0;
+                const double phi_eV = (phi_uni >= 0.0) ? phi_uni
+                                      : Kokkos::fmax(phi_float_mult, 0.0) * sk_te;
+                const int isp_k = particle_i.ispecies;
+                const double Zk = Kokkos::fabs(d_species[isp_k].charge);
+                const double pmass = d_species[isp_k].mass;
+                if (Zk > 0.0 && pmass > 0.0 && phi_eV > 0.0) {
+                  const double *snorm = (DIM == 3) ? tri->norm : line->norm;
+                  const double vdotn = v[0]*snorm[0] + v[1]*snorm[1] + v[2]*snorm[2];
+                  const double vn_toward = -vdotn;
+                  const double dE_J = Zk * QE_k * phi_eV;
+                  const double vn_new = Kokkos::sqrt(vn_toward*vn_toward + 2.0*dE_J/pmass);
+                  const double dv = vn_new - vn_toward;
+                  v[0] -= dv * snorm[0]; v[1] -= dv * snorm[1]; v[2] -= dv * snorm[2];
+                }
+              }
+            }
+          }
+
+          if (nsurf_tally)
+            iorig = particle_i;
 
           if (DIM == 3) {
             if (sc_type == 0) {
@@ -3179,6 +3276,42 @@ void UpdateKokkos::build_oe_mesh_from_fix()
 }
 
 /* ----------------------------------------------------------------------
+   Bind the grid-cell -> nearest wall element map from the pusher's geom
+   compute without building the spatial-sheath cache. The CPU hybrid uses
+   this map for the Boris shell (boris_near) and the gc_wall flux whenever
+   they are on, independent of the sheath mode; the device previously only
+   had it through build_oe_sheath_cache() (sheath spatial), leaving the
+   shell silently inactive with `sheath off`.
+------------------------------------------------------------------------- */
+
+void UpdateKokkos::bind_oe_midx_map()
+{
+  if (sheath_geom_cidx < 0) return;
+  Compute *cg = modify->compute[sheath_geom_cidx];
+  auto *csg = dynamic_cast<ComputeNearestSurfGrid*>(cg);
+  if (!csg) return;
+  cg->compute_per_grid();
+  cg->invoked_flag |= INVOKED_PER_GRID;
+  oe_sheath_sgroupbit = csg->sgroupbit;
+
+  const int ng = grid->nlocal;
+  k_oe_midx_gcell = DAT::tdual_int_1d("oe_midx_gcell",ng);
+  {
+    auto h_midx = k_oe_midx_gcell.h_view;
+    for (int icell = 0; icell < ng; icell++)
+      h_midx(icell) = csg->midx_grid[icell];
+  }
+  k_oe_midx_gcell.modify_host();
+  k_oe_midx_gcell.sync_device();
+  d_oe_midx_gcell = k_oe_midx_gcell.d_view;
+  oe_midx_stamp_n = grid->nlocal;
+  oe_midx_stamp_id = (grid->nlocal > 0 && grid->cells) ? grid->cells[0].id : (cellint) -1;
+  if (comm->me == 0 && screen && oe_midx_stamp_n >= 0)
+    fprintf(screen,"  [kokkos] pusher wall map bound (boris_near/gc_wall, sheath %s)\n",
+            sheath_flag ? "kick" : "off");
+}
+
+/* ----------------------------------------------------------------------
    OpenEdge Phase D (rev 2): build the spatial-mode sheath data on host.
 
    CPU-parity design (2026-08-26). The CPU pusher engages the sheath per
@@ -3649,6 +3782,7 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
   bool sh_active = false;
   double sh_nR = 0.0, sh_nZ = 0.0, sh_sR = 0.0, sh_sZ = 0.0, sh_dmax = 0.0;
   SheathModelsKokkos::CMCoeffs sh_c = {};
+  int sh_midx2 = -1;
   if (oe_sheath_provider && gcell >= 0 &&
       gcell < (int) d_oe_midx_gcell.extent(0)) {
     int midx = d_oe_midx_gcell(gcell);
@@ -3668,6 +3802,7 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
       if (best_m >= 0) midx = best_m;
     }
     if (midx >= 0) {
+      sh_midx2 = midx;
       double nxr = d_lines[midx].norm[0], nyr = d_lines[midx].norm[1];
       const double nmag = Kokkos::sqrt(nxr*nxr + nyr*nyr);
       if (nmag > 0.0) { nxr /= nmag; nyr /= nmag; }
@@ -3760,6 +3895,35 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
     sh_d_cur = (R0 - sh_sR)*sh_nR + (Z0 - sh_sZ)*sh_nZ;
   }
 
+  // sheath boundary mode (CPU push_boris_2d): sub-grid band, see 3D twin
+  if (sheath_boundary && sh_active) {
+    const double sh_d0_sign = (sh_d_cur >= 0.0) ? 1.0 : -1.0;
+    const bool paid_ok = oe_paid_on && i < (int) d_oe_paid.extent(0);
+    if (paid_ok && sh_d0_sign > 0.0 && sh_d_cur > sh_dmax) d_oe_paid(i) = 0;   // SH_OUTSIDE
+    if (sh_d0_sign > 0.0 && sh_d_cur <= sh_dmax) {
+      double phi_here = SheathModelsKokkos::phi_at_distance(sh_c, 0.0) +
+                        oe_wave_drop(sh_midx2, 0.0);
+      if (phi_here > 0.0) {
+        if (paid_ok && d_oe_paid(i) == 0) d_oe_paid(i) = 1;   // SH_ARMED
+        double vR0 = 0.0, vZ0 = 0.0, vphi0 = 0.0;
+        OpenEdge::sparta_v_to_RZphi(vcur, dim, axi, 0.0, vR0, vZ0, vphi0);
+        const double vn = vR0*sh_nR + vZ0*sh_nZ;
+        if (vn > 0.0) {
+          const double barrier_J = Kokkos::fabs(charge) * oe_echarge * phi_here;
+          const double KEn = 0.5 * mass * vn * vn;
+          double dvn = 0.0;
+          if (KEn < barrier_J) dvn = 2.0 * vn;
+          else if (!paid_ok || d_oe_paid(i) != 2) {
+            dvn = vn - Kokkos::sqrt(vn*vn - 2.0*barrier_J/mass);
+            if (paid_ok) d_oe_paid(i) = 2;   // SH_APPLIED
+          }
+          OpenEdge::RZphi_force_to_sparta(vR0 - dvn*sh_nR, vZ0 - dvn*sh_nZ, vphi0,
+                                          dim, axi, 0.0, vcur[0], vcur[1], vcur[2]);
+        }
+      }
+    }
+  }
+
   for (int isub = 0; isub < nsub; isub++) {
     double xold[2] = {xcur[0], xcur[1]};
     double vR = 0.0, vZ = 0.0, vphi = 0.0;
@@ -3774,7 +3938,7 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
       zcur += vcur[2] * dt_sub;
     }
     // spatial-sheath potential impulse (CPU push_boris_2d parity)
-    if (sh_active) {
+    if (sh_active && !sheath_boundary) {   // spatial mode only (CPU guard)
       const double vn = vrhs[0]*sh_nR + vrhs[2]*sh_nZ;
       const double d_old = sh_d_cur;
       const double d_new = d_old + vn * dt_sub;
@@ -4377,6 +4541,36 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
     } else d_oe_sheath_phiprev(i) = 1.0;   // out of band: known phi = 0
   }
 
+  // sheath boundary mode (CPU push_boris_3d): sub-grid sheath-as-boundary
+  // band. Inside d_max on the plasma side: outbound ions either reflect
+  // (KE_n < barrier) or pay the barrier exactly once per transit
+  // (sheath_paid state OUTSIDE -> ARMED -> APPLIED).
+  if (sheath_boundary && sh_active) {
+    const double sh_d0 = (x[0]-sh_sref[0])*sh_nx + (x[1]-sh_sref[1])*sh_ny + (x[2]-sh_sref[2])*sh_nz;
+    const double sh_d0_sign = (sh_d0 >= 0.0) ? 1.0 : -1.0;
+    const bool paid_ok = oe_paid_on && i < (int) d_oe_paid.extent(0);
+    if (paid_ok && sh_d0_sign > 0.0 && sh_d0 > sh_dmax) d_oe_paid(i) = 0;   // SH_OUTSIDE
+    if (sh_d0_sign > 0.0 && sh_d0 <= sh_dmax) {
+      double sh_phi_total = SheathModelsKokkos::phi_at_distance(sh_c, 0.0) +
+                            oe_wave_drop(sh_midx_dbg, 0.0);
+      if (sh_phi_total > 0.0) {
+        if (paid_ok && d_oe_paid(i) == 0) d_oe_paid(i) = 1;   // SH_ARMED: band entry
+        const double vn = vcur[0]*sh_nx + vcur[1]*sh_ny + vcur[2]*sh_nz;
+        if (vn > 0.0) {
+          const double barrier_J = Kokkos::fabs(charge) * oe_echarge * sh_phi_total;
+          const double KEn = 0.5 * mass * vn * vn;
+          double dvn = 0.0;
+          if (KEn < barrier_J) dvn = 2.0 * vn;
+          else if (!paid_ok || d_oe_paid(i) != 2) {
+            dvn = vn - Kokkos::sqrt(vn*vn - 2.0*barrier_J/mass);
+            if (paid_ok) d_oe_paid(i) = 2;   // SH_APPLIED
+          }
+          vcur[0] -= dvn * sh_nx; vcur[1] -= dvn * sh_ny; vcur[2] -= dvn * sh_nz;
+        }
+      }
+    }
+  }
+
   for (int isub = 0; isub < nsub; isub++) {
     double E[3] = {0.0, 0.0, 0.0};
     double B[3] = {B_cached[0], B_cached[1], B_cached[2]};
@@ -4425,7 +4619,7 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
     // phi clamped to phi(0) for d <= 0. Outbound ions that cannot climb
     // the remaining potential reflect elastically at the turning point.
     // Line-for-line port of CPU pusher.cpp push_boris_3d.
-    if (sh_active) {
+    if (sh_active && !sheath_boundary) {   // spatial mode only (CPU guard)
       const double d_old =
         (xold[0] - sh_sref[0]) * sh_nx
       + (xold[1] - sh_sref[1]) * sh_ny

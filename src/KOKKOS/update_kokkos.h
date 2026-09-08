@@ -148,6 +148,29 @@ class UpdateKokkos : public Update {
   double oe_const_br, oe_const_bz, oe_const_bt, oe_const_bcart[3];
   void bind_oe_equ_from_fix(class FixBackground *pd);
   void bind_oe_psi();
+  // nearest-wall map (grid cell -> wall element) for the Boris shell /
+  // gc_wall flux, bound independently of the sheath mode (CPU uses the
+  // geom compute whenever boris_near or gc_wall is on)
+  void bind_oe_midx_map();
+
+  // sheath kick / boundary modes on device (roadmap item 5):
+  //  - impact kick at every material-wall collision (CPU Update::move block)
+  //  - boundary mode: sub-grid sheath-as-boundary band logic per push
+  //    (CPU push_boris_2d/3d), per-particle int custom "sheath_paid"
+  //  - RF waveform drop from the per-surf DOUBLE[3] custom (Vdc,Vrf,phase)
+  int oe_kick_on, oe_paid_on, oe_wave_on, oe_kick_te_on;
+  DAT::t_int_1d d_oe_paid;
+  DAT::t_float_1d d_oe_kick_te, d_oe_kick_ti;
+  DAT::t_float_2d_lr d_oe_wave;
+  KOKKOS_INLINE_FUNCTION
+  double oe_wave_drop(int midx, double t_offset) const {
+    if (!oe_wave_on || midx < 0 || midx >= (int) d_oe_wave.extent(0)) return 0.0;
+    const double now = time + (double)(ntimestep - time_last_update) * dt + t_offset;
+    const double vwall = d_oe_wave(midx,0) + d_oe_wave(midx,1) *
+        sin(2.0*3.14159265358979323846*sheath_frequency_hz*now + d_oe_wave(midx,2));
+    return Kokkos::fmax(0.0, -vwall);
+  }
+  int oe_midx_stamp_n; cellint oe_midx_stamp_id;
 
   // fix reflect/psi (psi-contour core boundary) on the device mover:
   // bilinear normalized-psi map copied from the fix, CPU-identical
