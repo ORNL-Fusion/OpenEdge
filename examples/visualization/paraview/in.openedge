@@ -1,0 +1,28 @@
+# Native ParaView output: no conversion script is required.
+
+variable            outdir index output
+
+shell               mkdir ${outdir}
+log                 ${outdir}/log.openedge
+
+seed                12345
+dimension           2
+boundary            o o p
+global              gridcut 0.0 comm/sort no
+
+create_box           0 10 0 10 -0.5 0.5
+create_grid          20 20 1 block * * *
+
+read_surf            input/circle.surf group obstacle particle check
+surf_collide         wall specular
+surf_modify          obstacle collide wall
+
+# The '*' is replaced by the timestep.  These styles write VTK XML
+# UnstructuredGrid files directly from OpenEdge.
+dump                 dgrid grid/vtk all 1 ${outdir}/grid_*.vtu id
+dump_modify          dgrid first yes
+dump                 dsurf surf/vtk obstacle 1 ${outdir}/surface_*.vtu id
+dump_modify          dsurf first yes
+
+run                  0
+print                "PARAVIEW_NATIVE_VTU_COMPLETE outdir=${outdir}"
