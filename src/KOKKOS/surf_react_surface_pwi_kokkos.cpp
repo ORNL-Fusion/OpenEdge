@@ -110,6 +110,13 @@ void SurfReactSurfacePWIKokkos::check_supported()
   if (R_attr)
     error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
                "R_surf (per-surf recycling coefficient)");
+  // slag 2026-08-28 `deposit_as <element> <species>`: the device react
+  // path credits deposits to the reactant species and debits erosion
+  // per species (sigma_acc); the alias/exposed-material split
+  // (deposit_species(), sigma_debit_element()) is host-only so far.
+  if (!dep_alias_of.empty())
+    error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
+               "deposit_as (deposit-material aliasing)");
 
   for (int m = 0; m < nlist_recycle; m++) {
     OneReaction *r = &rlist[m];
@@ -212,6 +219,7 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
   d_prob = DAT::t_float_1d("surf_react_pwi:prob",nl);
   d_Rrec = DAT::t_float_1d("surf_react_pwi:Rrec",nl);
   d_spp  = DAT::t_float_2d_lr("surf_react_pwi:spp",nl,4);
+  d_yscale = DAT::t_float_1d("surf_react_pwi:yscale",nl);
 
   auto h_type = Kokkos::create_mirror_view(d_type);
   auto h_prod = Kokkos::create_mirror_view(d_prod);
@@ -220,6 +228,8 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
   auto h_prob = Kokkos::create_mirror_view(d_prob);
   auto h_Rrec = Kokkos::create_mirror_view(d_Rrec);
   auto h_spp  = Kokkos::create_mirror_view(d_spp);
+  auto h_yscale = Kokkos::create_mirror_view(d_yscale);
+  Kokkos::deep_copy(h_yscale,1.0);
 
   for (int m = 0; m < nlist_recycle; m++) {
     OneReaction *r = &rlist[m];
@@ -233,6 +243,7 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
     h_spp(m,1) = r->sp_Eth;
     h_spp(m,2) = r->sp_Q;
     h_spp(m,3) = r->sp_ETF;
+    h_yscale(m) = (r->type == SPUTTER) ? r->sp_yscale : 1.0;
   }
   Kokkos::deep_copy(d_type,h_type);
   Kokkos::deep_copy(d_prod,h_prod);
@@ -241,6 +252,7 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
   Kokkos::deep_copy(d_prob,h_prob);
   Kokkos::deep_copy(d_Rrec,h_Rrec);
   Kokkos::deep_copy(d_spp,h_spp);
+  Kokkos::deep_copy(d_yscale,h_yscale);
 
   // TRIM reflection tables: fixed EIRENE-schema sizes
 

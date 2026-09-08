@@ -84,6 +84,7 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
   DAT::t_float_1d d_prob;           // [nlist] fixed probability
   DAT::t_float_1d d_Rrec;           // [nlist] A-channel recycling coeff R
   DAT::t_float_2d_lr d_spp;         // [nlist][4] Eckstein Es,Eth,Q,ETF
+  DAT::t_float_1d d_yscale;         // [nlist] S `yscale` yield multiplier (slag 2026-08-28)
 
   // TRIM reflection tables, fixed EIRENE-schema sizes (NE=12,NTHETA=7,NQ=5)
   DAT::t_float_2d_lr d_tr_E, d_tr_th, d_tr_raar;
@@ -431,6 +432,7 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
         p.Es = d_spp(m,0); p.Eth = d_spp(m,1); p.Q = d_spp(m,2); p.ETF = d_spp(m,3);
         Y = Eckstein::sputter_yield(E_in_eV, theta_eff, p);
       }
+      Y *= d_yscale(m);              // CPU: Y *= r->sp_yscale
       if (Y <= 0.0) continue;
 
       int nemit = (int) Y;
