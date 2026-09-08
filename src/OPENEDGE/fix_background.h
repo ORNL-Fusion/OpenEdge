@@ -131,6 +131,15 @@ class FixBackground : public Fix {
   // only mesh -> equilibrium -> 0; decks using the constant-B branches
   // must stay on the host implementation
   bool has_const_bfield() const { return const_has_bfield || const_has_bcart; }
+  // read-only access for the Kokkos mover (mesh-less constant-B decks)
+  bool const_bfield_cyl(double &br, double &bz, double &bt) const {
+    if (!const_has_bfield) return false;
+    br = const_br; bz = const_bz; bt = const_bt; return true;
+  }
+  bool const_bfield_cart(double b[3]) const {
+    if (!const_has_bcart) return false;
+    b[0] = const_bcart[0]; b[1] = const_bcart[1]; b[2] = const_bcart[2]; return true;
+  }
   bool psi_norm_gradient_at(double R, double Z,
                             double &dpsi_dR, double &dpsi_dZ) const;
 

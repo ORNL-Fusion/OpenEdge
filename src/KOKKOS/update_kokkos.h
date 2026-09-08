@@ -142,6 +142,13 @@ class UpdateKokkos : public Update {
   // native equilibrium B maps (slag b05b4687): preferred over
   // psi-derived B when present, matching the CPU equ_bfield_at chain
   int oe_has_equ_bmaps;
+  // constant-B fix background (no mesh, no psi map): 1 = cylindrical
+  // (const_br, const_bz, const_bt), 2 = Cartesian const_bcart
+  int oe_has_const_b;
+  double oe_const_br, oe_const_bz, oe_const_bt, oe_const_bcart[3];
+  void bind_oe_equ_from_fix(class FixBackground *pd);
+  KOKKOS_INLINE_FUNCTION
+  bool oe_const_bfield_slot(const double *xq, double *Bout) const;
   DAT::t_float_2d_lr d_oe_equ_br, d_oe_equ_bt, d_oe_equ_bz;
   int oe_dim, oe_axisymmetric;        // cached domain layout for point-query
 

@@ -317,6 +317,7 @@ void UpdateKokkos::init()
   // at the same site where d_oe_plasma_compute is bound (see below).
   oe_has_equilibrium = 0;
   oe_has_equ_bmaps = 0;
+  oe_has_const_b = 0;
   oe_plasma_kkbase = NULL;
   oe_equ_jm = oe_equ_km = 0;
   oe_equ_btf = oe_equ_rtf = 0.0;
@@ -373,9 +374,8 @@ void UpdateKokkos::init()
   if (oe_pusher_subcycles > 0 &&
       pusher->pusher_mode != Pusher::PUSHER_BORIS) {
     // Phase B (2026-09-08): hybrid/GCA ported to the device mover, 3D only
-    if (domain->dimension != 3)
-      error->all(FLERR,"Pusher mode hybrid/gca under Kokkos is 3D-only; "
-                 "run 2D/axisymmetric decks on the CPU build");
+    // 2D / axisymmetric hybrid ported 2026-09-08 (lh2d conjugation, 2D
+    // chord contract, Boris handoff to oe_boris2d)
     if (pusher->switch_log_file)
       error->all(FLERR,"Pusher switch_log_file is a host-only diagnostic; "
                  "not supported with Kokkos");
@@ -1329,14 +1329,14 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   if (pflag == PKEEP) {
     dtremain = dt;
     // OpenEdge: device Boris mover (hybrid/GCA errors out at init)
-    if (oe_pusher_subcycles > 0 && (d_oe_plasma_compute.data() || oe_has_mesh_b || oe_has_equilibrium)) {
+    if (oe_pusher_subcycles > 0 && (d_oe_plasma_compute.data() || oe_has_mesh_b || oe_has_equilibrium || oe_has_const_b)) {
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
-      if (DIM != 3)
-        oe_boris2d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
-      else if (oe_pusher_mode != 0)
+      if (oe_pusher_mode != 0)
         oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      else if (DIM != 3)
+        oe_boris2d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
       else
         oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
     } else {
@@ -1381,14 +1381,14 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   } else if (pflag == PINSERT) {
     dtremain = particle_i.dtremain;
     // OpenEdge: same Boris dispatch for newly inserted particles
-    if (oe_pusher_subcycles > 0 && (d_oe_plasma_compute.data() || oe_has_mesh_b || oe_has_equilibrium)) {
+    if (oe_pusher_subcycles > 0 && (d_oe_plasma_compute.data() || oe_has_mesh_b || oe_has_equilibrium || oe_has_const_b)) {
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
-      if (DIM != 3)
-        oe_boris2d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
-      else if (oe_pusher_mode != 0)
+      if (oe_pusher_mode != 0)
         oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      else if (DIM != 3)
+        oe_boris2d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
       else
         oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
     } else {
@@ -2606,6 +2606,71 @@ int UpdateKokkos::split2d(int icell, double *x) const
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
+   bind the fix background's equilibrium (psi map + optional native B maps)
+   to the device views; used with a mesh (mesh-miss fallback) and, since
+   2026-09-08, for mesh-less equilibrium-only decks (orbit in.gca.2d/axi)
+------------------------------------------------------------------------- */
+
+void UpdateKokkos::bind_oe_equ_from_fix(FixBackground *pd)
+{
+  // Equilibrium psi map from the fix: the CPU bfield_at chain is
+  // mesh -> equilibrium -> const; the mover's device dispatch already
+  // implements mesh-miss -> equilibrium (it was only ever bound from
+  // the compute provider before). Binding it here closes a documented
+  // divergence: outside-footprint particles moved ballistically on
+  // device while the CPU used equilibrium B (gate 9a fthcmp finding).
+
+  if (pd->has_equ && pd->equ_jm > 1 && pd->equ_km > 1 &&
+      (int) pd->psirz.size() >= pd->equ_jm * pd->equ_km &&
+      (int) pd->equ_r.size() >= pd->equ_jm &&
+      (int) pd->equ_z.size() >= pd->equ_km) {
+    const int jm = pd->equ_jm, km = pd->equ_km;
+    d_oe_equ_r   = DAT::t_float_1d("oe_equ_r",jm);
+    d_oe_equ_z   = DAT::t_float_1d("oe_equ_z",km);
+    d_oe_equ_psi = DAT::t_float_2d_lr("oe_equ_psi",km,jm);
+    auto h_r   = Kokkos::create_mirror_view(d_oe_equ_r);
+    auto h_z   = Kokkos::create_mirror_view(d_oe_equ_z);
+    auto h_psi = Kokkos::create_mirror_view(d_oe_equ_psi);
+    for (int j = 0; j < jm; j++) h_r(j) = pd->equ_r[j];
+    for (int k = 0; k < km; k++) h_z(k) = pd->equ_z[k];
+    for (int k = 0; k < km; k++)
+      for (int j = 0; j < jm; j++)
+        h_psi(k,j) = pd->psirz[(size_t)k*jm + j];
+    Kokkos::deep_copy(d_oe_equ_r,h_r);
+    Kokkos::deep_copy(d_oe_equ_z,h_z);
+    Kokkos::deep_copy(d_oe_equ_psi,h_psi);
+    oe_equ_btf = pd->btf;
+    oe_equ_rtf = pd->rtf;
+    oe_equ_jm  = jm;
+    oe_equ_km  = km;
+    oe_has_equilibrium = 1;
+
+    // native B maps (preferred over psi-derived, slag b05b4687)
+    const size_t equ_n = (size_t) jm * km;
+    if (pd->equ_br.size() == equ_n && pd->equ_bt.size() == equ_n &&
+        pd->equ_bz.size() == equ_n) {
+      d_oe_equ_br = DAT::t_float_2d_lr("oe_equ_br",km,jm);
+      d_oe_equ_bt = DAT::t_float_2d_lr("oe_equ_bt",km,jm);
+      d_oe_equ_bz = DAT::t_float_2d_lr("oe_equ_bz",km,jm);
+      auto h_br = Kokkos::create_mirror_view(d_oe_equ_br);
+      auto h_bt = Kokkos::create_mirror_view(d_oe_equ_bt);
+      auto h_bz = Kokkos::create_mirror_view(d_oe_equ_bz);
+      for (int k = 0; k < km; k++)
+        for (int j = 0; j < jm; j++) {
+          h_br(k,j) = pd->equ_br[(size_t)k*jm + j];
+          h_bt(k,j) = pd->equ_bt[(size_t)k*jm + j];
+          h_bz(k,j) = pd->equ_bz[(size_t)k*jm + j];
+        }
+      Kokkos::deep_copy(d_oe_equ_br,h_br);
+      Kokkos::deep_copy(d_oe_equ_bt,h_bt);
+      Kokkos::deep_copy(d_oe_equ_bz,h_bz);
+      oe_has_equ_bmaps = 1;
+    }
+  }
+
+}
+
+/* ----------------------------------------------------------------------
    OpenEdge: build the device mesh B/E views directly from FixBackground
    (static SOLPS/SOLEDGE3X plasma file). Mirrors the ComputePlasmaFields-
    Kokkos upload: per-tri fields, per-tri bounding boxes, CSR spatial
@@ -2629,21 +2694,34 @@ void UpdateKokkos::build_oe_mesh_from_fix()
   oe_has_mesh_gradti = 0;
   oe_has_equilibrium = 0;
   oe_has_equ_bmaps = 0;
+  oe_has_const_b = 0;
   if (pusher->pusher_plasma_fidx < 0) return;
   FixBackground *pd =
     dynamic_cast<FixBackground*>(modify->fix[pusher->pusher_plasma_fidx]);
   const int have_mesh_b = pd && pd->has_mesh && pd->mesh_nvtx > 0 &&
     pd->mesh_ntri > 0 &&
     (int) pd->mesh_tri_br.size() == pd->mesh_ntri;
+  oe_has_const_b = 0;
   if (!have_mesh_b) {
-    // fail loudly instead of advecting ions ballistically: the CPU
-    // point-query chain still serves B for equilibrium-only and
-    // constant-B decks, but the device equ binding below is only built
-    // alongside a mesh, so without one the pusher would silently no-op
-    if (pd && (!pd->equ_r.empty() || pd->has_const_bfield()))
-      error->all(FLERR,"Kokkos pusher: fix background has no mesh B "
-                 "(equilibrium-only / constant-B decks are not supported "
-                 "on the device mover; use the CPU build)");
+    // mesh-less fix provider (2026-09-08): bind the equilibrium psi map /
+    // native maps and the constant B so the device B chain (mesh -> equ ->
+    // const -> cell columns, the CPU bfield_at order) serves them
+    if (pd) {
+      oe_col_x0 = pd->column_x0;
+      oe_col_y0 = pd->column_y0;
+      oe_dim = domain->dimension;
+      oe_axisymmetric = domain->axisymmetric;
+      bind_oe_equ_from_fix(pd);
+      if (pd->const_bfield_cart(oe_const_bcart)) oe_has_const_b = 2;
+      else if (pd->const_bfield_cyl(oe_const_br, oe_const_bz, oe_const_bt)) oe_has_const_b = 1;
+      if (!oe_has_equilibrium && !oe_has_const_b &&
+          (!pd->equ_r.empty() || pd->has_const_bfield()))
+        error->all(FLERR,"Kokkos pusher: fix background has no mesh B and "
+                   "its equilibrium / constant B could not be bound");
+      if (comm->me == 0 && screen && (oe_has_equilibrium || oe_has_const_b))
+        fprintf(screen,"  [kokkos] pusher B: mesh-less fix provider "
+                "(equilibrium=%d const_b=%d)\n",oe_has_equilibrium,oe_has_const_b);
+    }
     return;
   }
   const int nvtx = pd->mesh_nvtx;
@@ -2878,61 +2956,7 @@ void UpdateKokkos::build_oe_mesh_from_fix()
       upload_cells(pd->mesh_grad_ti_z,"oe_meshcell_gtiz",d_oe_meshcell_gtiz);
   }
 
-  // Equilibrium psi map from the fix: the CPU bfield_at chain is
-  // mesh -> equilibrium -> const; the mover's device dispatch already
-  // implements mesh-miss -> equilibrium (it was only ever bound from
-  // the compute provider before). Binding it here closes a documented
-  // divergence: outside-footprint particles moved ballistically on
-  // device while the CPU used equilibrium B (gate 9a fthcmp finding).
-
-  if (pd->has_equ && pd->equ_jm > 1 && pd->equ_km > 1 &&
-      (int) pd->psirz.size() >= pd->equ_jm * pd->equ_km &&
-      (int) pd->equ_r.size() >= pd->equ_jm &&
-      (int) pd->equ_z.size() >= pd->equ_km) {
-    const int jm = pd->equ_jm, km = pd->equ_km;
-    d_oe_equ_r   = DAT::t_float_1d("oe_equ_r",jm);
-    d_oe_equ_z   = DAT::t_float_1d("oe_equ_z",km);
-    d_oe_equ_psi = DAT::t_float_2d_lr("oe_equ_psi",km,jm);
-    auto h_r   = Kokkos::create_mirror_view(d_oe_equ_r);
-    auto h_z   = Kokkos::create_mirror_view(d_oe_equ_z);
-    auto h_psi = Kokkos::create_mirror_view(d_oe_equ_psi);
-    for (int j = 0; j < jm; j++) h_r(j) = pd->equ_r[j];
-    for (int k = 0; k < km; k++) h_z(k) = pd->equ_z[k];
-    for (int k = 0; k < km; k++)
-      for (int j = 0; j < jm; j++)
-        h_psi(k,j) = pd->psirz[(size_t)k*jm + j];
-    Kokkos::deep_copy(d_oe_equ_r,h_r);
-    Kokkos::deep_copy(d_oe_equ_z,h_z);
-    Kokkos::deep_copy(d_oe_equ_psi,h_psi);
-    oe_equ_btf = pd->btf;
-    oe_equ_rtf = pd->rtf;
-    oe_equ_jm  = jm;
-    oe_equ_km  = km;
-    oe_has_equilibrium = 1;
-
-    // native B maps (preferred over psi-derived, slag b05b4687)
-    const size_t equ_n = (size_t) jm * km;
-    if (pd->equ_br.size() == equ_n && pd->equ_bt.size() == equ_n &&
-        pd->equ_bz.size() == equ_n) {
-      d_oe_equ_br = DAT::t_float_2d_lr("oe_equ_br",km,jm);
-      d_oe_equ_bt = DAT::t_float_2d_lr("oe_equ_bt",km,jm);
-      d_oe_equ_bz = DAT::t_float_2d_lr("oe_equ_bz",km,jm);
-      auto h_br = Kokkos::create_mirror_view(d_oe_equ_br);
-      auto h_bt = Kokkos::create_mirror_view(d_oe_equ_bt);
-      auto h_bz = Kokkos::create_mirror_view(d_oe_equ_bz);
-      for (int k = 0; k < km; k++)
-        for (int j = 0; j < jm; j++) {
-          h_br(k,j) = pd->equ_br[(size_t)k*jm + j];
-          h_bt(k,j) = pd->equ_bt[(size_t)k*jm + j];
-          h_bz(k,j) = pd->equ_bz[(size_t)k*jm + j];
-        }
-      Kokkos::deep_copy(d_oe_equ_br,h_br);
-      Kokkos::deep_copy(d_oe_equ_bt,h_bt);
-      Kokkos::deep_copy(d_oe_equ_bz,h_bz);
-      oe_has_equ_bmaps = 1;
-    }
-  }
-
+  bind_oe_equ_from_fix(pd);
   if (comm->me == 0 && screen)
     fprintf(screen,"  [kokkos] mesh B/E bound from fix background: "
             "%d tris, E-field %s, plasma %s, drag %s, gradTe %s, "
@@ -3194,6 +3218,30 @@ void UpdateKokkos::build_oe_sheath_cache()
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
+   constant-B fix background in SPARTA slot order at xq (xq already shifted
+   by the column origin in 3D). Cylindrical constants rotate by phi in 3D
+   (CPU bfield_at -> RZphi_force_to_sparta); the Cartesian constant is the
+   slot vector itself in 3D and (Br,Bz,Bt) = bcart in 2D as the CPU.
+------------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+bool UpdateKokkos::oe_const_bfield_slot(const double *xq, double *Bout) const
+{
+  if (!oe_has_const_b) return false;
+  if (oe_has_const_b == 2) {
+    if (oe_dim == 3) { Bout[0] = oe_const_bcart[0]; Bout[1] = oe_const_bcart[1]; Bout[2] = oe_const_bcart[2]; }
+    else OpenEdge::RZphi_force_to_sparta(oe_const_bcart[0], oe_const_bcart[1], oe_const_bcart[2],
+                                         oe_dim, oe_axisymmetric, 0.0, Bout[0], Bout[1], Bout[2]);
+    return true;
+  }
+  double phi = 0.0;
+  if (oe_dim == 3 && !oe_axisymmetric) phi = Kokkos::atan2(xq[1], xq[0]);
+  OpenEdge::RZphi_force_to_sparta(oe_const_br, oe_const_bz, oe_const_bt,
+                                  oe_dim, oe_axisymmetric, phi, Bout[0], Bout[1], Bout[2]);
+  return true;
+}
+
+/* ----------------------------------------------------------------------
    OpenEdge Phase B: device twin of Pusher::sample_gca_fields (3D).
    E from the mesh triangulation (fix background native potential), B and
    its derivatives from the equilibrium psi map (smooth grads); a mesh /
@@ -3254,6 +3302,12 @@ bool UpdateKokkos::oe_sample_gca_fields(const double *xpos, int icell,
           xq, oe_dim, oe_axisymmetric, d_oe_equ_r, d_oe_equ_z,
           d_oe_equ_br, d_oe_equ_bt, d_oe_equ_bz, oe_equ_jm, oe_equ_km, F.B);
     }
+    if (!have_b) {
+      // uniform field: zero gradients are a VALID GCA regime (CPU
+      // derivatives_valid = true for the constant source)
+      have_b = oe_const_bfield_slot(xq, F.B);
+      if (have_b) F.derivs_valid = true;
+    }
     if (!have_b && d_oe_plasma_compute.data() && oe_bx_col >= 0) {
       F.B[0] = d_oe_plasma_compute(icell, oe_bx_col);
       F.B[1] = d_oe_plasma_compute(icell, oe_by_col);
@@ -3274,6 +3328,10 @@ KOKKOS_INLINE_FUNCTION
 double UpdateKokkos::oe_near_signed(int midx, const double *p) const
 {
   if (midx < 0) return 1.0e30;
+  if (oe_dim != 3) {
+    const Surf::Line &ln = d_lines[midx];
+    return (p[0]-ln.p1[0])*ln.norm[0] + (p[1]-ln.p1[1])*ln.norm[1];
+  }
   const Surf::Tri &tr = d_tris[midx];
   return (p[0]-tr.p1[0])*tr.norm[0] + (p[1]-tr.p1[1])*tr.norm[1] +
          (p[2]-tr.p1[2])*tr.norm[2];
@@ -3358,6 +3416,7 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
         got_B = true;
       }
     }
+    if (!got_B) got_B = oe_const_bfield_slot(xq, Bslot);
     if (!got_B && d_oe_plasma_compute.data() && oe_bx_col >= 0) {
       Bslot[0] = d_oe_plasma_compute(icell, oe_bx_col);
       Bslot[1] = d_oe_plasma_compute(icell, oe_by_col);
@@ -3624,6 +3683,11 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
   const double qm = (charge * oe_echarge) / mass;
   const double qm_abs = Kokkos::fabs(qm);
   const bool have_state = (oe_has_gca_customs != 0);
+  // 2D-cart slot triple (x=R, y=Z, z=phi) is LEFT-handed: conjugate the
+  // toroidal components for the GCA RHS and flip the reconstructed v back
+  // (CPU push_hybrid_3d lh2d). Axi slots (Z,R,phi) and 3D are right-handed.
+  const bool lh2d = (oe_dim == 2 && !oe_axisymmetric);
+  const bool dim2 = (oe_dim != 3);
 
   GCAKokkos::Fields F;
   oe_sample_gca_fields(x, icell, F);
@@ -3688,13 +3752,21 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
 
   bool ran_gca = false;
   if (use_gca) {
+    auto flipF = [lh2d](GCAKokkos::Fields &Ff) {
+      if (!lh2d) return;
+      Ff.E[2] = -Ff.E[2]; Ff.B[2] = -Ff.B[2];
+      Ff.kappa[2] = -Ff.kappa[2]; Ff.curl_b[2] = -Ff.curl_b[2];
+    };
+    GCAKokkos::Fields Fk = F;
+    flipF(Fk);
     GCAKokkos::State g;
     if (have_state && d_oe_gca_valid(i) > 0.5) {
       g.X[0] = d_oe_gca_x(i); g.X[1] = d_oe_gca_y(i); g.X[2] = d_oe_gca_z(i);
       g.v_par = d_oe_gca_vpar(i);
       g.mu = (d_oe_gca_mu(i) > 0.0) ? d_oe_gca_mu(i) : 0.0;
     } else {
-      g = GCAKokkos::init_from_particle(x, v, mass, qm, F.B);
+      const double vinit[3] = {v[0], v[1], lh2d ? -v[2] : v[2]};
+      g = GCAKokkos::init_from_particle(x, vinit, mass, qm, Fk.B);
     }
 
     // per-stage field resampling: a failed stage query keeps the k1
@@ -3702,36 +3774,37 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
     auto fields_at = [&](const double *Xs, GCAKokkos::Fields &FS) {
       GCAKokkos::Fields Ft;
       if (!oe_sample_gca_fields(Xs, icell, Ft)) return;
+      flipF(Ft);
       if (!Ft.e_valid) { Ft.E[0] = FS.E[0]; Ft.E[1] = FS.E[1]; Ft.E[2] = FS.E[2]; }
       FS = Ft;
     };
 
     if (oe_gca_integrator == 1) {            // GCA_SIMPLE
-      GCAKokkos::push_gca(qm, dt, mass, F.E, F.B, F.gradBmag, g);
+      GCAKokkos::push_gca(qm, dt, mass, Fk.E, Fk.B, Fk.gradBmag, g);
     } else if (oe_gca_integrator == 2) {     // GCA_RK2 (midpoint)
       const double y[4] = {g.X[0], g.X[1], g.X[2], g.v_par};
-      GCAKokkos::Rhs r1 = GCAKokkos::rhs(qm, mass, y[3], g.mu, F);
+      GCAKokkos::Rhs r1 = GCAKokkos::rhs(qm, mass, y[3], g.mu, Fk);
       double ymid[4] = {y[0] + 0.5*dt*r1.dXdt[0], y[1] + 0.5*dt*r1.dXdt[1],
                         y[2] + 0.5*dt*r1.dXdt[2], y[3] + 0.5*dt*r1.dvpar_dt};
-      GCAKokkos::Fields Fmid = F;
+      GCAKokkos::Fields Fmid = Fk;
       fields_at(ymid, Fmid);
       GCAKokkos::Rhs r2 = GCAKokkos::rhs(qm, mass, ymid[3], g.mu, Fmid);
       for (int k = 0; k < 3; k++) g.X[k] = y[k] + dt * r2.dXdt[k];
       g.v_par = y[3] + dt * r2.dvpar_dt;
     } else {                                 // GCA_RK4
       const double y[4] = {g.X[0], g.X[1], g.X[2], g.v_par};
-      GCAKokkos::Rhs r1 = GCAKokkos::rhs(qm, mass, y[3], g.mu, F);
+      GCAKokkos::Rhs r1 = GCAKokkos::rhs(qm, mass, y[3], g.mu, Fk);
       double k1[4] = {dt*r1.dXdt[0], dt*r1.dXdt[1], dt*r1.dXdt[2], dt*r1.dvpar_dt};
       double y2[4] = {y[0]+0.5*k1[0], y[1]+0.5*k1[1], y[2]+0.5*k1[2], y[3]+0.5*k1[3]};
-      GCAKokkos::Fields F2 = F; fields_at(y2, F2);
+      GCAKokkos::Fields F2 = Fk; fields_at(y2, F2);
       GCAKokkos::Rhs r2 = GCAKokkos::rhs(qm, mass, y2[3], g.mu, F2);
       double k2[4] = {dt*r2.dXdt[0], dt*r2.dXdt[1], dt*r2.dXdt[2], dt*r2.dvpar_dt};
       double y3[4] = {y[0]+0.5*k2[0], y[1]+0.5*k2[1], y[2]+0.5*k2[2], y[3]+0.5*k2[3]};
-      GCAKokkos::Fields F3 = F; fields_at(y3, F3);
+      GCAKokkos::Fields F3 = Fk; fields_at(y3, F3);
       GCAKokkos::Rhs r3 = GCAKokkos::rhs(qm, mass, y3[3], g.mu, F3);
       double k3[4] = {dt*r3.dXdt[0], dt*r3.dXdt[1], dt*r3.dXdt[2], dt*r3.dvpar_dt};
       double y4[4] = {y[0]+k3[0], y[1]+k3[1], y[2]+k3[2], y[3]+k3[3]};
-      GCAKokkos::Fields F4 = F; fields_at(y4, F4);
+      GCAKokkos::Fields F4 = Fk; fields_at(y4, F4);
       GCAKokkos::Rhs r4 = GCAKokkos::rhs(qm, mass, y4[3], g.mu, F4);
       double k4[4] = {dt*r4.dXdt[0], dt*r4.dXdt[1], dt*r4.dXdt[2], dt*r4.dvpar_dt};
       for (int k = 0; k < 3; k++)
@@ -3759,14 +3832,14 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
       }
       // reconstruct v with the END-of-step fields (diagnostics + clean
       // Boris fallback); deterministic gyrophase hash, A1 flux sampling
-      GCAKokkos::Fields Fe = F;
+      GCAKokkos::Fields Fe = Fk;
       fields_at(g.X, Fe);
       const double omega_c = qm_abs * Fe.Bmag;
       const double phase_turns =
         (double) d_particles[i].id * GCAKokkos::PHASE_GOLDEN +
         (omega_c * dt * (double) ntimestep) / GCAKokkos::TWO_PI;
       double rand_u = phase_turns - Kokkos::floor(phase_turns);
-      if (oe_gc_wall_flux && midx_bn >= 0 && Fe.Bmag > 0.0) {
+      if (oe_gc_wall_flux && midx_bn >= 0 && oe_dim == 3 && Fe.Bmag > 0.0) {
         const double vperp_e = Kokkos::sqrt(2.0 * g.mu * Fe.Bmag / mass);
         const double rho_e = vperp_e / (qm_abs * Fe.Bmag);
         const double s1 = oe_near_signed(midx_bn, g.X);
@@ -3784,7 +3857,17 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
       }
       // qm = 0: the ADVECTED position rides at the guiding center
       GCAKokkos::to_particle(g, Fe.B, mass, 0.0, rand_u, xnew, v);
+      if (lh2d) v[2] = -v[2];   // back to slot frame
       if (oe_pusher_mode == 2) { xnew[0] = g.X[0]; xnew[1] = g.X[1]; xnew[2] = g.X[2]; }
+      // 2D: the GC advance is cylindrical, so hand the mover a pure
+      // in-plane chord (v = (xnew-x)/dt, v[2] = 0): axi_remap becomes the
+      // identity and mid-move re-entries retrace the same chord
+      if (dim2) {
+        xnew[2] = 0.0;
+        v[0] = (xnew[0] - x[0]) / dt;
+        v[1] = (xnew[1] - x[1]) / dt;
+        v[2] = 0.0;
+      }
       ran_gca = true;
     }
   }
@@ -3800,16 +3883,20 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
       g.mu = (d_oe_gca_mu(i) > 0.0) ? d_oe_gca_mu(i) : 0.0;
       const double pt = (double) d_particles[i].id * GCAKokkos::PHASE_GOLDEN;
       double xo[3], vo[3];
-      GCAKokkos::to_particle(g, F.B, mass, qm, pt - Kokkos::floor(pt), xo, vo);
+      const double Bh[3] = {F.B[0], F.B[1], lh2d ? -F.B[2] : F.B[2]};
+      GCAKokkos::to_particle(g, Bh, mass, qm, pt - Kokkos::floor(pt), xo, vo);
+      if (lh2d) vo[2] = -vo[2];
       v[0] = vo[0]; v[1] = vo[1]; v[2] = vo[2];
-      xstart[0] = xo[0]; xstart[1] = xo[1]; xstart[2] = xo[2];
+      xstart[0] = xo[0]; xstart[1] = xo[1];
+      if (!dim2) xstart[2] = xo[2];    // CPU: slot z stays as is in 2D
     }
     if (have_state) {
       d_oe_gca_mode(i) = 0.0;
       d_oe_gca_valid(i) = 0.0;                 // Boris advances x; X goes stale
       d_oe_gca_chi(i) += qm_abs * Bmag * dt;   // residence gyroangle
     }
-    oe_boris3d(i, icell, dt, xstart, v, xnew, charge, mass);
+    if (dim2) oe_boris2d(i, icell, dt, xstart, v, xnew, charge, mass);
+    else      oe_boris3d(i, icell, dt, xstart, v, xnew, charge, mass);
   }
 }
 
@@ -3885,6 +3972,7 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
         got_B = true;
       }
     }
+    if (!got_B) got_B = oe_const_bfield_slot(xq, B_cached);
     if (!got_B && d_oe_plasma_compute.data() && oe_bx_col >= 0) {
       B_cached[0] = d_oe_plasma_compute(icell, oe_bx_col);
       B_cached[1] = d_oe_plasma_compute(icell, oe_by_col);
