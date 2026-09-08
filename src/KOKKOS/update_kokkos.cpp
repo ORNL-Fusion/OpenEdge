@@ -707,7 +707,13 @@ void UpdateKokkos::run(int nsteps)
       timer->stamp(TIME_COLLIDE);
     }
 
-    if (collide_react) collide_react_update();
+    // surf collide/react tally roll-up: for surface/pwi/kk this is the
+    // device->host areal-density/ehist delta sync (host-authoritative
+    // ledger). Own bucket so it is not charged to Modify.
+    if (collide_react) {
+      collide_react_update();
+      timer->stamp(TIME_SREACT);
+    }
 
     // diagnostic fixes
 

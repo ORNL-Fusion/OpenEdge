@@ -445,6 +445,7 @@ void FixBalance::timer_cost()
   my_timer_cost += timer->array[TIME_COLLIDE];
   my_timer_cost += timer->array[TIME_MODIFY];
   my_timer_cost += timer->array[TIME_PCACHE];
+  my_timer_cost += timer->array[TIME_SREACT];
 
   // last = time up to this point
 

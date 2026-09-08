@@ -49,7 +49,8 @@ class ModifyKokkos : public Modify {
   int fix_timing_every;
   std::vector<double> fix_time_start, fix_time_end;
   std::vector<long> fix_calls_start, fix_calls_end;
-  double fix_drain_start, fix_drain_end;   // leading-fence wait (async kernels
+  double fix_drain_start, fix_drain_end;
+  double fix_wall_start, fix_wall_end;     // entry->exit wall of the two loops   // leading-fence wait (async kernels
                                            // from earlier phases draining
                                            // into the Modify bucket)
   void fix_timing_report();

@@ -977,7 +977,10 @@ void Update::run(int nsteps)
     }
 
 
-    if (collide_react) collide_react_update();
+    if (collide_react) {
+      collide_react_update();
+      timer->stamp(TIME_SREACT);
+    }
 
     // diagnostic fixes
 

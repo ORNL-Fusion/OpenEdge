@@ -27,6 +27,7 @@
 #include "grid_kokkos.h"
 #include "kokkos.h"
 #include "comm.h"
+#include "timer.h"
 #include <stdlib.h>
 #include <mpi.h>
 
@@ -48,6 +49,7 @@ ModifyKokkos::ModifyKokkos(SPARTA *sparta) : Modify(sparta)
 
   fix_timing_every = 0;
   fix_drain_start = fix_drain_end = 0.0;
+  fix_wall_start = fix_wall_end = 0.0;
   if (const char *e = getenv("OE_FIX_TIMING")) {
     fix_timing_every = atoi(e);
     if (fix_timing_every <= 0) fix_timing_every = 100;
@@ -71,6 +73,7 @@ ModifyKokkos::~ModifyKokkos()
 void ModifyKokkos::start_of_step()
 {
   const bool ft = fix_timing_every > 0;
+  const double tw = ft ? MPI_Wtime() : 0.0;
   if (ft && (int) fix_time_start.size() < nfix) {
     fix_time_start.resize(nfix,0.0); fix_time_end.resize(nfix,0.0);
     fix_calls_start.resize(nfix,0);   fix_calls_end.resize(nfix,0);
@@ -91,6 +94,7 @@ void ModifyKokkos::start_of_step()
     if (ft) { Kokkos::fence(); fix_time_start[j] += MPI_Wtime() - t0;
               fix_calls_start[j]++; }
   }
+  if (ft) fix_wall_start += MPI_Wtime() - tw;
 }
 
 /* ----------------------------------------------------------------------
@@ -101,6 +105,7 @@ void ModifyKokkos::start_of_step()
 void ModifyKokkos::end_of_step()
 {
   const bool ft = fix_timing_every > 0;
+  const double tw = ft ? MPI_Wtime() : 0.0;
   if (ft && (int) fix_time_end.size() < nfix) {
     fix_time_start.resize(nfix,0.0); fix_time_end.resize(nfix,0.0);
     fix_calls_start.resize(nfix,0);   fix_calls_end.resize(nfix,0);
@@ -122,6 +127,7 @@ void ModifyKokkos::end_of_step()
       if (ft) { Kokkos::fence(); fix_time_end[j] += MPI_Wtime() - t0;
                 fix_calls_end[j]++; }
     }
+  if (ft) fix_wall_end += MPI_Wtime() - tw;
   if (ft && update->ntimestep % fix_timing_every == 0) fix_timing_report();
 }
 
@@ -145,6 +151,9 @@ void ModifyKokkos::fix_timing_report()
     fprintf(out,"  %-8s %-32s start %9.3f             end %9.3f   "
             "(leading-fence wait: async kernels from earlier phases)\n",
             "-","async-drain",fix_drain_start,fix_drain_end);
+    fprintf(out,"  %-8s %-32s start %9.3f             end %9.3f   "
+            "(entry->exit wall of ModifyKokkos loops; TIME_MODIFY bucket so far %.3f)\n",
+            "-","loop-wall",fix_wall_start,fix_wall_end,timer->array[TIME_MODIFY]);
     for (int j = 0; j < n; j++) {
       if (fix_calls_start[j] == 0 && fix_calls_end[j] == 0) continue;
       fprintf(out,"  %-8s %-32s start %9.3f / %9.3f (%ld)   end %9.3f / %9.3f (%ld)\n",
