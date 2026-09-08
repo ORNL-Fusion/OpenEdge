@@ -83,6 +83,11 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
   DAT::t_int_1d d_sput;             // [nlist] sputter table index or -1
   DAT::t_float_1d d_prob;           // [nlist] fixed probability
   DAT::t_float_1d d_Rrec;           // [nlist] A-channel recycling coeff R
+  // item 2 (2026-09-08): D/E/R channels, molecular A, per-surf twall/R
+  DAT::t_int_1d d_prod2;            // [nlist] D-channel second product, -1 otherwise
+  DAT::t_float_1d d_e0, d_e1;       // [nlist] energy[0], energy[1] (D/E: eV per product; A: R, f_mol)
+  DAT::t_float_1d d_twall_surf;     // per-surf wall temperature custom (twall_surf)
+  DAT::t_float_1d d_R_surf;         // per-surf recycling coefficient custom (R_surf)
   DAT::t_float_2d_lr d_spp;         // [nlist][4] Eckstein Es,Eth,Q,ETF
   DAT::t_float_1d d_yscale;         // [nlist] S `yscale` yield multiplier (slag 2026-08-28)
 
@@ -145,6 +150,9 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
   int nsp;                          // ehist_nsp
   double emax;                      // ehist_emax
   double fnum_c, evconv, twall_c, rough_c;
+  int twall_surf_on, R_surf_on;     // per-surf customs bound for this call
+  int collide_rot_c, vibstyle_c;    // erot/evib gates (twins of ParticleKokkos)
+  double boltz_c;
 
 #ifndef SPARTA_KOKKOS_EXACT
   Kokkos::Random_XorShift64_Pool<DeviceType> rand_pool;
@@ -399,6 +407,53 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
     if (datoms > 0.0) Kokkos::atomic_add(&d_dep_delta(g), datoms/area);
   }
 
+  // device twins of Particle::erot()/evib() (same gates and sampling as
+  // ParticleKokkos::erot/evib); the CPU resamples internal energy of every
+  // re-emitted / created product at twall_eff (or its 300 K fallback)
+  KOKKOS_INLINE_FUNCTION
+  double erot_dev(int isp, double T, rand_type &g) const
+  {
+    if (!collide_rot_c) return 0.0;
+    const int rotdof = d_species[isp].rotdof;
+    if (rotdof < 2) return 0.0;
+    if (rotdof == 2) return -log(g.drand()) * boltz_c * T;
+    const double a = 0.5*rotdof - 1.0;
+    const double xmax = a + 1.0 + 9.0*sqrt(a+1.0);
+    double erm;
+    while (1) {
+      erm = xmax*g.drand();
+      const double b = pow(erm/a,a) * exp(a-erm);
+      if (b > g.drand()) break;
+    }
+    return erm * boltz_c * T;
+  }
+  KOKKOS_INLINE_FUNCTION
+  double evib_dev(int isp, double T, rand_type &g) const
+  {
+    enum{NONE,DISCRETE,SMOOTH};
+    const int vibdof = d_species[isp].vibdof;
+    if (vibstyle_c == NONE || vibdof < 2) return 0.0;
+    double eng = 0.0;
+    if (vibstyle_c == DISCRETE && vibdof == 2) {
+      const int ivib = static_cast<int> (-log(g.drand()) * T / d_species[isp].vibtemp[0]);
+      eng = ivib * boltz_c * d_species[isp].vibtemp[0];
+    } else if (vibstyle_c == SMOOTH || vibdof >= 2) {
+      if (vibdof == 2) eng = -log(g.drand()) * boltz_c * T;
+      else if (vibdof > 2) {
+        const double a = 0.5*vibdof - 1.0;
+        const double xmax = a + 1.0 + 9.0*sqrt(a+1.0);
+        double erm;
+        while (1) {
+          erm = xmax*g.drand();
+          const double b = pow(erm/a,a) * exp(a-erm);
+          if (b > g.drand()) break;
+        }
+        eng = erm * boltz_c * T;
+      }
+    }
+    return eng;
+  }
+
   // device twins of deposit_species() and sigma_debit_element()
   KOKKOS_INLINE_FUNCTION
   int deposit_species_dev(int isp) const
@@ -503,6 +558,8 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
 
     const double theta_eff =
         (theta_in_deg > rough_c) ? theta_in_deg - rough_c : 0.0;
+    double twall_eff = twall_c;                       // CPU: twall_surf custom if bound
+    if (twall_surf_on) twall_eff = d_twall_surf(isurf);
 
     // ---- additive self-sputtering (before the reflect/absorb lottery) ----
 
@@ -523,7 +580,7 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
           const double c = (d_conc_isp(m) >= 0) ? mat_conc_dev(isurf, d_conc_isp(m)) : 1.0;
           Y = sput_yield_lead(it, E_in_eV, theta_eff, c);
         } else if (kind == 2) {
-          Y = sput_yield_lead(it, E_in_eV, theta_eff, twall_c);
+          Y = sput_yield_lead(it, E_in_eV, theta_eff, twall_eff);
           if (d_mat_isp(m) >= 0) Y *= mat_conc_dev(isurf, d_mat_isp(m));
         } else {
           Y = sput_yield(it, E_in_eV, theta_eff);
@@ -617,7 +674,7 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
           const int it = d_refl_tbl(m);
           const double cval = (d_conc_isp(m) >= 0) ? mat_conc_dev(isurf, d_conc_isp(m)) : 1.0;
           p_this = (d_su_kind(it) == 2)
-            ? sput_yield_lead(it, E_in_eV, theta_eff, twall_c)
+            ? sput_yield_lead(it, E_in_eV, theta_eff, twall_eff)
             : sput_yield_lead(it, E_in_eV, theta_eff, cval);
           if (p_this < 0.0) p_this = 0.0;
           if (p_this > 1.0) p_this = 1.0;
@@ -639,7 +696,66 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
         }
         velreset = 1;
 
-        if (type == PWI_TRIM_REFLECT) {
+        if (type == PWI_DISSOCIATION) {
+          const int sp0 = d_prod(m);
+          const int sp1 = d_prod2(m);
+          const double erot0 = (twall_eff > 0.0) ? erot_dev(sp0, twall_eff, rand_gen) : 0.0;
+          const double evib0 = (twall_eff > 0.0) ? evib_dev(sp0, twall_eff, rand_gen) : 0.0;
+          const double erot1 = (twall_eff > 0.0) ? erot_dev(sp1, twall_eff, rand_gen) : 0.0;
+          const double evib1 = (twall_eff > 0.0) ? evib_dev(sp1, twall_eff, rand_gen) : 0.0;
+          ip->ispecies = sp0;
+          ip->erot = erot0;
+          ip->evib = evib0;
+          cosine_velocity(ip->v, norm, d_e0(m), d_species[sp0].mass, rand_gen);
+
+          double x[3], v[3];
+          x[0] = ip->x[0]; x[1] = ip->x[1]; x[2] = ip->x[2];
+          cosine_velocity(v, norm, d_e1(m), d_species[sp1].mass, rand_gen);
+          const int id = MAXSMALLINT*rand_gen.drand();
+          int index;
+          if (ATOMIC_REDUCTION == 0) {
+            index = d_nlocal();
+            d_nlocal()++;
+          } else
+            index = Kokkos::atomic_fetch_add(&d_nlocal(),1);
+          const int reallocflag = ParticleKokkos::add_particle_kokkos(
+              d_particles,index,id,sp1,ip->icell,x,v,erot1,evib1);
+          if (reallocflag) {
+            d_retry() = 1;
+            rand_pool.free_state(rand_gen);
+            return 0;
+          }
+          // CPU: modify->update_custom(nlocal-1, 0,0,0, zero) -> customs
+          // zeroed, pweight defaults to fnum; the move kernel sets
+          // flag/dtremain/weight of jp like the CPU caller
+          custom_.zero_all(index);
+          if (pw_slot >= 0) custom_.set_dvec(pw_slot, index, fnum_c);
+          jp = &d_particles[index];
+          rand_pool.free_state(rand_gen);
+          return (m + 1);
+
+        } else if (type == PWI_EXCHANGE) {
+          const int sp0 = d_prod(m);
+          if (twall_eff > 0.0) {
+            ip->erot = erot_dev(sp0, twall_eff, rand_gen);
+            ip->evib = evib_dev(sp0, twall_eff, rand_gen);
+          } else if (sp0 != ip->ispecies) {
+            ip->erot = 0.0;
+            ip->evib = 0.0;
+          }
+          ip->ispecies = sp0;
+          cosine_velocity(ip->v, norm, d_e0(m), d_species[sp0].mass, rand_gen);
+          rand_pool.free_state(rand_gen);
+          return (m + 1);
+
+        } else if (type == PWI_RECOMBINATION) {
+          if (sigma_on)   // CPU: sigma_accumulate(deposit_species(isp))
+            sigma_acc(isurf, deposit_species_dev(ip->ispecies), pw_inc);
+          ip = NULL;
+          rand_pool.free_state(rand_gen);
+          return (m + 1);
+
+        } else if (type == PWI_TRIM_REFLECT) {
           const int sp0 = d_prod(m);
           double u1 = rand_gen.drand();
           double u2 = rand_gen.drand();
@@ -653,8 +769,13 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
                              cos_azim, d_species[sp0].mass, rand_gen);
           // internal energy: products are guarded monatomic at init, so
           // the twall accommodation branch is identically zero
-          ip->erot = 0.0;
-          ip->evib = 0.0;
+          if (twall_eff > 0.0) {
+            ip->erot = erot_dev(sp0, twall_eff, rand_gen);
+            ip->evib = evib_dev(sp0, twall_eff, rand_gen);
+          } else {
+            ip->erot = 0.0;
+            ip->evib = 0.0;
+          }
           ip->ispecies = sp0;
           ip->v[0] = v_out[0];
           ip->v[1] = v_out[1];
@@ -662,23 +783,41 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
           rand_pool.free_state(rand_gen);
           return (m + 1);
 
-        } else {  // PWI_ABSORB_REEMIT, simple return (reactant == product)
-          const double R_rec = d_Rrec(m);
+        } else {  // PWI_ABSORB_REEMIT: CPU lottery (atomic / molecular / pump)
+          double R_rec = d_Rrec(m);
+          if (R_surf_on) {                 // per-surf R_surf custom, clamped
+            R_rec = d_R_surf(isurf);
+            if (R_rec < 0.0) R_rec = 0.0;
+            if (R_rec > 1.0) R_rec = 1.0;
+          }
+          const double f_mol = d_e1(m);
+          const int sp_atom = ip->ispecies;
+          const int sp_mol  = d_prod(m);
+          const bool has_mol_channel = (sp_mol != sp_atom);
+          double p_atom, p_mol;
+          if (has_mol_channel) {
+            p_atom = R_rec * (1.0 - f_mol);
+            p_mol  = R_rec * f_mol * 0.5;   // 2 atoms -> 1 molecule
+          } else {
+            p_atom = R_rec;
+            p_mol  = 0.0;
+          }
+          const double T_out = (twall_eff > 0.0) ? twall_eff : 300.0;
           const double u = rand_gen.drand();
-          if (u < R_rec) {
-            // atomic re-emission at the wall temperature
-            const int sp0 = ip->ispecies;
-            const double T_out = (twall_c > 0.0) ? twall_c : 300.0;
-            thermal_flux_velocity(ip->v, norm, T_out, d_species[sp0].mass,
+          if (u < p_atom + p_mol) {
+            // atomic (u < p_atom) or molecular re-emission at the wall temperature
+            const int sp_out = (u < p_atom) ? sp_atom : sp_mol;
+            thermal_flux_velocity(ip->v, norm, T_out, d_species[sp_out].mass,
                                   rand_gen);
-            ip->erot = 0.0;
-            ip->evib = 0.0;
+            ip->ispecies = sp_out;
+            ip->erot = erot_dev(sp_out, T_out, rand_gen);
+            ip->evib = evib_dev(sp_out, T_out, rand_gen);
             rand_pool.free_state(rand_gen);
             return (m + 1);
           } else {
-            // retained: deposit into the areal-density ledger, delete
-            if (sigma_on)   // CPU: sigma_accumulate(deposit_species(isp))
-              sigma_acc(isurf, deposit_species_dev(ip->ispecies), pw_inc);
+            // retained (pumped): deposit into the areal-density ledger, delete
+            if (sigma_on)   // CPU: sigma_accumulate(deposit_species(sp_atom))
+              sigma_acc(isurf, deposit_species_dev(sp_atom), pw_inc);
             ip = NULL;
             rand_pool.free_state(rand_gen);
             return (m + 1);

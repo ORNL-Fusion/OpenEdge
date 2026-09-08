@@ -17,6 +17,8 @@
 #include "domain.h"
 #include "surf.h"
 #include "particle_kokkos.h"
+#include "surf_kokkos.h"
+#include "collide.h"
 #include "sparta_masks.h"
 #include "random_knuth.h"
 #include "memory.h"
@@ -107,53 +109,11 @@ void SurfReactSurfacePWIKokkos::init()
 
 void SurfReactSurfacePWIKokkos::check_supported()
 {
-  if (twall_attr)
-    error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
-               "twall_surf (per-surf wall temperature)");
-  if (R_attr)
-    error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
-               "R_surf (per-surf recycling coefficient)");
-  // deposit_as: ported (d_dep_alias / d_dep_cols, Phase D 2026-09-08)
-
-  for (int m = 0; m < nlist_recycle; m++) {
-    OneReaction *r = &rlist[m];
-    if (!r->active) continue;
-
-    if (r->type == DISSOCIATION || r->type == EXCHANGE ||
-        r->type == RECOMBINATION)
-      error->all(FLERR,"surf_react surface/pwi/kk supports only T/A/S "
-                 "reaction channels (D/E/R not yet ported)");
-
-    // Phase D (2026-09-08): mat/conc weighting, rtable reflection and
-    // compound / T-axis sputter tables are on the device (per-surf conc
-    // view synced after every sync_sigma; T-axis at the scalar twall --
-    // twall_surf is rejected above).
-
-    if (r->type == ABSORB_REEMIT) {
-      // CPU semantics: atomic re-emission (prob R*(1-f_mol)) returns the
-      // REACTANT species; the product species only matters for the
-      // molecular channel (prob R*f_mol/2), which is not ported yet.
-      // Reject only decks where that channel could actually fire.
-      if (r->energy[0] > 0.0 && r->energy[1] > 0.0 &&
-          (r->nproduct != 1 || r->products[0] != r->reactants[0]))
-        error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
-                   "molecular A-channel conversion (R > 0 with f_mol > 0 "
-                   "and product != reactant)");
-    }
-
-    // device path emits products with erot = evib = 0; the CPU
-    // resamples internal energy at twall — and at a 300 K fallback when
-    // twall is UNSET (surf_react_surface_pwi.cpp) — so molecular
-    // products diverge silently either way. Reject unconditionally.
-    for (int j = 0; j < r->nproduct; j++) {
-      int sp = r->products[j];
-      if (particle->species[sp].rotdof >= 2 ||
-          particle->species[sp].vibdof >= 2)
-        error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
-                   "polyatomic products (CPU resamples erot/evib at twall "
-                   "or its 300 K fallback; device emits 0)");
-    }
-  }
+  // 2026-09-08: every PWI mode now has a device implementation
+  // (T/A/S incl. mat/conc/rtable/T-axis tables and deposit_as; D/E/R
+  // channels; molecular A-conversion; twall_surf / R_surf per-surf
+  // customs; polyatomic products via erot_dev/evib_dev). Kept as the
+  // single place to reject a future host-only mode explicitly.
 }
 
 /* ----------------------------------------------------------------------
@@ -170,6 +130,13 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
   evconv = update->joule2ev * update->mvv2e;
   twall_c = twall;
   rough_c = rough_dm;
+  {
+    enum{NONE,DISCRETE,SMOOTH};
+    collide_rot_c = (collide && collide->rotstyle != NONE) ? 1 : 0;
+    vibstyle_c = collide ? collide->vibstyle : NONE;
+  }
+  boltz_c = update->boltz;
+  twall_surf_on = R_surf_on = 0;
   sigma_on = (sindex_custom >= 0);
   ehist_on = (ehist_file != NULL);
   ncols = sigma_ncols;
@@ -208,6 +175,9 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
   d_mat_isp  = DAT::t_int_1d("surf_react_pwi:mat_isp",nl);
   d_conc_isp = DAT::t_int_1d("surf_react_pwi:conc_isp",nl);
   d_refl_tbl = DAT::t_int_1d("surf_react_pwi:refl_tbl",nl);
+  d_prod2 = DAT::t_int_1d("surf_react_pwi:prod2",nl);
+  d_e0 = DAT::t_float_1d("surf_react_pwi:e0",nl);
+  d_e1 = DAT::t_float_1d("surf_react_pwi:e1",nl);
 
   auto h_type = Kokkos::create_mirror_view(d_type);
   auto h_prod = Kokkos::create_mirror_view(d_prod);
@@ -221,6 +191,10 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
   auto h_mat  = Kokkos::create_mirror_view(d_mat_isp);
   auto h_conc = Kokkos::create_mirror_view(d_conc_isp);
   auto h_refl = Kokkos::create_mirror_view(d_refl_tbl);
+  auto h_prod2 = Kokkos::create_mirror_view(d_prod2);
+  auto h_e0 = Kokkos::create_mirror_view(d_e0);
+  auto h_e1 = Kokkos::create_mirror_view(d_e1);
+  Kokkos::deep_copy(h_prod2,-1);
   Kokkos::deep_copy(h_mat,-1); Kokkos::deep_copy(h_conc,-1); Kokkos::deep_copy(h_refl,-1);
 
   for (int m = 0; m < nlist_recycle; m++) {
@@ -239,6 +213,10 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
     h_mat(m)  = r->mat_isp;
     h_conc(m) = r->conc_isp;
     h_refl(m) = (r->type == TRIM_REFLECT) ? r->refl_tbl : -1;
+    h_prod2(m) = (r->nproduct > 1) ? r->products[1] : -1;
+    // energy[] is MAXPRODUCT long; A stores (R, f_mol), D (E0, E1), E (E0)
+    h_e0(m) = r->energy ? r->energy[0] : 0.0;
+    h_e1(m) = r->energy ? r->energy[1] : 0.0;
   }
   Kokkos::deep_copy(d_type,h_type);
   Kokkos::deep_copy(d_prod,h_prod);
@@ -251,6 +229,9 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
   Kokkos::deep_copy(d_mat_isp,h_mat);
   Kokkos::deep_copy(d_conc_isp,h_conc);
   Kokkos::deep_copy(d_refl_tbl,h_refl);
+  Kokkos::deep_copy(d_prod2,h_prod2);
+  Kokkos::deep_copy(d_e0,h_e0);
+  Kokkos::deep_copy(d_e1,h_e1);
 
   // TRIM reflection tables: fixed EIRENE-schema sizes
 
@@ -537,6 +518,28 @@ void SurfReactSurfacePWIKokkos::pre_react()
   // resolve the pweight edvec slot at move time: other modules can add
   // particle customs after init, which shifts ewhich values
   pw_slot = (pweight_ewhich >= 0) ? particle->ewhich[pweight_ewhich] : -1;
+
+  // per-surf customs (twall_surf / R_surf): same binding as the diffuse
+  // collider's per-surf temperature; sync only moves data when modified
+  twall_surf_on = R_surf_on = 0;
+  if (tindex_custom >= 0 || rindex_custom >= 0) {
+    SurfKokkos *surf_kk = (SurfKokkos *) surf;
+    auto h_edvec_local = surf_kk->k_edvec_local.view_host();
+    if (tindex_custom >= 0) {
+      if (surf->estatus[tindex_custom] == 0) surf->spread_custom(tindex_custom);
+      const int ew = surf->ewhich[tindex_custom];
+      h_edvec_local[ew].k_view.sync_device();
+      d_twall_surf = h_edvec_local[ew].k_view.view_device();
+      twall_surf_on = 1;
+    }
+    if (rindex_custom >= 0) {
+      if (surf->estatus[rindex_custom] == 0) surf->spread_custom(rindex_custom);
+      const int ew = surf->ewhich[rindex_custom];
+      h_edvec_local[ew].k_view.sync_device();
+      d_R_surf = h_edvec_local[ew].k_view.view_device();
+      R_surf_on = 1;
+    }
+  }
 }
 
 void SurfReactSurfacePWIKokkos::post_react()
