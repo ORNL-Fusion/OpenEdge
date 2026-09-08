@@ -33,7 +33,7 @@ DT = 1e-6
 VTI = math.sqrt(2.0 * TI * QE / MI)
 U_SMALL = 1.0e-3
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def f_gamma(u, a):

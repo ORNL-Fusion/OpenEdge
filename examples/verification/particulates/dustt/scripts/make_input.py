@@ -8,7 +8,7 @@ RD = 1.0e-6
 RHO_LI = 534.0
 MASS = 4.0 / 3.0 * 3.141592653589793 * RD**3 * RHO_LI
 
-base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "input")
+base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "input")
 os.makedirs(base, exist_ok=True)
 
 with open(os.path.join(base, "grain.species"), "w") as f:

@@ -1,106 +1,60 @@
 # OpenEdge examples
 
-## Running a case
-
-CPU (MPI):
-
-```bash
-cd examples/workflows/west_impurity_transport
-mpirun -np 8 /path/to/build/src/spa_mpi -in in.axi_west_emission
-```
-
-GPU (Kokkos + CUDA, one rank per GPU; backend under active
-development/validation — see the top-level README):
+Each leaf directory is runnable on its own: an `in.*` deck, its `input/`
+data, and a `scripts/` folder with checks or plots. Outputs land in
+`output/` and are ignored by git.
 
 ```bash
-mpirun -np 1 /path/to/build_gpu/src/spa_mpi \
-    -k on g 1 -sf kk -in in.axi_west_emission
+cd examples/verification/pushers/orbit
+./run.sh /path/to/spa_mpi
 ```
 
-Quick sanity check of the whole suite:
+Smoke-test the whole suite from the repository root:
 
 ```bash
 ./regression/run_regression.sh --exe /path/to/spa_mpi
 ```
 
-Outputs (log, dumps, surface tallies) land in the case directory. See
-each leaf `README.md` for case-specific post-processing.
-
-The public examples are organized by purpose. Each leaf directory is intended
-to be runnable on its own and normally contains an `in.*` deck plus its input
-data, checks, or plotting scripts.
-
 ## Verification
 
-`verification/` contains focused checks that ask whether OpenEdge solves the
-implemented model correctly. They use analytical solutions, numerical
-references, or code-to-code comparisons with deterministic PASS/FAIL criteria.
-These are the best cases for regression testing. Comparisons against physical
-experiments are validation and should be labeled separately.
+Focused checks that ask whether OpenEdge solves the implemented model
+correctly, against analytical solutions, numerical references, or other
+codes. Every case has a deterministic PASS/FAIL gate.
 
 | Directory | Purpose |
 |---|---|
 | `verification/collisions/coulomb/` | Coulomb slowing-down and binary thermalization |
-| `verification/efield_polarization/` | Polarization-drift verification |
-| `verification/ionization_recombination/` | ADAS ionization, recombination, and charge exchange |
-| `verification/particulates/dustt/` | Grain dynamics comparison with DUSTT |
-| `verification/particulates/droplet_transport/` | Droplet-mover integration gate in CAT geometry |
-| `verification/pushers/orbit/` | Boris and GCA orbit verification |
-| `verification/pushers/hybrid/` | Hybrid near-wall pusher verification |
+| `verification/efield_polarization/` | Polarization drift in a time-dependent E field |
+| `verification/ionization_recombination/` | ADAS ionization and recombination balance |
+| `verification/particulates/dustt/` | Grain charging and drag against DUSTT |
+| `verification/particulates/droplet_transport/` | Droplet movers in CAT geometry |
+| `verification/pushers/orbit/` | Boris and GCA orbits |
+| `verification/pushers/hybrid/` | Boris/GCA near-wall handoff |
 | `verification/surface_emission/constant_flux/` | Constant-flux emission and cadence scaling |
+| `verification/surface_pwi/deposit_tagging/` | Deposit tagging and layer seeding |
 
 ## Workflows
 
-`workflows/` contains larger scientific cases, device applications, and
-notebook-driven demonstrations. They can participate in smoke tests, but are
-primarily intended to demonstrate complete modeling workflows.
+Device-scale cases that demonstrate a complete modeling chain.
 
 | Directory | Purpose |
 |---|---|
-| `workflows/particulates/cat_liquid_metal_divertor/` | CAT liquid-metal surface sources and droplet response |
-| `workflows/particulates/st40_lithium_powder_dropper/` | ST40 lithium-powder dropper |
-| `workflows/particulates/west_boron_powder_dropper/` | WEST boron-powder injection |
+| `workflows/particulates/cat_liquid_metal_divertor/` | CAT liquid-metal surface sources and droplets |
+| `workflows/particulates/st40_lithium_powder_dropper/` | ST40 lithium powder injection |
+| `workflows/particulates/west_boron_powder_dropper/` | WEST boron powder injection |
 | `workflows/impurity_transport/rfpie_tungsten_transport/` | RFPIE tungsten sputtering and transport |
 | `workflows/impurity_transport/west_tungsten_transport/` | Axisymmetric WEST tungsten transport |
 
-ParaView integration examples live under `visualization/paraview/`.
+ParaView examples are under `visualization/paraview/`.
 
-## Local WIP
+## Local work
 
-Unpublished or incomplete research cases belong under `wip/`. The complete
-directory is ignored by Git and is not part of the public repository. Do not
-rely on that directory as the only copy of important work: ignored files can
-be removed by `git clean -fdX`.
-
-Use `NOTES.local.md` or a `*.local.pdf` suffix for private notes stored inside
-an otherwise public case. Public case documentation should use `README.md`.
-
-## Running a case
-
-From the selected leaf directory:
-
-```bash
-mpirun -np 4 /path/to/spa_mpi -in in.case_name
-```
-
-Run the registered smoke-test suite from the repository root:
-
-```bash
-./regression/run_regression.sh --exe /path/to/spa_mpi
-```
-
-Generated logs, dumps, figures, and `output/` directories are ignored. Large
-background files may need to be generated locally; consult the leaf
-`README.md` for case-specific instructions.
+Unpublished cases go under `wip/`, which git ignores entirely. Keep a
+second copy of anything important there.
 
 ## Naming rules
 
-- Use lowercase `snake_case` directory names.
-- Name a leaf for the physics or workflow, not the person developing it.
-- Put focused PASS/FAIL checks in `verification/` and complete applications in
-  `workflows/`.
-- Use `in.openedge` for a workflow's single canonical deck.
-- Keep simulation dependencies in `input/`, analysis notebooks and helpers in
-  `scripts/`, generated products in `output/`, and local-only cases in `wip/`.
-- Name species files by role: `atoms.species`, `droplets.species`, or
-  `grains.species`.
+- lowercase `snake_case` directory names, named for the physics, not the author
+- `in.openedge` for a workflow's canonical deck
+- `input/` for simulation dependencies, `scripts/` for checks, plots and notebooks, `output/` for generated products
+- species files named by role: `atoms.species`, `droplets.species`, `grains.species`

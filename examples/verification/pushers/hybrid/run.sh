@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stage A of PLAN.md: Boris reference (+dt/2 band), hybrid at 1x/20x/400x
+# Stage A: Boris reference (+dt/2 band), hybrid at 1x/20x/400x
 # dt, pure GCA at 20x dt; gates in plot_impact.py. -np 1 (single-orbit
 # reproducibility; MPI invariance is covered by ../orbit).
 # Usage: ./run.sh [/path/to/spa binary]     (PYTHON=... to pick interpreter)
@@ -10,7 +10,7 @@ mkdir -p output
 rm -f output/impacts.* output/traj.* output/switch.*
 fail=0
 
-[ -f input/source.n256 ] && [ -f input/source.hyst ] || $PY make_inputs.py
+[ -f input/source.n256 ] && [ -f input/source.hyst ] || $PY scripts/make_inputs.py
 
 run() {
   echo "== $*"
@@ -31,7 +31,7 @@ run -var pmode hybrid -var gswitch 2.5  -var knear 2.5 -var dt 2e-7  -var nsteps
 # plane (endpoint-only distance tests cannot see this; signed-crossing
 # detection must switch every particle to Boris before impact)
 run -var pmode hybrid -var gswitch 2.5  -var knear 2.5 -var dt 2.5e-6 -var nsteps 800 -var dfreq 1 -var subc 5000 -var tag leap
-# k*rho_L calibration sweep (PLAN: k = 1 / 2.5 / 5)
+# k*rho_L calibration sweep
 run -var pmode hybrid -var gswitch 2.5  -var knear 1   -var dt 1e-8  -var nsteps 800 -var dfreq 4 -var tag k1
 run -var pmode hybrid -var gswitch 2.5  -var knear 5   -var dt 1e-8  -var nsteps 800 -var dfreq 4 -var tag k5
 # pure GCA to the wall (A0: uniform reconstruction phase — rejected ref)
@@ -42,5 +42,5 @@ run -var pmode gca    -var gswitch 2.5  -var knear 0   -var dt 1e-8  -var nsteps
 # Boris until chi >= 4*pi AND d > 2*d_sw, then re-enter GCA exactly once
 run -var pmode hybrid -var gswitch 2.5  -var knear 2.5 -var dt 1e-8  -var nsteps 300 -var dfreq 1 -var src source.hyst -var tag hyst
 
-$PY plot_impact.py || fail=1
+$PY scripts/plot_impact.py || fail=1
 exit $fail

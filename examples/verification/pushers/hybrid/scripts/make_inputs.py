@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the hybrid wall-test inputs: flat target surf + seeded He+
-ensemble (fixed launch point, uniform random gyrophase). Stage A of
-PLAN.md — uniform tilted B, no sheath, no collisions.
+ensemble (fixed launch point, uniform random gyrophase). Stage A:
+uniform tilted B, no sheath, no collisions.
 
 Frame: wall normal +z (target plane at z = 0), B tilted in the x-z
 plane at angle alpha to the normal, pointing INTO the wall:
@@ -136,7 +136,7 @@ def main():
     p.add_argument("--energy", type=float, default=5.0)
     args = p.parse_args()
 
-    base = os.path.join(os.path.dirname(__file__), "input")
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "input")
     os.makedirs(base, exist_ok=True)
     write_target(os.path.join(base, "target.surf"))
     # GC drifts +x at vpar*sin(a): start at -x so the footprint stays in-box

@@ -21,7 +21,7 @@ M = 6.6464731e-27
 Q = 1.602176634e-19
 ME = 9.1093837015e-31
 AMU = 1.66053906660e-27
-BASE = os.path.dirname(os.path.abspath(__file__))
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(BASE, "output")
 
 E_SUB = 2.0    # eV parallel, sub-barrier launch

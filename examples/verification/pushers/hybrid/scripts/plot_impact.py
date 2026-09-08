@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage-A gates for the hybrid wall-handoff test (PLAN.md, rev 3 + review).
+"""Stage-A gates for the hybrid wall-handoff test.
 
 Inputs per tag: vanish impact logs (output/impacts.<tag>.csv.rank*),
 per-step dumps (output/traj.<tag>), switch-event logs
@@ -35,7 +35,7 @@ V0 = np.sqrt(2.0 * 5.0 * Q / M)
 RHOL = M * (V0 / np.sqrt(2.0)) / (Q * B0)
 DSW = 2.5 * RHOL
 NENS = 256
-BASE = os.path.dirname(os.path.abspath(__file__))
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(BASE, "output")
 
 CFG = {"ref": 5e-10, "ref2": 2.5e-10, "ref4": 1.25e-10,
@@ -305,7 +305,7 @@ def main():
         tt, xx, yy = obs[t][2], obs[t][3], obs[t][4]
         if t == "skip":
             # impact TIME at 400x dt is knowingly degraded by the 3D
-            # subcycle remainder loss (documented mover defect, PLAN.md);
+            # subcycle remainder loss;
             # distributions are the gated quantity here
             print(f"  INFO: skip impact-time offset {abs(tt.mean()-t_r.mean()):.2e} s "
                   "(remainder-loss defect, exempt until mover repair)")

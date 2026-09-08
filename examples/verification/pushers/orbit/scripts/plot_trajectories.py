@@ -216,7 +216,7 @@ def main():
         help="slot layout of the GCA dump (Boris reference is always 3d)")
     args = parser.parse_args()
 
-    base   = os.path.dirname(__file__)
+    base   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     outdir = os.path.join(base, "output")
     bpath  = os.path.join(outdir, "traj.boris")
     gpath  = os.path.join(outdir, args.gca_dump)

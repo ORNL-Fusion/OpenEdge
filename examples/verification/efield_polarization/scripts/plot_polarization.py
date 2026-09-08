@@ -62,7 +62,7 @@ def save(fig, name, outdir):
 
 
 def main():
-    base = Path(__file__).resolve().parent
+    base = Path(__file__).resolve().parents[1]
     outdir = base / "figs_polarization"
     outdir.mkdir(parents=True, exist_ok=True)
 

@@ -11,7 +11,7 @@ behavior: kicks discarded at reconstruction) cannot pass.
 import os
 import numpy as np
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(BASE, "output")
 DT = 1e-8
 

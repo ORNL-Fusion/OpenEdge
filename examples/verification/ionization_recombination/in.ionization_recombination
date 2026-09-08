@@ -4,7 +4,7 @@
 # Single cell, 2000 fully-stripped O8+ test particles that ionize and
 # recombine under ADAS scd/acd rates until coronal equilibrium sets in
 # (Te = 12 eV, ne = 5e18 m^-3).  Per-charge-state densities are reduced
-# to scalars and printed in the stats block; plot_charged_states.py
+# to scalars and printed in the stats block; scripts/plot_charged_states.py
 # parses log.openedge.
 ################################################################################
 

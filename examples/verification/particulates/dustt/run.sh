@@ -10,7 +10,7 @@ mkdir -p output
 rm -f output/traj.*
 fail=0
 
-[ -f input/grain.rest ] || $PY make_input.py
+[ -f input/grain.rest ] || $PY scripts/make_input.py
 
 run() {
   echo "== $*"
@@ -29,5 +29,5 @@ run -var tag vac -var src grain.rest -var nel 0.0 -var ez -100.0 -var zfix -2.0e
 echo "== np2 invariance"
 mpirun -np 2 "$BIN" -var tag drag2 -var src grain.rest -var upar 2.0e4 -var dofix 1 -in in.grain > /dev/null 2>&1 || { echo "FAIL: solver np2"; fail=1; }
 
-$PY check_dustt.py || fail=1
+$PY scripts/check_dustt.py || fail=1
 exit $fail
