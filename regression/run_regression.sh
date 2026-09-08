@@ -4,6 +4,7 @@
 #
 #  Runs all registered regression tests and reports pass/fail.
 #  A test passes if the run exits 0 and its log contains no ERROR lines.
+#  Record: name|dir|deck|required-data-file|flags   (flags: nokk = skip under --kk)
 #
 #  Usage:
 #    ./regression/run_regression.sh [--np N] [--exe PATH] [--filter PATTERN]
@@ -149,7 +150,9 @@ echo "========================================================================"
 echo ""
 
 for entry in "${TESTS[@]}"; do
-  IFS='|' read -r name testdir infile requires <<< "$entry"
+  IFS='|' read -r name testdir infile requires flags <<< "$entry"
+  # legacy 4-field form: "nokk" in the requires slot means no data file
+  if [[ "$requires" == "nokk" ]]; then flags="nokk"; requires=""; fi
 
   if [[ "$name" != $FILTER ]]; then
     continue
@@ -170,15 +173,15 @@ for entry in "${TESTS[@]}"; do
     ((SKIP++))
     continue
   fi
-  if [[ -n "$requires" && "$requires" != "nokk" && ! -e "$dir/$requires" ]]; then
+  if [[ -n "$requires" && ! -e "$dir/$requires" ]]; then
     RESULTS+=("SKIP  $name  (missing $requires - regenerate it first)")
     echo "SKIP (missing data)"
     ((SKIP++))
     continue
   fi
 
-  if [[ $KKMODE -eq 1 && "$requires" == "nokk" ]]; then
-    RESULTS+=("SKIP  $name  (not supported under -sf kk by design: 2D pusher / GCA)")
+  if [[ $KKMODE -eq 1 && "$flags" == *nokk* ]]; then
+    RESULTS+=("SKIP  $name  (not supported under -sf kk by design: 2D/axi pusher, GCA or sheath kick)")
     printf "%-40s SKIP (nokk)\n" "$name"
     ((SKIP++))
     continue
