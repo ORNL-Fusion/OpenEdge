@@ -13,9 +13,11 @@
 #include "error.h"
 #include "fix_background.h"
 #include "memory.h"
+#include "mixture.h"
 #include "modify.h"
 #include "particle.h"
 #include "update.h"
+#include "mpi.h"
 
 #include <algorithm>
 #include <cmath>
@@ -37,14 +39,19 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
   if (narg < 4)
     error->all(FLERR, "Illegal fix reflect/psi command: "
                "fix ID reflect/psi {equ PATH | background FIXID} "
-               "[psi_norm VALUE] [action ...]");
+               "[psi_norm VALUE] [action ...] [mixture ID]");
 
   action_ = PSI_ACTION_REFLECT;
+  imix_ = -1;
+  nrows_ = 0;
+  pweight_index_ = pweight_ewhich_ = -1;
+  start_step_ = reduced_step_ = -1;
   nw_ = nh_ = 0;
   psi_axis_ = psib_ = 0.0;
 
   std::string equ_path;
   std::string plasma_fix_id;
+  std::string mixture_id;
   int threshold_user_set = 0;
   psi_threshold_ = 0.926;  // default for equ/geqdsk mode
 
@@ -76,6 +83,11 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
       else
         error->all(FLERR, "fix reflect/psi: action must be 'reflect' or 'absorb'");
       iarg += 2;
+    } else if (strcmp(arg[iarg], "mixture") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix reflect/psi: missing mixture ID");
+      mixture_id = arg[iarg + 1];
+      iarg += 2;
     } else {
       char msg[256];
       snprintf(msg, sizeof(msg),
@@ -88,6 +100,23 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
     error->all(FLERR, "fix reflect/psi: one of 'equ PATH' or 'background FIXID' is required");
   if (!equ_path.empty() && !plasma_fix_id.empty())
     error->all(FLERR, "fix reflect/psi: 'equ' and 'background' are mutually exclusive");
+  if (!mixture_id.empty()) {
+    imix_ = particle->find_mixture(const_cast<char *>(mixture_id.c_str()));
+    if (imix_ < 0)
+      error->all(FLERR, "fix reflect/psi: unknown mixture ID");
+  }
+
+  nrows_ = (imix_ >= 0) ? particle->mixture[imix_]->ngroup
+                         : particle->nspecies;
+  if (nrows_ <= 0)
+    error->all(FLERR, "fix reflect/psi: no species available for tally");
+  vector_flag = 1;
+  size_vector = 3 * nrows_;
+  global_freq = 1;
+  absorbed_events_local_.assign(nrows_, 0.0);
+  absorbed_physical_local_.assign(nrows_, 0.0);
+  absorbed_events_global_.assign(nrows_, 0.0);
+  absorbed_physical_global_.assign(nrows_, 0.0);
 
   if (!equ_path.empty()) {
     read_equ_file(equ_path);
@@ -109,6 +138,8 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
     printf("  psi_axis = %.6e  psib = %.6e\n", psi_axis_, psib_);
     printf("  psi_norm threshold = %.4f\n", psi_threshold_);
     printf("  action = %s\n", action_ == PSI_ACTION_ABSORB ? "absorb" : "reflect");
+    printf("  species scope = %s\n",
+           imix_ < 0 ? "all" : particle->mixture[imix_]->id);
   }
 }
 
@@ -164,6 +195,8 @@ void FixReflectPsi::init()
   update->psi_reflect_flag = 1;
   update->psi_reflect_action = action_;
   update->psi_reflect_threshold = psi_threshold_;
+  update->psi_reflect_imix = imix_;
+  update->psi_reflect_fix = this;
   update->psi_nw = nw_;
   update->psi_nh = nh_;
   update->psi_axis = psi_axis_;
@@ -171,6 +204,83 @@ void FixReflectPsi::init()
   update->psi_r_grid = r_grid_.data();
   update->psi_z_grid = z_grid_.data();
   update->psi_rz = psirz_.data();
+
+  // fix particle/weight may appear later than this fix in the input deck, but
+  // all fix constructors have run before init(). Use it when available;
+  // otherwise fall back to the standard fnum marker weight.
+  pweight_index_ = particle->find_custom((char *) "pweight");
+  pweight_ewhich_ = (pweight_index_ >= 0) ? particle->ewhich[pweight_index_] : -1;
+  if (start_step_ < 0) start_step_ = update->ntimestep;
+}
+
+/* ----------------------------------------------------------------------
+   Map a particle species to a row in the public tally vector.
+------------------------------------------------------------------------- */
+
+int FixReflectPsi::row_for_species(int ispecies) const
+{
+  if (ispecies < 0 || ispecies >= particle->nspecies) return -1;
+  if (imix_ < 0) return ispecies;
+  int *species2group = particle->mixture[imix_]->species2group;
+  return species2group ? species2group[ispecies] : -1;
+}
+
+/* ----------------------------------------------------------------------
+   Record one absorbed simulation particle.
+
+   pweight is the complete physical population carried by an OpenEdge marker.
+   Do not multiply it by SPARTA's cell/radial sampling weight: that weight is
+   part of legacy sampling-density normalization, not this global inventory.
+   With no pweight custom, the standard fnum convention is used.
+------------------------------------------------------------------------- */
+
+void FixReflectPsi::tally_absorb(int ispecies, int iparticle)
+{
+  const int row = row_for_species(ispecies);
+  if (row < 0 || row >= nrows_ || iparticle < 0 ||
+      iparticle >= particle->nlocal) return;
+
+  double marker_weight = update->fnum;
+  if (pweight_index_ >= 0) {
+    pweight_ewhich_ = particle->ewhich[pweight_index_];
+    const double candidate = particle->edvec[pweight_ewhich_][iparticle];
+    if (candidate > 0.0 && std::isfinite(candidate)) marker_weight = candidate;
+  }
+  absorbed_events_local_[row] += 1.0;
+  absorbed_physical_local_[row] += marker_weight;
+  reduced_step_ = -1;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixReflectPsi::reduce_tallies()
+{
+  if (reduced_step_ == update->ntimestep) return;
+  MPI_Allreduce(absorbed_events_local_.data(), absorbed_events_global_.data(),
+                nrows_, MPI_DOUBLE, MPI_SUM, world);
+  MPI_Allreduce(absorbed_physical_local_.data(),
+                absorbed_physical_global_.data(), nrows_, MPI_DOUBLE,
+                MPI_SUM, world);
+  reduced_step_ = update->ntimestep;
+}
+
+/* ----------------------------------------------------------------------
+   Flattened vector, three entries per selected mixture group/species:
+     3*i+1 simulation absorption events (cumulative)
+     3*i+2 physical particles absorbed (cumulative)
+     3*i+3 physical removal rate averaged since fix initialization [s^-1]
+------------------------------------------------------------------------- */
+
+double FixReflectPsi::compute_vector(int index)
+{
+  if (index < 0 || index >= size_vector) return 0.0;
+  reduce_tallies();
+  const int row = index / 3;
+  const int field = index % 3;
+  if (field == 0) return absorbed_events_global_[row];
+  if (field == 1) return absorbed_physical_global_[row];
+  const double elapsed = (update->ntimestep - start_step_) * update->dt;
+  return elapsed > 0.0 ? absorbed_physical_global_[row] / elapsed : 0.0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -323,4 +433,127 @@ double FixReflectPsi::psi_norm_at_point(double R, double Z) const
   double dpsi = psib_ - psi_axis_;
   if (std::abs(dpsi) < 1e-30) return 1.0;
   return (psi - psi_axis_) / dpsi;
+}
+
+/* ----------------------------------------------------------------------
+   Bilinear psi_N and its local (R,Z) gradient.
+------------------------------------------------------------------------- */
+
+double FixReflectPsi::psi_norm_gradient(double R, double Z,
+                                        double &grad_r,
+                                        double &grad_z) const
+{
+  grad_r = grad_z = 0.0;
+  if (r_grid_.size() < 2 || z_grid_.size() < 2 || psirz_.empty()) return 1.0;
+
+  const double Rc = std::min(std::max(R, r_grid_.front()), r_grid_.back());
+  const double Zc = std::min(std::max(Z, z_grid_.front()), z_grid_.back());
+  auto bracket = [](const std::vector<double> &grid, double value) {
+    if (value <= grid.front()) return 0;
+    if (value >= grid.back()) return static_cast<int>(grid.size()) - 2;
+    const auto it = std::upper_bound(grid.begin(), grid.end(), value);
+    return std::max(0, std::min(static_cast<int>(grid.size()) - 2,
+                               static_cast<int>(it - grid.begin()) - 1));
+  };
+
+  const int i = bracket(r_grid_, Rc);
+  const int j = bracket(z_grid_, Zc);
+  const double dr = r_grid_[i+1] - r_grid_[i];
+  const double dz = z_grid_[j+1] - z_grid_[j];
+  const double dpsi = psib_ - psi_axis_;
+  if (std::abs(dr) < 1.0e-30 || std::abs(dz) < 1.0e-30 ||
+      std::abs(dpsi) < 1.0e-30) return 1.0;
+
+  const double t = std::min(std::max((Rc-r_grid_[i])/dr, 0.0), 1.0);
+  const double u = std::min(std::max((Zc-z_grid_[j])/dz, 0.0), 1.0);
+  const double p00 = psirz_[j*nw_+i];
+  const double p10 = psirz_[j*nw_+i+1];
+  const double p01 = psirz_[(j+1)*nw_+i];
+  const double p11 = psirz_[(j+1)*nw_+i+1];
+  const double psi = (1.0-t)*(1.0-u)*p00 + t*(1.0-u)*p10 +
+                     (1.0-t)*u*p01 + t*u*p11;
+  grad_r = ((1.0-u)*(p10-p00) + u*(p11-p01)) / (dr*dpsi);
+  grad_z = ((1.0-t)*(p01-p00) + t*(p11-p10)) / (dz*dpsi);
+  return (psi-psi_axis_) / dpsi;
+}
+
+/* ---------------------------------------------------------------------- */
+
+double FixReflectPsi::psi_norm_at_sparta(const double xyz[3]) const
+{
+  double R, Z;
+  if (domain->dimension == 3) {
+    R = std::hypot(xyz[0], xyz[1]);
+    Z = xyz[2];
+  } else if (domain->axisymmetric) {
+    Z = xyz[0];
+    R = xyz[1];
+  } else {
+    R = xyz[0];
+    Z = xyz[1];
+  }
+  return psi_norm_at_point(R, Z);
+}
+
+/* ----------------------------------------------------------------------
+   Locate an outside-to-inside crossing and return the outward local normal.
+   The root is solved on the actual Cartesian/SPARTA chord, so R(phi) is
+   handled correctly in 3-D rather than linearly interpolating cylindrical R.
+------------------------------------------------------------------------- */
+
+bool FixReflectPsi::segment_crossing(const double x0[3], const double x1[3],
+                                     double &fraction, double normal[3]) const
+{
+  const double p0 = psi_norm_at_sparta(x0);
+  const double p1 = psi_norm_at_sparta(x1);
+  if (p0 < psi_threshold_ || p1 >= psi_threshold_) return false;
+
+  double lo = 0.0, hi = 1.0;
+  double xc[3] = {0.0, 0.0, 0.0};
+  for (int iter = 0; iter < 60; iter++) {
+    const double mid = 0.5*(lo+hi);
+    for (int k = 0; k < 3; k++) xc[k] = x0[k] + mid*(x1[k]-x0[k]);
+    if (psi_norm_at_sparta(xc) >= psi_threshold_) lo = mid;
+    else hi = mid;
+  }
+  fraction = 0.5*(lo+hi);
+  for (int k = 0; k < 3; k++)
+    xc[k] = x0[k] + fraction*(x1[k]-x0[k]);
+
+  double R, Z;
+  if (domain->dimension == 3) {
+    R = std::hypot(xc[0], xc[1]);
+    Z = xc[2];
+  } else if (domain->axisymmetric) {
+    Z = xc[0];
+    R = xc[1];
+  } else {
+    R = xc[0];
+    Z = xc[1];
+  }
+  double gR, gZ;
+  psi_norm_gradient(R, Z, gR, gZ);
+
+  if (domain->dimension == 3) {
+    if (R <= 1.0e-30) return false;
+    normal[0] = gR*xc[0]/R;
+    normal[1] = gR*xc[1]/R;
+    normal[2] = gZ;
+  } else if (domain->axisymmetric) {
+    normal[0] = gZ;
+    normal[1] = gR;
+    normal[2] = 0.0;
+  } else {
+    normal[0] = gR;
+    normal[1] = gZ;
+    normal[2] = 0.0;
+  }
+  const double nmag = std::sqrt(normal[0]*normal[0] +
+                                normal[1]*normal[1] +
+                                normal[2]*normal[2]);
+  if (!(nmag > 1.0e-20) || !std::isfinite(nmag)) return false;
+  normal[0] /= nmag;
+  normal[1] /= nmag;
+  normal[2] /= nmag;
+  return true;
 }

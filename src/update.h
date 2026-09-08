@@ -46,6 +46,8 @@ struct PairHash {
 
 namespace SPARTA_NS {
 
+class FixReflectPsi;
+
 class Update : protected Pointers {
   friend class Pusher;       // Pusher reaches Update::eperturbflag etc.
  public:
@@ -233,6 +235,8 @@ struct SurfHit2D {
   int psi_reflect_flag;        // 1 if psi-reflect is active
   int psi_reflect_action;      // 0=reflect, 1=absorb (matches FixReflectPsi enum)
   double psi_reflect_threshold;// normalized psi threshold
+  int psi_reflect_imix;        // mixture restriction, -1 = every species
+  FixReflectPsi *psi_reflect_fix; // owns species-resolved absorption ledger
   int psi_nw, psi_nh;         // equilibrium grid dimensions
   double psi_axis, psi_bry;   // psi at axis and boundary
   double *psi_r_grid;         // R grid [psi_nw] (owned by fix, do not free)

@@ -48,6 +48,12 @@
 #include <algorithm>
 
 using namespace SPARTA_NS;
+
+// Subcycle wall guard: a crossing found within this fraction of the
+// segment start counts as "started on the surface"; a clipped endpoint
+// is placed this fraction of the segment beyond the intersection.
+static constexpr double SUBCYCLE_ONSURF_PARAM = 1.0e-6;
+static constexpr double SUBCYCLE_CLIP_OVERSHOOT = 1.0e-4;
 using namespace MathConst;
 
 // File-scope helpers — kept private to this translation unit. Mirrors the
@@ -954,11 +960,19 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
             v[0] = vcur[0];
             v[1] = vcur[1];
             v[2] = vcur[2];
-            // Clip to intersection; keep the toroidal slot consistent
-            // with the fraction of the subcycle that was traversed.
-            xnew[0] = xc[0];
-            xnew[1] = xc[1];
-            xnew[2] = zcur - vcur[2] * dt_sub * (1.0 - param);
+            // Same rule as the 3-D guard: never park the endpoint on the
+            // surface. Started on it -> full subcycle endpoint; crossed
+            // mid-segment -> clip a small fraction past the intersection.
+            // The toroidal slot follows the traversed fraction.
+            if (param < SUBCYCLE_ONSURF_PARAM) {
+              xnew[0] = xcur[0];
+              xnew[1] = xcur[1];
+              xnew[2] = zcur;
+            } else {
+              xnew[0] = xc[0] + SUBCYCLE_CLIP_OVERSHOOT * (xcur[0] - xold[0]);
+              xnew[1] = xc[1] + SUBCYCLE_CLIP_OVERSHOOT * (xcur[1] - xold[1]);
+              xnew[2] = zcur - vcur[2] * dt_sub * (1.0 - param);
+            }
             return;
           }
         }
@@ -1530,9 +1544,23 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
             v[0] = vcur[0];
             v[1] = vcur[1];
             v[2] = vcur[2];
-            xnew[0] = xc[0];
-            xnew[1] = xc[1];
-            xnew[2] = xc[2];
+            // Never park the endpoint on the plane: a point placed there
+            // lands on either side by roundoff, and a particle left in
+            // front of the wall re-enters this guard next step at
+            // param 0, clips to zero motion and freezes for good.
+            // Segment starting on the surface: hand the full subcycle
+            // endpoint to the outer move loop, which collides normally.
+            // Mid-segment crossing: clip a small fraction of the segment
+            // past the intersection so the outer chord registers it.
+            if (param < SUBCYCLE_ONSURF_PARAM) {
+              xnew[0] = xcur[0];
+              xnew[1] = xcur[1];
+              xnew[2] = xcur[2];
+            } else {
+              xnew[0] = xc[0] + SUBCYCLE_CLIP_OVERSHOOT * (xcur[0] - xold[0]);
+              xnew[1] = xc[1] + SUBCYCLE_CLIP_OVERSHOOT * (xcur[1] - xold[1]);
+              xnew[2] = xc[2] + SUBCYCLE_CLIP_OVERSHOOT * (xcur[2] - xold[2]);
+            }
             return;
           }
         }
