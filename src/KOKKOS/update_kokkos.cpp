@@ -299,6 +299,14 @@ void UpdateKokkos::init()
   // OpenEdge: Boris config — read B/E directly from plasma compute view
   oe_pusher_subcycles = pusher->pusher_subcycles;
   oe_echarge = echarge;
+  // Phase B: hybrid/GCA configuration (device mover is 3D-only)
+  oe_pusher_mode      = pusher->pusher_mode;
+  oe_gca_integrator   = pusher->pusher_gca_integrator;
+  oe_gca_switch       = pusher->pusher_gca_switch;
+  oe_boris_near       = pusher->pusher_boris_near;
+  oe_boris_near_rhol  = pusher->pusher_boris_near_rhol;
+  oe_gc_wall_flux     = pusher->pusher_gc_wall_flux;
+  oe_has_gca_customs  = 0;
   oe_bx_col = oe_by_col = oe_bz_col = -1;
 
   // OpenEdge Phase A: equilibrium-based point-query B (defaults off).
@@ -360,9 +368,15 @@ void UpdateKokkos::init()
   // fire host-side machinery the Kokkos mover never calls (decision
   // 2026-08-25: spatial is the production mode; do not port).
   if (oe_pusher_subcycles > 0 &&
-      pusher->pusher_mode != Pusher::PUSHER_BORIS)
-    error->all(FLERR,"Pusher mode hybrid/gca is not supported with Kokkos; "
-               "use global pusher mode boris");
+      pusher->pusher_mode != Pusher::PUSHER_BORIS) {
+    // Phase B (2026-09-08): hybrid/GCA ported to the device mover, 3D only
+    if (domain->dimension != 3)
+      error->all(FLERR,"Pusher mode hybrid/gca under Kokkos is 3D-only; "
+                 "run 2D/axisymmetric decks on the CPU build");
+    if (pusher->switch_log_file)
+      error->all(FLERR,"Pusher switch_log_file is a host-only diagnostic; "
+                 "not supported with Kokkos");
+  }
   if (sheath_flag && (sheath_kick || sheath_boundary))
     error->all(FLERR,"Sheath kick/boundary modes are not supported with "
                "Kokkos; use sheath spatial");
@@ -977,6 +991,27 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
             particle->ewhich[sheath_phiprev_custom]].k_view.d_view;
         oe_has_sheath_customs = 1;
       }
+      // Phase B: guiding-center state customs for the hybrid/GCA mover
+      oe_has_gca_customs = 0;
+      if (oe_pusher_mode != Pusher::PUSHER_BORIS &&
+          pusher->gca_x_custom >= 0 && pusher->gca_y_custom >= 0 &&
+          pusher->gca_z_custom >= 0 && pusher->gca_vpar_custom >= 0 &&
+          pusher->gca_mu_custom >= 0 && pusher->gca_mode_custom >= 0 &&
+          pusher->gca_valid_custom >= 0 && pusher->gca_chi_custom >= 0) {
+        particle_kk->sync(Device,CUSTOM_MASK);
+        auto dv = [&](int c) {
+          return particle_kk->k_edvec.h_view[particle->ewhich[c]].k_view.d_view;
+        };
+        d_oe_gca_x     = dv(pusher->gca_x_custom);
+        d_oe_gca_y     = dv(pusher->gca_y_custom);
+        d_oe_gca_z     = dv(pusher->gca_z_custom);
+        d_oe_gca_vpar  = dv(pusher->gca_vpar_custom);
+        d_oe_gca_mu    = dv(pusher->gca_mu_custom);
+        d_oe_gca_mode  = dv(pusher->gca_mode_custom);
+        d_oe_gca_valid = dv(pusher->gca_valid_custom);
+        d_oe_gca_chi   = dv(pusher->gca_chi_custom);
+        oe_has_gca_customs = 1;
+      }
 
       if (surf->nsr && sparta->kokkos->react_retry_flag)
         backup();
@@ -1043,7 +1078,7 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
     }
 
     particle_kk->modify(Device,PARTICLE_MASK);
-    if (oe_has_sheath_customs)
+    if (oe_has_sheath_customs || oe_has_gca_customs)
       particle_kk->modify(Device,CUSTOM_MASK);
     d_particles = t_particle_1d(); // destroy reference to reduce memory use
 
@@ -1290,7 +1325,10 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
-      oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      if (oe_pusher_mode != 0)
+        oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      else
+        oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
     } else {
       xnew[0] = x[0] + dtremain*v[0];
       xnew[1] = x[1] + dtremain*v[1];
@@ -1329,7 +1367,10 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
-      oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      if (oe_pusher_mode != 0)
+        oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      else
+        oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
     } else {
       xnew[0] = x[0] + dtremain*v[0];
       xnew[1] = x[1] + dtremain*v[1];
@@ -3120,6 +3161,307 @@ void UpdateKokkos::build_oe_sheath_cache()
    oe_col_x0/y0 for the compute-provider rotation below.
 ------------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   OpenEdge Phase B: device twin of Pusher::sample_gca_fields (3D).
+   E from the mesh triangulation (fix background native potential), B and
+   its derivatives from the equilibrium psi map (smooth grads); a mesh /
+   native-map / cell-column B without derivatives otherwise (stays Boris,
+   as on the CPU). Returns true when a B sample was obtained.
+------------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+bool UpdateKokkos::oe_sample_gca_fields(const double *xpos, int icell,
+                                        GCAKokkos::Fields &F) const
+{
+  F = GCAKokkos::Fields();
+  double xq[3] = {xpos[0], xpos[1], xpos[2]};
+  if (oe_dim == 3 && !oe_axisymmetric) { xq[0] -= oe_col_x0; xq[1] -= oe_col_y0; }
+
+  if (oe_has_mesh_e) {
+    double Em[3] = {0.0, 0.0, 0.0};
+    if (MeshKokkos::query_bfield_at_point(
+          xq, oe_dim, oe_axisymmetric,
+          d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
+          d_oe_mesh_tri_er, d_oe_mesh_tri_ez, d_oe_mesh_tri_et,
+          d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
+          d_oe_mesh_tri_zmin, d_oe_mesh_tri_zmax,
+          d_oe_hash_offset, d_oe_hash_entries,
+          oe_mesh_hash_rmin, oe_mesh_hash_zmin,
+          oe_mesh_hash_dr,   oe_mesh_hash_dz,
+          oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri, Em)) {
+      F.E[0] = Em[0]; F.E[1] = Em[1]; F.E[2] = Em[2];
+      F.e_valid = true;
+    }
+  }
+
+  bool have_b = false;
+  if (oe_has_equilibrium && !oe_has_equ_bmaps) {
+    have_b = EquilibriumKokkos::query_bfield_grad_at_point(
+        xq, oe_dim, oe_axisymmetric,
+        d_oe_equ_r, d_oe_equ_z, d_oe_equ_psi,
+        oe_equ_btf, oe_equ_rtf, oe_equ_jm, oe_equ_km,
+        F.B, F.gradBmag, F.kappa, F.curl_b);
+    F.derivs_valid = have_b;
+  }
+  if (!have_b) {
+    // same fallback chain as oe_boris3d: mesh B, native maps, cell columns
+    if (oe_has_mesh_b) {
+      have_b = MeshKokkos::query_bfield_at_point(
+          xq, oe_dim, oe_axisymmetric,
+          d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
+          d_oe_mesh_tri_br, d_oe_mesh_tri_bz, d_oe_mesh_tri_bt,
+          d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
+          d_oe_mesh_tri_zmin, d_oe_mesh_tri_zmax,
+          d_oe_hash_offset, d_oe_hash_entries,
+          oe_mesh_hash_rmin, oe_mesh_hash_zmin,
+          oe_mesh_hash_dr,   oe_mesh_hash_dz,
+          oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri, F.B);
+    }
+    if (!have_b && oe_has_equilibrium && oe_has_equ_bmaps) {
+      have_b = EquilibriumKokkos::query_bfield_native_maps(
+          xq, oe_dim, oe_axisymmetric, d_oe_equ_r, d_oe_equ_z,
+          d_oe_equ_br, d_oe_equ_bt, d_oe_equ_bz, oe_equ_jm, oe_equ_km, F.B);
+    }
+    if (!have_b && d_oe_plasma_compute.data() && oe_bx_col >= 0) {
+      F.B[0] = d_oe_plasma_compute(icell, oe_bx_col);
+      F.B[1] = d_oe_plasma_compute(icell, oe_by_col);
+      F.B[2] = d_oe_plasma_compute(icell, oe_bz_col);
+      have_b = true;
+    }
+  }
+  F.Bmag = Kokkos::sqrt(F.B[0]*F.B[0] + F.B[1]*F.B[1] + F.B[2]*F.B[2]);
+  return have_b && F.Bmag > 0.0;
+}
+
+/* ----------------------------------------------------------------------
+   signed plane distance to the cell's nearest sheath-geometry element
+   (positive = plasma side along the surf normal); 1e30 when unset
+------------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+double UpdateKokkos::oe_near_signed(int midx, const double *p) const
+{
+  if (midx < 0) return 1.0e30;
+  const Surf::Tri &tr = d_tris[midx];
+  return (p[0]-tr.p1[0])*tr.norm[0] + (p[1]-tr.p1[1])*tr.norm[1] +
+         (p[2]-tr.p1[2])*tr.norm[2];
+}
+
+/* ----------------------------------------------------------------------
+   OpenEdge Phase B: device twin of Pusher::push_hybrid_3d (3D only; the
+   2D left-handed conjugation and switch_log_file are not ported). Trial
+   GCA advance with rho_L/L_B switching, Boris shell (C1) with hysteresis
+   (C2), swept-shell discard + Boris replay, per-stage field resampling
+   for rk2/rk4, deterministic gyrophase hash + A1 flux sampling, GC
+   state kept in the gca_* customs, Boris delegation to oe_boris3d
+   (sheath impulse included) from the materialized orbit.
+------------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
+                               double *x, double *v, double *xnew,
+                               double charge, double mass) const
+{
+  if (charge == 0.0 ||
+      (d_oe_pusher_skip.data() &&
+       d_oe_pusher_skip(d_particles[i].ispecies))) {
+    xnew[0] = x[0] + v[0] * dt;
+    xnew[1] = x[1] + v[1] * dt;
+    xnew[2] = x[2] + v[2] * dt;
+    return;
+  }
+  const double qm = (charge * oe_echarge) / mass;
+  const double qm_abs = Kokkos::fabs(qm);
+  const bool have_state = (oe_has_gca_customs != 0);
+
+  GCAKokkos::Fields F;
+  oe_sample_gca_fields(x, icell, F);
+  const double Bmag = F.Bmag;
+  const double gradBmag_magnitude =
+    Kokkos::sqrt(F.gradBmag[0]*F.gradBmag[0] + F.gradBmag[1]*F.gradBmag[1] +
+                 F.gradBmag[2]*F.gradBmag[2]);
+
+  // rho_L from stored mu when the GC state is valid, else from v
+  double rho_L = 0.0;
+  if (Bmag > 0.0 && qm_abs > 0.0) {
+    double vperp2;
+    if (have_state && d_oe_gca_valid(i) > 0.5) {
+      const double mu_eff = (d_oe_gca_mu(i) > 0.0) ? d_oe_gca_mu(i) : 0.0;
+      vperp2 = (2.0 * mu_eff * Bmag) / mass;
+    } else {
+      const double bhat[3] = {F.B[0]/Bmag, F.B[1]/Bmag, F.B[2]/Bmag};
+      const double v_par = v[0]*bhat[0] + v[1]*bhat[1] + v[2]*bhat[2];
+      vperp2 = v[0]*v[0] + v[1]*v[1] + v[2]*v[2] - v_par * v_par;
+    }
+    if (vperp2 < 0.0) vperp2 = 0.0;
+    rho_L = GCAKokkos::larmor_radius(Kokkos::sqrt(vperp2), qm_abs, Bmag);
+  }
+
+  // switching criterion (mode gca: always, with the dust fail-safe;
+  // mode hybrid: rho_L < L_B / switch, derivatives required)
+  bool use_gca = false;
+  if (Bmag > 0.0 && qm_abs > 0.0) {
+    if (oe_pusher_mode == 2) {
+      use_gca = true;
+      if (rho_L > 0.0 && F.derivs_valid) {
+        const double L_B = GCAKokkos::grad_b_length(Bmag, gradBmag_magnitude);
+        use_gca = (rho_L < L_B / oe_gca_switch);
+      }
+    } else {
+      const double L_B = GCAKokkos::grad_b_length(Bmag, gradBmag_magnitude);
+      if (rho_L > 0.0 && F.derivs_valid)
+        use_gca = (rho_L < L_B / oe_gca_switch);
+    }
+  }
+
+  // Boris shell (C1/C2) about the cell's nearest sheath-geometry element
+  int midx_bn = -1;
+  if ((oe_boris_near > 0.0 || oe_gc_wall_flux) && d_oe_midx_gcell.data()) {
+    int gcell = icell;
+    if (d_cells[icell].nsplit <= 0 && d_cells[icell].isplit >= 0)
+      gcell = d_sinfo[d_cells[icell].isplit].icell;
+    if (gcell >= 0 && gcell < (int) d_oe_midx_gcell.extent(0))
+      midx_bn = d_oe_midx_gcell(gcell);
+  }
+  double d_sw = -1.0, d_start = 1.0e30;
+  if (oe_boris_near > 0.0 && midx_bn >= 0) {
+    d_sw = oe_boris_near_rhol ? oe_boris_near * rho_L : oe_boris_near;
+    d_start = Kokkos::fabs(oe_near_signed(midx_bn, x));
+    if (use_gca && d_sw > 0.0) {
+      if (d_start < d_sw) use_gca = false;
+      else if (have_state && d_oe_gca_chi(i) > 0.0 &&
+               (d_oe_gca_chi(i) < 2.0*GCAKokkos::TWO_PI || d_start < 2.0*d_sw))
+        use_gca = false;      // C2 hysteresis hold
+    }
+  }
+
+  bool ran_gca = false;
+  if (use_gca) {
+    GCAKokkos::State g;
+    if (have_state && d_oe_gca_valid(i) > 0.5) {
+      g.X[0] = d_oe_gca_x(i); g.X[1] = d_oe_gca_y(i); g.X[2] = d_oe_gca_z(i);
+      g.v_par = d_oe_gca_vpar(i);
+      g.mu = (d_oe_gca_mu(i) > 0.0) ? d_oe_gca_mu(i) : 0.0;
+    } else {
+      g = GCAKokkos::init_from_particle(x, v, mass, qm, F.B);
+    }
+
+    // per-stage field resampling: a failed stage query keeps the k1
+    // fields; a failed stage E query keeps the k1 E (stale beats zero)
+    auto fields_at = [&](const double *Xs, GCAKokkos::Fields &FS) {
+      GCAKokkos::Fields Ft;
+      if (!oe_sample_gca_fields(Xs, icell, Ft)) return;
+      if (!Ft.e_valid) { Ft.E[0] = FS.E[0]; Ft.E[1] = FS.E[1]; Ft.E[2] = FS.E[2]; }
+      FS = Ft;
+    };
+
+    if (oe_gca_integrator == 1) {            // GCA_SIMPLE
+      GCAKokkos::push_gca(qm, dt, mass, F.E, F.B, F.gradBmag, g);
+    } else if (oe_gca_integrator == 2) {     // GCA_RK2 (midpoint)
+      const double y[4] = {g.X[0], g.X[1], g.X[2], g.v_par};
+      GCAKokkos::Rhs r1 = GCAKokkos::rhs(qm, mass, y[3], g.mu, F);
+      double ymid[4] = {y[0] + 0.5*dt*r1.dXdt[0], y[1] + 0.5*dt*r1.dXdt[1],
+                        y[2] + 0.5*dt*r1.dXdt[2], y[3] + 0.5*dt*r1.dvpar_dt};
+      GCAKokkos::Fields Fmid = F;
+      fields_at(ymid, Fmid);
+      GCAKokkos::Rhs r2 = GCAKokkos::rhs(qm, mass, ymid[3], g.mu, Fmid);
+      for (int k = 0; k < 3; k++) g.X[k] = y[k] + dt * r2.dXdt[k];
+      g.v_par = y[3] + dt * r2.dvpar_dt;
+    } else {                                 // GCA_RK4
+      const double y[4] = {g.X[0], g.X[1], g.X[2], g.v_par};
+      GCAKokkos::Rhs r1 = GCAKokkos::rhs(qm, mass, y[3], g.mu, F);
+      double k1[4] = {dt*r1.dXdt[0], dt*r1.dXdt[1], dt*r1.dXdt[2], dt*r1.dvpar_dt};
+      double y2[4] = {y[0]+0.5*k1[0], y[1]+0.5*k1[1], y[2]+0.5*k1[2], y[3]+0.5*k1[3]};
+      GCAKokkos::Fields F2 = F; fields_at(y2, F2);
+      GCAKokkos::Rhs r2 = GCAKokkos::rhs(qm, mass, y2[3], g.mu, F2);
+      double k2[4] = {dt*r2.dXdt[0], dt*r2.dXdt[1], dt*r2.dXdt[2], dt*r2.dvpar_dt};
+      double y3[4] = {y[0]+0.5*k2[0], y[1]+0.5*k2[1], y[2]+0.5*k2[2], y[3]+0.5*k2[3]};
+      GCAKokkos::Fields F3 = F; fields_at(y3, F3);
+      GCAKokkos::Rhs r3 = GCAKokkos::rhs(qm, mass, y3[3], g.mu, F3);
+      double k3[4] = {dt*r3.dXdt[0], dt*r3.dXdt[1], dt*r3.dXdt[2], dt*r3.dvpar_dt};
+      double y4[4] = {y[0]+k3[0], y[1]+k3[1], y[2]+k3[2], y[3]+k3[3]};
+      GCAKokkos::Fields F4 = F; fields_at(y4, F4);
+      GCAKokkos::Rhs r4 = GCAKokkos::rhs(qm, mass, y4[3], g.mu, F4);
+      double k4[4] = {dt*r4.dXdt[0], dt*r4.dXdt[1], dt*r4.dXdt[2], dt*r4.dvpar_dt};
+      for (int k = 0; k < 3; k++)
+        g.X[k] = y[k] + (k1[k] + 2.0*k2[k] + 2.0*k3[k] + k4[k]) / 6.0;
+      g.v_par = y[3] + (k1[3] + 2.0*k2[3] + 2.0*k3[3] + k4[3]) / 6.0;
+    }
+
+    // C1 trial/replay: discard the GCA step if the swept GC chord entered
+    // the shell or crossed the wall plane; the Boris path below replays
+    bool swept = false;
+    if (d_sw > 0.0) {
+      const double s1 = oe_near_signed(midx_bn, g.X);
+      const double s0 = oe_near_signed(midx_bn, x);
+      const double smin = Kokkos::fmin(Kokkos::fabs(s0), Kokkos::fabs(s1));
+      if (smin < d_sw || s0 * s1 <= 0.0) swept = true;
+    }
+    if (!swept) {
+      if (have_state) {
+        d_oe_gca_x(i) = g.X[0]; d_oe_gca_y(i) = g.X[1]; d_oe_gca_z(i) = g.X[2];
+        d_oe_gca_vpar(i) = g.v_par;
+        d_oe_gca_mu(i) = g.mu;
+        d_oe_gca_mode(i) = 1.0;
+        d_oe_gca_valid(i) = 1.0;
+        d_oe_gca_chi(i) = 0.0;
+      }
+      // reconstruct v with the END-of-step fields (diagnostics + clean
+      // Boris fallback); deterministic gyrophase hash, A1 flux sampling
+      GCAKokkos::Fields Fe = F;
+      fields_at(g.X, Fe);
+      const double omega_c = qm_abs * Fe.Bmag;
+      const double phase_turns =
+        (double) d_particles[i].id * GCAKokkos::PHASE_GOLDEN +
+        (omega_c * dt * (double) ntimestep) / GCAKokkos::TWO_PI;
+      double rand_u = phase_turns - Kokkos::floor(phase_turns);
+      if (oe_gc_wall_flux && midx_bn >= 0 && Fe.Bmag > 0.0) {
+        const double vperp_e = Kokkos::sqrt(2.0 * g.mu * Fe.Bmag / mass);
+        const double rho_e = vperp_e / (qm_abs * Fe.Bmag);
+        const double s1 = oe_near_signed(midx_bn, g.X);
+        if (s1 < 2.0 * rho_e + Kokkos::fabs(g.v_par) * dt) {
+          const Surf::Tri &trw = d_tris[midx_bn];
+          const double nw[3] = {trw.norm[0], trw.norm[1], trw.norm[2]};
+          const double bh[3] = {Fe.B[0]/Fe.Bmag, Fe.B[1]/Fe.Bmag, Fe.B[2]/Fe.Bmag};
+          double e1w[3], e2w[3];
+          GCAKokkos::perp_basis(bh, e1w, e2w);
+          const double a  = g.v_par * (bh[0]*nw[0] + bh[1]*nw[1] + bh[2]*nw[2]);
+          const double cx = vperp_e * (e1w[0]*nw[0] + e1w[1]*nw[1] + e1w[2]*nw[2]);
+          const double cy = vperp_e * (e2w[0]*nw[0] + e2w[1]*nw[1] + e2w[2]*nw[2]);
+          rand_u = GCAKokkos::flux_phase_sample(a, cx, cy, rand_u);
+        }
+      }
+      // qm = 0: the ADVECTED position rides at the guiding center
+      GCAKokkos::to_particle(g, Fe.B, mass, 0.0, rand_u, xnew, v);
+      if (oe_pusher_mode == 2) { xnew[0] = g.X[0]; xnew[1] = g.X[1]; xnew[2] = g.X[2]; }
+      ran_gca = true;
+    }
+  }
+
+  if (!ran_gca) {
+    // Boris fallback / handoff: materialize the orbit about the STORED
+    // guiding center (value semantics), then delegate to oe_boris3d
+    double xstart[3] = {x[0], x[1], x[2]};
+    if (have_state && d_oe_gca_valid(i) > 0.5 && Bmag > 0.0) {
+      GCAKokkos::State g;
+      g.X[0] = d_oe_gca_x(i); g.X[1] = d_oe_gca_y(i); g.X[2] = d_oe_gca_z(i);
+      g.v_par = d_oe_gca_vpar(i);
+      g.mu = (d_oe_gca_mu(i) > 0.0) ? d_oe_gca_mu(i) : 0.0;
+      const double pt = (double) d_particles[i].id * GCAKokkos::PHASE_GOLDEN;
+      double xo[3], vo[3];
+      GCAKokkos::to_particle(g, F.B, mass, qm, pt - Kokkos::floor(pt), xo, vo);
+      v[0] = vo[0]; v[1] = vo[1]; v[2] = vo[2];
+      xstart[0] = xo[0]; xstart[1] = xo[1]; xstart[2] = xo[2];
+    }
+    if (have_state) {
+      d_oe_gca_mode(i) = 0.0;
+      d_oe_gca_valid(i) = 0.0;                 // Boris advances x; X goes stale
+      d_oe_gca_chi(i) += qm_abs * Bmag * dt;   // residence gyroangle
+    }
+    oe_boris3d(i, icell, dt, xstart, v, xnew, charge, mass);
+  }
+}
+
 KOKKOS_INLINE_FUNCTION
 void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
                                double *x, double *v, double *xnew,
@@ -3619,6 +3961,18 @@ void UpdateKokkos::backup()
     Kokkos::deep_copy(d_oe_sheath_bank_backup,d_oe_sheath_bank);
     Kokkos::deep_copy(d_oe_sheath_phiprev_backup,d_oe_sheath_phiprev);
   }
+  // Phase B: the hybrid mover writes the GC-state customs; snapshot them too
+  if (oe_has_gca_customs) {
+    DAT::t_float_1d *src[8] = {&d_oe_gca_x,&d_oe_gca_y,&d_oe_gca_z,&d_oe_gca_vpar,
+                               &d_oe_gca_mu,&d_oe_gca_mode,&d_oe_gca_valid,&d_oe_gca_chi};
+    for (int k = 0; k < 8; k++) {
+      if (d_oe_gca_backup[k].extent(0) != src[k]->extent(0))
+        d_oe_gca_backup[k] = DAT::t_float_1d(
+            Kokkos::view_alloc("update:gca_backup",Kokkos::WithoutInitializing),
+            src[k]->extent(0));
+      Kokkos::deep_copy(d_oe_gca_backup[k],*src[k]);
+    }
+  }
 
   if (surf->nsc > 0) {
     int nspec,ndiff,npist;
@@ -3651,6 +4005,11 @@ void UpdateKokkos::restore()
   if (oe_has_sheath_customs) {
     Kokkos::deep_copy(d_oe_sheath_bank,d_oe_sheath_bank_backup);
     Kokkos::deep_copy(d_oe_sheath_phiprev,d_oe_sheath_phiprev_backup);
+  }
+  if (oe_has_gca_customs) {
+    DAT::t_float_1d *dst[8] = {&d_oe_gca_x,&d_oe_gca_y,&d_oe_gca_z,&d_oe_gca_vpar,
+                               &d_oe_gca_mu,&d_oe_gca_mode,&d_oe_gca_valid,&d_oe_gca_chi};
+    for (int k = 0; k < 8; k++) Kokkos::deep_copy(*dst[k],d_oe_gca_backup[k]);
   }
 
   if (surf->nsc > 0) {

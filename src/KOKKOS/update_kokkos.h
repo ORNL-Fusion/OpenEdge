@@ -20,6 +20,7 @@
 #include "surf_collide_piston_kokkos.h"
 #include "surf_collide_transparent_kokkos.h"
 #include "surf_collide_toroidal_kokkos.h"
+#include "gca_kokkos.h"
 #include "compute_boundary_kokkos.h"
 #include "compute_surf_kokkos.h"
 #include "pusher_kokkos.h"
@@ -263,6 +264,16 @@ class UpdateKokkos : public Update {
   DAT::t_float_1d d_oe_sheath_bank_backup;
   DAT::t_float_1d d_oe_sheath_phiprev_backup;
   int    oe_has_sheath_customs;
+
+  // OpenEdge Phase B: hybrid/GCA pusher configuration + GC-state customs
+  int    oe_pusher_mode;          // Pusher::PusherMode (0 boris, 1 hybrid, 2 gca)
+  int    oe_gca_integrator;       // Pusher::GCAIntegrator (0 rk4, 1 simple, 2 rk2)
+  int    oe_boris_near_rhol, oe_gc_wall_flux;
+  double oe_gca_switch, oe_boris_near;
+  int    oe_has_gca_customs;
+  DAT::t_float_1d d_oe_gca_x, d_oe_gca_y, d_oe_gca_z, d_oe_gca_vpar,
+                  d_oe_gca_mu, d_oe_gca_mode, d_oe_gca_valid, d_oe_gca_chi;
+  DAT::t_float_1d d_oe_gca_backup[8];
   void build_oe_sheath_cache();
   // Spatial-sheath engagement diagnostics (device twins of the CPU
   // sheath_diag_* counters; gated on `global pusher ... dump yes`).
@@ -365,6 +376,19 @@ class UpdateKokkos : public Update {
   };
 
   // OpenEdge: device-callable Boris 3D pusher (reads E/B from grid fix views)
+  // OpenEdge Phase B: device hybrid/GCA pusher (3D). Mirrors
+  // Pusher::push_hybrid_3d / sample_gca_fields; Boris delegation =
+  // oe_boris3d. GC state lives in the gca_* particle customs.
+  KOKKOS_INLINE_FUNCTION
+  bool oe_sample_gca_fields(const double *xpos, int icell,
+                            GCAKokkos::Fields &F) const;
+  KOKKOS_INLINE_FUNCTION
+  double oe_near_signed(int midx, const double *p) const;
+  KOKKOS_INLINE_FUNCTION
+  void oe_hybrid3d(int i, int icell, double dt,
+                   double *x, double *v, double *xnew,
+                   double charge, double mass) const;
+
   KOKKOS_INLINE_FUNCTION
   void oe_boris3d(int i, int icell, double dt_full,
                   double *x, double *v, double *xnew,
