@@ -46,7 +46,11 @@ Device-scale cases that demonstrate a complete modeling chain.
 | `workflows/impurity_transport/rfpie_tungsten_transport/` | RFPIE tungsten sputtering and transport |
 | `workflows/impurity_transport/west_tungsten_transport/` | Axisymmetric WEST tungsten transport |
 
-ParaView examples are under `visualization/paraview/`.
+## Visualization
+
+| Directory | Purpose |
+|---|---|
+| `visualization/paraview/` | Native grid, surface, and particle VTK XML output; no Python conversion required |
 
 ## Local work
 
