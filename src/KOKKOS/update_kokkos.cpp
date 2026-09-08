@@ -307,6 +307,8 @@ void UpdateKokkos::init()
   oe_boris_near_rhol  = pusher->pusher_boris_near_rhol;
   oe_gc_wall_flux     = pusher->pusher_gc_wall_flux;
   oe_has_gca_customs  = 0;
+  oe_gc_hooks = 31;
+  if (const char *e = getenv("OE_GC_HOOKS")) oe_gc_hooks = atoi(e);
   oe_bx_col = oe_by_col = oe_bz_col = -1;
 
   // OpenEdge Phase A: equilibrium-based point-query B (defaults off).
@@ -1358,6 +1360,14 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
         v[2] += vkick2;
         xnew[2] += d_dx_cd(i,2);
       }
+      // GCA-state particles: shift the STORED guiding center by the same
+      // displacement (CPU apply_gc_displacement); otherwise the pusher
+      // restores the pre-kick GC next step and the diffusion reverts
+      if (oe_has_gca_customs && (oe_gc_hooks & 2) && d_oe_gca_valid(i) > 0.5) {
+        d_oe_gca_x(i) += d_dx_cd(i,0);
+        d_oe_gca_y(i) += d_dx_cd(i,1);
+        if (DIM == 3) d_oe_gca_z(i) += d_dx_cd(i,2);
+      }
       has_kick = 1;
     }
   } else if (pflag == PINSERT) {
@@ -1935,6 +1945,14 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
               jpart = sc_kk_toroidal_copy[m].obj.
                 collide_kokkos<REACT,ATOMIC_REDUCTION>(ipart,dtremain,minsurf,line->norm,line->isr,reaction,d_retry,d_nlocal);
             }
+          }
+
+          // CPU parity: diffuse walls and toroidal caps invalidate the
+          // stored guiding-center state (surf_collide_diffuse / toroidal
+          // call pusher->invalidate_gc); specular / vanish do not
+          if (oe_has_gca_customs && (oe_gc_hooks & 1) && (sc_type == 1 || sc_type == 5)) {
+            d_oe_gca_valid(i) = 0.0;
+            if (jpart) d_oe_gca_valid((int) (jpart - d_particles.data())) = 0.0;
           }
 
           if (jpart) {

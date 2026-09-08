@@ -23,6 +23,7 @@
 #include "sparta.h"
 #include "sparta_masks.h"
 #include "update.h"
+#include "pusher.h"
 #include "update_kokkos.h"
 
 using namespace SPARTA_NS;
@@ -156,6 +157,15 @@ void FixForceThermalKokkos::kick_device(double dt_half)
   ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
   particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK);
   d_particles = particle_kk->k_particles.view_device();
+  gca_vpar_slot_ = gca_valid_slot_ = -1;
+  int gc_hooks = 31; if (const char *e = getenv("OE_GC_HOOKS")) gc_hooks = atoi(e);
+  if ((gc_hooks & 16) && update->pusher && update->pusher->pusher_mode != Pusher::PUSHER_BORIS &&
+      update->pusher->gca_vpar_custom >= 0 && update->pusher->gca_valid_custom >= 0) {
+    particle_kk->sync(Device,CUSTOM_MASK);
+    custom_ = particle_kk->device_custom();
+    gca_vpar_slot_  = particle->ewhich[update->pusher->gca_vpar_custom];
+    gca_valid_slot_ = particle->ewhich[update->pusher->gca_valid_custom];
+  }
   d_species   = particle_kk->k_species.d_view;
 
   col_x0_ = pd_ ? pd_->column_x0 : 0.0;
@@ -259,6 +269,7 @@ void FixForceThermalKokkos::kick_device(double dt_half)
   copymode = 0;
 
   particle_kk->modify(Device,PARTICLE_MASK);
+  if (gca_valid_slot_ >= 0) particle_kk->modify(Device,CUSTOM_MASK);
 
   if (compare) {
     particle_kk->sync(Host,PARTICLE_MASK);
@@ -407,6 +418,15 @@ void FixForceThermalKokkos::operator()(TagFixForceThermal,
   }
 
   if (a_par == 0.0) return;
+
+  // CPU apply_parallel_impulse: a GCA-valid particle takes the parallel
+  // kick on its stored v_par (a raw v kick would be discarded at the next
+  // reconstruction); Boris-mode / invalid particles take the plain kick
+  if (gca_valid_slot_ >= 0 &&
+      custom_.k_edvec.view_device()[gca_valid_slot_].k_view.view_device()[i] > 0.5) {
+    custom_.k_edvec.view_device()[gca_vpar_slot_].k_view.view_device()[i] += a_par * dt_half_;
+    return;
+  }
 
   p.v[0] += a_par * bhat0 * dt_half_;
   p.v[1] += a_par * bhat1 * dt_half_;

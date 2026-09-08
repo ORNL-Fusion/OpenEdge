@@ -16,9 +16,11 @@
 #include "grid_kokkos.h"
 #include "particle_kokkos.h"
 #include "pusher_kokkos.h"
+#include "gca_kokkos.h"
 #include "sparta.h"
 #include "sparta_masks.h"
 #include "update.h"
+#include "pusher.h"
 #include "update_kokkos.h"
 
 using namespace SPARTA_NS;
@@ -156,6 +158,21 @@ void FixCoulombBackgroundKokkos::end_of_step()
   ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
   GridKokkos *grid_kk = (GridKokkos *) grid;
   particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK);
+  gca_vpar_slot_ = gca_mu_slot_ = gca_valid_slot_ = -1;
+  int gc_hooks = 31; if (const char *e = getenv("OE_GC_HOOKS")) gc_hooks = atoi(e);
+  if ((gc_hooks & 8) && update->pusher && update->pusher->pusher_mode != Pusher::PUSHER_BORIS &&
+      update->pusher->gca_vpar_custom >= 0 && update->pusher->gca_mu_custom >= 0 &&
+      update->pusher->gca_valid_custom >= 0) {
+    particle_kk->sync(Device,CUSTOM_MASK);
+    custom_ = particle_kk->device_custom();
+    gca_vpar_slot_  = particle->ewhich[update->pusher->gca_vpar_custom];
+    gca_mu_slot_    = particle->ewhich[update->pusher->gca_mu_custom];
+    gca_valid_slot_ = particle->ewhich[update->pusher->gca_valid_custom];
+    gca_x_slot_ = particle->ewhich[update->pusher->gca_x_custom];
+    gca_y_slot_ = particle->ewhich[update->pusher->gca_y_custom];
+    gca_z_slot_ = particle->ewhich[update->pusher->gca_z_custom];
+    ntimestep_ = update->ntimestep;
+  }
   grid_kk->sync(Device,CINFO_MASK);
   d_particles = particle_kk->k_particles.view_device();
   d_species   = particle_kk->k_species.d_view;
@@ -221,6 +238,7 @@ void FixCoulombBackgroundKokkos::end_of_step()
   copymode = 0;
 
   particle_kk->modify(Device,PARTICLE_MASK);
+  if (gca_valid_slot_ >= 0) particle_kk->modify(Device,CUSTOM_MASK);
 }
 
 /* ----------------------------------------------------------------------
@@ -324,8 +342,31 @@ void FixCoulombBackgroundKokkos::operator()(TagFixCoulombBg,
   e2[2] = bhat[0]*e1[1] - bhat[1]*e1[0];
 
   const double v_thermal = Kokkos::sqrt(Ti_eV * echarge_ / mbg_);
-  double *v = p.v;
   const double m_test = d_species(isp).mass;
+  // CPU parity (fix_coulomb_base.cpp): a GCA-valid particle scatters the
+  // MATERIALIZED physical velocity from its stored guiding-center state
+  // (local copy -- the particle's own v is a chord / stale reconstruction
+  // and is left untouched) and re-projects (v_par, mu) afterwards
+  double vloc[3] = {p.v[0], p.v[1], p.v[2]};
+  double *v = p.v;
+  bool gc_part = false;
+  if (gca_valid_slot_ >= 0 && m_test > 0.0 &&
+      custom_.k_edvec.view_device()[gca_valid_slot_].k_view.view_device()[i] > 0.5) {
+    GCAKokkos::State g;
+    g.X[0] = custom_.k_edvec.view_device()[gca_x_slot_].k_view.view_device()[i];
+    g.X[1] = custom_.k_edvec.view_device()[gca_y_slot_].k_view.view_device()[i];
+    g.X[2] = custom_.k_edvec.view_device()[gca_z_slot_].k_view.view_device()[i];
+    g.v_par = custom_.k_edvec.view_device()[gca_vpar_slot_].k_view.view_device()[i];
+    const double mu_s = custom_.k_edvec.view_device()[gca_mu_slot_].k_view.view_device()[i];
+    g.mu = (mu_s > 0.0) ? mu_s : 0.0;
+    const double qm_l = Zq * echarge_ / m_test;
+    const double ph = Kokkos::fmod((double) p.id * 0.6180339887498949 +
+                                   (double) ntimestep_ * 0.3819660112501051, 1.0);
+    double xo[3];
+    GCAKokkos::to_particle(g, B, m_test, qm_l, ph, xo, vloc);
+    v = vloc;
+    gc_part = true;
+  }
   const double q_test = Zq * echarge_;
 
   rand_type rand_gen = rand_pool.get_state();
@@ -420,6 +461,22 @@ void FixCoulombBackgroundKokkos::operator()(TagFixCoulombBg,
   v[0] -= m_bg_frac * dg0;
   v[1] -= m_bg_frac * dg1;
   v[2] -= m_bg_frac * dg2;
+
+  // CPU sync_gc_velocity: a GCA-valid particle's stored (v_par, mu) must
+  // follow the drag-modified v (else the next reconstruction discards it)
+  if (gc_part) {
+    const double Bm = Kokkos::sqrt(Bx*Bx + By*By + Bz*Bz);
+    if (Bm <= 0.0) {
+      custom_.k_edvec.view_device()[gca_valid_slot_].k_view.view_device()[i] = 0.0;
+    } else {
+      const double vpar = (v[0]*Bx + v[1]*By + v[2]*Bz) / Bm;
+      double vperp2 = v[0]*v[0] + v[1]*v[1] + v[2]*v[2] - vpar*vpar;
+      if (vperp2 < 0.0) vperp2 = 0.0;
+      custom_.k_edvec.view_device()[gca_vpar_slot_].k_view.view_device()[i] = vpar;
+      custom_.k_edvec.view_device()[gca_mu_slot_].k_view.view_device()[i] =
+        m_test * vperp2 / (2.0 * Bm);
+    }
+  }
 
   rand_pool.free_state(rand_gen);
 }

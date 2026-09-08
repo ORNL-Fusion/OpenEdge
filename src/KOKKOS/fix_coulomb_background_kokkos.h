@@ -61,6 +61,11 @@ class FixCoulombBackgroundKokkos : public FixCoulombBackground,
   void operator()(TagFixCoulombBg, const int &i) const;
 
  private:
+  // Phase B: GC-state customs for the hybrid pusher (CPU sync_gc_velocity)
+  ParticleKokkos::DeviceCustom custom_;
+  int gca_vpar_slot_, gca_mu_slot_, gca_valid_slot_;
+  int gca_x_slot_, gca_y_slot_, gca_z_slot_;
+  bigint ntimestep_;
   int device_ok;
   int warned_fallback;
 

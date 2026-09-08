@@ -6,6 +6,8 @@
 #include "particle_kokkos.h"
 #include "grid.h"
 #include "update.h"
+#include <cstdlib>
+#include "pusher.h"
 #include "comm.h"
 #include "modify.h"
 #include "memory.h"
@@ -530,6 +532,20 @@ void FixVolumeChemAdasKokkos::end_of_step()
     d_ev_count = Kokkos::View<int,DeviceType>("chem:ev_count");
   Kokkos::deep_copy(d_ev_count,0);
 
+  // Phase B: hybrid/GCA pusher -> the kernel invalidates the stored GC
+  // state on a species change; bind the custom views unconditionally
+  // (the product-creation branch above binds custom_ only for two-product
+  // reaction tables)
+  gca_valid_slot_ = -1;
+  int gc_hooks = 31; if (const char *e = getenv("OE_GC_HOOKS")) gc_hooks = atoi(e);
+  if ((gc_hooks & 4) && update->pusher && update->pusher->pusher_mode != Pusher::PUSHER_BORIS &&
+      update->pusher->gca_valid_custom >= 0) {
+    ParticleKokkos *pkk_gc = (ParticleKokkos *) particle;
+    pkk_gc->sync(Device,CUSTOM_MASK);
+    custom_ = pkk_gc->device_custom();
+    gca_valid_slot_ = particle->ewhich[update->pusher->gca_valid_custom];
+  }
+
   if (nlocal > 0) {
     // parallel_for copies the functor (this whole fix); copymode stops
     // the copy's destructor from freeing the base-class allocations
@@ -541,6 +557,7 @@ void FixVolumeChemAdasKokkos::end_of_step()
   }
 
   particle_kk->modify(Device,PARTICLE_MASK);
+  if (gca_valid_slot_ >= 0) particle_kk->modify(Device,CUSTOM_MASK);
   if (have_two_ && d_new_count.data()) {
     int nnew_total = 0;
     Kokkos::deep_copy(nnew_total, d_new_count);
@@ -818,6 +835,11 @@ void FixVolumeChemAdasKokkos::operator()(TagFixChemAdas, const int &i) const
   // (no eirene_mode, no GC state to invalidate — hybrid errors out under
   // Kokkos; single product only, enforced at init)
   p.ispecies = d_r_product0(best_idx);
+  // species/charge change invalidates the stored guiding-center state
+  // (CPU invalidate_gc GC_INVAL_SPECIES: q/m-dependent v_par and mu are
+  // meaningless across the swap; the pusher re-inits from v next step)
+  if (gca_valid_slot_ >= 0)
+    custom_.k_edvec.view_device()[gca_valid_slot_].k_view.view_device()[i] = 0.0;
 
   double fc_kick_x = 0.0, fc_kick_y = 0.0, fc_kick_z = 0.0;
 

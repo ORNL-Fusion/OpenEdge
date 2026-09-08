@@ -271,6 +271,8 @@ class UpdateKokkos : public Update {
   int    oe_boris_near_rhol, oe_gc_wall_flux;
   double oe_gca_switch, oe_boris_near;
   int    oe_has_gca_customs;
+  int    oe_gc_hooks;             // OE_GC_HOOKS bitmask (diagnostic A/B): 1 collision
+                                  // invalidate, 2 kick displace; default all on
   DAT::t_float_1d d_oe_gca_x, d_oe_gca_y, d_oe_gca_z, d_oe_gca_vpar,
                   d_oe_gca_mu, d_oe_gca_mode, d_oe_gca_valid, d_oe_gca_chi;
   DAT::t_float_1d d_oe_gca_backup[8];

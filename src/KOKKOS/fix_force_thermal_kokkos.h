@@ -49,6 +49,9 @@ class FixForceThermalKokkos : public FixForceThermal, public KokkosBase {
   void operator()(TagFixForceThermal, const int &i) const;
 
  private:
+  // Phase B: GC-state customs for the hybrid pusher (CPU apply_parallel_impulse)
+  ParticleKokkos::DeviceCustom custom_;
+  int gca_vpar_slot_, gca_valid_slot_;
   int device_ok;
   int warned_fallback;
 

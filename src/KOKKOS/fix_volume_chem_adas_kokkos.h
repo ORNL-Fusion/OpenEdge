@@ -124,6 +124,7 @@ class FixVolumeChemAdasKokkos : public FixVolumeChemAdas, public KokkosBase {
   int have_ti_, have_vpar_, have_b_, have_pweight_;
   // newborn creation (dissociation second product; PWI device idiom)
   ParticleKokkos::DeviceCustom custom_;
+  int gca_valid_slot_;              // edvec slot of gca_valid (-1 = no hybrid pusher)
   int pw_slot_;
   Kokkos::View<int, DeviceType> d_new_count;
   int nglocal_;
