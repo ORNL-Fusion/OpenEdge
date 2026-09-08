@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -122,8 +122,8 @@ column of the M-column per-grid array.  See the discussion above for
 how N can be specified with a wildcard asterisk to effectively specify
 multiple values.
 
-Users can also write code for their own compute styles and "add them
-to SPARTA"_Section_modify.html.
+Users can also write code for their own compute styles and add them
+to OpenEdge.
 
 If a value begins with "f_", a fix ID must follow which has been
 previously defined in the input script.  If no bracketed term is
@@ -136,8 +136,8 @@ values.
 
 Note that some fixes only produce their values on certain timesteps,
 which must be compatible with {Nevery}, else an error will result.
-Users can also write code for their own fix styles and "add them to
-SPARTA"_Section_modify.html.
+Users can also write code for their own fix styles and add them to
+OpenEdge.
 
 If a value begins with "v_", a variable name must follow which has
 been previously defined in the input script.  Only grid-style
@@ -150,12 +150,10 @@ this is a very general means of specifying quantities to time average.
 If a value begins with "g_", the name of a custom per-grid vector or
 array must follow.  Custom attributes can store either a single or
 multiple values per grid cell.  See "Section
-6.17"_Section_howto.html#howto_17 for more discussion of custom
+6.17"_Section_howto.html#howto_14 for more discussion of custom
 attributes and command that define them.  For example, the
-"read_grid"_read_grid.html and "surf_react
-implicit"_surf_react_implicit.html commands can define per-grid
-attributes.  (The surf/react implicit command has not yet been
-released in public SPARTA).
+"read_grid"_read_grid.html and the unreleased {surf_react implicit}
+command can define per-grid attributes.
 
 If {g_name} is used as a value, the custom attribute must be a vector.
 If {g_name\[N\]} is used, the custom attribute must be an array, and N
@@ -222,8 +220,8 @@ is when averaging is performed.
 
 This fix performs averaging for all child grid cells in the
 simulation, which includes unsplit, split, and sub cells.  "Section
-4.8"_Section_howto.html#howto_ of the manual gives details of how
-SPARTA defines child, unsplit, split, and sub cells.
+4.10"_Section_howto.html#howto_10 of the manual gives details of how
+OpenEdge defines child, unsplit, split, and sub cells.
 
 Grid cells not in the specified {group-ID} will output zeroes for all
 their values.
@@ -233,21 +231,21 @@ their values.
 Styles with a {kk} suffix are functionally the same as the
 corresponding style without the suffix.  They have been optimized to
 run faster, depending on your available hardware, as discussed in the
-"Accelerating SPARTA"_Section_accelerate.html section of the manual.
+"Building OpenEdge"_Section_start.html#start_2 section of the manual.
 The accelerated styles take the same arguments and should produce the
 same results, except for different random number, round-off and
 precision issues.
 
 These accelerated styles are part of the KOKKOS package. They are only
-enabled if SPARTA was built with that package.  See the "Making
-SPARTA"_Section_start.html#start_3 section for more info.
+enabled if OpenEdge was built with that package.  See the "Making
+OpenEdge"_Section_start.html#start_3 section for more info.
 
 You can specify the accelerated styles explicitly in your input script
 by including their suffix, or you can use the "-suffix command-line
-switch"_Section_start.html#start_7 when you invoke SPARTA, or you can
+switch"_Section_start.html#start_5 when you invoke OpenEdge, or you can
 use the "suffix"_suffix.html command in your input script.
 
-See the "Accelerating SPARTA"_Section_accelerate.html section of the
+See the "Building OpenEdge"_Section_start.html#start_2 section of the
 manual for more instructions on how to use the accelerated styles
 effectively.
 

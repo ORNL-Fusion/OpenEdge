@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -49,8 +49,8 @@ Overlay a grid over the simulation domain defined by the
 "create_box"_create_box.html command.  The grid can also be defined by
 the "read_grid"_read_grid.html command.
 
-The grid in SPARTA is hierarchical, as described in "Section howto
-4.8"_Section_howto.html#howto_8.  The entire simulation box is a
+The grid in OpenEdge is hierarchical, as described in "Section howto
+4.8"_Section_howto.html#howto_10.  The entire simulation box is a
 single parent grid cell at level 0.  It is subdivided into Nx by Ny by
 Nz cells at level 1.  Each of those cells can be a child cell (no
 further sub-division) or can be a parent cell which is further
@@ -70,7 +70,7 @@ cells to each processor.  This means each processor's cells will be
 geometrically compact.  The {random} and {stride} keywords, produce
 dispersed assignments of child cells to each processor.
 
-IMPORTANT NOTE: See "Section 6.8"_Section_howto.html#howto_8 of the
+IMPORTANT NOTE: See "Section 4.10"_Section_howto.html#howto_12 of the
 manual for an explanation of clumped and dispersed grid cell
 assignments and their relative performance trade-offs.  The
 "balance_grid"_balance_grid.html command can be used after the grid is
@@ -96,15 +96,15 @@ effectively assigns a contiguous 3d sub-block of cells to each
 processor.
 
 Any of the {Px}, {Py}, {Pz} parameters can be specified with an
-asterisk "*", in which case SPARTA will choose the number of
+asterisk "*", in which case OpenEdge will choose the number of
 processors in that dimension.  It will do this based on the size and
 shape of the global grid so as to minimize the surface-to-volume ratio
 of each processor's sub-block of cells.
 
 The product of Px, Py, Pz must equal P, the total # of processors
-SPARTA is running on.  For a 2d simulation, Pz must equal 1. If
+OpenEdge is running on.  For a 2d simulation, Pz must equal 1. If
 multiple partitions are being used then P is the number of processors
-in this partition; see "Section 2.6"_Section_start.html#start_7 for an
+in this partition; see "Section 2.5"_Section_start.html#start_5 for an
 explanation of the -partition command-line switch.
 
 Note that if you run on a large, prime number of processors P, then a

@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -21,8 +21,8 @@ clear
 [Description:]
 
 This command deletes all atoms, restores all settings to their default
-values, and frees all memory allocated by SPARTA.  Once a clear
-command has been executed, it is almost as if SPARTA were starting
+values, and frees all memory allocated by OpenEdge.  Once a clear
+command has been executed, it is almost as if OpenEdge were starting
 over, with only the exceptions noted below.  This command enables
 multiple jobs to be run sequentially from one input script.
 

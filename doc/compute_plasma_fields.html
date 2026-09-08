@@ -1,0 +1,211 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>compute plasma/fields command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>compute ID plasma/fields group-ID source sargs ... value1 value2 ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "compute.html">compute</A> command 
+
+<LI>plasma/fields = style name of this compute command 
+
+<LI>group-ID = group ID for which grid cells to perform calculation on 
+
+<LI>source = <I>background</I> or <I>constant</I> or <I>analytic</I> 
+
+<PRE>  <I>background</I> sarg = fix-ID = ID of a <A HREF = "fix_background.html">fix background</A>
+  <I>constant</I> sargs = zero or more constant keyword/value pairs, optionally
+    terminated by the word <I>values</I>
+  <I>analytic</I> sargs = zero or more constant or analytic keyword/value pairs,
+    optionally terminated by the word <I>values</I>
+    constant keywords = <I>magnetic_field</I> or <I>electric_field</I> or <I>temp_e</I> or
+      <I>temp_i</I> or <I>dens_e</I> or <I>dens_i</I> or <I>parrflow</I>
+      <I>magnetic_field</I> values = Br Bt Bz = uniform B (T)
+      <I>electric_field</I> values = Er Et Ez = uniform E (V/m)
+      <I>temp_e</I> value = electron temperature (eV)
+      <I>temp_i</I> value = ion temperature (eV)
+      <I>dens_e</I> value = electron density (m^-3)
+      <I>dens_i</I> value = ion density (m^-3)
+      <I>parrflow</I> value = parallel flow speed (m/s)
+    analytic keywords = <I>r0</I> or <I>ne0</I> or <I>te0</I> or <I>te1</I> or <I>ti0</I> or <I>eps</I>
+      or <I>x0</I> or <I>y0</I>
+      <I>r0</I> value = radius of the analytic column (m)
+      <I>ne0</I> value = peak electron density (m^-3)
+      <I>te0</I> value = edge electron temperature (eV)
+      <I>te1</I> value = peak-minus-edge electron temperature (eV)
+      <I>ti0</I> value = uniform ion temperature (eV)
+      <I>eps</I> value = softening added to r^2 (m^2)
+      <I>x0</I>,<I>y0</I> values = center of the column (default = box center) 
+</PRE>
+<LI>zero or one equilibrium keyword/value pair may follow the source 
+
+<PRE>  <I>equilibrium</I> value = path = equilibrium (psi map) file 
+</PRE>
+<LI>one or more values may be appended 
+
+<LI>value = <I>br</I> or <I>bt</I> or <I>bz</I> or <I>bx</I> or <I>by</I> or <I>er</I> or <I>et</I> or <I>ez</I> or <I>ex</I> or <I>ey</I> or <I>vr</I> or <I>vt</I> or <I>vz</I> or <I>vx</I> or <I>vy</I> or <I>dens_e</I> or <I>temp_e</I> or <I>dens_i</I> or <I>temp_i</I> or <I>parrflow</I> or <I>epar</I> or <I>q_par</I> or <I>q_perp</I> or <I>q_mag</I> or <I>grad_te_r</I> or <I>grad_te_t</I> or <I>grad_te_z</I> or <I>grad_ti_r</I> or <I>grad_ti_t</I> or <I>grad_ti_z</I> or <I>grad_ne_r</I> or <I>grad_ne_z</I> or <I>grad_te_mag</I> or <I>sepdist</I> 
+
+<PRE>  br,bt,bz = cylindrical magnetic field components (T)
+  bx,by = magnetic field along the simulation x and y axes (T)
+  er,et,ez = cylindrical electric field components (V/m)
+  ex,ey = electric field along the simulation x and y axes (V/m)
+  vr,vt,vz = cylindrical components of the parallel flow velocity (m/s)
+  vx,vy = flow velocity along the simulation x and y axes (m/s)
+  dens_e,dens_i = electron and ion density (m^-3)
+  temp_e,temp_i = electron and ion temperature (eV)
+  parrflow = parallel flow speed (m/s)
+  epar = E dot b, the electric field component along B (V/m)
+  q_par,q_perp = parallel and perpendicular heat flux (W/m^2)
+  q_mag = sqrt(q_par^2 + q_perp^2) (W/m^2)
+  grad_te_r,grad_te_t,grad_te_z = cylindrical components of grad Te (eV/m)
+  grad_ti_r,grad_ti_t,grad_ti_z = cylindrical components of grad Ti (eV/m)
+  grad_ne_r,grad_ne_z = R and Z components of grad ne (m^-4)
+  grad_te_mag = sqrt(grad_te_r^2 + grad_te_z^2) (eV/m)
+  sepdist = |psi_N - 1| at the cell center 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix pd background file plasma.h5
+compute cplasma plasma/fields all background pd dens_e temp_e temp_i &
+    er ez et br bz bt
+compute csep plasma/fields all background pd sepdist
+compute cconst plasma/fields all constant temp_e 20 dens_e 1e19 &
+    magnetic_field 0.0 2.0 0.0 values br bt bz temp_e
+compute cana plasma/fields all analytic r0 0.05 ne0 5e18 te0 2 te1 8 &
+    magnetic_field 0 0 1 values dens_e temp_e grad_te_r 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Sample a plasma background onto the grid and expose the sampled
+quantities as per-grid-cell values.  Each value is evaluated at the
+center of every grid cell in the group.  The compute is used to dump
+or average the background plasma alongside particle data, to drive
+<A HREF = "adapt_grid.html">adapt_grid</A> refinement from plasma gradients or from
+the distance to the separatrix, and as the plasma provider of the
+<A HREF = "global.html">global pusher</A> keyword when no fix background is
+wanted.
+</P>
+<P>The <I>source</I> argument selects where the plasma comes from.
+</P>
+<P>With <I>background</I> the plasma, fields, equilibrium, and heat-flux data
+are all taken from the named <A HREF = "fix_background.html">fix background</A>.
+This is the normal production usage.  For an axisymmetric (legacy
+format) background the fix's (R,Z) mesh values are interpolated to
+the cell centers, and the magnetic field is taken from the fix's
+equilibrium psi map or mesh B.  For a <I>format zones3d</I> background
+every cell center is sampled directly through the 3-D provider; in
+that case <I>sepdist</I> and the heat-flux values are unavailable, and the
+B-vector values require a nonzero <I>b_sign</I> on the fix.
+</P>
+<P>With <I>constant</I> every cell receives the same plasma, defined by the
+constant keywords.  <I>magnetic_field</I> and <I>electric_field</I> take
+cylindrical components in the order (R, toroidal, Z).  Keywords that
+are not given default to zero.
+</P>
+<P>With <I>analytic</I> a Gaussian-like column profile is generated around
+the point (x0,y0), with r = sqrt((x-x0)^2 + (y-y0)^2 + eps) and
+f(r) = exp(-(r/r0)^12):
+</P>
+<PRE>ne = ne0 * f(r),  ni = ne
+Te = te0 + te1 * f(r),  Ti = ti0 
+</PRE>
+<P>The radial derivatives of ne and Te are computed analytically and
+returned by the <I>grad_ne_r</I> and <I>grad_te_r</I> values.  In 2d only the
+x coordinate enters r.  When <I>x0</I> or <I>y0</I> is omitted the box center
+is used.  The magnetic and electric fields and the parallel flow of
+the analytic source come from the constant keywords <I>magnetic_field</I>,
+<I>electric_field</I>, and <I>parrflow</I>.  Defaults are r0 = 0.02 m, ne0 =
+1.0e19, te0 = 1.0 eV, te1 = 4.0 eV, ti0 = 1.0 eV, eps = 1.0e-10.
+</P>
+<P>For <I>constant</I> and <I>analytic</I>, the keyword list is terminated either
+by the word <I>values</I> or by the first token that is not a recognized
+constant/analytic keyword.  Use <I>values</I> whenever the first output
+value could be mistaken for a keyword, e.g. <I>temp_e</I> or <I>dens_e</I>.
+</P>
+<P>The optional <I>equilibrium</I> keyword supplies a psi map from a
+standalone equilibrium file.  It provides the magnetic field for the
+<I>constant</I> and <I>analytic</I> sources when no <I>magnetic_field</I> is given
+and is required by the <I>sepdist</I> value unless the background already
+carries an equilibrium.
+</P>
+<HR>
+
+<P>The cylindrical values <I>br</I>, <I>bt</I>, <I>bz</I>, <I>er</I>, <I>et</I>, <I>ez</I>, <I>vr</I>,
+<I>vt</I>, <I>vz</I> report components in the (R, toroidal, Z) frame of the
+plasma data.  The <I>bx</I>, <I>by</I>, <I>ex</I>, <I>ey</I>, <I>vx</I>, <I>vy</I> values report
+the same vectors projected onto the simulation x and y axes, which
+in a planar 2d simulation are (R,Z), in an axisymmetric simulation
+are (Z,R), and in 3d are the Cartesian axes obtained by rotating the
+cylindrical components by the toroidal angle of the cell center.
+Note that in 2d the <I>bz</I>, <I>ez</I>, and <I>vz</I> values return the component
+along the simulation z slot, i.e. the out-of-plane toroidal
+component, not the cylindrical Z component; use <I>by</I> (planar) or
+<I>bx</I> (axisymmetric) for cylindrical Z in 2d.
+</P>
+<P>The <I>epar</I> value is the projection of the stored electric field on
+the unit vector along B.  The <I>q_par</I>, <I>q_perp</I>, and <I>q_mag</I> values
+are the heat fluxes stored in the background; they are available
+only when the plasma source carries physical heat-flux data, and the
+compute stops with an error otherwise.
+</P>
+<P>The <I>grad_te_mag</I> value is the magnitude of grad Te in the poloidal
+plane (the toroidal component is excluded) and is intended as a
+refinement criterion for <A HREF = "adapt_grid.html">adapt_grid</A>.  The
+<I>sepdist</I> value is |psi_N - 1| at the cell center, where psi_N is
+the normalized poloidal flux; refining with <I>adapt_grid ... thresh
+less</I> on this value produces a band of fine cells that follows the
+separatrix.
+</P>
+<HR>
+
+<P><B>Output info:</B>
+</P>
+<P>This compute calculates a per-grid vector if a single value is
+specified, or a per-grid array with one column per value, in the
+order the values were listed.  The values can be output by the <A HREF = "dump.html">dump
+grid</A> command, time-averaged by <A HREF = "fix_ave_grid.html">fix
+ave/grid</A>, or used as the refinement criterion of
+<A HREF = "adapt_grid.html">adapt_grid</A> and <A HREF = "fix_adapt.html">fix adapt</A>.
+</P>
+<P>Cells that are not in the group, or that are split cells, store
+zeros.  The units of each value are given in the syntax list above.
+</P>
+<HR>
+
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.  It is only enabled if
+OpenEdge was built with that package.  See the <A HREF = "Section_start.html#start_3">Section
+2.3</A> section for more info.
+</P>
+<P>At least one value must be specified.  The <I>background</I> source
+requires a previously defined <A HREF = "fix_background.html">fix background</A>.
+The <I>sepdist</I> value requires an equilibrium psi map.  The heat-flux
+values require a plasma source that provides q data.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_background.html">fix background</A>, <A HREF = "compute_grid.html">compute
+grid</A>, <A HREF = "adapt_grid.html">adapt_grid</A>, <A HREF = "global.html">global
+pusher</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The constant keywords default to zero.  The analytic keywords default
+to r0 = 0.02, ne0 = 1.0e19, te0 = 1.0, te1 = 4.0, ti0 = 1.0, eps =
+1.0e-10, and x0,y0 = center of the simulation box.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

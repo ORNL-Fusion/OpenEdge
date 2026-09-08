@@ -4,6 +4,9 @@
 
    Syntax:
      fix ID droplet/charge Nevery background PD \
+         [model dustt2005|dis2021] \
+         [see_model none|dustt2005|kollath_smirnov2007|young_dekker] \
+         [see_angular yes|no] \
          [ion_mass_amu M] [thermionic yes|no] \
          [richardson_A V] [work_function_eV V] \
          [radius R] [mass M] [temp T]
@@ -25,6 +28,7 @@ FixStyle(particulate/charge,FixDropletCharge)
 #define SPARTA_FIX_DROPLET_CHARGE_H
 
 #include "fix.h"
+#include "particulate_model_kernels.h"
 #include <vector>
 #include <string>
 
@@ -43,6 +47,29 @@ class FixDropletCharge : public Fix {
   void end_of_step() override;
   double memory_usage() override;
 
+  ParticulateModel::PhysicsModel physics_model() const
+    { return physics_model_; }
+  const std::string &background_fix_id() const { return plasma_fix_id_; }
+  double ion_mass_amu_value() const { return ion_mass_amu; }
+  double ion_charge_state_value() const { return ion_charge_state; }
+  const struct GrainMaterial *grain_material() const { return mat_; }
+
+  // Evaluate the same DIS current/emission closure used by the charge solve
+  // at an already-known potential.  particulate/thermal calls this through
+  // an explicit charge-fix ID so current balance and heat balance cannot
+  // silently select different emission models or material coefficients.
+  bool evaluate_dis_state(double Te_eV, double Ti_eV,
+                          double ne_m3, double ni_m3,
+                          double Td_K, double rd_m, double u_mach,
+                          double phi_V,
+                          ParticulateModel::DISCurrentState &current,
+                          ParticulateModel::DISHeatFluxState *heat) const;
+  bool solve_dis_state(double Te_eV, double Ti_eV,
+                       double ne_m3, double ni_m3,
+                       double Td_K, double rd_m, double u_mach,
+                       ParticulateModel::DISCurrentState &current,
+                       ParticulateModel::DISHeatFluxState *heat) const;
+
  protected:
   std::string plasma_fix_id_;
   FixBackground *pd_ = nullptr;
@@ -51,7 +78,14 @@ class FixDropletCharge : public Fix {
   double seed_mass        = -1.0;
   double seed_temp        = -1.0;
   double ion_mass_amu     =  2.0;
+  double ion_charge_state =  1.0;
+  ParticulateModel::PhysicsModel physics_model_ = ParticulateModel::DUSTT2005;
   int    see_on           =  0;   // Sternglass secondary emission (opt-in)
+  ParticulateModel::SecondaryEmissionModel secondary_model_ =
+    ParticulateModel::SECONDARY_NONE;
+  int see_model_explicit_ = 0;
+  int see_angular_correction_ = 0;
+  int see_angular_explicit_ = 0;
   int    fixed_mode_      =  0;   // fixed_charge: stamp Zd, skip OML
   double fixed_zd_        =  0.0;
   mutable int see_sat_warned_ = 0;
@@ -80,6 +114,10 @@ class FixDropletCharge : public Fix {
   int qcustom = -1;
 
   void apply_charge_update();
+  bool make_dis_parameters(double Te_eV, double Ti_eV,
+                           double ne_m3, double ni_m3,
+                           double Td_K, double rd_m, double u_mach,
+                           ParticulateModel::DISCurrentParameters &p) const;
   bool solve_phi_oml(double Te_eV, double Ti_eV, double ne_m3, double ni_m3,
                      double Td_K, double rd_m, double u_mach,
                      double &phi_V) const;

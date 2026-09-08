@@ -1,0 +1,57 @@
+{
+  "status": "PASS",
+  "source_case": "dt0p5us",
+  "dump_interval_s": 0.001,
+  "terminal_evaporation_events": 232,
+  "exact_continuous_vapor_atoms": 4.1586e+19,
+  "trajectory_reconstructed_atoms_raw": 4.158594191978951e+19,
+  "trajectory_capture_fraction": 0.9999986033710746,
+  "map_normalization_factor": 1.000001396630876,
+  "weighting_guard": "The map is Li-atom weighted within an equal-count diagnostic diameter scan; it is not weighted by a measured ST40 size distribution.",
+  "spatial_inventory": {
+    "atom_weighted_centroid_R_m": 0.5239109789513009,
+    "atom_weighted_centroid_Z_m": 0.44237492121374433,
+    "vapor_fraction_in_SOL_psi_ge_1": 0.9916356400187296,
+    "vapor_fraction_inside_LCFS_0p51_to_1": 0.008364359981270272,
+    "vapor_fraction_inside_core_psi_lt_0p51": 0.0
+  },
+  "background_query": {
+    "status": "PASS",
+    "adaptive_cells_total": 10638,
+    "cells_inside_vessel": 5275,
+    "central_audit_cells": 84,
+    "central_te_eV_range": [
+      295.64274667837,
+      296.70605631828
+    ],
+    "central_ne_m3_range": [
+      8.3805014652178e+19,
+      8.385098373739e+19
+    ],
+    "imported_heatflux_datasets": [
+      "q_par",
+      "q_perp",
+      "mesh/q_par",
+      "mesh/q_perp"
+    ],
+    "q_mag_W_m2_range_inside": [
+      0.0,
+      163465145.88252
+    ],
+    "q_mag_W_m2_quantiles_inside": {
+      "0.0": 0.0,
+      "0.1": 0.0,
+      "0.5": 8084.7945276501,
+      "0.9": 1655029.0228421825,
+      "0.99": 36439949.765627734,
+      "1.0": 163465145.88252
+    },
+    "q_nonzero_cells_inside": 3247,
+    "q_vector_identity_max_abs_error_W_m2": 0.0,
+    "central_q_mag_W_m2_range": [
+      47872.95584688,
+      85324.831782414
+    ],
+    "interpretation": "The native SOLPS q field was restored after the equilibrium-only conversion dropped it. The central regular-grid carrier is an explicitly labelled harmonic continuation. Accepted trajectories use OML heating, so prescribed q remains a diagnostic."
+  }
+}

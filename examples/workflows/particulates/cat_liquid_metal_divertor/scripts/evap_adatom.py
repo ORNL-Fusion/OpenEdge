@@ -10,7 +10,7 @@ Two source channels are exposed:
   * `li_adatom_flux` — Arrhenius-modulated adatom desorption driven by the
     incident D+ flux.
 
-Both mirror the C++ in `src/OPENEDGE/liquid_metal_strip.h` and the
+Both mirror the C++ in `src/OPENEDGE/liquid_metal_strip.{h,cpp}` and the
 `compute surface/chemical/{evaporation,adatom}` fixes.
 """
 

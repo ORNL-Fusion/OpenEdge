@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -22,7 +22,7 @@ log log.equil append :pre
 
 [Description:]
 
-This command closes the current SPARTA log file, opens a new file with
+This command closes the current OpenEdge log file, opens a new file with
 the specified name, and begins logging information to it.  If the
 specified file name is {none}, then no new log file is opened.  If the
 optional keyword {append} is specified, then output will be appended
@@ -32,9 +32,9 @@ If multiple processor partitions are being used, the file name should
 be a variable, so that different processors do not attempt to write to
 the same log file.
 
-The file "log.sparta" is the default log file for a SPARTA run.  The
+The file "log.sparta" is the default log file for a OpenEdge run.  The
 name of the initial log file can also be set by the command-line
-switch -log.  See "Section 2.6"_Section_start.html#start_7 for
+switch -log.  See "Section 2.5"_Section_start.html#start_5 for
 details.
 
 [Restrictions:] none
@@ -43,4 +43,4 @@ details.
 
 [Default:]
 
-The default SPARTA log file is named log.sparta
+The default OpenEdge log file is named log.sparta

@@ -15,7 +15,7 @@ plate while W self-sputtering (RustBCA `w_on_w`) erodes it.
 | bw | `in.bw_smoke` | B-on-W compound deck (WEST wedge) still runs with `deposit_as`; `target Wd target_like W yield_scale 0.5` equals 0.5 x the W compute |
 
 ```bash
-SPA=~/build_oe/src/spa_mac_mpi PYTHON=python3 ./run.sh      # PYTHON needs numpy
+SPA=/path/to/spa_mpi PYTHON=python3 ./run.sh      # PYTHON needs numpy
 SKIP_BW=1 ./run.sh                                          # skip the 70 MB plasma smoke
 ```
 

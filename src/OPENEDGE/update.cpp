@@ -16,6 +16,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "update.h"
 #include "math_const.h"
 #include "particle.h"
+#include "mixture.h"
 #include "modify.h"
 #include "fix.h"
 #include "compute.h"
@@ -43,6 +44,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "fix_force_thermal.h"
 #include "fix_coulomb_base.h"
 #include "fix_volume_chem_adas.h"
+#include "fix_reflect_psi.h"
 #include "memory.h"
 #include "error.h"
 #include <algorithm>
@@ -130,6 +132,35 @@ inline PlasmaFileParams query_plasma_from_fix(const FixBackground *pd, const dou
   PlasmaFileParams P{};
   if (!pd) return P;
 
+  if (pd->is_zones3d()) {
+    PlasmaPointSample sample;
+    pd->sample_point(xyz, sample, icell, -1,
+                     PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B |
+                     PLASMA_NEED_E | PLASMA_NEED_GRAD_TE |
+                     PLASMA_NEED_GRAD_TI);
+    const double phi = std::atan2(xyz[1], xyz[0]);
+    const double cp = std::cos(phi), sp = std::sin(phi);
+    auto to_cyl = [cp, sp](const double v[3], double &vr,
+                           double &vt, double &vz) {
+      vr = v[0] * cp + v[1] * sp;
+      vt = -v[0] * sp + v[1] * cp;
+      vz = v[2];
+    };
+    P.temp_e = sample.te; P.dens_e = sample.ne;
+    P.temp_i = sample.ti; P.dens_i = sample.ni;
+    P.parr_flow = sample.upar;
+    to_cyl(sample.flow, P.parr_flow_r, P.parr_flow_t, P.parr_flow_z);
+    to_cyl(sample.grad_te, P.grad_temp_e_r, P.grad_temp_e_t,
+           P.grad_temp_e_z);
+    to_cyl(sample.grad_ti, P.grad_temp_i_r, P.grad_temp_i_t,
+           P.grad_temp_i_z);
+    if (sample.has_e && sample.has_b && sample.bmag > 1.0e-30)
+      P.epar = (sample.e[0] * sample.b[0] +
+                sample.e[1] * sample.b[1] +
+                sample.e[2] * sample.b[2]) / sample.bmag;
+    return P;
+  }
+
   double R, Z;
   xyz_to_rz(xyz, dim, axi, R, Z);
 
@@ -157,13 +188,8 @@ inline MagneticFieldFileDataParams query_bfield_from_fix(const FixBackground *pd
                                                          const double xyz[3], int dim, int axi,
                                                          int icell = -1, int iparticle = -1)
 {
-  MagneticFieldFileDataParams B{};
-  if (!pd || !pd->has_bfield) return B;
-
-  xyz_to_rz(xyz, dim, axi, B.r, B.z);
-  pd->bfield_at(B.r, B.z, B.br, B.bz, B.bt, icell, iparticle);
-  B.Bmag = std::sqrt(B.br * B.br + B.bt * B.bt + B.bz * B.bz);
-  return B;
+  if (!pd) return MagneticFieldFileDataParams{};
+  return pd->query_bfield_at_point(xyz, icell, iparticle);
 }
 
 // ---- Fused bilinear stencil for FixBackground ----
@@ -308,6 +334,8 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   psi_reflect_flag = 0;
   psi_reflect_action = 0;
   psi_reflect_threshold = 1.0;
+  psi_reflect_imix = -1;
+  psi_reflect_fix = nullptr;
   psi_nw = psi_nh = 0;
   psi_axis = psi_bry = 0.0;
   psi_r_grid = NULL;
@@ -773,6 +801,14 @@ void Update::init()
         pcache_need_mask |= PCACHE_EFIELD;
         note_cad(modify->fix[ifix]->nevery);
         recognized = 1;
+      } else if (strcmp(s,"particulate/charge") == 0 ||
+                 strcmp(s,"particulate/drag") == 0 ||
+                 strcmp(s,"particulate/thermal") == 0) {
+        // Particulate physics queries FixBackground directly at the grain
+        // position. Mark these known fixes so a grain-only deck does not
+        // trigger the legacy PCACHE_ALL fallback and request an absolute B
+        // vector that its unmagnetized particles never consume.
+        recognized = 1;
       }
     }
     // Sheath Boltzmann ne correction (inside cache_plasma_particles) reads
@@ -1141,7 +1177,16 @@ void Update::cache_plasma_particles()
       if (need_plasma) pf = cp->query_plasma_at_point(x);
       if (need_bfield) bf = cp->query_bfield_at_point(x);
     } else if (pd) {
-      // ---- fix background path: shared bilinear stencil ----
+      if (pd->is_zones3d()) {
+        // Native 3-D provider: one exact point query; no R-Z projection.
+        if (need_plasma)
+          pf = query_plasma_from_fix(pd, x, dim, domain->axisymmetric,
+                                     icell_p);
+        if (need_bfield)
+          bf = query_bfield_from_fix(pd, x, dim, domain->axisymmetric,
+                                     icell_p, i);
+      } else {
+      // ---- legacy fix background path: shared bilinear stencil ----
       double R, Z;
       xyz_to_rz(x, dim, domain->axisymmetric, R, Z);
       const PdStencil2D st = make_pd_stencil(pd, R, Z);
@@ -1207,6 +1252,7 @@ void Update::cache_plasma_particles()
         // hits the empty regular-grid arrays and would return zero.
         pd->bfield_at(R, Z, bf.br, bf.bz, bf.bt, particles[i].icell, i);
         bf.Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
+      }
       }
     }
 
@@ -1701,61 +1747,51 @@ template < int DIM, int SURF, int OPT > void Update::move()
         }
       }
 
-      // Psi-based core boundary: check if xnew is inside the core
-      // (psi_norm < threshold). If so, reflect the radial component of
-      // both displacement and velocity so the particle bounces outward.
-      // This check is done here (after Boris push, before surface tracing)
-      // so that the reflected trajectory goes through proper surface checks.
-      if (psi_reflect_flag && (pflag == PKEEP || pflag == PINSERT)) {
-        double Rnew, Znew;
-        // psi grid is independent of plasma column; no plasma context here,
-        // default 0,0 (psi reflection is a tokamak-only feature anyway).
-        OpenEdge::sparta_to_RZ(xnew, domain->dimension, domain->axisymmetric,
-                                Rnew, Znew, 0.0, 0.0);
-
-        // Bilinear interpolation of psi_norm at xnew
-        double psi_n = 1.0;
-        if (psi_nw > 1 && psi_nh > 1 && psi_rz) {
-          double Rc = Rnew;
-          double Zc = Znew;
-          if (Rc < psi_r_grid[0]) Rc = psi_r_grid[0];
-          if (Rc > psi_r_grid[psi_nw-1]) Rc = psi_r_grid[psi_nw-1];
-          if (Zc < psi_z_grid[0]) Zc = psi_z_grid[0];
-          if (Zc > psi_z_grid[psi_nh-1]) Zc = psi_z_grid[psi_nh-1];
-
-          auto bracket_index = [](const double *grid, int n, double x) {
-            if (x <= grid[0]) return 0;
-            if (x >= grid[n-1]) return n - 2;
-            const double *it = std::upper_bound(grid, grid + n, x);
-            int idx = static_cast<int>(it - grid) - 1;
-            if (idx < 0) idx = 0;
-            if (idx > n - 2) idx = n - 2;
-            return idx;
-          };
-
-          int ii = bracket_index(psi_r_grid, psi_nw, Rc);
-          int jj = bracket_index(psi_z_grid, psi_nh, Zc);
-          double dr = psi_r_grid[ii+1] - psi_r_grid[ii];
-          double dz = psi_z_grid[jj+1] - psi_z_grid[jj];
-          if (fabs(dr) > 1e-30 && fabs(dz) > 1e-30) {
-            double t = (Rc - psi_r_grid[ii]) / dr;
-            double u = (Zc - psi_z_grid[jj]) / dz;
-            if (t < 0.0) t = 0.0; if (t > 1.0) t = 1.0;
-            if (u < 0.0) u = 0.0; if (u > 1.0) u = 1.0;
-
-            double psi_val = (1-t)*(1-u)*psi_rz[jj*psi_nw+ii]
-                           + t*(1-u)*psi_rz[jj*psi_nw+ii+1]
-                           + (1-t)*u*psi_rz[(jj+1)*psi_nw+ii]
-                           + t*u*psi_rz[(jj+1)*psi_nw+ii+1];
-            double dpsi = psi_bry - psi_axis;
-            if (fabs(dpsi) > 1e-30) psi_n = (psi_val - psi_axis) / dpsi;
+      // Psi-based core boundary. Absorption remains an endpoint sink. For
+      // reflection, locate the actual outside-to-inside crossing, use the
+      // local grad(psi_N) normal, and mirror the unused part of the chord.
+      int psi_scope = 1;
+      if (psi_reflect_imix >= 0) {
+        int *species2group = particle->mixture[psi_reflect_imix]->species2group;
+        psi_scope = species2group && species2group[particles[i].ispecies] >= 0;
+      }
+      if (psi_reflect_flag && psi_scope && psi_reflect_fix &&
+          (pflag == PKEEP || pflag == PINSERT)) {
+        const double psi_new = psi_reflect_fix->psi_norm_at_sparta(xnew);
+        if (psi_new < psi_reflect_threshold) {
+          if (psi_reflect_action == 1) {
+            // Absorb: a diffusion displacement may carry a marker across the
+            // interface, but its pseudo-velocity must not enter the ledger.
+            if (has_kick) {
+              v[0] -= vkick0;
+              v[1] -= vkick1;
+              if (DIM == 3) v[2] -= vkick2;
+              has_kick = 0;
+            }
+            psi_reflect_fix->tally_absorb(particles[i].ispecies, i);
+            particles[i].flag = PDISCARD;
+            icell = particles[i].icell;
+            goto post_move_bookkeeping;
           }
-        }
 
-        if (psi_n < psi_reflect_threshold) {
-          // Crossing into the core ends the diffusion step: strip the
-          // cross-field kick before the move is rejected / v_R flipped,
-          // so the kick cannot leak into v past the reflection.
+          double crossing_fraction = 0.0;
+          double psi_normal[3] = {0.0, 0.0, 0.0};
+          if (!psi_reflect_fix->segment_crossing(
+                  x, xnew, crossing_fraction, psi_normal))
+            error->one(FLERR,
+              "fix reflect/psi: cannot resolve an outside-to-inside "
+              "psi-contour crossing; particle may have started inside");
+
+          const int ncoord = (DIM == 3) ? 3 : 2;
+          double proposed[3] = {xnew[0], xnew[1], xnew[2]};
+          double crossing[3] = {x[0], x[1], x[2]};
+          for (int k = 0; k < ncoord; k++)
+            crossing[k] = x[k] + crossing_fraction*(proposed[k]-x[k]);
+
+          // Remove the random-walk pseudo-velocity before reflecting the
+          // physical velocity. The reflected V-shaped path is represented to
+          // the grid/surface mover by a new temporary chord pseudo-velocity,
+          // which post_move_bookkeeping strips again.
           if (has_kick) {
             v[0] -= vkick0;
             v[1] -= vkick1;
@@ -1763,40 +1799,66 @@ template < int DIM, int SURF, int OPT > void Update::move()
             has_kick = 0;
           }
 
-          if (psi_reflect_action == 1) {
-            // Absorb: mark for deletion and let the normal post-move
-            // bookkeeping queue the particle for removal.
-            particles[i].flag = PDISCARD;
-            icell = particles[i].icell;
-            goto post_move_bookkeeping;
+          double vref[3] = {v[0], v[1], v[2]};
+          double vdotn = 0.0;
+          for (int k = 0; k < ncoord; k++)
+            vdotn += vref[k]*psi_normal[k];
+          for (int k = 0; k < ncoord; k++)
+            vref[k] -= 2.0*vdotn*psi_normal[k];
+
+          double final_pos[3] = {proposed[0], proposed[1], proposed[2]};
+          double remdotn = 0.0;
+          for (int k = 0; k < ncoord; k++)
+            remdotn += (proposed[k]-crossing[k])*psi_normal[k];
+          for (int k = 0; k < ncoord; k++) {
+            const double rem = proposed[k]-crossing[k];
+            final_pos[k] = crossing[k] + rem -
+                           2.0*remdotn*psi_normal[k];
           }
 
-          // Reflect: reject the move, particle stays at current position
-          xnew[0] = x[0];
-          xnew[1] = x[1];
-          if (DIM == 3) xnew[2] = x[2];
-
-          // Reverse radial velocity so particle moves outward next step.
-          // Slot for v_R depends on domain layout:
-          //   2D Cart (legacy):  x=R,y=Z  -> v_R = v[0]
-          //   2D axi:            x=Z,y=R  -> v_R = v[1]
-          //   3D Cart:           R = sqrt(x^2+y^2) -> project v[0..1] onto R
-          if (DIM == 3) {
-            double R0 = sqrt(x[0]*x[0] + x[1]*x[1]);
-            if (R0 > 1e-10) {
-              double cphi = x[0] / R0;
-              double sphi = x[1] / R0;
-              double vr = particles[i].v[0]*cphi + particles[i].v[1]*sphi;
-              double vp = -particles[i].v[0]*sphi + particles[i].v[1]*cphi;
-              vr = -vr;
-              particles[i].v[0] = vr*cphi - vp*sphi;
-              particles[i].v[1] = vr*sphi + vp*cphi;
+          // Strong curvature plus an unusually long step can put the
+          // tangent-plane mirror point back inside. Keep the boundary
+          // fail-closed by placing it an epsilon outside the solved crossing.
+          if (psi_reflect_fix->psi_norm_at_sparta(final_pos) <
+              psi_reflect_threshold) {
+            double eps = 1.0e-12;
+            for (int iter = 0; iter < 12; iter++) {
+              for (int k = 0; k < ncoord; k++)
+                final_pos[k] = crossing[k] + eps*psi_normal[k];
+              if (psi_reflect_fix->psi_norm_at_sparta(final_pos) >=
+                  psi_reflect_threshold) break;
+              eps *= 10.0;
             }
-          } else if (domain->axisymmetric) {
-            particles[i].v[1] = -particles[i].v[1];
-          } else {
-            particles[i].v[0] = -particles[i].v[0];
+            if (psi_reflect_fix->psi_norm_at_sparta(final_pos) <
+                psi_reflect_threshold)
+              error->one(FLERR,
+                "fix reflect/psi: failed to place reflected particle "
+                "outside psi contour");
           }
+
+          // Represent the reflected endpoint by a straight effective chord so
+          // the existing grid/surface mover remains exact. The difference from
+          // the physical reflected velocity is bookkeeping, not heating, and
+          // is stripped at the usual kick cleanup sites.
+          double pseudo[3] = {0.0, 0.0, 0.0};
+          if (!(dtremain > 0.0))
+            error->one(FLERR, "fix reflect/psi: non-positive move time");
+          for (int k = 0; k < ncoord; k++) {
+            const double veff = (final_pos[k]-x[k])/dtremain;
+            pseudo[k] = veff-vref[k];
+            v[k] = veff;
+            xnew[k] = final_pos[k];
+          }
+          if (DIM == 2) v[2] = vref[2];
+
+          vkick0 = pseudo[0];
+          vkick1 = pseudo[1];
+          vkick2 = (DIM == 3) ? pseudo[2] : 0.0;
+          has_kick = 1;
+
+          // A psi reflection is a velocity-changing boundary event. Any
+          // stored guiding-center state must be rebuilt on the next step.
+          pusher->invalidate_gc(i, Pusher::GC_INVAL_BOUNDARY);
         }
       }
 

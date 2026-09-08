@@ -6,7 +6,7 @@
    Syntax:
      fix ID drag Nevery A_bg Z_bg background PD \
          [gravity gx gy gz] \
-         [model epstein|coulomb] \
+         [model dustt2005|dis2021] \
          [coulomb/chi V] [coulomb/delta V] [coulomb/lnlambda V] \
          [mass M] [radius R] [temp T]
 
@@ -22,11 +22,13 @@ FixStyle(particulate/drag,FixDropletDrag)
 
 #include "fix.h"
 #include "particle.h"
+#include "particulate_model_kernels.h"
 #include <string>
 
 namespace SPARTA_NS {
 
 class FixBackground;
+class FixDropletCharge;
 
 class FixDropletDrag : public Fix {
  public:
@@ -44,6 +46,8 @@ class FixDropletDrag : public Fix {
  protected:
   std::string plasma_fix_id_;
   FixBackground *pd_ = nullptr;
+  std::string charge_fix_id_;
+  FixDropletCharge *charge_fix_ = nullptr;
 
   double A_background      = 2.0;
   double Z_background      = 1.0;
@@ -54,6 +58,7 @@ class FixDropletDrag : public Fix {
   int    neutrals_on_      = 1;       // DUSTT F_fric,n (neutral mass =
                                       //  A_bg amu; auto-off without data)
   int    dq_custom_        = -1;      // particulate_charge custom index
+  ParticulateModel::PhysicsModel physics_model_ = ParticulateModel::DUSTT2005;
 
   double chi_coulomb       = 0.0;
   double delta_ite         = 1.0;

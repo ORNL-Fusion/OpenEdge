@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -60,7 +60,7 @@ grid cells to processors on-the-fly during a run.
 <P>After grid cells have been assigned, they are migrated to new owning
 processors, along with any particles they own or other per-cell
 attributes stored by fixes.  The internal data structures within
-SPARTA for grid cells and particles are re-initialized with the new
+OpenEdge for grid cells and particles are re-initialized with the new
 decomposition.
 </P>
 <P>This command can be used immediately after the grid is created, via
@@ -87,7 +87,7 @@ processor's cells will be geometrically compact.  The <I>stride</I> and
 <I>random</I> and <I>proc</I> styles will produce dispersed assignments of
 child cells to each processor.
 </P>
-<P>IMPORTANT NOTE: See <A HREF = "Section_howto.html#howto_8">Section 6.8</A> of the
+<P>IMPORTANT NOTE: See <A HREF = "Section_howto.html#howto_12">Section 4.10</A> of the
 manual for an explanation of clumped and dispersed grid cell
 assignments and their relative performance trade-offs.
 </P>
@@ -95,7 +95,7 @@ assignments and their relative performance trade-offs.
 
 <P>The <I>none</I> style will not change the assignment of grid cells to
 processors.  However it will update the internal data structures
-within SPARTA that store ghost cell information on each processor for
+within OpenEdge that store ghost cell information on each processor for
 cells owned by other processors.  This is useful if the <A HREF = "global.html">global
 gridcut</A> command was used after grid cells were already
 defined.  That command erases ghost cell information stored by
@@ -104,7 +104,7 @@ run.  Using the balance_grid none command will re-generate the ghost
 cell information.
 </P>
 <P>The <I>stride</I>, <I>clump</I>, and <I>block</I> styles can only be used if the grid
-is "uniform".  The grid in SPARTA is hierarchical with one or more
+is "uniform".  The grid in OpenEdge is hierarchical with one or more
 levels, as defined by the <A HREF = "create_grid.html">create_grid</A> or
 <A HREF = "read_grid.html">read_grid</A> commlands.  If the parent cell of every
 grid cell is at the same level of the hierarchy, then for purposes of
@@ -201,10 +201,10 @@ exercising the rebalancing code.
 <P><B>Restrictions:</B>
 </P>
 <P>This command can only be used after the grid has been created by the
-<A HREF = "create_grid.html">create_grid</A>, <A HREF = "read_grid">read_grid</A>, or
+<A HREF = "create_grid.html">create_grid</A>, <A HREF = "read_grid.html">read_grid</A>, or
 <A HREF = "read_restart.html">read_restart</A> commands.
 </P>
-<P>This command also initializes various options in SPARTA before
+<P>This command also initializes various options in OpenEdge before
 performing the balancing.  This is so that grid cells are ready to
 migrate to new processors.  Thus if an error is flagged, e.g. that a
 simulation box boundary condition is not yet assigned, that operation
@@ -220,4 +220,5 @@ performed.
 <P>The default settings for the optional keywords are axes = xyz, flip =
 no.
 </P>
+<!-- PAGE BREAK -->
 </HTML>

@@ -287,7 +287,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       add_kind(SPUTTER_RATE_TOTAL,0);
       iarg++;
     } else if (strcmp(arg[iarg],"erosion_flux") == 0) {
-      // Alias for sputter_flux_total (docs/fixes/pmi_surf_data.md).
+      // Alias for sputter_flux_total (doc/compute_surface_physical_sputter.html).
       add_kind(SPUTTER_FLUX_TOTAL,0);
       iarg++;
     } else if (strcmp(arg[iarg],"erosion_rate") == 0) {

@@ -1,0 +1,60 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix force/gravity command :h3
+
+[Syntax:]
+
+fix ID force/gravity group-ID gR gZ gphi :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+force/gravity = style name of this fix command :l
+group-ID = particle group ID (accepted but not used; see below) :l
+gR,gZ,gphi = constant acceleration components in physical cylindrical order (m/s^2) :l
+:ule
+
+[Examples:]
+
+fix fg force/gravity all 0.0 -9.81 0.0 :pre
+
+[Description:]
+
+Apply a constant body-force acceleration to every particle on every
+timestep. The acceleration is split symmetrically around the particle
+move:
+
+v <- v + g*(dt/2)   (start of step)
+move / collisions
+v <- v + g*(dt/2)   (end of step) :pre
+
+The three components are given in the physical cylindrical order
+(R, Z, phi) used by all OpenEdge particulate inputs, not in the
+internal storage order. They are converted per particle to the storage
+slots for the active geometry: in axisymmetric runs (R,Z) map onto the
+(y,x) slots, in 2d Cartesian runs onto (x,y), and in 3d Cartesian runs
+the (R,phi) components are rotated into (x,y) using the particle's
+toroidal angle while gZ is applied along z. The same input therefore
+describes the same physical field in all three layouts; the example
+above is a downward (-Z) gravity in every case.
+
+This fix is used by the particulate (droplet and grain) transport
+models, where the particle weight competes with plasma drag and lift
+forces.
+
+The {group-ID} argument is parsed but currently ignored: the
+acceleration is applied to all particles regardless of group.
+
+[Restrictions:]
+
+This command is part of the OPENEDGE package.
+
+[Related commands:]
+
+"fix particulate/drag"_fix_particulate_drag.html
+
+[Default:] none

@@ -1,0 +1,307 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+surf_react surface/pwi command :h3
+
+[Syntax:]
+
+surf_react ID surface/pwi infile keyword values ... :pre
+
+ID = user-assigned name for the surface reaction model :ulb,l
+surface/pwi = style name of this surface reaction model :l
+infile = file listing the surface reaction channels (format below) :l
+zero or more keyword/value pairs may be appended :l
+keyword = {twall} or {twall_surf} or {trim_dir} or {R_surf} or {ehist} or {roughness_dm} or {adens_surf} or {adens_init} or {adens_init_file} or {adens_init_group} or {deposit_as} or {rzone} or {adens_erosion} or {adens_implant} or {conc_feedback} or {adens_nevery} or {strata} or {strata_dens} :l
+  {twall} value = wall temperature in Kelvin
+  {twall_surf} value = name of a custom per-surf vector with the wall
+    temperature of each element in Kelvin
+  {trim_dir} value = directory of per-pair reflection table files
+  {R_surf} value = name of a custom per-surf vector with the recycling
+    coefficient of each element (overrides R of every A channel)
+  {ehist} values = file nbins emax every
+    file = output file for impact energy/angle histograms
+    nbins = number of energy bins from 0 to emax (overflow in last bin)
+    emax = upper energy bound in eV
+    every = write and reset the histograms every this many steps
+  {roughness_dm} value = mean surface angle delta_m in degrees, 0 <= dm < 90
+  {adens_surf} value = name of the custom per-surf array holding the
+    areal density of each species (atoms/m^2); created if absent
+  {adens_init} values = species value
+    species = species ID whose column is initialized
+    value = initial areal density in atoms/m^2
+  {adens_init_file} values = file column species scale
+    file = dump surf text file or two-column "id value" text file
+    column = name of the dump column to read
+    species = species ID whose column is initialized
+    scale = multiplier applied to the file values (> 0)
+  {adens_init_group} value = surface group ID the initial layers are
+    restricted to
+  {deposit_as} values = element species
+    element = element symbol whose retained atoms are re-tagged
+    species = species ID that holds the redeposited material
+  {rzone} value = reaction-zone areal density in atoms/m^2
+  {adens_erosion} values = compute-ID col species \[noconc\]
+    compute-ID = per-surf compute providing a gross erosion flux
+    col = 0 for a per-surf vector, N for column N of a per-surf array
+    species = species ID debited by the flux
+    noconc = do not scale the debit by the surface concentration
+  {adens_implant} values = species source \[rcoef R0\] \[cmax c\] \[alpha a\] \[depth d\]
+    species = species ID credited with implanted atoms
+    source = {compute} compute-ID col or {const} flux
+    rcoef R0 = reflected fraction of the incident flux
+    cmax c = saturation concentration (required)
+    alpha a = steepness of the saturation switch
+    depth d = implantation depth in m (strata mode)
+  {conc_feedback} value = {yes} or {no}
+  {adens_nevery} value = N = fold local areal-density updates into the
+    per-surf array every N steps
+  {strata} values = K \[minthick t\]
+    K = maximum number of strata per element (2 to 64)
+    minthick t = minimum stratum thickness in Angstrom
+  {strata_dens} values = species density
+    species = species ID (any charge state selects the material)
+    density = solid number density of that material in atoms/m^3 :pre
+:ule
+
+The spellings {sigma_surf}, {sigma_init}, {sigma_erosion},
+{sigma_zone}, {sigma_feedback} and {sigma_nevery} are accepted for
+{adens_surf}, {adens_init}, {adens_erosion}, {rzone}, {conc_feedback}
+and {adens_nevery}.
+
+[Examples:]
+
+surf_react wallPWI surface/pwi input/wall.recycle
+surf_react wallPWI surface/pwi input/wall.recycle twall 400.0
+surf_react wallPWI surface/pwi input/wall.recycle R_surf R_rec twall_surf Twall_pfc
+surf_react wallPWI surface/pwi input/wall.pwi twall 500.0 &
+           adens_surf adens rzone 1.0e19 adens_init B 5.0e19 &
+           adens_erosion cpmiW 0 W adens_erosion cpmiB 0 B
+surf_react wallPWI surface/pwi input/wall.pwi twall 500.0 &
+           adens_surf adens deposit_as W Wd &
+           adens_init_file state/adens.dump s_adens_net Wd 1.0 &
+           adens_erosion cpmiW 0 W adens_erosion cpmiWd 0 Wd :pre
+
+[Description:]
+
+Define a plasma-wall interaction model for surface elements.  When a
+particle hits a surface the channels listed in {infile} for its
+species are probed in order; one of them fires and sets the outgoing
+species, velocity and internal energy, or deletes the particle.  The
+model reproduces the wall options of EIRENE: BCA (TRIM) reflection
+tables for the prompt scattering fraction, absorb-and-re-emit with a
+recycling coefficient and molecular fraction for the remainder,
+additive physical sputtering, plus simple fixed-energy channels.  It
+is species- and material-agnostic; the same grammar runs D on W, H on
+Li, He on Be, and so on.
+
+Optionally the model keeps a per-element inventory of the wall
+composition (areal densities of every species in a reaction zone)
+which feeds back on the reflection and sputter yields, in the manner
+of WallDYN.
+
+:line
+
+[Reaction file format:]
+
+Comment lines start with # and blank lines are ignored.  Every
+channel is a pair of lines:
+
+reactant --> product1 \[+ product2\]
+TYPE coefficients :pre
+
+Reactant and products are species IDs; a single product NULL means no
+product.  TYPE is one letter (upper or lower case):
+
+T table            reflection: probability R_N(E,theta) and outgoing
+                   energy/angles from the BCA table {table}
+                   (1 reactant, 1 product); optional keywords
+                   {mat} species, {conc} species, {rtable} table
+A R \[f_mol\]        absorb and re-emit thermally with recycling
+                   coefficient R and molecular fraction f_mol
+                   (1 reactant, 1 product)
+S entry            additive sputtering with yield Y(E,theta) of {entry}
+                   (e.g. W_on_W); product = sputtered species
+                   (1 reactant, 1 product); optional keywords
+                   {mat} species, {conc} species, {yscale} f
+E prob energy      exchange: re-emit the product with fixed kinetic
+                   energy in eV (1 reactant, 1 product)
+D prob e1 e2       dissociation: two products with fixed energies in
+                   eV (1 reactant, 2 products)
+R prob             recombination: delete the particle
+                   (1 reactant, product NULL) :pre
+
+The {T}, {A}, {E}, {D} and {R} channels of one reactant form a
+lottery: a uniform random number is compared with the cumulative
+probability of the channels in file order and the first channel to
+exceed it fires.  The {T} probability is R_N(E,theta) interpolated per
+hit; {A} always has probability 1, so it is the natural catch-all
+listed after {T}.  If no channel fires the particle falls through to
+the "surf_collide"_surf_collide.html model.  {S} channels are
+additive: they do not take part in the lottery but emit sputtered
+atoms on every hit, with a yield evaluated per hit.
+
+{T} tables are read from the /surface/reflection/<pair> group of the
+processes.h5 database (pair names in lower case, e.g. d_on_w).  If
+{trim_dir} is given, a file <table>.h5 in that directory is used
+instead.  Missing tables are an error at initialization.  The
+reflected velocity is sampled from the energy and angle quantiles of
+the table, so the shape of the BCA distribution is preserved.
+
+{A} with reactant == product returns the particle with probability R
+and deletes it (pumps it) with probability 1-R.  With reactant !=
+product (e.g. D --> D2) the particle returns as the reactant with
+probability R (1-f_mol), as the molecular product with probability
+R f_mol/2 (two atoms make one molecule) and is retained otherwise.
+Re-emission is a half-Maxwellian flux at the wall temperature along
+the surface normal.  When {R_surf} is set, the per-element value
+replaces R for every {A} channel of this model.
+
+{S} evaluates Y(E,theta) from the table /surface/sputter/<entry> of
+processes.h5 when present, otherwise from the analytic Eckstein
+coefficients of the same name, multiplied by the particle weight and
+by {yscale}.  The integer part of the expected number of sputtered
+atoms plus a stochastic remainder is emitted.  Sputtered atoms are
+launched with a cosine angular distribution and a Thompson energy
+distribution f(E) ~ E/(E+Es)^3 with the smooth cutoff at Emax =
+gamma E_in - Es, where Es is the full surface binding energy of the
+table (W: 8.68 eV) and gamma = 4 M1 M2/(M1+M2)^2.  {roughness_dm}
+evaluates the yield at theta_eff = max(0, theta - delta_m).
+
+{E} and {D} products leave with the given kinetic energies and cosine
+directions; {R} deletes the particle with the given probability.
+
+:line
+
+[Wall temperature:]
+
+{twall} sets a uniform wall temperature used by the {A} re-emission
+sampler and to resample the rotational and vibrational energy of
+{E}, {D} and {A} products.  {twall_surf} replaces the scalar with a
+per-element lookup in a custom per-surf floating-point vector, which
+can be set by "custom"_custom.html, read by
+"read_surf"_read_surf.html, or updated by a fix.  {twall} and
+{twall_surf} are mutually exclusive.  If neither is given, internal
+energies pass through when the species is unchanged and are zeroed
+when it changes, and the {A} sampler uses 300 K.
+
+:line
+
+[Surface composition:]
+
+With {adens_surf} the model tracks, for every element, the areal
+density (atoms/m^2) of every species in a custom per-surf DOUBLE
+array with one column per species.  Every retained incident particle
+credits its species column by weight/area; every sputtered atom and
+every {adens_erosion} flux debits its species column.  Charge states
+of one element pool into one material.  Derived per-surf customs are
+created alongside: <attr>_net (signed net change), <attr>_dep (gross
+deposition) and <attr>_ero (gross removal), which start at zero and
+exclude the seeded layers, and <attr>_conc, the reaction-zone
+concentration of every species.  All persist across restarts.
+
+Concentrations are c_i = adens_i/{rzone}; the remainder of the zone
+is bulk substrate.  They weight the {T} and {S} channels that carry a
+{mat} species (linear weighting of a pure-pair coefficient) and give
+the composition coordinate of 3d compound tables named by {conc}
+species ({rtable} names the 3d reflection table whose probability
+replaces R_N of the pure table; the outgoing spectrum is still
+sampled from the pure table).  {conc_feedback no} freezes this
+feedback: {mat} weights are 1 and compound tables evaluate at their
+pure-target endpoint.
+
+{adens_init} seeds a uniform initial layer (e.g. boronization);
+{adens_init_file} seeds a per-element layer read by surface ID from a
+"dump surf"_dump.html text file (the named column of the last
+snapshot) or from a two-column id/value file, scaled and clipped at
+zero.  Both apply once, when the array is first created, and can be
+restricted to one surface group with {adens_init_group}.
+
+{deposit_as} tracks redeposited atoms of an element as a material of
+their own: retained atoms whose species starts with {element} (all
+charge states) are credited to the {species} column, and erosion of
+the element is debited from its materials in proportion to their
+concentrations, so a deposit is consumed before the bulk below it.
+{species} must be declared with the element's mass, must not start
+with the element symbol (e.g. Wd for W) and is never transported.
+Give it its own yield with an {S ... mat species \[yscale f\]}
+channel and a "compute surface/physical/sputter ... target species
+target_like element"_compute_surface_physical_sputter.html binding
+via {adens_erosion}.
+
+{adens_erosion} debits a species by a background-driven gross
+erosion flux read per element from a per-surf compute (typically
+"compute surface/physical/sputter ...
+erosion_flux"_compute_surface_physical_sputter.html).  The debit is
+scaled by the concentration of the eroded material unless {noconc} is
+given, which is appropriate when the compute already evaluates
+composition-resolved tables.  It may be repeated for several
+materials.
+
+{adens_implant} credits a species with implanted atoms from a
+background flux (a per-surf compute column or a constant in
+atoms/m^2/s): implanted = flux (1-R0) (1-s) dt with the saturation
+switch s = 0.5 (tanh(alpha (c - cmax)) + 1) on the current
+concentration c.  {cmax} must be given.
+
+{strata} replaces the homogeneous reaction zone by a Lagrangian
+stack of up to K strata per element with their own compositions,
+stored in the custom array <attr>_strata; deposition pushes strata,
+erosion peels them, and {adens_implant} inserts at {depth}.
+{strata_dens} overrides the built-in solid number density of a
+material.  Local updates are folded into the owned array every
+{adens_nevery} steps.
+
+:line
+
+[Impact histograms:]
+
+{ehist} records weight-carrying histograms of the incident energy and
+of the incident angle from the surface normal for every impact, split
+into all impacts and impacts that sputtered at least one atom, plus a
+per-species energy histogram.  Angle bins are 5 degrees wide.  A
+block is appended to the file and the histograms are reset every
+{every} steps; each block starts with a "# step ..." header and holds
+lines "E center w_all w_sput", "A center w_all w_sput" and per-species
+"S species center w" (species with no weight in the window omitted).
+
+:line
+
+[Output info:]
+
+This model computes a global vector of length 2 + 2*nlist where nlist
+is the number of channels read from {infile}; see the "surf_react"_surf_react.html
+page for the layout.  Each channel is tallied separately and its
+label carries a tag such as \[T:reflect\], \[A:absorb\] or
+\[S:sputter\].  An {A} channel counts every hit that reaches it,
+whichever internal branch fired.  Per-surf composition is available
+in the {adens_surf} array and its derived customs and can be written
+by "dump surf"_dump.html.
+
+[Restrictions:]
+
+This command is part of the OPENEDGE package.  It requires explicit,
+non-distributed surface elements.  The {twall_surf} and {R_surf}
+attributes must be custom per-surf floating-point vectors; {R_surf}
+values are clamped to \[0,1\].  {adens_erosion} and {adens_implant
+compute} require per-surf computes with the requested column.
+
+[Related commands:]
+
+"surf_react"_surf_react.html, "surf_collide"_surf_collide.html,
+"compute surface/physical/sputter"_compute_surface_physical_sputter.html,
+"fix surface/emit/source"_fix_surface_emit_source.html,
+"fix surface/emit/recycle"_fix_surface_emit_recycle.html,
+"custom"_custom.html, "read_surf"_read_surf.html
+
+[Default:]
+
+The option defaults are rzone = 1.0e19, conc_feedback = yes,
+adens_nevery = 1, roughness_dm = 0.0, strata off with minthick = 0.5,
+and for adens_implant rcoef = 0.0, alpha = 100.0, depth = 0.0.  No
+wall temperature, R_surf, ehist, adens_surf or trim_dir is set by
+default.

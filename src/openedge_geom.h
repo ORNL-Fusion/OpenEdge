@@ -65,6 +65,22 @@ void sparta_to_RZ(const double *xyz, int dim, bool axisymmetric,
   }
 }
 
+// Maps a SPARTA position to cylindrical (R,Z,phi) about the requested
+// column axis.  phi is meaningful only for 3-D Cartesian geometry; the 2-D
+// layouts have no resolved toroidal coordinate and return phi=0.  Keeping
+// this conversion in one helper prevents individual background consumers
+// from silently using a different column origin for atan2.
+KOKKOS_INLINE_FUNCTION
+void sparta_to_RZphi(const double *xyz, int dim, bool axisymmetric,
+                     double &R, double &Z, double &phi,
+                     double x0 = 0.0, double y0 = 0.0) {
+  sparta_to_RZ(xyz, dim, axisymmetric, R, Z, x0, y0);
+  if (!axisymmetric && !oe_force_axi_rz && dim == 3)
+    phi = std::atan2(xyz[1] - y0, xyz[0] - x0);
+  else
+    phi = 0.0;
+}
+
 // Decompose a physical cylindrical force (F_R, F_Z, F_phi) onto SPARTA's
 // (Fx, Fy, Fz) slots. In 3D the azimuth `phi = atan2(y, x)` of the particle
 // is needed to project R/phi onto Cartesian X/Y; pass 0 when irrelevant.

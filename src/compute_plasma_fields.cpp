@@ -40,7 +40,7 @@ enum {
   BR, BT, BZ, BX, BY,
   ER, ET, EZ, EX, EY,
   VR, VT, VZ, VX, VY,
-  TI, TE, NI, NE, PARRFLOW, EPAR,
+  TI, TE, NI, NE, PARRFLOW, EPAR, QPAR, QPERP, QMAG,
   GRAD_TE_R, GRAD_TE_T, GRAD_TE_Z, GRAD_TI_R, GRAD_TI_T, GRAD_TI_Z,
   GRAD_NE_R, GRAD_NE_Z,
   GRAD_TE_MAG, SEPDIST
@@ -221,6 +221,9 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
     else if (strcmp(arg[iarg],"dens_e")==0)  value[iv] = NE;
     else if (strcmp(arg[iarg],"parrflow")==0) value[iv] = PARRFLOW;
     else if (strcmp(arg[iarg],"epar")==0)    value[iv] = EPAR;
+    else if (strcmp(arg[iarg],"q_par")==0)   value[iv] = QPAR;
+    else if (strcmp(arg[iarg],"q_perp")==0)  value[iv] = QPERP;
+    else if (strcmp(arg[iarg],"q_mag")==0)   value[iv] = QMAG;
     else if (strcmp(arg[iarg],"grad_te_r")==0) value[iv] = GRAD_TE_R;
     else if (strcmp(arg[iarg],"grad_te_t")==0) value[iv] = GRAD_TE_T;
     else if (strcmp(arg[iarg],"grad_te_z")==0) value[iv] = GRAD_TE_Z;
@@ -420,6 +423,79 @@ void ComputePlasmaFields::init()
       error->all(FLERR,
         "compute plasma/fields: background fix must be style background");
 
+    if (pd->is_zones3d()) {
+      // Native 3-D backgrounds cannot be copied into PlasmaFileData's R-Z
+      // raster without destroying their toroidal structure. Sample every
+      // SPARTA cell centroid through the provider interface instead.
+      has_equilibrium = 0;
+      for (int iv = 0; iv < nvalue; ++iv) {
+        if (value[iv] == QPAR || value[iv] == QPERP || value[iv] == QMAG)
+          error->all(FLERR,
+            "compute plasma/fields: heat-flux output was requested but "
+            "the zones3d background provides no physical q data");
+        if (value[iv] == SEPDIST)
+          error->all(FLERR,
+            "compute plasma/fields: sepdist is unavailable for a native "
+            "zones3d background without a separate 3-D flux label");
+        const bool needs_b_direction =
+          value[iv] == BR || value[iv] == BT || value[iv] == BZ ||
+          value[iv] == BX || value[iv] == BY;
+        if (needs_b_direction && !pd->has_bfield)
+          error->all(FLERR,
+            "compute plasma/fields: B-vector output from zones3d requires "
+            "an explicit nonzero b_sign on fix background");
+      }
+
+      for (int icell = 0; icell < ncells; ++icell) {
+        PlasmaFileParams P{};
+        MagneticFieldFileDataParams B{};
+        if ((cinfo[icell].mask & groupbit) && cells[icell].nsplit >= 1) {
+          const double xyz[3] = {
+            0.5 * (cells[icell].lo[0] + cells[icell].hi[0]),
+            0.5 * (cells[icell].lo[1] + cells[icell].hi[1]),
+            0.5 * (cells[icell].lo[2] + cells[icell].hi[2])};
+          PlasmaPointSample sample;
+          pd->sample_point(xyz, sample, icell, -1,
+                           PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B |
+                           PLASMA_NEED_E | PLASMA_NEED_GRAD_TE |
+                           PLASMA_NEED_GRAD_TI);
+          const double phi = std::atan2(xyz[1], xyz[0]);
+          const double cp = std::cos(phi), sp = std::sin(phi);
+          P.dens_e = sample.ne; P.temp_e = sample.te;
+          P.dens_i = sample.ni; P.temp_i = sample.ti;
+          P.parr_flow = sample.upar;
+          P.parr_flow_r = sample.flow[0] * cp + sample.flow[1] * sp;
+          P.parr_flow_t = -sample.flow[0] * sp + sample.flow[1] * cp;
+          P.parr_flow_z = sample.flow[2];
+          P.grad_temp_e_r = sample.grad_te[0] * cp + sample.grad_te[1] * sp;
+          P.grad_temp_e_t = -sample.grad_te[0] * sp + sample.grad_te[1] * cp;
+          P.grad_temp_e_z = sample.grad_te[2];
+          P.grad_temp_i_r = sample.grad_ti[0] * cp + sample.grad_ti[1] * sp;
+          P.grad_temp_i_t = -sample.grad_ti[0] * sp + sample.grad_ti[1] * cp;
+          P.grad_temp_i_z = sample.grad_ti[2];
+
+          B.br = sample.b[0] * cp + sample.b[1] * sp;
+          B.bt = -sample.b[0] * sp + sample.b[1] * cp;
+          B.bz = sample.b[2];
+          B.r = std::hypot(xyz[0], xyz[1]);
+          B.z = xyz[2];
+          B.Bmag = sample.bmag;
+          B.derivatives_valid = false;
+          B.axisymmetric_source = false;
+        }
+        plasma_arr[icell] = P;
+        mag_arr[icell] = B;
+      }
+      plasma_stencil.clear();
+      sample_stale = 0;
+      if (me == 0 && screen)
+        fprintf(screen,
+          "compute plasma/fields: sampled native zones3d fix '%s' onto "
+          "%d local grid cells (gen=%d)\n",
+          background_fix_id.c_str(), ncells, pd->generation);
+      return;
+    }
+
     // Build PlasmaFileData from the fix's flat arrays
     // (convert flat vectors to vector<vector<double>> format)
     plasma_data.column_x0 = pd->column_x0;
@@ -558,6 +634,15 @@ void ComputePlasmaFields::init()
     error->all(FLERR,"compute plasma/fields: file mode is no longer supported "
                "- load the plasma via fix background");
   }
+
+  bool wants_heat = false;
+  for (int iv = 0; iv < nvalue; ++iv)
+    wants_heat |= value[iv] == QPAR || value[iv] == QPERP ||
+                  value[iv] == QMAG;
+  if (wants_heat && !has_prescribed_heat_flux())
+    error->all(FLERR,
+      "compute plasma/fields: heat-flux output was requested but the "
+      "selected plasma source provides no physical q data");
 
   // --- Stencil computation and per-cell interpolation ---
   if (input_mode == MODE_BACKGROUND) {
@@ -778,6 +863,38 @@ void ComputePlasmaFields::compute_per_grid()
     const double epar = (Bmag > tiny)
       ? (Er * bhat_r + Et * bhat_t + Ezv * bhat_z) : 0.0;
 
+    // Heat-flux diagnostics follow the same point-query path as the
+    // particulate thermal model. Missing physical q data fail closed.
+    double te_sample = P.temp_e, ti_sample = P.temp_i;
+    double ne_sample = P.dens_e, ni_sample = P.dens_i;
+    double qpar = 0.0, qperp = 0.0;
+    if (input_mode == MODE_BACKGROUND && bg_fix_) {
+      bool want_thermo = false, want_heat = false;
+      for (int iv = 0; iv < nvalue; ++iv) {
+        want_thermo |= value[iv] == TE || value[iv] == TI ||
+                       value[iv] == NE || value[iv] == NI;
+        want_heat |= value[iv] == QPAR || value[iv] == QPERP ||
+                     value[iv] == QMAG;
+      }
+      const unsigned request = (want_thermo ? PLASMA_NEED_THERMO : 0u) |
+                               (want_heat ? PLASMA_NEED_HEAT : 0u);
+      if (request != 0u) {
+        PlasmaPointSample sampled;
+        bg_fix_->sample_point(xyz_c, sampled, icell, -1, request);
+        if (want_thermo) {
+          te_sample = sampled.te;
+          ti_sample = sampled.ti;
+          ne_sample = sampled.ne;
+          ni_sample = sampled.ni;
+        }
+        if (want_heat) {
+          qpar = sampled.q_par;
+          qperp = sampled.q_perp;
+        }
+      }
+    }
+    const double qmag = std::sqrt(qpar*qpar + qperp*qperp);
+
     // Refresh SPARTA-slot E in case mesh E overrode the zero defaults.
     OpenEdge::RZphi_force_to_sparta(Er, Ezv, Et, dim, domain->axisymmetric,
                                      phi, Ex, Ey, Ezz);
@@ -800,12 +917,15 @@ void ComputePlasmaFields::compute_per_grid()
         case VZ:        vout = (dim == 2) ? Vzz : Vzv; break;
         case VX:        vout = Vx; break;
         case VY:        vout = Vy; break;
-        case TI:        vout = P.temp_i; break;
-        case TE:        vout = P.temp_e; break;
-        case NI:        vout = P.dens_i; break;
-        case NE:        vout = P.dens_e; break;
+        case TI:        vout = ti_sample; break;
+        case TE:        vout = te_sample; break;
+        case NI:        vout = ni_sample; break;
+        case NE:        vout = ne_sample; break;
         case PARRFLOW:  vout = P.parr_flow; break;
         case EPAR:      vout = epar; break;
+        case QPAR:      vout = qpar; break;
+        case QPERP:     vout = qperp; break;
+        case QMAG:      vout = qmag; break;
         case GRAD_TE_R: vout = P.grad_temp_e_r; break;
         case GRAD_TE_T: vout = P.grad_temp_e_t; break;
         case GRAD_TE_Z: vout = P.grad_temp_e_z; break;
@@ -1248,6 +1368,37 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
 {
   PlasmaFileParams P{};
 
+  if (input_mode == MODE_BACKGROUND && bg_fix_ && bg_fix_->is_zones3d()) {
+    PlasmaPointSample sample;
+    bg_fix_->sample_point(xyz, sample, -1, -1,
+                          PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B |
+                          PLASMA_NEED_E | PLASMA_NEED_GRAD_TE |
+                          PLASMA_NEED_GRAD_TI);
+    const double phi = std::atan2(xyz[1], xyz[0]);
+    const double cp = std::cos(phi), sp = std::sin(phi);
+    auto to_cyl = [cp, sp](const double vector[3], double &vr,
+                           double &vt, double &vz) {
+      vr = vector[0] * cp + vector[1] * sp;
+      vt = -vector[0] * sp + vector[1] * cp;
+      vz = vector[2];
+    };
+    P.dens_e = sample.ne;
+    P.temp_e = sample.te;
+    P.dens_i = sample.ni;
+    P.temp_i = sample.ti;
+    P.parr_flow = sample.upar;
+    to_cyl(sample.flow, P.parr_flow_r, P.parr_flow_t, P.parr_flow_z);
+    to_cyl(sample.grad_te, P.grad_temp_e_r, P.grad_temp_e_t,
+           P.grad_temp_e_z);
+    to_cyl(sample.grad_ti, P.grad_temp_i_r, P.grad_temp_i_t,
+           P.grad_temp_i_z);
+    if (sample.has_e && sample.has_b && sample.bmag > 1.0e-30)
+      P.epar = (sample.e[0] * sample.b[0] +
+                sample.e[1] * sample.b[1] +
+                sample.e[2] * sample.b[2]) / sample.bmag;
+    return P;
+  }
+
   if (input_mode == MODE_CONSTANT) {
     P.dens_e = neconst;
     P.temp_e = teconst;
@@ -1345,6 +1496,40 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
   return P;
 }
 
+bool ComputePlasmaFields::has_prescribed_heat_flux() const
+{
+  if (input_mode == MODE_BACKGROUND)
+    return bg_fix_ && bg_fix_->has_qheatflux;
+  if (input_mode == MODE_FILE) return plasma_data.has_qmag;
+  return false;
+}
+
+double ComputePlasmaFields::query_heat_flux_at_point(const double xyz[3]) const
+{
+  if (input_mode == MODE_BACKGROUND && bg_fix_) {
+    PlasmaPointSample sample;
+    bg_fix_->sample_point(xyz, sample, -1, -1, PLASMA_NEED_HEAT);
+    return std::hypot(sample.q_par, sample.q_perp);
+  }
+  if (input_mode == MODE_FILE) {
+    if (!plasma_data.has_qmag)
+      error->one(FLERR,
+        "compute plasma/fields: prescribed heat flux was requested but "
+        "the plasma file does not provide q_mag");
+    const BilinearStencil stencil =
+      makeStencilAtPoint(xyz, plasma_data.r, plasma_data.z);
+    if (!stencil.valid)
+      error->one(FLERR,
+        "compute plasma/fields: prescribed heat-flux query lies outside "
+        "the supplied q_mag grid");
+    return interpField2D(plasma_data.q_mag, stencil);
+  }
+  error->one(FLERR,
+    "compute plasma/fields: prescribed heat flux is unavailable for "
+    "constant or analytic plasma sources");
+  return 0.0;
+}
+
 /*----------------------------------------------------------------------
    Point-query: interpolate magnetic field at arbitrary (x,y,z)
 ------------------------------------------------------------------------- */
@@ -1353,6 +1538,22 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
     const double xyz[3], bool prefer_equilibrium) const
 {
   MagneticFieldFileDataParams B{};
+
+  if (input_mode == MODE_BACKGROUND && bg_fix_ && bg_fix_->is_zones3d()) {
+    PlasmaPointSample sample;
+    bg_fix_->sample_point(xyz, sample, -1, -1, PLASMA_NEED_FLOW_B);
+    const double phi = std::atan2(xyz[1], xyz[0]);
+    const double cp = std::cos(phi), sp = std::sin(phi);
+    B.br = sample.b[0] * cp + sample.b[1] * sp;
+    B.bt = -sample.b[0] * sp + sample.b[1] * cp;
+    B.bz = sample.b[2];
+    B.r = std::hypot(xyz[0], xyz[1]);
+    B.z = xyz[2];
+    B.Bmag = sample.bmag;
+    B.derivatives_valid = false;
+    B.axisymmetric_source = false;
+    return B;
+  }
 
   if (input_mode == MODE_CONSTANT || input_mode == MODE_ANALYTIC) {
     B.derivatives_valid = (input_mode == MODE_CONSTANT);  // uniform: grads exactly 0

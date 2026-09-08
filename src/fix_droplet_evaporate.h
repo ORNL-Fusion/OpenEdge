@@ -5,7 +5,9 @@
 
     Syntax:
       fix ID evaporation Nevery MIXTURE background PD \
-          [heatflux/scale S] [rocket_eta E] [emit_into MIXTURE_ID]
+          [heatflux/scale S] [rocket_eta E] [emit_into MIXTURE_ID] \
+          [model dustt2005|dis2021] \
+          [termination dis|dustt] [dis_mass_tol F]
 
     Per-particle mass, radius, and bulk temperature are taken from the
     species file (extended 12-column format).
@@ -17,11 +19,25 @@
       isotropic Maxwellian at droplet T. Species drawn from MIX_ID's
       fraction-weighted distribution.
 
-    background PD is required: the fix pulls q_par / q_perp and
-    grad_Te_{R,Z} from that fix background at the droplet position.
-    If the plasma.h5 does not carry q_par/q_perp, fix background prints
-    a one-time warning at init and this fix reads back the built-in
-    defaults (default_q_par / default_q_perp on pd).
+    model dis2021 (canonical termination):
+      Follow the continuous DIS evaporation equation down to the relative
+      mass tolerance dis_mass_tol (default 1e-12), then account the tiny
+      numerical remainder as evaporated and remove the grain.  The emitted
+      atom tally therefore closes exactly against the initial grain mass.
+
+    model dustt2005 (default; canonical termination):
+      Reproduce the DUSTT trajectory cutoff R/R0 = 0.1 (Pigarov et al.,
+      Phys. Plasmas 12, 122508, 2005).  This is a breakup/termination rule,
+      not complete evaporation: 99.9% of a spherical grain has evaporated
+      and the remaining 0.1% is reported separately as a terminal remainder.
+
+    termination dis|dustt explicitly overrides the model's termination rule
+    for diagnostic A/B tests; production decks should normally omit it.
+
+    background PD is required. Prescribed-flux and auto heating pull
+    q_par / q_perp from that background and fail at init when neither
+    component is present. OML heating does not request prescribed heat
+    flux. There is deliberately no synthetic heat-flux fallback.
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -34,11 +50,13 @@ FixStyle(particulate/thermal,FixDropletEvaporate)
 #define SPARTA_FIX_EVAP_H
 
 #include "fix.h"
+#include "particulate_model_kernels.h"
 #include <string>
 
 namespace SPARTA_NS {
 
 class FixBackground;
+class FixDropletCharge;
 class RanKnuth;
 
 class FixDropletEvaporate : public Fix {
@@ -49,6 +67,7 @@ class FixDropletEvaporate : public Fix {
   void init() override;
   double memory_usage() override;
   double compute_scalar() override;
+  double compute_vector(int) override;
 
   double heatflux_scale;  // multiplier on |q| (default 1.0)
   double rocket_eta;      // asymmetry parameter for rocket force [0,1]
@@ -67,23 +86,40 @@ class FixDropletEvaporate : public Fix {
   // Heating model: 0 = prescribed |q|, 1 = OML collection, 2 = adaptive.
   int heating_mode_;
   double ion_mass_amu_;   // background ion mass for the OML ion flux
+  double ion_charge_state_;
+  ParticulateModel::PhysicsModel physics_model_;
+  enum TerminationMode { TERMINATION_DIS = 0, TERMINATION_DUSTT = 1 };
+  int termination_mode_;
+  int termination_explicit_;
+  double dis_mass_tol_;   // numerical completion tolerance m/m0 for DIS
   int dq_custom_;         // particulate_charge custom index (-1 = none)
   int nw_custom_;         // grain_nweight custom index (-1 = none)
   int heating_q_custom_;
   int debye_ratio_custom_;
   int oml_weight_custom_;
+  int dis_q_ion_custom_;
+  int dis_q_electron_custom_;
+  int dis_q_neutralization_custom_;
+  int dis_q_sheath_custom_;
+  int dis_q_thermionic_custom_;
+  int dis_q_secondary_custom_;
   void end_of_step() override;
   void start_of_step() override;
 
-  // Cumulative real Li atoms evaporated by all droplets, on this rank.
+  // Cumulative real material atoms evaporated by all grains, on this rank.
   // compute_scalar() MPI-reduces across ranks on demand.
   double evap_atoms_local_;
+  // DUSTT-only mass removed at R/R0=0.1, expressed as an equivalent atom
+  // count.  It is deliberately not included in the evaporation/source tally.
+  double terminal_remainder_atoms_local_;
 
   std::string plasma_fix_id_;
   FixBackground *pd_;
+  std::string charge_fix_id_;
+  FixDropletCharge *charge_fix_;
 
-  // Optional volumetric Li source on droplet evaporation.
-  // When emit_imix >= 0, each droplet spawns Maxwellian atoms in its
+  // Optional volumetric material source on grain evaporation.
+  // When emit_imix >= 0, each grain spawns Maxwellian atoms in its
   // cell each evap call.  Mixture defines the species menu.
   int       emit_imix;
   RanKnuth *random;

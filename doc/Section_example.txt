@@ -1,57 +1,59 @@
-"Previous Section"_Section_howto.html - "SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc - "Next Section"_Section_perf.html :c
+"Previous Section"_Section_howto.html - "OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc - "Next Section"_Section_errors.html :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
-7. Example problems :h3
+5. Example problems :h3
 
-The SPARTA distribution includes an examples sub-directory with
-several sample problems.  Each problem is in a sub-directory of its
-own.  They are all small problems that run quickly, requiring at most
-a couple of minutes to run on a desktop machine.  Many are 2d so that
-they run more quickly and can be easily visualized.  Each problem has
-an input script (in.*) and produces a log file (log.*) when it runs.
-The data files they use for chemical species or reaction parameters
-are copied from the data directory so the problems are self-contained.
+The OpenEdge distribution includes an examples directory with two
+kinds of cases.  Each case has its own directory with an input script
+named in.*, its input data in an input sub-directory, and its checks
+or plotting scripts in a scripts sub-directory.  Outputs are written
+to an output sub-directory.  The README file in each directory
+describes the case, how to run it and what it checks.
 
-Sample log file outputs on different machines and different numbers of
-processors are included in the directories to compare your answers to.
-E.g. a log file like log.free.date.foo.P means it ran on P processors
-of machine "foo", using the dated SPARTA version.
+Verification cases ask whether OpenEdge solves the implemented model
+correctly, against an analytical solution, a numerical reference or
+another code.  Each has a deterministic PASS or FAIL gate and runs in
+seconds to minutes on a laptop.  They are the cases to run after
+changing the source.
 
-If the "dump image" lines in each script are uncommented, a series of
-image snapshots will be produced.  Animations of several of the
-examples can be viewed on the Movies section of the "SPARTA WWW
-Site"_sws.
+collisions/coulomb = Coulomb slowing-down and binary thermalization against the NRL formulary
+efield_polarization = polarization drift of a proton in a time-dependent electric field
+ionization_recombination = oxygen charge-state balance under ADAS rates
+particulates/dustt2005/uniform_plasma_benchmark = DUSTT-2005 grain model against analytic reference results
+particulates/dustt2005/cat_solps_droplet_transport = DUSTT-2005 droplet transport in CAT geometry
+particulates/dis2021/uniform_plasma_comparison = DIS-2021 verification and controlled comparison with DUSTT-2005
+pushers/orbit = Boris and guiding-center banana orbits in the Khan analytical field
+pushers/hybrid = Boris/GCA hand-off near an absorbing wall
+surface_emission/constant_flux = constant-flux emission independent of emission cadence
+surface_pwi/deposit_tagging = deposit tagging and layer seeding in the PWI ledger :ul
 
-These are the sample problems in the examples sub-directories.  See
-the examples/README file for more details.
+Workflow cases are device-scale applications that demonstrate a
+complete modeling chain, from a converted plasma background to
+impurity or particulate transport and wall response.  They take
+minutes to hours and are meant as templates.
 
-chem = chemistry in a 3d box
-circle = 2d flow around a circular object
-collide = collisional motion in a 3d box
-free = free molecular motion in a 3d box
-sphere = 3d flow around a sphere
-spiky = 2d flow around a spiky circle
-step = 2d flow around a staircase of steps :ul
+impurity_transport/west_tungsten_transport = axisymmetric tungsten sputtering and transport in WEST
+impurity_transport/rfpie_tungsten_transport = helium-driven tungsten sputtering on a biased target in RFPIE
+particulates/cat_liquid_metal_divertor = lithium release from a liquid-metal divertor in CAT
+particulates/st40_lithium_powder_dropper = lithium powder injection in ST40
+particulates/west_boron_powder_dropper = boron powder injection in WEST :ul
 
-Here is how you might run and visualize one of the sample problems:
+Here is how you might run a verification case:
 
-cd free
-cp ../../src/spa_g++ .           # copy SPARTA executable to this dir
-spa_g++ < in.free                # run the problem :pre
+cd examples/verification/pushers/orbit
+./run.sh /path/to/spa_mpi :pre
 
-Running the simulation produces the file log.sparta and optionall
-image.*.jpg.  If you have the freely available ImageMagick toolkit on
-your machine, you can run its "convert" command to create an animated
-GIF, and visualize it from the FireFox browser as follows:
+and a workflow case:
 
-convert image*ppm movie.gif
-firefox ./movie.gif :pre
+cd examples/workflows/impurity_transport/west_tungsten_transport
+mpirun -np 4 /path/to/spa_mpi -in in.openedge :pre
 
-A similar command should work with other browsers.  Or you can select
-"Open File" under the File menu of your browser and load the animated
-GIF file directly.
+The regression directory at the top of the distribution holds a
+script that runs every registered case as a smoke test:
+
+./regression/run_regression.sh --exe /path/to/spa_mpi :pre

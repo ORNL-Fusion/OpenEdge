@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "Section_start.html">Previous Section</A> - <A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> - <A HREF = "Section_howto.html">Next Section</A> 
+<CENTER><A HREF = "Section_start.html">Previous Section</A> - <A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> - <A HREF = "Section_howto.html">Next Section</A> 
 </CENTER>
 
 
@@ -11,10 +11,10 @@
 
 <H3>3. Commands 
 </H3>
-<P>This section describes how a SPARTA input script is formatted and what
-commands are used to define a SPARTA simulation.
+<P>This section describes how a OpenEdge input script is formatted and what
+commands are used to define a OpenEdge simulation.
 </P>
-3.1 <A HREF = "#cmd_1">SPARTA input script</A><BR>
+3.1 <A HREF = "#cmd_1">OpenEdge input script</A><BR>
 3.2 <A HREF = "#cmd_2">Parsing rules</A><BR>
 3.3 <A HREF = "#cmd_3">Input script structure</A><BR>
 3.4 <A HREF = "#cmd_4">Commands listed by category</A><BR>
@@ -22,11 +22,11 @@ commands are used to define a SPARTA simulation.
 
 <HR>
 
-<A NAME = "cmd_1"></A><H4>3.1 SPARTA input script 
+<A NAME = "cmd_1"></A><H4>3.1 OpenEdge input script 
 </H4>
-<P>SPARTA executes by reading commands from a input script (text file),
-one line at a time.  When the input script ends, SPARTA exits.  Each
-command causes SPARTA to take some action.  It may set an internal
+<P>OpenEdge executes by reading commands from a input script (text file),
+one line at a time.  When the input script ends, OpenEdge exits.  Each
+command causes OpenEdge to take some action.  It may set an internal
 variable, read in a file, or run a simulation.  Most commands have
 default settings, which means you only need to use the command if you
 wish to change the default.
@@ -34,7 +34,7 @@ wish to change the default.
 <P>In many cases, the ordering of commands in an input script is not
 important.  However the following rules apply:
 </P>
-<P>(1) SPARTA does not read your entire input script and then perform a
+<P>(1) OpenEdge does not read your entire input script and then perform a
 simulation with all the settings.  Rather, the input script is read
 one line at a time and each command takes effect when it is read.
 Thus this sequence of commands:
@@ -59,8 +59,8 @@ example you cannot define the grid overlaying the simulation box until
 the box itself has been defined.  Likewise you cannot read in
 triangulated surfaces until a grid has been defined to store them.
 </P>
-<P>Many input script errors are detected by SPARTA and an ERROR or
-WARNING message is printed.  <A HREF = "Section_errors.html">Section 12</A> gives
+<P>Many input script errors are detected by OpenEdge and an ERROR or
+WARNING message is printed.  <A HREF = "Section_errors.html">Section 6</A> gives
 more information on what errors mean.  The documentation for each
 command lists restrictions on how the command can be used.
 </P>
@@ -69,11 +69,11 @@ command lists restrictions on how the command can be used.
 <A NAME = "cmd_2"></A><H4>3.2 Parsing rules 
 </H4>
 <P>Each non-blank line in the input script is treated as a command.
-SPARTA commands are case sensitive.  Command names are lower-case, as
+OpenEdge commands are case sensitive.  Command names are lower-case, as
 are specified command arguments.  Upper case letters may be used in
 file names or user-chosen ID strings.
 </P>
-<P>Here is how each line in the input script is parsed by SPARTA:
+<P>Here is how each line in the input script is parsed by OpenEdge:
 </P>
 <P>(1) If the last printable character on the line is a "&" character
 (with no surrounding quotes), the command is assumed to continue on
@@ -173,80 +173,107 @@ allowed, but that should be sufficient for most use cases.
 
 <H4><A NAME = "cmd_3"></A>3.3 Input script structure 
 </H4>
-<P>This section describes the structure of a typical SPARTA input script.
-The "examples" directory in the SPARTA distribution contains sample
-input scripts; the corresponding problems are discussed in <A HREF = "Section_example.html">Section
-5</A>, and animated on the <A HREF = "https://sparta.github.io">SPARTA WWW Site</A>.
+<P>This section describes the structure of a typical OpenEdge input
+script.  The examples directory contains sample scripts; the cases are
+described in <A HREF = "Section_example.html">Section 5</A>.
 </P>
-<P>A SPARTA input script typically has 4 parts:
+<P>An OpenEdge input script typically has 5 parts:
 </P>
 <OL><LI>Initialization
 <LI>Problem definition
-<LI>Settings
+<LI>Plasma background
+<LI>Physics settings and output
 <LI>Run a simulation 
 </OL>
-<P>The last 2 parts can be repeated as many times as desired.  I.e. run a
-simulation, change some settings, run some more, etc.  Each of the 4
-parts is now described in more detail.  Remember that almost all the
+<P>The last 2 parts can be repeated as many times as desired.  Almost all
 commands need only be used if a non-default value is desired.
 </P>
 <P>(1) Initialization
 </P>
-<P>Set parameters that need to be defined before the simulation domain,
-particles, grid cells, and surfaces are defined.
-</P>
-<P>Relevant commands include <A HREF = "dimension.html">dimension</A>,
-<A HREF = "units.html">units</A>, and <A HREF = "seed.html">seed</A>.
+<P>Set parameters that must be defined before the simulation domain,
+particles, grid cells and surfaces: <A HREF = "dimension.html">dimension</A>,
+<A HREF = "units.html">units</A>, <A HREF = "seed.html">seed</A>, <A HREF = "boundary.html">boundary</A>.
 </P>
 <P>(2) Problem definition
 </P>
-<P>These items must be defined before running a SPARTA calculation, and
-typically in this order:
+<P>These items are defined in this order:
 </P>
 <UL><LI><A HREF = "create_box.html">create_box</A> for the simulation box
 <LI><A HREF = "create_grid.html">create_grid</A> or <A HREF = "read_grid.html">read_grid</A> for grid cells
-<LI><A HREF = "read_surf.html">read_surf</A> or <A HREF = "read_isurf.html">read_isurf</A> for surfaces
-<LI><A HREF = "species.html">species</A> for particle species properties
-<LI><A HREF = "create_particles.html">create_particles</A> for particles 
+<LI><A HREF = "balance_grid.html">balance_grid</A> to distribute cells over processors
+<LI><A HREF = "species.html">species</A> and <A HREF = "mixture.html">mixture</A> for particle species
+<LI><A HREF = "material.html">material</A> for particulate materials
+<LI><A HREF = "read_surf.html">read_surf</A> for the wall and other surfaces
+<LI><A HREF = "read_particles.html">read_particles</A> or <A HREF = "create_particles.html">create_particles</A> for an initial population 
 </UL>
-<P>The first two are required.  Surfaces are optional.  Particles are also
-optional in the setup stage, since they can be added as the simulation
-runs.
+<P>The box and grid are required.  Surfaces are optional but every device
+case has a wall.  Particles are optional at this stage because most
+OpenEdge cases inject them during the run from a wall source or an
+injector.
 </P>
-<P>The system can also be load-balanced after the grid and/or particles
-are defined in the setup stage using the
-<A HREF = "balance_grid.html">balance_grid</A> command.  The grid can also be
-adapted before or betwee simulations using the
-<A HREF = "adapt_grid.html">adapt_grid</A> command.
+<P>(3) Plasma background
 </P>
-<P>(3) Settings
+<P><A HREF = "fix_background.html">fix background</A> reads the plasma file, or defines
+a constant or analytic plasma, and serves plasma quantities and the
+magnetic field to every other OpenEdge command.  Define it once, before
+any command that references it.  <A HREF = "compute_plasma_fields.html">compute
+plasma/fields</A> samples the background onto
+the grid for output.
 </P>
-<P>Once the problem geometry, grid cells, surfaces, and particles are
-defined, a variety of settings can be specified, which include
-simulation parameters, output options, etc.
+<P>(4) Physics settings and output
 </P>
-<P>Commands that do this include 
+<P>The transport model is selected with <A HREF = "global.html">global pusher</A> and a
+set of fixes, each referencing the background fix:
 </P>
-<P><A HREF = "global.html">global</A>
-<A HREF = "timestep.html">timestep</A>
-<A HREF = "collide.html">collide</A> for a collision model
-<A HREF = "react.html">react</A> for a chemisty model
-<A HREF = "fix.html">fix</A> for boundary conditions, time-averaging, load-balancing, etc
-<A HREF = "compute.html">compute</A> for diagnostic computations
-<A HREF = "stats_style.html">stats_style</A> for screen output
-<A HREF = "dump.html">dump</A> for snapshots of particle, grid, and surface info
-<A HREF = "dump.html">dump image</A> for on-the-fly images of the simulation
+<UL><LI><A HREF = "global.html">global pusher</A> for the Boris or guiding-center mover and the sheath model
+<LI><A HREF = "fix_coulomb_background.html">fix coulomb/background</A>, <A HREF = "fix_force_thermal.html">fix force/thermal</A>, <A HREF = "fix_cross_field_diffusion.html">fix cross_field_diffusion</A> for forces on ions
+<LI><A HREF = "fix_volume_chem_adas.html">fix volume/chem/adas</A> for atomic processes
+<LI><A HREF = "surf_collide.html">surf_collide</A> and <A HREF = "surf_react.html">surf_react</A> for wall models, attached with <A HREF = "surf_modify.html">surf_modify</A>
+<LI><A HREF = "fix_surface_emit_recycle.html">fix surface/emit/recycle</A>, <A HREF = "fix_surface_emit_source.html">fix surface/emit/source</A>, <A HREF = "fix_surface_emit_puff.html">fix surface/emit/puff</A> for wall and gas sources
+<LI><A HREF = "fix_particulate_emit.html">fix particulate/emit</A>, <A HREF = "fix_particulate_charge.html">fix particulate/charge</A>, <A HREF = "fix_particulate_drag.html">fix particulate/drag</A>, <A HREF = "fix_particulate_thermal.html">fix particulate/thermal</A> for dust and droplets
+<LI><A HREF = "fix_balance.html">fix balance</A> for load balancing during the run
+<LI><A HREF = "compute.html">compute</A> for diagnostics
+<LI><A HREF = "stats_style.html">stats_style</A> for screen output
+<LI><A HREF = "dump.html">dump</A> for snapshots of particle, grid and surface data 
+</UL>
+<P>(5) Run a simulation
 </P>
-<P>(4) Run a simulation
+<P>A simulation is run using the <A HREF = "run.html">run</A> command.  <A HREF = "timestep.html">timestep</A> sets the step.
 </P>
-<P>A simulation is run using the <A HREF = "run.html">run</A> command.
+<P>Here is the skeleton of a typical OpenEdge deck:
 </P>
+<P>dimension     2
+boundary      o ao p
+seed          12345
+create_box    ...
+create_grid   ...
+balance_grid  rcb part
+</P>
+<P>species       input/atoms.species W W+ W2+
+mixture       allW W W+ W2+
+read_surf     input/wall.surf group wall
+</P>
+<P>fix pd background file input/plasma.h5
+global pusher plasma pd mode hybrid subcycles 5 sheath spatial
+</P>
+<P>fix fcoul coulomb/background 1 background pd 2.0 1.0
+fix fchem volume/chem/adas 1 W W.reactions
+compute csput surface/physical/sputter wall background pd ...
+fix fsrc  surface/emit/source allW wall csput
+surf_react rpwi surface/pwi input/w.recycle
+surf_modify wall react rpwi
+</P>
+<PRE>timestep 2e-8
+stats    1000
+dump     d1 particle all 1000 output/state id type x y z
+run      100000 
+</PRE>
 <HR>
 
 <A NAME = "cmd_4"></A><H4>3.4 Commands listed by category 
 </H4>
-<P>This section lists many SPARTA commands, grouped by category.  The
-<A HREF = "#cmd_5">next section</A> lists all commands alphabetically.
+<P>This section lists OpenEdge commands, grouped by category.  The <A HREF = "#cmd_5">next
+section</A> lists all commands alphabetically.
 </P>
 <P>Initialization:
 </P>
@@ -257,10 +284,49 @@ simulation parameters, output options, etc.
 </P>
 <P><A HREF = "boundary.html">boundary</A>, <A HREF = "bound_modify.html">bound_modify</A>,
 <A HREF = "create_box.html">create_box</A>, <A HREF = "create_grid.html">create_grid</A>,
-<A HREF = "create_particles.html">create_particles</A>, <A HREF = "mixture.html">mixture</A>,
-<A HREF = "read_grid.html">read_grid</A>, <A HREF = "read_isurf.html">read_isurf</A>,
-<A HREF = "read_particles.html">read_particles</A>, <A HREF = "read_surf.html">read_surf</A>,
-<A HREF = "read_restart.html">read_restart</A>, <A HREF = "species.html">species</A>,
+<A HREF = "create_particles.html">create_particles</A>, <A HREF = "material.html">material</A>,
+<A HREF = "mixture.html">mixture</A>, <A HREF = "read_grid.html">read_grid</A>,
+<A HREF = "read_isurf.html">read_isurf</A>, <A HREF = "read_particles.html">read_particles</A>,
+<A HREF = "read_surf.html">read_surf</A>, <A HREF = "read_restart.html">read_restart</A>,
+<A HREF = "species.html">species</A>
+</P>
+<P>Plasma background:
+</P>
+<P><A HREF = "fix_background.html">fix background</A>, <A HREF = "compute_plasma_fields.html">compute plasma/fields</A>,
+<A HREF = "fix_efield_particle.html">fix efield/particle</A>, <A HREF = "fix_bfield_particle.html">fix bfield/particle</A>
+</P>
+<P>Transport:
+</P>
+<P><A HREF = "global.html">global pusher</A>, <A HREF = "fix_coulomb_background.html">fix coulomb/background</A>,
+<A HREF = "fix_coulomb_binary.html">fix coulomb/binary</A>, <A HREF = "fix_cross_field_diffusion.html">fix cross_field_diffusion</A>,
+<A HREF = "fix_force_thermal.html">fix force/thermal</A>, <A HREF = "fix_force_gravity.html">fix force/gravity</A>,
+<A HREF = "fix_neutral_collide_background.html">fix neutral/collide/background</A>,
+<A HREF = "fix_reflect_psi.html">fix reflect/psi</A>, <A HREF = "fix_particle_weight.html">fix particle/weight</A>
+</P>
+<P>Atomic processes:
+</P>
+<P><A HREF = "fix_volume_chem_adas.html">fix volume/chem/adas</A>,
+<A HREF = "compute_volume_emissivity_grid.html">compute volume/emissivity/grid</A>
+</P>
+<P>Plasma-wall interaction:
+</P>
+<P><A HREF = "compute_surface_physical_sputter.html">compute surface/physical/sputter</A>,
+<A HREF = "surf_react_surface_pwi.html">surf_react surface/pwi</A>,
+<A HREF = "fix_surface_emit_recycle.html">fix surface/emit/recycle</A>,
+<A HREF = "fix_surface_emit_source.html">fix surface/emit/source</A>,
+<A HREF = "fix_surface_emit_puff.html">fix surface/emit/puff</A>,
+<A HREF = "fix_surface_state_lm.html">fix surface/state/lm</A>,
+<A HREF = "compute_surface_chemical_evaporation.html">compute surface/chemical/evaporation</A>,
+<A HREF = "compute_surface_chemical_adatom.html">compute surface/chemical/adatom</A>,
+<A HREF = "compute_nearest_surf_grid.html">compute nearest_surf/grid</A>
+</P>
+<P>Particulates:
+</P>
+<P><A HREF = "material.html">material</A>, <A HREF = "fix_particulate_emit.html">fix particulate/emit</A>,
+<A HREF = "fix_particulate_charge.html">fix particulate/charge</A>,
+<A HREF = "fix_particulate_drag.html">fix particulate/drag</A>,
+<A HREF = "fix_particulate_thermal.html">fix particulate/thermal</A>,
+<A HREF = "surf_collide_particulate_bounce.html">surf_collide particulate/bounce</A>
 </P>
 <P>Settings:
 </P>
@@ -298,23 +364,24 @@ simulation parameters, output options, etc.
 
 <H4><A NAME = "cmd_5"></A><A NAME = "comm"></A>3.5 Individual commands 
 </H4>
-<P>This section lists all SPARTA commands alphabetically, with a separate
-listing below of styles within certain commands.  The <A HREF = "#cmd_4">previous
-section</A> lists many of the same commands, grouped by category.
+<P>This section lists all OpenEdge commands alphabetically, with a
+separate listing below of styles within certain commands.  The
+<A HREF = "#cmd_4">previous section</A> lists many of the same commands, grouped by
+category.
 </P>
 <DIV ALIGN=center><TABLE  BORDER=1 >
 <TR ALIGN="center"><TD ><A HREF = "adapt_grid.html">adapt_grid</A></TD><TD ><A HREF = "balance_grid.html">balance_grid</A></TD><TD ><A HREF = "boundary.html">boundary</A></TD><TD ><A HREF = "bound_modify.html">bound_modify</A></TD><TD ><A HREF = "clear.html">clear</A></TD><TD ><A HREF = "collide.html">collide</A></TD></TR>
 <TR ALIGN="center"><TD ><A HREF = "collide_modify.html">collide_modify</A></TD><TD ><A HREF = "compute.html">compute</A></TD><TD ><A HREF = "create_box.html">create_box</A></TD><TD ><A HREF = "create_grid.html">create_grid</A></TD><TD ><A HREF = "create_isurf.html">create_isurf</A></TD><TD ><A HREF = "create_particles.html">create_particles</A></TD></TR>
 <TR ALIGN="center"><TD ><A HREF = "custom.html">custom</A></TD><TD ><A HREF = "dimension.html">dimension</A></TD><TD ><A HREF = "dump.html">dump</A></TD><TD ><A HREF = "dump_image.html">dump image</A></TD><TD ><A HREF = "dump_modify.html">dump_modify</A></TD><TD ><A HREF = "dump_image.html">dump movie</A></TD></TR>
 <TR ALIGN="center"><TD ><A HREF = "echo.html">echo</A></TD><TD ><A HREF = "fix.html">fix</A></TD><TD ><A HREF = "global.html">global</A></TD><TD ><A HREF = "group.html">group</A></TD><TD ><A HREF = "if.html">if</A></TD><TD ><A HREF = "include.html">include</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "jump.html">jump</A></TD><TD ><A HREF = "label.html">label</A></TD><TD ><A HREF = "log.html">log</A></TD><TD ><A HREF = "mixture.html">mixture</A></TD><TD ><A HREF = "move_surf.html">move_surf</A></TD><TD ><A HREF = "next.html">next</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "package.html">package</A></TD><TD ><A HREF = "partition.html">partition</A></TD><TD ><A HREF = "print.html">print</A></TD><TD ><A HREF = "quit.html">quit</A></TD><TD ><A HREF = "react.html">react</A></TD><TD ><A HREF = "react_modify.html">react_modify</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "read_grid.html">read_grid</A></TD><TD ><A HREF = "read_isurf.html">read_isurf</A></TD><TD ><A HREF = "read_particles.html">read_particles</A></TD><TD ><A HREF = "read_restart.html">read_restart</A></TD><TD ><A HREF = "read_surf.html">read_surf</A></TD><TD ><A HREF = "region.html">region</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "remove_surf.html">remove_surf</A></TD><TD ><A HREF = "reset_timestep.html">reset_timestep</A></TD><TD ><A HREF = "restart.html">restart</A></TD><TD ><A HREF = "run.html">run</A></TD><TD ><A HREF = "scale_particles.html">scale_particles</A></TD><TD ><A HREF = "seed.html">seed</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "shell.html">shell</A></TD><TD ><A HREF = "species.html">species</A></TD><TD ><A HREF = "species_modify.html">species_modify</A></TD><TD ><A HREF = "stats.html">stats</A></TD><TD ><A HREF = "stats_modify.html">stats_modify</A></TD><TD ><A HREF = "stats_style.html">stats_style</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "suffix.html">suffix</A></TD><TD ><A HREF = "surf_collide.html">surf_collide</A></TD><TD ><A HREF = "surf_react.html">surf_react</A></TD><TD ><A HREF = "surf_modify.html">surf_modify</A></TD><TD ><A HREF = "timestep.html">timestep</A></TD><TD ><A HREF = "uncompute.html">uncompute</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "undump.html">undump</A></TD><TD ><A HREF = "unfix.html">unfix</A></TD><TD ><A HREF = "units.html">units</A></TD><TD ><A HREF = "variable.html">variable</A></TD><TD ><A HREF = "write_grid.html">write_grid</A></TD><TD ><A HREF = "write_isurf.html">write_isurf</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "write_restart.html">write_restart</A></TD><TD ><A HREF = "write_surf.html">write_surf</A> 
+<TR ALIGN="center"><TD ><A HREF = "jump.html">jump</A></TD><TD ><A HREF = "label.html">label</A></TD><TD ><A HREF = "log.html">log</A></TD><TD ><A HREF = "material.html">material</A></TD><TD ><A HREF = "mixture.html">mixture</A></TD><TD ><A HREF = "move_surf.html">move_surf</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "next.html">next</A></TD><TD ><A HREF = "package.html">package</A></TD><TD ><A HREF = "partition.html">partition</A></TD><TD ><A HREF = "print.html">print</A></TD><TD ><A HREF = "quit.html">quit</A></TD><TD ><A HREF = "react.html">react</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "react_modify.html">react_modify</A></TD><TD ><A HREF = "read_grid.html">read_grid</A></TD><TD ><A HREF = "read_isurf.html">read_isurf</A></TD><TD ><A HREF = "read_particles.html">read_particles</A></TD><TD ><A HREF = "read_restart.html">read_restart</A></TD><TD ><A HREF = "read_surf.html">read_surf</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "region.html">region</A></TD><TD ><A HREF = "remove_surf.html">remove_surf</A></TD><TD ><A HREF = "reset_timestep.html">reset_timestep</A></TD><TD ><A HREF = "restart.html">restart</A></TD><TD ><A HREF = "run.html">run</A></TD><TD ><A HREF = "scale_particles.html">scale_particles</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "seed.html">seed</A></TD><TD ><A HREF = "shell.html">shell</A></TD><TD ><A HREF = "species.html">species</A></TD><TD ><A HREF = "species_modify.html">species_modify</A></TD><TD ><A HREF = "stats.html">stats</A></TD><TD ><A HREF = "stats_modify.html">stats_modify</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "stats_style.html">stats_style</A></TD><TD ><A HREF = "suffix.html">suffix</A></TD><TD ><A HREF = "surf_collide.html">surf_collide</A></TD><TD ><A HREF = "surf_modify.html">surf_modify</A></TD><TD ><A HREF = "surf_react.html">surf_react</A></TD><TD ><A HREF = "timestep.html">timestep</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "uncompute.html">uncompute</A></TD><TD ><A HREF = "undump.html">undump</A></TD><TD ><A HREF = "unfix.html">unfix</A></TD><TD ><A HREF = "units.html">units</A></TD><TD ><A HREF = "variable.html">variable</A></TD><TD ><A HREF = "write_grid.html">write_grid</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "write_isurf.html">write_isurf</A></TD><TD ><A HREF = "write_restart.html">write_restart</A></TD><TD ><A HREF = "write_surf.html">write_surf</A> 
 </TD></TR></TABLE></DIV>
 
 <HR>
@@ -322,16 +389,18 @@ section</A> lists many of the same commands, grouped by category.
 <H4>Fix styles 
 </H4>
 <P>See the <A HREF = "fix.html">fix</A> command for one-line descriptions of each style
-or click on the style itself for a full description.  Some of the
-styles have accelerated versions, which can be used if SPARTA is built
-with the <A HREF = "Section_accelerate.html">appropriate accelerated package</A>.
-This is indicated by additional letters in parenthesis: k = KOKKOS.
+or click on the style itself for a full description.  Styles with a
+Kokkos version are marked (k).
 </P>
 <DIV ALIGN=center><TABLE  BORDER=1 >
-<TR ALIGN="center"><TD ><A HREF = "fix_ablate.html">ablate</A></TD><TD ><A HREF = "fix_adapt.html">adapt (k)</A></TD><TD ><A HREF = "fix_ambipolar.html">ambipolar (k)</A></TD><TD ><A HREF = "fix_ave_grid.html">ave/grid (k)</A></TD><TD ><A HREF = "fix_ave_histo.html">ave/histo (k)</A></TD><TD ><A HREF = "fix_ave_histo.html">ave/histo/weight (k)</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "fix_ave_surf.html">ave/surf</A></TD><TD ><A HREF = "fix_ave_time.html">ave/time</A></TD><TD ><A HREF = "fix_balance.html">balance (k)</A></TD><TD ><A HREF = "fix_dt_reset.html">dt/reset (k)</A></TD><TD ><A HREF = "fix_emit_face.html">emit/face (k)</A></TD><TD ><A HREF = "fix_emit_face_file.html">emit/face/file</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "fix_emit_surf.html">emit/surf</A></TD><TD ><A HREF = "fix_field_grid.html">field/grid</A></TD><TD ><A HREF = "fix_field_particle.html">field/particle</A></TD><TD ><A HREF = "fix_grid_check.html">grid/check (k)</A></TD><TD ><A HREF = "fix_halt.html">halt</A></TD><TD ><A HREF = "fix_move_surf.html">move/surf (k)</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "fix_print.html">print</A></TD><TD ><A HREF = "fix_surf_temp.html">surf/temp</A></TD><TD ><A HREF = "fix_temp_global_rescale.html">temp/global/rescale</A></TD><TD ><A HREF = "fix_temp_rescale.html">temp/rescale (k)</A></TD><TD ><A HREF = "fix_vibmode.html">vibmode (k)</A> 
+<TR ALIGN="center"><TD ><A HREF = "fix_ablate.html">ablate</A></TD><TD ><A HREF = "fix_adapt.html">adapt (k)</A></TD><TD ><A HREF = "fix_ambipolar.html">ambipolar (k)</A></TD><TD ><A HREF = "fix_ave_grid.html">ave/grid (k)</A></TD><TD ><A HREF = "fix_ave_histo.html">ave/histo (k)</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "fix_ave_histo.html">ave/histo/weight (k)</A></TD><TD ><A HREF = "fix_ave_surf.html">ave/surf</A></TD><TD ><A HREF = "fix_ave_time.html">ave/time</A></TD><TD ><A HREF = "fix_background.html">background</A></TD><TD ><A HREF = "fix_balance.html">balance (k)</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "fix_bfield_particle.html">bfield/particle</A></TD><TD ><A HREF = "fix_coulomb_background.html">coulomb/background</A></TD><TD ><A HREF = "fix_coulomb_binary.html">coulomb/binary</A></TD><TD ><A HREF = "fix_cross_field_diffusion.html">cross_field_diffusion</A></TD><TD ><A HREF = "fix_dt_reset.html">dt/reset (k)</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "fix_efield_particle.html">efield/particle</A></TD><TD ><A HREF = "fix_emit_face.html">emit/face (k)</A></TD><TD ><A HREF = "fix_emit_surf.html">emit/surf</A></TD><TD ><A HREF = "fix_force_gravity.html">force/gravity</A></TD><TD ><A HREF = "fix_force_thermal.html">force/thermal</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "fix_grid_check.html">grid/check (k)</A></TD><TD ><A HREF = "fix_halt.html">halt</A></TD><TD ><A HREF = "fix_move_surf.html">move/surf (k)</A></TD><TD ><A HREF = "fix_neutral_collide_background.html">neutral/collide/background</A></TD><TD ><A HREF = "fix_particle_weight.html">particle/weight</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "fix_particulate_charge.html">particulate/charge</A></TD><TD ><A HREF = "fix_particulate_drag.html">particulate/drag</A></TD><TD ><A HREF = "fix_particulate_emit.html">particulate/emit</A></TD><TD ><A HREF = "fix_particulate_thermal.html">particulate/thermal</A></TD><TD ><A HREF = "fix_print.html">print</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "fix_reflect_psi.html">reflect/psi</A></TD><TD ><A HREF = "fix_surf_temp.html">surf/temp</A></TD><TD ><A HREF = "fix_surface_emit_puff.html">surface/emit/puff</A></TD><TD ><A HREF = "fix_surface_emit_recycle.html">surface/emit/recycle</A></TD><TD ><A HREF = "fix_surface_emit_source.html">surface/emit/source</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "fix_surface_state_lm.html">surface/state/lm</A></TD><TD ><A HREF = "fix_temp_global_rescale.html">temp/global/rescale</A></TD><TD ><A HREF = "fix_temp_rescale.html">temp/rescale (k)</A></TD><TD ><A HREF = "fix_vibmode.html">vibmode (k)</A></TD><TD ><A HREF = "fix_volume_chem_adas.html">volume/chem/adas</A> 
 </TD></TR></TABLE></DIV>
 
 <HR>
@@ -339,18 +408,16 @@ This is indicated by additional letters in parenthesis: k = KOKKOS.
 <H4>Compute styles 
 </H4>
 <P>See the <A HREF = "compute.html">compute</A> command for one-line descriptions of
-each style or click on the style itself for a full description.  Some
-of the styles have accelerated versions, which can be used if SPARTA
-is built with the <A HREF = "Section_accelerate.html">appropriate accelerated
-package</A>.  This is indicated by additional
-letters in parenthesis: k = KOKKOS.
+each style or click on the style itself for a full description.
+Styles with a Kokkos version are marked (k).
 </P>
 <DIV ALIGN=center><TABLE  BORDER=1 >
-<TR ALIGN="center"><TD ><A HREF = "compute_boundary.html">boundary (k)</A></TD><TD ><A HREF = "compute_count.html">count (k)</A></TD><TD ><A HREF = "compute_distsurf_grid.html">distsurf/grid (k)</A></TD><TD ><A HREF = "compute_dt_grid.html">dt/grid (k)</A></TD><TD ><A HREF = "compute_eflux_grid.html">eflux/grid (k)</A></TD><TD ><A HREF = "compute_fft_grid.html">fft/grid (k)</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "compute_grid.html">grid (k)</A></TD><TD ><A HREF = "compute_isurf_grid.html">isurf/grid</A></TD><TD ><A HREF = "compute_ke_particle.html">ke/particle (k)</A></TD><TD ><A HREF = "compute_lambda_grid.html">lambda/grid (k)</A></TD><TD ><A HREF = "compute_pflux_grid.html">pflux/grid (k)</A></TD><TD ><A HREF = "compute_property_grid.html">property/grid (k)</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "compute_react_boundary.html">react/boundary</A></TD><TD ><A HREF = "compute_react_surf.html">react/surf</A></TD><TD ><A HREF = "compute_react_isurf_grid.html">react/isurf/grid</A></TD><TD ><A HREF = "compute_reduce.html">reduce</A></TD><TD ><A HREF = "compute_sonine_grid.html">sonine/grid (k)</A></TD><TD ><A HREF = "compute_surf.html">surf (k)</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "compute_surf_ead.html">surf/ead</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "compute_thermal_grid.html">thermal/grid (k)</A></TD><TD ><A HREF = "compute_temp.html">temp (k)</A></TD><TD ><A HREF = "compute_tvib_grid.html">tvib/grid</A> 
+<TR ALIGN="center"><TD ><A HREF = "compute_boundary.html">boundary (k)</A></TD><TD ><A HREF = "compute_count.html">count (k)</A></TD><TD ><A HREF = "compute_distsurf_grid.html">distsurf/grid (k)</A></TD><TD ><A HREF = "compute_dt_grid.html">dt/grid (k)</A></TD><TD ><A HREF = "compute_eflux_grid.html">eflux/grid (k)</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "compute_grid.html">grid (k)</A></TD><TD ><A HREF = "compute_grid_weighted.html">grid/weighted</A></TD><TD ><A HREF = "compute_isurf_grid.html">isurf/grid</A></TD><TD ><A HREF = "compute_ke_particle.html">ke/particle (k)</A></TD><TD ><A HREF = "compute_lambda_grid.html">lambda/grid (k)</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "compute_nearest_surf_grid.html">nearest_surf/grid</A></TD><TD ><A HREF = "compute_pflux_grid.html">pflux/grid (k)</A></TD><TD ><A HREF = "compute_plasma_fields.html">plasma/fields</A></TD><TD ><A HREF = "compute_property_grid.html">property/grid (k)</A></TD><TD ><A HREF = "compute_property_surf.html">property/surf</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "compute_react_boundary.html">react/boundary</A></TD><TD ><A HREF = "compute_react_surf.html">react/surf</A></TD><TD ><A HREF = "compute_react_isurf_grid.html">react/isurf/grid</A></TD><TD ><A HREF = "compute_reduce.html">reduce</A></TD><TD ><A HREF = "compute_sonine_grid.html">sonine/grid (k)</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "compute_surf.html">surf (k)</A></TD><TD ><A HREF = "compute_surface_chemical_adatom.html">surface/chemical/adatom</A></TD><TD ><A HREF = "compute_surface_chemical_evaporation.html">surface/chemical/evaporation</A></TD><TD ><A HREF = "compute_surface_physical_sputter.html">surface/physical/sputter</A></TD><TD ><A HREF = "compute_thermal_grid.html">thermal/grid (k)</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "compute_temp.html">temp (k)</A></TD><TD ><A HREF = "compute_tvib_grid.html">tvib/grid</A></TD><TD ><A HREF = "compute_volume_emissivity_grid.html">volume/emissivity/grid</A> 
 </TD></TR></TABLE></DIV>
 
 <HR>
@@ -358,10 +425,6 @@ letters in parenthesis: k = KOKKOS.
 <H4>Collide styles 
 </H4>
 <P>See the <A HREF = "collide.html">collide</A> command for details of each style.
-Some of the styles have accelerated versions, which can be used if
-SPARTA is built with the <A HREF = "Section_accelerate.html">appropriate accelerated
-package</A>.  This is indicated by additional
-letters in parenthesis: k = KOKKOS.
 </P>
 <DIV ALIGN=center><TABLE  BORDER=1 >
 <TR ALIGN="center"><TD ><A HREF = "collide.html">vss (k)</A> 
@@ -372,15 +435,12 @@ letters in parenthesis: k = KOKKOS.
 <H4>Surface collide styles 
 </H4>
 <P>See the <A HREF = "surf_collide.html">surf_collide</A> command for details of each
-style.  Some of the styles have accelerated versions, which can be
-used if SPARTA is built with the <A HREF = "Section_accelerate.html">appropriate accelerated
-package</A>.  This is indicated by additional
-letters in parenthesis: k = KOKKOS.
+style.
 </P>
 <DIV ALIGN=center><TABLE  BORDER=1 >
-<TR ALIGN="center"><TD ><A HREF = "surf_collide.html">cll</A></TD><TD ><A HREF = "surf_collide.html">diffuse (k)</A></TD><TD ><A HREF = "surf_collide.html">impulsive</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "surf_collide.html">piston (k)</A></TD><TD ><A HREF = "surf_collide.html">specular (k)</A></TD><TD ><A HREF = "surf_collide.html">td</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "surf_collide.html">vanish (k)</A> 
+<TR ALIGN="center"><TD ><A HREF = "surf_collide.html">adiabatic</A></TD><TD ><A HREF = "surf_collide.html">cll</A></TD><TD ><A HREF = "surf_collide.html">diffuse (k)</A></TD><TD ><A HREF = "surf_collide.html">impulsive</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "surf_collide.html">partial_recycle</A></TD><TD ><A HREF = "surf_collide_particulate_bounce.html">particulate/bounce</A></TD><TD ><A HREF = "surf_collide.html">piston (k)</A></TD><TD ><A HREF = "surf_collide.html">specular (k)</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "surf_collide.html">td</A></TD><TD ><A HREF = "surf_collide.html">toroidal</A></TD><TD ><A HREF = "surf_collide.html">transparent</A></TD><TD ><A HREF = "surf_collide.html">vanish (k)</A> 
 </TD></TR></TABLE></DIV>
 
 <HR>
@@ -388,14 +448,12 @@ letters in parenthesis: k = KOKKOS.
 <H4>Surface reaction styles 
 </H4>
 <P>See the <A HREF = "surf_react.html">surf_react</A> command for details of each
-style. Some of the styles have accelerated versions, which can be
-used if SPARTA is built with the <A HREF = "Section_accelerate.html">appropriate accelerated
-package</A>.  This is indicated by additional
-letters in parenthesis: k = KOKKOS.
+style.
 </P>
 <DIV ALIGN=center><TABLE  BORDER=1 >
-<TR ALIGN="center"><TD ><A HREF = "surf_react_adsorb.html">adsorb</A></TD><TD ><A HREF = "surf_react.html">global (k)</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "surf_react.html">prob (k)</A> 
+<TR ALIGN="center"><TD ><A HREF = "surf_react_adsorb.html">adsorb</A></TD><TD ><A HREF = "surf_react.html">global (k)</A></TD><TD ><A HREF = "surf_react.html">prob (k)</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "surf_react_surface_pwi.html">surface/pwi</A></TD><TD ><A HREF = "surf_react.html">vanish_track</A> 
 </TD></TR></TABLE></DIV>
 
+<!-- PAGE BREAK -->
 </HTML>

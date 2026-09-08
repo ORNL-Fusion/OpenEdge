@@ -1,70 +1,44 @@
 # CAT liquid-metal divertor sources
 
-This CAT workflow evaluates lithium release from a liquid-metal divertor in a
-static, SOLPS-derived plasma background. It combines a spatially varying
-surface state with three wall-source models:
+Lithium release from a liquid-metal divertor in static SOLPS backgrounds
+(attached and detached). `fix surface/state/lm` sets per-surface temperature
+and D flux; three wall-source models consume them:
 
-- thermal evaporation from the local surface temperature;
-- deuterium-driven adatom desorption;
-- physical sputtering by D, Ne, and Li projectiles.
+- thermal evaporation from the local surface temperature
+- deuterium-driven adatom desorption
+- physical sputtering by D, Ne and Li
 
-The workflow also contains a particulate branch that launches lithium droplets
-and follows their charging, drag, and plasma-driven evaporation.
+A particulate branch launches Li droplets and follows their charging, drag
+and evaporation with `heating oml`. The dump records the applied heat flux
+and a/lambda_D along each trajectory.
 
-## Model boundary
+`in.openedge` loops over both backgrounds with one closed full-wall
+geometry; the two divertor legs are refined to about 5 mm and selected by
+surface ID. `clear` resets state between cases and keeps the `case`
+variable.
 
-`in.openedge` loops over the attached and detached backgrounds.
-For each case, `fix surface/state/lm` creates and fills the per-surface
-`Tsurf_lm` and `Gamma_D_lm` fields in memory. The source computes consume those
-fields in the same simulation. The CSV is diagnostic output and is never read
-back into a second `.surf` file.
-
-Both cases use one closed, full-wall geometry. Its inner and outer
-liquid-metal divertor regions are locally refined and selected by surface ID;
-there are no separate slab or case-specific surface files.
-The wall is the axisymmetric full-device geometry used by the droplet workflow,
-with only the two divertor legs refined to roughly 5 mm segments.
-
-`clear` resets particles, fixes, and surfaces before the detached case while
-preserving the `case` input variable.
-
-Atomic `surface/emit/source` commands remain disabled because this deck follows
-liquid droplets. An atomic transport case should define Li atom/ion species and
-the associated chemistry.
-
-Droplet heating is explicitly set to `heating oml`, using local `ne`, `Te`, and
-`Ti`. The particle dump records the applied heat flux and `a/lambda_D` so the
-collection regime can be checked along each trajectory. This is a provisional
-closure for the millimetre droplets, which are outside the formal OML range;
-quantitative temperatures, evaporation rates, and lifetimes are not yet
-validated.
-
-Until D/Ne/Li-on-Li angle-energy tables are installed, physical sputtering uses
-the analytic fallback and is least reliable at grazing incidence.
-
-This is therefore a device workflow, not the constant-flux emitter check. The
-focused cadence and particle-count test lives at
-`../../../verification/surface_emission/constant_flux/`.
-
-## Main files
+## Files
 
 | File | Purpose |
 |---|---|
-| `in.openedge` | Attached/detached OpenEdge deck |
-| `input/plasma_attached.h5`, `input/plasma_detached.h5` | Static SOLPS-derived backgrounds |
-| `input/wall.surf` | Full wall with refined inner and outer divertors |
-| `input/ld_tg_{i,o}_{attached,detached}.dat` | Inner/outer liquid-metal inputs |
-| `scripts/analysis.ipynb` | Analysis-only attached/detached comparison |
-| `scripts/evap_adatom.py` | Python reference implementations of the wall-source models |
-| `scripts/plotter.py` | Shared analysis plotting helpers |
+| `in.openedge` | Attached and detached deck |
+| `input/plasma_attached.h5`, `input/plasma_detached.h5` | SOLPS backgrounds |
+| `input/wall.surf` | Full wall with refined divertors |
+| `input/ld_tg_{i,o}_{attached,detached}.dat` | Liquid-metal surface inputs |
+| `scripts/analysis.ipynb` | Attached vs detached comparison |
+| `scripts/evap_adatom.py` | Python reference for the wall-source models |
+| `scripts/plotter.py` | Plot helpers |
 
 ## Run
-
-From this directory:
 
 ```bash
 mpirun -np 4 /path/to/spa_mpi -in in.openedge
 ```
 
-Results are written under `output/attached/` and `output/detached/`, with
-separate inner- and outer-divertor surface diagnostics.
+Results go to `output/attached/` and `output/detached/`, with separate
+inner and outer divertor surface diagnostics.
+
+Caveats: mm droplets are outside the formal OML range, so droplet
+temperatures and lifetimes are indicative. Li sputtering uses the analytic
+yield until angle-energy tables are installed. The constant-flux emitter
+check is `verification/surface_emission/constant_flux/`.

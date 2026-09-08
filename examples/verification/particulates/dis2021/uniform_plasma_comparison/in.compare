@@ -1,0 +1,54 @@
+# One-step comparison of the DUSTT-2005 and DIS-2021 particulate chains.
+# run.sh supplies physics_model and tag; defaults make this a standalone DIS
+# smoke input for the top-level regression driver.
+
+seed                20260908
+dimension           3
+boundary            o o o
+global              gridcut 0.0 comm/sort no
+global              fnum 1.0
+
+create_box          0.0 1.0 0.0 1.0 0.0 1.0
+create_grid         4 4 4
+balance_grid        rcb part
+
+species             input/boron.species bgrain
+mixture             grains bgrain frac 1.0
+read_particles      input/grain.particles 0
+
+# Explicit verification assumptions. DIS requires both a provenance label and
+# explicit values for every active property; DUSTT receives the same material.
+material B_compare provenance verification_fixture_20260908 &
+                     rho 2340 cp 2000 cp_solid 2000 mass_amu 10.81 &
+                     hvap_J_mol 5.65e5 antoine_a 8.64 antoine_b -32030 &
+                     emissivity 0.80 work_function_eV 4.45 &
+                     richardson_A 1.2e6 tmelt_K 2349 &
+                     hmelt_J_mol 5.02e4 tensile_Pa 1.0e9 &
+                     see_delta_m 1.05 see_E_m_eV 240
+
+variable            physics_model index dis2021
+variable            tag index dis2021
+
+fix pd background constant static yes bz 1.0 &
+       ne 1.0e19 ni 1.0e19 te 60.0 ti 60.0 upar 2.0e4
+global pusher plasma pd mode boris skip grains
+
+fix fcharge particulate/charge 1 background pd model ${physics_model} &
+       ion_mass_amu 2.014 ion_charge_state 1 thermionic no &
+       see_model none validity error mixture grains material B_compare
+fix fdrag particulate/drag 1 2.014 1 background pd model ${physics_model} &
+       coulomb/self yes charge fcharge neutrals no efield no &
+       mixture grains material B_compare
+fix fthermal particulate/thermal 1 grains background pd &
+       model ${physics_model} heating oml ion_mass_amu 2.014 &
+       ion_charge_state 1 charge fcharge material B_compare rocket_eta 0.0
+
+dump d particle grains 1 output/state.${tag} id type x y z vx vy vz &
+       radius temp p_particulate_charge p_droplet_heating_q
+dump_modify d first yes
+dump_modify d format float %.17g
+
+timestep            1.0e-9
+stats               1
+stats_style         step np
+run                 1

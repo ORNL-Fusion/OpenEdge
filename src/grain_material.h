@@ -24,11 +24,36 @@ CommandStyle(material,MaterialCmd)
 #define OPENEDGE_GRAIN_MATERIAL_H
 
 #include "pointers.h"
+#include <cstddef>
+#include <cstdint>
 
 namespace SPARTA_NS {
 
+// Bits record values supplied explicitly by an input deck.  Built-in Li/B
+// entries deliberately have a zero mask: they preserve DUSTT compatibility,
+// but cannot silently satisfy the provenance contract of model dis2021.
+enum GrainMaterialProperty : std::uint64_t {
+  GRAIN_MAT_RHO          = 1ULL << 0,
+  GRAIN_MAT_CP           = 1ULL << 1,
+  GRAIN_MAT_CP_SOLID     = 1ULL << 2,
+  GRAIN_MAT_MASS_AMU     = 1ULL << 3,
+  GRAIN_MAT_HVAP         = 1ULL << 4,
+  GRAIN_MAT_ANTOINE_A    = 1ULL << 5,
+  GRAIN_MAT_ANTOINE_B    = 1ULL << 6,
+  GRAIN_MAT_EMISSIVITY   = 1ULL << 7,
+  GRAIN_MAT_WORK_FUNCTION = 1ULL << 8,
+  GRAIN_MAT_RICHARDSON   = 1ULL << 9,
+  GRAIN_MAT_TMELT        = 1ULL << 10,
+  GRAIN_MAT_HMELT        = 1ULL << 11,
+  GRAIN_MAT_TENSILE      = 1ULL << 12,
+  GRAIN_MAT_SEE_DELTA_M  = 1ULL << 13,
+  GRAIN_MAT_SEE_E_M      = 1ULL << 14
+};
+
 struct GrainMaterial {
   char name[16];
+  char provenance_id[96]; // source-set or documented-assumption identifier
+  std::uint64_t explicit_mask;
   double rho;              // solid/liquid mass density [kg/m^3]
   double cp;               // specific heat [J/kg/K] (liquid, or single-phase)
   double cp_solid;         // specific heat below tmelt_K [J/kg/K]; <= 0
@@ -61,6 +86,13 @@ inline double grain_material_cp(const GrainMaterial *m, double T_K)
 
 // Find-or-create a mutable entry (used by the material command).
 GrainMaterial *grain_material_define(const char *name);
+
+// Return true and write a comma-separated list when required properties were
+// not supplied explicitly.  A DIS fix uses this to fail closed before any
+// trajectories are advanced.
+bool grain_material_missing_properties(const GrainMaterial *,
+                                       std::uint64_t required,
+                                       char *buffer, std::size_t nbuffer);
 
 class MaterialCmd : protected Pointers {
  public:

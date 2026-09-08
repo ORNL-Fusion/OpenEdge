@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -190,7 +190,7 @@ The {flush} keyword applies to all dump styles except {image} and
 multiple successive snapshots to the same file.  It determines whether
 a flush operation is invoked after a dump snapshot is written to the
 dump file.  A flush insures the output in that file is current (no
-buffering by the OS), even if SPARTA halts before the simulation
+buffering by the OS), even if OpenEdge halts before the simulation
 completes.
 
 :line
@@ -217,14 +217,14 @@ the default setting is used.  A setting of {none} clears all previous
 settings, reverting all values to their default format.
 
 NOTE: Grid cell IDs are stored internally as 4-byte or 8-byte signed
-integers, depending on how SPARTA was compiled.  When specifying the
+integers, depending on how OpenEdge was compiled.  When specifying the
 {format int} option you can use a "%d"-style format identifier in the
-format string and SPARTA will convert this to the corresponding 8-byte
+format string and OpenEdge will convert this to the corresponding 8-byte
 form it it is needed when outputting those values.  However, when
 specifying the {line} option or {format M string} option for those
 values, you should specify a format string appropriate for an 8-byte
-signed integer, e.g. one with "%ld", if SPARTA was compiled with the
--DSPARTA_BIGBIG option for 8-byte IDs.
+signed integer, e.g. one with "%ld", if OpenEdge was compiled with the
+-DOpenEdge_BIGBIG option for 8-byte IDs.
 
 :line
 
@@ -645,7 +645,7 @@ thresh = none :ul
 
 :line
 
-These are the 140 colors that SPARTA pre-defines for use with the
+These are the 140 colors that OpenEdge pre-defines for use with the
 "dump image"_dump_image.html and dump_modify commands.  Additional
 colors can be defined with the dump_modify color command.  The 3
 numbers listed for each name are the RGB (red/green/blue) values.

@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -160,7 +160,7 @@ read_isurf          all 20 20 20 binary.21x21x21 99.5 ablate
 <A HREF = "read_isurf.html">read_isurf</A> command, because surfaces must exist
 before assigning collision and reaction models to them.  The <A HREF = "fix_ablate.html">fix
 ablate</A> command must come before the
-<A HREF = "read_isurf.html">read_isurf</A> command, since it uses the ID of the <A HREF = "fix_ablate">fix
+<A HREF = "read_isurf.html">read_isurf</A> command, since it uses the ID of the <A HREF = "fix_ablate.html">fix
 ablate</A> command as an argument to create implicit surfaces.
 The <A HREF = "fix_ablate.html">fix ablate</A> command takes a compute or fix as an
 argument, in this case the ID of the <A HREF = "compute_react_isurf_grid.html">compute
@@ -169,7 +169,7 @@ specify what calculation drives the ablation.  In this case, it is the
 <A HREF = "compute_react_isurf_grid.html">compute react/isurf/grid</A> command (or
 could be the <A HREF = "fix_ave_grid.html">fix ave/grid</A> command) which tallies
 counts of surface reactions for implicit triangles in each grid cell.
-The <A HREF = "compute">compute react/isurf/grid</A> react/isurf/grid command
+The <A HREF = "compute_react_isurf_grid.html">compute react/isurf/grid</A> command
 requires the ID of a surface reaction model, so that it knows the list
 of possible reactions to tally.  In this case the reaction is set by
 the <A HREF = "surf_react.html">surf_react</A> command, which must therefore comes
@@ -312,8 +312,8 @@ A non-zero value indicates a corner case in the marching cubes or
 marching squares algorithm the developers still need to address.
 </P>
 <P>These values can be accessed by any command that uses global values
-from a fix as input.  See <A HREF = "Section_howto.html#howto_4">Section 6.4</A> for
-an overview of SPARTA output options.
+from a fix as input.  See <A HREF = "Section_howto.html#howto_10">Section 4.8</A> for
+an overview of OpenEdge output options.
 </P>
 <P>The scalar and vector values are unitless.
 </P>
@@ -341,4 +341,5 @@ Fast Tetrahedral Meshes with Good Dihedral Angles," SIGGRAPH (2007).
 
 <P><B>(Hong24)</B> A. Y. K. Hong, M. A. Gallis, S. G Moore, and S. J. Plimpton, "Towards physically realistic ablation modeling in direct simulation Monte Carlo," Physics of Fluids (2024).
 </P>
+<!-- PAGE BREAK -->
 </HTML>

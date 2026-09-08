@@ -1,20 +1,21 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
 surf_react command :h3
 "surf_react adsorb"_surf_react_adsorb.html command :h3
+"surf_react surface/pwi"_surf_react_surface_pwi.html command :h3
 
 [Syntax:]
 
 surf_react ID style args :pre
 
 ID = user-assigned name for the surface reaction model :ulb,l
-style = {global} or {prob} or {adsorb} or {global/kk} or {prob/kk} :l
+style = {global} or {prob} or {adsorb} or {vanish_track} or {surface/pwi} or {global/kk} or {prob/kk} :l
 args = arguments for that style :l
   {global} or {global/kk} args = pdelete pcreate
     pdelete = probability that surface collision removes the incident particle
@@ -35,7 +36,14 @@ args = arguments for that style :l
       surf = surface elements = triangles in 3d, lines in 2d 
     temp = temperature of the surface
     n_sites = # of available adsorption sites per unit area (3D) or length (2D)
-    adsp1,adsp2,... = list of species that can adsorb on surface :pre
+    adsp1,adsp2,... = list of species that can adsorb on surface
+  {vanish_track} args = keyword values ...
+    keyword = {log} or {file}
+      {log} value = {yes} or {no} = write one line per deleted particle
+      {file} value = base name of the log file (implies log yes)
+  {surface/pwi} args = infile keyword values ...
+    infile = file with list of plasma-wall interaction channels
+    keywords = see "surf_react surface/pwi"_surf_react_surface_pwi.html :pre
 :ule
 
 [Examples:]
@@ -43,7 +51,9 @@ args = arguments for that style :l
 surf_react 1 global 0.2 0.15
 surf_react 1 prob air.surf  
 surf_react 1 adsorb gs gs_react.surf nsync 10 surf 1000 6.022e18 O CO
-surf_react 1 adsorb gs/ps gs_react.surf ps_react.surf nsync 1 face 300 3e9 O :pre
+surf_react 1 adsorb gs/ps gs_react.surf ps_react.surf nsync 1 face 300 3e9 O
+surf_react sink vanish_track file state/sink.csv
+surf_react wallPWI surface/pwi input/wall.pwi twall 400.0 :pre
 
 [Description:]
 
@@ -55,7 +65,7 @@ chemical reactions that can occur on the surface itself.
 One or more models can be defined and assigned to different surfaces
 or simulation box boundaries via the "surf_modify"_surf_modify.html or
 "bound_modify"_bound_modify.html commands.  See "Section
-6.9"_Section_howto.html#howto_9 for more details of how SPARTA defines
+6.9"_Section_howto.html#howto_11 for more details of how OpenEdge defines
 surfaces as collections of geometric elements, triangles in 3d and
 line segments in 2d.  Also see the "react"_react.html command for
 specification of a gas-phase chemistry reaction model.
@@ -75,7 +85,7 @@ normally be the case if reasonable reaction coefficients are defined.
 
 IMPORTANT NOTE: A surface reaction model cannot be specified for
 surfaces whose surface collision style does not support reactions.
-Currently this is only the {vanish} collision style.  See the
+Currently these are the {vanish} and {toroidal} collision styles.  See the
 "surf_collide"_surf_collide.html doc page for details.
 
 :line
@@ -106,7 +116,7 @@ command, which is simpler.
 
 For the {prob} style, a file is specified which contains a list of
 surface chemical reactions, with their associated parameters.  The
-reactions are read into SPARTA and stored in a list.  Each time a
+reactions are read into OpenEdge and stored in a list.  Each time a
 simulation is run via the "run"_run.html command, the list is scanned.
 Only reactions for which all the reactants and all the products are
 currently defined as species-IDs will be active for the simulation.
@@ -163,7 +173,7 @@ case) with the following meaning:
 S = Surface :ul
 
 The style determines how many reaction coefficients are listed as C1,
-C2, etc, and how they are interpreted by SPARTA.
+C2, etc, and how they are interpreted by OpenEdge.
 
 For S = Surface style, there are two coefficients. The first is
 required and the second is optional and will be set to 0.0 if not
@@ -187,8 +197,29 @@ it supports is given on a separate
 
 :line
 
+The {vanish_track} style deletes every particle that hits the surface,
+like "surf_collide vanish"_surf_collide.html, but as a reaction model
+so that the deletions are tallied as a single reaction named "delete"
+and can be combined with any surface collision model.  With {log yes}
+or {file}, every deletion is also appended to a CSV file, one file
+per processor named base.rankN (base defaults to
+surf_react_vanish.csv), with the columns timestep, rank, surf_index,
+surf_id, id, ispecies, x, y, z, vx, vy, vz, mass, radius, temp.  This
+is useful to record where and with what velocity particles leave the
+simulation through a surface.
+
+:line
+
+The {surface/pwi} style is the plasma-wall interaction model of
+OpenEdge: BCA reflection tables, absorb-and-re-emit with a recycling
+coefficient, additive physical sputtering and an optional per-element
+surface composition inventory.  It is described on a separate
+"surf_react_surface_pwi"_surf_react_surface_pwi.html doc page.
+
+:line
+
 If the ambipolar approximation is being used, via the "fix
-ambipolar"_fix_ambipolar.hmtl command, then reactions which involve
+ambipolar"_fix_ambipolar.html command, then reactions which involve
 either ambipolar ions or the ambipolar electron have more restricitve
 rules about the ordering of reactants and products, than those
 described in the preceeding section for the {prob} style.
@@ -215,12 +246,14 @@ The values can be used by the "stats_style"_stats_style.html command
 and by "variables"_variable.html that define formulas.  The latter
 means they can be used by any command that uses a variable as input,
 e.g. "the "fix ave/time"_fix_ave_time.html command.  See "Section
-4.4"_Section_howto.html#howto_4 for an overview of SPARTA output
+4.4"_Section_howto.html#howto_8 for an overview of OpenEdge output
 options.
 
-The {global}, {prob}, and {adsorb} styles each compute a vector of
-length 2 + 2*nlist.  For the {global} style, nlist = 2, for "delete"
-and "create" reactions.  For the {prob} style, nlist is the number of
+The {global}, {prob}, {adsorb}, {vanish_track} and {surface/pwi}
+styles each compute a vector of length 2 + 2*nlist.  For the {global}
+style, nlist = 2, for "delete" and "create" reactions.  For the
+{vanish_track} style, nlist = 1, for the "delete" reaction.  For the
+{surface/pwi} style, nlist is the number of channels in its file.  For the {prob} style, nlist is the number of
 reactions listed in the file is read as input.  For the {adsorb}
 style, nlist is the sum of both the gas-surface and pure-surface
 reactions listed in the file(s) read as input.
@@ -239,21 +272,21 @@ reaction since the beginning of the current run.
 Styles with a {kk} suffix are functionally the same as the
 corresponding style without the suffix.  They have been optimized to
 run faster, depending on your available hardware, as discussed in the
-"Accelerating SPARTA"_Section_accelerate.html section of the manual.
+"Building OpenEdge"_Section_start.html#start_2 section of the manual.
 The accelerated styles take the same arguments and should produce the
 same results, except for different random number, round-off and
 precision issues.
 
 These accelerated styles are part of the KOKKOS package. They are only
-enabled if SPARTA was built with that package.  See the "Making
-SPARTA"_Section_start.html#start_3 section for more info.
+enabled if OpenEdge was built with that package.  See the "Making
+OpenEdge"_Section_start.html#start_3 section for more info.
 
 You can specify the accelerated styles explicitly in your input script
 by including their suffix, or you can use the "-suffix command-line
-switch"_Section_start.html#start_7 when you invoke SPARTA, or you can
+switch"_Section_start.html#start_5 when you invoke OpenEdge, or you can
 use the "suffix"_suffix.html command in your input script.
 
-See the "Accelerating SPARTA"_Section_accelerate.html section of the
+See the "Building OpenEdge"_Section_start.html#start_2 section of the
 manual for more instructions on how to use the accelerated styles
 effectively.
 
@@ -264,10 +297,14 @@ effectively.
 If specified with a {kk} suffix, this command can be used no more than
 twice in the same input script (active at the same time).
 
+The {vanish_track} and {surface/pwi} styles are part of the OPENEDGE
+package.
+
 [Related commands:]
 
 "react"_react.html, "surf_modify"_surf_modify.html,
 "bound_modify"_bound_modify.html,
-"surf_react_adsorb"_surf_react_adsorb.html
+"surf_react_adsorb"_surf_react_adsorb.html,
+"surf_react_surface_pwi"_surf_react_surface_pwi.html
 
-[Default:] none
+[Default:] For the {vanish_track} style, log = no.

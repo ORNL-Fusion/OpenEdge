@@ -1,4 +1,4 @@
-# Stage D1 (PLAN.md): A1 in production geometry — 2D axisymmetric,
+# Stage D1: A1 in production geometry — 2D axisymmetric,
 # He+ ensemble onto an annular ring target (active face at Z = 0,
 # normal +Z), B = 1 T at 45 deg to the normal via cylindrical constants
 # (bz/bt — served by every legacy accessor). No sheath, no collisions.

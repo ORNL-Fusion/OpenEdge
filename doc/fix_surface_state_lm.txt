@@ -1,0 +1,151 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix surface/state/lm command :h3
+
+[Syntax:]
+
+fix ID surface/state/lm group-ID Nevery hf_source keyword value ... :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+surface/state/lm = style name of this fix command :l
+group-ID = ID of surface group covered by the liquid-metal strip :l
+Nevery = re-solve the strip every Nevery timesteps :l
+hf_source = {c_ID} or {c_ID\[N\]} or {f_ID} or {f_ID\[N\]} or {Q} or {plasma compute-ID} or {background fix-ID} or {target file leg} or {solps_b2pl file} :l
+  c_ID, c_ID\[N\] = per-surf compute (vector, or column N of array)
+    giving the wall heat flux (W/m^2)
+  f_ID, f_ID\[N\] = per-surf fix giving the wall heat flux (W/m^2)
+  Q = uniform constant heat flux (W/m^2)
+  plasma compute-ID = point-query the parallel heat flux from a
+    compute plasma/fields
+  background fix-ID = heat flux sqrt(q_par^2 + q_perp^2) from a
+    "fix background"_fix_background.html
+  target file leg = precomputed HDF5 target profile; leg = group
+    name in the file (e.g. {inner} or {outer}) with datasets s,
+    q_total, gamma_D
+  solps_b2pl file = SOLPS b2plot target-loading file ld_tg_*.dat
+    (Wtot column 5; D+ flux computed from ne, Te, Ti) :pre
+zero or more keyword/value pairs may be appended; at least 14
+arguments in total are required :l
+keyword = {h0} or {U0} or {Bs} or {Bw} or {alpha} or {width} or {Tin} or {sigma_w} or {tw} or {qss} or {Nx} or {Ny} or {ncase} or {max_iter} or {eps} or {relax} or {dt} or {evap} or {hf_scale} or {static} or {custom} or {csv} :l
+  {h0} value = film thickness at the inlet (m)
+  {U0} value = film velocity at the inlet (m/s)
+  {Bs} value = magnetic field component for the side-wall Hartmann
+    number (T)
+  {Bw} value = magnetic field component for the wall Hartmann number
+    (T)
+  {alpha} value = inclination angle of the strip (degrees)
+  {width} value = strip width (m)
+  {Tin} value = inlet temperature (degrees C)
+  {sigma_w} value = electrical conductivity of the wall (S/m);
+    0 = insulating wall
+  {tw} value = wall thickness (m)
+  {qss} value = heat-flux scale used to nondimensionalize (W/m^2)
+  {Nx} value = number of stations along the strip
+  {Ny} value = number of points across the film
+  {ncase} value = 1 (side-wall case) or 2 (axisymmetric case)
+  {max_iter} value = maximum number of pseudo-time iterations
+  {eps} value = convergence criterion of the steady-state solve
+  {relax} value = relaxation parameter
+  {dt} value = dimensionless pseudo-time step
+  {evap} value = {yes} or {no} = include evaporative cooling in the
+    strip energy balance
+  {hf_scale} value = S = multiplier on the incoming heat flux
+  {static} value = {yes} or {no} = solve once at setup and freeze
+  {custom} value = name = per-surf custom attribute receiving the
+    surface temperature
+  {csv} value = file = write the converged strip profile to this CSV
+    file (rank 0) :pre
+:ule
+
+[Examples:]
+
+fix flm surface/state/lm divertor 100 background pd &
+    h0 5e-3 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350 static yes
+fix flm_ol surface/state/lm div_ol 100 solps_b2pl ../solps/ld_tg_o.dat &
+    h0 5e-3 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350 static yes
+fix flm_il surface/state/lm div_il 100 solps_b2pl ../solps/ld_tg_i.dat &
+    h0 5e-3 U0 8.0 Bs 5.0 alpha 43.0 width 1.67 Tin 350 static yes
+fix flm surface/state/lm divertor 50 c_cheat[1] h0 5e-3 U0 8.0 &
+    Bs 5.0 alpha 43.0 width 1.67 Tin 350 csv output/strip.csv :pre
+
+[Description:]
+
+Model a flowing liquid-lithium film on the surface elements of a
+group with the Smolentsev shallow-water MHD strip solver. The strip
+runs along the wall arc length of the group; the wall heat flux from
+{hf_source} is interpolated onto the strip stations, and the solver
+advances the film momentum and heat-transfer equations in pseudo-time
+to steady state, including Antoine/Hertz-Knudsen evaporative cooling
+when {evap yes}.
+
+The converged state is mapped back to per-surf custom attributes:
+
+{Tsurf_lm} = surface temperature (degrees C); the name can be changed
+with the {custom} keyword :ulb,l
+{h_lm} = film thickness (m) :l
+{Gamma_D_lm} = incident D+ flux (1/m^2/s); non-zero only when the heat
+flux source carries it ({target} or {solps_b2pl}), zero otherwise :l,ule
+
+These attributes are accessible from any compute or dump as
+{s_name}, and are read by "compute
+surface/chemical/evaporation"_compute_surface_chemical_evaporation.html
+and "compute
+surface/chemical/adatom"_compute_surface_chemical_adatom.html, whose
+per-surf fluxes are in turn consumed by "fix
+surface/emit/source"_fix_surface_emit_source.html to launch Li atoms.
+Surfaces outside the group keep the initial values Tin, h0 and 0.
+
+Several fix surface/state/lm instances can share the same custom
+attributes: each writes only the surfaces of its own group. This is
+how an inner and an outer divertor leg are modeled together (second
+example above).
+
+The {static} keyword selects between solving the strip once at setup
+and freezing the per-surf values ({yes}; appropriate when the heat
+flux source is itself static) and re-solving every Nevery steps
+({no}; appropriate when a kinetic run updates the wall heat flux).
+{hf_scale} multiplies the heat flux from any source before it enters
+the strip. The {csv} keyword writes the converged strip profile
+(arc length, R, Z, Tsurf, h, Wtot, Gamma_D, Gamma_evap per station)
+to a file.
+
+The strip geometry and flow are set by {h0}, {U0}, {Bs}, {Bw},
+{alpha} and {width}; {sigma_w} and {tw} set the wall conductance
+(0 = electrically insulating wall); {qss} is the heat-flux scale of
+the nondimensionalization; {Nx}, {Ny}, {ncase}, {max_iter}, {eps},
+{relax} and {dt} control the numerical solve. The Li fluid properties
+are fixed at their values near 350 C.
+
+:line
+
+[Restrictions:]
+
+This fix is part of the OPENEDGE package. It requires explicit
+surface elements and cannot be used with implicit surfaces. The
+{plasma} source requires a compute plasma/fields; the {background}
+source requires a "fix background"_fix_background.html carrying
+q_par/q_perp heat-flux data. The {target} source requires HDF5. This
+fix declares a 4-column per-surf array, but the array is not
+populated; use the per-surf custom attributes listed above for
+output.
+
+[Related commands:]
+
+"compute surface/chemical/evaporation"_compute_surface_chemical_evaporation.html,
+"compute surface/chemical/adatom"_compute_surface_chemical_adatom.html,
+"fix surface/emit/source"_fix_surface_emit_source.html, "fix
+background"_fix_background.html, "custom"_custom.html
+
+[Default:]
+
+The option defaults are h0 = 0.005, U0 = 8.0, Bs = 5.0, Bw = 0.0,
+alpha = 43.0, width = 1.67, Tin = 350, sigma_w = 0, tw = 25e-6, qss =
+1.0e6, Nx = 201, Ny = 51, ncase = 1, max_iter = 3000, eps = 5e-8,
+relax = 1.0, dt = 0.5, evap = yes, hf_scale = 1.0, static = no, custom
+= Tsurf_lm, no csv file.

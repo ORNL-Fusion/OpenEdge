@@ -498,18 +498,26 @@ void FixCoulombBase::nanbu_background_cell(int icell, int np)
     if (species[isp].charge == 0.0) continue;
 
     const Particle::OnePart &part = particles[idx];
-    double Te_eV   = use_background_ ? std::max(pd_interp(pd_->temp_e, idx, part), 0.0)
+    PlasmaPointSample background;
+    if (use_background_)
+      pd_->sample_point(part.x, background, part.icell, idx,
+                        PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B);
+    double Te_eV   = use_background_ ? std::max(background.te, 0.0)
                                       : std::max(read_src(srcTe_, idx, icell), 0.0);
-    double ne      = use_background_ ? std::max(pd_interp(pd_->dens_e, idx, part), 0.0)
+    double ne      = use_background_ ? std::max(background.ne, 0.0)
                                       : std::max(read_src(srcNe_, idx, icell), 0.0);
-    double Ti_eV   = use_background_ ? std::max(pd_interp(pd_->temp_i, idx, part), 0.0)
+    double Ti_eV   = use_background_ ? std::max(background.ti, 0.0)
                                       : std::max(read_src(srcTi_bg_, idx, icell), 0.0);
-    double Ni_bg   = use_background_ ? std::max(pd_interp(pd_->dens_i, idx, part), 0.0)
+    double Ni_bg   = use_background_ ? std::max(background.ni, 0.0)
                                       : std::max(read_src(srcNi_bg_, idx, icell), 0.0);
-    double Vpar_bg = use_background_ ? pd_interp(pd_->parr_flow, idx, part)
+    double Vpar_bg = use_background_ ? background.upar
                                       : read_src(srcVpar_bg_, idx, icell);
     double Bx = 0.0, By = 0.0, Bz = 0.0;
-    if (use_background_) pd_bfield_sparta(part, idx, Bx, By, Bz);
+    if (use_background_) {
+      Bx = background.b[0];
+      By = background.b[1];
+      Bz = background.b[2];
+    }
     else {
       Bx = read_src(srcBx_, idx, icell);
       By = read_src(srcBy_, idx, icell);
@@ -836,15 +844,10 @@ void FixCoulombBase::pd_bfield_sparta(const Particle::OnePart &p,
 {
   Bx = By = Bz = 0.0;
   if (!pd_ || !pd_->has_bfield) return;
-
-  double R, Z;
-  particle_rz(p, R, Z);
-
-  double Br = 0.0, Bz_cyl = 0.0, Bt = 0.0;
-  pd_->bfield_at(R, Z, Br, Bz_cyl, Bt, p.icell, iparticle);
-
-  double phi = 0.0;
-  if (domain->dimension == 3) phi = std::atan2(p.x[1], p.x[0]);
-  OpenEdge::RZphi_force_to_sparta(Br, Bz_cyl, Bt, domain->dimension,
-                                   domain->axisymmetric, phi, Bx, By, Bz);
+  PlasmaPointSample sample;
+  pd_->sample_point(p.x, sample, p.icell, iparticle,
+                    PLASMA_NEED_FLOW_B);
+  Bx = sample.b[0];
+  By = sample.b[1];
+  Bz = sample.b[2];
 }

@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -51,7 +51,7 @@ distribution of particles varies with time, leading to load imbalance.
 After grid cells have been assigned, they are migrated to new owning
 processors, along with any particles they own or other per-cell
 attributes stored by fixes.  The internal data structures within
-SPARTA for grid cells and particles are re-initialized with the new
+OpenEdge for grid cells and particles are re-initialized with the new
 decomposition.
 
 The details of how child cells are assigned to processors by the
@@ -63,7 +63,7 @@ each processor.  This means each processor's cells will be
 geometrically compact.  The {random} and {proc} keywords will produce
 dispersed assignments of child cells to each processor.
 
-IMPORTANT NOTE: See "Section 6.8"_Section_howto.html#howto_8 of the
+IMPORTANT NOTE: See "Section 4.10"_Section_howto.html#howto_12 of the
 manual for an explanation of clumped and dispersed grid cell
 assignments and their relative performance trade-offs.
 
@@ -172,7 +172,7 @@ exercising the rebalancing code.
 
 The {emptyweight} keyword sets the weight assigned to a cell with no
 particles when {weight} is {part} or {time}.  Its default is 0.1, which
-preserves the standard SPARTA behavior.  A positive numeric value sets
+preserves the standard OpenEdge behavior.  A positive numeric value sets
 the weight directly.  The {auto} value is useful for sparse-marker
 OpenEdge simulations whose number of grid cells is much larger than
 their number of particles.  It scales the total empty-cell weight with
@@ -207,21 +207,21 @@ and 0.0 is returned for the global scalar value.
 Styles with a {kk} suffix are functionally the same as the
 corresponding style without the suffix.  They have been optimized to
 run faster, depending on your available hardware, as discussed in the
-"Accelerating SPARTA"_Section_accelerate.html section of the manual.
+"Building OpenEdge"_Section_start.html#start_2 section of the manual.
 The accelerated styles take the same arguments and should produce the
 same results, except for different random number, round-off and
 precision issues.
 
 These accelerated styles are part of the KOKKOS package. They are only
-enabled if SPARTA was built with that package.  See the "Making
-SPARTA"_Section_start.html#start_3 section for more info.
+enabled if OpenEdge was built with that package.  See the "Making
+OpenEdge"_Section_start.html#start_3 section for more info.
 
 You can specify the accelerated styles explicitly in your input script
 by including their suffix, or you can use the "-suffix command-line
-switch"_Section_start.html#start_7 when you invoke SPARTA, or you can
+switch"_Section_start.html#start_5 when you invoke OpenEdge, or you can
 use the "suffix"_suffix.html command in your input script.
 
-See the "Accelerating SPARTA"_Section_accelerate.html section of the
+See the "Building OpenEdge"_Section_start.html#start_2 section of the
 manual for more instructions on how to use the accelerated styles
 effectively.
 

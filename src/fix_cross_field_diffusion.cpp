@@ -396,8 +396,14 @@ void FixCrossFieldDiffusion::start_of_step()
     if (diff_model_ == DIFF_CONST) {
       D_local = D_perp_;
     } else if (diff_model_ == DIFF_BOHM) {
-      const double Te_eV = use_background_ ? std::max(pd_interp(pd_->temp_e, ip, p), 0.0)
-                                            : std::max(read_src(srcTe_, ip, icell), 0.0);
+      double Te_eV = 0.0;
+      if (use_background_) {
+        PlasmaPointSample sample;
+        pd_->sample_point(p.x, sample, p.icell, ip, PLASMA_NEED_THERMO);
+        Te_eV = std::max(sample.te, 0.0);
+      } else {
+        Te_eV = std::max(read_src(srcTe_, ip, icell), 0.0);
+      }
       D_local = bohm_scale_ * Te_eV / (16.0 * Bmag);
     }
 
@@ -720,16 +726,10 @@ void FixCrossFieldDiffusion::pd_bfield_sparta(const Particle::OnePart &p,
 {
   B0 = B1 = B2 = 0.0;
   if (!pd_ || !pd_->has_bfield) return;
-
-  double R, Z;
-  particle_rz(p, R, Z);
-
-  double Br = 0.0, Bz = 0.0, Bt = 0.0;
-  pd_->bfield_at(R, Z, Br, Bz, Bt, p.icell, iparticle);
-
-  // Decompose physical (Br, Bz, Bt) onto SPARTA's (B0, B1, B2) slot layout.
-  double phi = 0.0;
-  if (domain->dimension == 3) phi = std::atan2(p.x[1], p.x[0]);
-  OpenEdge::RZphi_force_to_sparta(Br, Bz, Bt, domain->dimension,
-                                   domain->axisymmetric, phi, B0, B1, B2);
+  PlasmaPointSample sample;
+  pd_->sample_point(p.x, sample, p.icell, iparticle,
+                    PLASMA_NEED_FLOW_B);
+  B0 = sample.b[0];
+  B1 = sample.b[1];
+  B2 = sample.b[2];
 }

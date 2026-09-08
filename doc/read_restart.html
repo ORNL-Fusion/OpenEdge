@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -53,7 +53,7 @@ Hence the new run will not be identical to the continued original run,
 but should be statistically similar.
 </P>
 <P>IMPORTANT NOTE: Because restart files are binary, they may not be
-portable to other machines.  SPARTA will print an error message if
+portable to other machines.  OpenEdge will print an error message if
 it cannot read a restart file for this reason.
 </P>
 <P>If a restarted run is performed on the same number of processors as
@@ -63,7 +63,7 @@ simulation.  If the processor count changes, then the assignment will
 necessarily be different.  In particular, even if the original
 assignment was "clumped", meaning each processor's cells were
 geometrically compact, the new assignment will not be clumped; it will
-be "dispersed".  See <A HREF = "Section_howto.html#howto_8">Section 6.8</A> of the
+be "dispersed".  See <A HREF = "Section_howto.html#howto_12">Section 4.10</A> of the
 manual for an explanation of clumped and dispersed grid cell
 assignments and their relative performance trade-offs.
 </P>
@@ -107,11 +107,11 @@ you want your script to continue a run from where it left off.  See
 the <A HREF = "run.html">run</A> command and its "upto" option for how to specify
 the run command so it doesn't need to be changed either.
 </P>
-<P>If a "%" character appears in the restart filename, SPARTA expects a
+<P>If a "%" character appears in the restart filename, OpenEdge expects a
 set of multiple files to exist.  The <A HREF = "restart.html">restart</A> and
 <A HREF = "write_restart.html">write_restart</A> commands explain how such sets are
 created.  Read_restart will first read a filename where "%" is
-replaced by "base".  This file tells SPARTA how many processors
+replaced by "base".  This file tells OpenEdge how many processors
 created the set and how many files are in it.  Read_restart then reads
 the additional files.  For example, if the restart file was specified
 as save.% when it was written, then read_restart reads the files
@@ -122,10 +122,10 @@ processors that created the restart file.
 simulation, or some subset of those processors, if the <I>fileper</I> or
 <I>nfile</I> options were used when the restart file was written; see the
 <A HREF = "restart.html">restart</A> and <A HREF = "write_restart.html">write_restart</A> commands
-for details.  The processors in the current SPARTA simulation share
+for details.  The processors in the current OpenEdge simulation share
 the work of reading these files; each reads a roughly equal subset of
 the files.  The number of processors which created the set can be
-different than the number of processors in the current SPARTA
+different than the number of processors in the current OpenEdge
 simulation.  This can be a fast mode of input on parallel machines
 that support parallel I/O.
 </P>
@@ -223,4 +223,5 @@ custom attributes and their data.
 </P>
 <P><B>Default:</B> none
 </P>
+<!-- PAGE BREAK -->
 </HTML>

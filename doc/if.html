@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -17,11 +17,11 @@
 </PRE>
 <UL><LI>boolean = a Boolean expression evaluated as TRUE or FALSE (see below)
 <LI>then = required word
-<LI>t1,t2,...,tN = one or more SPARTA commands to execute if condition is met, each enclosed in quotes
+<LI>t1,t2,...,tN = one or more OpenEdge commands to execute if condition is met, each enclosed in quotes
 <LI>elif = optional word, can appear multiple times
-<LI>f1,f2,...,fN = one or more SPARTA commands to execute if elif condition is met, each enclosed in quotes (optional arguments)
+<LI>f1,f2,...,fN = one or more OpenEdge commands to execute if elif condition is met, each enclosed in quotes (optional arguments)
 <LI>else = optional argument
-<LI>e1,e2,...,eN = one or more SPARTA commands to execute if no condition is met, each enclosed in quotes (optional arguments) 
+<LI>e1,e2,...,eN = one or more OpenEdge commands to execute if no condition is met, each enclosed in quotes (optional arguments) 
 </UL>
 <P><B>Examples:</B>
 </P>
@@ -59,7 +59,7 @@ Boolean expression is FALSE, then no commands are executed.
 </P>
 <P>The syntax for Boolean expressions is described below.
 </P>
-<P>Each command (t1, f1, e1, etc) can be any valid SPARTA input script
+<P>Each command (t1, f1, e1, etc) can be any valid OpenEdge input script
 command, except an <A HREF = "include.html">include</A> command, which is not
 allowed. If the command is more than one word, it must enclosed in
 quotes, so it will be treated as a single argument, as in the examples
@@ -83,7 +83,7 @@ else &
   "run 50000" 
 </PRE>
 <P>Note that if one of the commands to execute is <A HREF = "quit.html">quit</A>, as in
-the first example above, then executing the command will cause SPARTA
+the first example above, then executing the command will cause OpenEdge
 to halt.
 </P>
 <P>Note that by jumping to a label in the same input script, the if
@@ -175,4 +175,5 @@ non-zero.  If the result is zero, the expression result is FALSE.
 </P>
 <P><B>Default:</B> none
 </P>
+<!-- PAGE BREAK -->
 </HTML>

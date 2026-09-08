@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -26,12 +26,12 @@
 </P>
 <P>Read a snapshot of particles from a previously created dump file and
 add them to the simulation domain.  This is a means of reading in
-particles from a previous SPARTA simulation or created as output by
+particles from a previous OpenEdge simulation or created as output by
 another code.  The <A HREF = "create_particles.html">create_particles</A>, <A HREF = "fix_emit_face.html">fix
 emit/face</A>, and <A HREF = "read_restart.html">read_restart</A>
 commands are alternate ways to generate particles for a simulation.
 </P>
-<P>The dump file must be in the SPARTA format created by the <A HREF = "dump.html">dump
+<P>The dump file must be in the OpenEdge format created by the <A HREF = "dump.html">dump
 particles</A> command which is described on its doc page.
 </P>
 <P>Currently, each line of particle data in the file must have 8 fields
@@ -46,7 +46,7 @@ defined in the current input script via the <A HREF = "species.html">species</A>
 command.  The x,y,z values are the particle coordinates which must be
 inside (or on the surface of) the simulation box.  If a particle is
 outside the box it will be skipped when the file is read.  For 2d or
-axisymmetric simulations z = 0.0 should be used, though SPARTA does
+axisymmetric simulations z = 0.0 should be used, though OpenEdge does
 not check for this.  The vx,vy,vz values are the particle velocity.
 The rotational and vibrational energies for the new particles are set
 to 0.0.
@@ -74,4 +74,5 @@ to move.
 </P>
 <P><B>Default:</B> none
 </P>
+<!-- PAGE BREAK -->
 </HTML>

@@ -1,0 +1,118 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix reflect/psi command :h3
+
+[Syntax:]
+
+fix ID reflect/psi source keyword value ... :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+reflect/psi = style name of this fix command :l
+source = {equ} file or {background} fix-ID (exactly one is required) :l
+  {equ} file = SOLPS-style .equ equilibrium text file containing the
+    poloidal flux map ({geqdsk} is accepted as an alias for {equ})
+  {background} fix-ID = ID of a "fix background"_fix_background.html
+    whose plasma file carries the psi map :pre
+zero or more keyword/value pairs may be appended :l
+keyword = {psi_norm} or {action} or {mixture} :l
+  {psi_norm} value = threshold in normalized flux; particles with
+    psi_N below it are intercepted
+  {action} value = {reflect} or {absorb}
+  {mixture} value = mixture-ID = apply only to species in this mixture :pre
+:ule
+
+[Examples:]
+
+fix fcore reflect/psi equ input/g174310.03500.equ psi_norm 0.926
+fix pd background file plasma.h5 static yes
+fix fcore reflect/psi background pd action absorb
+fix fcore reflect/psi background pd psi_norm 0.97 action absorb mixture allLi
+fix coreout ave/time 10000 1 10000 f_fcore mode vector file core_flux :pre
+
+[Description:]
+
+Impose a boundary on a flux surface inside the domain. Particles whose
+normalized poloidal flux
+
+psi_N = (psi - psi_axis) / (psi_boundary - psi_axis) :pre
+
+drops below the {psi_norm} threshold after a move are either reflected
+back to the outside or deleted. This provides an inner-core boundary
+for impurity transport runs without meshing the closed-flux-surface
+region with explicit surfaces, and allows the boundary to act on
+selected species only.
+
+With {equ}, the psi map, its (R,Z) grid and the boundary flux psib are
+read from a SOLPS .equ text file (markers jm=, km=, psib=, r(1:jm);,
+z(1:km); and ((psi(j,k)-psib,j=1,jm),k=1,km)). psi_axis is taken as
+the minimum of psi over the central part of the grid, so psi_N = 0 at
+the magnetic axis and 1 at the separatrix. With {background}, the map,
+axis and boundary values are those loaded by the referenced fix from
+its plasma file; the normalization of that file places psi_N = 0 on
+the stored core boundary contour and 1 on the separatrix, which is why
+the default threshold differs between the two sources (see Default).
+
+The check is performed inside the particle mover on every step for
+each particle in scope (there is no Nevery). psi_N is evaluated by
+bilinear interpolation on the equilibrium grid.
+
+{action reflect} locates the outside-to-inside crossing on the
+particle's chord by bisection, evaluates the local gradient of psi_N
+there, and reflects the velocity specularly about that normal, v' =
+v - 2 (v . n) n. The unused part of the step is mirrored through the
+local tangent plane, so speed and the tangential velocity are
+preserved in 2d, axisymmetric and 3d geometry. If the mirrored end
+point would still lie inside, the particle is placed just outside the
+crossing.
+
+{action absorb} deletes the particle whose end-of-move position is
+inside the contour. The removal is tallied at the end point, so the
+crossing location and time carry at most one timestep of overshoot;
+check an integrated absorbed flux for timestep convergence when it is
+a reported quantity. Sputtered impurities entering the closed-flux
+region normally do not return on the simulated timescale, so {absorb}
+is the usual choice for a core boundary.
+
+The {mixture} keyword restricts the boundary to the species of a
+mixture; all other species cross the contour freely. This is useful
+in particulate runs, where atomic and ionic impurities are absorbed at
+the core boundary while macroscopic grains continue into the core
+background.
+
+This fix computes a global vector with three entries per species (or
+per mixture group when {mixture} is used): the cumulative number of
+absorbed simulation particles, the cumulative number of absorbed
+physical particles (summed from the {pweight} attribute of "fix
+particle/weight"_fix_particle_weight.html when present, otherwise
+using {fnum}), and the mean physical removal rate since the fix was
+initialized (1/s). For a mixture with groups Li, Li+, Li2+, entries
+1-3 are Li, 4-6 Li+, 7-9 Li2+. The vector can be output with "fix
+ave/time"_fix_ave_time.html as in the example above. Difference the
+cumulative physical count between outputs to obtain a windowed
+removal rate.
+
+[Restrictions:]
+
+This command is part of the OPENEDGE package.
+
+Exactly one of {equ} or {background} must be given. In {background}
+mode the referenced plasma file must contain a psi map together with
+its core and separatrix values, otherwise the fix stops with an error.
+The {equ} reader expects the SOLPS .equ text layout described above.
+
+[Related commands:]
+
+"fix background"_fix_background.html, "fix
+particle/weight"_fix_particle_weight.html, "fix
+ave/time"_fix_ave_time.html
+
+[Default:]
+
+The option defaults are action = reflect, psi_norm = 0.926 with {equ}
+and psi_norm = 0.0 with {background}, and all species in scope.

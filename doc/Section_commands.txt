@@ -1,17 +1,17 @@
-"Previous Section"_Section_start.html - "SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc - "Next Section"_Section_howto.html :c
+"Previous Section"_Section_start.html - "OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc - "Next Section"_Section_howto.html :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
 3. Commands :h3
 
-This section describes how a SPARTA input script is formatted and what
-commands are used to define a SPARTA simulation.
+This section describes how a OpenEdge input script is formatted and what
+commands are used to define a OpenEdge simulation.
 
-3.1 "SPARTA input script"_#cmd_1
+3.1 "OpenEdge input script"_#cmd_1
 3.2 "Parsing rules"_#cmd_2
 3.3 "Input script structure"_#cmd_3
 3.4 "Commands listed by category"_#cmd_4
@@ -19,11 +19,11 @@ commands are used to define a SPARTA simulation.
 
 :line
 
-3.1 SPARTA input script :link(cmd_1),h4
+3.1 OpenEdge input script :link(cmd_1),h4
 
-SPARTA executes by reading commands from a input script (text file),
-one line at a time.  When the input script ends, SPARTA exits.  Each
-command causes SPARTA to take some action.  It may set an internal
+OpenEdge executes by reading commands from a input script (text file),
+one line at a time.  When the input script ends, OpenEdge exits.  Each
+command causes OpenEdge to take some action.  It may set an internal
 variable, read in a file, or run a simulation.  Most commands have
 default settings, which means you only need to use the command if you
 wish to change the default.
@@ -31,7 +31,7 @@ wish to change the default.
 In many cases, the ordering of commands in an input script is not
 important.  However the following rules apply:
 
-(1) SPARTA does not read your entire input script and then perform a
+(1) OpenEdge does not read your entire input script and then perform a
 simulation with all the settings.  Rather, the input script is read
 one line at a time and each command takes effect when it is read.
 Thus this sequence of commands:
@@ -56,8 +56,8 @@ example you cannot define the grid overlaying the simulation box until
 the box itself has been defined.  Likewise you cannot read in
 triangulated surfaces until a grid has been defined to store them.
 
-Many input script errors are detected by SPARTA and an ERROR or
-WARNING message is printed.  "Section 12"_Section_errors.html gives
+Many input script errors are detected by OpenEdge and an ERROR or
+WARNING message is printed.  "Section 6"_Section_errors.html gives
 more information on what errors mean.  The documentation for each
 command lists restrictions on how the command can be used.
 
@@ -66,11 +66,11 @@ command lists restrictions on how the command can be used.
 3.2 Parsing rules :link(cmd_2),h4
 
 Each non-blank line in the input script is treated as a command.
-SPARTA commands are case sensitive.  Command names are lower-case, as
+OpenEdge commands are case sensitive.  Command names are lower-case, as
 are specified command arguments.  Upper case letters may be used in
 file names or user-chosen ID strings.
 
-Here is how each line in the input script is parsed by SPARTA:
+Here is how each line in the input script is parsed by OpenEdge:
 
 (1) If the last printable character on the line is a "&" character
 (with no surrounding quotes), the command is assumed to continue on
@@ -170,95 +170,160 @@ allowed, but that should be sufficient for most use cases.
 
 3.3 Input script structure :h4,link(cmd_3)
 
-This section describes the structure of a typical SPARTA input script.
-The "examples" directory in the SPARTA distribution contains sample
-input scripts; the corresponding problems are discussed in "Section
-5"_Section_example.html, and animated on the "SPARTA WWW Site"_sws.
+This section describes the structure of a typical OpenEdge input
+script.  The examples directory contains sample scripts; the cases are
+described in "Section 5"_Section_example.html.
 
-A SPARTA input script typically has 4 parts:
+An OpenEdge input script typically has 5 parts:
 
 Initialization
 Problem definition
-Settings
+Plasma background
+Physics settings and output
 Run a simulation :ol
 
-The last 2 parts can be repeated as many times as desired.  I.e. run a
-simulation, change some settings, run some more, etc.  Each of the 4
-parts is now described in more detail.  Remember that almost all the
+The last 2 parts can be repeated as many times as desired.  Almost all
 commands need only be used if a non-default value is desired.
 
 (1) Initialization
 
-Set parameters that need to be defined before the simulation domain,
-particles, grid cells, and surfaces are defined.
-
-Relevant commands include "dimension"_dimension.html,
-"units"_units.html, and "seed"_seed.html.
+Set parameters that must be defined before the simulation domain,
+particles, grid cells and surfaces: "dimension"_dimension.html,
+"units"_units.html, "seed"_seed.html, "boundary"_boundary.html.
 
 (2) Problem definition
 
-These items must be defined before running a SPARTA calculation, and
-typically in this order:
+These items are defined in this order:
 
 "create_box"_create_box.html for the simulation box
 "create_grid"_create_grid.html or "read_grid"_read_grid.html for grid cells
-"read_surf"_read_surf.html or "read_isurf"_read_isurf.html for surfaces
-"species"_species.html for particle species properties
-"create_particles"_create_particles.html for particles :ul
+"balance_grid"_balance_grid.html to distribute cells over processors
+"species"_species.html and "mixture"_mixture.html for particle species
+"material"_material.html for particulate materials
+"read_surf"_read_surf.html for the wall and other surfaces
+"read_particles"_read_particles.html or "create_particles"_create_particles.html for an initial population :ul
 
-The first two are required.  Surfaces are optional.  Particles are also
-optional in the setup stage, since they can be added as the simulation
-runs.
+The box and grid are required.  Surfaces are optional but every device
+case has a wall.  Particles are optional at this stage because most
+OpenEdge cases inject them during the run from a wall source or an
+injector.
 
-The system can also be load-balanced after the grid and/or particles
-are defined in the setup stage using the
-"balance_grid"_balance_grid.html command.  The grid can also be
-adapted before or betwee simulations using the
-"adapt_grid"_adapt_grid.html command.
+(3) Plasma background
 
-(3) Settings
+"fix background"_fix_background.html reads the plasma file, or defines
+a constant or analytic plasma, and serves plasma quantities and the
+magnetic field to every other OpenEdge command.  Define it once, before
+any command that references it.  "compute
+plasma/fields"_compute_plasma_fields.html samples the background onto
+the grid for output.
 
-Once the problem geometry, grid cells, surfaces, and particles are
-defined, a variety of settings can be specified, which include
-simulation parameters, output options, etc.
+(4) Physics settings and output
 
-Commands that do this include 
+The transport model is selected with "global pusher"_global.html and a
+set of fixes, each referencing the background fix:
 
-"global"_global.html
-"timestep"_timestep.html
-"collide"_collide.html for a collision model
-"react"_react.html for a chemisty model
-"fix"_fix.html for boundary conditions, time-averaging, load-balancing, etc
-"compute"_compute.html for diagnostic computations
+"global pusher"_global.html for the Boris or guiding-center mover and the sheath model
+"fix coulomb/background"_fix_coulomb_background.html, "fix force/thermal"_fix_force_thermal.html, "fix cross_field_diffusion"_fix_cross_field_diffusion.html for forces on ions
+"fix volume/chem/adas"_fix_volume_chem_adas.html for atomic processes
+"surf_collide"_surf_collide.html and "surf_react"_surf_react.html for wall models, attached with "surf_modify"_surf_modify.html
+"fix surface/emit/recycle"_fix_surface_emit_recycle.html, "fix surface/emit/source"_fix_surface_emit_source.html, "fix surface/emit/puff"_fix_surface_emit_puff.html for wall and gas sources
+"fix particulate/emit"_fix_particulate_emit.html, "fix particulate/charge"_fix_particulate_charge.html, "fix particulate/drag"_fix_particulate_drag.html, "fix particulate/thermal"_fix_particulate_thermal.html for dust and droplets
+"fix balance"_fix_balance.html for load balancing during the run
+"compute"_compute.html for diagnostics
 "stats_style"_stats_style.html for screen output
-"dump"_dump.html for snapshots of particle, grid, and surface info
-"dump image"_dump.html for on-the-fly images of the simulation
+"dump"_dump.html for snapshots of particle, grid and surface data :ul
 
-(4) Run a simulation
+(5) Run a simulation
 
-A simulation is run using the "run"_run.html command.
+A simulation is run using the "run"_run.html command.  "timestep"_timestep.html sets the step.
+
+Here is the skeleton of a typical OpenEdge deck:
+
+dimension     2
+boundary      o ao p
+seed          12345
+create_box    ...
+create_grid   ...
+balance_grid  rcb part
+
+species       input/atoms.species W W+ W2+
+mixture       allW W W+ W2+
+read_surf     input/wall.surf group wall
+
+fix pd background file input/plasma.h5
+global pusher plasma pd mode hybrid subcycles 5 sheath spatial
+
+fix fcoul coulomb/background 1 background pd 2.0 1.0
+fix fchem volume/chem/adas 1 W W.reactions
+compute csput surface/physical/sputter wall background pd ...
+fix fsrc  surface/emit/source allW wall csput
+surf_react rpwi surface/pwi input/w.recycle
+surf_modify wall react rpwi
+
+timestep 2e-8
+stats    1000
+dump     d1 particle all 1000 output/state id type x y z
+run      100000 :pre
 
 :line
 
 3.4 Commands listed by category :link(cmd_4),h4
 
-This section lists many SPARTA commands, grouped by category.  The
-"next section"_#cmd_5 lists all commands alphabetically.
+This section lists OpenEdge commands, grouped by category.  The "next
+section"_#cmd_5 lists all commands alphabetically.
 
 Initialization:
 
 "dimension"_dimension.html, "package"_package.html, "seed"_seed.html,
 "suffix"_suffix.html, "units"_units.html
 
-
 Problem definition:
 
 "boundary"_boundary.html, "bound_modify"_bound_modify.html,
 "create_box"_create_box.html, "create_grid"_create_grid.html,
-"create_particles"_create_particles.html, "mixture"_mixture.html,
-"read_grid"_read_grid.html, "read_isurf"_read_isurf.html,
-"read_particles"_read_particles.html, "read_surf"_read_surf.html,
-"read_restart"_read_restart.html, "species"_species.html,
+"create_particles"_create_particles.html, "material"_material.html,
+"mixture"_mixture.html, "read_grid"_read_grid.html,
+"read_isurf"_read_isurf.html, "read_particles"_read_particles.html,
+"read_surf"_read_surf.html, "read_restart"_read_restart.html,
+"species"_species.html
+
+Plasma background:
+
+"fix background"_fix_background.html, "compute plasma/fields"_compute_plasma_fields.html,
+"fix efield/particle"_fix_efield_particle.html, "fix bfield/particle"_fix_bfield_particle.html
+
+Transport:
+
+"global pusher"_global.html, "fix coulomb/background"_fix_coulomb_background.html,
+"fix coulomb/binary"_fix_coulomb_binary.html, "fix cross_field_diffusion"_fix_cross_field_diffusion.html,
+"fix force/thermal"_fix_force_thermal.html, "fix force/gravity"_fix_force_gravity.html,
+"fix neutral/collide/background"_fix_neutral_collide_background.html,
+"fix reflect/psi"_fix_reflect_psi.html, "fix particle/weight"_fix_particle_weight.html
+
+Atomic processes:
+
+"fix volume/chem/adas"_fix_volume_chem_adas.html,
+"compute volume/emissivity/grid"_compute_volume_emissivity_grid.html
+
+Plasma-wall interaction:
+
+"compute surface/physical/sputter"_compute_surface_physical_sputter.html,
+"surf_react surface/pwi"_surf_react_surface_pwi.html,
+"fix surface/emit/recycle"_fix_surface_emit_recycle.html,
+"fix surface/emit/source"_fix_surface_emit_source.html,
+"fix surface/emit/puff"_fix_surface_emit_puff.html,
+"fix surface/state/lm"_fix_surface_state_lm.html,
+"compute surface/chemical/evaporation"_compute_surface_chemical_evaporation.html,
+"compute surface/chemical/adatom"_compute_surface_chemical_adatom.html,
+"compute nearest_surf/grid"_compute_nearest_surf_grid.html
+
+Particulates:
+
+"material"_material.html, "fix particulate/emit"_fix_particulate_emit.html,
+"fix particulate/charge"_fix_particulate_charge.html,
+"fix particulate/drag"_fix_particulate_drag.html,
+"fix particulate/thermal"_fix_particulate_thermal.html,
+"surf_collide particulate/bounce"_surf_collide_particulate_bounce.html
 
 Settings:
 
@@ -296,9 +361,10 @@ Miscellaneous:
 
 3.5 Individual commands :h4,link(cmd_5),link(comm)
 
-This section lists all SPARTA commands alphabetically, with a separate
-listing below of styles within certain commands.  The "previous
-section"_#cmd_4 lists many of the same commands, grouped by category.
+This section lists all OpenEdge commands alphabetically, with a
+separate listing below of styles within certain commands.  The
+"previous section"_#cmd_4 lists many of the same commands, grouped by
+category.
 
 "adapt_grid"_adapt_grid.html,
 "balance_grid"_balance_grid.html,
@@ -327,6 +393,7 @@ section"_#cmd_4 lists many of the same commands, grouped by category.
 "jump"_jump.html,
 "label"_label.html,
 "log"_log.html,
+"material"_material.html,
 "mixture"_mixture.html,
 "move_surf"_move_surf.html,
 "next"_next.html,
@@ -356,8 +423,8 @@ section"_#cmd_4 lists many of the same commands, grouped by category.
 "stats_style"_stats_style.html,
 "suffix"_suffix.html,
 "surf_collide"_surf_collide.html,
-"surf_react"_surf_react.html,
 "surf_modify"_surf_modify.html,
+"surf_react"_surf_react.html,
 "timestep"_timestep.html,
 "uncompute"_uncompute.html,
 "undump"_undump.html,
@@ -374,10 +441,8 @@ section"_#cmd_4 lists many of the same commands, grouped by category.
 Fix styles :h4
 
 See the "fix"_fix.html command for one-line descriptions of each style
-or click on the style itself for a full description.  Some of the
-styles have accelerated versions, which can be used if SPARTA is built
-with the "appropriate accelerated package"_Section_accelerate.html.
-This is indicated by additional letters in parenthesis: k = KOKKOS.
+or click on the style itself for a full description.  Styles with a
+Kokkos version are marked (k).
 
 "ablate"_fix_ablate.html,
 "adapt (k)"_fix_adapt.html,
@@ -387,65 +452,81 @@ This is indicated by additional letters in parenthesis: k = KOKKOS.
 "ave/histo/weight (k)"_fix_ave_histo.html,
 "ave/surf"_fix_ave_surf.html,
 "ave/time"_fix_ave_time.html,
+"background"_fix_background.html,
 "balance (k)"_fix_balance.html,
+"bfield/particle"_fix_bfield_particle.html,
+"coulomb/background"_fix_coulomb_background.html,
+"coulomb/binary"_fix_coulomb_binary.html,
+"cross_field_diffusion"_fix_cross_field_diffusion.html,
 "dt/reset (k)"_fix_dt_reset.html,
+"efield/particle"_fix_efield_particle.html,
 "emit/face (k)"_fix_emit_face.html,
-"emit/face/file"_fix_emit_face_file.html,
 "emit/surf"_fix_emit_surf.html,
-"field/grid"_fix_field_grid.html,
-"field/particle"_fix_field_particle.html,
+"force/gravity"_fix_force_gravity.html,
+"force/thermal"_fix_force_thermal.html,
 "grid/check (k)"_fix_grid_check.html,
 "halt"_fix_halt.html,
 "move/surf (k)"_fix_move_surf.html,
+"neutral/collide/background"_fix_neutral_collide_background.html,
+"particle/weight"_fix_particle_weight.html,
+"particulate/charge"_fix_particulate_charge.html,
+"particulate/drag"_fix_particulate_drag.html,
+"particulate/emit"_fix_particulate_emit.html,
+"particulate/thermal"_fix_particulate_thermal.html,
 "print"_fix_print.html,
+"reflect/psi"_fix_reflect_psi.html,
 "surf/temp"_fix_surf_temp.html,
+"surface/emit/puff"_fix_surface_emit_puff.html,
+"surface/emit/recycle"_fix_surface_emit_recycle.html,
+"surface/emit/source"_fix_surface_emit_source.html,
+"surface/state/lm"_fix_surface_state_lm.html,
 "temp/global/rescale"_fix_temp_global_rescale.html,
 "temp/rescale (k)"_fix_temp_rescale.html,
-"vibmode (k)"_fix_vibmode.html :tb(c=6,ea=c)
+"vibmode (k)"_fix_vibmode.html,
+"volume/chem/adas"_fix_volume_chem_adas.html :tb(c=5,ea=c)
 
 :line
 
 Compute styles :h4
 
 See the "compute"_compute.html command for one-line descriptions of
-each style or click on the style itself for a full description.  Some
-of the styles have accelerated versions, which can be used if SPARTA
-is built with the "appropriate accelerated
-package"_Section_accelerate.html.  This is indicated by additional
-letters in parenthesis: k = KOKKOS.
+each style or click on the style itself for a full description.
+Styles with a Kokkos version are marked (k).
 
 "boundary (k)"_compute_boundary.html,
 "count (k)"_compute_count.html,
 "distsurf/grid (k)"_compute_distsurf_grid.html,
 "dt/grid (k)"_compute_dt_grid.html,
 "eflux/grid (k)"_compute_eflux_grid.html,
-"fft/grid (k)"_compute_fft_grid.html,
 "grid (k)"_compute_grid.html,
+"grid/weighted"_compute_grid_weighted.html,
 "isurf/grid"_compute_isurf_grid.html,
 "ke/particle (k)"_compute_ke_particle.html,
 "lambda/grid (k)"_compute_lambda_grid.html,
+"nearest_surf/grid"_compute_nearest_surf_grid.html,
 "pflux/grid (k)"_compute_pflux_grid.html,
+"plasma/fields"_compute_plasma_fields.html,
 "property/grid (k)"_compute_property_grid.html,
+"property/surf"_compute_property_surf.html,
 "react/boundary"_compute_react_boundary.html,
 "react/surf"_compute_react_surf.html,
 "react/isurf/grid"_compute_react_isurf_grid.html,
 "reduce"_compute_reduce.html,
 "sonine/grid (k)"_compute_sonine_grid.html,
 "surf (k)"_compute_surf.html,
-"surf/ead"_compute_surf_ead.html,
+"surface/chemical/adatom"_compute_surface_chemical_adatom.html,
+"surface/chemical/evaporation"_compute_surface_chemical_evaporation.html,
+"surface/physical/sputter"_compute_surface_physical_sputter.html,
 "thermal/grid (k)"_compute_thermal_grid.html,
 "temp (k)"_compute_temp.html,
-"tvib/grid"_compute_tvib_grid.html :tb(c=6,ea=c)
+"tvib/grid"_compute_tvib_grid.html,
+"volume/emissivity/grid"_compute_volume_emissivity_grid.html :tb(c=5,ea=c)
 
 :line
 
 Collide styles :h4
 
 See the "collide"_collide.html command for details of each style.
-Some of the styles have accelerated versions, which can be used if
-SPARTA is built with the "appropriate accelerated
-package"_Section_accelerate.html.  This is indicated by additional
-letters in parenthesis: k = KOKKOS.
 
 "vss (k)"_collide.html :tb(c=1,ea=c)
 
@@ -454,29 +535,30 @@ letters in parenthesis: k = KOKKOS.
 Surface collide styles :h4
 
 See the "surf_collide"_surf_collide.html command for details of each
-style.  Some of the styles have accelerated versions, which can be
-used if SPARTA is built with the "appropriate accelerated
-package"_Section_accelerate.html.  This is indicated by additional
-letters in parenthesis: k = KOKKOS.
+style.
 
+"adiabatic"_surf_collide.html,
 "cll"_surf_collide.html,
 "diffuse (k)"_surf_collide.html,
 "impulsive"_surf_collide.html,
+"partial_recycle"_surf_collide.html,
+"particulate/bounce"_surf_collide_particulate_bounce.html,
 "piston (k)"_surf_collide.html,
 "specular (k)"_surf_collide.html,
 "td"_surf_collide.html,
-"vanish (k)"_surf_collide.html :tb(c=3,ea=c)
+"toroidal"_surf_collide.html,
+"transparent"_surf_collide.html,
+"vanish (k)"_surf_collide.html :tb(c=4,ea=c)
 
 :line
 
 Surface reaction styles :h4
 
 See the "surf_react"_surf_react.html command for details of each
-style. Some of the styles have accelerated versions, which can be
-used if SPARTA is built with the "appropriate accelerated
-package"_Section_accelerate.html.  This is indicated by additional
-letters in parenthesis: k = KOKKOS.
+style.
 
 "adsorb"_surf_react_adsorb.html,
 "global (k)"_surf_react.html,
-"prob (k)"_surf_react.html :tb(c=2,ea=c)
+"prob (k)"_surf_react.html,
+"surface/pwi"_surf_react_surface_pwi.html,
+"vanish_track"_surf_react.html :tb(c=3,ea=c)

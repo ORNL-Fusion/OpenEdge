@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -143,7 +143,7 @@ is ignored.  This means variables can NOT be re-defined in an input
 script (with 2 exceptions, read further).  This is to allow an input
 script to be processed multiple times without resetting the variables;
 see the <A HREF = "jump.html">jump</A> or <A HREF = "include.html">include</A> commands.  It also
-means that using the <A HREF = "Section_start.html#start_7">command-line switch</A>
+means that using the <A HREF = "Section_start.html#start_5">command-line switch</A>
 -var will override a corresponding index variable setting in the input
 script.
 </P>
@@ -210,8 +210,8 @@ string is assigned.  All processors assign the same string to the
 variable.
 </P>
 <P><I>Index</I> style variables with a single string value can also be set by
-using the command-line switch -var; see <A HREF = "Section_start.html#start_7">Section
-2.6</A> of the manual for details.
+using the command-line switch -var; see <A HREF = "Section_start.html#start_5">Section
+2.5</A> of the manual for details.
 </P>
 <P>The <I>loop</I> style is identical to the <I>index</I> style except that the
 strings are the integers from 1 to N inclusive, if only one argument N
@@ -226,9 +226,9 @@ inclusive, and the string N1 is initially assigned to the variable.
 N1 <= N2 and N2 >= 0 is required.
 </P>
 <P>For the <I>world</I> style, one or more strings are specified.  There must
-be one string for each processor partition or "world".  See <A HREF = "Section_start.html#start_7">Section
-2.6</A> of the manual for information on
-running SPARTA with multiple partitions via the "-partition"
+be one string for each processor partition or "world".  See <A HREF = "Section_start.html#start_5">Section
+2.5</A> of the manual for information on
+running OpenEdge with multiple partitions via the "-partition"
 command-line switch.  This variable command assigns one string to each
 world.  All processors in the world are assigned the same string.  The
 next command cannot be used with <I>equal</I> style variables, since there
@@ -237,8 +237,8 @@ you wish to run different simulations on different partitions.
 </P>
 <P>For the <I>universe</I> style, one or more strings are specified.  There
 must be at least as many strings as there are processor partitions or
-"worlds".  See <A HREF = "Section_start.html#start_7">this page</A> for information
-on running SPARTA with multiple partitions via the "-partition"
+"worlds".  See <A HREF = "Section_start.html#start_5">this page</A> for information
+on running OpenEdge with multiple partitions via the "-partition"
 command-line switch.  This variable command initially assigns one
 string to each world.  When a <A HREF = "next.html">next</A> command is encountered
 using this variable, the first processor partition to encounter it, is
@@ -248,7 +248,7 @@ variable strings are consumed.  Thus, this command can be used to run
 one after the other on whatever partition becomes available, until
 they are all finished.  <I>Universe</I> style variables are incremented
 using the files "tmp.sparta.variable" and "tmp.sparta.variable.lock"
-which you will see in your directory during such a SPARTA run.
+which you will see in your directory during such a OpenEdge run.
 </P>
 <P>The <I>uloop</I> style is identical to the <I>universe</I> style except that the
 strings are the integers from 1 to N.  This allows generation of long
@@ -272,7 +272,7 @@ default format "%.15g" has too much precision.
 which should be the name of an environment variable.  When the
 variable is evaluated, it returns the value of the environment
 variable, or an empty string if it not defined.  This style of
-variable can be used to adapt the behavior of SPARTA input scripts via
+variable can be used to adapt the behavior of OpenEdge input scripts via
 environment variable settings, or to retrieve information that has
 been previously stored with the <A HREF = "shell.html">shell putenv</A> command.
 Note that because environment variable settings are stored by the
@@ -299,7 +299,7 @@ a non-blank line, delimited by white space, is the "string" assigned
 to the variable.
 </P>
 <P>For the <I>internal</I> style a numeric value is provided.  This value will
-be assigned to the variable until a SPARTA command sets it to a new
+be assigned to the variable until a OpenEdge command sets it to a new
 value.  There is currently only one command that requirew <I>internal</I>
 variables as inputs, because it resets them:
 <A HREF = "create_particles.html">create_particles</A>.  As mentioned above, an
@@ -322,12 +322,12 @@ each particle whenever it is evaluated.  For <I>grid</I> style variables
 the formula computes one quantity for each grid cell whenever it is
 evaluated.  A <I>grid</I> style variable computes quantites for all flavors
 of child grid cells in the simulation, which includes unsplit, cut,
-split, and sub cells.  See <A HREF = "Section_howto.html#howto_8">Section 4.8</A> of
-the manual gives details of how SPARTA defines child, unsplit, split,
+split, and sub cells.  See <A HREF = "Section_howto.html#howto_10">Section 4.8</A> of
+the manual gives details of how OpenEdge defines child, unsplit, split,
 and sub cells.  For <I>surf</I> style variables the formula computes one
 quantity for each surface element (line or triangle) whenever it is
 evaluated.  They can only be defined for explicit surfaces, not
-implicit surfaces.  See <A HREF = "Section_howto.html#howto_9">Section 4.9</A> of
+implicit surfaces.  See <A HREF = "Section_howto.html#howto_11">Section 4.9</A> of
 the manual for a description of both kinds of surface elements.
 </P>
 <P>Note that <I>equal</I>, <I>particle</I>, <I>grid</I>, and <I>surf</I> variables can
@@ -797,7 +797,7 @@ data files, e.g. via the <A HREF = "read_surf.html">read_surf</A> command.  Or t
 can be defined and used by specific commands, e.g. <A HREF = "fix_ambipolar.html">fix
 ambipolar</A> or <A HREF = "fix_surf_temp.html">fix surf/temp</A> or
 <A HREF = "surf_react_adsorb.html">surf_react adsorb</A>.  The name of each
-attribute sis set by the user or defined by the command.  See <A HREF = "Section_howto.html#howto_17">Section
+attribute sis set by the user or defined by the command.  See <A HREF = "Section_howto.html#howto_14">Section
 6.17</A> for more discussion of custom
 attributes.
 </P>
@@ -883,15 +883,15 @@ sign (e.g. $x or ${abc}) versus with a leading "v_" (e.g. v_x or
 v_abc).  The former can be used in any input script command, including
 a variable command.  The input script parser evaluates the reference
 variable immediately and substitutes its value into the command.  As
-explained in <A HREF = "Section_commands.html#3_2">Section commands 3.2</A> for
+explained in <A HREF = "Section_commands.html#cmd_2">Section 3.2</A> for
 "Parsing rules", you can also use un-named "immediate" variables for
 this purpose.  For example, a string like this
 $((xlo+xhi)/2+sqrt(v_area)) in an input script command evaluates the
 string between the parenthesis as an equal-style variable formula.
 </P>
 <P>Referencing a variable with a leading "v_" is an optional or required
-kind of argument for some commands (e.g. the <A HREF = "fix_ave_spatial.html">fix
-ave/spatial</A> or <A HREF = "dump.html">dump custom</A> or
+kind of argument for some commands (e.g. the <A HREF = "fix_ave_grid.html">fix
+ave/grid</A> or <A HREF = "dump.html">dump custom</A> or
 <A HREF = "stats_style.html">stats_style</A> commands) if you wish it to evaluate a
 variable periodically during a run.  It can also be used in a variable
 formula if you wish to reference a second variable.  The second
@@ -939,7 +939,7 @@ is evaluated later.
 
 <P><B>Variable Accuracy:</B>
 </P>
-<P>Obviously, SPARTA attempts to evaluate variables containing formulas
+<P>Obviously, OpenEdge attempts to evaluate variables containing formulas
 (<I>equal</I>, <I>particle</I>, <I>grid</I>, <I>surf</I> style variables) accurately
 whenever the evaluation is performed.  Depending on what is included
 in the formula, this may require invoking a <A HREF = "compute.html">compute</A>, or
@@ -950,9 +950,9 @@ pressure induced on a global boundary due to collisions, then these
 quantities need to be tallied during the timesteps on which the
 variable will need the values.
 </P>
-<P>SPARTA keeps track of all of this as it performs a <A HREF = "run.html">run</A> as
+<P>OpenEdge keeps track of all of this as it performs a <A HREF = "run.html">run</A> as
 well as in between simulations.  An error will be generated if you
-attempt to evaluate a variable when SPARTA knows it cannot produce
+attempt to evaluate a variable when OpenEdge knows it cannot produce
 accurate values.  For example, if a <A HREF = "stats.html">stats</A> command prints
 a variable which accesses values stored by a <A HREF = "fix_ave_time.html">fix
 ave/time</A> command and the timesteps on which stats
@@ -963,7 +963,7 @@ in the fix command, then an error will occur.
 requires invocation of a compute (directly or indirectly).  The first
 is if the variable is evaluated before a <A HREF = "run.html">run</A> command which
 follows the <A HREF = "compute.html">compute</A> command which created that compute.
-In this case, SPARTA will generate an error.  This is because some
+In this case, OpenEdge will generate an error.  This is because some
 computes require initializations which does not take place unit a run
 is initialized.  One example is the <A HREF = "compute_property_surf.html">compute
 property/surf</A> command which creates a list
@@ -978,7 +978,7 @@ the <A HREF = "remove_surf.html">remove_surf</A> command could be used to remove
 surface elements.  If the variable depends on a <A HREF = "compute_property_surf.html">property/surf
 compute</A>, that compute will not
 re-initialize itself until the next simulation.  Thus it may generate
-an incorrect answer when evaluated.  Note that SPARTA will not
+an incorrect answer when evaluated.  Note that OpenEdge will not
 generate an error in this case; the evaluated variable may simply be
 incorrect.
 </P>
@@ -999,4 +999,5 @@ print</A>, <A HREF = "print.html">print</A>
 </P>
 <P><B>Default:</B> none
 </P>
+<!-- PAGE BREAK -->
 </HTML>

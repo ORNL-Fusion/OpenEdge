@@ -1,0 +1,119 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix cross_field_diffusion command :h3
+
+[Syntax:]
+
+fix ID cross_field_diffusion Nevery bsource keyword values ... :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+cross_field_diffusion = style name of this fix command :l
+Nevery = apply the displacement every Nevery timesteps :l
+bsource = {background} fix-ID or {bfield_const} Bx By Bz or {bfield} BxSRC BySRC BzSRC :l
+  {background} fix-ID = ID of a "fix background"_fix_background.html
+    supplying B (and Te, ne, psi when needed) at the particle
+  {bfield_const} Bx By Bz = uniform magnetic field (T) in OpenEdge
+    coordinate order
+  {bfield} BxSRC BySRC BzSRC = per-grid or per-particle sources for the
+    field components; each is {c_ID\[col\]} or {p_name} :pre
+one or more keyword/value pairs must be appended :l
+keyword = {D_perp} or {bohm} or {pinch} or {pinch_psi} or {gradient_pinch} :l
+  {D_perp} value = D = constant perpendicular diffusivity (m^2/s)
+  {bohm} values = \[TeSRC\] \[scale S\]
+    TeSRC = electron temperature source (eV), required unless
+      bsource is {background}
+    scale S = multiplier on the Bohm diffusivity (default 1.0)
+  {pinch} values = Vr Vz = constant pinch velocity in (R,Z) (m/s)
+  {pinch_psi} value = V = pinch speed along grad(psi_N) (m/s);
+    V < 0 points toward the magnetic axis
+  {gradient_pinch} values = Cp \[neSRC gradNeR_SRC gradNeZ_SRC\]
+    Cp = dimensionless pinch coefficient
+    neSRC, gradNeR_SRC, gradNeZ_SRC = electron density (m^-3) and its
+      (R,Z) gradient (m^-4), required unless bsource is {background} :pre
+:ule
+
+[Examples:]
+
+fix pd background file plasma.h5 static yes
+fix fcd cross_field_diffusion 1 background pd D_perp 1.0
+fix fcd cross_field_diffusion 1 background pd bohm scale 0.1 pinch -50.0 0.0
+fix fcd cross_field_diffusion 1 background pd D_perp 0.5 gradient_pinch 2.0
+fix fcd cross_field_diffusion 1 bfield_const 0.0 0.0 2.5 D_perp 1.0 :pre
+
+[Description:]
+
+Add anomalous cross-field transport to charged particles as a
+position displacement perpendicular to the local magnetic field. The
+displacement has a random-walk (diffusive) part and optional
+deterministic (pinch) parts. It is computed at the start of the step
+for every charged particle and applied by the particle mover together
+with the regular advance, so surface collisions and cell crossings
+along the displaced path are still resolved. Neutral species are not
+moved.
+
+The diffusive displacement is
+
+dx = sqrt(2 D dt) * xi * e_perp        (2d)
+dx = sqrt(2 D dt) * (xi1 e1 + xi2 e2)  (3d) :pre
+
+with dt = Nevery * timestep and xi Gaussian random numbers of unit
+variance. In 2d and axisymmetric geometry e_perp is the unit vector in
+the poloidal plane perpendicular to the poloidal field; in 3d, e1 and
+e2 are two unit vectors perpendicular to B obtained by Gram-Schmidt
+orthogonalization.
+
+Two diffusion models are available. {D_perp} uses the constant value
+D. {bohm} uses the Bohm diffusivity D = S * Te / (16 B) with Te in eV
+and B in tesla, multiplied by the optional {scale} S. With a
+{background} source Te is sampled from the fix; otherwise a TeSRC
+token must follow the {bohm} keyword.
+
+Three pinch terms may be added. {pinch} adds a constant velocity
+(Vr, Vz) in physical cylindrical coordinates, converted to the
+OpenEdge storage layout for 2d, axisymmetric and 3d runs (in 3d the
+radial direction is taken about the column axis of the background).
+{pinch_psi} adds a velocity of magnitude V along the local unit
+gradient of the normalized poloidal flux psi_N, following the
+SOLEDGE3X convention that V < 0 is directed toward the magnetic axis;
+it requires a {background} source whose plasma file carries a psi map
+and is otherwise inert. {gradient_pinch} adds the gradient-driven
+velocity
+
+V = Cp * D * grad_perp(ne) / ne :pre
+
+where D is the local diffusivity from {D_perp} or {bohm} (the term is
+zero when no diffusion model is active). With a {background} source
+grad(ne) is evaluated by finite differences on the regular (R,Z) grid
+of the background; if the background provides only mesh data, the
+gradient is zero. With other sources the density and its gradient
+must be supplied as three SRC tokens.
+
+SRC tokens are {c_ID\[col\]} for column col of a per-grid compute
+(read at the particle's cell; the compute is invoked by this fix) or
+{p_name} for a per-particle custom floating-point vector.
+
+[Restrictions:]
+
+This command is part of the OPENEDGE package.
+
+At least one of {D_perp}, {bohm}, {pinch} or {gradient_pinch} must be
+given; {pinch_psi} alone does not satisfy this requirement. Only one
+diffusion model is used; if both {D_perp} and {bohm} appear, the last
+one wins. Only charged species are displaced.
+
+[Related commands:]
+
+"fix force/thermal"_fix_force_thermal.html, "fix
+coulomb/background"_fix_coulomb_background.html, "fix
+background"_fix_background.html
+
+[Default:]
+
+The option defaults are bohm scale = 1.0. No diffusion or pinch is
+applied unless requested.

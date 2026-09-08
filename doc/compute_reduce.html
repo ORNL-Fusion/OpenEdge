@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -76,7 +76,7 @@ three kinds of quantities.  <A HREF = "variable.html">Particle-style, grid-style
 surf-style variables</A> generate per-particle, per-grid,
 or per-surf quantities respectively.  Custom attributes can be
 per-particle, per-grid, or per-surf quantities.  See the
-<A HREF = "variable">variable</A> command and its special functions which can
+<A HREF = "variable.html">variable</A> command and its special functions which can
 perform the same operations as the compute reduce command on global
 vectors.
 </P>
@@ -147,7 +147,7 @@ per-particle or per-grid quantities.  See the individual
 is appended, the vector calculated by the compute is used.  If a
 bracketed integer is appended, the Nth column of the array calculated
 by the compute is used.  Users can also write code for their own
-compute styles and <A HREF = "Section_modify.html">add them to SPARTA</A>.  See the
+compute styles and add them to OpenEdge.  See the
 discussion above for how N can be specified with a wildcard asterisk
 to effectively specify multiple values.
 </P>
@@ -160,7 +160,7 @@ with when this compute references the values, else an error results.
 If no bracketed integer is appended, the vector calculated by the fix
 is used.  If a bracketed integer is appended, the Nth column of the
 array calculated by the fix is used.  Users can also write code for
-their own fix style and <A HREF = "Section_modify.html">add them to SPARTA</A>.  See
+their own fix style and add them to OpenEdge.  See
 the discussion above for how N can be specified with a wildcard
 asterisk to effectively specify multiple values.
 </P>
@@ -184,7 +184,7 @@ command.  Or they can be defined and used by specific commands,
 e.g. <A HREF = "fix_ambipolar.html">fix ambipolar</A> or <A HREF = "fix_surf_temp.html">fix
 surf/temp</A> or <A HREF = "surf_react_adsorb.html">surf_react
 adsorb</A>.  The name of each attribute is set by
-the user or defined by the command.  See <A HREF = "Section_howto.html#howto_17">Section
+the user or defined by the command.  See <A HREF = "Section_howto.html#howto_14">Section
 6.17</A> for more discussion of custom
 attributes.
 </P>
@@ -269,8 +269,8 @@ inputs specified.
 specified or a global vector of length N where N is the number of
 inputs, and which can be accessed by indices 1 to N.  These values can
 be used by any command that uses global scalar or vector values from a
-compute as input.  See <A HREF = "Section_howto.html#howto_4">Section 6.4</A> for an
-overview of SPARTA output options.
+compute as input.  See <A HREF = "Section_howto.html#howto_10">Section 4.8</A> for an
+overview of OpenEdge output options.
 </P>
 <P>The scalar or vector values will be in whatever <A HREF = "units.html">units</A> the
 quantities being reduced are in.
@@ -283,4 +283,5 @@ quantities being reduced are in.
 </P>
 <P><B>Default:</B> none
 </P>
+<!-- PAGE BREAK -->
 </HTML>

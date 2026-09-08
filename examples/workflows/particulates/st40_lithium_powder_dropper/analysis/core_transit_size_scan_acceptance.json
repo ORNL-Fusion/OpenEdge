@@ -1,0 +1,97 @@
+{
+  "status": "PASS",
+  "description": "Outer-timestep convergence for the deterministic diagnostic diameter scan; thermal adaptive substeps remain active.",
+  "diameters_um": [
+    40,
+    60,
+    80,
+    100,
+    125,
+    150,
+    200,
+    250,
+    300
+  ],
+  "launches_per_diameter": 30,
+  "total_grains_per_case": 270,
+  "cases": {
+    "dt2us": {
+      "output": "output_core_transit_size_scan_dt2us",
+      "dt_s": 2e-06,
+      "steps": 375000,
+      "dump_steps": 500
+    },
+    "dt1us": {
+      "output": "output_core_transit_size_scan_dt1us",
+      "dt_s": 1e-06,
+      "steps": 750000,
+      "dump_steps": 1000
+    },
+    "dt0p5us": {
+      "output": "output_core_transit_size_scan_dt0p5us",
+      "dt_s": 5e-07,
+      "steps": 1500000,
+      "dump_steps": 2000
+    }
+  },
+  "integrity": {
+    "dt2us": {
+      "wall_reactions": 38,
+      "continuously_evaporated_atoms": 4.1586e+19,
+      "dustt_terminal_remainder_atoms": 3.96212e+16,
+      "retained_atoms_last_sample_estimate": 4.052708316161012e+17,
+      "initial_atoms": 4.203082280466128e+19,
+      "closure_fraction": 1.0000016470520965,
+      "classified_wall_events": 38
+    },
+    "dt1us": {
+      "wall_reactions": 38,
+      "continuously_evaporated_atoms": 4.1586e+19,
+      "dustt_terminal_remainder_atoms": 3.96212e+16,
+      "retained_atoms_last_sample_estimate": 4.052588195169877e+17,
+      "initial_atoms": 4.203082280466128e+19,
+      "closure_fraction": 1.0000013612594731,
+      "classified_wall_events": 38
+    },
+    "dt0p5us": {
+      "wall_reactions": 38,
+      "continuously_evaporated_atoms": 4.1586e+19,
+      "dustt_terminal_remainder_atoms": 3.96212e+16,
+      "retained_atoms_last_sample_estimate": 4.052596535824768e+17,
+      "initial_atoms": 4.203082280466128e+19,
+      "closure_fraction": 1.0000013811036121,
+      "classified_wall_events": 38
+    }
+  },
+  "convergence": [
+    {
+      "coarse": "dt2us",
+      "fine": "dt1us",
+      "fate_match_fraction": 1.0,
+      "lcfs_entry_match_fraction": 1.0,
+      "core_entry_match_fraction": 1.0,
+      "terminal_position_delta_mm_median": 0.0010610212925911227,
+      "terminal_position_delta_mm_p95": 0.00930946699193417,
+      "terminal_position_delta_mm_max": 0.4229600969006715,
+      "last_sample_time_delta_ms_p95": 0.0,
+      "last_sample_time_delta_ms_max": 0.0,
+      "last_radius_delta_over_initial_p95": 4.921597317880213e-05,
+      "last_radius_delta_over_initial_max": 0.00026671188503000207
+    },
+    {
+      "coarse": "dt1us",
+      "fine": "dt0p5us",
+      "fate_match_fraction": 1.0,
+      "lcfs_entry_match_fraction": 1.0,
+      "core_entry_match_fraction": 1.0,
+      "terminal_position_delta_mm_median": 0.0008654944426789702,
+      "terminal_position_delta_mm_p95": 0.005373229999788049,
+      "terminal_position_delta_mm_max": 0.5025879290727163,
+      "last_sample_time_delta_ms_p95": 0.0,
+      "last_sample_time_delta_ms_max": 0.0,
+      "last_radius_delta_over_initial_p95": 7.018736691534347e-05,
+      "last_radius_delta_over_initial_max": 0.0003511863250749925
+    }
+  ],
+  "interpretation_guard": "Diameter bins have equal diagnostic launch coverage and are not an experimental ST40 particle-size distribution."
+}
