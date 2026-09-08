@@ -18,6 +18,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "update.h"
 #include "particle.h"
 #include "domain.h"
+#include "openedge_geom.h"
 #include "utils.h"
 #include "error.h"
 #include "comm.h"
@@ -85,18 +86,18 @@ void FixForceGravity::half_kick(double dt_half)
 
   auto *const parts = particle->particles;
 
-  const double gx = g_[0], gy = g_[1], gz = g_[2];
+  const int dim = domain->dimension;
+  const bool axi = domain->axisymmetric;
 
-  // (gx, gy, gz) is interpreted in SPARTA slot order in every mode:
-  //   2D Cartesian (legacy): x=R, y=Z, z=phi  -> set gx=g_R, gy=g_Z, gz=g_phi
-  //   2D axisymmetric:       x=Z, y=R, z=phi  -> set gx=g_Z, gy=g_R, gz=g_phi
-  //   3D Cartesian:          gx, gy, gz are Cartesian components
-  // The user is responsible for picking the right slot. This matches the
-  // bx/by/bz convention used everywhere else (CLAUDE.md "B-field sources
-  // must be in SPARTA coordinate order"). The pre-existing axisymmetric
-  // branch mixed slot conventions and was incorrect under SPARTA's true
-  // axi mode (which keeps particles in the symmetry plane, so x[2]==0).
+  // The public contract is physical cylindrical (g_R,g_Z,g_phi), matching
+  // all other OpenEdge particulate inputs. Convert to storage/Cartesian slots
+  // at each particle so one deck works in 2D, axisymmetric, and 3D geometry.
   for (int i = 0; i < nlocal; ++i) {
+    const double phi = (!axi && dim == 3)
+      ? std::atan2(parts[i].x[1], parts[i].x[0]) : 0.0;
+    double gx, gy, gz;
+    OpenEdge::RZphi_force_to_sparta(g_[0], g_[1], g_[2], dim, axi, phi,
+                                    gx, gy, gz);
     double *v = parts[i].v;
     v[0] += gx * dt_half;
     v[1] += gy * dt_half;

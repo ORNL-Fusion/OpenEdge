@@ -36,9 +36,7 @@ public:
   double memory_usage() override;
 
 private:
-  // User-specified components:
-  //  - Axisymmetric: cylindrical (g_r, g_z, g_phi)
-  //  - 2D/3D: Cartesian (g_x, g_y, g_z)
+  // User-specified physical cylindrical components (g_R,g_Z,g_phi).
   double g_[3] = {0.0, 0.0, 0.0};
 
   void half_kick(double dt_half);
