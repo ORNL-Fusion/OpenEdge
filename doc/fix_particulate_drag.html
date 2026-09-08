@@ -1,0 +1,139 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix particulate/drag command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID particulate/drag Nevery A_bg Z_bg background bg-ID keyword value ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>particulate/drag = style name of this fix command 
+
+<LI>Nevery = apply the drag update every Nevery timesteps 
+
+<LI>A_bg = background-ion mass (amu) 
+
+<LI>Z_bg = background-ion charge state (integer) 
+
+<LI>background = required literal keyword 
+
+<LI>bg-ID = ID of the <A HREF = "fix_background.html">fix background</A> supplying the plasma 
+
+<LI>zero or more keyword/value pairs may be appended 
+
+<LI>keyword = <I>model</I> or <I>mixture</I> or <I>material</I> or <I>coulomb/self</I> or <I>charge</I> or <I>coulomb/chi</I> or <I>coulomb/delta</I> or <I>coulomb/lnlambda</I> or <I>neutrals</I> or <I>efield</I> or <I>gravity</I> or <I>radius</I> or <I>mass</I> or <I>temp</I> 
+
+<PRE>  <I>model</I> value = <I>dustt2005</I> or <I>dis2021</I> = momentum-transfer closure
+  <I>mixture</I> value = mix-ID = only act on species in this mixture
+  <I>material</I> value = NAME = <A HREF = "material.html">material</A> supplying the
+    particulate density
+  <I>coulomb/self</I> value = <I>yes</I> or <I>no</I> = derive potential, Ti/Te and
+    Coulomb logarithm from the local plasma and particulate charge
+  <I>charge</I> value = fix-ID = ID of the matching fix particulate/charge
+  <I>coulomb/chi</I> value = X = normalized surface potential used when
+    coulomb/self = no
+  <I>coulomb/delta</I> value = X = Ti/Te used when coulomb/self = no (> 0)
+  <I>coulomb/lnlambda</I> value = X = Coulomb logarithm used when
+    coulomb/self = no (>= 0)
+  <I>neutrals</I> value = <I>yes</I> or <I>no</I> = neutral friction
+  <I>efield</I> value = <I>yes</I> or <I>no</I> = electric force Z_d e E
+  <I>gravity</I> values = gR gZ gphi = gravitational acceleration in
+    physical (R, Z, phi) components (m/s^2)
+  <I>radius</I> value = R = initialize a missing particle radius (m)
+  <I>mass</I> value = M = initialize a missing particle mass (kg)
+  <I>temp</I> value = T = initialize a missing particle temperature (K) 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix fd particulate/drag 1 2.0 1 background pd &
+       model dustt2005 mixture particulates material Li &
+       coulomb/self yes neutrals yes efield yes &
+       gravity 0.0 -9.80665 0.0
+fix fd particulate/drag 1 2.0 1 background pd model dis2021 &
+       mixture particulates material Li charge qd 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Apply momentum transfer to finite-size particulates from the
+background ions (collection plus Coulomb scattering drag) and
+neutrals, together with optional electric and gravitational
+acceleration. The ion and neutral drag are combined into a single
+relaxation rate and the velocity is advanced with the exact
+constant-coefficient exponential solution in two half-kicks around
+particle transport; gravity and the electric acceleration enter the
+same update.
+</P>
+<P>A_bg and Z_bg give the mass and charge state of the background ions.
+The <I>model</I> keyword selects the closure, <I>dustt2005</I> (the default) or
+<I>dis2021</I>; use the same model on the charge, drag and thermal fixes.
+</P>
+<P>The <I>mixture</I> keyword restricts the update to species of the named
+mixture. The <I>material</I> keyword takes the particulate density from a
+<A HREF = "material.html">material</A>; without it the density of liquid lithium
+(534 kg/m^3) is used.
+</P>
+<P>With <I>coulomb/self yes</I> (the default) the Coulomb drag uses the local
+plasma and the <I>particulate_charge</I> attribute written by <A HREF = "fix_particulate_charge.html">fix
+particulate/charge</A>. If no charge fix is
+present, model dustt2005 warns and falls back to a zero surface
+potential (collection drag only). With <I>coulomb/self no</I> the three
+<I>coulomb/chi</I>, <I>coulomb/delta</I> and <I>coulomb/lnlambda</I> values are used
+instead. The <I>charge</I> keyword names the matching charge fix; it is
+required by model dis2021 with coulomb/self yes and lets the code
+verify that the charge and drag fixes use the same model, background,
+material and ion parameters.
+</P>
+<P><I>neutrals yes</I> adds neutral friction when the background provides
+positive neutral density and temperature; otherwise it contributes
+zero. <I>efield yes</I> applies the acceleration Z_d e E / m_d from the
+local electric field and the particulate charge. <I>gravity</I> adds a
+constant acceleration given in physical (R, Z, phi) components, mapped
+to the active storage layout. Do not apply gravity both here and
+through <A HREF = "fix_force_gravity.html">fix gravity</A>.
+</P>
+<P>The <I>radius</I>, <I>mass</I> and <I>temp</I> keywords fill in particulate state
+that is missing on a particle; values already present are not
+replaced.
+</P>
+<HR>
+
+<P><B>Restrictions:</B>
+</P>
+<P>This fix is part of the OPENEDGE package. It requires a <A HREF = "fix_background.html">fix
+background</A>. The <I>gravity</I> keyword cannot be
+combined with a <A HREF = "fix_force_gravity.html">fix gravity</A> command. Model
+<I>dis2021</I> requires a <I>material</I> defined by a <A HREF = "material.html">material</A>
+command with a <I>provenance</I> string and an explicit rho; with
+<I>coulomb/self yes</I> it also requires <I>charge</I> naming a fix
+particulate/charge that uses model dis2021, the same background fix,
+the same material, matching ion_mass_amu/ion_charge_state, and that is
+defined before this fix.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_particulate_charge.html">fix particulate/charge</A>, <A HREF = "fix_particulate_thermal.html">fix
+particulate/thermal</A>, <A HREF = "fix_force_gravity.html">fix
+gravity</A>, <A HREF = "material.html">material</A>, <A HREF = "fix_background.html">fix
+background</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The option defaults are model = dustt2005, coulomb/self = yes,
+coulomb/chi = 0, coulomb/delta = 1, coulomb/lnlambda = 10, neutrals =
+yes, efield = yes, no gravity, no mixture filter, density 534 kg/m^3
+(no material).
+</P>
+<!-- PAGE BREAK -->
+</HTML>

@@ -1,0 +1,91 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix coulomb/binary command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID coulomb/binary Nevery source 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>coulomb/binary = style name of this fix command 
+
+<LI>Nevery = apply the collision operator every Nevery timesteps 
+
+<LI>source = <I>background</I> fix-ID or <I>plasma</I> TeSRC NeSRC 
+
+<PRE>  <I>background</I> fix-ID = ID of a <A HREF = "fix_background.html">fix background</A>
+    supplying Te and ne at the particle position
+  <I>plasma</I> TeSRC NeSRC = sources for the electron temperature (eV)
+    and density (m^-3); each is <I>c_ID[col]</I> (column col of a
+    per-grid compute) or <I>p_name</I> (per-particle custom vector) 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix pd background file plasma.h5 static yes
+fix fcp coulomb/binary 1 background pd 
+</PRE>
+<PRE>fix fcp coulomb/binary 2 plasma c_cpl[7] c_cpl[10] 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Apply binary Coulomb collisions between the charged simulation
+particles themselves, cell by cell, using the Nanbu (1997) scattering
+operator with Takizuka-Abe style random pairing. Use this fix when the
+kinetic species are dense enough that self-collisions matter; scatter
+against the fluid background plasma is handled separately by <A HREF = "fix_coulomb_background.html">fix
+coulomb/background</A>.
+</P>
+<P>On each step where the fix acts, the charged particles in every grid
+cell are shuffled and paired sequentially. If the count is odd, the
+last particle is paired with a randomly chosen earlier partner. For
+each pair the relative velocity g is rotated by an angle chi sampled
+from the Nanbu distribution with scattering parameter
+</P>
+<PRE>s = (qA qB)^2 n lnLambda dt / (4 pi eps0^2 mu^2 g^3) 
+</PRE>
+<P>where mu is the reduced mass, dt = Nevery * timestep, and n is the
+density of collision partners in the cell, computed from the charged
+simulation particles as N_charged * fnum / V_cell. Both particles of a
+pair are updated so that momentum and kinetic energy are conserved
+exactly.
+</P>
+<P>The plasma <I>source</I> is used only for the Coulomb logarithm, lnLambda =
+max(2, ln(12 pi ne lambda_D^3)), evaluated from Te and ne averaged
+over the two partners of a pair. Per-grid compute sources are read at
+the particles' cell; the referenced computes are invoked by this fix
+when needed.
+</P>
+<P>Neutral species are ignored. Cells with fewer than two charged
+particles are skipped. The operator is applied at the end of the
+step, after the particle move.
+</P>
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.
+</P>
+<P>Requires either a <A HREF = "fix_background.html">fix background</A> or a per-grid
+compute providing Te and ne. The partner density uses the global
+<I>fnum</I> weight of the <A HREF = "global.html">global</A> command, not per-particle
+weights.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_coulomb_background.html">fix coulomb/background</A>, <A HREF = "fix_background.html">fix
+background</A>
+</P>
+<P><B>Default:</B> none
+</P>
+<!-- PAGE BREAK -->
+</HTML>

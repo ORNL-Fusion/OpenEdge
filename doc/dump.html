@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -144,7 +144,7 @@ its options.
 
 <P>The <I>particle</I> and <I>grid</I> and <I>surf</I> styles create files in a simple
 text format that is self-explanatory when viewing a dump file.  Many
-of the SPARTA <A HREF = "Section_tools.html">post-processing tools</A>, including
+of the OpenEdge post-processing tools, including
 <A HREF = "https://lammps.github.io/pizza">Pizza.py</A>, work with this format.
 </P>
 <P>For post-processing purposes the text files are self-describing in the
@@ -163,7 +163,7 @@ x-dimension, and similarly for y and z.  The "xx yy zz" represent 6
 characters that encode the style of boundary for each of the 6
 simulation box boundaries (xlo,xhi and ylo,yhi and zlo,zhi).  Each of
 the 6 characters is either o = outflow, p = periodic, or s = specular.
-See the <A HREF = "doc/boundary.html">boundary</A> command for details.
+See the <A HREF = "boundary.html">boundary</A> command for details.
 </P>
 <P>The "ITEM: NUMBER OF ATOMS" or "ITEM: NUMBER OF CELLS" or "ITEM:
 NUMBER OF SURFS" entry in each snapshot gives the number of particles,
@@ -189,7 +189,7 @@ command.
 <P>The specified filename determines how the dump file(s) is written.
 The default is to write one large text file, which is opened when the
 dump command is invoked and closed when an <A HREF = "undump.html">undump</A>
-command is used or when SPARTA exits.
+command is used or when OpenEdge exits.
 </P>
 <P>Dump filenames can contain two wildcard characters.  If a "*"
 character appears in the filename, then one file per snapshot is
@@ -214,8 +214,8 @@ large number of small dump files!
 "%" is also used) is written in binary format.  A binary dump file
 will be about the same size as a text version, but will typically
 write out much faster.  Of course, when post-processing, you will need
-to convert it back to text format (see the <A HREF = "Section_tools.html#binary">binary2txt
-tool</A>) or write your own code to read the
+to convert it back to text format (see the binary2txt
+tool) or write your own code to read the
 binary file.  The format of the binary file can be understood by
 looking at the tools/binary2txt.cpp file.
 </P>
@@ -268,7 +268,7 @@ the appropriate distance <A HREF = "units.html">units</A>.  Use <I>xs</I>, <I>ys
 vibrational energies of the particle.  A particle's kinetic energy is
 given by 1/2 m (vx^2 + vy^2 + vz^2).  The way that rotational and
 vibrational energy is treated in collisions and stored by particles is
-affected by the <A HREF = "collid_modify.html">collide_modify</A> command.
+affected by the <A HREF = "collide_modify.html">collide_modify</A> command.
 </P>
 <P>The <I>c_ID</I> and <I>c_ID[N]</I> attributes allow per-particle vectors or
 arrays calculated by a <A HREF = "compute.html">compute</A> to be output.  The ID in
@@ -307,7 +307,7 @@ means of creating quantities to output to a dump file.
 </P>
 <P>The <I>p_name</I> and <I>p_name[N]</I> attributes allow custom per-particle
 vectors or arrays defined by some other command to be output.  The
-name should be replaced by the name of the attribute.  See <A HREF = "Section_howto.html#howto_17">Section
+name should be replaced by the name of the attribute.  See <A HREF = "Section_howto.html#howto_14">Section
 6.17</A> for more discussion of custom
 attributes and command that define them.  For example, the <A HREF = "fix_ambipolar.html">fix
 ambipolar</A> command which defines the per-particle
@@ -320,8 +320,8 @@ will output the Nth column of an M-column array.  See the discussion
 above for how N can be specified with a wildcard asterisk to
 effectively specify multiple values.
 </P>
-<P>See <A HREF = "Section_modify.html">Section 10</A> of the manual for information on
-how to add new compute and fix styles to SPARTA to calculate
+<P>See the source code of the manual for information on
+how to add new compute and fix styles to OpenEdge to calculate
 per-particle quantities which could then be output into dump files.
 </P>
 <HR>
@@ -331,8 +331,8 @@ as part of the <I>grid</I> style.
 </P>
 <P>Note that dump grid will output one line (per snapshot) for 3 kinds of
 child cells: unsplit cells, cut cells, and sub cells of split cells.
-<A HREF = "Section_howto.html#howto_8">Section 6.8</A> of the manual gives details
-of how SPARTA defines child, unsplit, cut, split, and sub cells.  This
+<A HREF = "Section_howto.html#howto_12">Section 4.10</A> of the manual gives details
+of how OpenEdge defines child, unsplit, cut, split, and sub cells.  This
 is different than <A HREF = "compute.html">compute</A> or <A HREF = "fix.html">fix</A> commands
 which produce per grid information; they also include split cells in
 their output.  The dump grid command discards the split cell
@@ -342,7 +342,7 @@ unsplit cells can be outside (in the flow) or inside surface objects,
 if they exist.
 </P>
 <P><I>Id</I> and <I>idstr</I> are two different forms of the grid cell ID.  In
-SPARTA each grid cell is assigned a unique ID which represents its
+OpenEdge each grid cell is assigned a unique ID which represents its
 location, in a topological sense, within the hierarchical grid.  This
 ID is stored as an integer such as 5774983, but can also be decoded
 into a string such as 33-4-6, which makes it easier to understand the
@@ -371,9 +371,9 @@ attributes are the same for multiple sub-cells of a single split cell
 they are part of.
 </P>
 <P>The <I>vol</I> attribute is the flow volume of the grid cell (or area in
-2d) for unsplit or cut or sub cells.  <A HREF = "Section_howto.html#howto_8">Section
+2d) for unsplit or cut or sub cells.  <A HREF = "Section_howto.html#howto_10">Section
 4.8</A> of the manual gives details of how
-SPARTA defines unsplit and sub cells.  Flow volume is the portion of
+OpenEdge defines unsplit and sub cells.  Flow volume is the portion of
 the grid cell that is accessible to particles, i.e. outside any closed
 surface that may intersect the cell.  Note that unsplit cells which
 are inside a surface object will have a flow volume of 0.0.  Likewise
@@ -418,13 +418,11 @@ quantities to output to a dump file.
 </P>
 <P>The <I>g_name</I> and <I>g_name[N]</I> attributes allow custom per-grid cell
 vectors or arrays defined by some other command to be output.  The
-name should be replaced by the name of the attribute.  See <A HREF = "Section_howto.html#howto_17">Section
+name should be replaced by the name of the attribute.  See <A HREF = "Section_howto.html#howto_14">Section
 6.17</A> for more discussion of custom
 attributes and command that define them.  For example, the
-<A HREF = "read_grid.html">read_grid</A> and <A HREF = "surf_react_implicit.html">surf_react
-implicit</A> commands can define per-grid
-attributes.  (The surf/react implicit command has not yet been
-released in public SPARTA).
+<A HREF = "read_grid.html">read_grid</A> and the unreleased <I>surf_react implicit</I>
+command can define per-grid attributes.
 </P>
 <P>If <I>g_name</I> is used as a attribute, the custom attribute must be a
 vector, and it is output.  If <I>g_name[N]</I> is used, the custom
@@ -433,8 +431,8 @@ will output the Nth column of an M-column array.  See the discussion
 above for how N can be specified with a wildcard asterisk to
 effectively specify multiple values.
 </P>
-<P>See <A HREF = "Section_modify.html">Section 10</A> of the manual for information on
-how to add new compute and fix styles to SPARTA to calculate per-grid
+<P>See the source code of the manual for information on
+how to add new compute and fix styles to OpenEdge to calculate per-grid
 quantities which could then be output into dump files.
 </P>
 <HR>
@@ -495,7 +493,7 @@ quantities to output to a dump file.
 <P>The <I>s_name</I> and <I>s_name[N]</I> attributes allow custom per-surface
 element vectors or arrays defined by some other command to be output.
 The name should be replaced by the name of the attribute.  See
-<A HREF = "Section_howto.html#howto_17">Section 6.17</A> for more discussion of
+<A HREF = "Section_howto.html#howto_14">Section 4.14</A> for more discussion of
 custom attributes and command that define them.  For example, the
 <A HREF = "read_surf.html">read_surf</A>, <A HREF = "fix_surf_temp.html">fix surf/temp</A>, and
 <A HREF = "surf_react_adsorb.html">surf_react adsorb</A> commands can define
@@ -508,16 +506,16 @@ will output the Nth column of an M-column array.  See the discussion
 above for how N can be specified with a wildcard asterisk to
 effectively specify multiple values.
 </P>
-<P>See <A HREF = "Section_modify.html">Section 10</A> of the manual for information on
-how to add new compute and fix styles to SPARTA to calculate per-surf
+<P>See the source code of the manual for information on
+how to add new compute and fix styles to OpenEdge to calculate per-surf
 quantities which could then be output into dump files.
 </P>
 <HR>
 
 <P><B>Restrictions:</B>
 </P>
-<P>To write gzipped dump files, you must compile SPARTA with the
--DSPARTA_GZIP option - see the <A HREF = "Section_start.html#start_2">Making SPARTA</A>
+<P>To write gzipped dump files, you must compile OpenEdge with the
+-DOpenEdge_GZIP option - see the <A HREF = "Section_start.html#start_2">Making OpenEdge</A>
 section of the documentation.
 </P>
 <P><B>Related commands:</B>
@@ -530,4 +528,5 @@ section of the documentation.
 <P>The defaults for the image style are listed on the <A HREF = "dump_image.html">dump
 image</A> doc page.
 </P>
+<!-- PAGE BREAK -->
 </HTML>

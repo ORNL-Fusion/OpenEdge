@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -59,8 +59,8 @@ reactions that can occur on the surface itself.
 </P>
 <P>One or more models can be defined and assigned to different surfaces
 or simulation box boundaries via the <A HREF = "surf_modify.html">surf_modify</A> or
-<A HREF = "bound_modify.html">bound_modify</A> commands.  See <A HREF = "Section_howto.html#howto_9">Section
-6.9</A> for more details of how SPARTA defines
+<A HREF = "bound_modify.html">bound_modify</A> commands.  See <A HREF = "Section_howto.html#howto_11">Section
+6.9</A> for more details of how OpenEdge defines
 surfaces as collections of geometric elements, triangles in 3d and
 line segments in 2d.  Also see the <A HREF = "react.html">react</A> command for
 specification of a gas-phase chemistry reaction model.
@@ -142,7 +142,7 @@ list of GS or PS reactions and their associated parameters.  Two files
 must be specified for the <I>gs/ps</I> model: a GS file first and a PS file
 second.
 </P>
-<P>The reactions are read into SPARTA and stored as a list.  Each time a
+<P>The reactions are read into OpenEdge and stored as a list.  Each time a
 simulation is run the list is scanned, and only active reactions are
 flagged.  In order for a reaction to be active, all the reactants and
 all the products must be currently defined as species-IDs; and also
@@ -280,7 +280,7 @@ case) with the following meaning:
 </UL>
 <P>IMPORTANT: The style of the reaction determines how many reaction
 coefficients are listed as C1, C2, etc, and how they are interpreted
-by SPARTA.
+by OpenEdge.
 </P>
 <P>For S = Simple style, there is a single coefficient:
 </P>
@@ -352,8 +352,8 @@ specified in the <A HREF = "surf_collide.html">surf_collide</A> command.
 The values can be used by the <A HREF = "stats_style.html">stats_style</A> command
 and by <A HREF = "variable.html">variables</A> that define formulas.  The latter
 means they can be used by any command that uses a variable as input,
-e.g. the <A HREF = "fix_ave_time.html">fix ave/time</A> command.  See <A HREF = "Section_howto.html#howto_4">Section
-4.4</A> for an overview of SPARTA output
+e.g. the <A HREF = "fix_ave_time.html">fix ave/time</A> command.  See <A HREF = "Section_howto.html#howto_8">Section
+4.4</A> for an overview of OpenEdge output
 options.
 </P>
 <P>This <I>adsorb</I> style compute a vector of length 2 + 2*nlist.  Nlist is
@@ -389,7 +389,7 @@ appropriately when that occurs.
 </P>
 <P><B>Related commands:</B>
 </P>
-<P><A HREF = "aurf_react.html">surf_react</A>, <A HREF = "react.html">react</A>, 
+<P><A HREF = "surf_react.html">surf_react</A>, <A HREF = "react.html">react</A>,
 <A HREF = "surf_modify.html">surf_modify</A>,
 <A HREF = "bound_modify.html">bound_modify</A>, 
 </P>
@@ -415,4 +415,5 @@ Chemistry of Solids, vol. 3, no. 1-2, pp. 95-101, 1957.
 mechanism of collision-induced desorption: CH4 on Ni (111)", Physical
 Review Letters, vol. 62, no. 6, p. 685, 1989.
 </P>
+<!-- PAGE BREAK -->
 </HTML>

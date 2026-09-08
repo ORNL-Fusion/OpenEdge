@@ -1,0 +1,192 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>material command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>material NAME keyword value ... 
+</PRE>
+<UL><LI>NAME = name of the material (at most 15 characters); <I>Li</I> and <I>B</I> are built in 
+
+<LI>one or more keyword/value pairs must be appended 
+
+<LI>keyword = <I>provenance</I> or <I>rho</I> or <I>cp</I> or <I>cp_solid</I> or <I>mass_amu</I> or <I>hvap_J_mol</I> or <I>antoine_a</I> or <I>antoine_b</I> or <I>emissivity</I> or <I>work_function_eV</I> or <I>richardson_A</I> or <I>tmelt_K</I> or <I>hmelt_J_mol</I> or <I>tensile_Pa</I> or <I>see_delta_m</I> or <I>see_E_m_eV</I> 
+
+<PRE>  <I>provenance</I> value = ID = free-form string recording where the data
+    came from (at most 95 characters)
+  <I>rho</I> value = density (kg/m^3)
+  <I>cp</I> value = specific heat of the liquid (or single-phase) material
+    (J/kg/K)
+  <I>cp_solid</I> value = specific heat of the solid phase (J/kg/K);
+    0 = use <I>cp</I> for both phases
+  <I>mass_amu</I> value = atomic mass (amu)
+  <I>hvap_J_mol</I> value = enthalpy of vaporization or sublimation (J/mol)
+  <I>antoine_a</I> value = a in log10 p_sat[atm] = a + b/T[K]
+  <I>antoine_b</I> value = b in log10 p_sat[atm] = a + b/T[K] (b < 0)
+  <I>emissivity</I> value = total emissivity for radiative cooling (0 to 1)
+  <I>work_function_eV</I> value = work function for thermionic emission (eV)
+  <I>richardson_A</I> value = Richardson constant (A/m^2/K^2)
+  <I>tmelt_K</I> value = melting temperature (K)
+  <I>hmelt_J_mol</I> value = enthalpy of fusion (J/mol)
+  <I>tensile_Pa</I> value = tensile strength (Pa); 0 = no electrostatic
+    breakup
+  <I>see_delta_m</I> value = maximum secondary-electron yield
+  <I>see_E_m_eV</I> value = electron energy at the maximum yield (eV) 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>material B emissivity 0.75
+material MyStuff rho 1850 cp 1800 mass_amu 9.0 hvap_J_mol 5e5 &
+         antoine_a 9.1 antoine_b -28000
+material Li provenance "Handbook-2019" rho 534 cp 4200 cp_solid 3580 &
+         mass_amu 6.94 hvap_J_mol 1.47e5 antoine_a 5.055 &
+         antoine_b -8023 emissivity 0.10 tmelt_K 453.7 hmelt_J_mol 3.0e3 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Define a new particulate material, or override properties of an
+existing one. Materials are consumed by the <I>material</I> keyword of <A HREF = "fix_particulate_thermal.html">fix
+particulate/thermal</A>, <A HREF = "fix_particulate_drag.html">fix
+particulate/drag</A> and <A HREF = "fix_particulate_charge.html">fix
+particulate/charge</A>.
+</P>
+<P>Two materials are built in and may be used without a material command
+or partially overridden by one:
+</P>
+<UL><LI><I>Li</I>: rho 534, cp 4200, cp_solid 3580, mass_amu 6.94, hvap_J_mol
+1.47e5, antoine_a 5.055, antoine_b -8023, emissivity 0.10,
+work_function_eV 2.9, richardson_A 1.2e6, tmelt_K 453.7, hmelt_J_mol
+3.0e3, tensile_Pa 0, see_delta_m 0.5, see_E_m_eV 85 
+
+<LI><I>B</I>: rho 2340, cp 2000, cp_solid 0, mass_amu 10.81, hvap_J_mol 5.65e5,
+antoine_a 8.64, antoine_b -32030, emissivity 0.80, work_function_eV
+4.45, richardson_A 1.2e6, tmelt_K 2349, hmelt_J_mol 5.02e4, tensile_Pa
+1.0e9, see_delta_m 1.2, see_E_m_eV 150 
+</UL>
+<P>A material command with a new NAME creates the material with every
+property unset; rho, cp, mass_amu and hvap_J_mol must then be supplied
+before the material can be used by fix particulate/thermal. A
+material command with an existing NAME changes only the listed
+properties.
+</P>
+<P>Each keyword given explicitly is recorded as such. Model <I>dis2021</I> of
+the particulate fixes requires that every property it uses was set
+explicitly by a material command and that a <I>provenance</I> string was
+given; built-in values do not count as explicit. Model <I>dustt2005</I>
+accepts the built-in values.
+</P>
+<P>Which properties are used by which fix:
+</P>
+<UL><LI>fix particulate/thermal: rho, cp, cp_solid, mass_amu, hvap_J_mol,
+antoine_a, antoine_b, emissivity, tmelt_K, hmelt_J_mol 
+
+<LI>fix particulate/drag: rho 
+
+<LI>fix particulate/charge: work_function_eV and richardson_A (thermionic
+emission), tensile_Pa (electrostatic breakup), see_delta_m and
+see_E_m_eV (see_model kollath_smirnov2007) 
+</UL>
+<P>The vapor pressure used for evaporation is p_sat = 10^(a + b/T) atm
+with T in K. Emissivity is the total hemispherical value used for
+gray-body radiative exchange with the wall temperature.
+</P>
+<HR>
+
+<P><B>Particulate models:</B>
+</P>
+<P>OpenEdge represents a finite-size condensed object (solid powder grain,
+molten droplet, or an object that changes phase during a run) by the
+per-particle <I>radius</I>, <I>mass</I> and <I>temp</I> attributes of a particle.
+These are initialized from the <A HREF = "species.html">species</A> definition and
+evolved by the particulate fixes:
+</P>
+<UL><LI><A HREF = "material.html">material</A>: density, heat capacity, phase-change,
+vapor-pressure, emission and strength properties 
+
+<LI><A HREF = "fix_particulate_emit.html">fix particulate/emit</A>: inject particulates
+from selected surfaces 
+
+<LI><A HREF = "fix_particulate_charge.html">fix particulate/charge</A>: local charge
+state 
+
+<LI><A HREF = "fix_particulate_drag.html">fix particulate/drag</A>: ion, neutral,
+electric and gravitational forces 
+
+<LI><A HREF = "fix_particulate_thermal.html">fix particulate/thermal</A>: temperature,
+phase change, evaporation, mass and radius 
+
+<LI><A HREF = "surf_collide_particulate_bounce.html">surf_collide particulate/bounce</A>:
+sticking or restitution at a wall 
+</UL>
+<P>Recommended setup: define particulate species with positive radius,
+mass and temperature, place them in a dedicated
+<A HREF = "mixture.html">mixture</A>, and use that mixture to scope the particulate
+fixes. Charged atomic species can use the Boris/GCA pusher while
+finite-size particulates bypass it:
+</P>
+<PRE>global pusher mode hybrid plasma pd skip particulates 
+</PRE>
+<PRE>fix emit particulate/emit particulates injector ...
+fix charge particulate/charge 1 background pd model dustt2005 &
+           mixture particulates material Li
+fix drag particulate/drag 1 2.0 1 background pd &
+         model dustt2005 mixture particulates material Li
+fix heat particulate/thermal 1 particulates background pd &
+         model dustt2005 material Li heating auto 
+</PRE>
+<P>Select the same <I>model</I> (<I>dustt2005</I>, the default, or <I>dis2021</I>) on
+the charge, drag and thermal fixes; the dis2021 fixes check this. The
+particulate fixes use a symmetric start/end-of-step update, so keep
+their Nevery values consistent unless a convergence study shows that a
+different cadence is acceptable.
+</P>
+<P>Coordinate convention: user-supplied directions are given as physical
+(R, Z, phi) components. OpenEdge maps them to the active Cartesian or
+axisymmetric storage layout. This applies to the emission <I>dir</I> vector
+and the drag <I>gravity</I> vector.
+</P>
+<P>Validity: the charging, drag and heating closures have different
+validity ranges. A successful run does not establish that a closure is
+valid for a given particulate size. In particular, OML charging and
+heating require a particulate small compared with the plasma Debye
+length. Use <I>validity error</I> on fix particulate/charge for runs that
+must stay inside that approximation.
+</P>
+<HR>
+
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.
+</P>
+<P>NAME is limited to 15 characters and the provenance string to 95
+characters. All property values must be numeric.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_particulate_thermal.html">fix particulate/thermal</A>, <A HREF = "fix_particulate_drag.html">fix
+particulate/drag</A>, <A HREF = "fix_particulate_charge.html">fix
+particulate/charge</A>, <A HREF = "fix_particulate_emit.html">fix
+particulate/emit</A>, <A HREF = "surf_collide_particulate_bounce.html">surf_collide
+particulate/bounce</A>,
+<A HREF = "species.html">species</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>A new material starts with all properties unset (cp_solid,
+hmelt_J_mol, tensile_Pa, see_delta_m, see_E_m_eV, antoine_a,
+antoine_b and emissivity are 0; the others are undefined and must be
+given). The built-in Li and B values are listed above.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

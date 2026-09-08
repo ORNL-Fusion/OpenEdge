@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -137,8 +137,8 @@ Grid cells not in the specified {group-ID} will output zeroes for all
 their values.
 
 The array can be accessed by any command that uses per-grid values
-from a compute as input.  See "Section 6.4"_Section_howto.html#howto_4
-for an overview of SPARTA output options.
+from a compute as input.  See "Section 4.8"_Section_howto.html#howto_10
+for an overview of OpenEdge output options.
 
 The per-grid array values will be in the "units"_units.html
 appropriate to the individual values as described above. {N} is

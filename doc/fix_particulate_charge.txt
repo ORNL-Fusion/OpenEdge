@@ -1,0 +1,128 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix particulate/charge command :h3
+
+[Syntax:]
+
+fix ID particulate/charge Nevery background bg-ID keyword value ... :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+particulate/charge = style name of this fix command :l
+Nevery = update the charge every Nevery timesteps :l
+background = required literal keyword :l
+bg-ID = ID of the "fix background"_fix_background.html supplying the plasma :l
+zero or more keyword/value pairs may be appended :l
+keyword = {model} or {mixture} or {material} or {ion_mass_amu} or {ion_charge_state} or {fixed_charge} or {thermionic} or {richardson_A} or {work_function_eV} or {see} or {see_model} or {see_angular} or {validity} or {radius} or {mass} or {temp} :l
+  {model} value = {dustt2005} or {dis2021} = charging closure
+  {mixture} value = mix-ID = only act on species in this mixture
+  {material} value = NAME = "material"_material.html supplying
+    thermionic, secondary-emission and tensile properties
+  {ion_mass_amu} value = M = background-ion mass (amu)
+  {ion_charge_state} value = Z = background-ion charge state (> 0)
+  {fixed_charge} value = Zd = stamp this charge number, skip the solve
+  {thermionic} value = {yes} or {no} = Richardson-Dushman emission
+  {richardson_A} value = A = Richardson constant (A/m^2/K^2)
+  {work_function_eV} value = W = work function (eV)
+  {see} value = {yes} or {no} = dustt2005 secondary-electron channel
+  {see_model} value = {none} or {dustt2005} or {kollath_smirnov2007}
+    or {young_dekker}
+  {see_angular} value = {yes} or {no} = incidence-angle average of the
+    secondary yield
+  {validity} value = {warn} or {error} or {no} = response when the
+    particulate radius exceeds the Debye length
+  {radius} value = R = initialize a missing particle radius (m)
+  {mass} value = M = initialize a missing particle mass (kg, > 0)
+  {temp} value = T = initialize a missing particle temperature (K) :pre
+:ule
+
+[Examples:]
+
+fix pd background file input/plasma.h5 static yes
+fix qd particulate/charge 1 background pd model dustt2005 &
+       mixture particulates material Li validity warn
+fix qd particulate/charge 1 background pd model dis2021 &
+       mixture particulates material Li thermionic yes &
+       see_model kollath_smirnov2007 see_angular yes :pre
+
+[Description:]
+
+Compute the charge of finite-size particulates from the local plasma
+background. The charge number is stored in the custom per-particle
+attribute {particulate_charge} and is consumed by "fix
+particulate/drag"_fix_particulate_drag.html and "fix
+particulate/thermal"_fix_particulate_thermal.html. The update is
+applied at the start and end of every Nevery-th timestep.
+
+The floating potential phi_d is obtained by balancing the electron
+current, the flow-dependent orbital-motion-limited (OML) ion current
+and any enabled emission currents (thermionic, secondary electron).
+The charge number is Z_d = 4 pi eps0 R_d phi_d / e. The {model}
+keyword selects the closure used for these currents: {dustt2005} (the
+default) or {dis2021}. Use the same model on the charge, drag and
+thermal fixes.
+
+The {mixture} keyword restricts the update to species of the named
+mixture; without it every particle with a positive radius is
+processed. The {material} keyword names a "material"_material.html
+whose work_function_eV and richardson_A are used for thermionic
+emission unless the explicit {work_function_eV} and {richardson_A}
+keywords are given, and whose tensile_Pa enables electrostatic
+breakup: when tensile_Pa > 0 and the surface potential exceeds the
+critical value phi* = 0.1 sqrt(10 tensile_Pa) R_d\[um\], the
+particulate is split into two mass-conserving fragments.
+
+The {fixed_charge} keyword writes the given charge number to every
+processed particle and bypasses the solve; it is intended for force
+and sensitivity tests.
+
+Secondary electron emission: with model dustt2005, {see yes} enables
+the Sternglass electron-impact channel (equivalent to {see_model
+dustt2005}); it is an experimental channel and a warning is printed.
+With model dis2021 the closure must be named with {see_model}:
+{kollath_smirnov2007} uses the material's see_delta_m and see_E_m_eV;
+{see_angular yes} applies the cosine-incidence average of that yield
+(a warning is printed when it is left at its default). {see_model
+young_dekker} is recognized but not available; selecting it stops the
+run with an error.
+
+The {validity} keyword controls what happens when R_d exceeds the
+local Debye length, outside the OML approximation: {warn} prints a
+summary at the end of the run, {error} stops the run, {no} is silent.
+The {radius}, {mass} and {temp} keywords fill in particulate state
+that is missing on a particle; values already present are not
+replaced.
+
+:line
+
+[Restrictions:]
+
+This fix is part of the OPENEDGE package. It requires a "fix
+background"_fix_background.html. Model {dis2021} requires a
+{material} defined by a "material"_material.html command with a
+{provenance} string, with the properties needed by the enabled
+channels given explicitly; it rejects {see yes} and {see_model
+dustt2005}. Model {dustt2005} accepts only {see_model none} or
+{dustt2005}. {see_model kollath_smirnov2007} requires a material with
+positive see_delta_m and see_E_m_eV. {see_model young_dekker} is not
+available.
+
+[Related commands:]
+
+"material"_material.html, "fix
+particulate/drag"_fix_particulate_drag.html, "fix
+particulate/thermal"_fix_particulate_thermal.html, "fix
+particulate/emit"_fix_particulate_emit.html, "fix
+background"_fix_background.html
+
+[Default:]
+
+The option defaults are model = dustt2005, ion_mass_amu = 2.0,
+ion_charge_state = 1, thermionic = no, richardson_A = 1.2e6,
+work_function_eV = 2.9, see = no, see_model = none, see_angular = no,
+validity = warn, no mixture filter, no material, no fixed_charge.

@@ -1,0 +1,115 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>compute surface/chemical/adatom command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>compute ID surface/chemical/adatom group-ID tsurf name dp_flux source keyword value ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "compute.html">compute</A> command 
+
+<LI>surface/chemical/adatom = style name of this compute command 
+
+<LI>group-ID = ID of surface group to evaluate 
+
+<LI>tsurf = required keyword 
+
+<LI>name = name of the per-surf custom attribute holding the surface temperature (degrees C) 
+
+<LI>dp_flux = required keyword 
+
+<LI>source = <I>c_ID</I> or <I>c_ID[N]</I> or <I>f_ID</I> or <I>f_ID[N]</I> or <I>s_name</I> 
+
+<PRE>  c_ID, c_ID[N] = per-surf compute (vector, or column N of array)
+    giving the incident D+ flux (1/m^2/s)
+  f_ID, f_ID[N] = per-surf fix giving the incident D+ flux
+  s_name = per-surf custom attribute giving the incident D+ flux 
+</PRE>
+<LI>zero or more keyword/value pairs may be appended 
+
+<LI>keyword = <I>Yad</I> or <I>Yad_Yps</I> or <I>f_ad</I> or <I>A_arr</I> or <I>E_eff</I> 
+
+<PRE>  <I>Yad</I> value = ad-atom yield for D on Li
+  <I>Yad_Yps</I> value = ratio of ad-atom to physical-sputtering yield
+  <I>f_ad</I> value = neutral fraction of the released ad-atoms
+  <I>A_arr</I> value = Arrhenius pre-factor
+  <I>E_eff</I> value = effective binding energy (eV) 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>compute cadat surface/chemical/adatom divertor tsurf Tsurf_lm dp_flux s_Gamma_D_lm
+compute cadat surface/chemical/adatom divertor tsurf Tsurf_lm &
+    dp_flux c_dflux<B>2</B> Yad 1e-3 E_eff 0.9
+fix femit surface/emit/source LiSource divertor cadat perspecies no &
+    normal yes nlaunch_total 200 model thermal_tsurf Tsurf_lm 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Compute the thermally released ad-atom (lithium) flux of each surface
+element in the group from its surface temperature and the incident
+deuterium ion flux. The temperature is read from the per-surf custom
+attribute <I>name</I> (degrees C), typically <I>Tsurf_lm</I> written by <A HREF = "fix_surface_state_lm.html">fix
+surface/state/lm</A>. The D+ flux is taken from
+the <I>dp_flux</I> source: a per-surf compute or fix (with optional
+column), or a per-surf custom attribute such as <I>Gamma_D_lm</I>, which
+fix surface/state/lm fills when its heat-flux source carries the ion
+flux.
+</P>
+<P>The released flux is the Arrhenius expression
+</P>
+<PRE>Gamma_ad(T,Gamma_D) = f_ad * (Yad_Yps / (1 + A_arr exp(E_eff/(k_B T))))
+                      * Yad * Gamma_D 
+</PRE>
+<P>with T in K. The flux is zero for surfaces outside the group.
+</P>
+<P>The per-surf values are meant to be fed to <A HREF = "fix_surface_emit_source.html">fix
+surface/emit/source</A> as the emission
+source for Li atoms, or written with <A HREF = "dump.html">dump surf</A>.
+</P>
+<HR>
+
+<P><B>Output info:</B>
+</P>
+<P>This compute calculates a per-surf vector, with one value per surface
+element owned by the processor. The value is the ad-atom release flux
+in atoms/m^2/s; it is zero for surfaces not in the group.
+</P>
+<P>The vector can be accessed by any command that uses per-surf values
+from a compute as input, e.g. <A HREF = "dump.html">dump surf</A>, <A HREF = "fix_ave_surf.html">fix
+ave/surf</A> or <A HREF = "fix_surface_emit_source.html">fix
+surface/emit/source</A>.
+</P>
+<HR>
+
+<P><B>Restrictions:</B>
+</P>
+<P>This compute is part of the OPENEDGE package. Both <I>tsurf</I> and
+<I>dp_flux</I> are required. The custom attributes named by <I>tsurf</I> and by
+an <I>s_name</I> source must exist when the compute is initialized. A
+<I>c_ID</I> or <I>f_ID</I> source must produce per-surf values; a column index
+must be >= 1 and cannot be given with an <I>s_name</I> source.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_surface_state_lm.html">fix surface/state/lm</A>, <A HREF = "compute_surface_chemical_evaporation.html">compute
+surface/chemical/evaporation</A>,
+<A HREF = "fix_surface_emit_source.html">fix surface/emit/source</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The option defaults are Yad = 1e-3, Yad_Yps = 1.0, f_ad = 1.0, A_arr
+= 1e-7, E_eff = 0.9.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

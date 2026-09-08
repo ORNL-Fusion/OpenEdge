@@ -1,0 +1,168 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix particulate/thermal command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID particulate/thermal Nevery mix-ID background bg-ID keyword value ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>particulate/thermal = style name of this fix command 
+
+<LI>Nevery = apply the thermal update every Nevery timesteps 
+
+<LI>mix-ID = ID of mixture containing the particulate species 
+
+<LI>background = required literal keyword 
+
+<LI>bg-ID = ID of the <A HREF = "fix_background.html">fix background</A> supplying the plasma 
+
+<LI>zero or more keyword/value pairs may be appended 
+
+<LI>keyword = <I>model</I> or <I>material</I> or <I>heating</I> or <I>charge</I> or <I>heatflux/scale</I> or <I>ion_mass_amu</I> or <I>ion_charge_state</I> or <I>twall_K</I> or <I>alpha_e</I> or <I>rocket_eta</I> or <I>emit_into</I> or <I>termination</I> or <I>dis_mass_tol</I> 
+
+<PRE>  <I>model</I> value = <I>dustt2005</I> or <I>dis2021</I> = thermal and termination
+    closure
+  <I>material</I> value = NAME = <A HREF = "material.html">material</A> properties
+  <I>heating</I> value = <I>flux</I> or <I>oml</I> or <I>auto</I>
+    flux = Q = 0.25 sqrt(q_par^2 + q_perp^2) from the background
+    oml = local electron and ion collection heating
+    auto = oml when the Debye length is defined; error if R_d exceeds it
+  <I>charge</I> value = fix-ID = ID of the matching fix particulate/charge
+  <I>heatflux/scale</I> value = S = multiplier on the heat input (>= 0)
+  <I>ion_mass_amu</I> value = M = background-ion mass (amu)
+  <I>ion_charge_state</I> value = Z = background-ion charge state (> 0)
+  <I>twall_K</I> value = T = wall temperature for radiative exchange (K)
+  <I>alpha_e</I> value = A = evaporation (accommodation) coefficient (0,1]
+  <I>rocket_eta</I> value = ETA = evaporation-recoil efficiency [0,1]
+  <I>emit_into</I> value = mix-ID = create vapor particles in this mixture
+  <I>termination</I> value = <I>dis</I> or <I>dustt</I> = override the model's rule
+  <I>dis_mass_tol</I> value = F = relative mass at which model dis2021
+    removes the particulate (0,1) 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix heat particulate/thermal 1 particulates background pd &
+         model dustt2005 material Li heating auto alpha_e 1.0 &
+         twall_K 300 emit_into lithium_vapor
+fix heat particulate/thermal 1 particulates background pd &
+         model dis2021 material Li heating oml charge qd 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Evolve the temperature, phase, evaporation (or sublimation), mass and
+radius of finite-size particulates. Optionally launch the evaporated
+atoms as kinetic particles and apply an asymmetric evaporation-recoil
+force.
+</P>
+<P>The surface energy balance contains the plasma heating, gray-body
+radiative exchange with the wall at <I>twall_K</I>, and the latent heat
+carried by the evaporated flux. Density, heat capacities, emissivity,
+melting point, latent heats, atomic mass and Antoine coefficients come
+from the <A HREF = "material.html">material</A> named by <I>material</I>. Evaporation
+uses the Antoine vapor pressure and a Hertz-Knudsen flux with
+accommodation coefficient <I>alpha_e</I>. An apparent-heat-capacity band
+handles melting. Adaptive internal substeps limit each update to 25 K
+and 2% radius change.
+</P>
+<P>The <I>heating</I> keyword selects the heat input. <I>flux</I> (the default)
+uses the parallel and perpendicular heat-flux components carried by
+the background. <I>oml</I> uses local electron and ion collection; it takes
+the particulate charge from <A HREF = "fix_particulate_charge.html">fix
+particulate/charge</A> when present and
+otherwise a hydrogenic floating-potential estimate. <I>auto</I> uses OML
+collection where the Debye length is defined and stops with an error
+if R_d/lambda_D > 1, since a finite-size collection closure is not
+available. <I>heatflux/scale</I> multiplies the selected heat input. With
+model dustt2005 a negative net heat flux is clamped to zero; with
+model dis2021 the signed net flux enters the energy equation.
+</P>
+<P>The <I>model</I> keyword selects the closure and its termination rule:
+<I>dustt2005</I> (the default) removes the particulate at R/R0 = 0.1, at
+which point 99.9% of the initial atoms of a sphere have evaporated;
+the remaining 0.1% is reported as a terminal remainder. <I>dis2021</I>
+integrates continuous evaporation down to the relative mass
+<I>dis_mass_tol</I>, accounts the remainder as evaporated and closes at
+100%. <I>termination</I> overrides the model's rule for verification runs
+and is not normally needed. The <I>charge</I> keyword names the matching
+charge fix; it is required by model dis2021 with <I>heating oml</I> or
+<I>auto</I>.
+</P>
+<P>With <I>emit_into</I>, each particulate spawns vapor atoms in its current
+grid cell: the number per update is Poisson-distributed with mean
+4 pi R^2 Gamma_evap dt / fnum, the velocity is an isotropic
+Maxwellian at the particulate temperature, and the species is drawn
+from the target mixture's fractions. If <A HREF = "fix_particulate_emit.html">fix
+particulate/emit</A> assigned an <I>nweight</I>, the
+vapor source and atom tallies are scaled by it.
+</P>
+<P><I>rocket_eta</I> scales the recoil force from asymmetric evaporation; 0
+disables it.
+</P>
+<HR>
+
+<P><B>Restart, output info:</B>
+</P>
+<P>No information about this fix is written to <A HREF = "restart.html">binary restart
+files</A>.
+</P>
+<P>This fix computes a global scalar and a global vector of length 2.
+The scalar is the cumulative number of physical atoms evaporated,
+summed over all processors. Vector element 1 is the same tally;
+element 2 is the terminal remainder of model dustt2005 in atom
+equivalents. These can be accessed by any command that uses global
+values from a fix, e.g. <A HREF = "stats_style.html">stats_style</A>.
+</P>
+<P>The fix also writes the custom per-particle attributes
+<I>droplet_heating_q</I> (net heat flux, W/m^2), <I>droplet_a_over_lambdaD</I>
+(R_d/lambda_D) and <I>droplet_oml_weight</I> (1 when OML heating was used);
+model dis2021 additionally writes the individual heat channels
+<I>particulate_dis_q_ion</I>, <I>particulate_dis_q_electron</I>,
+<I>particulate_dis_q_neutralization</I>, <I>particulate_dis_q_sheath</I>,
+<I>particulate_dis_q_thermionic</I> and <I>particulate_dis_q_secondary</I>.
+</P>
+<HR>
+
+<P><B>Restrictions:</B>
+</P>
+<P>This fix is part of the OPENEDGE package. It requires a <A HREF = "fix_background.html">fix
+background</A>; <I>heating flux</I> and <I>auto</I> require
+that background to carry q_par/q_perp heat-flux data. The material
+must define rho, cp, mass_amu, hvap_J_mol and a negative antoine_b.
+Model <I>dis2021</I> requires a <A HREF = "material.html">material</A> command with a
+<I>provenance</I> string and explicit rho, cp, cp_solid, mass_amu,
+hvap_J_mol, antoine_a, antoine_b, emissivity, tmelt_K and
+hmelt_J_mol; every species of the mixture must have a positive radius
+and a mass consistent with 4/3 pi rho R^3; with <I>heating oml</I> or
+<I>auto</I> it requires <I>charge</I> naming a fix particulate/charge using
+model dis2021, the same background, material and ion parameters,
+defined before this fix.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_particulate_charge.html">fix particulate/charge</A>, <A HREF = "fix_particulate_drag.html">fix
+particulate/drag</A>, <A HREF = "fix_particulate_emit.html">fix
+particulate/emit</A>,
+<A HREF = "material.html">material</A>, <A HREF = "fix_background.html">fix background</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The option defaults are model = dustt2005, material = Li, heating =
+flux, heatflux/scale = 1.0, ion_mass_amu = 2.0, ion_charge_state = 1,
+twall_K = 300, alpha_e = 1.0, rocket_eta = 0, dis_mass_tol = 1e-12,
+termination follows the model, no emit_into.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

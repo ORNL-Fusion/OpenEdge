@@ -1,46 +1,36 @@
-."Previous Section"_Section_commands.html - "SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc - "Next Section"_Section_example.html :c
+"Previous Section"_Section_commands.html - "OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc - "Next Section"_Section_example.html :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
-
-:line 
-
-6. How-to discussions :h3
-
-The following sections describe how to perform common tasks using
-SPARTA, as well as provide some techinical details about how
-SPARTA works.
-
-6.1 "2d simulations"_#howto_1
-6.2 "Axisymmetric simulations"_#howto_2
-6.3 "Running multiple simulations from one input script"_#howto_3
-6.4 "Output from SPARTA (stats, dumps, computes, fixes, variables)"_#howto_4
-6.5 "Visualizing SPARTA snapshots"_#howto_5
-6.6 "Library interface to SPARTA"_#howto_6
-6.7 "Coupling SPARTA to other codes"_#howto_7 
-6.8 "Details of grid geometry in SPARTA"_#howto_8
-6.9 "Details of surfaces in SPARTA"_#howto_9
-6.10 "Restarting a simulation"_#howto_10
-6.11 "Using the ambipolar approximation"_#howto_11
-6.12 "Using multiple vibrational energy levels"_#howto_12
-6.13 "Surface elements: explicit, implicit, distributed"_#howto_13
-6.14 "Implicit surface ablation"_#howto_14
-6.15 "Transparent surface elements"_#howto_15
-6.16 "Visualizing SPARTA output with ParaView"_#howto_16
-6.17 "Custom per-particle, per-grid, per-surf attributes"_#howto_17
-6.18 "Variable timestep simulations"_#howto_18 :all(b)
-
-The example input scripts included in the SPARTA distribution and
-highlighted in "Section 5"_Section_example.html of the manual also
-show how to setup and run various kinds of simulations.
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
+
+4. How-to discussions :h3
+
+This section describes how to perform common tasks using OpenEdge.
+
+4.1 "2d simulations"_#howto_1
+4.2 "Axisymmetric simulations"_#howto_2
+4.3 "Plasma and magnetic-field backgrounds"_#howto_3
+4.4 "The plasma.h5 file"_#howto_4
+4.5 "Wall geometry and surface normals"_#howto_5
+4.6 "The processes.h5 database"_#howto_6
+4.7 "Running multiple simulations from one input script"_#howto_7
+4.8 "Output from OpenEdge (stats, dumps, computes, fixes, variables)"_#howto_8
+4.9 "Visualizing snapshots"_#howto_9
+4.10 "Details of grid geometry"_#howto_10
+4.11 "Details of surfaces"_#howto_11
+4.12 "Restarting a simulation"_#howto_12
+4.13 "Visualizing output with ParaView"_#howto_13
+4.14 "Custom per-particle, per-grid, per-surf attributes"_#howto_14
+4.15 "Variable timestep simulations"_#howto_15 :all(b)
+
 :line
 
-6.1 2d simulations :link(howto_1),h4
+4.1 2d simulations :link(howto_1),h4
 
-In SPARTA, as in other DSMC codes, a 2d simulation means that
+In OpenEdge, as in other DSMC codes, a 2d simulation means that
 particles move only in the xy plane, but still have all 3 xyz
 components of velocity.  Only the xy components of velocity are used
 to advect the particles, so that they stay in the xy plane, but all 3
@@ -56,7 +46,7 @@ command.  This is the default. :l
 Using the "create box"_create_box.html command, set the z boundaries
 of the box to values that straddle the z = 0.0 plane.  I.e. zlo < 0.0
 and zhi > 0.0.  Typical values are -0.5 and 0.5, but regardless of the
-actual values, SPARTA computes the "volume" of 2d grid cells as if
+actual values, OpenEdge computes the "volume" of 2d grid cells as if
 their z-dimension length is 1.0, in whatever "units"_units.html are
 defined.  This volume is used with the "global nrho"_global.html
 setting to calculate numbers of particles to create or insert.  It is
@@ -65,14 +55,14 @@ also used to compute collision frequencies. :l
 If surfaces are defined via the "read_surf"_read_surf.html command,
 use 2d objects defined by line segements. :l,ule
 
-Many of the example input scripts included in the SPARTA distribution
+Many of the example input scripts included in the OpenEdge distribution
 are for 2d models.
 
 :line
 
-6.2 Axisymmetric simulations :link(howto_2),h4
+4.2 Axisymmetric simulations :link(howto_2),h4
 
-In SPARTA, an axi-symmetric model is a 2d model.  An example input
+In OpenEdge, an axi-symmetric model is a 2d model.  An example input
 script is provided in the examples/axisymm directory.
 
 An axi-symmetric problem can be setup using the following commands:
@@ -100,7 +90,129 @@ rotated around the y=0 axis of symmetry.
 
 :line
 
-6.3 Running multiple simulations from one input script :link(howto_3),h4
+4.3 Plasma and magnetic-field backgrounds :link(howto_3),h4
+
+OpenEdge does not solve for the plasma.  Every plasma quantity that
+the physics commands need, electron and ion density and temperature,
+parallel flow, magnetic field and their gradients, comes from a
+background defined once with "fix background"_fix_background.html and
+referenced by ID from every other OpenEdge command.
+
+Three kinds of background are available.  A file background reads a
+plasma.h5 file produced by one of the converters in tools/converters
+from a SOLPS-ITER, SOLEDGE3X, OEDGE or EMC3-EIRENE run; see the "next
+section"_#howto_8 for its layout.  A constant background sets uniform
+values and a uniform magnetic field, which is what most verification
+cases use.  An analytic background evaluates prescribed profiles.
+
+Each particle samples the background at its own position.  For a
+two-dimensional axisymmetric mesh the sample point is (R,Z); for a
+native three-dimensional EMC3-EIRENE background it is (R,Z,phi).
+Points outside the mesh are handled according to the outside keyword
+of the fix, either by stopping with an error or by treating the region
+as vacuum.  The particle grid and the plasma mesh are independent, so
+the grid can be refined near the wall without touching the plasma
+data.
+
+The magnetic field is reconstructed from the poloidal flux map psi(R,Z)
+stored in the equilibrium group of the plasma file, which gives the
+field and its spatial derivatives analytically.  The guiding-center
+pusher requires this equilibrium.  Where a flux map is not available,
+field components can be prescribed per particle with "fix
+bfield/particle"_fix_bfield_particle.html, and the Boris pusher can be
+used alone.
+
+"compute plasma/fields"_compute_plasma_fields.html samples any of the
+background quantities onto the particle grid for output with a grid
+dump, which is the usual way to check that a background was read and
+oriented correctly before a production run.
+
+:line
+
+4.4 The plasma.h5 file :link(howto_4),h4
+
+The converters write a single HDF5 file with three top-level groups.
+
+/equilibrium holds the poloidal flux map psi on an (R,Z) grid, the
+grid coordinates r and z, the toroidal field parameters btf and rtf,
+and the boundary flux psib.  It is used for the magnetic field and for
+the normalized flux coordinate used by "fix reflect/psi"_fix_reflect_psi.html. :ulb,l
+
+/ion_species lists the ion species of the fluid run: names, element
+symbols with the charge-state suffix stripped, species indices, the
+main ion index, masses in amu and charge states.  The element symbols
+are what "compute surface/physical/sputter"_compute_surface_physical_sputter.html
+uses to match projectiles to yield tables. :l
+
+/mesh holds the plasma mesh and the fields on it: vertex coordinates,
+the triangulation, the cell index of every triangle, electron density
+and temperature, ion density and temperature, parallel flow, per-ion
+fields in an ions sub-group, and the wall face areas and wall segment
+mapping that "fix surface/emit/recycle"_fix_surface_emit_recycle.html
+uses to emit the recycling flux at each wall segment. :ule,l
+
+Plasma files for the example cases are either tracked with the case or
+regenerated with a converter command given in the case README.  The
+converter for each fluid code documents its own options with --help.
+
+:line
+
+4.5 Wall geometry and surface normals :link(howto_5),h4
+
+The wall is a OpenEdge surface file, line segments in 2d and triangles
+in 3d, read with "read_surf"_read_surf.html.  The converters write the
+wall polygon from the fluid-code run into wall.surf together with the
+plasma file, so that wall segments and plasma cells correspond.
+
+OpenEdge follows one convention for every wall model: the surface
+normal points into the plasma, and emitted particles leave along the
+inward normal.  A wall.surf written by a converter already has this
+orientation and must be read without the invert keyword.  A surface
+that encloses a region that particles must not enter, such as a core
+boundary written as a flux contour, needs the opposite orientation and
+is read with invert.  The flow volume that "read_surf"_read_surf.html
+reports after reading is the quick check: it should be the plasma
+volume, not the volume of the enclosed solid.
+
+Wall models are attached to surface groups.  "surf_collide"_surf_collide.html
+sets what happens to a particle kinematically when it hits, and
+"surf_react"_surf_react.html sets the plasma-wall interaction, both
+assigned with "surf_modify"_surf_modify.html.  Wall sources are fixes
+that emit from a surface group.  Refining the wall into short segments
+with the tools in tools/converters improves the resolution of wall
+fluxes and of the per-segment surface ledgers.
+
+:line
+
+4.6 The processes.h5 database :link(howto_6),h4
+
+All atomic and surface-interaction data that OpenEdge commands consume
+live in one HDF5 file, database/processes.h5, shipped with the
+distribution.  It has two top-level groups.
+
+/volume holds gas-phase processes: ADAS rate coefficients for
+ionization, recombination and charge exchange, radiated power
+coefficients, photon-emission coefficients for line emission,
+threshold energies, and the per-element reaction catalogs that "fix
+volume/chem/adas"_fix_volume_chem_adas.html reads when given an
+element symbol instead of a reactions file. :ulb,l
+
+/surface holds processes at the wall: sputter yields as a function of
+impact energy and angle for each projectile and target pair,
+reflection coefficients and energy and angle distributions, recycling
+parameters, evaporation coefficients, and desorption rates. :ule,l
+
+Rate coefficients are stored as log10 values on a log temperature by
+log density by charge-state grid, with the grid axes as sibling
+datasets.  Sputter and reflection tables are generated with the
+RustBCA binary-collision code; the scripts under tools regenerate them.
+The database is found through the OPENEDGE_ROOT environment variable
+or the path compiled into the executable, so runs do not need to copy
+it.
+
+:line
+
+4.7 Running multiple simulations from one input script :link(howto_7),h4
 
 This can be done in several ways.  See the documentation for
 individual commands for more details on how these examples work.
@@ -122,7 +234,7 @@ would run 5 successive simulations of the same system for a total of
 
 If you wish to run totally different simulations, one after the other,
 the "clear"_clear.html command can be used in between them to
-re-initialize SPARTA.  For example, this script
+re-initialize OpenEdge.  For example, this script
 
 read_grid data.grid
 create_particles 1000000
@@ -170,12 +282,12 @@ next a
 jump in.flow :pre
 
 All of the above examples work whether you are running on 1 or
-multiple processors, but assumed you are running SPARTA on a single
-partition of processors.  SPARTA can be run on multiple partitions via
+multiple processors, but assumed you are running OpenEdge on a single
+partition of processors.  OpenEdge can be run on multiple partitions via
 the "-partition" command-line switch as described in "Section
-2.5"_Section_start.html#start_7 of the manual.
+2.5"_Section_start.html#start_5 of the manual.
 
-In the last 2 examples, if SPARTA were run on 3 partitions, the same
+In the last 2 examples, if OpenEdge were run on 3 partitions, the same
 scripts could be used if the "index" and "loop" variables were
 replaced with {universe}-style variables, as described in the
 "variable"_variable.html command.  Also, the "next rho" and "next a"
@@ -188,9 +300,9 @@ simulation, and so forth, until all 8 were completed.
 
 :line
 
-6.4 Output from SPARTA (stats, dumps, computes, fixes, variables) :link(howto_4),h4
+4.8 Output from OpenEdge (stats, dumps, computes, fixes, variables) :link(howto_8),h4
 
-There are four basic kinds of SPARTA output:
+There are four basic kinds of OpenEdge output:
 
 "Statistical output"_stats_style.html, which is a list of quantities
 printed every few timesteps to the screen and logfile. :ulb,l
@@ -212,19 +324,19 @@ restart files.  It can generate any number of dump files and fix
 output files, depending on what "dump"_dump.html and "fix"_fix.html
 commands you specify.
 
-As discussed below, SPARTA gives you a variety of ways to determine
+As discussed below, OpenEdge gives you a variety of ways to determine
 what quantities are computed and printed when the statistics, dump, or
 fix commands listed above perform output.  Throughout this discussion,
-note that users can also add their own computes and fixes to SPARTA
-(see "Section 10"_Section_modify.html) which can generate values that
+note that users can also add their own computes and fixes to OpenEdge
+which can generate values that
 can then be output with these commands.
 
-The following sub-sections discuss different SPARTA commands related
+The following sub-sections discuss different OpenEdge commands related
 to output and the kind of data they operate on and produce:
 
 "Global/per-particle/per-grid/per-surf data"_#global
 "Scalar/vector/array data"_#scalar
-"Statistical output"_#stat
+"Statistical output"_#stats
 "Dump file output"_#dump
 "Fixes that write output files"_#fixoutput
 "Computes that process output quantities"_#computeoutput
@@ -337,7 +449,7 @@ commands.
 
 Computes that generate values to output :h5,link(compute)
 
-Every "compute"_compute.html in SPARTA produces either global or per
+Every "compute"_compute.html in OpenEdge produces either global or per
 particle or per grid or per surf values.  The values can be scalars or
 vectors or arrays of data.  These values can be output using the other
 commands described in this section.  The doc page for each compute
@@ -348,7 +460,7 @@ produce global values.
 
 Fixes that generate values to output :h5,link(fix)
 
-Some "fixes"_fix.html in SPARTA produces either global or per particle
+Some "fixes"_fix.html in OpenEdge produces either global or per particle
 or per grid or per surf values which can be accessed by other
 commands.  The values can be scalars or vectors or arrays of data.
 These values can be output using the other commands described in this
@@ -389,7 +501,7 @@ described in this section.
 Summary table of output options and data flow between commands :h5,link(table)
 
 This table summarizes the various commands that can be used for
-generating output from SPARTA.  Each command produces output data of
+generating output from OpenEdge.  Each command produces output data of
 some kind and/or writes data to a file.  Most of the commands can take
 data from other commands as input.  Thus you can link many of these
 commands together in pipeline form, where data produced by one command
@@ -420,7 +532,7 @@ Command: Input: Output:
 
 :line
 
-6.5 Visualizing SPARTA snapshots :link(howto_5),h4
+4.9 Visualizing snapshots :link(howto_9),h4
 
 The "dump image"_dump_image.html command can be used to do on-the-fly
 visualization as a simulation proceeds.  It works by creating a series
@@ -436,19 +548,19 @@ particle, grid cell, or surface element data as a simulation runs.
 These can be post-processed and read in to other visualization
 packages.
 
-A Python-based toolkit distributed by our group can read SPARTA
+A Python-based toolkit distributed by our group can read OpenEdge
 particle dump files with columns of user-specified particle
 information, and convert them to various formats or pipe them into
 visualization software directly.  See the "Pizza.py WWW site"_pizza
-for details.  Specifically, Pizza.py can convert SPARTA particle dump
+for details.  Specifically, Pizza.py can convert OpenEdge particle dump
 files into PDB, XYZ, "Ensight"_ensight, and VTK formats.  Pizza.py can
-pipe SPARTA dump files directly into the Raster3d and RasMol
+pipe OpenEdge dump files directly into the Raster3d and RasMol
 visualization programs.  Pizza.py has tools that do interactive 3d
 OpenGL visualization and one that creates SVG images of dump file
 snapshots.
 
 Additional Pizza.py tools may be added that allow visualization of
-surface and grid cell information as output by SPARTA.
+surface and grid cell information as output by OpenEdge.
 
 :link(pizza,http://lammps.github.io/pizza)
 :link(vmd,http://www.ks.uiuc.edu/Research/vmd)
@@ -456,178 +568,15 @@ surface and grid cell information as output by SPARTA.
 
 :line
 
-6.6 Library interface to SPARTA :link(howto_6),h4
+4.10 Details of grid geometry :link(howto_10),h4
 
-As described in "Section 2.4"_Section_start.html#start_4, SPARTA can
-be built as a library, so that it can be called by another code, used
-in a "coupled manner"_Section_howto.html#howto_7 with other codes, or
-driven through a "Python interface"_Section_python.html.
-
-All of these methodologies use a C-style interface to SPARTA that is
-provided in the files src/library.cpp and src/library.h.  The
-functions therein have a C-style argument list, but contain C++ code
-you could write yourself in a C++ application that was invoking SPARTA
-directly.  The C++ code in the functions illustrates how to invoke
-internal SPARTA operations.  Note that SPARTA classes are defined
-within a SPARTA namespace (SPARTA_NS) if you use them from another C++
-application.
-
-Library.cpp contains these 4 functions:
-
-void sparta_open(int, char **, MPI_Comm, void **);
-void sparta_close(void *);
-void sparta_file(void *, char *);
-char *sparta_command(void *, char *); :pre
-
-The sparta_open() function is used to initialize SPARTA, passing in a
-list of strings as if they were "command-line
-arguments"_Section_start.html#start_7 when SPARTA is run in
-stand-alone mode from the command line, and a MPI communicator for
-SPARTA to run under.  It returns a ptr to the SPARTA object that is
-created, and which is used in subsequent library calls.  The
-sparta_open() function can be called multiple times, to create
-multiple instances of SPARTA.
-
-SPARTA will run on the set of processors in the communicator.  This
-means the calling code can run SPARTA on all or a subset of
-processors.  For example, a wrapper script might decide to alternate
-between SPARTA and another code, allowing them both to run on all the
-processors.  Or it might allocate half the processors to SPARTA and
-half to the other code and run both codes simultaneously before
-syncing them up periodically.  Or it might instantiate multiple
-instances of SPARTA to perform different calculations.
-
-The sparta_close() function is used to shut down an instance of SPARTA
-and free all its memory.
-
-The sparta_file() and sparta_command() functions are used to pass a
-file or string to SPARTA as if it were an input script or single
-command in an input script.  Thus the calling code can read or
-generate a series of SPARTA commands one line at a time and pass it
-thru the library interface to setup a problem and then run it,
-interleaving the sparta_command() calls with other calls to extract
-information from SPARTA, perform its own operations, or call another
-code's library.
-
-Other useful functions are also included in library.cpp. For example:
-
-void *sparta_extract_global(void *, char *)
-void *sparta_extract_compute(void *, char *, int, int)
-void *sparta_extract_variable(void *, char *, char *) :pre
-
-This can extract various global quantities from SPARTA as well as
-values calculated by a compute or variable.  See the library.cpp file
-and its associated header file library.h for details.
-
-Other functions may be added to the library interface as needed to
-allow reading from or writing to internal SPARTA data structures. 
-
-The key idea of the library interface is that you can write any
-functions you wish to define how your code talks to SPARTA and add
-them to src/library.cpp and src/library.h, as well as to the "Python
-interface"_Section_python.html.  The routines you add can in principle
-access or change any SPARTA data you wish.  The examples/COUPLE and
-python directories have example C++ and C and Python codes which show
-how a driver code can link to SPARTA as a library, run SPARTA on a
-subset of processors, grab data from SPARTA, change it, and put it
-back into SPARTA.
-
-IMPORTANT NOTE: The examples/COUPLE dir has not been added to the
-distribution yet.
-
-:line
-
-6.7 Coupling SPARTA to other codes :link(howto_7),h4
-
-SPARTA is designed to allow it to be coupled to other codes.  For
-example, a continuum finite element (FE) simulation might use SPARTA
-grid cell quantities as boundary conditions on FE nodal points,
-compute a FE solution, and return continuum flow conditions as
-boundary conditions for SPARTA to use.
-
-SPARTA can be coupled to other codes in at least 3 ways.  Each has
-advantages and disadvantages, which you'll have to think about in the
-context of your application.
-
-(1) Define a new "fix"_fix.html command that calls the other code.  In
-this scenario, SPARTA is the driver code.  During its timestepping,
-the fix is invoked, and can make library calls to the other code,
-which has been linked to SPARTA as a library.  See "Section
-8"_Section_modify.html of the documentation for info on how to add a
-new fix to SPARTA.
-
-(2) Define a new SPARTA command that calls the other code.  This is
-conceptually similar to method (1), but in this case SPARTA and the
-other code are on a more equal footing.  Note that now the other code
-is not called during the timestepping of a SPARTA run, but between
-runs.  The SPARTA input script can be used to alternate SPARTA runs
-with calls to the other code, invoked via the new command.  The
-"run"_run.html command facilitates this with its {every} option, which
-makes it easy to run a few steps, invoke the command, run a few steps,
-invoke the command, etc.
-
-In this scenario, the other code can be called as a library, as in
-(1), or it could be a stand-alone code, invoked by a system() call
-made by the command (assuming your parallel machine allows one or more
-processors to start up another program).  In the latter case the
-stand-alone code could communicate with SPARTA thru files that the
-command writes and reads.
-
-See "Section_modify"_Section_modify.html of the documentation for how
-to add a new command to SPARTA.
-
-(3) Use SPARTA as a library called by another code.  In this case the
-other code is the driver and calls SPARTA as needed.  Or a wrapper
-code could link and call both SPARTA and another code as libraries.
-Again, the "run"_run.html command has options that allow it to be
-invoked with minimal overhead (no setup or clean-up) if you wish to do
-multiple short runs, driven by another program.
-
-Examples of driver codes that call SPARTA as a library are included in
-the examples/COUPLE directory of the SPARTA distribution; see
-examples/COUPLE/README for more details.
-
-IMPORTANT NOTE: The examples/COUPLE dir has not been added to the
-distribution yet.
-
-"Section 2.3"_Section_start.html#start3 of the manual describes how to
-build SPARTA as a library.  Once this is done, you can interface with
-SPARTA either via C++, C, Fortran, or Python (or any other language
-that supports a vanilla C-like interface).  For example, from C++ you
-could create one (or more) "instances" of SPARTA, pass it an input
-script to process, or execute individual commands, all by invoking the
-correct class methods in SPARTA.  From C or Fortran you can make
-function calls to do the same things.  See
-"Section_9"_Section_python.html of the manual for a description of the
-Python wrapper provided with SPARTA that operates through the SPARTA
-library interface.
-
-The files src/library.cpp and library.h contain the C-style interface
-to SPARTA.  See "Section 6.6"_#howto_6 of the manual for a description
-of the interface and how to extend it for your needs.
-
-Note that the sparta_open() function that creates an instance of
-SPARTA takes an MPI communicator as an argument.  This means that
-instance of SPARTA will run on the set of processors in the
-communicator.  Thus the calling code can run SPARTA on all or a subset
-of processors.  For example, a wrapper script might decide to
-alternate between SPARTA and another code, allowing them both to run
-on all the processors.  Or it might allocate half the processors to
-SPARTA and half to the other code and run both codes simultaneously
-before syncing them up periodically.  Or it might instantiate multiple
-instances of SPARTA to perform different calculations.
-
-:line
-
-6.8 Details of grid geometry in SPARTA :link(howto_8),h4
-
-SPARTA overlays a grid over the simulation domain which is used to
+OpenEdge overlays a grid over the simulation domain which is used to
 track particles and to co-locate particles in the same grid cell for
 performing collision and chemistry operations.  Surface elements are
 also assigned to grid cells they intersect with, so that
 particle/surface collisions can be efficiently computed.
 
-SPARTA uses a Cartesian hierarchical grid.  Cartesian means that the
+OpenEdge uses a Cartesian hierarchical grid.  Cartesian means that the
 faces of a grid cell, at any level of the hierarchy, are aligned with
 the Cartesian xyz axes.  I.e. each grid cell is an axis-aligned
 pallelpiped or rectangular box.
@@ -649,8 +598,8 @@ at the same level.  The per-level Nx,Ny,Nz values are defined by the
 As described below, each child cell is assigned an ID which encodes
 the cell's logical position within in the hierarchical grid, as a
 32-bit or 64-bit unsigned integer ID.  The precision is set by the
--DSPARTA_BIG or -DSPARTA_SMALL or -DSPARTA_BIGBIG compiler switch, as
-described in "Section 2.2"_Section_start.html#start2_2.  The number of
+-DOpenEdge_BIG or -DOpenEdge_SMALL or -DOpenEdge_BIGBIG compiler switch, as
+described in "Section 2.2"_Section_start.html#start_2.  The number of
 grid levels that can be used depends on this precision and the
 resolution of the grid at each level.  For example, in a 3d
 simulation, a level that is refined with a 2x2x2 sub-grid requires 4
@@ -660,7 +609,7 @@ and 16 levels for 64-bit IDs.
 This manner of defining a hierarchical grid allows for flexible grid
 cell refinement in any region of the simulation domain.  E.g. around a
 surface, or in a high-density region of the gas flow.  Also note that
-a 3d oct-tree (quad-tree in 2d) is a special case of the SPARTA
+a 3d oct-tree (quad-tree in 2d) is a special case of the OpenEdge
 hierarchical grid, where Nx = Ny = Nz = 2 is used at every level.
 
 An example 2d hierarchical grid is shown in the diagram, for a
@@ -672,7 +621,7 @@ contain 3rd level grid cells via a further 3x3 sub-division.
 
 :c,image(JPG/refine_grid.jpg)
 
-In the rest of the SPARTA manual, the following terminology is used to
+In the rest of the OpenEdge manual, the following terminology is used to
 refer to the cells of the hierarchical grid.  The flow region is the
 portion of the simulation domain that is "outside" any surface objects
 and is typically filled with particles.
@@ -685,7 +634,7 @@ cut cell = a child cell intersected by one or more surface elements, resulting i
 split cell = a child cell intersected by two or more surface elements, resulting in two or more disjoint flow regions
 sub cell = one disjoint flow region portion of a split cell :ul
 
-Note that in SPARTA, parent cells are only conceptual.  They do not
+Note that in OpenEdge, parent cells are only conceptual.  They do not
 exist as individual entities or require memory.  Child cells store
 various attributes and are distributed across processors, so that each
 child cell is owned by exactly one processor, as discussed below.
@@ -727,7 +676,7 @@ grid"_dump.html command, using its {id} and {idstr} attributes.  The
 integer form can also be output by the "compute
 property/grid"_compute_property_grid.html.
 
-Here is how a grid cell ID is computed by SPARTA, either for parent or
+Here is how a grid cell ID is computed by OpenEdge, either for parent or
 child cells.  Say the level 1 grid is a 10x10x20 sub-division (2000
 cells) of the root cell (simulation box).  The level 1 cells are
 numbered from 1 to 2000 with the x-dimension varying fastest, then y,
@@ -749,14 +698,14 @@ encoded with 4, because it requires 4 bits to represent 8 cells (1 to
 376 = 8568.  In string format it would be 376-4, with dashes
 separating each of the levels.  Either of these formats (integer or
 string) can be specified as id or idstr for output of grid cell info
-with the "dump grid"_dump_grid.html command; see its doc page for more
+with the "dump grid"_dump.html command; see its doc page for more
 details.
 
 Note that a child cell has the same ID whether it is unsplit, cut, or
 split.  Currently, sub cells of a split cell also have the same ID,
 though that may change in the future.
 
-The "create_grid"_create_grid.html and "balance"_balance.html and "fix
+The "create_grid"_create_grid.html and "balance"_fix_balance.html and "fix
 balance"_fix_balance.html commands determine the assignment of child
 cells to processors.  If a child cell is assigned to a processor, that
 processor owns the cell whether it is an unsplit, cut, or split cell.
@@ -807,9 +756,9 @@ computational load in a statistical sense.
 
 :line
 
-6.9 Details of surfaces in SPARTA :link(howto_9),h4
+4.11 Details of surfaces :link(howto_11),h4
 
-A SPARTA simulation can define one or more surface objects, each of
+A OpenEdge simulation can define one or more surface objects, each of
 which are read in via the "read_surf"_read_surf.html.  For 2d
 simulations a surface object is a collection of connected line
 segments.  For 3d simulations it is a collection of connected
@@ -850,7 +799,7 @@ off the surface can be computed.  This is done via the
 "surf_modify"_surf_modify.html and "surf_collide"_surf_collide.html
 commands.
 
-As described in the previous "Section 6.8"_#howto_8, SPARTA overlays a
+As described in the previous "Section 4.10"_#howto_10, OpenEdge overlays a
 grid over the simulation domain to track particles.  Surface elements
 are also assigned to grid cells they intersect with, so that
 particle/surface collisions can be efficiently computed.  Typically a
@@ -872,9 +821,9 @@ overlapping surface elements must be computed.
 
 :line
 
-6.10 Restarting a simulation :link(howto_10),h4
+4.12 Restarting a simulation :link(howto_12),h4
 
-There are two ways to continue a long SPARTA simulation.  Multiple
+There are two ways to continue a long OpenEdge simulation.  Multiple
 "run"_run.html commands can be used in the same input script.  Each
 run will continue from where the previous run left off.  Or binary
 restart files can be saved to disk using the "restart"_restart.html
@@ -889,7 +838,7 @@ Details are discussed in the documentation for the
 "write_restart"_write_restart.html commands.
 
 Look at the {in.collide} input script provided in the {bench}
-directory of the SPARTA distribution to see the original script that
+directory of the OpenEdge distribution to see the original script that
 this script is based on.  If that script had the line
 
 restart	        50 tmp.restart :pre
@@ -932,403 +881,10 @@ the original run.
 
 :line
 
-6.11 Using the ambipolar approximation :link(howto_11),h4
-
-The ambipolar approximation is a computationally efficient way to
-model low-density plasmas which contain positively-charged ions and
-negatively-charged electrons.  In this model, electrons are not free
-particles which move independently.  This would require a simulation
-with a very small timestep due to electon's small mass and high speed
-(1000x that of an ion or neutral particle).
-
-Instead each ambipolar electron is assumed to stay "close" to its
-parent ion, so that the plasma gas appears macroscopically neutral.
-Each pair of particles thus moves together through the simulation
-domain, as if they were a single particle, which is how they are
-stored within SPARTA.  This means a normal timestep can be used.
-
-There are two stages during a timestep when the coupled particles are
-broken apart and treated as an independent ion and electron.  
-
-The first is during gas-phase collisions and chemistry.  The ionized
-ambipolar particles in a grid cell are each split into two particles
-(ion and electron) and each can participate in two-body collisions
-with any other particle in the cell.  Electron/electron collisions are
-actually not performed, but are tallied in the overall collision count
-(if using a collision mixture with a single group, not when using
-multiple groups).  If gas-phase chemistry is turned on, reactions
-involving ions and electrons can be specified, which include
-dissociation, ionization, exchange, and recombination reactions.  At
-the end of the collision/chemsitry operations for the grid cell, there
-is still a one-to-one pairing between ambipolar ions and electrons.
-Each pair is recombined into a single particle.
-
-The second is during collisions with surface (or the boundaries of the
-simulation box) if a surface reaction model is defined for the surface
-element or boundary.  Just as with gas-phase chemistry, surface
-reactions involving ambipolar species can be defined.  For example, an
-ambipolar ion/electron pair can re-combine into a neutral species during
-the collision.
-
-Here are the SPARTA commands you can use to run a simulation using the
-ambipolar approximation.  See the input scripts in examples/ambi for
-an example.
-
-Note that you will likely need to use two (or more mixtures) as
-arguments to various commands, one which includes the ambipolar
-electron species, and one which does not.  Example
-"mixture"_mixture.html commands for doing this are shown below.
-
-Use the "fix ambipolar"_fix_ambipolar.html command to specify which
-species is the ambipolar electron and what (multiple) species are
-ambipolar ions.  This is required for all the other options listed
-here to work.  The fix defines two custom per-particle attributes, an
-integer vector called "ionambi" which stores a 1 for a particle if it
-is an ambipolar ion, and a 0 otherwise.  And a floating-point array
-called "velambi" which stores a 3-vector with the velocity of the
-associated electron for each ambipolar ion or zeroes otherwise.  Note
-that no particles should ever exist in the simulation with a species
-matching ambipolar electrons.  Such particles are only generated (and
-destroyed) internally, as described above.
-
-Use the "collide_modify ambipolar yes"_collide_modify.html command if
-you want to perform gas-phase collisions using the ambipolar model.
-This is not required.  If you do this, you may also want to specify a
-mixture for the collide command which has two or more groups.  If this
-is the case, the ambipolar electron species must be in a group by
-itself.  The other group(s) can contain any combination of ion or
-neutral species.  Note that putting the ambipolar electron species in
-its own group should improve the efficiency of the code due to the
-large disparity in electron versus ion/neutral velocities.
-
-If you want to perform gas-phase chemistry for reactions involving
-ambipolar ions and electrons, use the "react"_react.html command with
-an input file of reactions that include the ambipolar electron and ion
-species defined by the fix ambipolar commmand.  See the
-"react"_react.html command doc page for info the syntax required for
-ambipolar reactions.  Their reactants and products must be listed in
-specific order.
-
-When creating particles, either by the
-"create_particles"_create_particles.html or "fix emit"_fix_emit.html
-command variants, do NOT use a mixture that includes the ambipolar
-electron species.  If you do this, you will create "free" electrons
-which are not coupled to an ambipolar ion.  You can include ambipolar
-ions in the mixture.  This will create ambipolar ions along with their
-associated electron.  The electron will be assigned a velocity
-consistent with its mass and the temperature of the created particles.
-You can use the "mixture copy"_mixture.html and "mixture
-delete"_mixture.html commands to create a mixture that excludes only
-the ambipolar electron species, e.g.
-
-mixture all copy noElectron
-mixture noElectron delete e :pre
-
-If you want ambipolar ions to re-combine with their electrons when
-they collide with surfaces, use the "surf_react"_surf_react.html
-command with an input file of surface reactions that includes
-recombination reactions like:
-
-N+ + e -> N :pre
-
-See the "surf_react"_surf_react.html doc page for syntax details.  A
-sample surface reaction data file is provided in data/air.surf.  You
-assign the surface reaction model to surface or the simulation box
-boundaries via the "surf_modify"_surf_modify.html and
-"bound_modify"_bound_modify.html commands.
-
-For diagnositics and output, you can use the "compute
-count"_compute_count.html and "dump particle"_dump.html commands.  The
-"compute count"_compute_count.html command generate counts of
-individual species, entire mixtures, and groups within mixtures.  For
-example these commands will include counts of ambipolar ions in
-statistical output:
-
-compute myCount O+ N+ NO+ e
-stats_style step nsreact nsreactave cpu np c_myCount :pre
-
-Note that the count for species "e" = ambipolar electrons should alwas
-be zero, since those particles only exist during gas and surface
-collisions.  The "stats_style"_stats_style.html {nsreact} and
-{nsreactave} keywords print tallies of surface reactions taking place.
-
-The "dump particle"_dump.html command can output the custom particle
-attributes defined by the "fix ambipolar"_fix_ambipolar.html command.
-E.g. this command
-
-dump 1 particle 1000 tmp.dump id type x y z p_ionambi p_velambi\[2\] :pre
-
-will output the ionambi flag = 1 for ambipolar ions, along with the vy
-of their associated ambipolar electrons.
-
-The "fix ambipolar"_fix ambiploar.html doc page explains how to
-restart ambipolar simulations where the fix is used.
-
-:line
-
-6.12 Using multiple vibrational energy levels :link(howto_12),h4
-
-DSMC models for collisions between one or more polyatomic species can
-include the effect of multiple discrete vibrational levels, where a
-collision transfers vibrational energy not just between the two
-particles in aggregate but between the various levels defined for each
-particle species.
-
-This kind of model can be enabled in SPARTA using the following
-commands:
-
-"species ... vibfile ..."_species.html
-"collide_modify vibrate discrete"_collide_modify.html
-"fix vibmode"_fix_vibmode.html
-"dump particle p_vibmode"_dump.html :ul
-
-The "species"_species.html command with its {vibfile} option allows a
-separate file with per-species vibrational information to be read.
-See data/air.species.vib for an example of such a file.
-
-Only species with 4,6,8 vibrational degrees of freedom, as defined in
-the species file read by the "species"_species.html command, need to
-be listed in the {vibfile}.  These species have N modes, where N =
-degrees of freedom / 2.  For each mode, a vibrational temperature,
-relaxation number, and degeneracy is defined in the {vibfile}.  These
-quantities are used in the energy exchange formulas for each
-collision.
-
-The "collide_modify vibrate discrete"_collide_modify.html command is
-used to enable the discrete model.  Other allowed settings are {none}
-and {smooth}.  The former turns off vibrational energy effects
-altogether.  The latter uses a single continuous value to represent
-vibrational energy; no per-mode information is used.
-
-The "fix vibmode"_fix_vibmode.html command is used to allocate
-per-particle storage for the population of levels appropriate to the
-particle's species.  This will be from 1 to 4 values for each species.
-Note that this command must be used before particles are created via
-the "create_particles"_create_particles.html command to allow the
-level populations for new particles to be set appropriately.  The "fix
-vibmode"_fix_vibmode.html command doc page has more details.
-
-The "dump particle"_dump.html command can output the custom particle
-attributes defined by the "fix vibmode"_fix_vibmode.html command.
-E.g. this command
-
-dump 1 particle 1000 tmp.dump id type x y z evib p_vibmode\[1\] p_vibmode\[2\] p_vibmode\[3\] :pre
-
-will output for each particle evib = total vibrational energy (summed
-across all levels), and the population counts for the first 3
-vibrational energy levels.  The vibmode count will be 0 for
-vibrational levels that do not exist for particles of a particular
-species.
-
-The "read_restart"_read_restart.html doc page explains how to restart
-simulations where a fix like "fix vibmode"_fix_vibmode.html has been
-used to store extra per-particle properties.
-
-:line
-
-6.13 Surface elements: explicit, implicit, distributed :link(howto_13),h4
-
-SPARTA can work with two kinds of surface elements: explicit and
-implicit.  Explicit surfaces are lines (2d) or triangles (3d) defined
-in surface data files read by the "read_surf"_read_surf.html command.
-An individual element can be any size; a single surface element can
-intersect many grid cells.  Implicit surfaces are lines (2d) or
-triangles (3d) defined by grid corner point data files read by the
-"read_isurf"_read_isurf.html command.  The corner point values define
-lines or triangles that are wholly contained with single grid cells.
-
-Note that you cannot mix explicit and implicit surfaces in the same
-simulation.
-
-The data and attributes of explicit surface elements can be stored in
-one of two ways.  The default is for each processor to store a copy of
-all the elements.  Memory-wise, this is fine for most models.  The
-other option is distributed, where each processor only stores copies
-of surface elements assigned to grid cells it owns or has a ghost copy
-of.  For models with huge numbers of surface elements, distributing
-them will use much less memory per processor.  Note that a surface
-element requires about 150 bytes of storage, so storing a million
-requires about 150 MBytes.
-
-Implicit surfaces are always stored in a distributed fashion.  Each
-processor only stores a copy of surface elements assigned to grid
-cells it owns or has a ghost copy of.  Note that 3d implicit surfs are
-not yet fully implemented.  Specifically, the
-"read_isurf"_read_isurf.html command will not yet read and create
-them.
-
-The "global surfs"_global.html command is used to specify the use of
-explicit versus implicit, and distributed versus non-distributed
-surface elements.
-
-Unless noted, the following surface-related commands work with either
-explict or implicit surfaces, whether they are distributed or not.
-For large data sets, the read and write surf and isurf commands have
-options to use multiple files and/or operate in parallel which can
-reduce I/O times.
-
-"adapt_grid"_adapt_grid.html
-"compute_isurf/grid"_compute_isurf_grid.html    # for implicit surfs
-"compute_surf"_compute_surf.html                # for explicit surfs
-"dump surf"_dump.html
-"dump image"_dump_image.html
-"fix adapt/grid"_fix_adapt_grid.html
-"fix emit/surf"_fix_emit_surf.html
-"group surf"_group.html
-"read_isurf"_read_isurf.html                    # for implicit surfs
-"read_surf"_read_surf.html                      # for explicit surfs
-"surf_modify"_surf_modify.html 
-"write_isurf"_write_surf.html                   # for implicit surfs
-"write_surf"_write_surf.html :ul
-
-These command do not yet support distributed surfaces:
-
-"move_surf"_move_surf.html
-"fix move/surf"_fix_move_surf.html
-"remove_surf"_remove_surf.html :ul
-
-:line
-
-6.14 Implicit surface ablation :link(howto_14),h4
-
-The implicit surfaces described in the previous section can be used to
-perform ablation simulations, where the set of implicit surface
-elements evolve over time to model a receding surface.  These are the
-relevant commands:
-
-"global surfs implicit"_global.html
-"read isurf"_read_isurf.html
-"fix ablate"_fix_ablate.html
-"compute isurf/grid"_compute_isurf_grid.html
-"compute react/isurf/grid"_compute_react_isurf_grid.html
-"fix ave/grid"_fix_ave_grid.html
-"write isurf"_write_isurf.html 
-"write_surf"_write_surf.html :ul
-
-The "read_isurf"_read_isurf.html command takes a binary file as an
-argument which contains a pixelated (2d) or voxelated (3d)
-representation of the surface (e.g. a porous heat shield material).
-It reads the file and assigns the pixel/voxel values to corner points
-of a region of the SPARTA grid.
-
-The "read_isurf"_read_isurf.html command also takes the ID of a "fix
-ablate"_fix_ablate.html command as an argument.  This fix is invoked
-to perform a Marching Squares (2d) or Marching Cubes (3d) algorithm to
-convert the corner point values to a set of line segments (2d) or
-triangles (3d) each of which is wholly contained in a grid cell.  It
-also stores the per grid cell corner point values.
-
-If the {Nevery} argument of the "fix ablate"_fix_ablate.html command
-is 0, ablation is never performed, the implicit surfaces are static.
-If it is non-zero, an ablation operation is performed every {Nevery}
-steps.  A per-grid cell value is used to decrement the corner point
-values in each grid cell.  The values can be (1) from a compute such
-as "compute isurf/grid"_compute_isurf_grid.html which tallies
-statistics about gas particle collisions with surfaces within each
-grid cell.  Or "compute
-react/isurf/grid"_compute_react_isurf_grid.html which tallies the
-number of surface reactions that take place.  Or values can be (2)
-from a fix such as "fix ave/grid"_fix_ave_grid.html which time
-averages these statistics over many timesteps.  Or they can be (3)
-generated randomly, which is useful for debugging.
-
-The decrement of grid corner point values is done in a manner that
-models recession of the surface elements within in each grid cell.
-All the current implicit surface elements are then discarded, and new
-ones are generated from the new corner point values via the Marching
-Squares or Marching Cubes algorithm. 
-
-IMPORTANT NOTE: Ideally these algorithms should preserve the gas flow
-volume inferred by the previous surfaces and only add to it with the
-new surfaces.  However there are a few cases for the 3d Marching Cubes
-algorithm where the gas flow volume is not strictly preserved.  This
-can trap existing particles inside the new surfaces.  Currently SPARTA
-checks for this condition and deletes the trapped particles.  In the
-future, we plan to modify the standard Marching Cubes algorithm to
-prevent this from happening.  In our testing, the fraction of trapped
-particles in an ablation operation is tiny (around 0.005% or 5 in
-100000).  The number of deleted particles can be monitored as an
-output option by the "fix ablate"_fix_ablate.html command.
-
-The "write_isurf"_write_isurf.html command can be used to periodically
-write out a pixelated/voxelated file of corner point values, in the
-same format that the "read_isurf"_read_isurf.html command reads.  Note
-that after ablation, corner point values are typically no longer
-integers, but floating point values.  The "read_isurf"_read_isurf.html
-and "write_isurf"_write_isurf.html commands have options to work with
-both kinds of files.  The "write_surf"_write_surf.html command can
-also output implicit surface elements for visualization by tools such
-as ParaView which can read SPARTA surface element files after suitable
-post-processing.  See the "Section tools
-paraview"_Section_tools.html#paraview doc page for more details.
-
-:line
-
-6.15 Transparent surface elements :link(howto_15),h4
-
-Transparent surfaces are useful for tallying flow statistics.
-Particles pass through them unaffected.  However the flux of particles
-through those surface elements can be tallied and output.
-
-Transparent surfaces are treated differently than regular surfaces.
-They do not need to be watertight.  E.g. you can define a set of line
-segments that form a straight (or curved) line in 2d.  Or a set of
-triangle that form a plane (or curved surface) in 3d.  You can define
-multiple such surfaces, e.g. multiple disjoint planes, and tally flow
-statistics through each of them.  To tally or sum the statistics
-separately, you may want to assign the triangles in each plane to a
-different surface group via the "read_surf group"_read_surf.html or
-"group surf"_group.html commands.
-
-Note that for purposes of collisions, transparent surface elements are
-one-sided.  A collision is only tallied for particles passing through
-the outward face of the element.  If you want to tally particles
-passing through in both directions, then define 2 transparent
-surfaces, with opposite orientation.  Again, you may want to put the 2
-surfaces in separate groups.
-
-There also should be no restriction on transparent surfaces
-intersecting each other or intersecting regular surfaces.  Though
-there may be some corner cases we haven't thought about or tested.
-
-These are the relevant commands.  See their doc pages for details:
-
-"read_surf transparent"_read_surf.html
-"surf_collide transparent"_surf_collide.html
-"compute surf"_compute_surf.html :ul
-
-The "read_surf"_read_surf.html command with its {transparent} keyword
-is used to flag all the read-in surface elements as transparent.  This
-means they must be in a file separate from regular non-transparent
-elements.
-
-The "surf_collide"_surf_collide.html command must be used with its
-{transparent} model and assigned to all transparent surface elements
-via the "surf_modify"_surf_modify.html command.
-
-The "compute_surf"_compute_surf.html command can be used to tally the
-count, mass flux, and energy flux of particles that pass through
-transparent surface elements.  These quantities can then be time
-averaged via the "fix ave/surf"_fix_ave_surf.html command or output
-via the "dump surf"_dump_surf.html command in the usual ways,
-as described in "Section 6.4"_Section_howto.html#howto_4.
-
-The examples/circle/in.circle.transparent script shows how to use
-these commands when modeling flow around a 2d circle.  Two additional
-transparent line segments are placed in front of the circle to tally
-particle count and kinetic energy flux in both directions in front of
-the object.  These are defined in the data.plane1 and data.plane2
-files.  The resulting tallies are output with the
-"stats_style"_stats_style.html command.  They could also be output
-with a "dump surf"_dump_surf.html command for more resolution if the 2
-lines were each defined as multiple line segments.
-
-:line
-
-6.16 Visualizing SPARTA output with ParaView :link(howto_16),h4
+4.13 Visualizing output with ParaView :link(howto_13),h4
 
 The {sparta/tools/paraview} directory contains two Python programs
-that can be used to convert SPARTA surface and grid data to ParaView
+that can be used to convert OpenEdge surface and grid data to ParaView
 {.pvd} format for visualization with ParaView:
 
 surf2paraview.py  
@@ -1371,9 +927,9 @@ pvpython is in C:\Program Files (x86)\ParaView 5.6.0\bin :pre
 
 (2) Using surf2paraview.py
 
-The {surf2paraview.py} program converts 3D SPARTA surface triangulation
-files and 2D SPARTA closed polygon files into ParaView {.pvd} format.
-Additionally, the program can optionally read one or more SPARTA
+The {surf2paraview.py} program converts 3D OpenEdge surface triangulation
+files and 2D OpenEdge closed polygon files into ParaView {.pvd} format.
+Additionally, the program can optionally read one or more OpenEdge
 surface dump files and associate the calculated results with the
 surface geometry over time.
 
@@ -1381,7 +937,7 @@ The program has two required arguments:
 
 pvpython surf2paraview.py data.mir mir_surf :pre
 
-The first argument is the file name of a SPARTA surf file containing a
+The first argument is the file name of a OpenEdge surf file containing a
 3d triangulation of an objects surface, or a 2d enclosed polygon of
 line segments.  The second argument is the name of the resulting
 ParaView output {.pvd} file.  The above command line will produce a file
@@ -1396,7 +952,7 @@ with the surface elements:
 pvpython surf2paraview.py data.mir mir_surf -r ../parent/mir/tmp_surf.* :pre
 
 The {-r} (or {--result}) option is followed by a list of file names with
-full or relative paths to SPARTA surf dump files.  The files can be
+full or relative paths to OpenEdge surf dump files.  The files can be
 over different time steps and from different processors at the same
 time step. The script will organize the result files so that ParaView
 can play a smooth animation over all time steps for the stored
@@ -1405,7 +961,7 @@ the file name to gather all of the {tmp_surf.*} files stored in the
 directory.  Wild card characters can only be used in the file name part
 of the path and can be given for multiple paths.
 
-NOTE: SPARTA 2d enclosed polygons will be 2d outlines in ParaView.
+NOTE: OpenEdge 2d enclosed polygons will be 2d outlines in ParaView.
 This means that any grid cells inside of the polygon will be visible
 in ParaView.  To obscure the inside of the enclosed polygon, select a
 Delaunay 2D filter from the ParaView menu.
@@ -1427,8 +983,8 @@ Exodus 2 output is requested.
 (3) Using grid2paraview.py
 
 The {grid2paraview.py} program converts a text file description of a 2D
-or 3D SPARTA mesh into a ParaView {.pvd} file.  Additionally, the
-program can optionally read one or more SPARTA grid dump files and
+or 3D OpenEdge mesh into a ParaView {.pvd} file.  Additionally, the
+program can optionally read one or more OpenEdge grid dump files and
 associate the calculated results with the grid cells over time.
 
 The program has two required arguments:
@@ -1436,7 +992,7 @@ The program has two required arguments:
 pvpython grid2paraview.py mir.txt mir_grid :pre
 
 The first argument is a text file containing a description of the
-SPARTA grid.  The description uses commands found in the SPARTA input
+OpenEdge grid.  The description uses commands found in the OpenEdge input
 deck.  These commands are {dimension}, {create_box}, and {create_grid} or
 {read_grid}.  The file can also contain "slice" commands which will
 define slice planes through the 3d grid and output 3d data for each
@@ -1444,16 +1000,16 @@ slice plane (crinkle cut).  The file can also contain comment lines
 with start with a "#" character.
 
 The dimension and create_box command have exactly the same syntax as
-corresponding SPARTA input script commands.  Both of these commands
+corresponding OpenEdge input script commands.  Both of these commands
 must be used.
 
 The grid itself can be defined by either a create_grid or read_grid
 command, one of which must be used.  The create_grid command is
-similar to the SPARTA input script command with the same name, but it
+similar to the OpenEdge input script command with the same name, but it
 only allows for use of the "level" keyword.  The other keywords that
 specify processor assignments for cells are not allowed.  The
-read_grid command has the same syntax as the corresponding SPARTA
-input script command, and reads a SPARTA parent grid file, which can
+read_grid command has the same syntax as the corresponding OpenEdge
+input script command, and reads a OpenEdge parent grid file, which can
 define a hierarchical grid with multiple levels of refinement.
 
 One or more slice commands are optional.  Each defines a 2d plane
@@ -1491,12 +1047,12 @@ with the grid cells:
 pvpython grid2paraview.py mir.txt mir_grid -r ../parent/mir/tmp_flow.* :pre
 
 The {-r} (or {--result}) option is followed by a list of file names with
-full or relative paths to SPARTA grid dump files. This option operates
+full or relative paths to OpenEdge grid dump files. This option operates
 like the {-r} option in the {surf2paraview.py} program.
 
 The grid description given in the {*.txt} file must match the data given
 in the grid flow files. The grid flow files must also contain a column
-that gives the SPARTA encoded integer id for the cell.
+that gives the OpenEdge encoded integer id for the cell.
 
 For large grids (greater than 100x100x100), the time to write out the
 {.pvd} file and data directory can be lengthy.  For this reason, the
@@ -1521,9 +1077,9 @@ serially.  This is due to how the multiprocessing module is
 implemented on Windows, which prohibits multiple instances of {pvpython}
 from starting independently.
 
-(4) pvbatch for Large SPARTA Grids
+(4) pvbatch for Large OpenEdge Grids
 
-When SPARTA grid output becomes large, the processing time required for
+When OpenEdge grid output becomes large, the processing time required for
 grid2paraview.py can be long on a single node even with multi-processing.
 If more than one compute node is available (HPC environment), grid2paraview.py
 can be run with MPI using ParaView's {pvbatch} program. The {pvbatch} program
@@ -1543,7 +1099,7 @@ multi-processing with threads on a single compute node. Notice the "-sym"
 argument to {pvbatch}, which tells {pvbatch} to run in symmetric MPI mode.
 This argument is required.
 
-(5) Catalyst for Large SPARTA Grids
+(5) Catalyst for Large OpenEdge Grids
 
 There is an option in {grid2paraview.py} to execute a ParaView Catalyst Python
 script that has been exported from the ParaView GUI. For more details on
@@ -1555,7 +1111,7 @@ The Catalyst script will generate images or data extracts for each time-step.
 This will avoid having to run ParaView as a separate step to generate
 visualizations. The ideal work-flow is to run the ParaView GUI on a much smaller
 grid version to setup the visualization and export the Catalyst script.
-Then, run {grid2paraview.py} on the larger SPARTA grid output to generate
+Then, run {grid2paraview.py} on the larger OpenEdge grid output to generate
 images. From the {mir.txt} example, to run {grid2paraview.py} using {pvbatch} and
 Catalyst, use the following command line ({catalyst.py} was exported from
 the ParaView GUI).
@@ -1571,9 +1127,9 @@ either edit your catalyst script or change the output directory name on the
 command line to match what your script expects. The output directory is not 
 created when {-c} option is used.
 
-(6) Post-processing large refined SPARTA output grids
+(6) Post-processing large refined OpenEdge output grids
 
-When SPARTA grids contain a large amount of grid refinement concentrated in
+When OpenEdge grids contain a large amount of grid refinement concentrated in
 small areas of the grid, the tool {grid2paraview.py} tends to run out of memory
 because it depends on a static distribution of cells to processors in terms of
 grid chunks defined at the top level of the grid. To overcome this memory issue,
@@ -1581,7 +1137,7 @@ two new ParaView tools were developed:
 
 sort_sparta_grid_file.py and grid2paraview_cells.py :pre
 
-The program {sort_sparta_grid_file.py} takes as input a SPARTA grid file and uses
+The program {sort_sparta_grid_file.py} takes as input a OpenEdge grid file and uses
 the parallel bucket sort algorithm to sort the grid cells into the same number
 of files as MPI ranks used to run the program.
 
@@ -1589,7 +1145,7 @@ mpiexec -np 4 pvbatch -sym sort_sparta_grid_file.py data.grid :pre
 
 The program must be run using the ParaView {pvbatch} program with the
 {-sym} argument.  The above command line will produce 4 output files
-containing SPARTA grid dashed ids of cells located in the same area of
+containing OpenEdge grid dashed ids of cells located in the same area of
 the grid. The output file names are based on the name of the {*.grid}
 file used as input ({data.grid} in this case). The output files will
 be named as shown below.
@@ -1609,7 +1165,7 @@ The program must be run using the ParaView {pvbatch} program with the
 {-sym} argument.  The above command line will produce an {output.pvd}
 file and a directory name output/ containing the ParaView VTU file
 data. The {grid.txt} file must contain a {read_grid} statement with
-the path to a SPARTA grid cell output file, and is otherwise the same
+the path to a OpenEdge grid cell output file, and is otherwise the same
 as the {grid2paraview.py} version. The option {--float} outputs float
 precision numbers to the VTU files to save memory (default is double
 precision). The {--variables} option limits the output arrays to the
@@ -1630,7 +1186,7 @@ generated by {sort_sparta_grid_file.py}.
 
 :line
 
-6.17 Custom per-particle, per-grid, per-surf attributes :link(howto_17),h4
+4.14 Custom per-particle, per-grid, per-surf attributes :link(howto_14),h4
 
 Particles, grid cells, and surface elements can have custom attributes
 which store either single or multiple values per particle, per grid
@@ -1661,7 +1217,7 @@ attributes in various ways:
 "dump grid"_dump.html - output per-grid attributes to a dump file
 "fix ave/grid"_fix_ave_grid.html - time-average a per-grid attribute
 "read_grid"_read_grid.html - define and initialize per-grid attributes
-surf_react implicit - use per-grid vectors and an array to store chemical state (not yet released in public SPARTA)
+surf_react implicit - use per-grid vectors and an array to store chemical state (not yet released in public OpenEdge)
 "variable"_variable.html - use a per-grid attribute in a grid-style variable formula
 "write_grid"_write_grid.html - write per-grid attributes to a grid data file :ul
 
@@ -1716,10 +1272,10 @@ various output commands listed above.
 
 :line
 
-6.18 Variable timestep simulations :link(howto_18),h4
+4.15 Variable timestep simulations :link(howto_15),h4
 
 As an alternative to utilization of a user-provided constant timestep,
-the variable timestep option enables SPARTA to compute global
+the variable timestep option enables OpenEdge to compute global
 timesteps based on the current state of the physical processes being
 modeled. The timestep is global in the sense that all cells advance
 their particles in time using the same timestep value.  The timestep
@@ -1751,7 +1307,7 @@ value for the subsequent runs.
 The "compute dt/grid"_compute_dt_grid.html command is used to
 calculate the cell-based timesteps, and the "fix
 dt/reset"_fix_dt_reset.html command uses this data to calculate the
-global timestep.  An internal time variable has been added to SPARTA
+global timestep.  An internal time variable has been added to OpenEdge
 to track elapsed simulation time, and this time variable as well as
 the current timestep can be output using the {time} and {dt} keywords
 in the "stats_style"_stats_style.html command. These {time} and {dt}

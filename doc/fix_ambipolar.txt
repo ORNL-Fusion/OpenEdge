@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -36,10 +36,10 @@ Instead each ambipolar electron is assumed to stay "close" to its
 parent ion, so that the plasma gas appears macroscopically neutral.
 Each pair of particles thus moves together through the simulation
 domain, as if they were a single particle, which is how they are
-stored within SPARTA.  This means a normal timestep can be used.
+stored within OpenEdge.  This means a normal timestep can be used.
 
 An overview of how to run simulations with the ambipolar approximation
-is given in the "Section 6.11"_Section_howto.html#howto_11.  This
+is given in the "Section 4.11"_Section_howto.html#howto_11.  This
 includes gas-phase collisions and chemistry as well as surface
 chemistry when particles collide with surface elements or the global
 boundary of the simulation box.  The section also lists all the
@@ -49,7 +49,7 @@ this fix ambipolar command being defined.
 
 This command defines {especies} which is the species ID associated
 with the ambipolar electrons.  It also specifies one or more species
-IDs as {ion1}, {ion2}, etc for ambipolar ions.  SPARTA checks that the
+IDs as {ion1}, {ion2}, etc for ambipolar ions.  OpenEdge checks that the
 especies has a negative charge (as read in by the
 "species"_species.html command), and the ions have positive charges.
 An error is flagged if that is not the case.
@@ -90,21 +90,21 @@ particle dump files.
 Styles with a {kk} suffix are functionally the same as the
 corresponding style without the suffix.  They have been optimized to
 run faster, depending on your available hardware, as discussed in the
-"Accelerating SPARTA"_Section_accelerate.html section of the manual.
+"Building OpenEdge"_Section_start.html#start_2 section of the manual.
 The accelerated styles take the same arguments and should produce the
 same results, except for different random number, round-off and
 precision issues.
 
 These accelerated styles are part of the KOKKOS package. They are only
-enabled if SPARTA was built with that package.  See the "Making
-SPARTA"_Section_start.html#start_3 section for more info.
+enabled if OpenEdge was built with that package.  See the "Making
+OpenEdge"_Section_start.html#start_3 section for more info.
 
 You can specify the accelerated styles explicitly in your input script
 by including their suffix, or you can use the "-suffix command-line
-switch"_Section_start.html#start_7 when you invoke SPARTA, or you can
+switch"_Section_start.html#start_5 when you invoke OpenEdge, or you can
 use the "suffix"_suffix.html command in your input script.
 
-See the "Accelerating SPARTA"_Section_accelerate.html section of the
+See the "Building OpenEdge"_Section_start.html#start_2 section of the
 manual for more instructions on how to use the accelerated styles
 effectively.
 

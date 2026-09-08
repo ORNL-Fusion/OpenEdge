@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -47,7 +47,7 @@ read_isurf subset 150 100 50 isurf.materials.3d 120.5 fablate read parallel
 </PRE>
 <P><B>Description:</B>
 </P>
-<P>Read the geometry of a surface from the specified file.  In SPARTA, a
+<P>Read the geometry of a surface from the specified file.  In OpenEdge, a
 "surface" is a collection of surface elements that represent the
 surface of one or more physical objects which will be embedded in the
 global simulation box.  Surfaces can be explicit or implicit.  
@@ -77,8 +77,6 @@ material on spacecraft.
 </P>
 <CENTER><A HREF = "JPG/porous2d_initial.png"><IMG SRC = "JPG/porous2d_initial_small.png"></A><A HREF = "JPG/porous3d_initial.png"><IMG SRC = "JPG/porous3d_initial_small.png"></A>
 </CENTER>
-<IMG SRC = "">
-
 <P>Particles collide with surface elements as they advect.  Each surface
 element is assigned to a collision model, specified by the
 <A HREF = "surf_collide.html">surf_collide</A> command which affects how a particle
@@ -135,7 +133,7 @@ of the file.
 <P>IMPORTANT NOTE: The Nxfile, Nyfile, Nzfile values are for a 2d or 3d
 grid of corner points, which overlay the Nx by Ny by Nz grid of cells.
 In each dimension there is one more corner point than cells.  Thus
-Nxfile = Nx+1, Nyfile = Ny+1, Nzfile = Nz+1 is required.  SPARTA will
+Nxfile = Nx+1, Nyfile = Ny+1, Nzfile = Nz+1 is required.  OpenEdge will
 give an error if the read_isurf Nx,Ny,Nz arguments do not match the
 first 2 or 3 integers in the file.
 </P>
@@ -191,7 +189,7 @@ with zero length (2d line) or area (3d triangle).
 </P>
 <P>IMPORTANT NOTE: The aggregate set of implicit surfaces created by this
 procedure must represent a watertight object(s), the same as explained
-for the <A HREF = "read_surf.html">read_surf</A> command, otherwise SPARTA will
+for the <A HREF = "read_surf.html">read_surf</A> command, otherwise OpenEdge will
 generate an error.  The marching cube and square algorithms guarantee
 this.  However, if the Nx by Ny by Nz array of grid cells is interior
 to the simulation box, the entire outer boundary of the Nx+1 by Ny+1
@@ -261,7 +259,7 @@ of the file.
 <P>IMPORTANT NOTE: The Nxfile, Nyfile, Nzfile values are for a 2d or 3d
 grid of per-cell values, which overlay the Nx by Ny by Nz grid of
 cells.  Thus Nxfile = Nx, Nyfile = Ny, Nzfile = Nz is required.
-SPARTA will give an error if the read_isurf Nx,Ny,Nz arguments do not
+OpenEdge will give an error if the read_isurf Nx,Ny,Nz arguments do not
 match the first 2 or 3 integers in the file.
 </P>
 <P>The remaining N bytes of the file are a series of one-byte integer
@@ -339,4 +337,5 @@ ablate</A>
 <P>The optional keyword defaults are group = all, type = no, push = yes,
 precision int, and read serial.
 </P>
+<!-- PAGE BREAK -->
 </HTML>

@@ -1,0 +1,125 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix particulate/emit command :h3
+
+[Syntax:]
+
+fix ID particulate/emit mix-ID group-ID keyword value ... :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+particulate/emit = style name of this fix command :l
+mix-ID = ID of mixture whose (particulate) species are emitted :l
+group-ID = ID of surface group that emits particulates :l
+zero or more keyword/value pairs may be appended :l
+keyword = {nevery} or {n} or {perspecies} or {region} or {normal} or {magVelocity} or {vmin} or {vmax} or {incidentAngle} or {cone} or {angle} or {dir} or {planar} or {nweight} or {subsonic} or {twopass} or {custom} :l
+  {nevery} value = Ne = emit every Ne timesteps
+  {n} value = Np or v_name
+    Np = emit Np particles per event (0 = use mixture flow rate)
+    v_name = "equal-style variable"_variable.html giving Np
+  {perspecies} value = {yes} or {no}
+  {region} value = region-ID = only emit inside the "region"_region.html
+  {normal} value = {yes} or {no} = apply the mixture stream velocity
+    along the surface normal, as in "fix emit/surf"_fix_emit_surf.html
+  {magVelocity} value = V = single launch speed (velocity units)
+  {vmin} value = Vmin = lower bound of a uniform speed range
+  {vmax} value = Vmax = upper bound of a uniform speed range
+  {incidentAngle} value = Theta = fixed polar angle from the launch
+    axis (degrees, 0 to 180)
+  {cone} value = Half = sample uniformly in solid angle inside a cone
+    of this half-angle (degrees, 0 to 90)
+  {angle} value = {cosine} or {uniform} = polar-angle distribution
+  {dir} values = dR dZ dphi = fixed physical launch axis replacing the
+    local surface normal
+  {planar} value = {yes} or {no} = suppress the out-of-plane velocity
+    component (2d only)
+  {nweight} value = W = number of physical particulates represented by
+    one emitted particle
+  {subsonic} values = Psub Tsub = as in "fix emit/surf"_fix_emit_surf.html
+  {twopass} = no value, as in "fix emit/surf"_fix_emit_surf.html
+  {custom} values = attribute s_name
+    attribute = {density} or {temperature} or {vstream} or {speed} or
+      {fractions}
+    s_name = per-surf custom attribute supplying that quantity :pre
+:ule
+
+[Examples:]
+
+fix source particulate/emit particulates injector nevery 1 n 10 &
+    perspecies no vmin 0.1 vmax 2.0 angle cosine planar yes &
+    dir 0.0 -1.0 0.0
+fix drop particulate/emit powder dropper n 5 perspecies no &
+    magVelocity 1.0 cone 10 nweight 1e4 :pre
+
+[Description:]
+
+Emit finite-size particulates from the surface elements of a surface
+group. The radius, mass and initial temperature of each emitted
+particle come from the particulate "species"_species.html definition
+of the mixture. Emission positions are sampled uniformly along a 2d
+line segment or over a 3d triangle.
+
+The {nevery} keyword sets the emission cadence. The {n} keyword sets
+the number of particles per emission event: a positive constant Np is
+distributed over the emitting elements by area; {n 0} (the default)
+uses the mixture's flow-based source rate as in "fix
+emit/surf"_fix_emit_surf.html; {n v_name} evaluates an equal-style
+variable each event. A constant or variable count requires
+{perspecies no}.
+
+The {nweight} keyword declares that one emitted computational particle
+represents W physical particulates. The value is stored in the custom
+per-particle attribute {grain_nweight} and scales the vapor production
+and atom tallies of "fix particulate/thermal"_fix_particulate_thermal.html;
+the trajectory of the particle is that of a single particulate.
+
+Launch velocity: {magVelocity} sets one launch speed; {vmin} and
+{vmax} sample the speed uniformly in the given interval (set both
+bounds). The direction is sampled about a launch axis, which is the
+local surface normal unless {dir} is given. The angular distribution
+is chosen with priority {incidentAngle} (fixed polar angle), then
+{cone} (uniform in solid angle inside the cone), then {angle}
+({cosine} = Knudsen/Lambert cosine law, {uniform} = polar angle
+uniform in \[0,90) degrees).
+
+The {dir} keyword replaces the surface normal with a fixed launch axis
+given in physical (R, Z, phi) components, mapped internally to the
+Cartesian or axisymmetric storage layout. This is useful for a
+gravity-fed dropper. With {planar yes} (2d only) the out-of-plane
+velocity component is set to zero; with {dir} the dphi component must
+then be zero.
+
+The {region}, {normal}, {subsonic}, {twopass} and {custom} keywords
+behave as for "fix emit/surf"_fix_emit_surf.html. The {custom}
+keywords take a per-surf custom attribute (prefix s_) for the number
+density, temperature, stream velocity, speed or species fractions of
+the emitting element.
+
+:line
+
+[Restrictions:]
+
+This fix is part of the OPENEDGE package. It requires explicit surface
+elements and cannot be used with implicit surfaces. {planar yes}
+requires "dimension"_dimension.html 2. A constant or variable {n}
+cannot be combined with {perspecies yes}. The {custom} keywords
+require {n 0} and cannot be combined with {subsonic}.
+
+[Related commands:]
+
+"fix emit/surf"_fix_emit_surf.html, "fix
+particulate/thermal"_fix_particulate_thermal.html, "fix
+particulate/drag"_fix_particulate_drag.html, "fix
+particulate/charge"_fix_particulate_charge.html,
+"material"_material.html
+
+[Default:]
+
+The option defaults are nevery = 1, n = 0, perspecies = yes, normal =
+no, angle = uniform, planar = no, nweight = 1, no region, no dir, no
+speed setting (the mixture stream velocity is used).

@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -71,7 +71,7 @@ read_surf surf.file trans 10 5 0 scale 3 3 3 invert clip file tmp.surfs.% points
 </PRE>
 <P><B>Description:</B>
 </P>
-<P>Read the geometry of a surface from the specified file.  In SPARTA, a
+<P>Read the geometry of a surface from the specified file.  In OpenEdge, a
 "surface" is a collection of surface elements that represent the
 surface(s) of one or more physical objects which will be embedded in
 the global simulation box.  Surfaces can be explicit or implicit.
@@ -122,7 +122,7 @@ multiple times in a single simulation or in different simulations.
 </P>
 <P>The tools directory contains tools that can create surface files with
 simple geometric objects (spheres, blocks, etc).  It also has tools
-that can convert surface files in other formats to the SPARTA format
+that can convert surface files in other formats to the OpenEdge format
 for explicit surfaces, e.g. for files created by a mesh-generation
 program.
 </P>
@@ -134,10 +134,10 @@ program.
 specified file can be a text file or a gzipped text file (detected by
 a .gz suffix).
 </P>
-<P>If a "%" character appears in the surface filename, SPARTA expects a
+<P>If a "%" character appears in the surface filename, OpenEdge expects a
 set of multiple files to exist.  The <A HREF = "write_surf.html">write_surf</A>
 command explains how such sets are created.  Read_surf will first read
-a filename where "%" is replaced by "base".  This file tells SPARTA
+a filename where "%" is replaced by "base".  This file tells OpenEdge
 how many total surfaces and files are in the set (i.e. just the header
 information described below).  The read_surf command then reads the
 additional files.  For example, if the surface file was specified as
@@ -149,10 +149,10 @@ created the surface file.
 simulation, or some subset of those processors, if the <I>fileper</I> or
 <I>nfile</I> options were used when the surface file was written; see the
 <A HREF = "write_surf.html">write_surf</A> command for details.  The processors in
-the current SPARTA simulation share the work of reading these files;
+the current OpenEdge simulation share the work of reading these files;
 each reads a roughly equal subset of the files.  The number of
 processors which created the set can be different than the number of
-processors in the current SPARTA simulation.  This can be a fast mode
+processors in the current OpenEdge simulation.  This can be a fast mode
 of input on parallel machines that support parallel I/O.
 </P>
 <P>The remainder of this section describes the format of a single surface
@@ -193,7 +193,7 @@ Thus the keyword <I>points</I> should be in a line like "1000 points".
 </UL>
 <P>The <I>files</I> keyword only appears in the "base" file for a set of
 multiple files indicated by the "%" character in the filename.  It
-tells SPARTA how many additional files exist in the set.  A "base"
+tells OpenEdge how many additional files exist in the set.  A "base"
 file has no additional sections, i.e. no body.
 </P>
 <P>The <I>points</I> keyword is optional (see below).  For a set of multiple
@@ -230,7 +230,7 @@ is no requirement that each point appear exactly once in the <I>Points</I>
 list.  For example, a point that is the common corner point of M
 triangles, could appear 1 or 2 or up to M times.  However, if the same
 point appears multiple times in the <I>Points</I> list, the coordinates of
-all copies must be numerically identical, in order for SPARTA to
+all copies must be numerically identical, in order for OpenEdge to
 verify the surface is a watertight object, as discussed below.
 </P>
 <P>IMPORTANT NOTE: The <I>points</I> keyword and <I>Points</I> section are not
@@ -256,7 +256,7 @@ For a set of multiple files, each line in the collection of all files
 should have a unique ID, and the IDs should range from 1 to N, where N
 is the number of lines specified in the base file.
 </P>
-<P>Note that SPARTA does not check line-IDs for uniqueness, only that
+<P>Note that OpenEdge does not check line-IDs for uniqueness, only that
 the smallest values is 1 and the largest value is N.  Also note that
 lines in an individual file (single or multiple) do not need to be
 listed by ID order; they can be in any order.
@@ -310,14 +310,14 @@ use format A.  If it was not, use format B.
 tri-ID (type) p1x p1y p1z p2x p2y p2z p3x p3y p3z (custom1) custom2) ...  # format B 
 </PRE>
 <P>The tri-ID is stored internally with the triangle and can be output
-with the <A HREF = "dump_surf.html">dump surf</A> comand.  If the read_surf command
+with the <A HREF = "dump.html">dump surf</A> comand.  If the read_surf command
 is reading a single file, the tri-IDs should be unique values from 1
 to N where N is the number of triangles specified in the header of the
 file.  For a set of multiple files, each triangle in the collection of
 all files should have a unique ID, and the IDs should range from 1 to
 N, where N is the number of triangles specified in the base file.
 </P>
-<P>Note that SPARTA does not check tri-IDs for uniqueness, only that the
+<P>Note that OpenEdge does not check tri-IDs for uniqueness, only that the
 smallest values is 1 and the largest value is N.  Also note that
 triangles in an individual file (single or multiple) do not need to be
 listed by ID order; they can be in any order.
@@ -487,7 +487,7 @@ boundary that is generated by the clip operation should be generated
 twice, once on the low side of the box and once on the high side.  And
 those two points must be periodic images of each other, as implied by
 periodicity.  If the surface you are reading does not clip in this
-manner, then SPARTA will likely generate an error about mis-matched or
+manner, then OpenEdge will likely generate an error about mis-matched or
 inconsistent cells when it attempts to mark all the grid cells and
 their corner points as inside vs outside the surface.
 </P>
@@ -612,8 +612,8 @@ already exist in the simulation, you must insure particles do not
 end up inside the added surfaces.  See the <I>particle</I> keyword
 for options with regard to particles.
 </P>
-<P>To read gzipped surface files, you must compile SPARTA with the
--DSPARTA_GZIP option - see <A HREF = "Section_start.html#start_2">Section 2.2</A> of
+<P>To read gzipped surface files, you must compile OpenEdge with the
+-DOpenEdge_GZIP option - see <A HREF = "Section_start.html#start_2">Section 2.2</A> of
 the manual for details.
 </P>
 <P>The <I>clip</I> keyword cannot be used when the <A HREF = "global.html">global surfs
@@ -652,7 +652,7 @@ can occur for infinitely thin surfaces due to numeric round-off.
 </P>
 <P>When running a simulation with multiple objects, read from one or more
 surface files, you should insure they do not touch or overlap with
-each other.  SPARTA does not check for this, but it will typically
+each other.  OpenEdge does not check for this, but it will typically
 lead to unphysical particle dynamics.
 </P>
 <P><B>Related commands:</B>
@@ -664,4 +664,5 @@ lead to unphysical particle dynamics.
 <P>The default origin for the vertices in the surface file is (0,0,0).
 The defaults for group = all, typeadd = 0, particle = none.
 </P>
+<!-- PAGE BREAK -->
 </HTML>

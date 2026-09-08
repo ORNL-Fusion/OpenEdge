@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -109,7 +109,7 @@ relative to the last time they were invoked.  Thus if you are printing
 out statistical output every 100 timesteps, the two keywords will
 continually output the time and timestep rate for the last 100 steps.
 </P>
-<P>The <I>wall</I> keyword is elapsed time in seconds since SPARTA was
+<P>The <I>wall</I> keyword is elapsed time in seconds since OpenEdge was
 launched.  This can be used to time portions of the input script in
 the following manner:
 </P>
@@ -170,8 +170,8 @@ command.
 </P>
 <P>The <I>ngrid</I> keyword is the number of grid cells which includes both
 unsplit and split cells.  The <I>nsplit</I> keyword is the number of split
-cells.  See <A HREF = "Section_howto.html#howto_8">Section howto 4.8</A> for a
-description of the hierarchical grid used by SPARTA and a definition
+cells.  See <A HREF = "Section_howto.html#howto_10">Section howto 4.8</A> for a
+description of the hierarchical grid used by OpenEdge and a definition
 of these kinds of grid cells.
 </P>
 <P>The <I>maxlevel</I> keyword is the # of levels of grid refinement currently
@@ -256,8 +256,8 @@ or stats keywords, or they can invoke other computes, fixes, or
 variables when evaluated, so this is a very general means of creating
 statistical output.
 </P>
-<P>See <A HREF = "Section_modify.html">Section_modify</A> for information on how to add
-new compute and fix styles to SPARTA to calculate quantities that can
+<P>See the source code for information on how to add
+new compute and fix styles to OpenEdge to calculate quantities that can
 then be referenced with these keywords to generate statistical output.
 </P>
 <HR>
@@ -272,4 +272,5 @@ then be referenced with these keywords to generate statistical output.
 </P>
 <PRE>stats_style step cpu np 
 </PRE>
+<!-- PAGE BREAK -->
 </HTML>

@@ -1,0 +1,80 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>surf_collide particulate/bounce command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>surf_collide ID particulate/bounce pstick pvel pdiff keyword value ... 
+</PRE>
+<UL><LI>ID = user-assigned name for the surface collision model 
+
+<LI>particulate/bounce = style name of this surface collision model 
+
+<LI>pstick = probability that an impacting particulate is removed (0 to 1) 
+
+<LI>pvel = fraction of the impact speed retained on reflection (0 to 1) 
+
+<LI>pdiff = probability of diffuse cosine-law reflection, otherwise specular (0 to 1) 
+
+<LI>zero or more keyword/value pairs may be appended 
+
+<LI>keyword = <I>pmass</I> or <I>ptemp</I> 
+
+<PRE>  <I>pmass</I> value = F = fraction of the radius retained on reflection
+    (0 < F <= 1); mass is scaled by F^3
+  <I>ptemp</I> value = F = factor applied to the particulate temperature
+    on reflection (> 0) 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>surf_collide particulate_wall particulate/bounce 0.7 0.4 0.5 &
+             pmass 0.9 ptemp 0.8
+surf_modify wall collide particulate_wall 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Define a collision model for finite-size particulates striking a
+surface. The model is assigned to surfaces via the
+<A HREF = "surf_modify.html">surf_modify</A> command.
+</P>
+<P>A particulate (a particle with positive radius) sticks and is removed
+with probability <I>pstick</I>. Otherwise it is reflected with speed
+<I>pvel</I> times its impact speed: with probability <I>pdiff</I> the direction
+is sampled from a cosine-law distribution about the surface normal,
+else the reflection is specular. After reflection the radius is
+multiplied by <I>pmass</I> and the mass by <I>pmass</I>^3, and the temperature
+is multiplied by <I>ptemp</I>.
+</P>
+<P>Particles without a positive radius are removed by this collision
+model, so it should only be assigned to surfaces hit by particulate
+species, or paired with separate handling of atomic species.
+</P>
+<HR>
+
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package. pstick, pvel and pdiff
+must lie in [0,1]; pmass in (0,1]; ptemp must be positive.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "surf_modify.html">surf_modify</A>, <A HREF = "surf_collide.html">surf_collide</A>,
+<A HREF = "fix_particulate_emit.html">fix particulate/emit</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The option defaults are pmass = 1.0 and ptemp = 1.0.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

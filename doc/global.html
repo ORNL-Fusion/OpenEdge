@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -17,7 +17,7 @@
 </PRE>
 <UL><LI>one or more keyword/value pairs 
 
-<LI>keyword = <I>fnum</I> or <I>nrho</I> or <I>vstream</I> or <I>temp</I> or <I>field</I> or <I>efield</I> or <I>bfield</I> or <I>surfs</I> or <I>surfgrid</I> or <I>surfmax</I> or <I>splitmax</I> or <I>surftally</I> or <I>gridcut</I> or <I>comm/sort</I> or <I>comm/style</I> or <I>weight</I> or <I>particle/reorder</I> or <I>mem/limit</I> or <I>pusher</I> or <I>boris_subcycles</I> or <I>boris_dump</I> or <I>boris_dump_every</I> or <I>boris_bad_dt_check</I> or <I>boris_bad_dt_limit</I>
+<LI>keyword = <I>fnum</I> or <I>nrho</I> or <I>vstream</I> or <I>temp</I> or <I>field</I> or <I>efield</I> or <I>bfield</I> or <I>surfs</I> or <I>surfgrid</I> or <I>surfmax</I> or <I>splitmax</I> or <I>surftally</I> or <I>gridcut</I> or <I>comm/sort</I> or <I>comm/style</I> or <I>weight</I> or <I>particle/reorder</I> or <I>mem/limit</I> or <I>optmove</I> or <I>pusher</I> or <I>phi_track</I> 
 
 <PRE>  <I>fnum</I> value = ratio
     ratio = Fnum ratio of physical particles to simulation particles
@@ -39,22 +39,16 @@
         fixID = ID of fix that computes per grid cell field components
         Nfreq = update field values every this many timesteps
   <I>efield</I> values = efstyle args
-    efstyle = <I>none</I> or <I>particle</I> or <I>grid</I>
+    efstyle = <I>none</I> or <I>particle</I>
       <I>none</I> arg = none
       <I>particle</I> args = fixID Nfreq
         fixID = ID of fix efield/particle that computes per particle E-field components
         Nfreq = update field values every this many timesteps (0 = once at start)
-      <I>grid</I> args = fixID Nfreq
-        fixID = ID of fix efield/grid that computes per grid cell E-field components
-        Nfreq = update field values every this many timesteps (0 = once at start)
   <I>bfield</I> values = bfstyle args
-    bfstyle = <I>none</I> or <I>particle</I> or <I>grid</I>
+    bfstyle = <I>none</I> or <I>particle</I>
       <I>none</I> arg = none
       <I>particle</I> args = fixID Nfreq
         fixID = ID of fix bfield/particle that computes per particle B-field components
-        Nfreq = update field values every this many timesteps (0 = once at start)
-      <I>grid</I> args = fixID Nfreq
-        fixID = ID of fix bfield/grid that computes per grid cell B-field components
         Nfreq = update field values every this many timesteps (0 = once at start)
   <I>surfs</I> value = explicit or explicit/distributed or implicit
     explicit = surfs defined in read_surf file, each proc owns copy of all surfs
@@ -91,32 +85,36 @@
     bytes = limit extra particle memory to this amount (in MBytes)
   <I>optmove</I> value = yes or no
     yes/no = use optimized particle move if yes, else use regular move 
-  <I>pusher</I> values = one or more pusher keyword/value pairs
-    pusher keyword = <I>mode</I>, <I>plasma</I>, <I>subcycles</I>, <I>gca_switch</I>,
-                     <I>boris_near</I>, <I>gca_integrator</I>, <I>dump</I>, <I>dump_every</I>,
-                     <I>bad_dt_check</I>, <I>bad_dt_limit</I>, or <I>sheath</I>
-      <I>mode</I> value = <I>boris</I>, <I>hybrid</I>, or <I>gca</I>
-      <I>plasma</I> value = compute or fix ID providing plasma fields
-      <I>subcycles</I> value = positive integer
-      <I>gca_switch</I> value = positive GCA validity factor
-      <I>boris_near</I> value = non-negative distance
-      <I>gca_integrator</I> value = <I>rk2</I>, <I>rk4</I>, or <I>simple</I>
-      <I>dump</I> value = yes or no
-      <I>dump_every</I> value = positive integer
-      <I>bad_dt_check</I> value = yes or no
-      <I>bad_dt_limit</I> value = positive number
-      <I>sheath</I> value = <I>off</I>, <I>kick</I>, <I>spatial</I>, or <I>boundary</I>, followed by
-                       optional <I>geom</I> ID, <I>mD_amu</I> mass, and <I>dmax</I> distance
-  <I>boris_subcycles</I> value = N
-    N = number of Boris substeps per particle move timestep (N &gt; 0)
-  <I>boris_dump</I> value = yes or no
-    yes/no = print Boris E/B debug line (rank 0, particle index 0)
-  <I>boris_dump_every</I> value = N
-    N = print Boris debug every N timesteps (N &gt; 0)
-  <I>boris_bad_dt_check</I> value = yes or no
-    yes/no = enable warning based on |q/m|*|B|*dt_sub
-  <I>boris_bad_dt_limit</I> value = X
-    X = warning threshold for |q/m|*|B|*dt_sub (X &gt; 0)
+</PRE>
+<PRE>  <I>pusher</I> values = one or more pusher keyword/value pairs
+    pusher keyword = <I>mode</I> or <I>plasma</I> or <I>skip</I> or <I>subcycles</I> or
+                     <I>gca_switch</I> or <I>gca_integrator</I> or <I>boris_near</I> or
+                     <I>gc_wall</I> or <I>switch_log</I> or <I>dump</I> or <I>dump_every</I> or
+                     <I>bad_dt_check</I> or <I>bad_dt_limit</I> or <I>sheath</I>
+      <I>mode</I> value = <I>boris</I> or <I>hybrid</I> or <I>gca</I>
+      <I>plasma</I> value = ID of a fix background or compute plasma/fields
+      <I>skip</I> value = mix-ID = mixture whose particles bypass the pusher
+      <I>subcycles</I> value = N = substeps per particle move (N > 0)
+      <I>gca_switch</I> value = F = Larmor-radius to gradient-scale switch factor (F > 0)
+      <I>gca_integrator</I> value = <I>rk4</I> or <I>rk2</I> or <I>simple</I>
+      <I>boris_near</I> values = M [rhoL]
+        M = force Boris within this distance of the sheath geometry (M >= 0, 0 = off)
+        rhoL = optional; interpret M as a multiple of the local Larmor radius
+      <I>gc_wall</I> value = <I>a0</I> or <I>flux</I>
+      <I>switch_log</I> value = file = base name of per-rank mode-switch log files
+      <I>dump</I> value = <I>yes</I> or <I>no</I>
+      <I>dump_every</I> value = N = print pusher diagnostics every N timesteps (N > 0)
+      <I>bad_dt_check</I> value = <I>yes</I> or <I>no</I>
+      <I>bad_dt_limit</I> value = X = warning threshold for |q/m|*|B|*dt_sub (X > 0)
+      <I>sheath</I> values = smode sargs
+        smode = <I>off</I> or <I>kick</I> or <I>spatial</I> or <I>boundary</I>
+        sargs = zero or more of <I>geom</I> ID, <I>mD_amu</I> M, <I>dmax</I> D, <I>waveform</I> attr freq
+          geom ID = ID of a compute nearest_surf/grid (required unless off)
+          mD_amu M = background ion mass in amu
+          dmax D = sheath engagement distance (D >= 0, 0 = automatic)
+          waveform attr freq = per-surface custom attribute and RF frequency (Hz)
+  <I>phi_track</I> value = yes or no
+    yes/no = accumulate the unwrapped toroidal angle of each particle 
 </PRE>
 
 </UL>
@@ -127,15 +125,17 @@ global vstream 100.0 0 0 fnum 5.0e18
 global temp 1000
 global weight cell radius 
 global mem/limit 100 
-global field constant 9.8 0 0 1
-global efield particle 1 1
-global bfield particle 2 1
-global efield grid 1 0
-global bfield grid 2 0
-global boris_subcycles 20
-global boris_bad_dt_check yes boris_bad_dt_limit 0.1
+global field constant 9.8 0 0 1 
+</PRE>
+<PRE>global efield particle fe 1
+global bfield particle fb 0 
+</PRE>
+<PRE>global pusher mode boris plasma pd subcycles 20
 global pusher plasma pd mode gca gca_integrator rk2
-global pusher plasma pd mode gca gca_integrator rk4
+global pusher mode hybrid plasma pd skip particulates gca_switch 2.5 &
+       gc_wall flux sheath boundary geom cgeom mD_amu 2.0
+global pusher mode boris plasma pd subcycles 50 sheath spatial geom cgeom
+global phi_track yes 
 </PRE>
 <P><B>Description:</B>
 </P>
@@ -187,11 +187,7 @@ the magnetic moment of each particle, is an example of a variable
 external field.  The fixID argument is the ID of a fix which computes
 the components of the field vector for each particle.  These may alter
 both the position and velocity of each particle when it is advected
-each timestep.  
-</P>
-<P>See the doc page for the <A HREF = "fix_field_particle.html">fix field/particle</A>
-command for the only current fix in SPARTA which is compatible with
-the <I>particle</I> setting.
+each timestep.
 </P>
 <P>The <I>grid</I> setting is for a field that is computed on a per grid cell
 basis and applied to all the particles in the grid cell.  A spatially-
@@ -207,90 +203,172 @@ computed once at the beginning of each simulation run.  For a field
 with time-dependence you can choose how often to recompute the field,
 depending on how fast it varies.
 </P>
-<P>The <I>efield</I> keyword specifies an external electric field for
-OpenEdge Boris particle pushing.  The <I>bfield</I> keyword specifies an
-external magnetic field.  Both keywords use the same syntax:
+<P>The <I>efield</I> keyword specifies an external electric field and the
+<I>bfield</I> keyword an external magnetic field for the charged-particle
+pusher.  Both keywords use the same syntax:
 </P>
 <PRE>global efield efstyle fixID Nfreq
-global bfield bfstyle fixID Nfreq
+global bfield bfstyle fixID Nfreq 
 </PRE>
-<P>where efstyle/bfstyle is <I>none</I>, <I>particle</I>, or <I>grid</I>.
-</P>
-<P>The <I>none</I> setting disables the field.
-</P>
-<P>The <I>particle</I> setting evaluates the field per particle every Nfreq
-timesteps using a fix efield/particle or fix bfield/particle.  These
-fixes reference particle-style variables.
-</P>
-<P>The <I>grid</I> setting evaluates the field per grid cell every Nfreq
-timesteps using a fix efield/grid or fix bfield/grid.  These fixes
-reference grid-style variables or compute sources.  An Nfreq of 0
-means the field is computed once at the start of the run and reused
-for all subsequent timesteps.  An Nfreq of 1 means the field is
-recomputed every timestep, which is required for time-dependent fields.
-</P>
-<P>All four variants (<I>efield particle</I>, <I>efield grid</I>, <I>bfield particle</I>,
-<I>bfield grid</I>) use the same argument format: fixID followed by Nfreq.
-</P>
-<P>For OpenEdge Boris particle pushing in 3d, additional controls are
-available:
-</P>
-<P>- <I>boris_subcycles</I> splits each particle move timestep into N Boris
-substeps.
-</P>
-<P>- <I>boris_dump</I> and <I>boris_dump_every</I> control optional Boris debug
-output of q/m and E/B values.
-</P>
-<P>- <I>boris_bad_dt_check</I> and <I>boris_bad_dt_limit</I> enable a runtime
-warning if the substep is too large, using
-  |q/m|*|B|*dt_sub &gt; limit.
-</P>
-<P>The <I>pusher</I> keyword is the hierarchical OpenEdge interface for Boris,
-hybrid Boris/GCA, and pure guiding-center motion.  The <I>plasma</I> value
-must identify either a compute plasma/fields command or a fix background
-command.  Pure <I>gca</I> mode always uses GCA when a non-zero magnetic field
-and charged particle are present.  <I>hybrid</I> mode uses <I>gca_switch</I> to
-select between Boris and GCA from the Larmor-radius to magnetic-gradient
-scale ratio.  <I>boris_near</I> can force the Boris path within the specified
-distance of the configured sheath geometry.
-</P>
-<P>The <I>gca_integrator</I> value selects the guiding-center time integrator.
-<I>rk4</I> evaluates the full Littlejohn B-star RHS four times and is the
-backward-compatible default.  <I>rk2</I> uses the explicit midpoint method
-and evaluates the same full RHS twice.  <I>simple</I> uses a reduced one-stage
-update without the full curvature/curl(b) correction.  In the current
-CPU implementation, E, B, and their derivatives are sampled once and
-frozen over the timestep for all stages.  Thus RK2 halves the full-RHS
-algebra relative to RK4, but not the number of mesh-field queries.
-</P>
-<P>When using <I>bfield</I> with the <I>grid</I> style, an update frequency of 0
-means field values are computed once at run start and then re-used for
-all subsequent timesteps.  The field is still applied every particle
-move.
-</P>
-<P>See the doc page for the <A HREF = "fix_field_grid.html">fix field/grid</A> command
-for the only current fix in SPARTA which is compatible with the
-<I>grid</I> setting.
+<P>where efstyle/bfstyle is <I>none</I> or <I>particle</I>.  The <I>none</I> setting
+disables the field.  The <I>particle</I> setting evaluates the field per
+particle every Nfreq timesteps using a <A HREF = "fix_efield_particle.html">fix
+efield/particle</A> or <A HREF = "fix_bfield_particle.html">fix
+bfield/particle</A>, which reference
+particle-style variables.  An Nfreq of 0 means the field is computed
+once at the start of the run and reused for all subsequent timesteps.
+An Nfreq of 1 means the field is recomputed every timestep, which is
+required for time-dependent fields.  These fields are intended for
+verification cases with analytic fields; production simulations take
+E and B from the plasma provider named by the <I>plasma</I> value of the
+<I>pusher</I> keyword.
 </P>
 <P>Note that there is a tradeoff between the <I>particle</I> and <I>grid</I>
-options.  For the <I>particle</I> option the field must be computed every
-timestep for all particles; the field values are accurately computed
-at precisely each particle's position but it is an expensive
-operation.  For the <I>grid</I> option the field is only computed once at
-the beginning of a run or once every Nfreq timesteps.  Even if it is
-computed every timestep, the number of grid cells is typically much
-smaller than the number of particles.  However the accuracy of the
-field applied to each particle is more approximate than for the
-<I>particle</I> option.  This is because the field applied to each particle
-is the value it has at the center of the particle's grid cell.
-</P>
-<P>In OpenEdge 3d Boris pushing with per-grid E/B fields, trilinear
-interpolation on uniform grids is used when neighbor cell values are
-available.
+options of the <I>field</I> keyword.  For the <I>particle</I> option the field
+must be computed every timestep for all particles; the field values
+are accurately computed at precisely each particle's position but it
+is an expensive operation.  For the <I>grid</I> option the field is only
+computed once at the beginning of a run or once every Nfreq
+timesteps.  Even if it is computed every timestep, the number of grid
+cells is typically much smaller than the number of particles.
+However the accuracy of the field applied to each particle is more
+approximate than for the <I>particle</I> option.  This is because the
+field applied to each particle is the value it has at the center of
+the particle's grid cell.
 </P>
 <HR>
 
-<P>The <I>surfs</I> keyword determines what kind of surface elements SPARTA
+<P>The <I>pusher</I> keyword configures the charged-particle pusher: full
+gyro-orbit Boris integration, guiding-center (GCA) integration, or a
+hybrid that switches between the two per particle.  All pusher
+sub-keywords follow the word <I>pusher</I> and may be split over several
+<I>global pusher</I> commands; parsing of pusher sub-keywords ends at the
+first token that is not one of them.
+</P>
+<P>The <I>mode</I> value selects the integrator.  <I>boris</I> integrates the full
+gyro-orbit with the Boris rotation and should be used when the
+gyroradius is resolved or gyro-phase physics matters.  <I>gca</I>
+integrates the guiding center (E x B, grad-B and curvature drifts,
+mirror force, and parallel dynamics) and is far cheaper when the
+gyroradius is much smaller than the resolved scales.  <I>hybrid</I>
+chooses per particle and per step: GCA where the local Larmor radius
+rho_L is small compared to the magnetic gradient scale
+L_B = |B| / |grad |B||, Boris elsewhere.  The <I>gca_switch</I> factor F
+sets that criterion: GCA is used when rho_L < L_B / F.  The same
+test is applied as a fail-safe in pure <I>gca</I> mode, so that a particle
+whose Larmor radius rivals the gradient scale (e.g. a charged dust
+grain) is never guiding-center transformed.  GCA is only selected
+when the field source provides field derivatives (an equilibrium or
+constant field); with a mesh-only B the particle stays on the Boris
+path.
+</P>
+<P>The <I>plasma</I> value names the provider of the plasma and fields: a
+<A HREF = "fix_background.html">fix background</A> or a <A HREF = "compute_plasma_fields.html">compute
+plasma/fields</A>.  Without a plasma
+provider the pusher uses only the <I>efield</I>/<I>bfield</I> settings.
+Particles in the mixture named by <I>skip</I> bypass the pusher entirely;
+use it for finite-size particulates whose forces come from the
+particulate fixes.
+</P>
+<P>The <I>subcycles</I> value sub-steps the orbit integration N times within
+each particle move.  The <I>gca_integrator</I> value selects the
+guiding-center time integrator: <I>rk4</I> evaluates the full
+Littlejohn B-star right-hand side four times per step, <I>rk2</I> uses
+the explicit midpoint method with two evaluations, and <I>simple</I> is a
+reduced one-stage update without the curvature and curl(b)
+corrections, suitable only for scoping.  In all three the fields and
+their derivatives are sampled once per step and frozen over the
+stages, so <I>rk2</I> halves the algebra of <I>rk4</I> but not the number of
+field queries.
+</P>
+<P>The <I>boris_near</I> value forces the Boris path for a guiding-center
+particle within distance M of the nearest wall element, using the
+per-cell geometry of the compute named by the sheath <I>geom</I> value.
+With the optional <I>rhoL</I> token M is a multiple of the particle's
+local Larmor radius instead of a length.  Once switched, a particle
+stays on the Boris path until it has completed at least two
+gyroperiods and is clear of twice the shell distance (hysteresis).
+A value of 0 disables the shell.  The <I>gc_wall</I> value chooses how a
+guiding-center particle is tested against walls: <I>a0</I> uses the
+guiding-center point with a uniformly distributed gyrophase; <I>flux</I>
+reconstructs the gyro-orbit when the guiding center can reach the
+wall within the step and samples the gyrophase from the first-passage
+flux weight, which is needed to reproduce the impact angle and
+energy distributions of the resolved orbit.  The <I>switch_log</I> value
+writes every hybrid mode switch (timestep, particle ID, old and new
+mode, reason, distances, and energies) as CSV to one file per MPI
+rank named file.rankN.
+</P>
+<P>The <I>dump</I> and <I>dump_every</I> values enable a diagnostic line for the
+first particle on rank 0 every N timesteps, and set the interval at
+which the sheath model prints its per-step summary.  The
+<I>bad_dt_check</I> and <I>bad_dt_limit</I> values enable a one-time warning
+when the substep is too large to resolve the gyromotion, i.e. when
+|q/m|*|B|*dt_sub exceeds the limit; the step is not modified.
+</P>
+<HR>
+
+<P>The <I>sheath</I> value adds a Debye-sheath and magnetic-presheath model
+that accelerates ions toward absorbing surfaces.  The <I>geom</I> ID must
+name a <A HREF = "compute_nearest_surf_grid.html">compute nearest_surf/grid</A>
+that provides the per-cell distance to the nearest wall element, its
+index, and its normal; it is required for every mode except <I>off</I>.
+Upstream Te, Ti, ne, and B come from the pusher's <I>plasma</I> provider.
+</P>
+<P>The modes are as follows.  <I>off</I> applies no sheath.  <I>kick</I> applies
+the sheath energy as a velocity boost at the moment a particle hits
+a wall element of the <I>geom</I> surface group; there is no near-wall
+electric field, which makes it robust at grazing angles and suited
+to impact-energy and angle (IEAD) diagnostics.  <I>spatial</I> applies
+the sheath potential as a spatially resolved impulse over the sheath
+width: the sheath electric field is integrated during each Boris
+substep as the particle approaches the wall, so a higher <I>subcycles</I>
+count (typically 50 to 500) is needed to sample the field at
+sub-Debye-length resolution.  <I>boundary</I> treats the sheath as a
+potential barrier at absorbing surfaces: no spatial field is applied,
+ions that reach the wall receive the sheath drop and particles that
+cannot overcome the barrier are reflected back into the plasma
+(prompt redeposition), with the escape deceleration charged once per
+sheath transit.
+</P>
+<P>The sheath scales are set automatically from the local plasma.  The
+angle between B and the wall normal gives the magnetic-presheath
+thickness L_MPS = rho_i * tan(alpha), evaluated at the particle
+position and clamped so that it stays finite at grazing incidence.
+The engagement distance is dmax = max(5 L_MPS, 10 lambda_D); the
+<I>dmax</I> value overrides it with a fixed distance, and 0 restores the
+automatic choice.  The wall potential is the Bohm floating-wall
+value 0.5 * Te * ln( (mD / (2 pi me)) / (1 + Ti/Te) ), where mD is
+the background ion mass set by <I>mD_amu</I>.  The potential profile is a
+combined Coulette-Manfredi kinetic fit close to the wall and a
+Borodkina magnetic-presheath tail beyond about 60 lambda_D, blended
+linearly between 60 and 120 lambda_D.  When the sheath is active the
+per-particle electron density used by the volume chemistry models is
+also reduced by the Boltzmann factor exp(-phi(d)/Te) inside dmax, so
+ionization sources fall off correctly through the presheath.
+</P>
+<P>The <I>waveform</I> value drives the wall potential of RF-biased surfaces.
+Its first argument names a per-surface custom attribute (see the
+<A HREF = "custom.html">custom</A> command) of type double with 3 values per
+element, [Vdc, Vrf_peak, phase_rad], and its second argument is
+the RF frequency in Hz; the instantaneous wall bias is
+Vdc + Vrf_peak * sin(2 pi f t + phase).  The waveform is only
+available with <I>sheath boundary</I>.
+</P>
+<HR>
+
+<P>The <I>phi_track</I> keyword accumulates, for every particle advanced by
+the mover in an axisymmetric simulation, the unwrapped toroidal angle
+into a custom per-particle attribute named <I>phi_unwrap</I>.  The angle
+is incremented by the change of atan2(z,y) at every remap to the
+(R,Z) plane, giving full 2D3V trajectories with toroidal phase, e.g.
+for synthetic-camera projections without a 3d mesh.  Particles
+advanced by the pure guiding-center path do not use the remap and are
+not tracked.
+</P>
+<HR>
+
+<P>The <I>surfs</I> keyword determines what kind of surface elements OpenEdge
 uses and how they are distributed across processors.  Possible values
 are <I>explicit</I>, <I>explicit/distributed</I>, and <I>implicit</I>.  See the
 <A HREF = "Section_howto.html#howto_13">Howto 6.13</A> section of the manual for an
@@ -384,7 +462,7 @@ cells are generated, a warning to this effect will be triggered.  At a
 later point when surfaces are read in or a simulation is performed, an
 error will result.  The solution is to use the
 <A HREF = "balance_grid.html">balance_grid</A> command to change to a clumped grid
-cell assignment.  See <A HREF = "Section_howto.html#howto_8">Section 6.8</A> of the
+cell assignment.  See <A HREF = "Section_howto.html#howto_12">Section 4.10</A> of the
 manual for an explanation of clumped and dispersed grid cell
 assignments and their relative performance trade-offs.
 </P>
@@ -421,9 +499,9 @@ there may be no particle migration needed to upwind processors, so the
 <I>all</I> method can generate smaller counts of neighboring processors.
 </P>
 <P>Note that the <I>neigh</I> style only has an effect (at run time) when the
-grid is decomposed by the RCB option of the <A HREF = "balance.html">balance</A> or
+grid is decomposed by the RCB option of the <A HREF = "fix_balance.html">balance</A> or
 <A HREF = "fix_balance.html">fix balance</A> commands.  If that is not the case,
-SPARTA performs the particle communication as if the <I>all</I> setting
+OpenEdge performs the particle communication as if the <I>all</I> setting
 were in place.
 </P>
 <P>The <I>weight</I> keyword determines whether particle weighting is used.
@@ -493,7 +571,7 @@ Setting a limit on the memory size will perform these operations more
 incrementally so that memory errors do not occur. 
 </P>
 <P>A load-balance operation can use as much as 3x more memory than the 
-memory used to store particles (reported by SPARTA when a simulation 
+memory used to store particles (reported by OpenEdge when a simulation
 begins). Particle reordering temporarily doubles the memory needed to 
 store particles because it is performed out-of-place by default. Reading 
 and writing restart files also requires temporary buffers to hold grid 
@@ -557,6 +635,14 @@ defined, e.g. via the <A HREF = "read_surf.html">read_surf</A> command.
 surfs = explicit, surfgrid = auto,
 surfmax = 100, splitmax = 10, surftally = auto,
 gridcut = -1.0, comm/sort = no, comm/style = neigh, weight = cell
-none, particle/reorder = 0, mem/limit = 0, optmove = no.
+none, particle/reorder = 0, mem/limit = 0, optmove = no, phi_track =
+no.
 </P>
+<P>The pusher defaults are mode = boris, no plasma provider, no skip
+mixture, subcycles = 1, gca_switch = 2.5, gca_integrator = rk4,
+boris_near = 0, gc_wall = a0, no switch_log, dump = no, dump_every =
+1, bad_dt_check = yes, bad_dt_limit = 0.1, sheath = off, mD_amu =
+2.0141, dmax = 0 (automatic), no waveform.
+</P>
+<!-- PAGE BREAK -->
 </HTML>

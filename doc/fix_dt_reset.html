@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -45,7 +45,7 @@ cell timesteps calculated by a compute or fix.  The new global
 timestep can be output by the <A HREF = "stats_style.html">stats_style</A> command.
 Or it can be used to overwrite the current global timestep for a
 variable time simulation.  See this
-<A HREF = "Section_howto.html#howto_17">section</A> of the manual for more
+<A HREF = "Section_howto.html#howto_14">section</A> of the manual for more
 information on variable timestep simulations.
 </P>
 <P>The <I>Nfreq</I> argument specifies how often the global timestep is calculated.
@@ -73,8 +73,8 @@ can only be invoked on those timesteps.
 data used to calculate the timestep, such as mean collision time, temperature, or particle speed, may be zero.
 Also, some cells may not contain particles, either due to their type or to local flow conditions.
 For example, split cells (in which sub cells store the particles) and cells interior to surface
-objects do not store particles.  See <A HREF = "Section_howto.html#howto_8">Section 6.8</A> of the manual for
-details of how SPARTA defines child, unsplit, split, and sub cells.
+objects do not store particles.  See <A HREF = "Section_howto.html#howto_12">Section 4.10</A> of the manual for
+details of how OpenEdge defines child, unsplit, split, and sub cells.
 </P>
 <P>From the per-cell timesteps, 3 values are extracted by this fix.  They
 are the minimum positive timestep (DTmin) for all cells, the maximum positive timestep
@@ -116,4 +116,5 @@ timestep is overwritten with the new value.
 </P>
 <P><B>Default:</B> none
 </P>
+<!-- PAGE BREAK -->
 </HTML>

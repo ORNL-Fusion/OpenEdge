@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -49,7 +49,7 @@ grid cells, or surface elements.  To create or reset an attribute a
 variable is specified and evaluated.  Custom attributes can be can be
 vectors (single value per entity) or arrays (mutiple values per
 entity).  They can also be integer or floating point values.  See
-"Section 6.17"_Section_howto.html#howto_17 for more discussion of
+"Section 4.14"_Section_howto.html#howto_14 for more discussion of
 custom attributes.
 
 The specified {style} setting is {particle} or {grid} or {surf}

@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -137,7 +137,7 @@ is ignored.  This means variables can NOT be re-defined in an input
 script (with 2 exceptions, read further).  This is to allow an input
 script to be processed multiple times without resetting the variables;
 see the "jump"_jump.html or "include"_include.html commands.  It also
-means that using the "command-line switch"_Section_start.html#start_7
+means that using the "command-line switch"_Section_start.html#start_5
 -var will override a corresponding index variable setting in the input
 script.
 
@@ -205,7 +205,7 @@ variable.
 
 {Index} style variables with a single string value can also be set by
 using the command-line switch -var; see "Section
-2.6"_Section_start.html#start_7 of the manual for details.
+2.5"_Section_start.html#start_5 of the manual for details.
 
 The {loop} style is identical to the {index} style except that the
 strings are the integers from 1 to N inclusive, if only one argument N
@@ -221,8 +221,8 @@ N1 <= N2 and N2 >= 0 is required.
 
 For the {world} style, one or more strings are specified.  There must
 be one string for each processor partition or "world".  See "Section
-2.6"_Section_start.html#start_7 of the manual for information on
-running SPARTA with multiple partitions via the "-partition"
+2.5"_Section_start.html#start_5 of the manual for information on
+running OpenEdge with multiple partitions via the "-partition"
 command-line switch.  This variable command assigns one string to each
 world.  All processors in the world are assigned the same string.  The
 next command cannot be used with {equal} style variables, since there
@@ -231,8 +231,8 @@ you wish to run different simulations on different partitions.
 
 For the {universe} style, one or more strings are specified.  There
 must be at least as many strings as there are processor partitions or
-"worlds".  See "this page"_Section_start.html#start_7 for information
-on running SPARTA with multiple partitions via the "-partition"
+"worlds".  See "this page"_Section_start.html#start_5 for information
+on running OpenEdge with multiple partitions via the "-partition"
 command-line switch.  This variable command initially assigns one
 string to each world.  When a "next"_next.html command is encountered
 using this variable, the first processor partition to encounter it, is
@@ -242,7 +242,7 @@ variable strings are consumed.  Thus, this command can be used to run
 one after the other on whatever partition becomes available, until
 they are all finished.  {Universe} style variables are incremented
 using the files "tmp.sparta.variable" and "tmp.sparta.variable.lock"
-which you will see in your directory during such a SPARTA run.
+which you will see in your directory during such a OpenEdge run.
 
 The {uloop} style is identical to the {universe} style except that the
 strings are the integers from 1 to N.  This allows generation of long
@@ -266,7 +266,7 @@ For the {getenv} style, a single string is assigned to the variable
 which should be the name of an environment variable.  When the
 variable is evaluated, it returns the value of the environment
 variable, or an empty string if it not defined.  This style of
-variable can be used to adapt the behavior of SPARTA input scripts via
+variable can be used to adapt the behavior of OpenEdge input scripts via
 environment variable settings, or to retrieve information that has
 been previously stored with the "shell putenv"_shell.html command.
 Note that because environment variable settings are stored by the
@@ -293,7 +293,7 @@ a non-blank line, delimited by white space, is the "string" assigned
 to the variable.
 
 For the {internal} style a numeric value is provided.  This value will
-be assigned to the variable until a SPARTA command sets it to a new
+be assigned to the variable until a OpenEdge command sets it to a new
 value.  There is currently only one command that requirew {internal}
 variables as inputs, because it resets them:
 "create_particles"_create_particles.html.  As mentioned above, an
@@ -316,12 +316,12 @@ each particle whenever it is evaluated.  For {grid} style variables
 the formula computes one quantity for each grid cell whenever it is
 evaluated.  A {grid} style variable computes quantites for all flavors
 of child grid cells in the simulation, which includes unsplit, cut,
-split, and sub cells.  See "Section 4.8"_Section_howto.html#howto_8 of
-the manual gives details of how SPARTA defines child, unsplit, split,
+split, and sub cells.  See "Section 4.8"_Section_howto.html#howto_10 of
+the manual gives details of how OpenEdge defines child, unsplit, split,
 and sub cells.  For {surf} style variables the formula computes one
 quantity for each surface element (line or triangle) whenever it is
 evaluated.  They can only be defined for explicit surfaces, not
-implicit surfaces.  See "Section 4.9"_Section_howto.html#howto_9 of
+implicit surfaces.  See "Section 4.9"_Section_howto.html#howto_11 of
 the manual for a description of both kinds of surface elements.
 
 Note that {equal}, {particle}, {grid}, and {surf} variables can
@@ -789,7 +789,7 @@ can be defined and used by specific commands, e.g. "fix
 ambipolar"_fix_ambipolar.html or "fix surf/temp"_fix_surf_temp.html or
 "surf_react adsorb"_surf_react_adsorb.html.  The name of each
 attribute sis set by the user or defined by the command.  See "Section
-6.17"_Section_howto.html#howto_17 for more discussion of custom
+6.17"_Section_howto.html#howto_14 for more discussion of custom
 attributes.
 
 Single-value attributes are referred to as per-particle, per-grid, or
@@ -868,7 +868,7 @@ sign (e.g. $x or $\{abc\}) versus with a leading "v_" (e.g. v_x or
 v_abc).  The former can be used in any input script command, including
 a variable command.  The input script parser evaluates the reference
 variable immediately and substitutes its value into the command.  As
-explained in "Section commands 3.2"_Section_commands.html#3_2 for
+explained in "Section 3.2"_Section_commands.html#cmd_2 for
 "Parsing rules", you can also use un-named "immediate" variables for
 this purpose.  For example, a string like this
 $((xlo+xhi)/2+sqrt(v_area)) in an input script command evaluates the
@@ -876,7 +876,7 @@ string between the parenthesis as an equal-style variable formula.
 
 Referencing a variable with a leading "v_" is an optional or required
 kind of argument for some commands (e.g. the "fix
-ave/spatial"_fix_ave_spatial.html or "dump custom"_dump.html or
+ave/grid"_fix_ave_grid.html or "dump custom"_dump.html or
 "stats_style"_stats_style.html commands) if you wish it to evaluate a
 variable periodically during a run.  It can also be used in a variable
 formula if you wish to reference a second variable.  The second
@@ -924,7 +924,7 @@ is evaluated later.
 
 [Variable Accuracy:]
 
-Obviously, SPARTA attempts to evaluate variables containing formulas
+Obviously, OpenEdge attempts to evaluate variables containing formulas
 ({equal}, {particle}, {grid}, {surf} style variables) accurately
 whenever the evaluation is performed.  Depending on what is included
 in the formula, this may require invoking a "compute"_compute.html, or
@@ -935,9 +935,9 @@ pressure induced on a global boundary due to collisions, then these
 quantities need to be tallied during the timesteps on which the
 variable will need the values.
 
-SPARTA keeps track of all of this as it performs a "run"_run.html as
+OpenEdge keeps track of all of this as it performs a "run"_run.html as
 well as in between simulations.  An error will be generated if you
-attempt to evaluate a variable when SPARTA knows it cannot produce
+attempt to evaluate a variable when OpenEdge knows it cannot produce
 accurate values.  For example, if a "stats"_stats.html command prints
 a variable which accesses values stored by a "fix
 ave/time"_fix_ave_time.html command and the timesteps on which stats
@@ -948,7 +948,7 @@ However, there are two special cases to be aware of when a variable
 requires invocation of a compute (directly or indirectly).  The first
 is if the variable is evaluated before a "run"_run.html command which
 follows the "compute"_compute.html command which created that compute.
-In this case, SPARTA will generate an error.  This is because some
+In this case, OpenEdge will generate an error.  This is because some
 computes require initializations which does not take place unit a run
 is initialized.  One example is the "compute
 property/surf"_compute_property_surf.html command which creates a list
@@ -963,7 +963,7 @@ the "remove_surf"_remove_surf.html command could be used to remove
 surface elements.  If the variable depends on a "property/surf
 compute"_compute_property_surf.html, that compute will not
 re-initialize itself until the next simulation.  Thus it may generate
-an incorrect answer when evaluated.  Note that SPARTA will not
+an incorrect answer when evaluated.  Note that OpenEdge will not
 generate an error in this case; the evaluated variable may simply be
 incorrect.
 

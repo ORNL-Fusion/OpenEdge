@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -166,8 +166,8 @@ then a PNG format is created, else a PPM (aka NETPBM) format file is
 created.  The JPEG and PNG files are binary; PPM has a text mode
 header followed by binary data.  JPEG images have lossy compression;
 PNG has lossless compression; and PPM files are uncompressed but can
-be compressed with gzip, if SPARTA has been compiled with
--DSPARTA_GZIP and a ".gz" suffix is used.
+be compressed with gzip, if OpenEdge has been compiled with
+-DOpenEdge_GZIP and a ".gz" suffix is used.
 </P>
 <P>Similarly, the format of the resulting movie is chosen with the
 <I>movie</I> dump style.  This is handled by the underlying FFmpeg
@@ -177,9 +177,9 @@ examples are: .avi, .mpg, .m4v, .mp4, .mkv, .flv, .mov, .gif
 Additional settings of the movie compression like bitrate and
 framerate can be set using the <A HREF = "dump_modify.html">dump_modify</A> command.
 </P>
-<P>To write out JPEG and PNG format files, you must build SPARTA with
+<P>To write out JPEG and PNG format files, you must build OpenEdge with
 support for the corresponding JPEG or PNG library.  To convert images
-into movies, SPARTA has to be compiled with the -DSPARTA_FFMPEG flag.
+into movies, OpenEdge has to be compiled with the -DOpenEdge_FFMPEG flag.
 See <A HREF = "Section_start.html#start_2">Section 2.2</A> of the manual for
 instructions on how to do this.
 </P>
@@ -389,7 +389,7 @@ By default the mapping of proc IDs to colors is as follows:
 IDs range from 1 to Nprocs inclusive, instead of the more customary 0
 to Nprocs-1.  This mapping can be changed by the <A HREF = "dump_modify.html">dump_modify
 scolor</A> command, which has not yet been added to
-SPARTA.
+OpenEdge.
 </P>
 <P>The <I>color</I> setting can also be a per-surf compute or fix.  In this
 case, it is specified as <I>c_ID</I> or <I>c_ID[N]</I> for a compute and as
@@ -626,21 +626,21 @@ supported.
 
 <P><B>Restrictions:</B>
 </P>
-<P>To write JPEG images, you must use the -DSPARTA_JPEG switch when
-building SPARTA and link with a JPEG library. To write PNG images, you
-must use the -DSPARTA_PNG switch when building SPARTA and link with a
+<P>To write JPEG images, you must use the -DOpenEdge_JPEG switch when
+building OpenEdge and link with a JPEG library. To write PNG images, you
+must use the -DOpenEdge_PNG switch when building OpenEdge and link with a
 PNG library.
 </P>
-<P>To write <I>movie</I> files, you must use the -SPARTA_FFMPEG switch when
-building SPARTA.  The FFmpeg executable must also be available on the
-machine where SPARTA is being run.  Typically it's name is lowercase,
+<P>To write <I>movie</I> files, you must use the -OpenEdge_FFMPEG switch when
+building OpenEdge.  The FFmpeg executable must also be available on the
+machine where OpenEdge is being run.  Typically it's name is lowercase,
 i.e. ffmpeg.
 </P>
-<P>See <A HREF = "Section_start.html#start_2_2">Section 2.2.2</A> section of the
+<P>See <A HREF = "Section_start.html#start_2">Section 2.2</A> section of the
 documentation for details on how to compile with optional switches.
 </P>
 <P>Note that since FFmpeg is run as an external program via a pipe,
-SPARTA has limited control over its execution and no knowledge about
+OpenEdge has limited control over its execution and no knowledge about
 errors and warnings printed by it. Those warnings and error messages
 will be printed to the screen only. Due to the way image data is
 communicated to FFmpeg, it will often print the message + pipe::
@@ -690,4 +690,5 @@ mp4).
 <LI>shiny = 1.0
 <LI>ssao = no 
 </UL>
+<!-- PAGE BREAK -->
 </HTML>

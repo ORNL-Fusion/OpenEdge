@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -202,7 +202,7 @@ default, then it will not be written.
 multiple successive snapshots to the same file.  It determines whether
 a flush operation is invoked after a dump snapshot is written to the
 dump file.  A flush insures the output in that file is current (no
-buffering by the OS), even if SPARTA halts before the simulation
+buffering by the OS), even if OpenEdge halts before the simulation
 completes.
 </P>
 <HR>
@@ -229,14 +229,14 @@ the default setting is used.  A setting of <I>none</I> clears all previous
 settings, reverting all values to their default format.
 </P>
 <P>NOTE: Grid cell IDs are stored internally as 4-byte or 8-byte signed
-integers, depending on how SPARTA was compiled.  When specifying the
+integers, depending on how OpenEdge was compiled.  When specifying the
 <I>format int</I> option you can use a "%d"-style format identifier in the
-format string and SPARTA will convert this to the corresponding 8-byte
+format string and OpenEdge will convert this to the corresponding 8-byte
 form it it is needed when outputting those values.  However, when
 specifying the <I>line</I> option or <I>format M string</I> option for those
 values, you should specify a format string appropriate for an 8-byte
-signed integer, e.g. one with "%ld", if SPARTA was compiled with the
--DSPARTA_BIGBIG option for 8-byte IDs.
+signed integer, e.g. one with "%ld", if OpenEdge was compiled with the
+-DOpenEdge_BIGBIG option for 8-byte IDs.
 </P>
 <HR>
 
@@ -658,7 +658,7 @@ defined by the <A HREF = "group.html">group surf</A> command.
 </UL>
 <HR>
 
-<P>These are the 140 colors that SPARTA pre-defines for use with the
+<P>These are the 140 colors that OpenEdge pre-defines for use with the
 <A HREF = "dump_image.html">dump image</A> and dump_modify commands.  Additional
 colors can be defined with the dump_modify color command.  The 3
 numbers listed for each name are the RGB (red/green/blue) values.
@@ -695,4 +695,5 @@ Divide each value by 255 to get the equivalent 0.0 to 1.0 value.
 <TR><TD >wheat = 245, 222, 179 </TD><TD >white = 255, 255, 255 </TD><TD >whitesmoke = 245, 245, 245 </TD><TD >yellow = 255, 255, 0 </TD><TD >yellowgreen = 154, 205, 50 
 </TD></TR></TABLE></DIV>
 
+<!-- PAGE BREAK -->
 </HTML>

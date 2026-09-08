@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -22,13 +22,13 @@ units cgs :pre
 
 This command sets the style of units used for a simulation.  It
 determines the units of all quantities specified in the input script
-and various input files read by SPARTA, as well as the units of all
+and various input files read by OpenEdge, as well as the units of all
 quantities output to the screen, log file, dump files, and other
 output files.  Typically, this command is used at the very beginning
 of an input script.
 
 IMPORTANT NOTE: Internally, this command simply sets the numeric
-values of conversion factors used by SPARTA, e.g. the Boltzmann
+values of conversion factors used by OpenEdge, e.g. the Boltzmann
 constant used to convert temperature to energy.  It is up to you to
 insure that all input values used in the input script and other input
 files (surface data, species files, reaction files) contain numeric

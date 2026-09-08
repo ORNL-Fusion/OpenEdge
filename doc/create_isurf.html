@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -51,21 +51,21 @@ segments.  However each element is contained within a single grid
 cell.
 </P>
 <P>A related command which defines implicit surfaces is the
-<A HREF = "read_isurf">read_isurf</A> command which reads a file of corner point
+<A HREF = "read_isurf.html">read_isurf</A> command which reads a file of corner point
 values defined on a 2d or 3d grid, which is mapped to (a portion of)
-the SPARTA grid.  It then calculates appropriate implicit line
+the OpenEdge grid.  It then calculates appropriate implicit line
 segments or triangles within each grid cell based on its 4 or 8 corner
-points.  See the <A HREF = "read_isurf">read_isurf</A> command for details.
+points.  See the <A HREF = "read_isurf.html">read_isurf</A> command for details.
 </P>
 <P>This command derives the 2d or 3d grid of corner point values from the
 set of explicit surface elements, rather then reading them from a
-file <A HREF = "#Hong24">(Hong24)</A>.  It then proceeds similarly to the <A HREF = "read_isurf">read_isurf</A>
+file <A HREF = "#Hong24">(Hong24)</A>.  It then proceeds similarly to the <A HREF = "read_isurf.html">read_isurf</A>
 command where implicit line segments or triangles within each grid
 cell are calculated from the 4 or 8 corner points of the cell.  When
 the process is complete, all explicit surfaces are removed from the
-simulation.  This is because SPARTA does not currently allow both
+simulation.  This is because OpenEdge does not currently allow both
 implicit and explicit surfaces to simulataneously exist.  The
-<A HREF = "read_isurf">read_isurf</A> doc page has additional information about
+<A HREF = "read_isurf.html">read_isurf</A> doc page has additional information about
 using implicit surfaces in a simulation, which also apply to this
 command.
 </P>
@@ -85,7 +85,7 @@ command.  Click on each image for a larger version:
 </CENTER>
 <CENTER><A HREF = "JPG/implicit_eggcarton.png"><IMG SRC = "JPG/implicit_eggcarton_small.png"></A>
 </CENTER>
-<CENTER><A HREF = "JGP/implicit_cone.png"><IMG SRC = "JPG/implicit_cone_small.png"></A>
+<CENTER><A HREF = "JPG/implicit_cone.png"><IMG SRC = "JPG/implicit_cone_small.png"></A>
 </CENTER>
 <HR>
 
@@ -101,7 +101,7 @@ as explained in the next paragraph.
 </P>
 <P>IMPORTANT NOTE: The aggregate set of implicit surfaces created by this
 command must represent a watertight object(s), the same as explained
-for the read_surf command, otherwise SPARTA will generate an
+for the read_surf command, otherwise OpenEdge will generate an
 error. The marching cube and square algorithms guarantee this (see the
 <A HREF = "read_isurf.html">read_isurf</A> doc page for details).  However, if the
 Nx by Ny by Nz array of grid cells is interior to the simulation box,
@@ -156,7 +156,7 @@ of the solid fractions in each of the N surrounding cells divided by
 N.  (The specific value of N is explained in the next paragraph.)  The
 solid fraction is computed from the solid volume which is determined
 by the gas volume which is a per-grid cell quantity computed by
-SPARTA.  That is, (solid volume) = (grid cell volume) - (gas volume)
+OpenEdge.  That is, (solid volume) = (grid cell volume) - (gas volume)
 and (solid fraction) = (solid volume) / (grid cell volume)
 </P>
 <P>Interior corner points (corner points not located on the domain
@@ -262,7 +262,7 @@ after this command is used.
 <P>This command can only be used after the simulation box is defined by
 the <A HREF = "create_box.html">create_box</A> command, and after a grid has been
 created by the <A HREF = "create_grid.html">create_grid</A> command.  Additionally,
-explicit surfaces must already be defined by the <A HREF = "read_surf">read_surf</A>
+explicit surfaces must already be defined by the <A HREF = "read_surf.html">read_surf</A>
 command.  Simulations with implicit surfaces cannot perform grid
 adaptation.
 </P>
@@ -296,4 +296,5 @@ immediately deleted by this command.
 
 <P><B>(Hong24)</B> A. Y. K. Hong, M. A. Gallis, S. G Moore, and S. J. Plimpton, "Towards physically realistic ablation modeling in direct simulation Monte Carlo," Physics of Fluids (2024).
 </P>
+<!-- PAGE BREAK -->
 </HTML>

@@ -1,0 +1,168 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>compute grid/weighted command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>compute ID grid/weighted group-ID mix-ID value1 value2 ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "compute.html">compute</A> command 
+
+<LI>grid/weighted = style name of this compute command 
+
+<LI>group-ID = group ID for which grid cells to perform calculation on 
+
+<LI>mix-ID = mixture ID to perform calculation on 
+
+<LI>one or more values can be appended 
+
+<LI>value = <I>n_w</I> or <I>nrho_w</I> or <I>mass_w</I> or <I>massrho_w</I> or <I>nfrac_w</I> or <I>massfrac_w</I> or <I>u_w</I> or <I>v_w</I> or <I>w_w</I> or <I>usq_w</I> or <I>vsq_w</I> or <I>wsq_w</I> or <I>ke_w</I> or <I>temp_w</I> or <I>erot_w</I> or <I>evib_w</I> or <I>trot_w</I> or <I>tvib_w</I> or <I>pxrho_w</I> or <I>pyrho_w</I> or <I>pzrho_w</I> or <I>kerho_w</I> 
+
+<PRE>  n_w = weighted particle count
+  nrho_w = weighted number density
+  mass_w = weighted mean mass
+  massrho_w = weighted mass density
+  nfrac_w = weighted number fraction of the group in the cell
+  massfrac_w = weighted mass fraction of the group in the cell
+  u_w,v_w,w_w = mass-weighted mean x,y,z velocity components
+  usq_w,vsq_w,wsq_w = mass-weighted mean of squared velocity components
+  ke_w = weighted mean kinetic energy
+  temp_w = weighted temperature
+  erot_w = weighted mean rotational energy
+  evib_w = weighted mean vibrational energy
+  trot_w = weighted rotational temperature
+  tvib_w = weighted vibrational temperature
+  pxrho_w,pyrho_w,pzrho_w = weighted x,y,z momentum density
+  kerho_w = weighted kinetic energy density 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix pw particle/weight
+mixture LiAll Li Li+ Li2+ Li3+
+compute cgw grid/weighted all LiAll nrho_w u_w v_w temp_w nfrac_w
+fix 1 ave/grid all 10 100 1000 c_cgw[*]
+dump 1 grid all 1000 tmp.grid id f_1[*] 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Calculate per-grid-cell flow quantities, as <A HREF = "compute_grid.html">compute
+grid</A> does, but weight every particle by its own
+weight instead of the global <I>fnum</I> ratio.  The per-particle weight
+is the custom attribute <I>pweight</I> created by <A HREF = "fix_particle_weight.html">fix
+particle/weight</A> and set at launch by the
+weighted emission fixes, e.g. <A HREF = "fix_surface_emit_source.html">fix
+surface/emit/source</A>.  Whenever
+particles in a simulation carry different weights, this compute
+gives the correctly normalized densities, fluxes, and moments; the
+unweighted compute grid would be wrong by the factor by which the
+weights vary.
+</P>
+<P>The values are the weighted counterparts of the <A HREF = "compute_grid.html">compute
+grid</A> values, with a <I>_w</I> suffix to make the
+weighting explicit.  In the formulas below p_i is the weight of
+particle i, m_i its mass, v_i its velocity, W the cell weight (see
+the <I>weight</I> keyword of the <A HREF = "global.html">global</A> command), and V the
+cell volume.  Sums run over the particles of one mixture group in
+the cell unless stated otherwise.
+</P>
+<P>The density-like values are extensive and are normalized by the cell
+volume:
+</P>
+<PRE>n_w = Sum(p_i)
+nrho_w = W * Sum(p_i) / V
+massrho_w = W * Sum(p_i m_i) / V
+pxrho_w = W * Sum(p_i m_i v_x,i) / V, and likewise pyrho_w, pzrho_w
+kerho_w = W * Sum(1/2 p_i m_i v_i^2) / V 
+</PRE>
+<P>Because <I>pweight</I> defaults to <I>fnum</I> for particles that are not
+launched by a weighted emitter, <I>nrho_w</I> agrees with the <I>nrho</I> value
+of compute grid for an unweighted simulation.  No additional <I>fnum</I>
+factor is applied.
+</P>
+<P>The mean (intensive) values are ratios of weighted sums:
+</P>
+<PRE>mass_w = Sum(p_i m_i) / Sum(p_i)
+u_w = Sum(p_i m_i v_x,i) / Sum(p_i m_i), and likewise v_w, w_w
+usq_w = Sum(p_i m_i v_x,i^2) / Sum(p_i m_i), and likewise vsq_w, wsq_w
+ke_w = 1/2 * mvv2e * Sum(p_i m_i v_i^2) / Sum(p_i)
+temp_w = mvv2e / (3 kB) * Sum(p_i m_i v_i^2) / Sum(p_i)
+erot_w = Sum(p_i erot_i) / Sum(p_i)
+evib_w = Sum(p_i evib_i) / Sum(p_i)
+trot_w = 2 mvv2e / kB * Sum(p_i erot_i) / Sum(p_i rotdof_i)
+tvib_w = 2 mvv2e / kB * Sum(p_i evib_i) / Sum(p_i vibdof_i) 
+</PRE>
+<P>where mvv2e converts mass times velocity squared to energy and kB is
+the Boltzmann constant, both in the current <A HREF = "units.html">units</A>.  The
+<I>trot_w</I> and <I>tvib_w</I> denominators use the rotational and vibrational
+degrees of freedom of each particle's species, as in compute grid.
+Note that <I>temp_w</I> is the thermal temperature computed from the full
+velocity, without subtracting the mean flow velocity.
+</P>
+<P>The group-fraction values divide a group sum by the sum over all
+particles of the mixture in the cell:
+</P>
+<PRE>nfrac_w = Sum_group(p_i) / Sum_cell(p_i)
+massfrac_w = Sum_group(p_i m_i) / Sum_cell(p_i m_i) 
+</PRE>
+<P>All ratios evaluate to zero in a cell whose denominator is zero.
+</P>
+<HR>
+
+<P><B>Output info:</B>
+</P>
+<P>This compute calculates a per-grid array, with the number of columns
+equal to the number of values times the number of groups in the
+mixture.  The ordering of columns is first by values, then by groups.
+I.e. if the <I>nrho_w</I> and <I>u_w</I> values were specified, the first two
+columns would be <I>nrho_w</I> and <I>u_w</I> for the first group, the 3rd and
+4th columns would be <I>nrho_w</I> and <I>u_w</I> for the second group, etc.
+</P>
+<P>The array can be accessed by any command that uses per-grid values
+from a compute as input, e.g. the <A HREF = "dump.html">dump grid</A> and <A HREF = "fix_ave_grid.html">fix
+ave/grid</A> commands.  Time averaging with fix
+ave/grid is performed on the underlying weighted tallies, so the
+ratio values are averaged correctly.  See <A HREF = "Section_howto.html#howto_4">Section
+6.4</A> for an overview of OpenEdge output
+options.
+</P>
+<P>Cells that are not in the group, and split cells, store zeros.  The
+units of the values are the weighted analogs of the corresponding
+compute grid values: <I>n_w</I> is a count of physical particles,
+<I>nrho_w</I> a number density, <I>massrho_w</I> a mass density, the velocity
+values are in velocity units, the energies in energy units, and the
+temperatures in temperature units; the fractions are dimensionless.
+</P>
+<HR>
+
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.  It is only enabled if
+OpenEdge was built with that package.  See the <A HREF = "Section_start.html#start_3">Section
+2.3</A> section for more info.
+</P>
+<P>A <A HREF = "fix_particle_weight.html">fix particle/weight</A> must be defined so
+that the <I>pweight</I> attribute exists; the compute stops with an error
+otherwise.  The number of groups in the mixture must not change after
+the compute is defined.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_particle_weight.html">fix particle/weight</A>, <A HREF = "compute_grid.html">compute
+grid</A>, <A HREF = "fix_ave_grid.html">fix ave/grid</A>, <A HREF = "fix_surface_emit_source.html">fix
+surface/emit/source</A>
+</P>
+<P><B>Default:</B> none
+</P>
+<!-- PAGE BREAK -->
+</HTML>

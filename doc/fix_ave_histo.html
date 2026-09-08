@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -137,7 +137,7 @@ means all indices from m to n (inclusive).
 </P>
 <P>Using a wildcard is the same as if the individual elements of the
 vector or columns of the array had been listed one by one.  E.g. these
-2 fix ave/histo commands are equivalent, since the <A HREF = "compute_com_chunk.html">compute
+2 fix ave/histo commands are equivalent, since the <A HREF = "compute_grid.html">compute
 grid</A> command creates a per-grid array with 3
 columns:
 </P>
@@ -192,8 +192,8 @@ effectively specify multiple values.
 <P>Note that there is a <A HREF = "compute_reduce.html">compute reduce</A> command
 which can sum per-particle or per-grid or per-surf quantities into a
 global scalar or vector which can thus be accessed by fix ave/histo.
-Users can also write code for their own compute styles and <A HREF = "Section_modify.html">add them
-to SPARTA</A>.
+Users can also write code for their own compute styles and add them
+to OpenEdge.
 </P>
 <P>If a value begins with "f_", a fix ID must follow which has been
 previously defined in the input script.  If <I>mode</I> = scalar, then if
@@ -209,8 +209,8 @@ multiple values.
 </P>
 <P>Note that some fixes only produce their values on certain timesteps,
 which must be compatible with <I>Nevery</I>, else an error will result.
-Users can also write code for their own fix styles and <A HREF = "Section_modify.html">add them to
-SPARTA</A>.
+Users can also write code for their own fix styles and add them to
+OpenEdge.
 </P>
 <P>If a value begins with "v_", a variable name must follow which has
 been previously defined in the input script.  If <I>mode</I> = scalar, then
@@ -319,7 +319,7 @@ output.  This option can only be used with the <I>ave running</I> setting.
 </P>
 <P>The <I>title1</I> and <I>title2</I> and <I>title3</I> keywords allow specification of
 the strings that will be printed as the first 3 lines of the output
-file, assuming the <I>file</I> keyword was used.  SPARTA uses default
+file, assuming the <I>file</I> keyword was used.  OpenEdge uses default
 values for each of these, so they do not need to be specified.
 </P>
 <P>By default, these header lines are as follows:
@@ -361,21 +361,21 @@ values in the 3rd column sum to 1.0.
 <P>Styles with a <I>kk</I> suffix are functionally the same as the
 corresponding style without the suffix.  They have been optimized to
 run faster, depending on your available hardware, as discussed in the
-<A HREF = "Section_accelerate.html">Accelerating SPARTA</A> section of the manual.
+<A HREF = "Section_start.html#start_2">Building OpenEdge</A> section of the manual.
 The accelerated styles take the same arguments and should produce the
 same results, except for different random number, round-off and
 precision issues.
 </P>
 <P>These accelerated styles are part of the KOKKOS package. They are only
-enabled if SPARTA was built with that package.  See the <A HREF = "Section_start.html#start_3">Making
-SPARTA</A> section for more info.
+enabled if OpenEdge was built with that package.  See the <A HREF = "Section_start.html#start_3">Making
+OpenEdge</A> section for more info.
 </P>
 <P>You can specify the accelerated styles explicitly in your input script
-by including their suffix, or you can use the <A HREF = "Section_start.html#start_7">-suffix command-line
-switch</A> when you invoke SPARTA, or you can
+by including their suffix, or you can use the <A HREF = "Section_start.html#start_5">-suffix command-line
+switch</A> when you invoke OpenEdge, or you can
 use the <A HREF = "suffix.html">suffix</A> command in your input script.
 </P>
-<P>See the <A HREF = "Section_accelerate.html">Accelerating SPARTA</A> section of the
+<P>See the <A HREF = "Section_start.html#start_2">Building OpenEdge</A> section of the
 manual for more instructions on how to use the accelerated styles
 effectively.
 </P>
@@ -395,4 +395,5 @@ output, no region/mixture/group restriction on inclusion of particles
 or grid cells, beyond = ignore, and title 1,2,3 = strings as described
 above.
 </P>
+<!-- PAGE BREAK -->
 </HTML>

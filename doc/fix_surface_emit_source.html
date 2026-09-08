@@ -1,0 +1,186 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix surface/emit/source command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID surface/emit/source mix-ID group-ID source keyword value ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>surface/emit/source = style name of this fix command 
+
+<LI>mix-ID = ID of mixture to use when creating particles 
+
+<LI>group-ID = ID of surface group that emits particles 
+
+<LI>source = compute-ID [flux_index M] or <I>constant</I> F or <I>file</I> path [section NAME] 
+
+<PRE>  compute-ID = ID of a compute with per-surf output giving the flux
+    of each element in particles/m^2/s
+  flux_index M = column of the compute's per-surf array to use
+    (default 1); only valid directly after compute-ID
+  constant F = the same flux F (particles/m^2/s) on every element
+  file path = read density, velocity and temperature from an inflow
+    file and use flux = nrho * |v . n| per element
+  section NAME = section of the file to read (default ZLO) 
+</PRE>
+<LI>zero or more keyword/value pairs may be appended 
+
+<LI>keyword = <I>conc_scale</I> or <I>n</I> or <I>nlaunch</I> or <I>nlaunch_total</I> or <I>flux_thresh</I> or <I>normal</I> or <I>model</I> or <I>nevery</I> or <I>perspecies</I> or <I>region</I> 
+
+<PRE>  <I>conc_scale</I> values = attr col
+    attr = custom per-surf array (e.g. the surface/pwi concentrations)
+    col = column (1-based) that multiplies the flux of each element
+  <I>n</I> value = Np = emit Np particles per emission step with the default
+    weight (0 = flux mode)
+  <I>nlaunch</I> value = N = emit N weighted particles per emitting element
+  <I>nlaunch_total</I> value = N = emit N weighted particles per emission
+    step in total, apportioned by element source strength
+  <I>flux_thresh</I> value = F = ignore elements with flux below F
+  <I>normal</I> value = <I>yes</I> or <I>no</I> = launch along the element normal
+  <I>model</I> values = <I>thermal</I> or <I>thermal_tsurf</I> name or
+    <I>thompson</I> Ub [cos_n n] [emax E] or <I>fixed_energy</I> E
+    thermal = half-Maxwellian at the mixture temperature
+    thermal_tsurf name = half-Maxwellian at the per-element surface
+      temperature stored in the custom per-surf vector <I>name</I>
+    thompson Ub = Thompson distribution with surface binding energy Ub
+      (eV); optional cos_n exponent of the angular distribution and
+      emax high-energy cutoff (eV, must exceed Ub)
+    fixed_energy E = monoenergetic launch at E (eV)
+  <I>nevery</I> value = Nevery = emit every this many timesteps
+  <I>perspecies</I> value = <I>yes</I> or <I>no</I>
+  <I>region</I> value = region-ID = only emit from surface elements in region 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>compute cpmiO surface/physical/sputter wall background pd target W projectiles O erosion_flux
+fix femit surface/emit/source tungstenSource wall cpmiO perspecies no &
+    nlaunch_total 200 model thompson 8.68 emax 80 nevery 100
+fix femit surface/emit/source tungstenSource wall cpmiWd conc_scale adens_conc 3 &
+    perspecies no nlaunch_total 200 model thompson 8.68 emax 80
+fix fpuff surface/emit/source dgas valve constant 1.0e22 n 20 normal yes
+fix finflow surface/emit/source dgas inlet file input/inflow.dat section ZLO n 50 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Emit particles of a mixture from the surface elements of a group with
+the emitted flux taken from a per-element source: a compute (e.g. the
+erosion flux of <A HREF = "compute_surface_physical_sputter.html">compute
+surface/physical/sputter</A>), a
+constant, or an inflow file.  Each emission converts the source
+strength of element i, s_i = flux_i * area_i * dt * nevery, into
+launched particles.  Area is the axisymmetric ring area in 2d
+axisymmetric mode.
+</P>
+<P>In compute mode the per-surf vector, or column <I>flux_index</I> of the
+per-surf array, of the named compute is read on every emission; when
+the compute is static its values are cached.  <I>conc_scale</I> multiplies
+the flux of each element by a column of a custom per-surf array,
+typically a reaction-zone concentration written by <A HREF = "surf_react_surface_pwi.html">surf_react
+surface/pwi</A>, so that the emitted flux of
+a material is the erosion flux times its local concentration.  In
+<I>constant</I> mode every element carries the same flux.  In <I>file</I> mode
+the file has the SPARTA inflow format: a section header line (NAME),
+then "NIJ ni nj", "NV nv", "VALUES name ..." with names among nrho,
+vx, vy, vz, temp and gamma, "IMESH x ...", "JMESH y ...", and the
+ni*nj rows of values; the fields are interpolated bilinearly at each
+element centroid, the flux is nrho times the normal component of the
+stream velocity, and temp sets the launch temperature.
+</P>
+<P>Three launch modes control the statistics:
+</P>
+<UL><LI><I>n</I> Np emits a fixed particle count with the default weight (<I>fnum</I>);
+the source only selects the launch locations. 
+
+<LI><I>nlaunch</I> N emits N particles from every emitting element, each
+carrying the weight s_i/N.  Statistics are uniform across elements
+regardless of their strength; the total particle count scales with the
+number of emitting elements.  Suited to small emitting regions. 
+
+<LI><I>nlaunch_total</I> N emits N particles per emission in total, apportioned
+over elements in proportion to s_i (stratified source sampling).
+Elements expecting at least one particle emit exactly their own source
+each event; weaker elements fire probabilistically with the global
+weight S_total/N, which keeps the expectation unbiased.  Total emission
+is conserved for any N, so N is purely a cost/statistics knob.  Suited
+to whole-machine walls. 
+
+<LI>Without any of these the number of particles follows from s_i/<I>fnum</I>
+as for <A HREF = "fix_emit_surf.html">fix emit/surf</A>. 
+</UL>
+<P>The weighted modes (<I>nlaunch</I>, <I>nlaunch_total</I>) store the particle
+weight in the attribute created by <A HREF = "fix_particle_weight.html">fix
+particle/weight</A>, which is required.
+Elements whose flux is below <I>flux_thresh</I> are skipped.
+</P>
+<P>The <I>model</I> keyword selects the energy distribution of the emitted
+particles; all models use a cos^n angular distribution about the
+surface normal (n = 1 unless <I>cos_n</I> is given).  <I>thermal</I> is a
+half-Maxwellian at the mixture temperature; <I>thermal_tsurf</I> uses the
+per-element temperature in the named custom per-surf vector (in
+Kelvin).  <I>thompson</I> samples the Thompson sputter spectrum
+</P>
+<PRE>f(E) ~ E/(E+Ub)^3 * [1 - sqrt((E+Ub)/(emax+Ub))],  0 <= E <= emax 
+</PRE>
+<P>where Ub is the full surface binding energy (W: 8.68 eV; the spectrum
+peaks at Ub/2 by itself, so never insert a halved value).  Without
+<I>emax</I> the ~1/E^2 tail emits a small fraction of atoms at very high
+energy; production runs should set <I>emax</I> to the kinematic cutoff
+(roughly gamma*E_inc - Ub, or ~2 Te for light projectiles).
+<I>fixed_energy</I> launches every particle at the given energy.
+</P>
+<P>With <I>normal yes</I> the drift direction is the surface normal instead of
+the mixture <I>vstream</I>.  With <I>perspecies yes</I> the mixture fractions
+are applied per species to the particle count rather than sampled.
+</P>
+<P>The keyword <I>source_thresh</I> is not supported and produces an error.
+</P>
+<P><B>Restart, output info:</B>
+</P>
+<P>No information about this fix is written to <A HREF = "restart.html">binary restart
+files</A>.
+</P>
+<P>This fix computes a global vector of length 2 which can be accessed
+by various output commands.  The first element is the number of
+particles emitted on the most recent emission step, the second the
+cumulative number of particles emitted since the start of the run.
+</P>
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.  It requires explicit
+(non-implicit) surface elements.  The source compute must produce
+per-surf output.  <I>n</I> > 0 and <I>nlaunch_total</I> cannot be combined with
+<I>perspecies yes</I>; <I>n</I> > 0, <I>nlaunch</I> and <I>nlaunch_total</I> are mutually
+exclusive.  <I>nlaunch</I> and <I>nlaunch_total</I> require <A HREF = "fix_particle_weight.html">fix
+particle/weight</A>.  The <I>conc_scale</I> and
+<I>thermal_tsurf</I> custom attributes must exist when the fix is
+initialized.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_emit_surf.html">fix emit/surf</A>,
+<A HREF = "compute_surface_physical_sputter.html">compute surface/physical/sputter</A>,
+<A HREF = "surf_react_surface_pwi.html">surf_react surface/pwi</A>,
+<A HREF = "fix_particle_weight.html">fix particle/weight</A>,
+<A HREF = "fix_surface_emit_puff.html">fix surface/emit/puff</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The option defaults are flux_index = 1, section = ZLO, n = 0, flux_thresh
+= 0.0, normal = no, model = thermal (cos_n = 1, no emax), nevery = 1,
+perspecies = yes, no conc_scale and no region.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

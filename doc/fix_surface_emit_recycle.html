@@ -1,0 +1,126 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix surface/emit/recycle command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID surface/emit/recycle mix-ID group-ID fix-ID keyword value ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>surface/emit/recycle = style name of this fix command 
+
+<LI>mix-ID = ID of mixture to use when creating particles 
+
+<LI>group-ID = ID of surface group that emits particles 
+
+<LI>fix-ID = ID of the <A HREF = "fix_background.html">fix background</A> supplying the plasma 
+
+<LI>zero or more keyword/value pairs may be appended 
+
+<LI>keyword = <I>mass</I> or <I>R</I> or <I>twall</I> or <I>twall_species</I> or <I>nevery</I> or <I>region</I> 
+
+<PRE>  <I>mass</I> value = main-ion mass in amu used for the sound speed
+  <I>R</I> value = total recycling coefficient (0 to 1)
+  <I>twall</I> value = emission temperature in Kelvin
+  <I>twall_species</I> values = sp1 T1 [sp2 T2 ...]
+    sp = species ID in the mixture
+    T = emission temperature in Kelvin for that species
+  <I>nevery</I> value = Nevery = emit every this many timesteps
+  <I>region</I> value = region-ID = only emit from surface elements in region 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix rec surface/emit/recycle dgas wall pd
+fix rec surface/emit/recycle dgas wall pd R 0.98 twall 500.0 &
+    twall_species D 23210.0 D2 500.0 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Emit neutral particles from the surface elements of a group at the
+rate of the local plasma wall flux, i.e. model the thermal
+re-emission of recycled plasma ions as neutrals.  The plasma state
+(ne, Te, Ti, B) adjacent to each element is taken from the <A HREF = "fix_background.html">fix
+background</A>.  Per element the Bohm wall flux is
+</P>
+<PRE>Gamma = n c_s sin(alpha_B),   c_s = sqrt((Te+Ti)/m_i) 
+</PRE>
+<P>with m_i the <I>mass</I> value and sin(alpha_B) the projection of B onto
+the surface normal, and the emission rate is
+</P>
+<PRE>dN/dt = 0.5 R Gamma A 
+</PRE>
+<P>where R is the recycling coefficient (1-R is pumped) and A the element
+area (the axisymmetric ring area in 2d axisymmetric mode).  The factor
+1/2 balances the recombination of two atoms into one molecule at the
+wall; the mixture fractions control the atom/molecule split of the
+emitted species.  When the background carries a wall-face area for
+each element (from the plasma-code boundary cells), that area is used
+in place of the geometric element area, so the emitted total matches
+the plasma-code flux budget independent of how the grid splits the
+element.
+</P>
+<P>Emitted particles are launched along the surface normal with a
+half-Maxwellian flux distribution at the emission temperature, and
+their rotational and vibrational energies are sampled at the same
+temperature.  <I>twall</I> sets the temperature for every species;
+<I>twall_species</I> overrides it for individual species, e.g. Franck-Condon
+atoms at ~23000 K (2 eV) and wall-thermalized molecules at the wall
+temperature.  Every species named in <I>twall_species</I> must exist in
+the mixture.  The pairs are consumed until the next keyword or the end
+of the command.
+</P>
+<P>The fast (BCA) reflection channel is not part of this fix; use
+<A HREF = "surf_react_surface_pwi.html">surf_react surface/pwi</A> for it on the
+same surface group.  The particles created by this fix pass through
+the surface collision and reaction models assigned to the element, so
+they are tallied like other emitted particles.
+</P>
+<P>At initialization the fix prints, once, the number of emission tasks
+and the global Bohm-flux rate it will use.  Emission tasks are
+rebuilt when the grid changes or the background plasma is reloaded.
+</P>
+<P><B>Restart, output info:</B>
+</P>
+<P>No information about this fix is written to <A HREF = "restart.html">binary restart
+files</A>.
+</P>
+<P>This fix computes a global vector of length 2 which can be accessed
+by various output commands.  The first element is the number of
+particles emitted on the most recent emission step, the second the
+cumulative number of particles emitted since the start of the run.
+</P>
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.  It requires a <A HREF = "fix_background.html">fix
+background</A> and explicit (non-implicit) surface
+elements.  The <I>perspecies</I> keyword of <A HREF = "fix_emit_surf.html">fix emit/surf</A>
+is accepted but has no effect; species are always drawn from the
+mixture fractions.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_emit_surf.html">fix emit/surf</A>,
+<A HREF = "fix_surface_emit_source.html">fix surface/emit/source</A>,
+<A HREF = "fix_surface_emit_puff.html">fix surface/emit/puff</A>,
+<A HREF = "surf_react_surface_pwi.html">surf_react surface/pwi</A>,
+<A HREF = "fix_background.html">fix background</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The option defaults are mass = 2.0, R = 0.99, twall = 400.0, nevery =
+1, no twall_species and no region.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

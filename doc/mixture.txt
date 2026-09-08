@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -49,7 +49,7 @@ mixture air delete N NO :pre
 [Description:]
 
 Define a gas mixture and its properties.  A mixture can be referenced
-by its ID in several other SPARTA commands such as
+by its ID in several other OpenEdge commands such as
 "create_particles"_create_particles.html or "per-grid
 computes"_compute.html.  Any number of mixtures can be defined and
 used in a simulation.
@@ -70,7 +70,7 @@ ID, to add species to the mixture, define groups within the mixture,
 or change its attributes.  Also note that a species can belong to more
 than one mixture.
 
-There are 2 default mixtures defined by SPARTA that always exist.
+There are 2 default mixtures defined by OpenEdge that always exist.
 
 The first default mixture has an ID = "all", and contains all species
 that have been defined.  When new species are created via the

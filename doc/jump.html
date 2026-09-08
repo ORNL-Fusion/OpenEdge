@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -27,7 +27,7 @@ jump SELF runloop
 <P><B>Description:</B>
 </P>
 <P>This command closes the current input script file, opens the file with
-the specified name, and begins reading SPARTA commands from that file.
+the specified name, and begins reading OpenEdge commands from that file.
 Unlike the <A HREF = "include.html">include</A> command, the original file is not
 returned to, although by using multiple jump commands it is possible
 to chain from file to file or back to the original file.
@@ -43,12 +43,12 @@ e.g.
 </PRE>
 <P>since the SELF option invokes the C-library rewind() call, which may
 not be supported for stdin on some systems or by some MPI
-implementations.  This can be worked around by using the <A HREF = "Section_start.html#start_7">-in
+implementations.  This can be worked around by using the <A HREF = "Section_start.html#start_5">-in
 command-line argument</A>, e.g.
 </P>
 <PRE>spa_g++ -in in.script 
 </PRE>
-<P>or by using the <A HREF = "Section_start.html#start_7">-var command-line
+<P>or by using the <A HREF = "Section_start.html#start_5">-var command-line
 argument</A> to pass the script name as a
 variable to the input script.  In the latter case, a
 <A HREF = "variable.html">variable</A> called "fname" could be used in place of
@@ -76,7 +76,7 @@ jump in.flow loop
 </PRE>
 <P>If the jump <I>file</I> argument is a variable, the jump command can be
 used to cause different processor partitions to run different input
-scripts.  In this example, SPARTA is run on 40 processors, with 4
+scripts.  In this example, OpenEdge is run on 40 processors, with 4
 partitions of 10 procs each.  An in.file containing the example
 variable and jump command will cause each partition to run a different
 simulation.
@@ -108,7 +108,7 @@ jump	    in.script loopa
 <P><B>Restrictions:</B>
 </P>
 <P>If you jump to a file and it does not contain the specified label,
-SPARTA will come to the end of the file and exit.
+OpenEdge will come to the end of the file and exit.
 </P>
 <P><B>Related commands:</B>
 </P>
@@ -117,4 +117,5 @@ SPARTA will come to the end of the file and exit.
 </P>
 <P><B>Default:</B> none
 </P>
+<!-- PAGE BREAK -->
 </HTML>

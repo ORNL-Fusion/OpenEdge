@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -21,17 +21,17 @@ seed 5838959 :pre
 [Description:]
 
 This command sets the random number seed for a master random number
-generator.  This generator is used by SPARTA to initialize auxiliary
+generator.  This generator is used by OpenEdge to initialize auxiliary
 random number generators, which in turn are used for all operations in
 the code requiring random numbers.  This means you can effectively run
 a statistically-independent simulation by simply changing this single
 seed.
 
-The various random number generators used in SPARTA are portable,
+The various random number generators used in OpenEdge are portable,
 which means they produce the same random number streams on any
 machine.
 
-This command is required to perform a SPARTA simulation.
+This command is required to perform a OpenEdge simulation.
 
 [Restrictions:] none
 

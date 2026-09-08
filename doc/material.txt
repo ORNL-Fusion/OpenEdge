@@ -1,0 +1,174 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+material command :h3
+
+[Syntax:]
+
+material NAME keyword value ... :pre
+
+NAME = name of the material (at most 15 characters); {Li} and {B} are built in :ulb,l
+one or more keyword/value pairs must be appended :l
+keyword = {provenance} or {rho} or {cp} or {cp_solid} or {mass_amu} or {hvap_J_mol} or {antoine_a} or {antoine_b} or {emissivity} or {work_function_eV} or {richardson_A} or {tmelt_K} or {hmelt_J_mol} or {tensile_Pa} or {see_delta_m} or {see_E_m_eV} :l
+  {provenance} value = ID = free-form string recording where the data
+    came from (at most 95 characters)
+  {rho} value = density (kg/m^3)
+  {cp} value = specific heat of the liquid (or single-phase) material
+    (J/kg/K)
+  {cp_solid} value = specific heat of the solid phase (J/kg/K);
+    0 = use {cp} for both phases
+  {mass_amu} value = atomic mass (amu)
+  {hvap_J_mol} value = enthalpy of vaporization or sublimation (J/mol)
+  {antoine_a} value = a in log10 p_sat\[atm\] = a + b/T\[K\]
+  {antoine_b} value = b in log10 p_sat\[atm\] = a + b/T\[K\] (b < 0)
+  {emissivity} value = total emissivity for radiative cooling (0 to 1)
+  {work_function_eV} value = work function for thermionic emission (eV)
+  {richardson_A} value = Richardson constant (A/m^2/K^2)
+  {tmelt_K} value = melting temperature (K)
+  {hmelt_J_mol} value = enthalpy of fusion (J/mol)
+  {tensile_Pa} value = tensile strength (Pa); 0 = no electrostatic
+    breakup
+  {see_delta_m} value = maximum secondary-electron yield
+  {see_E_m_eV} value = electron energy at the maximum yield (eV) :pre
+:ule
+
+[Examples:]
+
+material B emissivity 0.75
+material MyStuff rho 1850 cp 1800 mass_amu 9.0 hvap_J_mol 5e5 &
+         antoine_a 9.1 antoine_b -28000
+material Li provenance "Handbook-2019" rho 534 cp 4200 cp_solid 3580 &
+         mass_amu 6.94 hvap_J_mol 1.47e5 antoine_a 5.055 &
+         antoine_b -8023 emissivity 0.10 tmelt_K 453.7 hmelt_J_mol 3.0e3 :pre
+
+[Description:]
+
+Define a new particulate material, or override properties of an
+existing one. Materials are consumed by the {material} keyword of "fix
+particulate/thermal"_fix_particulate_thermal.html, "fix
+particulate/drag"_fix_particulate_drag.html and "fix
+particulate/charge"_fix_particulate_charge.html.
+
+Two materials are built in and may be used without a material command
+or partially overridden by one:
+
+{Li}: rho 534, cp 4200, cp_solid 3580, mass_amu 6.94, hvap_J_mol
+1.47e5, antoine_a 5.055, antoine_b -8023, emissivity 0.10,
+work_function_eV 2.9, richardson_A 1.2e6, tmelt_K 453.7, hmelt_J_mol
+3.0e3, tensile_Pa 0, see_delta_m 0.5, see_E_m_eV 85 :ulb,l
+{B}: rho 2340, cp 2000, cp_solid 0, mass_amu 10.81, hvap_J_mol 5.65e5,
+antoine_a 8.64, antoine_b -32030, emissivity 0.80, work_function_eV
+4.45, richardson_A 1.2e6, tmelt_K 2349, hmelt_J_mol 5.02e4, tensile_Pa
+1.0e9, see_delta_m 1.2, see_E_m_eV 150 :l,ule
+
+A material command with a new NAME creates the material with every
+property unset; rho, cp, mass_amu and hvap_J_mol must then be supplied
+before the material can be used by fix particulate/thermal. A
+material command with an existing NAME changes only the listed
+properties.
+
+Each keyword given explicitly is recorded as such. Model {dis2021} of
+the particulate fixes requires that every property it uses was set
+explicitly by a material command and that a {provenance} string was
+given; built-in values do not count as explicit. Model {dustt2005}
+accepts the built-in values.
+
+Which properties are used by which fix:
+
+fix particulate/thermal: rho, cp, cp_solid, mass_amu, hvap_J_mol,
+antoine_a, antoine_b, emissivity, tmelt_K, hmelt_J_mol :ulb,l
+fix particulate/drag: rho :l
+fix particulate/charge: work_function_eV and richardson_A (thermionic
+emission), tensile_Pa (electrostatic breakup), see_delta_m and
+see_E_m_eV (see_model kollath_smirnov2007) :l,ule
+
+The vapor pressure used for evaporation is p_sat = 10^(a + b/T) atm
+with T in K. Emissivity is the total hemispherical value used for
+gray-body radiative exchange with the wall temperature.
+
+:line
+
+[Particulate models:]
+
+OpenEdge represents a finite-size condensed object (solid powder grain,
+molten droplet, or an object that changes phase during a run) by the
+per-particle {radius}, {mass} and {temp} attributes of a particle.
+These are initialized from the "species"_species.html definition and
+evolved by the particulate fixes:
+
+"material"_material.html: density, heat capacity, phase-change,
+vapor-pressure, emission and strength properties :ulb,l
+"fix particulate/emit"_fix_particulate_emit.html: inject particulates
+from selected surfaces :l
+"fix particulate/charge"_fix_particulate_charge.html: local charge
+state :l
+"fix particulate/drag"_fix_particulate_drag.html: ion, neutral,
+electric and gravitational forces :l
+"fix particulate/thermal"_fix_particulate_thermal.html: temperature,
+phase change, evaporation, mass and radius :l
+"surf_collide particulate/bounce"_surf_collide_particulate_bounce.html:
+sticking or restitution at a wall :l,ule
+
+Recommended setup: define particulate species with positive radius,
+mass and temperature, place them in a dedicated
+"mixture"_mixture.html, and use that mixture to scope the particulate
+fixes. Charged atomic species can use the Boris/GCA pusher while
+finite-size particulates bypass it:
+
+global pusher mode hybrid plasma pd skip particulates :pre
+
+fix emit particulate/emit particulates injector ...
+fix charge particulate/charge 1 background pd model dustt2005 &
+           mixture particulates material Li
+fix drag particulate/drag 1 2.0 1 background pd &
+         model dustt2005 mixture particulates material Li
+fix heat particulate/thermal 1 particulates background pd &
+         model dustt2005 material Li heating auto :pre
+
+Select the same {model} ({dustt2005}, the default, or {dis2021}) on
+the charge, drag and thermal fixes; the dis2021 fixes check this. The
+particulate fixes use a symmetric start/end-of-step update, so keep
+their Nevery values consistent unless a convergence study shows that a
+different cadence is acceptable.
+
+Coordinate convention: user-supplied directions are given as physical
+(R, Z, phi) components. OpenEdge maps them to the active Cartesian or
+axisymmetric storage layout. This applies to the emission {dir} vector
+and the drag {gravity} vector.
+
+Validity: the charging, drag and heating closures have different
+validity ranges. A successful run does not establish that a closure is
+valid for a given particulate size. In particular, OML charging and
+heating require a particulate small compared with the plasma Debye
+length. Use {validity error} on fix particulate/charge for runs that
+must stay inside that approximation.
+
+:line
+
+[Restrictions:]
+
+This command is part of the OPENEDGE package.
+
+NAME is limited to 15 characters and the provenance string to 95
+characters. All property values must be numeric.
+
+[Related commands:]
+
+"fix particulate/thermal"_fix_particulate_thermal.html, "fix
+particulate/drag"_fix_particulate_drag.html, "fix
+particulate/charge"_fix_particulate_charge.html, "fix
+particulate/emit"_fix_particulate_emit.html, "surf_collide
+particulate/bounce"_surf_collide_particulate_bounce.html,
+"species"_species.html
+
+[Default:]
+
+A new material starts with all properties unset (cp_solid,
+hmelt_J_mol, tensile_Pa, see_delta_m, see_E_m_eV, antoine_a,
+antoine_b and emissivity are 0; the others are undefined and must be
+given). The built-in Li and B values are listed above.

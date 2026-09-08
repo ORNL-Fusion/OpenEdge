@@ -1,0 +1,66 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+surf_collide particulate/bounce command :h3
+
+[Syntax:]
+
+surf_collide ID particulate/bounce pstick pvel pdiff keyword value ... :pre
+
+ID = user-assigned name for the surface collision model :ulb,l
+particulate/bounce = style name of this surface collision model :l
+pstick = probability that an impacting particulate is removed (0 to 1) :l
+pvel = fraction of the impact speed retained on reflection (0 to 1) :l
+pdiff = probability of diffuse cosine-law reflection, otherwise specular (0 to 1) :l
+zero or more keyword/value pairs may be appended :l
+keyword = {pmass} or {ptemp} :l
+  {pmass} value = F = fraction of the radius retained on reflection
+    (0 < F <= 1); mass is scaled by F^3
+  {ptemp} value = F = factor applied to the particulate temperature
+    on reflection (> 0) :pre
+:ule
+
+[Examples:]
+
+surf_collide particulate_wall particulate/bounce 0.7 0.4 0.5 &
+             pmass 0.9 ptemp 0.8
+surf_modify wall collide particulate_wall :pre
+
+[Description:]
+
+Define a collision model for finite-size particulates striking a
+surface. The model is assigned to surfaces via the
+"surf_modify"_surf_modify.html command.
+
+A particulate (a particle with positive radius) sticks and is removed
+with probability {pstick}. Otherwise it is reflected with speed
+{pvel} times its impact speed: with probability {pdiff} the direction
+is sampled from a cosine-law distribution about the surface normal,
+else the reflection is specular. After reflection the radius is
+multiplied by {pmass} and the mass by {pmass}^3, and the temperature
+is multiplied by {ptemp}.
+
+Particles without a positive radius are removed by this collision
+model, so it should only be assigned to surfaces hit by particulate
+species, or paired with separate handling of atomic species.
+
+:line
+
+[Restrictions:]
+
+This command is part of the OPENEDGE package. pstick, pvel and pdiff
+must lie in \[0,1\]; pmass in (0,1\]; ptemp must be positive.
+
+[Related commands:]
+
+"surf_modify"_surf_modify.html, "surf_collide"_surf_collide.html,
+"fix particulate/emit"_fix_particulate_emit.html
+
+[Default:]
+
+The option defaults are pmass = 1.0 and ptemp = 1.0.

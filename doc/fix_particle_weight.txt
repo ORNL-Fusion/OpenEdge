@@ -1,0 +1,86 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix particle/weight command :h3
+
+[Syntax:]
+
+fix ID particle/weight :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+particle/weight = style name of this fix command :l
+:ule
+
+[Examples:]
+
+fix pw particle/weight
+fix femit surface/emit/source LiSource divertor cevap perspecies no &
+    nlaunch_total 200 model thermal
+compute cgw grid/weighted all LiAll nrho_w u_w temp_w :pre
+
+[Description:]
+
+Create the per-particle weight attribute used by the weighted
+emission and diagnostic commands of OpenEdge.  The fix adds a custom
+per-particle floating-point attribute named {pweight} (see the
+"custom"_custom.html command) that records how many physical
+particles each simulation particle represents.  The weighted emitters
+such as "fix surface/emit/source"_fix_surface_emit_source.html write
+this attribute when they insert a particle, and "compute
+grid/weighted"_compute_grid_weighted.html reads it to form properly
+normalized densities, fluxes, and moments.
+
+A weight is required whenever emission rates vary across the wall or
+between sources, since the launched particles then represent
+different numbers of physical particles.  Without this fix the
+weighted emitters have nowhere to store the weight and refuse to run
+in their weighted modes.
+
+Particles that are not created by a weighted emitter, e.g. those
+inserted by "create_particles"_create_particles.html, "fix
+emit/face"_fix_emit_face.html, or surface reactions, receive the
+default weight {fnum} (see the "global"_global.html command), both at
+the start of a run for existing particles whose weight is still zero
+and at insertion time for new particles.  This makes the weighted
+diagnostics consistent with their unweighted counterparts for
+unweighted particles.  A weight already set to a non-zero value by an
+emitter is never overwritten.
+
+Like any custom attribute, {pweight} follows the particle through
+sorting, cloning, splitting, and migration between processors.  Only
+one fix of this style should be defined in a simulation.
+
+:line
+
+[Restart, output info:]
+
+The {pweight} attribute is a custom per-particle attribute and is
+written to "binary restart files"_restart.html with the particles.
+If it is already present when the fix is defined, e.g. after
+"read_restart"_read_restart.html, the existing attribute is reused.
+
+This fix produces no output of its own.  The weights can be written
+by the "dump particle"_dump.html command as {p_pweight}.
+
+:line
+
+[Restrictions:]
+
+This command is part of the OPENEDGE package.  It is only enabled if
+OpenEdge was built with that package.  See the "Section
+2.3"_Section_start.html#start_3 section for more info.
+
+The command takes no arguments.
+
+[Related commands:]
+
+"compute grid/weighted"_compute_grid_weighted.html, "fix
+surface/emit/source"_fix_surface_emit_source.html,
+"custom"_custom.html
+
+[Default:] none

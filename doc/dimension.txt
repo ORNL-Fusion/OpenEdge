@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -21,7 +21,7 @@ dimension 3 :pre
 
 [Description:]
 
-Set the dimensionality of the simulation.  By default SPARTA runs 3d
+Set the dimensionality of the simulation.  By default OpenEdge runs 3d
 simulations, but 2d simulations can also be run.
 
 2d axi-symmetric models can be run by setting the dimension to 2, and

@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -36,7 +36,7 @@ read_isurf subset 150 100 50 isurf.materials.3d 120.5 fablate read parallel :pre
 
 [Description:]
 
-Read the geometry of a surface from the specified file.  In SPARTA, a
+Read the geometry of a surface from the specified file.  In OpenEdge, a
 "surface" is a collection of surface elements that represent the
 surface of one or more physical objects which will be embedded in the
 global simulation box.  Surfaces can be explicit or implicit.  
@@ -65,8 +65,6 @@ of a sample of NASA FiberForm (TM) material, used as a heat shield
 material on spacecraft.
 
 :c,image(JPG/porous2d_initial_small.png,JPG/porous2d_initial.png),image(JPG/porous3d_initial_small.png,JPG/porous3d_initial.png)
-
-:image()
 
 Particles collide with surface elements as they advect.  Each surface
 element is assigned to a collision model, specified by the
@@ -124,7 +122,7 @@ of the file.
 IMPORTANT NOTE: The Nxfile, Nyfile, Nzfile values are for a 2d or 3d
 grid of corner points, which overlay the Nx by Ny by Nz grid of cells.
 In each dimension there is one more corner point than cells.  Thus
-Nxfile = Nx+1, Nyfile = Ny+1, Nzfile = Nz+1 is required.  SPARTA will
+Nxfile = Nx+1, Nyfile = Ny+1, Nzfile = Nz+1 is required.  OpenEdge will
 give an error if the read_isurf Nx,Ny,Nz arguments do not match the
 first 2 or 3 integers in the file.
 
@@ -180,7 +178,7 @@ with zero length (2d line) or area (3d triangle).
 
 IMPORTANT NOTE: The aggregate set of implicit surfaces created by this
 procedure must represent a watertight object(s), the same as explained
-for the "read_surf"_read_surf.html command, otherwise SPARTA will
+for the "read_surf"_read_surf.html command, otherwise OpenEdge will
 generate an error.  The marching cube and square algorithms guarantee
 this.  However, if the Nx by Ny by Nz array of grid cells is interior
 to the simulation box, the entire outer boundary of the Nx+1 by Ny+1
@@ -250,7 +248,7 @@ of the file.
 IMPORTANT NOTE: The Nxfile, Nyfile, Nzfile values are for a 2d or 3d
 grid of per-cell values, which overlay the Nx by Ny by Nz grid of
 cells.  Thus Nxfile = Nx, Nyfile = Ny, Nzfile = Nz is required.
-SPARTA will give an error if the read_isurf Nx,Ny,Nz arguments do not
+OpenEdge will give an error if the read_isurf Nx,Ny,Nz arguments do not
 match the first 2 or 3 integers in the file.
 
 The remaining N bytes of the file are a series of one-byte integer

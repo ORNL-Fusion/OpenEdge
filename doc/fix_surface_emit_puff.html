@@ -1,0 +1,120 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix surface/emit/puff command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID surface/emit/puff mix-ID group-ID keyword value ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>surface/emit/puff = style name of this fix command 
+
+<LI>mix-ID = ID of mixture to use when creating particles 
+
+<LI>group-ID = ID of surface group that emits particles 
+
+<LI>zero or more keyword/value pairs may be appended 
+
+<LI>keyword = <I>n</I> or <I>normal</I> or <I>stop_at_np</I> or <I>slave</I> or <I>nlaunch_total</I> or <I>nevery</I> or <I>perspecies</I> or <I>region</I> 
+
+<PRE>  <I>n</I> value = Np = emit Np particles per emission step (0 = flow mode)
+  <I>normal</I> value = <I>yes</I> or <I>no</I> = emit along the surface normal
+  <I>stop_at_np</I> value = Ntot = stop emitting once Ntot particles have
+    been emitted in total (0 = no limit)
+  <I>slave</I> values = R Gamma sc-IDs
+    R = fraction of the weight absorbed by the listed vanish models
+      that is re-emitted
+    Gamma = external feed rate in atoms/s
+    sc-IDs = comma-separated IDs of surf_collide vanish models
+  <I>nlaunch_total</I> value = N = emit N weighted particles per emission
+    step (slave mode only)
+  <I>nevery</I> value = Nevery = emit every this many timesteps
+  <I>perspecies</I> value = <I>yes</I> or <I>no</I>
+  <I>region</I> value = region-ID = only emit from surface elements in region 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix puff surface/emit/puff dgas valve n 50 normal yes stop_at_np 100000
+fix puff surface/emit/puff dgas valve slave 0.9 1.0e20 pump1,pump2 &
+    nlaunch_total 200 nevery 10 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Emit particles of a mixture from the surface elements of a group at a
+prescribed rate, e.g. a gas puff or a fixed-rate injection from a
+predefined surface.  No plasma background or surface compute is
+needed.  Particles are distributed over the elements in proportion to
+their area, launched with a cosine angular distribution about the
+surface normal and a Maxwellian flux distribution at the mixture
+temperature.  With <I>normal yes</I> the drift direction is the surface
+normal instead of the mixture <I>vstream</I>.
+</P>
+<P>Three emission modes are available.  In flow mode (<I>n</I> 0, the
+default) the emission rate follows from the mixture density,
+temperature and stream velocity as for <A HREF = "fix_emit_surf.html">fix
+emit/surf</A>.  With <I>n</I> Np, exactly Np particles per
+emission step are emitted (per processor, distributed over its
+tasks).  In <I>slave</I> mode the number of atoms injected per emission
+window is
+</P>
+<PRE>N_atoms = R W_abs + Gamma dt nevery 
+</PRE>
+<P>where W_abs is the real-atom weight absorbed by the listed
+<A HREF = "surf_collide.html">surf_collide vanish</A> models since the previous
+emission (their escaped weight), so that a pumped flux is partially
+re-fed at the puff location, and Gamma is an external source.  R = 0
+gives a pure external source.  Without <I>nlaunch_total</I> the atoms are
+converted to particles with the global <I>fnum</I>; with <I>nlaunch_total</I> N
+exactly N particles are emitted per window, each carrying the weight
+N_atoms/N in the per-particle weight attribute, which decouples the
+particle statistics from <I>fnum</I>.
+</P>
+<P><I>stop_at_np</I> latches emission off once the cumulative number of
+emitted particles reaches the limit, which gives a clean one-shot
+puff that can be tracked to completion.
+</P>
+<P><B>Restart, output info:</B>
+</P>
+<P>No information about this fix is written to <A HREF = "restart.html">binary restart
+files</A>.
+</P>
+<P>This fix computes a global vector of length 2 which can be accessed
+by various output commands.  The first element is the number of
+particles emitted on the most recent emission step, the second the
+cumulative number of particles emitted since the start of the run.
+</P>
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.  It requires explicit
+(non-implicit) surface elements.  <I>perspecies yes</I> cannot be combined
+with <I>n</I> > 0 or <I>slave</I>.  <I>nlaunch_total</I> requires <I>slave</I> mode and
+<A HREF = "fix_particle_weight.html">fix particle/weight</A>.  The <I>slave</I> collide
+IDs must be <A HREF = "surf_collide.html">surf_collide vanish</A> models.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_emit_surf.html">fix emit/surf</A>,
+<A HREF = "fix_surface_emit_source.html">fix surface/emit/source</A>,
+<A HREF = "fix_surface_emit_recycle.html">fix surface/emit/recycle</A>,
+<A HREF = "fix_particle_weight.html">fix particle/weight</A>,
+<A HREF = "surf_collide.html">surf_collide</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The option defaults are n = 0 (flow mode), normal = no, stop_at_np = 0
+(no limit), nevery = 1, perspecies = yes and no region.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -64,7 +64,7 @@ three kinds of quantities.  "Particle-style, grid-style, and
 surf-style variables"_variable.html generate per-particle, per-grid,
 or per-surf quantities respectively.  Custom attributes can be
 per-particle, per-grid, or per-surf quantities.  See the
-"variable"_variable command and its special functions which can
+"variable"_variable.html command and its special functions which can
 perform the same operations as the compute reduce command on global
 vectors.
 
@@ -135,7 +135,7 @@ per-particle or per-grid quantities.  See the individual
 is appended, the vector calculated by the compute is used.  If a
 bracketed integer is appended, the Nth column of the array calculated
 by the compute is used.  Users can also write code for their own
-compute styles and "add them to SPARTA"_Section_modify.html.  See the
+compute styles and add them to OpenEdge.  See the
 discussion above for how N can be specified with a wildcard asterisk
 to effectively specify multiple values.
 
@@ -148,7 +148,7 @@ with when this compute references the values, else an error results.
 If no bracketed integer is appended, the vector calculated by the fix
 is used.  If a bracketed integer is appended, the Nth column of the
 array calculated by the fix is used.  Users can also write code for
-their own fix style and "add them to SPARTA"_Section_modify.html.  See
+their own fix style and add them to OpenEdge.  See
 the discussion above for how N can be specified with a wildcard
 asterisk to effectively specify multiple values.
 
@@ -173,7 +173,7 @@ e.g. "fix ambipolar"_fix_ambipolar.html or "fix
 surf/temp"_fix_surf_temp.html or "surf_react
 adsorb"_surf_react_adsorb.html.  The name of each attribute is set by
 the user or defined by the command.  See "Section
-6.17"_Section_howto.html#howto_17 for more discussion of custom
+6.17"_Section_howto.html#howto_14 for more discussion of custom
 attributes.
 
 If no bracketed integer is appended, the custom attribute must be a
@@ -257,8 +257,8 @@ This compute calculates a global scalar if a single input value is
 specified or a global vector of length N where N is the number of
 inputs, and which can be accessed by indices 1 to N.  These values can
 be used by any command that uses global scalar or vector values from a
-compute as input.  See "Section 6.4"_Section_howto.html#howto_4 for an
-overview of SPARTA output options.
+compute as input.  See "Section 4.8"_Section_howto.html#howto_10 for an
+overview of OpenEdge output options.
 
 The scalar or vector values will be in whatever "units"_units.html the
 quantities being reduced are in.

@@ -104,8 +104,9 @@ examples/wip/
 examples/**/NOTES.local.md
 examples/**/*.local.pdf
 
-# Sphinx build output
-/docs/_build/
+# Generated manual artifact. The source .txt and generated .html pages are
+# versioned; rebuild the PDF with `make -C doc pdf`.
+/doc/Manual.pdf
 
 # Reproducible high-volume ST40 analysis intermediates. Compact summaries and
 # machine-readable acceptance records remain versioned.
@@ -127,6 +128,7 @@ database/iead/IEAD_REGENERATE.md
 
 # Personal plans / TODOs / working notes — never committed (see notes/README.md)
 /notes/
+examples/**/*_PLAN.md
 
 
 # Device backgrounds intentionally retained with the public workflows.

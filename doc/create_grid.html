@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -56,7 +56,7 @@ create_grid 8 8 10 levels 3 subset 2 5* * * 4 4 4 subset 3 1 2*3 3* 2 2 1
 <A HREF = "create_box.html">create_box</A> command.  The grid can also be defined by
 the <A HREF = "read_grid.html">read_grid</A> command.
 </P>
-<P>The grid in SPARTA is hierarchical, as described in <A HREF = "Section_howto.html#howto_8">Section howto
+<P>The grid in OpenEdge is hierarchical, as described in <A HREF = "Section_howto.html#howto_10">Section howto
 4.8</A>.  The entire simulation box is a
 single parent grid cell at level 0.  It is subdivided into Nx by Ny by
 Nz cells at level 1.  Each of those cells can be a child cell (no
@@ -77,7 +77,7 @@ cells to each processor.  This means each processor's cells will be
 geometrically compact.  The <I>random</I> and <I>stride</I> keywords, produce
 dispersed assignments of child cells to each processor.
 </P>
-<P>IMPORTANT NOTE: See <A HREF = "Section_howto.html#howto_8">Section 6.8</A> of the
+<P>IMPORTANT NOTE: See <A HREF = "Section_howto.html#howto_12">Section 4.10</A> of the
 manual for an explanation of clumped and dispersed grid cell
 assignments and their relative performance trade-offs.  The
 <A HREF = "balance_grid.html">balance_grid</A> command can be used after the grid is
@@ -103,15 +103,15 @@ effectively assigns a contiguous 3d sub-block of cells to each
 processor.
 </P>
 <P>Any of the <I>Px</I>, <I>Py</I>, <I>Pz</I> parameters can be specified with an
-asterisk "*", in which case SPARTA will choose the number of
+asterisk "*", in which case OpenEdge will choose the number of
 processors in that dimension.  It will do this based on the size and
 shape of the global grid so as to minimize the surface-to-volume ratio
 of each processor's sub-block of cells.
 </P>
 <P>The product of Px, Py, Pz must equal P, the total # of processors
-SPARTA is running on.  For a 2d simulation, Pz must equal 1. If
+OpenEdge is running on.  For a 2d simulation, Pz must equal 1. If
 multiple partitions are being used then P is the number of processors
-in this partition; see <A HREF = "Section_start.html#start_7">Section 2.6</A> for an
+in this partition; see <A HREF = "Section_start.html#start_5">Section 2.5</A> for an
 explanation of the -partition command-line switch.
 </P>
 <P>Note that if you run on a large, prime number of processors P, then a
@@ -255,4 +255,5 @@ the <A HREF = "create_box.html">create_box</A> command.
 with Px = Py = Pz = *.  The inside keyword has a default setting of
 any.
 </P>
+<!-- PAGE BREAK -->
 </HTML>
