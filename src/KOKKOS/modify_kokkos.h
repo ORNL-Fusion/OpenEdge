@@ -16,6 +16,7 @@
 #define SPARTA_MODIFY_KOKKOS_H
 
 #include "modify.h"
+#include <vector>
 
 namespace SPARTA_NS {
 
@@ -41,6 +42,17 @@ class ModifyKokkos : public Modify {
  private:
   class ParticleKokkos* particle_kk;
   class GridKokkos* grid_kk;
+
+  // OE_FIX_TIMING=<nsteps>: per-fix wall-time accounting for the Modify
+  // bucket (device fenced around every fix call so async kernels are
+  // charged to their owner); cumulative report every <nsteps> on rank 0
+  int fix_timing_every;
+  std::vector<double> fix_time_start, fix_time_end;
+  std::vector<long> fix_calls_start, fix_calls_end;
+  double fix_drain_start, fix_drain_end;   // leading-fence wait (async kernels
+                                           // from earlier phases draining
+                                           // into the Modify bucket)
+  void fix_timing_report();
 };
 
 }

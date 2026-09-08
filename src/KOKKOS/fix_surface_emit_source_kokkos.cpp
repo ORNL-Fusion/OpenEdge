@@ -46,12 +46,21 @@ FixSurfaceEmitSourceKokkos::FixSurfaceEmitSourceKokkos(SPARTA *sparta,
 #endif
   kokkos_flag = 1;
   execution_space = Device;
-  datamask_read = PARTICLE_MASK | SPECIES_MASK;
-  datamask_modify = PARTICLE_MASK;
+  // EMPTY masks (as fix_emit_surf/kk, fix_emit_face/kk): perform_task()
+  // syncs/modifies particles explicitly on both the device and host
+  // paths. A non-empty mask here is charged by ModifyKokkos around EVERY
+  // per-grid hook -- and this fix has gridmigrate=1, so pack/unpack_grid_one
+  // fire once per migrating cell during fix balance. With PARTICLE_MASK
+  // that was a full H2D + D2H particle-array round trip per cell
+  // (~50 s per rebalance at 100x; the gate-10 "Modify 89%" regression).
+  datamask_read = EMPTY_MASK;
+  datamask_modify = EMPTY_MASK;
 
   device_ok = 0;
   warned_fallback = 0;
   tasks_uploaded_ = 0;
+  dev_announced_ = 0;
+  host_warm_calls_ = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -234,7 +243,20 @@ void FixSurfaceEmitSourceKokkos::perform_task()
 
   int dev = device_ok;
   const char *why = nullptr;
-  if (dev && !cache_ready) { dev = 0; why = nullptr; }  // silent: warmup
+  if (dev && !cache_ready) {
+    // warmup: the host path runs until the upstream source is frozen.
+    // Stay silent for a few steps, then say so once — a source that never
+    // freezes (non-static cpmi, compound mix) means a permanent, silent
+    // host fallback with the full per-step particle D2H/H2D.
+    dev = 0; why = nullptr;
+    host_warm_calls_++;
+    if (host_warm_calls_ == 20 && comm->me == 0 && screen)
+      fprintf(screen,"fix surface/emit/source/kk: still HOST emission after "
+              "%d calls — per-task source not yet static (cached=%d size=%d/%d "
+              "total=%g); device path will engage when it freezes\n",
+              host_warm_calls_,task_source_cached,
+              (int) cached_task_source.size(),ntask,cached_source_total);
+  }
   if (dev && update->nsurf_tally > 0) {
     dev = 0; why = "active surf tallies this step";
   }
@@ -250,6 +272,14 @@ void FixSurfaceEmitSourceKokkos::perform_task()
     FixSurfaceEmitSource::perform_task();
     particle_kk->sync(Device,PARTICLE_MASK|CUSTOM_MASK);
     return;
+  }
+
+  if (!dev_announced_) {
+    dev_announced_ = 1;
+    if (comm->me == 0 && screen)
+      fprintf(screen,"fix surface/emit/source/kk: device emission ACTIVE from "
+              "step " BIGINT_FORMAT " (after %d host warmup calls, ntask %d)\n",
+              update->ntimestep,host_warm_calls_,ntask);
   }
 
   if (!tasks_uploaded_) upload_tasks();

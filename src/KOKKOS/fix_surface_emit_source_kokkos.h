@@ -65,6 +65,8 @@ class FixSurfaceEmitSourceKokkos : public FixSurfaceEmitSource,
   int device_ok;
   int warned_fallback;
   int tasks_uploaded_;            // device task views current
+  int dev_announced_;             // one-shot "device emission ACTIVE" banner
+  int host_warm_calls_;           // host calls spent waiting for a static source
 
   void upload_tasks();
 

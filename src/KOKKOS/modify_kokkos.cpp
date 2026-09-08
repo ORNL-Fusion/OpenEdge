@@ -26,6 +26,9 @@
 #include "particle_kokkos.h"
 #include "grid_kokkos.h"
 #include "kokkos.h"
+#include "comm.h"
+#include <stdlib.h>
+#include <mpi.h>
 
 using namespace SPARTA_NS;
 
@@ -42,6 +45,16 @@ ModifyKokkos::ModifyKokkos(SPARTA *sparta) : Modify(sparta)
 {
   particle_kk = (ParticleKokkos*) particle;
   grid_kk = (GridKokkos*) grid;
+
+  fix_timing_every = 0;
+  fix_drain_start = fix_drain_end = 0.0;
+  if (const char *e = getenv("OE_FIX_TIMING")) {
+    fix_timing_every = atoi(e);
+    if (fix_timing_every <= 0) fix_timing_every = 100;
+    if (comm->me == 0 && screen)
+      fprintf(screen,"ModifyKokkos: per-fix timing enabled "
+              "(OE_FIX_TIMING, report every %d steps)\n",fix_timing_every);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -57,8 +70,16 @@ ModifyKokkos::~ModifyKokkos()
 
 void ModifyKokkos::start_of_step()
 {
+  const bool ft = fix_timing_every > 0;
+  if (ft && (int) fix_time_start.size() < nfix) {
+    fix_time_start.resize(nfix,0.0); fix_time_end.resize(nfix,0.0);
+    fix_calls_start.resize(nfix,0);   fix_calls_end.resize(nfix,0);
+  }
   for (int i = 0; i < n_start_of_step; i++) {
     int j = list_start_of_step[i];
+    double t0 = 0.0;
+    if (ft) { double tf = MPI_Wtime(); Kokkos::fence(); t0 = MPI_Wtime();
+              fix_drain_start += t0 - tf; }
     particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
     int prev_auto_sync = sparta->kokkos->auto_sync;
     if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
@@ -67,6 +88,8 @@ void ModifyKokkos::start_of_step()
 
     sparta->kokkos->auto_sync = prev_auto_sync;
     particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+    if (ft) { Kokkos::fence(); fix_time_start[j] += MPI_Wtime() - t0;
+              fix_calls_start[j]++; }
   }
 }
 
@@ -77,9 +100,17 @@ void ModifyKokkos::start_of_step()
 
 void ModifyKokkos::end_of_step()
 {
+  const bool ft = fix_timing_every > 0;
+  if (ft && (int) fix_time_end.size() < nfix) {
+    fix_time_start.resize(nfix,0.0); fix_time_end.resize(nfix,0.0);
+    fix_calls_start.resize(nfix,0);   fix_calls_end.resize(nfix,0);
+  }
   for (int i = 0; i < n_end_of_step; i++)
     if (update->ntimestep % end_of_step_every[i] == 0) {
       int j = list_end_of_step[i];
+      double t0 = 0.0;
+      if (ft) { double tf = MPI_Wtime(); Kokkos::fence(); t0 = MPI_Wtime();
+                fix_drain_end += t0 - tf; }
       particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
       int prev_auto_sync = sparta->kokkos->auto_sync;
       if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
@@ -88,7 +119,41 @@ void ModifyKokkos::end_of_step()
 
       sparta->kokkos->auto_sync = prev_auto_sync;
       particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+      if (ft) { Kokkos::fence(); fix_time_end[j] += MPI_Wtime() - t0;
+                fix_calls_end[j]++; }
     }
+  if (ft && update->ntimestep % fix_timing_every == 0) fix_timing_report();
+}
+
+/* ----------------------------------------------------------------------
+   OE_FIX_TIMING report: cumulative per-fix seconds (rank 0 values plus
+   the max over ranks), start_of_step and end_of_step separately
+------------------------------------------------------------------------- */
+
+void ModifyKokkos::fix_timing_report()
+{
+  const int n = nfix;
+  std::vector<double> mx_start(n,0.0), mx_end(n,0.0);
+  MPI_Reduce(fix_time_start.data(),mx_start.data(),n,MPI_DOUBLE,MPI_MAX,0,world);
+  MPI_Reduce(fix_time_end.data(),mx_end.data(),n,MPI_DOUBLE,MPI_MAX,0,world);
+  if (comm->me != 0) return;
+  FILE *outs[2] = {screen,logfile};
+  for (FILE *out : outs) {
+    if (!out) continue;
+    fprintf(out,"[fix-timing] step " BIGINT_FORMAT
+            " cumulative seconds (rank0 / max-rank), calls\n",update->ntimestep);
+    fprintf(out,"  %-8s %-32s start %9.3f             end %9.3f   "
+            "(leading-fence wait: async kernels from earlier phases)\n",
+            "-","async-drain",fix_drain_start,fix_drain_end);
+    for (int j = 0; j < n; j++) {
+      if (fix_calls_start[j] == 0 && fix_calls_end[j] == 0) continue;
+      fprintf(out,"  %-8s %-32s start %9.3f / %9.3f (%ld)   end %9.3f / %9.3f (%ld)\n",
+              fix[j]->id,fix[j]->style,
+              fix_time_start[j],mx_start[j],fix_calls_start[j],
+              fix_time_end[j],mx_end[j],fix_calls_end[j]);
+    }
+    fflush(out);
+  }
 }
 
 /* ----------------------------------------------------------------------
