@@ -5,6 +5,7 @@
 
 #include "fix_droplet_drag.h"
 #include "fix_background.h"
+#include "fix_droplet_charge.h"
 #include "grain_material.h"
 #include "update.h"
 #include "grid.h"
@@ -55,11 +56,15 @@ FixDropletDrag::FixDropletDrag(SPARTA *sparta, int narg, char **arg)
       iarg += 4;
     } else if (strcmp(arg[iarg], "model") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "fix drag: model needs a value");
-      if (strcmp(arg[iarg+1], "dustt2005") != 0 &&
-          strcmp(arg[iarg+1], "dustt") != 0)
+      if (strcmp(arg[iarg+1], "dustt2005") == 0 ||
+          strcmp(arg[iarg+1], "dustt") == 0)
+        physics_model_ = ParticulateModel::DUSTT2005;
+      else if (strcmp(arg[iarg+1], "dis2021") == 0 ||
+               strcmp(arg[iarg+1], "dis") == 0)
+        physics_model_ = ParticulateModel::DIS2021;
+      else
         error->all(FLERR,
-          "fix drag: model must be 'dustt2005' (DUSTT collection+Coulomb "
-          "kinetic drag, Pigarov et al. 2005)");
+          "fix particulate/drag: model must be dustt2005 or dis2021");
       iarg += 2;
     } else if (strcmp(arg[iarg], "coulomb/chi") == 0) {
       chi_coulomb = input->numeric(FLERR, arg[iarg+1]); iarg += 2;
@@ -88,6 +93,11 @@ FixDropletDrag::FixDropletDrag(SPARTA *sparta, int narg, char **arg)
       if      (strcmp(arg[iarg+1], "yes") == 0) self_consistent_ = 1;
       else if (strcmp(arg[iarg+1], "no")  == 0) self_consistent_ = 0;
       else error->all(FLERR, "fix drag: coulomb/self must be yes or no");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "charge") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix particulate/drag: charge requires a fix ID");
+      charge_fix_id_ = std::string(arg[iarg+1]);
       iarg += 2;
     } else if (strcmp(arg[iarg], "neutrals") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "fix drag: neutrals yes|no");
@@ -151,17 +161,79 @@ void FixDropletDrag::init()
     error->all(FLERR, "fix drag: background fix must be style background");
 
   dq_custom_ = particle->find_custom((char *) "particulate_charge");
-  if (self_consistent_ && dq_custom_ < 0 && comm->me == 0)
+  if (physics_model_ == ParticulateModel::DIS2021 &&
+      self_consistent_ && dq_custom_ < 0)
+    error->all(FLERR,
+      "fix particulate/drag model dis2021: coulomb/self yes requires "
+      "fix particulate/charge; DIS does not substitute a neutral grain");
+  if (physics_model_ == ParticulateModel::DIS2021 && self_consistent_) {
+    if (charge_fix_id_.empty())
+      error->all(FLERR,
+        "fix particulate/drag model dis2021 with coulomb/self yes requires "
+        "'charge FIXID'");
+    const int iqfix = modify->find_fix(charge_fix_id_.c_str());
+    if (iqfix < 0)
+      error->all(FLERR,
+        "fix particulate/drag: referenced charge fix was not found");
+    charge_fix_ = dynamic_cast<FixDropletCharge *>(modify->fix[iqfix]);
+    if (!charge_fix_ ||
+        charge_fix_->physics_model() != ParticulateModel::DIS2021)
+      error->all(FLERR,
+        "fix particulate/drag model dis2021: charge FIXID must name a "
+        "particulate/charge fix using model dis2021");
+    if (charge_fix_->background_fix_id() != plasma_fix_id_)
+      error->all(FLERR,
+        "fix particulate/drag model dis2021: charge and drag fixes must "
+        "reference the same background fix");
+    const int idrag = modify->find_fix(id);
+    if (idrag < 0 || iqfix >= idrag)
+      error->all(FLERR,
+        "fix particulate/drag model dis2021: the referenced charge fix "
+        "must be defined before the drag fix");
+    const double mass_rel = std::fabs(charge_fix_->ion_mass_amu_value()
+                                      - A_background) / A_background;
+    const double charge_rel = std::fabs(charge_fix_->ion_charge_state_value()
+                                        - Z_background) / Z_background;
+    if (mass_rel > 1.0e-12 || charge_rel > 1.0e-12)
+      error->all(FLERR,
+        "fix particulate/drag model dis2021: A_bg and Z_bg must match "
+        "ion_mass_amu and ion_charge_state in the charge fix");
+  }
+  if (physics_model_ == ParticulateModel::DUSTT2005 &&
+      self_consistent_ && dq_custom_ < 0 && comm->me == 0)
     error->warning(FLERR, "fix drag: coulomb/self without fix grain/charge - "
                    "chi falls back to 0 (collection drag only)");
 
   // Optional grain material: overrides the legacy hardcoded Li density
-  // used in the Epstein frequency (rho_d = 534 kg/m^3).
+  // used in the Epstein frequency (rho_d = 534 kg/m^3). DIS makes this
+  // explicit and provenance-tagged because rho directly scales drag.
+  const GrainMaterial *mat = nullptr;
   if (mat_name_[0]) {
-    const GrainMaterial *mat = grain_material_find(mat_name_);
+    mat = grain_material_find(mat_name_);
     if (!mat || mat->rho <= 0.0)
       error->all(FLERR, "fix drag: unknown material or material has no rho");
     rho_d = mat->rho;
+  }
+  if (physics_model_ == ParticulateModel::DIS2021) {
+    if (!mat || !mat->provenance_id[0])
+      error->all(FLERR,
+        "fix particulate/drag model dis2021 requires 'material NAME' "
+        "whose material command supplies a provenance ID");
+    char missing[128];
+    if (grain_material_missing_properties(mat, GRAIN_MAT_RHO,
+                                           missing, sizeof(missing)))
+      error->all(FLERR,
+        "fix particulate/drag model dis2021: material must explicitly "
+        "supply rho");
+    if (charge_fix_ && charge_fix_->grain_material() != mat)
+      error->all(FLERR,
+        "fix particulate/drag model dis2021: charge and drag fixes must "
+        "use the same material definition");
+    if (comm->me == 0 && screen)
+      fprintf(screen,
+        "particulate/drag dis2021 material=%s provenance=%s "
+        "explicit_mask=0x%llx\n", mat->name, mat->provenance_id,
+        static_cast<unsigned long long>(mat->explicit_mask));
   }
   pd_->init();
 }
@@ -187,7 +259,9 @@ void FixDropletDrag::kick_half(double dt_half)
   const int nlocal = particle->nlocal;
   Particle::OnePart * const parts = particle->particles;
 
-  const double mi       = A_background * update->proton_mass;
+  const double mi       = A_background *
+    (physics_model_ == ParticulateModel::DIS2021
+      ? 1.66053906660e-27 : update->proton_mass);
   const int    dim      = domain->dimension;
   const int    axisym   = domain->axisymmetric;
 
@@ -201,16 +275,14 @@ void FixDropletDrag::kick_half(double dt_half)
     if (seed_radius > 0.0 && p.radius <= 0.0) p.radius = seed_radius;
     if (seed_temp   > 0.0 && p.temp   <= 0.0) p.temp   = seed_temp;
 
-    // R/Z at particle for plasma queries.
-    double R = 0.0, Z = 0.0;
-    OpenEdge::sparta_to_RZ(p.x, dim, axisym, R, Z);
+    unsigned request = PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B;
+    if (neutrals_on_) request |= PLASMA_NEED_NEUTRAL;
+    if (efield_on_) request |= PLASMA_NEED_E;
+    PlasmaPointSample plasma;
+    pd_->sample_point(p.x, plasma, p.icell, ip, request);
 
-    const double Ti_eV = std::max(pd_->interp2D(pd_->temp_i, R, Z, p.icell), 0.0);
-    const double Ni    = std::max(pd_->interp2D(pd_->dens_i, R, Z, p.icell), 0.0);
-    const double Vpar  =          pd_->interp2D(pd_->parr_flow, R, Z, p.icell);
-    double Br = 0.0, Bz = 0.0, Bt = 0.0;
-    if (pd_->has_bfield || !pd_->mesh_tri_br.empty())
-      pd_->bfield_at(R, Z, Br, Bz, Bt, p.icell, ip);
+    const double Ti_eV = std::max(plasma.ti, 0.0);
+    const double Ni    = std::max(plasma.ni, 0.0);
 
     const double rd = p.radius;
     double nuE = 0.0;
@@ -221,17 +293,9 @@ void FixDropletDrag::kick_half(double dt_half)
       // with v_Ti = sqrt(2 T_i / m_i) [Pigarov PoP 12, 122508, Eq. 16]
       nuE = ion_drag_nu(Ni, Ti_eV, rd);
 
-      const double Bn = std::sqrt(Br*Br + Bt*Bt + Bz*Bz);
-      if (Bn > 1.0e-12) {
-        // Parallel flow vector in cylindrical (R, Z, t), then to SPARTA slots.
-        const double Vr = Vpar * (Br / Bn);
-        const double Vz = Vpar * (Bz / Bn);
-        const double Vt = Vpar * (Bt / Bn);
-        double phi = 0.0;
-        if (dim == 3) phi = std::atan2(p.x[1], p.x[0]);
-        OpenEdge::RZphi_force_to_sparta(Vr, Vz, Vt, dim, axisym, phi,
-                                         upar[0], upar[1], upar[2]);
-      }
+      upar[0] = plasma.flow[0];
+      upar[1] = plasma.flow[1];
+      upar[2] = plasma.flow[2];
 
       if (nuE > 0.0) {
         // u = |V_i - v| / v_Ti (DUSTT Mach number, v_Ti = sqrt(2T_i/m_i))
@@ -241,43 +305,60 @@ void FixDropletDrag::kick_half(double dt_half)
           const double dv1 = p.v[1] - upar[1];
           const double dv2 = p.v[2] - upar[2];
           const double u   = std::sqrt(dv0*dv0 + dv1*dv1 + dv2*dv2) / vth_i;
-          if (!self_consistent_) {
-            nuE *= coulomb_multiplier(u);
-          } else {
-            // Per-particle chi/delta/lnLambda from the OML charge and the
-            // local plasma (DUSTT ion-drag closure, Hutchinson-fit lnL).
+          {
+            // Per-particle chi/delta/lnLambda from the OML charge and local
+            // plasma.  DIS uses signed chi=-Phi/Te; DUSTT retains its legacy
+            // negative-grain-only closure exactly.
             const double QE   = update->echarge;
             const double EPS0 = 8.8541878128e-12;
-            const double Te_eV = std::max(pd_->interp2D(pd_->temp_e, R, Z, p.icell), 0.0);
-            const double ne    = std::max(pd_->interp2D(pd_->dens_e, R, Z, p.icell), 0.0);
-            double chi = 0.0;
-            if (dq_custom_ >= 0 && Te_eV > 0.0) {
+            const double Te_eV = std::max(plasma.te, 0.0);
+            const double ne    = std::max(plasma.ne, 0.0);
+            double chi = chi_coulomb;
+            double delta = delta_ite;
+            double lnlam = ln_lambda_coulomb;
+            if (self_consistent_ && dq_custom_ >= 0 && Te_eV > 0.0) {
               const int ew = particle->ewhich[dq_custom_];
               if (ew >= 0) {
                 const double Zd   = particle->edvec[ew][ip];
                 const double r_c  = std::max(rd, 1.0e-9);
                 const double phiV = Zd * QE / (4.0 * MY_PI * EPS0 * r_c);
-                if (std::isfinite(phiV) && phiV < 0.0)
-                  chi = std::min(-phiV / Te_eV, 20.0);
+                if (std::isfinite(phiV)) {
+                  if (physics_model_ == ParticulateModel::DIS2021)
+                    chi = -phiV / Te_eV;
+                  else if (phiV < 0.0)
+                    chi = std::min(-phiV / Te_eV, 20.0);
+                  else
+                    chi = 0.0;
+                }
+              }
+              delta = std::max(Ti_eV / Te_eV, 1.0e-6);
+              lnlam = 0.0;
+              if (ne > 0.0 && chi != 0.0) {
+                const double TiJ  = Ti_eV * QE;
+                const double TeJ  = Te_eV * QE;
+                const double mve2 = TiJ * (3.0 + 2.0*u*u);
+                const double b90  = rd * std::fabs(chi) * TeJ / mve2;
+                const double lamD = std::sqrt(EPS0 * TeJ / (ne * QE * QE));
+                const double lams = lamD / std::sqrt(1.0 + 3.0*TeJ/mve2);
+                const double eta  = 1.0 + (rd/lams)
+                                    * (1.0 + std::sqrt(Te_eV/(6.0*Ti_eV)));
+                lnlam = 0.5 * std::log((b90*b90 + (eta*lams)*(eta*lams))
+                                       / (b90*b90 + rd*rd));
+                if (!(lnlam > 0.0)) lnlam = 0.0;
               }
             }
-            const double delta = (Te_eV > 0.0)
-              ? std::max(Ti_eV / Te_eV, 1.0e-6) : 1.0;
-            double lnlam = 0.0;
-            if (ne > 0.0 && Te_eV > 0.0 && chi > 0.0) {
-              const double TiJ  = Ti_eV * QE;
-              const double TeJ  = Te_eV * QE;
-              const double mve2 = TiJ * (3.0 + 2.0*u*u);
-              const double b90  = rd * chi * TeJ / mve2;
-              const double lamD = std::sqrt(EPS0 * TeJ / (ne * QE * QE));
-              const double lams = lamD / std::sqrt(1.0 + 3.0*TeJ/mve2);
-              const double eta  = 1.0 + (rd/lams)
-                                  * (1.0 + std::sqrt(Te_eV/(6.0*Ti_eV)));
-              lnlam = 0.5 * std::log((b90*b90 + (eta*lams)*(eta*lams))
-                                     / (b90*b90 + rd*rd));
-              if (!(lnlam > 0.0)) lnlam = 0.0;
+
+            if (physics_model_ == ParticulateModel::DIS2021) {
+              const double X = Z_background * chi / std::max(delta, 1.0e-12);
+              double zeta = 0.0;
+              if (!ParticulateModel::dis_ion_drag_factor(u, X, lnlam, zeta))
+                error->one(FLERR,
+                  "fix particulate/drag model dis2021: invalid ion-drag "
+                  "state in Smirnov 2007 Eqs. (5)/(6)");
+              nuE *= zeta;
+            } else {
+              nuE *= coulomb_multiplier(u, chi, delta, lnlam);
             }
-            nuE *= coulomb_multiplier(u, chi, delta, lnlam);
           }
         } else nuE = 0.0;
       }
@@ -290,8 +371,8 @@ void FixDropletDrag::kick_half(double dt_half)
     // Auto-off when the background carries no neutral data.
     double nuN = 0.0;
     if (neutrals_on_ && rd > 0.0) {
-      const double Nn = std::max(pd_->interp2D(pd_->dens_n, R, Z, p.icell), 0.0);
-      const double Tn = std::max(pd_->interp2D(pd_->temp_n, R, Z, p.icell), 0.0);
+      const double Nn = std::max(plasma.nn, 0.0);
+      const double Tn = std::max(plasma.tn, 0.0);
       if (Nn > 0.0 && Tn > 0.0 && rho_d > 0.0) {
         const double vtn = std::sqrt(2.0 * (Tn * update->echarge) / mi);
         const double s = std::sqrt(p.v[0]*p.v[0] + p.v[1]*p.v[1] +
@@ -331,17 +412,11 @@ void FixDropletDrag::kick_half(double dt_half)
     if (efield_on_ && dq_custom_ >= 0 && p.mass > 0.0) {
       const int ew = particle->ewhich[dq_custom_];
       const double zd = (ew >= 0) ? particle->edvec[ew][ip] : 0.0;
-      if (zd != 0.0) {
-        double ER = 0.0, EZ = 0.0, Et = 0.0;
-        if (pd_->query_efield_at_point(p.x, ER, EZ, Et, p.icell, ip)) {
-          const double qom = zd * update->echarge / p.mass;
-          double phi = 0.0;
-          if (dim == 3) phi = std::atan2(p.x[1], p.x[0]);
-          double aE0, aE1, aE2;
-          OpenEdge::RZphi_force_to_sparta(qom*ER, qom*EZ, qom*Et,
-                                          dim, axisym, phi, aE0, aE1, aE2);
-          g0 += aE0; g1 += aE1; g2 += aE2;
-        }
+      if (zd != 0.0 && plasma.has_e) {
+        const double qom = zd * update->echarge / p.mass;
+        g0 += qom * plasma.e[0];
+        g1 += qom * plasma.e[1];
+        g2 += qom * plasma.e[2];
       }
     }
 
@@ -379,7 +454,9 @@ double FixDropletDrag::ion_drag_nu(double Ni, double Ti_eV, double rd_m) const
   // nu = F_Epstein/(M_d |V_i - v|) = m_i n_i v_Ti sigma_d / M_d
   //    = (3/4) rho_g v_Ti / (rho_d R_d),  v_Ti = sqrt(2 T_i / m_i)
   if (Ni <= 0.0 || Ti_eV <= 0.0 || rd_m <= 0.0 || rho_d <= 0.0) return 0.0;
-  const double mi    = A_background * update->proton_mass;
+  const double mi    = A_background *
+    (physics_model_ == ParticulateModel::DIS2021
+      ? 1.66053906660e-27 : update->proton_mass);
   const double vti   = std::sqrt(2.0 * (Ti_eV * update->echarge) / mi);
   const double rho_g = Ni * mi;
   return 0.75 * (rho_g * vti) / (rho_d * rd_m);

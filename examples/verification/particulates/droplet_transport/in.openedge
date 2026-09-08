@@ -36,16 +36,17 @@ fix    pd background file input/plasma.h5 static yes
 
 read_particles input/source 1
 
-fix fevap_1 particulate/thermal 1 drops_1 background pd heating oml &
+fix fevap_1 particulate/thermal 1 drops_1 background pd model dustt2005 heating oml &
             ion_mass_amu 2.0 material Li rocket_eta 0.5
-fix fevap_2 particulate/thermal 1 drops_2 background pd heating oml &
+fix fevap_2 particulate/thermal 1 drops_2 background pd model dustt2005 heating oml &
             ion_mass_amu 2.0 material Li rocket_eta 0.5
-fix fevap_3 particulate/thermal 1 drops_3 background pd heating oml &
+fix fevap_3 particulate/thermal 1 drops_3 background pd model dustt2005 heating oml &
             ion_mass_amu 2.0 material Li rocket_eta 0.5
 
 fix fdrag   particulate/drag 1 2.0 1 background pd gravity 0 -9.8 0 &
             model dustt2005 coulomb/self yes material Li
-fix fcharge particulate/charge 1 background pd ion_mass_amu 2.0 thermionic no
+fix fcharge particulate/charge 1 background pd model dustt2005 &
+            ion_mass_amu 2.0 thermionic no
 
 global pusher plasma pd
 global pusher subcycles 5

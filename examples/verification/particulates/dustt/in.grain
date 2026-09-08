@@ -50,9 +50,9 @@ global pusher plasma pd mode boris skip grains
 # drag gated so the free-kinematics run is force-free.
 # nevery 1, A_bg 2 (D), Z_bg 1; no gravity (isolate plasma forces)
 if "${zfix} == 0.0" then &
-  "fix fchg particulate/charge 1 background pd ion_mass_amu 2.0 thermionic no see ${dosee} mixture grains material Li" &
+  "fix fchg particulate/charge 1 background pd model dustt2005 ion_mass_amu 2.0 thermionic no see ${dosee} mixture grains material Li" &
 else &
-  "fix fchg particulate/charge 1 background pd fixed_charge ${zfix} mixture grains material Li"
+  "fix fchg particulate/charge 1 background pd model dustt2005 fixed_charge ${zfix} mixture grains material Li"
 
 if "${dofix} == 1" then &
   "fix fdrag particulate/drag 1 2.0 1 background pd model dustt2005 coulomb/self yes material Li mixture grains"
