@@ -136,6 +136,18 @@ particulate fixes use a symmetric start/end-of-step update, so keep
 their Nevery values consistent unless a convergence study shows that a
 different cadence is acceptable.
 
+The model names select different published closure sets, not different
+accuracy levels. In the usual negative-grain, no-emission limit their
+floating potentials are close, but their drag and heating need not be:
+{dustt2005} uses the Pigarov (2005) ion-friction expression and fixed
+2.5-temperature heating factors, whereas {dis2021} uses the corrected
+Smirnov (2007) OML collection drag and velocity-dependent DIS energy
+moments. Their emission and evaporation-endpoint treatments also differ.
+The maintained comparison in
+{examples/verification/particulates/dis2021/uniform_plasma_comparison}
+checks both implementations from one shared initial condition and reports
+the separation explicitly.
+
 Coordinate convention: user-supplied directions are given as physical
 (R, Z, phi) components. OpenEdge maps them to the active Cartesian or
 axisymmetric storage layout. This applies to the emission {dir} vector

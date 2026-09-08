@@ -28,6 +28,7 @@ codes. Every case has a deterministic PASS/FAIL gate.
 | `verification/ionization_recombination/` | ADAS ionization and recombination balance |
 | `verification/particulates/dustt2005/uniform_plasma_benchmark/` | DUSTT-2005 grain model against analytic reference results |
 | `verification/particulates/dustt2005/cat_solps_droplet_transport/` | DUSTT-2005 droplet transport in CAT geometry |
+| `verification/particulates/dis2021/uniform_plasma_comparison/` | DIS-2021 verification and controlled comparison with DUSTT-2005 |
 | `verification/pushers/orbit/` | Boris and GCA orbits |
 | `verification/pushers/hybrid/` | Boris/GCA near-wall handoff |
 | `verification/surface_emission/constant_flux/` | Constant-flux emission and cadence scaling |

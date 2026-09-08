@@ -76,6 +76,7 @@ declare -a TESTS=(
   "coulomb_background|verification/collisions/coulomb|in.background|"
   "coulomb_binary|verification/collisions/coulomb|in.binary|"
   "dustt2005_uniform_plasma|verification/particulates/dustt2005/uniform_plasma_benchmark|in.grain|"
+  "dis2021_uniform_comparison|verification/particulates/dis2021/uniform_plasma_comparison|in.compare|"
   "pusher_gca|verification/pushers/orbit|in.gca|"
   "pusher_boris|verification/pushers/orbit|in.boris|"
   "constant_flux|verification/surface_emission/constant_flux|in.constant_flux|"

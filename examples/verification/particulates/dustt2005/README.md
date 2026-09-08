@@ -10,4 +10,5 @@ These cases exercise the `dustt2005` implementation at two levels:
 
 Keep the cases separate: the first diagnoses model-level regressions, while the
 second catches integration failures involving realistic background and geometry
-data.
+data. For a controlled explanation of how this model differs from DIS-2021, see
+`../dis2021/uniform_plasma_comparison/`.

@@ -26,6 +26,7 @@ efield_polarization = polarization drift of a proton in a time-dependent electri
 ionization_recombination = oxygen charge-state balance under ADAS rates
 particulates/dustt2005/uniform_plasma_benchmark = DUSTT-2005 grain model against analytic reference results
 particulates/dustt2005/cat_solps_droplet_transport = DUSTT-2005 droplet transport in CAT geometry
+particulates/dis2021/uniform_plasma_comparison = DIS-2021 verification and controlled comparison with DUSTT-2005
 pushers/orbit = Boris and guiding-center banana orbits in the Khan analytical field
 pushers/hybrid = Boris/GCA hand-off near an absorbing wall
 surface_emission/constant_flux = constant-flux emission independent of emission cadence
