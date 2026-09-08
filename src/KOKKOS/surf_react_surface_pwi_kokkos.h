@@ -93,7 +93,16 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
 
   // 2D sputter-yield tables, padded to max dims
   DAT::t_int_1d d_su_NE, d_su_NT;
-  DAT::t_float_2d_lr d_su_E, d_su_th, d_su_Y;
+  DAT::t_float_2d_lr d_su_E, d_su_th, d_su_Y;   // Y: [il*NE*NTHETA + ie*NTHETA + ia]
+  // Phase D (2026-09-08): lead axis of a 3D table -- kind 0 = plain 2D,
+  // 1 = concentration axis (compound target / rtable), 2 = wall-T axis
+  DAT::t_int_1d d_su_NL, d_su_kind;
+  DAT::t_float_2d_lr d_su_ax;                  // [nsu][maxNL] C or T_K, ascending
+  DAT::t_int_1d d_mat_isp, d_conc_isp, d_refl_tbl;  // [nlist] per-reaction
+  DAT::t_float_2d_lr d_sconc;                  // [nslocal][sigma_ncols] surface conc
+  int conc_dev_on_;                            // d_sconc live (sigma_feedback && conc custom)
+  int conc_dirty_;                             // host conc changed since last upload
+  void upload_conc();
 
   // ---- per-step device tallies and deltas ----
 
@@ -163,11 +172,12 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
   // ProcessLibrary::TrimSputterTable::slice_yield().
 
   KOKKOS_INLINE_FUNCTION
-  double sput_yield(int it, double E_eV, double theta_deg) const
+  double sput_slice(int it, int il, double E_eV, double theta_deg) const
   {
     const int NE = d_su_NE(it);
     const int NT = d_su_NT(it);
     if (NE < 2 || NT < 2) return 0.0;
+    const int off = il * NE * NT;
     if (E_eV < d_su_E(it,0)) return 0.0;
     const double x = (E_eV < d_su_E(it,NE-1)) ? E_eV : d_su_E(it,NE-1);
     const double le = log(x);
@@ -191,13 +201,50 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
     const double a1 = d_su_th(it,ia-1), a2 = d_su_th(it,ia);
     const double te = (le2 != le1) ? (le - le1) / (le2 - le1) : 0.0;
     const double ta = (a2 != a1) ? (a - a1) / (a2 - a1) : 0.0;
-    const double y00 = d_su_Y(it,(ie-1)*NT + (ia-1));
-    const double y10 = d_su_Y(it,ie*NT + (ia-1));
-    const double y01 = d_su_Y(it,(ie-1)*NT + ia);
-    const double y11 = d_su_Y(it,ie*NT + ia);
+    const double y00 = d_su_Y(it,off + (ie-1)*NT + (ia-1));
+    const double y10 = d_su_Y(it,off + ie*NT + (ia-1));
+    const double y01 = d_su_Y(it,off + (ie-1)*NT + ia);
+    const double y11 = d_su_Y(it,off + ie*NT + ia);
     double y = (1.0-te)*(1.0-ta)*y00 + te*(1.0-ta)*y10
              + (1.0-te)*ta*y01 + te*ta*y11;
     return (Kokkos::isfinite(y) && y > 0.0) ? y : 0.0;
+  }
+
+  // plain 2D table (or slice 0 of a 3D one): TrimSputterTable::yield(E,theta)
+  KOKKOS_INLINE_FUNCTION
+  double sput_yield(int it, double E_eV, double theta_deg) const
+  {
+    return sput_slice(it, 0, E_eV, theta_deg);
+  }
+
+  // 3D table: linear between the two bracketing lead-axis slices, clamped
+  // to the axis -- TrimSputterTable::yield(E,theta,c) / yield_at_T()
+  KOKKOS_INLINE_FUNCTION
+  double sput_yield_lead(int it, double E_eV, double theta_deg, double x) const
+  {
+    const int NL = d_su_NL(it);
+    if (NL <= 1) return sput_slice(it, 0, E_eV, theta_deg);
+    double xx = x;
+    if (xx < d_su_ax(it,0)) xx = d_su_ax(it,0);
+    if (xx > d_su_ax(it,NL-1)) xx = d_su_ax(it,NL-1);
+    int lo = 0, hi = NL;
+    while (lo < hi) { int mid = (lo+hi)/2; if (d_su_ax(it,mid) < xx) lo = mid+1; else hi = mid; }
+    int il = lo;
+    if (il <= 0) il = 1;
+    if (il >= NL) il = NL - 1;
+    const double x1 = d_su_ax(it,il-1), x2 = d_su_ax(it,il);
+    const double f = (x2 != x1) ? (xx - x1) / (x2 - x1) : 0.0;
+    return (1.0 - f) * sput_slice(it, il-1, E_eV, theta_deg)
+         + f * sput_slice(it, il, E_eV, theta_deg);
+  }
+
+  // device twin of SurfReactSurfacePWI::mat_conc(): 1.0 when feedback is
+  // off or no conc custom, else the synced per-surf concentration
+  KOKKOS_INLINE_FUNCTION
+  double mat_conc_dev(int isurf, int isp) const
+  {
+    if (!conc_dev_on_ || isp < 0) return 1.0;
+    return d_sconc(isurf, isp);
   }
 
   // Thompson sputtered-atom energy with recoil cutoff; same proposal/
@@ -425,12 +472,29 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
       const int m = d_list(ip->ispecies,i);
       if (d_type(m) != PWI_SPUTTER) continue;
 
+      // CPU parity (surf_react_surface_pwi.cpp react(), S channel):
+      // compound table -> Y(E,theta,c) at the local conc of the `conc`
+      // species, no mat rescale; T-axis table -> Y(E,theta,twall) then
+      // optional mat weight; plain 2D / Eckstein -> optional mat weight.
       double Y;
-      if (d_sput(m) >= 0) Y = sput_yield(d_sput(m), E_in_eV, theta_eff);
-      else {
+      if (d_sput(m) >= 0) {
+        const int it = d_sput(m);
+        const int kind = d_su_kind(it);
+        if (kind == 1) {
+          const double c = (d_conc_isp(m) >= 0) ? mat_conc_dev(isurf, d_conc_isp(m)) : 1.0;
+          Y = sput_yield_lead(it, E_in_eV, theta_eff, c);
+        } else if (kind == 2) {
+          Y = sput_yield_lead(it, E_in_eV, theta_eff, twall_c);
+          if (d_mat_isp(m) >= 0) Y *= mat_conc_dev(isurf, d_mat_isp(m));
+        } else {
+          Y = sput_yield(it, E_in_eV, theta_eff);
+          if (d_mat_isp(m) >= 0) Y *= mat_conc_dev(isurf, d_mat_isp(m));
+        }
+      } else {
         Eckstein::SputterParams p;
         p.Es = d_spp(m,0); p.Eth = d_spp(m,1); p.Q = d_spp(m,2); p.ETF = d_spp(m,3);
         Y = Eckstein::sputter_yield(E_in_eV, theta_eff, p);
+        if (d_mat_isp(m) >= 0) Y *= mat_conc_dev(isurf, d_mat_isp(m));
       }
       Y *= d_yscale(m);              // CPU: Y *= r->sp_yscale
       if (Y <= 0.0) continue;
@@ -507,9 +571,22 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
       if (type == PWI_SPUTTER) continue;
 
       double p_this;
-      if (type == PWI_TRIM_REFLECT)
-        p_this = Reflection::R_N_interp(trim_view(d_trim(m)), E_in_eV, theta_in_deg);
-      else
+      if (type == PWI_TRIM_REFLECT) {
+        if (d_refl_tbl(m) >= 0) {
+          // composition-resolved (or T-axis) reflection coefficient
+          // R(E,theta_eff,c) -- CPU `rtable`; roughness shift as on CPU
+          const int it = d_refl_tbl(m);
+          const double cval = (d_conc_isp(m) >= 0) ? mat_conc_dev(isurf, d_conc_isp(m)) : 1.0;
+          p_this = (d_su_kind(it) == 2)
+            ? sput_yield_lead(it, E_in_eV, theta_eff, twall_c)
+            : sput_yield_lead(it, E_in_eV, theta_eff, cval);
+          if (p_this < 0.0) p_this = 0.0;
+          if (p_this > 1.0) p_this = 1.0;
+        } else {
+          p_this = Reflection::R_N_interp(trim_view(d_trim(m)), E_in_eV, theta_in_deg);
+          if (d_mat_isp(m) >= 0) p_this *= mat_conc_dev(isurf, d_mat_isp(m));
+        }
+      } else
         p_this = d_prob(m);
 
       react_prob += p_this;

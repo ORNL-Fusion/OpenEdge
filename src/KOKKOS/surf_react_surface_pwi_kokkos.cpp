@@ -53,6 +53,7 @@ SurfReactSurfacePWIKokkos::SurfReactSurfacePWIKokkos(SPARTA *sparta, int narg,
   random_backup = NULL;
   pw_slot = -1;
   sigma_on = ehist_on = 0;
+  conc_dev_on_ = conc_dirty_ = 0;
   ncols = nbin = nsp = 0;
   emax = fnum_c = evconv = twall_c = rough_c = 0.0;
 }
@@ -128,22 +129,10 @@ void SurfReactSurfacePWIKokkos::check_supported()
       error->all(FLERR,"surf_react surface/pwi/kk supports only T/A/S "
                  "reaction channels (D/E/R not yet ported)");
 
-    if (r->mat_isp >= 0 || r->conc_isp >= 0)
-      error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
-                 "composition-weighted (mat/conc) reaction channels");
-
-    if (r->type == TRIM_REFLECT && r->refl_tbl >= 0)
-      error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
-                 "rtable composition-resolved reflection");
-
-    if (r->type == SPUTTER && r->sp_tbl >= 0) {
-      if (sput_tables[r->sp_tbl].NC > 0)
-        error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
-                   "compound-target (3D) sputter tables");
-      if (sput_tables[r->sp_tbl].NT > 0)
-        error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
-                   "temperature-dependent sputter tables");
-    }
+    // Phase D (2026-09-08): mat/conc weighting, rtable reflection and
+    // compound / T-axis sputter tables are on the device (per-surf conc
+    // view synced after every sync_sigma; T-axis at the scalar twall --
+    // twall_surf is rejected above).
 
     if (r->type == ABSORB_REEMIT) {
       // CPU semantics: atomic re-emission (prob R*(1-f_mol)) returns the
@@ -221,6 +210,9 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
   d_Rrec = DAT::t_float_1d("surf_react_pwi:Rrec",nl);
   d_spp  = DAT::t_float_2d_lr("surf_react_pwi:spp",nl,4);
   d_yscale = DAT::t_float_1d("surf_react_pwi:yscale",nl);
+  d_mat_isp  = DAT::t_int_1d("surf_react_pwi:mat_isp",nl);
+  d_conc_isp = DAT::t_int_1d("surf_react_pwi:conc_isp",nl);
+  d_refl_tbl = DAT::t_int_1d("surf_react_pwi:refl_tbl",nl);
 
   auto h_type = Kokkos::create_mirror_view(d_type);
   auto h_prod = Kokkos::create_mirror_view(d_prod);
@@ -231,6 +223,10 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
   auto h_spp  = Kokkos::create_mirror_view(d_spp);
   auto h_yscale = Kokkos::create_mirror_view(d_yscale);
   Kokkos::deep_copy(h_yscale,1.0);
+  auto h_mat  = Kokkos::create_mirror_view(d_mat_isp);
+  auto h_conc = Kokkos::create_mirror_view(d_conc_isp);
+  auto h_refl = Kokkos::create_mirror_view(d_refl_tbl);
+  Kokkos::deep_copy(h_mat,-1); Kokkos::deep_copy(h_conc,-1); Kokkos::deep_copy(h_refl,-1);
 
   for (int m = 0; m < nlist_recycle; m++) {
     OneReaction *r = &rlist[m];
@@ -245,6 +241,9 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
     h_spp(m,2) = r->sp_Q;
     h_spp(m,3) = r->sp_ETF;
     h_yscale(m) = (r->type == SPUTTER) ? r->sp_yscale : 1.0;
+    h_mat(m)  = r->mat_isp;
+    h_conc(m) = r->conc_isp;
+    h_refl(m) = (r->type == TRIM_REFLECT) ? r->refl_tbl : -1;
   }
   Kokkos::deep_copy(d_type,h_type);
   Kokkos::deep_copy(d_prod,h_prod);
@@ -254,6 +253,9 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
   Kokkos::deep_copy(d_Rrec,h_Rrec);
   Kokkos::deep_copy(d_spp,h_spp);
   Kokkos::deep_copy(d_yscale,h_yscale);
+  Kokkos::deep_copy(d_mat_isp,h_mat);
+  Kokkos::deep_copy(d_conc_isp,h_conc);
+  Kokkos::deep_copy(d_refl_tbl,h_refl);
 
   // TRIM reflection tables: fixed EIRENE-schema sizes
 
@@ -306,42 +308,73 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
     Kokkos::deep_copy(d_tr_ca,h_ca);
   }
 
-  // 2D sputter-yield tables, padded to max dims
+  // sputter-yield tables (2D, or 3D with a concentration / wall-T lead
+  // axis), padded to max dims; also serve as `rtable` reflection tables
 
   int nsu = MAX((int) sput_tables.size(),1);
-  int maxNE = 1, maxNT = 1;
+  int maxNE = 1, maxNT = 1, maxNL = 1;
   for (size_t t = 0; t < sput_tables.size(); t++) {
     maxNE = MAX(maxNE,sput_tables[t].NE);
     maxNT = MAX(maxNT,sput_tables[t].NTHETA);
+    maxNL = MAX(maxNL,sput_tables[t].nlead());
   }
   d_su_NE = DAT::t_int_1d("surf_react_pwi:su_NE",nsu);
   d_su_NT = DAT::t_int_1d("surf_react_pwi:su_NT",nsu);
+  d_su_NL = DAT::t_int_1d("surf_react_pwi:su_NL",nsu);
+  d_su_kind = DAT::t_int_1d("surf_react_pwi:su_kind",nsu);
   d_su_E  = DAT::t_float_2d_lr("surf_react_pwi:su_E",nsu,maxNE);
   d_su_th = DAT::t_float_2d_lr("surf_react_pwi:su_th",nsu,maxNT);
-  d_su_Y  = DAT::t_float_2d_lr("surf_react_pwi:su_Y",nsu,maxNE*maxNT);
+  d_su_ax = DAT::t_float_2d_lr("surf_react_pwi:su_ax",nsu,maxNL);
+  d_su_Y  = DAT::t_float_2d_lr("surf_react_pwi:su_Y",nsu,maxNL*maxNE*maxNT);
 
   {
     auto h_NE = Kokkos::create_mirror_view(d_su_NE);
     auto h_NT = Kokkos::create_mirror_view(d_su_NT);
+    auto h_NL = Kokkos::create_mirror_view(d_su_NL);
+    auto h_kind = Kokkos::create_mirror_view(d_su_kind);
     auto h_E  = Kokkos::create_mirror_view(d_su_E);
     auto h_th = Kokkos::create_mirror_view(d_su_th);
+    auto h_ax = Kokkos::create_mirror_view(d_su_ax);
     auto h_Y  = Kokkos::create_mirror_view(d_su_Y);
     Kokkos::deep_copy(h_NE,0);
     Kokkos::deep_copy(h_NT,0);
+    Kokkos::deep_copy(h_NL,1);
+    Kokkos::deep_copy(h_kind,0);
+    Kokkos::deep_copy(h_ax,0.0);
     for (size_t t = 0; t < sput_tables.size(); t++) {
       const ProcessLibrary::TrimSputterTable &st = sput_tables[t];
       h_NE(t) = st.NE;
       h_NT(t) = st.NTHETA;
+      h_NL(t) = st.nlead();
+      h_kind(t) = (st.NC > 0) ? 1 : ((st.NT > 0) ? 2 : 0);
       for (int i = 0; i < st.NE; i++) h_E(t,i) = st.E[i];
       for (int i = 0; i < st.NTHETA; i++) h_th(t,i) = st.theta[i];
-      // device layout is [ie*NT + ia], same row-major as the host table
-      for (int i = 0; i < st.NE*st.NTHETA; i++) h_Y(t,i) = st.Y[i];
+      if (st.NC > 0) for (int i = 0; i < st.NC; i++) h_ax(t,i) = st.C[i];
+      else if (st.NT > 0) for (int i = 0; i < st.NT; i++) h_ax(t,i) = st.Tax[i];
+      // device layout [il*NE*NTHETA + ie*NTHETA + ia] == host Y order
+      // (TrimSputterTable::slice_yield: Y[ic*NE*NTHETA + i*NTHETA + j])
+      const int ny = st.nlead()*st.NE*st.NTHETA;
+      for (int i = 0; i < ny; i++) h_Y(t,i) = st.Y[i];
     }
     Kokkos::deep_copy(d_su_NE,h_NE);
     Kokkos::deep_copy(d_su_NT,h_NT);
+    Kokkos::deep_copy(d_su_NL,h_NL);
+    Kokkos::deep_copy(d_su_kind,h_kind);
     Kokkos::deep_copy(d_su_E,h_E);
     Kokkos::deep_copy(d_su_th,h_th);
+    Kokkos::deep_copy(d_su_ax,h_ax);
     Kokkos::deep_copy(d_su_Y,h_Y);
+  }
+
+  // per-surf material concentration for mat/conc weighting and compound
+  // tables: device copy of the <attr>_conc custom (local+ghost surfs),
+  // refreshed by upload_conc() whenever sync_sigma re-derives it
+  conc_dev_on_ = (sigma_feedback && sconc_index >= 0) ? 1 : 0;
+  if (conc_dev_on_) {
+    int nslocal = surf->nlocal + surf->nghost;
+    d_sconc = DAT::t_float_2d_lr("surf_react_pwi:sconc",MAX(nslocal,1),
+                                 MAX(sigma_ncols,1));
+    conc_dirty_ = 1;
   }
 
   // areal-density ledger: per-surf area + global ID for local+ghost surfs
@@ -413,6 +446,10 @@ void SurfReactSurfacePWIKokkos::tally_update()
       update->ntimestep % ehist_every == 0) fold_ehist();
 
   SurfReactSurfacePWI::tally_update();
+  // sync_sigma (inside the base tally_update) re-derives the per-surf
+  // conc every sigma_nevery steps; refresh the device copy before the
+  // next move
+  if (conc_dev_on_ && update->ntimestep % sigma_nevery == 0) conc_dirty_ = 1;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -455,8 +492,24 @@ void SurfReactSurfacePWIKokkos::fold_ehist()
    hooks called by the Kokkos surface collider around the move kernel
 ------------------------------------------------------------------------- */
 
+void SurfReactSurfacePWIKokkos::upload_conc()
+{
+  if (!conc_dev_on_ || !conc_dirty_) return;
+  int nslocal = surf->nlocal + surf->nghost;
+  if (nslocal > (int) d_sconc.extent(0))
+    d_sconc = DAT::t_float_2d_lr("surf_react_pwi:sconc",nslocal,MAX(sigma_ncols,1));
+  double **conc = surf->edarray_local[surf->ewhich[sconc_index]];
+  auto h = Kokkos::create_mirror_view(d_sconc);
+  for (int i = 0; i < nslocal; i++)
+    for (int j = 0; j < sigma_ncols; j++) h(i,j) = conc[i][j];
+  Kokkos::deep_copy(d_sconc,h);
+  conc_dirty_ = 0;
+}
+
 void SurfReactSurfacePWIKokkos::pre_react()
 {
+  upload_conc();
+
   ParticleKokkos* particle_kk = (ParticleKokkos*) particle;
   particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK|CUSTOM_MASK);
   d_particles = particle_kk->k_particles.view_device();
