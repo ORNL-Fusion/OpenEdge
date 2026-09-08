@@ -147,6 +147,112 @@ class UpdateKokkos : public Update {
   int oe_has_const_b;
   double oe_const_br, oe_const_bz, oe_const_bt, oe_const_bcart[3];
   void bind_oe_equ_from_fix(class FixBackground *pd);
+  void bind_oe_psi();
+
+  // fix reflect/psi (psi-contour core boundary) on the device mover:
+  // bilinear normalized-psi map copied from the fix, CPU-identical
+  // bisection crossing + specular reflection, per-species absorb tallies
+  int oe_psi_on, oe_psi_action, oe_psi_imix, oe_psi_nw, oe_psi_nh, oe_pw_slot_on;
+  double oe_psi_thr, oe_psi_axis, oe_psi_b;
+  DAT::t_float_1d d_oe_psi_r, d_oe_psi_z, d_oe_psi_map, d_oe_pw;
+  DAT::t_int_2d d_oe_s2g;
+  Kokkos::View<double*, DeviceType> d_oe_psi_ev, d_oe_psi_ph;
+  Kokkos::View<double*, DeviceType>::HostMirror h_oe_psi_ev, h_oe_psi_ph;
+  Kokkos::View<int, DeviceType> d_oe_psi_bad;
+  Kokkos::View<int, DeviceType>::HostMirror h_oe_psi_bad;
+
+  // pusher switch_log_file on the device hybrid: bounded per-pass event
+  // buffer (id, oldmode, newmode, reason code, d_start, d_end, d_sw,
+  // e_pre, e_post, replay) drained on the host through Pusher::log_switch
+  int oe_swlog_on, oe_swlog_cap;
+  Kokkos::View<double*[10], DeviceType> d_oe_swlog;
+  Kokkos::View<double*[10], DeviceType>::HostMirror h_oe_swlog;
+  Kokkos::View<int, DeviceType> d_oe_swlog_n;
+  Kokkos::View<int, DeviceType>::HostMirror h_oe_swlog_n;
+  KOKKOS_INLINE_FUNCTION
+  void oe_swlog_push(int id, int oldmode, int newmode, int reason,
+                     double d_start, double d_end, double d_sw,
+                     double e_pre, double e_post, int replay) const {
+    const int k = Kokkos::atomic_fetch_add(&d_oe_swlog_n(), 1);
+    if (k >= oe_swlog_cap) return;      // overflow counted by the host
+    d_oe_swlog(k,0) = (double) id;  d_oe_swlog(k,1) = oldmode; d_oe_swlog(k,2) = newmode;
+    d_oe_swlog(k,3) = reason;       d_oe_swlog(k,4) = d_start; d_oe_swlog(k,5) = d_end;
+    d_oe_swlog(k,6) = d_sw;         d_oe_swlog(k,7) = e_pre;   d_oe_swlog(k,8) = e_post;
+    d_oe_swlog(k,9) = replay;
+  }
+
+  KOKKOS_INLINE_FUNCTION
+  int oe_psi_bracket(const DAT::t_float_1d &g, int n, double x) const {
+    if (x <= g(0)) return 0;
+    if (x >= g(n-1)) return n-2;
+    int lo = 0, hi = n-1;               // largest i with g(i) <= x
+    while (hi - lo > 1) { const int mid = (lo+hi)/2; if (g(mid) <= x) lo = mid; else hi = mid; }
+    if (lo > n-2) lo = n-2;
+    return lo;
+  }
+  KOKKOS_INLINE_FUNCTION
+  void oe_psi_rz(const double *xyz, double &R, double &Z) const {
+    if (oe_dim == 3) { R = sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]); Z = xyz[2]; }
+    else if (oe_axisymmetric) { Z = xyz[0]; R = xyz[1]; }
+    else { R = xyz[0]; Z = xyz[1]; }
+  }
+  // CPU FixReflectPsi::psi_norm_gradient: returns normalized psi, fills gradients
+  KOKKOS_INLINE_FUNCTION
+  double oe_psi_norm_grad(double R, double Z, double &gR, double &gZ) const {
+    gR = gZ = 0.0;
+    const int nw = oe_psi_nw, nh = oe_psi_nh;
+    const double Rc = Kokkos::fmin(Kokkos::fmax(R, d_oe_psi_r(0)), d_oe_psi_r(nw-1));
+    const double Zc = Kokkos::fmin(Kokkos::fmax(Z, d_oe_psi_z(0)), d_oe_psi_z(nh-1));
+    const int i = oe_psi_bracket(d_oe_psi_r, nw, Rc);
+    const int j = oe_psi_bracket(d_oe_psi_z, nh, Zc);
+    const double dr = d_oe_psi_r(i+1) - d_oe_psi_r(i);
+    const double dz = d_oe_psi_z(j+1) - d_oe_psi_z(j);
+    const double dpsi = oe_psi_b - oe_psi_axis;
+    if (Kokkos::fabs(dr) < 1.0e-30 || Kokkos::fabs(dz) < 1.0e-30 ||
+        Kokkos::fabs(dpsi) < 1.0e-30) return 1.0;
+    const double t = Kokkos::fmin(Kokkos::fmax((Rc - d_oe_psi_r(i))/dr, 0.0), 1.0);
+    const double u = Kokkos::fmin(Kokkos::fmax((Zc - d_oe_psi_z(j))/dz, 0.0), 1.0);
+    const double p00 = d_oe_psi_map(j*nw+i),     p10 = d_oe_psi_map(j*nw+i+1);
+    const double p01 = d_oe_psi_map((j+1)*nw+i), p11 = d_oe_psi_map((j+1)*nw+i+1);
+    const double psi = (1.0-t)*(1.0-u)*p00 + t*(1.0-u)*p10 + (1.0-t)*u*p01 + t*u*p11;
+    gR = ((1.0-u)*(p10-p00) + u*(p11-p01)) / (dr*dpsi);
+    gZ = ((1.0-t)*(p01-p00) + t*(p11-p10)) / (dz*dpsi);
+    return (psi - oe_psi_axis) / dpsi;
+  }
+  KOKKOS_INLINE_FUNCTION
+  double oe_psi_norm_at(const double *xyz) const {
+    double R, Z, gR, gZ;
+    oe_psi_rz(xyz, R, Z);
+    return oe_psi_norm_grad(R, Z, gR, gZ);
+  }
+  // CPU FixReflectPsi::segment_crossing
+  KOKKOS_INLINE_FUNCTION
+  bool oe_psi_crossing(const double *x0, const double *x1, double &fraction,
+                       double *normal) const {
+    const double p0 = oe_psi_norm_at(x0);
+    const double p1 = oe_psi_norm_at(x1);
+    if (p0 < oe_psi_thr || p1 >= oe_psi_thr) return false;
+    double lo = 0.0, hi = 1.0, xc[3];
+    for (int iter = 0; iter < 60; iter++) {
+      const double mid = 0.5*(lo+hi);
+      for (int k = 0; k < 3; k++) xc[k] = x0[k] + mid*(x1[k]-x0[k]);
+      if (oe_psi_norm_at(xc) >= oe_psi_thr) lo = mid; else hi = mid;
+    }
+    fraction = 0.5*(lo+hi);
+    for (int k = 0; k < 3; k++) xc[k] = x0[k] + fraction*(x1[k]-x0[k]);
+    double R, Z, gR, gZ;
+    oe_psi_rz(xc, R, Z);
+    oe_psi_norm_grad(R, Z, gR, gZ);
+    if (oe_dim == 3) {
+      if (R <= 1.0e-30) return false;
+      normal[0] = gR*xc[0]/R; normal[1] = gR*xc[1]/R; normal[2] = gZ;
+    } else if (oe_axisymmetric) { normal[0] = gZ; normal[1] = gR; normal[2] = 0.0; }
+    else { normal[0] = gR; normal[1] = gZ; normal[2] = 0.0; }
+    const double nmag = sqrt(normal[0]*normal[0] + normal[1]*normal[1] + normal[2]*normal[2]);
+    if (!(nmag > 1.0e-20) || !Kokkos::isfinite(nmag)) return false;
+    normal[0] /= nmag; normal[1] /= nmag; normal[2] /= nmag;
+    return true;
+  }
   KOKKOS_INLINE_FUNCTION
   bool oe_const_bfield_slot(const double *xq, double *Bout) const;
   DAT::t_float_2d_lr d_oe_equ_br, d_oe_equ_bt, d_oe_equ_bz;

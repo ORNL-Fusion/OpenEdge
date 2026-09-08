@@ -262,6 +262,21 @@ void FixReflectPsi::tally_absorb(int ispecies, int iparticle)
   reduced_step_ = -1;
 }
 
+/* ----------------------------------------------------------------------
+   Fold a batch of absorptions tallied on the device for one species
+   (nevents simulation particles carrying `weight` physical particles).
+------------------------------------------------------------------------- */
+
+void FixReflectPsi::tally_absorb_bulk(int ispecies, double nevents,
+                                      double weight)
+{
+  const int row = row_for_species(ispecies);
+  if (row < 0 || row >= nrows_ || !(nevents > 0.0)) return;
+  absorbed_events_local_[row] += nevents;
+  absorbed_physical_local_[row] += weight;
+  reduced_step_ = -1;
+}
+
 /* ---------------------------------------------------------------------- */
 
 void FixReflectPsi::reduce_tallies()

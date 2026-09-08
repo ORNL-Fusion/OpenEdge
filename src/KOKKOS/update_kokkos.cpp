@@ -42,6 +42,9 @@
 #include "output.h"
 #include "geometry_kokkos.h"
 #include "openedge_geom.h"
+#include "fix_reflect_psi.h"
+#include <algorithm>
+#include <vector>
 #include "random_mars.h"
 #include "timer.h"
 #include "math_extra.h"
@@ -188,9 +191,6 @@ void UpdateKokkos::init()
   // UpdateKokkos then overrides moveptr and field fix resolution below.
   Update::init();
 
-  if (psi_reflect_flag)
-    error->all(FLERR,"fix reflect/psi is not supported under Kokkos "
-               "(psi-contour core boundary not in the device mover)");
   if (pusher && pusher->pusher_plasma_fidx >= 0) {
     FixBackground *pd_chk =
       dynamic_cast<FixBackground*>(modify->fix[pusher->pusher_plasma_fidx]);
@@ -318,6 +318,10 @@ void UpdateKokkos::init()
   oe_has_equilibrium = 0;
   oe_has_equ_bmaps = 0;
   oe_has_const_b = 0;
+  oe_psi_on = oe_psi_action = oe_pw_slot_on = 0;
+  oe_swlog_on = oe_swlog_cap = 0;
+  oe_psi_imix = -1; oe_psi_nw = oe_psi_nh = 0;
+  oe_psi_thr = oe_psi_axis = oe_psi_b = 0.0;
   oe_plasma_kkbase = NULL;
   oe_equ_jm = oe_equ_km = 0;
   oe_equ_btf = oe_equ_rtf = 0.0;
@@ -376,9 +380,20 @@ void UpdateKokkos::init()
     // Phase B (2026-09-08): hybrid/GCA ported to the device mover, 3D only
     // 2D / axisymmetric hybrid ported 2026-09-08 (lh2d conjugation, 2D
     // chord contract, Boris handoff to oe_boris2d)
-    if (pusher->switch_log_file)
-      error->all(FLERR,"Pusher switch_log_file is a host-only diagnostic; "
-                 "not supported with Kokkos");
+    // switch_log_file: device events are buffered per pass and written by
+    // the host through the CPU writer (same CSV schema; events sorted by id)
+    oe_swlog_on = 0;
+    if (pusher->switch_log_file) {
+      oe_swlog_on = 1;
+      oe_swlog_cap = 65536;
+      d_oe_swlog = Kokkos::View<double*[10], DeviceType>("oe:swlog",oe_swlog_cap);
+      h_oe_swlog = Kokkos::create_mirror_view(d_oe_swlog);
+      d_oe_swlog_n = Kokkos::View<int, DeviceType>("oe:swlog_n");
+      h_oe_swlog_n = Kokkos::create_mirror_view(d_oe_swlog_n);
+      if (comm->me == 0 && screen)
+        fprintf(screen,"  [kokkos] pusher switch_log on device (buffer %d events/pass)\n",
+                oe_swlog_cap);
+    }
   }
   if (sheath_flag && (sheath_kick || sheath_boundary))
     error->all(FLERR,"Sheath kick/boundary modes are not supported with "
@@ -630,6 +645,8 @@ void UpdateKokkos::run(int nsteps)
     }
   }
 
+  bind_oe_psi();   // fix reflect/psi (flag set by modify->init, after update->init)
+
   for (int i = 0; i < nsteps; i++) {
 
     if (timer->check_timeout(i)) {
@@ -865,6 +882,17 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
       niterate++;
 
     d_particles = particle_kk->k_particles.view_device();
+
+    if (oe_psi_on) {   // fix reflect/psi: species scope table + marker weight
+      d_oe_s2g = particle_kk->k_species2group.view_device();
+      oe_pw_slot_on = 0;
+      const int pwi = particle->find_custom((char *) "pweight");
+      if (pwi >= 0) {
+        particle_kk->sync(Device,CUSTOM_MASK);
+        d_oe_pw = particle_kk->k_edvec.h_view[particle->ewhich[pwi]].k_view.d_view;
+        oe_pw_slot_on = 1;
+      }
+    }
 
     GridKokkos* grid_kk = ((GridKokkos*)grid);
     d_cells = grid_kk->k_cells.view_device();
@@ -1123,6 +1151,54 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
     }
 
     entryexit += h_entryexit();
+
+    if (oe_psi_on) {   // fix reflect/psi: device tallies -> fix ledger; failures abort like the CPU
+      Kokkos::deep_copy(h_oe_psi_bad, d_oe_psi_bad);
+      if (h_oe_psi_bad() > 0)
+        error->one(FLERR,"fix reflect/psi: cannot resolve an outside-to-inside "
+                   "psi-contour crossing or place the reflected particle outside "
+                   "the contour (device mover)");
+      if (oe_psi_action == 1) {
+        Kokkos::deep_copy(h_oe_psi_ev, d_oe_psi_ev);
+        Kokkos::deep_copy(h_oe_psi_ph, d_oe_psi_ph);
+        for (int isp = 0; isp < particle->nspecies; isp++)
+          if (h_oe_psi_ev(isp) > 0.0)
+            psi_reflect_fix->tally_absorb_bulk(isp, h_oe_psi_ev(isp), h_oe_psi_ph(isp));
+        Kokkos::deep_copy(d_oe_psi_ev, 0.0);
+        Kokkos::deep_copy(d_oe_psi_ph, 0.0);
+      }
+    }
+
+    if (oe_swlog_on) {   // pusher switch_log: drain device events through the CPU writer
+      static const char *reason_str[6] =
+        {"criterion","shell_start","hysteresis_hold","swept","start","reentry"};
+      Kokkos::deep_copy(h_oe_swlog_n, d_oe_swlog_n);
+      const int nev_all = h_oe_swlog_n();
+      const int nev = (nev_all < oe_swlog_cap) ? nev_all : oe_swlog_cap;
+      if (nev > 0) {
+        Kokkos::deep_copy(h_oe_swlog, d_oe_swlog);
+        std::vector<int> order(nev);
+        for (int k = 0; k < nev; k++) order[k] = k;
+        std::sort(order.begin(), order.end(), [&](int a, int b) {
+          if (h_oe_swlog(a,0) != h_oe_swlog(b,0)) return h_oe_swlog(a,0) < h_oe_swlog(b,0);
+          return h_oe_swlog(a,1) < h_oe_swlog(b,1);
+        });
+        for (int kk = 0; kk < nev; kk++) {
+          const int k = order[kk];
+          int rc = (int) h_oe_swlog(k,3);
+          if (rc < 0 || rc > 5) rc = 0;
+          pusher->log_switch((int) h_oe_swlog(k,0), (int) h_oe_swlog(k,1),
+                             (int) h_oe_swlog(k,2), reason_str[rc],
+                             h_oe_swlog(k,4), h_oe_swlog(k,5), h_oe_swlog(k,6),
+                             h_oe_swlog(k,7), h_oe_swlog(k,8), (int) h_oe_swlog(k,9));
+        }
+        if (nev_all > oe_swlog_cap && comm->me == 0 && screen)
+          fprintf(screen,"WARNING: pusher switch_log device buffer overflow "
+                  "(%d events, %d kept) on step " BIGINT_FORMAT "\n",
+                  nev_all, oe_swlog_cap, ntimestep);
+        Kokkos::deep_copy(d_oe_swlog_n, 0);
+      }
+    }
 
     error_flag = h_error_flag();
 
@@ -1502,9 +1578,88 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   else
     reduce.ntouch_one++;
 
+  // fix reflect/psi (CPU Update::move psi block): test the proposed end
+  // point against the psi contour; absorb (tally + discard) or reflect
+  // specularly about the local contour normal, folding the displacement
+  // into a pseudo-kick exactly as the CPU does
+  if (oe_psi_on && (pflag == PKEEP || pflag == PINSERT)) {
+    bool psi_scope = true;
+    if (oe_psi_imix >= 0)
+      psi_scope = d_oe_s2g(oe_psi_imix, particle_i.ispecies) >= 0;
+    if (psi_scope && oe_psi_norm_at(xnew) < oe_psi_thr) {
+      if (oe_psi_action == 1) {
+        if (has_kick) {
+          v[0] -= vkick0; v[1] -= vkick1;
+          if (DIM == 3) v[2] -= vkick2;
+          has_kick = 0;
+        }
+        double pw = fnum;
+        if (oe_pw_slot_on) {
+          const double cand = d_oe_pw(i);
+          if (cand > 0.0 && Kokkos::isfinite(cand)) pw = cand;
+        }
+        Kokkos::atomic_add(&d_oe_psi_ev(particle_i.ispecies), 1.0);
+        Kokkos::atomic_add(&d_oe_psi_ph(particle_i.ispecies), pw);
+        particle_i.flag = PDISCARD;
+      } else {
+        double crossing_fraction = 0.0, psi_normal[3] = {0.0, 0.0, 0.0};
+        bool ok = oe_psi_crossing(x, xnew, crossing_fraction, psi_normal);
+        const int ncoord = (DIM == 3) ? 3 : 2;
+        if (ok) {
+          double proposed[3] = {xnew[0], xnew[1], xnew[2]};
+          double crossing[3] = {x[0], x[1], x[2]};
+          for (int k = 0; k < ncoord; k++)
+            crossing[k] = x[k] + crossing_fraction*(proposed[k]-x[k]);
+          if (has_kick) {
+            v[0] -= vkick0; v[1] -= vkick1;
+            if (DIM == 3) v[2] -= vkick2;
+            has_kick = 0;
+          }
+          double vref[3] = {v[0], v[1], v[2]};
+          double vdotn = 0.0;
+          for (int k = 0; k < ncoord; k++) vdotn += vref[k]*psi_normal[k];
+          for (int k = 0; k < ncoord; k++) vref[k] -= 2.0*vdotn*psi_normal[k];
+          double final_pos[3] = {proposed[0], proposed[1], proposed[2]};
+          double remdotn = 0.0;
+          for (int k = 0; k < ncoord; k++) remdotn += (proposed[k]-crossing[k])*psi_normal[k];
+          for (int k = 0; k < ncoord; k++)
+            final_pos[k] = crossing[k] + (proposed[k]-crossing[k]) - 2.0*remdotn*psi_normal[k];
+          if (oe_psi_norm_at(final_pos) < oe_psi_thr) {
+            double eps = 1.0e-12;
+            for (int iter = 0; iter < 12; iter++) {
+              for (int k = 0; k < ncoord; k++) final_pos[k] = crossing[k] + eps*psi_normal[k];
+              if (oe_psi_norm_at(final_pos) >= oe_psi_thr) break;
+              eps *= 10.0;
+            }
+            if (oe_psi_norm_at(final_pos) < oe_psi_thr) ok = false;
+          }
+          if (ok && !(dtremain > 0.0)) ok = false;
+          if (ok) {
+            double pseudo[3] = {0.0, 0.0, 0.0};
+            for (int k = 0; k < ncoord; k++) {
+              const double veff = (final_pos[k]-x[k])/dtremain;
+              pseudo[k] = veff - vref[k];
+              v[k] = veff;
+              xnew[k] = final_pos[k];
+            }
+            if (DIM == 2) v[2] = vref[2];
+            vkick0 = pseudo[0]; vkick1 = pseudo[1];
+            vkick2 = (DIM == 3) ? pseudo[2] : 0.0;
+            has_kick = 1;
+            if (oe_has_gca_customs) d_oe_gca_valid(i) = 0.0;   // re-project GC after the bounce
+          }
+        }
+        if (!ok) {   // CPU: error->one; device: count, discard, host aborts after the pass
+          Kokkos::atomic_inc(&d_oe_psi_bad());
+          particle_i.flag = PDISCARD;
+        }
+      }
+    }
+  }
+
   // advect one particle from cell to cell and thru surf collides til done
 
-  while (1) {
+  while (particle_i.flag != PDISCARD) {   // fix reflect/psi absorb skips the loop
 
 #ifdef MOVE_DEBUG
     if (DIM == 3) {
@@ -2604,6 +2759,61 @@ int UpdateKokkos::split2d(int icell, double *x) const
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
+   fix reflect/psi device binding. FixReflectPsi::init() sets
+   update->psi_reflect_flag from modify->init(), which SPARTA runs AFTER
+   update->init(); bind at run start (idempotent, cheap) instead.
+------------------------------------------------------------------------- */
+
+void UpdateKokkos::bind_oe_psi()
+{
+  // fix reflect/psi: copy the fix's normalized-psi map to the device; the
+  // move kernel applies the CPU contour test/reflection/absorption per
+  // particle (see oe_psi_* in the header)
+  oe_psi_on = 0;
+  if (psi_reflect_flag) {
+    if (!psi_reflect_fix)
+      error->all(FLERR,"fix reflect/psi: no fix bound for the device mover");
+    const std::vector<double> &rg = psi_reflect_fix->psi_r_grid();
+    const std::vector<double> &zg = psi_reflect_fix->psi_z_grid();
+    const std::vector<double> &pm = psi_reflect_fix->psi_map();
+    oe_psi_nw = (int) rg.size();
+    oe_psi_nh = (int) zg.size();
+    if (oe_psi_nw < 2 || oe_psi_nh < 2 ||
+        pm.size() < (size_t) (oe_psi_nw * oe_psi_nh))
+      error->all(FLERR,"fix reflect/psi: psi map unavailable for the device mover");
+    d_oe_psi_r   = DAT::t_float_1d("oe:psi_r",oe_psi_nw);
+    d_oe_psi_z   = DAT::t_float_1d("oe:psi_z",oe_psi_nh);
+    d_oe_psi_map = DAT::t_float_1d("oe:psi_map",oe_psi_nw*oe_psi_nh);
+    auto hr = Kokkos::create_mirror_view(d_oe_psi_r);
+    auto hz = Kokkos::create_mirror_view(d_oe_psi_z);
+    auto hm = Kokkos::create_mirror_view(d_oe_psi_map);
+    for (int i = 0; i < oe_psi_nw; i++) hr(i) = rg[i];
+    for (int j = 0; j < oe_psi_nh; j++) hz(j) = zg[j];
+    for (int k = 0; k < oe_psi_nw*oe_psi_nh; k++) hm(k) = pm[k];
+    Kokkos::deep_copy(d_oe_psi_r,hr);
+    Kokkos::deep_copy(d_oe_psi_z,hz);
+    Kokkos::deep_copy(d_oe_psi_map,hm);
+    oe_psi_axis = psi_reflect_fix->psi_axis_value();
+    oe_psi_b    = psi_reflect_fix->psi_boundary_value();
+    oe_psi_thr    = psi_reflect_threshold;
+    oe_psi_action = psi_reflect_action;
+    oe_psi_imix   = psi_reflect_imix;
+    d_oe_psi_ev = Kokkos::View<double*, DeviceType>("oe:psi_ev",particle->nspecies);
+    d_oe_psi_ph = Kokkos::View<double*, DeviceType>("oe:psi_ph",particle->nspecies);
+    h_oe_psi_ev = Kokkos::create_mirror_view(d_oe_psi_ev);
+    h_oe_psi_ph = Kokkos::create_mirror_view(d_oe_psi_ph);
+    d_oe_psi_bad = Kokkos::View<int, DeviceType>("oe:psi_bad");
+    h_oe_psi_bad = Kokkos::create_mirror_view(d_oe_psi_bad);
+    oe_psi_on = 1;
+    if (comm->me == 0 && screen)
+      fprintf(screen,"  [kokkos] fix reflect/psi on device: %s at psi_norm %g, "
+              "map %dx%d%s\n", oe_psi_action == 1 ? "absorb" : "reflect",
+              oe_psi_thr, oe_psi_nw, oe_psi_nh,
+              oe_psi_imix >= 0 ? " (mixture-restricted)" : "");
+  }
+}
+
+/* ----------------------------------------------------------------------
    bind the fix background's equilibrium (psi map + optional native B maps)
    to the device views; used with a mesh (mesh-miss fallback) and, since
    2026-09-08, for mesh-less equilibrium-only decks (orbit in.gca.2d/axi)
@@ -2693,6 +2903,7 @@ void UpdateKokkos::build_oe_mesh_from_fix()
   oe_has_equilibrium = 0;
   oe_has_equ_bmaps = 0;
   oe_has_const_b = 0;
+  // (reflect/psi and switch_log flags are owned by init()/bind_oe_psi(); not reset here)
   if (pusher->pusher_plasma_fidx < 0) return;
   FixBackground *pd =
     dynamic_cast<FixBackground*>(modify->fix[pusher->pusher_plasma_fidx]);
@@ -3681,6 +3892,11 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
   const double qm = (charge * oe_echarge) / mass;
   const double qm_abs = Kokkos::fabs(qm);
   const bool have_state = (oe_has_gca_customs != 0);
+  // switch_log bookkeeping (CPU: prev_mode/prev_chi/sw_reason/d_end_log)
+  const double prev_mode = have_state ? d_oe_gca_mode(i) : 0.0;
+  const double prev_chi  = have_state ? d_oe_gca_chi(i) : 0.0;
+  int sw_reason = 0;            // 0 criterion, 1 shell_start, 2 hysteresis_hold, 3 swept
+  double d_end_log = -1.0;
   // 2D-cart slot triple (x=R, y=Z, z=phi) is LEFT-handed: conjugate the
   // toroidal components for the GCA RHS and flip the reconstructed v back
   // (CPU push_hybrid_3d lh2d). Axi slots (Z,R,phi) and 3D are right-handed.
@@ -3741,10 +3957,12 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
     d_sw = oe_boris_near_rhol ? oe_boris_near * rho_L : oe_boris_near;
     d_start = Kokkos::fabs(oe_near_signed(midx_bn, x));
     if (use_gca && d_sw > 0.0) {
-      if (d_start < d_sw) use_gca = false;
+      if (d_start < d_sw) { use_gca = false; sw_reason = 1; }
       else if (have_state && d_oe_gca_chi(i) > 0.0 &&
-               (d_oe_gca_chi(i) < 2.0*GCAKokkos::TWO_PI || d_start < 2.0*d_sw))
+               (d_oe_gca_chi(i) < 2.0*GCAKokkos::TWO_PI || d_start < 2.0*d_sw)) {
         use_gca = false;      // C2 hysteresis hold
+        sw_reason = 2;
+      }
     }
   }
 
@@ -3817,7 +4035,8 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
       const double s1 = oe_near_signed(midx_bn, g.X);
       const double s0 = oe_near_signed(midx_bn, x);
       const double smin = Kokkos::fmin(Kokkos::fabs(s0), Kokkos::fabs(s1));
-      if (smin < d_sw || s0 * s1 <= 0.0) swept = true;
+      d_end_log = s1;
+      if (smin < d_sw || s0 * s1 <= 0.0) { swept = true; sw_reason = 3; }
     }
     if (!swept) {
       if (have_state) {
@@ -3827,6 +4046,12 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
         d_oe_gca_mode(i) = 1.0;
         d_oe_gca_valid(i) = 1.0;
         d_oe_gca_chi(i) = 0.0;
+        if (oe_swlog_on && prev_mode < 0.5) {   // Boris -> GCA event (CPU log_switch)
+          const double e_pre = 0.5*mass*(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+          const double e_post = 0.5*mass*g.v_par*g.v_par + g.mu*Bmag;
+          oe_swlog_push(d_particles[i].id, 0, 1, (prev_chi > 0.0) ? 5 : 4,
+                        d_start, -1.0, d_sw, e_pre, e_post, 0);
+        }
       }
       // reconstruct v with the END-of-step fields (diagnostics + clean
       // Boris fallback); deterministic gyrophase hash, A1 flux sampling
@@ -3887,6 +4112,13 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
       v[0] = vo[0]; v[1] = vo[1]; v[2] = vo[2];
       xstart[0] = xo[0]; xstart[1] = xo[1];
       if (!dim2) xstart[2] = xo[2];    // CPU: slot z stays as is in 2D
+    }
+    if (oe_swlog_on && have_state && prev_mode > 0.5) {   // GCA -> Boris event
+      const double mu_l = (d_oe_gca_mu(i) > 0.0) ? d_oe_gca_mu(i) : 0.0;
+      const double e_pre = 0.5*mass*d_oe_gca_vpar(i)*d_oe_gca_vpar(i) + mu_l*Bmag;
+      const double e_post = 0.5*mass*(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+      oe_swlog_push(d_particles[i].id, 1, 0, sw_reason, d_start, d_end_log, d_sw,
+                    e_pre, e_post, sw_reason == 3 ? 1 : 0);
     }
     if (have_state) {
       d_oe_gca_mode(i) = 0.0;

@@ -71,6 +71,15 @@ class FixReflectPsi : public Fix {
 
   enum { PSI_ACTION_REFLECT, PSI_ACTION_ABSORB };
 
+  // Device mover (Kokkos) access: read-only psi map and a bulk absorption
+  // tally folded from per-species device counters after each move pass.
+  const std::vector<double> &psi_r_grid() const { return r_grid_; }
+  const std::vector<double> &psi_z_grid() const { return z_grid_; }
+  const std::vector<double> &psi_map() const { return psirz_; }
+  double psi_axis_value() const { return psi_axis_; }
+  double psi_boundary_value() const { return psib_; }
+  void tally_absorb_bulk(int ispecies, double nevents, double weight);
+
  protected:
   int action_;                 // PSI_ACTION_REFLECT or PSI_ACTION_ABSORB
   double psi_threshold_;     // normalized psi boundary
