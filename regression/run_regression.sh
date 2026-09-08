@@ -86,7 +86,7 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 #  skipped (e.g. git-ignored plasma files that need regeneration).
 # -----------------------------------------------------------------------
 declare -a TESTS=(
-  "ionization_recombination|verification/ionization_recombination|in.ionization_recombination|nokk"
+  "ionization_recombination|verification/ionization_recombination|in.ionization_recombination"
   "efield_polarization|verification/efield_polarization|in.input|"
   "coulomb_background|verification/collisions/coulomb|in.background|"
   "coulomb_binary|verification/collisions/coulomb|in.binary|"
@@ -97,9 +97,9 @@ declare -a TESTS=(
   "constant_flux|verification/surface_emission/constant_flux|in.constant_flux|"
   "d2_chemistry|verification/d2_chemistry|in.d2_chem|"
   "dustt2005_cat_transport|verification/particulates/dustt2005/cat_solps_droplet_transport|in.openedge|input/plasma.h5|nokk"
-  "west_boron_powder_dropper|workflows/particulates/west_boron_powder_dropper|in.openedge|../../impurity_transport/west_tungsten_transport/input/plasma.h5|nokk"
+  "west_boron_powder_dropper|workflows/particulates/west_boron_powder_dropper|in.openedge|../../impurity_transport/west_tungsten_transport/input/plasma.h5"
   "cat_liquid_metal_divertor|workflows/particulates/cat_liquid_metal_divertor|in.openedge|input/plasma_attached.h5|nokk"
-  "west_tungsten_transport|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5|nokk"
+  "west_tungsten_transport|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5"
   "rfpie_tungsten_transport|workflows/impurity_transport/rfpie_tungsten_transport|in.openedge|input/plasma_he.h5|nokk"
 )
 
@@ -204,6 +204,9 @@ for entry in "${TESTS[@]}"; do
         -log none > "$logfile" 2>&1) || ok=0
   fi
   if [[ $ok -eq 1 ]] && grep -q "^ERROR" "$logfile"; then ok=0; fi
+  # a rank dying under srun/mpirun can still return 0 through the launcher;
+  # treat launcher-reported task failures as FAIL too
+  if [[ $ok -eq 1 ]] && grep -qE "Segmentation fault|srun: error|DUE TO TASK FAILURE|Kokkos::abort|cudaError" "$logfile"; then ok=0; fi
 
   if [[ $ok -eq 1 ]]; then
     RESULTS+=("PASS  $name")

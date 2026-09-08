@@ -389,10 +389,8 @@ void UpdateKokkos::init()
   // sheath, hybrid/GCA, device pcache sheath correction and the device
   // cross-field fill stay 3D-only for now (the last two fall back to the
   // host loudly; the first two error out)
-  if (oe_pusher_subcycles > 0 && domain->dimension != 3 &&
-      sheath_flag && !sheath_kick)
-    error->all(FLERR,"Spatial sheath under Kokkos is 3D-only in this version; "
-               "run 2D/axisymmetric sheath decks on the CPU build");
+  // (2D spatial sheath ported 2026-09-08: line-element cache + kick-drift
+  // impulse in oe_boris2d)
 }
 
 /* ---------------------------------------------------------------------- */
@@ -427,6 +425,8 @@ void UpdateKokkos::setup()
 
     sparta->kokkos->prewrap = 0;
   } else {
+    // mixtures may have been added or regrouped since the last run
+    particle_kk->sync_species2group();
     grid_kk->modify(Host,ALL_MASK);
     grid_kk->update_hash();
 
@@ -600,7 +600,7 @@ void UpdateKokkos::run(int nsteps)
     if (getenv("OE_PCACHE_HOST"))
       why = "OE_PCACHE_HOST env override";
     else if (domain->dimension != 3 && sheath_flag && !sheath_kick)
-      why = "2D/axisymmetric sheath ne correction (device fill is 3D-only there)";
+      why = "2D/axisymmetric sheath ne correction (device pcache fill uses the tri map)";
     else if (!oe_has_mesh_b || !oe_has_mesh_plasma)
       why = "device mesh B/plasma views not built (fix-provider mesh decks only)";
     else if (pcache_need_mask & ~sup)
@@ -2977,8 +2977,6 @@ void UpdateKokkos::build_oe_sheath_cache()
   oe_sheath_provider = 0;
   if (!sheath_flag || sheath_kick) return;
   if (sheath_geom_cidx < 0) return;
-  if (domain->dimension != 3) return;   // device mover is 3D-only
-
   Compute *cg = modify->compute[sheath_geom_cidx];
   auto *csg = dynamic_cast<ComputeNearestSurfGrid*>(cg);
   if (!csg) return;
@@ -3075,16 +3073,22 @@ void UpdateKokkos::build_oe_sheath_cache()
     k_oe_sheath_elem = DAT::tdual_float_2d_lr("oe_sheath_elem",
                                               nsurf_all,ncols);
     auto h_elem = k_oe_sheath_elem.h_view;
+    const bool dim3 = (domain->dimension == 3);
     Surf::Tri *tris = surf->tris;
+    Surf::Line *lines = surf->lines;
 
     int n_group = 0, n_active = 0;
     for (int m = 0; m < nsurf_all; m++) {
       for (int c = 0; c < ncols; c++) h_elem(m,c) = 0.0;
-      if (!(tris[m].mask & oe_sheath_sgroupbit)) continue;
+      const int emask = dim3 ? tris[m].mask : lines[m].mask;
+      if (!(emask & oe_sheath_sgroupbit)) continue;
       n_group++;
       Pusher::SheathElemCache C;
       C.state = 0;
-      pusher->build_sheath_cache_entry_3d(m,C);
+      // per-element coefficients byte-identical to the CPU: the 3D twin
+      // for triangles, the original 2D builder for line elements
+      if (dim3) pusher->build_sheath_cache_entry_3d(m,C);
+      else      pusher->build_sheath_cache_entry(m,C);
       if (C.state != 1) continue;
       const SheathModels::SheathEmagCoeffs &cf = C.coeffs;
       h_elem(m,0)  = 1.0;
@@ -3371,6 +3375,123 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
   if (d_cells[icell].nsplit <= 0 && d_cells[icell].isplit >= 0)
     gcell = d_sinfo[d_cells[icell].isplit].icell;
 
+  // ---- spatial sheath (2D twin of push_boris_2d): geometry in cylindrical
+  //      (R,Z), per-element cached Coulette-Manfredi coefficients from the
+  //      fix provider, per-particle fallback for the compute provider ----
+  bool sh_active = false;
+  double sh_nR = 0.0, sh_nZ = 0.0, sh_sR = 0.0, sh_sZ = 0.0, sh_dmax = 0.0;
+  SheathModelsKokkos::CMCoeffs sh_c = {};
+  if (oe_sheath_provider && gcell >= 0 &&
+      gcell < (int) d_oe_midx_gcell.extent(0)) {
+    int midx = d_oe_midx_gcell(gcell);
+    const int nsurf_cell = d_cells[gcell].nsurf;
+    if (nsurf_cell > 0) {
+      auto csurfs_begin = d_csurfs.row_map(gcell);
+      double best_d = 1.0e20;
+      int best_m = -1;
+      for (int m = 0; m < nsurf_cell; m++) {
+        const int ms = d_csurfs.entries(csurfs_begin + m);
+        if (!(d_lines[ms].mask & oe_sheath_sgroupbit)) continue;
+        const double dpl = Kokkos::fabs(
+            (x[0]-d_lines[ms].p1[0])*d_lines[ms].norm[0] +
+            (x[1]-d_lines[ms].p1[1])*d_lines[ms].norm[1]);
+        if (dpl < best_d) { best_d = dpl; best_m = ms; }
+      }
+      if (best_m >= 0) midx = best_m;
+    }
+    if (midx >= 0) {
+      double nxr = d_lines[midx].norm[0], nyr = d_lines[midx].norm[1];
+      const double nmag = Kokkos::sqrt(nxr*nxr + nyr*nyr);
+      if (nmag > 0.0) { nxr /= nmag; nyr /= nmag; }
+      const double n_slot[3] = {nxr, nyr, 0.0};
+      double nphi_tmp = 0.0;
+      OpenEdge::sparta_v_to_RZphi(n_slot, dim, axi, 0.0, sh_nR, sh_nZ, nphi_tmp);
+      const double xmid_slot[3] = {0.5*(d_lines[midx].p1[0]+d_lines[midx].p2[0]),
+                                   0.5*(d_lines[midx].p1[1]+d_lines[midx].p2[1]), 0.0};
+      OpenEdge::sparta_to_RZ(xmid_slot, dim, axi, sh_sR, sh_sZ, 0.0, 0.0);
+      if (oe_sheath_provider == 1 && d_oe_sheath_elem.data() &&
+          midx < (int) d_oe_sheath_elem.extent(0) &&
+          d_oe_sheath_elem(midx,0) > 0.5) {
+        sh_dmax           = d_oe_sheath_elem(midx,1);
+        sh_c.phi_total_eV = d_oe_sheath_elem(midx,2);
+        sh_c.lambdaD_m    = d_oe_sheath_elem(midx,3);
+        sh_c.lmps_m       = d_oe_sheath_elem(midx,4);
+        sh_c.inv_lD       = d_oe_sheath_elem(midx,5);
+        sh_c.inv_lmps     = d_oe_sheath_elem(midx,6);
+        sh_c.K1_scaled    = d_oe_sheath_elem(midx,7);
+        sh_c.K2           = d_oe_sheath_elem(midx,8);
+        sh_c.phi_slow_eV  = d_oe_sheath_elem(midx,9);
+        sh_c.phi_fast_eV  = d_oe_sheath_elem(midx,10);
+        sh_c.e_anchor_vpm = d_oe_sheath_elem(midx,11);
+        sh_active = true;
+      } else if (oe_sheath_provider == 2) {
+        // CPU push_boris_2d parity: with the per-element cache enabled
+        // (fix provider) an INACTIVE element (no plasma / no B at its
+        // midpoint) gets NO sheath -- there is no per-particle fallback in
+        // 2D. The fallback below exists only for the compute provider.
+        // (Falling back for the fix provider activated a sheath on 771 of
+        // 808 west-divertor elements the CPU leaves bare: A +25%, S x3.)
+        double te = 0.0, ti = 0.0, ne = 0.0;
+        double bvec[3] = {BR, BZ, Bphi};
+        if (oe_sheath_provider == 2 && d_oe_sheath_cellplasma.data() &&
+            icell < (int) d_oe_sheath_cellplasma.extent(0)) {
+          te = d_oe_sheath_cellplasma(icell,0);
+          ti = d_oe_sheath_cellplasma(icell,1);
+          ne = d_oe_sheath_cellplasma(icell,2);
+          bvec[0] = d_oe_sheath_cellplasma(icell,3);
+          bvec[1] = d_oe_sheath_cellplasma(icell,5);
+          bvec[2] = d_oe_sheath_cellplasma(icell,4);
+        } else if (oe_sheath_provider == 1 && oe_has_mesh_plasma) {
+          double P[3];
+          if (MeshKokkos::query_scalars_at_point(
+                xq, dim, axi,
+                d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
+                d_oe_mesh_tri_te, d_oe_mesh_tri_ti, d_oe_mesh_tri_ne,
+                d_oe_hash_offset, d_oe_hash_entries,
+                oe_mesh_hash_rmin, oe_mesh_hash_zmin,
+                oe_mesh_hash_dr,   oe_mesh_hash_dz,
+                oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri, P)) {
+            te = P[0]; ti = P[1]; ne = P[2];
+          }
+        }
+        const double bmag = Kokkos::sqrt(bvec[0]*bvec[0] + bvec[1]*bvec[1] + bvec[2]*bvec[2]);
+        if (te > 0.0 && ne > 0.0 && bmag > 0.0) {
+          const double nvec[3] = {sh_nR, sh_nZ, 0.0};
+          SheathModelsKokkos::ChoduraMetrics cm =
+            SheathModelsKokkos::chodura_metrics(0.0, 1.0, bvec, nvec);
+          sh_dmax = SheathModelsKokkos::auto_dmax(te, ti, ne, bmag, cm.alpha_deg,
+                                                  oe_sheath_mD_amu, oe_sheath_dmax_user);
+          sh_c = SheathModelsKokkos::prepare_coulette_manfredi(
+                     te, ti, ne, bmag, cm.alpha_deg, oe_sheath_mD_amu, 0.0);
+          sh_active = true;
+        }
+      }
+    }
+  }
+  const bool have_bank =
+      oe_has_sheath_customs && i < (int) d_oe_sheath_bank.extent(0);
+  const bool have_phiprev =
+      oe_has_sheath_customs && i < (int) d_oe_sheath_phiprev.extent(0);
+  double sh_phi_tot_sp = 0.0;
+  if (sh_active && have_bank)
+    sh_phi_tot_sp = SheathModelsKokkos::phi_at_distance(sh_c, 0.0);
+  int sh_phi_pending = 0;
+  double sh_phi_ref = 0.0;
+  if (have_phiprev) {
+    if (sh_active) {
+      if (d_oe_sheath_phiprev(i) > 0.0) {
+        sh_phi_ref = d_oe_sheath_phiprev(i) - 1.0;
+        sh_phi_pending = 1;
+      }
+    } else d_oe_sheath_phiprev(i) = 1.0;
+  }
+  double sh_d_cur = 0.0;
+  if (sh_active) {
+    double R0 = 0.0, Z0 = 0.0;
+    OpenEdge::sparta_to_RZ(xq, dim, axi, R0, Z0, 0.0, 0.0);
+    sh_d_cur = (R0 - sh_sR)*sh_nR + (Z0 - sh_sZ)*sh_nZ;
+  }
+
   for (int isub = 0; isub < nsub; isub++) {
     double xold[2] = {xcur[0], xcur[1]};
     double vR = 0.0, vZ = 0.0, vphi = 0.0;
@@ -3383,6 +3504,52 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
       xcur[0] += vcur[0] * dt_sub;
       xcur[1] += vcur[1] * dt_sub;
       zcur += vcur[2] * dt_sub;
+    }
+    // spatial-sheath potential impulse (CPU push_boris_2d parity)
+    if (sh_active) {
+      const double vn = vrhs[0]*sh_nR + vrhs[2]*sh_nZ;
+      const double d_old = sh_d_cur;
+      const double d_new = d_old + vn * dt_sub;
+      sh_d_cur = d_new;
+      if (Kokkos::fmin(d_old, d_new) < sh_dmax) {
+        const double phi_old_geo = SheathModelsKokkos::phi_at_distance(
+            sh_c, Kokkos::fmax(d_old, 0.0));
+        const double phi_old = sh_phi_pending ? sh_phi_ref : phi_old_geo;
+        sh_phi_pending = 0;
+        const double phi_new = SheathModelsKokkos::phi_at_distance(
+            sh_c, Kokkos::fmax(d_new, 0.0));
+        double dKE_J = Kokkos::fabs(charge) * oe_echarge * (phi_new - phi_old);
+        if (have_bank && dKE_J > 0.0) {
+          const double room = Kokkos::fabs(charge) * oe_echarge * sh_phi_tot_sp
+                              - d_oe_sheath_bank(i);
+          if (dKE_J > room) dKE_J = (room > 0.0) ? room : 0.0;
+        }
+        if (dKE_J != 0.0) {
+          const double s2 = vn*vn + 2.0*dKE_J/mass;
+          double vn_new;
+          if (s2 >= 0.0) {
+            vn_new = (vn >= 0.0) ? Kokkos::sqrt(s2) : -Kokkos::sqrt(s2);
+            if (have_bank) d_oe_sheath_bank(i) += dKE_J;
+          } else {
+            vn_new = -vn;
+            sh_d_cur = d_old;
+            if (!axi) {
+              xcur[0] -= (d_new - d_old) * sh_nR;
+              xcur[1] -= (d_new - d_old) * sh_nZ;
+            }
+            if (oe_sheath_diag) Kokkos::atomic_inc(&d_oe_shd_counts(2));
+          }
+          const double dvn = vn_new - vn;
+          vrhs[0] += dvn * sh_nR;
+          vrhs[2] += dvn * sh_nZ;
+          OpenEdge::RZphi_force_to_sparta(vrhs[0], vrhs[2], vrhs[1], dim, axi, 0.0,
+                                          vcur[0], vcur[1], vcur[2]);
+          if (oe_sheath_diag) Kokkos::atomic_inc(&d_oe_shd_counts(1));
+        }
+        if (have_phiprev)
+          d_oe_sheath_phiprev(i) = 1.0 + SheathModelsKokkos::phi_at_distance(
+              sh_c, Kokkos::fmax(sh_d_cur, 0.0));
+      } else if (have_phiprev) d_oe_sheath_phiprev(i) = 1.0;
     }
     // planar subcycle guards (CPU parity): in-cell line hit -> clip past
     // the intersection (never park ON the line); cell exit -> bail

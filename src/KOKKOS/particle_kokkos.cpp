@@ -692,6 +692,28 @@ void ParticleKokkos::grow_species()
 
 /* ---------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   (re)build the device mixture x species -> group table. Called from
+   wrap_kokkos() and from every UpdateKokkos::init(): a deck can define or
+   regroup a mixture BETWEEN run commands, and a table built only at the
+   first wrap then has too few rows / stale groups -- every Kokkos compute
+   that maps ispecies -> group reads past it (grid/weighted/kk wrote its
+   tally out of bounds; heap corruption; found 2026-09-08 on the west
+   tungsten transport deck).
+------------------------------------------------------------------------- */
+
+void ParticleKokkos::sync_species2group()
+{
+  if ((int) k_species2group.extent(0) != nmixture ||
+      (int) k_species2group.extent(1) != nspecies)
+    k_species2group = DAT::tdual_int_2d("particle:species2group",nmixture,nspecies);
+  for (int i = 0; i < nmixture; i++)
+    for (int j = 0; j < nspecies; j++)
+      k_species2group.view_host()(i,j) = mixture[i]->species2group[j];
+  k_species2group.modify_host();
+  k_species2group.sync_device();
+}
+
 void ParticleKokkos::wrap_kokkos()
 {
   // species
@@ -706,12 +728,7 @@ void ParticleKokkos::wrap_kokkos()
 
   // mixtures
 
-  k_species2group = DAT::tdual_int_2d("particle:species2group",nmixture,nspecies);
-  for (int i = 0; i < nmixture; i++)
-    for (int j = 0; j < nspecies; j++)
-      k_species2group.view_host()(i,j) = mixture[i]->species2group[j];
-  k_species2group.modify_host();
-  k_species2group.sync_device();
+  sync_species2group();
 
   //if (mixtures != k_mixtures.view_host().data()) {
   //  memoryKK->wrap_kokkos(k_mixtures,mixture,nmixture,"particle:mixture");

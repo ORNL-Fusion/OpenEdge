@@ -149,6 +149,7 @@ class ParticleKokkos : public Particle {
   void unpack_custom_kokkos(char *, int) const;
 
   void wrap_kokkos();
+  void sync_species2group();   // rebuild the mixture x species -> group table
   void sync(ExecutionSpace, unsigned int);
   void modify(ExecutionSpace, unsigned int);
 
