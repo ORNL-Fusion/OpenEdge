@@ -75,7 +75,10 @@ void sparta_to_RZphi(const double *xyz, int dim, bool axisymmetric,
                      double &R, double &Z, double &phi,
                      double x0 = 0.0, double y0 = 0.0) {
   sparta_to_RZ(xyz, dim, axisymmetric, R, Z, x0, y0);
-  if (!axisymmetric && !oe_force_axi_rz && dim == 3)
+  // use_axi_rz() carries the __CUDA_ARCH__ guard: the host global
+  // oe_force_axi_rz is not visible in device code (nvcc build of the
+  // OPENEDGE package failed on the direct reference, slag f7470a56).
+  if (!use_axi_rz(axisymmetric) && dim == 3)
     phi = std::atan2(xyz[1] - y0, xyz[0] - x0);
   else
     phi = 0.0;

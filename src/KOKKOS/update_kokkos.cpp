@@ -74,6 +74,11 @@ enum{NOFIELD,CFIELD,PFIELD,GFIELD};             // several files
 #define MOVE_DEBUG_INDEX -1   // particle index on owning proc
 #define MOVE_DEBUG_STEP 4107    // timestep
 
+// Subcycle wall guard constants: identical to pusher.cpp
+// (SUBCYCLE_ONSURF_PARAM / SUBCYCLE_CLIP_OVERSHOOT); kept in sync by hand.
+#define OE_SUBCYCLE_ONSURF_PARAM 1.0e-6
+#define OE_SUBCYCLE_CLIP_OVERSHOOT 1.0e-4
+
 #define VAL_1(X) X
 #define VAL_2(X) VAL_1(X), VAL_1(X)
 #define VAL_3(X) VAL_2(X), VAL_1(X)
@@ -175,8 +180,24 @@ void UpdateKokkos::init()
 {
   // Call base Update::init() first for OpenEdge-specific initialization:
   // plasma cache custom vectors, sheath setup, Boris config, field fixes.
+  // Then reject CPU-only features loudly (slag 2026-09-08 merge): the
+  // psi-contour core boundary (fix reflect/psi) is not in the Kokkos
+  // mover, and the native 3-D zones background provider is not sampled
+  // by the device pcache / sheath / drag / diffusion kernels.
   // UpdateKokkos then overrides moveptr and field fix resolution below.
   Update::init();
+
+  if (psi_reflect_flag)
+    error->all(FLERR,"fix reflect/psi is not supported under Kokkos "
+               "(psi-contour core boundary not in the device mover)");
+  if (pusher && pusher->pusher_plasma_fidx >= 0) {
+    FixBackground *pd_chk =
+      dynamic_cast<FixBackground*>(modify->fix[pusher->pusher_plasma_fidx]);
+    if (pd_chk && pd_chk->is_zones3d())
+      error->all(FLERR,"fix background native 3D zones provider is not "
+                 "supported under Kokkos (device sampling covers the "
+                 "regular/triangle R-Z providers only)");
+  }
 
   if (runflag == 0) return;
 
@@ -3481,7 +3502,21 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
                 d_tris[isurf].p1, d_tris[isurf].p2, d_tris[isurf].p3,
                 d_tris[isurf].norm, xc, param, side)) {
             v[0] = vcur[0]; v[1] = vcur[1]; v[2] = vcur[2];
-            xnew[0] = xc[0]; xnew[1] = xc[1]; xnew[2] = xc[2];
+            // CPU parity (slag f7470a56 fix): never park the endpoint ON
+            // the plane — a point placed there lands on either side by
+            // roundoff, and a particle left in front of the wall re-enters
+            // this guard next step at param 0, clips to zero motion and
+            // freezes for good. Segment starting on the surface -> hand
+            // the full subcycle endpoint to the outer move loop (which
+            // collides normally); mid-segment crossing -> clip a small
+            // fraction past the intersection so the outer chord sees it.
+            if (param < OE_SUBCYCLE_ONSURF_PARAM) {
+              xnew[0] = xcur[0]; xnew[1] = xcur[1]; xnew[2] = xcur[2];
+            } else {
+              xnew[0] = xc[0] + OE_SUBCYCLE_CLIP_OVERSHOOT * (xcur[0] - xold[0]);
+              xnew[1] = xc[1] + OE_SUBCYCLE_CLIP_OVERSHOOT * (xcur[1] - xold[1]);
+              xnew[2] = xc[2] + OE_SUBCYCLE_CLIP_OVERSHOOT * (xcur[2] - xold[2]);
+            }
             return;
           }
         }
