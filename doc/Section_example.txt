@@ -24,8 +24,8 @@ changing the source.
 collisions/coulomb = Coulomb slowing-down and binary thermalization against the NRL formulary
 efield_polarization = polarization drift of a proton in a time-dependent electric field
 ionization_recombination = oxygen charge-state balance under ADAS rates
-particulates/dustt = grain charging and drag against the DUSTT model
-particulates/droplet_transport = lithium droplets flown to the wall in CAT geometry
+particulates/dustt2005/uniform_plasma_benchmark = DUSTT-2005 grain model against analytic reference results
+particulates/dustt2005/cat_solps_droplet_transport = DUSTT-2005 droplet transport in CAT geometry
 pushers/orbit = Boris and guiding-center banana orbits in the Khan analytical field
 pushers/hybrid = Boris/GCA hand-off near an absorbing wall
 surface_emission/constant_flux = constant-flux emission independent of emission cadence

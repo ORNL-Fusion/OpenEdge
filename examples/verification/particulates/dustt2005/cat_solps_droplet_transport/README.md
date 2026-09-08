@@ -1,4 +1,4 @@
-# Lithium droplet transport in a SOLPS background
+# DUSTT-2005 lithium droplet transport in a CAT SOLPS background
 
 Three Li droplets (radii 1.5, 2.5, 3.5 mm) launched from the CAT outer
 divertor with dustt2005 collection and Coulomb drag, gravity, OML charging
@@ -33,7 +33,7 @@ python3 scripts/plot_trajectories.py
 ## Regenerating `plasma.h5`
 
 ```bash
-python3 ../../../../tools/converters/convert_solps_plasma.py <attached_run_dir> \
+python3 ../../../../../tools/converters/convert_solps_plasma.py <attached_run_dir> \
     --b2fgmtry <baserun>/b2fgmtry --b2fstate <attached_run_dir>/b2fstate \
     --equ-file <baserun>/dg.equ --plasma-out input/plasma.h5 \
     --wall-in input/wall.surf --geometry axi --heatflux jeremy_total

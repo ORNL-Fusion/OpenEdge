@@ -68,7 +68,7 @@ src/STUBS/*.a
 
 # Large example data (generated or downloaded separately)
 examples/**/input/*.h5
-!examples/verification/particulates/droplet_transport/input/plasma.h5
+!examples/verification/particulates/dustt2005/cat_solps_droplet_transport/input/plasma.h5
 !examples/workflows/impurity_transport/rfpie_tungsten_transport/input/plasma_he.h5
 !examples/workflows/impurity_transport/west_tungsten_transport/input/plasma.h5
 !examples/workflows/particulates/cat_liquid_metal_divertor/input/plasma_attached.h5

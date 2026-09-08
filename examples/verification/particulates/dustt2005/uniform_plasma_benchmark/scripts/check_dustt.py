@@ -347,7 +347,8 @@ def main():
          f"max abs dev {dev:.2e}")
 
     ok = all(checks)
-    print(("PASS" if ok else "FAIL") + ": verification/particulates/dustt vs DUSTT")
+    print(("PASS" if ok else "FAIL")
+          + ": dustt2005/uniform_plasma_benchmark vs DUSTT")
     return 0 if ok else 1
 
 

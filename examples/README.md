@@ -26,8 +26,8 @@ codes. Every case has a deterministic PASS/FAIL gate.
 | `verification/collisions/coulomb/` | Coulomb slowing-down and binary thermalization |
 | `verification/efield_polarization/` | Polarization drift in a time-dependent E field |
 | `verification/ionization_recombination/` | ADAS ionization and recombination balance |
-| `verification/particulates/dustt/` | Grain charging and drag against DUSTT |
-| `verification/particulates/droplet_transport/` | Droplet movers in CAT geometry |
+| `verification/particulates/dustt2005/uniform_plasma_benchmark/` | DUSTT-2005 grain model against analytic reference results |
+| `verification/particulates/dustt2005/cat_solps_droplet_transport/` | DUSTT-2005 droplet transport in CAT geometry |
 | `verification/pushers/orbit/` | Boris and GCA orbits |
 | `verification/pushers/hybrid/` | Boris/GCA near-wall handoff |
 | `verification/surface_emission/constant_flux/` | Constant-flux emission and cadence scaling |

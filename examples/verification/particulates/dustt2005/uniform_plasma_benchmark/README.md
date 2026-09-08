@@ -1,4 +1,4 @@
-# DUSTT grain-model unit test
+# DUSTT-2005 uniform-plasma benchmark
 
 Grain charging, drag and kinematics against DUSTT (Pigarov, PoP 12,
 122508) in a uniform prescribed plasma (`fix pd background constant`,
