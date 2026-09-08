@@ -84,6 +84,7 @@ class FixSurfaceEmitSourceKokkos : public FixSurfaceEmitSource,
   t_particle_1d d_particles;
   t_species_1d d_species;
   t_tri_1d d_tris;
+  t_line_1d d_lines;            // 2D/axi: line elements
   ParticleKokkos::DeviceCustom custom_;
   int pw_slot_;
   Kokkos::View<int, DeviceType> d_new_count;
@@ -91,6 +92,7 @@ class FixSurfaceEmitSourceKokkos : public FixSurfaceEmitSource,
 
   // ---- kernel scalars ----
   int ntask_, nspecies_mix_;
+  int dim_;                       // 2 -> line sampling, 3 -> tri fans
   int model_;                     // EmitModel copy (THOMPSON/FIXED)
   int weighted_;                  // pweight = w_emit vs fnum default
   double dt_eff_, fnum_, src_total_;

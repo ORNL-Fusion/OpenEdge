@@ -18,6 +18,7 @@
 #include "sparta_masks.h"
 #include "update.h"
 #include "update_kokkos.h"
+#include "openedge_geom.h"
 
 using namespace SPARTA_NS;
 
@@ -72,8 +73,6 @@ void FixCrossFieldDiffusionKokkos::init()
     device_ok = 0; why = "OE_CD_HOST env override";
   } else if (!use_background_) {
     device_ok = 0; why = "compute-source / constant-B fields (device is background-mesh only)";
-  } else if (dim_ != 3) {
-    device_ok = 0; why = "2D/axisymmetric (device fill is 3D-only)";
   } else if (!dynamic_cast<UpdateKokkos *>(update)) {
     device_ok = 0; why = "no UpdateKokkos (host run)";
   } else if (pd_ && pd_->has_const_bfield()) {
@@ -240,7 +239,9 @@ void FixCrossFieldDiffusionKokkos::operator()(TagFixCrossFieldDiffusion,
   if (d_species(p.ispecies).charge == 0.0) return;   // skip neutrals
 
   // column-axis shift for the (R,Z) queries (3D linear-device decks)
-  double xq[3] = {p.x[0] - col_x0_, p.x[1] - col_y0_, p.x[2]};
+  double xq[3];
+  if (dim_ != 3) { xq[0] = p.x[0]; xq[1] = p.x[1]; xq[2] = 0.0; }
+  else { xq[0] = p.x[0] - col_x0_; xq[1] = p.x[1] - col_y0_; xq[2] = p.x[2]; }
 
   // B at the particle: mesh -> equilibrium chain (CPU pd_bfield_sparta)
   double B[3] = {0.0, 0.0, 0.0};
@@ -283,6 +284,21 @@ void FixCrossFieldDiffusionKokkos::operator()(TagFixCrossFieldDiffusion,
   // stochastic perpendicular displacement (3D basis, two Gaussians)
   if (D_local > 0.0) {
     const double sigma = Kokkos::sqrt(2.0 * D_local * dt_eff_);
+    if (dim_ != 3) {
+      // CPU 2D: single perpendicular direction in the poloidal plane
+      // (B in SPARTA slots, same as the CPU sample.b)
+      const double Bpol = Kokkos::sqrt(B[0]*B[0] + B[1]*B[1]);
+      if (Bpol > 1.0e-20) {
+        const double inv_Bpol = 1.0 / Bpol;
+        const double eperp0 = -B[1] * inv_Bpol;
+        const double eperp1 =  B[0] * inv_Bpol;
+        rand_type rand_gen = rand_pool.get_state();
+        const double xi = rand_gen.normal();
+        rand_pool.free_state(rand_gen);
+        ddx0 += sigma * xi * eperp0;
+        ddx1 += sigma * xi * eperp1;
+      }
+    } else {
     const double inv_Bmag = 1.0 / Bmag;
     const double bhat0 = B[0] * inv_Bmag;
     const double bhat1 = B[1] * inv_Bmag;
@@ -310,13 +326,21 @@ void FixCrossFieldDiffusionKokkos::operator()(TagFixCrossFieldDiffusion,
     ddx0 += sigma * (xi1*e1_0 + xi2*e2_0);
     ddx1 += sigma * (xi1*e1_1 + xi2*e2_1);
     ddx2 += sigma * (xi1*e1_2 + xi2*e2_2);
+    }
   }
 
   // constant pinch (cylindrical R,Z about the column axis)
   const double rx = p.x[0] - col_x0_;
   const double ry = p.x[1] - col_y0_;
   const double R = Kokkos::sqrt(rx*rx + ry*ry);
-  if (have_pinch_) {
+  if (have_pinch_ && dim_ != 3) {
+    double dxs0, dxs1, dxs2_unused;
+    OpenEdge::RZphi_force_to_sparta(v_pinch_R_, v_pinch_Z_, 0.0,
+                                    dim_, axisym_ != 0, 0.0,
+                                    dxs0, dxs1, dxs2_unused);
+    ddx0 += dxs0 * dt_eff_;
+    ddx1 += dxs1 * dt_eff_;
+  } else if (have_pinch_) {
     if (R > 1.0e-20) {
       const double cphi = rx / R, sphi = ry / R;
       ddx0 += v_pinch_R_ * cphi * dt_eff_;
@@ -329,7 +353,8 @@ void FixCrossFieldDiffusionKokkos::operator()(TagFixCrossFieldDiffusion,
   // twin of pd->psi_norm_gradient_at — bilinear cell derivative with
   // the CPU's clamp-to-zero outside the equilibrium rectangle)
   if (have_psi_pinch_ && psi_ok_) {
-    const double Rp = R, Zp = p.x[2];
+    double Rp, Zp;
+    OpenEdge::sparta_to_RZ(p.x, dim_, axisym_ != 0, Rp, Zp, col_x0_, col_y0_);
     const bool clamp_R = (Rp < r_front_ || Rp > r_back_);
     const bool clamp_Z = (Zp < z_front_ || Zp > z_back_);
     const double Rc = Kokkos::fmin(Kokkos::fmax(Rp, r_front_), r_back_);
@@ -353,12 +378,20 @@ void FixCrossFieldDiffusionKokkos::operator()(TagFixCrossFieldDiffusion,
     if (gm > 1.0e-12) {
       const double vr = v_pinch_psi_ * gR / gm;
       const double vz = v_pinch_psi_ * gZ / gm;
-      if (R > 1.0e-20) {
-        const double cphi = rx / R, sphi = ry / R;
-        ddx0 += vr * cphi * dt_eff_;
-        ddx1 += vr * sphi * dt_eff_;
+      if (dim_ != 3) {
+        double dxs0, dxs1, dxs2_unused;
+        OpenEdge::RZphi_force_to_sparta(vr, vz, 0.0, dim_, axisym_ != 0, 0.0,
+                                        dxs0, dxs1, dxs2_unused);
+        ddx0 += dxs0 * dt_eff_;
+        ddx1 += dxs1 * dt_eff_;
+      } else {
+        if (R > 1.0e-20) {
+          const double cphi = rx / R, sphi = ry / R;
+          ddx0 += vr * cphi * dt_eff_;
+          ddx1 += vr * sphi * dt_eff_;
+        }
+        ddx2 += vz * dt_eff_;
       }
-      ddx2 += vz * dt_eff_;
     }
   }
 

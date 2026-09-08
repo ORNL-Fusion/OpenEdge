@@ -83,8 +83,6 @@ void FixSurfaceEmitSourceKokkos::init()
   const char *why = nullptr;
   if (getenv("OE_EMIT_HOST")) {
     device_ok = 0; why = "OE_EMIT_HOST env override";
-  } else if (domain->dimension != 3) {
-    device_ok = 0; why = "2D (device emission is 3D-only)";
   } else if (perspecies) {
     device_ok = 0; why = "perspecies emission";
   } else if (region) {
@@ -317,7 +315,9 @@ void FixSurfaceEmitSourceKokkos::perform_task()
   d_species   = particle_kk->k_species.d_view;
   SurfKokkos *surf_kk = (SurfKokkos *) surf;
   surf_kk->sync(Device,ALL_MASK);
-  d_tris = surf_kk->k_tris.view_device();
+  d_tris  = surf_kk->k_tris.view_device();
+  d_lines = surf_kk->k_lines.view_device();
+  dim_ = domain->dimension;
 
   custom_  = particle_kk->device_custom();
   pw_slot_ = (pweight_ewhich >= 0) ? pweight_ewhich : -1;
@@ -374,7 +374,8 @@ void FixSurfaceEmitSourceKokkos::operator()(TagFixSurfEmitSource,
   const int off   = d_t_poff(i);
   const int nsub  = d_t_npoint(i) - 2;
 
-  const double *normal = d_tris[isurf].norm;
+  const double *normal = (dim_ == 2) ? d_lines[isurf].norm
+                                     : d_tris[isurf].norm;
   double atan[3], btan[3], vstream[3];
   for (int c = 0; c < 3; c++) {
     atan[c]    = d_t_tan1(i,c);
@@ -398,18 +399,28 @@ void FixSurfaceEmitSourceKokkos::operator()(TagFixSurfEmitSource,
 
     // position: pick a sub-triangle of the clipped polygon, then a
     // uniform point in it
-    rn = rand_gen.drand();
-    int n = 0;
-    while (n < nsub - 1 && rn >= d_t_frac(off + n)) n++;
-    const double *p1 = &d_t_path(3*off);
-    const double *p2 = &d_t_path(3*(off+n+1));
-    const double *p3 = &d_t_path(3*(off+n+2));
-    double alpha = rand_gen.drand();
-    double beta  = rand_gen.drand();
-    if (alpha + beta > 1.0) { alpha = 1.0 - alpha; beta = 1.0 - beta; }
     double x[3];
-    for (int c = 0; c < 3; c++)
-      x[c] = p1[c] + alpha*(p2[c]-p1[c]) + beta*(p3[c]-p1[c]);
+    if (dim_ == 2) {
+      // CPU 2D: uniform along the clipped line segment (path = 2 points)
+      rn = rand_gen.drand();
+      const double *p1 = &d_t_path(3*off);
+      const double *p2 = &d_t_path(3*(off+1));
+      x[0] = p1[0] + rn*(p2[0]-p1[0]);
+      x[1] = p1[1] + rn*(p2[1]-p1[1]);
+      x[2] = 0.0;
+    } else {
+      rn = rand_gen.drand();
+      int n = 0;
+      while (n < nsub - 1 && rn >= d_t_frac(off + n)) n++;
+      const double *p1 = &d_t_path(3*off);
+      const double *p2 = &d_t_path(3*(off+n+1));
+      const double *p3 = &d_t_path(3*(off+n+2));
+      double alpha = rand_gen.drand();
+      double beta  = rand_gen.drand();
+      if (alpha + beta > 1.0) { alpha = 1.0 - alpha; beta = 1.0 - beta; }
+      for (int c = 0; c < 3; c++)
+        x[c] = p1[c] + alpha*(p2[c]-p1[c]) + beta*(p3[c]-p1[c]);
+    }
 
     // energy + cos^n direction in the surface frame
     double E_eV, cos_n_local = 1.0;

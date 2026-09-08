@@ -599,8 +599,6 @@ void UpdateKokkos::run(int nsteps)
     };
     if (getenv("OE_PCACHE_HOST"))
       why = "OE_PCACHE_HOST env override";
-    else if (domain->dimension != 3 && sheath_flag && !sheath_kick)
-      why = "2D/axisymmetric sheath ne correction (device pcache fill uses the tri map)";
     else if (!oe_has_mesh_b || !oe_has_mesh_plasma)
       why = "device mesh B/plasma views not built (fix-provider mesh decks only)";
     else if (pcache_need_mask & ~sup)
@@ -4508,7 +4506,8 @@ void UpdateKokkos::cache_plasma_particles_device()
   if (surf->exist && oe_pc_csg) {
     SurfKokkos *surf_kk = (SurfKokkos *) surf;
     surf_kk->sync(Device,ALL_MASK);
-    d_tris = surf_kk->k_tris.view_device();
+    d_tris  = surf_kk->k_tris.view_device();
+    d_lines = surf_kk->k_lines.view_device();
   }
   oe_pc_ncells = grid->nlocal + grid->nghost;
   if (!d_pc_diag.data())
@@ -4659,6 +4658,8 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
           gcell < oe_pc_ncells) {
         int midx = d_oe_midx_gcell(gcell);
         int nsurf_cell = d_cells[gcell].nsurf;
+        const int nsurf_dev = (oe_dim != 3) ? (int) d_lines.extent(0)
+                                            : (int) d_tris.extent(0);
         if (nsurf_cell > 0) {
           auto csurfs_begin = d_csurfs.row_map(gcell);
           if (csurfs_begin + nsurf_cell >
@@ -4670,35 +4671,49 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
           int best_m = -1;
           for (int mm = 0; mm < nsurf_cell; mm++) {
             const int ms = d_csurfs.entries(csurfs_begin + mm);
-            if (ms < 0 || ms >= (int) d_tris.extent(0)) {
+            if (ms < 0 || ms >= nsurf_dev) {
               Kokkos::atomic_inc(&d_pc_diag(4));
               continue;
             }
-            if (!(d_tris[ms].mask & oe_sheath_sgroupbit)) continue;
-            const double dpl = Kokkos::fabs(
-                (p.x[0]-d_tris[ms].p1[0])*d_tris[ms].norm[0] +
-                (p.x[1]-d_tris[ms].p1[1])*d_tris[ms].norm[1] +
-                (p.x[2]-d_tris[ms].p1[2])*d_tris[ms].norm[2]);
+            double dpl;
+            if (oe_dim != 3) {
+              if (!(d_lines[ms].mask & oe_sheath_sgroupbit)) continue;
+              dpl = Kokkos::fabs(
+                  (p.x[0]-d_lines[ms].p1[0])*d_lines[ms].norm[0] +
+                  (p.x[1]-d_lines[ms].p1[1])*d_lines[ms].norm[1]);
+            } else {
+              if (!(d_tris[ms].mask & oe_sheath_sgroupbit)) continue;
+              dpl = Kokkos::fabs(
+                  (p.x[0]-d_tris[ms].p1[0])*d_tris[ms].norm[0] +
+                  (p.x[1]-d_tris[ms].p1[1])*d_tris[ms].norm[1] +
+                  (p.x[2]-d_tris[ms].p1[2])*d_tris[ms].norm[2]);
+            }
             if (dpl < best_d) { best_d = dpl; best_m = ms; }
           }
           if (best_m >= 0) midx = best_m;
         }
-        if (midx >= (int) d_tris.extent(0)) {
+        if (midx >= nsurf_dev) {
           Kokkos::atomic_inc(&d_pc_diag(5));
           midx = -1;
         }
         if (midx >= 0) {
-          double nx = d_tris[midx].norm[0];
-          double ny = d_tris[midx].norm[1];
-          double nz = d_tris[midx].norm[2];
+          double nx, ny, nz, sref0, sref1, sref2;
+          if (oe_dim != 3) {
+            // CPU 2D: line normal (nz = 0), midpoint as the reference point
+            nx = d_lines[midx].norm[0]; ny = d_lines[midx].norm[1]; nz = 0.0;
+            sref0 = 0.5*(d_lines[midx].p1[0]+d_lines[midx].p2[0]);
+            sref1 = 0.5*(d_lines[midx].p1[1]+d_lines[midx].p2[1]);
+            sref2 = 0.0;
+          } else {
+            nx = d_tris[midx].norm[0];
+            ny = d_tris[midx].norm[1];
+            nz = d_tris[midx].norm[2];
+            sref0 = (d_tris[midx].p1[0]+d_tris[midx].p2[0]+d_tris[midx].p3[0])/3.0;
+            sref1 = (d_tris[midx].p1[1]+d_tris[midx].p2[1]+d_tris[midx].p3[1])/3.0;
+            sref2 = (d_tris[midx].p1[2]+d_tris[midx].p2[2]+d_tris[midx].p3[2])/3.0;
+          }
           const double nmag = Kokkos::sqrt(nx*nx + ny*ny + nz*nz);
           if (nmag > 0.0) { nx /= nmag; ny /= nmag; nz /= nmag; }
-          const double sref0 =
-            (d_tris[midx].p1[0]+d_tris[midx].p2[0]+d_tris[midx].p3[0])/3.0;
-          const double sref1 =
-            (d_tris[midx].p1[1]+d_tris[midx].p2[1]+d_tris[midx].p3[1])/3.0;
-          const double sref2 =
-            (d_tris[midx].p1[2]+d_tris[midx].p2[2]+d_tris[midx].p3[2])/3.0;
           const double dpart = Kokkos::fabs(
               (p.x[0]-sref0)*nx + (p.x[1]-sref1)*ny + (p.x[2]-sref2)*nz);
 
