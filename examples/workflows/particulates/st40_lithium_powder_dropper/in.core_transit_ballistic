@@ -1,0 +1,15 @@
+# Deterministic gravity-only oracle for the ST40 Stage-1 cohort.
+
+variable dt       index 2.0e-6
+variable nsteps   index 375000
+variable ndump    index 500
+variable outdir   index output_core_transit_ballistic
+
+shell mkdir ${outdir}
+log ${outdir}/log.openedge
+
+include input/setup_core_transit.inc
+include input/physics_core_transit_ballistic.inc
+include input/diagnostics_core_transit_ballistic.inc
+
+run ${nsteps}

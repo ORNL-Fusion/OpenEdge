@@ -1,0 +1,42 @@
+# Regression for the species-selective psi core boundary.
+# Axisymmetric OpenEdge slots are x=Z, y=R, z=phi.
+
+seed        20260829
+dimension   2
+boundary    o ao p
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0
+global      phi_track yes
+timestep    1.0e-3
+
+create_box  -1.0 1.0  0.0 1.05  -0.05 0.05
+create_grid 20 20 1
+balance_grid rcb cell
+global      weight cell radius
+
+species     ../../input/grains.species droplet
+species     ../../input/atoms.species Li Li+ Li2+ Li3+
+mixture     grains droplet frac 1.0
+mixture     allLi Li Li+ Li2+ Li3+ group SELF
+
+fix         pd background file ../../input/plasma_st40_solps_corefill.h5 static yes
+fix         fcore reflect/psi background pd psi_norm 0.51 &
+            action absorb mixture allLi
+fix         fpw particle/weight
+
+# A grain and all four Li charge states start together outside psi_N=0.51 and
+# move down across it. Only the atomic/ionic species belong to allLi; the grain
+# must survive and reach Z=0.23 m.
+read_particles input/two_particle_crossing 0
+
+shell mkdir output_absorb
+dump dpart particle all 1 output_absorb/state id type x y z vx vy vz
+dump_modify dpart first yes
+dump_modify dpart format float %.14g
+
+fix fflux ave/time 1 1 1 f_fcore mode vector file output_absorb/core_flux
+
+compute cnt count grains/default allLi/Li allLi/Li+ allLi/Li2+ allLi/Li3+
+stats 1
+stats_style step np c_cnt[1] c_cnt[2] c_cnt[3] c_cnt[4] c_cnt[5]
+run 5

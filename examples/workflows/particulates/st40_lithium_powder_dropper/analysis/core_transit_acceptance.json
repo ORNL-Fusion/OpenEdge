@@ -1,0 +1,39 @@
+{
+  "status": "PASS",
+  "cohort_size": 30,
+  "ballistic_max_position_error_m": 1.3301222006286603e-11,
+  "ballistic_max_velocity_error_m_s": 2.5768720499369672e-11,
+  "wall_reaction_counts": {
+    "ballistic": 30,
+    "dustt2005_corefill": 4
+  },
+  "classified_wall_counts": {
+    "ballistic": 30,
+    "dustt2005_corefill": 4
+  },
+  "entered_core_counts": {
+    "ballistic": 30,
+    "dustt2005_corefill": 0
+  },
+  "crossed_lower_core_alive_counts": {
+    "ballistic": 30,
+    "dustt2005_corefill": 0
+  },
+  "terminal_fate_counts": {
+    "ballistic": {
+      "lower_wall": 30
+    },
+    "dustt2005_corefill": {
+      "evaporated_in_SOL": 26,
+      "upper_or_side_wall": 4
+    }
+  },
+  "physics_inventory": {
+    "initial_atoms": 7.279715673755476e+17,
+    "continuously_evaporated_atoms": 6.62069e+17,
+    "dustt_terminal_remainder_atoms": 630819000000000.0,
+    "wall_retained_atoms_estimate_from_1ms_last_state": 6.5179985936388536e+16,
+    "closure_fraction": 0.9998739477703916
+  },
+  "classification_note": "Wall IDs are selected by terminal distance <20 mm and are required to equal the independent OpenEdge surface-reaction tally. Wall inventory uses the final 1-ms particle sample and is approximate."
+}

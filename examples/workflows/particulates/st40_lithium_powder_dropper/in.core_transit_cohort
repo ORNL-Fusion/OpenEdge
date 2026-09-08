@@ -1,0 +1,16 @@
+# Deterministic Stage-1 ST40 grain cohort.
+# No Li markers are emitted: this isolates grain transit, heating, and fate.
+
+variable dt       index 2.0e-6
+variable nsteps   index 375000
+variable ndump    index 500
+variable outdir   index output_core_transit_cohort
+
+shell mkdir ${outdir}
+log ${outdir}/log.openedge
+
+include input/setup_core_transit.inc
+include input/physics_core_transit_cohort.inc
+include input/diagnostics_core_transit_cohort.inc
+
+run ${nsteps}

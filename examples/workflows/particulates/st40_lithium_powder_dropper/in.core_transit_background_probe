@@ -1,0 +1,18 @@
+# OpenEdge point-query audit of the ST40 background on the actual run grid.
+# No grains are launched and no transport steps are advanced.
+
+variable dt index 2.0e-6
+variable outdir index output_core_transit_background_probe
+
+shell mkdir ${outdir}
+log ${outdir}/log.openedge
+
+include input/setup_core_transit_size_scan.inc
+
+compute cbg plasma/fields all background pd temp_e dens_e q_par q_perp q_mag
+dump dbg grid all 1 ${outdir}/background_grid id xlo xhi ylo yhi &
+         c_cbg[1] c_cbg[2] c_cbg[3] c_cbg[4] c_cbg[5]
+dump_modify dbg first yes
+dump_modify dbg format float %.14g
+
+run 0

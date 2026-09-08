@@ -73,7 +73,7 @@ examples/**/input/*.h5
 !examples/workflows/impurity_transport/west_tungsten_transport/input/plasma.h5
 !examples/workflows/particulates/cat_liquid_metal_divertor/input/plasma_attached.h5
 !examples/workflows/particulates/cat_liquid_metal_divertor/input/plasma_detached.h5
-!examples/workflows/particulates/st40_lithium_powder_dropper/input/plasma_st40_solps.h5
+!examples/workflows/particulates/st40_lithium_powder_dropper/input/plasma_st40_solps_corefill.h5
 examples/**/input/*.equ
 examples/**/input/*.stl
 examples/**/input/data/*.h5
@@ -106,6 +106,13 @@ examples/**/*.local.pdf
 
 # Sphinx build output
 /docs/_build/
+
+# Reproducible high-volume ST40 analysis intermediates. Compact summaries and
+# machine-readable acceptance records remain versioned.
+examples/workflows/particulates/st40_lithium_powder_dropper/analysis/core_transit_trajectories.csv
+examples/workflows/particulates/st40_lithium_powder_dropper/analysis/core_transit_size_scan_trajectories.csv
+examples/workflows/particulates/st40_lithium_powder_dropper/analysis/core_transit_background_openedge.csv
+examples/workflows/particulates/st40_lithium_powder_dropper/analysis/core_transit_evaporation_segments.csv
 
 # WIP code in the OpenEdge package — local-only, not part of the build.
 # CMake globs only src/OPENEDGE/*.cpp,h (single dir, no recurse), so
