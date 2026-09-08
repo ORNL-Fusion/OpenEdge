@@ -12,6 +12,7 @@
 #include "string.h"
 #include "surf_react_surface_pwi_kokkos.h"
 #include "update.h"
+#include "timer.h"
 #include "comm.h"
 #include "domain.h"
 #include "surf.h"
@@ -403,7 +404,11 @@ void SurfReactSurfacePWIKokkos::tally_update()
   for (int i = 0; i < nlist; i++) tally_single[i] += h_scalars(i+1);
   Kokkos::deep_copy(d_scalars,0);
 
-  if (sigma_on && update->ntimestep % sigma_nevery == 0) fold_sigma();
+  if (sigma_on && update->ntimestep % sigma_nevery == 0) {
+    timer->stamp(TIME_SREACT);
+    fold_sigma();                 // device sigma/dep delta D2H -> "Adens"
+    timer->stamp(TIME_ADENS);
+  }
   if (ehist_on && ehist_every > 0 &&
       update->ntimestep % ehist_every == 0) fold_ehist();
 

@@ -29,6 +29,7 @@
 #include "surf_react_surface_pwi.h"
 #include "input.h"
 #include "update.h"
+#include "timer.h"
 #include "domain.h"
 #include "comm.h"
 #include "particle.h"
@@ -1671,8 +1672,13 @@ void SurfReactSurfacePWI::derive_sigma_conc()
 void SurfReactSurfacePWI::tally_update()
 {
   SurfReact::tally_update();
-  if (sindex_custom >= 0 && update->ntimestep % sigma_nevery == 0)
+  if (sindex_custom >= 0 && update->ntimestep % sigma_nevery == 0) {
+    // areal-density ledger (Allreduce + owned fold + strata + debit):
+    // its own Finish row "Adens", carved out of SReact
+    timer->stamp(TIME_SREACT);
     sync_sigma();
+    timer->stamp(TIME_ADENS);
+  }
   if (ehist_file && ehist_every > 0 &&
       update->ntimestep % ehist_every == 0) ehist_write();
 }

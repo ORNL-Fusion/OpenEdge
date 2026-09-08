@@ -17,6 +17,8 @@
 #include "modify.h"
 #include "domain.h"
 #include "update.h"
+#include "timer.h"
+#include "string.h"
 #include "compute.h"
 #include "fix.h"
 #include "style_compute.h"
@@ -146,10 +148,29 @@ void Modify::setup()
    start-of-timestep call, only for relevant fixes
 ------------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   OpenEdge timing buckets for the Modify phase: Coulomb collision fixes
+   (coulomb/background drag, coulomb/binary) are charged to Coll,
+   volume/chem/adas to Chem, everything else stays in Modify. Timer
+   stamps are sequential, so stamping after each fix partitions the
+   phase exactly; the caller's trailing stamp(TIME_MODIFY) picks up only
+   the loop overhead.
+------------------------------------------------------------------------- */
+
+static inline void stamp_fix_bucket(Timer *timer, Fix *f)
+{
+  int which = TIME_MODIFY;
+  if (strstr(f->style,"coulomb")) which = TIME_COLLIDE;
+  else if (strstr(f->style,"volume/chem")) which = TIME_CHEM;
+  timer->stamp(which);
+}
+
 void Modify::start_of_step()
 {
-  for (int i = 0; i < n_start_of_step; i++)
+  for (int i = 0; i < n_start_of_step; i++) {
     fix[list_start_of_step[i]]->start_of_step();
+    stamp_fix_bucket(timer,fix[list_start_of_step[i]]);
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -160,8 +181,10 @@ void Modify::start_of_step()
 void Modify::end_of_step()
 {
   for (int i = 0; i < n_end_of_step; i++)
-    if (update->ntimestep % end_of_step_every[i] == 0)
+    if (update->ntimestep % end_of_step_every[i] == 0) {
       fix[list_end_of_step[i]]->end_of_step();
+      stamp_fix_bucket(timer,fix[list_end_of_step[i]]);
+    }
 }
 
 /* ----------------------------------------------------------------------

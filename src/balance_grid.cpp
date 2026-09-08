@@ -589,6 +589,8 @@ void BalanceGrid::timer_cell_weights(double* &weight)
   cost += timer->array[TIME_MODIFY];
   cost += timer->array[TIME_PCACHE];
   cost += timer->array[TIME_SREACT];
+  cost += timer->array[TIME_CHEM];
+  cost += timer->array[TIME_ADENS];
 
   // localwt = weight assigned to each owned grid cell
   // just return if no time yet tallied

@@ -78,7 +78,8 @@ void Finish::end(int flag, double time_multiple_runs)
       (timer->array[TIME_MOVE] + timer->array[TIME_COLLIDE] +
        timer->array[TIME_SORT] + timer->array[TIME_COMM] +
        timer->array[TIME_MODIFY] + timer->array[TIME_OUTPUT] +
-       timer->array[TIME_PCACHE] + timer->array[TIME_SREACT]);
+       timer->array[TIME_PCACHE] + timer->array[TIME_SREACT] +
+       timer->array[TIME_CHEM] + timer->array[TIME_ADENS]);
 
     time_loop = timer->array[TIME_LOOP];
     MPI_Allreduce(&time_loop,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
@@ -164,6 +165,10 @@ void Finish::end(int flag, double time_multiple_runs)
     mpi_timings("Pcache",timer,TIME_PCACHE,world,nprocs,
                 me,time_loop,screen,logfile);
     mpi_timings("SReact",timer,TIME_SREACT,world,nprocs,
+                me,time_loop,screen,logfile);
+    mpi_timings("Chem",timer,TIME_CHEM,world,nprocs,
+                me,time_loop,screen,logfile);
+    mpi_timings("Adens",timer,TIME_ADENS,world,nprocs,
                 me,time_loop,screen,logfile);
 
     time = time_other;
