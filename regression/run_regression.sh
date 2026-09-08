@@ -95,11 +95,11 @@ declare -a TESTS=(
   "pusher_boris|verification/pushers/orbit|in.boris|nokk"
   "constant_flux|verification/surface_emission/constant_flux|in.constant_flux|"
   "d2_chemistry|verification/d2_chemistry|in.d2_chem|"
-  "dustt2005_cat_transport|verification/particulates/dustt2005/cat_solps_droplet_transport|in.openedge|input/plasma.h5"
-  "west_boron_powder_dropper|workflows/particulates/west_boron_powder_dropper|in.openedge|../../impurity_transport/west_tungsten_transport/input/plasma.h5"
-  "cat_liquid_metal_divertor|workflows/particulates/cat_liquid_metal_divertor|in.openedge|input/plasma_attached.h5"
-  "west_tungsten_transport|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5"
-  "rfpie_tungsten_transport|workflows/impurity_transport/rfpie_tungsten_transport|in.openedge|input/plasma_he.h5"
+  "dustt2005_cat_transport|verification/particulates/dustt2005/cat_solps_droplet_transport|in.openedge|input/plasma.h5|nokk"
+  "west_boron_powder_dropper|workflows/particulates/west_boron_powder_dropper|in.openedge|../../impurity_transport/west_tungsten_transport/input/plasma.h5|nokk"
+  "cat_liquid_metal_divertor|workflows/particulates/cat_liquid_metal_divertor|in.openedge|input/plasma_attached.h5|nokk"
+  "west_tungsten_transport|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5|nokk"
+  "rfpie_tungsten_transport|workflows/impurity_transport/rfpie_tungsten_transport|in.openedge|input/plasma_he.h5|nokk"
 )
 
 # -----------------------------------------------------------------------
