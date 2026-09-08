@@ -356,8 +356,20 @@ void FixForceThermal::kick_half(double dt_half)
     if (m_Z <= 0.0) continue;
 
     const int icell = p.icell;
+    PlasmaPointSample background;
+    const bool native_3d_background = use_background_ && pd_->is_zones3d();
+    if (native_3d_background) {
+      unsigned request = PLASMA_NEED_FLOW_B;
+      if (have_ion_thermal_) request |= PLASMA_NEED_GRAD_TI;
+      if (have_elec_thermal_) request |= PLASMA_NEED_GRAD_TE;
+      pd_->sample_point(p.x, background, p.icell, ip, request);
+    }
     double B0, B1, B2;
-    if (use_background_) pd_bfield_sparta(p, ip, B0, B1, B2);
+    if (native_3d_background) {
+      B0 = background.b[0];
+      B1 = background.b[1];
+      B2 = background.b[2];
+    } else if (use_background_) pd_bfield_sparta(p, ip, B0, B1, B2);
     else {
       B0 = read_src(srcBx_, ip, icell);
       B1 = read_src(srcBy_, ip, icell);
@@ -388,24 +400,38 @@ void FixForceThermal::kick_half(double dt_half)
     const double Z2 = Z * Z;
 
     if (have_ion_thermal_) {
-      const double gTiR = use_background_
-        ? pd_grad(pd_->mesh_grad_ti_r, pd_->grad_ti_r, p)
-        : read_src(srcGradTiR_, ip, icell);
-      const double gTiZ = use_background_
-        ? pd_grad(pd_->mesh_grad_ti_z, pd_->grad_ti_z, p)
-        : read_src(srcGradTiZ_, ip, icell);
-      const double grad_par_Ti = gTiR * bhat_R_cyl + gTiZ * bhat_Z_cyl;
+      double grad_par_Ti;
+      if (native_3d_background) {
+        grad_par_Ti = background.grad_ti[0] * bhat0 +
+                      background.grad_ti[1] * bhat1 +
+                      background.grad_ti[2] * bhat2;
+      } else {
+        const double gTiR = use_background_
+          ? pd_grad(pd_->mesh_grad_ti_r, pd_->grad_ti_r, p)
+          : read_src(srcGradTiR_, ip, icell);
+        const double gTiZ = use_background_
+          ? pd_grad(pd_->mesh_grad_ti_z, pd_->grad_ti_z, p)
+          : read_src(srcGradTiZ_, ip, icell);
+        grad_par_Ti = gTiR * bhat_R_cyl + gTiZ * bhat_Z_cyl;
+      }
       a_par += beta_i_ * Z2 * QE * grad_par_Ti / m_Z;
     }
 
     if (have_elec_thermal_) {
-      const double gTeR = use_background_
-        ? pd_grad(pd_->mesh_grad_te_r, pd_->grad_te_r, p)
-        : read_src(srcGradTeR_, ip, icell);
-      const double gTeZ = use_background_
-        ? pd_grad(pd_->mesh_grad_te_z, pd_->grad_te_z, p)
-        : read_src(srcGradTeZ_, ip, icell);
-      const double grad_par_Te = gTeR * bhat_R_cyl + gTeZ * bhat_Z_cyl;
+      double grad_par_Te;
+      if (native_3d_background) {
+        grad_par_Te = background.grad_te[0] * bhat0 +
+                      background.grad_te[1] * bhat1 +
+                      background.grad_te[2] * bhat2;
+      } else {
+        const double gTeR = use_background_
+          ? pd_grad(pd_->mesh_grad_te_r, pd_->grad_te_r, p)
+          : read_src(srcGradTeR_, ip, icell);
+        const double gTeZ = use_background_
+          ? pd_grad(pd_->mesh_grad_te_z, pd_->grad_te_z, p)
+          : read_src(srcGradTeZ_, ip, icell);
+        grad_par_Te = gTeR * bhat_R_cyl + gTeZ * bhat_Z_cyl;
+      }
       a_par += alpha_e_ * Z2 * QE * grad_par_Te / m_Z;
     }
 
@@ -592,22 +618,10 @@ void FixForceThermal::pd_bfield_sparta(const Particle::OnePart &p,
 {
   B0 = B1 = B2 = 0.0;
   if (!pd_ || !pd_->has_bfield) return;
-
-  double R, Z;
-  particle_rz(p, R, Z);
-
-  double Br = 0.0, Bz = 0.0, Bt = 0.0;
-  pd_->bfield_at(R, Z, Br, Bz, Bt, p.icell, iparticle);
-
-  // Decompose physical (Br, Bz, Bt) onto SPARTA's (B0, B1, B2) slot layout
-  // using the same convention as the helper:
-  //   2D Cart  : x=R, y=Z, z=phi  -> B0=Br, B1=Bz, B2=Bt
-  //   2D axi   : x=Z, y=R, z=phi  -> B0=Bz, B1=Br, B2=Bt
-  //   3D       : (x,y) Cartesian rotation by phi
-  double phi = 0.0;
-  if (domain->dimension == 3) {
-    phi = std::atan2(p.x[1], p.x[0]);
-  }
-  OpenEdge::RZphi_force_to_sparta(Br, Bz, Bt, domain->dimension,
-                                   domain->axisymmetric, phi, B0, B1, B2);
+  PlasmaPointSample sample;
+  pd_->sample_point(p.x, sample, p.icell, iparticle,
+                    PLASMA_NEED_FLOW_B);
+  B0 = sample.b[0];
+  B1 = sample.b[1];
+  B2 = sample.b[2];
 }

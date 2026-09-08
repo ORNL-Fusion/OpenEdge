@@ -7,6 +7,9 @@
      fix ID background file plasma.h5 [equilibrium file.equ] [static yes|no]
                        [mesh_triangle_cache yes|no]
                        [mesh_lookup_diagnostics yes|no]
+                       [format zones3d flow_sign +/-1
+                        cs_model te_plus_ti b_sign -1|0|+1
+                        outside fail|vacuum]
      fix ID background constant [r_bounds rmin rmax] [z_bounds zmin zmax]
                          [ne val] [te val] [ni val] [ti val]
                          [parr_flow val] [parr_flow_r val] [parr_flow_t val]
@@ -22,6 +25,7 @@
 ------------------------------------------------------------------------- */
 
 #include "string.h"
+#include "background_zones3d.h"
 #include "fix_background.h"
 #include "comm.h"
 #include "compute_plasma_fields.h"
@@ -126,8 +130,6 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
   has_mesh_wall_face_area = 0;
   has_mesh_wall_surf_cell = 0;
   has_qheatflux = 0;
-  default_q_par  = 50.0e6;
-  default_q_perp = 0.0;
   is_static = 0;
   mesh_triangle_cache = 1;
   mesh_lookup_diagnostics = 0;
@@ -143,6 +145,12 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
   bfield_regular_queries = 0;
   bfield_preference_fallbacks = 0;
   source_mode = -1;
+  provider_mode = 0;
+  zones3d_flow_sign = 0;
+  zones3d_b_sign = 0;
+  zones3d_cs_te_plus_ti = 0;
+  zones3d_outside_vacuum = 0;
+  zones3d = std::make_unique<BackgroundZones3D>();
   generation = 0;
   equ_jm = equ_km = 0;
   btf = rtf = psib = psi_axis = 0.0;
@@ -201,6 +209,48 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
       if (strcmp(arg[iarg + 1], "yes") == 0) is_static = 1;
       else if (strcmp(arg[iarg + 1], "no") == 0) is_static = 0;
       else error->all(FLERR, "fix background: static must be yes or no");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "format") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix background: format needs legacy|zones3d");
+      if (strcmp(arg[iarg + 1], "legacy") == 0) provider_mode = 0;
+      else if (strcmp(arg[iarg + 1], "zones3d") == 0) provider_mode = 1;
+      else error->all(FLERR, "fix background: format must be legacy or zones3d");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "flow_sign") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix background: flow_sign needs +1 or -1");
+      zones3d_flow_sign = input->inumeric(FLERR, arg[iarg + 1]);
+      if (zones3d_flow_sign != -1 && zones3d_flow_sign != 1)
+        error->all(FLERR, "fix background: flow_sign must be +1 or -1");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "b_sign") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix background: b_sign needs -1, 0, or +1");
+      zones3d_b_sign = input->inumeric(FLERR, arg[iarg + 1]);
+      if (zones3d_b_sign < -1 || zones3d_b_sign > 1)
+        error->all(FLERR, "fix background: b_sign must be -1, 0, or +1");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "cs_model") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix background: cs_model needs te_plus_ti");
+      if (strcmp(arg[iarg + 1], "te_plus_ti") != 0)
+        error->all(FLERR, "fix background: cs_model must be te_plus_ti");
+      zones3d_cs_te_plus_ti = 1;
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "outside") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix background: outside needs fail|vacuum");
+      if (strcmp(arg[iarg + 1], "fail") == 0) zones3d_outside_vacuum = 0;
+      else if (strcmp(arg[iarg + 1], "vacuum") == 0) zones3d_outside_vacuum = 1;
+      else error->all(FLERR, "fix background: outside must be fail or vacuum");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "precision") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix background: precision needs single");
+      if (strcmp(arg[iarg + 1], "single") != 0)
+        error->all(FLERR,
+                   "fix background zones3d: only precision single is currently supported");
       iarg += 2;
     } else if (strcmp(arg[iarg], "mesh_triangle_cache") == 0) {
       if (iarg + 1 >= narg)
@@ -322,13 +372,26 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
     error->all(FLERR, "fix background: r_bounds requires rmax > rmin");
   if (const_has_z_bounds && const_zmax <= const_zmin)
     error->all(FLERR, "fix background: z_bounds requires zmax > zmin");
+  if (provider_mode == 1) {
+    if (source_mode != PLASMA_SOURCE_FILE)
+      error->all(FLERR, "fix background: format zones3d requires file mode");
+    if (zones3d_flow_sign == 0)
+      error->all(FLERR,
+                 "fix background zones3d: explicit flow_sign +1|-1 is required");
+    if (!zones3d_cs_te_plus_ti)
+      error->all(FLERR,
+                 "fix background zones3d: explicit cs_model te_plus_ti is required");
+    if (column_x0 != 0.0 || column_y0 != 0.0)
+      error->all(FLERR,
+                 "fix background zones3d: column_axis requires a torus centred at x=y=0");
+  }
 
   // A custom per-particle integer is the native SPARTA mechanism for state
   // that must survive particle sorting, cloning, and MPI migration. Store
   // triangle+1 so SPARTA's zero-initialized custom value means "no hint".
   // Include the fix ID in the name so multiple background meshes cannot
   // accidentally share triangle indices.
-  if (mesh_triangle_cache) {
+  if (mesh_triangle_cache && provider_mode == 0) {
     const std::string hint_name = std::string("oe_mesh_tri_") + id;
     mesh_tri_custom = particle->find_custom((char *) hint_name.c_str());
     if (mesh_tri_custom < 0)
@@ -365,6 +428,7 @@ void FixBackground::init()
 
 void FixBackground::setup()
 {
+  if (provider_mode == 1 && zones3d) zones3d->reset_counters();
   mesh_hint_hits = 0;
   mesh_particle_hint_hits = 0;
   mesh_cell_hint_hits = 0;
@@ -382,6 +446,26 @@ void FixBackground::setup()
 void FixBackground::post_run()
 {
   if (!mesh_lookup_diagnostics) return;
+
+  if (provider_mode == 1) {
+    const BackgroundZones3D::Counters c = zones3d->counters();
+    long long local[5] = {c.queries, c.ok, c.outside, c.invalid,
+                          c.ambiguous};
+    long long total[5] = {0, 0, 0, 0, 0};
+    MPI_Allreduce(local, total, 5, MPI_LONG_LONG, MPI_SUM, world);
+    if (comm->me == 0) {
+      auto report = [&](FILE *fp) {
+        if (!fp) return;
+        fprintf(fp,
+                "[background/zones3d] queries/ok/outside/invalid/ambiguous "
+                "= %lld/%lld/%lld/%lld/%lld\n",
+                total[0], total[1], total[2], total[3], total[4]);
+      };
+      report(screen);
+      report(logfile);
+    }
+    return;
+  }
 
   bigint lookup_local[10] = {mesh_hint_hits, mesh_particle_hint_hits,
                              mesh_cell_hint_hits, mesh_neighbor_walk_hits,
@@ -488,6 +572,36 @@ void FixBackground::post_run()
 void FixBackground::reload()
 {
   clear_loaded_data();
+
+  if (provider_mode == 1) {
+    if (domain->dimension != 3)
+      error->all(FLERR,
+                 "fix background zones3d requires a dimension 3 simulation");
+    try {
+      zones3d->configure(zones3d_flow_sign, zones3d_b_sign,
+                         zones3d_cs_te_plus_ti != 0);
+      zones3d->load(plasma_path, world, comm->me);
+    } catch (const std::exception &e) {
+      error->all(FLERR, e.what());
+    }
+    has_bfield = zones3d->has_absolute_b() ? 1 : 0;
+    generation++;
+    if (comm->me == 0) {
+      auto report = [&](FILE *fp) {
+        if (!fp) return;
+        fprintf(fp,
+                "[background/zones3d] Loaded %d zones / %lld cells, "
+                "flow_sign=%+d, b_sign=%+d, ion_mass=%.6g amu, gen=%d\n",
+                zones3d->zone_count(),
+                static_cast<long long>(zones3d->cell_count()),
+                zones3d_flow_sign, zones3d_b_sign,
+                zones3d->ion_mass_amu(), generation);
+      };
+      report(screen);
+      report(logfile);
+    }
+    return;
+  }
 
   std::string load_error;
   if (comm->me == 0) {
@@ -875,26 +989,6 @@ void FixBackground::reload()
         nion, bf_src,
         has_equ ? "yes" : "no", generation);
     }
-    // Only warn about missing q_par/q_perp if a consumer that actually
-    // reads them (currently: fix evaporation) is present. Decks without
-    // liquid-metal physics don't care that the file lacks heat flux.
-    if (!has_qheatflux && generation == 1) {
-      bool has_heatflux_consumer = false;
-      for (int i = 0; i < modify->nfix; i++) {
-        if (strcmp(modify->fix[i]->style, "evaporation") == 0) {
-          has_heatflux_consumer = true;
-          break;
-        }
-      }
-      if (has_heatflux_consumer) {
-        char msg[200];
-        snprintf(msg, sizeof(msg),
-          "[background] no q_par/q_perp in %s — defaulting to "
-          "q_par=%.2e W/m^2, q_perp=%.2e W/m^2 for evaporation queries",
-          plasma_path.c_str(), default_q_par, default_q_perp);
-        error->warning(FLERR, msg);
-      }
-    }
   }
 }
 
@@ -902,6 +996,7 @@ void FixBackground::reload()
 
 void FixBackground::clear_loaded_data()
 {
+  if (zones3d) zones3d->clear();
   nr = nz = 0;
   nion = 0;
   has_bfield = 0;
@@ -2138,6 +2233,10 @@ double FixBackground::interp2D(const std::vector<double> &field,
                                 double R, double Z, int icell,
                                 int iparticle) const
 {
+  if (provider_mode == 1)
+    error->one(FLERR,
+               "fix background zones3d: interp2D(R,Z) is unavailable; "
+               "consumer must use sample_point(xyz)");
   if (const std::vector<double> *mesh_field = mesh_field_for(field)) {
     // exact sampling: triangle containing (R,Z) via the warm-start
     // search; outside the mesh footprint fall through to the stencil
@@ -2178,6 +2277,130 @@ double FixBackground::interp2D(const std::vector<double> &field,
 
 /* ---------------------------------------------------------------------- */
 
+bool FixBackground::sample_point(const double xyz[3],
+                                 PlasmaPointSample &sample,
+                                 int icell, int iparticle,
+                                 unsigned request) const
+{
+  sample = PlasmaPointSample{};
+
+  if (provider_mode == 1) {
+    const bool found = zones3d->sample(xyz, sample, request);
+    if (found) {
+      if ((request & PLASMA_NEED_HEAT) && !sample.has_q)
+        error->one(FLERR,
+          "fix background zones3d: heat flux was requested but the "
+          "background does not provide q_par/q_perp");
+      return true;
+    }
+    if (zones3d_outside_vacuum) {
+      // Retain the non-OK status for diagnostics while returning a true
+      // vacuum sample. No neighbouring cell is borrowed.
+      return true;
+    }
+    const char *status = sample.status == PLASMA_SAMPLE_INVALID
+      ? "INVALID" : "OUTSIDE";
+    char msg[320];
+    snprintf(msg, sizeof(msg),
+             "fix background zones3d: point (%.9g, %.9g, %.9g) is %s; "
+             "use 'outside vacuum' only when vacuum behavior is intended",
+             xyz[0], xyz[1], xyz[2], status);
+    error->one(FLERR, msg);
+    return false;
+  }
+
+  const int dim = domain->dimension;
+  const bool axi = domain->axisymmetric || OpenEdge::oe_force_axi_rz;
+  double R = 0.0, Z = 0.0, phi = 0.0;
+  OpenEdge::sparta_to_RZphi(xyz, dim, axi, R, Z, phi,
+                            column_x0, column_y0);
+
+  // Scalars retain the legacy mesh-first, regular-grid-fallback sampling
+  // policy.  Native 3-D providers will replace this dispatch while every
+  // physics consumer continues to use the same point-query contract.
+  if (request & PLASMA_NEED_THERMO) {
+    sample.te = interp2D(temp_e, R, Z, icell, iparticle);
+    sample.ti = interp2D(temp_i, R, Z, icell, iparticle);
+    sample.ne = interp2D(dens_e, R, Z, icell, iparticle);
+    sample.ni = (dens_i.empty() && mesh_ni.empty())
+              ? sample.ne : interp2D(dens_i, R, Z, icell, iparticle);
+  }
+  if (request & PLASMA_NEED_NEUTRAL) {
+    sample.nn = interp2D(dens_n, R, Z, icell, iparticle);
+    sample.tn = interp2D(temp_n, R, Z, icell, iparticle);
+    sample.has_neutral = (!dens_n.empty() || !mesh_nn.empty()) &&
+                         (!temp_n.empty() || !mesh_tn.empty());
+  }
+
+  if (request & PLASMA_NEED_HEAT) {
+    if (!has_qheatflux)
+      error->one(FLERR,
+        "fix background: heat flux was requested but the plasma file "
+        "does not provide q_par/q_perp; add physical heat-flux datasets "
+        "or select a heating model that does not use prescribed flux");
+    sample.has_q = true;
+    if (!mesh_q_par.empty() || !q_par.empty())
+      sample.q_par = interp2D(q_par, R, Z, icell, iparticle);
+    if (!mesh_q_perp.empty() || !q_perp.empty())
+      sample.q_perp = interp2D(q_perp, R, Z, icell, iparticle);
+  }
+
+  // query_bfield_at_point returns cylindrical components. Convert once at
+  // the provider boundary so consumers never need to know the source basis.
+  if (request & PLASMA_NEED_FLOW_B) {
+    const MagneticFieldFileDataParams B =
+      query_bfield_at_point(xyz, icell, iparticle, false);
+    sample.bmag = B.Bmag;
+    sample.has_b = B.Bmag > 1.0e-12;
+    OpenEdge::RZphi_force_to_sparta(B.br, B.bz, B.bt, dim, axi, phi,
+                                    sample.b[0], sample.b[1], sample.b[2]);
+
+    const double vpar = interp2D(parr_flow, R, Z, icell, iparticle);
+    sample.upar = vpar;
+    if (sample.has_b) {
+      const double invb = 1.0 / sample.bmag;
+      sample.flow[0] = vpar * sample.b[0] * invb;
+      sample.flow[1] = vpar * sample.b[1] * invb;
+      sample.flow[2] = vpar * sample.b[2] * invb;
+    }
+  }
+
+  if (request & PLASMA_NEED_E) {
+    double ER = 0.0, EZ = 0.0, Et = 0.0;
+    sample.has_e = query_efield_at_point(xyz, ER, EZ, Et,
+                                         icell, iparticle);
+    if (sample.has_e)
+      OpenEdge::RZphi_force_to_sparta(ER, EZ, Et, dim, axi, phi,
+                                      sample.e[0], sample.e[1], sample.e[2]);
+  }
+
+  if (request & PLASMA_NEED_GRAD_TE) {
+    const double gR = interp2D(grad_te_r, R, Z, icell, iparticle);
+    const double gT = interp2D(grad_te_t, R, Z, icell, iparticle);
+    const double gZ = interp2D(grad_te_z, R, Z, icell, iparticle);
+    OpenEdge::RZphi_force_to_sparta(gR, gZ, gT, dim, axi, phi,
+                                    sample.grad_te[0], sample.grad_te[1],
+                                    sample.grad_te[2]);
+  }
+
+  if (request & PLASMA_NEED_GRAD_TI) {
+    const double gR = interp2D(grad_ti_r, R, Z, icell, iparticle);
+    const double gT = interp2D(grad_ti_t, R, Z, icell, iparticle);
+    const double gZ = interp2D(grad_ti_z, R, Z, icell, iparticle);
+    OpenEdge::RZphi_force_to_sparta(gR, gZ, gT, dim, axi, phi,
+                                    sample.grad_ti[0], sample.grad_ti[1],
+                                    sample.grad_ti[2]);
+  }
+
+  // The legacy providers clamp/fall back exactly as interp2D historically
+  // did, so their wrapper reports OK. Native 3-D providers will return
+  // OUTSIDE/INVALID/AMBIGUOUS here and apply their explicit policy.
+  sample.status = PLASMA_SAMPLE_OK;
+  return true;
+}
+
+/* ---------------------------------------------------------------------- */
+
 /* ----------------------------------------------------------------------
    mesh cell of the triangle containing (R,Z); -1 outside the footprint
    (no extrapolation — contrast mesh_cell_at's max_dist fallback)
@@ -2203,6 +2426,10 @@ void FixBackground::bfield_at(double R, double Z,
                                double &Br_out, double &Bz_out,
                                double &Bt_out, int icell, int iparticle) const
 {
+  if (provider_mode == 1)
+    error->one(FLERR,
+               "fix background zones3d: bfield_at(R,Z) is ambiguous; use "
+               "the xyz-aware query_bfield_at_point interface");
   // Uniform Cartesian B (bcart) takes precedence, mirroring
   // query_bfield_at_point(). The (R, Z) interface carries no phi, so
   // the 3D rotation is impossible here: 2D uses the slot-frame
@@ -2323,6 +2550,25 @@ FixBackground::query_bfield_at_point(const double xyz[3], int icell,
   OpenEdge::sparta_to_RZ(xyz, dim, axi, R, Z, column_x0, column_y0);
   B.r = R;
   B.z = Z;
+
+  if (provider_mode == 1) {
+    if (!zones3d->has_absolute_b())
+      error->one(FLERR,
+                 "fix background zones3d: an absolute magnetic-field "
+                 "vector was requested but b_sign is unresolved (0)");
+    PlasmaPointSample sample;
+    sample_point(xyz, sample, icell, iparticle,
+                 PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B);
+    const double phi = std::atan2(xyz[1], xyz[0]);
+    const double cp = std::cos(phi), sp = std::sin(phi);
+    B.br = sample.b[0] * cp + sample.b[1] * sp;
+    B.bt = -sample.b[0] * sp + sample.b[1] * cp;
+    B.bz = sample.b[2];
+    B.Bmag = sample.bmag;
+    B.derivatives_valid = false;
+    B.axisymmetric_source = false;
+    return B;
+  }
 
   // Uniform CARTESIAN B (bcart): returned as position-dependent
   // cylindrical components so the downstream phi-rotation reconstructs

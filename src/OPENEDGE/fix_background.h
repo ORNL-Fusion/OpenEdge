@@ -14,12 +14,61 @@ FixStyle(background,FixBackground)
 #define SPARTA_FIX_BACKGROUND_H
 
 #include "fix.h"
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace SPARTA_NS {
 
 struct MagneticFieldFileDataParams;
+class BackgroundZones3D;
+
+// Geometry-independent result returned by FixBackground::sample_point().
+// Scalar quantities use SI/eV units matching plasma.h5.  All vectors are in
+// OpenEdge's Cartesian simulation basis, never cylindrical components; providers own
+// any R-Z-phi conversion.  This is the common boundary between the existing
+// axisymmetric providers and future native 3-D curvilinear providers.
+enum PlasmaSampleStatus {
+  PLASMA_SAMPLE_OK = 0,
+  PLASMA_SAMPLE_OUTSIDE = 1,
+  PLASMA_SAMPLE_INVALID = 2,
+  PLASMA_SAMPLE_AMBIGUOUS = 3
+};
+
+enum PlasmaSampleRequest : unsigned {
+  PLASMA_NEED_THERMO  = 1u << 0,
+  PLASMA_NEED_FLOW_B  = 1u << 1,
+  PLASMA_NEED_E       = 1u << 2,
+  PLASMA_NEED_HEAT    = 1u << 3,
+  PLASMA_NEED_GRAD_TE = 1u << 4,
+  PLASMA_NEED_GRAD_TI = 1u << 5,
+  PLASMA_NEED_NEUTRAL = 1u << 6,
+  PLASMA_NEED_ALL     = (1u << 7) - 1u
+};
+
+struct PlasmaPointSample {
+  double te = 0.0, ti = 0.0;
+  double ne = 0.0, ni = 0.0;
+  double nn = 0.0, tn = 0.0;
+  double q_par = 0.0, q_perp = 0.0;
+  double mach = 0.0;
+  double upar = 0.0;
+  double flow[3] = {0.0, 0.0, 0.0};
+  double b[3] = {0.0, 0.0, 0.0};
+  double e[3] = {0.0, 0.0, 0.0};
+  double grad_te[3] = {0.0, 0.0, 0.0};
+  double grad_ti[3] = {0.0, 0.0, 0.0};
+  double bmag = 0.0;
+  int status = PLASMA_SAMPLE_OK;
+  int provider_cell = -1;
+  int provider_zone = -1;
+  int provider_ir = -1, provider_ip = -1, provider_it = -1;
+  int provider_claims = 0;
+  bool has_b = false;
+  bool has_e = false;
+  bool has_q = false;
+  bool has_neutral = false;
+};
 
 class FixBackground : public Fix {
  public:
@@ -48,6 +97,14 @@ class FixBackground : public Fix {
   // live only on the regular (rvals,zvals) grid.
   double interp2D(const std::vector<double> &field, double R, double Z,
                   int icell = -1, int iparticle = -1) const;
+  // Unified point query used by physics consumers. xyz is always an OpenEdge
+  // position; returned vectors are already expressed in simulation slots. The
+  // current implementation wraps the legacy 2-D providers exactly. A native
+  // 3-D provider will dispatch behind this API without changing consumers.
+  bool sample_point(const double xyz[3], PlasmaPointSample &sample,
+                    int icell = -1, int iparticle = -1,
+                    unsigned request = PLASMA_NEED_ALL) const;
+  bool is_zones3d() const { return provider_mode == 1; }
   // strict hinted mesh-cell lookup (no extrapolation halo); -1 outside
   int mesh_cell_for(double R, double Z, int icell = -1,
                     int iparticle = -1) const;
@@ -94,13 +151,11 @@ class FixBackground : public Fix {
   // by the converter from the SOLPS / SOLEDGE3X surface heat-flux fields
   // (parallel + perpendicular). Consumers (fix evaporation, …) read via
   // interp2D(q_par, R, Z) / interp2D(q_perp, R, Z). has_qheatflux=1 when
-  // either component is present in plasma.h5; if neither, consumers fall
-  // back to default_q_par / default_q_perp (below) and a one-time warning
-  // prints at init.
+  // either component is present in plasma.h5. Heat-flux consumers fail
+  // closed when neither component is supplied; there is no numerical
+  // fallback because a plausible constant silently changes the physics.
   int has_qheatflux;
   std::vector<double> q_par, q_perp;
-  double default_q_par;   // W/m^2 fallback when has_qheatflux=0 (50e6)
-  double default_q_perp;  // W/m^2 fallback when has_qheatflux=0 (0)
 
   // ---- Magnetic field availability ----
   // true when ANY B source is loaded: mesh vtx_b*, equilibrium psi, or
@@ -143,7 +198,7 @@ class FixBackground : public Fix {
   // Per-cell heat-flux components on the EIRENE mesh. Same semantics as
   // q_par/q_perp above. Consumers query via mesh_cell_at(R,Z) then
   // mesh_q_par[cell] / mesh_q_perp[cell]. Empty => regular-grid fallback
-  // (q_par / q_perp), then default_q_{par,perp}.
+  // (q_par / q_perp). If both carriers are absent, a heat request aborts.
   std::vector<double> mesh_q_par, mesh_q_perp;
   // Electric field E = -grad(phi) precomputed on the B2 mesh. Converter
   // reads the plasma code's native potential (SOLPS /balance.nc po,
@@ -251,6 +306,16 @@ class FixBackground : public Fix {
   int source_mode;                 // 0=file, 1=constant
   std::string plasma_path;
   std::string equ_path;
+
+  // ---- Native 3-D curvilinear provider ----
+  // provider_mode: 0 = legacy regular/triangle R-Z data, 1 = native
+  // openedge_background3d ruled-hexahedron zones.
+  int provider_mode;
+  int zones3d_flow_sign;
+  int zones3d_b_sign;
+  int zones3d_cs_te_plus_ti;
+  int zones3d_outside_vacuum;
+  std::unique_ptr<BackgroundZones3D> zones3d;
 
   // ---- Column-axis offset (3D Cartesian only) ----
   // Position of the axisymmetric plasma column axis in SPARTA (x, y).

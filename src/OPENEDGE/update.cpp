@@ -130,6 +130,35 @@ inline PlasmaFileParams query_plasma_from_fix(const FixBackground *pd, const dou
   PlasmaFileParams P{};
   if (!pd) return P;
 
+  if (pd->is_zones3d()) {
+    PlasmaPointSample sample;
+    pd->sample_point(xyz, sample, icell, -1,
+                     PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B |
+                     PLASMA_NEED_E | PLASMA_NEED_GRAD_TE |
+                     PLASMA_NEED_GRAD_TI);
+    const double phi = std::atan2(xyz[1], xyz[0]);
+    const double cp = std::cos(phi), sp = std::sin(phi);
+    auto to_cyl = [cp, sp](const double v[3], double &vr,
+                           double &vt, double &vz) {
+      vr = v[0] * cp + v[1] * sp;
+      vt = -v[0] * sp + v[1] * cp;
+      vz = v[2];
+    };
+    P.temp_e = sample.te; P.dens_e = sample.ne;
+    P.temp_i = sample.ti; P.dens_i = sample.ni;
+    P.parr_flow = sample.upar;
+    to_cyl(sample.flow, P.parr_flow_r, P.parr_flow_t, P.parr_flow_z);
+    to_cyl(sample.grad_te, P.grad_temp_e_r, P.grad_temp_e_t,
+           P.grad_temp_e_z);
+    to_cyl(sample.grad_ti, P.grad_temp_i_r, P.grad_temp_i_t,
+           P.grad_temp_i_z);
+    if (sample.has_e && sample.has_b && sample.bmag > 1.0e-30)
+      P.epar = (sample.e[0] * sample.b[0] +
+                sample.e[1] * sample.b[1] +
+                sample.e[2] * sample.b[2]) / sample.bmag;
+    return P;
+  }
+
   double R, Z;
   xyz_to_rz(xyz, dim, axi, R, Z);
 
@@ -157,13 +186,8 @@ inline MagneticFieldFileDataParams query_bfield_from_fix(const FixBackground *pd
                                                          const double xyz[3], int dim, int axi,
                                                          int icell = -1, int iparticle = -1)
 {
-  MagneticFieldFileDataParams B{};
-  if (!pd || !pd->has_bfield) return B;
-
-  xyz_to_rz(xyz, dim, axi, B.r, B.z);
-  pd->bfield_at(B.r, B.z, B.br, B.bz, B.bt, icell, iparticle);
-  B.Bmag = std::sqrt(B.br * B.br + B.bt * B.bt + B.bz * B.bz);
-  return B;
+  if (!pd) return MagneticFieldFileDataParams{};
+  return pd->query_bfield_at_point(xyz, icell, iparticle);
 }
 
 // ---- Fused bilinear stencil for FixBackground ----
@@ -766,6 +790,14 @@ void Update::init()
         pcache_need_mask |= PCACHE_EFIELD;
         note_cad(modify->fix[ifix]->nevery);
         recognized = 1;
+      } else if (strcmp(s,"particulate/charge") == 0 ||
+                 strcmp(s,"particulate/drag") == 0 ||
+                 strcmp(s,"particulate/thermal") == 0) {
+        // Particulate physics queries FixBackground directly at the grain
+        // position. Mark these known fixes so a grain-only deck does not
+        // trigger the legacy PCACHE_ALL fallback and request an absolute B
+        // vector that its unmagnetized particles never consume.
+        recognized = 1;
       }
     }
     // Sheath Boltzmann ne correction (inside cache_plasma_particles) reads
@@ -1122,7 +1154,16 @@ void Update::cache_plasma_particles()
       if (need_plasma) pf = cp->query_plasma_at_point(x);
       if (need_bfield) bf = cp->query_bfield_at_point(x);
     } else if (pd) {
-      // ---- fix background path: shared bilinear stencil ----
+      if (pd->is_zones3d()) {
+        // Native 3-D provider: one exact point query; no R-Z projection.
+        if (need_plasma)
+          pf = query_plasma_from_fix(pd, x, dim, domain->axisymmetric,
+                                     icell_p);
+        if (need_bfield)
+          bf = query_bfield_from_fix(pd, x, dim, domain->axisymmetric,
+                                     icell_p, i);
+      } else {
+      // ---- legacy fix background path: shared bilinear stencil ----
       double R, Z;
       xyz_to_rz(x, dim, domain->axisymmetric, R, Z);
       const PdStencil2D st = make_pd_stencil(pd, R, Z);
@@ -1188,6 +1229,7 @@ void Update::cache_plasma_particles()
         // hits the empty regular-grid arrays and would return zero.
         pd->bfield_at(R, Z, bf.br, bf.bz, bf.bt, particles[i].icell, i);
         bf.Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
+      }
       }
     }
 

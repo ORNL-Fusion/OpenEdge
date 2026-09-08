@@ -102,7 +102,7 @@ struct PlasmaFileParams {
   double grad_temp_i_r;
   double grad_temp_i_t;
   double grad_temp_i_z;
-  double q_mag;   // surface heat flux [W/m^2], 0 if not in plasma.h5
+  double q_mag;   // sampled heat flux [W/m^2]; use dedicated query as consumer
   double epar;    // parallel ambipolar E-field [V/m], 0 if not computed
 };
 
@@ -175,6 +175,8 @@ class ComputePlasmaFields : public Compute {
 
   // Point-query API: interpolate background data at arbitrary (x,y,z)
   PlasmaFileParams query_plasma_at_point(const double xyz[3]) const;
+  bool has_prescribed_heat_flux() const;
+  double query_heat_flux_at_point(const double xyz[3]) const;
   // Existing callers use mesh/grid-first data. GCA requests the smooth
   // equilibrium field and its derivatives when one is available.
   MagneticFieldFileDataParams query_bfield_at_point(

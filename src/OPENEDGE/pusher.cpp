@@ -122,6 +122,35 @@ inline PlasmaFileParams query_plasma_from_fix(const FixBackground *pd,
   PlasmaFileParams P{};
   if (!pd) return P;
 
+  if (pd->is_zones3d()) {
+    PlasmaPointSample sample;
+    pd->sample_point(xyz, sample, icell, -1,
+                     PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B |
+                     PLASMA_NEED_E | PLASMA_NEED_GRAD_TE |
+                     PLASMA_NEED_GRAD_TI);
+    const double phi = std::atan2(xyz[1], xyz[0]);
+    const double cp = std::cos(phi), sp = std::sin(phi);
+    auto to_cyl = [cp, sp](const double v[3], double &vr,
+                           double &vt, double &vz) {
+      vr = v[0] * cp + v[1] * sp;
+      vt = -v[0] * sp + v[1] * cp;
+      vz = v[2];
+    };
+    P.temp_e = sample.te; P.dens_e = sample.ne;
+    P.temp_i = sample.ti; P.dens_i = sample.ni;
+    P.parr_flow = sample.upar;
+    to_cyl(sample.flow, P.parr_flow_r, P.parr_flow_t, P.parr_flow_z);
+    to_cyl(sample.grad_te, P.grad_temp_e_r, P.grad_temp_e_t,
+           P.grad_temp_e_z);
+    to_cyl(sample.grad_ti, P.grad_temp_i_r, P.grad_temp_i_t,
+           P.grad_temp_i_z);
+    if (sample.has_e && sample.has_b && sample.bmag > 1.0e-30)
+      P.epar = (sample.e[0] * sample.b[0] +
+                sample.e[1] * sample.b[1] +
+                sample.e[2] * sample.b[2]) / sample.bmag;
+    return P;
+  }
+
   double R, Z;
   xyz_to_rz(xyz, dim, axi, R, Z);
 

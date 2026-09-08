@@ -403,6 +403,11 @@ void FixSurfaceStateLm::init()
     if (!fbg)
       error->all(FLERR,
         "Fix surface/state/liquid_metal: 'background' arg must reference a fix background");
+    fbg->init();
+    if (!fbg->has_qheatflux)
+      error->all(FLERR,
+        "Fix surface/state/liquid_metal: background heat-flux source "
+        "requires physical q_par/q_perp datasets; no fallback is available");
   }
 
   // initialize strip solver
@@ -792,10 +797,8 @@ void FixSurfaceStateLm::end_of_step()
         xmid[2] = (tris[m].p1[2] + tris[m].p2[2] + tris[m].p3[2]) / 3.0;
       }
 
-      PlasmaFileParams pp = cp_plasma->query_plasma_at_point(xmid);
-
-      // heat flux from q_mag with optional scaling
-      double qw = pp.q_mag * hf_scale;
+      // Dedicated query fails closed if q is missing or out of bounds.
+      double qw = cp_plasma->query_heat_flux_at_point(xmid) * hf_scale;
       if (!std::isfinite(qw) || qw < 0.0) qw = 0.0;
 
       int ix = surf_to_strip[i];
@@ -841,8 +844,8 @@ void FixSurfaceStateLm::end_of_step()
       OpenEdge::sparta_to_RZ(xmid, dimension, domain->axisymmetric, R, Z,
                              fbg->column_x0, fbg->column_y0);
 
-      double q_par  = fbg->default_q_par;
-      double q_perp = fbg->default_q_perp;
+      double q_par = 0.0;
+      double q_perp = 0.0;
       if (fbg->has_qheatflux) {
         // Prefer the wall_surf_cell map: identifies the SOLPS cell adjacent
         // to each wall segment, no bilinear extrapolation across the SOLPS
