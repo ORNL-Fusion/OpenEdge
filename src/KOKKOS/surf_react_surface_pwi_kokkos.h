@@ -101,6 +101,13 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
   DAT::t_int_1d d_mat_isp, d_conc_isp, d_refl_tbl;  // [nlist] per-reaction
   DAT::t_float_2d_lr d_sconc;                  // [nslocal][sigma_ncols] surface conc
   int conc_dev_on_;                            // d_sconc live (sigma_feedback && conc custom)
+  // deposit_as <element> <species> (slag e6fd8b8d): credit retained atoms
+  // to the deposit material column, debit erosion from the exposed
+  // materials in proportion to their reaction-zone concentrations
+  DAT::t_int_1d d_dep_alias;                   // [ncols] species col -> credited col
+  DAT::t_int_2d d_dep_cols;                    // [ncols][maxdep] debit candidate cols
+  DAT::t_int_1d d_dep_ncols;                   // [ncols] number of candidates
+  int dep_alias_on_;
   int conc_dirty_;                             // host conc changed since last upload
   void upload_conc();
 
@@ -392,6 +399,38 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
     if (datoms > 0.0) Kokkos::atomic_add(&d_dep_delta(g), datoms/area);
   }
 
+  // device twins of deposit_species() and sigma_debit_element()
+  KOKKOS_INLINE_FUNCTION
+  int deposit_species_dev(int isp) const
+  {
+    return dep_alias_on_ ? d_dep_alias(isp) : isp;
+  }
+
+  KOKKOS_INLINE_FUNCTION
+  void sigma_debit_element_dev(int isurf, int isp, double datoms) const
+  {
+    if (datoms <= 0.0) return;
+    if (!dep_alias_on_ || d_dep_ncols(isp) < 2 || !conc_dev_on_) {
+      sigma_acc(isurf, isp, -datoms);
+      return;
+    }
+    const int nc = d_dep_ncols(isp);
+    double csum = 0.0;
+    for (int k = 0; k < nc; k++) {
+      const double c = d_sconc(isurf, d_dep_cols(isp,k));
+      if (c > 0.0) csum += c;
+    }
+    if (csum <= 0.0) {
+      sigma_acc(isurf, isp, -datoms);
+      return;
+    }
+    for (int k = 0; k < nc; k++) {
+      const int col = d_dep_cols(isp,k);
+      const double c = d_sconc(isurf, col);
+      if (c > 0.0) sigma_acc(isurf, col, -datoms * c / csum);
+    }
+  }
+
   // impact histogram: layout [all_E | sput_E | all_A | sput_A | perspecies_E]
 
   KOKKOS_INLINE_FUNCTION
@@ -553,8 +592,8 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
         }
       }
 
-      if (sigma_on)
-        sigma_acc(isurf, sp, -((double) nemit) * pw_inc);
+      if (sigma_on)   // CPU: sigma_debit_element (exposed-material split)
+        sigma_debit_element_dev(isurf, sp, ((double) nemit) * pw_inc);
     }
 
     if (ehist_on)
@@ -638,8 +677,8 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
             return (m + 1);
           } else {
             // retained: deposit into the areal-density ledger, delete
-            if (sigma_on)
-              sigma_acc(isurf, ip->ispecies, pw_inc);
+            if (sigma_on)   // CPU: sigma_accumulate(deposit_species(isp))
+              sigma_acc(isurf, deposit_species_dev(ip->ispecies), pw_inc);
             ip = NULL;
             rand_pool.free_state(rand_gen);
             return (m + 1);

@@ -54,6 +54,7 @@ SurfReactSurfacePWIKokkos::SurfReactSurfacePWIKokkos(SPARTA *sparta, int narg,
   pw_slot = -1;
   sigma_on = ehist_on = 0;
   conc_dev_on_ = conc_dirty_ = 0;
+  dep_alias_on_ = 0;
   ncols = nbin = nsp = 0;
   emax = fnum_c = evconv = twall_c = rough_c = 0.0;
 }
@@ -112,13 +113,7 @@ void SurfReactSurfacePWIKokkos::check_supported()
   if (R_attr)
     error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
                "R_surf (per-surf recycling coefficient)");
-  // slag 2026-08-28 `deposit_as <element> <species>`: the device react
-  // path credits deposits to the reactant species and debits erosion
-  // per species (sigma_acc); the alias/exposed-material split
-  // (deposit_species(), sigma_debit_element()) is host-only so far.
-  if (!dep_alias_of.empty())
-    error->all(FLERR,"surf_react surface/pwi/kk does not yet support "
-               "deposit_as (deposit-material aliasing)");
+  // deposit_as: ported (d_dep_alias / d_dep_cols, Phase D 2026-09-08)
 
   for (int m = 0; m < nlist_recycle; m++) {
     OneReaction *r = &rlist[m];
@@ -375,6 +370,29 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
     d_sconc = DAT::t_float_2d_lr("surf_react_pwi:sconc",MAX(nslocal,1),
                                  MAX(sigma_ncols,1));
     conc_dirty_ = 1;
+  }
+
+  // deposit_as alias / debit-candidate tables (identity when unused)
+  dep_alias_on_ = (!dep_alias_of.empty() && (int) dep_alias_of.size() == sigma_ncols) ? 1 : 0;
+  if (dep_alias_on_) {
+    int maxdep = 1;
+    for (int j = 0; j < sigma_ncols; j++)
+      maxdep = MAX(maxdep,(int) dep_cols_of[j].size());
+    d_dep_alias = DAT::t_int_1d("surf_react_pwi:dep_alias",sigma_ncols);
+    d_dep_ncols = DAT::t_int_1d("surf_react_pwi:dep_ncols",sigma_ncols);
+    d_dep_cols  = DAT::t_int_2d("surf_react_pwi:dep_cols",sigma_ncols,maxdep);
+    auto h_al = Kokkos::create_mirror_view(d_dep_alias);
+    auto h_nc = Kokkos::create_mirror_view(d_dep_ncols);
+    auto h_dc = Kokkos::create_mirror_view(d_dep_cols);
+    Kokkos::deep_copy(h_dc,-1);
+    for (int j = 0; j < sigma_ncols; j++) {
+      h_al(j) = dep_alias_of[j];
+      h_nc(j) = (int) dep_cols_of[j].size();
+      for (int k = 0; k < h_nc(j); k++) h_dc(j,k) = dep_cols_of[j][k];
+    }
+    Kokkos::deep_copy(d_dep_alias,h_al);
+    Kokkos::deep_copy(d_dep_ncols,h_nc);
+    Kokkos::deep_copy(d_dep_cols,h_dc);
   }
 
   // areal-density ledger: per-surf area + global ID for local+ghost surfs
