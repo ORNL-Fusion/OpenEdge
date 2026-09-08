@@ -188,7 +188,7 @@ void Finish::end(int flag, double time_multiple_runs)
     bigint nattempt_total = 0;
     bigint ncollide_total = 0;
     bigint nreact_total = 0;
-    int stuck_total,axibad_total;
+    int stuck_total,axibad_total,caplost_total;
 
     MPI_Allreduce(&update->nmove_running,&nmove_total,1,
                   MPI_SPARTA_BIGINT,MPI_SUM,world);
@@ -219,6 +219,7 @@ void Finish::end(int flag, double time_multiple_runs)
     }
     MPI_Allreduce(&update->nstuck,&stuck_total,1,MPI_INT,MPI_SUM,world);
     MPI_Allreduce(&update->naxibad,&axibad_total,1,MPI_INT,MPI_SUM,world);
+    MPI_Allreduce(&update->ncaplost,&caplost_total,1,MPI_INT,MPI_SUM,world);
 
     double pms,pmsp,ctps,cis,pfc,pfcwb,pfeb,schps,sclps,srps,caps,cps,rps;
     pms = pmsp = ctps = cis = pfc = pfcwb = pfeb =
@@ -270,6 +271,8 @@ void Finish::end(int flag, double time_multiple_runs)
         fprintf(screen,"Gas reactions     = " BIGINT_FORMAT " %s\n",
                 nreact_total,MathExtra::num2str(nreact_total,str));
         fprintf(screen,"Particles stuck   = %d\n",stuck_total);
+        if (caplost_total)
+          fprintf(screen,"Particles lost at periodic caps (teleport target not local) = %d\n",caplost_total);
         fprintf(screen,"Axisymm bad moves = %d\n",axibad_total);
 
         fprintf(screen,"\n");
@@ -312,6 +315,8 @@ void Finish::end(int flag, double time_multiple_runs)
         fprintf(logfile,"Reactions         = " BIGINT_FORMAT " %s\n",
                 nreact_total,MathExtra::num2str(nreact_total,str));
         fprintf(logfile,"Particles stuck   = %d\n",stuck_total);
+        if (caplost_total)
+          fprintf(logfile,"Particles lost at periodic caps (teleport target not local) = %d\n",caplost_total);
         fprintf(logfile,"Axisymm bad moves = %d\n",axibad_total);
 
         fprintf(logfile,"\n");

@@ -846,7 +846,7 @@ void Update::setup()
   nboundary_running = nexit_running = 0;
   nscheck_running = nscollide_running = 0;
   surf->nreact_running = 0;
-  nstuck = naxibad = 0;
+  nstuck = naxibad = ncaplost = 0;
 
   collide_react = collide_react_setup();
   tallyflag = tally_setup();
@@ -2497,7 +2497,12 @@ template < int DIM, int SURF, int OPT > void Update::move()
                     break;
                   }
                 } else {
+                  // teleport target is not a cell this rank stores
+                  // (owned or ghost): the particle is LOST. Counted as
+                  // ncaplost ("Particles lost at periodic caps" in the
+                  // Finish table); grows with rank count.
                   particles[i].flag = PDISCARD;
+                  ncaplost++;
                   nscollide_one++;
                   break;
                 }

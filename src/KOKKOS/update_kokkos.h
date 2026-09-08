@@ -19,6 +19,7 @@
 #include "surf_collide_vanish_kokkos.h"
 #include "surf_collide_piston_kokkos.h"
 #include "surf_collide_transparent_kokkos.h"
+#include "surf_collide_toroidal_kokkos.h"
 #include "compute_boundary_kokkos.h"
 #include "compute_surf_kokkos.h"
 #include "pusher_kokkos.h"
@@ -35,11 +36,12 @@ struct s_UPDATE_REDUCE {
   int ntouch_one,nexit_one,nboundary_one,
       entryexit,ncomm_one,
       nscheck_one,nscollide_one,nreact_one,nstuck,
-      naxibad,error_flag;
+      naxibad,error_flag,ncaplost;
   KOKKOS_INLINE_FUNCTION
   s_UPDATE_REDUCE() {
     ntouch_one = nexit_one = nboundary_one = ncomm_one = 0;
     nscheck_one = nscollide_one = nreact_one = nstuck = naxibad = 0;
+    ncaplost = 0;
   }
   KOKKOS_INLINE_FUNCTION
   void operator+=(const s_UPDATE_REDUCE &rhs) {
@@ -47,6 +49,7 @@ struct s_UPDATE_REDUCE {
     nboundary_one += rhs.nboundary_one; ncomm_one += rhs.ncomm_one;
     nscheck_one += rhs.nscheck_one; nscollide_one += rhs.nscollide_one;
     nreact_one += rhs.nreact_one; nstuck += rhs.nstuck; naxibad += rhs.naxibad;
+    ncaplost += rhs.ncaplost;
   }
 };
 typedef struct s_UPDATE_REDUCE UPDATE_REDUCE;
@@ -280,6 +283,7 @@ class UpdateKokkos : public Update {
   KKCopy<SurfCollideVanishKokkos> sc_kk_vanish_copy[KOKKOS_MAX_SURF_COLL_PER_TYPE];
   KKCopy<SurfCollidePistonKokkos> sc_kk_piston_copy[KOKKOS_MAX_SURF_COLL_PER_TYPE];
   KKCopy<SurfCollideTransparentKokkos> sc_kk_transparent_copy[KOKKOS_MAX_SURF_COLL_PER_TYPE];
+  KKCopy<SurfCollideToroidalKokkos> sc_kk_toroidal_copy[KOKKOS_MAX_SURF_COLL_PER_TYPE];
 
   //KKCopy<ComputeSurfKokkos> blist_active_copy[KOKKOS_MAX_GLIST];
   KKCopy<ComputeSurfKokkos> slist_active_copy[KOKKOS_MAX_SLIST];
@@ -288,7 +292,7 @@ class UpdateKokkos : public Update {
   ComputeBoundaryKokkos tmp_compute_boundary_kk;
   ComputeSurfKokkos tmp_compute_surf_kk;
 
-  typedef Kokkos::DualView<int[14], DeviceType::array_layout, DeviceType> tdual_int_14;
+  typedef Kokkos::DualView<int[15], DeviceType::array_layout, DeviceType> tdual_int_14;
   typedef tdual_int_14::t_dev t_int_14;
   typedef tdual_int_14::t_host t_host_int_14;
   t_int_14 d_scalars;
@@ -304,6 +308,7 @@ class UpdateKokkos : public Update {
   DAT::t_int_scalar d_nscollide_one;  HAT::t_int_scalar h_nscollide_one;
   DAT::t_int_scalar d_nreact_one;     HAT::t_int_scalar h_nreact_one;
   DAT::t_int_scalar d_nstuck;         HAT::t_int_scalar h_nstuck;
+  DAT::t_int_scalar d_ncaplost;       HAT::t_int_scalar h_ncaplost;
   DAT::t_int_scalar d_naxibad;        HAT::t_int_scalar h_naxibad;
   DAT::t_int_scalar d_error_flag;     HAT::t_int_scalar h_error_flag;
   DAT::t_int_scalar d_retry;          HAT::t_int_scalar h_retry;
