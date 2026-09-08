@@ -929,10 +929,10 @@ dump dsurf surf/vtk all 1 output/surface_*.vtu id
 dump_modify dsurf first yes
 run 0
 </PRE>
-<P>The runnable <I>examples/visualization/paraview</I> case demonstrates this
-zero-step pattern.  Open its generated <I>.vtu</I> files directly in
-ParaView.  Time-dependent cases use the same commands with a larger dump
-interval and a nonzero run length.
+<P>The runnable <I>examples/visualization/paraview</I> case demonstrates
+time-dependent native output for the grid, an embedded surface, and
+particles injected with <I>fix emit/face</I>.  Open its generated <I>.vtu</I> file
+series directly in ParaView.
 </P>
 <HR>
 

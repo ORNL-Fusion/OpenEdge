@@ -6,6 +6,27 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 np=${NP:-1}
+run_steps=${RUN_STEPS:-100}
+
+if [[ ! "$run_steps" =~ ^[1-9][0-9]*$ ]]; then
+  printf 'ERROR: RUN_STEPS must be a positive integer, got: %s\n' "$run_steps" >&2
+  exit 2
+fi
+
+if [[ -n "${DUMP_EVERY:-}" ]]; then
+  dump_every=$DUMP_EVERY
+else
+  dump_every=$((run_steps / 10))
+  if (( dump_every < 1 )); then dump_every=1; fi
+fi
+if [[ ! "$dump_every" =~ ^[1-9][0-9]*$ ]]; then
+  printf 'ERROR: DUMP_EVERY must be a positive integer, got: %s\n' "$dump_every" >&2
+  exit 2
+fi
+if (( dump_every > run_steps )); then
+  printf 'ERROR: DUMP_EVERY must be a positive integer no larger than RUN_STEPS.\n' >&2
+  exit 2
+fi
 
 supports_native_vtk() {
   local help
@@ -47,11 +68,19 @@ else
 fi
 
 printf 'Using VTK-enabled executable: %s\n' "$bin"
+printf 'Running %s steps and writing every %s steps.\n' "$run_steps" "$dump_every"
+
+# Do not mix snapshots from runs that used different output intervals.
+mkdir -p output
+rm -f output/grid_*.vtu output/surface_*.vtu output/particles_*.vtu
 
 # Disable the startup log in this directory; the input opens output/log.openedge.
-mpirun -np "$np" "$bin" -log none -in in.openedge
+mpirun -np "$np" "$bin" -log none \
+  -var runsteps "$run_steps" -var dumpevery "$dump_every" -in in.openedge
 
-for file in output/grid_0.vtu output/surface_0.vtu; do
+last_dump=$((run_steps / dump_every * dump_every))
+for file in output/grid_0.vtu output/surface_0.vtu \
+            output/particles_0.vtu "output/particles_${last_dump}.vtu"; do
   if [[ ! -s "$file" ]]; then
     printf 'FAIL: missing or empty %s\n' "$file" >&2
     exit 1
@@ -65,4 +94,9 @@ for file in output/grid_0.vtu output/surface_0.vtu; do
   fi
 done
 
-printf 'PASS: native VTU files are in %s/output\n' "$PWD"
+if ! grep -Eq 'NumberOfPoints="[1-9][0-9]*"' "output/particles_${last_dump}.vtu"; then
+  printf 'FAIL: final particle VTU contains no particles\n' >&2
+  exit 1
+fi
+
+printf 'PASS: native VTU series (%s steps) is in %s/output\n' "$run_steps" "$PWD"

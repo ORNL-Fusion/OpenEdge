@@ -1,28 +1,45 @@
 # Native ParaView output: no conversion script is required.
 
 variable            outdir index output
+variable            runsteps index 100
+variable            dumpevery index 10
 
 shell               mkdir ${outdir}
 log                 ${outdir}/log.openedge
 
 seed                12345
 dimension           2
-boundary            o o p
+boundary            o r p
 global              gridcut 0.0 comm/sort no
+global              nrho 1.0 fnum 0.001
 
 create_box           0 10 0 10 -0.5 0.5
 create_grid          20 20 1 block * * *
+
+species              input/air.species N O
+mixture              air N O vstream 100.0 0.0 0.0
 
 read_surf            input/circle.surf group obstacle particle check
 surf_collide         wall specular
 surf_modify          obstacle collide wall
 
+# Continuously inject particles through the left face.  They reflect from
+# the y boundaries and the circle, then leave through the right face.
+fix                  in emit/face air xlo
+
 # The '*' is replaced by the timestep.  These styles write VTK XML
 # UnstructuredGrid files directly from OpenEdge.
-dump                 dgrid grid/vtk all 1 ${outdir}/grid_*.vtu id
+dump                 dgrid grid/vtk all ${dumpevery} ${outdir}/grid_*.vtu id
 dump_modify          dgrid first yes
-dump                 dsurf surf/vtk obstacle 1 ${outdir}/surface_*.vtu id
+dump                 dsurf surf/vtk obstacle ${dumpevery} ${outdir}/surface_*.vtu id
 dump_modify          dsurf first yes
+dump                 dpart particle/vtk all ${dumpevery} &
+                     ${outdir}/particles_*.vtu id type x y z vx vy vz
+dump_modify          dpart first yes
 
-run                  0
-print                "PARAVIEW_NATIVE_VTU_COMPLETE outdir=${outdir}"
+timestep             0.0001
+stats                ${dumpevery}
+stats_style          step cpu np
+
+run                  ${runsteps}
+print                "PARAVIEW_NATIVE_VTU_COMPLETE steps=${runsteps} outdir=${outdir}"

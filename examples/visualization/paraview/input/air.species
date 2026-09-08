@@ -1,0 +1,4 @@
+# Minimal two-species gas for the native ParaView visualization example.
+# ID  molwt  molmass  rotdof  rotrel  vibdof  vibrel  vibtemp  weight  charge
+N     14.008 2.325e-26 0      0.0     0       0.0     0.0      1.0     0.0
+O     16.000 2.650e-26 0      0.0     0       0.0     0.0      1.0     0.0

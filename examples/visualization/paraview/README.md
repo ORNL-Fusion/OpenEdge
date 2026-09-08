@@ -1,9 +1,11 @@
 # Native ParaView output
 
-This small zero-step case writes the OpenEdge grid and embedded surface
-directly as ParaView-readable VTK XML files. It uses the production pattern:
-native `grid/vtk` and `surf/vtk` dumps, `dump_modify ... first yes`, then
-`run 0`. There is no Python conversion or Catalyst step.
+This small particle-flow case writes the OpenEdge grid, embedded surface, and
+particles directly as ParaView-readable VTK XML files. An N/O stream enters
+through the left boundary with `fix emit/face`, reflects specularly from the
+circular obstacle, and exits through the right boundary. The case is
+deliberately collisionless because its purpose is demonstrating native VTK
+output. There is no Python conversion or Catalyst step.
 
 ## Build
 
@@ -18,12 +20,17 @@ cmake --build . -j 8
 ## Run
 
 ```bash
-./run.sh /path/to/spa_mpi
+./run.sh /path/to/spa_mpi             # 100 steps, 10 output intervals
+RUN_STEPS=1000 ./run.sh               # 1000 steps, 10 output intervals
 ```
 
 With no path argument, `run.sh` searches common build directories under
 `$HOME` and selects an executable that advertises the native VTK dump styles.
 An explicitly supplied executable is checked before the simulation starts.
+
+The default is 100 steps. `RUN_STEPS` changes the duration, and `DUMP_EVERY`
+can set the output interval explicitly. The runner clears older VTU snapshots
+first so ParaView does not combine files from runs with different intervals.
 
 Set `NP` to exercise the same input with more MPI ranks:
 
@@ -33,12 +40,23 @@ NP=4 ./run.sh /path/to/spa_mpi
 
 The case writes:
 
-- `output/grid_0.vtu`: the 2D grid cells
-- `output/surface_0.vtu`: the circular obstacle
+- `output/grid_*.vtu`: the 2D grid cells
+- `output/surface_*.vtu`: the circular obstacle
+- `output/particles_*.vtu`: particle positions, IDs, species types, and
+  velocity vectors
 
-Open either file directly in ParaView. For a time-dependent simulation,
-change the dump interval and advance more than zero steps; the `*` in each
-filename is replaced by the timestep.
+Open the three file series directly in ParaView. The `*` in each filename is
+replaced by the timestep. ParaView exposes particle species as `type` and the
+grouped `(vx,vy,vz)` components as the vector field `v`.
+
+## View in ParaView
+
+1. Choose **File > Open** and select `grid_0.vtu`, `surface_0.vtu`, and
+   `particles_0.vtu`. ParaView recognizes each numbered set as a time series.
+2. Click **Apply** for each source.
+3. Select the particle source, use **Point Gaussian** representation, and
+   color by `type` or `v`.
+4. Press **Play** to animate the inlet stream around the circle.
 
 The same native interface can export simulation fields, for example:
 
