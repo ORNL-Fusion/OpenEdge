@@ -14,7 +14,8 @@
 //   m_ion_amu=2.014   (deuterium plasma; for adatom Bohm flux)
 //
 // Build:
-//   g++ -O2 -std=c++11 -I../../src/OPENEDGE run_strip.cpp -o run_strip
+//   g++ -O2 -std=c++11 -I../../src/OPENEDGE run_strip.cpp \
+//       ../../src/OPENEDGE/liquid_metal_strip.cpp -o run_strip
 
 #include "liquid_metal_strip.h"
 
