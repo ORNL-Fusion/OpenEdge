@@ -2450,6 +2450,37 @@ void FixBackground::bfield_at(double R, double Z,
 }
 
 /* ----------------------------------------------------------------------
+   Position-aware B query (see header). Cartesian constant field in 3D:
+   (Br,Bt) = rotation of (bx,by) by phi at xyz, matching
+   query_bfield_at_point(); this is what the (R,Z) interface cannot do.
+------------------------------------------------------------------------- */
+
+void FixBackground::bfield_at_xyz(const double xyz[3],
+                                   double &Br_out, double &Bz_out,
+                                   double &Bt_out, int icell, int iparticle) const
+{
+  const int dim = domain->dimension;
+  const bool axi = domain->axisymmetric;
+  if (const_has_bcart) {
+    if (dim == 3) {
+      const double rx = xyz[0] - column_x0, ry = xyz[1] - column_y0;
+      const double rxy = std::sqrt(rx*rx + ry*ry);
+      double cphi = 1.0, sphi = 0.0;
+      if (rxy > 1.0e-20) { cphi = rx / rxy; sphi = ry / rxy; }
+      Br_out =  const_bcart[0]*cphi + const_bcart[1]*sphi;
+      Bt_out = -const_bcart[0]*sphi + const_bcart[1]*cphi;
+      Bz_out =  const_bcart[2];
+    } else {
+      Br_out = const_bcart[0]; Bz_out = const_bcart[1]; Bt_out = const_bcart[2];
+    }
+    return;
+  }
+  double R = 0.0, Z = 0.0;
+  OpenEdge::sparta_to_RZ(xyz, dim, axi, R, Z, column_x0, column_y0);
+  bfield_at(R, Z, Br_out, Bz_out, Bt_out, icell, iparticle);
+}
+
+/* ----------------------------------------------------------------------
    pointwise B from the loaded equilibrium. Native br/bt/bz maps take
    precedence; legacy files fall back to
    Br = -1/R dpsi/dZ, Bz = 1/R dpsi/dR, Bt = btf*rtf/R.

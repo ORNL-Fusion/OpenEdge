@@ -1334,7 +1334,7 @@ void FixVolumeChemAdas::spawn_volume_recombination()
                                       : pd->interp2D(pd->parr_flow, R, Z, icell);
         if (pd->has_bfield) {
           double Br = 0.0, Bz_ = 0.0, Bt = 0.0;
-          pd->bfield_at(R, Z, Br, Bz_, Bt, icell);
+          pd->bfield_at_xyz(xc, Br, Bz_, Bt, icell);   // bcart-safe in 3D
           // cylindrical -> SPARTA slots (see compute branch above)
           const double phi_c = (dim == 3)
               ? std::atan2(xc[1] - pd->column_y0,

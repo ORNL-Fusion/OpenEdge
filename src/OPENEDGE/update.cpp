@@ -1250,7 +1250,7 @@ void Update::cache_plasma_particles()
         // Route through bfield_at() so mesh-native B (mesh_tri_b*) is
         // picked up on mesh-only plasma.h5 runs; the stencil path only
         // hits the empty regular-grid arrays and would return zero.
-        pd->bfield_at(R, Z, bf.br, bf.bz, bf.bt, particles[i].icell, i);
+        pd->bfield_at_xyz(x, bf.br, bf.bz, bf.bt, particles[i].icell, i);   // bcart-safe in 3D
         bf.Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
       }
       }

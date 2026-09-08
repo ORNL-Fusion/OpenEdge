@@ -110,6 +110,12 @@ class FixBackground : public Fix {
                     int iparticle = -1) const;
   void   bfield_at(double R, double Z, double &Br, double &Bz, double &Bt,
                    int icell = -1, int iparticle = -1) const;
+  // Position-aware variant for callers that know the particle / cell
+  // position: a Cartesian constant field (bcart) is rotated into (Br,Bz,Bt)
+  // at phi(xyz) in 3D instead of erroring; every other source goes through
+  // bfield_at(R,Z) with R,Z derived from xyz (column offsets applied).
+  void   bfield_at_xyz(const double xyz[3], double &Br, double &Bz, double &Bt,
+                       int icell = -1, int iparticle = -1) const;
   // Cylindrical-derivative B query for the GCA pusher: returns Br/Bz/Bt
   // along with dB/dR, dB/dZ in the same MagneticFieldFileDataParams shape
   // ComputePlasmaFields produces. Existing callers retain mesh-first

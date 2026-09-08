@@ -564,7 +564,7 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
       OpenEdge::sparta_to_RZ(xyz, dim, axi, R, Z,
                              pd->column_x0, pd->column_y0);
       double Br = 0.0, Bz = 0.0, Bt = 0.0;
-      pd->bfield_at(R, Z, Br, Bz, Bt, icell, i);
+      pd->bfield_at_xyz(xyz, Br, Bz, Bt, icell, i);   // bcart-safe
       B[0] = Br;
       B[1] = Bz;
       B[2] = Bt;
