@@ -41,6 +41,7 @@
 #include "surf_react.h"
 #include "output.h"
 #include "geometry_kokkos.h"
+#include "openedge_geom.h"
 #include "random_mars.h"
 #include "timer.h"
 #include "math_extra.h"
@@ -384,9 +385,14 @@ void UpdateKokkos::init()
                "Kokkos; use sheath spatial");
   // the device Boris dispatch is DIM == 3 only: a 2D/axisymmetric deck
   // with a configured pusher would silently advect ions ballistically
-  if (oe_pusher_subcycles > 0 && domain->dimension != 3)
-    error->all(FLERR,"The Kokkos pusher is 3D-only in this version; "
-               "run 2D/axisymmetric pusher decks on the CPU build");
+  // 2D/axisymmetric Boris is ported (oe_boris2d, 2026-09-08); the spatial
+  // sheath, hybrid/GCA, device pcache sheath correction and the device
+  // cross-field fill stay 3D-only for now (the last two fall back to the
+  // host loudly; the first two error out)
+  if (oe_pusher_subcycles > 0 && domain->dimension != 3 &&
+      sheath_flag && !sheath_kick)
+    error->all(FLERR,"Spatial sheath under Kokkos is 3D-only in this version; "
+               "run 2D/axisymmetric sheath decks on the CPU build");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -593,8 +599,8 @@ void UpdateKokkos::run(int nsteps)
     };
     if (getenv("OE_PCACHE_HOST"))
       why = "OE_PCACHE_HOST env override";
-    else if (domain->dimension != 3)
-      why = "2D/axisymmetric (device fill is 3D-only)";
+    else if (domain->dimension != 3 && sheath_flag && !sheath_kick)
+      why = "2D/axisymmetric sheath ne correction (device fill is 3D-only there)";
     else if (!oe_has_mesh_b || !oe_has_mesh_plasma)
       why = "device mesh B/plasma views not built (fix-provider mesh decks only)";
     else if (pcache_need_mask & ~sup)
@@ -1323,11 +1329,13 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   if (pflag == PKEEP) {
     dtremain = dt;
     // OpenEdge: device Boris mover (hybrid/GCA errors out at init)
-    if (DIM == 3 && oe_pusher_subcycles > 0 && (d_oe_plasma_compute.data() || oe_has_mesh_b)) {
+    if (oe_pusher_subcycles > 0 && (d_oe_plasma_compute.data() || oe_has_mesh_b || oe_has_equilibrium)) {
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
-      if (oe_pusher_mode != 0)
+      if (DIM != 3)
+        oe_boris2d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      else if (oe_pusher_mode != 0)
         oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
       else
         oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
@@ -1373,11 +1381,13 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   } else if (pflag == PINSERT) {
     dtremain = particle_i.dtremain;
     // OpenEdge: same Boris dispatch for newly inserted particles
-    if (DIM == 3 && oe_pusher_subcycles > 0 && (d_oe_plasma_compute.data() || oe_has_mesh_b)) {
+    if (oe_pusher_subcycles > 0 && (d_oe_plasma_compute.data() || oe_has_mesh_b || oe_has_equilibrium)) {
       const int ispecies = particle_i.ispecies;
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
-      if (oe_pusher_mode != 0)
+      if (DIM != 3)
+        oe_boris2d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+      else if (oe_pusher_mode != 0)
         oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
       else
         oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
@@ -3263,6 +3273,162 @@ double UpdateKokkos::oe_near_signed(int midx, const double *p) const
   const Surf::Tri &tr = d_tris[midx];
   return (p[0]-tr.p1[0])*tr.norm[0] + (p[1]-tr.p1[1])*tr.norm[1] +
          (p[2]-tr.p1[2])*tr.norm[2];
+}
+
+/* ----------------------------------------------------------------------
+   OpenEdge 2D / axisymmetric device Boris: twin of Pusher::push_boris_2d.
+   Positions stay in SPARTA slot order; E and B are lifted to cylindrical
+   (R, Z, phi) and rotated into the right-handed (R, phi, Z) basis for the
+   Boris cross product, then rotated back. Axisymmetric mode is
+   kick-drift: velocity kicks at FIXED position, single straight segment
+   xnew = x + dt*v (the mover's axi_remap reconstructs the gyration).
+   Planar 2D subcycles carry the line-clip / cell-exit guards of the CPU.
+   The spatial sheath is not ported in 2D (init errors out).
+------------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
+                              double *x, double *v, double *xnew,
+                              double charge, double mass) const
+{
+  if (charge == 0.0 ||
+      (d_oe_pusher_skip.data() &&
+       d_oe_pusher_skip(d_particles[i].ispecies))) {
+    xnew[0] = x[0] + v[0] * dt;
+    xnew[1] = x[1] + v[1] * dt;
+    xnew[2] = x[2] + v[2] * dt;
+    return;
+  }
+  const double qm = (charge * oe_echarge) / mass;
+  const int nsub = (oe_pusher_subcycles > 0) ? oe_pusher_subcycles : 1;
+  const double dt_sub = dt / static_cast<double>(nsub);
+  const int dim = oe_dim;
+  const bool axi = (oe_axisymmetric != 0);
+  double xcur[2] = {x[0], x[1]};
+  double zcur = x[2];
+  double vcur[3] = {v[0], v[1], v[2]};
+
+  // fields once per call (slot order from the device queries; no column
+  // offset in 2D, as the CPU sparta_to_RZ with x0 = y0 = 0)
+  double xq[3] = {x[0], x[1], 0.0};
+  double Eslot[3] = {0.0, 0.0, 0.0};
+  if (oe_has_mesh_e) {
+    double Em[3] = {0.0, 0.0, 0.0};
+    if (MeshKokkos::query_bfield_at_point(
+          xq, dim, axi,
+          d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
+          d_oe_mesh_tri_er, d_oe_mesh_tri_ez, d_oe_mesh_tri_et,
+          d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
+          d_oe_mesh_tri_zmin, d_oe_mesh_tri_zmax,
+          d_oe_hash_offset, d_oe_hash_entries,
+          oe_mesh_hash_rmin, oe_mesh_hash_zmin,
+          oe_mesh_hash_dr,   oe_mesh_hash_dz,
+          oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri, Em)) {
+      Eslot[0] = Em[0]; Eslot[1] = Em[1]; Eslot[2] = Em[2];
+    }
+  }
+  double Bslot[3] = {0.0, 0.0, 0.0};
+  {
+    bool got_B = false;
+    if (oe_has_mesh_b) {
+      got_B = MeshKokkos::query_bfield_at_point(
+          xq, dim, axi,
+          d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
+          d_oe_mesh_tri_br, d_oe_mesh_tri_bz, d_oe_mesh_tri_bt,
+          d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
+          d_oe_mesh_tri_zmin, d_oe_mesh_tri_zmax,
+          d_oe_hash_offset, d_oe_hash_entries,
+          oe_mesh_hash_rmin, oe_mesh_hash_zmin,
+          oe_mesh_hash_dr,   oe_mesh_hash_dz,
+          oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri, Bslot);
+    }
+    if (!got_B && oe_has_equilibrium) {
+      if (oe_has_equ_bmaps)
+        got_B = EquilibriumKokkos::query_bfield_native_maps(
+            xq, dim, axi, d_oe_equ_r, d_oe_equ_z,
+            d_oe_equ_br, d_oe_equ_bt, d_oe_equ_bz, oe_equ_jm, oe_equ_km, Bslot);
+      else {
+        EquilibriumKokkos::query_bfield_at_point(
+            xq, dim, axi, d_oe_equ_r, d_oe_equ_z, d_oe_equ_psi,
+            oe_equ_btf, oe_equ_rtf, oe_equ_jm, oe_equ_km, Bslot);
+        got_B = true;
+      }
+    }
+    if (!got_B && d_oe_plasma_compute.data() && oe_bx_col >= 0) {
+      Bslot[0] = d_oe_plasma_compute(icell, oe_bx_col);
+      Bslot[1] = d_oe_plasma_compute(icell, oe_by_col);
+      Bslot[2] = d_oe_plasma_compute(icell, oe_bz_col);
+    }
+  }
+  // lift to cylindrical (R, Z, phi), right-handed (R, phi, Z) for Boris
+  double ER = 0.0, EZ = 0.0, Ephi = 0.0, BR = 0.0, BZ = 0.0, Bphi = 0.0;
+  OpenEdge::sparta_v_to_RZphi(Eslot, dim, axi, 0.0, ER, EZ, Ephi);
+  OpenEdge::sparta_v_to_RZphi(Bslot, dim, axi, 0.0, BR, BZ, Bphi);
+  const double Erhs[3] = {ER, Ephi, EZ};
+  const double Brhs[3] = {BR, Bphi, BZ};
+
+  int gcell = icell;
+  if (d_cells[icell].nsplit <= 0 && d_cells[icell].isplit >= 0)
+    gcell = d_sinfo[d_cells[icell].isplit].icell;
+
+  for (int isub = 0; isub < nsub; isub++) {
+    double xold[2] = {xcur[0], xcur[1]};
+    double vR = 0.0, vZ = 0.0, vphi = 0.0;
+    OpenEdge::sparta_v_to_RZphi(vcur, dim, axi, 0.0, vR, vZ, vphi);
+    double vrhs[3] = {vR, vphi, vZ};
+    BorisGridKokkos::push_velocity(qm, dt_sub, Erhs, Brhs, vrhs);
+    OpenEdge::RZphi_force_to_sparta(vrhs[0], vrhs[2], vrhs[1], dim, axi, 0.0,
+                                    vcur[0], vcur[1], vcur[2]);
+    if (!axi) {
+      xcur[0] += vcur[0] * dt_sub;
+      xcur[1] += vcur[1] * dt_sub;
+      zcur += vcur[2] * dt_sub;
+    }
+    // planar subcycle guards (CPU parity): in-cell line hit -> clip past
+    // the intersection (never park ON the line); cell exit -> bail
+    if (nsub > 1 && !axi) {
+      const int nsurf_cell = d_cells[gcell].nsurf;
+      if (nsurf_cell > 0) {
+        auto csurfs_begin = d_csurfs.row_map(gcell);
+        for (int m = 0; m < nsurf_cell; m++) {
+          int isurf = d_csurfs.entries(csurfs_begin + m);
+          double xc[3], param;
+          int side;
+          double xold3[3] = {xold[0], xold[1], 0.0};
+          double xcur3[3] = {xcur[0], xcur[1], 0.0};
+          if (GeometryKokkos::line_line_intersect(
+                xold3, xcur3, d_lines[isurf].p1, d_lines[isurf].p2,
+                d_lines[isurf].norm, xc, param, side)) {
+            v[0] = vcur[0]; v[1] = vcur[1]; v[2] = vcur[2];
+            if (param < OE_SUBCYCLE_ONSURF_PARAM) {
+              xnew[0] = xcur[0]; xnew[1] = xcur[1]; xnew[2] = zcur;
+            } else {
+              xnew[0] = xc[0] + OE_SUBCYCLE_CLIP_OVERSHOOT * (xcur[0] - xold[0]);
+              xnew[1] = xc[1] + OE_SUBCYCLE_CLIP_OVERSHOOT * (xcur[1] - xold[1]);
+              xnew[2] = zcur - vcur[2] * dt_sub * (1.0 - param);
+            }
+            return;
+          }
+        }
+      }
+      const double *clo = d_cells[gcell].lo;
+      const double *chi = d_cells[gcell].hi;
+      if (xcur[0] < clo[0] || xcur[0] >= chi[0] ||
+          xcur[1] < clo[1] || xcur[1] >= chi[1]) {
+        v[0] = vcur[0]; v[1] = vcur[1]; v[2] = vcur[2];
+        xnew[0] = xcur[0]; xnew[1] = xcur[1]; xnew[2] = zcur;
+        return;
+      }
+    }
+  }
+  v[0] = vcur[0]; v[1] = vcur[1]; v[2] = vcur[2];
+  if (axi) {
+    xnew[0] = x[0] + vcur[0] * dt;
+    xnew[1] = x[1] + vcur[1] * dt;
+    xnew[2] = x[2] + vcur[2] * dt;
+  } else {
+    xnew[0] = xcur[0]; xnew[1] = xcur[1]; xnew[2] = zcur;
+  }
 }
 
 /* ----------------------------------------------------------------------

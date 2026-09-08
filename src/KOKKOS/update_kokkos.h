@@ -390,6 +390,12 @@ class UpdateKokkos : public Update {
   void oe_hybrid3d(int i, int icell, double dt,
                    double *x, double *v, double *xnew,
                    double charge, double mass) const;
+  // 2D / axisymmetric kick-drift Boris (device twin of Pusher::push_boris_2d,
+  // without the spatial sheath -- 2D sheath errors out at init)
+  KOKKOS_INLINE_FUNCTION
+  void oe_boris2d(int i, int icell, double dt,
+                  double *x, double *v, double *xnew,
+                  double charge, double mass) const;
 
   KOKKOS_INLINE_FUNCTION
   void oe_boris3d(int i, int icell, double dt_full,
