@@ -317,6 +317,16 @@ class UpdateKokkos : public Update {
   // centroid's mesh cell via cell_mesh_cell, NOT the particle's tri)
   DAT::t_float_1d d_oe_meshcell_gter, d_oe_meshcell_gtez;
   DAT::t_float_1d d_oe_meshcell_gtir, d_oe_meshcell_gtiz;
+  // OpenEdge: regular (R,Z) plasma raster of the fix provider (old
+  // plasma.h5 layout, e.g. rfpie): bilinear-sampled on the device where
+  // the triangle mesh is absent (CPU: interp2D fallback). Bound at run
+  // start by bind_oe_raster().
+  int    oe_has_raster, oe_has_ras_drag, oe_has_ras_gradte, oe_has_ras_gradti;
+  int    oe_ras_nr, oe_ras_nz;
+  double oe_ras_r0, oe_ras_dr, oe_ras_z0, oe_ras_dz;
+  DAT::t_float_1d d_oe_ras_te, d_oe_ras_ti, d_oe_ras_ne, d_oe_ras_ni, d_oe_ras_vpar;
+  DAT::t_float_1d d_oe_ras_gte_r, d_oe_ras_gte_z, d_oe_ras_gti_r, d_oe_ras_gti_z;
+  void bind_oe_raster();
   friend class FixCoulombBackgroundKokkos;
   friend class FixForceThermalKokkos;
   friend class FixCrossFieldDiffusionKokkos;

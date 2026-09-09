@@ -43,6 +43,7 @@
 #include "geometry_kokkos.h"
 #include "openedge_geom.h"
 #include "fix_reflect_psi.h"
+#include "raster_kokkos.h"
 #include <algorithm>
 #include <vector>
 #include "random_mars.h"
@@ -321,6 +322,8 @@ void UpdateKokkos::init()
   oe_psi_on = oe_psi_action = oe_pw_slot_on = 0;
   oe_swlog_on = oe_swlog_cap = 0;
   oe_kick_on = oe_paid_on = oe_wave_on = oe_kick_te_on = 0;
+  oe_has_raster = oe_has_ras_drag = oe_has_ras_gradte = oe_has_ras_gradti = 0;
+  oe_ras_nr = oe_ras_nz = 0; oe_ras_r0 = oe_ras_dr = oe_ras_z0 = oe_ras_dz = 0.0;
   oe_psi_imix = -1; oe_psi_nw = oe_psi_nh = 0;
   oe_psi_thr = oe_psi_axis = oe_psi_b = 0.0;
   oe_plasma_kkbase = NULL;
@@ -617,6 +620,7 @@ void UpdateKokkos::run(int nsteps)
   // OpenEdge gate 9b: decide once per run whether the plasma cache can
   // be filled on the device. The host fill costs a full particle+custom
   // D2H sync every step (the TIME_PCACHE bucket, ~15% at 1000x load).
+  bind_oe_raster();   // regular-grid plasma raster of the fix provider (if any)
   oe_pcache_dev = 0;
   oe_pc_csg = (sheath_flag && sheath_geom_cidx >= 0) ? 1 : 0;
   if (plasma_cache_flag) {
@@ -632,15 +636,16 @@ void UpdateKokkos::run(int nsteps)
     };
     if (getenv("OE_PCACHE_HOST"))
       why = "OE_PCACHE_HOST env override";
-    else if (!oe_has_mesh_b || !oe_has_mesh_plasma)
-      why = "device mesh B/plasma views not built (fix-provider mesh decks only)";
+    else if (!(oe_has_mesh_plasma || oe_has_raster))
+      why = "no device plasma source (neither mesh views nor a regular raster)";
+    else if (((pcache_need_mask & PCACHE_BFIELD) || oe_pc_csg) &&
+             !(oe_has_mesh_b || oe_has_equilibrium || oe_has_const_b))
+      why = "no device B source (mesh / equilibrium / constant)";
     else if (pcache_need_mask & ~sup)
       why = "unsupported cache slots (gradients / E-field)";
     else if ((pcache_need_mask & (PCACHE_NI | PCACHE_VPAR)) &&
-             !oe_has_mesh_drag)
-      why = "mesh ni/upar fields absent";
-    else if (pdc && pdc->has_const_bfield())
-      why = "constant-B branch (device B chain is mesh/equilibrium only)";
+             !(oe_has_mesh_drag || oe_has_ras_drag))
+      why = "ni/upar fields absent (mesh and raster)";
     else if (oe_pc_csg &&
              !(oe_sheath_provider && d_oe_midx_gcell.data()))
       why = "sheath ne correction needs the device sheath cache";
@@ -2856,6 +2861,56 @@ int UpdateKokkos::split2d(int icell, double *x) const
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
+   OpenEdge: bind the fix provider's regular (R,Z) plasma raster (old
+   plasma.h5 layout) to device views. The CPU samples it with interp2D
+   wherever the triangle mesh is absent; the device kernels do the same
+   through RasterKokkos::sample. No-op when the provider has no raster.
+------------------------------------------------------------------------- */
+
+void UpdateKokkos::bind_oe_raster()
+{
+  oe_has_raster = oe_has_ras_drag = oe_has_ras_gradte = oe_has_ras_gradti = 0;
+  if (!pusher || pusher->pusher_plasma_fidx < 0) return;
+  FixBackground *pd = dynamic_cast<FixBackground*>(modify->fix[pusher->pusher_plasma_fidx]);
+  if (!pd) return;
+  const int nr = (int) pd->rvals.size(), nz = (int) pd->zvals.size();
+  if (nr < 2 || nz < 2) return;
+  const size_t n = (size_t) nr * nz;
+  if (pd->dens_e.size() != n || pd->temp_e.size() != n) return;
+  auto up = [&](DAT::t_float_1d &d, const std::vector<double> &v, const char *name) {
+    d = DAT::t_float_1d(Kokkos::view_alloc(std::string(name),Kokkos::WithoutInitializing),n);
+    auto h = Kokkos::create_mirror_view(d);
+    for (size_t k = 0; k < n; k++) h(k) = v[k];
+    Kokkos::deep_copy(d,h);
+  };
+  oe_ras_nr = nr; oe_ras_nz = nz;
+  oe_ras_r0 = pd->rvals[0]; oe_ras_dr = pd->rvals[1] - pd->rvals[0];
+  oe_ras_z0 = pd->zvals[0]; oe_ras_dz = pd->zvals[1] - pd->zvals[0];
+  up(d_oe_ras_te, pd->temp_e, "oe:ras_te");
+  up(d_oe_ras_ne, pd->dens_e, "oe:ras_ne");
+  if (pd->temp_i.size() == n) up(d_oe_ras_ti, pd->temp_i, "oe:ras_ti");
+  else up(d_oe_ras_ti, pd->temp_e, "oe:ras_ti");   // CPU: Ti falls back to Te
+  if (pd->dens_i.size() == n && pd->parr_flow.size() == n) {
+    up(d_oe_ras_ni, pd->dens_i, "oe:ras_ni");
+    up(d_oe_ras_vpar, pd->parr_flow, "oe:ras_vpar");
+    oe_has_ras_drag = 1;
+  }
+  if (pd->grad_te_r.size() == n && pd->grad_te_z.size() == n) {
+    up(d_oe_ras_gte_r, pd->grad_te_r, "oe:ras_gte_r"); up(d_oe_ras_gte_z, pd->grad_te_z, "oe:ras_gte_z");
+    oe_has_ras_gradte = 1;
+  }
+  if (pd->grad_ti_r.size() == n && pd->grad_ti_z.size() == n) {
+    up(d_oe_ras_gti_r, pd->grad_ti_r, "oe:ras_gti_r"); up(d_oe_ras_gti_z, pd->grad_ti_z, "oe:ras_gti_z");
+    oe_has_ras_gradti = 1;
+  }
+  oe_has_raster = 1;
+  if (comm->me == 0 && screen)
+    fprintf(screen,"  [kokkos] plasma raster bound: %dx%d (R,Z), drag %s, gradTe %s, gradTi %s\n",
+            nr, nz, oe_has_ras_drag ? "yes" : "no", oe_has_ras_gradte ? "yes" : "no",
+            oe_has_ras_gradti ? "yes" : "no");
+}
+
+/* ----------------------------------------------------------------------
    fix reflect/psi device binding. FixReflectPsi::init() sets
    update->psi_reflect_flag from modify->init(), which SPARTA runs AFTER
    update->init(); bind at run start (idempotent, cheap) instead.
@@ -5006,13 +5061,13 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
   // tri-constant plasma scalars (CPU mesh_cell_for at the particle
   // position; a miss = the CPU empty-structured-grid fallback = 0)
   double te = 0.0, ti = 0.0, ne = 0.0, ni = 0.0, vpar = 0.0;
-  const int tri = MeshKokkos::locate_tri_at_point(
+  const int tri = (oe_has_mesh_plasma && oe_mesh_ntri > 0) ? MeshKokkos::locate_tri_at_point(
       xq, oe_dim, oe_axisymmetric,
       d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
       d_oe_hash_offset, d_oe_hash_entries,
       oe_mesh_hash_rmin, oe_mesh_hash_zmin,
       oe_mesh_hash_dr,   oe_mesh_hash_dz,
-      oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri);
+      oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri) : -1;
   if (tri >= 0) {
     te = d_oe_mesh_tri_te(tri);
     ti = d_oe_mesh_tri_ti(tri);
@@ -5020,6 +5075,15 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
     if (oe_has_mesh_drag) {
       ni   = d_oe_mesh_tri_ni(tri);
       vpar = d_oe_mesh_tri_upar(tri);
+    }
+  } else if (oe_has_raster) {   // CPU: interp2D raster fallback outside / without the mesh
+    double R, Z; RasterKokkos::rz_of(xq, oe_dim, oe_axisymmetric, R, Z);
+    te = RasterKokkos::sample(d_oe_ras_te, oe_ras_r0, oe_ras_dr, oe_ras_nr, oe_ras_z0, oe_ras_dz, oe_ras_nz, R, Z);
+    ti = RasterKokkos::sample(d_oe_ras_ti, oe_ras_r0, oe_ras_dr, oe_ras_nr, oe_ras_z0, oe_ras_dz, oe_ras_nz, R, Z);
+    ne = RasterKokkos::sample(d_oe_ras_ne, oe_ras_r0, oe_ras_dr, oe_ras_nr, oe_ras_z0, oe_ras_dz, oe_ras_nz, R, Z);
+    if (oe_has_ras_drag) {
+      ni   = RasterKokkos::sample(d_oe_ras_ni,   oe_ras_r0, oe_ras_dr, oe_ras_nr, oe_ras_z0, oe_ras_dz, oe_ras_nz, R, Z);
+      vpar = RasterKokkos::sample(d_oe_ras_vpar, oe_ras_r0, oe_ras_dr, oe_ras_nr, oe_ras_z0, oe_ras_dz, oe_ras_nz, R, Z);
     }
   }
 
@@ -5054,7 +5118,9 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
             d_oe_equ_r, d_oe_equ_z, d_oe_equ_psi,
             oe_equ_btf, oe_equ_rtf, oe_equ_jm, oe_equ_km, B);
       }
+      got_B = true;
     }
+    if (!got_B) oe_const_bfield_slot(xq, B);   // constant-B provider
   }
 
   if (mask & PCACHE_TE)   d_pc_te(i)   = te;

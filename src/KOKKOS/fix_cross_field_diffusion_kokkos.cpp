@@ -19,6 +19,7 @@
 #include "update.h"
 #include "update_kokkos.h"
 #include "openedge_geom.h"
+#include "raster_kokkos.h"
 
 using namespace SPARTA_NS;
 
@@ -75,8 +76,6 @@ void FixCrossFieldDiffusionKokkos::init()
     device_ok = 0; why = "compute-source / constant-B fields (device is background-mesh only)";
   } else if (!dynamic_cast<UpdateKokkos *>(update)) {
     device_ok = 0; why = "no UpdateKokkos (host run)";
-  } else if (pd_ && pd_->has_const_bfield()) {
-    device_ok = 0; why = "constant-B branch (device B chain is mesh/equilibrium only)";
   } else if (have_grad_pinch_ && pd_ &&
              pd_->rvals.size() >= 2 && !pd_->dens_e.empty()) {
     // the CPU does per-particle FD on the structured raster there; on
@@ -134,11 +133,11 @@ void FixCrossFieldDiffusionKokkos::start_of_step()
   // the device mesh views are built at run() setup; check here
   int dev = device_ok;
   const char *why = nullptr;
-  if (dev && !update_kk->oe_has_mesh_b) {
-    dev = 0; why = "device mesh B views not built";
+  if (dev && !(update_kk->oe_has_mesh_b || update_kk->oe_has_equilibrium || update_kk->oe_has_const_b)) {
+    dev = 0; why = "no device B source (mesh / equilibrium / constant)";
   }
-  if (dev && diff_model_ == 2 && !update_kk->oe_has_mesh_plasma) {
-    dev = 0; why = "mesh te view absent (bohm model)";
+  if (dev && diff_model_ == 2 && !(update_kk->oe_has_mesh_plasma || update_kk->oe_has_raster)) {
+    dev = 0; why = "te source absent for the bohm model (mesh and raster)";
   }
   if (dev && have_psi_pinch_ && psi_ok_ && !update_kk->oe_has_equilibrium) {
     dev = 0; why = "equilibrium psi map not on device";
@@ -190,6 +189,14 @@ void FixCrossFieldDiffusionKokkos::start_of_step()
   d_tri_zmax = update_kk->d_oe_mesh_tri_zmax;
   if (update_kk->oe_has_mesh_plasma)
     d_tri_te = update_kk->d_oe_mesh_tri_te;
+  has_raster_ = update_kk->oe_has_raster;
+  ras_nr_ = update_kk->oe_ras_nr; ras_nz_ = update_kk->oe_ras_nz;
+  ras_r0_ = update_kk->oe_ras_r0; ras_dr_ = update_kk->oe_ras_dr;
+  ras_z0_ = update_kk->oe_ras_z0; ras_dz_ = update_kk->oe_ras_dz;
+  d_ras_te = update_kk->d_oe_ras_te;
+  has_const_b_ = update_kk->oe_has_const_b;
+  cb_br_ = update_kk->oe_const_br; cb_bz_ = update_kk->oe_const_bz; cb_bt_ = update_kk->oe_const_bt;
+  for (int k = 0; k < 3; k++) cb_bcart_[k] = update_kk->oe_const_bcart[k];
   d_hash_off = update_kk->d_oe_hash_offset;
   d_hash_ent = update_kk->d_oe_hash_entries;
   hash_rmin_ = update_kk->oe_mesh_hash_rmin;
@@ -261,6 +268,7 @@ void FixCrossFieldDiffusionKokkos::operator()(TagFixCrossFieldDiffusion,
           xq, dim_, axisym_, d_equ_r, d_equ_z, d_equ_psi,
           equ_btf_, equ_rtf_, equ_jm_, equ_km_, B);
   }
+  if (!got_B && !has_equ_) ConstBKokkos::slot(has_const_b_, dim_, axisym_, xq, cb_br_, cb_bz_, cb_bt_, cb_bcart_, B);
   const double Bmag = Kokkos::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
   if (Bmag < 1.0e-20) return;   // CPU skips everything, pinches included
 
@@ -270,11 +278,15 @@ void FixCrossFieldDiffusionKokkos::operator()(TagFixCrossFieldDiffusion,
     D_local = D_perp_;
   } else if (diff_model_ == 2) {
     double te = 0.0;
-    const int tri = MeshKokkos::locate_tri_at_point(
+    const int tri = (ntri_ > 0) ? MeshKokkos::locate_tri_at_point(
         xq, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
         d_hash_off, d_hash_ent, hash_rmin_, hash_zmin_,
-        hash_dr_, hash_dz_, hash_nr_, hash_nz_, ntri_);
-    if (tri >= 0) te = d_tri_te(tri);
+        hash_dr_, hash_dz_, hash_nr_, hash_nz_, ntri_) : -1;
+    if (tri >= 0 && d_tri_te.extent(0) > 0) te = d_tri_te(tri);
+    else if (has_raster_) {
+      double R, Z; RasterKokkos::rz_of(xq, dim_, axisym_, R, Z);
+      te = RasterKokkos::sample(d_ras_te, ras_r0_, ras_dr_, ras_nr_, ras_z0_, ras_dz_, ras_nz_, R, Z);
+    }
     if (te < 0.0) te = 0.0;
     D_local = bohm_scale_ * te / (16.0 * Bmag);
   }

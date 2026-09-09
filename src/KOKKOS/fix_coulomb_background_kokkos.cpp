@@ -22,6 +22,7 @@
 #include "update.h"
 #include "pusher.h"
 #include "update_kokkos.h"
+#include "raster_kokkos.h"
 
 using namespace SPARTA_NS;
 
@@ -78,14 +79,9 @@ void FixCoulombBackgroundKokkos::init()
     device_ok = 0; why = "compute-source plasma (device is background-mesh only)";
   } else if (do_binary_) {
     device_ok = 0; why = "binary mode (device is background-drag only)";
-  } else if (pd_ && pd_->has_const_bfield()) {
-    device_ok = 0; why = "constant-B branch (device B chain is mesh/equilibrium only)";
-  } else if (pd_ && (!pd_->dens_e.empty() || !pd_->dens_i.empty())) {
-    // old plasma.h5 with a regular (R,Z) raster (or constant mode): the
-    // CPU falls back to bilinear raster interp outside the mesh
-    // footprint; the device zeroes there -> stay on the host
-    device_ok = 0; why = "structured-grid plasma raster (device is mesh-only)";
   }
+  // (constant-B and regular-raster providers are handled on the device
+  //  since 2026-09-09: RasterKokkos / ConstBKokkos)
 
   UpdateKokkos *update_kk = dynamic_cast<UpdateKokkos *>(update);
   if (device_ok && !update_kk) {
@@ -133,11 +129,14 @@ void FixCoulombBackgroundKokkos::end_of_step()
   // (not in init, which runs before UpdateKokkos::run's setup)
   int dev = device_ok;
   const char *why = nullptr;
-  if (dev && (!update_kk->oe_has_mesh_b || !update_kk->oe_has_mesh_plasma)) {
-    dev = 0; why = "device mesh B/plasma views not built";
+  if (dev && !(update_kk->oe_has_mesh_plasma || update_kk->oe_has_raster)) {
+    dev = 0; why = "no device plasma source (mesh views or raster)";
   }
-  if (dev && !update_kk->oe_has_mesh_drag) {
-    dev = 0; why = "plasma file lacks mesh ni/upar fields";
+  if (dev && !(update_kk->oe_has_mesh_b || update_kk->oe_has_equilibrium || update_kk->oe_has_const_b)) {
+    dev = 0; why = "no device B source (mesh / equilibrium / constant)";
+  }
+  if (dev && !(update_kk->oe_has_mesh_drag || update_kk->oe_has_ras_drag)) {
+    dev = 0; why = "plasma file lacks ni/upar fields (mesh and raster)";
   }
 
   if (!dev) {
@@ -189,6 +188,15 @@ void FixCoulombBackgroundKokkos::end_of_step()
   d_tri_ne   = update_kk->d_oe_mesh_tri_ne;
   d_tri_ni   = update_kk->d_oe_mesh_tri_ni;
   d_tri_upar = update_kk->d_oe_mesh_tri_upar;
+  has_raster_ = update_kk->oe_has_raster; has_ras_drag_ = update_kk->oe_has_ras_drag;
+  ras_nr_ = update_kk->oe_ras_nr; ras_nz_ = update_kk->oe_ras_nz;
+  ras_r0_ = update_kk->oe_ras_r0; ras_dr_ = update_kk->oe_ras_dr;
+  ras_z0_ = update_kk->oe_ras_z0; ras_dz_ = update_kk->oe_ras_dz;
+  d_ras_te = update_kk->d_oe_ras_te; d_ras_ti = update_kk->d_oe_ras_ti; d_ras_ne = update_kk->d_oe_ras_ne;
+  d_ras_ni = update_kk->d_oe_ras_ni; d_ras_vpar = update_kk->d_oe_ras_vpar;
+  has_const_b_ = update_kk->oe_has_const_b;
+  cb_br_ = update_kk->oe_const_br; cb_bz_ = update_kk->oe_const_bz; cb_bt_ = update_kk->oe_const_bt;
+  for (int k = 0; k < 3; k++) cb_bcart_[k] = update_kk->oe_const_bcart[k];
   d_tri_br   = update_kk->d_oe_mesh_tri_br;
   d_tri_bz   = update_kk->d_oe_mesh_tri_bz;
   d_tri_bt   = update_kk->d_oe_mesh_tri_bt;
@@ -269,18 +277,25 @@ void FixCoulombBackgroundKokkos::operator()(TagFixCoulombBg,
 
   // plasma at the particle position (tri-constant, mesh branch of
   // interp2D; a miss = CPU's empty-structured-grid fallback = zeros)
-  const int tri = MeshKokkos::locate_tri_at_point(
+  const int tri = (ntri_ > 0) ? MeshKokkos::locate_tri_at_point(
       xq, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
       d_hash_off, d_hash_ent, hash_rmin_, hash_zmin_,
-      hash_dr_, hash_dz_, hash_nr_, hash_nz_, ntri_);
+      hash_dr_, hash_dz_, hash_nr_, hash_nz_, ntri_) : -1;
 
   double Te_eV = 0.0, ne = 0.0, Ti_eV = 0.0, Ni_bg = 0.0, Vpar_bg = 0.0;
-  if (tri >= 0) {
+  if (tri >= 0 && d_tri_ni.extent(0) > 0) {
     Te_eV   = d_tri_te(tri) > 0.0 ? d_tri_te(tri) : 0.0;
     ne      = d_tri_ne(tri) > 0.0 ? d_tri_ne(tri) : 0.0;
     Ti_eV   = d_tri_ti(tri) > 0.0 ? d_tri_ti(tri) : 0.0;
     Ni_bg   = d_tri_ni(tri) > 0.0 ? d_tri_ni(tri) : 0.0;
     Vpar_bg = d_tri_upar(tri);
+  } else if (has_raster_ && has_ras_drag_) {   // CPU: interp2D raster fallback
+    double R, Z; RasterKokkos::rz_of(xq, dim_, axisym_, R, Z);
+    auto ras = [&](const DAT::t_float_1d &f) {
+      return RasterKokkos::sample(f, ras_r0_, ras_dr_, ras_nr_, ras_z0_, ras_dz_, ras_nz_, R, Z); };
+    Te_eV = Kokkos::fmax(ras(d_ras_te), 0.0); ne = Kokkos::fmax(ras(d_ras_ne), 0.0);
+    Ti_eV = Kokkos::fmax(ras(d_ras_ti), 0.0); Ni_bg = Kokkos::fmax(ras(d_ras_ni), 0.0);
+    Vpar_bg = ras(d_ras_vpar);
   }
 
   double B[3] = {0.0,0.0,0.0};
@@ -302,6 +317,7 @@ void FixCoulombBackgroundKokkos::operator()(TagFixCoulombBg,
           xq, dim_, axisym_, d_equ_r, d_equ_z, d_equ_psi,
           equ_btf_, equ_rtf_, equ_jm_, equ_km_, B);
   }
+  if (!gotB && !has_equ_) ConstBKokkos::slot(has_const_b_, dim_, axisym_, xq, cb_br_, cb_bz_, cb_bt_, cb_bcart_, B);
   const double Bx = B[0], By = B[1], Bz = B[2];
 
   if (Ni_bg <= 0.0 || Ti_eV <= 0.0) return;

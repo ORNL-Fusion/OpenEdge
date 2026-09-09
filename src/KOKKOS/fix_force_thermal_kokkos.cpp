@@ -25,6 +25,7 @@
 #include "update.h"
 #include "pusher.h"
 #include "update_kokkos.h"
+#include "raster_kokkos.h"
 
 using namespace SPARTA_NS;
 
@@ -66,18 +67,9 @@ void FixForceThermalKokkos::init()
     device_ok = 0; why = "compute-source fields (device is background-mesh only)";
   } else if (!dynamic_cast<UpdateKokkos *>(update)) {
     device_ok = 0; why = "no UpdateKokkos (host run)";
-  } else if (pd_ && pd_->has_const_bfield()) {
-    device_ok = 0; why = "constant-B branch (device B chain is mesh/equilibrium only)";
-  } else if (pd_ &&
-             ((have_elec_thermal_ && pd_->mesh_grad_te_r.empty() &&
-               !pd_->grad_te_r.empty()) ||
-              (have_ion_thermal_ && pd_->mesh_grad_ti_r.empty() &&
-               !pd_->grad_ti_r.empty()))) {
-    // CPU pd_grad falls back to bilinear interp on the regular (R,Z)
-    // grid when mesh gradients are absent; the device contributes 0
-    // for that family -> stay on the host for raster-gradient decks
-    device_ok = 0; why = "structured-grid gradients (device is mesh-only)";
   }
+  // (constant-B and regular-raster gradient providers are handled on the
+  //  device since 2026-09-09: RasterKokkos / ConstBKokkos)
 
   if (!device_ok) {
     if (comm->me == 0 && screen && !warned_fallback)
@@ -130,8 +122,8 @@ void FixForceThermalKokkos::kick_device(double dt_half)
 
   int dev = device_ok;
   const char *why = nullptr;
-  if (dev && !update_kk->oe_has_mesh_b) {
-    dev = 0; why = "device mesh B views not built";
+  if (dev && !(update_kk->oe_has_mesh_b || update_kk->oe_has_equilibrium || update_kk->oe_has_const_b)) {
+    dev = 0; why = "no device B source (mesh / equilibrium / constant)";
   }
 
   if (!dev) {
@@ -152,6 +144,16 @@ void FixForceThermalKokkos::kick_device(double dt_half)
   // absent (empty structured fallback); mirror with per-family flags
   use_gradte_ = have_elec_thermal_ && update_kk->oe_has_mesh_gradte;
   use_gradti_ = have_ion_thermal_  && update_kk->oe_has_mesh_gradti;
+  has_ras_gradte_ = have_elec_thermal_ && !use_gradte_ && update_kk->oe_has_ras_gradte;
+  has_ras_gradti_ = have_ion_thermal_  && !use_gradti_ && update_kk->oe_has_ras_gradti;
+  ras_nr_ = update_kk->oe_ras_nr; ras_nz_ = update_kk->oe_ras_nz;
+  ras_r0_ = update_kk->oe_ras_r0; ras_dr_ = update_kk->oe_ras_dr;
+  ras_z0_ = update_kk->oe_ras_z0; ras_dz_ = update_kk->oe_ras_dz;
+  d_ras_gte_r = update_kk->d_oe_ras_gte_r; d_ras_gte_z = update_kk->d_oe_ras_gte_z;
+  d_ras_gti_r = update_kk->d_oe_ras_gti_r; d_ras_gti_z = update_kk->d_oe_ras_gti_z;
+  has_const_b_ = update_kk->oe_has_const_b;
+  cb_br_ = update_kk->oe_const_br; cb_bz_ = update_kk->oe_const_bz; cb_bt_ = update_kk->oe_const_bt;
+  for (int k = 0; k < 3; k++) cb_bcart_[k] = update_kk->oe_const_bcart[k];
   if (!use_gradte_ && !use_gradti_) return;   // nothing to kick
 
   ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
@@ -379,6 +381,7 @@ void FixForceThermalKokkos::operator()(TagFixForceThermal,
           xq, dim_, axisym_, d_equ_r, d_equ_z, d_equ_psi,
           equ_btf_, equ_rtf_, equ_jm_, equ_km_, B);
   }
+  if (!gotB && !has_equ_) ConstBKokkos::slot(has_const_b_, dim_, axisym_, xq, cb_br_, cb_bz_, cb_bt_, cb_bcart_, B);
   const double Bmag =
       Kokkos::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
   if (Bmag < 1.0e-20) return;
@@ -415,6 +418,19 @@ void FixForceThermalKokkos::operator()(TagFixForceThermal,
     const double grad_par_Te =
         d_gter_cell(mc) * bhat_R_cyl + d_gtez_cell(mc) * bhat_Z_cyl;
     a_par += alpha_e_k_ * Z2 * echarge_ * grad_par_Te / m_Z;
+  }
+  if (has_ras_gradti_ || has_ras_gradte_) {   // CPU pd_grad: interp2D raster at the particle
+    double R, Z; RasterKokkos::rz_of(xq, dim_, axisym_, R, Z);
+    auto ras = [&](const DAT::t_float_1d &f) {
+      return RasterKokkos::sample(f, ras_r0_, ras_dr_, ras_nr_, ras_z0_, ras_dz_, ras_nz_, R, Z); };
+    if (has_ras_gradti_) {
+      const double grad_par_Ti = ras(d_ras_gti_r) * bhat_R_cyl + ras(d_ras_gti_z) * bhat_Z_cyl;
+      a_par += beta_i_k_ * Z2 * echarge_ * grad_par_Ti / m_Z;
+    }
+    if (has_ras_gradte_) {
+      const double grad_par_Te = ras(d_ras_gte_r) * bhat_R_cyl + ras(d_ras_gte_z) * bhat_Z_cyl;
+      a_par += alpha_e_k_ * Z2 * echarge_ * grad_par_Te / m_Z;
+    }
   }
 
   if (a_par == 0.0) return;
