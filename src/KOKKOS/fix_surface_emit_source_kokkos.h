@@ -88,6 +88,7 @@ class FixSurfaceEmitSourceKokkos : public FixSurfaceEmitSource,
   ParticleKokkos::DeviceCustom custom_;
   int pw_slot_;
   Kokkos::View<int, DeviceType> d_new_count;
+  Kokkos::View<int, Kokkos::HostSpace> h_newn_;   // persistent source for the async counter set
   Kokkos::View<int, DeviceType> d_nsingle;
 
   // ---- kernel scalars ----

@@ -671,7 +671,7 @@ void ParticleKokkos::grow(int nextra)
   if (target <= maxlocal) return;
 
   bigint newmax = maxlocal;
-  while (newmax < target) newmax += MAX(DELTA, newmax*0.1);
+  while (newmax < target) newmax += MAX(DELTA, newmax*0.1);   // (25% headroom tried 2026-09-09: 1000x crash bisect)
   int oldmax = maxlocal;
 
   if (newmax > MAXSMALLINT)

@@ -479,7 +479,9 @@ void FixVolumeChemAdasKokkos::end_of_step()
       particle->grow(particle->nlocal + ncap - particle->maxlocal);
     if (!d_new_count.data())
       d_new_count = Kokkos::View<int, DeviceType>("chem:newn");
-    Kokkos::deep_copy(DeviceType(),d_new_count, particle->nlocal);   // async
+    if (!h_cnt_.data()) h_cnt_ = Kokkos::View<int[2], Kokkos::HostSpace>("chem:cnt_host");
+    h_cnt_(0) = particle->nlocal;
+    Kokkos::deep_copy(DeviceType(),d_new_count, Kokkos::subview(h_cnt_,0));   // async view->view
     custom_  = particle_kk->device_custom();
     pw_slot_ = (pweight_index >= 0) ? particle->ewhich[pweight_index] : -1;
   }
@@ -533,6 +535,7 @@ void FixVolumeChemAdasKokkos::end_of_step()
   }
   if (!d_ev_count.data())
     d_ev_count = Kokkos::View<int,DeviceType>("chem:ev_count");
+  if (!h_cnt_.data()) h_cnt_ = Kokkos::View<int[2], Kokkos::HostSpace>("chem:cnt_host");
   Kokkos::deep_copy(DeviceType(),d_ev_count,0);   // async: same stream as the kernel
 
   // Phase B: hybrid/GCA pusher -> the kernel invalidates the stored GC
@@ -555,15 +558,18 @@ void FixVolumeChemAdasKokkos::end_of_step()
     copymode = 1;
     Kokkos::parallel_for(
         Kokkos::RangePolicy<DeviceType,TagFixChemAdas>(0,nlocal),*this);
-    Kokkos::fence();
-    copymode = 0;
+    copymode = 0;   // (no explicit fence: the counter readback below synchronizes)
   }
 
   particle_kk->modify(Device,PARTICLE_MASK);
   if (gca_valid_slot_ >= 0) particle_kk->modify(Device,CUSTOM_MASK);
+  // perf: both counters come back under a single fence
+  if (have_two_ && d_new_count.data())
+    Kokkos::deep_copy(DeviceType(), Kokkos::subview(h_cnt_,0), d_new_count);
+  Kokkos::deep_copy(DeviceType(), Kokkos::subview(h_cnt_,1), d_ev_count);
+  DeviceType().fence();
   if (have_two_ && d_new_count.data()) {
-    int nnew_total = 0;
-    Kokkos::deep_copy(nnew_total, d_new_count);
+    int nnew_total = h_cnt_(0);
     if (nnew_total > particle->nlocal) {
       particle->nlocal = nnew_total;
       particle->sorted = 0;                       // CPU drain parity
@@ -572,16 +578,23 @@ void FixVolumeChemAdasKokkos::end_of_step()
   }
 
   // ---- apply the rare events to the host tallies ----
-  int nev = 0;
-  Kokkos::deep_copy(nev,d_ev_count);
+  int nev = h_cnt_(1);
   if (nev > 0) {
-    auto h_ridx = Kokkos::create_mirror_view_and_copy(
-        Kokkos::HostSpace{}, Kokkos::subview(d_ev_ridx,std::make_pair(0,nev)));
-    auto h_cell = Kokkos::create_mirror_view_and_copy(
-        Kokkos::HostSpace{}, Kokkos::subview(d_ev_cell,std::make_pair(0,nev)));
-    auto h_vals = Kokkos::create_mirror_view_and_copy(
-        Kokkos::HostSpace{},
-        Kokkos::subview(d_ev_vals,std::make_pair(0,nev),Kokkos::ALL));
+    // perf: persistent host mirrors (grow-only), three async copies, one fence
+    // (was create_mirror_view_and_copy x3 = 3 host allocations + 3 fences per step)
+    if ((int) h_ev_ridx_.extent(0) < nev) {
+      const int ncap = (int) d_ev_ridx.extent(0);
+      h_ev_ridx_ = Kokkos::View<int*, Kokkos::HostSpace>(Kokkos::view_alloc("chem:ev_ridx_h",Kokkos::WithoutInitializing),ncap);
+      h_ev_cell_ = Kokkos::View<int*, Kokkos::HostSpace>(Kokkos::view_alloc("chem:ev_cell_h",Kokkos::WithoutInitializing),ncap);
+      h_ev_vals_ = Kokkos::View<double**, Kokkos::LayoutRight, Kokkos::HostSpace>(Kokkos::view_alloc("chem:ev_vals_h",Kokkos::WithoutInitializing),ncap,6);
+    }
+    auto h_ridx = Kokkos::subview(h_ev_ridx_,std::make_pair(0,nev));
+    auto h_cell = Kokkos::subview(h_ev_cell_,std::make_pair(0,nev));
+    auto h_vals = Kokkos::subview(h_ev_vals_,std::make_pair(0,nev),Kokkos::ALL);
+    Kokkos::deep_copy(DeviceType(), h_ridx, Kokkos::subview(d_ev_ridx,std::make_pair(0,nev)));
+    Kokkos::deep_copy(DeviceType(), h_cell, Kokkos::subview(d_ev_cell,std::make_pair(0,nev)));
+    Kokkos::deep_copy(DeviceType(), h_vals, Kokkos::subview(d_ev_vals,std::make_pair(0,nev),Kokkos::ALL));
+    DeviceType().fence();
 
     for (int e = 0; e < nev; e++) {
       const int ridx = h_ridx(e);

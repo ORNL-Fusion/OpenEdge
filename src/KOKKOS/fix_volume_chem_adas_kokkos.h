@@ -137,6 +137,10 @@ class FixVolumeChemAdasKokkos : public FixVolumeChemAdas, public KokkosBase {
   DAT::t_int_1d   d_ev_cell;      // event cell
   DAT::t_float_2d_lr d_ev_vals;   // 6 tally values (layout per output_mode)
   Kokkos::View<int, DeviceType> d_ev_count;
+  // perf: host-side readback buffers (persistent; see end_of_step)
+  Kokkos::View<int[2], Kokkos::HostSpace> h_cnt_;
+  Kokkos::View<int*, Kokkos::HostSpace> h_ev_ridx_, h_ev_cell_;
+  Kokkos::View<double**, Kokkos::LayoutRight, Kokkos::HostSpace> h_ev_vals_;
 
   void upload_static_tables();
   void build_nn_cell();
