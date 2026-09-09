@@ -448,7 +448,12 @@ void SurfReactSurfacePWIKokkos::tally_update()
   // sync_sigma (inside the base tally_update) re-derives the per-surf
   // conc every sigma_nevery steps; refresh the device copy before the
   // next move
-  if (conc_dev_on_ && update->ntimestep % sigma_nevery == 0) conc_dirty_ = 1;
+  // The move kernel reaches this object through a per-step COPY
+  // (sr_kk_pwi_copy in the collider), so upload_conc() clearing
+  // conc_dirty_ on the copy never reached the original and the conc table
+  // (nsurf x ncols doubles) was re-uploaded every move pass. Own the flag
+  // here, on the original: dirty only on the ledger-sync step.
+  if (conc_dev_on_) conc_dirty_ = (update->ntimestep % sigma_nevery == 0) ? 1 : 0;
 }
 
 /* ---------------------------------------------------------------------- */
