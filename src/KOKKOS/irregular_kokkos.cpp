@@ -351,7 +351,7 @@ void IrregularKokkos::exchange_uniform(DAT::t_char_1d d_sendbuf_in, int nbytes_i
   d_recvbuf = d_recvbuf_in;
 
   if (!sparta->kokkos->gpu_aware_flag &&
-      h_recvbuf.extent(0) != d_recvbuf.extent(0)) {
+      h_recvbuf.extent(0) < d_recvbuf.extent(0)) {   // OpenEdge perf: grow-only mirror
     h_recvbuf = HAT::t_char_1d(Kokkos::view_alloc("irregular:d_recvbuf:mirror",Kokkos::WithoutInitializing),d_recvbuf.extent(0));
   }
 
@@ -431,7 +431,17 @@ void IrregularKokkos::exchange_uniform(DAT::t_char_1d d_sendbuf_in, int nbytes_i
       DeviceType().fence();
       copymode = 0;
     } else { // unpack on host
-      auto h_sendbuf = Kokkos::create_mirror_view_and_copy(SPAHostType(),d_sendbuf);
+      // OpenEdge perf: persistent host mirror of the send buffer, copy only
+      // the bytes in use (was create_mirror_view_and_copy of the whole view
+      // every call: host alloc + full D2H per step)
+      bigint used_send = (bigint)num_self*nbytes;
+      for (int isend = 0; isend < nsend; isend++) used_send += (bigint)num_send[isend]*nbytes;
+      if (used_send > (bigint)d_sendbuf.extent(0)) used_send = d_sendbuf.extent(0);
+      if (h_sendbuf.extent(0) < d_sendbuf.extent(0))
+        h_sendbuf = HAT::t_char_1d(Kokkos::view_alloc("irregular:d_sendbuf:mirror",Kokkos::WithoutInitializing),d_sendbuf.extent(0));
+      if (used_send > 0)
+        Kokkos::deep_copy(Kokkos::subview(h_sendbuf,std::make_pair((bigint)0,used_send)),
+                          Kokkos::subview(d_sendbuf,std::make_pair((bigint)0,used_send)));
 
       k_index_self.sync_host();
 
@@ -449,7 +459,15 @@ void IrregularKokkos::exchange_uniform(DAT::t_char_1d d_sendbuf_in, int nbytes_i
 
   if (!sparta->kokkos->gpu_aware_flag)
     if (nrecv || num_self)
-      Kokkos::deep_copy(d_recvbuf,h_recvbuf);
+    {
+      // OpenEdge perf: H2D of the received bytes only (buffers are grow-only)
+      bigint used_recv = (bigint)num_self*nbytes;
+      for (int irecv = 0; irecv < nrecv; irecv++) used_recv += (bigint)num_recv[irecv]*nbytes;
+      if (used_recv > (bigint)d_recvbuf.extent(0)) used_recv = d_recvbuf.extent(0);
+      if (used_recv > 0)
+        Kokkos::deep_copy(Kokkos::subview(d_recvbuf,std::make_pair((bigint)0,used_recv)),
+                          Kokkos::subview(h_recvbuf,std::make_pair((bigint)0,used_recv)));
+  }
 }
 
 KOKKOS_INLINE_FUNCTION

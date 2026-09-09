@@ -54,6 +54,7 @@ class IrregularKokkos : public Irregular {
   DAT::t_char_1d d_recvbuf;
   DAT::t_char_1d d_buf;
   HAT::t_char_1d h_recvbuf;
+  HAT::t_char_1d h_sendbuf;     // OpenEdge perf: persistent self-unpack mirror
   HAT::t_char_1d h_buf;
   int nbytes;
 };

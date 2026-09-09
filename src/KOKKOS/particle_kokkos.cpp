@@ -287,6 +287,48 @@ void ParticleKokkos::sort_kokkos()
       //d_sorted = tmp;
       Kokkos::deep_copy(d_particles,d_sorted);
 
+      // OpenEdge: the sort permutes the particle array only; every custom
+      // attribute (pweight, plasma cache, GC state, sheath ledgers, ...)
+      // must follow the same permutation d_sorted_id or it silently
+      // misaligns (seen as +10% particles / +17% ionization at 1000x with
+      // global particle/reorder 100). Gather each custom by d_sorted_id.
+      if (ncustom) {
+        sync(Device,CUSTOM_MASK);
+        auto perm = d_sorted_id;
+        const int n = nlocal;
+        for (int m = 0; m < ncustom_ivec; m++) {
+          auto v = k_eivec.h_view[m].k_view.d_view;
+          if ((int) v.extent(0) < n) continue;
+          DAT::t_int_1d tmp(Kokkos::view_alloc("particle:sort_tmp_i",Kokkos::WithoutInitializing),n);
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { tmp(i) = v(perm(i)); });
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { v(i) = tmp(i); });
+        }
+        for (int m = 0; m < ncustom_dvec; m++) {
+          auto v = k_edvec.h_view[m].k_view.d_view;
+          if ((int) v.extent(0) < n) continue;
+          DAT::t_float_1d tmp(Kokkos::view_alloc("particle:sort_tmp_d",Kokkos::WithoutInitializing),n);
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { tmp(i) = v(perm(i)); });
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { v(i) = tmp(i); });
+        }
+        for (int m = 0; m < ncustom_iarray; m++) {
+          auto v = k_eiarray.h_view[m].k_view.d_view;
+          if ((int) v.extent(0) < n) continue;
+          const int nc = (int) v.extent(1);
+          DAT::t_int_2d_lr tmp(Kokkos::view_alloc("particle:sort_tmp_ia",Kokkos::WithoutInitializing),n,nc);
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { for (int c = 0; c < nc; c++) tmp(i,c) = v(perm(i),c); });
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { for (int c = 0; c < nc; c++) v(i,c) = tmp(i,c); });
+        }
+        for (int m = 0; m < ncustom_darray; m++) {
+          auto v = k_edarray.h_view[m].k_view.d_view;
+          if ((int) v.extent(0) < n) continue;
+          const int nc = (int) v.extent(1);
+          DAT::t_float_2d_lr tmp(Kokkos::view_alloc("particle:sort_tmp_da",Kokkos::WithoutInitializing),n,nc);
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { for (int c = 0; c < nc; c++) tmp(i,c) = v(perm(i),c); });
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { for (int c = 0; c < nc; c++) v(i,c) = tmp(i,c); });
+        }
+        modify(Device,CUSTOM_MASK);
+      }
+
       this->modify(Device,PARTICLE_MASK);
     }
     else if (reorder_scheme == FIXEDMEMORY) {

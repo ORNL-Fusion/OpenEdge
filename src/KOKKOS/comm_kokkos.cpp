@@ -118,7 +118,9 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
   //if (maxsendbuf == 0 || nmigrate*nbytes_total > maxsendbuf) { // this doesn't work, not sure why
 
     bigint maxsendbuf = (bigint)nmigrate*nbytes_total;
-    if (maxsendbuf > bigint(d_sbuf.extent(0)) || !gpu_aware_flag)
+    // OpenEdge perf: grow-only (upstream re-allocated every call without
+    // GPU-aware MPI: 1 cudaMalloc+cudaFree per migrate = per step)
+    if (maxsendbuf > bigint(d_sbuf.extent(0)))
       d_sbuf = DAT::t_char_1d(Kokkos::view_alloc("comm:sbuf",Kokkos::WithoutInitializing),maxsendbuf);
   //}
 
@@ -229,7 +231,8 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
     // allocate exact buffer size to reduce GPU <--> CPU memory transfer
 
     bigint maxrecvbuf = (bigint)nrecv*nbytes_total;
-    d_rbuf = DAT::t_char_1d(Kokkos::view_alloc("comm:rbuf",Kokkos::WithoutInitializing),maxrecvbuf);
+    if (maxrecvbuf > bigint(d_rbuf.extent(0)))   // OpenEdge perf: grow-only
+      d_rbuf = DAT::t_char_1d(Kokkos::view_alloc("comm:rbuf",Kokkos::WithoutInitializing),maxrecvbuf);
 
     nlocal = particle->nlocal;
     iparticle_kk->exchange_uniform(d_sbuf,nbytes_total,(char *)d_rbuf.data(),d_rbuf);

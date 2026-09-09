@@ -4803,9 +4803,12 @@ void UpdateKokkos::backup()
 {
   ParticleKokkos* particle_kk = (ParticleKokkos*) particle;
   d_particles = particle_kk->k_particles.view_device();
-  d_particles_backup = decltype(d_particles)(Kokkos::view_alloc("update:particles_backup",Kokkos::WithoutInitializing),d_particles.extent(0));
+  // OpenEdge perf: grow-only (was a fresh allocation every move pass)
+  if (d_particles_backup.extent(0) < d_particles.extent(0))
+    d_particles_backup = decltype(d_particles)(Kokkos::view_alloc("update:particles_backup",Kokkos::WithoutInitializing),d_particles.extent(0));
 
-  Kokkos::deep_copy(d_particles_backup,d_particles);
+  Kokkos::deep_copy(Kokkos::subview(d_particles_backup,
+                      std::make_pair((size_t)0,d_particles.extent(0))),d_particles);
 
   // OpenEdge Phase D: the move kernel writes the spatial-sheath customs
   // (bank/phiprev); snapshot them so a react/retry replay starts from
@@ -4860,7 +4863,12 @@ void UpdateKokkos::backup()
 void UpdateKokkos::restore()
 {
   ParticleKokkos* particle_kk = (ParticleKokkos*) particle;
-  Kokkos::deep_copy(particle_kk->k_particles.view_device(),d_particles_backup);
+  {
+    auto d_cur = particle_kk->k_particles.view_device();
+    const size_t n = d_cur.extent(0) < d_particles_backup.extent(0) ? d_cur.extent(0) : d_particles_backup.extent(0);
+    Kokkos::deep_copy(Kokkos::subview(d_cur,std::make_pair((size_t)0,n)),
+                      Kokkos::subview(d_particles_backup,std::make_pair((size_t)0,n)));
+  }
   d_particles = particle_kk->k_particles.view_device();
 
   // OpenEdge Phase D: roll the spatial-sheath customs back with the
@@ -4894,7 +4902,7 @@ void UpdateKokkos::restore()
 
   // deallocate references to reduce memory use
 
-  d_particles_backup = {};
+  // (backup view kept allocated; see backup())
 }
 
 /* ----------------------------------------------------------------------
