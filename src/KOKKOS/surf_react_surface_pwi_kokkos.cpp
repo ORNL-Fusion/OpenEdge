@@ -560,12 +560,12 @@ void SurfReactSurfacePWIKokkos::backup()
   custom_ = particle_kk->device_custom();
   pw_slot = (pweight_ewhich >= 0) ? particle->ewhich[pweight_ewhich] : -1;
 
-  Kokkos::deep_copy(d_scalars_bak,d_scalars);
+  Kokkos::deep_copy(DeviceType(),d_scalars_bak,d_scalars);
   if (sigma_on) {
-    Kokkos::deep_copy(d_sigma_bak,d_sigma_delta);
-    Kokkos::deep_copy(d_dep_bak,d_dep_delta);
+    Kokkos::deep_copy(DeviceType(),d_sigma_bak,d_sigma_delta);
+    Kokkos::deep_copy(DeviceType(),d_dep_bak,d_dep_delta);
   }
-  if (ehist_on) Kokkos::deep_copy(d_ehist_bak,d_ehist_delta);
+  if (ehist_on) Kokkos::deep_copy(DeviceType(),d_ehist_bak,d_ehist_delta);
 
 #ifdef SPARTA_KOKKOS_EXACT
   if (!random_backup)
@@ -576,12 +576,12 @@ void SurfReactSurfacePWIKokkos::backup()
 
 void SurfReactSurfacePWIKokkos::restore()
 {
-  Kokkos::deep_copy(d_scalars,d_scalars_bak);
+  Kokkos::deep_copy(DeviceType(),d_scalars,d_scalars_bak);
   if (sigma_on) {
-    Kokkos::deep_copy(d_sigma_delta,d_sigma_bak);
-    Kokkos::deep_copy(d_dep_delta,d_dep_bak);
+    Kokkos::deep_copy(DeviceType(),d_sigma_delta,d_sigma_bak);
+    Kokkos::deep_copy(DeviceType(),d_dep_delta,d_dep_bak);
   }
-  if (ehist_on) Kokkos::deep_copy(d_ehist_delta,d_ehist_bak);
+  if (ehist_on) Kokkos::deep_copy(DeviceType(),d_ehist_delta,d_ehist_bak);
 
 #ifdef SPARTA_KOKKOS_EXACT
   memcpy(random,random_backup,sizeof(RanKnuth));

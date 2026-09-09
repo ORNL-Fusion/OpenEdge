@@ -479,7 +479,7 @@ void FixVolumeChemAdasKokkos::end_of_step()
       particle->grow(particle->nlocal + ncap - particle->maxlocal);
     if (!d_new_count.data())
       d_new_count = Kokkos::View<int, DeviceType>("chem:newn");
-    Kokkos::deep_copy(d_new_count, particle->nlocal);
+    Kokkos::deep_copy(DeviceType(),d_new_count, particle->nlocal);   // async
     custom_  = particle_kk->device_custom();
     pw_slot_ = (pweight_index >= 0) ? particle->ewhich[pweight_index] : -1;
   }
@@ -521,16 +521,19 @@ void FixVolumeChemAdasKokkos::end_of_step()
 
   // event buffers: hard bound of one event per particle
   if ((int) d_ev_ridx.extent(0) < nlocal) {
+    // perf: grow with headroom (was exact nlocal -> 3 cudaMalloc per step
+    // while emission keeps adding particles)
+    const int ncap = nlocal + nlocal/4 + 1024;
     d_ev_ridx = DAT::t_int_1d(
-        Kokkos::view_alloc("chem:ev_ridx",Kokkos::WithoutInitializing),nlocal);
+        Kokkos::view_alloc("chem:ev_ridx",Kokkos::WithoutInitializing),ncap);
     d_ev_cell = DAT::t_int_1d(
-        Kokkos::view_alloc("chem:ev_cell",Kokkos::WithoutInitializing),nlocal);
+        Kokkos::view_alloc("chem:ev_cell",Kokkos::WithoutInitializing),ncap);
     d_ev_vals = DAT::t_float_2d_lr(
-        Kokkos::view_alloc("chem:ev_vals",Kokkos::WithoutInitializing),nlocal,6);
+        Kokkos::view_alloc("chem:ev_vals",Kokkos::WithoutInitializing),ncap,6);
   }
   if (!d_ev_count.data())
     d_ev_count = Kokkos::View<int,DeviceType>("chem:ev_count");
-  Kokkos::deep_copy(d_ev_count,0);
+  Kokkos::deep_copy(DeviceType(),d_ev_count,0);   // async: same stream as the kernel
 
   // Phase B: hybrid/GCA pusher -> the kernel invalidates the stored GC
   // state on a species change; bind the custom views unconditionally

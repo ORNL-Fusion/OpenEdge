@@ -299,7 +299,7 @@ void SurfCollideDiffuseKokkos::pre_collide()
   vibstyle = NONE;
   if (Pointers::collide) vibstyle = Pointers::collide->vibstyle;
 
-  Kokkos::deep_copy(d_scalars,0);
+  Kokkos::deep_copy(DeviceType(),d_scalars,0);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -387,7 +387,7 @@ void SurfCollideDiffuseKokkos::restore()
     }
   }
 
-  Kokkos::deep_copy(d_scalars,0);
+  Kokkos::deep_copy(DeviceType(),d_scalars,0);
 
 #ifdef SPARTA_KOKKOS_EXACT
   memcpy(random,random_backup,sizeof(RanKnuth));

@@ -39,12 +39,15 @@ using namespace SPARTA_NS;
 // volume/chem/* -> Chem, rest -> Modify. Device fixes are fenced before
 // the stamp so their asynchronous kernels are charged to their own bucket
 // instead of the next synchronization point.
-static inline void stamp_fix_bucket_kk(Timer *timer, Fix *f)
+static inline void stamp_fix_bucket_kk(Timer *timer, Fix *f, bool detail)
 {
   int which = TIME_MODIFY;
   if (strstr(f->style,"coulomb")) which = TIME_COLLIDE;
   else if (strstr(f->style,"volume/chem")) which = TIME_CHEM;
-  if (which != TIME_MODIFY && f->kokkos_flag) Kokkos::fence();
+  // perf: the attribution fence is only worth its cost when per-fix timing
+  // detail is requested (OE_FIX_TIMING); otherwise the async kernel is
+  // charged to the next synchronization point
+  if (detail && which != TIME_MODIFY && f->kokkos_flag) Kokkos::fence();
   timer->stamp(which);
 }
 
@@ -106,7 +109,7 @@ void ModifyKokkos::start_of_step()
     particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
     if (ft) { Kokkos::fence(); fix_time_start[j] += MPI_Wtime() - t0;
               fix_calls_start[j]++; }
-    stamp_fix_bucket_kk(timer,fix[j]);
+    stamp_fix_bucket_kk(timer,fix[j],ft);
   }
   if (ft) fix_wall_start += MPI_Wtime() - tw;
 }
@@ -140,7 +143,7 @@ void ModifyKokkos::end_of_step()
       particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
       if (ft) { Kokkos::fence(); fix_time_end[j] += MPI_Wtime() - t0;
                 fix_calls_end[j]++; }
-      stamp_fix_bucket_kk(timer,fix[j]);
+      stamp_fix_bucket_kk(timer,fix[j],ft);
     }
   if (ft) fix_wall_end += MPI_Wtime() - tw;
   if (ft && update->ntimestep % fix_timing_every == 0) fix_timing_report();

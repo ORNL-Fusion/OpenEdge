@@ -4807,8 +4807,8 @@ void UpdateKokkos::backup()
   if (d_particles_backup.extent(0) < d_particles.extent(0))
     d_particles_backup = decltype(d_particles)(Kokkos::view_alloc("update:particles_backup",Kokkos::WithoutInitializing),d_particles.extent(0));
 
-  Kokkos::deep_copy(Kokkos::subview(d_particles_backup,
-                      std::make_pair((size_t)0,d_particles.extent(0))),d_particles);
+  Kokkos::deep_copy(DeviceType(),Kokkos::subview(d_particles_backup,
+                      std::make_pair((size_t)0,d_particles.extent(0))),d_particles);   // async D2D
 
   // OpenEdge Phase D: the move kernel writes the spatial-sheath customs
   // (bank/phiprev); snapshot them so a react/retry replay starts from
@@ -4946,7 +4946,7 @@ void UpdateKokkos::cache_plasma_particles_device()
   oe_pc_ncells = grid->nlocal + grid->nghost;
   if (!d_pc_diag.data())
     d_pc_diag = Kokkos::View<int[6], DeviceType>("oe_pc_diag");
-  Kokkos::deep_copy(d_pc_diag, 0);
+  Kokkos::deep_copy(DeviceType(),d_pc_diag, 0);   // async
 
   // bind the masked custom slots fresh each call (grow_custom-safe)
   auto edvec = [&](int cidx) -> DAT::t_float_1d {
@@ -4973,7 +4973,7 @@ void UpdateKokkos::cache_plasma_particles_device()
 
   // one-line diagnostic when a validity guard fired (would have been an
   // OOB read before the guards); print once per run
-  {
+  if (!oe_pc_diag_warned && (ntimestep % 100 == 0 || ntimestep <= 2)) {   // perf: tripwire read every 100 steps
     int h[6];
     auto hv = Kokkos::create_mirror_view(d_pc_diag);
     Kokkos::deep_copy(hv, d_pc_diag);

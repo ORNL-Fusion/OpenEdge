@@ -158,7 +158,7 @@ void SurfCollidePistonKokkos::pre_collide()
   particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK);
   d_particles = particle_kk->k_particles.view_device();
 
-  Kokkos::deep_copy(d_scalars,0);
+  Kokkos::deep_copy(DeviceType(),d_scalars,0);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -216,5 +216,5 @@ void SurfCollidePistonKokkos::restore()
     }
   }
 
-  Kokkos::deep_copy(d_scalars,0);
+  Kokkos::deep_copy(DeviceType(),d_scalars,0);
 }

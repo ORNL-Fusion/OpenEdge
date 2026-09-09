@@ -41,7 +41,7 @@ SurfCollideToroidalKokkos::SurfCollideToroidalKokkos(SPARTA *sparta) :
 
 void SurfCollideToroidalKokkos::pre_collide()
 {
-  Kokkos::deep_copy(d_nsingle,0);
+  Kokkos::deep_copy(DeviceType(),d_nsingle,0);
 }
 
 /* ---------------------------------------------------------------------- */

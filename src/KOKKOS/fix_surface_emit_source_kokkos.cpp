@@ -326,8 +326,8 @@ void FixSurfaceEmitSourceKokkos::perform_task()
     d_new_count = Kokkos::View<int, DeviceType>("emit:newn");
     d_nsingle   = Kokkos::View<int, DeviceType>("emit:nsingle");
   }
-  Kokkos::deep_copy(d_new_count, particle->nlocal);
-  Kokkos::deep_copy(d_nsingle, 0);
+  Kokkos::deep_copy(DeviceType(),d_new_count, particle->nlocal);   // async
+  Kokkos::deep_copy(DeviceType(),d_nsingle, 0);
 
   copymode = 1;
   Kokkos::parallel_for(
