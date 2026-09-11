@@ -173,17 +173,31 @@ void ParticleKokkos::grow_custom(int index, int nold, int nnew)
         : k_edarray.view_host()[ewhich[index]].k_view.need_sync_device();
   }
   auto restore_host = [&](auto &kv) {
-    if (host_live) {
-      Kokkos::deep_copy(kv.view_host(),kv.view_device());
-      kv.clear_sync_state();
-    }
+    // DualView::resize leaves a fresh, zero host mirror flagged "device
+    // newer". Under auto_sync a later blanket modify(Host) (see
+    // ParticleKokkos::sync) would push that zero mirror over the device
+    // data, so keep both sides identical after every resize.
+    (void) host_live;
+    Kokkos::deep_copy(kv.view_host(),kv.view_device());
+    kv.clear_sync_state();
   };
 
   if (sparta->kokkos->prewrap) {
     sync(Host,CUSTOM_MASK);
     modify(Host,CUSTOM_MASK);
-  } else
-    sync(Device,CUSTOM_MASK);
+  } else {
+    // sync only THIS vector, honouring its own DualView flags. The former
+    // sync(Device,CUSTOM_MASK) under auto_sync marked every custom vector
+    // host-modified and pushed stale or freshly zeroed host mirrors over
+    // the device copies (GPU pweight wipe, 2026-09-11 -50 mm audit).
+    if (etype[index] == INT) {
+      if (esize[index] == 0) k_eivec.view_host()[ewhich[index]].k_view.sync_device();
+      else k_eiarray.view_host()[ewhich[index]].k_view.sync_device();
+    } else {
+      if (esize[index] == 0) k_edvec.view_host()[ewhich[index]].k_view.sync_device();
+      else k_edarray.view_host()[ewhich[index]].k_view.sync_device();
+    }
+  }
 
   if (etype[index] == INT) {
     if (esize[index] == 0) {

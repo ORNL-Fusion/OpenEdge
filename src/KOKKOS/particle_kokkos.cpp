@@ -692,7 +692,10 @@ void ParticleKokkos::grow(int nextra)
     this->sync(Device,PARTICLE_MASK);
     Kokkos::resize(Kokkos::view_alloc(Kokkos::WithoutInitializing),
                    k_particles,maxlocal);
-    if (host_live) {
+    // under auto_sync the host copy may be edited without being flagged
+    // (host-side fix) and a blanket modify(Host) may follow: keep the host
+    // mirror identical to the device after the resize (2026-09-11 audit)
+    if (host_live || sparta->kokkos->auto_sync) {
       Kokkos::deep_copy(k_particles.view_host(),k_particles.view_device());
       k_particles.clear_sync_state();
     } else {
