@@ -4,3 +4,4 @@ state.restart
 log.*
 screen.*
 *.log
+state_surf.restart
