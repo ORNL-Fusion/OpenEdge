@@ -37,6 +37,13 @@ class Irregular : protected Pointers {
   void exchange_variable(char *, int *, char *);
   void reverse(int, int *);
 
+  // read-only view of the receive side of the current plan (OpenEdge: the
+  // Kokkos cell migration decodes received particles by source proc)
+  int recv_nprocs() const { return nrecv; }
+  const int *recv_procs() const { return proc_recv; }
+  const int *recv_nums() const { return num_recv; }
+  int self_count() const { return num_self; }
+
  protected:
   int me,nprocs;
 

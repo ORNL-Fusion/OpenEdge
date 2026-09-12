@@ -36,6 +36,7 @@ class CommKokkos : public Comm {
   ~CommKokkos();
   int migrate_particles(int, int*, const DAT::t_int_1d &);
   void migrate_cells(int);
+  int cell_migration_device() const;   // 1 = migrate_cells moves particles on the device
 
   template<int NEED_ATOMICS, int HAVE_CUSTOM>
   KOKKOS_INLINE_FUNCTION
@@ -65,6 +66,9 @@ class CommKokkos : public Comm {
   DAT::t_int_1d d_plist;
   DAT::t_int_1d d_pproc;
   HAT::t_int_1d h_pproc;
+  DAT::t_int_1d d_cellmig_plist;       // particles in migrating cells (device cell migration)
+  class Irregular *ibalance;           // own comm plan for the rebalance migration (never the per-step neighbor plan)
+  void migrate_cells_only(int, int *);
   DAT::t_char_1d d_sbuf;
   DAT::t_char_1d d_rbuf;
 
