@@ -202,6 +202,7 @@ KokkosSPARTA::KokkosSPARTA(SPARTA *sparta, int narg, char **arg) : Pointers(spar
   react_retry_flag = 0;
   react_extra = 1.1;
   fallback_strict = getenv("OE_KK_STRICT") ? 1 : 0;
+  checksync = getenv("OE_KK_CHECKSYNC") ? atoi(getenv("OE_KK_CHECKSYNC")) : 0;
 
   // finalize Kokkos on abort
 
@@ -248,6 +249,13 @@ void KokkosSPARTA::accelerator(int narg, char **arg)
       if (iarg+2 > narg) error->all(FLERR,"Illegal package kokkos command");
       if (strcmp(arg[iarg+1],"warn") == 0) fallback_strict = 0;
       else if (strcmp(arg[iarg+1],"error") == 0) fallback_strict = 1;
+      else error->all(FLERR,"Illegal package kokkos command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"checksync") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal package kokkos command");
+      if (strcmp(arg[iarg+1],"off") == 0) checksync = 0;
+      else if (strcmp(arg[iarg+1],"warn") == 0) checksync = 1;
+      else if (strcmp(arg[iarg+1],"error") == 0) checksync = 2;
       else error->all(FLERR,"Illegal package kokkos command");
       iarg += 2;
     } else if (strcmp(arg[iarg],"react/extra") == 0) {
@@ -300,17 +308,49 @@ void KokkosSPARTA::note_fallback(const char *who, const char *why)
    total host calls over ranks, ranks affected, step range, first reason
 ------------------------------------------------------------------------- */
 
+void KokkosSPARTA::note_sync_conflict(const char *what, const char *space)
+{
+  if (!checksync) return;
+  const long step = (long) update->ntimestep;
+  std::string who = std::string(what) + " modify(" + space + ")";
+  for (auto &e : conflicts) {
+    if (e.who == who) { e.count++; e.last = step; goto strict; }
+  }
+  { FallbackEntry e; e.who = who; e.why = "other space held newer data"; e.count = 1; e.first = e.last = step; conflicts.push_back(e); }
+ strict:
+  if (checksync >= 2) {
+    char msg[512];
+    snprintf(msg,sizeof(msg),"Kokkos sync conflict: %s while the other memory space holds newer data (package kokkos checksync error)",who.c_str());
+    error->one(FLERR,msg);
+  }
+}
+
 void KokkosSPARTA::fallback_report(FILE *screen, FILE *logfile)
+{
+  ledger_report(fallbacks,"Kokkos host fallbacks this run (host calls summed over ranks):",
+                "Kokkos host fallbacks this run: none",screen,logfile);
+  if (checksync)
+    ledger_report(conflicts,"Kokkos DualView sync conflicts this run (data of the newer space was overwritten):",
+                  "Kokkos DualView sync conflicts this run: none",screen,logfile);
+}
+
+/* ----------------------------------------------------------------------
+   gather every rank's ledger to rank 0 and print one line per entry:
+   total calls over ranks, ranks affected, step range, first reason
+------------------------------------------------------------------------- */
+
+void KokkosSPARTA::ledger_report(std::vector<FallbackEntry> &ledger, const char *title,
+                                 const char *none, FILE *screen, FILE *logfile)
 {
   int me,nprocs;
   MPI_Comm_rank(world,&me);
   MPI_Comm_size(world,&nprocs);
 
   std::string mine;
-  for (auto &e : fallbacks)
+  for (auto &e : ledger)
     mine += e.who + "\t" + e.why + "\t" + std::to_string(e.count) + "\t" +
             std::to_string(e.first) + "\t" + std::to_string(e.last) + "\n";
-  fallbacks.clear();
+  ledger.clear();
 
   int n = (int) mine.size();
   std::vector<int> counts(nprocs),displs(nprocs);
@@ -343,8 +383,8 @@ void KokkosSPARTA::fallback_report(FILE *screen, FILE *logfile)
   FILE *outs[2] = {screen,logfile};
   for (FILE *out : outs) {
     if (!out) continue;
-    if (order.empty()) { fprintf(out,"Kokkos host fallbacks this run: none\n"); continue; }
-    fprintf(out,"Kokkos host fallbacks this run (host calls summed over ranks):\n");
+    if (order.empty()) { fprintf(out,"%s\n",none); continue; }
+    fprintf(out,"%s\n",title);
     for (auto &who : order) {
       Agg &a = agg[who];
       fprintf(out,"  %-34s calls %-9ld ranks %d/%d  steps %ld-%ld  %s\n",

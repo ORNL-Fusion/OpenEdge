@@ -848,6 +848,24 @@ void ParticleKokkos::sync(ExecutionSpace space, unsigned int mask)
 
 void ParticleKokkos::modify(ExecutionSpace space, unsigned int mask)
 {
+  // OpenEdge: marking one space modified while the other already holds
+  // newer data overwrites that data at the next sync (OE_KK_CHECKSYNC)
+  if (sparta->kokkos->checksync) {
+    const bool dev = (space == Device);
+    if ((mask & PARTICLE_MASK) && (dev ? k_particles.need_sync_device() : k_particles.need_sync_host()))
+      sparta->kokkos->note_sync_conflict("particles",dev ? "Device" : "Host");
+    if ((mask & SPECIES_MASK) && (dev ? k_species.need_sync_device() : k_species.need_sync_host()))
+      sparta->kokkos->note_sync_conflict("species",dev ? "Device" : "Host");
+    if ((mask & CUSTOM_MASK) && ncustom) {
+      int bad = 0;
+      for (int i = 0; i < ncustom_ivec; i++) if (dev ? k_eivec.view_host()[i].k_view.need_sync_device() : k_eivec.view_host()[i].k_view.need_sync_host()) bad++;
+      for (int i = 0; i < ncustom_iarray; i++) if (dev ? k_eiarray.view_host()[i].k_view.need_sync_device() : k_eiarray.view_host()[i].k_view.need_sync_host()) bad++;
+      for (int i = 0; i < ncustom_dvec; i++) if (dev ? k_edvec.view_host()[i].k_view.need_sync_device() : k_edvec.view_host()[i].k_view.need_sync_host()) bad++;
+      for (int i = 0; i < ncustom_darray; i++) if (dev ? k_edarray.view_host()[i].k_view.need_sync_device() : k_edarray.view_host()[i].k_view.need_sync_host()) bad++;
+      if (bad) sparta->kokkos->note_sync_conflict("particle customs",dev ? "Device" : "Host");
+    }
+  }
+
   if (space == Device) {
     if (mask & PARTICLE_MASK) k_particles.modify_device();
     if (mask & SPECIES_MASK) k_species.modify_device();

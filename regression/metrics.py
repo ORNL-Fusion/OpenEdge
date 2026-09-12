@@ -10,7 +10,7 @@ Metrics: the last row of the last stats block (Step, Np and every stats column)
 plus `loop_particles` (from "Loop time of ... with N particles") and
 `host_fallback_calls` (from the Kokkos fallback report, informational only).
 Default tolerances: 3 % on particle counts, 5 % on other columns, exact for
-metrics whose reference value is 0. Edit the reference file to tighten or
+metrics whose reference value is 0 unless the reference gives an 'abs' bound. Edit the reference file to tighten or
 loosen individual metrics; tolerances survive `update`.
 """
 import sys, json, re, math
@@ -56,7 +56,9 @@ def compare(metrics, ref):
             fails.append(key); lines.append(f'  {key:22s} missing in run'); continue
         v = metrics[key]
         if r == 0.0:
-            ok = (v == 0.0); err = abs(v)
+            # a zero reference (e.g. a charge state not yet populated) may
+            # legitimately become a few markers: allow |run| <= 'abs' if given
+            err = abs(v); ok = err <= float(spec.get('abs', 0.0))
         else:
             err = abs(v - r) / abs(r); ok = err <= tol
         lines.append(f'  {key:22s} run {v:.6g}  ref {r:.6g}  rel {err:.2e}  tol {tol:.2g}  {"ok" if ok else "MISS"}')

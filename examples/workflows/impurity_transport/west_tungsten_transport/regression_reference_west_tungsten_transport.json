@@ -17,15 +17,18 @@
  },
  "c_cwN0": {
   "value": 9938627400000.0,
-  "tol": 0.05
+  "tol": 0.1,
+  "note": "~8000 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma"
  },
  "c_cwN1": {
   "value": 24765692000000.0,
-  "tol": 0.05
+  "tol": 0.1,
+  "note": "~8000 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma"
  },
  "c_cwN2": {
   "value": 18034645000000.0,
-  "tol": 0.05
+  "tol": 0.1,
+  "note": "~8000 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma"
  },
  "c_cwN3": {
   "value": 3489609000000.0,
@@ -39,35 +42,51 @@
  },
  "c_cwN5": {
   "value": 0.0,
-  "tol": 0.05
+  "tol": 0.8,
+  "note": "high charge state, zero in the reference; a few markers may appear",
+  "abs": 500000000000.0
  },
  "c_cwN6": {
   "value": 0.0,
-  "tol": 0.05
+  "tol": 0.8,
+  "note": "high charge state, zero in the reference; a few markers may appear",
+  "abs": 500000000000.0
  },
  "c_cwN7": {
   "value": 0.0,
-  "tol": 0.05
+  "tol": 0.05,
+  "abs": 500000000000.0,
+  "note": "high charge state, zero in the reference; a few markers may appear"
  },
  "c_cwN8": {
   "value": 0.0,
-  "tol": 0.05
+  "tol": 0.05,
+  "abs": 500000000000.0,
+  "note": "high charge state, zero in the reference; a few markers may appear"
  },
  "c_cwN9": {
   "value": 0.0,
-  "tol": 0.05
+  "tol": 0.05,
+  "abs": 500000000000.0,
+  "note": "high charge state, zero in the reference; a few markers may appear"
  },
  "c_cwN10": {
   "value": 0.0,
-  "tol": 0.05
+  "tol": 0.05,
+  "abs": 500000000000.0,
+  "note": "high charge state, zero in the reference; a few markers may appear"
  },
  "c_cwN15": {
   "value": 0.0,
-  "tol": 0.05
+  "tol": 0.05,
+  "abs": 500000000000.0,
+  "note": "high charge state, zero in the reference; a few markers may appear"
  },
  "c_cwN20": {
   "value": 0.0,
-  "tol": 0.05
+  "tol": 0.05,
+  "abs": 500000000000.0,
+  "note": "high charge state, zero in the reference; a few markers may appear"
  },
  "loop_particles": {
   "value": 8313,

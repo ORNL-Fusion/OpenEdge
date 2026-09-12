@@ -35,6 +35,7 @@
 #include "string.h"
 #include "math.h"
 #include "fix_surface_state_lm.h"
+#include "sparta_masks.h"
 #include "domain.h"
 #include "comm.h"
 #include "surf.h"
@@ -63,6 +64,10 @@ enum { COMPUTE, FIX, CONSTANT, PLASMA, TARGET, BACKGROUND, SOLPS_B2PL };
 FixSurfaceStateLm::FixSurfaceStateLm(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
+  // Kokkos host-fix sandwich: this fix reads/writes surface state only
+  datamask_read = EMPTY_MASK;
+  datamask_modify = EMPTY_MASK;
+
   if (narg < 14)
     error->all(FLERR,
       "Illegal fix surface/state/lm command: not enough arguments\n"

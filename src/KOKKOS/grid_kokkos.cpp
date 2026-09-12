@@ -394,6 +394,14 @@ void GridKokkos::modify(ExecutionSpace space, unsigned int mask)
       return;
   }
 
+  if (sparta->kokkos->checksync) {
+    const bool dev = (space == Device);
+    if ((mask & CELL_MASK) && (dev ? k_cells.need_sync_device() : k_cells.need_sync_host()))
+      sparta->kokkos->note_sync_conflict("grid cells",dev ? "Device" : "Host");
+    if ((mask & CINFO_MASK) && (dev ? k_cinfo.need_sync_device() : k_cinfo.need_sync_host()))
+      sparta->kokkos->note_sync_conflict("grid cinfo",dev ? "Device" : "Host");
+  }
+
   if (space == Device) {
     if (mask & CELL_MASK) k_cells.modify_device();
     if (mask & CINFO_MASK) k_cinfo.modify_device();

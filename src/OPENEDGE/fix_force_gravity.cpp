@@ -15,6 +15,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
 #include "fix_force_gravity.h"
+#include "sparta_masks.h"
 #include "update.h"
 #include "particle.h"
 #include "domain.h"
@@ -34,6 +35,10 @@ using namespace SPARTA_NS;
 FixForceGravity::FixForceGravity(SPARTA *sparta, int narg, char **arg)
 : Fix(sparta, narg, arg)
 {
+  // Kokkos host-fix sandwich: particles only (no custom attributes touched)
+  datamask_read = PARTICLE_MASK | SPECIES_MASK;
+  datamask_modify = PARTICLE_MASK;
+
   // Expected: fix ID group-ID gravity g1 g2 g3
   if (narg < 6)     error->all(FLERR, "Illegal fix force/gravity: need group-ID and 3 components (g1 g2 g3)");
   
