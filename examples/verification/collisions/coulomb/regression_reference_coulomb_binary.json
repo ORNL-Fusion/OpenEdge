@@ -1,0 +1,30 @@
+{
+ "Step": {
+  "value": 1000.0,
+  "tol": null
+ },
+ "CPU": {
+  "value": 0.21487101,
+  "tol": null
+ },
+ "Np": {
+  "value": 10000.0,
+  "tol": 0.03
+ },
+ "c_Tavg_1": {
+  "value": 114492.06,
+  "tol": 0.05
+ },
+ "c_Tavg_2": {
+  "value": 60037.583,
+  "tol": 0.05
+ },
+ "loop_particles": {
+  "value": 10000,
+  "tol": 0.03
+ },
+ "host_fallback_calls": {
+  "value": 0,
+  "tol": null
+ }
+}

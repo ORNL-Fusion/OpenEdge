@@ -140,3 +140,7 @@ examples/workflows/particulates/cat_liquid_metal_divertor/jeremy_cases_generated
 /GPU_PORTING*
 /*_TOLERANCES.md
 /*handoff*.md
+
+# regression runner outputs (references are versioned)
+examples/**/regression_metrics_*.json
+examples/**/regression.log

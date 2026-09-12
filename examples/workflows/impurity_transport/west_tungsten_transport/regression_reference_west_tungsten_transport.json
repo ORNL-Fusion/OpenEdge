@@ -1,0 +1,80 @@
+{
+ "Step": {
+  "value": 999.0,
+  "tol": null
+ },
+ "CPU": {
+  "value": 2.1757298,
+  "tol": null
+ },
+ "Np": {
+  "value": 8313.0,
+  "tol": 0.03
+ },
+ "c_cwNtot": {
+  "value": 56441019000000.0,
+  "tol": 0.05
+ },
+ "c_cwN0": {
+  "value": 9938627400000.0,
+  "tol": 0.05
+ },
+ "c_cwN1": {
+  "value": 24765692000000.0,
+  "tol": 0.05
+ },
+ "c_cwN2": {
+  "value": 18034645000000.0,
+  "tol": 0.05
+ },
+ "c_cwN3": {
+  "value": 3489609000000.0,
+  "tol": 0.25,
+  "note": "W3+ density at 1000 steps: small population"
+ },
+ "c_cwN4": {
+  "value": 212446390000.0,
+  "tol": 0.8,
+  "note": "W4+ density at 1000 steps: very small population"
+ },
+ "c_cwN5": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_cwN6": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_cwN7": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_cwN8": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_cwN9": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_cwN10": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_cwN15": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_cwN20": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "loop_particles": {
+  "value": 8313,
+  "tol": 0.03
+ },
+ "host_fallback_calls": {
+  "value": 0,
+  "tol": null
+ }
+}

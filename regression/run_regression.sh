@@ -3,7 +3,9 @@
 #  OpenEdge Regression Test Runner
 #
 #  Runs all registered regression tests and reports pass/fail.
-#  A test passes if the run exits 0 and its log contains no ERROR lines.
+#  A test passes if the run exits 0, its log contains no ERROR lines, and
+#  (when <case>/regression_reference.json exists) its end-of-run metrics
+#  are within the stored tolerances (regression/metrics.py).
 #  Record: name|dir|deck|required-data-file|flags   (flags: nokk = skip under --kk)
 #
 #  Usage:
@@ -16,6 +18,10 @@
 #    --nsteps N      Requested smoke-test steps (default: 1000). Workflow
 #                    cases are always capped at 1000 steps.
 #    --verbose       Show full output on failure
+#    --update-ref    Write <case>/regression_reference.json from this run
+#                    (intended for the CPU path; keeps existing tolerances)
+#    --parity-cpu-exe PATH  With --kk: also run examples/verification/gpu_parity
+#                    (CPU binary PATH vs the --kk binary, deterministic compare)
 # -----------------------------------------------------------------------
 
 set +u  # Intel setvars uses unset variables
@@ -36,6 +42,10 @@ WORKFLOW_MAX_STEPS=1000
 VERBOSE=0
 KKMODE=0
 LAUNCHER=""    # override 'mpirun -np N' (e.g. --launcher "srun -n 4")
+UPDATE_REF=0
+PARITY_CPU_EXE=""
+METRICS="$SCRIPT_DIR/metrics.py"
+PY="${PYTHON:-python3}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,6 +56,8 @@ while [[ $# -gt 0 ]]; do
     --kk)      KKMODE=1; shift ;;
     --launcher) LAUNCHER="$2"; shift 2 ;;
     --verbose) VERBOSE=1; shift ;;
+    --update-ref) UPDATE_REF=1; shift ;;
+    --parity-cpu-exe) PARITY_CPU_EXE="$2"; shift 2 ;;
     *)         echo "Unknown option: $1"; exit 1 ;;
   esac
 done
@@ -66,11 +78,22 @@ fi
 # Kokkos mode: run every case through the -sf kk path. GPU backend when
 # the binary is a CUDA build, host OpenMP backend otherwise.
 KKARGS=()
+MODE=cpu
 if [[ $KKMODE -eq 1 ]]; then
-  case "$EXE" in
-    *cuda*) KKARGS=(-k on g 1 -sf kk -pk kokkos react/retry yes) ;;
-    *)      KKARGS=(-k on t 1 -sf kk -pk kokkos react/retry yes) ;;
-  esac
+  # detect the backend from the binary itself (linked CUDA runtime), not its name
+  # gpu/aware no: the MPI on this machine is not GPU-aware unless
+  # MPICH_GPU_SUPPORT_ENABLED=1 (multi-rank runs segfault otherwise)
+  GPUAWARE=no; [[ "${MPICH_GPU_SUPPORT_ENABLED:-0}" == "1" ]] && GPUAWARE=yes
+  if ldd "$EXE" 2>/dev/null | grep -qiE 'libcudart|libcuda\.so'; then
+    KKARGS=(-k on g 1 -sf kk -pk kokkos react/retry yes gpu/aware $GPUAWARE comm threaded); MODE=gpu
+  elif ldd "$EXE" >/dev/null 2>&1; then
+    KKARGS=(-k on t 1 -sf kk -pk kokkos react/retry yes); MODE=kkhost
+  else
+    case "$EXE" in
+      *cuda*) KKARGS=(-k on g 1 -sf kk -pk kokkos react/retry yes gpu/aware $GPUAWARE comm threaded); MODE=gpu ;;
+      *)      KKARGS=(-k on t 1 -sf kk -pk kokkos react/retry yes); MODE=kkhost ;;
+    esac
+  fi
 fi
 
 # Source Intel MPI if available
@@ -146,7 +169,8 @@ echo "========================================================================"
 echo "  OpenEdge Regression Tests"
 echo "  Executable: $EXE"
 echo "  MPI ranks:  $NP"
-if [[ $KKMODE -eq 1 ]]; then echo "  Kokkos:     ${KKARGS[*]}"; fi
+if [[ $KKMODE -eq 1 ]]; then echo "  Kokkos:     ${KKARGS[*]}  (backend: $MODE)"; fi
+if [[ $UPDATE_REF -eq 1 ]]; then echo "  Reference:  writing regression_reference.json from this ($MODE) run"; fi
 echo "  Steps:      $NSTEPS"
 echo "========================================================================"
 echo ""
@@ -230,12 +254,37 @@ for entry in "${TESTS[@]}"; do
   # treat launcher-reported task failures as FAIL too
   if [[ $ok -eq 1 ]] && grep -qE "Segmentation fault|srun: error|DUE TO TASK FAILURE|Kokkos::abort|cudaError" "$logfile"; then ok=0; fi
 
+  # end-of-run metrics: extract, then compare against the stored reference
+  # (or write the reference with --update-ref)
+  metrics_note=""
   if [[ $ok -eq 1 ]]; then
-    RESULTS+=("PASS  $name")
-    echo "PASS"
+    # keyed by case name: several cases can share one directory
+    mfile="$dir/regression_metrics_${name}_$MODE.json"
+    reffile="$dir/regression_reference_${name}.json"
+    if "$PY" "$METRICS" extract "$logfile" "$mfile" 2>/dev/null; then
+      if [[ $UPDATE_REF -eq 1 ]]; then
+        "$PY" "$METRICS" update "$mfile" "$reffile" > /dev/null && metrics_note="(reference updated)"
+      elif [[ -f "$reffile" ]]; then
+        cmp_out=$("$PY" "$METRICS" compare "$mfile" "$reffile")
+        if [[ $? -ne 0 ]]; then
+          ok=0; metrics_note="(metrics outside reference bands: $(echo "$cmp_out" | tail -1 | cut -d' ' -f3-))"
+          echo "$cmp_out" >> "$logfile"
+          if [[ "$VERBOSE" -eq 1 ]]; then echo "$cmp_out"; fi
+        else
+          metrics_note="(metrics within reference)"
+        fi
+      else
+        metrics_note="(no reference)"
+      fi
+    fi
+  fi
+
+  if [[ $ok -eq 1 ]]; then
+    RESULTS+=("PASS  $name  $metrics_note")
+    echo "PASS $metrics_note"
     ((PASS++))
   else
-    RESULTS+=("FAIL  $name")
+    RESULTS+=("FAIL  $name  $metrics_note")
     echo "FAIL"
     ((FAIL++))
     if [[ "$VERBOSE" -eq 1 ]]; then
@@ -247,6 +296,28 @@ for entry in "${TESTS[@]}"; do
 
   rm -f "$tmpinput"
 done
+
+# -----------------------------------------------------------------------
+#  gpu_parity: deterministic CPU-vs-GPU comparison (needs both binaries)
+# -----------------------------------------------------------------------
+if [[ "gpu_parity" == $FILTER || "*" == "$FILTER" ]]; then
+  printf "%-40s " "gpu_parity"
+  pdir="$EXAMPLES_DIR/verification/gpu_parity"
+  if [[ $KKMODE -ne 1 || -z "$PARITY_CPU_EXE" ]]; then
+    RESULTS+=("SKIP  gpu_parity  (needs --kk and --parity-cpu-exe <cpu binary>)")
+    echo "SKIP (needs --kk and --parity-cpu-exe)"
+    ((SKIP++))
+  else
+    if [[ -n "$LAUNCHER" ]]; then lc="$LAUNCHER"; lg="$LAUNCHER"; else lc="mpirun -np $NP"; lg="mpirun -np $NP"; fi
+    if (cd "$pdir" && EXE_CPU="$PARITY_CPU_EXE" EXE_GPU="$EXE" LAUNCH_CPU="$lc" LAUNCH_GPU="$lg" \
+        bash run.sh > "$pdir/regression.log" 2>&1); then
+      RESULTS+=("PASS  gpu_parity  (grid/weighted + thermal kick CPU==GPU)"); echo "PASS"; ((PASS++))
+    else
+      RESULTS+=("FAIL  gpu_parity  (see examples/verification/gpu_parity/regression.log)"); echo "FAIL"; ((FAIL++))
+      if [[ "$VERBOSE" -eq 1 ]]; then tail -20 "$pdir/regression.log"; fi
+    fi
+  fi
+fi
 
 # -----------------------------------------------------------------------
 #  Summary

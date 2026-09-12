@@ -1,0 +1,31 @@
+{
+ "Step": {
+  "value": 1000.0,
+  "tol": null
+ },
+ "Np": {
+  "value": 39986.0,
+  "tol": 0.03
+ },
+ "c_nD2": {
+  "value": 1.2323944e+19,
+  "tol": 0.8,
+  "note": "D2 remnant after near-complete dissociation: a handful of markers"
+ },
+ "c_nD": {
+  "value": 2.865581e+22,
+  "tol": 0.05
+ },
+ "c_nDp": {
+  "value": 6.5308099e+21,
+  "tol": 0.05
+ },
+ "loop_particles": {
+  "value": 39986,
+  "tol": 0.03
+ },
+ "host_fallback_calls": {
+  "value": 0,
+  "tol": null
+ }
+}
