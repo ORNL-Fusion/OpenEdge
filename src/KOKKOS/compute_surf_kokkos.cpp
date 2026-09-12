@@ -40,6 +40,7 @@ ComputeSurfKokkos::ComputeSurfKokkos(SPARTA *sparta, int narg, char **arg) :
 {
   kokkos_flag = 1;
   d_which = DAT::t_int_1d("surf:which",nvalue);
+  weighted = 0; pw_ewhich = -1; fnum_inv = 1.0;
 }
 
 ComputeSurfKokkos::ComputeSurfKokkos(SPARTA *sparta) :
@@ -49,6 +50,7 @@ ComputeSurfKokkos::ComputeSurfKokkos(SPARTA *sparta) :
 {
   copy = 1;
   uncopy = 0;
+  weighted = 0; pw_ewhich = -1; fnum_inv = 1.0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -140,6 +142,16 @@ void ComputeSurfKokkos::pre_surf_tally()
   surf_kk->sync(Device,ALL_MASK);
   d_lines = surf_kk->k_lines.view_device();
   d_tris = surf_kk->k_tris.view_device();
+
+  // OpenEdge weighted tally: pweight custom view + particle base (rebound
+  // every step; growth during the move is handled by the mover's retry)
+  if (weighted) {
+    if (pw_ewhich < 0) error->one(FLERR,"compute surf/weighted/kk: pweight custom not resolved");
+    particle_kk->sync(Device,PARTICLE_MASK|CUSTOM_MASK);
+    d_pweight = particle_kk->k_edvec.h_view[pw_ewhich].k_view.d_view;
+    d_particles = particle_kk->k_particles.d_view;
+    fnum_inv = 1.0 / update->fnum;
+  }
 
   need_dup = sparta->kokkos->need_dup<DeviceType>();
   if (need_dup)

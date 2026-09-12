@@ -6,6 +6,7 @@
 
 #include "fix_surface_emit_source_kokkos.h"
 #include "kokkos.h"
+#include "compute_surf_kokkos.h"
 
 #include <cstdlib>
 
@@ -258,7 +259,15 @@ void FixSurfaceEmitSourceKokkos::perform_task()
               (int) cached_task_source.size(),ntask,cached_source_total);
   }
   if (dev && update->nsurf_tally > 0) {
-    dev = 0; why = "active surf tallies this step";
+    // the CPU emission reports each emitted particle to the surf computes
+    // (iorig = NULL); the device kernel does not. compute surf/weighted/kk
+    // ignores emission events, so only other surf computes force the host.
+    int need_host = 0;
+    for (int k = 0; k < update->nsurf_tally; k++) {
+      ComputeSurfKokkos *cs = dynamic_cast<ComputeSurfKokkos *>(update->slist_active[k]);
+      if (!cs || !cs->weighted_tally()) { need_host = 1; break; }
+    }
+    if (need_host) { dev = 0; why = "active surf tallies this step (non-weighted surf compute)"; }
   }
 
   if (!dev) {

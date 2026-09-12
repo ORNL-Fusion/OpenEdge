@@ -13,11 +13,11 @@
  },
  "Nscoll": {
   "value": 0.0,
-  "tol": 0.05
+  "tol": null
  },
  "Nsreact": {
   "value": 0.0,
-  "tol": 0.05
+  "tol": null
  },
  "loop_particles": {
   "value": 83800,

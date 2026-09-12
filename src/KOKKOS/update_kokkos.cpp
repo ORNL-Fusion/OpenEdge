@@ -361,6 +361,7 @@ void UpdateKokkos::init()
   oe_has_mesh_gradte = 0;
   oe_has_mesh_gradti = 0;
   oe_has_sheath_customs = 0;
+  oe_has_tally_pw = 0;
 
   // Spatial-sheath engagement diagnostics (device twins of the CPU
   // sheath_diag_* counters; `global pusher ... dump yes` enables them).
@@ -1088,6 +1089,17 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
         d_oe_sheath_phiprev = particle_kk->k_edvec.h_view[
             particle->ewhich[sheath_phiprev_custom]].k_view.d_view;
         oe_has_sheath_customs = 1;
+      }
+      // OpenEdge: incident pweight for compute surf/weighted/kk (the CPU
+      // stamps update->tally_pweight before each surf_tally batch)
+      oe_has_tally_pw = 0;
+      if (nsurf_tally) {
+        const int pw_idx = particle->find_custom((char *) "pweight");
+        if (pw_idx >= 0) {
+          particle_kk->sync(Device,CUSTOM_MASK);
+          d_oe_tally_pw = particle_kk->k_edvec.h_view[particle->ewhich[pw_idx]].k_view.d_view;
+          oe_has_tally_pw = 1;
+        }
       }
       // Phase B: guiding-center state customs for the hybrid/GCA mover
       oe_has_gca_customs = 0;
@@ -2234,10 +2246,12 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
             jpart->weight = particle_i.weight;
           }
 
-          if (nsurf_tally)
+          if (nsurf_tally) {
+            const double pw_in = oe_has_tally_pw ? d_oe_tally_pw(i) : 1.0;
             for (m = 0; m < nsurf_tally; m++)
               slist_active_copy[m].obj.
-                    surf_tally_kk<ATOMIC_REDUCTION>(dtremain,minsurf,icell,reaction,&iorig,ipart,jpart);
+                    surf_tally_kk<ATOMIC_REDUCTION>(dtremain,minsurf,icell,reaction,&iorig,ipart,jpart,pw_in);
+          }
 
           // stuck_iterate = consecutive iterations particle is immobile
 

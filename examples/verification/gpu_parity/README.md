@@ -12,6 +12,11 @@ with the CUDA Kokkos binary from that same restart, with positions frozen
   gradients) compared particle by particle (rel 1e-6), and the particle set must
   be identical (a lost particle is a failure).
 
+Stage 3 (`in.make_state_surf` + `in.parity_surf`, run by the same `run.sh`): W ions
+stream onto the rfpie target puck (absorbing) in a tilted constant B; `compute
+surf/weighted` (all six keywords) through `fix ave/surf` is dumped every step and
+compared surf by surf between the CPU and the GPU (rel 1e-9, `compare_surf.py`).
+
 ```bash
 EXE_CPU=<cpu or kk-host binary> EXE_GPU=<spa_kokkos_cuda_*> \
 LAUNCH_CPU="srun -n 4" LAUNCH_GPU="srun -n 4 --gpus-per-task=1" bash run.sh

@@ -15,7 +15,8 @@ loosen individual metrics; tolerances survive `update`.
 """
 import sys, json, re, math
 PARTICLE_KEYS = ('Np', 'loop_particles')
-INFO_KEYS = ('Step', 'CPU', 'host_fallback_calls')
+# per-step event counters (last step only) are Poisson noise, not regression metrics
+INFO_KEYS = ('Step', 'CPU', 'host_fallback_calls', 'Nscoll', 'Nsreact', 'Nattempt', 'Ncoll', 'Nreact', 'Ntouch', 'Ncomm', 'Nbound', 'Nexit')
 
 def extract(logpath):
     lines = open(logpath, errors='ignore').read().splitlines()

@@ -406,6 +406,8 @@ class UpdateKokkos : public Update {
   // per-particle customs of the spatial-mode potential impulse
   // (sheath_bank / sheath_phiprev), rebound each move() attempt; the
   // _backup twins snapshot them across a react/retry replay
+  DAT::t_float_1d d_oe_tally_pw;   // pweight custom for weighted surf tallies
+  int oe_has_tally_pw;
   DAT::t_float_1d d_oe_sheath_bank;
   DAT::t_float_1d d_oe_sheath_phiprev;
   DAT::t_float_1d d_oe_sheath_bank_backup;
