@@ -14,4 +14,10 @@ rm -rf out_cpu out_gpu; mkdir -p out_cpu out_gpu
 $LAUNCH_CPU $EXE_CPU -in in.parity_surf -var tag cpu -log log.cpu_surf > screen.cpu_surf 2>&1 || { echo "cpu surf run failed"; exit 2; }
 $LAUNCH_GPU $EXE_GPU -k on g 1 -sf kk -pk kokkos react/retry yes gpu/aware no comm threaded -in in.parity_surf -var tag gpu -log log.gpu_surf > screen.gpu_surf 2>&1 || { echo "gpu surf run failed"; exit 2; }
 grep -h -A2 'Kokkos host fallbacks' screen.gpu_surf | head -3
-python3 compare_surf.py
+python3 compare_surf.py || exit 1
+# population-control check (thinning on the frozen state)
+rm -rf out_cpu out_gpu; mkdir -p out_cpu out_gpu
+$LAUNCH_CPU $EXE_CPU -in in.parity_pop -var tag cpu -log log.cpu_pop > screen.cpu_pop 2>&1 || { echo "cpu pop run failed"; exit 2; }
+$LAUNCH_GPU $EXE_GPU -k on g 1 -sf kk -pk kokkos react/retry yes gpu/aware no comm threaded -in in.parity_pop -var tag gpu -log log.gpu_pop > screen.gpu_pop 2>&1 || { echo "gpu pop run failed"; exit 2; }
+grep -h -A2 'Kokkos host fallbacks' screen.gpu_pop | head -3
+python3 compare_pop.py

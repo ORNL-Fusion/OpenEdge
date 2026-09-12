@@ -40,7 +40,7 @@ class FixPopulationControl : public Fix {
   void init();
   void end_of_step();
 
- private:
+ protected:                 // the Kokkos twin reuses these
   int nmax_;                 // max markers per (cell, species)
   int pweight_index_;        // custom pweight attribute index
   int pweight_ewhich_;
