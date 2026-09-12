@@ -13,6 +13,8 @@
 ------------------------------------------------------------------------- */
 
 #include "spatype.h"
+#include <charconv>
+#include <cctype>
 #include "mpi.h"
 #include "stdlib.h"
 #include "string.h"
@@ -83,6 +85,8 @@ Dump::Dump(SPARTA *sparta, int, char **arg) : Pointers(sparta)
   buf = NULL;
   maxsbuf = 0;
   sbuf = NULL;
+  ffmt = NULL;
+  nffmt = 0;
 
   // parse filename for special syntax
   // if contains '%', write one file per proc and replace % with proc-ID
@@ -147,6 +151,7 @@ Dump::~Dump()
 
   memory->destroy(buf);
   memory->destroy(sbuf);
+  delete [] ffmt;
 
   if (multiproc) MPI_Comm_free(&clustercomm);
 
@@ -451,6 +456,56 @@ void Dump::openfile()
 }
 
 /* ----------------------------------------------------------------------
+   OpenEdge: classify each field's printf format once per write so that
+   convert_string can use std::to_chars (3-5x faster than sprintf for
+   doubles, byte-identical output for %g/%e/%f with a precision)
+------------------------------------------------------------------------- */
+
+void Dump::parse_fast_formats()
+{
+  if (nffmt != size_one) {
+    delete [] ffmt;
+    ffmt = new FastFmt[size_one];
+    nffmt = size_one;
+  }
+  for (int j = 0; j < size_one; j++) {
+    FastFmt &f = ffmt[j];
+    f.kind = 0; f.prec = -1; f.nsuffix = 0;
+    const char *p = vformat[j];
+    if (!p || p[0] != '%') continue;
+    p++;
+    int prec = -1;
+    if (*p == '.') {
+      p++; prec = 0;
+      if (!isdigit((unsigned char) *p)) continue;
+      while (isdigit((unsigned char) *p)) prec = prec*10 + (*p++ - '0');
+    }
+    int kind = 0;
+    if (vtype[j] == DOUBLE) {
+      if (*p == 'g') kind = 1;
+      else if (*p == 'e') kind = 2;
+      else if (*p == 'f') kind = 3;
+      if (kind) p++;
+    } else if (vtype[j] == INT && prec < 0) {
+      if (*p == 'd') { kind = 4; p++; }
+    } else if (vtype[j] == UINT && prec < 0) {
+      if (*p == 'u') { kind = 6; p++; }
+    } else if ((vtype[j] == BIGINT || vtype[j] == BIGUINT) && prec < 0) {
+      // BIGINT_FORMAT is %ld or %lld; BIGUINT_FORMAT %lu or %llu
+      while (*p == 'l') p++;
+      if (vtype[j] == BIGINT && *p == 'd') { kind = 5; p++; }
+      else if (vtype[j] == BIGUINT && *p == 'u') { kind = 7; p++; }
+    }
+    if (!kind) continue;
+    // literal suffix only (no further conversions), short enough to cache
+    const int ns = (int) strlen(p);
+    if (ns >= (int) sizeof(f.suffix) || strchr(p,'%')) continue;
+    f.kind = kind; f.prec = (prec < 0) ? 6 : prec; f.nsuffix = ns;
+    memcpy(f.suffix,p,ns+1);
+  }
+}
+
+/* ----------------------------------------------------------------------
    convert mybuf of doubles to one big formatted string in sbuf
    return -1 if strlen exceeds an int, since used as arg in MPI calls in Dump
 ------------------------------------------------------------------------- */
@@ -460,16 +515,40 @@ int Dump::convert_string(int n, double *mybuf)
   int i,j;
   char str[32];
 
+  parse_fast_formats();
+
   int offset = 0;
   int m = 0;
   for (i = 0; i < n; i++) {
-    if (offset + size_one*ONEFIELD > maxsbuf) {
+    if (offset + size_one*ONEFIELD + 2 > maxsbuf) {   // + newline headroom
       if ((bigint) maxsbuf + DELTA > MAXSMALLINT) return -1;
       maxsbuf += DELTA;
       memory->grow(sbuf,maxsbuf,"dump:sbuf");
     }
 
     for (j = 0; j < size_one; j++) {
+      const FastFmt &f = ffmt[j];
+      if (f.kind) {
+        char *out = &sbuf[offset];
+        char *end = out + ONEFIELD;
+        std::to_chars_result r;
+        switch (f.kind) {
+        case 1: r = std::to_chars(out,end,mybuf[m],std::chars_format::general,f.prec); break;
+        case 2: r = std::to_chars(out,end,mybuf[m],std::chars_format::scientific,f.prec); break;
+        case 3: r = std::to_chars(out,end,mybuf[m],std::chars_format::fixed,f.prec); break;
+        case 4: r = std::to_chars(out,end,static_cast<int> (ubuf(mybuf[m]).i)); break;
+        case 5: r = std::to_chars(out,end,static_cast<bigint> (ubuf(mybuf[m]).i)); break;
+        case 6: r = std::to_chars(out,end,static_cast<uint32_t> (ubuf(mybuf[m]).i)); break;
+        default: r = std::to_chars(out,end,static_cast<uint64_t> (ubuf(mybuf[m]).i)); break;
+        }
+        if (r.ec == std::errc()) {
+          memcpy(r.ptr,f.suffix,f.nsuffix);
+          offset += (int) (r.ptr - out) + f.nsuffix;
+          m++;
+          continue;
+        }
+        // fall through to sprintf if the field did not fit
+      }
       if (vtype[j] == DOUBLE)
         offset += sprintf(&sbuf[offset],vformat[j],mybuf[m]);
       else if (vtype[j] == INT)
@@ -495,7 +574,7 @@ int Dump::convert_string(int n, double *mybuf)
       }
       m++;
     }
-    offset += sprintf(&sbuf[offset],"\n");
+    sbuf[offset++] = '\n';
   }
 
   return offset;

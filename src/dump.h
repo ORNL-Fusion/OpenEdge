@@ -94,6 +94,14 @@ class Dump : protected Pointers {
   char **vformat;            // format string for each field
 
   int convert_string(int, double *);
+
+  // OpenEdge: parsed per-field formats for the std::to_chars fast path in
+  // convert_string (plain %g/%e/%f/%d/%u with an optional precision and a
+  // literal suffix; anything else falls back to sprintf)
+  struct FastFmt { int kind; int prec; int nsuffix; char suffix[16]; };
+  FastFmt *ffmt;
+  int nffmt;
+  void parse_fast_formats();
   void gather_and_write();
 
   virtual void init_style() = 0;

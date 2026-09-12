@@ -40,6 +40,8 @@
 #include "surf_collide.h"
 #include "surf_react.h"
 #include "output.h"
+#include "stats.h"
+#include "dump.h"
 #include "geometry_kokkos.h"
 #include "openedge_geom.h"
 #include "fix_reflect_psi.h"
@@ -826,7 +828,26 @@ void UpdateKokkos::run(int nsteps)
     // all output
 
     if (ntimestep == output->next) {
-      particle_kk->sync(Host,ALL_MASK);
+      // OpenEdge: bring particles to the host only when this step's output
+      // reads them (particle/image dumps, restart, stats computes that run
+      // on the host). Grid and surf dumps read fix/compute arrays that the
+      // Kokkos classes sync themselves. OE_OUTPUT_FULLSYNC=1 restores the
+      // unconditional sync.
+      static int fullsync = -1;
+      if (fullsync < 0) fullsync = getenv("OE_OUTPUT_FULLSYNC") ? 1 : 0;
+      int need_particles = fullsync;
+      if (!need_particles && output->next_dump_any == ntimestep)
+        for (int idump = 0; idump < output->ndump; idump++)
+          if (output->next_dump[idump] == ntimestep) {
+            const char *st = output->dump[idump]->style;
+            if (strcmp(st,"grid") != 0 && strcmp(st,"surf") != 0 &&
+                strcmp(st,"surf/vtk") != 0 && strcmp(st,"grid/vtk") != 0)
+              need_particles = 1;
+          }
+      if (!need_particles && output->next_restart == ntimestep) need_particles = 1;
+      if (!need_particles && output->next_stats == ntimestep &&
+          output->stats->any_host_compute()) need_particles = 1;
+      if (need_particles) particle_kk->sync(Host,ALL_MASK);
       output->write(ntimestep);
       timer->stamp(TIME_OUTPUT);
     }

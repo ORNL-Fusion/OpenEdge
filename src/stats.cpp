@@ -1536,3 +1536,15 @@ void Stats::compute_zhi()
 {
   dvalue = domain->boxhi[2];
 }
+
+/* ----------------------------------------------------------------------
+   OpenEdge: does any compute invoked by stats run on the host?
+   (UpdateKokkos syncs particles to the host before output only then)
+------------------------------------------------------------------------- */
+
+int Stats::any_host_compute() const
+{
+  for (int i = 0; i < ncompute; i++)
+    if (!computes[i]->kokkos_flag) return 1;
+  return 0;
+}
