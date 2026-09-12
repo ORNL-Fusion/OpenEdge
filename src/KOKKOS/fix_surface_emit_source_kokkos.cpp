@@ -311,8 +311,16 @@ void FixSurfaceEmitSourceKokkos::perform_task()
     // made grow a no-op whenever maxlocal-nlocal was between cap/2 and cap,
     // and the kernel then appended past the allocation (nlaunch_total
     // >= 2000 crash, 2026-09-11 audit).
-    if (particle->nlocal + cap > particle->maxlocal)
-      particle_kk->grow((int) cap);
+    if (particle->nlocal + cap > particle->maxlocal) {
+      // amortize: every grow reallocates the device particle array and the
+      // pinned host mirrors of all custom vectors; with thousands of
+      // markers per step an exact-cap grow fires every few steps during
+      // ramp-up (110 s of the first 1000 steps at nlaunch_total 5000).
+      // Ask for headroom so grow fires O(log) times.
+      long long req = cap;
+      if (req < (long long) particle->nlocal/2 + 16384) req = (long long) particle->nlocal/2 + 16384;
+      particle_kk->grow((int) req);
+    }
   }
 
   particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK|CUSTOM_MASK);

@@ -476,7 +476,11 @@ void FixVolumeChemAdasKokkos::end_of_step()
     // exact capacity for the in-kernel atomic append (grow's own policy
     // amortizes the reallocation)
     if (particle->nlocal + ncap > particle->maxlocal)
-      particle->grow(ncap);   // grow(nextra) = slots beyond nlocal (was the deficit: no-op bug)
+      {
+        int req = ncap;   // grow(nextra) = slots beyond nlocal; amortized headroom (see emit/source/kk)
+        if (req < particle->nlocal/2 + 16384) req = particle->nlocal/2 + 16384;
+        particle->grow(req);
+      }
     if (!d_new_count.data())
       d_new_count = Kokkos::View<int, DeviceType>("chem:newn");
     if (!h_cnt_.data()) h_cnt_ = Kokkos::View<int[2], Kokkos::HostSpace>("chem:cnt_host");
