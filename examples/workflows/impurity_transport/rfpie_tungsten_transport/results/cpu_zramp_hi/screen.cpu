@@ -1,0 +1,358 @@
+SPARTA-OPENDGE (24 Sep 2025)
+Running on 128 MPI task(s)
+Created orthogonal box = (-0.0301 -0.0301 -0.0002) to (0.0301 0.0301 0.06)
+WARNING: Could not acquire nearby ghost cells b/c grid partition is not clumped (/global/homes/d/diawa/OpenEdge/src/grid.cpp:473)
+Created 3145728 child grid cells
+  CPU time = 0.00900378 secs
+  create/ghost percent = 64.572 35.428
+Balance grid migrated 3121152 cells
+  CPU time = 0.138069 secs
+  reassign/sort/migrate/ghost percent = 44.7326 1.41977 26.0637 27.784
+Reading surface file ...
+  478 triangles
+  -0.01143 0.01143 xlo xhi
+  -0.01143 0.01143 ylo yhi
+  0 0.001905 zlo zhi
+  0.00118332 min triangle edge length
+  7.48089e-08 min triangle area
+  4900 0 = cells overlapping surfs, overlap cells with unmarked corner pts
+  3132008 8820 4900 = cells outside/inside/overlapping surfs
+  4900 = surf cells with 1,2,etc splits
+  0.000217386761284651 0.000217386761284699 = cell-wise and global flow volume
+  CPU time = 0.147357 secs
+  read/check/sort/surf2grid/ghost/inout/particle percent = 3.523 8.11106 1.95958 62.0294 24.377 20.238 0.00466419
+  surf2grid time = 0.0914045 secs
+  map/comm1/comm2/comm3/comm4/split percent = 61.8008 2.72397 6.01268 1.91653 8.15663 8.34386
+0 = initial surface count in group target_body
+178 = final surface count in group target_body
+0 = initial surface count in group target
+300 = final surface count in group target
+  reactions catalog: w (processes.h5 /volume/reactions/w/catalog)
+Reading ADAS data for w (Z=74) from /global/homes/d/diawa/OpenEdge/database/processes.h5 (/volume/rates/)
+  boris: bfield_compute 'pd' bound to fix background (has_bfield=0, mesh_tri_b=0)
+[background] Reading input/plasma_he_zramp.h5
+[background] Loaded: 161 x 121 regular grid, 1 ion species, bfield=const, equ=no, gen=1
+[volume/chem/adas] ionization    : 4 active, 26 skipped (of 30)
+[volume/chem/adas] recombination : 4 active, 26 skipped (of 30)
+[volume/chem/adas] cx            : 4 active, 26 skipped (of 30)
+[volume/chem/adas] missing species (first 8): W5+,W6+,W7+,W8+,W9+,W10+,W11+,W12+
+[volume/chem/adas] output summary  (6 cols)  ADAS tables: SCD ACD CCD PLT PRB -
+compute surface/physical/sputter: loaded sputter yield table 'he_on_w' (50 x 45) from processes.h5
+compute surface/physical/sputter: target=W projectiles=He  (slots 1..1 mapped)
+PMI magnetic incidence: poloidal
+Memory usage per proc in Mbytes:
+  particles (ave,min,max) = 0 0 0
+  grid      (ave,min,max) = 9.0647 9.0647 9.0647
+  surf      (ave,min,max) = 0.060173 0.060173 0.060173
+  total     (ave,min,max) = 13.1561 13.1561 13.1562
+Step CPU Np Nscoll Nsreact 
+       0            0        0        0        0 
+Chem/ADAS reaction tallies:
+  id fchem Z=74 #-of-reactions 90
+    reaction all: 0
+    ioniz: 0
+    recomb: 0
+    CX: 0
+    dissoc: 0
+Loop time of 0.00106081 on 128 procs for 0 steps with 0 particles
+  boris: bfield_compute 'pd' bound to fix background (has_bfield=1, mesh_tri_b=0)
+[volume/chem/adas] ionization    : 4 active, 26 skipped (of 30)
+[volume/chem/adas] recombination : 4 active, 26 skipped (of 30)
+[volume/chem/adas] cx            : 4 active, 26 skipped (of 30)
+[volume/chem/adas] missing species (first 8): W5+,W6+,W7+,W8+,W9+,W10+,W11+,W12+
+[volume/chem/adas] output summary  (6 cols)  ADAS tables: SCD ACD CCD PLT PRB -
+PMI magnetic incidence: poloidal
+Memory usage per proc in Mbytes:
+  particles (ave,min,max) = 0 0 0
+  grid      (ave,min,max) = 9.0647 9.0647 9.0647
+  surf      (ave,min,max) = 0.060173 0.060173 0.060173
+  total     (ave,min,max) = 13.1561 13.1561 13.1562
+Step CPU Np Nscoll Nsreact 
+       0            0        0        0        0 
+    1000     24.71248  3559879        9        0 
+Chem/ADAS reaction tallies:
+  id fchem Z=74 #-of-reactions 90
+    reaction all: 404161
+    ioniz: 404161
+    recomb: 0
+    CX: 0
+    dissoc: 0
+    reaction W --> W+ [I:ioniz]: 403520
+    reaction W+ --> W2+ [I:ioniz]: 641
+Loop time of 24.7148 on 128 procs for 1000 steps with 3559879 particles
+Performance: 40.462 timesteps/s, 144.039 Mparticle-step/s
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Move    | 0.73367    | 1.4876     | 2.6054     |  45.1 |  6.02
+Coll    | 0.31789    | 0.9154     | 1.6791     |  39.2 |  3.70
+Sort    | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0.66783    | 0.83637    | 0.92991    |   6.1 |  3.38
+Modify  | 1.8339     | 2.2319     | 2.7294     |  15.5 |  9.03
+Output  | 2.6822e-05 | 0.0017458  | 0.00354    |   2.1 |  0.01
+Pcache  | 1.4811     | 2.5378     | 5.2838     |  40.8 | 10.27
+SReact  | 0.00029896 | 0.00076586 | 0.0018414  |   0.0 |  0.00
+Chem    | 2.8316     | 4.051      | 7.2924     |  37.0 | 16.39
+Adens   | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 12.65      |            |       | 51.19
+
+Particle moves    = 2136316419 (2.14B)
+Cells touched     = 2706783882 (2.71B)
+Particle comms    = 29464214 (29.5M)
+Boundary collides = 0 (0K)
+Boundary exits    = 1433037 (1.43M)
+SurfColl checks   = 57813717 (57.8M)
+SurfColl occurs   = 6941 (6.94K)
+Surf reactions    = 0 (0K)
+Collide attempts  = 0 (0K)
+Collide occurs    = 0 (0K)
+Gas reactions     = 404161 (0.404M)
+Particles stuck   = 0
+Axisymm bad moves = 0
+
+Particle-moves/CPUsec/proc: 675304
+Particle-moves/step: 2.13632e+06
+Cell-touches/particle/step: 1.26703
+Particle comm iterations/step: 3.512
+Particle fraction communicated: 0.0137921
+Particle fraction colliding with boundary: 0
+Particle fraction exiting boundary: 0.000670798
+Surface-checks/particle/step: 0.0270623
+Surface-collisions/particle/step: 3.24905e-06
+Surface-reactions/particle/step: 0
+Collision-attempts/particle/step: 0
+Collisions/particle/step: 0
+Gas-reactions/particle/step: 0.000189186
+
+Particles: 27811.6 ave 31653 max 14842 min
+Histogram: 4 6 6 3 5 4 8 12 20 60
+Cells:     24576 ave 72673 max 1797 min
+Histogram: 48 12 0 28 4 12 4 8 8 4
+GhostCell: 5491.8 ave 11746 max 1164 min
+Histogram: 23 13 10 10 18 23 15 8 4 4
+EmptyCell: 4252.03 ave 8712 max 1059 min
+Histogram: 24 9 15 4 13 31 19 1 8 4
+Surfs:     478 ave 478 max 478 min
+Histogram: 128 0 0 0 0 0 0 0 0 0
+GhostSurf: 0 ave 0 max 0 min
+Histogram: 128 0 0 0 0 0 0 0 0 0
+  boris: bfield_compute 'pd' bound to fix background (has_bfield=1, mesh_tri_b=0)
+[volume/chem/adas] ionization    : 4 active, 26 skipped (of 30)
+[volume/chem/adas] recombination : 4 active, 26 skipped (of 30)
+[volume/chem/adas] cx            : 4 active, 26 skipped (of 30)
+[volume/chem/adas] missing species (first 8): W5+,W6+,W7+,W8+,W9+,W10+,W11+,W12+
+[volume/chem/adas] output summary  (6 cols)  ADAS tables: SCD ACD CCD PLT PRB -
+PMI magnetic incidence: poloidal
+Memory usage per proc in Mbytes:
+  particles (ave,min,max) = 10.5391 8.875 44.375
+  grid      (ave,min,max) = 12.6204 9.0647 28.1897
+  surf      (ave,min,max) = 0.060173 0.060173 0.060173
+  total     (ave,min,max) = 28.6192 20.0331 60.1047
+Step CPU Np Nscoll Nsreact 
+    1000            0  3559879        0        0 
+    2000    32.084758  4207620        9        0 
+    3000    64.051144  4349925        7        0 
+    4000    95.130103  4401369       15        0 
+    5000    126.49584  4437784       15        0 
+    6000    157.99847  4459546       10        0 
+    7000    188.94031  4468840       12        0 
+    8000    220.87678  4472465       15        0 
+    9000    252.02939  4470997       11        0 
+   10000    284.43872  4472743       18        0 
+Chem/ADAS reaction tallies:
+  id fchem Z=74 #-of-reactions 90
+    reaction all: 7193123
+    ioniz: 7193123
+    recomb: 0
+    CX: 0
+    dissoc: 0
+    reaction W --> W+ [I:ioniz]: 7163513
+    reaction W+ --> W2+ [I:ioniz]: 29604
+    reaction W2+ --> W3+ [I:ioniz]: 6
+Loop time of 284.439 on 128 procs for 9000 steps with 4472743 particles
+Performance: 31.641 timesteps/s, 141.523 Mparticle-step/s
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Move    | 19.152     | 36.735     | 49.354     | 154.5 | 12.91
+Coll    | 13.15      | 28.088     | 38.72      | 135.0 |  9.87
+Sort    | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 9.7168     | 11.192     | 12.267     |  17.2 |  3.93
+Modify  | 18.354     | 34.099     | 46.298     | 128.6 | 11.99
+Output  | 2.7741     | 2.7856     | 2.793      |   0.3 |  0.98
+Pcache  | 45.969     | 51.915     | 62.698     |  36.0 | 18.25
+SReact  | 0.0040378  | 0.0096361  | 0.028404   |   4.1 |  0.00
+Chem    | 71.27      | 85.968     | 114.48     | 136.7 | 30.22
+Adens   | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 33.65      |            |       | 11.83
+
+Particle moves    = 39393654124 (39.4B)
+Cells touched     = 48850627792 (48.9B)
+Particle comms    = 388375936 (388M)
+Boundary collides = 0 (0K)
+Boundary exits    = 43981828 (44M)
+SurfColl checks   = 523547165 (524M)
+SurfColl occurs   = 101821 (0.102M)
+Surf reactions    = 0 (0K)
+Collide attempts  = 0 (0K)
+Collide occurs    = 0 (0K)
+Gas reactions     = 7193123 (7.19M)
+Particles stuck   = 0
+Axisymm bad moves = 0
+
+Particle-moves/CPUsec/proc: 1.082e+06
+Particle-moves/step: 4.37707e+06
+Cell-touches/particle/step: 1.24006
+Particle comm iterations/step: 3.88189
+Particle fraction communicated: 0.00985885
+Particle fraction colliding with boundary: 0
+Particle fraction exiting boundary: 0.00111647
+Surface-checks/particle/step: 0.0132901
+Surface-collisions/particle/step: 2.58471e-06
+Surface-reactions/particle/step: 0
+Collision-attempts/particle/step: 0
+Collisions/particle/step: 0
+Gas-reactions/particle/step: 0.000182596
+
+Particles: 34943.3 ave 52377 max 24084 min
+Histogram: 20 23 18 16 18 1 10 3 7 12
+Cells:     24576 ave 60984 max 3092 min
+Histogram: 29 7 21 7 23 17 15 1 4 4
+GhostCell: 5780.64 ave 10040 max 1590 min
+Histogram: 13 8 6 9 20 22 25 14 7 4
+EmptyCell: 4421.02 ave 6361 max 1494 min
+Histogram: 12 8 4 8 2 12 21 22 30 9
+Surfs:     478 ave 478 max 478 min
+Histogram: 128 0 0 0 0 0 0 0 0 0
+GhostSurf: 0 ave 0 max 0 min
+Histogram: 128 0 0 0 0 0 0 0 0 0
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries
+[CRAYBLAS_WARNING] Application linked against multiple cray-libsci libraries

@@ -1,2 +1,7 @@
 output/
 log.*
+runs/
+regression.log
+slurm-*.out
+slurm-*.err
+!results/*.png

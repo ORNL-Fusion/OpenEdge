@@ -219,17 +219,30 @@ def ingest_volume_pec(fout: h5py.File) -> dict:
                     continue
                 stats["lines"] += 1
                 g = grp_root.require_group(f"{element}/{pec_id}/{key}")
-                ds = g.create_dataset("coefficient", data=fin[key][...],
+                # Runtime contract (ProcessLibrary::load_pec_line +
+                # compute volume/emissivity/grid, audited 2026-09-11): the
+                # loader takes `coefficient` as log10(PEC) on a (nTe, nne)
+                # row-major grid, `temperature` as log10(Te [eV]) and
+                # `density` as log10(ne [m^-3]); the deck's `pec_units`
+                # (cm3s default) converts the coefficient.  Source files
+                # are LINEAR: PEC in cm^3/s on (nTe, nne), Te in eV, ne in
+                # cm^-3.  Convert here.
+                pec_lin = np.asarray(fin[key][...], dtype=float)
+                if te is not None and pec_lin.shape == (len(ne), len(te)):
+                    pec_lin = pec_lin.T                       # -> (nTe, nne)
+                ds = g.create_dataset("coefficient",
+                                      data=np.log10(np.maximum(pec_lin, 1e-300)),
                                       compression="gzip", compression_opts=6)
-                ds.attrs["units"]  = "photons m^3 s^-1"
+                ds.attrs["units"]  = "log10(photons cm^3 s^-1)"
+                ds.attrs["layout"] = "(nTe, nne) row-major; axes log10(Te eV), log10(ne m^-3)"
                 ds.attrs["source"] = f"open-ADAS adf15 (EIRENE distribution) {path.name}"
                 ds.attrs["method"] = ("bilinear in log10(Te) x log10(ne); "
                                       "multiply by n_e * n_ion to get "
-                                      "photons m^-3 s^-1")
+                                      "photons m^-3 s^-1 (4pi, not per sr)")
                 if te is not None and "temperature" not in g:
-                    g.create_dataset("temperature", data=te)
+                    g.create_dataset("temperature", data=np.log10(np.asarray(te, dtype=float)))
                 if ne is not None and "density" not in g:
-                    g.create_dataset("density", data=ne)
+                    g.create_dataset("density", data=np.log10(np.asarray(ne, dtype=float) * 1.0e6))
     return stats
 
 
