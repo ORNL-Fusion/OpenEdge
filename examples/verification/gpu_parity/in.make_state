@@ -1,0 +1,21 @@
+# gpu_parity stage 1 (CPU only): build a particle state in the rfpie box and
+# write a restart file that both the CPU and the GPU binaries then read.
+seed                104729
+dimension           3
+global              gridcut 0.0 comm/sort no
+boundary            o o o
+create_box          -0.0301 0.0301 -0.0301 0.0301 -0.0002 0.0600
+create_grid         32 32 48
+balance_grid        rcb cell
+global              fnum 1.0e10
+species             rfpie_input/atoms.species W W+ W2+ W3+
+mixture             wDiag W W+ W2+ W3+ group SELF
+mixture             ions W+ frac 0.4
+mixture             ions W2+ frac 0.4
+mixture             ions W3+ frac 0.2
+mixture             ions temp 60000.0 nrho 1.0e17
+fix                 pd background file rfpie_input/plasma_he.h5 static yes bz 0.1
+fix                 pw particle/weight
+create_particles    ions n 200000
+run                 0
+write_restart       state.restart

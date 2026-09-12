@@ -483,8 +483,7 @@ void FixSurfaceEmitSourceKokkos::operator()(TagFixSurfEmitSource,
 
     const int id = (int)(MAXSMALLINT * rand_gen.drand());
     const int index = Kokkos::atomic_fetch_add(&d_new_count(),1);
-    const int rf = ParticleKokkos::add_particle_kokkos(
-        d_particles,index,id,ispecies,pcell,x,v,0.0,0.0);
+    const int rf = ParticleKokkos::add_particle_kokkos(d_particles,d_species,index,id,ispecies,pcell,x,v,0.0,0.0);
     if (rf) continue;   // cannot happen: capacity pre-grown
     nactual++;
 

@@ -1279,7 +1279,7 @@ void CollideVSSKokkos::operator()(TagCollideCollisionsOneAmbipolar< GASTALLY, AT
 
       } else if (jspecies == ambispecies && jpart->ispecies != ambispecies) {
         int index = Kokkos::atomic_fetch_add(&d_nlocal(),1);
-        int reallocflag = ParticleKokkos::add_particle_kokkos(d_particles,index,0,jspecies,icell,jpart->x,jpart->v,0.0,0.0);
+        int reallocflag = ParticleKokkos::add_particle_kokkos(d_particles,d_species,index,0,jspecies,icell,jpart->x,jpart->v,0.0,0.0);
         if (reallocflag) {
           d_retry() = 1;
           d_part_grow() = 1;
@@ -1551,7 +1551,7 @@ int CollideVSSKokkos::perform_collision_kokkos(Particle::OnePart *&ip,
     memcpy(v,ip->v,3*sizeof(double));
     index_kpart = Kokkos::atomic_fetch_add(&d_nlocal(),1);
     int reallocflag =
-      ParticleKokkos::add_particle_kokkos(d_particles,index_kpart,id,kspecies,ip->icell,x,v,0.0,0.0);
+      ParticleKokkos::add_particle_kokkos(d_particles,d_species,index_kpart,id,kspecies,ip->icell,x,v,0.0,0.0);
     if (reallocflag) {
       d_retry() = 1;
       d_part_grow() = 1;

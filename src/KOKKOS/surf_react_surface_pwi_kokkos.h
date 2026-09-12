@@ -622,7 +622,7 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
         } else
           index = Kokkos::atomic_fetch_add(&d_nlocal(),1);
 
-        int reallocflag = ParticleKokkos::add_particle_kokkos(d_particles,index,
+        int reallocflag = ParticleKokkos::add_particle_kokkos(d_particles,d_species,index,
                                           id,sp,ip->icell,x,v,0.0,0.0);
         if (reallocflag) {
           d_retry() = 1;
@@ -718,8 +718,7 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
             d_nlocal()++;
           } else
             index = Kokkos::atomic_fetch_add(&d_nlocal(),1);
-          const int reallocflag = ParticleKokkos::add_particle_kokkos(
-              d_particles,index,id,sp1,ip->icell,x,v,erot1,evib1);
+          const int reallocflag = ParticleKokkos::add_particle_kokkos(d_particles,d_species,index,id,sp1,ip->icell,x,v,erot1,evib1);
           if (reallocflag) {
             d_retry() = 1;
             rand_pool.free_state(rand_gen);

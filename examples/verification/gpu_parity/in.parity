@@ -1,0 +1,22 @@
+# gpu_parity stage 2 (run with the CPU binary and with the GPU binary):
+# identical particles from state.restart, positions frozen (move no), one
+# step of fix force/thermal only. Checks:
+#  - grid/weighted keywords (all ratio and density outputs) at step 0
+#  - thermal-force velocity kick after one step (raster-gradient plasma file)
+variable            tag index cpu
+read_restart        state.restart
+seed                104729
+global              move no
+fix                 pd background file rfpie_input/plasma_he.h5 static yes br 0.08 bz 0.06
+fix                 pw particle/weight
+global              pusher plasma pd mode boris subcycles 1
+fix                 fth force/thermal 1 background pd ion_thermal yes elec_thermal yes
+compute             cgw grid/weighted all wDiag n_w nrho_w massrho_w mass_w nfrac_w massfrac_w &
+                    u_w v_w w_w usq_w ke_w temp_w pxrho_w kerho_w
+fix                 avg ave/grid all 1 1 1 c_cgw[*] ave one
+dump                dg grid all 1 out_${tag}/grid.*.dump id f_avg[*]
+dump_modify         dg format float %.12e
+dump                dp particle all 1 out_${tag}/part.*.dump id type vx vy vz
+dump_modify         dp format float %.12e
+timestep            2.0e-8
+run                 1

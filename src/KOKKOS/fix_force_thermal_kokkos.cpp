@@ -154,7 +154,8 @@ void FixForceThermalKokkos::kick_device(double dt_half)
   has_const_b_ = update_kk->oe_has_const_b;
   cb_br_ = update_kk->oe_const_br; cb_bz_ = update_kk->oe_const_bz; cb_bt_ = update_kk->oe_const_bt;
   for (int k = 0; k < 3; k++) cb_bcart_[k] = update_kk->oe_const_bcart[k];
-  if (!use_gradte_ && !use_gradti_) return;   // nothing to kick
+  if (!use_gradte_ && !use_gradti_ && !has_ras_gradte_ && !has_ras_gradti_)
+    return;   // nothing to kick (neither mesh nor raster gradients)
 
   ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
   particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK);

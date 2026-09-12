@@ -23,11 +23,16 @@ using namespace SPARTA_NS;
 
 // user keywords (must match compute_grid_weighted.cpp)
 
-enum{N_W,NRHO_W,MASSRHO_W,PXRHO_W,PYRHO_W,PZRHO_W,KERHO_W};
+enum{N_W,NRHO_W,MASSRHO_W,PXRHO_W,PYRHO_W,PZRHO_W,KERHO_W,
+     MASS_W,NFRAC_W,MASSFRAC_W,
+     U_W,V_W,W_W,USQ_W,VSQ_W,WSQ_W,
+     KE_W,TEMP_W,EROT_W,EVIB_W,TROT_W,TVIB_W};
 
 // internal accumulators (must match compute_grid_weighted.cpp)
 
-enum{WCOUNT,WMASSSUM,WMVX,WMVY,WMVZ,WMVSQ,LASTSIZE};
+enum{WCOUNT,WMASSSUM,WMVX,WMVY,WMVZ,WMVSQ,
+     WMVXSQ,WMVYSQ,WMVZSQ,
+     WEROT,WEVIB,WDOFROT,WDOFVIB,LASTSIZE};
 
 /* ---------------------------------------------------------------------- */
 
@@ -143,11 +148,15 @@ void ComputeGridWeightedKokkos::operator()(TagComputeGridWeighted_compute_per_gr
   if (igroup < 0) return;
 
   const int icell = d_particles[i].icell;
+  if (icell < 0 || icell >= nglocal) return;   // stale icell after balance/adapt (CPU guard)
   if (!(d_cinfo[icell].mask & groupbit)) return;
 
   const double mass = d_species[ispecies].mass;
   double* v = d_particles[i].v;
   const double pw = d_pweight[i];
+
+  if (cellmass_w) a_tally(icell,cellmass_w) += pw * mass;   // cell-level (all groups) columns
+  if (cellcount_w) a_tally(icell,cellcount_w) += pw;
 
   int k = igroup*npergroup;
 
@@ -168,9 +177,30 @@ void ComputeGridWeightedKokkos::operator()(TagComputeGridWeighted_compute_per_gr
     case WMVZ:
       a_tally(icell,k++) += pw * mass * v[2];
       break;
-    case WMVSQ:
-      a_tally(icell,k++) += pw * mass * (v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
-      break;
+      case WMVSQ:
+        a_tally(icell,k++) += pw * mass * (v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+        break;
+      case WMVXSQ:
+        a_tally(icell,k++) += pw * mass * v[0]*v[0];
+        break;
+      case WMVYSQ:
+        a_tally(icell,k++) += pw * mass * v[1]*v[1];
+        break;
+      case WMVZSQ:
+        a_tally(icell,k++) += pw * mass * v[2]*v[2];
+        break;
+      case WEROT:
+        a_tally(icell,k++) += pw * d_particles[i].erot;
+        break;
+      case WEVIB:
+        a_tally(icell,k++) += pw * d_particles[i].evib;
+        break;
+      case WDOFROT:
+        a_tally(icell,k++) += pw * d_species[ispecies].rotdof;
+        break;
+      case WDOFVIB:
+        a_tally(icell,k++) += pw * d_species[ispecies].vibdof;
+        break;
     }
   }
 }
@@ -189,11 +219,14 @@ void ComputeGridWeightedKokkos::operator()(TagComputeGridWeighted_compute_per_gr
 
     const int ispecies = d_particles[i].ispecies;
     const int igroup = d_s2g(imix,ispecies);
-    if (igroup < 0) return;
+    if (igroup < 0) continue;   // CPU: skip this particle, keep tallying the cell
 
     const double mass = d_species[ispecies].mass;
     double* v = d_particles[i].v;
     const double pw = d_pweight[i];
+
+    if (cellmass_w) d_tally(icell,cellmass_w) += pw * mass;
+    if (cellcount_w) d_tally(icell,cellcount_w) += pw;
 
     int k = igroup*npergroup;
 
@@ -216,6 +249,27 @@ void ComputeGridWeightedKokkos::operator()(TagComputeGridWeighted_compute_per_gr
         break;
       case WMVSQ:
         d_tally(icell,k++) += pw * mass * (v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+        break;
+      case WMVXSQ:
+        d_tally(icell,k++) += pw * mass * v[0]*v[0];
+        break;
+      case WMVYSQ:
+        d_tally(icell,k++) += pw * mass * v[1]*v[1];
+        break;
+      case WMVZSQ:
+        d_tally(icell,k++) += pw * mass * v[2]*v[2];
+        break;
+      case WEROT:
+        d_tally(icell,k++) += pw * d_particles[i].erot;
+        break;
+      case WEVIB:
+        d_tally(icell,k++) += pw * d_particles[i].evib;
+        break;
+      case WDOFROT:
+        d_tally(icell,k++) += pw * d_species[ispecies].rotdof;
+        break;
+      case WDOFVIB:
+        d_tally(icell,k++) += pw * d_species[ispecies].vibdof;
         break;
       }
     }
@@ -298,6 +352,51 @@ void ComputeGridWeightedKokkos::post_process_grid_kokkos(int index, int nsample,
       Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagComputeGridWeighted_KERHO_W>(lo,hi),*this);
       break;
     }
+
+  // ratio outputs: vec = pref * etally[num] / etally[den] (0 when den == 0),
+  // same column pairs as ComputeGridWeighted::post_process_grid
+
+  case MASS_W:
+  case NFRAC_W:
+  case MASSFRAC_W:
+  case U_W:
+  case V_W:
+  case W_W:
+  case USQ_W:
+  case VSQ_W:
+  case WSQ_W:
+  case EROT_W:
+  case EVIB_W:
+    {
+      ratio_num_col = emap[0]; ratio_den_col = emap[1]; ratio_pref = 1.0;
+      Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagComputeGridWeighted_RATIO>(lo,hi),*this);
+      break;
+    }
+
+  case KE_W:
+    {
+      ratio_num_col = emap[0]; ratio_den_col = emap[1]; ratio_pref = eprefactor;
+      Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagComputeGridWeighted_RATIO>(lo,hi),*this);
+      break;
+    }
+
+  case TEMP_W:
+    {
+      ratio_num_col = emap[0]; ratio_den_col = emap[1]; ratio_pref = tprefactor;
+      Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagComputeGridWeighted_RATIO>(lo,hi),*this);
+      break;
+    }
+
+  case TROT_W:
+  case TVIB_W:
+    {
+      ratio_num_col = emap[0]; ratio_den_col = emap[1]; ratio_pref = rvprefactor;
+      Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagComputeGridWeighted_RATIO>(lo,hi),*this);
+      break;
+    }
+
+  default:
+    error->one(FLERR,"compute grid/weighted/kk: unsupported keyword (internal)");
   }
   copymode = 0;
 }
@@ -343,6 +442,15 @@ void ComputeGridWeightedKokkos::operator()(TagComputeGridWeighted_PXRHO_W, const
     const double wt = d_cinfo[icell].weight / vol;
     d_vec[icell] = wt * d_etally(icell,wmom_col) / nsample;
   }
+}
+
+/* ---------------------------------------------------------------------- */
+
+KOKKOS_INLINE_FUNCTION
+void ComputeGridWeightedKokkos::operator()(TagComputeGridWeighted_RATIO, const int &icell) const {
+  const double norm = d_etally(icell,ratio_den_col);
+  if (norm == 0.0) d_vec[icell] = 0.0;
+  else d_vec[icell] = ratio_pref * d_etally(icell,ratio_num_col) / norm;
 }
 
 /* ---------------------------------------------------------------------- */

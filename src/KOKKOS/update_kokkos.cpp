@@ -772,23 +772,25 @@ void UpdateKokkos::run(int nsteps)
       timer->stamp(TIME_PCACHE);
     }
 
-    // move particles
+    // move particles (skip when global move no, as Update::run does)
 
-    if (cellweightflag) particle->pre_weight();
-    (this->*moveptr)();
-    timer->stamp(TIME_MOVE);
+    if (move_flag) {
+      if (cellweightflag) particle->pre_weight();
+      (this->*moveptr)();
+      timer->stamp(TIME_MOVE);
 
-    // communicate particles
+      // communicate particles
 
-    if (nmigrate) {
-      k_mlist_small = Kokkos::subview(k_mlist,std::make_pair(0,nmigrate));
-      k_mlist_small.sync_host();
+      if (nmigrate) {
+        k_mlist_small = Kokkos::subview(k_mlist,std::make_pair(0,nmigrate));
+        k_mlist_small.sync_host();
+      }
+      auto mlist_small = k_mlist_small.view_host().data();
+
+      ((CommKokkos*)comm)->migrate_particles(nmigrate,mlist_small,k_mlist_small.view_device());
+      if (cellweightflag) particle->post_weight();
+      timer->stamp(TIME_COMM);
     }
-    auto mlist_small = k_mlist_small.view_host().data();
-
-    ((CommKokkos*)comm)->migrate_particles(nmigrate,mlist_small,k_mlist_small.view_device());
-    if (cellweightflag) particle->post_weight();
-    timer->stamp(TIME_COMM);
 
     const int reorder_flag = (update->reorder_period &&
         (update->ntimestep % update->reorder_period == 0));
@@ -1170,8 +1172,8 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
     }
 
     particle_kk->modify(Device,PARTICLE_MASK);
-    if (oe_has_sheath_customs || oe_has_gca_customs)
-      particle_kk->modify(Device,CUSTOM_MASK);
+    if (oe_has_sheath_customs || oe_has_gca_customs || sheath_paid_custom >= 0)
+      particle_kk->modify(Device,CUSTOM_MASK);   // sheath_paid is written in every sheath mode
     d_particles = t_particle_1d(); // destroy reference to reduce memory use
 
     k_mlist.modify_device();

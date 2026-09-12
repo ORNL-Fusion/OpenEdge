@@ -1,0 +1,6 @@
+out_cpu/
+out_gpu/
+state.restart
+log.*
+screen.*
+*.log

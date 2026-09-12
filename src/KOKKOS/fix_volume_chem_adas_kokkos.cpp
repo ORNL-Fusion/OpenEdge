@@ -962,8 +962,7 @@ void FixVolumeChemAdasKokkos::operator()(TagFixChemAdas, const int &i) const
       }
       const int id2 = (int)(MAXSMALLINT * rand_gen.drand());
       const int index = Kokkos::atomic_fetch_add(&d_new_count(),1);
-      const int rf = ParticleKokkos::add_particle_kokkos(
-          d_particles,index,id2,sp2,icell,xn,vn,0.0,0.0);
+      const int rf = ParticleKokkos::add_particle_kokkos(d_particles,d_species,index,id2,sp2,icell,xn,vn,0.0,0.0);
       if (!rf) {
         custom_.zero_all(index);
         // CPU drain parity: modify->update_custom -> fix particle/weight

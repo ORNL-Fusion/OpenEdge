@@ -47,6 +47,10 @@ class ParticleKokkos : public Particle {
   static KOKKOS_INLINE_FUNCTION
   int add_particle_kokkos(t_particle_1d particles, int, int, int, int,
                            double *, double *, double, double);
+  // OpenEdge: same, plus per-particle mass/radius/temp from the species table
+  template<class SpeciesView> static KOKKOS_INLINE_FUNCTION
+  int add_particle_kokkos(t_particle_1d particles, const SpeciesView &species,
+                           int, int, int, int, double *, double *, double, double);
 #ifndef SPARTA_KOKKOS_EXACT
   void compress_migrate(int, int *) override;
 #endif
@@ -256,6 +260,7 @@ int ParticleKokkos::add_particle_kokkos(t_particle_1d particles, int index, int 
   tmp.evib = evib;
   enum{PKEEP,PINSERT,PDONE,PDISCARD,PENTRY,PEXIT,PSURF};  // same as .cpp file
   tmp.flag = PKEEP;
+  tmp.mass = tmp.radius = tmp.temp = 0.0;   // no species table here: explicit, not garbage
 
   int realloc = 0;
 
@@ -265,6 +270,19 @@ int ParticleKokkos::add_particle_kokkos(t_particle_1d particles, int index, int 
     realloc = 1;
   }
 
+  return realloc;
+}
+
+template<class SpeciesView> KOKKOS_INLINE_FUNCTION
+int ParticleKokkos::add_particle_kokkos(t_particle_1d particles, const SpeciesView &species,
+      int index, int id, int ispecies, int icell, double *x, double *v, double erot, double evib)
+{
+  const int realloc = add_particle_kokkos(particles,index,id,ispecies,icell,x,v,erot,evib);
+  if (!realloc) {   // CPU Particle::add_particle sets these from the species table
+    particles[index].mass   = species[ispecies].mass;
+    particles[index].radius = species[ispecies].radius;
+    particles[index].temp   = species[ispecies].temp;
+  }
   return realloc;
 }
 
