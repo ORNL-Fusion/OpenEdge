@@ -74,6 +74,7 @@ class FixVolumeChemAdasKokkos : public FixVolumeChemAdas, public KokkosBase {
  private:
   int device_ok;             // 1 = device fast path usable for this config
   int warned_fallback;
+  const char *fallback_why_ = nullptr;   // init-time host reason (ledger)
 
   // ---- static rate tables (uploaded once in init) ----
   // Flat layout matches RateData: coeff[q*nT*nD + it*nD + id], values are

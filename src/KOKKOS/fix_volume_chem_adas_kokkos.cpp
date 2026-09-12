@@ -3,6 +3,7 @@
 ------------------------------------------------------------------------- */
 
 #include "fix_volume_chem_adas_kokkos.h"
+#include "kokkos.h"
 #include "particle_kokkos.h"
 #include "grid.h"
 #include "update.h"
@@ -227,6 +228,7 @@ void FixVolumeChemAdasKokkos::init()
     }
   }
 
+  fallback_why_ = why;
   if (!device_ok) {
     if (!warned_fallback && comm->me == 0 && screen)
       fprintf(screen, "fix volume/chem/adas/kk: HOST fallback (%s)\n", why);
@@ -397,6 +399,7 @@ void FixVolumeChemAdasKokkos::end_of_step()
       "populates Te/ne at particle positions");
 
   if (!device_ok) {
+    sparta->kokkos->note_fallback("fix volume/chem/adas/kk",fallback_why_);
     // transparent host fallback: ModifyKokkos wrapped this call with
     // datamask sync, and kokkos_flag=1 means no auto_sync — do the
     // host-side sync explicitly, run the base, mark host-modified.

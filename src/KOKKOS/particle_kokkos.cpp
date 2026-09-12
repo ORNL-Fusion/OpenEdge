@@ -531,6 +531,7 @@ void ParticleKokkos::post_weight()
   if (particle->ncustom) METHOD = 1;
 
   if (METHOD == 1) { // just call the host one
+    sparta->kokkos->note_fallback("particle post_weight (cell weighting)","custom attributes present: host method");
     this->sync(Host,PARTICLE_MASK|CUSTOM_MASK);
 
     auto grid_kk = (GridKokkos*) grid;

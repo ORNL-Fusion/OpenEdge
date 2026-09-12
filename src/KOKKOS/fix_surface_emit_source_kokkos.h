@@ -64,6 +64,7 @@ class FixSurfaceEmitSourceKokkos : public FixSurfaceEmitSource,
  private:
   int device_ok;
   int warned_fallback;
+  const char *fallback_why_ = nullptr;   // init-time host reason (ledger)
   int tasks_uploaded_;            // device task views current
   int dev_announced_;             // one-shot "device emission ACTIVE" banner
   int host_warm_calls_;           // host calls spent waiting for a static source

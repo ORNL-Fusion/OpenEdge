@@ -63,6 +63,7 @@ class FixCrossFieldDiffusionKokkos : public FixCrossFieldDiffusion,
  private:
   int device_ok;
   int warned_fallback;
+  const char *fallback_why_ = nullptr;   // init-time host reason (ledger)
 
   // bound per step from UpdateKokkos (friend) + ParticleKokkos
   t_particle_1d d_particles;

@@ -6,6 +6,7 @@
 ------------------------------------------------------------------------- */
 
 #include "fix_coulomb_background_kokkos.h"
+#include "kokkos.h"
 
 #include <cstdlib>
 
@@ -88,6 +89,7 @@ void FixCoulombBackgroundKokkos::init()
     device_ok = 0; why = "no UpdateKokkos (host run)";
   }
 
+  fallback_why_ = why;
   if (!device_ok) {
     if (comm->me == 0 && screen && !warned_fallback)
       fprintf(screen,"fix coulomb/background/kk: HOST fallback (%s)\n",why);
@@ -143,6 +145,7 @@ void FixCoulombBackgroundKokkos::end_of_step()
     if (!warned_fallback && comm->me == 0 && screen && why)
       fprintf(screen,"fix coulomb/background/kk: HOST fallback (%s)\n",why);
     warned_fallback = 1;
+    sparta->kokkos->note_fallback("fix coulomb/background/kk",why ? why : fallback_why_);
     ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
     particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK);
     FixCoulombBackground::end_of_step();

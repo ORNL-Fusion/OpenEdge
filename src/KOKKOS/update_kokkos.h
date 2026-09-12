@@ -342,6 +342,7 @@ class UpdateKokkos : public Update {
   // refinement — exact CPU cache_plasma_particles() semantics for the
   // supported mask. Unsupported configs keep the host fill.
   void cache_plasma_particles_device();
+  const char *oe_pcache_why = nullptr;   // why the device cache is off (ledger)
   int oe_pcache_dev;    // 1 = device fill active this run
   int oe_pc_mask;       // pcache_need_mask captured for the kernel
   int oe_pc_csg;        // sheath Boltzmann ne correction active

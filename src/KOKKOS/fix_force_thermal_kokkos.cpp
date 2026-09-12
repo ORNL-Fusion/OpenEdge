@@ -7,6 +7,7 @@
 ------------------------------------------------------------------------- */
 
 #include "fix_force_thermal_kokkos.h"
+#include "kokkos.h"
 
 #include <cstdlib>
 #include <cmath>
@@ -71,6 +72,7 @@ void FixForceThermalKokkos::init()
   // (constant-B and regular-raster gradient providers are handled on the
   //  device since 2026-09-09: RasterKokkos / ConstBKokkos)
 
+  fallback_why_ = why;
   if (!device_ok) {
     if (comm->me == 0 && screen && !warned_fallback)
       fprintf(screen,"fix force/thermal/kk: HOST fallback (%s)\n",why);
@@ -88,6 +90,7 @@ void FixForceThermalKokkos::start_of_step()
     // host fallback must run the BASE hook, not kick_half directly:
     // compute-source mode refreshes its per-step field caches there —
     // bypassing it would kick with stale (init-time) fields forever
+    sparta->kokkos->note_fallback("fix force/thermal/kk",fallback_why_);
     ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
     particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK);
     FixForceThermal::start_of_step();
@@ -104,6 +107,7 @@ void FixForceThermalKokkos::end_of_step()
   if (!device_ok) {
     // base hook also re-fetches per-particle custom vectors that can be
     // reallocated during the move (see fix_force_thermal.cpp)
+    sparta->kokkos->note_fallback("fix force/thermal/kk",fallback_why_);
     ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
     particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK);
     FixForceThermal::end_of_step();
@@ -130,6 +134,7 @@ void FixForceThermalKokkos::kick_device(double dt_half)
     if (!warned_fallback && comm->me == 0 && screen && why)
       fprintf(screen,"fix force/thermal/kk: HOST fallback (%s)\n",why);
     warned_fallback = 1;
+    sparta->kokkos->note_fallback("fix force/thermal/kk",why ? why : fallback_why_);
     ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
     particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK);
     FixForceThermal::kick_half(dt_half);

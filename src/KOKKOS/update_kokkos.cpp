@@ -658,6 +658,7 @@ void UpdateKokkos::run(int nsteps)
               !(okc(pc_bx_custom) && okc(pc_by_custom) && okc(pc_bz_custom))))
       why = "pcache custom slots unresolved";
     oe_pcache_dev = (why == nullptr);
+    oe_pcache_why = why;
     if (comm->me == 0 && screen) {
       if (oe_pcache_dev)
         fprintf(screen,"  [kokkos] pcache: DEVICE fill active (mask 0x%x%s)\n",
@@ -747,6 +748,7 @@ void UpdateKokkos::run(int nsteps)
       if (oe_pcache_dev) {
         cache_plasma_particles_device();
       } else {
+        sparta->kokkos->note_fallback("pusher plasma cache (pcache)",oe_pcache_why);
         particle_kk->sync(Host,PARTICLE_MASK|CUSTOM_MASK);
         cache_plasma_particles();
         particle_kk->modify(Host,CUSTOM_MASK);
@@ -830,6 +832,8 @@ void UpdateKokkos::run(int nsteps)
   }
 
   modify->post_run();
+
+  sparta->kokkos->fallback_report(screen,logfile);   // OpenEdge: per-run host-fallback summary
 
   sparta->kokkos->auto_sync = 1;
   particle_kk->sync(Host,ALL_MASK);

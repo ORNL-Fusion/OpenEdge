@@ -54,6 +54,7 @@ class FixForceThermalKokkos : public FixForceThermal, public KokkosBase {
   int gca_vpar_slot_, gca_valid_slot_;
   int device_ok;
   int warned_fallback;
+  const char *fallback_why_ = nullptr;   // init-time host reason (ledger)
 
   // bound per kick from UpdateKokkos (friend) + ParticleKokkos
   t_particle_1d d_particles;

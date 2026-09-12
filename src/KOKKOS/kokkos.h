@@ -17,6 +17,8 @@
 
 #include "pointers.h"
 #include "kokkos_type.h"
+#include <string>
+#include <vector>
 
 namespace SPARTA_NS {
 
@@ -32,10 +34,18 @@ class KokkosSPARTA : protected Pointers {
   int gpu_aware_flag;
   int react_retry_flag;
   double react_extra;
+  int fallback_strict;       // OpenEdge: 1 = error on any host fallback (package kokkos fallback error / OE_KK_STRICT)
 
   KokkosSPARTA(class SPARTA *, int, char **);
   ~KokkosSPARTA();
   void accelerator(int, char **);
+
+  // OpenEdge host-fallback ledger: every Kokkos class that runs a hook on
+  // the host instead of the device calls note_fallback() on each such
+  // call; fallback_report() (end of every run) prints the per-class totals
+  // over all ranks, or a single 'none' line, then clears the ledger.
+  void note_fallback(const char *who, const char *why);
+  void fallback_report(FILE *screen, FILE *logfile);
 
   template<class DeviceType>
   int need_dup()
@@ -49,6 +59,8 @@ class KokkosSPARTA : protected Pointers {
   }
 
  private:
+  struct FallbackEntry { std::string who, why; long count; long first, last; };
+  std::vector<FallbackEntry> fallbacks;
   static void my_signal_handler(int);
 };
 

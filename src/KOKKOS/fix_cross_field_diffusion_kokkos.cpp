@@ -5,6 +5,7 @@
 ------------------------------------------------------------------------- */
 
 #include "fix_cross_field_diffusion_kokkos.h"
+#include "kokkos.h"
 
 #include <cstdlib>
 
@@ -84,6 +85,7 @@ void FixCrossFieldDiffusionKokkos::init()
     device_ok = 0; why = "gradient_pinch with a structured raster (host FD)";
   }
 
+  fallback_why_ = why;
   if (!device_ok) {
     if (comm->me == 0 && screen && !warned_fallback)
       fprintf(screen,"fix cross_field_diffusion/kk: HOST fallback (%s)\n",why);
@@ -147,6 +149,7 @@ void FixCrossFieldDiffusionKokkos::start_of_step()
     if (!warned_fallback && comm->me == 0 && screen && why)
       fprintf(screen,"fix cross_field_diffusion/kk: HOST fallback (%s)\n",why);
     warned_fallback = 1;
+    sparta->kokkos->note_fallback("fix cross_field_diffusion/kk",why ? why : fallback_why_);
     if (update_kk) update_kk->oe_cd_dev = 0;   // run() uploads host dx_cd
     ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
     particle_kk->sync(Host,PARTICLE_MASK|SPECIES_MASK);

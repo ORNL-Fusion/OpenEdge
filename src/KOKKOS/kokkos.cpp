@@ -21,6 +21,9 @@
 #include "sparta.h"
 #include "error.h"
 #include "memory_kokkos.h"
+#include "update.h"
+#include "comm.h"
+#include <map>
 
 using namespace SPARTA_NS;
 
@@ -198,6 +201,7 @@ KokkosSPARTA::KokkosSPARTA(SPARTA *sparta, int narg, char **arg) : Pointers(spar
 
   react_retry_flag = 0;
   react_extra = 1.1;
+  fallback_strict = getenv("OE_KK_STRICT") ? 1 : 0;
 
   // finalize Kokkos on abort
 
@@ -240,6 +244,12 @@ void KokkosSPARTA::accelerator(int narg, char **arg)
         react_retry_flag = 0;
       } else error->all(FLERR,"Illegal package kokkos command");
       iarg += 2;
+    } else if (strcmp(arg[iarg],"fallback") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal package kokkos command");
+      if (strcmp(arg[iarg+1],"warn") == 0) fallback_strict = 0;
+      else if (strcmp(arg[iarg+1],"error") == 0) fallback_strict = 1;
+      else error->all(FLERR,"Illegal package kokkos command");
+      iarg += 2;
     } else if (strcmp(arg[iarg],"react/extra") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal package kokkos command");
       react_extra = atof(arg[iarg+1]);
@@ -254,6 +264,92 @@ void KokkosSPARTA::accelerator(int narg, char **arg)
       } else error->all(FLERR,"Illegal package kokkos command");
       iarg += 2;
     } else error->all(FLERR,"Illegal package kokkos command");
+  }
+}
+
+/* ----------------------------------------------------------------------
+   OpenEdge host-fallback ledger
+------------------------------------------------------------------------- */
+
+void KokkosSPARTA::note_fallback(const char *who, const char *why)
+{
+  if (!why) why = "(no reason recorded)";
+  const long step = (long) update->ntimestep;
+  for (auto &e : fallbacks) {
+    if (e.who == who) {
+      e.count++; e.last = step;
+      if (fallback_strict) {
+        char msg[512];
+        snprintf(msg,sizeof(msg),"%s: host fallback (%s) with package kokkos fallback error",who,why);
+        error->one(FLERR,msg);
+      }
+      return;
+    }
+  }
+  FallbackEntry e; e.who = who; e.why = why; e.count = 1; e.first = e.last = step;
+  fallbacks.push_back(e);
+  if (fallback_strict) {
+    char msg[512];
+    snprintf(msg,sizeof(msg),"%s: host fallback (%s) with package kokkos fallback error",who,why);
+    error->one(FLERR,msg);
+  }
+}
+
+/* ----------------------------------------------------------------------
+   gather every rank's ledger to rank 0 and print one line per class:
+   total host calls over ranks, ranks affected, step range, first reason
+------------------------------------------------------------------------- */
+
+void KokkosSPARTA::fallback_report(FILE *screen, FILE *logfile)
+{
+  int me,nprocs;
+  MPI_Comm_rank(world,&me);
+  MPI_Comm_size(world,&nprocs);
+
+  std::string mine;
+  for (auto &e : fallbacks)
+    mine += e.who + "\t" + e.why + "\t" + std::to_string(e.count) + "\t" +
+            std::to_string(e.first) + "\t" + std::to_string(e.last) + "\n";
+  fallbacks.clear();
+
+  int n = (int) mine.size();
+  std::vector<int> counts(nprocs),displs(nprocs);
+  MPI_Gather(&n,1,MPI_INT,counts.data(),1,MPI_INT,0,world);
+  int total = 0;
+  if (me == 0) for (int i = 0; i < nprocs; i++) { displs[i] = total; total += counts[i]; }
+  std::vector<char> all(me == 0 ? total+1 : 1);
+  MPI_Gatherv(mine.data(),n,MPI_CHAR,all.data(),counts.data(),displs.data(),MPI_CHAR,0,world);
+  if (me != 0) return;
+
+  struct Agg { std::string why; long calls = 0; int ranks = 0; long first = 0, last = 0; };
+  std::map<std::string,Agg> agg;
+  std::vector<std::string> order;
+  for (int r = 0; r < nprocs; r++) {
+    std::string blob(all.data()+displs[r],counts[r]);
+    size_t pos = 0;
+    while (pos < blob.size()) {
+      size_t nl = blob.find('\n',pos); if (nl == std::string::npos) nl = blob.size();
+      std::string line = blob.substr(pos,nl-pos); pos = nl+1;
+      std::vector<std::string> f; size_t p = 0;
+      while (true) { size_t t = line.find('\t',p); f.push_back(line.substr(p,t==std::string::npos?std::string::npos:t-p)); if (t == std::string::npos) break; p = t+1; }
+      if (f.size() < 5) continue;
+      Agg &a = agg[f[0]];
+      if (a.ranks == 0) { a.why = f[1]; a.first = atol(f[3].c_str()); a.last = atol(f[4].c_str()); order.push_back(f[0]); }
+      a.calls += atol(f[2].c_str()); a.ranks++;
+      a.first = std::min(a.first,atol(f[3].c_str())); a.last = std::max(a.last,atol(f[4].c_str()));
+    }
+  }
+
+  FILE *outs[2] = {screen,logfile};
+  for (FILE *out : outs) {
+    if (!out) continue;
+    if (order.empty()) { fprintf(out,"Kokkos host fallbacks this run: none\n"); continue; }
+    fprintf(out,"Kokkos host fallbacks this run (host calls summed over ranks):\n");
+    for (auto &who : order) {
+      Agg &a = agg[who];
+      fprintf(out,"  %-34s calls %-9ld ranks %d/%d  steps %ld-%ld  %s\n",
+              who.c_str(),a.calls,a.ranks,nprocs,a.first,a.last,a.why.c_str());
+    }
   }
 }
 

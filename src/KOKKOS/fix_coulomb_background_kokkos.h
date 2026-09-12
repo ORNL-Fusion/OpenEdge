@@ -68,6 +68,7 @@ class FixCoulombBackgroundKokkos : public FixCoulombBackground,
   bigint ntimestep_;
   int device_ok;
   int warned_fallback;
+  const char *fallback_why_ = nullptr;   // init-time host reason (ledger)
 
   // Nanbu A(s) table (uploaded once in init)
   DAT::t_float_1d d_s_tab, d_A_tab;

@@ -5,6 +5,7 @@
 ------------------------------------------------------------------------- */
 
 #include "fix_surface_emit_source_kokkos.h"
+#include "kokkos.h"
 
 #include <cstdlib>
 
@@ -110,6 +111,7 @@ void FixSurfaceEmitSourceKokkos::init()
     }
   }
 
+  fallback_why_ = why;
   if (!device_ok) {
     if (comm->me == 0 && screen && !warned_fallback)
       fprintf(screen,"fix surface/emit/source/kk: HOST emission (%s)\n",why);
@@ -260,6 +262,8 @@ void FixSurfaceEmitSourceKokkos::perform_task()
   }
 
   if (!dev) {
+    sparta->kokkos->note_fallback("fix surface/emit/source/kk",
+        why ? why : (fallback_why_ ? fallback_why_ : "warmup: per-task source not yet static"));
     if (why && !warned_fallback && comm->me == 0 && screen) {
       fprintf(screen,"fix surface/emit/source/kk: HOST emission (%s)\n",why);
       warned_fallback = 1;
