@@ -511,7 +511,10 @@ void FixAveGridKokkos::operator()(TagFixAveGrid_Norm_array_grid, const int &i) c
 void FixAveGridKokkos::grow_percell(int nnew)
 {
   if (nglocal+nnew < maxgrid) return;
-  maxgrid += DELTAGRID;
+  // amortized growth: each grow round-trips the whole tally/output arrays
+  // between host and device, so 1024-cell steps made a 6e5-cell rebalance
+  // receive O(n^2) (27 s on rfpie, 2026-09-12); also honor nnew > DELTAGRID
+  while (maxgrid < nglocal+nnew) maxgrid += MAX(DELTAGRID, maxgrid/4);
   int n = maxgrid;
 
   // resize with the device as the source of truth, then refresh the host

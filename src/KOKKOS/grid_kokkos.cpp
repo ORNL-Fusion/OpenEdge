@@ -114,7 +114,10 @@ void GridKokkos::grow_cells(int n, int m)
 
     if (nlocal+nghost+n >= maxcell) {
       const int oldmax = maxcell;
-      while (maxcell < nlocal+nghost+n) maxcell += DELTA;
+      // amortized: every grow syncs, resizes on the device and syncs back the
+      // whole cell array (auto_sync during host unpacks); 8192-cell steps
+      // cost 36 s to receive 6e5 cells in a rebalance (2026-09-12)
+      while (maxcell < nlocal+nghost+n) maxcell += MAX(DELTA, maxcell/4);
       if (cells == NULL)
         MemKK::realloc_kokkos(k_cells,"grid:cells",maxcell);
       else {
@@ -129,7 +132,7 @@ void GridKokkos::grow_cells(int n, int m)
     }
 
     if (nlocal+m >= maxlocal) {
-      while (maxlocal < nlocal+m) maxlocal += DELTA;
+      while (maxlocal < nlocal+m) maxlocal += MAX(DELTA, maxlocal/4);
       if (cinfo == NULL)
         MemKK::realloc_kokkos(k_cinfo,"grid:cinfo",maxlocal);
       else {

@@ -30,6 +30,8 @@
 #include "random_knuth.h"
 #include "memory.h"
 #include "error.h"
+#include <cstdio>
+#include <cstdlib>
 #include "timer.h"
 #include "fix_adapt.h"
 
@@ -214,6 +216,9 @@ void FixBalance::init()
 
 void FixBalance::end_of_step()
 {
+  static int oe_diag = -1;
+  if (oe_diag < 0) { const char *e = getenv("OE_CELLMIG_DIAG"); oe_diag = e ? atoi(e) : 0; }
+  const double oe_t_enter = MPI_Wtime();
   // return if imbalance < threshhold
 
   imbnow = imbalance_factor(maxperproc);
@@ -327,17 +332,28 @@ void FixBalance::end_of_step()
   // invoke grid methods to complete grid setup
   // some fixes have post migration operations to perform
 
+  const double tb0 = MPI_Wtime();
   grid->unset_neighbors();
   grid->remove_ghosts();
 
+  const double tb1 = MPI_Wtime();
   comm->migrate_cells(nmigrate);
+  const double tb2 = MPI_Wtime();
   grid->hashfilled = 0;
 
   grid->setup_owned();
+  const double tb3 = MPI_Wtime();
   grid->acquire_ghosts();
+  const double tb4 = MPI_Wtime();
 
   grid->reset_neighbors();
   comm->reset_neighbors();
+  const double tb5 = MPI_Wtime();
+  if (oe_diag) {
+    printf("OE_BALANCE rank=%d step=%ld nmigrate=%d t(rcb+assign %.3f, unset/remove ghosts %.3f, migrate_cells %.3f, setup_owned %.3f, acquire_ghosts %.3f, reset_neighbors %.3f) s\n",
+           comm->me,(long)update->ntimestep,nmigrate,tb0-oe_t_enter,tb1-tb0,tb2-tb1,tb3-tb2,tb4-tb3,tb5-tb4);
+    fflush(stdout);
+  }
 
   // if explicit distributed surfs
   // set redistribute timestep and clear custom status flags
@@ -351,7 +367,12 @@ void FixBalance::end_of_step()
   // notify all classes that store per-grid data that grid may have changed
   // do this after clearing custom status flags in case classes use that info
 
+  const double tb6 = MPI_Wtime();
   grid->notify_changed();
+  if (oe_diag) {
+    printf("OE_BALANCE rank=%d step=%ld t(notify_changed %.3f) s\n",comm->me,(long)update->ntimestep,MPI_Wtime()-tb6);
+    fflush(stdout);
+  }
 
   // final imbalance factor
   // for RCB TIME, cannot compute imbalance from timers since grid cells moved

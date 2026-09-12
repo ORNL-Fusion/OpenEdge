@@ -352,6 +352,9 @@ class Grid : protected Pointers {
     return nmask;
   }
 
+ public:
+  virtual void grow_cells(int, int);   // public: CommKokkos pre-grows receivers
+
  protected:
   int me;
   int maxcell;             // size of cells
@@ -483,7 +486,6 @@ class Grid : protected Pointers {
   int box_overlap(double *, double *, double *, double *);
   int box_periodic(double *, double *, Box *);
 
-  virtual void grow_cells(int, int);
   virtual void grow_pcells();
   virtual void grow_sinfo(int);
 

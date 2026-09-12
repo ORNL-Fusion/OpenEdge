@@ -2046,7 +2046,7 @@ void Grid::grow_cells(int n, int m)
 {
   if (nlocal+nghost+n >= maxcell) {
     int oldmax = maxcell;
-    while (maxcell < nlocal+nghost+n) maxcell += DELTA;
+    while (maxcell < nlocal+nghost+n) maxcell += MAX(DELTA, maxcell/4);   // amortized
     cells = (ChildCell *)
       memory->srealloc(cells,maxcell*sizeof(ChildCell),"grid:cells",
                        SPARTA_GET_ALIGN(ChildCell));
@@ -2056,7 +2056,7 @@ void Grid::grow_cells(int n, int m)
 
   if (nlocal+m >= maxlocal) {
     int oldmax = maxlocal;
-    while (maxlocal < nlocal+m) maxlocal += DELTA;
+    while (maxlocal < nlocal+m) maxlocal += MAX(DELTA, maxlocal/4);   // amortized
     cinfo = (ChildInfo *)
       memory->srealloc(cinfo,maxlocal*sizeof(ChildInfo),"grid:cinfo");
     memset(&cinfo[oldmax],0,(maxlocal-oldmax)*sizeof(ChildInfo));

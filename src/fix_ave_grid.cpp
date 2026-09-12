@@ -981,7 +981,7 @@ void FixAveGrid::grow_percell(int nnew)
   if (nglocal+nnew < maxgrid) return;
 
   int maxgridold = maxgrid;
-  while (maxgrid < nglocal+nnew) maxgrid += DELTAGRID;
+  while (maxgrid < nglocal+nnew) maxgrid += MAX(DELTAGRID, maxgrid/4);   // amortized
 
   if (nvalues == 1) memory->grow(vector_grid,maxgrid,"ave/grid:vector_grid");
   else memory->grow(array_grid,maxgrid,nvalues,"ave/grid:array_grid");

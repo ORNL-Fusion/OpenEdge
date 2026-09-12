@@ -602,6 +602,9 @@ void CommKokkos::migrate_cells_only(int nmigrate, int *cellbase)
 {
   Grid::ChildCell *cells = grid->cells;
   int nglocal = grid->nlocal;
+  static int diag = -1;
+  if (diag < 0) { const char *e = getenv("OE_CELLMIG_DIAG"); diag = e ? atoi(e) : 0; }
+  double tt[8]; int nt = 0; tt[nt++] = MPI_Wtime();
 
   if (nmigrate > maxgproc) {
     maxgproc = nmigrate;
@@ -636,12 +639,14 @@ void CommKokkos::migrate_cells_only(int nmigrate, int *cellbase)
     offset += grid->pack_one(icell,&sbuf[offset],1,0,1,1);
   }
 
+  tt[nt++] = MPI_Wtime();   // pack
   if (nmigrate) {
     if (surf->implicit) surf->compress_implicit();
     grid->compress();
     if (surf->distributed && !surf->implicit) surf->compress_explicit();
   }
   particle->sorted = 0;
+  tt[nt++] = MPI_Wtime();   // compress
 
   if (!igrid) igrid = new Irregular(sparta);
   bigint recvsize;
@@ -654,7 +659,19 @@ void CommKokkos::migrate_cells_only(int nmigrate, int *cellbase)
     memset(rbuf,0,maxrecvbuf);
   }
 
+  tt[nt++] = MPI_Wtime();   // plan
   igrid->exchange_variable(sbuf,gsize,rbuf);
+  tt[nt++] = MPI_Wtime();   // exchange
+
+  // pre-grow the cell arrays once for the incoming top-level cells (sub
+  // cells add a little more); otherwise unpack_one grows them chunk by chunk
+  {
+    int nin = igrid->self_count();
+    const int nrp0 = igrid->recv_nprocs(); const int *rn0 = igrid->recv_nums();
+    for (int r = 0; r < nrp0; r++) nin += rn0[r];
+    if (nin > 0) grid->grow_cells(nin, nin);
+  }
+  tt[nt++] = MPI_Wtime();   // pregrow
 
   offset = 0;
   const int nself = igrid->self_count();
@@ -665,5 +682,12 @@ void CommKokkos::migrate_cells_only(int nmigrate, int *cellbase)
   for (int r = 0; r < nrp; r++) {
     cellbase[rp[r]] = grid->nlocal;
     for (int k = 0; k < rn[r]; k++) offset += grid->unpack_one(&rbuf[offset],1,0,1);
+  }
+  tt[nt++] = MPI_Wtime();   // unpack
+  if (diag) {
+    const char *nm[] = {"pack","compress","plan","exchange","pregrow","unpack"};
+    char line[512]; int n = snprintf(line,sizeof(line),"OE_CELLMIG_CELLS rank=%d nlocal %d -> %d t(",me,nglocal,grid->nlocal);
+    for (int i = 1; i < nt; i++) n += snprintf(line+n,sizeof(line)-n,"%s %.3f%s",nm[i-1],tt[i]-tt[i-1],i<nt-1?", ":") s\n");
+    fputs(line,screen ? screen : stderr); if (logfile) fputs(line,logfile);
   }
 }
