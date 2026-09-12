@@ -305,9 +305,14 @@ void FixSurfaceEmitSourceKokkos::perform_task()
       if (s <= 0.0) continue;
       cap += (long long)((double) nlaunch_total * s / src_total_) + 1;
     }
-    // exact capacity for the in-kernel atomic append
+    // exact capacity for the in-kernel atomic append.
+    // grow(nextra) takes the number of particles to add BEYOND nlocal
+    // (target = nlocal + nextra); passing the deficit nlocal+cap-maxlocal
+    // made grow a no-op whenever maxlocal-nlocal was between cap/2 and cap,
+    // and the kernel then appended past the allocation (nlaunch_total
+    // >= 2000 crash, 2026-09-11 audit).
     if (particle->nlocal + cap > particle->maxlocal)
-      particle_kk->grow((int)(particle->nlocal + cap - particle->maxlocal));
+      particle_kk->grow((int) cap);
   }
 
   particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK|CUSTOM_MASK);
@@ -340,6 +345,9 @@ void FixSurfaceEmitSourceKokkos::perform_task()
   int nnew_total = 0, nsingle_dev = 0;
   Kokkos::deep_copy(nnew_total, d_new_count);
   Kokkos::deep_copy(nsingle_dev, d_nsingle);
+  if (nnew_total > (int) particle_kk->k_particles.d_view.extent(0))
+    error->one(FLERR,"fix surface/emit/source/kk: device emission overran the "
+               "particle array (pre-grow capacity too small)");
   if (nnew_total > particle->nlocal) {
     particle->nlocal = nnew_total;
     particle->sorted = 0;
