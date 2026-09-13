@@ -41,6 +41,10 @@ class ComputeSurfKokkos : public ComputeSurf {
   void init_normflux();
   void clear();
   int tallyinfo(surfint *&);
+  // OpenEdge: host-side tally entry (reached only from host fixes such as
+  // the emission warm-up); the device tally is surf_tally_kk below
+  void surf_tally(double, int, int, int, Particle::OnePart *,
+                  Particle::OnePart *, Particle::OnePart *) override;
   void update_hash();
   void pre_surf_tally();
   void post_surf_tally();

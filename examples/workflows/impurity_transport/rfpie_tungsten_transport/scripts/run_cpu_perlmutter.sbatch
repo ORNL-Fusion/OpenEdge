@@ -5,7 +5,7 @@
 #      EXE    (default $PSCRATCH/openedge-build-kkhost4/src/spa_kokkos_omp, run on the pure CPU path)
 #SBATCH -J rfpie_cpu_zramp_hi -q regular -t 00:30:00 -N 1 -A m5186 -C cpu --ntasks-per-node=128 --cpus-per-task=2
 #SBATCH -o slurm-%x-%j.out -e slurm-%x-%j.err
-module reset >/dev/null 2>&1; module load cpe/25.09 >/dev/null 2>&1; module load PrgEnv-gnu/8.6.0 cray-hdf5 python >/dev/null 2>&1;   # pinned to the cpe/25.09 toolchain module unload craype-accel-nvidia80 >/dev/null 2>&1
+module reset >/dev/null 2>&1; module load cpe/25.09 >/dev/null 2>&1; module load PrgEnv-gnu/8.6.0 cray-hdf5 python >/dev/null 2>&1; module unload craype-accel-nvidia80 >/dev/null 2>&1   # pinned to the cpe/25.09 toolchain
 export OMP_NUM_THREADS=1 MPICH_GPU_SUPPORT_ENABLED=0 OPENEDGE_ROOT=${OPENEDGE_ROOT:-$HOME/OpenEdge}
 EXE=${EXE:-$PSCRATCH/openedge-build-kkhost4/src/spa_kokkos_omp}
 CASE=${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}
