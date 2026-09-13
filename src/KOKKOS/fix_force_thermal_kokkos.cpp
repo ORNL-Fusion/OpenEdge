@@ -166,7 +166,8 @@ void FixForceThermalKokkos::kick_device(double dt_half)
   particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK);
   d_particles = particle_kk->k_particles.view_device();
   gca_vpar_slot_ = gca_valid_slot_ = -1;
-  int gc_hooks = 31; if (const char *e = getenv("OE_GC_HOOKS")) gc_hooks = atoi(e);
+  static int gc_hooks = -1;   // read once (was a getenv per call)
+  if (gc_hooks < 0) { gc_hooks = 31; if (const char *e = getenv("OE_GC_HOOKS")) gc_hooks = atoi(e); }
   if ((gc_hooks & 16) && update->pusher && update->pusher->pusher_mode != Pusher::PUSHER_BORIS &&
       update->pusher->gca_vpar_custom >= 0 && update->pusher->gca_valid_custom >= 0) {
     particle_kk->sync(Device,CUSTOM_MASK);
@@ -273,8 +274,7 @@ void FixForceThermalKokkos::kick_device(double dt_half)
   copymode = 1;
   Kokkos::parallel_for(
       Kokkos::RangePolicy<DeviceType,TagFixForceThermal>(0,nlocal),*this);
-  Kokkos::fence();
-  copymode = 0;
+  copymode = 0;   // no fence needed (stream-ordered)
 
   particle_kk->modify(Device,PARTICLE_MASK);
   if (gca_valid_slot_ >= 0) particle_kk->modify(Device,CUSTOM_MASK);

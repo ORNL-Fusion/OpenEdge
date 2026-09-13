@@ -550,7 +550,8 @@ void FixVolumeChemAdasKokkos::end_of_step()
   // (the product-creation branch above binds custom_ only for two-product
   // reaction tables)
   gca_valid_slot_ = -1;
-  int gc_hooks = 31; if (const char *e = getenv("OE_GC_HOOKS")) gc_hooks = atoi(e);
+  static int gc_hooks = -1;   // read once (was a getenv per call)
+  if (gc_hooks < 0) { gc_hooks = 31; if (const char *e = getenv("OE_GC_HOOKS")) gc_hooks = atoi(e); }
   if ((gc_hooks & 4) && update->pusher && update->pusher->pusher_mode != Pusher::PUSHER_BORIS &&
       update->pusher->gca_valid_custom >= 0) {
     ParticleKokkos *pkk_gc = (ParticleKokkos *) particle;

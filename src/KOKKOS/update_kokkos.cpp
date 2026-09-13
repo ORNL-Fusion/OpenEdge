@@ -5064,8 +5064,7 @@ void UpdateKokkos::cache_plasma_particles_device()
   copymode = 1;
   Kokkos::parallel_for(
       Kokkos::RangePolicy<DeviceType,TagUpdatePcacheFill>(0,nlocal),*this);
-  DeviceType().fence();
-  copymode = 0;
+  copymode = 0;   // no fence needed (stream-ordered; the tripwire mirror copy syncs)
 
   // one-line diagnostic when a validity guard fired (would have been an
   // OOB read before the guards); print once per run

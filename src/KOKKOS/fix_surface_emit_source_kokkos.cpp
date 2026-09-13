@@ -360,8 +360,7 @@ void FixSurfaceEmitSourceKokkos::perform_task()
   copymode = 1;
   Kokkos::parallel_for(
       Kokkos::RangePolicy<DeviceType,TagFixSurfEmitSource>(0,ntask),*this);
-  DeviceType().fence();
-  copymode = 0;
+  copymode = 0;   // the blocking deep_copy of the counters below synchronizes
 
   int nnew_total = 0, nsingle_dev = 0;
   Kokkos::deep_copy(nnew_total, d_new_count);

@@ -233,8 +233,7 @@ void FixCrossFieldDiffusionKokkos::start_of_step()
   Kokkos::parallel_for(
       Kokkos::RangePolicy<DeviceType,TagFixCrossFieldDiffusion>(0,nlocal),
       *this);
-  DeviceType().fence();
-  copymode = 0;
+  copymode = 0;   // no fence: the functor is copied at launch; the stream orders the rest
 }
 
 /* ----------------------------------------------------------------------
