@@ -82,11 +82,12 @@ KKARGS=()
 MODE=cpu
 if [[ $KKMODE -eq 1 ]]; then
   # detect the backend from the binary itself (linked CUDA runtime), not its name
+  # OE_KK_NGPU=4 with an srun line that leaves all GPUs visible (--gpu-bind=none): Kokkos picks by rank
   # gpu/aware no: the MPI on this machine is not GPU-aware unless
   # MPICH_GPU_SUPPORT_ENABLED=1 (multi-rank runs segfault otherwise)
   GPUAWARE=no; [[ "${MPICH_GPU_SUPPORT_ENABLED:-0}" == "1" ]] && GPUAWARE=yes
   if ldd "$EXE" 2>/dev/null | grep -qi 'libcudart'; then   # libcuda.so.1 alone is also linked by the OpenMP build on Perlmutter
-    KKARGS=(-k on g 1 -sf kk -pk kokkos react/retry yes gpu/aware $GPUAWARE comm threaded); MODE=gpu
+    KKARGS=(-k on g ${OE_KK_NGPU:-1} -sf kk -pk kokkos react/retry yes gpu/aware $GPUAWARE comm threaded); MODE=gpu
   elif ldd "$EXE" >/dev/null 2>&1; then
     KKARGS=(-k on t 1 -sf kk -pk kokkos react/retry yes); MODE=kkhost
   else
