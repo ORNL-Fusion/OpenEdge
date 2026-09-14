@@ -146,6 +146,11 @@ class FixBackground : public Fix {
     if (!const_has_bcart) return false;
     b[0] = const_bcart[0]; b[1] = const_bcart[1]; b[2] = const_bcart[2]; return true;
   }
+  // constant cylindrical E (er/ez/et), the query_efield_at_point constant mode
+  bool const_efield_cyl(double &er, double &ez, double &et) const {
+    if (!const_has_efield) return false;
+    er = const_e_r; ez = const_e_z; et = const_e_t; return true;
+  }
   bool psi_norm_gradient_at(double R, double Z,
                             double &dpsi_dR, double &dpsi_dZ) const;
 

@@ -561,6 +561,10 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
     double twall_eff = twall_c;                       // CPU: twall_surf custom if bound
     if (twall_surf_on) twall_eff = d_twall_surf(isurf);
 
+    // reflect/absorb lottery value drawn first, before the sputter draws:
+    // same RNG stream order as the CPU react() (random_prob at its top)
+    const double random_prob = rand_gen.drand();
+
     // ---- additive self-sputtering (before the reflect/absorb lottery) ----
 
     int nsput_total = 0;
@@ -659,7 +663,6 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
     // ---- first-to-fire reflect/absorb lottery ----
 
     double react_prob = 0.0;
-    const double random_prob = rand_gen.drand();
 
     for (int i = 0; i < n; i++) {
       const int m = d_list(ip->ispecies,i);

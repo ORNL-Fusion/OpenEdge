@@ -321,6 +321,7 @@ void UpdateKokkos::init()
   oe_has_equilibrium = 0;
   oe_has_equ_bmaps = 0;
   oe_has_const_b = 0;
+  oe_has_const_e = 0;
   oe_psi_on = oe_psi_action = oe_pw_slot_on = 0;
   oe_swlog_on = oe_swlog_cap = 0;
   oe_kick_on = oe_paid_on = oe_wave_on = oe_kick_te_on = 0;
@@ -947,6 +948,15 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
 
     oe_paid_on = oe_wave_on = oe_kick_te_on = 0;
     if (oe_kick_on) {   // sheath kick/boundary: paid state, pcache Te/Ti, RF waveform
+      // 6f: in kick mode the device reads Te/Ti from the pusher plasma cache
+      // (the CPU does a point query at impact); without the cache the kick
+      // would silently be zero unless a per-element sheath provider gives phi
+      if (sheath_kick && !sheath_boundary && oe_sheath_provider != 1 &&
+          !(pc_te_custom >= 0 && pc_ti_custom >= 0 &&
+            particle->ewhich[pc_te_custom] >= 0 && particle->ewhich[pc_ti_custom] >= 0))
+        error->all(FLERR,"Kokkos sheath kick mode needs the pusher plasma cache "
+                   "(pcache Te/Ti) or a per-element sheath provider: the device "
+                   "kick reads Te from the cache, the CPU queries it at impact");
       if (sheath_paid_custom >= 0) {
         particle_kk->sync(Device,CUSTOM_MASK);
         d_oe_paid = particle_kk->k_eivec.h_view[particle->ewhich[sheath_paid_custom]].k_view.d_view;
@@ -3096,6 +3106,7 @@ void UpdateKokkos::build_oe_mesh_from_fix()
   oe_has_equilibrium = 0;
   oe_has_equ_bmaps = 0;
   oe_has_const_b = 0;
+  oe_has_const_e = 0;
   // (reflect/psi and switch_log flags are owned by init()/bind_oe_psi(); not reset here)
   if (pusher->pusher_plasma_fidx < 0) return;
   FixBackground *pd =
@@ -3104,6 +3115,7 @@ void UpdateKokkos::build_oe_mesh_from_fix()
     pd->mesh_ntri > 0 &&
     (int) pd->mesh_tri_br.size() == pd->mesh_ntri;
   oe_has_const_b = 0;
+  oe_has_const_e = 0;
   if (!have_mesh_b) {
     // mesh-less fix provider (2026-09-08): bind the equilibrium psi map /
     // native maps and the constant B so the device B chain (mesh -> equ ->
@@ -3116,13 +3128,14 @@ void UpdateKokkos::build_oe_mesh_from_fix()
       bind_oe_equ_from_fix(pd);
       if (pd->const_bfield_cart(oe_const_bcart)) oe_has_const_b = 2;
       else if (pd->const_bfield_cyl(oe_const_br, oe_const_bz, oe_const_bt)) oe_has_const_b = 1;
+      if (pd->const_efield_cyl(oe_const_er, oe_const_ez, oe_const_et)) oe_has_const_e = 1;
       if (!oe_has_equilibrium && !oe_has_const_b &&
           (!pd->equ_r.empty() || pd->has_const_bfield()))
         error->all(FLERR,"Kokkos pusher: fix background has no mesh B and "
                    "its equilibrium / constant B could not be bound");
-      if (comm->me == 0 && screen && (oe_has_equilibrium || oe_has_const_b))
+      if (comm->me == 0 && screen && (oe_has_equilibrium || oe_has_const_b || oe_has_const_e))
         fprintf(screen,"  [kokkos] pusher B: mesh-less fix provider "
-                "(equilibrium=%d const_b=%d)\n",oe_has_equilibrium,oe_has_const_b);
+                "(equilibrium=%d const_b=%d const_e=%d)\n",oe_has_equilibrium,oe_has_const_b,oe_has_const_e);
     }
     return;
   }
@@ -3679,6 +3692,19 @@ bool UpdateKokkos::oe_const_bfield_slot(const double *xq, double *Bout) const
   return true;
 }
 
+/* constant cylindrical E of the fix background in SPARTA slot order at xq;
+   the CPU query_efield_at_point returns it before any mesh lookup (6d) */
+KOKKOS_INLINE_FUNCTION
+bool UpdateKokkos::oe_const_efield_slot(const double *xq, double *Eout) const
+{
+  if (!oe_has_const_e) return false;
+  double phi = 0.0;
+  if (oe_dim == 3 && !oe_axisymmetric) phi = Kokkos::atan2(xq[1], xq[0]);
+  OpenEdge::RZphi_force_to_sparta(oe_const_er, oe_const_ez, oe_const_et,
+                                  oe_dim, oe_axisymmetric, phi, Eout[0], Eout[1], Eout[2]);
+  return true;
+}
+
 /* ----------------------------------------------------------------------
    OpenEdge Phase B: device twin of Pusher::sample_gca_fields (3D).
    E from the mesh triangulation (fix background native potential), B and
@@ -3695,7 +3721,10 @@ bool UpdateKokkos::oe_sample_gca_fields(const double *xpos, int icell,
   double xq[3] = {xpos[0], xpos[1], xpos[2]};
   if (oe_dim == 3 && !oe_axisymmetric) { xq[0] -= oe_col_x0; xq[1] -= oe_col_y0; }
 
-  if (oe_has_mesh_e) {
+  if (oe_has_const_e) {   // constant E wins over mesh E (CPU query_efield_at_point)
+    oe_const_efield_slot(xq, F.E);
+    F.e_valid = true;
+  } else if (oe_has_mesh_e) {
     double Em[3] = {0.0, 0.0, 0.0};
     if (MeshKokkos::query_bfield_at_point(
           xq, oe_dim, oe_axisymmetric,
@@ -3713,7 +3742,11 @@ bool UpdateKokkos::oe_sample_gca_fields(const double *xpos, int icell,
   }
 
   bool have_b = false;
-  if (oe_has_equilibrium && !oe_has_equ_bmaps) {
+  if (oe_has_const_b == 2) {   // CPU precedence: Cartesian constant B before mesh/equilibrium; cylindrical constant B is the last fallback (bfield_at order)
+    have_b = oe_const_bfield_slot(xq, F.B);
+    F.derivs_valid = have_b;   // uniform field: zero gradients are valid
+  }
+  if (!have_b && oe_has_equilibrium && !oe_has_equ_bmaps) {
     have_b = EquilibriumKokkos::query_bfield_grad_at_point(
         xq, oe_dim, oe_axisymmetric,
         d_oe_equ_r, d_oe_equ_z, d_oe_equ_psi,
@@ -3812,7 +3845,8 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
   // offset in 2D, as the CPU sparta_to_RZ with x0 = y0 = 0)
   double xq[3] = {x[0], x[1], 0.0};
   double Eslot[3] = {0.0, 0.0, 0.0};
-  if (oe_has_mesh_e) {
+  if (oe_has_const_e) oe_const_efield_slot(xq, Eslot);   // constant E first (CPU order)
+  else if (oe_has_mesh_e) {
     double Em[3] = {0.0, 0.0, 0.0};
     if (MeshKokkos::query_bfield_at_point(
           xq, dim, axi,
@@ -3830,7 +3864,8 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
   double Bslot[3] = {0.0, 0.0, 0.0};
   {
     bool got_B = false;
-    if (oe_has_mesh_b) {
+    if (oe_has_const_b == 2) got_B = oe_const_bfield_slot(xq, Bslot);   // CPU precedence: Cartesian constant B first, cylindrical last
+    if (!got_B && oe_has_mesh_b) {
       got_B = MeshKokkos::query_bfield_at_point(
           xq, dim, axi,
           d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
@@ -4430,7 +4465,8 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
       xq[0] -= oe_col_x0; xq[1] -= oe_col_y0;
     }
     bool got_B = false;
-    if (oe_has_mesh_b) {
+    if (oe_has_const_b == 2) got_B = oe_const_bfield_slot(xq, B_cached);   // CPU precedence: Cartesian constant B first, cylindrical last
+    if (!got_B && oe_has_mesh_b) {
       got_B = MeshKokkos::query_bfield_at_point(
           xq, oe_dim, oe_axisymmetric,
           d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
@@ -4675,7 +4711,13 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
     // subcycle at the current position; the query converts cylindrical
     // (E_R, E_Z, E_t) to SPARTA slot order internally. Matches the CPU
     // pusher's per-subcycle query_efield_at_point.
-    if (oe_has_mesh_e) {
+    if (oe_has_const_e) {   // constant E wins over mesh E (CPU query_efield_at_point)
+      double Ec[3] = {0.0, 0.0, 0.0};
+      double xqc[3] = {xcur[0], xcur[1], xcur[2]};
+      if (oe_dim == 3 && !oe_axisymmetric) { xqc[0] -= oe_col_x0; xqc[1] -= oe_col_y0; }
+      oe_const_efield_slot(xqc, Ec);
+      E[0] += Ec[0]; E[1] += Ec[1]; E[2] += Ec[2];
+    } else if (oe_has_mesh_e) {
       double Emesh[3] = {0.0, 0.0, 0.0};
       double xqe[3] = {xcur[0], xcur[1], xcur[2]};
       if (oe_dim == 3 && !oe_axisymmetric) {
@@ -5133,7 +5175,8 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
   double B[3] = {0.0, 0.0, 0.0};
   if ((mask & PCACHE_BFIELD) || oe_pc_csg) {
     bool got_B = false;
-    if (oe_has_mesh_b) {
+    if (oe_has_const_b == 2) got_B = oe_const_bfield_slot(xq, B);   // CPU precedence: Cartesian constant B first, cylindrical last
+    if (!got_B && oe_has_mesh_b) {
       got_B = MeshKokkos::query_bfield_at_point(
           xq, oe_dim, oe_axisymmetric,
           d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,

@@ -29,3 +29,9 @@ $LAUNCH_GPU $EXE_GPU -k on g 1 -sf kk -pk kokkos react/retry yes gpu/aware no co
 grep -h -A2 'Kokkos host fallbacks' screen.gpu_write | head -3
 python3 compare_restart.py || exit 1
 python3 compare.py || exit 1
+# constant E + B on the fix background: one Boris step with the mover on (audit 6d)
+rm -rf out_cpu out_gpu; mkdir -p out_cpu out_gpu
+$LAUNCH_CPU $EXE_CPU -in in.parity_efield -var tag cpu -log log.cpu_efield > screen.cpu_efield 2>&1 || { echo "cpu efield run failed"; exit 2; }
+$LAUNCH_GPU $EXE_GPU -k on g 1 -sf kk -pk kokkos react/retry yes gpu/aware no comm threaded -in in.parity_efield -var tag gpu -log log.gpu_efield > screen.gpu_efield 2>&1 || { echo "gpu efield run failed"; exit 2; }
+grep -h -A2 'Kokkos host fallbacks' screen.gpu_efield | head -3
+python3 compare_efield.py || exit 1

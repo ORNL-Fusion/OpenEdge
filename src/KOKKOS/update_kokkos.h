@@ -146,6 +146,10 @@ class UpdateKokkos : public Update {
   // (const_br, const_bz, const_bt), 2 = Cartesian const_bcart
   int oe_has_const_b;
   double oe_const_br, oe_const_bz, oe_const_bt, oe_const_bcart[3];
+  // constant cylindrical E of the fix background (6d): wins over mesh E as
+  // in FixBackground::query_efield_at_point
+  int oe_has_const_e;
+  double oe_const_er, oe_const_ez, oe_const_et;
   void bind_oe_equ_from_fix(class FixBackground *pd);
   void bind_oe_psi();
   // nearest-wall map (grid cell -> wall element) for the Boris shell /
@@ -278,6 +282,8 @@ class UpdateKokkos : public Update {
   }
   KOKKOS_INLINE_FUNCTION
   bool oe_const_bfield_slot(const double *xq, double *Bout) const;
+  KOKKOS_INLINE_FUNCTION
+  bool oe_const_efield_slot(const double *xq, double *Eout) const;
   DAT::t_float_2d_lr d_oe_equ_br, d_oe_equ_bt, d_oe_equ_bz;
   int oe_dim, oe_axisymmetric;        // cached domain layout for point-query
 

@@ -6,7 +6,8 @@
 #  A test passes if the run exits 0, its log contains no ERROR lines, and
 #  (when <case>/regression_reference.json exists) its end-of-run metrics
 #  are within the stored tolerances (regression/metrics.py).
-#  Record: name|dir|deck|required-data-file|flags   (flags: nokk = skip under --kk)
+#  Record: name|dir|deck|required-data-file|flags|args
+#  (flags: nokk = skip under --kk; args: extra command-line args, e.g. -var gridcut 0.02)
 #
 #  Usage:
 #    ./regression/run_regression.sh [--np N] [--exe PATH] [--filter PATTERN]
@@ -126,6 +127,9 @@ declare -a TESTS=(
   "cat_liquid_metal_divertor|workflows/particulates/cat_liquid_metal_divertor|in.openedge|input/plasma_attached.h5"
   "west_tungsten_transport|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5"
   "rfpie_tungsten_transport|workflows/impurity_transport/rfpie_tungsten_transport|in.openedge|input/plasma_he.h5"
+  # coverage variants (audit 2026-09-12 item 16): cut-cell ghost decomposition and chunked balance/restart memory
+  "west_tungsten_gridcut|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5||-var gridcut 0.02"
+  "west_tungsten_memlimit|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5||-var memlimit 1"
 )
 
 # -----------------------------------------------------------------------
@@ -176,7 +180,7 @@ echo "========================================================================"
 echo ""
 
 for entry in "${TESTS[@]}"; do
-  IFS='|' read -r name testdir infile requires flags <<< "$entry"
+  IFS='|' read -r name testdir infile requires flags xargs <<< "$entry"
   # legacy 4-field form: "nokk" in the requires slot means no data file
   if [[ "$requires" == "nokk" ]]; then flags="nokk"; requires=""; fi
 
@@ -244,10 +248,10 @@ for entry in "${TESTS[@]}"; do
   ok=1
   if [[ -n "$LAUNCHER" ]]; then
     (cd "$dir" && $LAUNCHER "$EXE" "${KKARGS[@]}" -in "$(basename "$tmpinput")" \
-        -log none > "$logfile" 2>&1) || ok=0
+        $xargs -log none > "$logfile" 2>&1) || ok=0
   else
     (cd "$dir" && mpirun -np "$NP" "$EXE" "${KKARGS[@]}" -in "$(basename "$tmpinput")" \
-        -log none > "$logfile" 2>&1) || ok=0
+        $xargs -log none > "$logfile" 2>&1) || ok=0
   fi
   if [[ $ok -eq 1 ]] && grep -q "^ERROR" "$logfile"; then ok=0; fi
   # a rank dying under srun/mpirun can still return 0 through the launcher;

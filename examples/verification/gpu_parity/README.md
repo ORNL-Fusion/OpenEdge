@@ -26,6 +26,11 @@ set, species, x, v, pweight) and the stage-2 grid/weighted + kick check must pas
 the GPU-written state (`compare.py`). This is the only test of `write_restart` from a
 device-resident particle set.
 
+Stage 6 (`in.parity_efield`): constant cylindrical E and B on the fix background
+(`er/ez/et`, `br/bz`) with the raster plasma file, one Boris step with the mover on;
+the velocity change and positions after the step must agree CPU vs GPU to 1e-9
+(`compare_efield.py`). Covers audit item 6d (constant E had no device twin).
+
 ```bash
 EXE_CPU=<cpu or kk-host binary> EXE_GPU=<spa_kokkos_cuda_*> \
 LAUNCH_CPU="srun -n 4" LAUNCH_GPU="srun -n 4 --gpus-per-task=1" bash run.sh
