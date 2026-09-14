@@ -165,6 +165,69 @@ void ParticleKokkos::compress_migrate(int ndelete, int *dellist)
 }
 #endif
 
+/* ----------------------------------------------------------------------
+   OpenEdge (2026-09-14): compress_migrate entirely on the device from the
+   device migrate list: no D2H of mlist, no host pairing loop, no H2D of the
+   (mlist,slist) pairs. Same pairing as the host version: holes below upper
+   in dellist order are filled by the kept upper-region particles in
+   ascending order. Five launches, no fence.
+------------------------------------------------------------------------- */
+
+void ParticleKokkos::compress_migrate_kokkos(int ndelete, const DAT::t_int_1d &d_dellist)
+{
+  if (ndelete <= 0) return;
+  if (maxsort < maxlocal) {   // keep the host scratch consistent for the CPU paths
+    maxsort = maxlocal;
+    memory->destroy(next);
+    memory->create(next,maxsort,"particle:next");
+  }
+  if (ndelete > (int) d_cm_del.extent(0)) {
+    d_cm_del  = DAT::t_int_1d(Kokkos::view_alloc("particle:cm_del",Kokkos::WithoutInitializing),ndelete);
+    d_cm_hole = DAT::t_int_1d(Kokkos::view_alloc("particle:cm_hole",Kokkos::WithoutInitializing),ndelete);
+    d_cm_kept = DAT::t_int_1d(Kokkos::view_alloc("particle:cm_kept",Kokkos::WithoutInitializing),ndelete);
+  }
+  const int upper = nlocal - ndelete;
+  auto del = d_cm_del, hole = d_cm_hole, kept = d_cm_kept;
+  Kokkos::parallel_for("cm_init",Kokkos::RangePolicy<DeviceType>(0,ndelete),
+    KOKKOS_LAMBDA(const int m) { del(m) = 0; hole(m) = -1; });
+  Kokkos::parallel_for("cm_mark",Kokkos::RangePolicy<DeviceType>(0,ndelete),
+    KOKKOS_LAMBDA(const int m) { const int i = d_dellist(m); if (i >= upper) del(i-upper) = 1; });
+  Kokkos::parallel_scan("cm_holes",Kokkos::RangePolicy<DeviceType>(0,ndelete),
+    KOKKOS_LAMBDA(const int m, int &k, const bool final) {
+      const int i = d_dellist(m); const int f = (i < upper) ? 1 : 0;
+      if (final && f) hole(k) = i;
+      k += f; });
+  Kokkos::parallel_scan("cm_kept",Kokkos::RangePolicy<DeviceType>(0,ndelete),
+    KOKKOS_LAMBDA(const int j, int &k, const bool final) {
+      const int f = del(j) ? 0 : 1;
+      if (final && f) kept(k) = upper + j;
+      k += f; });
+
+  nlocal = upper;
+
+  this->sync(Device,PARTICLE_MASK|CUSTOM_MASK);
+  d_particles = k_particles.view_device();
+  d_mlist = d_cm_hole;
+  d_slist = d_cm_kept;
+  copymode = 1;
+  Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagParticleCompressMigrateDevice>(0,ndelete),*this);
+  copymode = 0;
+  this->modify(Device,PARTICLE_MASK|CUSTOM_MASK);
+  d_particles = t_particle_1d();
+
+  sorted = 0;
+  sorted_kk = 0;
+}
+
+KOKKOS_INLINE_FUNCTION
+void ParticleKokkos::operator()(TagParticleCompressMigrateDevice, const int &k) const {
+  const int j = d_mlist[k];      // hole below upper, -1 past the pair count
+  if (j < 0) return;
+  const int i = d_slist[k];      // kept upper-region particle
+  d_particles[j] = d_particles[i];
+  copy_custom_kokkos(j,i);
+}
+
 KOKKOS_INLINE_FUNCTION
 void ParticleKokkos::operator()(TagParticleCompressReactions, const int &i) const {
   const int j = d_mlist[i];

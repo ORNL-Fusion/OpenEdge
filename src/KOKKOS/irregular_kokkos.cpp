@@ -49,6 +49,13 @@ IrregularKokkos::IrregularKokkos(SPARTA *sparta) : Irregular(sparta)
   for (int i = 0; i < 6; i++) oe_xt[i] = 0.0;
   memory->create(oe_a2a_s,2*nprocs,"irregular:a2a_s");
   memory->create(oe_a2a_r,2*nprocs,"irregular:a2a_r");
+  // plan collective: an Allreduce of nprocs*nprocs+1 ints (shared-memory tree on a
+  // node) up to 32 ranks, an Alltoall of 2*nprocs ints above; OE_PLAN_COLL overrides
+  oe_plan_coll = (nprocs <= 32) ? 1 : 0;
+  if (const char *e = getenv("OE_PLAN_COLL")) oe_plan_coll = (strcmp(e,"allreduce") == 0) ? 1 : 0;
+  if (nprocs > 32) oe_plan_coll = 0;
+  oe_ar_buf = NULL;
+  if (oe_plan_coll) memory->create(oe_ar_buf,nprocs*nprocs+1,"irregular:ar_buf");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -64,6 +71,7 @@ IrregularKokkos::~IrregularKokkos()
   index_self = NULL;
   memory->destroy(oe_a2a_s);
   memory->destroy(oe_a2a_r);
+  memory->destroy(oe_ar_buf);
 }
 
 /* ----------------------------------------------------------------------
@@ -83,11 +91,25 @@ int IrregularKokkos::create_data_uniform_flag(int n, int *proclist, int flag_in,
 
   for (i = 0; i < nprocs; i++) work1[i] = 0;
   for (i = 0; i < n; i++) work1[proclist[i]]++;
-  for (i = 0; i < nprocs; i++) {
-    oe_a2a_s[2*i] = (i == me) ? 0 : work1[i];
-    oe_a2a_s[2*i+1] = flag_in;
+  if (oe_plan_coll) {
+    // Allreduce variant: row me = my counts per destination, last slot = flag; after
+    // the SUM every rank holds the full count matrix and the flag sum (> 0 = any)
+    const int nn = nprocs*nprocs;
+    for (i = 0; i < nn+1; i++) oe_ar_buf[i] = 0;
+    for (i = 0; i < nprocs; i++) oe_ar_buf[me*nprocs+i] = (i == me) ? 0 : work1[i];
+    oe_ar_buf[nn] = flag_in ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE,oe_ar_buf,nn+1,MPI_INT,MPI_SUM,world);
+    for (i = 0; i < nprocs; i++) {
+      oe_a2a_r[2*i] = oe_ar_buf[i*nprocs+me];
+      oe_a2a_r[2*i+1] = oe_ar_buf[nn] > 0 ? 1 : 0;
+    }
+  } else {
+    for (i = 0; i < nprocs; i++) {
+      oe_a2a_s[2*i] = (i == me) ? 0 : work1[i];
+      oe_a2a_s[2*i+1] = flag_in;
+    }
+    MPI_Alltoall(oe_a2a_s,2,MPI_INT,oe_a2a_r,2,MPI_INT,world);
   }
-  MPI_Alltoall(oe_a2a_s,2,MPI_INT,oe_a2a_r,2,MPI_INT,world);
 
   // receive side: procs sending to me, ascending rank order, and the flag max
 

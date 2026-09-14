@@ -49,6 +49,7 @@ class IrregularKokkos : public Irregular {
  private:
   int offset_send;
   int *oe_a2a_s,*oe_a2a_r;      // [2*nprocs] (count, flag) blocks for create_data_uniform_flag
+  int *oe_ar_buf; int oe_plan_coll;   // Allreduce variant: [nprocs*nprocs+1] counts + flag; 0 = alltoall, 1 = allreduce
 
   DAT::tdual_int_1d k_index_send;
   DAT::t_int_1d d_index_send;

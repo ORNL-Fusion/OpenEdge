@@ -789,7 +789,7 @@ void UpdateKokkos::run(int nsteps)
 
       if (nmigrate) {
         k_mlist_small = Kokkos::subview(k_mlist,std::make_pair(0,nmigrate));
-        k_mlist_small.sync_host();
+        if (sparta->kokkos->comm_serial) k_mlist_small.sync_host();   // device compress needs no host copy
       }
       auto mlist_small = k_mlist_small.view_host().data();
 
@@ -1369,7 +1369,7 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
     // nmigrate is cleared so the post-move migration in run() has nothing left.
     if (nmigrate) {
       k_mlist_small = Kokkos::subview(k_mlist,std::make_pair(0,nmigrate));
-      k_mlist_small.sync_host();
+      if (sparta->kokkos->comm_serial) k_mlist_small.sync_host();   // device compress needs no host copy
     }
     auto mlist_small = k_mlist_small.view_host().data();
     timer->stamp(TIME_MOVE);

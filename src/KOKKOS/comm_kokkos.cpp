@@ -244,7 +244,7 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
 
   // compress my list of particles
 
-  if (nmigrate) particle->compress_migrate(nmigrate,plist);
+  if (nmigrate) particle_kk->compress_migrate_kokkos(nmigrate,d_plist);   // device: no host mlist needed
   int ncompress = particle->nlocal;
   if (oe_comm_timing_every) { double t = MPI_Wtime(); oe_ct[1] += t - oe_t; oe_t = t; }
 

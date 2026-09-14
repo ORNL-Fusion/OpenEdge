@@ -24,6 +24,7 @@
 namespace SPARTA_NS {
 
 struct TagParticleCompressReactions{};
+struct TagParticleCompressMigrateDevice{};
 struct TagCopyParticleReorderDestinations{};
 struct TagFixedMemoryReorder{};
 struct TagFixedMemoryReorderInit{};
@@ -160,6 +161,12 @@ class ParticleKokkos : public Particle {
   KOKKOS_INLINE_FUNCTION
   void operator()(TagParticleCompressReactions, const int&) const;
 
+  KOKKOS_INLINE_FUNCTION
+  void operator()(TagParticleCompressMigrateDevice, const int&) const;
+
+  // compress_migrate from the device migrate list (no host list, no H2D of pairs)
+  void compress_migrate_kokkos(int ndelete, const DAT::t_int_1d &d_dellist);
+
   template<int NEED_ATOMICS, int REORDER_FLAG>
   KOKKOS_INLINE_FUNCTION
   void operator()(TagParticleSort<NEED_ATOMICS,REORDER_FLAG>, const int&) const;
@@ -226,6 +233,10 @@ class ParticleKokkos : public Particle {
   DAT::t_int_2d d_plist;
   DAT::t_int_1d d_cellcount;
 
+  // device compress_migrate scratch (OpenEdge 2026-09-14): deleted flags of the
+  // upper region, holes below upper (dellist order, -1 past the count), kept
+  // upper particles ascending
+  DAT::t_int_1d d_cm_del, d_cm_hole, d_cm_kept;
   DAT::t_int_2d_lr d_lists;
   DAT::t_int_1d d_mlist;
   DAT::t_int_1d d_slist;
