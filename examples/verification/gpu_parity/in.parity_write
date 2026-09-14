@@ -1,0 +1,20 @@
+# gpu_parity stage 5 (GPU binary): write_restart from a device-resident state.
+# Particles from state.restart move for 5 steps in the tilted B (Kokkos mover,
+# migration between ranks, thermal kicks), are dumped with their custom pweight,
+# then written to state_gpu.restart at a reset step 0. Both binaries then read
+# that file through in.parity (-var state state_gpu.restart): the readers' step-0
+# particle dumps must equal the writer's dump bit for bit (compare_restart.py)
+# and the CPU-vs-GPU grid/weighted + kick check must pass on it (compare.py).
+variable            tag index gpu
+read_restart        state.restart
+seed                104729
+fix                 pd background file rfpie_input/plasma_he.h5 static yes br 0.08 bz 0.06
+fix                 pw particle/weight
+global              pusher plasma pd mode boris subcycles 1
+fix                 fth force/thermal 1 background pd ion_thermal yes elec_thermal yes
+dump                dp particle all 5 out_${tag}/wpart.*.dump id type x y z vx vy vz p_pweight
+dump_modify         dp format float %.17g
+timestep            2.0e-8
+run                 5
+reset_timestep      0
+write_restart       state_gpu.restart

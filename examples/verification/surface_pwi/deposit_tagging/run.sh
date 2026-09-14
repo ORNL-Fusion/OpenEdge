@@ -14,11 +14,13 @@ mkdir -p output
 
 SPA=${SPA:-$HOME/build_oe/src/spa_mac_mpi}
 NP=${NP:-4}
+LAUNCH=${LAUNCH:-mpirun -np $NP}   # e.g. "srun -n 4 ..." from regression/run_regression.sh
+SPA_ARGS=${SPA_ARGS:-}                # e.g. "-k on g 1 -sf kk ..."
 PYTHON=${PYTHON:-python3}   # needs numpy
 run() {  # name deck [extra -var args]
   local name=$1 deck=$2; shift 2
   echo "=== $name"
-  mpirun -np "$NP" "$SPA" -in "$deck" "$@" -log "output/log.$name" > "output/screen.$name" 2>&1 \
+  $LAUNCH "$SPA" $SPA_ARGS -in "$deck" "$@" -log "output/log.$name" > "output/screen.$name" 2>&1 \
     || { echo "run $name failed:"; tail -5 "output/screen.$name"; exit 1; }
 }
 
@@ -33,6 +35,10 @@ fi
 ${PYTHON:-python3} - <<'EOF'
 import glob, os, sys
 import numpy as np
+
+# run-to-run identity tolerance: 1e-9 on deterministic backends; the GPU tallies
+# use atomics, so two runs are different realizations (LEDGER_RTOL=0.05 there)
+RUN_RTOL = float(os.environ.get("LEDGER_RTOL", "1e-9"))
 
 N_W = 6.306e28
 failed = False
@@ -70,8 +76,8 @@ cu, du = dump("output/untagged.2000.dump")
 ct, dt = dump("output/tagged.2000.dump")
 net_u, net_t = col(cu, du, "s_adens_net"), col(ct, dt, "s_adens_net")
 print(f"(a) net untagged {net_u}  tagged {net_t}  atoms/m^2")
-check(np.allclose(net_u, net_t, rtol=1e-9, atol=0), "net ledger identical with deposit_as")
-check(np.allclose(col(cu, du, "s_adens_ero"), col(ct, dt, "s_adens_ero"), rtol=1e-9),
+check(np.allclose(net_u, net_t, rtol=RUN_RTOL, atol=0), f"net ledger identical with deposit_as (rtol {RUN_RTOL:g})")
+check(np.allclose(col(cu, du, "s_adens_ero"), col(ct, dt, "s_adens_ero"), rtol=RUN_RTOL),
       "gross erosion identical with deposit_as")
 w_t, wd_t = col(ct, dt, "s_adens[1]"), col(ct, dt, "s_adens[2]")
 # bulk W is eroded only while the reaction zone (rzone) is still filling
@@ -81,7 +87,7 @@ check(np.all(wd_t > 0) and np.all(np.abs(w_t) < 0.10 * wd_t),
 check(np.allclose(col(ct, dt, "s_adens_conc[2]"), 1.0), "tagged: exposed concentration is Wd at the end")
 th_u = [sum(l[0] for l in s) for s in strata(cu, du, 2)]
 th_t = [sum(l[0] for l in s) for s in strata(ct, dt, 2)]
-check(np.allclose(th_u, th_t, rtol=1e-9), "strata total thickness identical")
+check(np.allclose(th_u, th_t, rtol=RUN_RTOL), "strata total thickness identical")
 top = strata(ct, dt, 2)[0][0]
 check(top[2][1] > 0.999, f"tagged: top stratum is pure Wd (c_Wd={top[2][1]:.4f})")
 

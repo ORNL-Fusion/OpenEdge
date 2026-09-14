@@ -5,3 +5,4 @@ log.*
 screen.*
 *.log
 state_surf.restart
+state_gpu.restart

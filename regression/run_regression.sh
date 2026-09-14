@@ -84,7 +84,7 @@ if [[ $KKMODE -eq 1 ]]; then
   # gpu/aware no: the MPI on this machine is not GPU-aware unless
   # MPICH_GPU_SUPPORT_ENABLED=1 (multi-rank runs segfault otherwise)
   GPUAWARE=no; [[ "${MPICH_GPU_SUPPORT_ENABLED:-0}" == "1" ]] && GPUAWARE=yes
-  if ldd "$EXE" 2>/dev/null | grep -qiE 'libcudart|libcuda\.so'; then
+  if ldd "$EXE" 2>/dev/null | grep -qi 'libcudart'; then   # libcuda.so.1 alone is also linked by the OpenMP build on Perlmutter
     KKARGS=(-k on g 1 -sf kk -pk kokkos react/retry yes gpu/aware $GPUAWARE comm threaded); MODE=gpu
   elif ldd "$EXE" >/dev/null 2>&1; then
     KKARGS=(-k on t 1 -sf kk -pk kokkos react/retry yes); MODE=kkhost
@@ -316,6 +316,26 @@ if [[ "gpu_parity" == $FILTER || "*" == "$FILTER" ]]; then
       RESULTS+=("FAIL  gpu_parity  (see examples/verification/gpu_parity/regression.log)"); echo "FAIL"; ((FAIL++))
       if [[ "$VERBOSE" -eq 1 ]]; then tail -20 "$pdir/regression.log"; fi
     fi
+  fi
+fi
+
+# -----------------------------------------------------------------------
+#  pwi_deposit_tagging: surf_react surface/pwi ledger invariants (deposit_as,
+#  seeding, yscale) checked between runs of the same binary; any backend
+# -----------------------------------------------------------------------
+if [[ "pwi_deposit_tagging" == $FILTER || "*" == "$FILTER" ]]; then
+  printf "%-40s " "pwi_deposit_tagging"
+  ddir="$EXAMPLES_DIR/verification/surface_pwi/deposit_tagging"
+  if [[ -n "$LAUNCHER" ]]; then ld="$LAUNCHER"; else ld="mpirun -np $NP"; fi
+  bwinp=$(awk '$1=="variable" && $2=="inp" {print $4}' "$ddir/in.bw_smoke")
+  skipbw=0; [[ -e "$ddir/$bwinp/plasma_58245.h5" ]] || skipbw=1   # the 70 MB B-on-W plasma smoke needs its file
+  lrtol=1e-9; [[ "$MODE" == gpu ]] && lrtol=0.05   # GPU tallies are atomic: two runs are different realizations
+  if (cd "$ddir" && SPA="$EXE" SPA_ARGS="${KKARGS[*]}" LAUNCH="$ld" SKIP_BW=$skipbw LEDGER_RTOL=$lrtol \
+      bash run.sh > "$ddir/regression.log" 2>&1); then
+    RESULTS+=("PASS  pwi_deposit_tagging  (ledger invariants$( [[ $skipbw -eq 1 ]] && echo ', bw smoke skipped'))"); echo "PASS"; ((PASS++))
+  else
+    RESULTS+=("FAIL  pwi_deposit_tagging  (see examples/verification/surface_pwi/deposit_tagging/regression.log)"); echo "FAIL"; ((FAIL++))
+    if [[ "$VERBOSE" -eq 1 ]]; then tail -20 "$ddir/regression.log"; fi
   fi
 fi
 

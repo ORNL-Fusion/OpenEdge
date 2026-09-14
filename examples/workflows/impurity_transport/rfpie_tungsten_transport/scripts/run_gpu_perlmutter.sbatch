@@ -8,6 +8,7 @@
 #SBATCH -o slurm-%x-%j.out -e slurm-%x-%j.err
 module reset >/dev/null 2>&1; module load cpe/25.09 >/dev/null 2>&1; module load PrgEnv-gnu/8.6.0 cudatoolkit/12.9 cray-hdf5 python >/dev/null 2>&1; module unload craype-accel-nvidia80 >/dev/null 2>&1   # pinned: the site default moved to cpe/26.03 + CUDA 13.2 (2026-09-12)
 export OMP_NUM_THREADS=1 MPICH_GPU_SUPPORT_ENABLED=0 OPENEDGE_ROOT=${OPENEDGE_ROOT:-$HOME/OpenEdge}; unset CRAY_ACCEL_TARGET
+export FI_MR_CACHE_MONITOR=memhooks   # multi-node: the site default userfaultfd monitor breaks the fix balance cell migration (cxil_map write error, 2026-09-14)
 EXE=${EXE:-$PSCRATCH/openedge-build-gpu2/src/spa_kokkos_cuda_perlmutter}
 CASE=${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}
 RUN=${RUNDIR:-$PSCRATCH/openedge-runs/rfpie_fix}/gpu_zramp_hi
