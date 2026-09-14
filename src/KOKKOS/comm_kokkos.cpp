@@ -29,6 +29,8 @@
 #include "surf.h"
 #include "domain.h"
 #include "irregular.h"
+
+#define OE_A2A_MAXPROCS 256   // Alltoall migration plan up to this many ranks (see migrate_particles)
 #include <vector>
 #include <cstdio>
 #include <cstdlib>
@@ -46,9 +48,9 @@ CommKokkos::CommKokkos(SPARTA *sparta) : Comm(sparta),
   iparticle = new IrregularKokkos(sparta);
   ibalance = NULL;
 
-  k_nsend = DAT::tdual_int_scalar("comm:nsend");
-  d_nsend = k_nsend.view_device();
-  h_nsend = k_nsend.view_host();
+  k_pmeta = DAT::tdual_int_1d("comm:pmeta",1);
+  d_pmeta = k_pmeta.view_device();
+  h_pmeta = k_pmeta.view_host();
 
   oe_comm_timing_every = 0; oe_ct_calls = 0; oe_ct_last = -1;
   oe_nsend_sum = oe_nrecv_sum = 0;
@@ -105,8 +107,23 @@ CommKokkos::~CommKokkos()
      so Update can iterate on particle move
 ------------------------------------------------------------------------- */
 
-int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d &d_plist_in)
+int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d &d_plist_in,
+                                  int entryexit_in, int *any_entryexit_out)
 {
+  // Plan choice (uniform across ranks): the one-Alltoall plan whenever the rank
+  // count is small enough for a 2*nprocs-int Alltoall to be trivial, even with
+  // the neighbor plan enabled (gridcut >= 0 makes neighflag = 1 on every
+  // production deck). Above OE_A2A_MAXPROCS the neighbor plan (augment) keeps
+  // its point-to-point counts and the separate flag reduction. The Alltoall
+  // plan excludes empty pairs, so an all-empty pass can return before the
+  // exchange; the neighbor plan exchanges zero-length messages with every
+  // plan neighbor and must always run exchange_uniform.
+  const int use_a2a = (!neighflag || nprocs <= OE_A2A_MAXPROCS) && !sparta->kokkos->comm_serial;
+  if (any_entryexit_out && !use_a2a) {
+    MPI_Allreduce(&entryexit_in,any_entryexit_out,1,MPI_INT,MPI_MAX,world);
+    if (!*any_entryexit_out) return particle->nlocal;
+    any_entryexit_out = nullptr;
+  }
   GridKokkos* grid_kk = (GridKokkos*) grid;
   ParticleKokkos* particle_kk = ((ParticleKokkos*)particle);
   particle_kk->update_class_variables();
@@ -155,10 +172,11 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
 
   if (nmigrate > maxpproc) {
     maxpproc = nmigrate;
-    d_pproc = DAT::t_int_1d(Kokkos::view_alloc("comm:pproc",Kokkos::WithoutInitializing),maxpproc);
-    h_pproc = HAT::t_int_1d(Kokkos::view_alloc("comm:pproc_mirror",Kokkos::WithoutInitializing),maxpproc);
-    pproc = h_pproc.data();
+    k_pmeta = DAT::tdual_int_1d(Kokkos::view_alloc("comm:pmeta",Kokkos::WithoutInitializing),maxpproc+1);
+    d_pmeta = k_pmeta.view_device();
+    h_pmeta = k_pmeta.view_host();
   }
+  pproc = h_pmeta.data()+1;
   //if (maxsendbuf == 0 || nmigrate*nbytes_total > maxsendbuf) { // this doesn't work, not sure why
 
     bigint maxsendbuf = (bigint)nmigrate*nbytes_total;
@@ -179,10 +197,6 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
   int nsend = 0;
   //int offset = 0;
 
-  h_nsend() = 0;
-  k_nsend.modify_host();
-  k_nsend.sync_device();
-
   // OpenEdge: pack_custom_kokkos reads the custom device views — sync
   // them too, not just the particle structs
   if (ncustom)
@@ -194,8 +208,15 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
   d_cells = grid_kk->k_cells.view_device();
   d_particles = particle_kk->k_particles.view_device();
 
+  // OpenEdge perf (2026-09-14): counter + destination list in one view, zeroed on
+  // the device and read back with one D2H copy of nmigrate+1 ints (was: counter
+  // H2D, kernel, fence, full pproc D2H, counter D2H). Nothing to pack: no launches.
+  if (nmigrate) Kokkos::deep_copy(Kokkos::subview(d_pmeta,0),0);
+
   copymode = 1;
-  if (!ncustom) {
+  if (!nmigrate) {
+    // no migrating particle on this rank: skip the pack kernel
+  } else if (!ncustom) {
 
     if (need_atomics)
       Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagCommMigrateParticles<1,0> >(0,nmigrate),*this);
@@ -210,22 +231,20 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
       Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagCommMigrateParticles<0,1> >(0,nmigrate),*this);
 
   }
-  DeviceType().fence();
   copymode = 0;
 
-  particle_kk->modify(Device,PARTICLE_MASK);
+  if (nmigrate) {
+    particle_kk->modify(Device,PARTICLE_MASK);
+    const auto n1 = std::make_pair(0,nmigrate+1);
+    Kokkos::deep_copy(Kokkos::subview(h_pmeta,n1),Kokkos::subview(d_pmeta,n1));   // fences
+    nsend = h_pmeta(0);
+  }
   d_particles = t_particle_1d(); // destroy reference to reduce memory use
-
-  Kokkos::deep_copy(h_pproc,d_pproc);
-
-  k_nsend.modify_device();
-  k_nsend.sync_host();
-  nsend = h_nsend();
   if (oe_comm_timing_every) { double t = MPI_Wtime(); oe_ct[0] += t - oe_t; oe_t = t; }
 
   // compress my list of particles
 
-  particle->compress_migrate(nmigrate,plist);
+  if (nmigrate) particle->compress_migrate(nmigrate,plist);
   int ncompress = particle->nlocal;
   if (oe_comm_timing_every) { double t = MPI_Wtime(); oe_ct[1] += t - oe_t; oe_t = t; }
 
@@ -235,11 +254,23 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
   IrregularKokkos* iparticle_kk = (IrregularKokkos*) iparticle;
 
   int nrecv;
-  if (neighflag)
+  if (!use_a2a)
     nrecv = iparticle_kk->augment_data_uniform(nsend,pproc);
-  else
-    nrecv = iparticle_kk->create_data_uniform(nsend,pproc,commsortflag);
+  else {
+    // one MPI_Alltoall: counts + the mover's entry/exit flag (replaces the
+    // Reduce_scatter, count Send/Recv, Barrier and the separate flag Allreduce)
+    int any_flag = 0;
+    nrecv = iparticle_kk->create_data_uniform_flag(nsend,pproc,entryexit_in,any_flag);
+    if (any_entryexit_out) *any_entryexit_out = any_flag;
+  }
   if (oe_comm_timing_every) { double t = MPI_Wtime(); oe_ct[2] += t - oe_t; oe_t = t; }
+
+  if (use_a2a && nsend == 0 && nrecv == 0) {   // Alltoall plan, empty on every side: nothing to exchange
+    d_plist = {};
+    if (oe_comm_timing_every) { double t = MPI_Wtime(); oe_ct[6] += t - oe_t0; oe_ct_calls++;
+      if (update->ntimestep % oe_comm_timing_every == 0 && update->ntimestep != oe_ct_last) { oe_ct_last = update->ntimestep; oe_comm_timing_report(); } }
+    return ncompress;
+  }
 
   // extend particle list if necessary
 
@@ -332,12 +363,12 @@ void CommKokkos::operator()(TagCommMigrateParticles<NEED_ATOMICS, HAVE_CUSTOM>, 
   if (d_particles[j].flag == PDISCARD) return;
   int nsend;
   if (NEED_ATOMICS)
-    nsend = Kokkos::atomic_fetch_add(&d_nsend(),1);
+    nsend = Kokkos::atomic_fetch_add(&d_pmeta(0),1);
   else {
-    nsend = d_nsend();
-    d_nsend()++;
+    nsend = d_pmeta(0);
+    d_pmeta(0)++;
   }
-  d_pproc[nsend] = d_cells[d_particles[j].icell].proc;
+  d_pmeta(1+nsend) = d_cells[d_particles[j].icell].proc;
   d_particles[j].icell = d_cells[d_particles[j].icell].ilocal;
   const bigint offset = (bigint)nsend*nbytes_total;
   memcpy(&d_sbuf[offset],&d_particles[j],nbytes_particle);

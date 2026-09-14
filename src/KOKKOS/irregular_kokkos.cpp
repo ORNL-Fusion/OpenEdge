@@ -47,6 +47,8 @@ int compare_standalone(const void *, const void *);
 IrregularKokkos::IrregularKokkos(SPARTA *sparta) : Irregular(sparta)
 {
   for (int i = 0; i < 6; i++) oe_xt[i] = 0.0;
+  memory->create(oe_a2a_s,2*nprocs,"irregular:a2a_s");
+  memory->create(oe_a2a_r,2*nprocs,"irregular:a2a_r");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -60,6 +62,101 @@ IrregularKokkos::~IrregularKokkos()
 
   memoryKK->destroy_kokkos(k_index_self,index_self);
   index_self = NULL;
+  memory->destroy(oe_a2a_s);
+  memory->destroy(oe_a2a_r);
+}
+
+/* ----------------------------------------------------------------------
+   OpenEdge (2026-09-14): create_data_uniform with ONE collective. An
+   MPI_Alltoall of (count, flag) per destination replaces the
+   Reduce_scatter, the per-destination count Send/Recv with MPI_ANY_SOURCE
+   and the trailing MPI_Barrier of create_data_uniform, and carries the
+   mover's per-pass entry/exit flag (flag_out = max over ranks) so a move
+   pass costs one collective instead of four. Received messages are always
+   ordered by source rank (a superset of the sort option).
+   return total # of datums I will recv, including any to self
+------------------------------------------------------------------------- */
+
+int IrregularKokkos::create_data_uniform_flag(int n, int *proclist, int flag_in, int &flag_out)
+{
+  int i,m;
+
+  for (i = 0; i < nprocs; i++) work1[i] = 0;
+  for (i = 0; i < n; i++) work1[proclist[i]]++;
+  for (i = 0; i < nprocs; i++) {
+    oe_a2a_s[2*i] = (i == me) ? 0 : work1[i];
+    oe_a2a_s[2*i+1] = flag_in;
+  }
+  MPI_Alltoall(oe_a2a_s,2,MPI_INT,oe_a2a_r,2,MPI_INT,world);
+
+  // receive side: procs sending to me, ascending rank order, and the flag max
+
+  nrecv = 0;
+  nrecvdatum = 0;
+  flag_out = flag_in;
+  for (i = 0; i < nprocs; i++) {
+    if (oe_a2a_r[2*i+1] > flag_out) flag_out = oe_a2a_r[2*i+1];
+    if (i == me || oe_a2a_r[2*i] == 0) continue;
+    proc_recv[nrecv] = i;
+    num_recv[nrecv] = oe_a2a_r[2*i];
+    nrecvdatum += num_recv[nrecv];
+    nrecv++;
+  }
+
+  // send side: same bookkeeping as create_data_uniform
+
+  nsend = 0;
+  for (i = 0; i < nprocs; i++)
+    if (work1[i]) nsend++;
+  if (work1[me]) nsend--;
+
+  if (n > indexmax) {
+    indexmax = n;
+    memoryKK->destroy_kokkos(k_index_send,index_send);
+    memoryKK->create_kokkos(k_index_send,index_send,indexmax,"irregular:index_send");
+    d_index_send = k_index_send.view_device();
+  }
+  if (work1[me] > indexselfmax) {
+    indexselfmax = work1[me];
+    memoryKK->destroy_kokkos(k_index_self,index_self);
+    memoryKK->create_kokkos(k_index_self,index_self,indexselfmax,"irregular:index_self");
+    d_index_self = k_index_self.view_device();
+  }
+
+  int iproc = me;
+  int isend = 0;
+  for (i = 0; i < nprocs; i++) {
+    iproc++;
+    if (iproc == nprocs) iproc = 0;
+    if (iproc == me) {
+      num_self = work1[iproc];
+      work1[iproc] = 0;
+    } else if (work1[iproc]) {
+      proc_send[isend] = iproc;
+      num_send[isend] = work1[iproc];
+      work1[iproc] = isend;
+      isend++;
+    }
+  }
+  work2[0] = 0;
+  for (i = 1; i < nsend; i++) work2[i] = work2[i-1] + num_send[i-1];
+  m = 0;
+  for (i = 0; i < n; i++) {
+    iproc = proclist[i];
+    if (iproc == me) index_self[m++] = i;
+    else {
+      isend = work1[iproc];
+      index_send[work2[isend]++] = i;
+    }
+  }
+  k_index_self.modify_host();
+  k_index_send.modify_host();
+
+  sendmax = 0;
+  for (i = 0; i < nsend; i++) sendmax = MAX(sendmax,num_send[i]);
+  nrecvdatum += num_self;
+  for (i = 0; i < nrecv; i++) proc2recv[proc_recv[i]] = i;
+  return nrecvdatum;
 }
 
 /* ----------------------------------------------------------------------
@@ -373,61 +470,52 @@ void IrregularKokkos::exchange_uniform(DAT::t_char_1d d_sendbuf_in, int nbytes_i
 
   oe_xt[0] += MPI_Wtime() - oe_t;
 
-  // reallocate buf for largest send if necessary
+  // OpenEdge perf (2026-09-14): one gather kernel for all destinations (index_send
+  // is already grouped by destination), one fence, one D2H copy when host-staged,
+  // then one MPI_Send per destination from the packed offsets. Upstream launched a
+  // pack kernel + fence (+ D2H) per destination: ~3 migrate calls per step x up to
+  // nprocs-1 destinations of launch/fence latency was most of the Comm bucket.
 
-  if ((bigint)sendmax*nbytes > MAXSMALLINT)
+  int total_send = 0;
+  for (int isend = 0; isend < nsend; isend++) total_send += num_send[isend];
+  const bigint need = (bigint)total_send*nbytes;
+  if (need > MAXSMALLINT)
     error->one(FLERR,"Irregular comm send buffer exceeds 2 GB, try using"
                      "'global mem/limit' command");
-
-  if (sparta->kokkos->gpu_aware_flag) {
-    if (sendmax*nbytes > bufmax) {
-      bufmax = sendmax*nbytes;
-      d_buf = DAT::t_char_1d("Irregular:buf",bufmax);
-    } else if (d_buf.extent(0) < bufmax) {
-      d_buf = DAT::t_char_1d("Irregular:buf",bufmax);
-    }
+  if (need > (bigint)d_buf.extent(0)) {   // grow-only
+    d_buf = DAT::t_char_1d(Kokkos::view_alloc("irregular:buf",Kokkos::WithoutInitializing),need);
+    if (!sparta->kokkos->gpu_aware_flag)
+      h_buf = HAT::t_char_1d(Kokkos::view_alloc("irregular:buf:mirror",Kokkos::WithoutInitializing),need);
   }
-
-  // send each message
-  // pack buf with list of datums
-  // m = index of datum in sendbuf
+  bufmax = (int) d_buf.extent(0);
 
   if (sparta->kokkos->gpu_aware_flag)
     k_index_self.sync_device();
 
   k_index_send.sync_device();
 
+  oe_t = MPI_Wtime();
   offset_send = 0;
-  for (int isend = 0; isend < nsend; isend++) {
-    const int count = num_send[isend];
-
-    if (!sparta->kokkos->gpu_aware_flag) {
-
-      // allocate exact buffer size to reduce GPU <--> CPU memory transfer
-
-      if (bufmax != count*nbytes) {
-        bufmax = count*nbytes;
-        d_buf = DAT::t_char_1d(Kokkos::view_alloc("irregular:buf",Kokkos::WithoutInitializing),bufmax);
-        h_buf = HAT::t_char_1d(Kokkos::view_alloc("irregular:buf:mirror",Kokkos::WithoutInitializing),bufmax);
-      }
-    }
-
-    oe_t = MPI_Wtime();
+  if (total_send) {
     copymode = 1;
-    Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagIrregularPackBuffer>(0,count),*this);
-    DeviceType().fence();
+    Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagIrregularPackBuffer>(0,total_send),*this);
     copymode = 0;
-    oe_xt[1] += MPI_Wtime() - oe_t; oe_t = MPI_Wtime();
-
-    if (sparta->kokkos->gpu_aware_flag)
-      MPI_Send(d_buf.data(),count*nbytes,MPI_CHAR,proc_send[isend],0,world);
-    else {
-      Kokkos::deep_copy(h_buf,d_buf);
-      MPI_Send(h_buf.data(),count*nbytes,MPI_CHAR,proc_send[isend],0,world);
-    }
-    oe_xt[2] += MPI_Wtime() - oe_t;
-    offset_send += count;
+    if (sparta->kokkos->gpu_aware_flag) DeviceType().fence();
+    else Kokkos::deep_copy(Kokkos::subview(h_buf,std::make_pair((bigint)0,need)),
+                           Kokkos::subview(d_buf,std::make_pair((bigint)0,need)));   // fences
   }
+  oe_xt[1] += MPI_Wtime() - oe_t; oe_t = MPI_Wtime();
+
+  {
+    bigint off = 0;
+    char *src = sparta->kokkos->gpu_aware_flag ? d_buf.data() : h_buf.data();
+    for (int isend = 0; isend < nsend; isend++) {
+      const int count = num_send[isend];
+      MPI_Send(src + off,count*nbytes,MPI_CHAR,proc_send[isend],0,world);
+      off += (bigint)count*nbytes;
+    }
+  }
+  oe_xt[2] += MPI_Wtime() - oe_t;
 
   // copy datums to self, put at beginning of recvbuf
 

@@ -1363,26 +1363,27 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
 
     if (grid->cutoff < 0.0) break;
 
+    // OpenEdge perf (2026-09-14): the entry/exit flag rides in the migration
+    // plan's MPI_Alltoall (one collective per pass instead of four); the
+    // migration itself runs every pass (no launches when nothing moved) and
+    // nmigrate is cleared so the post-move migration in run() has nothing left.
+    if (nmigrate) {
+      k_mlist_small = Kokkos::subview(k_mlist,std::make_pair(0,nmigrate));
+      k_mlist_small.sync_host();
+    }
+    auto mlist_small = k_mlist_small.view_host().data();
     timer->stamp(TIME_MOVE);
-    MPI_Allreduce(&entryexit,&any_entryexit,1,MPI_INT,MPI_MAX,world);
-    timer->stamp();
-
-    if (any_entryexit) {
-      if (nmigrate) {
-        k_mlist_small = Kokkos::subview(k_mlist,std::make_pair(0,nmigrate));
-        k_mlist_small.sync_host();
-      }
-      auto mlist_small = k_mlist_small.view_host().data();
-      timer->stamp(TIME_MOVE);
-      pstart = ((CommKokkos*)comm)->migrate_particles(nmigrate,mlist_small,k_mlist_small.view_device());
-      timer->stamp(TIME_COMM);
-      pstop = particle->nlocal;
-      if (pstop-pstart > maxmigrate) {
-        maxmigrate = pstop-pstart;
-        memoryKK->destroy_kokkos(k_mlist,mlist);
-        memoryKK->create_kokkos(k_mlist,mlist,maxmigrate,"particle:mlist");
-      }
-    } else break;
+    pstart = ((CommKokkos*)comm)->migrate_particles(nmigrate,mlist_small,k_mlist_small.view_device(),
+                                                    entryexit,&any_entryexit);
+    timer->stamp(TIME_COMM);
+    pstop = particle->nlocal;
+    if (pstop-pstart > maxmigrate) {
+      maxmigrate = pstop-pstart;
+      memoryKK->destroy_kokkos(k_mlist,mlist);
+      memoryKK->create_kokkos(k_mlist,mlist,maxmigrate,"particle:mlist");
+    }
+    nmigrate = 0;
+    if (!any_entryexit) break;
 
     // END of single move/migrate iteration
   }
