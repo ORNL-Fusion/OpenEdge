@@ -49,6 +49,40 @@ CommKokkos::CommKokkos(SPARTA *sparta) : Comm(sparta),
   k_nsend = DAT::tdual_int_scalar("comm:nsend");
   d_nsend = k_nsend.view_device();
   h_nsend = k_nsend.view_host();
+
+  oe_comm_timing_every = 0; oe_ct_calls = 0; oe_ct_last = -1;
+  oe_nsend_sum = oe_nrecv_sum = 0;
+  for (int i = 0; i < 7; i++) oe_ct[i] = 0.0;
+  if (const char *e = getenv("OE_COMM_TIMING")) oe_comm_timing_every = atoi(e);
+}
+
+/* OE_COMM_TIMING report: cumulative seconds per section of migrate_particles
+   (rank 0 / max over ranks) plus the exchange_uniform breakdown; collective */
+
+void CommKokkos::oe_comm_timing_report()
+{
+  IrregularKokkos* ik = (IrregularKokkos*) iparticle;
+  double loc[13], mx[13];
+  for (int i = 0; i < 7; i++) loc[i] = oe_ct[i];
+  for (int i = 0; i < 6; i++) loc[7+i] = ik->oe_xt[i];
+  MPI_Allreduce(loc,mx,13,MPI_DOUBLE,MPI_MAX,world);
+  bigint sums[2] = {oe_nsend_sum,oe_nrecv_sum}, gsum[2];
+  MPI_Allreduce(sums,gsum,2,MPI_SPARTA_BIGINT,MPI_SUM,world);
+  if (me != 0) return;
+  const char *nm[7] = {"pack","compress","plan","grow+sync","exchange","unpack","total"};
+  const char *xn[6] = {"irecv","packbuf","send","self","waitall","h2d"};
+  FILE *outs[2] = {screen,logfile};
+  for (int o = 0; o < 2; o++) {
+    FILE *out = outs[o]; if (!out) continue;
+    fprintf(out,"[comm-timing] step " BIGINT_FORMAT " cumulative seconds (rank0 / max-rank), "
+            "%d calls, particles sent " BIGINT_FORMAT " recv " BIGINT_FORMAT " (all ranks)\n",
+            update->ntimestep,oe_ct_calls,gsum[0],gsum[1]);
+    for (int i = 0; i < 7; i++)
+      fprintf(out,"  %-10s %9.3f / %9.3f\n",nm[i],loc[i],mx[i]);
+    fprintf(out,"  exchange_uniform:");
+    for (int i = 0; i < 6; i++) fprintf(out,"  %s %.3f/%.3f",xn[i],loc[7+i],mx[7+i]);
+    fprintf(out,"\n");
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -99,6 +133,8 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
   // int i,j;
 
   d_plist = d_plist_in;
+  double oe_t0 = 0.0, oe_t = 0.0;
+  if (oe_comm_timing_every) oe_t0 = oe_t = MPI_Wtime();
 
   int ncustom = particle->ncustom;
   nbytes_particle = sizeof(Particle::OnePart);
@@ -185,11 +221,13 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
   k_nsend.modify_device();
   k_nsend.sync_host();
   nsend = h_nsend();
+  if (oe_comm_timing_every) { double t = MPI_Wtime(); oe_ct[0] += t - oe_t; oe_t = t; }
 
   // compress my list of particles
 
   particle->compress_migrate(nmigrate,plist);
   int ncompress = particle->nlocal;
+  if (oe_comm_timing_every) { double t = MPI_Wtime(); oe_ct[1] += t - oe_t; oe_t = t; }
 
   // create or augment irregular communication plan
   // nrecv = # of incoming particles
@@ -201,6 +239,7 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
     nrecv = iparticle_kk->augment_data_uniform(nsend,pproc);
   else
     nrecv = iparticle_kk->create_data_uniform(nsend,pproc,commsortflag);
+  if (oe_comm_timing_every) { double t = MPI_Wtime(); oe_ct[2] += t - oe_t; oe_t = t; }
 
   // extend particle list if necessary
 
@@ -229,11 +268,13 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
   else
     particle_kk->sync(Device,PARTICLE_MASK);
   d_particles = particle_kk->k_particles.view_device();
+  if (oe_comm_timing_every) { double t = MPI_Wtime(); oe_ct[3] += t - oe_t; oe_t = t; }
 
   if (gpu_aware_flag && !ncustom) {
     iparticle_kk->
       exchange_uniform(d_sbuf,nbytes_total,
                        (char *) (d_particles.data()+particle->nlocal),d_rbuf);
+    if (oe_comm_timing_every) { double t = MPI_Wtime(); oe_ct[4] += t - oe_t; oe_t = t; }
   } else {
 
     // allocate exact buffer size to reduce GPU <--> CPU memory transfer
@@ -244,6 +285,7 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
 
     nlocal = particle->nlocal;
     iparticle_kk->exchange_uniform(d_sbuf,nbytes_total,(char *)d_rbuf.data(),d_rbuf);
+    if (oe_comm_timing_every) { double t = MPI_Wtime(); oe_ct[4] += t - oe_t; oe_t = t; }
 
     copymode = 1;
     if (!ncustom) {
@@ -272,6 +314,14 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
 
   particle->nlocal += nrecv;
   ncomm += nsend;
+  if (oe_comm_timing_every) {
+    double t = MPI_Wtime(); oe_ct[5] += t - oe_t; oe_ct[6] += t - oe_t0;
+    oe_ct_calls++; oe_nsend_sum += nsend; oe_nrecv_sum += nrecv;
+    if (update->ntimestep % oe_comm_timing_every == 0 && update->ntimestep != oe_ct_last) {
+      oe_ct_last = update->ntimestep;
+      oe_comm_timing_report();
+    }
+  }
   return ncompress;
 }
 

@@ -32,6 +32,9 @@ class IrregularKokkos : public Irregular {
   int create_data_uniform(int, int *, int sort = 0);
   int augment_data_uniform(int, int *);
   void exchange_uniform(DAT::t_char_1d, int, char *, DAT::t_char_1d);
+  // OE_COMM_TIMING accumulators (s): 0 irecv post, 1 pack kernel, 2 send (+D2H),
+  // 3 self copy, 4 waitall, 5 recv H2D
+  double oe_xt[6];
 
   KOKKOS_INLINE_FUNCTION
   void operator()(TagIrregularPackBuffer, const int&) const;

@@ -37,6 +37,14 @@ class CommKokkos : public Comm {
   int migrate_particles(int, int*, const DAT::t_int_1d &);
   void migrate_cells(int);
   int cell_migration_device() const;   // 1 = migrate_cells moves particles on the device
+  // OE_COMM_TIMING=<nsteps>: per-section wall time of migrate_particles, printed
+  // every nsteps (rank 0 / max over ranks). Sections: 0 pack (sync + kernel +
+  // pproc D2H), 1 compress, 2 plan (create/augment_data_uniform), 3 grow + sync,
+  // 4 exchange_uniform, 5 unpack kernel, 6 total
+  int oe_comm_timing_every, oe_ct_calls;
+  double oe_ct[7];
+  bigint oe_ct_last, oe_nsend_sum, oe_nrecv_sum;
+  void oe_comm_timing_report();
 
   template<int NEED_ATOMICS, int HAVE_CUSTOM>
   KOKKOS_INLINE_FUNCTION

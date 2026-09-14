@@ -46,6 +46,7 @@ int compare_standalone(const void *, const void *);
 
 IrregularKokkos::IrregularKokkos(SPARTA *sparta) : Irregular(sparta)
 {
+  for (int i = 0; i < 6; i++) oe_xt[i] = 0.0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -357,6 +358,7 @@ void IrregularKokkos::exchange_uniform(DAT::t_char_1d d_sendbuf_in, int nbytes_i
 
   // post all receives, starting after self copies
 
+  double oe_t = MPI_Wtime();
   bigint offset = (bigint)num_self*nbytes;
   for (int irecv = 0; irecv < nrecv; irecv++) {
     if (sparta->kokkos->gpu_aware_flag) {
@@ -368,6 +370,8 @@ void IrregularKokkos::exchange_uniform(DAT::t_char_1d d_sendbuf_in, int nbytes_i
     }
     offset += (bigint)num_recv[irecv]*nbytes;
   }
+
+  oe_xt[0] += MPI_Wtime() - oe_t;
 
   // reallocate buf for largest send if necessary
 
@@ -408,10 +412,12 @@ void IrregularKokkos::exchange_uniform(DAT::t_char_1d d_sendbuf_in, int nbytes_i
       }
     }
 
+    oe_t = MPI_Wtime();
     copymode = 1;
     Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagIrregularPackBuffer>(0,count),*this);
     DeviceType().fence();
     copymode = 0;
+    oe_xt[1] += MPI_Wtime() - oe_t; oe_t = MPI_Wtime();
 
     if (sparta->kokkos->gpu_aware_flag)
       MPI_Send(d_buf.data(),count*nbytes,MPI_CHAR,proc_send[isend],0,world);
@@ -419,11 +425,13 @@ void IrregularKokkos::exchange_uniform(DAT::t_char_1d d_sendbuf_in, int nbytes_i
       Kokkos::deep_copy(h_buf,d_buf);
       MPI_Send(h_buf.data(),count*nbytes,MPI_CHAR,proc_send[isend],0,world);
     }
+    oe_xt[2] += MPI_Wtime() - oe_t;
     offset_send += count;
   }
 
   // copy datums to self, put at beginning of recvbuf
 
+  oe_t = MPI_Wtime();
   if (num_self) {
     if (sparta->kokkos->gpu_aware_flag) {
       copymode = 1;
@@ -452,10 +460,14 @@ void IrregularKokkos::exchange_uniform(DAT::t_char_1d d_sendbuf_in, int nbytes_i
     }
   }
 
+  oe_xt[3] += MPI_Wtime() - oe_t;
+
   // wait on all incoming messages
 
+  oe_t = MPI_Wtime();
   if (nrecv)
     MPI_Waitall(nrecv,request,status);
+  oe_xt[4] += MPI_Wtime() - oe_t; oe_t = MPI_Wtime();
 
   if (!sparta->kokkos->gpu_aware_flag)
     if (nrecv || num_self)
@@ -468,6 +480,7 @@ void IrregularKokkos::exchange_uniform(DAT::t_char_1d d_sendbuf_in, int nbytes_i
         Kokkos::deep_copy(Kokkos::subview(d_recvbuf,std::make_pair((bigint)0,used_recv)),
                           Kokkos::subview(h_recvbuf,std::make_pair((bigint)0,used_recv)));
   }
+  oe_xt[5] += MPI_Wtime() - oe_t;
 }
 
 KOKKOS_INLINE_FUNCTION
