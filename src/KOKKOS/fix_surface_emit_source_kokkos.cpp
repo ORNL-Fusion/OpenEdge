@@ -63,6 +63,7 @@ FixSurfaceEmitSourceKokkos::FixSurfaceEmitSourceKokkos(SPARTA *sparta,
   tasks_uploaded_ = 0;
   dev_announced_ = 0;
   host_warm_calls_ = 0;
+  cache_rebuilds_ = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -238,12 +239,19 @@ void FixSurfaceEmitSourceKokkos::perform_task()
 {
   // device path requires the static (cached) per-task source: the first
   // step(s) run on the host and populate/freeze the cache
-  const bool cache_ready = task_source_cached &&
-      (int) cached_task_source.size() == ntask &&
-      cached_source_total > 0.0;
+  bool cache_ready = task_source_cached &&
+      (int) cached_task_source.size() == ntask;
 
   int dev = device_ok;
   const char *why = nullptr;
+  if (dev && !cache_ready && build_task_source_cache()) {
+    // OpenEdge 2026-09-15: a static upstream (file / constant / frozen sputter
+    // compute) is re-cached here after grid_changed() — no host emission call
+    // and no particle round trip per rebalance (was one warm-up call per rank
+    // after every fix balance)
+    cache_ready = true;
+    cache_rebuilds_++;
+  }
   if (dev && !cache_ready) {
     // warmup: the host path runs until the upstream source is frozen.
     // Stay silent for a few steps, then say so once — a source that never
@@ -293,6 +301,7 @@ void FixSurfaceEmitSourceKokkos::perform_task()
               update->ntimestep,host_warm_calls_,ntask);
   }
 
+  if (cached_source_total <= 0.0) return;   // no source anywhere (CPU returns too)
   if (!tasks_uploaded_) upload_tasks();
   if (ntask_ == 0 && ntask == 0) return;
 
@@ -340,7 +349,10 @@ void FixSurfaceEmitSourceKokkos::perform_task()
   d_particles = particle_kk->k_particles.view_device();
   d_species   = particle_kk->k_species.d_view;
   SurfKokkos *surf_kk = (SurfKokkos *) surf;
-  surf_kk->sync(Device,ALL_MASK);
+  // the emission kernel reads only the element geometry (norm); an ALL_MASK sync
+  // here re-uploaded every host-modified surf custom (PWI ledgers fold on the host
+  // each step) on every call — most of the SLAG per-step floor (nsys, 2026-09-15)
+  surf_kk->sync(Device,TRI_MASK|LINE_MASK);
   d_tris  = surf_kk->k_tris.view_device();
   d_lines = surf_kk->k_lines.view_device();
   dim_ = domain->dimension;

@@ -6,8 +6,9 @@
 #  A test passes if the run exits 0, its log contains no ERROR lines, and
 #  (when <case>/regression_reference.json exists) its end-of-run metrics
 #  are within the stored tolerances (regression/metrics.py).
-#  Record: name|dir|deck|required-data-file|flags|args
-#  (flags: nokk = skip under --kk; args: extra command-line args, e.g. -var gridcut 0.02)
+#  Record: name|dir|deck|required-data-file|flags|args|envs
+#  (flags: nokk = skip under --kk; args: extra command-line args, e.g. -var gridcut 0.02;
+#   envs: VAR=value pairs exported for the run, e.g. OE_CELLMIG_DIAG=2)
 #
 #  Usage:
 #    ./regression/run_regression.sh [--np N] [--exe PATH] [--filter PATTERN]
@@ -131,6 +132,8 @@ declare -a TESTS=(
   # coverage variants (audit 2026-09-12 item 16): cut-cell ghost decomposition and chunked balance/restart memory
   "west_tungsten_gridcut|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5||-var gridcut 0.02"
   "west_tungsten_memlimit|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5||-var memlimit 1"
+  # rebalance placement probe (audit item 2 leftover): rfpie rebalancing every 100 steps under OE_CELLMIG_DIAG=2
+  "rfpie_rebalance_probe|workflows/impurity_transport/rfpie_tungsten_transport|in.openedge|input/plasma_he.h5||-var baltimeevery 100 -var balpartevery 50|OE_CELLMIG_DIAG=2"
 )
 
 # -----------------------------------------------------------------------
@@ -181,7 +184,7 @@ echo "========================================================================"
 echo ""
 
 for entry in "${TESTS[@]}"; do
-  IFS='|' read -r name testdir infile requires flags xargs <<< "$entry"
+  IFS='|' read -r name testdir infile requires flags xargs xenvs <<< "$entry"
   # legacy 4-field form: "nokk" in the requires slot means no data file
   if [[ "$requires" == "nokk" ]]; then flags="nokk"; requires=""; fi
 
@@ -248,16 +251,25 @@ for entry in "${TESTS[@]}"; do
   logfile="$dir/regression.log"
   ok=1
   if [[ -n "$LAUNCHER" ]]; then
-    (cd "$dir" && $LAUNCHER "$EXE" "${KKARGS[@]}" -in "$(basename "$tmpinput")" \
+    (cd "$dir" && env $xenvs $LAUNCHER "$EXE" "${KKARGS[@]}" -in "$(basename "$tmpinput")" \
         $xargs -log none > "$logfile" 2>&1) || ok=0
   else
-    (cd "$dir" && mpirun -np "$NP" "$EXE" "${KKARGS[@]}" -in "$(basename "$tmpinput")" \
+    (cd "$dir" && env $xenvs mpirun -np "$NP" "$EXE" "${KKARGS[@]}" -in "$(basename "$tmpinput")" \
         $xargs -log none > "$logfile" 2>&1) || ok=0
   fi
   if [[ $ok -eq 1 ]] && grep -q "^ERROR" "$logfile"; then ok=0; fi
   # a rank dying under srun/mpirun can still return 0 through the launcher;
   # treat launcher-reported task failures as FAIL too
   if [[ $ok -eq 1 ]] && grep -qE "Segmentation fault|srun: error|DUE TO TASK FAILURE|Kokkos::abort|cudaError" "$logfile"; then ok=0; fi
+  # rebalance placement probe (OE_CELLMIG_DIAG=2 in envs): the device cell migration
+  # verifies every particle against its cell box after each fix balance and prints
+  # OE_CELLMIG_CHECK per rank; any OE_CELLMIG_BAD line is a misplaced particle
+  probe_note=""
+  if [[ "$xenvs" == *OE_CELLMIG_DIAG=2* ]]; then
+    if grep -q "OE_CELLMIG_BAD" "$logfile"; then ok=0; probe_note="(misplaced particles after rebalance)"
+    elif [[ "$MODE" == gpu ]] && ! grep -q "OE_CELLMIG_CHECK" "$logfile"; then ok=0; probe_note="(placement probe did not run)"
+    else probe_note="(placement probe: $(grep -c OE_CELLMIG_CHECK "$logfile") checks, none bad)"; fi
+  fi
 
   # end-of-run metrics: extract, then compare against the stored reference
   # (or write the reference with --update-ref)
@@ -285,11 +297,11 @@ for entry in "${TESTS[@]}"; do
   fi
 
   if [[ $ok -eq 1 ]]; then
-    RESULTS+=("PASS  $name  $metrics_note")
-    echo "PASS $metrics_note"
+    RESULTS+=("PASS  $name  $metrics_note $probe_note")
+    echo "PASS $metrics_note $probe_note"
     ((PASS++))
   else
-    RESULTS+=("FAIL  $name  $metrics_note")
+    RESULTS+=("FAIL  $name  $metrics_note $probe_note")
     echo "FAIL"
     ((FAIL++))
     if [[ "$VERBOSE" -eq 1 ]]; then

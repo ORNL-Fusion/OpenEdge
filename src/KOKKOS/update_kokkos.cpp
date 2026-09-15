@@ -629,12 +629,18 @@ void UpdateKokkos::run(int nsteps)
   oe_pc_csg = (sheath_flag && sheath_geom_cidx >= 0) ? 1 : 0;
   if (plasma_cache_flag) {
     const char *why = nullptr;
-    const int sup = PCACHE_TE | PCACHE_NE | PCACHE_TI | PCACHE_NI |
-                    PCACHE_VPAR | PCACHE_BFIELD;
+    int sup = PCACHE_TE | PCACHE_NE | PCACHE_TI | PCACHE_NI |
+              PCACHE_VPAR | PCACHE_BFIELD;
     FixBackground *pdc = nullptr;
     if (pusher->pusher_plasma_fidx >= 0)
       pdc = dynamic_cast<FixBackground*>(
                 modify->fix[pusher->pusher_plasma_fidx]);
+    // E-field slot (2026-09-15): the device fills it from the constant or the
+    // mesh E exactly as the host (cylindrical -> slot frame at the point). The
+    // host consults query_efield_at_point first and falls back to the raster
+    // epar projection only when that fails, so with a constant or mesh E the
+    // epar raster is irrelevant; an epar-only deck keeps the host fill.
+    if (oe_has_const_e || oe_has_mesh_e) sup |= PCACHE_EFIELD;
     auto okc = [&](int cidx) {
       return cidx >= 0 && particle->ewhich[cidx] >= 0;
     };
@@ -659,7 +665,9 @@ void UpdateKokkos::run(int nsteps)
              ((pcache_need_mask & PCACHE_NI) && !okc(pc_ni_custom)) ||
              ((pcache_need_mask & PCACHE_VPAR) && !okc(pc_vpar_custom)) ||
              ((pcache_need_mask & PCACHE_BFIELD) &&
-              !(okc(pc_bx_custom) && okc(pc_by_custom) && okc(pc_bz_custom))))
+              !(okc(pc_bx_custom) && okc(pc_by_custom) && okc(pc_bz_custom))) ||
+             ((pcache_need_mask & PCACHE_EFIELD) &&
+              !(okc(pc_ex_custom) && okc(pc_ey_custom) && okc(pc_ez_custom))))
       why = "pcache custom slots unresolved";
     oe_pcache_dev = (why == nullptr);
     oe_pcache_why = why;
@@ -669,7 +677,8 @@ void UpdateKokkos::run(int nsteps)
                 pcache_need_mask,
                 oe_pc_csg ? ", sheath ne correction" : "");
       else
-        fprintf(screen,"  [kokkos] pcache: host fill (%s)\n",why);
+        fprintf(screen,"  [kokkos] pcache: host fill (%s; need mask 0x%x, device mask 0x%x)\n",
+                why,pcache_need_mask,sup);
     }
   }
 
@@ -5102,6 +5111,11 @@ void UpdateKokkos::cache_plasma_particles_device()
     d_pc_by = edvec(pc_by_custom);
     d_pc_bz = edvec(pc_bz_custom);
   }
+  if (m & PCACHE_EFIELD) {
+    d_pc_ex = edvec(pc_ex_custom);
+    d_pc_ey = edvec(pc_ey_custom);
+    d_pc_ez = edvec(pc_ez_custom);
+  }
   oe_pc_mask = m;
 
   copymode = 1;
@@ -5205,6 +5219,25 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
       got_B = true;
     }
     if (!got_B) oe_const_bfield_slot(xq, B);   // constant-B provider
+  }
+
+  // E-field slot: constant E first, else mesh E; both return the slot frame at
+  // xq, which is what the host writes (its cphi/sphi rotation of ER/Et)
+  if (mask & PCACHE_EFIELD) {
+    double E[3] = {0.0, 0.0, 0.0};
+    if (oe_has_const_e) oe_const_efield_slot(xq, E);
+    else if (oe_has_mesh_e)
+      MeshKokkos::query_bfield_at_point(
+          xq, oe_dim, oe_axisymmetric,
+          d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
+          d_oe_mesh_tri_er, d_oe_mesh_tri_ez, d_oe_mesh_tri_et,
+          d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
+          d_oe_mesh_tri_zmin, d_oe_mesh_tri_zmax,
+          d_oe_hash_offset, d_oe_hash_entries,
+          oe_mesh_hash_rmin, oe_mesh_hash_zmin,
+          oe_mesh_hash_dr,   oe_mesh_hash_dz,
+          oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri, E);
+    d_pc_ex(i) = E[0]; d_pc_ey(i) = E[1]; d_pc_ez(i) = E[2];
   }
 
   if (mask & PCACHE_TE)   d_pc_te(i)   = te;

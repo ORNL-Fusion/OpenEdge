@@ -354,6 +354,7 @@ class UpdateKokkos : public Update {
   int oe_pc_csg;        // sheath Boltzmann ne correction active
   DAT::t_float_1d d_pc_te, d_pc_ti, d_pc_ne, d_pc_ni, d_pc_vpar;
   DAT::t_float_1d d_pc_bx, d_pc_by, d_pc_bz;
+  DAT::t_float_1d d_pc_ex, d_pc_ey, d_pc_ez;   // E-field cache slots (constant / mesh E on the device, 2026-09-15)
   int oe_pc_ncells;               // nlocal+nghost at fill time
   int oe_pc_diag_warned;
   Kokkos::View<int[6], DeviceType> d_pc_diag;

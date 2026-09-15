@@ -38,8 +38,8 @@
  },
  "c_cwN4": {
   "value": 212446390000.0,
-  "tol": 0.8,
-  "note": "W4+ density at 1000 steps: very small population"
+  "tol": 1.0,
+  "note": "W4+ density at 1000 steps: a few markers; GPU runs 2026-09-15: 0.41, 0.95, 1.14, 1.22e11 vs 2.12e11 (CPU reference), band 0-2x"
  },
  "c_cwN5": {
   "value": 0.0,

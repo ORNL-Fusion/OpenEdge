@@ -111,6 +111,14 @@ class FixSurfaceEmitSource : public FixEmit {
   std::vector<double> cached_task_source;
   double cached_source_total;
   int task_source_cached;        // 0 = stale, 1 = valid
+  // per-task source strengths for the static-upstream (nlaunch_total) path,
+  // computed without emitting: compute_task_source fills the vector and returns
+  // the global total; build_task_source_cache refreshes the cache (spreading the
+  // frozen flux first if needed) and returns 1 when the upstream is static.
+  // The Kokkos twin calls the latter after grid_changed() instead of a host
+  // warm-up emission (OpenEdge 2026-09-15).
+  double compute_task_source(std::vector<double> &task_source, class Compute *c);
+  int build_task_source_cache();
 
   // Per-surface flux replicated across ranks (canonical SPARTA pattern: the
   // upstream compute writes array_surf only at this rank's owned surfaces, so
