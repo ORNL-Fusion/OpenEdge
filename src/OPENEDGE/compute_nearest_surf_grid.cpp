@@ -245,11 +245,12 @@ void ComputeNearestSurfGrid::compute_per_grid()
   memory->destroy(eligible);
   custom_modify_host();
   computed_once = 1;
-  bigint tot[2] = {ncached, ncomputed}, gtot[2];
-  MPI_Allreduce(tot,gtot,2,MPI_SPARTA_BIGINT,MPI_SUM,world);
-  if (comm->me == 0 && screen && gtot[1] > 0)
-    fprintf(screen,"  nearest_surf/grid: " BIGINT_FORMAT " cells from the migrated cache, "
-            BIGINT_FORMAT " computed\n",gtot[0],gtot[1]);
+  // no collective here: this compute runs only on the ranks whose cells changed
+  // (reallocate), so a reduction would mismatch other ranks' collectives
+  // (Cray MPICH aborted with "message sizes do not match" at a rebalance)
+  if (comm->me == 0 && screen && ncomputed > 0)
+    fprintf(screen,"  nearest_surf/grid (rank 0): " BIGINT_FORMAT " cells from the migrated cache, "
+            BIGINT_FORMAT " computed\n",ncached,ncomputed);
 }
 
 void ComputeNearestSurfGrid::reallocate()
