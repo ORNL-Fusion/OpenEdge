@@ -36,6 +36,7 @@
 #include <cstdlib>
 
 using namespace SPARTA_NS;
+namespace SPARTA_NS { extern int oe_grid_check_strict; }
 
 enum{PKEEP,PINSERT,PDONE,PDISCARD,PENTRY,PEXIT,PSURF};   // several files
 
@@ -473,6 +474,8 @@ void CommKokkos::migrate_cells(int nmigrate)
     }
   grid_kk->modify(Host,CELL_MASK);
   grid_kk->sync(Device,CELL_MASK);
+  oe_grid_check_strict = 0;   // migrating cells now carry destination proc + encoded slot
+  grid_kk->check_cells_device("migrate: device after sync(Device)");
   // device particle phases run without auto_sync: under auto_sync every
   // sync(Device) starts with a blanket modify(Host) that would push the
   // stale host particle mirror over the live device particles (the host
@@ -536,6 +539,9 @@ void CommKokkos::migrate_cells(int nmigrate)
   const int nprecv = particle->nlocal - ncompress;
   sparta->kokkos->auto_sync = auto_sync_save;
   t2 = MPI_Wtime();
+  grid_kk->check_cells_device("migrate: device after particle migration");
+  grid->check_cells("migrate: host after particle migration");
+  oe_grid_check_strict = 1;
 
   // 4. host: the cells themselves, without particles.
   //    Grid::compress repoints particles through cinfo.first/next lists;
@@ -728,6 +734,7 @@ void CommKokkos::migrate_cells_only(int nmigrate, int *cellbase)
   }
   particle->sorted = 0;
   tt[nt++] = MPI_Wtime();   // compress
+  grid->check_cells("migrate: host after compress");
 
   if (!igrid) igrid = new Irregular(sparta);
   bigint recvsize;
@@ -753,6 +760,7 @@ void CommKokkos::migrate_cells_only(int nmigrate, int *cellbase)
     if (nin > 0) grid->grow_cells(nin, nin);
   }
   tt[nt++] = MPI_Wtime();   // pregrow
+  grid->check_cells("migrate: host after pregrow");
 
   offset = 0;
   const int nself = igrid->self_count();
@@ -765,6 +773,7 @@ void CommKokkos::migrate_cells_only(int nmigrate, int *cellbase)
     for (int k = 0; k < rn[r]; k++) offset += grid->unpack_one(&rbuf[offset],1,0,1);
   }
   tt[nt++] = MPI_Wtime();   // unpack
+  grid->check_cells("migrate: host after unpack");
   if (diag) {
     const char *nm[] = {"pack","compress","plan","exchange","pregrow","unpack"};
     char line[512]; int n = snprintf(line,sizeof(line),"OE_CELLMIG_CELLS rank=%d nlocal %d -> %d t(",me,nglocal,grid->nlocal);

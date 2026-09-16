@@ -2548,6 +2548,7 @@ void Grid::read_restart(FILE *fp)
 ------------------------------------------------------------------------- */
 
 int Grid::check_cells_level = -1;
+namespace SPARTA_NS { int oe_grid_check_strict = 1; }   // 0 while cells carry their migration destination in proc/ilocal
 
 int Grid::check_cells(const char *tag)
 {
@@ -2561,21 +2562,36 @@ int Grid::check_cells(const char *tag)
     if (every < 0) { const char *e = getenv("OE_GRID_CHECK_EVERY"); every = (e && atoi(e) > 0) ? atoi(e) : 100; }
     if (update->ntimestep % every) return 0;
   }
+  return check_cells_array(tag,cells,nlocal);
+}
+
+/* ----------------------------------------------------------------------
+   validate N owned records in ARR (the host array, or a host copy of the
+   device array made by GridKokkos::check_cells_device)
+------------------------------------------------------------------------- */
+
+int Grid::check_cells_array(const char *tag, ChildCell *arr, int n)
+{
+  if (check_cells_level < 0) {
+    const char *e = getenv("OE_GRID_CHECK");
+    check_cells_level = e ? atoi(e) : 1;
+  }
+  if (check_cells_level <= 0 || arr == NULL) return 0;
 
   double *boxlo = domain->boxlo;
   double *boxhi = domain->boxhi;
   int nbad = 0;
   std::unordered_map<cellint,int> seen;
-  seen.reserve(2*nlocal+1);
+  seen.reserve(2*n+1);
   double lo[3],hi[3];
 
-  for (int i = 0; i < nlocal; i++) {
-    ChildCell *c = &cells[i];
+  for (int i = 0; i < n; i++) {
+    ChildCell *c = &arr[i];
     const char *why = NULL;
     if (c->level < 1 || c->level > maxlevel) why = "level out of range";
     else if (c->id == 0) why = "zero id";
-    else if (c->proc != comm->me) why = "proc != me";
-    else if (c->nsplit >= 1 && c->ilocal != i) why = "ilocal != index";   // sub cells carry their split cell's index
+    else if (oe_grid_check_strict && c->proc != comm->me) why = "proc != me";
+    else if (oe_grid_check_strict && c->nsplit >= 1 && c->ilocal != i) why = "ilocal != index";   // sub cells carry their split cell's index
     else if (c->lo[0] >= c->hi[0] || c->lo[1] >= c->hi[1] ||
              (domain->dimension == 3 && c->lo[2] >= c->hi[2])) why = "lo >= hi";
     else if (c->nsplit > 1 && (c->isplit < 0 || c->isplit >= nsplitlocal))
@@ -2590,7 +2606,7 @@ int Grid::check_cells(const char *tag)
       else if (c->nsplit >= 1) {
         auto it = seen.find(c->id);
         if (it != seen.end()) {
-          if (cells[it->second].nsplit > 1 || c->nsplit > 1) ; // split cell + its sub cells share the id
+          if (arr[it->second].nsplit > 1 || c->nsplit > 1) ; // split cell + its sub cells share the id
           else why = "duplicate id among unsplit cells";
         } else seen[c->id] = i;
       }
@@ -2602,13 +2618,18 @@ int Grid::check_cells(const char *tag)
                "neigh " CELLINT_FORMAT " " CELLINT_FORMAT " " CELLINT_FORMAT " "
                CELLINT_FORMAT " " CELLINT_FORMAT " " CELLINT_FORMAT
                " lo %.6g %.6g %.6g hi %.6g %.6g %.6g nsurf %d nsplit %d isplit %d\n",
-               comm->me,update->ntimestep,tag,why,i,nlocal,c->id,c->level,c->proc,c->ilocal,c->nmask,
+               comm->me,update->ntimestep,tag,why,i,n,c->id,c->level,c->proc,c->ilocal,c->nmask,
                c->neigh[0],c->neigh[1],c->neigh[2],c->neigh[3],c->neigh[4],c->neigh[5],
                c->lo[0],c->lo[1],c->lo[2],c->hi[0],c->hi[1],c->hi[2],c->nsurf,c->nsplit,c->isplit);
+        // raw 8-byte words of the record (16 x 8 bytes): a stray {int,int} write shows as one odd word
+        const unsigned long long *w = (const unsigned long long *) c;
+        printf("OE_GRID_CHECK rank %d   record words:",comm->me);
+        for (size_t k = 0; k < sizeof(ChildCell)/8; k++) printf(" %016llx",w[k]);
+        printf("\n");
         if (i > 0) printf("OE_GRID_CHECK rank %d   previous record: id " CELLINT_FORMAT " level %d lo %.6g %.6g %.6g\n",
-                          comm->me,cells[i-1].id,cells[i-1].level,cells[i-1].lo[0],cells[i-1].lo[1],cells[i-1].lo[2]);
-        if (i+1 < nlocal) printf("OE_GRID_CHECK rank %d   next record: id " CELLINT_FORMAT " level %d lo %.6g %.6g %.6g\n",
-                          comm->me,cells[i+1].id,cells[i+1].level,cells[i+1].lo[0],cells[i+1].lo[1],cells[i+1].lo[2]);
+                          comm->me,arr[i-1].id,arr[i-1].level,arr[i-1].lo[0],arr[i-1].lo[1],arr[i-1].lo[2]);
+        if (i+1 < n) printf("OE_GRID_CHECK rank %d   next record: id " CELLINT_FORMAT " level %d lo %.6g %.6g %.6g\n",
+                          comm->me,arr[i+1].id,arr[i+1].level,arr[i+1].lo[0],arr[i+1].lo[1],arr[i+1].lo[2]);
         fflush(stdout);
       }
       nbad++;

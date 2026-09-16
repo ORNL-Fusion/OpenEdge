@@ -319,6 +319,34 @@ void GridKokkos::wrap_kokkos()
   k_plevels.sync_device();
 }
 
+/* ----------------------------------------------------------------------
+   OpenEdge: validate the DEVICE copy of the owned cell records through a
+   private host copy (no DualView flags touched); OE_GRID_CHECK >= 1
+------------------------------------------------------------------------- */
+
+int GridKokkos::check_cells_device(const char *tag)
+{
+  if (sparta->kokkos->prewrap || Grid::check_cells_level == 0) return 0;
+  if (Grid::check_cells_level < 0) {
+    const char *e = getenv("OE_GRID_CHECK");
+    Grid::check_cells_level = e ? atoi(e) : 1;
+    if (Grid::check_cells_level <= 0) return 0;
+  }
+  // host newer (e.g. right after a rebalance, before the next sync(Device)):
+  // the device copy is stale by design, validate the host copy instead
+  if (k_cells.need_sync_device()) return check_cells_array(tag, cells, nlocal);
+  auto d = k_cells.view_device();
+  if (d.extent(0) < (size_t) nlocal) {
+    printf("OE_GRID_CHECK rank %d [%s]: device cell view holds %d records, nlocal %d\n",comm->me,tag,(int) d.extent(0),nlocal);
+    fflush(stdout);
+    error->one(FLERR,"OE_GRID_CHECK: device cell view shorter than nlocal");
+  }
+  auto sub = Kokkos::subview(d, std::make_pair(0, nlocal));
+  auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), sub);
+  Kokkos::fence();
+  return check_cells_array(tag, h.data(), nlocal);
+}
+
 /* ---------------------------------------------------------------------- */
 
 void GridKokkos::sync(ExecutionSpace space, unsigned int mask)

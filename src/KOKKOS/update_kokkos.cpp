@@ -863,6 +863,11 @@ void UpdateKokkos::run(int nsteps)
     }
 
     if (Grid::check_cells_level >= 2) grid->check_cells("step");
+    if (Grid::check_cells_level >= 3) {   // also validate the DEVICE copy every OE_GRID_CHECK_EVERY steps
+      static int every = -1;
+      if (every < 0) { const char *e = getenv("OE_GRID_CHECK_EVERY"); every = (e && atoi(e) > 0) ? atoi(e) : 100; }
+      if (ntimestep % every == 0) grid->check_cells_device("step device");
+    }
   }
 
   modify->post_run();
