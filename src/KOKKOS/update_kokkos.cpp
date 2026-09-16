@@ -861,6 +861,8 @@ void UpdateKokkos::run(int nsteps)
       output->write(ntimestep);
       timer->stamp(TIME_OUTPUT);
     }
+
+    if (Grid::check_cells_level >= 2) grid->check_cells("step");
   }
 
   modify->post_run();

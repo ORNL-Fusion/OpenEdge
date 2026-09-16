@@ -77,7 +77,9 @@ void FixBalanceKokkos::end_of_step()
   if (diag < 0) { const char *e = getenv("OE_CELLMIG_DIAG"); diag = e ? atoi(e) : 0; }
   const double t0 = MPI_Wtime();
 
+  grid->check_cells("balance: host copy before sync");
   grid_kk->sync(Host,CELL_MASK|CINFO_MASK|SINFO_MASK|PCELL_MASK);
+  grid->check_cells("balance: after sync(Host)");
   surf_kk->sync(Host,ALL_MASK);
   if (!devmig) particle_kk->sync(Host,PARTICLE_MASK);
   else if (bstyle == BISECTION && rcbwt == PARTICLE) {
@@ -110,6 +112,7 @@ void FixBalanceKokkos::end_of_step()
   // switches it off around its device particle phases only)
   FixBalance::end_of_step();
   const double t2 = MPI_Wtime();
+  grid->check_cells("balance: after migration");
 
   grid_kk->modify(Host,CELL_MASK|CINFO_MASK|SINFO_MASK|PCELL_MASK);
   if (!devmig) particle_kk->modify(Host,PARTICLE_MASK);
@@ -121,6 +124,7 @@ void FixBalanceKokkos::end_of_step()
   const double t3 = MPI_Wtime();
   grid_kk->update_hash();
   const double t4 = MPI_Wtime();
+  grid->check_cells("balance: done");
   if (diag) {
     printf("OE_BALANCE_KK rank=%d step=%ld t(sync+counts %.3f, FixBalance::end_of_step %.3f, wrap %.3f, hash %.3f) s\n",
            comm->me,(long)update->ntimestep,t1-t0,t2-t1,t3-t2,t4-t3);

@@ -331,6 +331,8 @@ class Grid : protected Pointers {
   int id_level(cellint);
   void id_child_lohi(int, double *, double *, cellint, double *, double *);
   void id_lohi(cellint, int, double *, double *, double *, double *);
+  int check_cells(const char *);   // OpenEdge: host cell-record sanity check (OE_GRID_CHECK)
+  static int check_cells_level;
   int id_bits(int, int, int);
   void id_num2str(cellint, char *);
 

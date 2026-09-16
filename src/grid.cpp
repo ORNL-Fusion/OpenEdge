@@ -13,6 +13,8 @@
 ------------------------------------------------------------------------- */
 
 #include "string.h"
+#include <unordered_map>
+#include "math.h"
 #include "grid.h"
 #include "geometry.h"
 #include "domain.h"
@@ -2536,6 +2538,88 @@ void Grid::read_restart(FILE *fp)
     if (me == 0) tmp = fread(gnames[i],sizeof(char),n,fp);
     MPI_Bcast(gnames[i],n,MPI_CHAR,0,world);
   }
+}
+
+/* ----------------------------------------------------------------------
+   OpenEdge: sanity check of the host cell records (id, level, box, split
+   info, duplicate ids). OE_GRID_CHECK=0 off, 1 (default) at rebalance and
+   restart write, 2 also every step. Per-rank, no collectives; prints the
+   offending record and aborts the rank.
+------------------------------------------------------------------------- */
+
+int Grid::check_cells_level = -1;
+
+int Grid::check_cells(const char *tag)
+{
+  if (check_cells_level < 0) {
+    const char *e = getenv("OE_GRID_CHECK");
+    check_cells_level = e ? atoi(e) : 1;
+  }
+  if (check_cells_level <= 0 || cells == NULL) return 0;
+  if (strcmp(tag,"step") == 0) {          // per-step checks (level 2): every OE_GRID_CHECK_EVERY steps (default 100)
+    static int every = -1;
+    if (every < 0) { const char *e = getenv("OE_GRID_CHECK_EVERY"); every = (e && atoi(e) > 0) ? atoi(e) : 100; }
+    if (update->ntimestep % every) return 0;
+  }
+
+  double *boxlo = domain->boxlo;
+  double *boxhi = domain->boxhi;
+  int nbad = 0;
+  std::unordered_map<cellint,int> seen;
+  seen.reserve(2*nlocal+1);
+  double lo[3],hi[3];
+
+  for (int i = 0; i < nlocal; i++) {
+    ChildCell *c = &cells[i];
+    const char *why = NULL;
+    if (c->level < 1 || c->level > maxlevel) why = "level out of range";
+    else if (c->id == 0) why = "zero id";
+    else if (c->proc != comm->me) why = "proc != me";
+    else if (c->nsplit >= 1 && c->ilocal != i) why = "ilocal != index";   // sub cells carry their split cell's index
+    else if (c->lo[0] >= c->hi[0] || c->lo[1] >= c->hi[1] ||
+             (domain->dimension == 3 && c->lo[2] >= c->hi[2])) why = "lo >= hi";
+    else if (c->nsplit > 1 && (c->isplit < 0 || c->isplit >= nsplitlocal))
+      why = "split cell with bad isplit";
+    else if (c->nsplit == 1 && c->nsurf > 0 && c->csurfs == NULL) why = "nsurf>0 with NULL csurfs";
+    else {
+      id_lohi(c->id,c->level,boxlo,boxhi,lo,hi);
+      double tol = 1.0e-6*(c->hi[0]-c->lo[0]);
+      if (fabs(lo[0]-c->lo[0]) > tol || fabs(hi[0]-c->hi[0]) > tol ||
+          fabs(lo[1]-c->lo[1]) > tol || fabs(hi[1]-c->hi[1]) > tol)
+        why = "box does not match id/level";
+      else if (c->nsplit >= 1) {
+        auto it = seen.find(c->id);
+        if (it != seen.end()) {
+          if (cells[it->second].nsplit > 1 || c->nsplit > 1) ; // split cell + its sub cells share the id
+          else why = "duplicate id among unsplit cells";
+        } else seen[c->id] = i;
+      }
+    }
+    if (why) {
+      if (nbad < 8) {
+        printf("OE_GRID_CHECK rank %d step " BIGINT_FORMAT " [%s]: %s at index %d of %d: "
+               "id " CELLINT_FORMAT " level %d proc %d ilocal %d nmask %d "
+               "neigh " CELLINT_FORMAT " " CELLINT_FORMAT " " CELLINT_FORMAT " "
+               CELLINT_FORMAT " " CELLINT_FORMAT " " CELLINT_FORMAT
+               " lo %.6g %.6g %.6g hi %.6g %.6g %.6g nsurf %d nsplit %d isplit %d\n",
+               comm->me,update->ntimestep,tag,why,i,nlocal,c->id,c->level,c->proc,c->ilocal,c->nmask,
+               c->neigh[0],c->neigh[1],c->neigh[2],c->neigh[3],c->neigh[4],c->neigh[5],
+               c->lo[0],c->lo[1],c->lo[2],c->hi[0],c->hi[1],c->hi[2],c->nsurf,c->nsplit,c->isplit);
+        if (i > 0) printf("OE_GRID_CHECK rank %d   previous record: id " CELLINT_FORMAT " level %d lo %.6g %.6g %.6g\n",
+                          comm->me,cells[i-1].id,cells[i-1].level,cells[i-1].lo[0],cells[i-1].lo[1],cells[i-1].lo[2]);
+        if (i+1 < nlocal) printf("OE_GRID_CHECK rank %d   next record: id " CELLINT_FORMAT " level %d lo %.6g %.6g %.6g\n",
+                          comm->me,cells[i+1].id,cells[i+1].level,cells[i+1].lo[0],cells[i+1].lo[1],cells[i+1].lo[2]);
+        fflush(stdout);
+      }
+      nbad++;
+    }
+  }
+  if (nbad) {
+    char str[256];
+    sprintf(str,"OE_GRID_CHECK [%s]: %d corrupt owned cell records on rank %d",tag,nbad,comm->me);
+    error->one(FLERR,str);
+  }
+  return nbad;
 }
 
 /* ----------------------------------------------------------------------
