@@ -82,7 +82,15 @@ void FixBalanceKokkos::end_of_step()
   grid->check_cells("balance: after sync(Host)");
   surf_kk->sync(Host,ALL_MASK);
   if (!devmig) particle_kk->sync(Host,PARTICLE_MASK);
-  else if (bstyle == BISECTION && rcbwt == PARTICLE) {
+  else {
+    // Every weighting, not only rcb part: FixBalance::end_of_step sorts the
+    // particles on the host after the RCB (needed by the host migration),
+    // and under the device migration the host mirror is stale (last dump or
+    // grow) -- Particle::sort then writes cinfo[icell].first/count through
+    // stale icell values past the cinfo array into the cells mirror (the
+    // 2026-09-15 WEST production corruption: {id+1, level=i} and {count, i}
+    // words at 64-byte strides). Take the per-cell counts from the device
+    // sort and mark the particles sorted so the host sort never runs.
     // device-only particle work: no auto_sync (its blanket modify(Host)
     // would push the stale host mirror over the device particles)
     const int as = sparta->kokkos->auto_sync;
