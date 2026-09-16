@@ -144,6 +144,23 @@ int GridKokkos::add_custom(char *name, int type, int size)
 }
 
 /* ----------------------------------------------------------------------
+   OpenEdge: flag every allocated custom vector/array as modified on the
+   host, bypassing the prewrap early return of GridKokkos::modify
+------------------------------------------------------------------------- */
+
+void GridKokkos::custom_modify_host_inner()
+{
+  for (int i = 0; i < ncustom_ivec; i++)
+    if (eivec[i]) k_eivec.view_host()[i].k_view.modify_host();
+  for (int i = 0; i < ncustom_iarray; i++)
+    if (eiarray[i]) k_eiarray.view_host()[i].k_view.modify_host();
+  for (int i = 0; i < ncustom_dvec; i++)
+    if (edvec[i]) k_edvec.view_host()[i].k_view.modify_host();
+  for (int i = 0; i < ncustom_darray; i++)
+    if (edarray[i]) k_edarray.view_host()[i].k_view.modify_host();
+}
+
+/* ----------------------------------------------------------------------
    allocate ONE custom per-surf vector/array associated with new index
    via memory->create() to current size nown
    set all values to 0 via memset()
@@ -154,8 +171,12 @@ void GridKokkos::allocate_custom(int index)
   // modifies the inner part of eivec,eiarray,edvec,edarray on host, and the outer view on device
 
   if (sparta->kokkos->prewrap) {
-    sync(Host,CUSTOM_MASK);
-    modify(Host,CUSTOM_MASK);
+    // GridKokkos::sync/modify are no-ops before the wrap: mark the inner
+    // views host-modified so the DualView resize below preserves the host
+    // values (read_restart unpacks the custom values while the cells grow;
+    // with equal flags the resize keeps the device side and hands the host
+    // a fresh array, which lost every restart custom until 2026-09-15)
+    custom_modify_host_inner();
   } else
     sync(Device,CUSTOM_MASK);
 
@@ -213,8 +234,12 @@ void GridKokkos::reallocate_custom(int /*nold*/, int nnew)
   // modifies the inner part of eivec,eiarray,edvec,edarray on host, and the outer view on device
 
   if (sparta->kokkos->prewrap) {
-    sync(Host,CUSTOM_MASK);
-    modify(Host,CUSTOM_MASK);
+    // GridKokkos::sync/modify are no-ops before the wrap: mark the inner
+    // views host-modified so the DualView resize below preserves the host
+    // values (read_restart unpacks the custom values while the cells grow;
+    // with equal flags the resize keeps the device side and hands the host
+    // a fresh array, which lost every restart custom until 2026-09-15)
+    custom_modify_host_inner();
   } else
     sync(Device,CUSTOM_MASK);
 

@@ -52,6 +52,7 @@ class GridKokkos : public Grid {
 
 // operations with grid cell IDs
   void update_hash();
+  void custom_modify_host_inner();   // OpenEdge: prewrap-safe host modify of the custom views
 
   /* ----------------------------------------------------------------------
      compute lo/hi extent of a specific child cell within a parent cell
