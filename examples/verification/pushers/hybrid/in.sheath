@@ -1,4 +1,4 @@
-# Stage B1 (PLAN.md): sheath boundary barrier at alpha = 0 (B || n),
+# Stage B1: sheath boundary barrier at alpha = 0 (B || n),
 # where the parallel-only treatment is exact. He+ onto the flat target
 # with an escape collector above; hybrid pusher, Boris shell at the wall.
 #   -var shmode boundary|off   (off = baseline for the inbound E_n shift)

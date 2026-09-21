@@ -1,303 +1,184 @@
-"Previous Section"_Manual.html - "SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc - "Next Section"_Section_start.html :c
+"Previous Section"_Manual.html - "OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc - "Next Section"_Section_start.html :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
 1. Introduction :h3
 
-These sections provide an overview of what SPARTA can do, describe
-what it means for SPARTA to be an open-source code, and acknowledge
-the funding and people who have contributed to SPARTA.
+These sections provide an overview of what OpenEdge can do, describe
+what it means for OpenEdge to be an open-source code, and acknowledge
+the people and projects that have contributed to it.
 
-1.1 "What is SPARTA"_#intro_1
-1.2 "SPARTA features"_#intro_2
-1.3 "Grids and surfaces in SPARTA"_#intro_3
+1.1 "What is OpenEdge"_#intro_1
+1.2 "OpenEdge features"_#intro_2
+1.3 "Grids, surfaces and plasma backgrounds"_#intro_3
 1.4 "Open source distribution"_#intro_4
 1.5 "Acknowledgments and citations"_#intro_5 :all(b)
 
 :line
 
-1.1 What is SPARTA :link(intro_1),h4
+1.1 What is OpenEdge :link(intro_1),h4
 
-SPARTA is a Direct Simulation Montel Carlo code that models rarefied
-gases, using collision, chemistry, and boundary condition models.  It
-uses a hierarchical Cartesian grid to track and group particles for 3d
-or 2d or axisymmetric models.  Objects emedded in the gas are
-represented as triangulated surfaces and cut through grid cells.
+OpenEdge is a kinetic Monte Carlo code for the edge of magnetically
+confined plasmas and for plasma-material interaction.  It follows test
+particles, meaning neutral atoms and molecules, impurity ions, and
+solid or liquid particulates, through a plasma and magnetic-field
+background that is prescribed rather than solved for.  The background
+comes from an edge fluid code such as SOLPS-ITER, SOLEDGE3X, OEDGE or
+EMC3-EIRENE, or from analytic or constant fields for verification.
 
-For examples of SPARTA simulations, see the "SPARTA WWW Site"_sws.
+Charged particles are advanced with a Boris integrator or, where the
+gyro-orbit is small compared with the field scale, a guiding-center
+integrator, with an automatic hand-off between the two.  Atomic
+processes use ADAS rate coefficients.  Particles feel Coulomb drag,
+thermal forces, cross-field diffusion and the wall sheath.  At the
+wall they are reflected, sputter material, recycle, or are retained,
+and the surface composition evolves in response.  Dust grains and
+droplets carry their own size, mass, charge and temperature and are
+heated, charged, dragged and evaporated by the plasma.
 
-SPARTA runs efficiently on single-processor desktop or laptop
-machines, but is designed for parallel computers.  It will run on any
-parallel machine that compiles C++ and supports the "MPI"_mpi
-message-passing library.  This includes distributed- or shared-memory
-parallel machines as well as commodity clusters.
+OpenEdge is built on "SPARTA"_sparta, the Direct Simulation Monte Carlo
+code from Sandia National Laboratories, and inherits its hierarchical
+Cartesian grid, cut-cell surface representation, particle storage, MPI
+parallelism and Kokkos performance-portability layer.  Every SPARTA
+input command remains available.  OpenEdge adds the physics commands
+documented in this manual.
 
-:link(mpi,http://www-unix.mcs.anl.gov/mpi)
+OpenEdge runs on single-processor laptops and on parallel machines
+that compile C++17 and support "MPI"_mpi.  A Kokkos build runs on
+multi-core CPUs and NVIDIA GPUs.
 
-SPARTA can model systems with only a few particles up to millions or
-billions.  See "Section 8"_Section_perf.html for information on SPARTA
-performance and scalability, or the Benchmarks section of the "SPARTA
-WWW Site"_sws.
-
-SPARTA is a freely-available open-source code, distributed under the
-terms of the "GNU Public License"_gnu, or sometimes by request under
-the terms of the "GNU Lesser General Public License (LGPL)"_gnu2,
-which means you can use or modify the code however you wish.  The only
-restrictions imposed by the GPL or LGPL are on how you distribute the
-code further.  See "Section 1.4"_#intro_4 below for a brief discussion
-of the open-source philosophy.
-
-:link(gnu,http://www.gnu.org/copyleft/gpl.html)
-
-SPARTA is designed to be easy to modify or extend with new
-capabilities, such as new collision or chemistry models, boundary
-conditions, or diagnostics.  See "Section 10"_Section_modify.html for
-more details.
-
-SPARTA is written in C++ which is used at a hi-level to structure the
-code and its options in an object-oriented fashion.  The kernel
-computations use simple data structures and C-like code for effciency.
-So SPARTA is really written in an object-oriented C style.
-
-SPARTA was developed with internal funding at "Sandia National
-Laboratories"_snl, a US Department of Energy lab.  See "Section
-1.5"_#intro_5 below for more information on SPARTA funding and
-individuals who have contributed to SPARTA.
-
-:link(snl,http://www.sandia.gov)
+:link(sparta,https://sparta.github.io)
+:link(mpi,https://www.mpi-forum.org)
 
 :line
 
-1.2 SPARTA features :link(intro_2),h4
+1.2 OpenEdge features :link(intro_2),h4
 
-This section highlights SPARTA features, with links to specific
-commands which give more details.  The "next section"_#intro_3
-illustrates the kinds of grid geometries and surface definitions which
-SPARTA supports.
+This section highlights OpenEdge features, with links to specific
+commands.  The SPARTA features that OpenEdge inherits, such as the
+grid, surface, output and load-balancing commands, are documented on
+their own command pages.
 
-If SPARTA doesn't have your favorite collision model, boundary
-condition, or diagnostic, see "Section 10"_Section_modify.html of the
-manual, which describes how it can be added to SPARTA.
+Plasma backgrounds :h4
 
-General features :h4
+read a converted plasma file with electron and ion density and
+temperature, parallel flow and equilibrium, "fix background"_fix_background.html :ulb,l
+native three-dimensional EMC3-EIRENE zones as well as two-dimensional
+axisymmetric meshes :l
+constant and analytic backgrounds for verification :l
+per-particle sampling of plasma quantities, magnetic field and
+gradients, "compute plasma/fields"_compute_plasma_fields.html :ule,l
 
-  runs on a single processor or in parallel
-  distributed-memory message-passing parallelism (MPI)
-  spatial-decomposition of simulation domain for parallelism
-  open-source distribution
-  highly portable C++
-  optional libraries used: MPI
-  "easy to extend"_Section_modify.html with new features and functionality
-  runs from an "input script"_Section_commands.html
-  syntax for defining and using "variables and formulas"_variable.html
-  syntax for "looping over runs"_jump.html and breaking out of loops
-  run one or "multiple simulations simultaneously"_Section_howto.html#howto_3 (in parallel) from one script
-  "build as library"_Section_start.html#start_4, invoke SPARTA thru "library interface"_Section_howto.html#howto_6 or provided "Python wrapper"_Section_python.html
-  "couple with other codes"_Section_howto.html#howto_7: SPARTA calls other code, other code calls SPARTA, umbrella code calls both :ul
+Charged-particle transport :h4
 
-Models :h4
+Boris pusher with subcycling, "global pusher"_global.html :ulb,l
+guiding-center pusher with RK2 or RK4 integration and a hybrid
+Boris/GCA hand-off near walls :l
+sheath models: energy kick, spatial potential, and boundary barrier :l
+Coulomb drag against the background plasma, "fix coulomb/background"_fix_coulomb_background.html, and binary Coulomb collisions between kinetic species, "fix coulomb/binary"_fix_coulomb_binary.html :l
+Braginskii thermal forces, "fix force/thermal"_fix_force_thermal.html :l
+anomalous cross-field diffusion and pinch, "fix cross_field_diffusion"_fix_cross_field_diffusion.html :l
+prescribed per-particle electric and magnetic fields, "fix efield/particle"_fix_efield_particle.html, "fix bfield/particle"_fix_bfield_particle.html :l
+absorption or reflection at a flux surface, "fix reflect/psi"_fix_reflect_psi.html :ule,l
 
-  "3d or 2d"_dimension.html or "2d-axisymmetric"_Section_howto.html#howto_2 domains
-  variety of "global boundary conditions"_boundary.html
-  "create particles"_create_particles.html within flow volume
-  emit particles from simulation box faces due to "flow properties"_fix_emit_face.html
-  emit particles from simulation box faces due to "profile defined in file"_fix_emit_face_file.html
-  emit particles from surface elements due to "normal and flow properties"_fix_emit_surf.html
-  "ambipolar"_Section_howto.html#howto_11 approximation for ionized plasmas :ul
+Atomic processes :h4
 
-Geometry :h4
+ADAS ionization, recombination, charge exchange and dissociation with
+competing-channel selection, "fix volume/chem/adas"_fix_volume_chem_adas.html :ulb,l
+neutral collisions against the background plasma, "fix neutral/collide/background"_fix_neutral_collide_background.html :l
+synthetic line emission from photon-emission coefficients, "compute volume/emissivity/grid"_compute_volume_emissivity_grid.html :ule,l
 
-  "Cartesian, heirarchical grids"_#intro_3 with multiple levels of local refinement
-  "create grid from input script"_create_grid.html or "read from file"_read_grid.html
-  embed :triangulated (3d) or line-segmented (2d) surfaces"_#intro_3 in grid, "read in from file"_read_surf.html :ul
+Plasma-wall interaction :h4
 
-Gas-phase collisions and chemistry :h4
+wall-incident flux, impact energy and angle, sputter yield and gross
+erosion from tabulated or analytic yields, "compute surface/physical/sputter"_compute_surface_physical_sputter.html :ulb,l
+reflection, absorption, re-emission and sputtering with areal-density
+ledgers and strata for evolving wall composition, "surf_react surface/pwi"_surf_react_surface_pwi.html :l
+neutral sources from recycling, sputtering and gas puffs, "fix surface/emit/recycle"_fix_surface_emit_recycle.html, "fix surface/emit/source"_fix_surface_emit_source.html, "fix surface/emit/puff"_fix_surface_emit_puff.html :l
+liquid-metal surfaces with evaporation and adatom desorption, "fix surface/state/lm"_fix_surface_state_lm.html :ule,l
 
-  collisions between all particles or pairs of species groups within grid cells
-  "collision models:"_collide.html VSS (variable soft sphere), VHS (variable hard sphere), HS (hard sphere)
-  "chemistry models:"_react.html TCE, QK :ul
+Particulates :h4
 
-Surface collisions and chemistry :h4
+dust grains and droplets with radius, mass and temperature state,
+"material"_material.html :ulb,l
+injection from surfaces, "fix particulate/emit"_fix_particulate_emit.html :l
+OML charging with thermionic and secondary-electron emission, "fix particulate/charge"_fix_particulate_charge.html :l
+ion, neutral, electric and gravitational forces, "fix particulate/drag"_fix_particulate_drag.html, "fix force/gravity"_fix_force_gravity.html :l
+heating, phase change, evaporation and breakup, "fix particulate/thermal"_fix_particulate_thermal.html :l
+sticking or bouncing at walls, "surf_collide particulate/bounce"_surf_collide_particulate_bounce.html :ule,l
 
-  for surface elements or global simulation box "boundaries"_bound_modify.html
-  "collisions:"_surf_collide.html specular or diffuse
-  "reactions"_surf_react.html :ul
+Diagnostics and weighting :h4
 
-Performance :h4
-
-  "grid cell weighting"_global.html of particles
-  "adaptation"_adapt_grid.html of the grid cells between runs
-  "on-the-fly adaptation"_fix_adapt.html of the grid cells
-  "static"_balance_grid.html load-balancing of grid cells or particles
-  "dynamic"_fix_balance.html load-balancing of grid cells or particles :ul
-
-Diagnostics :h4
-
-  "global boundary statistics"_compute_boundary.html
-  "per grid cell statistics"_compute_grid.html
-  "per surface element statistics"_compute_surf.html
-  time-averaging of "global"_fix_ave_time.html, "grid"_fix_ave_grid.html, "surface"_fix_ave_surf.html statistics :ul
-
-Output :h4
-
-  "log file of statistical info"_stats_style.html
-  "dump files"_dump.html (text or binary) of per particle, per grid cell, per surface element values
-  binary "restart files"_restart.html
-  on-the-fly "rendered images and movies"_dump_image.html of particles, grid cells, surface elements :ul
-
-Pre- and post-processing :h4
-
-Various pre- and post-processing serial tools are packaged with
-SPARTA; see "Section 9"_Section_tools.html of the manual. :ulb,l
-
-Our group has also written and released a separate toolkit called
-"Pizza.py"_pizza which provides tools for doing setup, analysis,
-plotting, and visualization for SPARTA simulations.  Pizza.py is
-written in "Python"_python and is available for download from "the
-Pizza.py WWW site"_pizza. :l,ule
-
-:link(pizza,https://lammps.github.io/pizza)
-:link(python,http://www.python.org)
+per-particle statistical weights and weighted grid moments, "fix particle/weight"_fix_particle_weight.html, "compute grid/weighted"_compute_grid_weighted.html :ulb,l
+distance and index of the nearest wall element per cell, "compute nearest_surf/grid"_compute_nearest_surf_grid.html :l
+all SPARTA dump, statistics and averaging commands :ule,l
 
 :line
 
-1.3 Grids and surfaces in SPARTA :link(intro_3),h4
+1.3 Grids, surfaces and plasma backgrounds :link(intro_3),h4
 
-SPARTA overlays a grid over the simulation domain which is used to
-track particles and to co-locate particles in the same grid cell for
-performing collision and chemistry operations.  SPARTA uses a
-Cartesian hierarchical grid.  Cartesian means that the faces of a grid
-cell are aligned with the Cartesian xyz axes.  Hierarchical means that
-individual grid cells can be sub-divided into smaller cells,
-recursively.  This allows for flexible grid cell refinement in any
-region of the simulation domain.  E.g. around a surface, or in a
-high-density region of the gas flow.
+OpenEdge uses the SPARTA hierarchical Cartesian grid to store and sort
+particles, in 3d, 2d or 2d axisymmetric geometry.  The vessel wall and
+any internal components are triangulated surfaces, or line segments in
+2d, that cut through grid cells.  Particles collide with these
+surfaces and the surface models decide what happens.
 
-An example 2d hierarchical grid is shown in the diagram, for a
-circular surface object (in red) with the grid refined on the upwind
-side of the object (flow from left to right).
+The plasma background is separate from the particle grid.  It lives
+on the native mesh of the edge code it came from: a quadrilateral B2
+mesh and its EIRENE triangulation for SOLPS, a triangulated mesh for
+SOLEDGE3X, or curvilinear zones for EMC3-EIRENE.  Each particle
+samples the background at its own position through "fix
+background"_fix_background.html, so the particle grid can be as coarse
+or as refined as the transport problem needs without touching the
+plasma data.
 
-:c,image(JPG/refine_grid.jpg)
-
-Objects represented with a surface triangulation (line segments in 2d)
-can also be read in to define objects which particles flow around.
-Individual surface elements are assigned to grid cells they intersect
-with, so that particle/surface collisions can be efficiently computed.
-
-As an example, here is coarsely triangulated representation of the
-space shuttle (only 616 triangles!), which could be embedded in a
-simulation box.  Click on the image for a larger picture.
-
-:c,image(JPG/shuttle_small.jpg,JPG/shuttle.jpg)
-
-See "Sections 4.9"_Section_howto.html#howto_9 and
-"4.10"_Section_howto.html# for more details of both the grids and
-surface objects that SPARTA supports and how to define them.
+The magnetic field comes either from the poloidal flux map of the
+equilibrium, which gives the field and its derivatives analytically,
+or from field components stored with the background.  A separate
+"processes.h5"_Section_howto.html#howto_6 database supplies atomic
+rates and surface-interaction data.
 
 :line
 
 1.4 Open source distribution :link(intro_4),h4
 
-SPARTA comes with no warranty of any kind.  As each source file states
-in its header, it is a copyrighted code that is distributed free-of-
-charge, under the terms of the "GNU Public License"_gnu (GPL).  This
-is often referred to as open-source distribution - see
-"www.gnu.org"_gnuorg or "www.opensource.org"_opensource for more
-details.  The legal text of the GPL is in the LICENSE file that is
-included in the SPARTA distribution.
+OpenEdge is distributed under the terms of the GNU General Public
+License version 2, the license of the SPARTA code it is built on.  The
+LICENSE and LICENSE.SPARTA files in the distribution give the full
+text and the attribution of the SPARTA components.  The NOTICES file
+lists third-party data and code included with OpenEdge and their
+licenses.
 
-:link(gnuorg,http://www.gnu.org)
-:link(opensource,http://www.opensource.org)
-
-Here is a summary of what the GPL means for SPARTA users:
-
-(1) Anyone is free to use, modify, or extend SPARTA in any way they
-choose, including for commercial purposes.
-
-(2) If you distribute a modified version of SPARTA, it must remain
-open-source, meaning you distribute it under the terms of the GPL.
-You should clearly annotate such a code as a derivative version of
-SPARTA.
-
-(3) If you release any code that includes SPARTA source code, then it
-must also be open-sourced, meaning you distribute it under the terms
-of the GPL.
-
-(4) If you give SPARTA files to someone else, the GPL LICENSE file and
-source file headers (including the copyright and GPL notices) should
-remain part of the code.
-
-In the spirit of an open-source code, these are various ways you can
-contribute to making SPARTA better.  You can send email to the
-"developers"_https://sparta.github.io/authors.html on any of these
-topics.
-
-Point prospective users to the "SPARTA WWW Site"_sws.  Mention it in
-talks or link to it from your WWW site. :ulb,l
-
-If you find an error or omission in this manual or on the "SPARTA WWW
-Site"_sws, or have a suggestion for something to clarify or include,
-send an email to the
-"developers"_https://sparta.github.io/authors.html. :l
-
-If you find a bug, "Section 12.1"_Section_errors.html#err_2 describes
-how to report it. :l
-
-If you publish a paper using SPARTA results, send the citation (and
-any cool pictures or movies) to add to the Publications, Pictures, and
-Movies pages of the "SPARTA WWW Site"_sws, with links and attributions
-back to you. :l
-
-The tools sub-directory of the SPARTA distribution has various
-stand-alone codes for pre- and post-processing of SPARTA data.  More
-details are given in "Section 9"_Section_tools.html.  If you write a
-new tool that others will find useful, it can be added to the SPARTA
-distribution. :l
-
-SPARTA is designed to be easy to extend with new code for features
-like boundary conditions, collision or chemistry models, diagnostic
-computations, etc.  "Section 10"_Section_modify.html of the manual
-gives details.  If you add a feature of general interest, it can be
-added to the SPARTA distribution. :l
-
-The Benchmark page of the "SPARTA WWW Site"_sws lists SPARTA
-performance on various platforms.  The files needed to run the
-benchmarks are part of the SPARTA distribution.  If your machine is
-sufficiently different from those listed, your timing data can be
-added to the page. :l
-
-Cash.  Small denominations, unmarked bills preferred.  Paper sack OK.
-Leave on desk.  VISA also accepted.  Chocolate chip cookies
-encouraged. :ule,l
+The GPL means you can use, modify and redistribute OpenEdge, and that
+any distributed derivative must also be released under the GPL.  If
+you improve OpenEdge, please contribute the changes back through the
+"repository"_ows so that others benefit.
 
 :line
 
-1.5 Acknowledgments and citations :h4,link(intro_5)
+1.5 Acknowledgments and citations :link(intro_5),h4
 
-SPARTA development has been funded by the "US Department of
-Energy"_doe (DOE).
+OpenEdge is developed at Oak Ridge National Laboratory.  It would not
+exist without SPARTA, developed by Steve Plimpton and Michael Gallis
+at Sandia National Laboratories.  The OpenEdge documentation reuses
+the SPARTA manual for the commands that OpenEdge inherits.
 
-:link(doe,http://www.doe.gov)
+Atomic data come from the "OPEN-ADAS"_adas project.  Sputter yield and
+reflection tables are generated with the "RustBCA"_rustbca binary
+collision code.  Plasma backgrounds are produced with SOLPS-ITER,
+SOLEDGE3X, OEDGE and EMC3-EIRENE.
 
-If you use SPARTA results in your published work, please cite the
-paper(s) listed under the "Citing SPARTA
-link"_https://sparta.github.io/cite.html of the SPARTA WWW page, and
-include a pointer to the "SPARTA WWW Site"_sws
-(https://sparta.github.io):
+Citation information for OpenEdge will be added here when the
+reference publications are available.  Please also cite SPARTA:
 
-The "Publications link"_https://sparta.github.io/papers.html on the
-SPARTA WWW page lists papers that have cited SPARTA.  If your paper is
-not listed there, feel free to send us the info.  If the simulations
-in your paper produced cool pictures or animations, we'll be pleased
-to add them to the "Pictures"_https://sparta.github.io/pictures.html
-or "Movies"_https://sparta.github.io/movies.html pages of the SPARTA
-WWW site.
+S. J. Plimpton, S. G. Moore, A. Borner, A. K. Stagg, T. P. Koehler,
+J. R. Torczynski and M. A. Gallis, Direct Simulation Monte Carlo on
+petaflop supercomputers and beyond, Physics of Fluids 31, 086101
+(2019).
 
-The core group of SPARTA developers is at Sandia National Labs:
-
-Steve Plimpton, sjplimp at gmail.com
-Michael Gallis, magalli at sandia.gov :ul
+:link(adas,https://open.adas.ac.uk)
+:link(rustbca,https://github.com/lcpp-org/RustBCA)

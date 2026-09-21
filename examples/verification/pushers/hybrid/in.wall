@@ -1,4 +1,4 @@
-# Hybrid wall-handoff verification, Stage A (PLAN.md): He+ ensemble onto a
+# Hybrid wall-handoff verification, Stage A: He+ ensemble onto a
 # flat absorbing target in a uniform tilted B. No sheath, no collisions.
 #   -var pmode  hybrid|gca      (boris reference = hybrid + gswitch 1e30)
 #   -var gswitch, knear, dt, nsteps, dfreq, tag, nens

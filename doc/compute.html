@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -31,13 +31,13 @@ particles or grid cells or surface elements.  Quantities calculated by
 a compute are instantaneous values, meaning they are calculated from
 information about the current timestep.  Examples include calculation
 of the system temperature or counting collisions of particles with
-surface elements.  Code for new computes can be added to SPARTA; see
-<A HREF = "Section_modify.html">Section 10</A> of the manual for details.
+surface elements.  Code for new computes can be added to OpenEdge; see
+the source code of the manual for details.
 </P>
 <P>Note that defining a compute does not perform a computation.  Instead
-computes are invoked by other SPARTA commands as needed, e.g. to
-generate statistics or dump file output.  See <A HREF = "Section_howto.html#howto_4">Section
-4.4</A> for a summary of various SPARTA output
+computes are invoked by other OpenEdge commands as needed, e.g. to
+generate statistics or dump file output.  See <A HREF = "Section_howto.html#howto_8">Section
+4.4</A> for a summary of various OpenEdge output
 options, many of which involve computes.
 </P>
 <P>The ID for a compute is used to identify the compute in other
@@ -51,34 +51,39 @@ after which its ID can be re-used.
 
 <P>Each compute style has its own doc page which describes its arguments
 and what it does.  Here is an alphabetic list of compute styles
-available in SPARTA:
+available in OpenEdge:
 </P>
-<UL><LI><A HREF = "compute_boundary.html">boundary</A> - various quantities on each global boundary 
+<UL><LI><A HREF = "compute_boundary.html">boundary</A> - various quantities on each global boundary
 <LI><A HREF = "compute_count.html">count</A> - particle counts for species and mixtures and mixture groups
 <LI><A HREF = "compute_distsurf_grid.html">distsurf/grid</A> - distance from grid cells to surface
 <LI><A HREF = "compute_dt_grid.html">dt/grid</A> - optimal timestep per grid cell
 <LI><A HREF = "compute_eflux_grid.html">eflux/grid</A> - energy flux density per grid cell
-<LI><A HREF = "compute_fft_grid.html">fft/grid</A> - FFTs across grid cells
 <LI><A HREF = "compute_grid.html">grid</A> - various per grid cell quantities
+<LI><A HREF = "compute_grid_weighted.html">grid/weighted</A> - per grid cell quantities using per-particle weights
 <LI><A HREF = "compute_isurf_grid.html">isurf/grid</A> - various implicit surface element quantities
 <LI><A HREF = "compute_ke_particle.html">ke/particle</A> - temperature per particle
 <LI><A HREF = "compute_lambda_grid.html">lambda/grid</A> - mean-free path per grid cell
+<LI><A HREF = "compute_nearest_surf_grid.html">nearest_surf/grid</A> - distance, index and normal of the nearest surface element per grid cell
 <LI><A HREF = "compute_pflux_grid.html">pflux/grid</A> - momentum flux density per grid cell
+<LI><A HREF = "compute_plasma_fields.html">plasma/fields</A> - background plasma and field quantities per grid cell
 <LI><A HREF = "compute_property_grid.html">property/grid</A> - per grid cell properties
 <LI><A HREF = "compute_property_surf.html">property/surf</A> - per surface element properties
 <LI><A HREF = "compute_react_boundary.html">react/boundary</A> - reaction stats on global boundary
-<LI><A HREF = "compute_react_surf.html">react/surf</A> = reaction stats for explicit surfs
 <LI><A HREF = "compute_react_isurf_grid.html">react/isurf/grid</A> - reactions stats for implicit surfs
+<LI><A HREF = "compute_react_surf.html">react/surf</A> - reaction stats for explicit surfs
 <LI><A HREF = "compute_reduce.html">reduce</A> - reduce vectors to scalars
 <LI><A HREF = "compute_sonine_grid.html">sonine/grid</A> - Sonine moments per grid cell
 <LI><A HREF = "compute_surf.html">surf</A> - various explicit surface element quantities
-<LI><A HREF = "compute_surf_ead.html">surf/ead</A> - per-surface energy-angle distribution
-<LI><A HREF = "compute_thermal_grid.html">thermal/grid</A> - thermal temperature per grid cell
+<LI><A HREF = "compute_surface_chemical_adatom.html">surface/chemical/adatom</A> - per surface element desorption flux of adsorbed atoms
+<LI><A HREF = "compute_surface_chemical_evaporation.html">surface/chemical/evaporation</A> - per surface element evaporation flux from the surface temperature
+<LI><A HREF = "compute_surface_physical_sputter.html">surface/physical/sputter</A> - per surface element incident fluxes, sputter yields and erosion flux
 <LI><A HREF = "compute_temp.html">temp</A> - temperature of particles
-<LI><A HREF = "compute_tvib_grid.html">tvib/grid</A> - vibrational temperature per grid cell 
+<LI><A HREF = "compute_thermal_grid.html">thermal/grid</A> - thermal temperature per grid cell
+<LI><A HREF = "compute_tvib_grid.html">tvib/grid</A> - vibrational temperature per grid cell
+<LI><A HREF = "compute_volume_emissivity_grid.html">volume/emissivity/grid</A> - volumetric line emissivity per grid cell 
 </UL>
 <P>There are also additional accelerated compute styles included in the
-SPARTA distribution for faster performance on specific hardware.  The
+OpenEdge distribution for faster performance on specific hardware.  The
 list of these with links to the individual styles are given in the
 pair section of <A HREF = "Section_commands.html#cmd_5">this page</A>.
 </P>
@@ -152,4 +157,5 @@ command.
 </P>
 <P><B>Default:</B> none
 </P>
+<!-- PAGE BREAK -->
 </HTML>

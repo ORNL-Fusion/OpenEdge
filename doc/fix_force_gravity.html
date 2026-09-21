@@ -1,0 +1,70 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix force/gravity command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID force/gravity group-ID gR gZ gphi 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>force/gravity = style name of this fix command 
+
+<LI>group-ID = particle group ID (accepted but not used; see below) 
+
+<LI>gR,gZ,gphi = constant acceleration components in physical cylindrical order (m/s^2) 
+
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix fg force/gravity all 0.0 -9.81 0.0 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Apply a constant body-force acceleration to every particle on every
+timestep. The acceleration is split symmetrically around the particle
+move:
+</P>
+<PRE>v <- v + g*(dt/2)   (start of step)
+move / collisions
+v <- v + g*(dt/2)   (end of step) 
+</PRE>
+<P>The three components are given in the physical cylindrical order
+(R, Z, phi) used by all OpenEdge particulate inputs, not in the
+internal storage order. They are converted per particle to the storage
+slots for the active geometry: in axisymmetric runs (R,Z) map onto the
+(y,x) slots, in 2d Cartesian runs onto (x,y), and in 3d Cartesian runs
+the (R,phi) components are rotated into (x,y) using the particle's
+toroidal angle while gZ is applied along z. The same input therefore
+describes the same physical field in all three layouts; the example
+above is a downward (-Z) gravity in every case.
+</P>
+<P>This fix is used by the particulate (droplet and grain) transport
+models, where the particle weight competes with plasma drag and lift
+forces.
+</P>
+<P>The <I>group-ID</I> argument is parsed but currently ignored: the
+acceleration is applied to all particles regardless of group.
+</P>
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_particulate_drag.html">fix particulate/drag</A>
+</P>
+<P><B>Default:</B> none
+</P>
+<!-- PAGE BREAK -->
+</HTML>

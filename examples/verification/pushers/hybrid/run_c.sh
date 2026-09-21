@@ -14,7 +14,7 @@ mkdir -p output
 rm -f output/traj.c_*
 fail=0
 
-[ -f input/source.b_in ] || $PY make_inputs.py
+[ -f input/source.b_in ] || $PY scripts/make_inputs.py
 
 run() {
   echo "== $*"
@@ -28,5 +28,5 @@ run -var pmode gca    -var gswitch 2.5  -var dperp 0.5    -var tag c_cd_gca
 run -var pmode hybrid -var gswitch 1e30 -var nicoul 1e20  -var tag c_coul_ref
 run -var pmode gca    -var gswitch 2.5  -var nicoul 1e20  -var tag c_coul_gca
 
-$PY plot_coupling.py || fail=1
+$PY scripts/plot_coupling.py || fail=1
 exit $fail

@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -152,8 +152,8 @@ vibrational mode (1 to 3 in this example).
 
 This compute performs calculations for all flavors of child grid cells
 in the simulation, which includes unsplit, cut, split, and sub cells.
-See "Section 4.8"_Section_howto.html#howto_8 of the manual gives
-details of how SPARTA defines child, unsplit, split, and sub cells.
+See "Section 4.8"_Section_howto.html#howto_10 of the manual gives
+details of how OpenEdge defines child, unsplit, split, and sub cells.
 Note that cells inside closed surfaces contain no particles.  These
 could be unsplit or cut cells (if they have zero flow volume).  Both
 of these kinds of cells will compute a zero result for all their
@@ -165,8 +165,8 @@ Grid cells not in the specified {group-ID} will output zeroes for all
 their values.
 
 The array can be accessed by any command that uses per-grid values
-from a compute as input.  See "Section 4.4"_Section_howto.html#howto_4
-for an overview of SPARTA output options.
+from a compute as input.  See "Section 4.4"_Section_howto.html#howto_8
+for an overview of OpenEdge output options.
 
 The per-grid array values will be in temperature "units"_units.html.
 

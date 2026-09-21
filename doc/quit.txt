@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -19,7 +19,7 @@ if "$n > 10000" then quit :pre
 
 [Description:]
 
-This command causes SPARTA to exit, after shutting down all
+This command causes OpenEdge to exit, after shutting down all
 output cleanly.
 
 It can be used as a debug statement in an input script, to terminate

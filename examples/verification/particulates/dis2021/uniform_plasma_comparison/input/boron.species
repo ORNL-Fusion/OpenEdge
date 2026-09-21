@@ -1,0 +1,3 @@
+# One spherical 1 um boron grain at 300 K.
+# ID Molwt(amu) Molmass(kg) RotDof RotRel VibDof VibRel VibTemp specwt charge radius temp
+bgrain 5.9027633112357607e12 9.8017690792001551e-15 0 0 0 0 0 1 0 1.0e-6 300.0

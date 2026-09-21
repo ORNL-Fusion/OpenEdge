@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -36,7 +36,7 @@ compute 1 property/surf all id xc yc zc :pre
 Define a computation that simply stores surface element attributes for
 each explicit surface element in a surface group.  This is useful for
 values which can be used by other "output
-commands"_Section_howto.html#howto_4 that take computes as inputs.
+commands"_Section_howto.html#howto_8 that take computes as inputs.
 See for example, the "compute reduce"_compute_reduce.html, "fix
 ave/surf"_fix_ave_surf.html, "dump surf"_dump.html, and "surf-style
 variable"_variable.html commands.
@@ -49,7 +49,7 @@ This command can only be used for simulations with explicit surface
 elements.  Explicit surface elements are triangles for 3d simulations
 and line segments for 2d simulations.  Unlike implicit surface
 elements, each explicit triangle or line segment may span multiple
-grid cells.  See "Section 4.9"_Section_howto.html#howto_9 of the
+grid cells.  See "Section 4.9"_Section_howto.html#howto_11 of the
 manual for details.
 
 :line
@@ -92,7 +92,7 @@ for all their values.
 
 The vector or array can be accessed by any command that uses per-surf
 values from a compute as input.  See "Section
-4.4"_Section_howto.html#howto_4 for an overview of SPARTA output
+4.4"_Section_howto.html#howto_8 for an overview of OpenEdge output
 options.
 
 The vector or array values will be in whatever "units"_units.html the

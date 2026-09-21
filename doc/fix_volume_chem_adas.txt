@@ -1,0 +1,202 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix volume/chem/adas command :h3
+
+[Syntax:]
+
+fix ID volume/chem/adas Nevery element reactions keyword value ... :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+volume/chem/adas = style name of this fix command :l
+Nevery = attempt reactions every Nevery timesteps :l
+element = element symbol (e.g. D, C, W) or atomic number of the reacting element :l
+reactions = source of the reaction list :l
+  a file path (contains "/" or ends in .reactions) is read directly
+  an element symbol selects the catalog for that element from the
+    process database
+  {auto} = same as giving the {element} symbol :pre
+zero or more keyword/value pairs may be appended :l
+keyword = {mode} or {rate_cache} or {source_species} or {stop_on_exhaust} or {exhaust_threshold} or {units} or {output} or {volume_source} or {ionization} or {recombination} or {cx} or {dissociation} :l
+  {mode} value = {kinetic} or {neutral}
+    kinetic = ionization relabels the particle as the ion species
+    neutral = ionization deletes the particle (EIRENE semantics)
+  {rate_cache} value = {particle} or {cell}
+    particle = evaluate rates for every particle
+    cell = evaluate rates once per cell and species and reuse them
+  {source_species} values = sp1 sp2 ... = species counted for exhaustion
+  {stop_on_exhaust} value = {yes} or {no}
+  {exhaust_threshold} value = N = stop when the source population <= N
+  {units} values = {counts} or {rate} or {batch} N R_puff or {batch_fix} emit-ID R_puff
+    counts = cumulative event tallies
+    rate = window-averaged SI source densities
+    batch N R_puff = each of N trajectories carries R_puff/N (1/s)
+    batch_fix emit-ID R_puff = as batch, N taken from the cumulative
+      count of the emit fix emit-ID
+  {output} value = {summary} or {detailed}
+  {volume_source} value = ID of a "compute plasma/fields"_compute_plasma_fields.html or "fix background"_fix_background.html
+  {ionization}, {recombination}, {cx}, {dissociation} value = {yes} or {no} :pre
+:ule
+
+[Examples:]
+
+fix pd background file plasma.h5 static yes
+global bfield_compute pd
+fix fchem volume/chem/adas 1 D auto mode neutral units rate
+fix fchem volume/chem/adas 1 W auto cx no
+fix fchem volume/chem/adas 1 D input/neutral.reactions mode neutral &
+    source_species D D2 stop_on_exhaust yes exhaust_threshold 100 &
+    units batch_fix fpuff 1.0e21 volume_source pd :pre
+
+[Description:]
+
+Apply volumetric atomic and molecular reactions to the simulation
+particles using rate coefficients from the ADAS tables stored in the
+OpenEdge process database ({database/processes.h5}). Ionization,
+recombination, charge exchange and dissociation are treated as
+competing Poisson channels: on each application, for each particle,
+the rates k(Te,ne) of all active reactions with that particle as
+reactant are evaluated at the local plasma conditions, the total
+probability 1 - exp(-sum(k ne dt)) with dt = Nevery * timestep
+decides whether an event occurs, and one channel is selected in
+proportion to its rate. This fix plays the role of the EIRENE
+collision operator in stand-alone OpenEdge runs.
+
+Te, ne (and Ti, parallel flow and B for charge exchange) are read from
+the per-particle plasma cache that the mover fills at particle
+positions. The cache needs a provider ("fix
+background"_fix_background.html or "compute
+plasma/fields"_compute_plasma_fields.html) and an activator: the
+{bfield_compute} option of the "global"_global.html command, the
+sheath model, or the guiding-center pusher. A pure-neutral deck still
+needs an activator, e.g. {global bfield_compute pd}. When the sheath
+model is active its Boltzmann density correction is applied to ne
+before the rates are evaluated.
+
+:line
+
+[Reaction list:] The {element} argument names the reacting element;
+isotope labels (H, D, T) map to the same tables since ADAS rates
+depend on charge state only. The {reactions} argument is resolved in
+this order: a literal path is read as a text file; an element symbol
+(or {auto}, meaning the {element} symbol) is looked up as a reaction
+catalog in the process database; if the database has no catalog for
+that element, the text file {database/ingest/reactions/<elem>.reactions}
+under the OpenEdge root is read instead.
+
+A reaction file lists reactions as pairs of lines; blank lines and
+lines starting with "#" are skipped. The first line is the reaction
+formula, the second line is the type, the rate style and the rate
+coefficients:
+
+D --> D+
+I A 1.0 0.0 0.0 0.0 0.0 :pre
+
+D2 --> D + D
+D J -2.787e+01 1.052e+01 -4.973e+00 1.451e+00 -3.063e-01 &
+    4.433e-02 -4.096e-03 2.160e-04 -4.929e-06 :pre
+
+Types are {I} = ionization (one reactant, one product), {R} =
+recombination, {E} = charge exchange with the background hydrogen, and
+{D} = dissociation (one reactant, one or two products; a new particle
+is created for the second product). Styles are {A} = ADAS, which uses
+the tabulated SCD (ionization), ACD (recombination) or CCD (charge
+exchange) coefficient from the process database by bilinear
+interpolation in (Te,ne) and takes 5 placeholder coefficients on the
+line, and {J} = Janev, a 9-coefficient polynomial fit ln k = sum b_n
+(ln Te)^n used for molecular dissociation. Species names in the
+formula must match the "species"_species.html defined in the deck;
+reactions involving undefined species are skipped at initialization
+and reported, so a charge-state ladder truncated in the deck ends at
+its highest defined state. The channel toggles {ionization},
+{recombination}, {cx} and {dissociation} disable all reactions of a
+type without editing the file.
+
+After a charge-exchange or dissociation event the product velocity is
+resampled from a Maxwellian at the local Ti shifted by the background
+flow when the cache provides them.
+
+:line
+
+[Modes and exhaustion:] With {mode kinetic} an ionized particle
+becomes the product ion species and continues to be followed. With
+{mode neutral} it is deleted instead, which reproduces the EIRENE
+neutral-only treatment. In that mode {source_species} names the
+species whose alive population is monitored, and {stop_on_exhaust
+yes} ends the run once that population, having first exceeded
+{exhaust_threshold}, drops to or below it. A nonzero threshold skips
+the slowly converging tail of a batch. {volume_source} adds neutrals
+created by recombination of the background ions: per cell, the mean
+number of events ne ni k_ACD V dt / fnum is sampled from a Poisson
+distribution and new neutrals of the recombination product species are
+launched at the cell center with a Maxwellian velocity at Ti plus the
+parallel flow. It requires an active recombination reaction and is
+intended for {mode neutral}, where no kinetic ions exist to
+recombine.
+
+{rate_cache cell} evaluates the rates once per cell and species from
+the first particle encountered and reuses them for the other
+particles of that species in the cell. It is considerably cheaper for
+dense populations and identical to {particle} wherever Te and ne do
+not vary within a cell (i.e. away from sheath cells).
+
+:line
+
+[Output:] The fix computes a per-grid array that can be used with
+"dump grid"_dump.html or "fix ave/grid"_fix_ave_grid.html. With
+{output summary} (default) it has 6 columns of signed plasma-frame
+source moments: the particle source Sp (positive for ionization,
+negative for recombination), the momentum source Sm_x, Sm_y, Sm_z, the
+electron energy source Qe (ionization cost and line radiation from the
+PLT tables, recombination from PRB) and the ion energy source Qi. With
+{output detailed} it has 20 columns of raw per-type tallies, quantity
+major over the four types (ionization, recombination, cx,
+dissociation): columns 1-4 event counts, 5-8 sum of m vx, 9-12 sum of
+m vy, 13-16 sum of m vz, 17-20 sum of 0.5 m v^2.
+
+The {units} keyword sets the weight of each tallied event. {counts}
+accumulates raw totals since the start. {rate} accumulates SI source
+densities (1/m^3/s, N/m^3, W/m^3) weighted by the reacting particle's
+{pweight}, zeroed at every Nevery window, for use with {fix ave/grid
+... ave running}. {batch} weights every event by R_puff/N divided by
+the cell volume, so that a batch of N trajectories representing a puff
+of R_puff atoms/s accumulates the steady-state source of that puff.
+{batch_fix} is the same but takes N from the cumulative emission count
+of the named emit fix on every step, so the normalization follows the
+ramp-up automatically.
+
+A summary of active and skipped reactions per type and of the ADAS
+tables found is printed at initialization, and cumulative per-type
+reaction counts are printed at the end of each run.
+
+[Restrictions:]
+
+This command is part of the OPENEDGE package.
+
+The per-particle plasma cache must be active (see above), otherwise
+the fix stops with an error at the first step. The process database
+must exist and contain SCD and ACD tables for the element; supported
+elements are H/D/T, He, Li, Be, B, C, N, O, Ne, Ar, Fe, Kr, Mo, Xe,
+Ta and W. Duplicate reactions in the file are an error.
+{volume_source} must name an existing compute plasma/fields or fix
+background.
+
+[Related commands:]
+
+"fix background"_fix_background.html, "compute
+plasma/fields"_compute_plasma_fields.html, "fix
+surface/emit/puff"_fix_surface_emit_puff.html, "compute
+volume/emissivity/grid"_compute_volume_emissivity_grid.html, "surf_react
+surface/pwi"_surf_react_surface_pwi.html
+
+[Default:]
+
+The option defaults are mode = kinetic, rate_cache = particle,
+stop_on_exhaust = no, exhaust_threshold = 0, units = counts, output =
+summary, ionization = recombination = cx = dissociation = yes, no
+source_species and no volume_source.

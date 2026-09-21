@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -74,14 +74,14 @@ command.
 
 This compute calculates a global array, with the number of columns
 either equal to the number of reactions defined by the
-"surf_react"_surf_react style (if no values are specified) or equal to
+"surf_react"_surf_react.html style (if no values are specified) or equal to
 M = the # of values specified.  The number of rows is 4 for a 2d
 simulation for the 4 faces (xlo, xhi, ylo, yhi), and it is 6 for a 3d
 simulation (xlo, xhi, ylo, yhi, zlo, zhi).
 
 The array can be accessed by any command that uses global array values
-from a compute as input.  See "Section 6.4"_Section_howto.html#howto_4
-for an overview of SPARTA output options.
+from a compute as input.  See "Section 4.8"_Section_howto.html#howto_10
+for an overview of OpenEdge output options.
 
 The array values are counts of the number of reactions that occurred
 on each face.

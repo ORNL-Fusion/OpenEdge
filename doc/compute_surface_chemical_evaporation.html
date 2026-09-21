@@ -1,0 +1,98 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>compute surface/chemical/evaporation command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>compute ID surface/chemical/evaporation group-ID tsurf name sticking value 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "compute.html">compute</A> command 
+
+<LI>surface/chemical/evaporation = style name of this compute command 
+
+<LI>group-ID = ID of surface group to evaluate 
+
+<LI>tsurf = required keyword 
+
+<LI>name = name of the per-surf custom attribute holding the surface temperature (degrees C) 
+
+<LI>sticking = required keyword 
+
+<LI>value = alpha_s = sticking (evaporation) coefficient (> 0) 
+
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>compute cevap surface/chemical/evaporation divertor tsurf Tsurf_lm sticking 1.0
+fix femit surface/emit/source LiSource divertor cevap perspecies no &
+    normal yes nlaunch_total 200 model thermal_tsurf Tsurf_lm 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Compute the lithium evaporation flux of each surface element in the
+group from its surface temperature. The temperature is read from the
+per-surf custom attribute <I>name</I> (in degrees C), typically <I>Tsurf_lm</I>
+written by <A HREF = "fix_surface_state_lm.html">fix surface/state/lm</A>.
+</P>
+<P>The vapor pressure follows the Antoine relation
+</P>
+<PRE>p_vap(T) = 10^(A - B/T) * 101325 Pa 
+</PRE>
+<P>with A = 5.66797 and B = 8310.41 K for lithium (valid for 298 K <= T
+<= 1600 K), and the flux is the Hertz-Knudsen expression
+</P>
+<PRE>Gamma_evap(T) = alpha_s * p_vap(T) / sqrt(2 pi m_Li k_B T) 
+</PRE>
+<P>where alpha_s is the <I>sticking</I> value. The flux is zero below 298.15
+K and for surfaces outside the group.
+</P>
+<P>The per-surf values are meant to be fed to <A HREF = "fix_surface_emit_source.html">fix
+surface/emit/source</A> as the emission
+source for Li atoms, or written with <A HREF = "dump.html">dump surf</A>.
+</P>
+<HR>
+
+<P><B>Output info:</B>
+</P>
+<P>This compute calculates a per-surf vector, with one value per
+surface element owned by the processor. The value is the evaporation
+flux in atoms/m^2/s; it is zero for surfaces not in the group.
+</P>
+<P>The vector can be accessed by any command that uses per-surf values
+from a compute as input, e.g. <A HREF = "dump.html">dump surf</A>, <A HREF = "fix_ave_surf.html">fix
+ave/surf</A> or <A HREF = "fix_surface_emit_source.html">fix
+surface/emit/source</A>.
+</P>
+<HR>
+
+<P><B>Restrictions:</B>
+</P>
+<P>This compute is part of the OPENEDGE package. The custom attribute
+named by <I>tsurf</I> must exist when the compute is initialized (it is
+created by fix surface/state/lm). The command requires at least 6
+arguments (counting the compute ID and style), so <I>tsurf name</I> alone
+is rejected: the <I>sticking</I> keyword and its value must be given even
+for the default value of 1.0.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_surface_state_lm.html">fix surface/state/lm</A>, <A HREF = "compute_surface_chemical_adatom.html">compute
+surface/chemical/adatom</A>, <A HREF = "fix_surface_emit_source.html">fix
+surface/emit/source</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>sticking = 1.0 internally, but see the restriction above.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

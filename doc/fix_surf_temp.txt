@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -35,7 +35,7 @@ Compute a new temperature for each surface element in the group once
 every Nevery steps.  This command uses a compute or fix ID which
 should compute the flux of total energy onto each surface element,
 e.g. {etot} from the "compute surf"_compute_surf.html command.  Note
-that SPARTA does not check that the specified compute/fix calculates
+that OpenEdge does not check that the specified compute/fix calculates
 an energy flux.
 
 This fix creates a custom per-surf floating point vector with the

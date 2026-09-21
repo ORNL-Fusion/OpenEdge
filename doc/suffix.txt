@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -24,11 +24,11 @@ suffix kk :pre
 
 This command allows you to use variants of various styles if they
 exist.  In that respect it operates the same as the "-suffix
-command-line switch"_Section_start.html#start_7.  It also has options
+command-line switch"_Section_start.html#start_5.  It also has options
 to turn off or back on any suffix setting made via the command line.
 
 The specified style {kk} refers to the optional KOKKOS package that
-SPARTA can be built with, as described in "this section of the
+OpenEdge can be built with, as described in "this section of the
 manual"_Section_start.html#start_3. The KOKKOS package is a collection
 of styles optimized to run using the Kokkos library on various kinds
 of hardware, including GPUs via CUDA and many-core chips via OpenMP
@@ -47,7 +47,7 @@ If the specified style is {off}, then any previously specified suffix
 is temporarily disabled, whether it was specified by a command-line
 switch or a previous suffix command.  If the specified style is {on},
 a disabled suffix is turned back on.  The use of these 2 commands lets
-your input script use a standard SPARTA style (i.e. a non-accelerated
+your input script use a standard OpenEdge style (i.e. a non-accelerated
 variant), which can be useful for testing or benchmarking purposes.
 Of course this is also possible by not using any suffix commands, and
 explicitly appending or not appending the suffix to the relevant
@@ -57,6 +57,6 @@ commands in your input script.
 
 [Related commands:]
 
-"Command-line switch -suffix"_Section_start.html#start_7
+"Command-line switch -suffix"_Section_start.html#start_5
 
 [Default:] none

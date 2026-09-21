@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -73,7 +73,7 @@ for a surface group, which defines a set of surface elements.  The
 <P>On each insertion timestep, each grid cell that overlaps with one or
 more emitting surface elements performs the following computations to
 add particles for each grid cell/surface element pairing.  The
-particles are added at the beginning of the SPARTA timestep.
+particles are added at the beginning of the OpenEdge timestep.
 </P>
 <P>The molecular flux emitted from a surface element per unit time is
 given by equation 4.22 of <A HREF = "#Bird94">(Bird94)</A>.  The number of particles
@@ -145,7 +145,7 @@ emitted particles for each grid cell/surface element pair, the same as
 described in the preceeding paragraph.
 </P>
 <P>Equal-style variables can specify formulas with various mathematical
-functions, and include <A HREF = "status_style.html">stats_style</A> command
+functions, and include <A HREF = "stats_style.html">stats_style</A> command
 keywords for the simulation box parameters and timestep and elapsed
 time.  Thus it is easy to specify a time-dependent value of <I>Np</I>.
 </P>
@@ -260,7 +260,7 @@ per-surf vectors or arrays defined by other commands.  E.g. the
 included in the surface data file.  Or the custom command which allows
 for definition of custom per-surf vectors or arrays and their
 initialization by use of <A HREF = "variable.html">surf-style variables</A>.  See
-<A HREF = "Section_howto.html#howto_17">Section Howto 6.17</A> for a discussion of
+<A HREF = "Section_howto.html#howto_14">Section Howto 6.17</A> for a discussion of
 custom per-surf attributes.
 </P>
 <P>IMPORTANT NOTE: The <I>custom</I> keyword cannot be used together with
@@ -339,7 +339,7 @@ a run is performed.
 <P>A <I>n</I> setting of <I>Np</I> > 0 or <I>Np</I> as a variable can only be used with
 a <I>perspecies</I> setting of <I>no</I>.
 </P>
-<P>If <I>normal</I> is set to <I>no</I>, which is the default, then unlike the <A HREF = "fix_emit/face.html">fix
+<P>If <I>normal</I> is set to <I>no</I>, which is the default, then unlike the <A HREF = "fix_emit_face.html">fix
 emit/face</A> command, no warning is issued if a
 surface element has an inward normal in a direction opposing the
 streaming velocity, as defined by the mixture.
@@ -372,4 +372,5 @@ Simulation of Gas Flows, Clarendon Press, Oxford (1994).
 <P><B>(Fang02)</B> Y. Fang and W. W. Liou, Microfluid Flow Computations
 Using a Parallel DSMC Code, AIAA 2002-1057. (2002).
 </P>
+<!-- PAGE BREAK -->
 </HTML>

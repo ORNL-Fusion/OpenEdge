@@ -1,42 +1,40 @@
-# WEST tungsten transport — axisymmetric workflow
+# WEST tungsten transport
 
-W-impurity transport in real WEST geometry, 2D axisymmetric (x = Z,
-y = R, axis at y = 0). Chain: O-on-W physical sputtering (RustBCA
-tables) -> Boris mover with spatial sheath -> Coulomb, thermal-gradient
-and cross-field forces (S3X-matched D_perp 0.3, pinch -0.6) -> ADAS
-ionization W..W20+ -> PWI wall (TRIM reflection, Thompson re-emission).
-W markers come from a four-band stratified wall source (lower/upper
-divertor, LFS, HFS) so every wall region gets statistics.
+Axisymmetric (x = Z, y = R) W transport in WEST geometry: O-on-W sputtering
+from RustBCA tables, Boris mover with spatial sheath, Coulomb, thermal-gradient
+and cross-field forces (D_perp 0.3, pinch -0.6 from SOLEDGE3X), ADAS
+ionization to W20+, and a PWI wall with TRIM reflection and Thompson
+re-emission. W markers come from a four-band wall source (lower and upper
+divertor, LFS, HFS).
 
 ## Run
 
-    mpirun -np 4 spa_mac_mpi -in in.openedge
+```bash
+mpirun -np 4 /path/to/spa_mpi -in in.openedge
+```
 
-Defaults run 10k steps (8k warmup + 2k diagnostics, dt 2e-8) — a
-few minutes on a laptop. Production: `-var nwarm 100000 -var ndiag
-10000`. Other knobs: `-var nLo/nUp/nLfs/nHfs <N>` (markers/step per
-band), `-var Dperp <val>`, `-var sheathmode boundary` (pre-Aug-2026
-sheath model for A/B).
+Defaults: 8000 warmup + 2000 diagnostic steps at dt = 2e-8 s, a few
+minutes on a laptop. Production: `-var nwarm 100000 -var ndiag 10000`.
+Other variables: `nLo/nUp/nLfs/nHfs` (markers per step per band), `Dperp`.
 
-## Outputs and analysis
+## Outputs
 
-Everything lands in `output/` (git-ignored): consolidated grid dump
-(total + neutral W density), `wall_ehist.dat` impact energy/angle
-histograms, warmup restart, OVITO particle dump. `scripts/analysis.ipynb`
-makes the density maps, radial profiles, ionization-length check,
-convergence trace, and the 2D total-W map; it auto-discovers however
-many `D<val>` runs exist.
+`output/` holds the grid dump (total and neutral W density), `wall_ehist.dat`
+impact energy and angle histograms, the warmup restart, and a particle dump.
+`scripts/analysis.ipynb` produces density maps, radial profiles, the
+ionization-length check and the convergence trace for every `D<val>` run
+it finds.
 
-## Rebuilding inputs from a SOLEDGE3X run
+## Rebuilding inputs from SOLEDGE3X
 
-    python3 ../../../../tools/converters/convert_s3x_plasma.py <run_dir> \
-        --plasma-snapshot plasmaFinal.h5 \
-        --plasma-out input/plasma.h5 --wall-out input/wall.surf --geometry axi
-    python3 scripts/subdivide_surf.py input/wall.surf input/wall_fine.surf \
-        --maxlen 0.02 \
-        --region 0.30 1.0 0 99 0.01
-    python3 scripts/make_core_surf.py input/plasma.h5 input/core.surf --level 0.1
+```bash
+python3 ../../../../tools/converters/convert_s3x_plasma.py <run_dir> \
+    --plasma-snapshot plasmaFinal.h5 \
+    --plasma-out input/plasma.h5 --wall-out input/wall.surf --geometry axi
+python3 scripts/subdivide_surf.py input/wall.surf input/wall_fine.surf \
+    --maxlen 0.02 --region 0.30 1.0 0 99 0.01
+python3 scripts/make_core_surf.py input/plasma.h5 input/core.surf --level 0.1
+```
 
-The wall file is wound normals-in: read WITHOUT `invert`; interior
-flow volume must come out ~26 m^3. `input/plasma.h5` (~12 MB) is
-git-ignored; regenerate with the converter above.
+The wall is wound normals-in, so read it without `invert`; the flow volume
+should be about 26 m^3. `input/plasma.h5` is git-ignored.

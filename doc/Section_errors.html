@@ -1,7 +1,5 @@
 <HTML>
-<CENTER><A HREF = "Section_python.html">Previous Section</A> - <A HREF = "https://sparta.github.io">SPARTA WWW Site</A> -
-<A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> - <A HREF = "Section_history.html">Next
-Section</A> 
+<CENTER><A HREF = "Section_example.html">Previous Section</A> - <A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -11,20 +9,20 @@ Section</A>
 
 <HR>
 
-<H3>12. Errors 
+<H3>6. Errors 
 </H3>
 <P>This section describes the various kinds of errors you can encounter
-when using SPARTA.
+when using OpenEdge.
 </P>
-12.1 <A HREF = "#err_1">Common problems</A><BR>
-12.2 <A HREF = "#err_2">Reporting bugs</A><BR>
-12.3 <A HREF = "#err_3">Error & warning messages</A> <BR>
+6.1 <A HREF = "#err_1">Common problems</A><BR>
+6.2 <A HREF = "#err_2">Reporting bugs</A><BR>
+6.3 <A HREF = "#err_3">Error & warning messages</A> <BR>
 
 <HR>
 
-<A NAME = "err_1"></A><H4>12.1 Common problems 
+<A NAME = "err_1"></A><H4>6.1 Common problems 
 </H4>
-<P>If two SPARTA runs do not produce the same answer on different
+<P>If two OpenEdge runs do not produce the same answer on different
 machines or different numbers of processors, this is typically not a
 bug.  On different machines, there can be numerical round-off in the
 computations which causes slight differences in particle trajectories
@@ -38,38 +36,38 @@ temperature or surface energy flux) for the two runs on different
 machines or on different numbers of processors should still be
 similar.
 </P>
-<P>A SPARTA simulation typically has two stages, setup and run.  Most
-SPARTA errors are detected at setup time; others like running out of
+<P>A OpenEdge simulation typically has two stages, setup and run.  Most
+OpenEdge errors are detected at setup time; others like running out of
 memory may not occur until the middle of a run.
 </P>
-<P>SPARTA tries to flag errors and print informative error messages so
-you can fix the problem.  Of course, SPARTA cannot figure out physics
+<P>OpenEdge tries to flag errors and print informative error messages so
+you can fix the problem.  Of course, OpenEdge cannot figure out physics
 or numerical mistakes, like choosing too big a timestep or specifying
-erroneous collision parameters.  If you run into errors that SPARTA
+erroneous collision parameters.  If you run into errors that OpenEdge
 doesn't catch that you think it should flag, please send an email to
-the <A HREF = "https://sparta.github.io/authors.html">developers</A>.
+the <A HREF = "https://github.com/ORNL-Fusion/OpenEdge/issues">developers</A>.
 </P>
 <P>If you get an error message about an invalid command in your input
 script, you can determine what command is causing the problem by
 looking in the log.sparta file, or using the <A HREF = "echo.html">echo command</A>
-in your script or "-echo screen" as a <A HREF = "Section_start.html#start_7">command-line
+in your script or "-echo screen" as a <A HREF = "Section_start.html#start_5">command-line
 argument</A> to see it on the screen.  For a
-given command, SPARTA expects certain arguments in a specified order.
-If you mess this up, SPARTA will often flag the error, but it may read
+given command, OpenEdge expects certain arguments in a specified order.
+If you mess this up, OpenEdge will often flag the error, but it may read
 a bogus argument and assign a value that is valid, but not what you
 wanted.
 </P>
-<P>Generally, SPARTA will print a message to the screen and logfile and
+<P>Generally, OpenEdge will print a message to the screen and logfile and
 exit gracefully when it encounters a fatal error.  Sometimes it will
 print a WARNING to the screen and logfile and continue on; you can
 decide if the WARNING is important or not.  A WARNING message that is
 generated in the middle of a run is only printed to the screen, not to
-the logfile, to avoid cluttering up statistical output.  If SPARTA
+the logfile, to avoid cluttering up statistical output.  If OpenEdge
 crashes or hangs without spitting out an error message first then it
 could be a bug (see the <A HREF = "#err_2">next section</A>) or one of the following
 cases:
 </P>
-<P>SPARTA runs in the available memory a processor allows to be
+<P>OpenEdge runs in the available memory a processor allows to be
 allocated.  Most reasonable runs are compute limited, not memory
 limited, so this shouldn't be a bottleneck on most platforms.  Almost
 all large memory allocations in the code are done via C-style malloc's
@@ -77,19 +75,19 @@ which will generate an error message if you run out of memory.
 Smaller chunks of memory are allocated via C++ "new" statements.  If
 you are unlucky, you could run out of memory just when one of these
 small requests is made, in which case the code will crash or hang (in
-parallel), since SPARTA doesn't trap on those errors.
+parallel), since OpenEdge doesn't trap on those errors.
 </P>
-<P>Illegal arithmetic can cause SPARTA to run slow or crash.  This is
+<P>Illegal arithmetic can cause OpenEdge to run slow or crash.  This is
 typically due to invalid physics and numerics that your simulation is
 computing.  If you see wild statistical values or NaN values in your
-SPARTA output, something is wrong with your simulation.  If you
+OpenEdge output, something is wrong with your simulation.  If you
 suspect this is happening, it is a good idea to print out statistical
 info frequently (e.g. every timestep) via the <A HREF = "stats.html">stats</A>
 command so you can monitor what is happening.  Visualizing the
 particle motion is also a good idea to insure your model is behaving
 as you expect.
 </P>
-<P>In parallel, one way SPARTA can hang is due to how different MPI
+<P>In parallel, one way OpenEdge can hang is due to how different MPI
 implementations handle buffering of messages.  If the code hangs
 without an error message, it may be that you need to specify an MPI
 setting or two (usually via an environment variable) to enable
@@ -97,31 +95,26 @@ buffering or boost the sizes of messages that can be buffered.
 </P>
 <HR>
 
-<A NAME = "err_2"></A><H4>12.2 Reporting bugs 
+<A NAME = "err_2"></A><H4>6.2 Reporting bugs 
 </H4>
-<P>If you are confident that you have found a bug in SPARTA, please
-follow these steps.
+<P>If you are confident that you have found a bug in OpenEdge, open an
+issue on the <A HREF = "https://github.com/ORNL-Fusion/OpenEdge/issues">OpenEdge repository</A>.
+First check the existing issues to see whether the bug has already
+been reported or fixed.
 </P>
-<P>Check the <A HREF = "https://sparta.github.io/bug.html">New features and bug
-fixes</A> section of the <A HREF = "https://sparta.github.io">SPARTA web
-site</A> to see if the bug has already been fixed.
-</P>
-<P>If not, please email a description of the problem to the
-<A HREF = "https://sparta.github.io/authors.html">developers</A>.
-</P>
-<P>The most useful thing you can do to help us fix the bug is to isolate
-the problem.  Run it on the smallest number of particles and grid
-cells and fewest number of processors and with the simplest and
-quick-to-run input script that reproduces the bug.  And try to
-identify what command or combination of commands is causing the
-problem.
+<P>The most useful report includes the smallest input script that
+reproduces the problem, the input files it needs, the OpenEdge version
+printed at the top of the log file, the compiler and MPI library, the
+number of processors, and the exact ERROR or WARNING text.  An input
+script that reproduces the problem in seconds on one processor is far
+more valuable than a description of a large production run.
 </P>
 <HR>
 
-<H4><A NAME = "err_3"></A>12.3 Error & warning messages 
+<H4><A NAME = "err_3"></A>6.3 Error & warning messages 
 </H4>
 <P>These are two alphabetic lists of the <A HREF = "#error">ERROR</A> and
-<A HREF = "#warn">WARNING</A> messages SPARTA prints out and the reason why.  If the
+<A HREF = "#warn">WARNING</A> messages OpenEdge prints out and the reason why.  If the
 explanation here is not sufficient, the documentation for the
 offending command may help.  Error and warning messages also list the
 source file and line number where the error was generated.  For
@@ -168,7 +161,7 @@ the surf_modify command before a simulation is perforemd.
 
 <DD>Argument of arcsin() must be between -1 and 1. 
 
-<DT><I>Axi-symmetry is not yet supported in SPARTA</I> 
+<DT><I>Axi-symmetry is not yet supported in OpenEdge</I> 
 
 <DD>This error condition will be removed after axi-symmetry is
 fully implemented. 
@@ -181,7 +174,7 @@ fully implemented.
 
 <DD>This is an error when calculating how a 3d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Bad grid of processors for balance_grid block</I> 
 
@@ -198,7 +191,7 @@ processors.
 
 <DT><I>Bigint setting in spatype.h is not compatible</I> 
 
-<DD>Bigint size stored in restart file is not consistent with SPARTA
+<DD>Bigint size stored in restart file is not consistent with OpenEdge
 version you are running. 
 
 <DT><I>Both restart files must use % or neither</I> 
@@ -273,7 +266,7 @@ each species is defined by the species command.
 
 <DT><I>Cannot create/grow a vector/array of pointers for %s</I> 
 
-<DD>SPARTA code is making an illegal call to the templated memory
+<DD>OpenEdge code is making an illegal call to the templated memory
 allocaters, to create a vector or array of pointers. 
 
 <DT><I>Cannot create_box after simulation box is defined</I> 
@@ -316,8 +309,8 @@ correct.
 
 <DT><I>Cannot open gzipped file</I> 
 
-<DD>SPARTA was compiled without support for reading and writing gzipped
-files through a pipeline to the gzip program with -DSPARTA_GZIP. 
+<DD>OpenEdge was compiled without support for reading and writing gzipped
+files through a pipeline to the gzip program with -DOpenEdge_GZIP. 
 
 <DT><I>Cannot open input script %s</I> 
 
@@ -325,17 +318,17 @@ files through a pipeline to the gzip program with -DSPARTA_GZIP.
 
 <DT><I>Cannot open log.sparta</I> 
 
-<DD>The default SPARTA log file cannot be opened.  Check that the
+<DD>The default OpenEdge log file cannot be opened.  Check that the
 directory you are running in allows for files to be created. 
 
 <DT><I>Cannot open logfile</I> 
 
-<DD>The SPARTA log file named in a command-line argument cannot be opened.
+<DD>The OpenEdge log file named in a command-line argument cannot be opened.
 Check that the path and name are correct. 
 
 <DT><I>Cannot open logfile %s</I> 
 
-<DD>The SPARTA log file specified in the input script cannot be opened.
+<DD>The OpenEdge log file specified in the input script cannot be opened.
 Check that the path and name are correct. 
 
 <DT><I>Cannot open print file %s</I> 
@@ -513,25 +506,25 @@ on the create_grid doc page.
 
 <DT><I>Cell ID has too many bits</I> 
 
-<DD>Cell IDs must fit in 32 bits (SPARTA small integer) or 64 bits (SPARTA
-big integer), as specified by the -DSPARTA_SMALL, -DSPARTA_BIG, or
--DSPARTA_BIGBIG options in the low-level Makefile used to build
-SPARTA.  See Section 2.2 of the manual for details.  And see Section
+<DD>Cell IDs must fit in 32 bits (OpenEdge small integer) or 64 bits (OpenEdge
+big integer), as specified by the -DOpenEdge_SMALL, -DOpenEdge_BIG, or
+-DOpenEdge_BIGBIG options in the low-level Makefile used to build
+OpenEdge.  See Section 2.2 of the manual for details.  And see Section
 4.8 for details on how cell IDs are formatted. 
 
 <DT><I>Cell type mis-match when marking on neigh proc</I> 
 
 <DD>Grid cell marking as inside, outside, or overlapping with surface
-elements failed.  Please report the issue to the SPARTA developers. 
+elements failed.  Please report the issue to the OpenEdge developers. 
 
 <DT><I>Cell type mis-match when marking on self</I> 
 
 <DD>Grid cell marking as inside, outside, or overlapping with surface
-elements failed.  Please report the issue to the SPARTA developers. 
+elements failed.  Please report the issue to the OpenEdge developers. 
 
 <DT><I>Cellint setting in spatype.h is not compatible</I> 
 
-<DD>Cellint size stored in restart file is not consistent with SPARTA
+<DD>Cellint size stored in restart file is not consistent with OpenEdge
 version you are running. 
 
 <DT><I>Collision mixture does not contain all species</I> 
@@ -726,7 +719,7 @@ elements.
 
 <DD>This is an error when calculating how a grid cell is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Could not find stats compute ID</I> 
 
@@ -792,22 +785,22 @@ properly.
 <DT><I>Did not assign all restart particles correctly</I> 
 
 <DD>One or more particles in the restart file were not assigned to a
-processor.  Please report the issue to the SPARTA developers. 
+processor.  Please report the issue to the OpenEdge developers. 
 
 <DT><I>Did not assign all restart split grid cells correctly</I> 
 
 <DD>One or more split grid cells in the restart file were not assigned
-to a processor.  Please report the issue to the SPARTA developers. 
+to a processor.  Please report the issue to the OpenEdge developers. 
 
 <DT><I>Did not assign all restart sub grid cells correctly</I> 
 
 <DD>One or more sub grid cells in the restart file were not assigned to a
-processor.  Please report the issue to the SPARTA developers. 
+processor.  Please report the issue to the OpenEdge developers. 
 
 <DT><I>Did not assign all restart unsplit grid cells correctly</I> 
 
 <DD>One or more unsplit grid cells in the restart file were not assigned
-to a processor.  Please report the issue to the SPARTA developers. 
+to a processor.  Please report the issue to the OpenEdge developers. 
 
 <DT><I>Dimension command after simulation box is defined</I> 
 
@@ -1032,19 +1025,19 @@ doc page.
 
 <DD>This is an error when calculating how a 3d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Edge part of invalid vertex</I> 
 
 <DD>This is an error when calculating how a 3d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Edge part of same vertex twice</I> 
 
 <DD>This is an error when calculating how a 3d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Empty brackets in variable</I> 
 
@@ -1053,7 +1046,7 @@ the variable doc page.
 
 <DT><I>Failed to allocate %ld bytes for array %s</I> 
 
-<DD>The SPARTA simulation has run out of memory.  You need to run a
+<DD>The OpenEdge simulation has run out of memory.  You need to run a
 smaller simulation or on more processors. 
 
 <DT><I>Failed to open FFmpeg pipeline to file %s</I> 
@@ -1063,7 +1056,7 @@ correct and writable and that the FFmpeg executable can be found and run.
 
 <DT><I>Failed to reallocate %ld bytes for array %s</I> 
 
-<DD>The SPARTA simulation has run out of memory.  You need to run a
+<DD>The OpenEdge simulation has run out of memory.  You need to run a
 smaller simulation or on more processors. 
 
 <DT><I>File variable could not read value</I> 
@@ -1256,7 +1249,7 @@ requesting a value on a non-allowed timestep.
 
 <DD>This is an error when calculating how a 3d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Found no restart file matching pattern</I> 
 
@@ -1274,14 +1267,14 @@ issue to the SPARTA developers.
 
 <DD>Corner points of grid cells on the boundary of the simulation domain
 were not all marked successfully as inside, outside, or overlapping
-with surface elements.  Please report the issue to the SPARTA
+with surface elements.  Please report the issue to the OpenEdge
 developers. 
 
 <DT><I>Grid cells marked as unknown = %d</I> 
 
 <DD>Grid cell marking as inside, outside, or overlapping with surface
 elements did not successfully mark all cells.  Please report the issue
-to the SPARTA developers. 
+to the OpenEdge developers. 
 
 <DT><I>Grid cutoff is longer than box length in a periodic dimension</I> 
 
@@ -1291,12 +1284,12 @@ global gridcut command.
 <DT><I>Grid in/out other-mark error %d\n</I> 
 
 <DD>Grid cell marking as inside, outside, or overlapping with surface
-elements failed.  Please report the issue to the SPARTA developers. 
+elements failed.  Please report the issue to the OpenEdge developers. 
 
 <DT><I>Grid in/out self-mark error %d for icell %d, icorner %d, connect %d %d, other cell %d, other corner %d, values %d %d\n</I> 
 
 <DD>A grid cell was incorrectly marked as inside, outside, or overlapping
-with surface elements.  Please report the issue to the SPARTA
+with surface elements.  Please report the issue to the OpenEdge
 developers. 
 
 <DT><I>Grid-style variables are not yet implemented</I> 
@@ -1307,14 +1300,14 @@ developers.
 
 <DD>Self-explanatory.  Check the input script syntax and compare to the
 documentation for the command.  You can use -echo screen as a
-command-line option when running SPARTA to see the offending line. 
+command-line option when running OpenEdge to see the offending line. 
 
 <DT><I>Inconsistent surface to grid mapping in read_restart</I> 
 
 <DD>When surface elements were mapped to grid cells after reading a
 restart file, an inconsitent count of elements in a grid cell was
 found, as compared to the original simulation, which should not
-happen.  Please report the issue to the SPARTA developers. 
+happen.  Please report the issue to the OpenEdge developers. 
 
 <DT><I>Incorrect format of parent cell in grid file</I> 
 
@@ -1356,9 +1349,9 @@ happen.  Please report the issue to the SPARTA developers.
 
 <DD>A Nx or Ny or Nz value for a parent cell is <= 0. 
 
-<DT><I>Invalid SPARTA restart file</I> 
+<DT><I>Invalid OpenEdge restart file</I> 
 
-<DD>The file does not appear to be a SPARTA restart file since it does not
+<DD>The file does not appear to be a OpenEdge restart file since it does not
 have the expected magic string at the beginning. 
 
 <DT><I>Invalid attribute in dump grid command</I> 
@@ -1384,12 +1377,12 @@ the command doc page for details.
 
 <DT><I>Invalid call to ComputeGrid::post_process_grid()</I> 
 
-<DD>This indicates a coding error.  Please report the issue to the SPARTA
+<DD>This indicates a coding error.  Please report the issue to the OpenEdge
 developers. 
 
 <DT><I>Invalid call to ComputeSonineGrid::post_process_grid()</I> 
 
-<DD>This indicates a coding error.  Please report the issue to the SPARTA
+<DD>This indicates a coding error.  Please report the issue to the OpenEdge
 developers. 
 
 <DT><I>Invalid cell ID in grid file</I> 
@@ -1418,7 +1411,7 @@ with values in the color map.
 <DT><I>Invalid command-line argument</I> 
 
 <DD>One or more command-line arguments is invalid.  Check the syntax of
-the command you are using to launch SPARTA. 
+the command you are using to launch OpenEdge. 
 
 <DT><I>Invalid compute ID in variable formula</I> 
 
@@ -1665,7 +1658,7 @@ integer in size.
 
 <DD>Self-explanatory. 
 
-<DT><I>MPI_SPARTA_BIGINT and bigint in spatype.h are not compatible</I> 
+<DT><I>MPI_OpenEdge_BIGINT and bigint in spatype.h are not compatible</I> 
 
 <DD>The size of the MPI datatype does not match the size of a bigint. 
 
@@ -1716,13 +1709,13 @@ formula.
 
 <DT><I>More than one positive area with a negative area</I> 
 
-<DD>SPARTA cannot determine which positive area the negative area is
+<DD>OpenEdge cannot determine which positive area the negative area is
 inside of, if a cell is so large that it includes both positive and
 negative areas. 
 
 <DT><I>More than one positive volume with a negative volume</I> 
 
-<DD>SPARTA cannot determine which positive volume the negative volume is
+<DD>OpenEdge cannot determine which positive volume the negative volume is
 inside of, if a cell is so large that it includes both positive and
 negative volumes. 
 
@@ -1751,13 +1744,13 @@ The -in command-line option must be used to specify a file.
 
 <DD>This is an error when calculating how a 2d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>No positive volumes in cell</I> 
 
 <DD>This is an error when calculating how a 3d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Non digit character between brackets in variable</I> 
 
@@ -1811,17 +1804,17 @@ maximum allowed limit.
 
 <DD>One or more grid cells have unknown neighbors which will prevent
 particles from moving correctly.  Please report the issue to the
-SPARTA developers. 
+OpenEdge developers. 
 
 <DT><I>Parent cell child missing</I> 
 
 <DD>Hierarchical grid traversal failed.  Please report the issue to the
-SPARTA developers. 
+OpenEdge developers. 
 
 <DT><I>Particle %d on proc %d hit inside of surf %d on step %ld</I> 
 
 <DD>This error should not happen if particles start outside of physical
-objects.  Please report the issue to the SPARTA developers. 
+objects.  Please report the issue to the OpenEdge developers. 
 
 <DT><I>Particle %d,%d on proc %d is in invalid cell  on timestep %ld</I> 
 
@@ -1867,13 +1860,13 @@ approximately 2 billion.
 
 <DD>This is an error when calculating how a 2d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Point appears last in more than one CLINE</I> 
 
 <DD>This is an error when calculating how a 2d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Power by 0 in variable formula</I> 
 
@@ -1882,7 +1875,7 @@ issue to the SPARTA developers.
 <DT><I>Processor partitions are inconsistent</I> 
 
 <DD>The total number of processors in all partitions must match the number
-of processors SPARTA is running on. 
+of processors OpenEdge is running on. 
 
 <DT><I>React tce can only be used with collide vss</I> 
 
@@ -1931,7 +1924,7 @@ when you do not intend to.
 
 <DT><I>Restart file byte ordering is not recognized</I> 
 
-<DD>The file does not appear to be a SPARTA restart file since it doesn't
+<DD>The file does not appear to be a OpenEdge restart file since it doesn't
 contain a recognized byte-ordering flag at the beginning. 
 
 <DT><I>Restart file byte ordering is swapped</I> 
@@ -1942,7 +1935,7 @@ the machine you are reading it on.
 <DT><I>Restart file incompatible with current version</I> 
 
 <DD>This is probably because you are trying to read a file created with a
-version of SPARTA that is too old compared to the current version. 
+version of OpenEdge that is too old compared to the current version. 
 
 <DT><I>Restart file is a multi-proc file</I> 
 
@@ -2001,40 +1994,40 @@ before any random numbers are needed by other commands.
 
 <DT><I>Sending particle to self</I> 
 
-<DD>This error should not occur.  Please report the issue to the SPARTA
+<DD>This error should not occur.  Please report the issue to the OpenEdge
 developers. 
 
 <DT><I>Single area is negative, inverse donut</I> 
 
 <DD>An inverse donut is a surface with a flow region interior to the donut
 hole and also exterior to the entire donut.  This means the flow
-regions are disconnected.  SPARTA cannot correctly compute the flow
+regions are disconnected.  OpenEdge cannot correctly compute the flow
 area of this kind of object. 
 
 <DT><I>Single volume is negative, inverse donut</I> 
 
 <DD>An inverse donut is a surface with a flow region interior to the donut
 hole and also exterior to the entire donut.  This means the flow
-regions are disconnected.  SPARTA cannot correctly compute the flow
+regions are disconnected.  OpenEdge cannot correctly compute the flow
 volume of this kind of object. 
 
 <DT><I>Singlet BPG edge not on cell face</I> 
 
 <DD>This is an error when calculating how a 3d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Singlet CLINES point not on cell border</I> 
 
 <DD>This is an error when calculating how a 2d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Small,big integers are not sized correctly</I> 
 
 <DD>This error occurs whenthe sizes of smallint and bigint as defined in
 src/spatype.h are not what is expected.  Please report the issue
-to the SPARTA developers. 
+to the OpenEdge developers. 
 
 <DT><I>Smallint setting in spatype.h is invalid</I> 
 
@@ -2042,7 +2035,7 @@ to the SPARTA developers.
 
 <DT><I>Smallint setting in spatype.h is not compatible</I> 
 
-<DD>Smallint size stored in restart file is not consistent with SPARTA
+<DD>Smallint size stored in restart file is not consistent with OpenEdge
 version you are running. 
 
 <DT><I>Species %s did not appear in VSS parameter file</I> 
@@ -2135,15 +2128,15 @@ for.
 
 <DT><I>Support for writing images in JPEG format not included</I> 
 
-<DD>SPARTA was not built with the -DSPARTA_JPEG switch in the Makefile. 
+<DD>OpenEdge was not built with the -DOpenEdge_JPEG switch in the Makefile. 
 
 <DT><I>Support for writing images in PNG format not included</I> 
 
-<DD>SPARTA was not built with the -DSPARTA_PNG switch in the Makefile. 
+<DD>OpenEdge was not built with the -DOpenEdge_PNG switch in the Makefile. 
 
 <DT><I>Support for writing movies not included</I> 
 
-<DD>SPARTA was not built with the -DSPARTA_FFMPEG switch in the Makefile 
+<DD>OpenEdge was not built with the -DOpenEdge_FFMPEG switch in the Makefile 
 
 <DT><I>Surf file cannot contain lines for 3d simulation</I> 
 
@@ -2229,9 +2222,9 @@ point is not on surface of simulation box.
 
 <DT><I>Too big a timestep</I> 
 
-<DD>Reset_timestep timestep value must fit in a SPARTA big integer, as
-specified by the -DSPARTA_SMALL, -DSPARTA_BIG, or -DSPARTA_BIGBIG
-options in the low-level Makefile used to build SPARTA.  See
+<DD>Reset_timestep timestep value must fit in a OpenEdge big integer, as
+specified by the -DOpenEdge_SMALL, -DOpenEdge_BIG, or -DOpenEdge_BIGBIG
+options in the low-level Makefile used to build OpenEdge.  See
 Section 2.2 of the manual for details. 
 
 <DT><I>Too many surfs in one cell</I> 
@@ -2241,9 +2234,9 @@ surfs per grid cell.
 
 <DT><I>Too many timesteps</I> 
 
-<DD>The cummulative timesteps must fit in a SPARTA big integer, as as
-specified by the -DSPARTA_SMALL, -DSPARTA_BIG, or -DSPARTA_BIGBIG
-options in the low-level Makefile used to build SPARTA.  See Section
+<DD>The cummulative timesteps must fit in a OpenEdge big integer, as as
+specified by the -DOpenEdge_SMALL, -DOpenEdge_BIG, or -DOpenEdge_BIGBIG
+options in the low-level Makefile used to build OpenEdge.  See Section
 2.2 of the manual for details. 
 
 <DT><I>Too much buffered per-proc info for dump</I> 
@@ -2263,7 +2256,7 @@ quote.
 
 <DT><I>Unexpected end of data file</I> 
 
-<DD>SPARTA hit the end of the data file while attempting to read a
+<DD>OpenEdge hit the end of the data file while attempting to read a
 section.  Something is wrong with the format of the data file. 
 
 <DT><I>Unexpected end of grid file</I> 
@@ -2286,7 +2279,7 @@ number of processor partitions.
 
 <DT><I>Unknown command: %s</I> 
 
-<DD>The command is not known to SPARTA.  Check the input script. 
+<DD>The command is not known to OpenEdge.  Check the input script. 
 
 <DT><I>Unknown outcome in reaction</I> 
 
@@ -2425,31 +2418,31 @@ sense in between runs.
 
 <DD>This is an error when calculating how a 3d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Vertex contains edge that doesn't point to it</I> 
 
 <DD>This is an error when calculating how a 3d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Vertex contains invalid edge</I> 
 
 <DD>This is an error when calculating how a 3d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Vertex has less than 3 edges</I> 
 
 <DD>This is an error when calculating how a 3d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>Vertex pointers to last edge are invalid</I> 
 
 <DD>This is an error when calculating how a 3d grid is cut or split by
 surface elements.  It should not normally occur.  Please report the
-issue to the SPARTA developers. 
+issue to the OpenEdge developers. 
 
 <DT><I>World variable count doesn't match # of partitions</I> 
 
@@ -2489,7 +2482,7 @@ of length equal to the number of particles.
 
 <DT><I>Restart file used different # of processors</I> 
 
-<DD>The restart file was written out by a SPARTA simulation running on a
+<DD>The restart file was written out by a OpenEdge simulation running on a
 different number of processors.  This means you will likely want to
 re-balance the grid cells and particles across processors.  This can
 be done using the balance or fix balance commands. 
@@ -2516,4 +2509,5 @@ of, which indicates an ill-formed surface.
 
 
 </DL>
+<!-- PAGE BREAK -->
 </HTML>

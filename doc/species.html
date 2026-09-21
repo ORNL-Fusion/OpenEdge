@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -46,7 +46,7 @@ list of species that the simulation recognizes.
 a list of species, not all of which need to specified in this command,
 or used in a simulation.  Only those requested by ID will be extracted
 from the file and they must be present in the file.  The format of the
-species file is discussed below.  The data directory in the SPARTA
+species file is discussed below.  The data directory in the OpenEdge
 distribution contains several species files, all with the suffix
 ".species".
 </P>
@@ -97,7 +97,7 @@ diatomic, 2/3/4 modes = triatomic or larger molecules.
 </P>
 <P>Note that all the listed rotational and vibrational values must be
 specified for each species, but in cases where they are not used by
-SPARTA, they can simply be specified as 0.0.  Whether or not the
+OpenEdge, they can simply be specified as 0.0.  Whether or not the
 values are used for a species depends on the value of rotdof and
 vibdof.  Whether the values are used in a simulation also depends on
 the settings specified for the <I>rotation</I> and <I>vibration</I> keywords of
@@ -128,7 +128,7 @@ accordingly.
 vibrational information in the specified <I>vfile</I>.  If this option is
 used, then an entry must appear in <I>vfile</I> for every species in this
 command with a vibdof value = 4,6,8.  Note that even if this
-vibrational info is read, it is ignored by SPARTA unless the
+vibrational info is read, it is ignored by OpenEdge unless the
 <A HREF = "collide_modify.html">collide_modify vibrate</A> setting is specified as
 <I>discrete</I>.
 </P>
@@ -167,4 +167,5 @@ the same species in the <I>vibfile</I>.
 </P>
 <P><B>Default:</B> none
 </P>
+<!-- PAGE BREAK -->
 </HTML>

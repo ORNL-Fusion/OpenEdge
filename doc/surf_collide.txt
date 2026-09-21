@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -13,7 +13,7 @@ surf_collide command :h3
 surf_collide ID style args keyword values ... :pre
 
 ID = user-assigned name for the surface collision model :ulb,l
-style = {specular} or {diffuse} or {cll} or {adiabatic} or {impulsive} or {td} or {piston} or {transparent} or {vanish} or {specular/kk} or {diffuse/kk} or {piston/kk} or {vanish/kk} :l
+style = {specular} or {diffuse} or {cll} or {adiabatic} or {impulsive} or {td} or {piston} or {transparent} or {vanish} or {partial_recycle} or {toroidal} or {particulate/bounce} or {specular/kk} or {diffuse/kk} or {piston/kk} or {vanish/kk} :l
 args = arguments for specific style :l
   {specular} or {specular/kk} args = noslip (optional)
     noslip = reflect all velocity components off surface (not just normal component)
@@ -48,14 +48,24 @@ args = arguments for specific style :l
             Tsurf can be a variable or custom per-surf attribute (see below)
   {piston} or {piston/kk} args = Vwall
     Vwall = velocity of boundary wall (velocity units)
-  {transparent} args = none :pre
-  {vanish} or {vanish/kk} args = none :pre
+  {transparent} args = none
+  {vanish} or {vanish/kk} args = none
+  {partial_recycle} args = Tsurf acc keyword values ...
+    Tsurf = temperature of surface (temperature units)
+    acc = accommodation coefficient
+    keyword = {r} or {return_species}
+      {r} value = R = recycling probability (0 to 1)
+      {return_species} value = species ID the re-emitted particle becomes
+  {toroidal} args = dphi phi_min (optional)
+    dphi = toroidal extent of the wedge in degrees
+    phi_min = starting toroidal angle in degrees (default 0)
+  {particulate/bounce} args = see "surf_collide particulate/bounce"_surf_collide_particulate_bounce.html :pre
 zero or more keyword/arg pairs may be appended :l
 keyword = {translate} or {rotate} or {temp/freq} or {partial} or {barrier} or {bond} or {init_energy} or {step} or {double} or {intenergy} :l
 values = values for specific keyword :l
   {translate} args = Vx Vy Vz
     Vx,Vy,Vz = translational velocity of surface (velocity units)
-  {rotate} args = Pz Py Pz Wx Wy Wz
+  {rotate} args = Px Py Pz Wx Wy Wz
     Px,Py,Pz = point to rotate surface around (distance units)
     Wx,Wy,Wz = angular velocity of surface around point (radians/time) 
   {temp/freq} arg = Nfreq
@@ -94,7 +104,9 @@ surf_collide 1 impulsive 1000.0 tempvar 3 500 2000 60 5 75
 surf_collide 1 impulsive 1000.0 softsphere 0.2 50 2000 60 5 75 double 10
 surf_collide 1 impulsive 1000.0 tempvar 3 500 2000 60 5 75 step 0.1
 surf_collide heatwall diffuse v_ramp 0.8 temp/freq 100
-surf_collide heatwall diffuse v_ramp 0.8 translate 5.0 0.0 0.0 :pre
+surf_collide heatwall diffuse v_ramp 0.8 translate 5.0 0.0 0.0
+surf_collide pump partial_recycle 300.0 1.0 r 0.9 return_species D2
+surf_collide caps toroidal 20.0 -10.0 :pre
 
 [Description:]
 
@@ -102,13 +114,13 @@ Define a model for particle-surface collisions.  One or more models
 can be defined and assigned to different surfaces or simulation box
 boundaries via the "surf_modify"_surf_modify.html or
 "bound_modify"_bound_modify.html commands.  See "Section
-4.9"_Section_howto.html#howto_9 for more details of how SPARTA defines
+4.9"_Section_howto.html#howto_11 for more details of how OpenEdge defines
 surfaces as collections of geometric elements, triangles in 3d and
 line segments in 2d.  Chemical reactions can also be part of a
 particle-surface interaction model.  See the
 surf_react"_surf_react.html command for details.  All of the collision
 styles listed here support optional reactions, except the {vanish}
-style.
+and {toroidal} styles.
 
 The ID for a surface collision model is used to identify it in other
 commands.  Each surface collision model ID must be unique.  The ID can
@@ -131,7 +143,7 @@ command.  Two different styles of variable can be used.
 The first is an equal-style variable which evaulates to a single
 scalar value, which will be the temperature assigned to every surface
 element.  Equal-style variables can specify formulas with various
-mathematical functions, and include "stats_style"_status_style.html
+mathematical functions, and include "stats_style"_stats_style.html
 command keywords and timestep and elapsed time.  Thus it is easy to
 specify a time-dependent temperature.
 
@@ -160,7 +172,7 @@ with floating point values for the temperature for each surface
 element.  These could be static values initialized, for example, by
 the "read_surf"_read_surf.html command.  Or they could be dynamic
 values recomputed periodically, for example, by the "fix surf/temp"
-command.  See "Section 6.17"_Section_howto.html#howto_17 for more
+command.  See "Section 4.14"_Section_howto.html#howto_14 for more
 discussion of custom attributes.
 
 Note that if the custom per-surf vector values are dynamic, then each
@@ -412,6 +424,38 @@ used to delete particles hitting a surface, by setting the {pdelete}
 parameter to 1.0.  Using a surf_collide vanish command is simpler.
 
 :line
+
+The {partial_recycle} style is the {diffuse} style with EIRENE-style
+partial recycling.  It takes the same {Tsurf} and {acc} arguments as
+{diffuse}.  For every particle that hits the surface a uniform random
+number u is drawn: if u >= R the particle is deleted (pumped), else it
+is re-emitted diffusely at {Tsurf} as for the {diffuse} style.  If
+{return_species} is given the re-emitted particle is converted to that
+species, e.g. incident D atoms returning as D2 molecules.  If a
+surface reaction model is assigned to the surface, it is applied first
+and the recycling draw only applies to particles the reaction did not
+consume.  The number of pumped and recycled particles is printed with
+the collision statistics.
+
+:line
+
+The {toroidal} style implements toroidal periodicity for the two
+phi-face caps of a 3d wedge of a torus.  A particle hitting one cap is
+moved to the opposite cap by rotating its position and velocity by
++/- {dphi} degrees about the z axis (the symmetry axis of the torus);
+which cap was hit is decided by comparing the particle's toroidal
+angle with the middle of the wedge, which starts at {phi_min}.  Any
+guiding-center state stored for the particle is reset so that the
+pusher re-initializes it from the rotated position.  This style does
+not support surface reactions.
+
+:line
+
+The {particulate/bounce} style models the impact of macroscopic
+particulates (dust grains, droplets) on a surface and is described on
+its own "doc page"_surf_collide_particulate_bounce.html.
+
+:line
 :line
 
 The keyword {translate} can only be applied to the {diffuse} and {cll}
@@ -443,7 +487,7 @@ tangential velocity, as if the entire object were rotating.
 IMPORTANT NOTE: For both the {translate} and {rotate} keywords the
 added velocity can only be tangential to the surface, with no normal
 component since the surface is not actually moving in the normal
-direction.  SPARTA does not check that the specified translation or
+direction.  OpenEdge does not check that the specified translation or
 rotation produces a tangential velocity.  However if does enforce the
 condition by subtracting off any component of the added velocity that
 is normal to the simulation box boundary or individual surface
@@ -463,7 +507,7 @@ the CLL model, the energy and angular distribution are linked. Lord
 "(Lord95)"_#Lord95 proposed a way to decouple the energy accommodation
 from the angular distribution. This case of partially diffuse
 scattering with incomplete energy accommodation can be activated in
-SPARTA using the optional keyword {partial}. It requires an additional
+OpenEdge using the optional keyword {partial}. It requires an additional
 parameter eccentricity set by the {eccen} argument. For this case, the
 energy accommodation is calculated using the accommodation
 coefficients, but the angular distribution is computed using the
@@ -514,7 +558,7 @@ before this high energy dissipates from the local hot-spots
 thermal equilibrium with the surroundings, the energies of the
 products might not depend only on the equilibrium surface temperature,
 but also on the incoming velocities of the particles. This can be used
-within SPARTA using the optional keyword {initenergy}. It requires 3
+within OpenEdge using the optional keyword {initenergy}. It requires 3
 arguments: fraction of the initial translational energy going into the
 translational, rotational and vibrational modes.
 
@@ -558,7 +602,7 @@ The values can be used by the "stats_style"_stats_style.html command
 and by "variables"_variable.html that define formulas.  The latter
 means they can be used by any command that uses a variable as input,
 e.g. the "fix ave/time"_fix_ave_time.html command.  See "Section
-4.4"_Section_howto.html#howto_4 for an overview of SPARTA output
+4.4"_Section_howto.html#howto_8 for an overview of OpenEdge output
 options.
 
 The first element of the vector is the count of particles that hit
@@ -571,21 +615,21 @@ that have hit surface elements since the current run began.
 Styles with a {kk} suffix are functionally the same as the
 corresponding style without the suffix.  They have been optimized to
 run faster, depending on your available hardware, as discussed in the
-"Accelerating SPARTA"_Section_accelerate.html section of the manual.
+"Building OpenEdge"_Section_start.html#start_2 section of the manual.
 The accelerated styles take the same arguments and should produce the
 same results, except for different random number, round-off and
 precision issues.
 
 These accelerated styles are part of the KOKKOS package. They are only
-enabled if SPARTA was built with that package.  See the "Making
-SPARTA"_Section_start.html#start_3 section for more info.
+enabled if OpenEdge was built with that package.  See the "Making
+OpenEdge"_Section_start.html#start_3 section for more info.
 
 You can specify the accelerated styles explicitly in your input script
 by including their suffix, or you can use the "-suffix command-line
-switch"_Section_start.html#start_7 when you invoke SPARTA, or you can
+switch"_Section_start.html#start_5 when you invoke OpenEdge, or you can
 use the "suffix"_suffix.html command in your input script.
 
-See the "Accelerating SPARTA"_Section_accelerate.html section of the
+See the "Building OpenEdge"_Section_start.html#start_2 section of the
 manual for more instructions on how to use the accelerated styles
 effectively.
 
@@ -594,6 +638,10 @@ effectively.
 [Restrictions:]
 
 The {translate} and {rotate} keywords cannot be used together.
+
+The {partial_recycle} and {toroidal} styles are part of the OPENEDGE
+package.  The {toroidal} style is intended for 3d wedge geometries and
+only makes sense on the phi-face caps.
 
 If specified with a {kk} suffix, this command can be used no more than
 twice in the same input script (active at the same time).
@@ -604,7 +652,9 @@ twice in the same input script (active at the same time).
 
 [Default:]
 
-The default for the {temp/freq} keyword = 1.
+The default for the {temp/freq} keyword = 1.  For the
+{partial_recycle} style the defaults are r = 1.0 and the re-emitted
+species is the incident species; for {toroidal}, phi_min = 0.
 
 :line
 

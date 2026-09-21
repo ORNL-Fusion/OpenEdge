@@ -1,0 +1,246 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix background command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID background source keyword value ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>background = style name of this fix command 
+
+<LI>source = <I>file path</I> or <I>constant</I> 
+
+<PRE>  <I>file</I> arg = path = HDF5 plasma file written by an OpenEdge converter
+  <I>constant</I> = spatially uniform plasma defined by the keywords below 
+</PRE>
+<LI>zero or more keyword/value pairs may be appended 
+
+<LI>keyword = <I>equilibrium</I> or <I>static</I> or <I>format</I> or <I>flow_sign</I> or <I>b_sign</I> or <I>cs_model</I> or <I>outside</I> or <I>precision</I> or <I>mesh_triangle_cache</I> or <I>mesh_lookup_diagnostics</I> or <I>rz_axes</I> or <I>column_axis</I> or <I>r_bounds</I> or <I>z_bounds</I> or <I>dens_e</I> or <I>temp_e</I> or <I>dens_i</I> or <I>temp_i</I> or <I>dens_n</I> or <I>temp_n</I> or <I>er</I> or <I>et</I> or <I>ez</I> or <I>epar</I> or <I>upar</I> or <I>upar_r</I> or <I>upar_t</I> or <I>upar_z</I> or <I>grad_te_r</I> or <I>grad_te_t</I> or <I>grad_te_z</I> or <I>grad_ti_r</I> or <I>grad_ti_t</I> or <I>grad_ti_z</I> or <I>br</I> or <I>bz</I> or <I>bt</I> or <I>bcart</I> 
+
+<PRE>  <I>equilibrium</I> value = path = standalone equilibrium (psi map) file
+  <I>static</I> value = <I>yes</I> or <I>no</I>
+    yes = read the plasma data once, at the first run, and keep it
+    no = re-read the plasma data at the start of every run
+  <I>format</I> value = <I>legacy</I> or <I>zones3d</I>
+    legacy = axisymmetric (R,Z) plasma file (mesh + equilibrium groups)
+    zones3d = native 3-D zoned EMC3-style background file
+  <I>flow_sign</I> value = +1 or -1 = sign of the parallel flow along the
+    stored field-line direction (zones3d only, required)
+  <I>b_sign</I> value = -1 or 0 or +1 = sign of B along the stored
+    field-line direction (zones3d only; 0 = direction unknown)
+  <I>cs_model</I> value = <I>te_plus_ti</I> = sound speed used to convert Mach
+    number to flow speed (zones3d only, required)
+  <I>outside</I> value = <I>fail</I> or <I>vacuum</I>
+    fail = a query outside the zones3d grid is an error
+    vacuum = a query outside the zones3d grid returns zero plasma
+  <I>precision</I> value = <I>single</I> = storage precision of the zones3d file
+  <I>mesh_triangle_cache</I> value = <I>yes</I> or <I>no</I>
+    yes = store a per-particle hint of the last mesh triangle found
+  <I>mesh_lookup_diagnostics</I> value = <I>yes</I> or <I>no</I>
+    yes = print lookup counters at the end of each run
+  <I>rz_axes</I> value = <I>axi</I> or <I>planar</I>
+    axi = treat simulation x as Z and y as R (axisymmetric slot order)
+    planar = treat simulation x as R and y as Z
+  <I>column_axis</I> values = x0 y0 = (x,y) of the axisymmetry axis
+    (3d Cartesian only)
+  <I>r_bounds</I> values = Rlo Rhi = radial extent of the constant plasma
+  <I>z_bounds</I> values = Zlo Zhi = vertical extent of the constant plasma
+  <I>dens_e</I> (or <I>ne</I>) value = electron density (m^-3)
+  <I>temp_e</I> (or <I>te</I>) value = electron temperature (eV)
+  <I>dens_i</I> (or <I>ni</I>) value = ion density (m^-3)
+  <I>temp_i</I> (or <I>ti</I>) value = ion temperature (eV)
+  <I>dens_n</I> (or <I>nn</I>) value = neutral density (m^-3)
+  <I>temp_n</I> (or <I>tn</I>) value = neutral temperature (eV)
+  <I>er</I>,<I>et</I>,<I>ez</I> value = cylindrical electric field component (V/m)
+  <I>epar</I> value = parallel electric field (V/m)
+  <I>upar</I> (or <I>parr_flow</I>) value = parallel flow speed (m/s)
+  <I>upar_r</I>,<I>upar_t</I>,<I>upar_z</I> (or <I>parr_flow_r</I>, ...) value =
+    cylindrical component of the parallel flow velocity (m/s)
+  <I>grad_te_r</I>,<I>grad_te_t</I>,<I>grad_te_z</I> value = cylindrical component
+    of grad Te (eV/m)
+  <I>grad_ti_r</I>,<I>grad_ti_t</I>,<I>grad_ti_z</I> value = cylindrical component
+    of grad Ti (eV/m)
+  <I>br</I>,<I>bz</I>,<I>bt</I> value = cylindrical magnetic field component (T)
+  <I>bcart</I> values = Bx By Bz = uniform Cartesian magnetic field (T) 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix pd background file plasma.h5 static yes
+fix pd background file plasma.h5 equilibrium shot.equ
+fix pd background file w7x_background3d.h5 format zones3d &
+    flow_sign +1 cs_model te_plus_ti b_sign -1 outside vacuum
+fix pd background constant temp_e 20 dens_e 1e19 temp_i 20 &
+    dens_i 1e19 br 0.0 bz 5.0
+fix pd background constant te 10 ne 1e18 ti 10 ni 1e18 &
+    bcart 0.0 0.0 2.0 upar 1.0e4 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Define the plasma background seen by the plasma-aware OpenEdge fixes
+and computes.  The fix stores electron and ion density, temperature,
+and flow, the electric and magnetic fields, and, when available, the
+poloidal-flux (psi) equilibrium and the list of background ion
+species.  Other commands read this data either as per-cell arrays or
+through point queries at particle positions: the <A HREF = "global.html">global
+pusher</A> keyword, <A HREF = "compute_plasma_fields.html">compute
+plasma/fields</A>, the Coulomb collision,
+sputtering, particulate, and sheath models, and <A HREF = "fix_reflect_psi.html">fix
+reflect/psi</A> all take a fix background ID as
+their plasma provider.  A deck normally defines a single fix
+background and points every consumer at it.
+</P>
+<P>The <I>source</I> argument selects where the plasma comes from.  Exactly
+one of <I>file</I> or <I>constant</I> must be given.
+</P>
+<HR>
+
+<P>The <I>file</I> source reads an HDF5 plasma file produced by one of the
+OpenEdge converters (SOLPS, SOLEDGE3X, OEDGE, EMC3).  With the default
+<I>format legacy</I> the file describes an axisymmetric plasma on an
+unstructured (R,Z) mesh together with an optional equilibrium group
+and an ion species table.  Values at a point are taken from the mesh
+cell (triangle) containing the point.  The magnetic field is built
+from the equilibrium psi map when one is present, B_R = (1/R) dpsi/dZ,
+B_Z = -(1/R) dpsi/dR, B_phi = Btf*Rtf/R, and otherwise from the
+per-vertex B stored in the mesh.
+</P>
+<P>The <I>equilibrium</I> keyword names a standalone equilibrium file whose
+psi map is used in place of any equilibrium group in the plasma file.
+It may be combined with either source.
+</P>
+<P>The <I>static</I> keyword controls re-reading.  With <I>static no</I> the file
+is re-read at the start of every <A HREF = "run.html">run</A> command, which is
+what a coupled outer loop that rewrites the plasma file between runs
+needs.  With <I>static yes</I> the file is read once and kept for all
+subsequent runs.
+</P>
+<P>The <I>mesh_triangle_cache</I> keyword enables a per-particle hint that
+remembers the mesh triangle in which the particle was last found, so
+that the next point query starts its search there.  It is only used
+with <I>format legacy</I>.  The <I>mesh_lookup_diagnostics</I> keyword prints
+counters of point-query outcomes (hint hits, neighbor walks, hash
+searches, outside-mesh queries, and for zones3d ok/outside/invalid/
+ambiguous counts) to the screen and log file after each run.
+</P>
+<P>The <I>rz_axes</I> keyword overrides how the 2d simulation axes map onto
+the cylindrical (R,Z) plane.  By default an axisymmetric domain uses
+x = Z and y = R, and a planar 2d domain uses x = R and y = Z.  Setting
+<I>axi</I> forces the axisymmetric slot order in a planar domain, <I>planar</I>
+forces the planar order.  The keyword has no effect in 3d.
+</P>
+<P>The <I>column_axis</I> keyword sets the (x,y) location of the axis of
+symmetry in a 3d Cartesian simulation.  Every plasma and field lookup
+converts the particle position to (R,Z) with
+R = sqrt((x-x0)^2 + (y-y0)^2).  Use it for linear devices whose
+simulation box is not centered on the plasma column.  It is ignored
+in 2d and axisymmetric simulations and is not allowed with
+<I>format zones3d</I>.
+</P>
+<HR>
+
+<P>The <I>format zones3d</I> value selects the native 3-D background format
+written by the EMC3 converter.  The plasma lives on ruled hexahedral
+cells in one or more toroidal zones, each with a topology label (SOL,
+private flux region, core).  Nothing is projected onto an (R,Z)
+raster: a point query locates the zone and cell containing the
+Cartesian point (R,phi,Z) and returns the cell values of Te, Ti, ne,
+ni, |B|, the Mach number, and the local field-line direction.  The
+<I>file</I> source is required; <I>constant</I> cannot be combined with
+<I>zones3d</I>.
+</P>
+<P>Because the file stores only a Mach number and an unsigned field-line
+direction, two keywords are mandatory with <I>zones3d</I>.  The
+<I>flow_sign</I> value (+1 or -1) fixes the sign of the parallel flow
+relative to the stored field-line direction, and <I>cs_model
+te_plus_ti</I> declares the sound speed used to convert Mach number to
+speed, c_s = sqrt(e*(Te+Ti)/m_i), with m_i the ion mass recorded in
+the file.  The flow velocity returned to consumers is
+u_par = flow_sign * M * c_s along the field-line direction.
+</P>
+<P>The <I>b_sign</I> keyword gives the sign of B along the stored field-line
+direction.  With +1 or -1 the fix provides a full B vector, which the
+guiding-center pusher and the <I>br</I>/<I>bt</I>/<I>bz</I> outputs of <A HREF = "compute_plasma_fields.html">compute
+plasma/fields</A> require.  With the default
+0 only |B| and the unsigned direction are available and a consumer
+that asks for the B vector stops with an error.
+</P>
+<P>The <I>outside</I> keyword decides what happens when a query point falls
+outside every zone.  With <I>fail</I> (the default) the run stops with an
+error that reports the point.  With <I>vacuum</I> the query returns a zero
+plasma (no density, no field), which is appropriate when the
+simulation box legitimately extends beyond the plasma grid.
+</P>
+<P>The <I>precision</I> keyword declares the storage precision of the
+zones3d file.  <I>single</I> is the only accepted value; the keyword is
+accepted for explicitness and does not change how the file is read.
+</P>
+<P>Parallel temperature gradients along the field line are computed
+from neighboring cells on request.  The zones3d format carries no
+heat-flux data, so consumers that need q_par or q_perp cannot be
+used with it.
+</P>
+<HR>
+
+<P>The <I>constant</I> source defines a spatially uniform plasma from the
+scalar keywords listed above and is intended for tests and
+benchmarks.  Any keyword that is not given is zero.  The <I>r_bounds</I>
+and <I>z_bounds</I> keywords set the (R,Z) rectangle over which the
+constant plasma is defined; the upper bound must exceed the lower
+bound.  The <I>dens_n</I> and <I>temp_n</I> keywords define a uniform neutral
+background in addition to the ions and electrons.
+</P>
+<P>The <I>br</I>, <I>bz</I>, and <I>bt</I> keywords define a uniform B in cylindrical
+components.  In 3d the toroidal and radial components rotate with
+the toroidal angle, so a tilted uniform Cartesian field cannot be
+expressed with them; use <I>bcart</I> Bx By Bz instead, which sets the
+same Cartesian vector everywhere.  The <I>er</I>, <I>et</I>, <I>ez</I> keywords
+set a uniform cylindrical E, and <I>epar</I> a parallel E.  The <I>upar</I>
+keyword sets the parallel flow speed while <I>upar_r</I>, <I>upar_t</I>,
+<I>upar_z</I> set its cylindrical components; the gradient keywords set
+the components of grad Te and grad Ti used by the thermal-force
+model.  Which consumer reads a given constant depends on that
+consumer; the fix simply stores them.
+</P>
+<HR>
+
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.  It is only enabled if
+OpenEdge was built with that package.  See the <A HREF = "Section_start.html#start_3">Section
+2.3</A> section for more info.
+</P>
+<P>Exactly one of <I>file</I> or <I>constant</I> must be specified.  <I>format
+zones3d</I> requires the <I>file</I> source and explicit <I>flow_sign</I> and
+<I>cs_model te_plus_ti</I> values, and cannot be combined with
+<I>column_axis</I>.  Reading HDF5 files requires an HDF5-enabled build.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "compute_plasma_fields.html">compute plasma/fields</A>, <A HREF = "global.html">global
+pusher</A>, <A HREF = "fix_reflect_psi.html">fix reflect/psi</A>,
+<A HREF = "compute_nearest_surf_grid.html">compute nearest_surf/grid</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The keyword defaults are static = no, format = legacy, b_sign = 0,
+outside = fail, mesh_triangle_cache = yes, mesh_lookup_diagnostics =
+no, column_axis = 0 0, r_bounds = 0 1, z_bounds = 0 1, and rz_axes
+follows the domain (axi for an axisymmetric domain, planar
+otherwise).  <I>flow_sign</I> and <I>cs_model</I> have no default.  All
+constant-plasma values default to 0.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

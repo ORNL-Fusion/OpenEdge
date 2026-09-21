@@ -1,0 +1,98 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+compute surface/chemical/adatom command :h3
+
+[Syntax:]
+
+compute ID surface/chemical/adatom group-ID tsurf name dp_flux source keyword value ... :pre
+
+ID is documented in "compute"_compute.html command :ulb,l
+surface/chemical/adatom = style name of this compute command :l
+group-ID = ID of surface group to evaluate :l
+tsurf = required keyword :l
+name = name of the per-surf custom attribute holding the surface temperature (degrees C) :l
+dp_flux = required keyword :l
+source = {c_ID} or {c_ID\[N\]} or {f_ID} or {f_ID\[N\]} or {s_name} :l
+  c_ID, c_ID\[N\] = per-surf compute (vector, or column N of array)
+    giving the incident D+ flux (1/m^2/s)
+  f_ID, f_ID\[N\] = per-surf fix giving the incident D+ flux
+  s_name = per-surf custom attribute giving the incident D+ flux :pre
+zero or more keyword/value pairs may be appended :l
+keyword = {Yad} or {Yad_Yps} or {f_ad} or {A_arr} or {E_eff} :l
+  {Yad} value = ad-atom yield for D on Li
+  {Yad_Yps} value = ratio of ad-atom to physical-sputtering yield
+  {f_ad} value = neutral fraction of the released ad-atoms
+  {A_arr} value = Arrhenius pre-factor
+  {E_eff} value = effective binding energy (eV) :pre
+:ule
+
+[Examples:]
+
+compute cadat surface/chemical/adatom divertor tsurf Tsurf_lm dp_flux s_Gamma_D_lm
+compute cadat surface/chemical/adatom divertor tsurf Tsurf_lm &
+    dp_flux c_dflux[2] Yad 1e-3 E_eff 0.9
+fix femit surface/emit/source LiSource divertor cadat perspecies no &
+    normal yes nlaunch_total 200 model thermal_tsurf Tsurf_lm :pre
+
+[Description:]
+
+Compute the thermally released ad-atom (lithium) flux of each surface
+element in the group from its surface temperature and the incident
+deuterium ion flux. The temperature is read from the per-surf custom
+attribute {name} (degrees C), typically {Tsurf_lm} written by "fix
+surface/state/lm"_fix_surface_state_lm.html. The D+ flux is taken from
+the {dp_flux} source: a per-surf compute or fix (with optional
+column), or a per-surf custom attribute such as {Gamma_D_lm}, which
+fix surface/state/lm fills when its heat-flux source carries the ion
+flux.
+
+The released flux is the Arrhenius expression
+
+Gamma_ad(T,Gamma_D) = f_ad * (Yad_Yps / (1 + A_arr exp(E_eff/(k_B T))))
+                      * Yad * Gamma_D :pre
+
+with T in K. The flux is zero for surfaces outside the group.
+
+The per-surf values are meant to be fed to "fix
+surface/emit/source"_fix_surface_emit_source.html as the emission
+source for Li atoms, or written with "dump surf"_dump.html.
+
+:line
+
+[Output info:]
+
+This compute calculates a per-surf vector, with one value per surface
+element owned by the processor. The value is the ad-atom release flux
+in atoms/m^2/s; it is zero for surfaces not in the group.
+
+The vector can be accessed by any command that uses per-surf values
+from a compute as input, e.g. "dump surf"_dump.html, "fix
+ave/surf"_fix_ave_surf.html or "fix
+surface/emit/source"_fix_surface_emit_source.html.
+
+:line
+
+[Restrictions:]
+
+This compute is part of the OPENEDGE package. Both {tsurf} and
+{dp_flux} are required. The custom attributes named by {tsurf} and by
+an {s_name} source must exist when the compute is initialized. A
+{c_ID} or {f_ID} source must produce per-surf values; a column index
+must be >= 1 and cannot be given with an {s_name} source.
+
+[Related commands:]
+
+"fix surface/state/lm"_fix_surface_state_lm.html, "compute
+surface/chemical/evaporation"_compute_surface_chemical_evaporation.html,
+"fix surface/emit/source"_fix_surface_emit_source.html
+
+[Default:]
+
+The option defaults are Yad = 1e-3, Yad_Yps = 1.0, f_ad = 1.0, A_arr
+= 1e-7, E_eff = 0.9.

@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -29,7 +29,7 @@ subsequently substituted for in an input script command, the new value
 is used. 
 
 See the "variable"_variable.html command for info on how to define and
-use different kinds of variables in SPARTA input scripts.  If a
+use different kinds of variables in OpenEdge input scripts.  If a
 variable name is a single lower-case character from "a" to "z", it can
 be used in an input script command as $a or $z.  If it is multiple
 letters, it can be used as $\{myTemp\}.
@@ -64,12 +64,12 @@ in the next command.  This is because of the manner in which the
 incrementing is done, using a single lock file for all variables.  The
 next value (for each variable) is assigned to whichever processor
 partition executes the command first.  All processors in the partition
-are assigned the same value(s).  Running SPARTA on multiple partitions
+are assigned the same value(s).  Running OpenEdge on multiple partitions
 of processors via the "-partition" command-line switch is described in
-"Section 2.6"_Section_start.html#start_7 of the manual.  {Universe}-
+"Section 2.5"_Section_start.html#start_5 of the manual.  {Universe}-
 and {uloop}-style variables are incremented using the files
 "tmp.sparta.variable" and "tmp.sparta.variable.lock" which you will
-see in your directory during and after such a SPARTA run.
+see in your directory during and after such a OpenEdge run.
 
 Here is an example of running a series of simulations using the next
 command with an {index}-style variable.  If this input script is named

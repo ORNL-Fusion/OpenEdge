@@ -1,0 +1,118 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix force/thermal command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID force/thermal Nevery bsource keyword values ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>force/thermal = style name of this fix command 
+
+<LI>Nevery = apply the force every Nevery timesteps 
+
+<LI>bsource = <I>background</I> fix-ID or <I>bfield</I> BxSRC BySRC BzSRC 
+
+<PRE>  <I>background</I> fix-ID = ID of a <A HREF = "fix_background.html">fix background</A>
+    supplying B and the Te, Ti gradients at the particle
+  <I>bfield</I> BxSRC BySRC BzSRC = per-grid or per-particle sources for the
+    field components (T) in OpenEdge coordinate order; each is
+    <I>c_ID[col]</I> or <I>p_name</I> 
+</PRE>
+<LI>one or more keyword/value pairs must be appended 
+
+<LI>keyword = <I>ion_thermal</I> or <I>elec_thermal</I> 
+
+<PRE>  <I>ion_thermal</I> values = [yes/no] [gradTiR_SRC gradTiZ_SRC]
+    yes/no = enable or disable the ion thermal force (default yes
+      when the keyword is present)
+    gradTiR_SRC, gradTiZ_SRC = (R,Z) components of grad(Ti) (eV/m),
+      required with <I>bfield</I> when enabled; not allowed with <I>background</I>
+  <I>elec_thermal</I> values = [yes/no] [gradTeR_SRC gradTeZ_SRC]
+    same as above for the electron thermal force and grad(Te) 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix pd background file plasma.h5 static yes
+fix fth force/thermal 1 background pd ion_thermal elec_thermal
+fix fth force/thermal 20 background pd ion_thermal yes elec_thermal no
+fix fth force/thermal 1 bfield c_cpl[1] c_cpl[2] c_cpl[3] &
+    elec_thermal c_cpl[12] c_cpl[13] 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Apply the Braginskii thermal forces to charged (impurity) particles.
+The force acts along the local magnetic field and is proportional to
+the parallel gradient of the background ion and electron
+temperatures:
+</P>
+<PRE>F_par = beta_i Z^2 e grad_par(Ti) + alpha_e Z^2 e grad_par(Te) 
+</PRE>
+<P>with beta_i = 2.6 (ion thermal force, heavy-impurity limit) and
+alpha_e = 0.71 (electron thermal force, Z_eff = 1). Both coefficients
+are fixed. Z is the particle charge state and grad_par is the
+component of the gradient along the unit vector of B. Both terms point
+toward higher temperature, i.e. typically toward the core. The
+<I>ion_thermal</I> and <I>elec_thermal</I> keywords select which of the two
+terms are applied; at least one must be enabled.
+</P>
+<P>The force is applied as two half-kicks, one before and one after the
+particle move, so that the Boris integration remains symmetric. Each
+half-kick uses dt/2 * Nevery so that the impulse accumulated over
+Nevery steps equals the force integrated over that interval. For
+particles advanced in guiding-center mode the impulse is added
+directly to the stored parallel velocity.
+</P>
+<P>With a <I>background</I> source, B is sampled at the particle position from
+the referenced fix and the temperature gradients are taken from the
+per-cell mesh gradient datasets of the plasma file when present,
+otherwise by bilinear interpolation of the regular-grid gradient
+fields. For 3d native backgrounds the full 3d gradient is sampled.
+With the <I>bfield</I> form, B and the (R,Z) gradient components are read
+from the listed sources: <I>c_ID[col]</I> is column col of a per-grid
+compute evaluated at the particle's cell (the compute is invoked by
+this fix), <I>p_name</I> is a per-particle custom floating-point vector.
+Gradient sources are always the cylindrical (R,Z) components; the
+toroidal component is taken as zero.
+</P>
+<P>Using Nevery > 1 reduces the cost of the per-particle field and
+gradient lookups, but the impulse per application grows with Nevery.
+Where gradients are strong (near the separatrix or X-point) keep
+Nevery small or increase the pusher subcycling with the <I>subcycles</I>
+option of the <A HREF = "global.html">global pusher</A> command.
+</P>
+<P>Neutral species are not affected.
+</P>
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.
+</P>
+<P>Requires either a <A HREF = "fix_background.html">fix background</A> or per-grid
+computes providing B and the temperature gradients. Only charged
+species are accelerated.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_cross_field_diffusion.html">fix cross_field_diffusion</A>, <A HREF = "fix_coulomb_background.html">fix
+coulomb/background</A>, <A HREF = "fix_background.html">fix
+background</A>, <A HREF = "global.html">global</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>A channel keyword given without yes/no is enabled. Neither channel is
+active unless its keyword appears.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

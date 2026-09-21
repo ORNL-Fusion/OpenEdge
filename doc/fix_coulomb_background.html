@@ -1,0 +1,122 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix coulomb/background command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID coulomb/background Nevery source A_bg Z_bg bg-sources 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>coulomb/background = style name of this fix command 
+
+<LI>Nevery = apply the collision operator every Nevery timesteps 
+
+<LI>source = <I>background</I> fix-ID or <I>plasma</I> TeSRC NeSRC 
+
+<PRE>  <I>background</I> fix-ID = ID of a <A HREF = "fix_background.html">fix background</A>
+    supplying Te, ne, Ti, ni, parallel flow and B at the particle
+  <I>plasma</I> TeSRC NeSRC = per-grid or per-particle sources for the
+    electron temperature (eV) and electron density (m^-3)
+    used in the Coulomb logarithm 
+</PRE>
+<LI>A_bg = mass of the background ion species (amu) 
+
+<LI>Z_bg = charge of the background species (units of e, negative for electrons) 
+
+<LI>bg-sources = TiSRC NiSRC VparSRC BxSRC BySRC BzSRC 
+
+<PRE>  required only with <I>plasma</I>; omitted with <I>background</I>
+  TiSRC, NiSRC = background temperature (eV) and density (m^-3)
+  VparSRC = background parallel flow speed (m/s)
+  BxSRC, BySRC, BzSRC = magnetic field components in OpenEdge
+    coordinate order (T) 
+</PRE>
+<LI>every SRC token is <I>c_ID[col]</I> (column col of a per-grid compute) or <I>p_name</I> (per-particle custom floating-point vector) 
+
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix pd background file plasma.h5 static yes
+fix fcb coulomb/background 5 background pd 2.0 1.0 
+</PRE>
+<PRE>fix fcb coulomb/background 1 plasma c_cpl[7] c_cpl[10] 2.0 1.0 &
+    c_cpl[8] c_cpl[10] c_cpl[11] c_cpl[1] c_cpl[2] c_cpl[3] 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Apply Coulomb collisions between every charged simulation particle and
+a fluid background plasma. The background is not represented by
+particles: at each application every charged particle in a cell
+collides once with a virtual partner of mass <I>A_bg</I> and charge <I>Z_bg</I>
+whose velocity is drawn from a Maxwellian at the local background
+temperature Ti and density ni, drifting with the local parallel flow
+Vpar along the magnetic field direction. Only the simulation particle
+velocity is changed; the background acts as an infinite reservoir.
+</P>
+<P>The scattering angle follows the Nanbu (1997) cumulative
+small-angle scheme, in the same form as the Takizuka-Abe pairing
+operator. For a test particle of charge q and mass m colliding with a
+partner of charge q_bg and mass m_bg at relative speed g, the
+scattering parameter is
+</P>
+<PRE>s = (q q_bg)^2 n_bg lnLambda dt / (4 pi eps0^2 mu^2 g^3) 
+</PRE>
+<P>where mu is the reduced mass and dt = Nevery * timestep. For s > 6 the
+scattering is isotropic, for 0.01 < s < 6 the Nanbu A(s) table is
+used, and for smaller s the small-angle limit cos(chi) = 1 + s ln(U)
+is sampled. The Coulomb logarithm is evaluated from the local
+electron temperature and density as
+</P>
+<PRE>lnLambda = max(2, ln(12 pi ne lambda_D^3)) 
+</PRE>
+<P>with the Debye length lambda_D computed from Te and ne.
+</P>
+<P>With the <I>background</I> form all plasma quantities (Te, ne, Ti, ni,
+Vpar, B) are sampled at the particle position from the referenced
+<A HREF = "fix_background.html">fix background</A>. With the <I>plasma</I> form the
+Coulomb-logarithm inputs Te and ne and the six background quantities
+are read from the listed sources, which may be per-grid compute
+columns (<I>c_ID[col]</I>, evaluated at the particle's cell) or
+per-particle custom vectors (<I>p_name</I>). The fix invokes the referenced
+computes itself on every step it acts.
+</P>
+<P>Neutral species are not affected. Cells or particles where the
+background density or temperature is zero are skipped. Particles
+integrated in guiding-center mode are scattered on their reconstructed
+physical velocity, after which the guiding-center state (v_par, mu) is
+re-projected.
+</P>
+<P>The operator is applied at the end of the step, after the particle
+move.
+</P>
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.
+</P>
+<P>Requires either a <A HREF = "fix_background.html">fix background</A> or per-grid
+computes providing the plasma quantities. Only charged species are
+scattered. The background density that enters <I>s</I> is the fluid
+density ni from the source; the <I>A_bg</I> and <I>Z_bg</I> values must describe
+the same species.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_coulomb_binary.html">fix coulomb/binary</A>, <A HREF = "fix_background.html">fix
+background</A>, <A HREF = "fix_neutral_collide_background.html">fix
+neutral/collide/background</A>
+</P>
+<P><B>Default:</B> none
+</P>
+<!-- PAGE BREAK -->
+</HTML>

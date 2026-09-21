@@ -1,13 +1,11 @@
 # Particulate verification
 
-Two rungs of the same ladder — keep both:
-
-- `dustt/` — **model unit test**: uniform prescribed plasma
-  (`fix pd background constant`, B_z = 1 T), grain charging and
-  dustt2005 drag checked against the analytic Pigarov 2005 answers
-  (`check_dustt.py`). Catches edits to the formulas.
-- `droplet_transport/` — **integration test**: the same movers in the
-  real CAT geometry with a converged SOLPS background; three mm-scale
-  Li droplets flown to the wall (`scripts/plot_trajectories.py`,
-  PASS/FAIL). Catches the plumbing the unit test can't: background
-  interpolation, axisymmetric pusher slots, wall interaction, halt.
+- `dustt2005/uniform_plasma_benchmark/` — unit test. Grain charging and
+  DUSTT-2005 drag in a uniform prescribed plasma are checked against the
+  analytic Pigarov (2005) results.
+- `dustt2005/cat_solps_droplet_transport/` — integration test. The same
+  DUSTT-2005 particulate model is exercised in the CAT geometry with a SOLPS
+  background; three Li droplets are flown to the wall.
+- `dis2021/uniform_plasma_comparison/` — model comparison. DUSTT-2005 and
+  DIS-2021 are run from the same one-grain initial condition, checked against
+  their respective equations, and compared for charge, drag, and OML heating.

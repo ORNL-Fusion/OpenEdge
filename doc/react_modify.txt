@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -57,7 +57,7 @@ applies no boost factor.
 
 IMPORTANT NOTE: Setting {rboost} too large could meant the probability
 of a recombination reaction becomes > 1.0, when it is does occur.
-SPARTA does not check for this, so you should estimate the largest
+OpenEdge does not check for this, so you should estimate the largest
 boost factor that is safe to use for your model.
 
 The {compute_chem_rates} keyword is a setting that allows the user to

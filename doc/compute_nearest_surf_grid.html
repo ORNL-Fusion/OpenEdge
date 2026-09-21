@@ -1,0 +1,118 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>compute nearest_surf/grid command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>compute ID nearest_surf/grid group-ID sgroup-ID value1 value2 ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "compute.html">compute</A> command 
+
+<LI>nearest_surf/grid = style name of this compute command 
+
+<LI>group-ID = group ID for which grid cells to perform calculation on 
+
+<LI>sgroup-ID = surface group ID of the surface elements to search 
+
+<LI>two or more values must be appended 
+
+<LI>value = <I>dist</I> or <I>surfid</I> or <I>surfidx</I> or <I>nx</I> or <I>ny</I> or <I>nz</I> 
+
+<PRE>  dist = perpendicular distance from the cell center to the nearest
+    surface element (distance units)
+  surfid = surface ID of the nearest element
+  surfidx = index of the nearest element in the local surface list
+  nx,ny,nz = components of the nearest element's normal, oriented
+    toward the cell center 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>compute cgeom nearest_surf/grid all wall dist surfid nx ny nz
+global pusher mode boris plasma pd sheath boundary geom cgeom 
+</PRE>
+<PRE>compute cnear nearest_surf/grid all divertor dist surfid
+dump dgrid grid all 1000 nearest.txt id c_cnear[1] c_cnear[2] 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Record, for every grid cell in the group, the nearest surface
+element (line in 2d, triangle in 3d) belonging to the surface group,
+the distance to it, and its normal vector.  The result is the
+cell-local wall geometry needed by the sheath models of the <A HREF = "global.html">global
+pusher</A> keyword, whose <I>geom</I> value must name a compute
+of this style, and by near-wall diagnostics such as wall-distance
+maps.
+</P>
+<P>For each cell the compute loops over the eligible surface elements
+and selects the element whose plane (line in 2d) is closest to the
+cell center, measured as the perpendicular distance from the center
+to the infinite plane containing the element.  Using the plane
+distance rather than the distance to the bounded element selects the
+plasma-facing face consistently when a cell is much larger than the
+surface features it overlaps, e.g. a thin slab inside a coarse cell.
+The <I>dist</I> value is that perpendicular distance.
+</P>
+<P>The <I>surfid</I> value is the ID of the selected element as assigned when
+the surface was read in, and <I>surfidx</I> is its index in the processor's
+surface list, which downstream commands use for fast lookups.  The
+<I>nx</I>, <I>ny</I>, <I>nz</I> values are the components of the element's unit
+normal, flipped if necessary so that the normal points from the
+element toward the cell center, i.e. into the plasma.  In 2d <I>nz</I> is
+always zero.
+</P>
+<P>The geometry is static, so the values are computed once when first
+requested and then cached.  They are recomputed when the grid changes,
+e.g. after <A HREF = "fix_adapt.html">fix adapt</A>, <A HREF = "adapt_grid.html">adapt_grid</A>,
+or a load balance, so the compute can be combined with grid
+adaptation.
+</P>
+<P>Cells that are not in the group, and split cells, receive zero for
+all values.  A cell for which no eligible surface element exists
+receives a <I>dist</I> of 1.0e20, a <I>surfid</I> of -1, a <I>surfidx</I> of -1,
+and a zero normal.
+</P>
+<HR>
+
+<P><B>Output info:</B>
+</P>
+<P>This compute calculates a per-grid vector if a single value is
+specified, or a per-grid array with one column per value, in the
+order the values were listed.  The values can be output by the <A HREF = "dump.html">dump
+grid</A> command or used by the sheath and hybrid-pusher
+options of the <A HREF = "global.html">global pusher</A> keyword.
+</P>
+<P>The <I>dist</I> value is in distance units; the other values are
+dimensionless.
+</P>
+<HR>
+
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.  It is only enabled if
+OpenEdge was built with that package.  See the <A HREF = "Section_start.html#start_3">Section
+2.3</A> section for more info.
+</P>
+<P>The command requires explicit surface elements to have been defined,
+e.g. via the <A HREF = "read_surf.html">read_surf</A> command, and at least two
+values.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "global.html">global pusher</A>, <A HREF = "group.html">group</A>, <A HREF = "compute_grid.html">compute
+grid</A>
+</P>
+<P><B>Default:</B> none
+</P>
+<!-- PAGE BREAK -->
+</HTML>

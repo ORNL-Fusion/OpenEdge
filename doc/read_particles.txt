@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -23,12 +23,12 @@ read_particles dump.sphere 10500 :pre
 
 Read a snapshot of particles from a previously created dump file and
 add them to the simulation domain.  This is a means of reading in
-particles from a previous SPARTA simulation or created as output by
+particles from a previous OpenEdge simulation or created as output by
 another code.  The "create_particles"_create_particles.html, "fix
 emit/face"_fix_emit_face.html, and "read_restart"_read_restart.html
 commands are alternate ways to generate particles for a simulation.
 
-The dump file must be in the SPARTA format created by the "dump
+The dump file must be in the OpenEdge format created by the "dump
 particles"_dump.html command which is described on its doc page.
 
 Currently, each line of particle data in the file must have 8 fields
@@ -43,7 +43,7 @@ defined in the current input script via the "species"_species.html
 command.  The x,y,z values are the particle coordinates which must be
 inside (or on the surface of) the simulation box.  If a particle is
 outside the box it will be skipped when the file is read.  For 2d or
-axisymmetric simulations z = 0.0 should be used, though SPARTA does
+axisymmetric simulations z = 0.0 should be used, though OpenEdge does
 not check for this.  The vx,vy,vz values are the particle velocity.
 The rotational and vibrational energies for the new particles are set
 to 0.0.

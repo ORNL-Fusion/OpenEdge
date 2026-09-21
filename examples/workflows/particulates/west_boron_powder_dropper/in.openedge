@@ -54,9 +54,9 @@ fix fdrop   particulate/emit grains dropper nevery ${nemit} n ${npergroup} &
 
 fix fdrag   particulate/drag 1 2.0 1 background pd gravity 0 -9.8 0 &
             model dustt2005 coulomb/self yes material B mixture grains
-fix fcharge particulate/charge 1 background pd ion_mass_amu 2.0 &
+fix fcharge particulate/charge 1 background pd model dustt2005 ion_mass_amu 2.0 &
             thermionic yes material B mixture grains
-fix fevap   particulate/thermal 1 grains background pd &
+fix fevap   particulate/thermal 1 grains background pd model dustt2005 &
             heating oml ion_mass_amu 2.0 material B emit_into bvapor
 fix fchem   volume/chem/adas 1 B input/b.reactions output summary
 

@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -34,12 +34,12 @@
 </PRE>
 <LI>zero or more keyword/value(s) pairs may be appended 
 
-<LI>keyword = <I>axes</I> or <I>flip</I> or <I>emptyweight</I>
+<LI>keyword = <I>axes</I> or <I>flip</I> or <I>emptyweight</I> 
 
 <PRE>  <I>axes</I> value = dims
     dims = string with any of "x", "y", or "z" characters in it
   <I>flip</I> value = yes or no
-  <I>emptyweight</I> value = <I>auto</I> or a positive number
+  <I>emptyweight</I> value = <I>auto</I> or a positive number 
 </PRE>
 
 </UL>
@@ -64,7 +64,7 @@ distribution of particles varies with time, leading to load imbalance.
 <P>After grid cells have been assigned, they are migrated to new owning
 processors, along with any particles they own or other per-cell
 attributes stored by fixes.  The internal data structures within
-SPARTA for grid cells and particles are re-initialized with the new
+OpenEdge for grid cells and particles are re-initialized with the new
 decomposition.
 </P>
 <P>The details of how child cells are assigned to processors by the
@@ -76,7 +76,7 @@ each processor.  This means each processor's cells will be
 geometrically compact.  The <I>random</I> and <I>proc</I> keywords will produce
 dispersed assignments of child cells to each processor.
 </P>
-<P>IMPORTANT NOTE: See <A HREF = "Section_howto.html#howto_8">Section 6.8</A> of the
+<P>IMPORTANT NOTE: See <A HREF = "Section_howto.html#howto_12">Section 4.10</A> of the
 manual for an explanation of clumped and dispersed grid cell
 assignments and their relative performance trade-offs.
 </P>
@@ -185,7 +185,7 @@ exercising the rebalancing code.
 </P>
 <P>The <I>emptyweight</I> keyword sets the weight assigned to a cell with no
 particles when <I>weight</I> is <I>part</I> or <I>time</I>.  Its default is 0.1, which
-preserves the standard SPARTA behavior.  A positive numeric value sets
+preserves the standard OpenEdge behavior.  A positive numeric value sets
 the weight directly.  The <I>auto</I> value is useful for sparse-marker
 OpenEdge simulations whose number of grid cells is much larger than
 their number of particles.  It scales the total empty-cell weight with
@@ -220,21 +220,21 @@ and 0.0 is returned for the global scalar value.
 <P>Styles with a <I>kk</I> suffix are functionally the same as the
 corresponding style without the suffix.  They have been optimized to
 run faster, depending on your available hardware, as discussed in the
-<A HREF = "Section_accelerate.html">Accelerating SPARTA</A> section of the manual.
+<A HREF = "Section_start.html#start_2">Building OpenEdge</A> section of the manual.
 The accelerated styles take the same arguments and should produce the
 same results, except for different random number, round-off and
 precision issues.
 </P>
 <P>These accelerated styles are part of the KOKKOS package. They are only
-enabled if SPARTA was built with that package.  See the <A HREF = "Section_start.html#start_3">Making
-SPARTA</A> section for more info.
+enabled if OpenEdge was built with that package.  See the <A HREF = "Section_start.html#start_3">Making
+OpenEdge</A> section for more info.
 </P>
 <P>You can specify the accelerated styles explicitly in your input script
-by including their suffix, or you can use the <A HREF = "Section_start.html#start_7">-suffix command-line
-switch</A> when you invoke SPARTA, or you can
+by including their suffix, or you can use the <A HREF = "Section_start.html#start_5">-suffix command-line
+switch</A> when you invoke OpenEdge, or you can
 use the <A HREF = "suffix.html">suffix</A> command in your input script.
 </P>
-<P>See the <A HREF = "Section_accelerate.html">Accelerating SPARTA</A> section of the
+<P>See the <A HREF = "Section_start.html#start_2">Building OpenEdge</A> section of the
 manual for more instructions on how to use the accelerated styles
 effectively.
 </P>
@@ -248,4 +248,5 @@ effectively.
 </P>
 <P><B>Default:</B> none
 </P>
+<!-- PAGE BREAK -->
 </HTML>

@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -37,11 +37,11 @@ stas_modify format line "%ld %g %g %15.8g"
 <P><B>Description:</B>
 </P>
 <P>Set options for how statistical information is computed and printed by
-SPARTA.
+OpenEdge.
 </P>
 <P>The <I>flush</I> keyword invokes a flush operation after statistical info
 is written to the log file.  This insures the output in that file is
-current (no buffering by the OS), even if SPARTA halts before the
+current (no buffering by the OS), even if OpenEdge halts before the
 simulation completes.
 </P>
 <P>The <I>format</I> keyword can be used to change the default numeric format
@@ -67,7 +67,7 @@ settings, reverting all values to their default format.
 <P>NOTE: The stats output values <I>step</I> and <I>atoms</I> are stored internally
 as 8-byte signed integers, rather than the usual 4-byte signed
 integers.  When specifying the <I>format int</I> option you can use a
-"%d"-style format identifier in the format string and SPARTA will
+"%d"-style format identifier in the format string and OpenEdge will
 convert this to the corresponding 8-byte form when it is applied to
 those keywords.  However, when specifying the <I>line</I> option or <I>format
 M string</I> option for <I>step</I> and <I>natoms</I>, you should specify a format
@@ -111,4 +111,5 @@ every command will be overridden.
 "%12.8g", and every = non-variable setting provided by the
 <A HREF = "stats.html">stats</A> command.
 </P>
+<!-- PAGE BREAK -->
 </HTML>

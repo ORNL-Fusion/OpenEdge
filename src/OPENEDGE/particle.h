@@ -53,7 +53,8 @@ class Particle : protected Pointers {
     double vibrel[MAXVIBMODE];
     double vibtemp[MAXVIBMODE];
     int vibdegen[MAXVIBMODE];
-    int nmode;
+    int nmode;              // # of distinct modes (frequencies) listed
+    int ntotal;            // N = total # of oscillators = sum of degeneracies
   };
 
   Species *species;         // list of particle species info
@@ -64,15 +65,15 @@ class Particle : protected Pointers {
   int nmixture;
   int maxmixture;
 
-  struct SPARTA_ALIGN(64) OnePart {
+  struct SPARTA_ALIGN(16) OnePart {
     int id;                 // particle ID
     int ispecies;           // particle species index
     int icell;              // which local Grid::cells the particle is in
+    int flag;               // used for migration status
     double x[3];            // particle position
     double v[3];            // particle velocity
     double erot;            // rotational energy
     double evib;            // vibrational energy
-    int flag;               // used for migration status
     double dtremain;        // portion of move timestep remaining
     double weight;          // particle or cell weight, if weighting enabled
     double temp;
@@ -144,6 +145,7 @@ class Particle : protected Pointers {
   void compress_rebalance_sorted();
   void compress_reactions(int, int *);
   void sort();
+  void reorder();
   void sort_allocate();
   void remove_all_from_cell(int);
   virtual void grow(int);

@@ -1,0 +1,40 @@
+# Li on the ST40 wall. All species stick in this Stage-1 scan.
+
+Li --> Li
+A 0.0
+
+Li+ --> Li
+A 0.0
+
+Li2+ --> Li
+A 0.0
+
+Li3+ --> Li
+A 0.0
+
+grain_d040um --> Li
+A 0.0
+
+grain_d060um --> Li
+A 0.0
+
+grain_d080um --> Li
+A 0.0
+
+grain_d100um --> Li
+A 0.0
+
+grain_d125um --> Li
+A 0.0
+
+grain_d150um --> Li
+A 0.0
+
+grain_d200um --> Li
+A 0.0
+
+grain_d250um --> Li
+A 0.0
+
+grain_d300um --> Li
+A 0.0

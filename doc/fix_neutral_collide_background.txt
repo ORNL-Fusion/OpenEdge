@@ -1,0 +1,100 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix neutral/collide/background command :h3
+
+[Syntax:]
+
+fix ID neutral/collide/background Nevery background fix-ID channel values ... :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+neutral/collide/background = style name of this fix command :l
+Nevery = attempt collisions every Nevery timesteps :l
+background fix-ID = ID of a "fix background"_fix_background.html providing the partner density, temperature and flow :l
+one or two channel blocks must follow :l
+channel = {ion} or {neutral}, each followed by zero or more keyword/value pairs :l
+  {ion} = scatter off the main background ion (density, temperature
+    and parallel flow of the background)
+  {neutral} = scatter off the fluid neutral of the background (density
+    and temperature of the neutral field, no flow) :pre
+keyword = {sigma} or {gref} or {omega} or {mass_amu} :l
+  {sigma} value = reference cross section at speed gref (m^2); required
+  {gref} value = reference relative speed (m/s)
+  {omega} value = VSS exponent w in sigma(g) = sigma (gref/g)^(2w-1),
+    0.5 <= w <= 1.5
+  {mass_amu} value = partner mass (amu) :pre
+:ule
+
+[Examples:]
+
+fix pd background file plasma.h5 static yes
+fix fnc neutral/collide/background 1 background pd &
+    ion sigma 5.2e-19 gref 1e4 omega 1.0 mass_amu 2.014 &
+    neutral sigma 3.0e-19 gref 1e4 omega 0.5 mass_amu 2.014 :pre
+
+[Description:]
+
+Apply elastic collisions between kinetic neutral particles and the
+fluid background plasma. Charged simulation particles are not
+affected. The background is treated as an infinite bath: on each
+application, every neutral particle draws a virtual partner from a
+Maxwellian at the local partner density and temperature, and with
+probability
+
+P = 1 - exp(-n sigma(g) g Nevery dt) :pre
+
+undergoes an isotropic center-of-mass scattering with that partner.
+Here g is the relative speed and the cross section follows the
+variable-soft-sphere power law
+
+sigma(g) = sigma_ref (gref/g)^(2 w - 1) :pre
+
+so that {omega} = 0.5 is a hard-sphere (speed-independent) cross
+section and {omega} = 1.0 a Langevin (polarization) interaction with
+constant rate coefficient. Only the neutral particle velocity is
+updated; momentum is deposited in the background.
+
+Two collision channels can be enabled independently. The {ion} channel
+uses the background main-ion density and temperature (falling back to
+the electron values when the ion fields are absent) and drifts the
+partner Maxwellian with the background parallel flow along B when both
+flow and field are available. The {neutral} channel uses the
+background fluid-neutral density and temperature (falling back to the
+ion temperature if a neutral temperature is absent) with no drift. If
+the background plasma file has no neutral density the {neutral}
+channel is inert and a warning is printed.
+
+Each channel block starts with its name and is followed by its own
+keyword/value pairs; a following {ion} or {neutral} token ends the
+block. {sigma} must be given for every channel.
+
+For a tungsten atom in a deuterium plasma, representative values are
+{ion sigma 5.2e-19 gref 1e4 omega 1.0} (Langevin rate coefficient of
+about 5e-15 m^3/s) and {neutral sigma 3.0e-19 gref 1e4 omega 0.5}
+(hard sphere from combined van der Waals radii).
+
+This fix computes a global scalar, the cumulative number of collisions
+performed, which can be accessed by various output commands.
+
+[Restrictions:]
+
+This command is part of the OPENEDGE package.
+
+Requires a "fix background"_fix_background.html. Only species with
+zero charge are scattered. Each channel needs {sigma} > 0, {gref} > 0
+and 0.5 <= {omega} <= 1.5.
+
+[Related commands:]
+
+"fix coulomb/background"_fix_coulomb_background.html, "fix
+background"_fix_background.html
+
+[Default:]
+
+The option defaults per channel are gref = 1.0e4, omega = 0.5,
+mass_amu = 2.014. No channel is active unless listed.

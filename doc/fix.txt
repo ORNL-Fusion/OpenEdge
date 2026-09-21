@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -23,11 +23,11 @@ fix 1 ave/time all 100 5 1000 c_myTemp c_thermo_temp file temp.profile :pre
 
 [Description:]
 
-Set a fix that will be applied to the system.  In SPARTA, a "fix" is
+Set a fix that will be applied to the system.  In OpenEdge, a "fix" is
 an operation that is applied to the system during timestepping.
 Examples include adding particles via inlet boundary conditions or
-computing diagnostics.  Code for new fixes can be added to SPARTA; see
-"Section 10"_Section_modify.html of the manual for details.
+computing diagnostics.  Code for new fixes can be added to OpenEdge; see
+the source code of the manual for details.
 
 Fixes perform their operations at different stages of the timestep.
 If 2 or more fixes operate at the same stage of the timestep, they are
@@ -63,7 +63,7 @@ for individual fixes for info on which ones can be restarted.
 
 Each fix style has its own doc page which describes its arguments and
 what it does, as listed below.  Here is an alphabetic list of fix
-styles available in SPARTA:
+styles available in OpenEdge:
 
 "ablate"_fix_ablate.html - alter implicit surfaces within each grid cell
 "adapt"_fix_adapt.html - on-the-fly grid adaptation
@@ -73,26 +73,42 @@ styles available in SPARTA:
 "ave/histo/weight"_fix_ave_histo.html - compute/output weighted histograms
 "ave/surf"_fix_ave_surf.html - compute per surface element time-averaged quantities
 "ave/time"_fix_ave_time.html - compute/output global time-averaged quantities
+"background"_fix_background.html - load the background plasma and magnetic equilibrium shared by other commands
 "balance"_fix_balance.html - perform dynamic load-balancing
+"bfield/particle"_fix_bfield_particle.html - gyro-motion of charged particles in the background magnetic field
+"coulomb/background"_fix_coulomb_background.html - Coulomb collisions of charged particles with the background plasma
+"coulomb/binary"_fix_coulomb_binary.html - binary Coulomb collisions between charged particles in a cell
+"cross_field_diffusion"_fix_cross_field_diffusion.html - anomalous cross-field diffusion of charged particles
 "dt/reset"_fix_dt_reset.html - adjust global timestep dynamically
+"efield/particle"_fix_efield_particle.html - acceleration of charged particles by the background electric field
 "emit/face"_fix_emit_face.html - emit particles at global boundaries
-"emit/face/file"_fix_emit_face_file.html - emit particles at global boundaries using a distribution defined in a file
 "emit/surf"_fix_emit_surf.html - emit particles at surfaces
-"field/grid"_fix_field_grid.html - apply an external field on a per grid cell basis
-"field/particle"_fix_field_particle.html - apply an external field on a per particle basis
-"gravity"_fix_gravity.html - apply a constant body-force acceleration
+"force/gravity"_fix_force_gravity.html - apply a constant gravitational acceleration
+"force/thermal"_fix_force_thermal.html - parallel friction and thermal forces on impurity ions
 "grid/check"_fix_grid_check.html - check if particles are in the correct grid cell
 "halt"_fix_halt.html - stop the simulation early if a condition is met
 "move/surf"_fix_move_surf.html - move surfaces dynamically during a simulation
+"neutral/collide/background"_fix_neutral_collide_background.html - collisions of neutrals with the background plasma (ionization, charge exchange)
+"particle/weight"_fix_particle_weight.html - per-particle statistical weights
+"particulate/charge"_fix_particulate_charge.html - charging of dust grains and droplets by the background plasma
+"particulate/drag"_fix_particulate_drag.html - plasma drag forces on dust grains and droplets
+"particulate/emit"_fix_particulate_emit.html - inject dust grains or droplets
+"particulate/thermal"_fix_particulate_thermal.html - heating, evaporation and sublimation of dust grains and droplets
 "print"_fix_print.html - print text and variables during a simulation
+"reflect/psi"_fix_reflect_psi.html - reflect particles that cross a normalized-flux (psi) boundary
 "surf/temp"_fix_surf_temp.html - compute per-surf temperatures dynamically
+"surface/emit/puff"_fix_surface_emit_puff.html - emit a gas puff from surfaces at a prescribed rate
+"surface/emit/recycle"_fix_surface_emit_recycle.html - emit recycled neutrals from surfaces at the plasma wall flux
+"surface/emit/source"_fix_surface_emit_source.html - emit particles from surfaces at a per-element source rate (e.g. sputtering)
+"surface/state/lm"_fix_surface_state_lm.html - liquid-metal film and surface temperature model on a divertor strip
 "temp/global/rescale"_fix_temp_global_rescale.html - rescale particle temperatures
 "temp/rescale"_fix_temp_rescale.html - rescale particle temperatures within each grid cell
-"surf/temp"_fix_surf_temp.html - compute per-surf temperatures dynamically
-"vibmode"_fix_vibmode.html - discrete vibrational energy modes :ul
+"vibmode"_fix_vibmode.html - discrete vibrational energy modes
+"volume/chem/adas"_fix_volume_chem_adas.html - ionization and recombination of impurities with ADAS rate coefficients :ul
+
 
 There are also additional accelerated compute styles included in the
-SPARTA distribution for faster performance on specific hardware.  The
+OpenEdge distribution for faster performance on specific hardware.  The
 list of these with links to the individual styles are given in the
 pair section of "this page"_Section_commands.html#cmd_5.
 

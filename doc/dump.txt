@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
    
@@ -132,7 +132,7 @@ its options.
 
 The {particle} and {grid} and {surf} styles create files in a simple
 text format that is self-explanatory when viewing a dump file.  Many
-of the SPARTA "post-processing tools"_Section_tools.html, including
+of the OpenEdge post-processing tools, including
 "Pizza.py"_https://lammps.github.io/pizza, work with this format.
 
 For post-processing purposes the text files are self-describing in the
@@ -151,7 +151,7 @@ x-dimension, and similarly for y and z.  The "xx yy zz" represent 6
 characters that encode the style of boundary for each of the 6
 simulation box boundaries (xlo,xhi and ylo,yhi and zlo,zhi).  Each of
 the 6 characters is either o = outflow, p = periodic, or s = specular.
-See the "boundary"_doc/boundary.html command for details.
+See the "boundary"_boundary.html command for details.
 
 The "ITEM: NUMBER OF ATOMS" or "ITEM: NUMBER OF CELLS" or "ITEM:
 NUMBER OF SURFS" entry in each snapshot gives the number of particles,
@@ -177,7 +177,7 @@ command.
 The specified filename determines how the dump file(s) is written.
 The default is to write one large text file, which is opened when the
 dump command is invoked and closed when an "undump"_undump.html
-command is used or when SPARTA exits.
+command is used or when OpenEdge exits.
 
 Dump filenames can contain two wildcard characters.  If a "*"
 character appears in the filename, then one file per snapshot is
@@ -202,8 +202,8 @@ If the filename ends with ".bin", the dump file (or files, if "*" or
 "%" is also used) is written in binary format.  A binary dump file
 will be about the same size as a text version, but will typically
 write out much faster.  Of course, when post-processing, you will need
-to convert it back to text format (see the "binary2txt
-tool"_Section_tools.html#binary) or write your own code to read the
+to convert it back to text format (see the binary2txt
+tool) or write your own code to read the
 binary file.  The format of the binary file can be understood by
 looking at the tools/binary2txt.cpp file.
 
@@ -256,7 +256,7 @@ the appropriate distance "units"_units.html.  Use {xs}, {ys}, {zs} to
 vibrational energies of the particle.  A particle's kinetic energy is
 given by 1/2 m (vx^2 + vy^2 + vz^2).  The way that rotational and
 vibrational energy is treated in collisions and stored by particles is
-affected by the "collide_modify"_collid_modify.html command.
+affected by the "collide_modify"_collide_modify.html command.
 
 The {c_ID} and {c_ID\[N\]} attributes allow per-particle vectors or
 arrays calculated by a "compute"_compute.html to be output.  The ID in
@@ -296,7 +296,7 @@ means of creating quantities to output to a dump file.
 The {p_name} and {p_name\[N\]} attributes allow custom per-particle
 vectors or arrays defined by some other command to be output.  The
 name should be replaced by the name of the attribute.  See "Section
-6.17"_Section_howto.html#howto_17 for more discussion of custom
+6.17"_Section_howto.html#howto_14 for more discussion of custom
 attributes and command that define them.  For example, the "fix
 ambipolar"_fix_ambipolar.html command which defines the per-particle
 custom vector "ionambi" and custom array "velambi".
@@ -308,8 +308,8 @@ will output the Nth column of an M-column array.  See the discussion
 above for how N can be specified with a wildcard asterisk to
 effectively specify multiple values.
 
-See "Section 10"_Section_modify.html of the manual for information on
-how to add new compute and fix styles to SPARTA to calculate
+See the source code of the manual for information on
+how to add new compute and fix styles to OpenEdge to calculate
 per-particle quantities which could then be output into dump files.
 
 :line
@@ -319,8 +319,8 @@ as part of the {grid} style.
 
 Note that dump grid will output one line (per snapshot) for 3 kinds of
 child cells: unsplit cells, cut cells, and sub cells of split cells.
-"Section 6.8"_Section_howto.html#howto_8 of the manual gives details
-of how SPARTA defines child, unsplit, cut, split, and sub cells.  This
+"Section 4.10"_Section_howto.html#howto_12 of the manual gives details
+of how OpenEdge defines child, unsplit, cut, split, and sub cells.  This
 is different than "compute"_compute.html or "fix"_fix.html commands
 which produce per grid information; they also include split cells in
 their output.  The dump grid command discards the split cell
@@ -330,7 +330,7 @@ unsplit cells can be outside (in the flow) or inside surface objects,
 if they exist.
 
 {Id} and {idstr} are two different forms of the grid cell ID.  In
-SPARTA each grid cell is assigned a unique ID which represents its
+OpenEdge each grid cell is assigned a unique ID which represents its
 location, in a topological sense, within the hierarchical grid.  This
 ID is stored as an integer such as 5774983, but can also be decoded
 into a string such as 33-4-6, which makes it easier to understand the
@@ -360,8 +360,8 @@ they are part of.
 
 The {vol} attribute is the flow volume of the grid cell (or area in
 2d) for unsplit or cut or sub cells.  "Section
-4.8"_Section_howto.html#howto_8 of the manual gives details of how
-SPARTA defines unsplit and sub cells.  Flow volume is the portion of
+4.8"_Section_howto.html#howto_10 of the manual gives details of how
+OpenEdge defines unsplit and sub cells.  Flow volume is the portion of
 the grid cell that is accessible to particles, i.e. outside any closed
 surface that may intersect the cell.  Note that unsplit cells which
 are inside a surface object will have a flow volume of 0.0.  Likewise
@@ -407,12 +407,10 @@ quantities to output to a dump file.
 The {g_name} and {g_name\[N\]} attributes allow custom per-grid cell
 vectors or arrays defined by some other command to be output.  The
 name should be replaced by the name of the attribute.  See "Section
-6.17"_Section_howto.html#howto_17 for more discussion of custom
+6.17"_Section_howto.html#howto_14 for more discussion of custom
 attributes and command that define them.  For example, the
-"read_grid"_read_grid.html and "surf_react
-implicit"_surf_react_implicit.html commands can define per-grid
-attributes.  (The surf/react implicit command has not yet been
-released in public SPARTA).
+"read_grid"_read_grid.html and the unreleased {surf_react implicit}
+command can define per-grid attributes.
 
 If {g_name} is used as a attribute, the custom attribute must be a
 vector, and it is output.  If {g_name\[N\]} is used, the custom
@@ -421,8 +419,8 @@ will output the Nth column of an M-column array.  See the discussion
 above for how N can be specified with a wildcard asterisk to
 effectively specify multiple values.
 
-See "Section 10"_Section_modify.html of the manual for information on
-how to add new compute and fix styles to SPARTA to calculate per-grid
+See the source code of the manual for information on
+how to add new compute and fix styles to OpenEdge to calculate per-grid
 quantities which could then be output into dump files.
 
 :line
@@ -483,7 +481,7 @@ quantities to output to a dump file.
 The {s_name} and {s_name\[N\]} attributes allow custom per-surface
 element vectors or arrays defined by some other command to be output.
 The name should be replaced by the name of the attribute.  See
-"Section 6.17"_Section_howto.html#howto_17 for more discussion of
+"Section 4.14"_Section_howto.html#howto_14 for more discussion of
 custom attributes and command that define them.  For example, the
 "read_surf"_read_surf.html, "fix surf/temp"_fix_surf_temp.html, and
 "surf_react adsorb"_surf_react_adsorb.html commands can define
@@ -496,16 +494,16 @@ will output the Nth column of an M-column array.  See the discussion
 above for how N can be specified with a wildcard asterisk to
 effectively specify multiple values.
 
-See "Section 10"_Section_modify.html of the manual for information on
-how to add new compute and fix styles to SPARTA to calculate per-surf
+See the source code of the manual for information on
+how to add new compute and fix styles to OpenEdge to calculate per-surf
 quantities which could then be output into dump files.
 
 :line
 
 [Restrictions:]
 
-To write gzipped dump files, you must compile SPARTA with the
--DSPARTA_GZIP option - see the "Making SPARTA"_Section_start.html#start_2
+To write gzipped dump files, you must compile OpenEdge with the
+-DOpenEdge_GZIP option - see the "Making OpenEdge"_Section_start.html#start_2
 section of the documentation.
 
 [Related commands:]

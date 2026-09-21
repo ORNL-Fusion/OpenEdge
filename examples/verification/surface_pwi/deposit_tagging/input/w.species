@@ -1,0 +1,5 @@
+# W beam / W plate test.  Wd = deposited-W material for surf_react surface/pwi
+# deposit_as (never transported; same mass as W).
+# ID Molwt Molmass rotDOF RotRel vibDOF VibRel VibTemp specwt charge
+W     184.00  3.077624296e-25    0   0.0   0   0.0   0.0   1.0   0.0
+Wd    184.00  3.077624296e-25    0   0.0   0   0.0   0.0   1.0   0.0

@@ -1,0 +1,36 @@
+# Local-normal reflection regression on the verified ST40 psi map.
+# Axisymmetric OpenEdge slots are x=Z, y=R, z=phi.
+
+seed        20260829
+dimension   2
+boundary    o ao p
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0
+global      phi_track yes
+timestep    5.0e-3
+
+create_box  -1.0 1.0  0.0 1.05  -0.05 0.05
+create_grid 40 30 1
+balance_grid rcb cell
+global      weight cell radius
+
+species     ../../input/grains.species droplet
+mixture     grains droplet frac 1.0
+
+fix         pd background file ../../input/plasma_st40_solps_corefill.h5 static yes
+fix         fcore reflect/psi background pd psi_norm 0.51 &
+            action reflect mixture grains
+
+# Start at (R,Z)=(0.60,0.25) and propose an oblique inward chord to
+# (0.55,0.20). The local psi normal has both R and Z components, so this
+# distinguishes a true contour reflection from the old v_R-only reversal.
+read_particles input/one_grain_reflect 0
+
+shell mkdir output_reflect
+dump dpart particle all 1 output_reflect/state id type x y z vx vy vz
+dump_modify dpart first yes
+dump_modify dpart format float %.16g
+
+stats 1
+stats_style step np
+run 1

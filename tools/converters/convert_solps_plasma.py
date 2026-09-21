@@ -342,7 +342,24 @@ def _read_geqdsk_bfield(gfile: Path):
     psi_arr = _lookup(data, "psi", "psirz")
     if psi_arr is None:
         raise RuntimeError("GEQDSK does not contain psi/psirz array")
-    flux2d = np.array(psi_arr, dtype=np.float64).reshape((ny, nx))
+    # freeqdsk exposes GEQDSK psi in its native (R, Z) indexing, i.e.
+    # shape (nx, ny). OpenEdge's equilibrium contract is (Z, R), matching
+    # every runtime lookup index `psi[iz,ir]`. A blind reshape is wrong for
+    # square equilibria because it silently preserves the transposition.
+    # Prefer the documented freeqdsk layout; retain a defensive branch for
+    # readers that already return (Z, R), and define the flat fallback as
+    # R-major GEQDSK data.
+    psi_raw = np.asarray(psi_arr, dtype=np.float64)
+    if psi_raw.ndim == 2 and psi_raw.shape == (nx, ny):
+        flux2d = psi_raw.T.copy()
+    elif psi_raw.ndim == 2 and psi_raw.shape == (ny, nx):
+        flux2d = psi_raw.copy()
+    elif psi_raw.size == nx * ny:
+        flux2d = psi_raw.reshape((nx, ny)).T.copy()
+    else:
+        raise RuntimeError(
+            f"GEQDSK psi shape {psi_raw.shape} is incompatible with "
+            f"nx={nx}, ny={ny}")
 
     dpsidR = np.zeros_like(flux2d)
     dpsidZ = np.zeros_like(flux2d)

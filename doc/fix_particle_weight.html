@@ -1,0 +1,94 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix particle/weight command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID particle/weight 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>particle/weight = style name of this fix command 
+
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix pw particle/weight
+fix femit surface/emit/source LiSource divertor cevap perspecies no &
+    nlaunch_total 200 model thermal
+compute cgw grid/weighted all LiAll nrho_w u_w temp_w 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Create the per-particle weight attribute used by the weighted
+emission and diagnostic commands of OpenEdge.  The fix adds a custom
+per-particle floating-point attribute named <I>pweight</I> (see the
+<A HREF = "custom.html">custom</A> command) that records how many physical
+particles each simulation particle represents.  The weighted emitters
+such as <A HREF = "fix_surface_emit_source.html">fix surface/emit/source</A> write
+this attribute when they insert a particle, and <A HREF = "compute_grid_weighted.html">compute
+grid/weighted</A> reads it to form properly
+normalized densities, fluxes, and moments.
+</P>
+<P>A weight is required whenever emission rates vary across the wall or
+between sources, since the launched particles then represent
+different numbers of physical particles.  Without this fix the
+weighted emitters have nowhere to store the weight and refuse to run
+in their weighted modes.
+</P>
+<P>Particles that are not created by a weighted emitter, e.g. those
+inserted by <A HREF = "create_particles.html">create_particles</A>, <A HREF = "fix_emit_face.html">fix
+emit/face</A>, or surface reactions, receive the
+default weight <I>fnum</I> (see the <A HREF = "global.html">global</A> command), both at
+the start of a run for existing particles whose weight is still zero
+and at insertion time for new particles.  This makes the weighted
+diagnostics consistent with their unweighted counterparts for
+unweighted particles.  A weight already set to a non-zero value by an
+emitter is never overwritten.
+</P>
+<P>Like any custom attribute, <I>pweight</I> follows the particle through
+sorting, cloning, splitting, and migration between processors.  Only
+one fix of this style should be defined in a simulation.
+</P>
+<HR>
+
+<P><B>Restart, output info:</B>
+</P>
+<P>The <I>pweight</I> attribute is a custom per-particle attribute and is
+written to <A HREF = "restart.html">binary restart files</A> with the particles.
+If it is already present when the fix is defined, e.g. after
+<A HREF = "read_restart.html">read_restart</A>, the existing attribute is reused.
+</P>
+<P>This fix produces no output of its own.  The weights can be written
+by the <A HREF = "dump.html">dump particle</A> command as <I>p_pweight</I>.
+</P>
+<HR>
+
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.  It is only enabled if
+OpenEdge was built with that package.  See the <A HREF = "Section_start.html#start_3">Section
+2.3</A> section for more info.
+</P>
+<P>The command takes no arguments.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "compute_grid_weighted.html">compute grid/weighted</A>, <A HREF = "fix_surface_emit_source.html">fix
+surface/emit/source</A>,
+<A HREF = "custom.html">custom</A>
+</P>
+<P><B>Default:</B> none
+</P>
+<!-- PAGE BREAK -->
+</HTML>

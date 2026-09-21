@@ -1,0 +1,229 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>compute surface/physical/sputter command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>compute ID surface/physical/sputter group-ID background fix-ID keyword values ... 
+</PRE>
+<UL><LI>ID is documented in the <A HREF = "compute.html">compute</A> command 
+
+<LI>surface/physical/sputter = style name of this compute 
+
+<LI>group-ID = group ID of surface elements to operate on 
+
+<LI>background fix-ID = <A HREF = "fix_background.html">fix background</A> supplying the plasma 
+
+<PRE>  <I>file</I> path may be given instead of <I>background</I> fix-ID to read the
+    plasma from an HDF5 file 
+</PRE>
+<LI>eckstein name = optional; use the single analytic Eckstein entry <I>name</I>
+  (e.g. O_on_W) instead of <I>target</I> and <I>projectiles</I> 
+
+<LI>zero or more keyword/value pairs may be appended 
+
+<LI>keyword = <I>target</I> or <I>target_like</I> or <I>yield_scale</I> or <I>projectiles</I> or <I>impurity</I> or <I>mass_amu</I> or <I>us</I> or <I>tsurf</I> or <I>compound</I> or <I>conc</I> or <I>roughness_dm</I> or <I>projectile_slots</I> or <I>static</I> or <I>incidence</I> or <I>visibility</I> or <I>iead</I> or <I>sheath_waveform</I> or <I>wall_flux_cutoff</I> or <I>boundary</I> or <I>debug_interp</I> or <I>nflux_species</I> or <I>incident_angle_species</I> or <I>incident_energy_species</I> or <I>sputter_yield_species</I> or <I>sputter_flux_species</I> or <I>sputter_flux_total</I> or <I>erosion_flux</I> or <I>sputter_rate_total</I> or <I>erosion_rate</I> 
+
+<PRE>  <I>target</I> value = element symbol of the wall material (e.g. W, Li, B)
+  <I>target_like</I> value = element whose yield data stand in for <I>target</I>
+  <I>yield_scale</I> value = multiplier applied to every yield
+  <I>projectiles</I> value = comma-separated projectile elements, or <I>all</I>
+  <I>impurity</I> values = mass_amu frac Zmax f1 ... fZmax
+    mass_amu = mass of a virtual impurity projectile (amu)
+    frac = its density as a fraction of the background n_e (0 < frac < 1)
+    Zmax = number of charge states, followed by their fractions f1..fZmax
+  <I>mass_amu</I> value = main-ion mass in amu used by the sheath model
+  <I>us</I> value = surface binding energy override in eV (analytic fallback)
+  <I>tsurf</I> value = name of a custom per-surf vector holding the surface
+    temperature in Kelvin
+  <I>compound</I> value = mixture name of composition-resolved yield tables
+  <I>conc</I> values = attr species
+    attr = custom per-surf array holding the surface composition
+    species = species whose column is the composition coordinate
+  <I>roughness_dm</I> value = mean surface angle delta_m in degrees, 0 <= dm < 90
+  <I>projectile_slots</I> values = lo hi = inclusive range of plasma ion slots
+    (1-based) that are treated as sputtering projectiles
+  <I>static</I> value = <I>yes</I> or <I>no</I>
+  <I>incidence</I> value = <I>poloidal</I> or <I>full3d</I> or <I>directed3d</I>
+  <I>visibility</I> value = custom per-surf vector holding a field-line
+    visibility fraction from 0 (shadowed) to 1 (visible)
+  <I>iead</I> value = <I>auto</I> or <I>none</I> or path to an IEAD table file
+  <I>sheath_waveform</I> values = attr frequency_hz phase_samples
+    attr = custom per-surf array of 3 columns (V_dc, V_rf, phase)
+    frequency_hz = frequency of the RF sheath voltage (>= 0)
+    phase_samples = number of phases the impact energy is averaged over
+  <I>wall_flux_cutoff</I> value = search radius in m for wall-flux samples
+  <I>boundary</I> value = file with an R Z polygon bounding the plasma
+  <I>debug_interp</I> values = E theta = print the interpolated yield at
+    energy E (eV) and angle theta (deg) when the compute is initialized
+  <I>nflux_species</I> value = slot or <I>all</I> = incident flux of an ion slot
+  <I>incident_angle_species</I> value = slot or <I>all</I> = impact angle (deg)
+  <I>incident_energy_species</I> value = slot or <I>all</I> = impact energy (eV)
+  <I>sputter_yield_species</I> value = slot or <I>all</I> = sputter yield
+  <I>sputter_flux_species</I> value = slot or <I>all</I> = sputtered flux
+  <I>sputter_flux_total</I> or <I>erosion_flux</I> = gross erosion flux summed
+    over all projectiles (atoms/m^2/s)
+  <I>sputter_rate_total</I> or <I>erosion_rate</I> = erosion flux times element
+    area (atoms/s) 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>compute cpmi surface/physical/sputter plate background pd &
+        target W projectiles all static yes erosion_flux
+compute cpmiLi surface/physical/sputter div_outer background pd &
+        target Li projectiles D,Ne,Li tsurf Tsurf_lm iead none static yes &
+        projectile_slots 1 14 erosion_flux sputter_flux_species all
+compute cpmiWd surface/physical/sputter wall background pd &
+        target Wd target_like W yield_scale 2.0 projectiles D,O erosion_flux 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Compute the physical-sputtering erosion of the surface elements in the
+group by the ions of the plasma background: per-projectile incident
+fluxes, impact energies and angles, sputter yields, and the gross
+erosion flux.  The erosion flux is the usual source term for <A HREF = "fix_surface_emit_source.html">fix
+surface/emit/source</A> and the erosion
+debit for <A HREF = "surf_react_surface_pwi.html">surf_react surface/pwi</A>.
+</P>
+<P>For every surface element and every plasma ion slot, the plasma state
+(n, Te, Ti, B) is taken from the <A HREF = "fix_background.html">fix
+background</A> at the element midpoint.  The incident
+flux is the Bohm flux Gamma = n c_s sin(alpha_B), with c_s =
+sqrt((Te+Ti)/m) and m the <I>mass_amu</I> main-ion mass, and sin(alpha_B)
+the projection of B onto the surface normal.  The impact energy
+follows the Chankin sheath model (sheath drop plus 2 Ti); the impact
+angle follows from the field geometry.
+</P>
+<P>The <I>incidence</I> keyword selects the field projection.  <I>poloidal</I> (the
+default) uses the (R,Z) components of B only.  <I>full3d</I> uses the full
+B vector including the toroidal component and the surface tilt.
+<I>directed3d</I> additionally uses the signed parallel flow of each ion
+slot and retains only flux arriving from the incoming field direction,
+so a face tilted away from the ions receives no direct flux.  The
+<I>visibility</I> keyword multiplies every incident flux by a static
+per-element fraction, e.g. a shadowing mask produced by an offline
+field-line trace.
+</P>
+<P>Sputter yields Y(E,theta) are taken from the tables in processes.h5
+(/surface/sputter/<projectile>_on_<target>) when present; pairs without
+a table fall back to the analytic Eckstein fit whose coefficients are
+looked up under the same <projectile>_on_<target> name.  A missing
+entry for any requested pair is an error at initialization.  <I>target</I>
+names the wall element, <I>projectiles</I> the list of projectile elements
+(or <I>all</I> for every ion element of the background); every ion slot of
+a given element, whatever its charge state, is routed to that
+element's data.  <I>projectile_slots</I> restricts which slots contribute to
+the sputter outputs; by default slot 1 (the main ion) is excluded from
+the <I>all</I> range of the sputter outputs.  <I>impurity</I> adds a virtual
+projectile that is not in the background: its density is <I>frac</I> times
+n_e, spread over Zmax charge states with the given fractions.
+</P>
+<P><I>target_like</I> names an element whose yield data stand in for a target
+that has no data of its own, e.g. a redeposited material tracked
+separately by surf_react surface/pwi <I>deposit_as</I> (<I>target Wd
+target_like W</I>).  A table named after the real target still takes
+precedence when present.  <I>yield_scale</I> multiplies every yield, e.g.
+to model a weakly bound deposit.  <I>us</I> overrides the target surface
+binding energy of the analytic fallback; the threshold energy is
+rescaled so that threshold ratios are preserved.  <I>roughness_dm</I>
+evaluates the yields at theta_eff = max(0, theta - delta_m) to mimic
+the flattened angular dependence of a rough surface.
+</P>
+<P>Yield tables may carry a temperature axis, e.g. the liquid-lithium
+tables where sputtering is strongly enhanced on hot surfaces.  With
+<I>tsurf</I> the yield is interpolated linearly in temperature at each
+element's value of the named custom vector (clamped to the table
+range).  Without <I>tsurf</I> a temperature-dependent table evaluates at
+its coldest slice.
+</P>
+<P>By default (<I>iead auto</I>) the yield is not evaluated at the mean impact
+energy and angle but convolved with the ion energy-angle distribution
+of the magnetized sheath, read from the IEAD database (a light-ion
+table, and a separate W table when W is a projectile).  <I>iead none</I>
+evaluates Y at the mean impact (E, 90 - alpha_B); a file path uses that
+file as the light-ion table.  Since the mean impact angle at a
+divertor target is very grazing, the convolved yield is typically
+much larger than the mean-impact yield.
+</P>
+<P><I>compound</I> selects composition-resolved (3d) yield tables named
+<projectile>_on_<mix>_<target>; the composition coordinate is read
+per element from the <I>conc</I> array column of the named species.
+<I>compound</I> and <I>conc</I> must be given together and require <I>target</I> and
+<I>projectiles</I>; they cannot be combined with <I>impurity</I>.
+</P>
+<P><I>sheath_waveform</I> models a biased or RF-driven sheath: the named
+custom per-surf array holds, per element, a DC voltage, an RF
+amplitude and a phase; the impact energy is averaged over
+<I>phase_samples</I> phases of the waveform at the given frequency.  With a
+single phase sample the compute is time resolved and the static cache
+is disabled.  It requires <I>iead none</I> and cannot be combined with
+<I>compound</I> or <I>impurity</I>.
+</P>
+<P><I>wall_flux_cutoff</I> is the search radius used when the background
+provides wall-flux samples (smooth B, Te, Ti along the wall) and the
+compute looks up the nearest samples to an element.  <I>boundary</I> names
+a text file of R Z points (one pair per line, # comments allowed)
+forming a polygon; for backgrounds without a mesh, elements whose
+midpoint falls outside the polygon are skipped.  <I>debug_interp</I> prints
+the raw and clamped table yield at the given (E, theta) to the screen
+and log file at initialization and may be repeated.
+</P>
+<P>With <I>static yes</I> the yields are computed once per background
+generation and reused; with <I>static no</I> they are recomputed on every
+invocation.  In <I>compound</I> mode the cached yields are re-interpolated
+at the live composition on every invocation.
+</P>
+<HR>
+
+<P><B>Output info:</B>
+</P>
+<P>This compute calculates a per-surf vector if a single output keyword
+is given, or a per-surf array with one column per output keyword in
+the order given.  The <I>*_species</I> keywords with <I>all</I> expand to one
+column per plasma ion slot.  Values are 0 for elements not in the
+group.  Fluxes are in atoms/m^2/s, energies in eV, angles in degrees
+from the surface normal, and <I>erosion_rate</I> in atoms/s using the
+axisymmetric ring area in 2d or the triangle area in 3d.
+</P>
+<P>The values can be output by <A HREF = "dump.html">dump surf</A>, time-averaged by
+<A HREF = "fix_ave_surf.html">fix ave/surf</A>, reduced by <A HREF = "compute_reduce.html">compute
+reduce</A>, or consumed by <A HREF = "fix_surface_emit_source.html">fix
+surface/emit/source</A>.
+</P>
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.  It requires a <A HREF = "fix_background.html">fix
+background</A> (or an HDF5 plasma file) and explicit
+surface elements.  The <I>tsurf</I>, <I>visibility</I>, <I>conc</I> and
+<I>sheath_waveform</I> custom attributes must exist by the first
+evaluation of the compute (they may be created by a fix or surf_react
+defined after this compute).
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_background.html">fix background</A>,
+<A HREF = "fix_surface_emit_source.html">fix surface/emit/source</A>,
+<A HREF = "surf_react_surface_pwi.html">surf_react surface/pwi</A>,
+<A HREF = "compute_surface_chemical_evaporation.html">compute surface/chemical/evaporation</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The option defaults are mass_amu = 2.0, incidence = poloidal, static =
+no, iead = auto (none when sheath_waveform is used), yield_scale =
+1.0, roughness_dm = 0.0, wall_flux_cutoff = 0.05, projectile_slots =
+2 to the last slot, and no target_like, tsurf, visibility, compound,
+impurity, boundary or sheath_waveform.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

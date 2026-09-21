@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -31,11 +31,11 @@ stas_modify format line "%ld %g %g %15.8g" :pre
 [Description:]
 
 Set options for how statistical information is computed and printed by
-SPARTA.
+OpenEdge.
 
 The {flush} keyword invokes a flush operation after statistical info
 is written to the log file.  This insures the output in that file is
-current (no buffering by the OS), even if SPARTA halts before the
+current (no buffering by the OS), even if OpenEdge halts before the
 simulation completes.
 
 The {format} keyword can be used to change the default numeric format
@@ -61,7 +61,7 @@ settings, reverting all values to their default format.
 NOTE: The stats output values {step} and {atoms} are stored internally
 as 8-byte signed integers, rather than the usual 4-byte signed
 integers.  When specifying the {format int} option you can use a
-"%d"-style format identifier in the format string and SPARTA will
+"%d"-style format identifier in the format string and OpenEdge will
 convert this to the corresponding 8-byte form when it is applied to
 those keywords.  However, when specifying the {line} option or {format
 M string} option for {step} and {natoms}, you should specify a format

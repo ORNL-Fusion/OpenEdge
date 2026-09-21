@@ -13,7 +13,7 @@ mkdir -p output
 rm -f output/impacts.b_* output/escapes.b_* output/traj.b_* output/switch.b_*
 fail=0
 
-[ -f input/source.b_in ] || $PY make_inputs.py
+[ -f input/source.b_in ] || $PY scripts/make_inputs.py
 
 run() {
   echo "== $*"
@@ -25,5 +25,5 @@ run -var shmode boundary -var src source.b_in  -var tag b_in  -var nsteps 1200
 run -var shmode boundary -var src source.b_sub -var tag b_sub -var nsteps 1200
 run -var shmode boundary -var src source.b_sup -var tag b_sup -var nsteps 1200
 
-$PY plot_sheath.py || fail=1
+$PY scripts/plot_sheath.py || fail=1
 exit $fail

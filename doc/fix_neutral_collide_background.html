@@ -1,0 +1,115 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix neutral/collide/background command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID neutral/collide/background Nevery background fix-ID channel values ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>neutral/collide/background = style name of this fix command 
+
+<LI>Nevery = attempt collisions every Nevery timesteps 
+
+<LI>background fix-ID = ID of a <A HREF = "fix_background.html">fix background</A> providing the partner density, temperature and flow 
+
+<LI>one or two channel blocks must follow 
+
+<LI>channel = <I>ion</I> or <I>neutral</I>, each followed by zero or more keyword/value pairs 
+
+<PRE>  <I>ion</I> = scatter off the main background ion (density, temperature
+    and parallel flow of the background)
+  <I>neutral</I> = scatter off the fluid neutral of the background (density
+    and temperature of the neutral field, no flow) 
+</PRE>
+<LI>keyword = <I>sigma</I> or <I>gref</I> or <I>omega</I> or <I>mass_amu</I> 
+
+<PRE>  <I>sigma</I> value = reference cross section at speed gref (m^2); required
+  <I>gref</I> value = reference relative speed (m/s)
+  <I>omega</I> value = VSS exponent w in sigma(g) = sigma (gref/g)^(2w-1),
+    0.5 <= w <= 1.5
+  <I>mass_amu</I> value = partner mass (amu) 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix pd background file plasma.h5 static yes
+fix fnc neutral/collide/background 1 background pd &
+    ion sigma 5.2e-19 gref 1e4 omega 1.0 mass_amu 2.014 &
+    neutral sigma 3.0e-19 gref 1e4 omega 0.5 mass_amu 2.014 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Apply elastic collisions between kinetic neutral particles and the
+fluid background plasma. Charged simulation particles are not
+affected. The background is treated as an infinite bath: on each
+application, every neutral particle draws a virtual partner from a
+Maxwellian at the local partner density and temperature, and with
+probability
+</P>
+<PRE>P = 1 - exp(-n sigma(g) g Nevery dt) 
+</PRE>
+<P>undergoes an isotropic center-of-mass scattering with that partner.
+Here g is the relative speed and the cross section follows the
+variable-soft-sphere power law
+</P>
+<PRE>sigma(g) = sigma_ref (gref/g)^(2 w - 1) 
+</PRE>
+<P>so that <I>omega</I> = 0.5 is a hard-sphere (speed-independent) cross
+section and <I>omega</I> = 1.0 a Langevin (polarization) interaction with
+constant rate coefficient. Only the neutral particle velocity is
+updated; momentum is deposited in the background.
+</P>
+<P>Two collision channels can be enabled independently. The <I>ion</I> channel
+uses the background main-ion density and temperature (falling back to
+the electron values when the ion fields are absent) and drifts the
+partner Maxwellian with the background parallel flow along B when both
+flow and field are available. The <I>neutral</I> channel uses the
+background fluid-neutral density and temperature (falling back to the
+ion temperature if a neutral temperature is absent) with no drift. If
+the background plasma file has no neutral density the <I>neutral</I>
+channel is inert and a warning is printed.
+</P>
+<P>Each channel block starts with its name and is followed by its own
+keyword/value pairs; a following <I>ion</I> or <I>neutral</I> token ends the
+block. <I>sigma</I> must be given for every channel.
+</P>
+<P>For a tungsten atom in a deuterium plasma, representative values are
+<I>ion sigma 5.2e-19 gref 1e4 omega 1.0</I> (Langevin rate coefficient of
+about 5e-15 m^3/s) and <I>neutral sigma 3.0e-19 gref 1e4 omega 0.5</I>
+(hard sphere from combined van der Waals radii).
+</P>
+<P>This fix computes a global scalar, the cumulative number of collisions
+performed, which can be accessed by various output commands.
+</P>
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.
+</P>
+<P>Requires a <A HREF = "fix_background.html">fix background</A>. Only species with
+zero charge are scattered. Each channel needs <I>sigma</I> > 0, <I>gref</I> > 0
+and 0.5 <= <I>omega</I> <= 1.5.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_coulomb_background.html">fix coulomb/background</A>, <A HREF = "fix_background.html">fix
+background</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The option defaults per channel are gref = 1.0e4, omega = 0.5,
+mass_amu = 2.014. No channel is active unless listed.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

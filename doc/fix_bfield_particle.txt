@@ -1,0 +1,83 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix bfield/particle command :h3
+
+[Syntax:]
+
+fix ID bfield/particle Bx By Bz :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+bfield/particle = style name of this fix command :l
+Bx,By,Bz = name of a "particle-style variable"_variable.html for each
+  component of the magnetic field (T), or NULL :l
+:ule
+
+[Examples:]
+
+variable Bx particle 0.0
+variable By particle 0.0
+variable Bz particle 1.0
+fix fb bfield/particle Bx By Bz
+global bfield particle fb 1 :pre
+
+fix fb bfield/particle NULL NULL Bz0
+global bfield particle fb 0 :pre
+
+[Description:]
+
+Define a magnetic field that is evaluated per particle from
+particle-style variables.  The three arguments name the variables
+(without the "v_" prefix) that give the x, y, and z components of B
+in Tesla in the simulation coordinate slots.  A component given as
+NULL is left unset and treated as zero.
+
+The fix does not act on its own.  It is made the magnetic field of
+the charged-particle pusher with the {bfield particle} setting of the
+"global"_global.html command, which also specifies how often (Nfreq
+timesteps) the variables are re-evaluated.  Every time the field is
+evaluated, each named variable is computed for all particles owned by
+the processor and the results are stored in a per-particle array
+with one column per non-NULL component.
+
+This fix is the idealized-field harness used by verification cases
+with analytic fields and a known solution.  Production simulations
+take their magnetic field from a "fix background"_fix_background.html
+through the {plasma} value of the "global pusher"_global.html
+keyword instead.
+
+:line
+
+[Restart, output info:]
+
+No information about this fix is written to "binary restart
+files"_restart.html.
+
+This fix computes a per-particle array with one column for each
+non-NULL component, in x, y, z order, holding the last evaluated
+field values.  It is intended to be consumed by the "global
+bfield"_global.html setting; the columns can also be accessed by
+the "dump particle"_dump.html command as f_ID\[N\].
+
+:line
+
+[Restrictions:]
+
+This command is part of the OPENEDGE package.  It is only enabled if
+OpenEdge was built with that package.  See the "Section
+2.3"_Section_start.html#start_3 section for more info.
+
+Exactly three arguments must be given.  Each non-NULL argument must
+name an existing particle-style variable when the run begins.
+
+[Related commands:]
+
+"fix efield/particle"_fix_efield_particle.html,
+"global"_global.html, "variable"_variable.html
+
+[Default:] none

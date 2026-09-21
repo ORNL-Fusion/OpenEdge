@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -21,12 +21,12 @@ echo log :pre
 
 [Description:]
 
-This command determines whether SPARTA echoes each input script
+This command determines whether OpenEdge echoes each input script
 command to the screen and/or log file as it is read and processed.  If
 an input script has errors, it can be useful to look at echoed output
 to see the last command processed.
 
-The "command-line switch"_Section_start.html#start_7 -echo can be used
+The "command-line switch"_Section_start.html#start_5 -echo can be used
 in place of this command.
 
 [Restrictions:] none

@@ -1,0 +1,17 @@
+# Deterministic ST40 grain-size response and timestep-convergence scan.
+# No Li markers are emitted: this isolates grain transit, heating, and fate.
+
+variable dt       index 2.0e-6
+variable nsteps   index 375000
+variable ndump    index 500
+variable outdir   index output_core_transit_size_scan_dt2us
+variable heat_scale index 1.0
+
+shell mkdir ${outdir}
+log ${outdir}/log.openedge
+
+include input/setup_core_transit_size_scan.inc
+include input/physics_core_transit_size_scan.inc
+include input/diagnostics_core_transit_cohort.inc
+
+run ${nsteps}

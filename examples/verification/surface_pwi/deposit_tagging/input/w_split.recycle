@@ -1,0 +1,8 @@
+# Same as w_plain.recycle but the self-sputter yield is split by material:
+# bulk W at the table yield, deposited W (Wd) at half the yield.
+W --> W
+A 0.0
+W --> W
+S w_on_w mat W
+W --> W
+S w_on_w mat Wd yscale 0.5

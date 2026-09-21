@@ -11,7 +11,7 @@ mkdir -p output
 rm -f output/traj.d_* output/impacts.d_* output/switch.d_*
 fail=0
 
-[ -f input/source.axi256 ] || $PY make_inputs.py
+[ -f input/source.axi256 ] || $PY scripts/make_inputs.py
 
 run() {
   echo "== $*"
@@ -23,5 +23,5 @@ run -var pmode hybrid -var gswitch 1e30 -var dt 2.5e-10 -var nsteps 24000 -var d
 run -var pmode gca -var gswitch 2.5 -var gcwall a0   -var dt 1e-8 -var nsteps 800 -var dfreq 1 -var tag d_a0
 run -var pmode gca -var gswitch 2.5 -var gcwall flux -var dt 1e-8 -var nsteps 800 -var dfreq 1 -var tag d_a1
 
-$PY plot_axi.py || fail=1
+$PY scripts/plot_axi.py || fail=1
 exit $fail

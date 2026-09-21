@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -77,7 +77,7 @@ The {union} style creates a region consisting of the volume of all the
 listed regions combined.  The {intersect} style creates a region
 consisting of the volume that is common to all the listed regions.
 
-IMPORTANT NOTE: Regions in SPARTA are always 3d geometric objects,
+IMPORTANT NOTE: Regions in OpenEdge are always 3d geometric objects,
 regardless of whether the "dimension"_dimension.html of the simulation
 2d or 3d.  Thus when using regions in a 2d simulation, for example,
 you should be careful to define the region so that its intersection

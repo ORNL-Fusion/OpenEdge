@@ -1,4 +1,4 @@
-# Stage C (PLAN.md): operator coupling to the GC state. He+ mid-box,
+# Stage C: operator coupling to the GC state. He+ mid-box,
 # uniform B = -z (parallel/perpendicular cleanly split), no surfaces.
 # One operator is dialed up per run via its magnitude variable:
 #   -var gradte  G   -> fix force/thermal   (parallel drift)

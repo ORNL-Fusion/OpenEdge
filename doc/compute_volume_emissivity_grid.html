@@ -1,0 +1,110 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>compute volume/emissivity/grid command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>compute ID volume/emissivity/grid group-ID mix-ID keyword values ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "compute.html">compute</A> command 
+
+<LI>volume/emissivity/grid = style name of this compute command 
+
+<LI>group-ID = group ID for which grid cells to perform calculation on 
+
+<LI>mix-ID = mixture ID whose species groups are tallied 
+
+<LI>the <I>pec</I> and <I>plasma_compute</I> keywords are required 
+
+<LI>keyword = <I>pec</I> or <I>plasma_compute</I> or <I>pec_units</I> 
+
+<PRE>  <I>pec</I> values = elem pec_id line = selector of the photon emissivity
+    coefficient table <I>/volume/pec/elem/pec_id/line</I> in the process
+    database
+  <I>plasma_compute</I> value = ID of a <A HREF = "compute_plasma_fields.html">compute plasma/fields</A>
+    providing Te and ne
+  <I>pec_units</I> value = <I>cm3s</I> or <I>m3s</I> = units of the stored PEC table 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>compute cpl plasma/fields all file plasma.h5
+compute cem volume/emissivity/grid all allW pec w 4009 wi_4295_pec &
+    plasma_compute cpl
+fix aem ave/grid all 1 1000 1000 c_cem[*]
+dump 1 grid all 1000 emis.*.dat id f_aem[*] 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Compute the volumetric line emissivity of a spectral line in every
+grid cell,
+</P>
+<PRE>emissivity = ne * nz * PEC(Te,ne)   (photons/m^3/s/sr) 
+</PRE>
+<P>where nz is the number density of the emitting species group, ne and
+Te the local electron density and temperature, and PEC the photon
+emissivity coefficient of the line. One column is produced per species
+group of the mixture <I>mix-ID</I>, so a mixture whose groups are the
+individual charge states yields one synthetic-emission map per charge
+state.
+</P>
+<P>The PEC table is read from the OpenEdge process database
+(<I>database/processes.h5</I>) under <I>/volume/pec/elem/pec_id/line</I>, which
+holds log10(PEC) on a log10(Te) x log10(ne) grid ingested from
+open-ADAS adf15 files. The table is bilinearly interpolated in
+log-log space and clamped to its bounds. <I>pec_units cm3s</I> (the ADAS
+convention) converts the coefficient to m^3/s; use <I>m3s</I> if the table
+is already in SI.
+</P>
+<P>The species density in each cell is accumulated from the per-particle
+weight <I>pweight</I> of <A HREF = "fix_particle_weight.html">fix particle/weight</A>,
+so flux-weighted emission is represented correctly: nz = sum(pweight)
+* cellweight / volume. Te and ne are queried from the referenced
+plasma/fields compute at the cell center. Cells with no particles of
+the group, or where Te or ne is not positive, get zero emissivity.
+</P>
+<P>The compute performs its tally when invoked and applies the plasma
+factors in a post-processing step, so it can be time averaged with
+<A HREF = "fix_ave_grid.html">fix ave/grid</A>, in which case the accumulated
+weights are divided by the number of samples before the emissivity is
+formed.
+</P>
+<P><B>Output info:</B>
+</P>
+<P>This compute calculates a per-grid array with one column per species
+group of the mixture. The values can be used by any command that uses
+per-grid values from a compute as input, such as <A HREF = "dump.html">dump
+grid</A> or <A HREF = "fix_ave_grid.html">fix ave/grid</A>.
+</P>
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package.
+</P>
+<P>Requires <A HREF = "fix_particle_weight.html">fix particle/weight</A> (the <I>pweight</I>
+attribute) and a <A HREF = "compute_plasma_fields.html">compute plasma/fields</A>.
+The process database must contain the requested PEC table, otherwise
+the compute stops with an error.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "compute_plasma_fields.html">compute plasma/fields</A>, <A HREF = "fix_particle_weight.html">fix
+particle/weight</A>, <A HREF = "fix_volume_chem_adas.html">fix
+volume/chem/adas</A>, <A HREF = "fix_ave_grid.html">fix
+ave/grid</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The option default is pec_units = cm3s.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

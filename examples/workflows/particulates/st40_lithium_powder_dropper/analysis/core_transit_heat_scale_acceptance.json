@@ -1,0 +1,167 @@
+{
+  "status": "PASS",
+  "description": "Deterministic DUSTT-2005 OML heat-scale sensitivity at the accepted 2-us outer timestep. The scale multiplies net OML surface heating and does not modify Te or ne.",
+  "heat_scales": [
+    0.0,
+    0.25,
+    0.5,
+    0.75,
+    1.0,
+    1.5,
+    2.0
+  ],
+  "grains_per_scale": 270,
+  "baseline_reproduces_dt2us": true,
+  "integrity": {
+    "hs000": {
+      "heat_scale": 0.0,
+      "wall_reactions": 270,
+      "wall_reactions_by_diameter_um": {
+        "40": 30,
+        "60": 30,
+        "80": 30,
+        "100": 30,
+        "125": 30,
+        "150": 30,
+        "200": 30,
+        "250": 30,
+        "300": 30
+      },
+      "minimum_wall_assignment_gap_mm": null,
+      "continuously_evaporated_atoms": 15463000.0,
+      "dustt_terminal_remainder_atoms": 0.0,
+      "retained_atoms_last_sample_estimate": 4.203082280466127e+19,
+      "initial_atoms": 4.203082280466128e+19,
+      "closure_fraction": 1.0000000000003677,
+      "classified_wall_events": 270
+    },
+    "hs025": {
+      "heat_scale": 0.25,
+      "wall_reactions": 130,
+      "wall_reactions_by_diameter_um": {
+        "40": 22,
+        "60": 22,
+        "80": 20,
+        "100": 17,
+        "125": 15,
+        "150": 13,
+        "200": 9,
+        "250": 6,
+        "300": 6
+      },
+      "minimum_wall_assignment_gap_mm": 114.14203176098293,
+      "continuously_evaporated_atoms": 3.93367e+19,
+      "dustt_terminal_remainder_atoms": 3.14932e+16,
+      "retained_atoms_last_sample_estimate": 2.6630800553341276e+18,
+      "initial_atoms": 4.203082280466128e+19,
+      "closure_fraction": 1.000010717150957,
+      "classified_wall_events": 130
+    },
+    "hs050": {
+      "heat_scale": 0.5,
+      "wall_reactions": 69,
+      "wall_reactions_by_diameter_um": {
+        "40": 9,
+        "60": 9,
+        "80": 6,
+        "100": 11,
+        "125": 9,
+        "150": 9,
+        "200": 6,
+        "250": 6,
+        "300": 4
+      },
+      "minimum_wall_assignment_gap_mm": 121.93188136496708,
+      "continuously_evaporated_atoms": 4.10074e+19,
+      "dustt_terminal_remainder_atoms": 3.44053e+16,
+      "retained_atoms_last_sample_estimate": 9.89168498926373e+17,
+      "initial_atoms": 4.203082280466128e+19,
+      "closure_fraction": 1.0000035924651247,
+      "classified_wall_events": 69
+    },
+    "hs075": {
+      "heat_scale": 0.75,
+      "wall_reactions": 45,
+      "wall_reactions_by_diameter_um": {
+        "40": 9,
+        "60": 9,
+        "80": 5,
+        "100": 4,
+        "125": 3,
+        "150": 4,
+        "200": 5,
+        "250": 4,
+        "300": 2
+      },
+      "minimum_wall_assignment_gap_mm": 145.5226104915475,
+      "continuously_evaporated_atoms": 4.14422e+19,
+      "dustt_terminal_remainder_atoms": 3.75438e+16,
+      "retained_atoms_last_sample_estimate": 5.511144786226064e+17,
+      "initial_atoms": 4.203082280466128e+19,
+      "closure_fraction": 1.0000008439987362,
+      "classified_wall_events": 45
+    },
+    "hs100": {
+      "heat_scale": 1.0,
+      "wall_reactions": 38,
+      "wall_reactions_by_diameter_um": {
+        "40": 9,
+        "60": 9,
+        "80": 5,
+        "100": 4,
+        "125": 3,
+        "150": 3,
+        "200": 2,
+        "250": 2,
+        "300": 1
+      },
+      "minimum_wall_assignment_gap_mm": 151.78388917752613,
+      "continuously_evaporated_atoms": 4.1586e+19,
+      "dustt_terminal_remainder_atoms": 3.96212e+16,
+      "retained_atoms_last_sample_estimate": 4.052708316161012e+17,
+      "initial_atoms": 4.203082280466128e+19,
+      "closure_fraction": 1.0000016470520965,
+      "classified_wall_events": 38
+    },
+    "hs150": {
+      "heat_scale": 1.5,
+      "wall_reactions": 34,
+      "wall_reactions_by_diameter_um": {
+        "40": 9,
+        "60": 9,
+        "80": 5,
+        "100": 4,
+        "125": 3,
+        "150": 3,
+        "200": 1
+      },
+      "minimum_wall_assignment_gap_mm": 144.19843873680722,
+      "continuously_evaporated_atoms": 4.17034e+19,
+      "dustt_terminal_remainder_atoms": 4.12286e+16,
+      "retained_atoms_last_sample_estimate": 2.8620007102795734e+17,
+      "initial_atoms": 4.203082280466128e+19,
+      "closure_fraction": 1.0000001395729678,
+      "classified_wall_events": 34
+    },
+    "hs200": {
+      "heat_scale": 2.0,
+      "wall_reactions": 32,
+      "wall_reactions_by_diameter_um": {
+        "40": 9,
+        "60": 8,
+        "80": 5,
+        "100": 4,
+        "125": 3,
+        "150": 3
+      },
+      "minimum_wall_assignment_gap_mm": 135.56971505572668,
+      "continuously_evaporated_atoms": 4.17678e+19,
+      "dustt_terminal_remainder_atoms": 4.14279e+16,
+      "retained_atoms_last_sample_estimate": 2.2159470221063702e+17,
+      "initial_atoms": 4.203082280466128e+19,
+      "closure_fraction": 0.9999999951832815,
+      "classified_wall_events": 32
+    }
+  },
+  "uncertainty": "Wilson 95% binomial intervals over deterministic launch states"
+}

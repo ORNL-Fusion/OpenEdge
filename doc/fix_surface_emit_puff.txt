@@ -1,0 +1,107 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix surface/emit/puff command :h3
+
+[Syntax:]
+
+fix ID surface/emit/puff mix-ID group-ID keyword value ... :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+surface/emit/puff = style name of this fix command :l
+mix-ID = ID of mixture to use when creating particles :l
+group-ID = ID of surface group that emits particles :l
+zero or more keyword/value pairs may be appended :l
+keyword = {n} or {normal} or {stop_at_np} or {slave} or {nlaunch_total} or {nevery} or {perspecies} or {region} :l
+  {n} value = Np = emit Np particles per emission step (0 = flow mode)
+  {normal} value = {yes} or {no} = emit along the surface normal
+  {stop_at_np} value = Ntot = stop emitting once Ntot particles have
+    been emitted in total (0 = no limit)
+  {slave} values = R Gamma sc-IDs
+    R = fraction of the weight absorbed by the listed vanish models
+      that is re-emitted
+    Gamma = external feed rate in atoms/s
+    sc-IDs = comma-separated IDs of surf_collide vanish models
+  {nlaunch_total} value = N = emit N weighted particles per emission
+    step (slave mode only)
+  {nevery} value = Nevery = emit every this many timesteps
+  {perspecies} value = {yes} or {no}
+  {region} value = region-ID = only emit from surface elements in region :pre
+:ule
+
+[Examples:]
+
+fix puff surface/emit/puff dgas valve n 50 normal yes stop_at_np 100000
+fix puff surface/emit/puff dgas valve slave 0.9 1.0e20 pump1,pump2 &
+    nlaunch_total 200 nevery 10 :pre
+
+[Description:]
+
+Emit particles of a mixture from the surface elements of a group at a
+prescribed rate, e.g. a gas puff or a fixed-rate injection from a
+predefined surface.  No plasma background or surface compute is
+needed.  Particles are distributed over the elements in proportion to
+their area, launched with a cosine angular distribution about the
+surface normal and a Maxwellian flux distribution at the mixture
+temperature.  With {normal yes} the drift direction is the surface
+normal instead of the mixture {vstream}.
+
+Three emission modes are available.  In flow mode ({n} 0, the
+default) the emission rate follows from the mixture density,
+temperature and stream velocity as for "fix
+emit/surf"_fix_emit_surf.html.  With {n} Np, exactly Np particles per
+emission step are emitted (per processor, distributed over its
+tasks).  In {slave} mode the number of atoms injected per emission
+window is
+
+N_atoms = R W_abs + Gamma dt nevery :pre
+
+where W_abs is the real-atom weight absorbed by the listed
+"surf_collide vanish"_surf_collide.html models since the previous
+emission (their escaped weight), so that a pumped flux is partially
+re-fed at the puff location, and Gamma is an external source.  R = 0
+gives a pure external source.  Without {nlaunch_total} the atoms are
+converted to particles with the global {fnum}; with {nlaunch_total} N
+exactly N particles are emitted per window, each carrying the weight
+N_atoms/N in the per-particle weight attribute, which decouples the
+particle statistics from {fnum}.
+
+{stop_at_np} latches emission off once the cumulative number of
+emitted particles reaches the limit, which gives a clean one-shot
+puff that can be tracked to completion.
+
+[Restart, output info:]
+
+No information about this fix is written to "binary restart
+files"_restart.html.
+
+This fix computes a global vector of length 2 which can be accessed
+by various output commands.  The first element is the number of
+particles emitted on the most recent emission step, the second the
+cumulative number of particles emitted since the start of the run.
+
+[Restrictions:]
+
+This command is part of the OPENEDGE package.  It requires explicit
+(non-implicit) surface elements.  {perspecies yes} cannot be combined
+with {n} > 0 or {slave}.  {nlaunch_total} requires {slave} mode and
+"fix particle/weight"_fix_particle_weight.html.  The {slave} collide
+IDs must be "surf_collide vanish"_surf_collide.html models.
+
+[Related commands:]
+
+"fix emit/surf"_fix_emit_surf.html,
+"fix surface/emit/source"_fix_surface_emit_source.html,
+"fix surface/emit/recycle"_fix_surface_emit_recycle.html,
+"fix particle/weight"_fix_particle_weight.html,
+"surf_collide"_surf_collide.html
+
+[Default:]
+
+The option defaults are n = 0 (flow mode), normal = no, stop_at_np = 0
+(no limit), nevery = 1, perspecies = yes and no region.

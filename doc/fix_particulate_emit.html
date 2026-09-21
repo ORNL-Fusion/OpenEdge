@@ -1,0 +1,138 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix particulate/emit command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID particulate/emit mix-ID group-ID keyword value ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>particulate/emit = style name of this fix command 
+
+<LI>mix-ID = ID of mixture whose (particulate) species are emitted 
+
+<LI>group-ID = ID of surface group that emits particulates 
+
+<LI>zero or more keyword/value pairs may be appended 
+
+<LI>keyword = <I>nevery</I> or <I>n</I> or <I>perspecies</I> or <I>region</I> or <I>normal</I> or <I>magVelocity</I> or <I>vmin</I> or <I>vmax</I> or <I>incidentAngle</I> or <I>cone</I> or <I>angle</I> or <I>dir</I> or <I>planar</I> or <I>nweight</I> or <I>subsonic</I> or <I>twopass</I> or <I>custom</I> 
+
+<PRE>  <I>nevery</I> value = Ne = emit every Ne timesteps
+  <I>n</I> value = Np or v_name
+    Np = emit Np particles per event (0 = use mixture flow rate)
+    v_name = <A HREF = "variable.html">equal-style variable</A> giving Np
+  <I>perspecies</I> value = <I>yes</I> or <I>no</I>
+  <I>region</I> value = region-ID = only emit inside the <A HREF = "region.html">region</A>
+  <I>normal</I> value = <I>yes</I> or <I>no</I> = apply the mixture stream velocity
+    along the surface normal, as in <A HREF = "fix_emit_surf.html">fix emit/surf</A>
+  <I>magVelocity</I> value = V = single launch speed (velocity units)
+  <I>vmin</I> value = Vmin = lower bound of a uniform speed range
+  <I>vmax</I> value = Vmax = upper bound of a uniform speed range
+  <I>incidentAngle</I> value = Theta = fixed polar angle from the launch
+    axis (degrees, 0 to 180)
+  <I>cone</I> value = Half = sample uniformly in solid angle inside a cone
+    of this half-angle (degrees, 0 to 90)
+  <I>angle</I> value = <I>cosine</I> or <I>uniform</I> = polar-angle distribution
+  <I>dir</I> values = dR dZ dphi = fixed physical launch axis replacing the
+    local surface normal
+  <I>planar</I> value = <I>yes</I> or <I>no</I> = suppress the out-of-plane velocity
+    component (2d only)
+  <I>nweight</I> value = W = number of physical particulates represented by
+    one emitted particle
+  <I>subsonic</I> values = Psub Tsub = as in <A HREF = "fix_emit_surf.html">fix emit/surf</A>
+  <I>twopass</I> = no value, as in <A HREF = "fix_emit_surf.html">fix emit/surf</A>
+  <I>custom</I> values = attribute s_name
+    attribute = <I>density</I> or <I>temperature</I> or <I>vstream</I> or <I>speed</I> or
+      <I>fractions</I>
+    s_name = per-surf custom attribute supplying that quantity 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix source particulate/emit particulates injector nevery 1 n 10 &
+    perspecies no vmin 0.1 vmax 2.0 angle cosine planar yes &
+    dir 0.0 -1.0 0.0
+fix drop particulate/emit powder dropper n 5 perspecies no &
+    magVelocity 1.0 cone 10 nweight 1e4 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Emit finite-size particulates from the surface elements of a surface
+group. The radius, mass and initial temperature of each emitted
+particle come from the particulate <A HREF = "species.html">species</A> definition
+of the mixture. Emission positions are sampled uniformly along a 2d
+line segment or over a 3d triangle.
+</P>
+<P>The <I>nevery</I> keyword sets the emission cadence. The <I>n</I> keyword sets
+the number of particles per emission event: a positive constant Np is
+distributed over the emitting elements by area; <I>n 0</I> (the default)
+uses the mixture's flow-based source rate as in <A HREF = "fix_emit_surf.html">fix
+emit/surf</A>; <I>n v_name</I> evaluates an equal-style
+variable each event. A constant or variable count requires
+<I>perspecies no</I>.
+</P>
+<P>The <I>nweight</I> keyword declares that one emitted computational particle
+represents W physical particulates. The value is stored in the custom
+per-particle attribute <I>grain_nweight</I> and scales the vapor production
+and atom tallies of <A HREF = "fix_particulate_thermal.html">fix particulate/thermal</A>;
+the trajectory of the particle is that of a single particulate.
+</P>
+<P>Launch velocity: <I>magVelocity</I> sets one launch speed; <I>vmin</I> and
+<I>vmax</I> sample the speed uniformly in the given interval (set both
+bounds). The direction is sampled about a launch axis, which is the
+local surface normal unless <I>dir</I> is given. The angular distribution
+is chosen with priority <I>incidentAngle</I> (fixed polar angle), then
+<I>cone</I> (uniform in solid angle inside the cone), then <I>angle</I>
+(<I>cosine</I> = Knudsen/Lambert cosine law, <I>uniform</I> = polar angle
+uniform in [0,90) degrees).
+</P>
+<P>The <I>dir</I> keyword replaces the surface normal with a fixed launch axis
+given in physical (R, Z, phi) components, mapped internally to the
+Cartesian or axisymmetric storage layout. This is useful for a
+gravity-fed dropper. With <I>planar yes</I> (2d only) the out-of-plane
+velocity component is set to zero; with <I>dir</I> the dphi component must
+then be zero.
+</P>
+<P>The <I>region</I>, <I>normal</I>, <I>subsonic</I>, <I>twopass</I> and <I>custom</I> keywords
+behave as for <A HREF = "fix_emit_surf.html">fix emit/surf</A>. The <I>custom</I>
+keywords take a per-surf custom attribute (prefix s_) for the number
+density, temperature, stream velocity, speed or species fractions of
+the emitting element.
+</P>
+<HR>
+
+<P><B>Restrictions:</B>
+</P>
+<P>This fix is part of the OPENEDGE package. It requires explicit surface
+elements and cannot be used with implicit surfaces. <I>planar yes</I>
+requires <A HREF = "dimension.html">dimension</A> 2. A constant or variable <I>n</I>
+cannot be combined with <I>perspecies yes</I>. The <I>custom</I> keywords
+require <I>n 0</I> and cannot be combined with <I>subsonic</I>.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "fix_emit_surf.html">fix emit/surf</A>, <A HREF = "fix_particulate_thermal.html">fix
+particulate/thermal</A>, <A HREF = "fix_particulate_drag.html">fix
+particulate/drag</A>, <A HREF = "fix_particulate_charge.html">fix
+particulate/charge</A>,
+<A HREF = "material.html">material</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The option defaults are nevery = 1, n = 0, perspecies = yes, normal =
+no, angle = uniform, planar = no, nweight = 1, no region, no dir, no
+speed setting (the mixture stream velocity is used).
+</P>
+<!-- PAGE BREAK -->
+</HTML>

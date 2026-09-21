@@ -1,0 +1,142 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix particulate/charge command 
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID particulate/charge Nevery background bg-ID keyword value ... 
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command 
+
+<LI>particulate/charge = style name of this fix command 
+
+<LI>Nevery = update the charge every Nevery timesteps 
+
+<LI>background = required literal keyword 
+
+<LI>bg-ID = ID of the <A HREF = "fix_background.html">fix background</A> supplying the plasma 
+
+<LI>zero or more keyword/value pairs may be appended 
+
+<LI>keyword = <I>model</I> or <I>mixture</I> or <I>material</I> or <I>ion_mass_amu</I> or <I>ion_charge_state</I> or <I>fixed_charge</I> or <I>thermionic</I> or <I>richardson_A</I> or <I>work_function_eV</I> or <I>see</I> or <I>see_model</I> or <I>see_angular</I> or <I>validity</I> or <I>radius</I> or <I>mass</I> or <I>temp</I> 
+
+<PRE>  <I>model</I> value = <I>dustt2005</I> or <I>dis2021</I> = charging closure
+  <I>mixture</I> value = mix-ID = only act on species in this mixture
+  <I>material</I> value = NAME = <A HREF = "material.html">material</A> supplying
+    thermionic, secondary-emission and tensile properties
+  <I>ion_mass_amu</I> value = M = background-ion mass (amu)
+  <I>ion_charge_state</I> value = Z = background-ion charge state (> 0)
+  <I>fixed_charge</I> value = Zd = stamp this charge number, skip the solve
+  <I>thermionic</I> value = <I>yes</I> or <I>no</I> = Richardson-Dushman emission
+  <I>richardson_A</I> value = A = Richardson constant (A/m^2/K^2)
+  <I>work_function_eV</I> value = W = work function (eV)
+  <I>see</I> value = <I>yes</I> or <I>no</I> = dustt2005 secondary-electron channel
+  <I>see_model</I> value = <I>none</I> or <I>dustt2005</I> or <I>kollath_smirnov2007</I>
+    or <I>young_dekker</I>
+  <I>see_angular</I> value = <I>yes</I> or <I>no</I> = incidence-angle average of the
+    secondary yield
+  <I>validity</I> value = <I>warn</I> or <I>error</I> or <I>no</I> = response when the
+    particulate radius exceeds the Debye length
+  <I>radius</I> value = R = initialize a missing particle radius (m)
+  <I>mass</I> value = M = initialize a missing particle mass (kg, > 0)
+  <I>temp</I> value = T = initialize a missing particle temperature (K) 
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<PRE>fix pd background file input/plasma.h5 static yes
+fix qd particulate/charge 1 background pd model dustt2005 &
+       mixture particulates material Li validity warn
+fix qd particulate/charge 1 background pd model dis2021 &
+       mixture particulates material Li thermionic yes &
+       see_model kollath_smirnov2007 see_angular yes 
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Compute the charge of finite-size particulates from the local plasma
+background. The charge number is stored in the custom per-particle
+attribute <I>particulate_charge</I> and is consumed by <A HREF = "fix_particulate_drag.html">fix
+particulate/drag</A> and <A HREF = "fix_particulate_thermal.html">fix
+particulate/thermal</A>. The update is
+applied at the start and end of every Nevery-th timestep.
+</P>
+<P>The floating potential phi_d is obtained by balancing the electron
+current, the flow-dependent orbital-motion-limited (OML) ion current
+and any enabled emission currents (thermionic, secondary electron).
+The charge number is Z_d = 4 pi eps0 R_d phi_d / e. The <I>model</I>
+keyword selects the closure used for these currents: <I>dustt2005</I> (the
+default) or <I>dis2021</I>. Use the same model on the charge, drag and
+thermal fixes.
+</P>
+<P>The <I>mixture</I> keyword restricts the update to species of the named
+mixture; without it every particle with a positive radius is
+processed. The <I>material</I> keyword names a <A HREF = "material.html">material</A>
+whose work_function_eV and richardson_A are used for thermionic
+emission unless the explicit <I>work_function_eV</I> and <I>richardson_A</I>
+keywords are given, and whose tensile_Pa enables electrostatic
+breakup: when tensile_Pa > 0 and the surface potential exceeds the
+critical value phi* = 0.1 sqrt(10 tensile_Pa) R_d[um], the
+particulate is split into two mass-conserving fragments.
+</P>
+<P>The <I>fixed_charge</I> keyword writes the given charge number to every
+processed particle and bypasses the solve; it is intended for force
+and sensitivity tests.
+</P>
+<P>Secondary electron emission: with model dustt2005, <I>see yes</I> enables
+the Sternglass electron-impact channel (equivalent to <I>see_model
+dustt2005</I>); it is an experimental channel and a warning is printed.
+With model dis2021 the closure must be named with <I>see_model</I>:
+<I>kollath_smirnov2007</I> uses the material's see_delta_m and see_E_m_eV;
+<I>see_angular yes</I> applies the cosine-incidence average of that yield
+(a warning is printed when it is left at its default). <I>see_model
+young_dekker</I> is recognized but not available; selecting it stops the
+run with an error.
+</P>
+<P>The <I>validity</I> keyword controls what happens when R_d exceeds the
+local Debye length, outside the OML approximation: <I>warn</I> prints a
+summary at the end of the run, <I>error</I> stops the run, <I>no</I> is silent.
+The <I>radius</I>, <I>mass</I> and <I>temp</I> keywords fill in particulate state
+that is missing on a particle; values already present are not
+replaced.
+</P>
+<HR>
+
+<P><B>Restrictions:</B>
+</P>
+<P>This fix is part of the OPENEDGE package. It requires a <A HREF = "fix_background.html">fix
+background</A>. Model <I>dis2021</I> requires a
+<I>material</I> defined by a <A HREF = "material.html">material</A> command with a
+<I>provenance</I> string, with the properties needed by the enabled
+channels given explicitly; it rejects <I>see yes</I> and <I>see_model
+dustt2005</I>. Model <I>dustt2005</I> accepts only <I>see_model none</I> or
+<I>dustt2005</I>. <I>see_model kollath_smirnov2007</I> requires a material with
+positive see_delta_m and see_E_m_eV. <I>see_model young_dekker</I> is not
+available.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "material.html">material</A>, <A HREF = "fix_particulate_drag.html">fix
+particulate/drag</A>, <A HREF = "fix_particulate_thermal.html">fix
+particulate/thermal</A>, <A HREF = "fix_particulate_emit.html">fix
+particulate/emit</A>, <A HREF = "fix_background.html">fix
+background</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>The option defaults are model = dustt2005, ion_mass_amu = 2.0,
+ion_charge_state = 1, thermionic = no, richardson_A = 1.2e6,
+work_function_eV = 2.9, see = no, see_model = none, see_angular = no,
+validity = warn, no mixture filter, no material, no fixed_charge.
+</P>
+<!-- PAGE BREAK -->
+</HTML>

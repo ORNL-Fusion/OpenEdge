@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -30,7 +30,7 @@
   <I>post</I> value = <I>no</I> or <I>yes</I>
   <I>every</I> values = M c1 c2 ...
     M = break the run into M-timestep segments and invoke one or more commands between each segment
-    c1,c2,...,cN = one or more SPARTA commands, each enclosed in quotes
+    c1,c2,...,cN = one or more OpenEdge commands, each enclosed in quotes
     c1 = NULL means no command will be invoked 
 </PRE>
 
@@ -87,33 +87,33 @@ the runs together.
 <P>The <I>pre</I> and <I>post</I> keywords can be used to streamline the setup,
 clean-up, and associated output to the screen that happens before and
 after a run.  This can be useful if you wish to do many short runs in
-succession (e.g. SPARTA is being called as a library which is doing
-other computations between successive short SPARTA runs).
+succession (e.g. OpenEdge is being called as a library which is doing
+other computations between successive short OpenEdge runs).
 </P>
-<P>By default (pre and post = yes), SPARTA zeroes statistical counts
+<P>By default (pre and post = yes), OpenEdge zeroes statistical counts
 before every run and initializes other <A HREF = "fix.html">fixes</A> and
 <A HREF = "compute.html">computes</A> as needed.  And after every run it gathers and
 prints timings statistics.  If a run is just a continuation of a
 previous run (i.e. no settings are changed), the initial computation
 is not necessary.  So if <I>pre</I> is specified as "no" then the initial
 setup is skipped, except for printing statistical info.  Note that if
-<I>pre</I> is set to "no" for the very 1st run SPARTA performs, then it is
+<I>pre</I> is set to "no" for the very 1st run OpenEdge performs, then it is
 overridden, since the initial setup computations must be done.
 </P>
 <P>IMPORTANT NOTE: If your input script changes settings between 2 runs
 (e.g. adds a <A HREF = "fix.html">fix</A> or <A HREF = "compute.html">compute</A>), then the
-initial setup must be performed.  SPARTA does not check for this, but
+initial setup must be performed.  OpenEdge does not check for this, but
 it would be an error to use the <I>pre no</I> option in this case.
 </P>
 <P>If <I>post</I> is specified as "no", the full timing and statistical output
 is skipped; only a one-line summary timing is printed.
 </P>
-<P>The <I>every</I> keyword provides a means of breaking a SPARTA run into a
-series of shorter runs.  Optionally, one or more SPARTA commands (c1,
+<P>The <I>every</I> keyword provides a means of breaking a OpenEdge run into a
+series of shorter runs.  Optionally, one or more OpenEdge commands (c1,
 c2, ..., cN) will be executed in between the short runs.  If used, the
 <I>every</I> keyword must be the last keyword, since it has a variable
 number of arguments.  Each of the trailing arguments is a single
-SPARTA command, and each command should be enclosed in quotes, so that
+OpenEdge command, and each command should be enclosed in quotes, so that
 the entire command will be treated as a single argument.  This will
 also prevent any variables in the command from being evaluated until
 it is executed multiple times during the run.  Note that if a command
@@ -125,12 +125,9 @@ as in the example above or below.
 and interleaving commands in your input script.  For example, a
 <A HREF = "print.html">print</A> command could be invoked or a <A HREF = "fix.html">fix</A> could
 be redefined, e.g. to reset a load balancing parameter.  Or this could
-be useful for invoking a command you have added to SPARTA that wraps
+be useful for invoking a command you have added to OpenEdge that wraps
 some other code (e.g. as a library) to perform a computation
-periodically during a long SPARTA run.  See <A HREF = "Section_modify.html">Section
-8</A> of the manual for info about how to add new
-commands to SPARTA.  See <A HREF = "Section_howto.html#howto_10">Section 6.7</A> of
-the manual for ideas about how to couple SPARTA to other codes.
+periodically during a long OpenEdge run.
 </P>
 <P>With the <I>every</I> option, N total steps are simulated, in shorter runs
 of M steps each.  After each M-length run, the specified commands are
@@ -170,7 +167,7 @@ command:
 run will print the full timing summary, but these operations will be
 skipped for intermediate runs.
 </P>
-<P>If you want SPARTA to exit early during the middle of a run when a
+<P>If you want OpenEdge to exit early during the middle of a run when a
 condition is met, use <A HREF = "fix_halt.html">fix halt</A>.
 </P>
 <P><B>Restrictions:</B>
@@ -189,4 +186,5 @@ run a simulation for any number of steps (ok, up to 2^63 steps).
 <P>The option defaults are start = the current timestep, stop = current
 timestep + N, pre = yes, and post = yes.
 </P>
+<!-- PAGE BREAK -->
 </HTML>

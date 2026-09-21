@@ -1,0 +1,16 @@
+# ST40 Li powder core-transit variant.
+# Grains cross psi_N=0.51; Li atoms/ions are absorbed there.
+
+variable dt       index 2.0e-6
+variable nsteps   index 250000
+variable ndump    index 25000
+variable nemit    index 200
+variable outdir   index output_core_transit
+
+shell mkdir ${outdir}
+
+include input/setup_core_transit.inc
+include input/physics.inc
+include input/diagnostics_core_transit.inc
+
+run ${nsteps}

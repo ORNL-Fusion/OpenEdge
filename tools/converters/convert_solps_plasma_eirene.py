@@ -345,7 +345,20 @@ def _read_geqdsk_bfield(gfile: Path):
     psi_arr = _get("psi", _get("psirz", None))
     if psi_arr is None:
         raise RuntimeError("GEQDSK does not contain psi/psirz array")
-    flux2d = np.array(psi_arr, dtype=np.float64).reshape((ny, nx))
+    # freeqdsk stores psi as (R, Z) = (nx, ny), whereas the OpenEdge HDF5
+    # equilibrium contract is (Z, R). Do not use reshape alone: for a square
+    # equilibrium it silently leaves R and Z transposed.
+    psi_raw = np.asarray(psi_arr, dtype=np.float64)
+    if psi_raw.ndim == 2 and psi_raw.shape == (nx, ny):
+        flux2d = psi_raw.T.copy()
+    elif psi_raw.ndim == 2 and psi_raw.shape == (ny, nx):
+        flux2d = psi_raw.copy()
+    elif psi_raw.size == nx * ny:
+        flux2d = psi_raw.reshape((nx, ny)).T.copy()
+    else:
+        raise RuntimeError(
+            f"GEQDSK psi shape {psi_raw.shape} is incompatible with "
+            f"nx={nx}, ny={ny}")
 
     dpsidR = np.zeros_like(flux2d)
     dpsidZ = np.zeros_like(flux2d)

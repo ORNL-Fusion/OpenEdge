@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -26,11 +26,11 @@ fix 1 ave/time all 100 5 1000 c_myTemp c_thermo_temp file temp.profile
 </PRE>
 <P><B>Description:</B>
 </P>
-<P>Set a fix that will be applied to the system.  In SPARTA, a "fix" is
+<P>Set a fix that will be applied to the system.  In OpenEdge, a "fix" is
 an operation that is applied to the system during timestepping.
 Examples include adding particles via inlet boundary conditions or
-computing diagnostics.  Code for new fixes can be added to SPARTA; see
-<A HREF = "Section_modify.html">Section 10</A> of the manual for details.
+computing diagnostics.  Code for new fixes can be added to OpenEdge; see
+the source code of the manual for details.
 </P>
 <P>Fixes perform their operations at different stages of the timestep.
 If 2 or more fixes operate at the same stage of the timestep, they are
@@ -66,7 +66,7 @@ for individual fixes for info on which ones can be restarted.
 
 <P>Each fix style has its own doc page which describes its arguments and
 what it does, as listed below.  Here is an alphabetic list of fix
-styles available in SPARTA:
+styles available in OpenEdge:
 </P>
 <UL><LI><A HREF = "fix_ablate.html">ablate</A> - alter implicit surfaces within each grid cell
 <LI><A HREF = "fix_adapt.html">adapt</A> - on-the-fly grid adaptation
@@ -76,25 +76,41 @@ styles available in SPARTA:
 <LI><A HREF = "fix_ave_histo.html">ave/histo/weight</A> - compute/output weighted histograms
 <LI><A HREF = "fix_ave_surf.html">ave/surf</A> - compute per surface element time-averaged quantities
 <LI><A HREF = "fix_ave_time.html">ave/time</A> - compute/output global time-averaged quantities
+<LI><A HREF = "fix_background.html">background</A> - load the background plasma and magnetic equilibrium shared by other commands
 <LI><A HREF = "fix_balance.html">balance</A> - perform dynamic load-balancing
+<LI><A HREF = "fix_bfield_particle.html">bfield/particle</A> - gyro-motion of charged particles in the background magnetic field
+<LI><A HREF = "fix_coulomb_background.html">coulomb/background</A> - Coulomb collisions of charged particles with the background plasma
+<LI><A HREF = "fix_coulomb_binary.html">coulomb/binary</A> - binary Coulomb collisions between charged particles in a cell
+<LI><A HREF = "fix_cross_field_diffusion.html">cross_field_diffusion</A> - anomalous cross-field diffusion of charged particles
 <LI><A HREF = "fix_dt_reset.html">dt/reset</A> - adjust global timestep dynamically
+<LI><A HREF = "fix_efield_particle.html">efield/particle</A> - acceleration of charged particles by the background electric field
 <LI><A HREF = "fix_emit_face.html">emit/face</A> - emit particles at global boundaries
-<LI><A HREF = "fix_emit_face_file.html">emit/face/file</A> - emit particles at global boundaries using a distribution defined in a file
 <LI><A HREF = "fix_emit_surf.html">emit/surf</A> - emit particles at surfaces
-<LI><A HREF = "fix_field_grid.html">field/grid</A> - apply an external field on a per grid cell basis
-<LI><A HREF = "fix_field_particle.html">field/particle</A> - apply an external field on a per particle basis
+<LI><A HREF = "fix_force_gravity.html">force/gravity</A> - apply a constant gravitational acceleration
+<LI><A HREF = "fix_force_thermal.html">force/thermal</A> - parallel friction and thermal forces on impurity ions
 <LI><A HREF = "fix_grid_check.html">grid/check</A> - check if particles are in the correct grid cell
 <LI><A HREF = "fix_halt.html">halt</A> - stop the simulation early if a condition is met
 <LI><A HREF = "fix_move_surf.html">move/surf</A> - move surfaces dynamically during a simulation
+<LI><A HREF = "fix_neutral_collide_background.html">neutral/collide/background</A> - collisions of neutrals with the background plasma (ionization, charge exchange)
+<LI><A HREF = "fix_particle_weight.html">particle/weight</A> - per-particle statistical weights
+<LI><A HREF = "fix_particulate_charge.html">particulate/charge</A> - charging of dust grains and droplets by the background plasma
+<LI><A HREF = "fix_particulate_drag.html">particulate/drag</A> - plasma drag forces on dust grains and droplets
+<LI><A HREF = "fix_particulate_emit.html">particulate/emit</A> - inject dust grains or droplets
+<LI><A HREF = "fix_particulate_thermal.html">particulate/thermal</A> - heating, evaporation and sublimation of dust grains and droplets
 <LI><A HREF = "fix_print.html">print</A> - print text and variables during a simulation
+<LI><A HREF = "fix_reflect_psi.html">reflect/psi</A> - reflect particles that cross a normalized-flux (psi) boundary
 <LI><A HREF = "fix_surf_temp.html">surf/temp</A> - compute per-surf temperatures dynamically
+<LI><A HREF = "fix_surface_emit_puff.html">surface/emit/puff</A> - emit a gas puff from surfaces at a prescribed rate
+<LI><A HREF = "fix_surface_emit_recycle.html">surface/emit/recycle</A> - emit recycled neutrals from surfaces at the plasma wall flux
+<LI><A HREF = "fix_surface_emit_source.html">surface/emit/source</A> - emit particles from surfaces at a per-element source rate (e.g. sputtering)
+<LI><A HREF = "fix_surface_state_lm.html">surface/state/lm</A> - liquid-metal film and surface temperature model on a divertor strip
 <LI><A HREF = "fix_temp_global_rescale.html">temp/global/rescale</A> - rescale particle temperatures
 <LI><A HREF = "fix_temp_rescale.html">temp/rescale</A> - rescale particle temperatures within each grid cell
-<LI><A HREF = "fix_surf_temp.html">surf/temp</A> - compute per-surf temperatures dynamically
-<LI><A HREF = "fix_vibmode.html">vibmode</A> - discrete vibrational energy modes 
+<LI><A HREF = "fix_vibmode.html">vibmode</A> - discrete vibrational energy modes
+<LI><A HREF = "fix_volume_chem_adas.html">volume/chem/adas</A> - ionization and recombination of impurities with ADAS rate coefficients 
 </UL>
 <P>There are also additional accelerated compute styles included in the
-SPARTA distribution for faster performance on specific hardware.  The
+OpenEdge distribution for faster performance on specific hardware.  The
 list of these with links to the individual styles are given in the
 pair section of <A HREF = "Section_commands.html#cmd_5">this page</A>.
 </P>
@@ -165,4 +181,5 @@ variable</A>.
 </P>
 <P><B>Default:</B> none
 </P>
+<!-- PAGE BREAK -->
 </HTML>

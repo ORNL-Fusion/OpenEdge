@@ -1,0 +1,123 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix particulate/drag command :h3
+
+[Syntax:]
+
+fix ID particulate/drag Nevery A_bg Z_bg background bg-ID keyword value ... :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+particulate/drag = style name of this fix command :l
+Nevery = apply the drag update every Nevery timesteps :l
+A_bg = background-ion mass (amu) :l
+Z_bg = background-ion charge state (integer) :l
+background = required literal keyword :l
+bg-ID = ID of the "fix background"_fix_background.html supplying the plasma :l
+zero or more keyword/value pairs may be appended :l
+keyword = {model} or {mixture} or {material} or {coulomb/self} or {charge} or {coulomb/chi} or {coulomb/delta} or {coulomb/lnlambda} or {neutrals} or {efield} or {gravity} or {radius} or {mass} or {temp} :l
+  {model} value = {dustt2005} or {dis2021} = momentum-transfer closure
+  {mixture} value = mix-ID = only act on species in this mixture
+  {material} value = NAME = "material"_material.html supplying the
+    particulate density
+  {coulomb/self} value = {yes} or {no} = derive potential, Ti/Te and
+    Coulomb logarithm from the local plasma and particulate charge
+  {charge} value = fix-ID = ID of the matching fix particulate/charge
+  {coulomb/chi} value = X = normalized surface potential used when
+    coulomb/self = no
+  {coulomb/delta} value = X = Ti/Te used when coulomb/self = no (> 0)
+  {coulomb/lnlambda} value = X = Coulomb logarithm used when
+    coulomb/self = no (>= 0)
+  {neutrals} value = {yes} or {no} = neutral friction
+  {efield} value = {yes} or {no} = electric force Z_d e E
+  {gravity} values = gR gZ gphi = gravitational acceleration in
+    physical (R, Z, phi) components (m/s^2)
+  {radius} value = R = initialize a missing particle radius (m)
+  {mass} value = M = initialize a missing particle mass (kg)
+  {temp} value = T = initialize a missing particle temperature (K) :pre
+:ule
+
+[Examples:]
+
+fix fd particulate/drag 1 2.0 1 background pd &
+       model dustt2005 mixture particulates material Li &
+       coulomb/self yes neutrals yes efield yes &
+       gravity 0.0 -9.80665 0.0
+fix fd particulate/drag 1 2.0 1 background pd model dis2021 &
+       mixture particulates material Li charge qd :pre
+
+[Description:]
+
+Apply momentum transfer to finite-size particulates from the
+background ions (collection plus Coulomb scattering drag) and
+neutrals, together with optional electric and gravitational
+acceleration. The ion and neutral drag are combined into a single
+relaxation rate and the velocity is advanced with the exact
+constant-coefficient exponential solution in two half-kicks around
+particle transport; gravity and the electric acceleration enter the
+same update.
+
+A_bg and Z_bg give the mass and charge state of the background ions.
+The {model} keyword selects the closure, {dustt2005} (the default) or
+{dis2021}; use the same model on the charge, drag and thermal fixes.
+
+The {mixture} keyword restricts the update to species of the named
+mixture. The {material} keyword takes the particulate density from a
+"material"_material.html; without it the density of liquid lithium
+(534 kg/m^3) is used.
+
+With {coulomb/self yes} (the default) the Coulomb drag uses the local
+plasma and the {particulate_charge} attribute written by "fix
+particulate/charge"_fix_particulate_charge.html. If no charge fix is
+present, model dustt2005 warns and falls back to a zero surface
+potential (collection drag only). With {coulomb/self no} the three
+{coulomb/chi}, {coulomb/delta} and {coulomb/lnlambda} values are used
+instead. The {charge} keyword names the matching charge fix; it is
+required by model dis2021 with coulomb/self yes and lets the code
+verify that the charge and drag fixes use the same model, background,
+material and ion parameters.
+
+{neutrals yes} adds neutral friction when the background provides
+positive neutral density and temperature; otherwise it contributes
+zero. {efield yes} applies the acceleration Z_d e E / m_d from the
+local electric field and the particulate charge. {gravity} adds a
+constant acceleration given in physical (R, Z, phi) components, mapped
+to the active storage layout. Do not apply gravity both here and
+through "fix gravity"_fix_force_gravity.html.
+
+The {radius}, {mass} and {temp} keywords fill in particulate state
+that is missing on a particle; values already present are not
+replaced.
+
+:line
+
+[Restrictions:]
+
+This fix is part of the OPENEDGE package. It requires a "fix
+background"_fix_background.html. The {gravity} keyword cannot be
+combined with a "fix gravity"_fix_force_gravity.html command. Model
+{dis2021} requires a {material} defined by a "material"_material.html
+command with a {provenance} string and an explicit rho; with
+{coulomb/self yes} it also requires {charge} naming a fix
+particulate/charge that uses model dis2021, the same background fix,
+the same material, matching ion_mass_amu/ion_charge_state, and that is
+defined before this fix.
+
+[Related commands:]
+
+"fix particulate/charge"_fix_particulate_charge.html, "fix
+particulate/thermal"_fix_particulate_thermal.html, "fix
+gravity"_fix_force_gravity.html, "material"_material.html, "fix
+background"_fix_background.html
+
+[Default:]
+
+The option defaults are model = dustt2005, coulomb/self = yes,
+coulomb/chi = 0, coulomb/delta = 1, coulomb/lnlambda = 10, neutrals =
+yes, efield = yes, no gravity, no mixture filter, density 534 kg/m^3
+(no material).

@@ -1,14 +1,14 @@
 <HTML>
 <HEAD>
-<TITLE>SPARTA Users Manual</TITLE>
-<META NAME="docnumber" CONTENT="20 Jan 2025 version">
-<META NAME="author" CONTENT="https://sparta.github.io - Sandia National Laboratories">
-<META NAME="copyright" CONTENT="Copyright (2014) Sandia Corporation.  This software and manual is distributed under the GNU General Public License.">
+<TITLE>OpenEdge Users Manual</TITLE>
+<META NAME="docnumber" CONTENT="version 26.04 (Sep 2026)">
+<META NAME="author" CONTENT="https://github.com/ORNL-Fusion/OpenEdge - Oak Ridge National Laboratory">
+<META NAME="copyright" CONTENT="Distributed under the GNU General Public License v2. Built on SPARTA, Copyright (2014) Sandia Corporation.">
 </HEAD>
 
 <BODY>
 
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -20,80 +20,65 @@
 
 <H1></H1>
 
-<CENTER><H3>SPARTA Documentation 
+<CENTER><H3>OpenEdge Documentation 
 </H3></CENTER>
-<CENTER><H4>20 Jan 2025 version 
+<CENTER><H4>version 26.04 (Sep 2026) 
 </H4></CENTER>
 <H4>Version info: 
 </H4>
-<P>The SPARTA "version" is the date when it was released, such as 3 Mar
-2014. SPARTA is updated continuously.  Whenever we fix a bug or add a
-feature, we release it immediately, and post a notice on <A HREF = "https://sparta.github.io/bug.html">this page of
-the WWW site</A>.  Each dated copy of SPARTA contains all the
-features and bug-fixes up to and including that version date. The
-version date is printed to the screen and logfile every time you run
-SPARTA. It is also in the file src/version.h and in the SPARTA
-directory name created when you unpack a tarball, and at the top of
-the first page of the manual (this page).
+<P>The OpenEdge version is the git tag of the release, such as 26.04,
+printed to the screen and log file at the start of every run and shown
+at the top of this page.  Development builds append the number of
+commits since the tag and the commit hash, as reported by "git
+describe".
 </P>
-<UL><LI>If you browse the HTML doc pages on the SPARTA WWW site, they always
-describe the most current version of SPARTA. 
+<UL><LI>If you browse the HTML pages in the doc directory of your checkout,
+they describe the version you have. 
 
-<LI>If you browse the HTML doc pages included in your tarball, they
-describe the version you have. 
-
-<LI>The <A HREF = "Manual.pdf">PDF file</A> on the WWW site or in the tarball is updated
-about once per month.  This is because it is large, and we don't want
-it to be part of very patch. 
-
-<LI>At some point, there also will be a <A HREF = "Developer.pdf">Developer.pdf</A> file
-in the doc directory, which describes the internal structure and
-algorithms of SPARTA. 
+<LI>The <A HREF = "Manual.pdf">PDF file</A> in the doc directory is regenerated at each
+release. 
 </UL>
-<P>SPARTA stands for Stochastic PArallel Rarefied-gas Time-accurate
-Analyzer.
+<P>OpenEdge is a kinetic transport code for the plasma edge and for
+plasma-material interaction.  It follows neutral atoms and molecules,
+impurity ions, and dust or droplet particulates through prescribed
+plasma and magnetic-field backgrounds taken from edge fluid codes such
+as SOLPS-ITER, SOLEDGE3X, OEDGE and EMC3-EIRENE.  Particles are pushed
+with Boris or guiding-center integrators, undergo ADAS atomic
+processes, Coulomb collisions and cross-field transport, and interact
+with the wall through sputtering, reflection, recycling and evolving
+surface composition.
 </P>
-<P>SPARTA is a Direct Simulation Montel Carlo (DSMC) simulator designed
-to run efficiently on parallel computers.  It was developed at Sandia
-National Laboratories, a US Department of Energy facility, with
-funding from the DOE.  It is an open-source code, distributed freely
-under the terms of the GNU Public License (GPL), or sometimes by
-request under the terms of the GNU Lesser General Public License
-(LGPL).
+<P>OpenEdge is built on <A HREF = "https://sparta.github.io">SPARTA</A>, the Direct Simulation Monte Carlo
+code developed at Sandia National Laboratories.  SPARTA provides the
+hierarchical Cartesian grid, cut-cell surfaces, particle storage, MPI
+parallelism and the Kokkos performance-portability layer.  The input
+language documented here is SPARTA's, extended with OpenEdge commands
+and styles.  OpenEdge is developed at Oak Ridge National Laboratory and
+is distributed under the GNU General Public License version 2, the
+same license as SPARTA.
 </P>
-<P>The primary developers of SPARTA are <A HREF = "https://sjplimp.github.io">Steve Plimpton</A>, and Michael
-Gallis who can be contacted at sjplimp at gmail.com and magalli at
-sandia.gov.  The <A HREF = "https://sparta.github.io">SPARTA WWW Site</A> at https://sparta.github.io has
-more information about the code and its uses.
-</P>
-
-
 
 
 <HR>
 
-<P>The SPARTA documentation is organized into the following sections.  If
-you find errors or omissions in this manual or have suggestions for
-useful information to add, please send an email to the developers so
-we can improve the SPARTA documentation.
+<P>The OpenEdge documentation is organized into the following sections.
+If you find errors or omissions in this manual, please open an issue on
+the <A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge repository</A>.
 </P>
-<P>Once you are familiar with SPARTA, you may want to bookmark <A HREF = "Section_commands.html#comm">this
-page</A> at Section_commands.html#comm since
-it gives quick access to documentation for all SPARTA commands.
-</P>
-<P>OpenEdge extensions documentation (PMI package) is available separately at
-<A HREF = "openedge/index.html">doc/openedge/index.html</A>.
+<P>Once you are familiar with OpenEdge, you may want to bookmark <A HREF = "Section_commands.html#comm">this
+page</A> since it gives quick access to the
+documentation for every command.
 </P>
 <P><A HREF = "Manual.pdf">PDF file</A> of the entire manual, generated by
 <A HREF = "http://www.easysw.com/htmldoc">htmldoc</A>
 </P>
 <OL><LI><A HREF = "Section_intro.html">Introduction</A> 
 
-<UL>  1.1 <A HREF = "Section_intro.html#intro_1">What is SPARTA</A> 
+<UL>  1.1 <A HREF = "Section_intro.html#intro_1">What is OpenEdge</A> 
 <BR>
-  1.2 <A HREF = "Section_intro.html#intro_2">SPARTA features</A> 
+  1.2 <A HREF = "Section_intro.html#intro_2">OpenEdge features</A> 
 <BR>
-  1.3 <A HREF = "Section_intro.html#intro_3">Grids and surfaces in SPARTA</A> 
+  1.3 <A HREF = "Section_intro.html#intro_3">Grids, surfaces and plasma backgrounds</A> 
 <BR>
   1.4 <A HREF = "Section_intro.html#intro_4">Open source distribution</A> 
 <BR>
@@ -101,25 +86,21 @@ it gives quick access to documentation for all SPARTA commands.
 <BR></UL>
 <LI><A HREF = "Section_start.html">Getting started</A> 
 
-<UL>  2.1 <A HREF = "Section_start.html#start_1">What's in the SPARTA distribution</A> 
+<UL>  2.1 <A HREF = "Section_start.html#start_1">What's in the OpenEdge distribution</A> 
 <BR>
-  2.2 <A HREF = "Section_start.html#start_2">Making SPARTA</A> 
+  2.2 <A HREF = "Section_start.html#start_2">Building OpenEdge</A> 
 <BR>
-  2.3 <A HREF = "Section_start.html#start_3">Building SPARTA with optional packages</A> 
+  2.3 <A HREF = "Section_start.html#start_3">Testing OpenEdge</A> 
 <BR>
-  2.4 <A HREF = "Section_start.html#start_4">Building SPARTA as a library</A> 
+  2.4 <A HREF = "Section_start.html#start_4">Running OpenEdge</A> 
 <BR>
-  2.5 <A HREF = "Section_start.html#start_5">Testing SPARTA</A> 
+  2.5 <A HREF = "Section_start.html#start_5">Command-line options</A> 
 <BR>
-  2.6 <A HREF = "Section_start.html#start_6">Running SPARTA</A> 
-<BR>
-  2.7 <A HREF = "Section_start.html#start_7">Command-line options</A> 
-<BR>
-  2.8 <A HREF = "start_8">Screen output</A> 
+  2.6 <A HREF = "Section_start.html#start_6">Screen output</A> 
 <BR></UL>
 <LI><A HREF = "Section_commands.html">Commands</A> 
 
-<UL>  3.1 <A HREF = "Section_commands.html#cmd_1">SPARTA input script</A> 
+<UL>  3.1 <A HREF = "Section_commands.html#cmd_1">OpenEdge input script</A> 
 <BR>
   3.2 <A HREF = "Section_commands.html#cmd_2">Parsing rules</A> 
 <BR>
@@ -129,105 +110,47 @@ it gives quick access to documentation for all SPARTA commands.
 <BR>
   3.5 <A HREF = "Section_commands.html#cmd_5">Commands listed alphabetically</A> 
 <BR></UL>
-<LI><A HREF = "Section_packages.html">Packages</A> 
-
-<LI><A HREF = "Section_accelerate.html">Accelerating SPARTA performance</A> 
-
-<UL>  5.1 <A HREF = "Section_accelerate.html#acc_1">Measuring performance</A> 
-<BR>
-  5.2 <A HREF = "Section_accelerate.html#acc_2">Packages with optimized styles</A> 
-<BR>
-  5.3 <A HREF = "Section_accelerate.html#acc_3">KOKKOS package</A> 
-<BR></UL>
 <LI><A HREF = "Section_howto.html">How-to discussions</A> 
 
-<UL>  6.1 <A HREF = "Section_howto.html#howto_1">2d simulations</A> 
+<UL>  4.1 <A HREF = "Section_howto.html#howto_1">2d simulations</A> 
 <BR>
-  6.2 <A HREF = "Section_howto.html#howto_2">Axisymmetric simulations</A> 
+  4.2 <A HREF = "Section_howto.html#howto_2">Axisymmetric simulations</A> 
 <BR>
-  6.3 <A HREF = "Section_howto.html#howto_3">Running multiple simulations from one input script</A> 
+  4.3 <A HREF = "Section_howto.html#howto_3">Plasma and magnetic-field backgrounds</A> 
 <BR>
-  6.4 <A HREF = "Section_howto.html#howto_4">Output from SPARTA</A> 
+  4.4 <A HREF = "Section_howto.html#howto_4">The plasma.h5 file</A> 
 <BR>
-  6.5 <A HREF = "Section_howto.html#howto_5">Visualizing SPARTA snapshots</A> 
+  4.5 <A HREF = "Section_howto.html#howto_5">Wall geometry and surface normals</A> 
 <BR>
-  6.6 <A HREF = "Section_howto.html#howto_6">Library interface to SPARTA</A> 
+  4.6 <A HREF = "Section_howto.html#howto_6">The processes.h5 database</A> 
 <BR>
-  6.7 <A HREF = "Section_howto.html#howto_7">Coupling SPARTA to other codes</A> 
+  4.7 <A HREF = "Section_howto.html#howto_7">Running multiple simulations from one input script</A> 
 <BR>
-  6.8 <A HREF = "Section_howto.html#howto_8">Details of grid geometry in SPARTA</A> 
+  4.8 <A HREF = "Section_howto.html#howto_8">Output from OpenEdge</A> 
 <BR>
-  6.9 <A HREF = "Section_howto.html#howto_9">Details of surfaces in SPARTA</A> 
+  4.9 <A HREF = "Section_howto.html#howto_9">Visualizing snapshots</A> 
 <BR>
-  6.10 <A HREF = "Section_howto.html#howto_10">Restarting a simulation</A> 
+  4.10 <A HREF = "Section_howto.html#howto_10">Details of grid geometry</A> 
 <BR>
-  6.11 <A HREF = "Section_howto.html#howto_11">Using the ambipolar approximation</A> 
+  4.11 <A HREF = "Section_howto.html#howto_11">Details of surfaces</A> 
 <BR>
-  6.12 <A HREF = "Section_howto.html#howto_12">Using multiple vibrational energy levels</A> 
+  4.12 <A HREF = "Section_howto.html#howto_12">Restarting a simulation</A> 
 <BR>
-  6.13 <A HREF = "Section_howto.html#howto_13">Surface elements: explicit, implicit, distributed</A> 
+  4.13 <A HREF = "Section_howto.html#howto_13">Visualizing output with ParaView</A> 
 <BR>
-  6.14 <A HREF = "Section_howto.html#howto_14">Implicit surface ablation</A> 
+  4.14 <A HREF = "Section_howto.html#howto_14">Custom per-particle, per-grid, per-surf attributes</A> 
 <BR>
-  6.15 <A HREF = "Section_howto.html#howto_15">Transparent surface elements</A> 
-<BR>
-  6.16 <A HREF = "Section_howto.html#howto_16">Visualizing SPARTA output with ParaView</A> 
-<BR>
-  6.17 <A HREF = "Section_howto.html#howto_17">Custom per-particle, per-grid, per-surf attributes</A> 
-<BR>
-  6.18 <A HREF = "Section_howto.html#howto_18">Variable timestep simulations</A> 
+  4.15 <A HREF = "Section_howto.html#howto_15">Variable timestep simulations</A> 
 <BR></UL>
 <LI><A HREF = "Section_example.html">Example problems</A> 
 
-<LI><A HREF = "Section_perf.html">Performance & scalability</A> 
-
-<LI><A HREF = "Section_tools.html">Additional tools</A> 
-
-<LI><A HREF = "Section_modify.html">Modifying & extending SPARTA</A> 
-
-<UL>  10.1 <A HREF = "Section_modify.html#mod_1">Compute styles</A> 
-<BR>
-  10.2 <A HREF = "Section_modify.html#mod_2">Fix styles</A> 
-<BR>
-  10.3 <A HREF = "Section_modify.html#mod_3">Region styles</A> 
-<BR>
-  10.4 <A HREF = "Section_modify.html#mod_4">Collision styles</A> 
-<BR>
-  10.5 <A HREF = "Section_modify.html#mod_5">Surface collision styles</A> 
-<BR>
-  10.6 <A HREF = "Section_modify.html#mod_6">Chemistry styles</A> 
-<BR>
-  10.7 <A HREF = "Section_modify.html#mod_7">Dump styles</A> 
-<BR>
-  10.8 <A HREF = "Section_modify.html#mod_8">Input script commands</A> 
-<BR></UL>
-<LI><A HREF = "Section_python.html">Python interface</A> 
-
-<UL>  11.1 <A HREF = "Section_python.html#py_1">Creating a shared MPI library</A> 
-<BR>
-  11.2 <A HREF = "Section_python.html#py_2">Extending Python with a parallel version of SPARTA</A> 
-<BR>
-  11.3 <A HREF = "Section_python.html#py_3">Extending Python with MPI</A> 
-<BR>
-  11.4 <A HREF = "Section_python.html#py_4">Testing the Python-SPARTA interface</A> 
-<BR>
-  11.5 <A HREF = "Section_python.html#py_5">Using SPARTA from Python</A> 
-<BR>
-  11.6 <A HREF = "Section_python.html#py_6">Example Python scripts that use SPARTA</A> 
-<BR></UL>
 <LI><A HREF = "Section_errors.html">Errors</A> 
 
-<UL>  12.1 <A HREF = "Section_errors.html#err_1">Common problems</A> 
+<UL>  6.1 <A HREF = "Section_errors.html#err_1">Common problems</A> 
 <BR>
-  12.2 <A HREF = "Section_errors.html#err_2">Reporting bugs</A> 
+  6.2 <A HREF = "Section_errors.html#err_2">Reporting bugs</A> 
 <BR>
-  12.3 <A HREF = "Section_errors.html#err_3">Error & warning messages</A> 
-<BR></UL>
-<LI><A HREF = "Section_history.html">Future and history</A> 
-
-<UL>  13.1 <A HREF = "Section_history.html#hist_1">Coming attractions</A> 
-<BR>
-  13.2 <A HREF = "Section_history.html#hist_2">Past versions</A> 
+  6.3 <A HREF = "Section_errors.html#err_3">Error & warning messages</A> 
 <BR></UL>
 
 </OL>
@@ -299,52 +222,7 @@ it gives quick access to documentation for all SPARTA commands.
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 </BODY>
 
+<!-- PAGE BREAK -->
 </HTML>

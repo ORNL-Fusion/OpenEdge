@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -38,7 +38,7 @@ Write a surface file in text format describing the currently defined
 surface elements, whether they be explicit or implicit surfaces.  See
 the "read_surf"_read_surf.html and "read_isurf"_read_isurf.html
 commands for a definition of surface elements and how they are defined
-and used be SPARTA.  The surface file can be used for later input to a
+and used be OpenEdge.  The surface file can be used for later input to a
 new simulation or for post-processing and visualization.
 
 Note that if surface objects were clipped when read in by the
@@ -78,7 +78,7 @@ write_surf command, e.g. for visualization purposes or to start a
 second simulation treating implicit surfaces previously ablated via
 the "fix ablate"_fix_ablate.html command as constant, unchanging
 explicit surfaces.  Because this command creates files in an explicit
-surface format, it can only be read back in to SPARTA via the
+surface format, it can only be read back in to OpenEdge via the
 "read_surf"_read_surf.html command.  It cannot be read back in via the
 "read_isurf"_read_isurf.html command.
 

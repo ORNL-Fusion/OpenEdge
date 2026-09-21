@@ -1,5 +1,5 @@
 <HTML>
-<CENTER><A HREF = "https://sparta.github.io">SPARTA WWW Site</A> - <A HREF = "Manual.html">SPARTA Documentation</A> - <A HREF = "Section_commands.html#comm">SPARTA Commands</A> 
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A> 
 </CENTER>
 
 
@@ -49,7 +49,7 @@ the default.
 </P>
 <P>For other styles, a file is specified which contains a list of
 chemical reactions, with their associated parameters.  The reactions
-are read into SPARTA and stored in a list.  Each time a simulation is
+are read into OpenEdge and stored in a list.  Each time a simulation is
 run via the <A HREF = "run.html">run</A> command, the list is scanned.  Only
 reactions for which all the reactants and all the products are
 currently defined as species-IDs will be active for the simulation.
@@ -69,7 +69,7 @@ coefficients are defined.
 <P>The format of the reaction file is the same for all three of the
 currently defined styles, and is also described below.  The various
 styles interpret and compute the specified reactions in different
-ways.  The data directory in the SPARTA distribution contains reaction
+ways.  The data directory in the OpenEdge distribution contains reaction
 files for these reaction models, all with the suffix ".tce".
 </P>
 <HR>
@@ -126,9 +126,9 @@ energy exchange is above the activation energy of the exchange reaction
 </CENTER>
 <P>A new version of the QK model for exchange reactions has been proposed
 by <A HREF = "#Bird11">(Bird11)</A>.  This will be implemented in future releases of
-SPARTA.
+OpenEdge.
 </P>
-<P>For the QK model, SPARTA reads the same 5 coefficients per reaction
+<P>For the QK model, OpenEdge reads the same 5 coefficients per reaction
 from the reaction file (described below) as for the TCE model.  Three
 of the coefficients (C1,C2,C5) are used to calculate terms in equation
 6.10 of <A HREF = "#Bird94">(Bird94)</A> for the probability that a reaction takes
@@ -185,13 +185,13 @@ involved in the reaction.
 <P>An ionization reaction with 2 products is typically a collision
 between R1 and R2 that results in a positively charged ion and an
 election.  See the discussion on ambipolar reactions below.  However,
-SPARTA does not check for this, so there is no restriction on the
+OpenEdge does not check for this, so there is no restriction on the
 species involved in the reaction.
 </P>
 <P>An ionization reaction with 3 products is typically a collision
 between a neutral R1 and an electon R2 which ejects an electron from
 the neutral species, resulting in an ion P1 and a new electron P2.
-See the discussion on ambipolar reactions below.  Again, SPARTA does
+See the discussion on ambipolar reactions below.  Again, OpenEdge does
 not check for this, so there is no restriction on the species involved
 in the reaction.  R2 is preserved in the collision, so P3 = R2 is
 required.
@@ -243,7 +243,7 @@ you can list multiple reactions of the third kind, each with a unique
 P2.
 </P>
 <P>IMPORTANT NOTE: If the ambipolar approximation is being used, via the
-<A HREF = "fix_ambipolar.hmtl">fix ambipolar</A> and <A HREF = "collide_modify.html">collide_modify ambipolar
+<A HREF = "fix_ambipolar.html">fix ambipolar</A> and <A HREF = "collide_modify.html">collide_modify ambipolar
 yes</A> commands, then reactions which involve either
 ambipolar ions or the ambipolar electron have more restricitve rules
 about the ordering of reactants and products.  See the next section
@@ -256,7 +256,7 @@ case) with the following meaning:
 <LI>Q = Quantum 
 </UL>
 <P>The style determines how many reaction coefficients are listed as C1,
-C2, etc, and how they are interpreted by SPARTA.
+C2, etc, and how they are interpreted by OpenEdge.
 </P>
 <P>For both the A = Arrhenius style and Q = Quantum style, there are 5
 coefficients:
@@ -280,7 +280,7 @@ described in the preceeding section.
 </P>
 <P>Note that ambipolar collisions are turned on via the <A HREF = "collide_modify.html">collide_modify
 ambipolar yes</A> commands, which in turn requries
-that the <A HREF = "fix_ambipolar.hmtl">fix ambipolar</A> is defined in your input
+that the <A HREF = "fix_ambipolar.html">fix ambipolar</A> is defined in your input
 script.  This fix defines a particular species as an ambipolar
 electron, written as "e" in the reactions that follow.  It also
 defines a list of ambipolar ions, which are written as species with a
@@ -324,21 +324,21 @@ the same way as described above for non-ambipolar recombination.
 <P>Styles with a <I>kk</I> suffix are functionally the same as the
 corresponding style without the suffix.  They have been optimized to
 run faster, depending on your available hardware, as discussed in the
-<A HREF = "Section_accelerate.html">Accelerating SPARTA</A> section of the manual.
+<A HREF = "Section_start.html#start_2">Building OpenEdge</A> section of the manual.
 The accelerated styles take the same arguments and should produce the
 same results, except for different random number, round-off and
 precision issues.
 </P>
 <P>These accelerated styles are part of the KOKKOS package. They are only
-enabled if SPARTA was built with that package.  See the <A HREF = "Section_start.html#start_3">Making
-SPARTA</A> section for more info.
+enabled if OpenEdge was built with that package.  See the <A HREF = "Section_start.html#start_3">Making
+OpenEdge</A> section for more info.
 </P>
 <P>You can specify the accelerated styles explicitly in your input script
-by including their suffix, or you can use the <A HREF = "Section_start.html#start_7">-suffix command-line
-switch</A> when you invoke SPARTA, or you can
+by including their suffix, or you can use the <A HREF = "Section_start.html#start_5">-suffix command-line
+switch</A> when you invoke OpenEdge, or you can
 use the <A HREF = "suffix.html">suffix</A> command in your input script.
 </P>
-<P>See the <A HREF = "Section_accelerate.html">Accelerating SPARTA</A> section of the
+<P>See the <A HREF = "Section_start.html#start_2">Building OpenEdge</A> section of the
 manual for more instructions on how to use the accelerated styles
 effectively.
 </P>
@@ -377,11 +377,12 @@ rates", Physics of Fluids, 23, 106101, (2011).
 Kinetic-Theory Approach for Computing Chemical-Reaction Rates in
 Upper-Atmosphere Hypersonic Flows", J Chem Phys, 131, 124311, (2009).
 </P>
-<A NAME = "Gallis11"></A>
+<A NAME = "Gallis10"></A>
 
 <P><B>(Gallis10)</B> M. A. Gallis, R. B. Bond, and J. R.Torczynski,
 "Assessment of Collision-Energy-Based Models for Atmospheric-Species
 Reactions in Hypersonic Flows", J Thermophysics and Heat Transfer,
 (2010).
 </P>
+<!-- PAGE BREAK -->
 </HTML>

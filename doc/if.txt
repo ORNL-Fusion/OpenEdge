@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -14,11 +14,11 @@ if boolean then t1 t2 ... elif boolean f1 f2 ... elif boolean f1 f2 ... else e1 
 
 boolean = a Boolean expression evaluated as TRUE or FALSE (see below)
 then = required word
-t1,t2,...,tN = one or more SPARTA commands to execute if condition is met, each enclosed in quotes
+t1,t2,...,tN = one or more OpenEdge commands to execute if condition is met, each enclosed in quotes
 elif = optional word, can appear multiple times
-f1,f2,...,fN = one or more SPARTA commands to execute if elif condition is met, each enclosed in quotes (optional arguments)
+f1,f2,...,fN = one or more OpenEdge commands to execute if elif condition is met, each enclosed in quotes (optional arguments)
 else = optional argument
-e1,e2,...,eN = one or more SPARTA commands to execute if no condition is met, each enclosed in quotes (optional arguments) :ul
+e1,e2,...,eN = one or more OpenEdge commands to execute if no condition is met, each enclosed in quotes (optional arguments) :ul
 
 [Examples:]
 
@@ -56,7 +56,7 @@ Boolean expression is FALSE, then no commands are executed.
 
 The syntax for Boolean expressions is described below.
 
-Each command (t1, f1, e1, etc) can be any valid SPARTA input script
+Each command (t1, f1, e1, etc) can be any valid OpenEdge input script
 command, except an "include"_include.html command, which is not
 allowed. If the command is more than one word, it must enclosed in
 quotes, so it will be treated as a single argument, as in the examples
@@ -80,7 +80,7 @@ else &
   "run 50000" :pre
 
 Note that if one of the commands to execute is "quit"_quit.html, as in
-the first example above, then executing the command will cause SPARTA
+the first example above, then executing the command will cause OpenEdge
 to halt.
 
 Note that by jumping to a label in the same input script, the if

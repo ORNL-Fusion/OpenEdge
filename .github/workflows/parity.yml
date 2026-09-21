@@ -1,0 +1,15 @@
+name: package parity
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: src/ vs src/OPENEDGE mirror and Install.sh
+        run: tools/check_package_parity.sh
+      - name: legacy make yes-openedge leaves the tree unchanged
+        run: tools/check_package_parity.sh --install

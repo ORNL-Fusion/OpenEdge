@@ -1,8 +1,8 @@
-"SPARTA WWW Site"_sws - "SPARTA Documentation"_sd - "SPARTA Commands"_sc :c
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
 
-:link(sws,https://sparta.github.io)
-:link(sd,Manual.html)
-:link(sc,Section_commands.html#comm)
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
 
 :line
 
@@ -43,7 +43,7 @@ the default.
 
 For other styles, a file is specified which contains a list of
 chemical reactions, with their associated parameters.  The reactions
-are read into SPARTA and stored in a list.  Each time a simulation is
+are read into OpenEdge and stored in a list.  Each time a simulation is
 run via the "run"_run.html command, the list is scanned.  Only
 reactions for which all the reactants and all the products are
 currently defined as species-IDs will be active for the simulation.
@@ -63,7 +63,7 @@ coefficients are defined.
 The format of the reaction file is the same for all three of the
 currently defined styles, and is also described below.  The various
 styles interpret and compute the specified reactions in different
-ways.  The data directory in the SPARTA distribution contains reaction
+ways.  The data directory in the OpenEdge distribution contains reaction
 files for these reaction models, all with the suffix ".tce".
 
 :line
@@ -120,9 +120,9 @@ energy exchange is above the activation energy of the exchange reaction
 
 A new version of the QK model for exchange reactions has been proposed
 by "(Bird11)"_#Bird11.  This will be implemented in future releases of
-SPARTA.
+OpenEdge.
 
-For the QK model, SPARTA reads the same 5 coefficients per reaction
+For the QK model, OpenEdge reads the same 5 coefficients per reaction
 from the reaction file (described below) as for the TCE model.  Three
 of the coefficients (C1,C2,C5) are used to calculate terms in equation
 6.10 of "(Bird94)"_#Bird94 for the probability that a reaction takes
@@ -179,13 +179,13 @@ involved in the reaction.
 An ionization reaction with 2 products is typically a collision
 between R1 and R2 that results in a positively charged ion and an
 election.  See the discussion on ambipolar reactions below.  However,
-SPARTA does not check for this, so there is no restriction on the
+OpenEdge does not check for this, so there is no restriction on the
 species involved in the reaction.
 
 An ionization reaction with 3 products is typically a collision
 between a neutral R1 and an electon R2 which ejects an electron from
 the neutral species, resulting in an ion P1 and a new electron P2.
-See the discussion on ambipolar reactions below.  Again, SPARTA does
+See the discussion on ambipolar reactions below.  Again, OpenEdge does
 not check for this, so there is no restriction on the species involved
 in the reaction.  R2 is preserved in the collision, so P3 = R2 is
 required.
@@ -237,7 +237,7 @@ you can list multiple reactions of the third kind, each with a unique
 P2.
 
 IMPORTANT NOTE: If the ambipolar approximation is being used, via the
-"fix ambipolar"_fix_ambipolar.hmtl and "collide_modify ambipolar
+"fix ambipolar"_fix_ambipolar.html and "collide_modify ambipolar
 yes"_collide_modify.html commands, then reactions which involve either
 ambipolar ions or the ambipolar electron have more restricitve rules
 about the ordering of reactants and products.  See the next section
@@ -250,7 +250,7 @@ A = Arrhenius
 Q = Quantum :ul
 
 The style determines how many reaction coefficients are listed as C1,
-C2, etc, and how they are interpreted by SPARTA.
+C2, etc, and how they are interpreted by OpenEdge.
 
 For both the A = Arrhenius style and Q = Quantum style, there are 5
 coefficients:
@@ -274,7 +274,7 @@ described in the preceeding section.
 
 Note that ambipolar collisions are turned on via the "collide_modify
 ambipolar yes"_collide_modify.html commands, which in turn requries
-that the "fix ambipolar"_fix_ambipolar.hmtl is defined in your input
+that the "fix ambipolar"_fix_ambipolar.html is defined in your input
 script.  This fix defines a particular species as an ambipolar
 electron, written as "e" in the reactions that follow.  It also
 defines a list of ambipolar ions, which are written as species with a
@@ -318,21 +318,21 @@ the same way as described above for non-ambipolar recombination.
 Styles with a {kk} suffix are functionally the same as the
 corresponding style without the suffix.  They have been optimized to
 run faster, depending on your available hardware, as discussed in the
-"Accelerating SPARTA"_Section_accelerate.html section of the manual.
+"Building OpenEdge"_Section_start.html#start_2 section of the manual.
 The accelerated styles take the same arguments and should produce the
 same results, except for different random number, round-off and
 precision issues.
 
 These accelerated styles are part of the KOKKOS package. They are only
-enabled if SPARTA was built with that package.  See the "Making
-SPARTA"_Section_start.html#start_3 section for more info.
+enabled if OpenEdge was built with that package.  See the "Making
+OpenEdge"_Section_start.html#start_3 section for more info.
 
 You can specify the accelerated styles explicitly in your input script
 by including their suffix, or you can use the "-suffix command-line
-switch"_Section_start.html#start_7 when you invoke SPARTA, or you can
+switch"_Section_start.html#start_5 when you invoke OpenEdge, or you can
 use the "suffix"_suffix.html command in your input script.
 
-See the "Accelerating SPARTA"_Section_accelerate.html section of the
+See the "Building OpenEdge"_Section_start.html#start_2 section of the
 manual for more instructions on how to use the accelerated styles
 effectively.
 
@@ -367,7 +367,7 @@ rates", Physics of Fluids, 23, 106101, (2011).
 Kinetic-Theory Approach for Computing Chemical-Reaction Rates in
 Upper-Atmosphere Hypersonic Flows", J Chem Phys, 131, 124311, (2009).
 
-:link(Gallis11)
+:link(Gallis10)
 [(Gallis10)] M. A. Gallis, R. B. Bond, and J. R.Torczynski,
 "Assessment of Collision-Energy-Based Models for Atmospheric-Species
 Reactions in Hypersonic Flows", J Thermophysics and Heat Transfer,

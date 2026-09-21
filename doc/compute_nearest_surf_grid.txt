@@ -1,0 +1,105 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+compute nearest_surf/grid command :h3
+
+[Syntax:]
+
+compute ID nearest_surf/grid group-ID sgroup-ID value1 value2 ... :pre
+
+ID is documented in "compute"_compute.html command :ulb,l
+nearest_surf/grid = style name of this compute command :l
+group-ID = group ID for which grid cells to perform calculation on :l
+sgroup-ID = surface group ID of the surface elements to search :l
+two or more values must be appended :l
+value = {dist} or {surfid} or {surfidx} or {nx} or {ny} or {nz} :l
+  dist = perpendicular distance from the cell center to the nearest
+    surface element (distance units)
+  surfid = surface ID of the nearest element
+  surfidx = index of the nearest element in the local surface list
+  nx,ny,nz = components of the nearest element's normal, oriented
+    toward the cell center :pre
+:ule
+
+[Examples:]
+
+compute cgeom nearest_surf/grid all wall dist surfid nx ny nz
+global pusher mode boris plasma pd sheath boundary geom cgeom :pre
+
+compute cnear nearest_surf/grid all divertor dist surfid
+dump dgrid grid all 1000 nearest.txt id c_cnear\[1\] c_cnear\[2\] :pre
+
+[Description:]
+
+Record, for every grid cell in the group, the nearest surface
+element (line in 2d, triangle in 3d) belonging to the surface group,
+the distance to it, and its normal vector.  The result is the
+cell-local wall geometry needed by the sheath models of the "global
+pusher"_global.html keyword, whose {geom} value must name a compute
+of this style, and by near-wall diagnostics such as wall-distance
+maps.
+
+For each cell the compute loops over the eligible surface elements
+and selects the element whose plane (line in 2d) is closest to the
+cell center, measured as the perpendicular distance from the center
+to the infinite plane containing the element.  Using the plane
+distance rather than the distance to the bounded element selects the
+plasma-facing face consistently when a cell is much larger than the
+surface features it overlaps, e.g. a thin slab inside a coarse cell.
+The {dist} value is that perpendicular distance.
+
+The {surfid} value is the ID of the selected element as assigned when
+the surface was read in, and {surfidx} is its index in the processor's
+surface list, which downstream commands use for fast lookups.  The
+{nx}, {ny}, {nz} values are the components of the element's unit
+normal, flipped if necessary so that the normal points from the
+element toward the cell center, i.e. into the plasma.  In 2d {nz} is
+always zero.
+
+The geometry is static, so the values are computed once when first
+requested and then cached.  They are recomputed when the grid changes,
+e.g. after "fix adapt"_fix_adapt.html, "adapt_grid"_adapt_grid.html,
+or a load balance, so the compute can be combined with grid
+adaptation.
+
+Cells that are not in the group, and split cells, receive zero for
+all values.  A cell for which no eligible surface element exists
+receives a {dist} of 1.0e20, a {surfid} of -1, a {surfidx} of -1,
+and a zero normal.
+
+:line
+
+[Output info:]
+
+This compute calculates a per-grid vector if a single value is
+specified, or a per-grid array with one column per value, in the
+order the values were listed.  The values can be output by the "dump
+grid"_dump.html command or used by the sheath and hybrid-pusher
+options of the "global pusher"_global.html keyword.
+
+The {dist} value is in distance units; the other values are
+dimensionless.
+
+:line
+
+[Restrictions:]
+
+This command is part of the OPENEDGE package.  It is only enabled if
+OpenEdge was built with that package.  See the "Section
+2.3"_Section_start.html#start_3 section for more info.
+
+The command requires explicit surface elements to have been defined,
+e.g. via the "read_surf"_read_surf.html command, and at least two
+values.
+
+[Related commands:]
+
+"global pusher"_global.html, "group"_group.html, "compute
+grid"_compute_grid.html
+
+[Default:] none

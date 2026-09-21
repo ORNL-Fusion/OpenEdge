@@ -45,8 +45,8 @@ make -j$(nproc)     # -> ./src/spa_mpi
 
 - **Build options, GPU builds, HPC recipes:** [BUILD_CMAKE.md](BUILD_CMAKE.md)
 - **Running cases and the example suite:** [examples/README.md](examples/README.md)
-- **Reference documentation** (fixes, computes, converters, performance,
-  migration guides): [docs/index.md](docs/index.md)
+- **Users manual:** [doc/Manual.html](doc/Manual.html); rebuild the HTML or a
+  local PDF with `make -C doc html` or `make -C doc pdf`
 
 ## License
 

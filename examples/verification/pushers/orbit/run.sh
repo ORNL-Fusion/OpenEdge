@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 mkdir -p output
 fail=0
 
-[ -f khan_plasma.h5 ] || $PY input/make_khan_plasma_h5.py
+[ -f khan_plasma.h5 ] || $PY scripts/make_khan_plasma_h5.py
 
 run() {  # run <deck> [-var ...] — abort on solver error
   echo "== mpirun -np 1 $BIN -in $*"
@@ -25,7 +25,7 @@ done
 
 log=output/run_gates.log
 gate() {  # gate <dump> <tag> <mode>
-  if $PY plot_trajectories.py --gca-dump "$1" --tag "$2" --mode "$3" \
+  if $PY scripts/plot_trajectories.py --gca-dump "$1" --tag "$2" --mode "$3" \
        > "$log" 2>&1; then tail -1 "$log"
   else tail -1 "$log"; fail=1; fi
 }
