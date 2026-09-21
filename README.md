@@ -43,5 +43,4 @@ make -j$(nproc)     # -> ./src/spa_mpi
 
 ## License
 
-[GPL-2.0](LICENSE), following SPARTA. See [LICENSE](LICENSE) and
-[LICENSE.SPARTA](LICENSE.SPARTA) for details.
+[GPL-2.0](LICENSE)
