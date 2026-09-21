@@ -5,32 +5,19 @@ the LAMMPS/SPARTA package convention with install/uninstall support.
 
 ## Package Contents
 
-The package has two categories of files:
+`src/` is the authoritative tree: every OpenEdge file is committed there and
+built from there by CMake. `src/OPENEDGE/` is a verbatim mirror of the
+OpenEdge-owned files so the legacy `make yes-openedge` path still works, and
+`Install.sh` lists each mirrored file, as `override` for modified base SPARTA
+files and `action` for new files. `Install.sh` is the file list; there is no
+second list to maintain here.
 
-**Override files** (24 files: goal is to reduce this number and stick with native sparta files) — modified versions of base SPARTA files:
-
-    update.cpp/h  input.cpp/h  particle.cpp/h  variable.cpp/h
-    compute_grid.cpp/h  dump_particle.cpp/h  sparta.cpp/h
-    fix_emit_face_file.cpp/h  fix_emit_surf.cpp/h  fix_field_grid.cpp/h
-    fix_field_particle.cpp/h  surf_collide_diffuse.cpp/h
-
-**New files** (54 files) — entirely new OpenEdge additions:
-
-    boris_grid.h  sheath_models.cpp/h  nanbu_scatter_table.h
-    compute_incident_plasma_flux.cpp/h
-    compute_plasma_fields.cpp/h  compute_surface_physical_sputter.cpp/h
-    compute_nearest_surf_grid.cpp/h
-    compute_surf_ead.cpp/h  compute_thermal_sheath_grid.cpp/h
-    fix_bfield_grid.cpp/h  fix_bfield_particle.cpp/h
-    fix_chem_adas.cpp/h  fix_coll_background.cpp/h  fix_coll_nanbu.cpp/h
-    fix_drag.cpp/h  fix_efield_grid.cpp/h  fix_efield_particle.cpp/h
-    fix_emit_droplet.cpp/h  fix_emit_surf_file.cpp/h  fix_surface_emit_source.cpp/h
-    fix_evaporation.cpp/h  fix_gravity.cpp/h
-    fix_thermal_force.cpp/h  fix_thermal_force_e.cpp/h  fix_thermal_force_i.cpp/h
-    fix_cross_diffusion.cpp/h  fix_reflect_psi.cpp/h  fix_viscous.cpp/h
-    fix_particle_weight.cpp/h
-    geqdsk_reader.cpp/h  grid_src.h
-    surf_react_mpex.cpp/h  surf_react_pmi.cpp/h
+Edit files in `src/`, then copy them to `src/OPENEDGE/`. The gate
+`tools/check_package_parity.sh` fails on any difference between the two
+trees, any package file missing from `Install.sh`, any `Install.sh` entry
+without a file, and any root file with an OpenEdge header that has no mirror.
+`tools/check_package_parity.sh --install` also runs `make yes-openedge` on a
+scratch copy and requires it to change nothing. CI runs both on every push.
 
 ## Prerequisites
 
