@@ -2,9 +2,14 @@
 # material Wd declared and a yield-scaled stand-in compute.  Checks that the
 # compound path still runs with deposit_as and stack-ordered erosion, and
 # that `target Wd target_like W yield_scale 0.5` equals 0.5 x the W compute.
+# IMPORTANT: 0.5 is an intentionally artificial verification value, not a
+# recommended physical yield for deposited W. Use 1.0 unless data justify a
+# distinct deposited-layer yield.
 # Neutrals only (no pusher / ADAS): a geometry + surface-model smoke.
 
-variable    inp      string ../../../wip/slag/input
+# Keep the verification self-contained: these inputs are vendored alongside
+# the deck instead of relying on the ignored examples/wip/slag tree.
+variable    inp      string input
 variable    nsteps   index 500
 
 shell       mkdir output
@@ -38,7 +43,7 @@ surf_modify plate collide pcoll react pwi
 surf_collide PERIODIC toroidal 0.79
 surf_modify caps collide PERIODIC
 
-fix         pd background file ${inp}/plasma_58245.h5 static yes
+fix         pd background file ${inp}/plasma.h5 static yes
 
 compute     cpmi surface/physical/sputter plate background pd &
             target W projectiles D,O compound bw conc adens_conc B &
@@ -60,6 +65,8 @@ timestep    1e-9
 stats       100
 stats_style step cpu np nscoll nsreact
 
+# surface/pwi creates s_adens_* during initialization.  Initialize before a
+# dump references those custom fields or dump surf cannot resolve them.
 run         0 post no
 dump        dsig surf plate ${nsteps} output/bw.*.dump id s_adens_net &
             s_adens_conc[1] s_adens_conc[5] c_cpmi c_cpmiB c_cpmiWd
