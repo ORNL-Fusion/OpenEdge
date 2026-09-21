@@ -27,13 +27,6 @@ studies and PMI / PWI workflows.
 - **Particulates**: dust and droplet transport.
 - **Parallel**: MPI with load balancing; Kokkos backends (OpenMP, CUDA).
 
-> **GPU status:** the Kokkos/CUDA backend is under **active development
-> and validation**. Core transport, PWI surface chemistry, and volume
-> chemistry are ported and validated on reference cases; coverage is
-> narrower than the CPU path and results should be checked against a
-> CPU run for new problem classes. Unported features error out
-> explicitly rather than running silently wrong.
-
 ## Getting started
 
 ```bash
