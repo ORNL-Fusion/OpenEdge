@@ -216,6 +216,22 @@ void FixDropletCharge::init()
   }
 
   if (physics_model_ == ParticulateModel::DIS2021) {
+    // the current balance needs a positive grain temperature from the
+    // species file column or the 'temp' keyword; fail here, not mid-run
+    if (seed_temp <= 0.0) {
+      const int *s2g = (imix >= 0)
+        ? particle->mixture[imix]->species2group : nullptr;
+      for (int isp = 0; isp < particle->nspecies; isp++) {
+        if (s2g && s2g[isp] < 0) continue;
+        if (particle->species[isp].temp > 0.0) continue;
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+          "fix particulate/charge model dis2021: species %s has no bulk "
+          "temperature; add the temp column to the species file or the "
+          "'temp' keyword", particle->species[isp].id);
+        error->all(FLERR, msg);
+      }
+    }
     if (!mat_ || !mat_->provenance_id[0])
       error->all(FLERR,
         "fix particulate/charge model dis2021 requires 'material NAME' "

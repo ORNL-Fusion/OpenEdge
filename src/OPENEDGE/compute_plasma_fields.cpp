@@ -2188,7 +2188,7 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
   if (input_mode == MODE_BACKGROUND && bg_fix_ && bg_fix_->is_zones3d()) {
     PlasmaPointSample sample;
     bg_fix_->sample_point(xyz, sample, -1, -1,
-                          PLASMA_NEED_FLOW_B | PLASMA_QUERY_SOFT);
+                          PLASMA_NEED_B | PLASMA_QUERY_SOFT);
     const double phi = std::atan2(xyz[1], xyz[0]);
     const double cp = std::cos(phi), sp = std::sin(phi);
     B.br = sample.b[0] * cp + sample.b[1] * sp;

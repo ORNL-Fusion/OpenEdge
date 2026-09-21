@@ -741,8 +741,7 @@ void FixCrossFieldDiffusion::pd_bfield_sparta(const Particle::OnePart &p,
   B0 = B1 = B2 = 0.0;
   if (!pd_ || !pd_->has_bfield) return;
   PlasmaPointSample sample;
-  pd_->sample_point(p.x, sample, p.icell, iparticle,
-                    PLASMA_NEED_FLOW_B);
+  pd_->sample_point(p.x, sample, p.icell, iparticle, PLASMA_NEED_B);
   B0 = sample.b[0];
   B1 = sample.b[1];
   B2 = sample.b[2];

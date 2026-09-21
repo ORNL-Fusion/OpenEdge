@@ -851,8 +851,7 @@ void FixCoulombBase::pd_bfield_sparta(const Particle::OnePart &p,
   Bx = By = Bz = 0.0;
   if (!pd_ || !pd_->has_bfield) return;
   PlasmaPointSample sample;
-  pd_->sample_point(p.x, sample, p.icell, iparticle,
-                    PLASMA_NEED_FLOW_B);
+  pd_->sample_point(p.x, sample, p.icell, iparticle, PLASMA_NEED_B);
   Bx = sample.b[0];
   By = sample.b[1];
   Bz = sample.b[2];

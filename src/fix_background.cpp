@@ -2348,14 +2348,15 @@ bool FixBackground::sample_point(const double xyz[3],
 
   // query_bfield_at_point returns cylindrical components. Convert once at
   // the provider boundary so consumers never need to know the source basis.
-  if (request & PLASMA_NEED_FLOW_B) {
+  if (request & (PLASMA_NEED_FLOW_B | PLASMA_NEED_B)) {
     const MagneticFieldFileDataParams B =
       query_bfield_at_point(xyz, icell, iparticle, false);
     sample.bmag = B.Bmag;
     sample.has_b = B.Bmag > 1.0e-12;
     OpenEdge::RZphi_force_to_sparta(B.br, B.bz, B.bt, dim, axi, phi,
                                     sample.b[0], sample.b[1], sample.b[2]);
-
+  }
+  if (request & PLASMA_NEED_FLOW_B) {
     const double vpar = interp2D(parr_flow, R, Z, icell, iparticle);
     sample.upar = vpar;
     if (sample.has_b) {
