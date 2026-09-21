@@ -24,6 +24,7 @@
 #include "math.h"
 #include "string.h"
 #include "stdio.h"
+#include "stdlib.h"
 #include "rcb.h"
 #include "irregular.h"
 #include "comm.h"
@@ -76,6 +77,14 @@ RCB::RCB(SPARTA *sparta) : Pointers(sparta)
   MPI_Op_create(box_merge,1,&box_op);
   MPI_Op_create(median_merge,1,&med_op);
 
+  // OpenEdge: reuse the recursion communicator chain across compute()
+  // calls; OE_RCB_COMM_CACHE=0 restores upstream dup/split/free churn
+  comm_cache = NULL;
+  ncomm_cache = 0;
+  comm_cache_on = 1;
+  const char *cc = getenv("OE_RCB_COMM_CACHE");
+  if (cc && strcmp(cc,"0") == 0) comm_cache_on = 0;
+
   reuse = 0;
 }
 
@@ -95,6 +104,11 @@ RCB::~RCB()
 
   memory->sfree(tree);
   delete irregular;
+
+  if (comm_cache) {
+    for (int i = 0; i < ncomm_cache; i++) MPI_Comm_free(&comm_cache[i]);
+    delete [] comm_cache;
+  }
 
   MPI_Type_free(&med_type);
   MPI_Type_free(&box_type);
@@ -191,8 +205,24 @@ void RCB::compute(int n, double **x, double *wt, char *eligible, int flip)
   counters[6] = 0;
 
   // create communicator for use in recursion
+  //
+  // OpenEdge: the split pattern below is pure rank arithmetic (procmid
+  // from proclower/procupper only), so the communicator chain is
+  // identical on every invocation. Build it once and reuse: the
+  // per-rebalance dup/split/free churn triggers a Cray MPICH (9.0.1 +
+  // 9.1.0) collective-matching loss on multi-rank-per-node runs
+  // (see examples/wip/slag/slag_mb_pilot/cray_mpich_shm_coll_issue_
+  // draft.md). OE_RCB_COMM_CACHE=0 restores the upstream behavior.
 
-  MPI_Comm_dup(world,&comm);
+  int commlevel = 0;
+  if (comm_cache_on) {
+    if (!comm_cache) {
+      comm_cache = new MPI_Comm[33];
+      MPI_Comm_dup(world,&comm_cache[0]);
+      ncomm_cache = 1;
+    }
+    comm = comm_cache[0];
+  } else MPI_Comm_dup(world,&comm);
 
   // recurse until partition is a single proc = me
   // proclower,procupper = lower,upper procs in partition
@@ -572,14 +602,23 @@ void RCB::compute(int n, double **x, double *wt, char *eligible, int flip)
       split = 1;
     }
 
-    MPI_Comm_split(comm,split,me,&comm_half);
-    MPI_Comm_free(&comm);
-    comm = comm_half;
+    if (comm_cache_on) {
+      commlevel++;
+      if (commlevel == ncomm_cache) {
+        MPI_Comm_split(comm,split,me,&comm_cache[commlevel]);
+        ncomm_cache++;
+      }
+      comm = comm_cache[commlevel];
+    } else {
+      MPI_Comm_split(comm,split,me,&comm_half);
+      MPI_Comm_free(&comm);
+      comm = comm_half;
+    }
   }
 
-  // clean up
+  // clean up (cached chain is freed in the destructor)
 
-  MPI_Comm_free(&comm);
+  if (!comm_cache_on) MPI_Comm_free(&comm);
 
   // set public variables with results of rebalance
 

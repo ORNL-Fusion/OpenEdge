@@ -1,0 +1,37 @@
+{
+ "Step": {
+  "value": 2000.0,
+  "tol": null,
+  "note": "reference = base rfpie_tungsten_transport: rebalancing every 100 steps must not change the answer"
+ },
+ "CPU": {
+  "value": 9.9486454,
+  "tol": null,
+  "note": "reference = base rfpie_tungsten_transport: rebalancing every 100 steps must not change the answer"
+ },
+ "Np": {
+  "value": 83800.0,
+  "tol": 0.03,
+  "note": "reference = base rfpie_tungsten_transport: rebalancing every 100 steps must not change the answer"
+ },
+ "Nscoll": {
+  "value": 0.0,
+  "tol": null,
+  "note": "reference = base rfpie_tungsten_transport: rebalancing every 100 steps must not change the answer"
+ },
+ "Nsreact": {
+  "value": 0.0,
+  "tol": null,
+  "note": "reference = base rfpie_tungsten_transport: rebalancing every 100 steps must not change the answer"
+ },
+ "loop_particles": {
+  "value": 83800,
+  "tol": 0.03,
+  "note": "reference = base rfpie_tungsten_transport: rebalancing every 100 steps must not change the answer"
+ },
+ "host_fallback_calls": {
+  "value": 0,
+  "tol": null,
+  "note": "reference = base rfpie_tungsten_transport: rebalancing every 100 steps must not change the answer"
+ }
+}

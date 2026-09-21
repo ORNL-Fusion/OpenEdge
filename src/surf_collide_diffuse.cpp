@@ -231,7 +231,6 @@ void SurfCollideDiffuse::diffuse(Particle::OnePart *p, double *norm)
 
   if (random->uniform() > acc) {
     MathExtra::reflect3(p->v,norm);
-//  printf("Diffuse collision\n");
   // diffuse reflection
   // vrm = most probable speed of species, eqns (4.1) and (4.7)
   // vperp = velocity component perpendicular to surface along norm, eqn (12.3)
@@ -330,25 +329,3 @@ void SurfCollideDiffuse::flags_and_coeffs(int *flags, double *coeffs)
 }
 
 
-double SurfCollideDiffuse::random_energy_thompson(double ub, double te){
-    /*
-    Generate a random number 'e' from a Thompson distribution function F(e, ub, emax).
-    The distribution is given by F(e, ub, emax) = const * e / (e + ub)**3, for 0 < e < emax.
-    The constant is calculated as const = ub / (0.5 * 1./(emax/ub+1.)**2 - 1./(emax/ub+1.) + 0.5).
-
-    :param ub: The parameter UB in the distribution.
-    :param emax: The maximum value of e (EMAX).
-    :return: A random number 'e' from the Thompson distribution.
-    */
-    double emax = 3.0 * te ;  
-    double emu = 1.0 / (emax / ub + 1.0);
-    double betad2 = 1.0 / (emu * emu - emu - emu + 1.0);
-
-    // generate random number
-    double r = random->uniform();
-    double arg = r / betad2;
-
-    double energy_sample = ub / ( 1.0 - std::sqrt(arg)) - ub;
-
-    return energy_sample;
-}

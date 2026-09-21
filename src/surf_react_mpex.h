@@ -55,19 +55,12 @@ class SurfReactMpex : public SurfReact {
     char *id;                      // reaction ID (formula)
   };
 
-   double random_energy_thompson(double , double );
 
 
     inline double clamp(double x, double lo, double hi) { return std::max(lo, std::min(hi, x)); }
 
 
     // helper for analytic Te(r) [eV]
-  static inline double Te_profile(double x, double y)
-  {
-    const double R0 = 0.02;  // 2 cm
-    double r = sqrt(x*x + y*y);
-    return 1.0 + 4.0 * exp( -pow(r / R0, 12.0) );
-  }
 
 
  protected:

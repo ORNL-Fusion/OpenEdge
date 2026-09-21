@@ -44,6 +44,7 @@ FixPopulationControl::FixPopulationControl(SPARTA *sparta, int narg, char **arg)
 
 FixPopulationControl::~FixPopulationControl()
 {
+  if (copymode) return;   // Kokkos functor copies share rng_
   delete rng_;
 }
 

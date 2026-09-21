@@ -4,6 +4,8 @@
 
 #include "compute_nearest_surf_grid_kokkos.h"
 #include "grid.h"
+#include "grid_kokkos.h"
+#include "sparta_masks.h"
 #include "memory_kokkos.h"
 
 using namespace SPARTA_NS;
@@ -68,4 +70,14 @@ void ComputeNearestSurfGridKokkos::sync_to_device()
   k_midx_grid.sync_device();
   d_array_grid = k_array_grid.d_view;
   d_midx_grid_kk = k_midx_grid.d_view;
+}
+
+void ComputeNearestSurfGridKokkos::custom_sync_host()
+{
+  ((GridKokkos *) grid)->sync(Host,CUSTOM_MASK);
+}
+
+void ComputeNearestSurfGridKokkos::custom_modify_host()
+{
+  ((GridKokkos *) grid)->modify(Host,CUSTOM_MASK);
 }

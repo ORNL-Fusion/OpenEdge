@@ -5,12 +5,12 @@
     Oak Ridge National Laboratory
     https://github.com/ORNL-Fusion/OpenEdge
 
-    fix coulomb/base: binary Coulomb collisions via the Nanbu (1997) /
+    Coulomb collision base class (not an instantiable style; use
+    fix coulomb/binary or fix coulomb/background): Nanbu (1997) /
     Takizuka-Abe (1977) algorithm.
 
     Syntax:
       fix ID coulomb/base Nevery plasma TeSrc NeSrc \
-          [nobinary] \
           [background A_bg Z_bg TiSrc NiSrc VparSrc BxSrc BySrc BzSrc]
 
     Example (binary only):
@@ -23,7 +23,6 @@
 
     Example (background-only electron collisions, no binary):
       fix nanbu_e coulomb/base 1 plasma c_cplasma[7] c_cplasma[10] \
-          nobinary \
           background 5.486e-4 -1.0 c_cplasma[7] c_cplasma[10] \
           c_cplasma[11] c_cplasma[1] c_cplasma[2] c_cplasma[3]
 

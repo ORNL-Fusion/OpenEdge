@@ -109,6 +109,11 @@ class RCB : protected Pointers {
   MPI_Op box_op,med_op;
   MPI_Datatype box_type,med_type;
 
+  // OpenEdge: cached recursion communicator chain (see compute())
+  MPI_Comm *comm_cache;
+  int ncomm_cache;
+  int comm_cache_on;
+
   int reuse;        // 1/0 to use/not use previous cuts
   int dottop;       // dots >= this index are new
   BBox rcbbox;      // bounding box of final RCB sub-domain

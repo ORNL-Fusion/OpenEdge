@@ -1013,6 +1013,8 @@ void FixBackground::clear_loaded_data()
   dens_e.clear();
   temp_e.clear();
   dens_i.clear();
+  dens_n.clear();
+  temp_n.clear();
   temp_i.clear();
   parr_flow.clear();
   parr_flow_r.clear();
@@ -2094,36 +2096,9 @@ int FixBackground::find_mesh_triangle(double R, double Z, int icell,
 
 /* ---------------------------------------------------------------------- */
 
-int FixBackground::find_nearest_mapped_triangle(double R, double Z, double max_dist) const
-{
-  const double max_d2 = max_dist * max_dist;
-  double best_d2 = max_d2;
-  int best = -1;
-  for (int i = 0; i < static_cast<int>(mapped_idx.size()); i++) {
-    const double dr = mapped_cr[i] - R;
-    const double dz = mapped_cz[i] - Z;
-    const double d2 = dr*dr + dz*dz;
-    if (d2 < best_d2) {
-      best_d2 = d2;
-      best = mapped_idx[i];
-    }
-  }
-  return best;
-}
 
 /* ---------------------------------------------------------------------- */
 
-int FixBackground::mesh_cell_at(double R, double Z, double max_dist) const
-{
-  if (!has_mesh || mesh_ncell <= 0 || mesh_cell_idx.empty()) return -1;
-  int tri = find_mesh_triangle(R, Z);
-  if (tri < 0 || tri >= static_cast<int>(mesh_cell_idx.size()) || mesh_cell_idx[tri] < 0)
-    tri = find_nearest_mapped_triangle(R, Z, max_dist);
-  if (tri < 0 || tri >= static_cast<int>(mesh_cell_idx.size())) return -1;
-  const int cell = mesh_cell_idx[tri];
-  if (cell < 0 || cell >= mesh_ncell) return -1;
-  return cell;
-}
 
 /* ----------------------------------------------------------------------
    Build per-SPARTA-cell mesh-cell index at cell centroids. Populates
@@ -2474,6 +2449,37 @@ void FixBackground::bfield_at(double R, double Z,
   }
 
   Br_out = Bz_out = Bt_out = 0.0;
+}
+
+/* ----------------------------------------------------------------------
+   Position-aware B query (see header). Cartesian constant field in 3D:
+   (Br,Bt) = rotation of (bx,by) by phi at xyz, matching
+   query_bfield_at_point(); this is what the (R,Z) interface cannot do.
+------------------------------------------------------------------------- */
+
+void FixBackground::bfield_at_xyz(const double xyz[3],
+                                   double &Br_out, double &Bz_out,
+                                   double &Bt_out, int icell, int iparticle) const
+{
+  const int dim = domain->dimension;
+  const bool axi = domain->axisymmetric;
+  if (const_has_bcart) {
+    if (dim == 3) {
+      const double rx = xyz[0] - column_x0, ry = xyz[1] - column_y0;
+      const double rxy = std::sqrt(rx*rx + ry*ry);
+      double cphi = 1.0, sphi = 0.0;
+      if (rxy > 1.0e-20) { cphi = rx / rxy; sphi = ry / rxy; }
+      Br_out =  const_bcart[0]*cphi + const_bcart[1]*sphi;
+      Bt_out = -const_bcart[0]*sphi + const_bcart[1]*cphi;
+      Bz_out =  const_bcart[2];
+    } else {
+      Br_out = const_bcart[0]; Bz_out = const_bcart[1]; Bt_out = const_bcart[2];
+    }
+    return;
+  }
+  double R = 0.0, Z = 0.0;
+  OpenEdge::sparta_to_RZ(xyz, dim, axi, R, Z, column_x0, column_y0);
+  bfield_at(R, Z, Br_out, Bz_out, Bt_out, icell, iparticle);
 }
 
 /* ----------------------------------------------------------------------

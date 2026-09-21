@@ -2,7 +2,7 @@
    OpenEdge - Plasma-edge particle transport code
    https://github.com/ORNL-Fusion/OpenEdge
 
-   fix liquid_metal: MHD liquid metal film model for divertor surfaces.
+   fix surface/state/lm: MHD liquid metal film model for divertor surfaces.
    Solves Smolentsev shallow-water MHD + heat transfer equations on a
    1D strip along the divertor, computes surface temperature,
    Li evaporation flux (Antoine+HK), ad-atom flux, and film thickness
@@ -35,6 +35,7 @@
 #include "string.h"
 #include "math.h"
 #include "fix_surface_state_lm.h"
+#include "sparta_masks.h"
 #include "domain.h"
 #include "comm.h"
 #include "surf.h"
@@ -63,18 +64,24 @@ enum { COMPUTE, FIX, CONSTANT, PLASMA, TARGET, BACKGROUND, SOLPS_B2PL };
 FixSurfaceStateLm::FixSurfaceStateLm(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
+  // Kokkos host-fix sandwich: this fix reads/writes surface state only
+  datamask_read = EMPTY_MASK;
+  datamask_modify = EMPTY_MASK;
+
   if (narg < 14)
     error->all(FLERR,
-      "Illegal fix liquid_metal command: not enough arguments\n"
+      "Illegal fix surface/state/lm command: not enough arguments\n"
       "Usage: fix ID liquid_metal group Nevery hf_source "
       "h0 VAL U0 VAL Bs VAL alpha VAL width VAL Tin VAL [keywords]");
 
   if (surf->implicit)
-    error->all(FLERR, "Cannot use fix liquid_metal with implicit surfs");
+    error->all(FLERR, "Cannot use fix surface/state/lm with implicit surfs");
 
   // per-surf array output: 4 columns (Tsurf, evap, adatom, h)
-  per_surf_flag = 1;
-  size_per_surf_cols = 4;
+  // per_surf output was declared but array_surf was never allocated —
+  // any f_ID[i][..] consumer dereferenced NULL. Dropped until the
+  // columns are actually implemented (then also wire q_par/q_perp
+  // from fix background; q_mag from the removed file mode is gone).
 
   // surface group
   int igroup = surf->find_group(arg[2]);
@@ -101,7 +108,7 @@ FixSurfaceStateLm::FixSurfaceStateLm(SPARTA *sparta, int narg, char **arg) :
     char *ptr = strchr(id_hf, '[');
     if (ptr) {
       if (id_hf[strlen(id_hf) - 1] != ']')
-        error->all(FLERR, "Invalid heat flux source in fix liquid_metal");
+        error->all(FLERR, "Invalid heat flux source in fix surface/state/lm");
       hf_index = atoi(ptr + 1);
       *ptr = '\0';
     }
@@ -123,7 +130,7 @@ FixSurfaceStateLm::FixSurfaceStateLm(SPARTA *sparta, int narg, char **arg) :
     char *ptr = strchr(id_hf, '[');
     if (ptr) {
       if (id_hf[strlen(id_hf) - 1] != ']')
-        error->all(FLERR, "Invalid heat flux source in fix liquid_metal");
+        error->all(FLERR, "Invalid heat flux source in fix surface/state/lm");
       hf_index = atoi(ptr + 1);
       *ptr = '\0';
     }
@@ -309,7 +316,7 @@ FixSurfaceStateLm::FixSurfaceStateLm(SPARTA *sparta, int narg, char **arg) :
       iarg += 2;
     } else {
       char msg[256];
-      snprintf(msg, 256, "Unknown keyword in fix liquid_metal: %s", arg[iarg]);
+      snprintf(msg, 256, "Unknown keyword in fix surface/state/lm: %s", arg[iarg]);
       error->all(FLERR, msg);
     }
   }
@@ -1050,7 +1057,7 @@ void FixSurfaceStateLm::load_target_heatflux()
     H5Gclose(grp);
     H5Fclose(file_id);
 
-    printf("  fix liquid_metal: loaded %s target from %s (%d points)\n",
+    printf("  fix surface/state/lm: loaded %s target from %s (%d points)\n",
            target_leg, target_file, npts);
     printf("    q_total range: [%.2e, %.2e] W/m²\n",
            *std::min_element(tgt_q.begin(), tgt_q.end()),
@@ -1163,7 +1170,7 @@ void FixSurfaceStateLm::load_solps_b2pl()
       tgt_Z[i] = Zs[i];
     }
 
-    printf("  fix liquid_metal: loaded SOLPS b2pl from %s (%d points)\n",
+    printf("  fix surface/state/lm: loaded SOLPS b2pl from %s (%d points)\n",
            solps_b2pl_path, npts);
     printf("    arc length: [%.3f, %.3f] m\n", tgt_s.front(), tgt_s.back());
     printf("    R range: [%.3f, %.3f] m   Z range: [%.3f, %.3f] m\n",

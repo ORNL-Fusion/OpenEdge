@@ -12,7 +12,10 @@ variable            nvito index 5000
 seed                12345
 dimension           2
 boundary            o ao p
-global              gridcut 0.0 comm/sort no
+variable            gridcut index 0.0        # regression variant: 0.02 (cut-cell ghost decomposition)
+variable            memlimit index 0         # regression variant: 1 (MB; chunked balance/restart comm)
+global              gridcut ${gridcut} comm/sort no
+if "${memlimit} > 0" then "global mem/limit ${memlimit}"
 shell               mkdir output
 
 create_box          -1.00 0.85 0.0 3.25 -0.05 0.05
@@ -139,7 +142,9 @@ dump                dovito particle all ${nvito} output/ovito.D${Dperp}.dump &
 
 # Run
 run                 ${nwarm}
-write_restart       output/warmup.D${Dperp}.restart
+variable            rst string output/warmup.D${Dperp}.restart
+if "${memlimit} > 0" then "variable rst string output/warmup.D${Dperp}.%.restart"   # mem/limit needs per-rank restart files
+write_restart       ${rst}
 
 unfix               fadapt
 unfix               fbal

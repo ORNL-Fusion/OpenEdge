@@ -1,0 +1,17 @@
+# kokkos_parity stage 2b: identical particles stream onto the target (Boris in a
+# tilted constant B), absorbed on impact. compute surf/weighted per-surf
+# tallies (all six keywords) through fix ave/surf, dumped each step.
+variable            tag index cpu
+read_restart        state_surf.restart
+seed                104729
+surf_collide        absorb vanish
+surf_modify         target collide absorb
+fix                 pd background file rfpie_input/plasma_he.h5 static yes br 0.08 bz 0.06
+fix                 pw particle/weight
+global              pusher plasma pd mode boris subcycles 1
+compute             cs surf/weighted target wDiag n nwt nflux nflux_incident mflux mflux_incident
+fix                 avs ave/surf target 1 1 1 c_cs[*] ave one
+dump                ds surf target 1 out_${tag}/surf.*.dump id f_avs[*]
+dump_modify         ds format float %.12e
+timestep            2.0e-8
+run                 5

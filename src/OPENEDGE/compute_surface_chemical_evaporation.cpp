@@ -1,7 +1,12 @@
 /* ----------------------------------------------------------------------
    OpenEdge:
    Per-surface bulk evaporation flux. Antoine + Hertz-Knudsen.
-------------------------------------------------------------------------- */
+------------------------------------------------------------------------- 
+   UNITS NOTE: this compute expects the bound Tsurf custom in degrees
+   CELSIUS (+273.15 is applied internally); compute surface/physical/
+   sputter expects KELVIN for its tsurf custom - do not bind one shared
+   attribute to both without converting.
+*/
 
 #include "compute_surface_chemical_evaporation.h"
 

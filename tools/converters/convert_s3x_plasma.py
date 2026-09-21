@@ -8,11 +8,6 @@ from matplotlib.path import Path
 import matplotlib.pyplot as plt
 from utilities import surface
 
-try:
-    from _wall_flux import build_wall_flux_s3x, write_wall_flux_h5
-except ImportError:
-    from ._wall_flux import build_wall_flux_s3x, write_wall_flux_h5  # type: ignore
-
 
 QE = 1.602176634e-19
 AMU = 1.66053906660e-27
@@ -232,10 +227,8 @@ def _load_zone_native(config_file, data_file, ref_file):
     same intermediates the /triangles path produces. Zone corner coords are
     normalized: R = R0 + a0*x, Z = a0*z (R0/a0 from mesh.h5)."""
     with h5py.File(ref_file, 'r') as ref:
-        n0 = float(np.asarray(ref['/n0'][...]).reshape(-1)[0])
-        T0 = float(np.asarray(ref['/T0'][...]).reshape(-1)[0])
-        c0 = float(np.asarray(ref['/c0'][...]).reshape(-1)[0])
-        B0 = float(np.asarray(ref['/B0'][...]).reshape(-1)[0])
+        n0 = float(ref['/n0'][...]); T0 = float(ref['/T0'][...])
+        c0 = float(ref['/c0'][...]); B0 = float(ref['/B0'][...])
         phi0 = _read_scalar(ref, '/phi0', T0)   # potential norm [V]
 
     mesh = h5py.File(config_file, 'r')
@@ -245,8 +238,7 @@ def _load_zone_native(config_file, data_file, ref_file):
 
     # ion metadata from species_raptorX.txt (row 0 = electrons)
     spfile = os.path.join(os.path.dirname(ref_file), 'species_raptorX.txt')
-    with open(spfile, encoding='utf-8') as species_file:
-        rows = [line.split() for line in species_file if line.strip()]
+    rows = [l.split() for l in open(spfile) if l.strip()]
     ions = rows[1:]
     ion_names = [f"{r[0]}+" if int(r[2]) == 1 else f"{r[0]}{int(r[2])}+" for r in ions]
     ion_mass_amu = np.array([float(r[1]) for r in ions])
@@ -368,8 +360,6 @@ def interpolate_and_save_plasma_field(
     heatflux="none",
     sheath_gamma=7.0,
     efield="auto",
-    metric_file=None,
-    wall_flux="auto",
 ):
     """
     Convert SOLEDGE3X plasma/mesh data to OpenEdge-style HDF5.
@@ -377,7 +367,7 @@ def interpolate_and_save_plasma_field(
     B-field source priority:
       1. GEQDSK file (--gfile) — reconstructed from psi, most trustworthy
       2. .equ file (--equ-file) — reconstructed from psi
-      3. mesh_raptorX.h5 triangles, or zone fields in mesh.h5 (default)
+      3. mesh_raptorX.h5 triangles — S3X equilibrium on the simulation mesh (default)
 
     Backward-compatible legacy fields are still written:
       dens_i/temp_i/parr_flow(/r/t/z) from main ion species.
@@ -387,9 +377,6 @@ def interpolate_and_save_plasma_field(
 
     Native SOLEDGE triangle-mesh fields are also written under:
       mesh/*
-
-    When native staggered S3X particle fluxes and metric_raptorX.h5 are
-    available, per-species wall-normal fluxes are written under wall_flux/*.
     """
 
     # Reference scalings
@@ -397,10 +384,10 @@ def interpolate_and_save_plasma_field(
         raise ValueError("plasma_out_file must be provided")
 
     with h5py.File(ref_file, 'r') as ref:
-        n0 = float(np.asarray(ref['/n0'][...]).reshape(-1)[0])
-        T0 = float(np.asarray(ref['/T0'][...]).reshape(-1)[0])
-        c0 = float(np.asarray(ref['/c0'][...]).reshape(-1)[0])
-        B0 = float(np.asarray(ref['/B0'][...]).reshape(-1)[0])
+        n0 = float(ref['/n0'][...])
+        T0 = float(ref['/T0'][...])
+        c0 = float(ref['/c0'][...])
+        B0 = float(ref['/B0'][...])
 
     # Wall geometry + config: prefer SOLEDGE mesh/config source.
     # Optional fallback to wall_file only if explicitly provided.
@@ -585,71 +572,6 @@ def interpolate_and_save_plasma_field(
         main_k = ion_inds.index(main_ion_spec)
     else:
         main_k = 0
-
-    # Native SOLEDGE3X particle fluxes live on zone faces.  Convert the
-    # plasma/material (chi=0/1) interfaces to the source-agnostic wall_flux
-    # scatter consumed by OpenEdge.  This is independent of whether the
-    # volume plasma came through the zone-native or EIRENE-triangle path.
-    if wall_flux not in ("auto", "required", "off"):
-        raise ValueError("wall_flux must be 'auto', 'required', or 'off'")
-    wall_flux_data = None
-    if wall_flux != "off":
-        if metric_file is None and config_file is not None:
-            metric_file = os.path.join(
-                os.path.dirname(os.path.abspath(config_file)),
-                "metric_raptorX.h5",
-            )
-        have_inputs = bool(
-            config_file and os.path.exists(config_file)
-            and metric_file and os.path.exists(metric_file)
-            and os.path.exists(data_file)
-        )
-        have_face_flux = False
-        if have_inputs:
-            with h5py.File(data_file, "r") as _data:
-                _probe = f"zone1/spec{ion_inds[0]}/fluxn"
-                have_face_flux = (
-                    _probe in _data
-                    and f"{_probe}/psi" in _data
-                    and f"{_probe}/theta" in _data
-                )
-        if have_inputs and have_face_flux:
-            with h5py.File(config_file, "r") as _mesh, \
-                    h5py.File(metric_file, "r") as _metric, \
-                    h5py.File(data_file, "r") as _data, \
-                    h5py.File(ref_file, "r") as _ref:
-                wall_flux_data = build_wall_flux_s3x(
-                    _mesh, _metric, _data, _ref,
-                    ion_spec_indices=ion_inds,
-                    main_ion_spec=ion_inds[main_k],
-                    wall_r=np.asarray(Rwall), wall_z=np.asarray(Zwall),
-                )
-            _gamma = wall_flux_data["gamma_i"]
-            _positive = _gamma[_gamma > 0.0]
-            _peak = float(_positive.max()) if _positive.size else 0.0
-            _negative = int(np.count_nonzero(_gamma < 0.0))
-            _projection = wall_flux_data["projection_distance"]
-            print(
-                "/wall_flux/ built from native S3X staggered fluxn: "
-                f"N={wall_flux_data['r'].size}, nspec={_gamma.shape[0]}, "
-                f"peak={_peak:.6e} m^-2 s^-1, negatives={_negative}"
-            )
-            print(
-                "  face-to-wall projection distance: "
-                f"median={np.median(_projection):.3e} m, "
-                f"p95={np.percentile(_projection, 95):.3e} m, "
-                f"max={_projection.max():.3e} m"
-            )
-        elif wall_flux == "required":
-            raise RuntimeError(
-                "S3X wall flux was required, but metric_raptorX.h5 or "
-                "zone*/spec*/fluxn/{psi,theta} is unavailable"
-            )
-        else:
-            print(
-                "WARNING: native S3X wall-face flux inputs are unavailable; "
-                "/wall_flux/ will not be written"
-            )
     mesh_vtx_r = np.asarray(Rk, dtype=np.float64)
     mesh_vtx_z = np.asarray(Zk, dtype=np.float64)
     mesh_tri = np.asarray(tri_knots.T, dtype=np.int32)
@@ -974,18 +896,6 @@ def interpolate_and_save_plasma_field(
             f.create_dataset('ion_species/mass_amu', data=ion_mass_amu)
             f.create_dataset('ion_species/charge_state_z', data=ion_charge_state_z)
 
-            if wall_flux_data is not None:
-                write_wall_flux_h5(
-                    f, wall_flux_data,
-                    source="SOLEDGE3X",
-                    extraction=(
-                        "native staggered fluxn across chi=0/1 wall faces; "
-                        "J*sqrt(g^ii) metric removed; face midpoints "
-                        "projected to source wall"
-                    ),
-                    species_names=ion_names,
-                )
-
             # Native SOLEDGE triangle mesh for direct point-in-cell lookup.
             # For SOLEDGE3X the plasma fields are already triangle-centered,
             # so the cell mapping is the identity.
@@ -1062,9 +972,8 @@ def _build_parser():
     )
     p.add_argument("run_path", type=str,
                    help="SOLEDGE3X run directory "
-                        "(refParam_raptorX.h5, mesh.h5, plasma_*.h5; "
-                        "metric_raptorX.h5 for wall flux; optional "
-                        "meshEIRENE.h5/mesh_raptorX.h5).")
+                        "(refParam_raptorX.h5, meshEIRENE.h5, mesh_raptorX.h5, "
+                        "mesh.h5, plasma_*.h5).")
     p.add_argument("--plasma-snapshot", required=True, type=str,
                    help="Filename of the plasma snapshot (e.g. plasma_00010.h5 "
                         "or plasmaFinal.h5).")
@@ -1089,14 +998,6 @@ def _build_parser():
                    help="write mesh/q_par as the sheath-limited estimate "
                         "gamma*ne*cs*e*Te (SOLEDGE snapshots carry no flux)")
     p.add_argument("--sheath-gamma", type=float, default=7.0)
-    p.add_argument("--metric-file", type=str, default="metric_raptorX.h5",
-                   help="SOLEDGE3X metric filename under run_path, or an "
-                        "absolute path (default: metric_raptorX.h5).")
-    p.add_argument("--wall-flux", choices=["auto", "required", "off"],
-                   default="auto",
-                   help="extract native staggered S3X particle fluxes onto "
-                        "the wall (default: auto). 'required' fails if the "
-                        "face fluxes or metric file are unavailable.")
     p.add_argument("--geometry", choices=["cart", "axi"], default="cart",
                    help="SPARTA wall.surf slot layout. cart (default): "
                         "x=R, y=Z; pairs with 'boundary o o p'. axi: "
@@ -1107,9 +1008,6 @@ def _build_parser():
 def main():
     args = _build_parser().parse_args()
     base = args.run_path
-    metric_file = args.metric_file
-    if not os.path.isabs(metric_file):
-        metric_file = os.path.join(base, metric_file)
     interpolate_and_save_plasma_field(
         ref_file=os.path.join(base, "refParam_raptorX.h5"),
         mesh_file=os.path.join(base, "meshEIRENE.h5"),
@@ -1127,8 +1025,6 @@ def main():
         heatflux=args.heatflux,
         sheath_gamma=args.sheath_gamma,
         efield=args.efield,
-        metric_file=metric_file,
-        wall_flux=args.wall_flux,
     )
 
 

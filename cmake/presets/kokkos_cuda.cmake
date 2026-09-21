@@ -22,7 +22,7 @@ set(CMAKE_CXX_COMPILER
 set(Kokkos_ENABLE_CUDA
     ON
     CACHE STRING "")
-set(Kokkos_ARCH_KEPLER35
-    ON
-    CACHE STRING "")
+# Select exactly one target architecture at configure time, for example
+# -DKokkos_ARCH_AMPERE80=ON for an NVIDIA A100.  Machine-specific presets can
+# include this file and set the corresponding Kokkos_ARCH_* option.
 # ################### END   KOKKOS OPTIONS ####################

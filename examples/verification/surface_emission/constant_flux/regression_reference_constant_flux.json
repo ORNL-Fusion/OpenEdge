@@ -1,0 +1,29 @@
+{
+ "Step": {
+  "value": 1000.0,
+  "tol": null
+ },
+ "Np": {
+  "value": 100.0,
+  "tol": 0.2,
+  "note": "about 100 emitted particles: Poisson noise ~10 %"
+ },
+ "f_femit[1]": {
+  "value": 10.0,
+  "tol": 0.3,
+  "note": "per-step launch count (about 10): Poisson noise ~30 %"
+ },
+ "f_femit[2]": {
+  "value": 10001.0,
+  "tol": 0.05
+ },
+ "loop_particles": {
+  "value": 100,
+  "tol": 0.2,
+  "note": "about 100 emitted particles: Poisson noise ~10 %"
+ },
+ "host_fallback_calls": {
+  "value": 0,
+  "tol": null
+ }
+}

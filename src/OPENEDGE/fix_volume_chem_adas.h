@@ -59,9 +59,8 @@ public:
     void reset_tally();
 
 // Per-cell source-term output for Gkeyll / external coupling.
-// Columns: 0=ionization, 1=recombination, 2=charge exchange, 3=dissociation.
-// Units: cumulative event count per cell since fix start (stored as double).
-// Exposed via the inherited base-class array_grid with size_per_grid_cols = 4.
+  // Per-grid output layout: 6 columns in summary mode, 20 in detailed
+  // mode (see init() where size_per_grid_cols is set).
 // Allocated lazily when grid->nlocal changes (see ensure_src_alloc).
 int maxgrid_src = 0;
 

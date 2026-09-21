@@ -1,0 +1,30 @@
+{
+ "Step": {
+  "value": 2000.0,
+  "tol": null
+ },
+ "CPU": {
+  "value": 9.9486454,
+  "tol": null
+ },
+ "Np": {
+  "value": 83800.0,
+  "tol": 0.03
+ },
+ "Nscoll": {
+  "value": 0.0,
+  "tol": null
+ },
+ "Nsreact": {
+  "value": 0.0,
+  "tol": null
+ },
+ "loop_particles": {
+  "value": 83800,
+  "tol": 0.03
+ },
+ "host_fallback_calls": {
+  "value": 0,
+  "tol": null
+ }
+}

@@ -1,6 +1,7 @@
 /* ----------------------------------------------------------------------
    OpenEdge extension of SPARTA UpdateKokkos.
-   Adds Boris/GCA pusher support with separate E-field and B-field fixes.
+   Adds the OpenEdge Boris pusher (E/B from plasma compute or fix
+   background mesh views) and the spatial-sheath device machinery.
    This file is the canonical Kokkos update implementation.
 ------------------------------------------------------------------------- */
 
@@ -18,6 +19,8 @@
 #include "surf_collide_vanish_kokkos.h"
 #include "surf_collide_piston_kokkos.h"
 #include "surf_collide_transparent_kokkos.h"
+#include "surf_collide_toroidal_kokkos.h"
+#include "gca_kokkos.h"
 #include "compute_boundary_kokkos.h"
 #include "compute_surf_kokkos.h"
 #include "pusher_kokkos.h"
@@ -34,11 +37,12 @@ struct s_UPDATE_REDUCE {
   int ntouch_one,nexit_one,nboundary_one,
       entryexit,ncomm_one,
       nscheck_one,nscollide_one,nreact_one,nstuck,
-      naxibad,error_flag;
+      naxibad,error_flag,ncaplost;
   KOKKOS_INLINE_FUNCTION
   s_UPDATE_REDUCE() {
     ntouch_one = nexit_one = nboundary_one = ncomm_one = 0;
     nscheck_one = nscollide_one = nreact_one = nstuck = naxibad = 0;
+    ncaplost = 0;
   }
   KOKKOS_INLINE_FUNCTION
   void operator+=(const s_UPDATE_REDUCE &rhs) {
@@ -46,12 +50,17 @@ struct s_UPDATE_REDUCE {
     nboundary_one += rhs.nboundary_one; ncomm_one += rhs.ncomm_one;
     nscheck_one += rhs.nscheck_one; nscollide_one += rhs.nscollide_one;
     nreact_one += rhs.nreact_one; nstuck += rhs.nstuck; naxibad += rhs.naxibad;
+    ncaplost += rhs.ncaplost;
   }
 };
 typedef struct s_UPDATE_REDUCE UPDATE_REDUCE;
 
 template<int DIM, int SURF, int REACT, int OPT, int ATOMIC_REDUCTION>
 struct TagUpdateMove{};
+
+// OpenEdge gate 9b: device plasma-cache fill (retires the per-step
+// host pcache loop and its full particle+custom D2H/H2D round-trip)
+struct TagUpdatePcacheFill{};
 
 class UpdateKokkos : public Update {
  public:
@@ -74,6 +83,9 @@ class UpdateKokkos : public Update {
   KOKKOS_INLINE_FUNCTION
   void operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>, const int&, UPDATE_REDUCE&) const;
 
+  KOKKOS_INLINE_FUNCTION
+  void operator()(TagUpdatePcacheFill, const int&) const;
+
  private:
 
   double dt;
@@ -95,6 +107,14 @@ class UpdateKokkos : public Update {
   t_line_1d d_lines;
   t_tri_1d d_tris;
   t_particle_1d d_particles;
+
+  // cross-field diffusion displacements. Host fix path: mirrors
+  // Update::dx_cd, uploaded each step in run(). Device fix path
+  // (cross_field_diffusion/kk): filled in place by the fix's kernel
+  // (oe_cd_dev = 1) and the upload is skipped.
+  int oe_cd_dev;
+  DAT::t_float_2d_lr d_dx_cd;
+  DAT::t_float_2d_lr::HostMirror h_dx_cd;
   t_species_1d d_species;  // OpenEdge: species data for charge/mass lookup
 
   // Base SPARTA field perturbation (fstyle)
@@ -105,8 +125,8 @@ class UpdateKokkos : public Update {
   // OpenEdge: plasma compute device view (bypass field fixes)
   // Boris kernel reads B directly from compute columns
   DAT::t_float_2d_lr d_oe_plasma_compute;
+  class KokkosBase *oe_plasma_kkbase;  // live source of d_oe_plasma_compute
   int oe_bx_col, oe_by_col, oe_bz_col;  // column indices for B in compute
-  int oe_ex_col, oe_ey_col, oe_ez_col;  // column indices for E (sheath)
 
   // OpenEdge: device-resident equilibrium psi map (Phase A of pusher port).
   // Filled by binding to ComputePlasmaFieldsKokkos at init time. When
@@ -119,6 +139,152 @@ class UpdateKokkos : public Update {
   double oe_equ_btf, oe_equ_rtf;
   int oe_equ_jm, oe_equ_km;
   int oe_has_equilibrium;
+  // native equilibrium B maps (slag b05b4687): preferred over
+  // psi-derived B when present, matching the CPU equ_bfield_at chain
+  int oe_has_equ_bmaps;
+  // constant-B fix background (no mesh, no psi map): 1 = cylindrical
+  // (const_br, const_bz, const_bt), 2 = Cartesian const_bcart
+  int oe_has_const_b;
+  double oe_const_br, oe_const_bz, oe_const_bt, oe_const_bcart[3];
+  // constant cylindrical E of the fix background (6d): wins over mesh E as
+  // in FixBackground::query_efield_at_point
+  int oe_has_const_e;
+  double oe_const_er, oe_const_ez, oe_const_et;
+  void bind_oe_equ_from_fix(class FixBackground *pd);
+  void bind_oe_psi();
+  // nearest-wall map (grid cell -> wall element) for the Boris shell /
+  // gc_wall flux, bound independently of the sheath mode (CPU uses the
+  // geom compute whenever boris_near or gc_wall is on)
+  void bind_oe_midx_map();
+
+  // sheath kick / boundary modes on device (roadmap item 5):
+  //  - impact kick at every material-wall collision (CPU Update::move block)
+  //  - boundary mode: sub-grid sheath-as-boundary band logic per push
+  //    (CPU push_boris_2d/3d), per-particle int custom "sheath_paid"
+  //  - RF waveform drop from the per-surf DOUBLE[3] custom (Vdc,Vrf,phase)
+  int oe_kick_on, oe_paid_on, oe_wave_on, oe_kick_te_on;
+  DAT::t_int_1d d_oe_paid;
+  DAT::t_float_1d d_oe_kick_te, d_oe_kick_ti;
+  DAT::t_float_2d_lr d_oe_wave;
+  KOKKOS_INLINE_FUNCTION
+  double oe_wave_drop(int midx, double t_offset) const {
+    if (!oe_wave_on || midx < 0 || midx >= (int) d_oe_wave.extent(0)) return 0.0;
+    const double now = time + (double)(ntimestep - time_last_update) * dt + t_offset;
+    const double vwall = d_oe_wave(midx,0) + d_oe_wave(midx,1) *
+        sin(2.0*3.14159265358979323846*sheath_frequency_hz*now + d_oe_wave(midx,2));
+    return Kokkos::fmax(0.0, -vwall);
+  }
+  int oe_midx_stamp_n; cellint oe_midx_stamp_id;
+
+  // fix reflect/psi (psi-contour core boundary) on the device mover:
+  // bilinear normalized-psi map copied from the fix, CPU-identical
+  // bisection crossing + specular reflection, per-species absorb tallies
+  int oe_psi_on, oe_psi_action, oe_psi_imix, oe_psi_nw, oe_psi_nh, oe_pw_slot_on;
+  double oe_psi_thr, oe_psi_axis, oe_psi_b;
+  DAT::t_float_1d d_oe_psi_r, d_oe_psi_z, d_oe_psi_map, d_oe_pw;
+  DAT::t_int_2d d_oe_s2g;
+  Kokkos::View<double*, DeviceType> d_oe_psi_ev, d_oe_psi_ph;
+  Kokkos::View<double*, DeviceType>::HostMirror h_oe_psi_ev, h_oe_psi_ph;
+  Kokkos::View<int, DeviceType> d_oe_psi_bad;
+  Kokkos::View<int, DeviceType>::HostMirror h_oe_psi_bad;
+
+  // pusher switch_log_file on the device hybrid: bounded per-pass event
+  // buffer (id, oldmode, newmode, reason code, d_start, d_end, d_sw,
+  // e_pre, e_post, replay) drained on the host through Pusher::log_switch
+  int oe_swlog_on, oe_swlog_cap;
+  Kokkos::View<double*[10], DeviceType> d_oe_swlog;
+  Kokkos::View<double*[10], DeviceType>::HostMirror h_oe_swlog;
+  Kokkos::View<int, DeviceType> d_oe_swlog_n;
+  Kokkos::View<int, DeviceType>::HostMirror h_oe_swlog_n;
+  KOKKOS_INLINE_FUNCTION
+  void oe_swlog_push(int id, int oldmode, int newmode, int reason,
+                     double d_start, double d_end, double d_sw,
+                     double e_pre, double e_post, int replay) const {
+    const int k = Kokkos::atomic_fetch_add(&d_oe_swlog_n(), 1);
+    if (k >= oe_swlog_cap) return;      // overflow counted by the host
+    d_oe_swlog(k,0) = (double) id;  d_oe_swlog(k,1) = oldmode; d_oe_swlog(k,2) = newmode;
+    d_oe_swlog(k,3) = reason;       d_oe_swlog(k,4) = d_start; d_oe_swlog(k,5) = d_end;
+    d_oe_swlog(k,6) = d_sw;         d_oe_swlog(k,7) = e_pre;   d_oe_swlog(k,8) = e_post;
+    d_oe_swlog(k,9) = replay;
+  }
+
+  KOKKOS_INLINE_FUNCTION
+  int oe_psi_bracket(const DAT::t_float_1d &g, int n, double x) const {
+    if (x <= g(0)) return 0;
+    if (x >= g(n-1)) return n-2;
+    int lo = 0, hi = n-1;               // largest i with g(i) <= x
+    while (hi - lo > 1) { const int mid = (lo+hi)/2; if (g(mid) <= x) lo = mid; else hi = mid; }
+    if (lo > n-2) lo = n-2;
+    return lo;
+  }
+  KOKKOS_INLINE_FUNCTION
+  void oe_psi_rz(const double *xyz, double &R, double &Z) const {
+    if (oe_dim == 3) { R = sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]); Z = xyz[2]; }
+    else if (oe_axisymmetric) { Z = xyz[0]; R = xyz[1]; }
+    else { R = xyz[0]; Z = xyz[1]; }
+  }
+  // CPU FixReflectPsi::psi_norm_gradient: returns normalized psi, fills gradients
+  KOKKOS_INLINE_FUNCTION
+  double oe_psi_norm_grad(double R, double Z, double &gR, double &gZ) const {
+    gR = gZ = 0.0;
+    const int nw = oe_psi_nw, nh = oe_psi_nh;
+    const double Rc = Kokkos::fmin(Kokkos::fmax(R, d_oe_psi_r(0)), d_oe_psi_r(nw-1));
+    const double Zc = Kokkos::fmin(Kokkos::fmax(Z, d_oe_psi_z(0)), d_oe_psi_z(nh-1));
+    const int i = oe_psi_bracket(d_oe_psi_r, nw, Rc);
+    const int j = oe_psi_bracket(d_oe_psi_z, nh, Zc);
+    const double dr = d_oe_psi_r(i+1) - d_oe_psi_r(i);
+    const double dz = d_oe_psi_z(j+1) - d_oe_psi_z(j);
+    const double dpsi = oe_psi_b - oe_psi_axis;
+    if (Kokkos::fabs(dr) < 1.0e-30 || Kokkos::fabs(dz) < 1.0e-30 ||
+        Kokkos::fabs(dpsi) < 1.0e-30) return 1.0;
+    const double t = Kokkos::fmin(Kokkos::fmax((Rc - d_oe_psi_r(i))/dr, 0.0), 1.0);
+    const double u = Kokkos::fmin(Kokkos::fmax((Zc - d_oe_psi_z(j))/dz, 0.0), 1.0);
+    const double p00 = d_oe_psi_map(j*nw+i),     p10 = d_oe_psi_map(j*nw+i+1);
+    const double p01 = d_oe_psi_map((j+1)*nw+i), p11 = d_oe_psi_map((j+1)*nw+i+1);
+    const double psi = (1.0-t)*(1.0-u)*p00 + t*(1.0-u)*p10 + (1.0-t)*u*p01 + t*u*p11;
+    gR = ((1.0-u)*(p10-p00) + u*(p11-p01)) / (dr*dpsi);
+    gZ = ((1.0-t)*(p01-p00) + t*(p11-p10)) / (dz*dpsi);
+    return (psi - oe_psi_axis) / dpsi;
+  }
+  KOKKOS_INLINE_FUNCTION
+  double oe_psi_norm_at(const double *xyz) const {
+    double R, Z, gR, gZ;
+    oe_psi_rz(xyz, R, Z);
+    return oe_psi_norm_grad(R, Z, gR, gZ);
+  }
+  // CPU FixReflectPsi::segment_crossing
+  KOKKOS_INLINE_FUNCTION
+  bool oe_psi_crossing(const double *x0, const double *x1, double &fraction,
+                       double *normal) const {
+    const double p0 = oe_psi_norm_at(x0);
+    const double p1 = oe_psi_norm_at(x1);
+    if (p0 < oe_psi_thr || p1 >= oe_psi_thr) return false;
+    double lo = 0.0, hi = 1.0, xc[3];
+    for (int iter = 0; iter < 60; iter++) {
+      const double mid = 0.5*(lo+hi);
+      for (int k = 0; k < 3; k++) xc[k] = x0[k] + mid*(x1[k]-x0[k]);
+      if (oe_psi_norm_at(xc) >= oe_psi_thr) lo = mid; else hi = mid;
+    }
+    fraction = 0.5*(lo+hi);
+    for (int k = 0; k < 3; k++) xc[k] = x0[k] + fraction*(x1[k]-x0[k]);
+    double R, Z, gR, gZ;
+    oe_psi_rz(xc, R, Z);
+    oe_psi_norm_grad(R, Z, gR, gZ);
+    if (oe_dim == 3) {
+      if (R <= 1.0e-30) return false;
+      normal[0] = gR*xc[0]/R; normal[1] = gR*xc[1]/R; normal[2] = gZ;
+    } else if (oe_axisymmetric) { normal[0] = gZ; normal[1] = gR; normal[2] = 0.0; }
+    else { normal[0] = gR; normal[1] = gZ; normal[2] = 0.0; }
+    const double nmag = sqrt(normal[0]*normal[0] + normal[1]*normal[1] + normal[2]*normal[2]);
+    if (!(nmag > 1.0e-20) || !Kokkos::isfinite(nmag)) return false;
+    normal[0] /= nmag; normal[1] /= nmag; normal[2] /= nmag;
+    return true;
+  }
+  KOKKOS_INLINE_FUNCTION
+  bool oe_const_bfield_slot(const double *xq, double *Bout) const;
+  KOKKOS_INLINE_FUNCTION
+  bool oe_const_efield_slot(const double *xq, double *Eout) const;
+  DAT::t_float_2d_lr d_oe_equ_br, d_oe_equ_bt, d_oe_equ_bz;
   int oe_dim, oe_axisymmetric;        // cached domain layout for point-query
 
   // OpenEdge: device-resident triangulation B (Phase B). Mesh path takes
@@ -141,41 +307,140 @@ class UpdateKokkos : public Update {
   int    oe_mesh_ntri;
   int    oe_has_mesh_b;
 
-  // OpenEdge Phase C: persistent GCA state on device. Bound to the
-  // ParticleKokkos custom-attribute device views at init time (mode=hybrid).
-  DAT::t_float_1d d_oe_gca_x;
-  DAT::t_float_1d d_oe_gca_y;
-  DAT::t_float_1d d_oe_gca_z;
-  DAT::t_float_1d d_oe_gca_vpar;
-  DAT::t_float_1d d_oe_gca_mu;
-  DAT::t_float_1d d_oe_gca_mode;
-  DAT::t_float_1d d_oe_gca_valid;
-  DAT::t_float_1d d_oe_gca_chi;
-  int oe_has_gca_state;
-  double oe_pusher_gca_switch;
+  // OpenEdge: background mesh E-field (E = -grad phi from the plasma
+  // file), flattened per-tri like the B views; consumed by oe_boris3d
+  int    oe_has_mesh_e;
+  DAT::t_float_1d d_oe_mesh_tri_er, d_oe_mesh_tri_ez, d_oe_mesh_tri_et;
 
-  // OpenEdge: Boris config
+  // OpenEdge gate 9: per-tri ion density + parallel flow (coulomb drag)
+  // and grad-T fields (thermal force), flattened like te/ti/ne. The
+  // device fix kernels bind these via friendship.
+  int    oe_has_mesh_drag;    // ni + upar present
+  int    oe_has_mesh_gradte;  // grad_te_r/z present
+  int    oe_has_mesh_gradti;  // grad_ti_r/z present
+  DAT::t_float_1d d_oe_mesh_tri_ni, d_oe_mesh_tri_upar;
+  // gradients are PER MESH CELL (host pd_grad samples the SPARTA-cell
+  // centroid's mesh cell via cell_mesh_cell, NOT the particle's tri)
+  DAT::t_float_1d d_oe_meshcell_gter, d_oe_meshcell_gtez;
+  DAT::t_float_1d d_oe_meshcell_gtir, d_oe_meshcell_gtiz;
+  // OpenEdge: regular (R,Z) plasma raster of the fix provider (old
+  // plasma.h5 layout, e.g. rfpie): bilinear-sampled on the device where
+  // the triangle mesh is absent (CPU: interp2D fallback). Bound at run
+  // start by bind_oe_raster().
+  int    oe_has_raster, oe_has_ras_drag, oe_has_ras_gradte, oe_has_ras_gradti;
+  int    oe_ras_nr, oe_ras_nz;
+  double oe_ras_r0, oe_ras_dr, oe_ras_z0, oe_ras_dz;
+  DAT::t_float_1d d_oe_ras_te, d_oe_ras_ti, d_oe_ras_ne, d_oe_ras_ni, d_oe_ras_vpar;
+  DAT::t_float_1d d_oe_ras_gte_r, d_oe_ras_gte_z, d_oe_ras_gti_r, d_oe_ras_gti_z;
+  void bind_oe_raster();
+  friend class FixCoulombBackgroundKokkos;
+  friend class FixForceThermalKokkos;
+  friend class FixCrossFieldDiffusionKokkos;
+
+  // build the device mesh B/E views directly from FixBackground for
+  // decks whose plasma provider is the fix (static SOLPS/SOLEDGE3X file)
+  void build_oe_mesh_from_fix();
+
+  // OpenEdge gate 9b: device plasma-cache fill. Capability decided once
+  // per run() (oe_pcache_dev); the kernel samples the masked slots from
+  // the device mesh views (tri-constant scalars, mesh/equ B) and applies
+  // the sheath Boltzmann ne correction with the mover's element
+  // refinement — exact CPU cache_plasma_particles() semantics for the
+  // supported mask. Unsupported configs keep the host fill.
+  void cache_plasma_particles_device();
+  const char *oe_pcache_why = nullptr;   // why the device cache is off (ledger)
+  int oe_pcache_dev;    // 1 = device fill active this run
+  int oe_pc_mask;       // pcache_need_mask captured for the kernel
+  int oe_pc_csg;        // sheath Boltzmann ne correction active
+  DAT::t_float_1d d_pc_te, d_pc_ti, d_pc_ne, d_pc_ni, d_pc_vpar;
+  DAT::t_float_1d d_pc_bx, d_pc_by, d_pc_bz;
+  DAT::t_float_1d d_pc_ex, d_pc_ey, d_pc_ez;   // E-field cache slots (constant / mesh E on the device, 2026-09-15)
+  int oe_pc_ncells;               // nlocal+nghost at fill time
+  int oe_pc_diag_warned;
+  Kokkos::View<int[6], DeviceType> d_pc_diag;
+
+  // OpenEdge: Boris config. Hybrid/GCA pusher modes are NOT
+  // supported on the device — the old oe_hybrid3d port encoded physics
+  // since removed from the CPU pusher (pre-selector sheath force, old
+  // switching without the Boris shell / trial-replay) and was deleted
+  // 2026-08-26; UpdateKokkos::init() errors out instead.
   int oe_pusher_subcycles;
-  int oe_pusher_mode;     // 0=Boris, 1=hybrid Boris/GCA (Pusher::PUSHER_*)
   double oe_echarge;
+  // per-species pusher bypass (global pusher ... skip <mixture>): dust
+  // grains advect ballistically even when charged, as on the CPU
+  DAT::t_int_1d d_oe_pusher_skip;
 
-  // OpenEdge Phase D: per-cell sheath spatial-mode cache.
-  // Layout per cell: 13 columns
-  //   [0..2]  nx, ny, nz        — outward surface normal (unit, raw from Surf)
-  //   [3..5]  srefx, srefy, srefz — reference point on nearest surface
-  //   [6..8]  te, ti, ne        — cell-center plasma at the surface
-  //   [9]    bmag                — cell-center |B| (cylindrical → Cartesian)
-  //   [10]   alpha_deg          — Chodura angle between B and normal (deg)
-  //   [11]   d_max              — sheath engagement cut-off (m)
-  //   [12]   active             — 1.0 if cell has a valid sheath, 0.0 otherwise
-  // Built on host once per run() in build_oe_sheath_cache(), mirrored
-  // device-side for O(1) lookup-by-icell inside oe_boris3d / oe_hybrid3d.
-  // Static-plasma assumption: rebuilt only at run() setup; not per step.
-  DAT::tdual_float_2d_lr k_oe_sheath_cell;
-  DAT::t_float_2d_lr     d_oe_sheath_cell;
-  int    oe_has_sheath_spatial;
+  // OpenEdge Phase D (rev 2, CPU-parity): spatial-mode sheath data.
+  //
+  // Fix-background provider (production monoblock deck): per-ELEMENT
+  // coefficient cache, the device mirror of the CPU per-element cache
+  // (Pusher::build_sheath_cache_entry_3d builds each row on the host, so
+  // plasma/B queries and coefficient prep are CPU-identical). One row per
+  // surf element:
+  //   [0]  state (1 = active; 0 = inactive: no te/ne/B at the centroid)
+  //   [1]  d_max            — engagement cut-off (m), from sheath_auto_dmax
+  //   [2]  phi_total_eV  [3] lambdaD_m  [4] lmps_m  [5] inv_lD
+  //   [6]  inv_lmps  [7] K1_scaled  [8] K2  [9] phi_slow_eV
+  //   [10] phi_fast_eV  [11] e_anchor_vpm
+  // Compute provider: per-cell raw plasma (te, ti, ne, br, bt, bz); the
+  // derived quantities are computed per particle on the device exactly as
+  // the CPU per-particle path does.
+  DAT::tdual_float_2d_lr k_oe_sheath_elem;
+  DAT::t_float_2d_lr     d_oe_sheath_elem;
+  DAT::tdual_float_2d_lr k_oe_sheath_cellplasma;
+  DAT::t_float_2d_lr     d_oe_sheath_cellplasma;
+  // per-cell nearest-surf element from the sheath geom compute
+  // (ComputeNearestSurfGrid::midx_grid), refined per particle on device
+  // against the cell's csurfs — mirrors CPU pusher.cpp refinement.
+  DAT::tdual_int_1d      k_oe_midx_gcell;
+  DAT::t_int_1d          d_oe_midx_gcell;
+  int    oe_sheath_provider;   // 0 = none, 1 = fix (per-element), 2 = compute (per-cell)
+  int    oe_sheath_sgroupbit;  // surf group mask of the sheath geom compute
+  // decomposition stamps: fix balance re-decomposes the grid mid-run
+  // (every 200 steps in the monoblock deck), which invalidates every
+  // local-cell-indexed map; run() rebuilds the cache when these change
+  int     oe_sheath_stamp_n;
+  cellint oe_sheath_stamp_id;
   double oe_sheath_mD_amu;
+  double oe_sheath_dmax_user;  // global pusher sheath dmax (0 = auto)
+  double oe_col_x0, oe_col_y0; // column axis for cyl->Cartesian rotations
+  // fix-provider per-particle fallback plasma (te/ti/ne flattened per
+  // mesh tri, same layout as the E views) for wall elements whose
+  // centroid sits outside the plasma-mesh footprint (CPU falls back to a
+  // per-particle query there).
+  DAT::t_float_1d d_oe_mesh_tri_te, d_oe_mesh_tri_ti, d_oe_mesh_tri_ne;
+  int    oe_has_mesh_plasma;
+  // per-particle customs of the spatial-mode potential impulse
+  // (sheath_bank / sheath_phiprev), rebound each move() attempt; the
+  // _backup twins snapshot them across a react/retry replay
+  DAT::t_float_1d d_oe_tally_pw;   // pweight custom for weighted surf tallies
+  int oe_has_tally_pw;
+  DAT::t_float_1d d_oe_sheath_bank;
+  DAT::t_float_1d d_oe_sheath_phiprev;
+  DAT::t_float_1d d_oe_sheath_bank_backup;
+  DAT::t_float_1d d_oe_sheath_phiprev_backup;
+  int    oe_has_sheath_customs;
+
+  // OpenEdge Phase B: hybrid/GCA pusher configuration + GC-state customs
+  int    oe_pusher_mode;          // Pusher::PusherMode (0 boris, 1 hybrid, 2 gca)
+  int    oe_gca_integrator;       // Pusher::GCAIntegrator (0 rk4, 1 simple, 2 rk2)
+  int    oe_boris_near_rhol, oe_gc_wall_flux;
+  double oe_gca_switch, oe_boris_near;
+  int    oe_has_gca_customs;
+  int    oe_gc_hooks;             // OE_GC_HOOKS bitmask (diagnostic A/B): 1 collision
+                                  // invalidate, 2 kick displace; default all on
+  DAT::t_float_1d d_oe_gca_x, d_oe_gca_y, d_oe_gca_z, d_oe_gca_vpar,
+                  d_oe_gca_mu, d_oe_gca_mode, d_oe_gca_valid, d_oe_gca_chi;
+  DAT::t_float_1d d_oe_gca_backup[8];
   void build_oe_sheath_cache();
+  // Spatial-sheath engagement diagnostics (device twins of the CPU
+  // sheath_diag_* counters; gated on `global pusher ... dump yes`).
+  // [0]=nactive (moves with a live sheath) [1]=nengage (subcycles with a
+  // nonzero impulse) [2]=nreflect (turning-point reflections)
+  int    oe_sheath_diag;
+  DAT::t_int_1d d_oe_shd_counts;
+  Kokkos::View<double*, DeviceType> d_oe_shd_esum;   // [0]=sum|E| [1]=max|E|
+  long   oe_trace_id;   // OE_SHEATH_TRACE_ID per-particle trace (-1 = off)
 
   KKCopy<GridKokkos> grid_kk_copy;
   KKCopy<DomainKokkos> domain_kk_copy;
@@ -187,6 +452,7 @@ class UpdateKokkos : public Update {
   KKCopy<SurfCollideVanishKokkos> sc_kk_vanish_copy[KOKKOS_MAX_SURF_COLL_PER_TYPE];
   KKCopy<SurfCollidePistonKokkos> sc_kk_piston_copy[KOKKOS_MAX_SURF_COLL_PER_TYPE];
   KKCopy<SurfCollideTransparentKokkos> sc_kk_transparent_copy[KOKKOS_MAX_SURF_COLL_PER_TYPE];
+  KKCopy<SurfCollideToroidalKokkos> sc_kk_toroidal_copy[KOKKOS_MAX_SURF_COLL_PER_TYPE];
 
   //KKCopy<ComputeSurfKokkos> blist_active_copy[KOKKOS_MAX_GLIST];
   KKCopy<ComputeSurfKokkos> slist_active_copy[KOKKOS_MAX_SLIST];
@@ -195,7 +461,7 @@ class UpdateKokkos : public Update {
   ComputeBoundaryKokkos tmp_compute_boundary_kk;
   ComputeSurfKokkos tmp_compute_surf_kk;
 
-  typedef Kokkos::DualView<int[14], DeviceType::array_layout, DeviceType> tdual_int_14;
+  typedef Kokkos::DualView<int[15], DeviceType::array_layout, DeviceType> tdual_int_14;
   typedef tdual_int_14::t_dev t_int_14;
   typedef tdual_int_14::t_host t_host_int_14;
   t_int_14 d_scalars;
@@ -211,6 +477,7 @@ class UpdateKokkos : public Update {
   DAT::t_int_scalar d_nscollide_one;  HAT::t_int_scalar h_nscollide_one;
   DAT::t_int_scalar d_nreact_one;     HAT::t_int_scalar h_nreact_one;
   DAT::t_int_scalar d_nstuck;         HAT::t_int_scalar h_nstuck;
+  DAT::t_int_scalar d_ncaplost;       HAT::t_int_scalar h_ncaplost;
   DAT::t_int_scalar d_naxibad;        HAT::t_int_scalar h_naxibad;
   DAT::t_int_scalar d_error_flag;     HAT::t_int_scalar h_error_flag;
   DAT::t_int_scalar d_retry;          HAT::t_int_scalar h_retry;
@@ -267,19 +534,29 @@ class UpdateKokkos : public Update {
   };
 
   // OpenEdge: device-callable Boris 3D pusher (reads E/B from grid fix views)
+  // OpenEdge Phase B: device hybrid/GCA pusher (3D). Mirrors
+  // Pusher::push_hybrid_3d / sample_gca_fields; Boris delegation =
+  // oe_boris3d. GC state lives in the gca_* particle customs.
+  KOKKOS_INLINE_FUNCTION
+  bool oe_sample_gca_fields(const double *xpos, int icell,
+                            GCAKokkos::Fields &F) const;
+  KOKKOS_INLINE_FUNCTION
+  double oe_near_signed(int midx, const double *p) const;
+  KOKKOS_INLINE_FUNCTION
+  void oe_hybrid3d(int i, int icell, double dt,
+                   double *x, double *v, double *xnew,
+                   double charge, double mass) const;
+  // 2D / axisymmetric kick-drift Boris (device twin of Pusher::push_boris_2d,
+  // without the spatial sheath -- 2D sheath errors out at init)
+  KOKKOS_INLINE_FUNCTION
+  void oe_boris2d(int i, int icell, double dt,
+                  double *x, double *v, double *xnew,
+                  double charge, double mass) const;
+
   KOKKOS_INLINE_FUNCTION
   void oe_boris3d(int i, int icell, double dt_full,
                   double *x, double *v, double *xnew,
                   double charge, double mass) const;
-
-  // OpenEdge: device-callable hybrid Boris/GCA dispatcher (Phase C3).
-  // Per-particle: chooses GCA when rho_L < L_B / pusher_gca_switch,
-  // falls back to subcycled Boris otherwise. Reads/writes the
-  // persistent GCA state (gca_x/y/z/vpar/mu/on) bound by Phase C2.
-  KOKKOS_INLINE_FUNCTION
-  void oe_hybrid3d(int i, int icell, double dt_full,
-                   double *x, double *v, double *xnew,
-                   double charge, double mass) const;
 
   KOKKOS_INLINE_FUNCTION
   int split3d(int, double*) const;

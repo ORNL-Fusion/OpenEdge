@@ -31,6 +31,7 @@ SurfCollideStyle(diffuse/kk,SurfCollideDiffuseKokkos)
 #include "fix_vibmode_kokkos.h"
 #include "surf_react_global_kokkos.h"
 #include "surf_react_prob_kokkos.h"
+#include "surf_react_surface_pwi_kokkos.h"
 
 namespace SPARTA_NS {
 
@@ -93,6 +94,7 @@ class SurfCollideDiffuseKokkos : public SurfCollideDiffuse {
   int sr_map[KOKKOS_MAX_TOT_SURF_REACT];
   KKCopy<SurfReactGlobalKokkos> sr_kk_global_copy[KOKKOS_MAX_SURF_REACT_PER_TYPE];
   KKCopy<SurfReactProbKokkos> sr_kk_prob_copy[KOKKOS_MAX_SURF_REACT_PER_TYPE];
+  KKCopy<SurfReactSurfacePWIKokkos> sr_kk_pwi_copy[KOKKOS_MAX_SURF_REACT_PER_TYPE];
 
  public:
 
@@ -110,7 +112,7 @@ class SurfCollideDiffuseKokkos : public SurfCollideDiffuse {
 
   template<int REACT, int ATOMIC_REDUCTION>
   KOKKOS_INLINE_FUNCTION
-  Particle::OnePart* collide_kokkos(Particle::OnePart *&ip, double &,
+  Particle::OnePart* collide_kokkos(Particle::OnePart *&ip, double &dtremain,
                                     int isurf, const double *norm, int isr, int &reaction,
                                     const DAT::t_int_scalar &d_retry, const DAT::t_int_scalar &d_nlocal) const
   {
@@ -128,7 +130,10 @@ class SurfCollideDiffuseKokkos : public SurfCollideDiffuse {
     reaction = 0;
     int velreset = 0;
 
-    if (REACT) {
+    // isr < 0 = no reaction model on this surface (matches the CPU
+    // collider's guard; sr_type_list[-1] is out-of-bounds)
+
+    if (REACT && isr >= 0) {
       if (ambi_flag || vibmode_flag) memcpy(&iorig,ip,sizeof(Particle::OnePart));
 
       int sr_type = sr_type_list[isr];
@@ -140,6 +145,9 @@ class SurfCollideDiffuseKokkos : public SurfCollideDiffuse {
       } else if (sr_type == 1) {
         reaction = sr_kk_prob_copy[m].obj.
           react_kokkos<ATOMIC_REDUCTION>(ip,isurf,norm,jp,velreset,d_retry,d_nlocal);
+      } else if (sr_type == 2) {
+        reaction = sr_kk_pwi_copy[m].obj.
+          react_kokkos<ATOMIC_REDUCTION>(ip,dtremain,isurf,norm,jp,velreset,d_retry,d_nlocal);
       }
 
       if (reaction) {

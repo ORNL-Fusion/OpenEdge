@@ -24,6 +24,7 @@
 namespace SPARTA_NS {
 
 struct TagParticleCompressReactions{};
+struct TagParticleCompressMigrateDevice{};
 struct TagCopyParticleReorderDestinations{};
 struct TagFixedMemoryReorder{};
 struct TagFixedMemoryReorderInit{};
@@ -47,6 +48,10 @@ class ParticleKokkos : public Particle {
   static KOKKOS_INLINE_FUNCTION
   int add_particle_kokkos(t_particle_1d particles, int, int, int, int,
                            double *, double *, double, double);
+  // OpenEdge: same, plus per-particle mass/radius/temp from the species table
+  template<class SpeciesView> static KOKKOS_INLINE_FUNCTION
+  int add_particle_kokkos(t_particle_1d particles, const SpeciesView &species,
+                           int, int, int, int, double *, double *, double, double);
 #ifndef SPARTA_KOKKOS_EXACT
   void compress_migrate(int, int *) override;
 #endif
@@ -66,6 +71,67 @@ class ParticleKokkos : public Particle {
 
   KOKKOS_INLINE_FUNCTION
   void copy_custom_kokkos(int, int) const;
+
+  // OpenEdge: device-side access to the custom particle attributes for
+  // classes that are not ParticleKokkos members (e.g. Kokkos surface
+  // reactions spawning sputtered particles). Plain-old-data handle safe
+  // to memcpy into a KKCopy'd functor. Build with device_custom() AFTER
+  // sync(Device,CUSTOM_MASK); rebuild whenever the particle arrays may
+  // have grown (custom views are reallocated by grow_custom).
+
+  struct DeviceCustom {
+    int nivec, niarray, ndvec, ndarray;
+    DAT::tdual_int_1d k_eicol, k_edcol;
+    tdual_struct_tdual_int_1d_1d k_eivec;
+    tdual_struct_tdual_float_1d_1d k_edvec;
+    tdual_struct_tdual_int_2d_1d k_eiarray;
+    tdual_struct_tdual_float_2d_1d k_edarray;
+
+    // zero every custom field of newly created particle i
+
+    KOKKOS_INLINE_FUNCTION
+    void zero_all(int i) const {
+      int m,ncol;
+      for (m = 0; m < nivec; m++)
+        k_eivec.view_device()[m].k_view.view_device()[i] = 0;
+      for (m = 0; m < niarray; m++)
+        for (ncol = 0; ncol < k_eicol.view_device()[m]; ncol++)
+          k_eiarray.view_device()[m].k_view.view_device()(i,ncol) = 0;
+      for (m = 0; m < ndvec; m++)
+        k_edvec.view_device()[m].k_view.view_device()[i] = 0.0;
+      for (m = 0; m < ndarray; m++)
+        for (ncol = 0; ncol < k_edcol.view_device()[m]; ncol++)
+          k_edarray.view_device()[m].k_view.view_device()(i,ncol) = 0.0;
+    }
+
+    // read/write one custom double vector (slot = particle->ewhich[index],
+    // e.g. the pweight attribute of fix particle/weight)
+
+    KOKKOS_INLINE_FUNCTION
+    double get_dvec(int slot, int i) const {
+      return k_edvec.view_device()[slot].k_view.view_device()[i];
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void set_dvec(int slot, int i, double value) const {
+      k_edvec.view_device()[slot].k_view.view_device()[i] = value;
+    }
+  };
+
+  DeviceCustom device_custom() {
+    DeviceCustom c;
+    c.nivec = ncustom_ivec;
+    c.niarray = ncustom_iarray;
+    c.ndvec = ncustom_dvec;
+    c.ndarray = ncustom_darray;
+    c.k_eicol = k_eicol;
+    c.k_edcol = k_edcol;
+    c.k_eivec = k_eivec;
+    c.k_edvec = k_edvec;
+    c.k_eiarray = k_eiarray;
+    c.k_edarray = k_edarray;
+    return c;
+  }
 
 #ifndef SPARTA_KOKKOS_EXACT
   typedef typename Kokkos::Random_XorShift64_Pool<DeviceType>::generator_type rand_type;
@@ -88,11 +154,18 @@ class ParticleKokkos : public Particle {
   void unpack_custom_kokkos(char *, int) const;
 
   void wrap_kokkos();
+  void sync_species2group();   // rebuild the mixture x species -> group table
   void sync(ExecutionSpace, unsigned int);
   void modify(ExecutionSpace, unsigned int);
 
   KOKKOS_INLINE_FUNCTION
   void operator()(TagParticleCompressReactions, const int&) const;
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(TagParticleCompressMigrateDevice, const int&) const;
+
+  // compress_migrate from the device migrate list (no host list, no H2D of pairs)
+  void compress_migrate_kokkos(int ndelete, const DAT::t_int_1d &d_dellist);
 
   template<int NEED_ATOMICS, int REORDER_FLAG>
   KOKKOS_INLINE_FUNCTION
@@ -160,6 +233,10 @@ class ParticleKokkos : public Particle {
   DAT::t_int_2d d_plist;
   DAT::t_int_1d d_cellcount;
 
+  // device compress_migrate scratch (OpenEdge 2026-09-14): deleted flags of the
+  // upper region, holes below upper (dellist order, -1 past the count), kept
+  // upper particles ascending
+  DAT::t_int_1d d_cm_del, d_cm_hole, d_cm_kept;
   DAT::t_int_2d_lr d_lists;
   DAT::t_int_1d d_mlist;
   DAT::t_int_1d d_slist;
@@ -194,6 +271,7 @@ int ParticleKokkos::add_particle_kokkos(t_particle_1d particles, int index, int 
   tmp.evib = evib;
   enum{PKEEP,PINSERT,PDONE,PDISCARD,PENTRY,PEXIT,PSURF};  // same as .cpp file
   tmp.flag = PKEEP;
+  tmp.mass = tmp.radius = tmp.temp = 0.0;   // no species table here: explicit, not garbage
 
   int realloc = 0;
 
@@ -203,6 +281,19 @@ int ParticleKokkos::add_particle_kokkos(t_particle_1d particles, int index, int 
     realloc = 1;
   }
 
+  return realloc;
+}
+
+template<class SpeciesView> KOKKOS_INLINE_FUNCTION
+int ParticleKokkos::add_particle_kokkos(t_particle_1d particles, const SpeciesView &species,
+      int index, int id, int ispecies, int icell, double *x, double *v, double erot, double evib)
+{
+  const int realloc = add_particle_kokkos(particles,index,id,ispecies,icell,x,v,erot,evib);
+  if (!realloc) {   // CPU Particle::add_particle sets these from the species table
+    particles[index].mass   = species[ispecies].mass;
+    particles[index].radius = species[ispecies].radius;
+    particles[index].temp   = species[ispecies].temp;
+  }
   return realloc;
 }
 

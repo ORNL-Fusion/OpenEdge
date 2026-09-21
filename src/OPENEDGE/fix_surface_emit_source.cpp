@@ -353,20 +353,6 @@ void FixSurfaceEmitSource::init()
 
 /* ---------------------------------------------------------------------- */
 
-int FixSurfaceEmitSource::local_isurf_index(surfint isurf) const
-{
-  if (surf->distributed) {
-    if (isurf < 0 || isurf >= surf->nown) return -1;
-    return static_cast<int>(isurf);
-  }
-
-  int me = comm->me;
-  int nprocs = comm->nprocs;
-  if ((isurf % nprocs) != me) return -1;
-  int ilocal = static_cast<int>(isurf / nprocs);
-  if (ilocal < 0 || ilocal >= surf->nown) return -1;
-  return ilocal;
-}
 
 /* ---------------------------------------------------------------------- */
 
@@ -632,6 +618,92 @@ void FixSurfaceEmitSource::create_task(int icell)
    insert particles in grid cells with emitting surface elements
 ------------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   per-task source strengths (flux x task area x dt x nevery) and their
+   global total, without emitting; c = upstream compute (NULL in file /
+   const mode; its flux must already be spread)
+------------------------------------------------------------------------- */
+
+double FixSurfaceEmitSource::compute_task_source(std::vector<double> &task_source,
+                                                 Compute *c)
+{
+  const int dimension = domain->dimension;
+  const double dt = update->dt * nevery;
+  task_source.assign(ntask,0.0);
+
+  double source_total_me = 0.0;
+  for (int i = 0; i < ntask; i++) {
+    const int isurf = tasks[i].isurf;
+    double flux;
+    if (file_mode) {
+      double *vs = tasks[i].vstream;
+      double *nrm = (dimension == 2)
+                    ? surf->lines[isurf].norm
+                    : surf->tris[isurf].norm;
+      double vn = vs[0]*nrm[0] + vs[1]*nrm[1] + vs[2]*nrm[2];
+      flux = tasks[i].nrho * (vn > 0.0 ? vn : -vn);
+    } else if (const_mode) {
+      flux = const_flux;
+    } else {
+      flux = flux_for_surface(isurf);
+    }
+    if (!std::isfinite(flux) || flux <= 0.0) continue;
+    if (flux < flux_thresh) continue;
+
+    const double source_strength = flux * tasks[i].area * dt;
+    if (!std::isfinite(source_strength) || source_strength <= 0.0) continue;
+
+    task_source[i] = source_strength;
+    source_total_me += source_strength;
+  }
+
+  double source_total = 0.0;
+  MPI_Allreduce(&source_total_me,&source_total,1,MPI_DOUBLE,MPI_SUM,world);
+  (void) c;
+  return source_total;
+}
+
+/* ----------------------------------------------------------------------
+   refresh cached_task_source / cached_source_total for a static upstream
+   (file, constant, or a frozen surface/physical/sputter compute), spreading
+   the frozen flux first when the task layout changed. Collective. Returns
+   1 when the upstream is static (cache valid on return), 0 otherwise.
+------------------------------------------------------------------------- */
+
+int FixSurfaceEmitSource::build_task_source_cache()
+{
+  if (!(npmode == FLOW && nlaunch_total_mode)) return 0;
+  Compute *c = NULL;
+  ComputeSurfacePhysicalSputter *cpmi = NULL;
+  if (!file_mode && !const_mode) {
+    c = modify->compute[iflux];
+    cpmi = dynamic_cast<ComputeSurfacePhysicalSputter *>(c);
+  }
+  const bool upstream_static = file_mode || const_mode ||
+                               (cpmi && cpmi->flux_is_frozen());
+  if (!upstream_static) return 0;
+
+  if (task_source_cached &&
+      static_cast<int>(cached_task_source.size()) == ntask) return 1;
+
+  if (c) {
+    const bool flux_frozen = cpmi && cpmi->flux_is_frozen() &&
+                             flux_spread_valid &&
+                             flux_n_localghost == surf->nlocal + surf->nghost;
+    if (!flux_frozen) {
+      c->compute_per_surf();
+      spread_flux(c);
+      flux_spread_valid = 1;
+    }
+  }
+
+  std::vector<double> task_source;
+  cached_source_total = compute_task_source(task_source,c);
+  cached_task_source = task_source;
+  task_source_cached = 1;
+  return 1;
+}
+
 void FixSurfaceEmitSource::perform_task()
 {
   int i,m,n,pcell,isurf,ninsert,nactual,isp,ispecies,ntri,id;
@@ -705,51 +777,15 @@ void FixSurfaceEmitSource::perform_task()
     const bool upstream_static = file_mode || const_mode ||
                                  (cpmi && cpmi->flux_is_frozen());
 
-    if (upstream_static && task_source_cached &&
-        static_cast<int>(cached_task_source.size()) == ntask) {
-      // reuse — flux and dt are constant for static sources
+    if (upstream_static) {
+      // reuse or (after grid_changed) rebuild the cache — flux and dt are
+      // constant for static sources
+      build_task_source_cache();
       if (cached_source_total <= 0.0) return;
       source_total = cached_source_total;
       task_source_ptr = cached_task_source.data();
     } else {
-      task_source.assign(ntask,0.0);
-
-      double source_total_me = 0.0;
-      for (i = 0; i < ntask; i++) {
-        source_strength = 0.0;
-        isurf = tasks[i].isurf;
-
-        double flux;
-        if (file_mode) {
-          double *vs = tasks[i].vstream;
-          double *nrm = (dimension == 2)
-                        ? surf->lines[isurf].norm
-                        : surf->tris[isurf].norm;
-          double vn = vs[0]*nrm[0] + vs[1]*nrm[1] + vs[2]*nrm[2];
-          flux = tasks[i].nrho * (vn > 0.0 ? vn : -vn);
-        } else if (const_mode) {
-          flux = const_flux;
-        } else {
-          flux = flux_for_surface(isurf);
-        }
-        if (!std::isfinite(flux) || flux <= 0.0) continue;
-        if (flux < flux_thresh) continue;
-
-        source_strength = flux * tasks[i].area * dt;
-        if (!std::isfinite(source_strength) || source_strength <= 0.0) continue;
-
-        task_source[i] = source_strength;
-        source_total_me += source_strength;
-      }
-
-      MPI_Allreduce(&source_total_me,&source_total,1,MPI_DOUBLE,MPI_SUM,world);
-
-      if (upstream_static) {
-        cached_task_source = task_source;
-        cached_source_total = source_total;
-        task_source_cached = 1;
-      }
-
+      source_total = compute_task_source(task_source,c);
       if (source_total <= 0.0) return;
       task_source_ptr = task_source.data();
     }
@@ -758,7 +794,7 @@ void FixSurfaceEmitSource::perform_task()
   for (i = 0; i < ntask; i++) {
     pcell = tasks[i].pcell;
     isurf = tasks[i].isurf;
-    if (isurf >= surf->nlocal) error->one(FLERR,"BAD surf index");
+    if (isurf >= surf->nlocal) error->one(FLERR,"Fix surface/emit/source: task surf index out of range");
 
     if (dimension == 2) normal = lines[isurf].norm;
     else normal = tris[isurf].norm;

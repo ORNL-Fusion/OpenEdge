@@ -41,9 +41,18 @@ class ComputeSurfKokkos : public ComputeSurf {
   void init_normflux();
   void clear();
   int tallyinfo(surfint *&);
+  // OpenEdge: host-side tally entry (reached only from host fixes such as
+  // the emission warm-up); the device tally is surf_tally_kk below
+  void surf_tally(double, int, int, int, Particle::OnePart *,
+                  Particle::OnePart *, Particle::OnePart *) override;
   void update_hash();
   void pre_surf_tally();
   void post_surf_tally();
+
+  // OpenEdge: compute surf/weighted/kk sets weighted=1 (pweight-aware tally).
+  // The state lives here because the mover uses a memcpy copy (KKCopy) of
+  // this base class; subclass members would be sliced away.
+  int weighted_tally() const { return weighted; }
 
 enum{NUM,NUMWT,NFLUX,NFLUXIN,MFLUX,MFLUXIN,FX,FY,FZ,TX,TY,TZ,
   PRESS,XPRESS,YPRESS,ZPRESS,XSHEAR,YSHEAR,ZSHEAR,KE,EROT,EVIB,ECHEM,ETOT};
@@ -62,8 +71,15 @@ template <int ATOMIC_REDUCTION>
 KOKKOS_INLINE_FUNCTION
 void surf_tally_kk(double /*dtremain*/, int isurf, int icell, int reaction,
                    Particle::OnePart *iorig,
-                   Particle::OnePart *ip, Particle::OnePart *jp) const
+                   Particle::OnePart *ip, Particle::OnePart *jp,
+                   double pw_in = 1.0) const
 {
+  // OpenEdge compute surf/weighted/kk: incidence-only, weighted by the
+  // pweight custom (pw_in = incident particle's pweight, stamped by the
+  // mover; outgoing pweights by particle index). Mirrors
+  // ComputeSurfWeighted::surf_tally.
+  if (weighted) { surf_tally_weighted_kk<ATOMIC_REDUCTION>(isurf,iorig,ip,jp,pw_in); return; }
+
   // skip if no original particle and a reaction is taking place
   //   called by SurfReactAdsorb for on-surf reaction
   // FixEmitSurf also calls with no original particle but no reaction
@@ -442,6 +458,66 @@ void surf_tally_kk(double /*dtremain*/, int isurf, int icell, int reaction,
     }
   }
 }
+
+template <int ATOMIC_REDUCTION>
+KOKKOS_INLINE_FUNCTION
+void surf_tally_weighted_kk(int isurf, Particle::OnePart *iorig,
+                            Particle::OnePart *ip, Particle::OnePart *jp,
+                            double w_in) const
+{
+  if (!iorig) return;                       // emission is measured elsewhere
+
+  if (dim == 2) { if (!(d_lines(isurf).mask & groupbit)) return; }
+  else          { if (!(d_tris(isurf).mask & groupbit)) return; }
+
+  const int origspecies = iorig->ispecies;
+  const int igroup = d_s2g(imix,origspecies);
+  if (igroup < 0) return;
+
+  surfint surfID; int transparent;
+  if (dim == 2) { surfID = d_lines[isurf].id; transparent = d_lines[isurf].transparent; }
+  else          { surfID = d_tris[isurf].id;  transparent = d_tris[isurf].transparent; }
+  const int itally = isurf;
+  d_tally2surf(itally) = surfID;
+  d_surf2tally(isurf) = isurf;
+
+  // normflux embeds fnum; the pweights already are real-particle counts
+  const double fs = d_normflux(isurf) * fnum_inv;
+  const double pw_ip = ip ? d_pweight(ip - d_particles.data()) : 0.0;
+  const double pw_jp = jp ? d_pweight(jp - d_particles.data()) : 0.0;
+  const double m_in = d_species[origspecies].mass * w_in;
+  const double m_ip = ip ? d_species(ip->ispecies).mass * pw_ip : 0.0;
+  const double m_jp = jp ? d_species(jp->ispecies).mass * pw_jp : 0.0;
+
+  auto v_tally = ScatterViewHelper<typename NeedDup<ATOMIC_REDUCTION,DeviceType>::value,decltype(dup_array_surf_tally),decltype(ndup_array_surf_tally)>::get(dup_array_surf_tally,ndup_array_surf_tally);
+  auto a_tally = v_tally.template access<typename AtomicDup<ATOMIC_REDUCTION,DeviceType>::value>();
+
+  int k = igroup*nvalue;
+  for (int m = 0; m < nvalue; m++) {
+    switch (d_which(m)) {
+    case NUM:      a_tally(itally,k++) += 1.0; break;
+    case NUMWT:    a_tally(itally,k++) += w_in; break;
+    case NFLUX:
+      a_tally(itally,k) += w_in * fs;
+      if (!transparent) { if (ip) a_tally(itally,k) -= pw_ip * fs; if (jp) a_tally(itally,k) -= pw_jp * fs; }
+      k++; break;
+    case NFLUXIN:  a_tally(itally,k++) += w_in * fs; break;
+    case MFLUX:
+      a_tally(itally,k) += m_in * fs;
+      if (!transparent) { if (ip) a_tally(itally,k) -= m_ip * fs; if (jp) a_tally(itally,k) -= m_jp * fs; }
+      k++; break;
+    case MFLUXIN:  a_tally(itally,k++) += m_in * fs; break;
+    default: k++; break;                    // rejected at construction
+    }
+  }
+}
+
+ protected:
+  int weighted;               // OpenEdge: 1 for compute surf/weighted/kk
+  int pw_ewhich;              // pweight custom dvec index (weighted only)
+  double fnum_inv;            // 1/fnum (weighted only)
+  DAT::t_float_1d d_pweight;  // pweight custom view (weighted only)
+  t_particle_1d d_particles;  // base pointer for ip/jp -> index (weighted only)
 
  private:
   int mvv2e;

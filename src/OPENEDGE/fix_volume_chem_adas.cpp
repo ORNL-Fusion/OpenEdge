@@ -393,7 +393,11 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
       //                         the first encountered particle's pcache and
       //                         reuse for all subsequent particles of that
       //                         species in the same cell. ~10x cheaper for
-      //                         dense impurities; identical physics in cells
+      //                         dense impurities; NOTE: cell mode evaluates the
+      //                         resonant-CX channel at the fluid mean energy
+      //                         (1.5*Ti) instead of each particle's kinetic
+      //                         energy - an approximation, not identical
+      //                         physics, for that channel in cells
       //                         where Te/ne don't vary across particles
       //                         (i.e., away from sheath cells).
       if (iarg + 1 >= narg)
@@ -1310,10 +1314,18 @@ void FixVolumeChemAdas::spawn_volume_recombination()
         Ti_eV = pf.temp_i;
         vpar  = pf.parr_flow;
         MagneticFieldFileDataParams bf = cp->query_bfield_at_point(xc);
-        bx = bf.br;  by = bf.bt;  bz = bf.bz;
+        // cylindrical (Br,Bz,Bt) -> SPARTA slots (the drift velocity
+        // derived below goes straight into dp.v, so slot order matters;
+        // the old direct copy put Bt in slot y — swapped drifts)
+        const double phi_c = (dim == 3)
+            ? std::atan2(xc[1] - cp->plasma_data.column_y0,
+                         xc[0] - cp->plasma_data.column_x0) : 0.0;
+        OpenEdge::RZphi_force_to_sparta(bf.br, bf.bz, bf.bt, dim, axi,
+                                        phi_c, bx, by, bz);
       } else if (pd->is_zones3d()) {
         // native 3-D provider: one point query; outside centroids stay
-        // zero and are skipped by the Te/ne check below
+        // zero and are skipped by the Te/ne check below. sample.b is
+        // already in SPARTA slots.
         PlasmaPointSample s;
         if (pd->sample_point(xc, s, icell, -1,
                              PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B |
@@ -1323,11 +1335,7 @@ void FixVolumeChemAdas::spawn_volume_recombination()
           ni_m3 = (s.ni > 0.0) ? s.ni : s.ne;
           Ti_eV = (s.ti > 0.0) ? s.ti : s.te;
           vpar  = s.upar;
-          const double phi = std::atan2(xc[1], xc[0]);
-          const double cp_ = std::cos(phi), sp_ = std::sin(phi);
-          bx = s.b[0] * cp_ + s.b[1] * sp_;      // Br
-          by = -s.b[0] * sp_ + s.b[1] * cp_;     // Bt
-          bz = s.b[2];                           // Bz
+          bx = s.b[0]; by = s.b[1]; bz = s.b[2];
         }
       } else {
         double R = 0.0, Z = 0.0;
@@ -1341,8 +1349,13 @@ void FixVolumeChemAdas::spawn_volume_recombination()
                                       : pd->interp2D(pd->parr_flow, R, Z, icell);
         if (pd->has_bfield) {
           double Br = 0.0, Bz_ = 0.0, Bt = 0.0;
-          pd->bfield_at(R, Z, Br, Bz_, Bt, icell);
-          bx = Br; by = Bt; bz = Bz_;
+          pd->bfield_at_xyz(xc, Br, Bz_, Bt, icell);   // bcart-safe in 3D
+          // cylindrical -> SPARTA slots (see compute branch above)
+          const double phi_c = (dim == 3)
+              ? std::atan2(xc[1] - pd->column_y0,
+                           xc[0] - pd->column_x0) : 0.0;
+          OpenEdge::RZphi_force_to_sparta(Br, Bz_, Bt, dim, axi,
+                                          phi_c, bx, by, bz);
         }
       }
       if (Te_eV <= 0.0 || ne_m3 <= 0.0 || ni_m3 <= 0.0) continue;
@@ -2242,7 +2255,7 @@ void FixVolumeChemAdas::readfile(char *fname)
     // check that reactant/product counts are consistent with type
 
    if (r->type == IONIZATION) {
-      if (r->nreactant != 1 || (r->nproduct != 1 && r->nproduct != 1)) {
+      if (r->nreactant != 1 || r->nproduct != 1) {
         print_reaction(copy1,copy2);
         error->all(FLERR,"Invalid ionization reaction");
       }

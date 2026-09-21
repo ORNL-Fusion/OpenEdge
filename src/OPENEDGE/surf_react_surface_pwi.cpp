@@ -29,6 +29,7 @@
 #include "surf_react_surface_pwi.h"
 #include "input.h"
 #include "update.h"
+#include "timer.h"
 #include "domain.h"
 #include "comm.h"
 #include "particle.h"
@@ -366,6 +367,10 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
 
 SurfReactSurfacePWI::~SurfReactSurfacePWI()
 {
+  // Kokkos KKCopy shallow copy: base state is owned by the host original;
+  // freeing it here would double-free the reaction tables
+  if (copy) return;
+
   if (rlist) {
     for (int i = 0; i < maxlist_recycle; i++) {
       OneReaction *r = &rlist[i];
@@ -412,6 +417,16 @@ void SurfReactSurfacePWI::init()
 {
   SurfReact::init();
   init_reactions();
+
+  // PWI tallies (sigma/gid0/area/ehist) index real surface elements; a
+  // box boundary reaches collide() with isurf = -(face+1) and would
+  // index them out of bounds on both CPU and device -> reject loudly
+  for (int i = 0; i < 6; i++)
+    if (domain->surf_react[i] >= 0 &&
+        surf->sr[domain->surf_react[i]] == this)
+      error->all(FLERR,"surf_react surface/pwi cannot be assigned to a "
+                 "box boundary (bound_modify); it requires real surface "
+                 "elements");
 
   // pweight custom (fix particle/weight): sputtered atoms inherit the
   // incident macroparticle's pweight. -1 if fix particle/weight is absent
@@ -842,7 +857,7 @@ int SurfReactSurfacePWI::emit_sputtered(Particle::OnePart *&ip, int isurf,
       // wall temperature (twall_surf custom if bound, else scalar twall).
       double twall_eff = twall;
       if (tindex_custom >= 0)
-        twall_eff = surf->edvec_local[tindex_custom][isurf];
+        twall_eff = surf->edvec_local[surf->ewhich[tindex_custom]][isurf];
       Y = sput_tables[r->sp_tbl].yield_at_T(E_in_eV, theta_eff, twall_eff);
       if (r->mat_isp >= 0) Y *= mat_conc(isurf, r->mat_isp);
     } else {
@@ -926,7 +941,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
   // (pass-through / zero-reset).
   double twall_eff = twall;
   if (tindex_custom >= 0)
-    twall_eff = surf->edvec_local[tindex_custom][isurf];
+    twall_eff = surf->edvec_local[surf->ewhich[tindex_custom]][isurf];
 
   // Incident impact (E, theta) at the wall. The incident velocity here
   // already includes the sheath boundary energy boost (the mover kicks v
@@ -1104,7 +1119,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
           // polyatomic products via species DOFs).
           double R_rec;
           if (rindex_custom >= 0) {
-            R_rec = surf->edvec_local[rindex_custom][isurf];
+            R_rec = surf->edvec_local[surf->ewhich[rindex_custom]][isurf];
             if (R_rec < 0.0) R_rec = 0.0;
             if (R_rec > 1.0) R_rec = 1.0;
           } else {
@@ -1689,8 +1704,13 @@ void SurfReactSurfacePWI::derive_sigma_conc()
 void SurfReactSurfacePWI::tally_update()
 {
   SurfReact::tally_update();
-  if (sindex_custom >= 0 && update->ntimestep % sigma_nevery == 0)
+  if (sindex_custom >= 0 && update->ntimestep % sigma_nevery == 0) {
+    // areal-density ledger (Allreduce + owned fold + strata + debit):
+    // its own Finish row "Adens", carved out of SReact
+    timer->stamp(TIME_SREACT);
     sync_sigma();
+    timer->stamp(TIME_ADENS);
+  }
   if (ehist_file && ehist_every > 0 &&
       update->ntimestep % ehist_every == 0) ehist_write();
 }

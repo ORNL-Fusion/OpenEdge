@@ -115,6 +115,12 @@ class FixBackground : public Fix {
                     int iparticle = -1) const;
   void   bfield_at(double R, double Z, double &Br, double &Bz, double &Bt,
                    int icell = -1, int iparticle = -1) const;
+  // Position-aware variant for callers that know the particle / cell
+  // position: a Cartesian constant field (bcart) is rotated into (Br,Bz,Bt)
+  // at phi(xyz) in 3D instead of erroring; every other source goes through
+  // bfield_at(R,Z) with R,Z derived from xyz (column offsets applied).
+  void   bfield_at_xyz(const double xyz[3], double &Br, double &Bz, double &Bt,
+                       int icell = -1, int iparticle = -1) const;
   // Cylindrical-derivative B query for the GCA pusher: returns Br/Bz/Bt
   // along with dB/dR, dB/dZ in the same MagneticFieldFileDataParams shape
   // ComputePlasmaFields produces. Existing callers retain mesh-first
@@ -132,6 +138,24 @@ class FixBackground : public Fix {
                              double &ER, double &EZ, double &Et,
                              int icell = -1, int iparticle = -1) const;
   double psi_norm_at(double R, double Z) const;
+  // device-port gating: the Kokkos drag/thermal/mover B chains implement
+  // only mesh -> equilibrium -> 0; decks using the constant-B branches
+  // must stay on the host implementation
+  bool has_const_bfield() const { return const_has_bfield || const_has_bcart; }
+  // read-only access for the Kokkos mover (mesh-less constant-B decks)
+  bool const_bfield_cyl(double &br, double &bz, double &bt) const {
+    if (!const_has_bfield) return false;
+    br = const_br; bz = const_bz; bt = const_bt; return true;
+  }
+  bool const_bfield_cart(double b[3]) const {
+    if (!const_has_bcart) return false;
+    b[0] = const_bcart[0]; b[1] = const_bcart[1]; b[2] = const_bcart[2]; return true;
+  }
+  // constant cylindrical E (er/ez/et), the query_efield_at_point constant mode
+  bool const_efield_cyl(double &er, double &ez, double &et) const {
+    if (!const_has_efield) return false;
+    er = const_e_r; ez = const_e_z; et = const_e_t; return true;
+  }
   bool psi_norm_gradient_at(double R, double Z,
                             double &dpsi_dR, double &dpsi_dZ) const;
 
@@ -147,7 +171,12 @@ class FixBackground : public Fix {
   // fix volume/chem/adas as the impurity-CX partner density)
   std::vector<double> dens_n;
   std::vector<double> temp_n;
-  bool has_neutral_dens() const { return !mesh_nn.empty(); }
+  bool has_neutral_dens() const {
+    // mesh-resident OR constant-mode (nn keyword fills the dens_n
+    // vector on the synthetic grid) — the old mesh-only test made the
+    // documented `nn` keyword unable to activate the impurity-CX channel
+    return !mesh_nn.empty() || !dens_n.empty();
+  }
   std::vector<double> parr_flow, parr_flow_r, parr_flow_t, parr_flow_z;
   std::vector<double> grad_te_r, grad_te_t, grad_te_z;
   std::vector<double> grad_ti_r, grad_ti_t, grad_ti_z;
@@ -197,11 +226,9 @@ class FixBackground : public Fix {
   std::vector<double> mesh_nn;
   std::vector<double> mesh_tn;
   // Precomputed gradients on the B2 mesh (converter writes these).
-  // Consumers query via mesh_cell_at(R, Z) + mesh_grad_*_{r,z}[cell].
   std::vector<double> mesh_grad_te_r, mesh_grad_te_z;
   std::vector<double> mesh_grad_ti_r, mesh_grad_ti_z;
   // Per-cell heat-flux components on the EIRENE mesh. Same semantics as
-  // q_par/q_perp above. Consumers query via mesh_cell_at(R,Z) then
   // mesh_q_par[cell] / mesh_q_perp[cell]. Empty => regular-grid fallback
   // (q_par / q_perp). If both carriers are absent, a heat request aborts.
   std::vector<double> mesh_q_par, mesh_q_perp;
@@ -279,7 +306,6 @@ class FixBackground : public Fix {
   int hash_nr, hash_nz;
   double hash_rmin, hash_zmin, hash_dr, hash_dz;
   std::vector<std::vector<int>> hash_grid;
-  int mesh_cell_at(double R, double Z, double max_dist=0.05) const;
 
   // ---- Cell-indexed mesh-cell cache ----
   // cell_mesh_cell[icell] = unstructured-mesh cell index at the centroid of
@@ -347,7 +373,6 @@ class FixBackground : public Fix {
   int walk_mesh_triangle(int start, double R, double Z, int &nhops) const;
   int find_mesh_triangle(double R, double Z, int icell = -1,
                          int iparticle = -1) const;
-  int find_nearest_mapped_triangle(double R, double Z, double max_dist) const;
   const std::vector<double> *mesh_field_for(const std::vector<double> &field) const;
 
   // ---- Constant-mode configuration ----

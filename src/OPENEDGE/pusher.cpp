@@ -564,7 +564,7 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
       OpenEdge::sparta_to_RZ(xyz, dim, axi, R, Z,
                              pd->column_x0, pd->column_y0);
       double Br = 0.0, Bz = 0.0, Bt = 0.0;
-      pd->bfield_at(R, Z, Br, Bz, Bt, icell, i);
+      pd->bfield_at_xyz(xyz, Br, Bz, Bt, icell, i);   // bcart-safe
       B[0] = Br;
       B[1] = Bz;
       B[2] = Bt;
@@ -1224,7 +1224,10 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
             sh_alpha_deg = cm.alpha_deg;
           }
 
-          sh_active = (sh_te > 0.0 && sh_ne > 0.0);
+          // require B > 0 like the 2D fallback and the cache builders:
+          // with B = 0, sheath_auto_dmax's rho_i blows up and a spurious
+          // alpha = 90 sheath would engulf the whole domain
+          sh_active = (sh_bmag > 0.0);
         }
       }
     }
@@ -1242,6 +1245,7 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
     + (xcur[1] - sh_sref[1]) * sh_ny
     + (xcur[2] - sh_sref[2]) * sh_nz;
     sh_d0_sign = (sh_d0 >= 0.0) ? 1.0 : -1.0;
+    sheath_diag_nactive++;   // 3D near-wall count (2D counts in its own block)
   }
 
   // Physics-derived sheath cut-off distance and Coulette-Manfredi
@@ -1256,6 +1260,18 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
                     sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
                     update->sheath_mD_amu, 0.0);
   }
+
+  // Per-particle sheath trace (parity debugging): OE_SHEATH_TRACE_ID=<id>
+  static const long sh_trace_id =
+      getenv("OE_SHEATH_TRACE_ID") ? atol(getenv("OE_SHEATH_TRACE_ID")) : -1;
+  const bool sh_trace =
+      (sh_trace_id >= 0 && (long) particle->particles[i].id == sh_trace_id);
+  if (sh_trace)
+    printf("SHTRACE cpu step %lld id %ld pre: active=%d cache=%d midx=%d "
+           "dmax=%.9e n=(%.9e,%.9e,%.9e) sref=(%.9e,%.9e,%.9e)\n",
+           (long long) update->ntimestep, sh_trace_id, sh_active,
+           sh_from_cache, sh_midx, sh_d_max, sh_nx, sh_ny, sh_nz,
+           sh_sref[0], sh_sref[1], sh_sref[2]);
 
   // spatial-mode lifetime energy ledger + total potential for its cap
   double *sh_bank_vec = (update->sheath_bank_custom >= 0)
@@ -1449,6 +1465,11 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
             sh_coeffs, std::max(d_new, 0.0));
         double dKE_J =
             std::fabs(charge) * update->echarge * (phi_new - phi_old);
+        if (sh_trace)
+          printf("SHTRACE cpu step %lld sub %d eng: d_old=%.9e d_new=%.9e "
+                 "phi_old=%.9e phi_new=%.9e dKE=%.9e bank=%.9e\n",
+                 (long long) update->ntimestep, isub, d_old, d_new,
+                 phi_old, phi_new, dKE_J, sh_bank_vec ? sh_bank_vec[i] : -1.0);
         // lifetime ledger cap: net energy given may never exceed Z e phi_tot
         if (sh_bank_vec && dKE_J > 0.0) {
           const double room =
@@ -1474,6 +1495,7 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
             xcur[1] -= (d_new - d_old) * sh_ny;
             xcur[2] -= (d_new - d_old) * sh_nz;
             sh_d_fin = d_old;
+            sheath_diag_nreflect++;   // spatial-mode turning point
           }
           const double dvn = vn_new - vn;
           vcur[0] += dvn * sh_nx;
@@ -2193,20 +2215,20 @@ void Pusher::init()
   // must resolve the gyroperiod for fallback particles (bad_dt_check).
 
   if (!pusher_plasma_cid)
-    error->all(FLERR,"global gca requires plasma provider ID");
+    error->all(FLERR,"global pusher plasma requires a provider ID");
   pusher_plasma_cidx = modify->find_compute(pusher_plasma_cid);
   pusher_plasma_fidx = -1;
   if (pusher_plasma_cidx >= 0) {
     if (!modify->compute[pusher_plasma_cidx]->per_grid_flag)
-      error->all(FLERR,"global gca: plasma compute must be per-grid");
+      error->all(FLERR,"global pusher plasma: compute must be per-grid");
   } else {
     pusher_plasma_fidx = modify->find_fix(pusher_plasma_cid);
     if (pusher_plasma_fidx < 0)
-      error->all(FLERR,"global gca: plasma provider ID not found");
+      error->all(FLERR,"global pusher plasma: provider ID not found");
     auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
     if (!pd)
       error->all(FLERR,
-                 "global gca: plasma fix provider must be style background");
+                 "global pusher plasma: fix provider must be style background");
   }
 
   // GCA needs smooth B-field derivatives (grad|B|, curvature, curl(b̂))
@@ -2411,22 +2433,6 @@ bool Pusher::sync_gc_velocity(int i, const double *v, const double B[3],
   return true;
 }
 
-bool Pusher::sync_gc_phase_space(int i, const double *x, const double *v,
-                                 const double B[3], double qm, double mass)
-{
-  // full re-init: always legal, establishes validity
-  if (gca_x_custom < 0) return false;
-  const double Bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
-  if (Bmag <= 0.0) return false;
-  GCAPusher::GCAState g = GCAPusher::init_from_particle(x, v, mass, qm, B);
-  particle->edvec[particle->ewhich[gca_x_custom]][i] = g.X[0];
-  particle->edvec[particle->ewhich[gca_y_custom]][i] = g.X[1];
-  particle->edvec[particle->ewhich[gca_z_custom]][i] = g.X[2];
-  particle->edvec[particle->ewhich[gca_vpar_custom]][i] = g.v_par;
-  particle->edvec[particle->ewhich[gca_mu_custom]][i] = g.mu;
-  particle->edvec[particle->ewhich[gca_valid_custom]][i] = 1.0;
-  return true;
-}
 
 bool Pusher::apply_parallel_impulse(int i, double dvpar)
 {
@@ -2636,7 +2642,7 @@ void Pusher::global_keyword(int narg, char **arg, int &iarg)
         } else break;
       }
       if (update->sheath_flag && !update->sheath_geom_cid)
-        error->all(FLERR, "global pusher sheath kick|spatial requires geom <ID>");
+        error->all(FLERR, "global pusher sheath kick|boundary|spatial requires geom <ID>");
     } else break;  // next keyword belongs to a different global option
   }
 }

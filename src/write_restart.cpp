@@ -267,6 +267,7 @@ void WriteRestart::write(char *file)
   // communication buffer for per-proc info = child grid cells and particles
   // max_size = largest buffer needed by any proc
 
+  grid->check_cells("write_restart");
   bigint send_size_big = grid->size_restart();
   send_size_big += particle->size_restart_big();
   if (send_size_big > MAXSMALLINT)

@@ -181,7 +181,18 @@ void FixReflectPsi::load_from_background(const std::string &fix_id)
 
 /* ---------------------------------------------------------------------- */
 
-FixReflectPsi::~FixReflectPsi() {}
+FixReflectPsi::~FixReflectPsi()
+{
+  // init() hands Update raw pointers into fix-owned vectors; clear them
+  // so an unfix followed by another run cannot reflect through dangling
+  // storage
+  if (update && update->psi_reflect_flag) {
+    update->psi_reflect_flag = 0;
+    update->psi_r_grid = nullptr;
+    update->psi_z_grid = nullptr;
+    update->psi_rz = nullptr;
+  }
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -251,6 +262,21 @@ void FixReflectPsi::tally_absorb(int ispecies, int iparticle)
   }
   absorbed_events_local_[row] += 1.0;
   absorbed_physical_local_[row] += marker_weight;
+  reduced_step_ = -1;
+}
+
+/* ----------------------------------------------------------------------
+   Fold a batch of absorptions tallied on the device for one species
+   (nevents simulation particles carrying `weight` physical particles).
+------------------------------------------------------------------------- */
+
+void FixReflectPsi::tally_absorb_bulk(int ispecies, double nevents,
+                                      double weight)
+{
+  const int row = row_for_species(ispecies);
+  if (row < 0 || row >= nrows_ || !(nevents > 0.0)) return;
+  absorbed_events_local_[row] += nevents;
+  absorbed_physical_local_[row] += weight;
   reduced_step_ = -1;
 }
 

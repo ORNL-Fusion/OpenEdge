@@ -662,7 +662,13 @@ void Update::init()
   // profile) can change between moves, leaving a small circulation; cap the
   // lifetime net gain at Z e phi_tot, the most a sheath can give an ion.
   sheath_bank_custom = -1;
-  if (sheath_flag && !sheath_kick && !sheath_boundary) {
+  // A/B diagnostic switch: OE_SHEATH_NO_LEDGER disables the spatial-mode
+  // bank/phiprev customs on BOTH the CPU and Kokkos paths (the movers
+  // handle absent vectors: geometric phi_old, no lifetime cap).
+  const int sheath_no_ledger = getenv("OE_SHEATH_NO_LEDGER") != nullptr;
+  if (sheath_no_ledger && comm->me == 0 && screen)
+    fprintf(screen,"OE_SHEATH_NO_LEDGER: spatial-sheath bank/phiprev customs disabled\n");
+  if (!sheath_no_ledger && sheath_flag && !sheath_kick && !sheath_boundary) {
     sheath_bank_custom = particle->find_custom((char *) "sheath_bank");
     if (sheath_bank_custom < 0)
       sheath_bank_custom = particle->add_custom((char *) "sheath_bank", 1, 0);
@@ -673,7 +679,7 @@ void Update::init()
   // for free (the pump that filled the bank cap for band-dwelling ions).
   // Stored as phi+1 V; 0 = unset (newborn / newly ionized).
   sheath_phiprev_custom = -1;
-  if (sheath_flag && !sheath_kick && !sheath_boundary) {
+  if (!sheath_no_ledger && sheath_flag && !sheath_kick && !sheath_boundary) {
     sheath_phiprev_custom = particle->find_custom((char *) "sheath_phiprev");
     if (sheath_phiprev_custom < 0)
       sheath_phiprev_custom = particle->add_custom((char *) "sheath_phiprev", 1, 0);
@@ -777,7 +783,8 @@ void Update::init()
           note_cad(modify->fix[ifix]->nevery);
         }
         recognized = 1;
-      } else if (strcmp(s,"cross_field_diffusion") == 0) {
+      } else if (strcmp(s,"cross_field_diffusion") == 0 ||
+                 strcmp(s,"cross_field_diffusion/kk") == 0) {
         // Same background-bypass pattern. NE/GRAD_NE only matter when
         // gradient_pinch is configured (needs_grad_ne()).
         FixCrossFieldDiffusion *fcd =
@@ -846,6 +853,15 @@ void Update::init()
   if (moveperturb) perturbflag = 1;
   else perturbflag = 0;
 
+  // OpenEdge gap (upstream-SPARTA capability, kept): the rewritten mover
+  // does not currently invoke moveperturb, so `global field` is parsed
+  // but NOT applied on the CPU path. Warn instead of failing silently;
+  // re-wiring it into the ballistic advection path is a backlog item.
+  if (perturbflag && comm->me == 0)
+    error->warning(FLERR,"global field is not applied by the OpenEdge "
+                   "mover in this version - the setting is parsed but "
+                   "has no effect on particle motion");
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -866,7 +882,7 @@ void Update::setup()
   nboundary_running = nexit_running = 0;
   nscheck_running = nscollide_running = 0;
   surf->nreact_running = 0;
-  nstuck = naxibad = 0;
+  nstuck = naxibad = ncaplost = 0;
 
   collide_react = collide_react_setup();
   tallyflag = tally_setup();
@@ -997,7 +1013,10 @@ void Update::run(int nsteps)
     }
 
 
-    if (collide_react) collide_react_update();
+    if (collide_react) {
+      collide_react_update();
+      timer->stamp(TIME_SREACT);
+    }
 
     // diagnostic fixes
 
@@ -1231,7 +1250,7 @@ void Update::cache_plasma_particles()
         // Route through bfield_at() so mesh-native B (mesh_tri_b*) is
         // picked up on mesh-only plasma.h5 runs; the stencil path only
         // hits the empty regular-grid arrays and would return zero.
-        pd->bfield_at(R, Z, bf.br, bf.bz, bf.bt, particles[i].icell, i);
+        pd->bfield_at_xyz(x, bf.br, bf.bz, bf.bt, particles[i].icell, i);   // bcart-safe in 3D
         bf.Bmag = std::sqrt(bf.br*bf.br + bf.bt*bf.bt + bf.bz*bf.bz);
       }
       }
@@ -2577,7 +2596,12 @@ template < int DIM, int SURF, int OPT > void Update::move()
                     break;
                   }
                 } else {
+                  // teleport target is not a cell this rank stores
+                  // (owned or ghost): the particle is LOST. Counted as
+                  // ncaplost ("Particles lost at periodic caps" in the
+                  // Finish table); grows with rank count.
                   particles[i].flag = PDISCARD;
+                  ncaplost++;
                   nscollide_one++;
                   break;
                 }
@@ -3041,9 +3065,9 @@ post_move_bookkeeping:
         else
           // Spatial mode: report the per-subcycle E-field seen by particles.
           fprintf(fp, "  sheath step " BIGINT_FORMAT " [spatial]: "
-                  "near-wall=%ld engaged=%ld  |E_sheath| mean=%.3e "
-                  "max=%.3e V/m\n",
-                  ntimestep, glob[0], glob[1], emean, emax_glob);
+                  "near-wall=%ld engaged=%ld turnrefl=%ld "
+                  "|E_sheath| mean=%.3e max=%.3e V/m\n",
+                  ntimestep, glob[0], glob[1], glob[2], emean, emax_glob);
       }
     }
 

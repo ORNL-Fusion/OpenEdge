@@ -1,0 +1,16 @@
+# kokkos_parity stage 6 (run with the CPU binary and with the GPU binary):
+# constant cylindrical E and B on the fix background (raster plasma file, no
+# mesh B), one Boris step with the mover on. Checks that the device pusher
+# applies the constant E (audit 6d: it had no device twin) with the same
+# result as the CPU: velocities after one step compared particle by particle.
+variable            tag index cpu
+variable            state index state.restart
+read_restart        ${state}
+seed                104729
+fix                 pd background file rfpie_input/plasma_he.h5 static yes br 0.08 bz 0.06 er 40.0 ez -25.0 et 15.0
+fix                 pw particle/weight
+global              pusher plasma pd mode boris subcycles 1
+dump                dp particle all 1 out_${tag}/epart.*.dump id type x y z vx vy vz
+dump_modify         dp format float %.17g
+timestep            2.0e-8
+run                 1

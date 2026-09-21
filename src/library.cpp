@@ -1197,10 +1197,12 @@ void openedge_reload_plasma(void *ptr, char *compute_id, char *new_path)
     dynamic_cast<ComputePlasmaFields *>(sparta->modify->compute[icompute]);
   if (!cp) return;
 
-  if (new_path && strlen(new_path) > 0)
-    cp->reload_plasma(std::string(new_path));
-  else
-    cp->reload_plasma();
+  // compute plasma/fields lost its file mode (plasma now arrives through
+  // fix background); the old reload path would silently no-op. Error
+  // loudly so couplers migrate to reloading the background fix.
+  sparta->error->all(FLERR,
+    "openedge_reload_plasma: compute plasma/fields no longer owns the "
+    "plasma file — reload the `fix background` instance instead");
 }
 
 /* ----------------------------------------------------------------------

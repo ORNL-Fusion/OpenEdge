@@ -32,6 +32,10 @@ class IrregularKokkos : public Irregular {
   int create_data_uniform(int, int *, int sort = 0);
   int augment_data_uniform(int, int *);
   void exchange_uniform(DAT::t_char_1d, int, char *, DAT::t_char_1d);
+  int create_data_uniform_flag(int, int *, int flag_in, int &flag_out);   // one MPI_Alltoall, carries a flag max
+  // OE_COMM_TIMING accumulators (s): 0 irecv post, 1 pack kernel, 2 send (+D2H),
+  // 3 self copy, 4 waitall, 5 recv H2D
+  double oe_xt[6];
 
   KOKKOS_INLINE_FUNCTION
   void operator()(TagIrregularPackBuffer, const int&) const;
@@ -44,6 +48,8 @@ class IrregularKokkos : public Irregular {
 
  private:
   int offset_send;
+  int *oe_a2a_s,*oe_a2a_r;      // [2*nprocs] (count, flag) blocks for create_data_uniform_flag
+  int *oe_ar_buf; int oe_plan_coll;   // Allreduce variant: [nprocs*nprocs+1] counts + flag; 0 = alltoall, 1 = allreduce
 
   DAT::tdual_int_1d k_index_send;
   DAT::t_int_1d d_index_send;
@@ -54,6 +60,7 @@ class IrregularKokkos : public Irregular {
   DAT::t_char_1d d_recvbuf;
   DAT::t_char_1d d_buf;
   HAT::t_char_1d h_recvbuf;
+  HAT::t_char_1d h_sendbuf;     // OpenEdge perf: persistent self-unpack mirror
   HAT::t_char_1d h_buf;
   int nbytes;
 };

@@ -1,0 +1,59 @@
+{
+ "Step": {
+  "value": 1000.0,
+  "tol": null
+ },
+ "CPU": {
+  "value": 0.1162939,
+  "tol": null
+ },
+ "Np": {
+  "value": 2000.0,
+  "tol": 0.03
+ },
+ "c_n0": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_n1": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_n2": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_n3": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_n4": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_n5": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_n6": {
+  "value": 0.0,
+  "tol": 0.05
+ },
+ "c_n7": {
+  "value": 3.1690141e+19,
+  "tol": 0.25,
+  "note": "top of the charge ladder: small population at 1000 steps, statistical"
+ },
+ "c_n8": {
+  "value": 7.0105634e+21,
+  "tol": 0.05
+ },
+ "loop_particles": {
+  "value": 2000,
+  "tol": 0.03
+ },
+ "host_fallback_calls": {
+  "value": 0,
+  "tol": null
+ }
+}

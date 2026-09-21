@@ -38,6 +38,14 @@ class ComputeNearestSurfGrid : public Compute {
   int nvalue;
   int *value;
   int computed_once;           // 1 after first compute (static geometry cache)
+  // per-cell results kept as grid custom attributes (nsg_dist, nsg_n[3], nsg_midx,
+  // nsg_id) so they migrate with the cells on a rebalance and survive a restart:
+  // a cell whose stored id matches is filled from the cache, only new cells are
+  // computed (OpenEdge 2026-09-15; the full recompute is O(cells x surfs)).
+  int cidx_dist_ = -1, cidx_n_ = -1, cidx_midx_ = -1, cidx_id_ = -1;
+  void ensure_customs();
+  virtual void custom_sync_host() {}     // Kokkos twin: DualView host sync before reading
+  virtual void custom_modify_host() {}   // Kokkos twin: mark host-modified after writing
   cellint stamp_id0_ = -1;     // first-cell id at last reallocate
 
   enum {DIST,SURFID,NX,NY,NZ,SURFIDX};

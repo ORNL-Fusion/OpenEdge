@@ -23,6 +23,8 @@ class ComputeNearestSurfGridKokkos : public ComputeNearestSurfGrid, public Kokko
   ComputeNearestSurfGridKokkos(class SPARTA *, int, char **);
   ~ComputeNearestSurfGridKokkos();
   void compute_per_grid();
+  void custom_sync_host() override;
+  void custom_modify_host() override;
 
  private:
   DAT::tdual_float_2d_lr k_array_grid;

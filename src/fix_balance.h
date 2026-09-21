@@ -36,7 +36,7 @@ class FixBalance : public Fix {
   double compute_vector(int);
   double memory_usage();
 
- private:
+ protected:
   int me,nprocs;
   double thresh;
   int bstyle,rcbwt,rcbflip;

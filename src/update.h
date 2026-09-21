@@ -244,6 +244,8 @@ struct SurfHit2D {
   double *psi_rz;             // psi(R,Z) [psi_nh * psi_nw]
 
   int nstuck;                // # of particles stuck on surfs and deleted
+  int ncaplost;              // # deleted after a periodic-cap teleport landed in
+                             //   a cell this rank does not store (not owned/ghost)
   int naxibad;               // # of particles where axisymm move was bad
                              // in this case, bad means particle ended up
                              // outside of final cell curved surf by epsilon

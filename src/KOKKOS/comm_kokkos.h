@@ -34,8 +34,20 @@ class CommKokkos : public Comm {
 
   CommKokkos(class SPARTA *);
   ~CommKokkos();
-  int migrate_particles(int, int*, const DAT::t_int_1d &);
+  // entryexit_in / any_entryexit_out (OpenEdge 2026-09-14): the mover's per-pass
+  // entry/exit flag rides in the plan's MPI_Alltoall; the reduction result comes
+  // back through the pointer. With a null pointer the plain migration runs.
+  int migrate_particles(int, int*, const DAT::t_int_1d &, int entryexit_in = 0, int *any_entryexit_out = nullptr);
   void migrate_cells(int);
+  int cell_migration_device() const;   // 1 = migrate_cells moves particles on the device
+  // OE_COMM_TIMING=<nsteps>: per-section wall time of migrate_particles, printed
+  // every nsteps (rank 0 / max over ranks). Sections: 0 pack (sync + kernel +
+  // pproc D2H), 1 compress, 2 plan (create/augment_data_uniform), 3 grow + sync,
+  // 4 exchange_uniform, 5 unpack kernel, 6 total
+  int oe_comm_timing_every, oe_ct_calls;
+  double oe_ct[7];
+  bigint oe_ct_last, oe_nsend_sum, oe_nrecv_sum;
+  void oe_comm_timing_report();
 
   template<int NEED_ATOMICS, int HAVE_CUSTOM>
   KOKKOS_INLINE_FUNCTION
@@ -48,9 +60,6 @@ class CommKokkos : public Comm {
  private:
   int nlocal;
 
-  DAT::tdual_int_scalar k_nsend;
-  DAT::t_int_scalar d_nsend;
-  HAT::t_int_scalar h_nsend;
 
   typedef Kokkos::
     DualView<Grid::ChildCell*, Kokkos::LayoutRight, DeviceType> tdual_cell_1d;
@@ -63,8 +72,14 @@ class CommKokkos : public Comm {
   t_particle_1d d_particles;
 
   DAT::t_int_1d d_plist;
-  DAT::t_int_1d d_pproc;
-  HAT::t_int_1d h_pproc;
+  // [0] = packed-particle counter, [1+k] = destination proc of packed particle k;
+  // one D2H copy of nsend+1 ints replaces the pproc copy + the counter sync
+  DAT::tdual_int_1d k_pmeta;
+  DAT::t_int_1d d_pmeta;
+  HAT::t_int_1d h_pmeta;
+  DAT::t_int_1d d_cellmig_plist;       // particles in migrating cells (device cell migration)
+  class Irregular *ibalance;           // own comm plan for the rebalance migration (never the per-step neighbor plan)
+  void migrate_cells_only(int, int *);
   DAT::t_char_1d d_sbuf;
   DAT::t_char_1d d_rbuf;
 

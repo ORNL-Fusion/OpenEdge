@@ -1,0 +1,22 @@
+{
+ "Step": {
+  "value": 1000.0,
+  "tol": null
+ },
+ "CPU": {
+  "value": 0.021945277,
+  "tol": null
+ },
+ "Np": {
+  "value": 3.0,
+  "tol": 0.03
+ },
+ "loop_particles": {
+  "value": 3,
+  "tol": 0.03
+ },
+ "host_fallback_calls": {
+  "value": 0,
+  "tol": null
+ }
+}

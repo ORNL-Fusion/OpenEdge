@@ -165,6 +165,69 @@ void ParticleKokkos::compress_migrate(int ndelete, int *dellist)
 }
 #endif
 
+/* ----------------------------------------------------------------------
+   OpenEdge (2026-09-14): compress_migrate entirely on the device from the
+   device migrate list: no D2H of mlist, no host pairing loop, no H2D of the
+   (mlist,slist) pairs. Same pairing as the host version: holes below upper
+   in dellist order are filled by the kept upper-region particles in
+   ascending order. Five launches, no fence.
+------------------------------------------------------------------------- */
+
+void ParticleKokkos::compress_migrate_kokkos(int ndelete, const DAT::t_int_1d &d_dellist)
+{
+  if (ndelete <= 0) return;
+  if (maxsort < maxlocal) {   // keep the host scratch consistent for the CPU paths
+    maxsort = maxlocal;
+    memory->destroy(next);
+    memory->create(next,maxsort,"particle:next");
+  }
+  if (ndelete > (int) d_cm_del.extent(0)) {
+    d_cm_del  = DAT::t_int_1d(Kokkos::view_alloc("particle:cm_del",Kokkos::WithoutInitializing),ndelete);
+    d_cm_hole = DAT::t_int_1d(Kokkos::view_alloc("particle:cm_hole",Kokkos::WithoutInitializing),ndelete);
+    d_cm_kept = DAT::t_int_1d(Kokkos::view_alloc("particle:cm_kept",Kokkos::WithoutInitializing),ndelete);
+  }
+  const int upper = nlocal - ndelete;
+  auto del = d_cm_del, hole = d_cm_hole, kept = d_cm_kept;
+  Kokkos::parallel_for("cm_init",Kokkos::RangePolicy<DeviceType>(0,ndelete),
+    KOKKOS_LAMBDA(const int m) { del(m) = 0; hole(m) = -1; });
+  Kokkos::parallel_for("cm_mark",Kokkos::RangePolicy<DeviceType>(0,ndelete),
+    KOKKOS_LAMBDA(const int m) { const int i = d_dellist(m); if (i >= upper) del(i-upper) = 1; });
+  Kokkos::parallel_scan("cm_holes",Kokkos::RangePolicy<DeviceType>(0,ndelete),
+    KOKKOS_LAMBDA(const int m, int &k, const bool final) {
+      const int i = d_dellist(m); const int f = (i < upper) ? 1 : 0;
+      if (final && f) hole(k) = i;
+      k += f; });
+  Kokkos::parallel_scan("cm_kept",Kokkos::RangePolicy<DeviceType>(0,ndelete),
+    KOKKOS_LAMBDA(const int j, int &k, const bool final) {
+      const int f = del(j) ? 0 : 1;
+      if (final && f) kept(k) = upper + j;
+      k += f; });
+
+  nlocal = upper;
+
+  this->sync(Device,PARTICLE_MASK|CUSTOM_MASK);
+  d_particles = k_particles.view_device();
+  d_mlist = d_cm_hole;
+  d_slist = d_cm_kept;
+  copymode = 1;
+  Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagParticleCompressMigrateDevice>(0,ndelete),*this);
+  copymode = 0;
+  this->modify(Device,PARTICLE_MASK|CUSTOM_MASK);
+  d_particles = t_particle_1d();
+
+  sorted = 0;
+  sorted_kk = 0;
+}
+
+KOKKOS_INLINE_FUNCTION
+void ParticleKokkos::operator()(TagParticleCompressMigrateDevice, const int &k) const {
+  const int j = d_mlist[k];      // hole below upper, -1 past the pair count
+  if (j < 0) return;
+  const int i = d_slist[k];      // kept upper-region particle
+  d_particles[j] = d_particles[i];
+  copy_custom_kokkos(j,i);
+}
+
 KOKKOS_INLINE_FUNCTION
 void ParticleKokkos::operator()(TagParticleCompressReactions, const int &i) const {
   const int j = d_mlist[i];
@@ -286,6 +349,48 @@ void ParticleKokkos::sort_kokkos()
       //d_particles = k_particles.view_device();
       //d_sorted = tmp;
       Kokkos::deep_copy(d_particles,d_sorted);
+
+      // OpenEdge: the sort permutes the particle array only; every custom
+      // attribute (pweight, plasma cache, GC state, sheath ledgers, ...)
+      // must follow the same permutation d_sorted_id or it silently
+      // misaligns (seen as +10% particles / +17% ionization at 1000x with
+      // global particle/reorder 100). Gather each custom by d_sorted_id.
+      if (ncustom) {
+        sync(Device,CUSTOM_MASK);
+        auto perm = d_sorted_id;
+        const int n = nlocal;
+        for (int m = 0; m < ncustom_ivec; m++) {
+          auto v = k_eivec.h_view[m].k_view.d_view;
+          if ((int) v.extent(0) < n) continue;
+          DAT::t_int_1d tmp(Kokkos::view_alloc("particle:sort_tmp_i",Kokkos::WithoutInitializing),n);
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { tmp(i) = v(perm(i)); });
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { v(i) = tmp(i); });
+        }
+        for (int m = 0; m < ncustom_dvec; m++) {
+          auto v = k_edvec.h_view[m].k_view.d_view;
+          if ((int) v.extent(0) < n) continue;
+          DAT::t_float_1d tmp(Kokkos::view_alloc("particle:sort_tmp_d",Kokkos::WithoutInitializing),n);
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { tmp(i) = v(perm(i)); });
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { v(i) = tmp(i); });
+        }
+        for (int m = 0; m < ncustom_iarray; m++) {
+          auto v = k_eiarray.h_view[m].k_view.d_view;
+          if ((int) v.extent(0) < n) continue;
+          const int nc = (int) v.extent(1);
+          DAT::t_int_2d_lr tmp(Kokkos::view_alloc("particle:sort_tmp_ia",Kokkos::WithoutInitializing),n,nc);
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { for (int c = 0; c < nc; c++) tmp(i,c) = v(perm(i),c); });
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { for (int c = 0; c < nc; c++) v(i,c) = tmp(i,c); });
+        }
+        for (int m = 0; m < ncustom_darray; m++) {
+          auto v = k_edarray.h_view[m].k_view.d_view;
+          if ((int) v.extent(0) < n) continue;
+          const int nc = (int) v.extent(1);
+          DAT::t_float_2d_lr tmp(Kokkos::view_alloc("particle:sort_tmp_da",Kokkos::WithoutInitializing),n,nc);
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { for (int c = 0; c < nc; c++) tmp(i,c) = v(perm(i),c); });
+          Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType>(0,n), KOKKOS_LAMBDA(const int i) { for (int c = 0; c < nc; c++) v(i,c) = tmp(i,c); });
+        }
+        modify(Device,CUSTOM_MASK);
+      }
 
       this->modify(Device,PARTICLE_MASK);
     }
@@ -489,6 +594,7 @@ void ParticleKokkos::post_weight()
   if (particle->ncustom) METHOD = 1;
 
   if (METHOD == 1) { // just call the host one
+    sparta->kokkos->note_fallback("particle post_weight (cell weighting)","custom attributes present: host method");
     this->sync(Host,PARTICLE_MASK|CUSTOM_MASK);
 
     auto grid_kk = (GridKokkos*) grid;
@@ -629,7 +735,9 @@ void ParticleKokkos::grow(int nextra)
   if (target <= maxlocal) return;
 
   bigint newmax = maxlocal;
-  while (newmax < target) newmax += MAX(DELTA, newmax*0.1);
+  // 25 % headroom: the 2026-09-09 "crash at 25 %" was the emit/chem pre-grow
+  // deficit fixed in d7ffc5af, not the headroom (re-tested 2026-09-12)
+  while (newmax < target) newmax += MAX(DELTA, newmax/4);
   int oldmax = maxlocal;
 
   if (newmax > MAXSMALLINT)
@@ -639,10 +747,26 @@ void ParticleKokkos::grow(int nextra)
   if (particles == NULL)
     MemKK::realloc_kokkos(k_particles,"particle:particles",maxlocal);
   else {
-    this->sync(Device,PARTICLE_MASK); // force resize on device
+    // Host-preserving resize. DualView::resize keeps only the DEVICE
+    // copy and hands back an UNINITIALIZED host mirror (no copy). A
+    // host-side caller that grows mid-loop (add_particle from a host
+    // fix or a Kokkos fix's host fallback) would keep writing into
+    // garbage and later push it over the device. If the host held
+    // unsynced writes, restore it after the resize and mark both sides
+    // current; otherwise the device stays authoritative as before.
+    const bool host_live = k_particles.need_sync_device();
+    this->sync(Device,PARTICLE_MASK);
     Kokkos::resize(Kokkos::view_alloc(Kokkos::WithoutInitializing),
                    k_particles,maxlocal);
-    this->modify(Device,PARTICLE_MASK); // needed for auto sync
+    // under auto_sync the host copy may be edited without being flagged
+    // (host-side fix) and a blanket modify(Host) may follow: keep the host
+    // mirror identical to the device after the resize (2026-09-11 audit)
+    if (host_live || sparta->kokkos->auto_sync) {
+      Kokkos::deep_copy(k_particles.view_host(),k_particles.view_device());
+      k_particles.clear_sync_state();
+    } else {
+      this->modify(Device,PARTICLE_MASK); // needed for auto sync
+    }
   }
   d_particles = k_particles.view_device();
   particles = k_particles.view_host().data();
@@ -679,6 +803,28 @@ void ParticleKokkos::grow_species()
 
 /* ---------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   (re)build the device mixture x species -> group table. Called from
+   wrap_kokkos() and from every UpdateKokkos::init(): a deck can define or
+   regroup a mixture BETWEEN run commands, and a table built only at the
+   first wrap then has too few rows / stale groups -- every Kokkos compute
+   that maps ispecies -> group reads past it (grid/weighted/kk wrote its
+   tally out of bounds; heap corruption; found 2026-09-08 on the west
+   tungsten transport deck).
+------------------------------------------------------------------------- */
+
+void ParticleKokkos::sync_species2group()
+{
+  if ((int) k_species2group.extent(0) != nmixture ||
+      (int) k_species2group.extent(1) != nspecies)
+    k_species2group = DAT::tdual_int_2d("particle:species2group",nmixture,nspecies);
+  for (int i = 0; i < nmixture; i++)
+    for (int j = 0; j < nspecies; j++)
+      k_species2group.view_host()(i,j) = mixture[i]->species2group[j];
+  k_species2group.modify_host();
+  k_species2group.sync_device();
+}
+
 void ParticleKokkos::wrap_kokkos()
 {
   // species
@@ -693,12 +839,7 @@ void ParticleKokkos::wrap_kokkos()
 
   // mixtures
 
-  k_species2group = DAT::tdual_int_2d("particle:species2group",nmixture,nspecies);
-  for (int i = 0; i < nmixture; i++)
-    for (int j = 0; j < nspecies; j++)
-      k_species2group.view_host()(i,j) = mixture[i]->species2group[j];
-  k_species2group.modify_host();
-  k_species2group.sync_device();
+  sync_species2group();
 
   //if (mixtures != k_mixtures.view_host().data()) {
   //  memoryKK->wrap_kokkos(k_mixtures,mixture,nmixture,"particle:mixture");
@@ -772,6 +913,24 @@ void ParticleKokkos::sync(ExecutionSpace space, unsigned int mask)
 
 void ParticleKokkos::modify(ExecutionSpace space, unsigned int mask)
 {
+  // OpenEdge: marking one space modified while the other already holds
+  // newer data overwrites that data at the next sync (OE_KK_CHECKSYNC)
+  if (sparta->kokkos->checksync) {
+    const bool dev = (space == Device);
+    if ((mask & PARTICLE_MASK) && (dev ? k_particles.need_sync_device() : k_particles.need_sync_host()))
+      sparta->kokkos->note_sync_conflict("particles",dev ? "Device" : "Host");
+    if ((mask & SPECIES_MASK) && (dev ? k_species.need_sync_device() : k_species.need_sync_host()))
+      sparta->kokkos->note_sync_conflict("species",dev ? "Device" : "Host");
+    if ((mask & CUSTOM_MASK) && ncustom) {
+      int bad = 0;
+      for (int i = 0; i < ncustom_ivec; i++) if (dev ? k_eivec.view_host()[i].k_view.need_sync_device() : k_eivec.view_host()[i].k_view.need_sync_host()) bad++;
+      for (int i = 0; i < ncustom_iarray; i++) if (dev ? k_eiarray.view_host()[i].k_view.need_sync_device() : k_eiarray.view_host()[i].k_view.need_sync_host()) bad++;
+      for (int i = 0; i < ncustom_dvec; i++) if (dev ? k_edvec.view_host()[i].k_view.need_sync_device() : k_edvec.view_host()[i].k_view.need_sync_host()) bad++;
+      for (int i = 0; i < ncustom_darray; i++) if (dev ? k_edarray.view_host()[i].k_view.need_sync_device() : k_edarray.view_host()[i].k_view.need_sync_host()) bad++;
+      if (bad) sparta->kokkos->note_sync_conflict("particle customs",dev ? "Device" : "Host");
+    }
+  }
+
   if (space == Device) {
     if (mask & PARTICLE_MASK) k_particles.modify_device();
     if (mask & SPECIES_MASK) k_species.modify_device();

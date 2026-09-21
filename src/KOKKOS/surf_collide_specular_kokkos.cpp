@@ -126,7 +126,7 @@ void SurfCollideSpecularKokkos::pre_collide()
         sr_kk_global_copy[nglob].copy((SurfReactGlobalKokkos*)(surf->sr[n]));
         sr_kk_global_copy[nglob].obj.pre_react();
         sr_type_list[n] = 0;
-        sr_map[n] = nprob;
+        sr_map[n] = nglob;
         nglob++;
       } else if (strcmp(surf->sr[n]->style,"prob") == 0) {
         sr_kk_prob_copy[nprob].copy((SurfReactProbKokkos*)(surf->sr[n]));
@@ -134,6 +134,13 @@ void SurfCollideSpecularKokkos::pre_collide()
         sr_type_list[n] = 1;
         sr_map[n] = nprob;
         nprob++;
+      } else if (strcmp(surf->sr[n]->style,"surface/pwi") == 0 ||
+                 strcmp(surf->sr[n]->style,"surface/pwi/kk") == 0) {
+        // PWI reactions are dispatched only by the diffuse collider;
+        // tolerate the style here so PWI on diffuse walls can coexist
+        // with specular boundaries (device aborts if actually dispatched)
+        sr_type_list[n] = 2;
+        sr_map[n] = 0;
       } else {
         error->all(FLERR,"Unknown Kokkos surface reaction method");
       }
@@ -147,7 +154,7 @@ void SurfCollideSpecularKokkos::pre_collide()
   particle_kk->sync(Device,PARTICLE_MASK|SPECIES_MASK);
   d_particles = particle_kk->k_particles.view_device();
 
-  Kokkos::deep_copy(d_scalars,0);
+  Kokkos::deep_copy(DeviceType(),d_scalars,0);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -205,5 +212,5 @@ void SurfCollideSpecularKokkos::restore()
     }
   }
 
-  Kokkos::deep_copy(d_scalars,0);
+  Kokkos::deep_copy(DeviceType(),d_scalars,0);
 }

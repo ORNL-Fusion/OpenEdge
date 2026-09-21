@@ -109,7 +109,8 @@ class SurfCollidePistonKokkos : public SurfCollidePiston {
     reaction = 0;
     int velreset = 0;
 
-    if (REACT) {
+    // isr < 0 = no reaction model on this surface (matches the CPU guard)
+    if (REACT && isr >= 0) {
       if (ambi_flag || vibmode_flag) memcpy(&iorig,ip,sizeof(Particle::OnePart));
 
       int sr_type = sr_type_list[isr];
@@ -121,6 +122,8 @@ class SurfCollidePistonKokkos : public SurfCollidePiston {
       } else if (sr_type == 1) {
         reaction = sr_kk_prob_copy[m].obj.
           react_kokkos<ATOMIC_REDUCTION>(ip,isurf,norm,jp,velreset,d_retry,d_nlocal);
+      } else if (sr_type == 2) {
+        Kokkos::abort("PWI surface reactions are only supported on diffuse surfaces with Kokkos");
       }
 
       if (reaction) {

@@ -25,6 +25,7 @@ namespace SPARTA_NS {
 
 class Stats : protected Pointers {
  public:
+  int any_host_compute() const;   // OpenEdge: 1 if a stats compute lacks a Kokkos twin
   Stats(class SPARTA *);
   ~Stats();
   void init();

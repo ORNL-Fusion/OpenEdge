@@ -163,6 +163,12 @@ void Error::one(const char *file, int line, const char *str)
             me,str,file,line);
     fprintf(screen,"Last command: %s\n",lastcmd.c_str());
     fflush(screen);
+  } else {
+    // OpenEdge: non-root ranks own no screen; without this the message of
+    // a one-rank abort is lost behind the MPI_Abort banner
+    fprintf(stderr,"ERROR on proc %d: %s (%s:%d)\nLast command: %s\n",
+            me,str,file,line,lastcmd.c_str());
+    fflush(stderr);
   }
   if (universe->nworlds > 1) {
     fprintf(universe->uscreen,"ERROR on proc %d: %s (%s:%d)\n",

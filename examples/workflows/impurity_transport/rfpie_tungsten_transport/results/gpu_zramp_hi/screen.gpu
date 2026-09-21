@@ -1,0 +1,291 @@
+Kokkos::OpenMP::initialize WARNING: OMP_PROC_BIND environment variable not set
+  In general, for best performance with OpenMP 4.0 or better set OMP_PROC_BIND=spread and OMP_PLACES=threads
+  For best performance with OpenMP 3.1 set OMP_PROC_BIND=true
+  For unit testing set OMP_PROC_BIND=false
+
+MPI detected: For OpenMP binding to work as intended, MPI ranks must be bound to exclusive CPU sets.
+
+SPARTA-OPENDGE (24 Sep 2025)
+KOKKOS mode is enabled (/global/homes/d/diawa/OpenEdge/src/KOKKOS/kokkos.cpp:53)
+  requested 1 GPU(s) per node
+  requested 1 thread(s) per MPI task
+WARNING: When using a single thread, the Kokkos Serial backend (i.e. Makefile.kokkos_mpi_only) gives better performance than the OpenMP backend (/global/homes/d/diawa/OpenEdge/src/KOKKOS/kokkos.cpp:151)
+Kokkos::OpenMP::initialize WARNING: OMP_PROC_BIND environment variable not set
+  In general, for best performance with OpenMP 4.0 or better set OMP_PROC_BIND=spread and OMP_PLACES=threads
+  For best performance with OpenMP 3.1 set OMP_PROC_BIND=true
+  For unit testing set OMP_PROC_BIND=false
+
+MPI detected: For OpenMP binding to work as intended, MPI ranks must be bound to exclusive CPU sets.
+
+Kokkos::OpenMP::initialize WARNING: OMP_PROC_BIND environment variable not set
+  In general, for best performance with OpenMP 4.0 or better set OMP_PROC_BIND=spread and OMP_PLACES=threads
+  For best performance with OpenMP 3.1 set OMP_PROC_BIND=true
+  For unit testing set OMP_PROC_BIND=false
+
+MPI detected: For OpenMP binding to work as intended, MPI ranks must be bound to exclusive CPU sets.
+
+Kokkos::OpenMP::initialize WARNING: OMP_PROC_BIND environment variable not set
+  In general, for best performance with OpenMP 4.0 or better set OMP_PROC_BIND=spread and OMP_PLACES=threads
+  For best performance with OpenMP 3.1 set OMP_PROC_BIND=true
+  For unit testing set OMP_PROC_BIND=false
+
+MPI detected: For OpenMP binding to work as intended, MPI ranks must be bound to exclusive CPU sets.
+
+Running on 4 MPI task(s)
+Created orthogonal box = (-0.0301 -0.0301 -0.0002) to (0.0301 0.0301 0.06)
+WARNING: Could not acquire nearby ghost cells b/c grid partition is not clumped (/global/homes/d/diawa/OpenEdge/src/grid.cpp:473)
+Created 3145728 child grid cells
+  CPU time = 0.12073 secs
+  create/ghost percent = 85.0316 14.9684
+Balance grid migrated 2359296 cells
+  CPU time = 1.48402 secs
+  reassign/sort/migrate/ghost percent = 7.22187 0.876985 12.0852 79.816
+Reading surface file ...
+  478 triangles
+  -0.01143 0.01143 xlo xhi
+  -0.01143 0.01143 ylo yhi
+  0 0.001905 zlo zhi
+  0.00118332 min triangle edge length
+  7.48089e-08 min triangle area
+  4900 0 = cells overlapping surfs, overlap cells with unmarked corner pts
+  3132008 8820 4900 = cells outside/inside/overlapping surfs
+  4900 = surf cells with 1,2,etc splits
+  0.000217386761280626 0.000217386761284699 = cell-wise and global flow volume
+  CPU time = 1.21907 secs
+  read/check/sort/surf2grid/ghost/inout/particle percent = 0.111582 0.0986764 3.6181 25.7787 70.393 20.8135 0.000796347
+  surf2grid time = 0.314259 secs
+  map/comm1/comm2/comm3/comm4/split percent = 47.3475 0.0659749 27.5424 2.19247 6.37507 8.67613
+0 = initial surface count in group target_body
+178 = final surface count in group target_body
+0 = initial surface count in group target
+300 = final surface count in group target
+  reactions catalog: w (processes.h5 /volume/reactions/w/catalog)
+Reading ADAS data for w (Z=74) from /global/homes/d/diawa/OpenEdge/database/processes.h5 (/volume/rates/)
+  boris: bfield_compute 'pd' bound to fix background (has_bfield=0, mesh_tri_b=0)
+  [kokkos] sheath boundary mode on device (impact kick, sub-grid band, RF waveform)
+[background] Reading input/plasma_he_zramp.h5
+[background] Loaded: 161 x 121 regular grid, 1 ion species, bfield=const, equ=no, gen=1
+fix surface/emit/source/kk: device emission armed (activates once the per-task source is static)
+[volume/chem/adas] ionization    : 4 active, 26 skipped (of 30)
+[volume/chem/adas] recombination : 4 active, 26 skipped (of 30)
+[volume/chem/adas] cx            : 4 active, 26 skipped (of 30)
+[volume/chem/adas] missing species (first 8): W5+,W6+,W7+,W8+,W9+,W10+,W11+,W12+
+[volume/chem/adas] output summary  (6 cols)  ADAS tables: SCD ACD CCD PLT PRB -
+fix volume/chem/adas/kk: device path active (Z=74, 90 reactions)
+fix cross_field_diffusion/kk: device fill active
+compute surface/physical/sputter: loaded sputter yield table 'he_on_w' (50 x 45) from processes.h5
+compute surface/physical/sputter: target=W projectiles=He  (slots 1..1 mapped)
+PMI magnetic incidence: poloidal
+Memory usage per proc in Mbytes:
+  particles (ave,min,max) = 0 0 0
+  grid      (ave,min,max) = 174.344 174.344 174.344
+  surf      (ave,min,max) = 0.060173 0.060173 0.060173
+  total     (ave,min,max) = 303.405 303.405 303.405
+Step CPU Np Nscoll Nsreact 
+       0            0        0        0        0 
+  [kokkos] pusher B: mesh-less fix provider (equilibrium=0 const_b=1)
+OpenEdge Phase D: per-element sheath cache — 300 of 300 group elements active (provider=fix)
+  [kokkos] plasma raster bound: 161x121 (R,Z), drag yes, gradTe yes, gradTi yes
+  [kokkos] pcache: DEVICE fill active (mask 0x37, sheath ne correction)
+Chem/ADAS reaction tallies:
+  id fchem Z=74 #-of-reactions 90
+    reaction all: 0
+    ioniz: 0
+    recomb: 0
+    CX: 0
+    dissoc: 0
+Loop time of 0.756319 on 4 procs for 0 steps with 0 particles
+  boris: bfield_compute 'pd' bound to fix background (has_bfield=1, mesh_tri_b=0)
+  [kokkos] sheath boundary mode on device (impact kick, sub-grid band, RF waveform)
+fix surface/emit/source/kk: device emission armed (activates once the per-task source is static)
+[volume/chem/adas] ionization    : 4 active, 26 skipped (of 30)
+[volume/chem/adas] recombination : 4 active, 26 skipped (of 30)
+[volume/chem/adas] cx            : 4 active, 26 skipped (of 30)
+[volume/chem/adas] missing species (first 8): W5+,W6+,W7+,W8+,W9+,W10+,W11+,W12+
+[volume/chem/adas] output summary  (6 cols)  ADAS tables: SCD ACD CCD PLT PRB -
+fix volume/chem/adas/kk: device path active (Z=74, 90 reactions)
+fix cross_field_diffusion/kk: device fill active
+PMI magnetic incidence: poloidal
+Memory usage per proc in Mbytes:
+  particles (ave,min,max) = 0 0 0
+  grid      (ave,min,max) = 174.344 174.344 174.344
+  surf      (ave,min,max) = 0.060173 0.060173 0.060173
+  total     (ave,min,max) = 303.405 303.405 303.405
+Step CPU Np Nscoll Nsreact 
+       0            0        0        0        0 
+  [kokkos] pusher B: mesh-less fix provider (equilibrium=0 const_b=1)
+OpenEdge Phase D: per-element sheath cache — 300 of 300 group elements active (provider=fix)
+  [kokkos] plasma raster bound: 161x121 (R,Z), drag yes, gradTe yes, gradTi yes
+  [kokkos] pcache: DEVICE fill active (mask 0x37, sheath ne correction)
+fix surface/emit/source/kk: device emission ACTIVE from step 2 (after 1 host warmup calls, ntask 2220)
+CommKokkos::migrate_cells: device particle migration active
+OpenEdge Phase D: per-element sheath cache — 300 of 300 group elements active (provider=fix)
+OpenEdge Phase D: per-element sheath cache — 300 of 300 group elements active (provider=fix)
+OpenEdge Phase D: per-element sheath cache — 300 of 300 group elements active (provider=fix)
+    1000    31.094111  3560938        8        0 
+Chem/ADAS reaction tallies:
+  id fchem Z=74 #-of-reactions 90
+    reaction all: 403309
+    ioniz: 403309
+    recomb: 0
+    CX: 0
+    dissoc: 0
+    reaction W --> W+ [I:ioniz]: 402682
+    reaction W+ --> W2+ [I:ioniz]: 627
+Loop time of 31.2189 on 4 procs for 1000 steps with 3560938 particles
+Performance: 32.032 timesteps/s, 114.063 Mparticle-step/s
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Move    | 1.9386     | 1.9831     | 2.0281     |   2.6 |  6.35
+Coll    | 0.25136    | 0.26197    | 0.27293    |   2.1 |  0.84
+Sort    | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 2.8623     | 2.904      | 2.954      |   2.0 |  9.30
+Modify  | 20.342     | 20.599     | 20.839     |   5.2 | 65.98
+Output  | 0.0098071  | 0.073907   | 0.13809    |  23.4 |  0.24
+Pcache  | 3.9551     | 4.1051     | 4.233      |   6.3 | 13.15
+SReact  | 0.00015001 | 0.00016134 | 0.00016774 |   0.0 |  0.00
+Chem    | 0.53313    | 0.8657     | 1.1894     |  34.3 |  2.77
+Adens   | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 0.4255     |            |       |  1.36
+
+Particle moves    = 2135927554 (2.14B)
+Cells touched     = 2705671701 (2.71B)
+Particle comms    = 5666352 (5.67M)
+Boundary collides = 0 (0K)
+Boundary exits    = 1431314 (1.43M)
+SurfColl checks   = 57758897 (57.8M)
+SurfColl occurs   = 6871 (6.87K)
+Surf reactions    = 0 (0K)
+Collide attempts  = 0 (0K)
+Collide occurs    = 0 (0K)
+Gas reactions     = 403309 (0.403M)
+Particles stuck   = 0
+Axisymm bad moves = 0
+
+Particle-moves/CPUsec/proc: 1.71044e+07
+Particle-moves/step: 2.13593e+06
+Cell-touches/particle/step: 1.26674
+Particle comm iterations/step: 2.734
+Particle fraction communicated: 0.00265288
+Particle fraction colliding with boundary: 0
+Particle fraction exiting boundary: 0.000670114
+Surface-checks/particle/step: 0.0270416
+Surface-collisions/particle/step: 3.21687e-06
+Surface-reactions/particle/step: 0
+Collision-attempts/particle/step: 0
+Collisions/particle/step: 0
+Gas-reactions/particle/step: 0.000188821
+
+Particles: 890234 ave 955323 max 825180 min
+Histogram: 2 0 0 0 0 0 0 0 0 2
+Cells:     786432 ave 1.15527e+06 max 417398 min
+Histogram: 2 0 0 0 0 0 0 0 0 2
+GhostCell: 28896 ave 44342 max 20566 min
+Histogram: 1 1 1 0 0 0 0 0 0 1
+EmptyCell: 20704 ave 26496 max 14976 min
+Histogram: 2 0 0 0 0 0 0 0 0 2
+Surfs:     478 ave 478 max 478 min
+Histogram: 4 0 0 0 0 0 0 0 0 0
+GhostSurf: 0 ave 0 max 0 min
+Histogram: 4 0 0 0 0 0 0 0 0 0
+  boris: bfield_compute 'pd' bound to fix background (has_bfield=1, mesh_tri_b=0)
+  [kokkos] sheath boundary mode on device (impact kick, sub-grid band, RF waveform)
+fix surface/emit/source/kk: device emission armed (activates once the per-task source is static)
+[volume/chem/adas] ionization    : 4 active, 26 skipped (of 30)
+[volume/chem/adas] recombination : 4 active, 26 skipped (of 30)
+[volume/chem/adas] cx            : 4 active, 26 skipped (of 30)
+[volume/chem/adas] missing species (first 8): W5+,W6+,W7+,W8+,W9+,W10+,W11+,W12+
+[volume/chem/adas] output summary  (6 cols)  ADAS tables: SCD ACD CCD PLT PRB -
+fix volume/chem/adas/kk: device path active (Z=74, 90 reactions)
+fix cross_field_diffusion/kk: device fill active
+PMI magnetic incidence: poloidal
+Memory usage per proc in Mbytes:
+  particles (ave,min,max) = 308.332 279.034 337.631
+  grid      (ave,min,max) = 222.305 174.344 270.266
+  surf      (ave,min,max) = 0.060173 0.060173 0.060173
+  total     (ave,min,max) = 688.292 608.657 767.91
+Step CPU Np Nscoll Nsreact 
+    1000            0  3560938        0        0 
+  [kokkos] pusher B: mesh-less fix provider (equilibrium=0 const_b=1)
+OpenEdge Phase D: per-element sheath cache — 300 of 300 group elements active (provider=fix)
+  [kokkos] plasma raster bound: 161x121 (R,Z), drag yes, gradTe yes, gradTi yes
+  [kokkos] pcache: DEVICE fill active (mask 0x37, sheath ne correction)
+    2000    16.017073  4206658        3        0 
+    3000    26.576489  4346877        9        0 
+    4000    42.322223  4405780        9        0 
+    5000    53.584845  4441235        9        0 
+    6000    69.461688  4458195        7        0 
+    7000    80.579475  4468456        8        0 
+    8000    96.637503  4472857       14        0 
+    9000    107.72436  4473447       15        0 
+   10000    128.53766  4471836       12        0 
+Chem/ADAS reaction tallies:
+  id fchem Z=74 #-of-reactions 90
+    reaction all: 7197205
+    ioniz: 7197205
+    recomb: 0
+    CX: 0
+    dissoc: 0
+    reaction W --> W+ [I:ioniz]: 7167671
+    reaction W+ --> W2+ [I:ioniz]: 29527
+    reaction W2+ --> W3+ [I:ioniz]: 7
+Loop time of 128.538 on 4 procs for 9000 steps with 4471836 particles
+Performance: 70.018 timesteps/s, 313.111 Mparticle-step/s
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Move    | 28.503     | 31.226     | 34.094     |  48.5 | 24.29
+Coll    | 3.3361     | 3.684      | 4.0338     |  17.6 |  2.87
+Sort    | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 20.373     | 20.85      | 21.495     |   8.9 | 16.22
+Modify  | 14.343     | 22.354     | 30.471     | 169.2 | 17.39
+Output  | 27.925     | 28.502     | 29.073     |  10.3 | 22.17
+Pcache  | 4.1619     | 4.4254     | 4.5879     |   8.1 |  3.44
+SReact  | 0.0013787  | 0.0015478  | 0.0016921  |   0.3 |  0.00
+Chem    | 4.8783     | 12.689     | 20.391     | 215.6 |  9.87
+Adens   | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 4.807      |            |       |  3.74
+
+Particle moves    = 39400683636 (39.4B)
+Cells touched     = 48837856482 (48.8B)
+Particle comms    = 67888125 (67.9M)
+Boundary collides = 0 (0K)
+Boundary exits    = 43985281 (44M)
+SurfColl checks   = 523874247 (524M)
+SurfColl occurs   = 102048 (0.102M)
+Surf reactions    = 0 (0K)
+Collide attempts  = 0 (0K)
+Collide occurs    = 0 (0K)
+Gas reactions     = 7197205 (7.2M)
+Particles stuck   = 0
+Axisymm bad moves = 0
+
+Particle-moves/CPUsec/proc: 7.66325e+07
+Particle-moves/step: 4.37785e+06
+Cell-touches/particle/step: 1.23952
+Particle comm iterations/step: 2.57833
+Particle fraction communicated: 0.00172302
+Particle fraction colliding with boundary: 0
+Particle fraction exiting boundary: 0.00111636
+Surface-checks/particle/step: 0.0132961
+Surface-collisions/particle/step: 2.59001e-06
+Surface-reactions/particle/step: 0
+Collision-attempts/particle/step: 0
+Collisions/particle/step: 0
+Gas-reactions/particle/step: 0.000182667
+
+Particles: 1.11796e+06 ave 1.22711e+06 max 1.00982e+06 min
+Histogram: 2 0 0 0 0 0 0 0 0 2
+Cells:     786432 ave 1.15527e+06 max 417398 min
+Histogram: 2 0 0 0 0 0 0 0 0 2
+GhostCell: 28896 ave 44342 max 20566 min
+Histogram: 1 1 1 0 0 0 0 0 0 1
+EmptyCell: 20704 ave 26496 max 14976 min
+Histogram: 2 0 0 0 0 0 0 0 0 2
+Surfs:     478 ave 478 max 478 min
+Histogram: 4 0 0 0 0 0 0 0 0 0
+GhostSurf: 0 ave 0 max 0 min
+Histogram: 4 0 0 0 0 0 0 0 0 0

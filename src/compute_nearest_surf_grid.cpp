@@ -7,6 +7,7 @@
 ------------------------------------------------------------------------- */
 
 #include <cmath>
+#include "mpi.h"
 #include "compute_nearest_surf_grid.h"
 
 #include <cstring>
@@ -19,6 +20,7 @@
 #include "input.h"
 #include "math_extra.h"
 #include "memory.h"
+#include "comm.h"
 #include "error.h"
 
 using namespace SPARTA_NS;
@@ -77,6 +79,23 @@ ComputeNearestSurfGrid::~ComputeNearestSurfGrid()
 void ComputeNearestSurfGrid::init()
 {
   reallocate();
+  ensure_customs();
+}
+
+/* grid custom attributes carrying the per-cell result (created once; a
+   restart file restores them, find_custom then succeeds) */
+
+void ComputeNearestSurfGrid::ensure_customs()
+{
+  if (cidx_dist_ >= 0) return;
+  cidx_dist_ = grid->find_custom((char *) "nsg_dist");
+  if (cidx_dist_ < 0) cidx_dist_ = grid->add_custom((char *) "nsg_dist",1,0);   // DOUBLE
+  cidx_n_ = grid->find_custom((char *) "nsg_n");
+  if (cidx_n_ < 0) cidx_n_ = grid->add_custom((char *) "nsg_n",1,3);
+  cidx_midx_ = grid->find_custom((char *) "nsg_midx");
+  if (cidx_midx_ < 0) cidx_midx_ = grid->add_custom((char *) "nsg_midx",0,0);    // INT
+  cidx_id_ = grid->find_custom((char *) "nsg_id");
+  if (cidx_id_ < 0) cidx_id_ = grid->add_custom((char *) "nsg_id",1,0);        // cell id as double (exact to 2^53)
 }
 
 void ComputeNearestSurfGrid::compute_per_grid()
@@ -91,6 +110,17 @@ void ComputeNearestSurfGrid::compute_per_grid()
   Surf::Line *lines = surf->lines;
   Surf::Tri *tris = surf->tris;
   const int nsurf_all = surf->nsurf;
+
+  // cached results travel with the cells (grid customs); usable when the
+  // surf array index is global (surfs not distributed)
+  ensure_customs();
+  custom_sync_host();
+  double *c_dist = grid->edvec[grid->ewhich[cidx_dist_]];
+  double **c_n = grid->edarray[grid->ewhich[cidx_n_]];
+  int *c_midx = grid->eivec[grid->ewhich[cidx_midx_]];
+  double *c_id = grid->edvec[grid->ewhich[cidx_id_]];
+  const int cache_ok = surf->distributed ? 0 : 1;
+  bigint ncached = 0, ncomputed = 0;
 
   int *eligible = nullptr;
   memory->create(eligible,nsurf_all,"nearest_surf/grid:eligible");
@@ -111,10 +141,22 @@ void ComputeNearestSurfGrid::compute_per_grid()
       continue;
     }
 
+    double mind = DIST_BIG;
+    int midx = -1;
+    double nx = 0.0, ny = 0.0, nz = 0.0;
+    double sid = -1.0;
+    const bool cached = cache_ok && c_id[icell] == (double) cells[icell].id &&
+                        c_midx[icell] >= -1 && c_midx[icell] < nsurf_all;
+    if (cached) {
+      mind = c_dist[icell]; midx = c_midx[icell];
+      nx = c_n[icell][0]; ny = c_n[icell][1]; nz = c_n[icell][2];
+      if (midx >= 0) sid = (dim == 2) ? (double) lines[midx].id : (double) tris[midx].id;
+      ncached++;
+    } else {
+      ncomputed++;
+
     const double *lo = cells[icell].lo;
     const double *hi = cells[icell].hi;
-    double lom[3] = {lo[0], lo[1], lo[2]};
-    double him[3] = {hi[0], hi[1], hi[2]};
     const double ctr[3] = {
       0.5 * (lo[0] + hi[0]),
       0.5 * (lo[1] + hi[1]),
@@ -126,8 +168,6 @@ void ComputeNearestSurfGrid::compute_per_grid()
     // multiple triangles (top, bottom, side faces of a slab) have similar
     // bounding-box distances — which happens whenever a cell is much larger than
     // the surface feature (e.g. 1×1×N grid with a thin slab surface).
-    double mind = DIST_BIG;
-    int midx = -1;
     for (int m = 0; m < nsurf_all; ++m) {
       if (!eligible[m]) continue;
       double d = DIST_BIG;
@@ -150,8 +190,6 @@ void ComputeNearestSurfGrid::compute_per_grid()
       }
     }
 
-    double nx = 0.0, ny = 0.0, nz = 0.0;
-    double sid = -1.0;
     if (midx >= 0) {
       if (dim == 2) {
         nx = lines[midx].norm[0];
@@ -178,6 +216,10 @@ void ComputeNearestSurfGrid::compute_per_grid()
       double nvec[3] = {nx, ny, nz};
       if (MathExtra::dot3(v, nvec) < 0.0) { nx = -nx; ny = -ny; nz = -nz; }
     }
+    c_dist[icell] = mind; c_midx[icell] = midx;
+    c_n[icell][0] = nx; c_n[icell][1] = ny; c_n[icell][2] = nz;
+    c_id[icell] = (double) cells[icell].id;
+    }   // computed
 
     midx_grid[icell] = midx;
 
@@ -201,7 +243,14 @@ void ComputeNearestSurfGrid::compute_per_grid()
   }
 
   memory->destroy(eligible);
+  custom_modify_host();
   computed_once = 1;
+  // no collective here: this compute runs only on the ranks whose cells changed
+  // (reallocate), so a reduction would mismatch other ranks' collectives
+  // (Cray MPICH aborted with "message sizes do not match" at a rebalance)
+  if (comm->me == 0 && screen && ncomputed > 0)
+    fprintf(screen,"  nearest_surf/grid (rank 0): " BIGINT_FORMAT " cells from the migrated cache, "
+            BIGINT_FORMAT " computed\n",ncached,ncomputed);
 }
 
 void ComputeNearestSurfGrid::reallocate()

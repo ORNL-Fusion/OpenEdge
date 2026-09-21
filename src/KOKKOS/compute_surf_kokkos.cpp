@@ -40,6 +40,7 @@ ComputeSurfKokkos::ComputeSurfKokkos(SPARTA *sparta, int narg, char **arg) :
 {
   kokkos_flag = 1;
   d_which = DAT::t_int_1d("surf:which",nvalue);
+  weighted = 0; pw_ewhich = -1; fnum_inv = 1.0;
 }
 
 ComputeSurfKokkos::ComputeSurfKokkos(SPARTA *sparta) :
@@ -49,6 +50,7 @@ ComputeSurfKokkos::ComputeSurfKokkos(SPARTA *sparta) :
 {
   copy = 1;
   uncopy = 0;
+  weighted = 0; pw_ewhich = -1; fnum_inv = 1.0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -141,6 +143,16 @@ void ComputeSurfKokkos::pre_surf_tally()
   d_lines = surf_kk->k_lines.view_device();
   d_tris = surf_kk->k_tris.view_device();
 
+  // OpenEdge weighted tally: pweight custom view + particle base (rebound
+  // every step; growth during the move is handled by the mover's retry)
+  if (weighted) {
+    if (pw_ewhich < 0) error->one(FLERR,"compute surf/weighted/kk: pweight custom not resolved");
+    particle_kk->sync(Device,PARTICLE_MASK|CUSTOM_MASK);
+    d_pweight = particle_kk->k_edvec.h_view[pw_ewhich].k_view.d_view;
+    d_particles = particle_kk->k_particles.d_view;
+    fnum_inv = 1.0 / update->fnum;
+  }
+
   need_dup = sparta->kokkos->need_dup<DeviceType>();
   if (need_dup)
     dup_array_surf_tally = Kokkos::Experimental::create_scatter_view<typename Kokkos::Experimental::ScatterSum, typename Kokkos::Experimental::ScatterDuplicated>(d_array_surf_tally);
@@ -160,7 +172,7 @@ void ComputeSurfKokkos::pre_surf_tally()
         sr_kk_global_copy[nglob].copy((SurfReactGlobalKokkos*)(surf->sr[n]));
         sr_kk_global_copy[nglob].obj.pre_react();
         sr_type_list[n] = 0;
-        sr_map[n] = nprob;
+        sr_map[n] = nglob;
         nglob++;
       } else if (strcmp(surf->sr[n]->style,"prob") == 0) {
         sr_kk_prob_copy[nprob].copy((SurfReactProbKokkos*)(surf->sr[n]));
@@ -168,6 +180,13 @@ void ComputeSurfKokkos::pre_surf_tally()
         sr_type_list[n] = 1;
         sr_map[n] = nprob;
         nprob++;
+      } else if (strcmp(surf->sr[n]->style,"surface/pwi") == 0 ||
+                 strcmp(surf->sr[n]->style,"surface/pwi/kk") == 0) {
+        // OpenEdge: surface/pwi has no chemical energy budget (its CPU
+        // reaction_coeff() returns 0), so the echem/etot columns need no
+        // device copy of the reaction; type 2 = coefficient 0 in surf_tally_kk
+        sr_type_list[n] = 2;
+        sr_map[n] = 0;
       } else {
         error->all(FLERR,"Unknown Kokkos surface reaction method");
       }
@@ -189,6 +208,27 @@ void ComputeSurfKokkos::post_surf_tally()
 
   k_tally2surf.modify_device();
   k_array_surf_tally.modify_device();
+}
+
+/* ----------------------------------------------------------------------
+   OpenEdge: host surf_tally on a Kokkos surf compute. The device mover
+   tallies through surf_tally_kk; the only host caller is a host fix
+   reporting emitted particles (iorig = NULL), e.g. the surface/emit/source
+   warm-up calls. The weighted flavor ignores emission on the CPU too
+   (ComputeSurfWeighted::surf_tally), so it is a no-op here; the base
+   flavor has no host tally arrays and would read unset pointers, so it
+   errors instead of segfaulting.
+------------------------------------------------------------------------- */
+
+void ComputeSurfKokkos::surf_tally(double, int, int, int,
+                                   Particle::OnePart *iorig,
+                                   Particle::OnePart *, Particle::OnePart *)
+{
+  if (weighted) return;
+  error->one(FLERR,"compute surf/kk: host-side surf_tally is not supported "
+             "(a host fix reported a surface event; use compute "
+             "surf/weighted/kk or a device fix)");
+  (void) iorig;
 }
 
 /* ----------------------------------------------------------------------

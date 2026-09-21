@@ -31,16 +31,18 @@ SurfReactStyle(surface/pwi,SurfReactSurfacePWI)
 #include <map>
 #include <string>
 #include <vector>
+#include "kk_host_only.h"
 
 namespace SPARTA_NS {
 
 class SurfReactSurfacePWI : public SurfReact {
  public:
   SurfReactSurfacePWI(class SPARTA *, int, char **);
-  ~SurfReactSurfacePWI();
-  void init();
+  SurfReactSurfacePWI(class SPARTA *sparta) : SurfReact(sparta) {} // needed for Kokkos
+  virtual ~SurfReactSurfacePWI();
+  virtual void init();
   int react(Particle::OnePart *&, int, double *, Particle::OnePart *&, int &);
-  void tally_update();
+  virtual void tally_update();
   char *reactionID(int);
   double reaction_coeff(int);
   int match_reactant(char *, int);
@@ -113,12 +115,12 @@ class SurfReactSurfacePWI : public SurfReact {
   // repeatable: one binding per eroded target material; each debit is
   // scaled by that material's surface concentration (protective layers
   // shield the substrate)
-  std::vector<std::string> sigma_ero_id;       // compute IDs
-  std::vector<int> sigma_ero_col;              // 0 = vector, >0 = array col
-  std::vector<std::string> sigma_ero_species;  // debited species names
-  std::vector<int> sigma_ero_noconc;           // 1 = flux already c-weighted
-  std::vector<class Compute *> sigma_ero_compute;
-  std::vector<int> sigma_ero_isp;
+  KKHostOnly<std::vector<std::string>> sigma_ero_id;       // compute IDs
+  KKHostOnly<std::vector<int>> sigma_ero_col;              // 0 = vector, >0 = array col
+  KKHostOnly<std::vector<std::string>> sigma_ero_species;  // debited species names
+  KKHostOnly<std::vector<int>> sigma_ero_noconc;           // 1 = flux already c-weighted
+  KKHostOnly<std::vector<class Compute *>> sigma_ero_compute;
+  KKHostOnly<std::vector<int>> sigma_ero_isp;
   int snet_index, sdep_index, sero_index;  // derived: _net, _dep, _ero
   int ledger_reset;                // keyword: zero pre-marker restart ledgers
   // WallDYN-style homogeneous reaction zone (deck keyword rzone, legacy
@@ -136,9 +138,9 @@ class SurfReactSurfacePWI : public SurfReact {
   int sigma_feedback;              // 0 = ignore mat weights (Y,R without feedback)
   int sconc_index;                 // custom index of <attr>_conc
   int substrate_isp;               // species index of the substrate (default W)
-  std::vector<int> mat_of;         // species -> material group (by element)
-  std::vector<std::string> sigma_init_names;   // species with initial sigma
-  std::vector<double> sigma_init_vals;         //   (boronization layers etc.)
+  KKHostOnly<std::vector<int>> mat_of;         // species -> material group (by element)
+  KKHostOnly<std::vector<std::string>> sigma_init_names;   // species with initial sigma
+  KKHostOnly<std::vector<double>> sigma_init_vals;         //   (boronization layers etc.)
   // adens_init_group <surfgroup>: restrict every adens_init* layer to one
   // surf group (e.g. the deposited band) instead of the whole react group
   char *sigma_init_group;
@@ -146,10 +148,10 @@ class SurfReactSurfacePWI : public SurfReact {
   // adens_init_file <file> <column> <species> <scale>: per-surface initial
   // areal density read by surf id (a `dump surf` file with the named
   // column, or a two-column "id value" text), times <scale>
-  std::vector<std::string> sfile_path, sfile_col, sfile_species;
-  std::vector<double> sfile_scale;
-  std::vector<int> sfile_isp;
-  std::vector<std::vector<double>> sfile_vals; // [k][surfID-1], atoms/m^2
+  KKHostOnly<std::vector<std::string>> sfile_path, sfile_col, sfile_species;
+  KKHostOnly<std::vector<double>> sfile_scale;
+  KKHostOnly<std::vector<int>> sfile_isp;
+  KKHostOnly<std::vector<std::vector<double>>> sfile_vals; // [k][surfID-1], atoms/m^2
   void read_sigma_init_file(int k);
   int init_layer_allowed(int iown);            // owned surf in init group?
   void collect_init_layers(int iown,
@@ -159,9 +161,9 @@ class SurfReactSurfacePWI : public SurfReact {
   // material root, own yield tables) instead of the substrate column;
   // erosion of the element is then debited from whichever of its
   // materials is exposed (stack order), see sigma_debit_element()
-  std::vector<std::string> dep_alias_elem, dep_alias_name;
-  std::vector<int> dep_alias_of;               // species col -> credited col
-  std::vector<std::vector<int>> dep_cols_of;   // species col -> debit candidates
+  KKHostOnly<std::vector<std::string>> dep_alias_elem, dep_alias_name;
+  KKHostOnly<std::vector<int>> dep_alias_of;               // species col -> credited col
+  KKHostOnly<std::vector<std::vector<int>>> dep_cols_of;   // species col -> debit candidates
   inline int deposit_species(int isp) {
     return dep_alias_of.empty() ? isp : dep_alias_of[isp];
   }
@@ -191,13 +193,13 @@ class SurfReactSurfacePWI : public SurfReact {
   int strata_index;                    // custom index of <attr>_strata
   int strata_ncols;                    // 4 + K*(2+nmat)
   int nmat;                            // number of material roots
-  std::vector<int> mat_root_of;        // species col -> material idx
-  std::vector<double> mat_dens;        // material solid density [atoms/m^3]
+  KKHostOnly<std::vector<int>> mat_root_of;        // species col -> material idx
+  KKHostOnly<std::vector<double>> mat_dens;        // material solid density [atoms/m^3]
   // deck overrides: strata_dens <species> <atoms/m^3> (repeatable);
   // built-in element defaults (W, B, O, C, Li, Be) used otherwise
-  std::vector<std::string> strata_dens_names;
-  std::vector<double> strata_dens_vals;
-  std::vector<SurfaceElementState> strata_state;   // [surf->nown]
+  KKHostOnly<std::vector<std::string>> strata_dens_names;
+  KKHostOnly<std::vector<double>> strata_dens_vals;
+  KKHostOnly<std::vector<SurfaceElementState>> strata_state;   // [surf->nown]
 
   // background implantation + retention saturation (task 5):
   //   adens_implant <species> compute <ID> <col> | const <flux_m2s>
@@ -208,17 +210,17 @@ class SurfReactSurfacePWI : public SurfReact {
   // at `depth` via add_implanted(). rcoef/depth are deck constants in
   // v1; binding the compute's mean-E/angle columns to evaluate the 3D
   // R and depth tables live is the documented follow-up.
-  std::vector<std::string> imp_species, imp_comp_id;
-  std::vector<int> imp_mode;            // 0 = compute col, 1 = const
-  std::vector<int> imp_col, imp_isp;
-  std::vector<double> imp_flux, imp_rcoef, imp_cmax, imp_alpha, imp_depth;
-  std::vector<class Compute *> imp_compute;
+  KKHostOnly<std::vector<std::string>> imp_species, imp_comp_id;
+  KKHostOnly<std::vector<int>> imp_mode;            // 0 = compute col, 1 = const
+  KKHostOnly<std::vector<int>> imp_col, imp_isp;
+  KKHostOnly<std::vector<double>> imp_flux, imp_rcoef, imp_cmax, imp_alpha, imp_depth;
+  KKHostOnly<std::vector<class Compute *>> imp_compute;
 
   // reflection-table support (shared format with surf_react pmi; tables
   // from database/surface/trim/*.h5, originally EIRENE TRIM but any
   // BCA-derived HDF5 with the same schema works).
   std::string trim_dir;
-  std::vector<Reflection::Table> trim_tables;
+  KKHostOnly<std::vector<Reflection::Table>> trim_tables;
   std::map<std::string, int> trim_index;
   int load_or_get_trim_table(const char *name);
 
@@ -235,7 +237,7 @@ class SurfReactSurfacePWI : public SurfReact {
   // the incident pweight. pweight_ewhich = edvec index of the pweight custom
   // (-1 if fix particle/weight is absent).
   int pweight_ewhich;
-  std::vector<ProcessLibrary::TrimSputterTable> sput_tables;
+  KKHostOnly<std::vector<ProcessLibrary::TrimSputterTable>> sput_tables;
   std::map<std::string,int> sput_index;
   int load_or_get_sputter_table(const char *name);
 

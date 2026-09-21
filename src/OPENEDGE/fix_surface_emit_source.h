@@ -36,7 +36,7 @@ class FixSurfaceEmitSource : public FixEmit {
   enum EmitModel { MODEL_THERMAL, MODEL_THERMAL_TSURF, MODEL_THOMPSON,
                    MODEL_FIXED_ENERGY };
 
- private:
+ protected:
   int imix,groupbit,normalflag;
 
   int npmode,np;    // npmode = FLOW,CONSTANT
@@ -111,6 +111,14 @@ class FixSurfaceEmitSource : public FixEmit {
   std::vector<double> cached_task_source;
   double cached_source_total;
   int task_source_cached;        // 0 = stale, 1 = valid
+  // per-task source strengths for the static-upstream (nlaunch_total) path,
+  // computed without emitting: compute_task_source fills the vector and returns
+  // the global total; build_task_source_cache refreshes the cache (spreading the
+  // frozen flux first if needed) and returns 1 when the upstream is static.
+  // The Kokkos twin calls the latter after grid_changed() instead of a host
+  // warm-up emission (OpenEdge 2026-09-15).
+  double compute_task_source(std::vector<double> &task_source, class Compute *c);
+  int build_task_source_cache();
 
   // Per-surface flux replicated across ranks (canonical SPARTA pattern: the
   // upstream compute writes array_surf only at this rank's owned surfaces, so
@@ -166,10 +174,9 @@ class FixSurfaceEmitSource : public FixEmit {
  protected:
   virtual void perform_task();
 
- private:
+ protected:
   void create_task(int);
   void grow_task();
-  int local_isurf_index(surfint) const;
   double flux_for_surface(surfint);
   void spread_flux(class Compute *);
 

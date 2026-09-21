@@ -310,6 +310,20 @@ void SurfKokkos::modify(ExecutionSpace space, unsigned int mask)
     if (space == Device)
       error->one(FLERR,"Modify Device before wrap");
 
+  if (sparta->kokkos->checksync) {
+    const bool dev = (space == Device);
+    if ((mask & LINE_MASK) && (dev ? k_lines.need_sync_device() : k_lines.need_sync_host()))
+      sparta->kokkos->note_sync_conflict("surf lines",dev ? "Device" : "Host");
+    if ((mask & TRI_MASK) && (dev ? k_tris.need_sync_device() : k_tris.need_sync_host()))
+      sparta->kokkos->note_sync_conflict("surf tris",dev ? "Device" : "Host");
+    if ((mask & CUSTOM_MASK) && ncustom) {
+      int bad = 0;
+      for (int i = 0; i < ncustom_ivec; i++) if (dev ? k_eivec.view_host()[i].k_view.need_sync_device() : k_eivec.view_host()[i].k_view.need_sync_host()) bad++;
+      for (int i = 0; i < ncustom_dvec; i++) if (dev ? k_edvec.view_host()[i].k_view.need_sync_device() : k_edvec.view_host()[i].k_view.need_sync_host()) bad++;
+      if (bad) sparta->kokkos->note_sync_conflict("surf customs",dev ? "Device" : "Host");
+    }
+  }
+
   if (space == Device) {
     if (mask & LINE_MASK) k_lines.modify_device();
     if (mask & TRI_MASK) k_tris.modify_device();

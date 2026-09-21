@@ -21,11 +21,12 @@ namespace SPARTA_NS {
 class SurfCollideToroidal : public SurfCollide {
  public:
   SurfCollideToroidal(class SPARTA *, int, char **);
+  SurfCollideToroidal(class SPARTA *sparta) : SurfCollide(sparta) {} // needed for Kokkos
   virtual ~SurfCollideToroidal() {}
   Particle::OnePart *collide(Particle::OnePart *&, double &,
                              int, double *, int, int &);
 
- private:
+ protected:              // read by SurfCollideToroidalKokkos
   double dphi_rad;      // wedge angle in radians
   double cos_dphi;      // cos(dphi)
   double sin_dphi;      // sin(dphi)

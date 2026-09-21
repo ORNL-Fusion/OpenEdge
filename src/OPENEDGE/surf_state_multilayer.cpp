@@ -152,25 +152,6 @@ double SurfaceElementState::erode_species(int species, double amount)
 
 /* ---------------------------------------------------------------------- */
 
-void SurfaceElementState::erode_surface(double thickness)
-{
-  if (thickness <= 0.0) return;
-
-  double remaining = thickness;
-  while (remaining > 0.0 && !layers.empty()) {
-    SurfaceLayer &top = layers.front();
-    if (top.thickness <= remaining) {
-      remaining -= top.thickness;
-      layers.erase(layers.begin());
-    } else {
-      top.thickness -= remaining;
-      remaining = 0.0;
-    }
-  }
-}
-
-/* ---------------------------------------------------------------------- */
-
 void SurfaceElementState::compact_layers()
 {
   // Merge thin BURIED layers only (start at 1): the TOP stratum is the
@@ -261,29 +242,10 @@ std::vector<double> SurfaceElementState::get_surface_composition(double depth) c
 
 /* ---------------------------------------------------------------------- */
 
-double SurfaceElementState::total_thickness() const
-{
-  double t = 0.0;
-  for (const auto &lyr : layers) t += lyr.thickness;
-  return t;
-}
-
-/* ---------------------------------------------------------------------- */
-
 double SurfaceElementState::surface_density() const
 {
   if (layers.empty()) return 0.0;
   return layers.front().density;
-}
-
-/* ---------------------------------------------------------------------- */
-
-int SurfaceElementState::pack_size() const
-{
-  // nspecies, max_layers, total_fluence, nlayers
-  // per layer: thickness, density, composition[nspecies]
-  int nlayers = static_cast<int>(layers.size());
-  return 4 + nlayers * (2 + nspecies);
 }
 
 int SurfaceElementState::pack(double *buf) const
@@ -329,36 +291,3 @@ int SurfaceElementState::unpack(const double *buf)
    SurfStateMultilayer methods
    ====================================================================== */
 
-SurfStateMultilayer::SurfStateMultilayer(int nspec, int maxlyr)
-  : nspecies(nspec), max_layers(maxlyr)
-{
-}
-
-SurfStateMultilayer::~SurfStateMultilayer()
-{
-}
-
-void SurfStateMultilayer::allocate(int nsurf)
-{
-  states.resize(nsurf, SurfaceElementState(nspecies, max_layers));
-}
-
-void SurfStateMultilayer::init_substrate(double thickness, double density,
-                                          int substrate_species)
-{
-  for (auto &st : states) {
-    st.init_substrate(thickness, density, substrate_species);
-  }
-}
-
-void SurfStateMultilayer::set_species_names(const std::vector<std::string> &names)
-{
-  species_names = names;
-}
-
-void SurfStateMultilayer::compact_all()
-{
-  for (auto &st : states) {
-    st.compact_layers();
-  }
-}

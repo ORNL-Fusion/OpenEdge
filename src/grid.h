@@ -331,6 +331,10 @@ class Grid : protected Pointers {
   int id_level(cellint);
   void id_child_lohi(int, double *, double *, cellint, double *, double *);
   void id_lohi(cellint, int, double *, double *, double *, double *);
+  int check_cells(const char *);   // OpenEdge: host cell-record sanity check (OE_GRID_CHECK)
+  int check_cells_array(const char *, ChildCell *, int);
+  virtual int check_cells_device(const char *) { return 0; }   // GridKokkos: validate a host copy of the device array
+  static int check_cells_level;
   int id_bits(int, int, int);
   void id_num2str(cellint, char *);
 
@@ -351,6 +355,9 @@ class Grid : protected Pointers {
     nmask |= flag << neighshift[iface];
     return nmask;
   }
+
+ public:
+  virtual void grow_cells(int, int);   // public: CommKokkos pre-grows receivers
 
  protected:
   int me;
@@ -483,7 +490,6 @@ class Grid : protected Pointers {
   int box_overlap(double *, double *, double *, double *);
   int box_periodic(double *, double *, Box *);
 
-  virtual void grow_cells(int, int);
   virtual void grow_pcells();
   virtual void grow_sinfo(int);
 

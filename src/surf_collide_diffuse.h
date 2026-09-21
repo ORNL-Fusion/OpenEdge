@@ -36,11 +36,10 @@ class SurfCollideDiffuse : public SurfCollide {
                              int, double *, int, int &);
   void wrapper(Particle::OnePart *, double *, int *, double*);
   void flags_and_coeffs(int *, double *);
-  double random_energy_thompson(double ub, double te);
 
 
  protected:
-  double acc;                // surface accomodation coeff
+  double acc;                // surface accommodation coeff
   double vx,vy,vz;           // translational velocity of surface
   double wx,wy,wz;           // angular velocity of surface
   double px,py,pz;           // point to rotate surface around

@@ -30,6 +30,7 @@ struct TagComputeGridWeighted_NRHO_W{};
 struct TagComputeGridWeighted_MASSRHO_W{};
 struct TagComputeGridWeighted_PXRHO_W{};
 struct TagComputeGridWeighted_KERHO_W{};
+struct TagComputeGridWeighted_RATIO{};
 
 class ComputeGridWeightedKokkos : public ComputeGridWeighted, public KokkosBase {
  public:
@@ -64,6 +65,9 @@ class ComputeGridWeightedKokkos : public ComputeGridWeighted, public KokkosBase 
   KOKKOS_INLINE_FUNCTION
   void operator()(TagComputeGridWeighted_KERHO_W, const int&) const;
 
+  KOKKOS_INLINE_FUNCTION
+  void operator()(TagComputeGridWeighted_RATIO, const int&) const;
+
   DAT::tdual_float_1d k_vector_grid;
 
  private:
@@ -91,6 +95,8 @@ class ComputeGridWeightedKokkos : public ComputeGridWeighted, public KokkosBase 
   DAT::t_float_1d d_pweight;
 
   int wcount_col,wmass_col,wmom_col,wke_col;
+  int ratio_num_col,ratio_den_col;
+  double ratio_pref;
   int nsample,nstride;
 };
 

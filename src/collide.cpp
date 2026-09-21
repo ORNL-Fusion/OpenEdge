@@ -1946,7 +1946,7 @@ void Collide::adapt_grid()
 void Collide::grow_percell(int n)
 {
   if (nglocal+n < nglocalmax || !ngroups) return;
-  while (nglocal+n >= nglocalmax) nglocalmax += DELTAGRID;
+  while (nglocal+n >= nglocalmax) nglocalmax += MAX(DELTAGRID, nglocalmax/4);   // amortized
   memory->grow(vremax,nglocalmax,ngroups,ngroups,"collide:vremax");
   if (remainflag)
     memory->grow(remain,nglocalmax,ngroups,ngroups,"collide:remain");
