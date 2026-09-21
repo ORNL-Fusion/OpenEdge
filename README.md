@@ -9,7 +9,7 @@
      hosted documentation, and a Zenodo DOI exist. -->
 
 A kinetic transport package for plasma-material and plasma-wall
-interactions, built on [SPARTA](https://sparta.github.io).
+interactions.
 
 OpenEdge evolves neutrals, impurity ions, and dust/droplets in
 prescribed plasma and magnetic backgrounds for edge / SOL transport
