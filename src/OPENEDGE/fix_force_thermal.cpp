@@ -359,7 +359,7 @@ void FixForceThermal::kick_half(double dt_half)
     PlasmaPointSample background;
     const bool native_3d_background = use_background_ && pd_->is_zones3d();
     if (native_3d_background) {
-      unsigned request = PLASMA_NEED_FLOW_B;
+      unsigned request = PLASMA_NEED_B;
       if (have_ion_thermal_) request |= PLASMA_NEED_GRAD_TI;
       if (have_elec_thermal_) request |= PLASMA_NEED_GRAD_TE;
       pd_->sample_point(p.x, background, p.icell, ip, request);
@@ -611,8 +611,7 @@ void FixForceThermal::pd_bfield_sparta(const Particle::OnePart &p,
   B0 = B1 = B2 = 0.0;
   if (!pd_ || !pd_->has_bfield) return;
   PlasmaPointSample sample;
-  pd_->sample_point(p.x, sample, p.icell, iparticle,
-                    PLASMA_NEED_FLOW_B);
+  pd_->sample_point(p.x, sample, p.icell, iparticle, PLASMA_NEED_B);
   B0 = sample.b[0];
   B1 = sample.b[1];
   B2 = sample.b[2];

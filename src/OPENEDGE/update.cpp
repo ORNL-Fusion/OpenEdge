@@ -1777,88 +1777,125 @@ template < int DIM, int SURF, int OPT > void Update::move()
           double crossing_fraction = 0.0;
           double psi_normal[3] = {0.0, 0.0, 0.0};
           if (!psi_reflect_fix->segment_crossing(
-                  x, xnew, crossing_fraction, psi_normal))
-            error->one(FLERR,
-              "fix reflect/psi: cannot resolve an outside-to-inside "
-              "psi-contour crossing; particle may have started inside");
-
-          const int ncoord = (DIM == 3) ? 3 : 2;
-          double proposed[3] = {xnew[0], xnew[1], xnew[2]};
-          double crossing[3] = {x[0], x[1], x[2]};
-          for (int k = 0; k < ncoord; k++)
-            crossing[k] = x[k] + crossing_fraction*(proposed[k]-x[k]);
-
-          // Remove the random-walk pseudo-velocity before reflecting the
-          // physical velocity. The reflected V-shaped path is represented to
-          // the grid/surface mover by a new temporary chord pseudo-velocity,
-          // which post_move_bookkeeping strips again.
-          if (has_kick) {
-            v[0] -= vkick0;
-            v[1] -= vkick1;
-            if (DIM == 3) v[2] -= vkick2;
-            has_kick = 0;
-          }
-
-          double vref[3] = {v[0], v[1], v[2]};
-          double vdotn = 0.0;
-          for (int k = 0; k < ncoord; k++)
-            vdotn += vref[k]*psi_normal[k];
-          for (int k = 0; k < ncoord; k++)
-            vref[k] -= 2.0*vdotn*psi_normal[k];
-
-          double final_pos[3] = {proposed[0], proposed[1], proposed[2]};
-          double remdotn = 0.0;
-          for (int k = 0; k < ncoord; k++)
-            remdotn += (proposed[k]-crossing[k])*psi_normal[k];
-          for (int k = 0; k < ncoord; k++) {
-            const double rem = proposed[k]-crossing[k];
-            final_pos[k] = crossing[k] + rem -
-                           2.0*remdotn*psi_normal[k];
-          }
-
-          // Strong curvature plus an unusually long step can put the
-          // tangent-plane mirror point back inside. Keep the boundary
-          // fail-closed by placing it an epsilon outside the solved crossing.
-          if (psi_reflect_fix->psi_norm_at_sparta(final_pos) <
-              psi_reflect_threshold) {
-            double eps = 1.0e-12;
-            for (int iter = 0; iter < 12; iter++) {
-              for (int k = 0; k < ncoord; k++)
-                final_pos[k] = crossing[k] + eps*psi_normal[k];
-              if (psi_reflect_fix->psi_norm_at_sparta(final_pos) >=
-                  psi_reflect_threshold) break;
-              eps *= 10.0;
+                  x, xnew, crossing_fraction, psi_normal)) {
+            // No outside-to-inside crossing on this chord: the particle
+            // already started inside (born there) or the contour normal is
+            // degenerate. Reject the move and turn it outward instead of
+            // aborting; OE_PSI_STRICT=1 restores the abort for debugging.
+            static int psi_strict = -1;
+            if (psi_strict < 0) {
+              const char *e = getenv("OE_PSI_STRICT");
+              psi_strict = e ? atoi(e) : 0;
             }
-            if (psi_reflect_fix->psi_norm_at_sparta(final_pos) <
-                psi_reflect_threshold)
+            if (psi_strict)
               error->one(FLERR,
-                "fix reflect/psi: failed to place reflected particle "
-                "outside psi contour");
+                "fix reflect/psi: cannot resolve an outside-to-inside "
+                "psi-contour crossing; particle may have started inside");
+            if (has_kick) {
+              v[0] -= vkick0;
+              v[1] -= vkick1;
+              if (DIM == 3) v[2] -= vkick2;
+              has_kick = 0;
+            }
+            xnew[0] = x[0];
+            xnew[1] = x[1];
+            if (DIM == 3) xnew[2] = x[2];
+            // reverse v_R: 3D projects onto R, axi has R in y, 2D Cart in x
+            if (DIM == 3) {
+              const double R0 = sqrt(x[0]*x[0] + x[1]*x[1]);
+              if (R0 > 1.0e-10) {
+                const double cphi = x[0]/R0, sphi = x[1]/R0;
+                const double vr = -(v[0]*cphi + v[1]*sphi);
+                const double vp = -v[0]*sphi + v[1]*cphi;
+                v[0] = vr*cphi - vp*sphi;
+                v[1] = vr*sphi + vp*cphi;
+              }
+            } else if (domain->axisymmetric) {
+              v[1] = -v[1];
+            } else {
+              v[0] = -v[0];
+            }
+            psi_reflect_fix->tally_inside_start(particles[i].ispecies);
+            pusher->invalidate_gc(i, Pusher::GC_INVAL_BOUNDARY);
+          } else {
+            const int ncoord = (DIM == 3) ? 3 : 2;
+            double proposed[3] = {xnew[0], xnew[1], xnew[2]};
+            double crossing[3] = {x[0], x[1], x[2]};
+            for (int k = 0; k < ncoord; k++)
+              crossing[k] = x[k] + crossing_fraction*(proposed[k]-x[k]);
+
+            // Remove the random-walk pseudo-velocity before reflecting the
+            // physical velocity. The reflected V-shaped path is represented to
+            // the grid/surface mover by a new temporary chord pseudo-velocity,
+            // which post_move_bookkeeping strips again.
+            if (has_kick) {
+              v[0] -= vkick0;
+              v[1] -= vkick1;
+              if (DIM == 3) v[2] -= vkick2;
+              has_kick = 0;
+            }
+
+            double vref[3] = {v[0], v[1], v[2]};
+            double vdotn = 0.0;
+            for (int k = 0; k < ncoord; k++)
+              vdotn += vref[k]*psi_normal[k];
+            for (int k = 0; k < ncoord; k++)
+              vref[k] -= 2.0*vdotn*psi_normal[k];
+
+            double final_pos[3] = {proposed[0], proposed[1], proposed[2]};
+            double remdotn = 0.0;
+            for (int k = 0; k < ncoord; k++)
+              remdotn += (proposed[k]-crossing[k])*psi_normal[k];
+            for (int k = 0; k < ncoord; k++) {
+              const double rem = proposed[k]-crossing[k];
+              final_pos[k] = crossing[k] + rem -
+                             2.0*remdotn*psi_normal[k];
+            }
+
+            // Strong curvature plus an unusually long step can put the
+            // tangent-plane mirror point back inside. Keep the boundary
+            // fail-closed by placing it an epsilon outside the solved crossing.
+            if (psi_reflect_fix->psi_norm_at_sparta(final_pos) <
+                psi_reflect_threshold) {
+              double eps = 1.0e-12;
+              for (int iter = 0; iter < 12; iter++) {
+                for (int k = 0; k < ncoord; k++)
+                  final_pos[k] = crossing[k] + eps*psi_normal[k];
+                if (psi_reflect_fix->psi_norm_at_sparta(final_pos) >=
+                    psi_reflect_threshold) break;
+                eps *= 10.0;
+              }
+              if (psi_reflect_fix->psi_norm_at_sparta(final_pos) <
+                  psi_reflect_threshold)
+                error->one(FLERR,
+                  "fix reflect/psi: failed to place reflected particle "
+                  "outside psi contour");
+            }
+
+            // Represent the reflected endpoint by a straight effective chord so
+            // the existing grid/surface mover remains exact. The difference from
+            // the physical reflected velocity is bookkeeping, not heating, and
+            // is stripped at the usual kick cleanup sites.
+            double pseudo[3] = {0.0, 0.0, 0.0};
+            if (!(dtremain > 0.0))
+              error->one(FLERR, "fix reflect/psi: non-positive move time");
+            for (int k = 0; k < ncoord; k++) {
+              const double veff = (final_pos[k]-x[k])/dtremain;
+              pseudo[k] = veff-vref[k];
+              v[k] = veff;
+              xnew[k] = final_pos[k];
+            }
+            if (DIM == 2) v[2] = vref[2];
+
+            vkick0 = pseudo[0];
+            vkick1 = pseudo[1];
+            vkick2 = (DIM == 3) ? pseudo[2] : 0.0;
+            has_kick = 1;
+
+            // A psi reflection is a velocity-changing boundary event. Any
+            // stored guiding-center state must be rebuilt on the next step.
+            pusher->invalidate_gc(i, Pusher::GC_INVAL_BOUNDARY);
           }
-
-          // Represent the reflected endpoint by a straight effective chord so
-          // the existing grid/surface mover remains exact. The difference from
-          // the physical reflected velocity is bookkeeping, not heating, and
-          // is stripped at the usual kick cleanup sites.
-          double pseudo[3] = {0.0, 0.0, 0.0};
-          if (!(dtremain > 0.0))
-            error->one(FLERR, "fix reflect/psi: non-positive move time");
-          for (int k = 0; k < ncoord; k++) {
-            const double veff = (final_pos[k]-x[k])/dtremain;
-            pseudo[k] = veff-vref[k];
-            v[k] = veff;
-            xnew[k] = final_pos[k];
-          }
-          if (DIM == 2) v[2] = vref[2];
-
-          vkick0 = pseudo[0];
-          vkick1 = pseudo[1];
-          vkick2 = (DIM == 3) ? pseudo[2] : 0.0;
-          has_kick = 1;
-
-          // A psi reflection is a velocity-changing boundary event. Any
-          // stored guiding-center state must be rebuilt on the next step.
-          pusher->invalidate_gc(i, Pusher::GC_INVAL_BOUNDARY);
         }
       }
 

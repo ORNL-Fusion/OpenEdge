@@ -138,6 +138,11 @@ void FixSurfaceEmitRecycle::init()
   if (ifix_plasma < 0 || ifix_plasma >= modify->nfix)
     error->all(FLERR,"Fix emit/surf/recycle plasma fix ID no longer exists");
   plasma = dynamic_cast<FixBackground *>(modify->fix[ifix_plasma]);
+  // reads mesh_te/mesh_ne by SOLPS cell and bfield_at(R,Z): mesh-only
+  if (plasma && plasma->is_zones3d())
+    error->all(FLERR, "fix surface/emit/recycle: requires an R-Z mesh "
+               "plasma background; native zones3d backgrounds are not "
+               "supported by this fix");
   if (!plasma)
     error->all(FLERR,"Fix emit/surf/recycle requires a fix background");
 

@@ -716,8 +716,7 @@ bool BackgroundZones3D::sample(const double xyz[3], PlasmaPointSample &out,
     out.te = zone.te[c]; out.ti = zone.ti[c];
     out.ne = zone.ne[c]; out.ni = zone.ni[c];
   }
-  if (request & PLASMA_NEED_FLOW_B) {
-    out.mach = zone.mach[c];
+  if (request & (PLASMA_NEED_FLOW_B | PLASMA_NEED_B)) {
     const double er = zone.trace_r[c];
     const double ep = zone.trace_phi[c];
     const double ez = zone.trace_z[c];
@@ -731,6 +730,8 @@ bool BackgroundZones3D::sample(const double xyz[3], PlasmaPointSample &out,
       out.b[1] = b_sign_ * out.bmag * ey;
       out.b[2] = b_sign_ * out.bmag * ez;
     }
+    if (!(request & PLASMA_NEED_FLOW_B)) goto gradients;
+    out.mach = zone.mach[c];
     const double cs = std::sqrt(QE * std::max(0.0,
                                 static_cast<double>(zone.te[c]) +
                                 static_cast<double>(zone.ti[c])) /
@@ -744,6 +745,7 @@ bool BackgroundZones3D::sample(const double xyz[3], PlasmaPointSample &out,
     out.flow[1] = upar * ey;
     out.flow[2] = upar * ez;
   }
+ gradients:
   if (request & PLASMA_NEED_GRAD_TE)
     parallel_gradient(zone, loc.ir, loc.ip, loc.it, zone.te, phi,
                       out.grad_te);

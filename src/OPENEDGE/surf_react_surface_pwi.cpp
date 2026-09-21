@@ -114,6 +114,7 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   sigma_area = NULL;
 
   snet_index = sdep_index = sero_index = -1;
+  ledger_reset = 0;
   strata_K = 0;
   strata_minthick = 0.5;
   rough_dm = 0.0;
@@ -239,6 +240,9 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       if (sfile_scale.back() <= 0.0)
         error->all(FLERR,"surf_react surface/pwi adens_init_file scale must be > 0");
       iarg += 5;
+    } else if (strcmp(arg[iarg],"ledger_reset") == 0) {
+      ledger_reset = 1;
+      iarg += 1;
     } else if (strcmp(arg[iarg],"deposit_as") == 0) {
       // deposit_as <element> <species>: retained atoms of <element> are
       // credited to the deposit material <species>
@@ -549,6 +553,7 @@ void SurfReactSurfacePWI::init()
     // adens_init/adens_init_file and persist incrementally across restarts.
     char dname[130];
     snprintf(dname,sizeof(dname),"%s_net",sigma_attr);
+    const bool net_preexisting = surf->find_custom(dname) >= 0;
     snet_index = surf->find_custom(dname);
     if (snet_index < 0) snet_index = surf->add_custom(dname, DOUBLE, 0);
     snprintf(dname,sizeof(dname),"%s_dep",sigma_attr);
@@ -616,6 +621,33 @@ void SurfReactSurfacePWI::init()
     snprintf(dname,sizeof(dname),"%s_ero",sigma_attr);
     sero_index = surf->find_custom(dname);
     if (sero_index < 0) sero_index = surf->add_custom(dname, DOUBLE, 0);
+
+    // Ledger version marker. Restart files written before the ledgers
+    // became incremental hold absolute totals in <attr>_net and have no
+    // marker: refuse them unless ledger_reset zeros the three ledgers.
+    snprintf(dname,sizeof(dname),"%s_ledgerv",sigma_attr);
+    int lver_index = surf->find_custom(dname);
+    if (net_preexisting && lver_index < 0 && !ledger_reset) {
+      char msg[320];
+      snprintf(msg,sizeof(msg),"surf_react surface/pwi: restart carries "
+               "%s_net/_dep/_ero from before they became incremental "
+               "runtime ledgers; add 'ledger_reset' to zero them",
+               sigma_attr);
+      error->all(FLERR,msg);
+    }
+    if (lver_index < 0) lver_index = surf->add_custom(dname, DOUBLE, 0);
+    {
+      double *lv = surf->edvec[surf->ewhich[lver_index]];
+      double *nv = surf->edvec[surf->ewhich[snet_index]];
+      double *dv = surf->edvec[surf->ewhich[sdep_index]];
+      double *ev = surf->edvec[surf->ewhich[sero_index]];
+      const bool zero = ledger_reset && net_preexisting;
+      for (int i = 0; i < surf->nown; i++) {
+        lv[i] = 2.0;
+        if (zero) nv[i] = dv[i] = ev[i] = 0.0;
+      }
+      surf->spread_custom(lver_index);
+    }
     surf->spread_custom(sero_index);
     surf->spread_custom(snet_index);
     surf->spread_custom(sdep_index);

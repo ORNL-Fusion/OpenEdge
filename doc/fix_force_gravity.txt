@@ -10,17 +10,23 @@ fix force/gravity command :h3
 
 [Syntax:]
 
-fix ID force/gravity group-ID gR gZ gphi :pre
+fix ID force/gravity group-ID gR gZ gphi keyword value ... :pre
 
 ID is documented in "fix"_fix.html command :ulb,l
 force/gravity = style name of this fix command :l
 group-ID = particle group ID (accepted but not used; see below) :l
 gR,gZ,gphi = constant acceleration components in physical cylindrical order (m/s^2) :l
+zero or more keyword/value pairs may be appended :l
+keyword = {frame} :l
+  {frame} value = {cyl} or {cart}
+    cyl = components are (gR,gZ,gphi), rotated per particle (default)
+    cart = components are (gx,gy,gz) applied directly to the storage slots :pre
 :ule
 
 [Examples:]
 
-fix fg force/gravity all 0.0 -9.81 0.0 :pre
+fix fg force/gravity all 0.0 -9.81 0.0
+fix fg force/gravity all 0.0 0.0 -9.81 frame cart :pre
 
 [Description:]
 
@@ -49,6 +55,15 @@ forces.
 The {group-ID} argument is parsed but currently ignored: the
 acceleration is applied to all particles regardless of group.
 
+The {frame} keyword selects how the three values are read.  {cyl}, the
+default, is the cylindrical convention above.  {cart} applies the
+values directly to the x, y, z storage slots without rotation, which
+is the meaning the components had before the cylindrical convention
+was adopted.  In 3d Cartesian runs a nonzero third component is
+ambiguous between the two readings, so the keyword is required there;
+an old deck such as "0 0 -9.81" must state {frame cart} to keep a
+downward acceleration.
+
 [Restrictions:]
 
 This command is part of the OPENEDGE package.
@@ -57,4 +72,4 @@ This command is part of the OPENEDGE package.
 
 "fix particulate/drag"_fix_particulate_drag.html
 
-[Default:] none
+[Default:] frame = cyl

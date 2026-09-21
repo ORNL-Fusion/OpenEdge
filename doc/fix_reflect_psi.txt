@@ -97,6 +97,14 @@ ave/time"_fix_ave_time.html as in the example above. Difference the
 cumulative physical count between outputs to obtain a windowed
 removal rate.
 
+The fix also computes a global scalar: the cumulative number of
+{reflect} moves that were rejected because the particle already
+started inside the contour. Such particles are typically born inside
+by an emission or a volume reaction; the move is rejected and the
+radial velocity reversed so they leave on later steps. Set the
+environment variable OE_PSI_STRICT=1 to abort on the first such event
+instead.
+
 [Restrictions:]
 
 This command is part of the OPENEDGE package.

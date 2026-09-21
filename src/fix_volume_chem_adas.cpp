@@ -1322,6 +1322,21 @@ void FixVolumeChemAdas::spawn_volume_recombination()
                          xc[0] - cp->plasma_data.column_x0) : 0.0;
         OpenEdge::RZphi_force_to_sparta(bf.br, bf.bz, bf.bt, dim, axi,
                                         phi_c, bx, by, bz);
+      } else if (pd->is_zones3d()) {
+        // native 3-D provider: one point query; outside centroids stay
+        // zero and are skipped by the Te/ne check below. sample.b is
+        // already in SPARTA slots.
+        PlasmaPointSample s;
+        if (pd->sample_point(xc, s, icell, -1,
+                             PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B |
+                             PLASMA_QUERY_SOFT)) {
+          Te_eV = s.te;
+          ne_m3 = s.ne;
+          ni_m3 = (s.ni > 0.0) ? s.ni : s.ne;
+          Ti_eV = (s.ti > 0.0) ? s.ti : s.te;
+          vpar  = s.upar;
+          bx = s.b[0]; by = s.b[1]; bz = s.b[2];
+        }
       } else {
         double R = 0.0, Z = 0.0;
         OpenEdge::sparta_to_RZ(xc, dim, axi, R, Z,
@@ -1543,6 +1558,7 @@ double FixVolumeChemAdas::neutral_dens_at_cell(int icell)
     }
   }
   if (!nn_pd || !nn_pd->has_neutral_dens()) return 0.0;
+  if (nn_pd->is_zones3d()) return 0.0;   // no neutral data on zones3d
   Grid::ChildCell *cells = grid->cells;
   double xc[3];
   xc[0] = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);

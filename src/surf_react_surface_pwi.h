@@ -122,6 +122,7 @@ class SurfReactSurfacePWI : public SurfReact {
   KKHostOnly<std::vector<class Compute *>> sigma_ero_compute;
   KKHostOnly<std::vector<int>> sigma_ero_isp;
   int snet_index, sdep_index, sero_index;  // derived: _net, _dep, _ero
+  int ledger_reset;                // keyword: zero pre-marker restart ledgers
   // WallDYN-style homogeneous reaction zone (deck keyword rzone, legacy
   // alias sigma_zone): concentrations c_i of the top rzone atoms/m^2,
   // stored in per-surf custom array <attr>_conc (esize = nspecies);

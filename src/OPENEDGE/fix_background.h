@@ -43,7 +43,12 @@ enum PlasmaSampleRequest : unsigned {
   PLASMA_NEED_GRAD_TE = 1u << 4,
   PLASMA_NEED_GRAD_TI = 1u << 5,
   PLASMA_NEED_NEUTRAL = 1u << 6,
-  PLASMA_NEED_ALL     = (1u << 7) - 1u
+  PLASMA_NEED_ALL     = (1u << 7) - 1u,
+  // Diagnostics only: an outside/invalid zones3d point returns false with a
+  // zeroed sample instead of aborting. Particle physics never sets this.
+  PLASMA_QUERY_SOFT   = 1u << 7,
+  // B vector/magnitude only (no parallel flow). FLOW_B implies it.
+  PLASMA_NEED_B       = 1u << 8
 };
 
 struct PlasmaPointSample {

@@ -446,6 +446,7 @@ void ComputePlasmaFields::init()
             "an explicit nonzero b_sign on fix background");
       }
 
+      int noutside = 0;
       for (int icell = 0; icell < ncells; ++icell) {
         PlasmaFileParams P{};
         MagneticFieldFileDataParams B{};
@@ -455,10 +456,17 @@ void ComputePlasmaFields::init()
             0.5 * (cells[icell].lo[1] + cells[icell].hi[1]),
             0.5 * (cells[icell].lo[2] + cells[icell].hi[2])};
           PlasmaPointSample sample;
-          pd->sample_point(xyz, sample, icell, -1,
-                           PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B |
-                           PLASMA_NEED_E | PLASMA_NEED_GRAD_TE |
-                           PLASMA_NEED_GRAD_TI);
+          // Diagnostic sampling: a centroid outside the provider (vacuum,
+          // wall) keeps zeros instead of aborting the run.
+          if (!pd->sample_point(xyz, sample, icell, -1,
+                                PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B |
+                                PLASMA_NEED_E | PLASMA_NEED_GRAD_TE |
+                                PLASMA_NEED_GRAD_TI | PLASMA_QUERY_SOFT)) {
+            ++noutside;
+            plasma_arr[icell] = P;
+            mag_arr[icell] = B;
+            continue;
+          }
           const double phi = std::atan2(xyz[1], xyz[0]);
           const double cp = std::cos(phi), sp = std::sin(phi);
           P.dens_e = sample.ne; P.temp_e = sample.te;
@@ -488,11 +496,14 @@ void ComputePlasmaFields::init()
       }
       plasma_stencil.clear();
       sample_stale = 0;
+      int noutside_all = 0;
+      MPI_Reduce(&noutside, &noutside_all, 1, MPI_INT, MPI_SUM, 0, world);
       if (me == 0 && screen)
         fprintf(screen,
           "compute plasma/fields: sampled native zones3d fix '%s' onto "
-          "%d local grid cells (gen=%d)\n",
-          background_fix_id.c_str(), ncells, pd->generation);
+          "%d local grid cells (gen=%d), %d centroids outside the "
+          "provider left at zero\n",
+          background_fix_id.c_str(), ncells, pd->generation, noutside_all);
       return;
     }
 
@@ -876,6 +887,9 @@ void ComputePlasmaFields::compute_per_grid()
         want_heat |= value[iv] == QPAR || value[iv] == QPERP ||
                      value[iv] == QMAG;
       }
+      // zones3d: plasma_arr already holds the centroid sample from init();
+      // only heat flux (rejected at init for zones3d) would need a query.
+      if (bg_fix_->is_zones3d()) want_thermo = false;
       const unsigned request = (want_thermo ? PLASMA_NEED_THERMO : 0u) |
                                (want_heat ? PLASMA_NEED_HEAT : 0u);
       if (request != 0u) {
@@ -1370,10 +1384,11 @@ PlasmaFileParams ComputePlasmaFields::query_plasma_at_point(
 
   if (input_mode == MODE_BACKGROUND && bg_fix_ && bg_fix_->is_zones3d()) {
     PlasmaPointSample sample;
+    // Outside points return the zeroed P{} (diagnostic contract).
     bg_fix_->sample_point(xyz, sample, -1, -1,
                           PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B |
                           PLASMA_NEED_E | PLASMA_NEED_GRAD_TE |
-                          PLASMA_NEED_GRAD_TI);
+                          PLASMA_NEED_GRAD_TI | PLASMA_QUERY_SOFT);
     const double phi = std::atan2(xyz[1], xyz[0]);
     const double cp = std::cos(phi), sp = std::sin(phi);
     auto to_cyl = [cp, sp](const double vector[3], double &vr,
@@ -1541,7 +1556,8 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
 
   if (input_mode == MODE_BACKGROUND && bg_fix_ && bg_fix_->is_zones3d()) {
     PlasmaPointSample sample;
-    bg_fix_->sample_point(xyz, sample, -1, -1, PLASMA_NEED_FLOW_B);
+    bg_fix_->sample_point(xyz, sample, -1, -1,
+                          PLASMA_NEED_B | PLASMA_QUERY_SOFT);
     const double phi = std::atan2(xyz[1], xyz[0]);
     const double cp = std::cos(phi), sp = std::sin(phi);
     B.br = sample.b[0] * cp + sample.b[1] * sp;

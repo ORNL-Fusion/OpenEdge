@@ -577,8 +577,6 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
         error->one(FLERR,
           "fix particulate/thermal model dis2021: non-finite grain potential");
       const double chi = -phi_V / Te;
-      const double tau_i = Ti / Te;
-      const double X = ion_charge_state_ * chi / tau_i;
       const double vti = std::sqrt(2.0 * QE * Ti / MI);
       const double dv0 = ip->v[0] - plasma.flow[0];
       const double dv1 = ip->v[1] - plasma.flow[1];
