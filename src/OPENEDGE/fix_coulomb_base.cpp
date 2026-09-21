@@ -360,14 +360,19 @@ void FixCoulombBase::nanbu_collisions_cell(int icell, int np)
 
     double *vA = pA.v;
     double *vB = pB.v;
+    PlasmaPointSample bgA, bgB;
+    if (use_background_) {
+      pd_->sample_point(pA.x, bgA, pA.icell, idxA, PLASMA_NEED_THERMO);
+      pd_->sample_point(pB.x, bgB, pB.icell, idxB, PLASMA_NEED_THERMO);
+    }
     const double Te_eV = std::max(
       use_background_
-        ? 0.5 * (pd_interp(pd_->temp_e, idxA, pA) + pd_interp(pd_->temp_e, idxB, pB))
+        ? 0.5 * (bgA.te + bgB.te)
         : 0.5 * (read_src(srcTe_, idxA, icell) + read_src(srcTe_, idxB, icell)),
       0.0);
     const double ne = std::max(
       use_background_
-        ? 0.5 * (pd_interp(pd_->dens_e, idxA, pA) + pd_interp(pd_->dens_e, idxB, pB))
+        ? 0.5 * (bgA.ne + bgB.ne)
         : 0.5 * (read_src(srcNe_, idxA, icell) + read_src(srcNe_, idxB, icell)),
       0.0);
     const double lnLambda = compute_coulomb_log(ne, Te_eV);

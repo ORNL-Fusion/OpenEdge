@@ -309,6 +309,11 @@ void FixCrossFieldDiffusion::init()
   }
   if (diff_model_ == DIFF_BOHM && !use_background_)
     bind(srcTe_, "Te");
+  if (have_grad_pinch_ && use_background_ && pd_ && pd_->is_zones3d() &&
+      comm->me == 0)
+    error->warning(FLERR, "fix cross_field_diffusion: gradient pinch needs "
+                   "grad(ne), which a zones3d background does not provide; "
+                   "the pinch term is disabled");
   if (have_grad_pinch_ && !use_background_) {
     bind(srcNe_, "Ne");
     bind(srcGradNeR_, "gradNeR");
@@ -511,8 +516,15 @@ void FixCrossFieldDiffusion::start_of_step()
 
     // gradient-driven pinch
     if (have_grad_pinch_ && D_local > 0.0) {
-      const double ne_loc = use_background_ ? std::max(pd_interp(pd_->dens_e, ip, p), 1.0e10)
-                                             : std::max(read_src(srcNe_, ip, icell), 1.0e10);
+      double ne_loc;
+      if (use_background_ && pd_->is_zones3d()) {
+        PlasmaPointSample bg;
+        pd_->sample_point(p.x, bg, p.icell, ip, PLASMA_NEED_THERMO);
+        ne_loc = std::max(bg.ne, 1.0e10);
+      } else {
+        ne_loc = use_background_ ? std::max(pd_interp(pd_->dens_e, ip, p), 1.0e10)
+                                 : std::max(read_src(srcNe_, ip, icell), 1.0e10);
+      }
       double gNeR, gNeZ;
       if (use_background_) {
         // grad(ne) is not precomputed on mesh plasma.h5. Falls back
@@ -523,7 +535,9 @@ void FixCrossFieldDiffusion::start_of_step()
         double R, Z;
         OpenEdge::sparta_to_RZ(p.x, dim, domain->axisymmetric, R, Z,
                                pd_->column_x0, pd_->column_y0);
-        if (pd_->rvals.size() < 2 || pd_->zvals.size() < 2) {
+        // zones3d provides no grad(ne): pinch term off (warned at init)
+        if (pd_->is_zones3d() ||
+            pd_->rvals.size() < 2 || pd_->zvals.size() < 2) {
           gNeR = 0.0; gNeZ = 0.0;
         } else {
           const double dR = std::max(1.0e-9, 0.5 * std::fabs(pd_->rvals[1] - pd_->rvals[0]));

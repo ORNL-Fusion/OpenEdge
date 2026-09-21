@@ -870,6 +870,10 @@ void FixSurfaceStateLm::end_of_step()
               && wcell < static_cast<int>(fbg->mesh_q_perp.size()))
             q_perp = fbg->mesh_q_perp[wcell];
         } else {
+          if (fbg->is_zones3d())
+            error->one(FLERR, "fix surface/state/lm: heat-flux lookup "
+                       "needs the R-Z plasma mesh; a zones3d background "
+                       "provides no q_par/q_perp");
           if (!fbg->mesh_q_par.empty())
             q_par = fbg->interp2D(fbg->mesh_q_par, R, Z);
           else if (!fbg->q_par.empty())

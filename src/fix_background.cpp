@@ -2298,6 +2298,7 @@ bool FixBackground::sample_point(const double xyz[3],
       // vacuum sample. No neighbouring cell is borrowed.
       return true;
     }
+    if (request & PLASMA_QUERY_SOFT) return false;
     const char *status = sample.status == PLASMA_SAMPLE_INVALID
       ? "INVALID" : "OUTSIDE";
     char msg[320];

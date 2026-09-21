@@ -13,6 +13,7 @@
 #include "memory.h"
 #include "error.h"
 #include "fix_background.h"
+#include "compute_plasma_fields.h"
 #include "openedge_geom.h"
 #include "eckstein_sputter_data.h"
 #include "eckstein_sputter.h"
@@ -1699,15 +1700,16 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
     // Surface element centroid in cylindrical (R,Z). Helper picks the
     // SPARTA slot mapping (Cart 2D x=R, axi 2D x=Z, 3D Cartesian).
     double r = 0.0, z = 0.0;
+    double mid[3] = {0.0, 0.0, 0.0};   // face centroid, SPARTA coordinates
     if (dimension == 2) {
-      const double mid[3] = {0.5*(lines[m].p1[0] + lines[m].p2[0]),
-                             0.5*(lines[m].p1[1] + lines[m].p2[1]), 0.0};
+      mid[0] = 0.5*(lines[m].p1[0] + lines[m].p2[0]);
+      mid[1] = 0.5*(lines[m].p1[1] + lines[m].p2[1]);
       OpenEdge::sparta_to_RZ(mid, dimension, domain->axisymmetric, r, z,
                              column_x0, column_y0);
     } else {
-      const double mid[3] = {(tris[m].p1[0] + tris[m].p2[0] + tris[m].p3[0]) / 3.0,
-                             (tris[m].p1[1] + tris[m].p2[1] + tris[m].p3[1]) / 3.0,
-                             (tris[m].p1[2] + tris[m].p2[2] + tris[m].p3[2]) / 3.0};
+      mid[0] = (tris[m].p1[0] + tris[m].p2[0] + tris[m].p3[0]) / 3.0;
+      mid[1] = (tris[m].p1[1] + tris[m].p2[1] + tris[m].p3[1]) / 3.0;
+      mid[2] = (tris[m].p1[2] + tris[m].p2[2] + tris[m].p3[2]) / 3.0;
       OpenEdge::sparta_to_RZ(mid, dimension, domain->axisymmetric, r, z,
                              column_x0, column_y0);
     }
@@ -1781,7 +1783,10 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
       bz_loc = mesh_tri_bz[tri_idx];
       bt_loc = mesh_tri_bt.empty() ? 0.0 : mesh_tri_bt[tri_idx];
     } else if (bg_fix) {
-      bg_fix->bfield_at(r, z, br_loc, bz_loc, bt_loc);
+      // point query works for every provider (mesh, equilibrium, zones3d)
+      const MagneticFieldFileDataParams Bq =
+        bg_fix->query_bfield_at_point(mid);
+      br_loc = Bq.br; bz_loc = Bq.bz; bt_loc = Bq.bt;
     }
     // Prefer the smooth /wall_flux/ B-field (IDW K=3 over the same
     // source samples used for gamma and Te/Ti) when available. Otherwise

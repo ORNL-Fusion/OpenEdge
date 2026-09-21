@@ -1311,6 +1311,24 @@ void FixVolumeChemAdas::spawn_volume_recombination()
         vpar  = pf.parr_flow;
         MagneticFieldFileDataParams bf = cp->query_bfield_at_point(xc);
         bx = bf.br;  by = bf.bt;  bz = bf.bz;
+      } else if (pd->is_zones3d()) {
+        // native 3-D provider: one point query; outside centroids stay
+        // zero and are skipped by the Te/ne check below
+        PlasmaPointSample s;
+        if (pd->sample_point(xc, s, icell, -1,
+                             PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B |
+                             PLASMA_QUERY_SOFT)) {
+          Te_eV = s.te;
+          ne_m3 = s.ne;
+          ni_m3 = (s.ni > 0.0) ? s.ni : s.ne;
+          Ti_eV = (s.ti > 0.0) ? s.ti : s.te;
+          vpar  = s.upar;
+          const double phi = std::atan2(xc[1], xc[0]);
+          const double cp_ = std::cos(phi), sp_ = std::sin(phi);
+          bx = s.b[0] * cp_ + s.b[1] * sp_;      // Br
+          by = -s.b[0] * sp_ + s.b[1] * cp_;     // Bt
+          bz = s.b[2];                           // Bz
+        }
       } else {
         double R = 0.0, Z = 0.0;
         OpenEdge::sparta_to_RZ(xc, dim, axi, R, Z,
@@ -1527,6 +1545,7 @@ double FixVolumeChemAdas::neutral_dens_at_cell(int icell)
     }
   }
   if (!nn_pd || !nn_pd->has_neutral_dens()) return 0.0;
+  if (nn_pd->is_zones3d()) return 0.0;   // no neutral data on zones3d
   Grid::ChildCell *cells = grid->cells;
   double xc[3];
   xc[0] = 0.5 * (cells[icell].lo[0] + cells[icell].hi[0]);
