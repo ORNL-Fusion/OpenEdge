@@ -16,7 +16,7 @@ ID = user-assigned name for the surface reaction model :ulb,l
 surface/pwi = style name of this surface reaction model :l
 infile = file listing the surface reaction channels (format below) :l
 zero or more keyword/value pairs may be appended :l
-keyword = {twall} or {twall_surf} or {trim_dir} or {R_surf} or {ehist} or {roughness_dm} or {adens_surf} or {adens_init} or {adens_init_file} or {adens_init_group} or {deposit_as} or {rzone} or {adens_erosion} or {adens_implant} or {conc_feedback} or {adens_nevery} or {strata} or {strata_dens} :l
+keyword = {twall} or {twall_surf} or {trim_dir} or {R_surf} or {ehist} or {roughness_dm} or {adens_surf} or {adens_init} or {adens_init_file} or {adens_init_group} or {deposit_as} or {rzone} or {adens_erosion} or {adens_implant} or {conc_feedback} or {adens_nevery} or {strata} or {strata_dens} or {ledger_reset} :l
   {twall} value = wall temperature in Kelvin
   {twall_surf} value = name of a custom per-surf vector with the wall
     temperature of each element in Kelvin
@@ -42,6 +42,8 @@ keyword = {twall} or {twall_surf} or {trim_dir} or {R_surf} or {ehist} or {rough
   {adens_init_group} value = surface group ID the initial layers are
     restricted to
   {deposit_as} values = element species
+  {ledger_reset} = no value; zero the runtime ledgers of a restart
+    written before they became incremental (see below)
     element = element symbol whose retained atoms are re-tagged
     species = species ID that holds the redeposited material
   {rzone} value = reaction-zone areal density in atoms/m^2
@@ -203,6 +205,15 @@ created alongside: <attr>_net (signed net change), <attr>_dep (gross
 deposition) and <attr>_ero (gross removal), which start at zero and
 exclude the seeded layers, and <attr>_conc, the reaction-zone
 concentration of every species.  All persist across restarts.
+
+Restart compatibility: <attr>_net, <attr>_dep and <attr>_ero are signed
+runtime deltas, not total areal densities; analysis that wants the
+total reads the material array itself.  Files written before the
+ledgers became incremental hold absolute totals in <attr>_net and are
+refused on read, because the marker custom <attr>_ledgerv they lack
+is now written with every ledger.  Add {ledger_reset} to accept such a
+file: the three ledgers are zeroed on every surface and the marker is
+created, while the material array and strata are kept.
 
 Concentrations are c_i = adens_i/{rzone}; the remainder of the zone
 is bulk substrate.  They weight the {T} and {S} channels that carry a

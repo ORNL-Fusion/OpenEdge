@@ -24,6 +24,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "comm.h"
 
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <cerrno>
 #include <cmath>
@@ -54,6 +55,28 @@ FixForceGravity::FixForceGravity(SPARTA *sparta, int narg, char **arg)
   g_[0] = parse_or_die(arg[3], "g1");
   g_[1] = parse_or_die(arg[4], "g2");
   g_[2] = parse_or_die(arg[5], "g3");
+
+  int frame_set = 0;
+  int iarg = 6;
+  while (iarg < narg) {
+    if (strcmp(arg[iarg], "frame") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix force/gravity: frame needs cyl or cart");
+      if (strcmp(arg[iarg + 1], "cyl") == 0) frame_cyl_ = 1;
+      else if (strcmp(arg[iarg + 1], "cart") == 0) frame_cyl_ = 0;
+      else error->all(FLERR, "fix force/gravity: frame must be cyl or cart");
+      frame_set = 1;
+      iarg += 2;
+    } else {
+      error->all(FLERR, "fix force/gravity: unknown keyword");
+    }
+  }
+  // Components changed meaning from Cartesian slots to cylindrical
+  // (gR,gZ,gphi); in 3D a nonzero third value is ambiguous without frame.
+  if (!frame_set && domain->box_exist && domain->dimension == 3 &&
+      !domain->axisymmetric && g_[2] != 0.0)
+    error->all(FLERR, "fix force/gravity: in 3D a nonzero third component "
+               "needs 'frame cyl' (gR gZ gphi) or 'frame cart' (gx gy gz)");
 }
 
 int FixForceGravity::setmask()
@@ -95,9 +118,10 @@ void FixForceGravity::half_kick(double dt_half)
   for (int i = 0; i < nlocal; ++i) {
     const double phi = (!axi && dim == 3)
       ? std::atan2(parts[i].x[1], parts[i].x[0]) : 0.0;
-    double gx, gy, gz;
-    OpenEdge::RZphi_force_to_sparta(g_[0], g_[1], g_[2], dim, axi, phi,
-                                    gx, gy, gz);
+    double gx = g_[0], gy = g_[1], gz = g_[2];
+    if (frame_cyl_)
+      OpenEdge::RZphi_force_to_sparta(g_[0], g_[1], g_[2], dim, axi, phi,
+                                      gx, gy, gz);
     double *v = parts[i].v;
     v[0] += gx * dt_half;
     v[1] += gy * dt_half;
