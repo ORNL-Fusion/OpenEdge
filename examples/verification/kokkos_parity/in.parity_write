@@ -1,4 +1,4 @@
-# gpu_parity stage 5 (GPU binary): write_restart from a device-resident state.
+# kokkos_parity stage 5 (GPU binary): write_restart from a device-resident state.
 # Particles from state.restart move for 5 steps in the tilted B (Kokkos mover,
 # migration between ranks, thermal kicks), are dumped with their custom pweight,
 # then written to state_gpu.restart at a reset step 0. Both binaries then read

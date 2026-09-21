@@ -1,4 +1,4 @@
-# gpu_parity stage 4: fix population/control on the frozen restart state.
+# kokkos_parity stage 4: fix population/control on the frozen restart state.
 # Every (cell, species) bucket over Nmax=1 is thinned to one survivor whose
 # pweight absorbs the bucket weight. Deterministic checks: particle count
 # after thinning (CPU == GPU exactly) and per-cell weighted density

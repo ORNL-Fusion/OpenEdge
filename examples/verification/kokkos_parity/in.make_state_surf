@@ -1,4 +1,4 @@
-# gpu_parity stage 1b (CPU only): W ions streaming onto the rfpie target puck;
+# kokkos_parity stage 1b (CPU only): W ions streaming onto the rfpie target puck;
 # writes state_surf.restart (surfaces included) for the surface-tally check.
 seed                104729
 dimension           3

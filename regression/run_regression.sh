@@ -22,7 +22,7 @@
 #    --verbose       Show full output on failure
 #    --update-ref    Write <case>/regression_reference.json from this run
 #                    (intended for the CPU path; keeps existing tolerances)
-#    --parity-cpu-exe PATH  With --kk: also run examples/verification/gpu_parity
+#    --parity-cpu-exe PATH  With --kk: also run examples/verification/kokkos_parity
 #                    (CPU binary PATH vs the --kk binary, deterministic compare)
 # -----------------------------------------------------------------------
 
@@ -315,22 +315,22 @@ for entry in "${TESTS[@]}"; do
 done
 
 # -----------------------------------------------------------------------
-#  gpu_parity: deterministic CPU-vs-GPU comparison (needs both binaries)
+#  kokkos_parity: deterministic CPU-vs-GPU comparison (needs both binaries)
 # -----------------------------------------------------------------------
-if [[ "gpu_parity" == $FILTER || "*" == "$FILTER" ]]; then
-  printf "%-40s " "gpu_parity"
-  pdir="$EXAMPLES_DIR/verification/gpu_parity"
+if [[ "kokkos_parity" == $FILTER || "*" == "$FILTER" ]]; then
+  printf "%-40s " "kokkos_parity"
+  pdir="$EXAMPLES_DIR/verification/kokkos_parity"
   if [[ $KKMODE -ne 1 || -z "$PARITY_CPU_EXE" ]]; then
-    RESULTS+=("SKIP  gpu_parity  (needs --kk and --parity-cpu-exe <cpu binary>)")
+    RESULTS+=("SKIP  kokkos_parity  (needs --kk and --parity-cpu-exe <cpu binary>)")
     echo "SKIP (needs --kk and --parity-cpu-exe)"
     ((SKIP++))
   else
     if [[ -n "$LAUNCHER" ]]; then lc="$LAUNCHER"; lg="$LAUNCHER"; else lc="mpirun -np $NP"; lg="mpirun -np $NP"; fi
     if (cd "$pdir" && EXE_CPU="$PARITY_CPU_EXE" EXE_GPU="$EXE" LAUNCH_CPU="$lc" LAUNCH_GPU="$lg" \
         bash run.sh > "$pdir/regression.log" 2>&1); then
-      RESULTS+=("PASS  gpu_parity  (grid/weighted + thermal kick CPU==GPU)"); echo "PASS"; ((PASS++))
+      RESULTS+=("PASS  kokkos_parity  (grid/weighted + thermal kick CPU==GPU)"); echo "PASS"; ((PASS++))
     else
-      RESULTS+=("FAIL  gpu_parity  (see examples/verification/gpu_parity/regression.log)"); echo "FAIL"; ((FAIL++))
+      RESULTS+=("FAIL  kokkos_parity  (see examples/verification/kokkos_parity/regression.log)"); echo "FAIL"; ((FAIL++))
       if [[ "$VERBOSE" -eq 1 ]]; then tail -20 "$pdir/regression.log"; fi
     fi
   fi

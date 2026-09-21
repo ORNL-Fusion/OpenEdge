@@ -1,4 +1,4 @@
-# gpu_parity stage 6 (run with the CPU binary and with the GPU binary):
+# kokkos_parity stage 6 (run with the CPU binary and with the GPU binary):
 # constant cylindrical E and B on the fix background (raster plasma file, no
 # mesh B), one Boris step with the mover on. Checks that the device pusher
 # applies the constant E (audit 6d: it had no device twin) with the same

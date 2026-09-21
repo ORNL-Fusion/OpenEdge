@@ -1,4 +1,4 @@
-# gpu_parity stage 2 (run with the CPU binary and with the GPU binary):
+# kokkos_parity stage 2 (run with the CPU binary and with the GPU binary):
 # identical particles from state.restart, positions frozen (move no), one
 # step of fix force/thermal only. Checks:
 #  - grid/weighted keywords (all ratio and density outputs) at step 0

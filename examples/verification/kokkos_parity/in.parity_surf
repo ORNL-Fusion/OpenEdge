@@ -1,4 +1,4 @@
-# gpu_parity stage 2b: identical particles stream onto the target (Boris in a
+# kokkos_parity stage 2b: identical particles stream onto the target (Boris in a
 # tilted constant B), absorbed on impact. compute surf/weighted per-surf
 # tallies (all six keywords) through fix ave/surf, dumped each step.
 variable            tag index cpu

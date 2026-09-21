@@ -1,4 +1,4 @@
-# gpu_parity — deterministic CPU vs GPU check of OpenEdge device paths
+# kokkos_parity — deterministic CPU vs GPU check of OpenEdge device paths
 
 Stage 1 (`in.make_state`, CPU binary) creates 200 000 W ions in the rfpie box with
 the rfpie raster plasma file (`rfpie_input` -> the rfpie case inputs) and writes
