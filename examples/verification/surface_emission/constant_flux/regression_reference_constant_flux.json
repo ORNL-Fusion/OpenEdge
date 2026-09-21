@@ -10,7 +10,8 @@
  },
  "f_femit[1]": {
   "value": 10.0,
-  "tol": 0.05
+  "tol": 0.3,
+  "note": "per-step launch count (about 10): Poisson noise ~30 %"
  },
  "f_femit[2]": {
   "value": 10001.0,
