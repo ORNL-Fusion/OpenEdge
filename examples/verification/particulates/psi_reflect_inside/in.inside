@@ -1,0 +1,24 @@
+# fix reflect/psi regression: reflect-mode particles born INSIDE the core
+# contour must not abort the run. Ten grains start deep inside the
+# psi_N < 0.51 region (psi_N < 0.08) with an inward velocity; the mover
+# rejects their moves, reverses v_R and tallies them (scalar f_fcore).
+seed        20260921
+dimension   2
+boundary    o ao p
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0
+global      phi_track yes
+timestep    5.0e-3
+create_box  -1.0 1.0  0.0 1.05  -0.05 0.05
+create_grid 40 30 1
+balance_grid rcb cell
+global      weight cell radius
+species     ../../../workflows/particulates/st40_lithium_powder_dropper/input/grains.species droplet
+mixture     grains droplet frac 1.0
+fix         pd background file ../../../workflows/particulates/st40_lithium_powder_dropper/input/plasma_st40_solps_corefill.h5 static yes
+fix         fcore reflect/psi background pd psi_norm 0.51 &
+            action reflect mixture grains
+read_particles input/inside.particles 0
+stats       100
+stats_style step np f_fcore[1] f_fcore
+run         1000

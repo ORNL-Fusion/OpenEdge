@@ -112,11 +112,14 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
     error->all(FLERR, "fix reflect/psi: no species available for tally");
   vector_flag = 1;
   size_vector = 3 * nrows_;
+  scalar_flag = 1;
   global_freq = 1;
   absorbed_events_local_.assign(nrows_, 0.0);
   absorbed_physical_local_.assign(nrows_, 0.0);
   absorbed_events_global_.assign(nrows_, 0.0);
   absorbed_physical_global_.assign(nrows_, 0.0);
+  inside_start_local_.assign(nrows_, 0.0);
+  inside_start_global_.assign(nrows_, 0.0);
 
   if (!equ_path.empty()) {
     read_equ_file(equ_path);
@@ -253,9 +256,21 @@ void FixReflectPsi::tally_absorb(int ispecies, int iparticle)
 
 /* ---------------------------------------------------------------------- */
 
+void FixReflectPsi::tally_inside_start(int ispecies)
+{
+  const int row = row_for_species(ispecies);
+  if (row < 0 || row >= nrows_) return;
+  inside_start_local_[row] += 1.0;
+  reduced_step_ = -1;
+}
+
+/* ---------------------------------------------------------------------- */
+
 void FixReflectPsi::reduce_tallies()
 {
   if (reduced_step_ == update->ntimestep) return;
+  MPI_Allreduce(inside_start_local_.data(), inside_start_global_.data(),
+                nrows_, MPI_DOUBLE, MPI_SUM, world);
   MPI_Allreduce(absorbed_events_local_.data(), absorbed_events_global_.data(),
                 nrows_, MPI_DOUBLE, MPI_SUM, world);
   MPI_Allreduce(absorbed_physical_local_.data(),
@@ -269,7 +284,19 @@ void FixReflectPsi::reduce_tallies()
      3*i+1 simulation absorption events (cumulative)
      3*i+2 physical particles absorbed (cumulative)
      3*i+3 physical removal rate averaged since fix initialization [s^-1]
+   Scalar: cumulative reflect-mode moves rejected because the particle
+   already started inside the contour (all species).
 ------------------------------------------------------------------------- */
+
+double FixReflectPsi::compute_scalar()
+{
+  reduce_tallies();
+  double total = 0.0;
+  for (int i = 0; i < nrows_; i++) total += inside_start_global_[i];
+  return total;
+}
+
+/* ---------------------------------------------------------------------- */
 
 double FixReflectPsi::compute_vector(int index)
 {

@@ -59,10 +59,14 @@ class FixReflectPsi : public Fix {
   int  setmask();
   void init();
   double compute_vector(int) override;
+  double compute_scalar() override;
 
   // Called by the particle mover immediately before an absorbed particle is
   // discarded. The tally is species resolved and uses physical marker weight.
   void tally_absorb(int ispecies, int iparticle);
+  // Called by the mover when a reflect-mode particle is already inside the
+  // contour at the start of its move; the move is rejected and counted.
+  void tally_inside_start(int ispecies);
 
   // Geometry helpers used by the mover for exact contour reflection.
   double psi_norm_at_sparta(const double xyz[3]) const;
@@ -86,6 +90,8 @@ class FixReflectPsi : public Fix {
   std::vector<double> absorbed_physical_local_;
   std::vector<double> absorbed_events_global_;
   std::vector<double> absorbed_physical_global_;
+  std::vector<double> inside_start_local_;
+  std::vector<double> inside_start_global_;
 
   // Equilibrium data
   int nw_, nh_;
