@@ -25,8 +25,7 @@ make -j$(nproc)
 # -> ./src/spa_mpi
 ```
 
-GPU build (Kokkos + CUDA — note: the GPU backend is under active
-development and validation, see the README status note):
+GPU build (Kokkos + CUDA):
 
 ```bash
 mkdir buildOpenEdge_gpu && cd buildOpenEdge_gpu
@@ -134,6 +133,40 @@ Two Perlmutter-specific cautions learned the hard way:
    (`CONFIGURE_DEPENDS`) reconfigure, which is sensitive to Lustre
    health; if a reconfigure hangs in `cl_sync_io_wait`, abandon that
    build directory and configure a fresh one rather than retrying.
+
+Running on Perlmutter:
+
+```bash
+export MPICH_GPU_SUPPORT_ENABLED=0   # any binary not linked with the GTL (all of the above); aborts at MPI init otherwise
+export FI_MR_CACHE_MONITOR=memhooks  # multi-node: the default userfaultfd monitor breaks fix balance cell migration
+srun -N1 -n4 --gpus-per-task=1 --gpu-bind=single:1 \
+     $PSCRATCH/openedge-build-gpu/src/spa_kokkos_cuda_perlmutter \
+     -k on g 1 -sf kk -pk kokkos react/retry yes gpu/aware no -in in.openedge
+```
+
+Login nodes have no `mpirun`; use `srun` inside an allocation, or run a
+single rank directly.
+
+## Checking a build
+
+Every binary can be checked against the repository's own gates before
+it is used for production work.
+
+```bash
+# every registered example, capped at 1000 steps, with metric bands
+./regression/run_regression.sh --np 4 --exe /path/to/spa_mpi
+
+# same on a Kokkos binary, plus the bit-for-bit CPU-vs-GPU parity stage
+./regression/run_regression.sh --kk --exe /path/to/spa_kokkos_cuda_perlmutter \
+    --parity-cpu-exe /path/to/spa_kokkos_omp
+
+# src/ vs src/OPENEDGE mirror and Install.sh (also run in CI on every push)
+tools/check_package_parity.sh
+tools/check_package_parity.sh --install
+```
+
+The parity stage and the CUDA regression need a GPU node; the rest runs
+anywhere the binary runs.
 
 # Keyword listing
 
