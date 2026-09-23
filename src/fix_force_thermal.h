@@ -8,7 +8,7 @@
     fix thermal_force: Braginskii thermal forces on impurity ions.
 
     Applies per-particle half-kick acceleration from:
-      1) Ion thermal force:       F_iT = beta_i * Z^2 * e * grad_par(Ti)
+      1) Ion thermal force:       F_iT = beta_i(mu,Z) * e * grad_par(Ti)
       2) Electron thermal force:  F_eT = alpha_e * Z^2 * e * grad_par(Te)
 
     where grad_par = (grad . bhat) is the parallel component of the
@@ -26,6 +26,7 @@
     Syntax:
       fix ID thermal_force Nevery \
           {bfield BxSRC BySRC BzSRC | background FIXID} \
+          [ion_mass_amu M] \
           [ion_thermal yes|no [gradTiR_SRC gradTiZ_SRC in source-token mode]] \
           [elec_thermal yes|no [gradTeR_SRC gradTeZ_SRC in source-token mode]]
 
@@ -41,9 +42,10 @@
           ion_thermal yes c_cwest[12] c_cwest[13] \
           elec_thermal yes c_cwest[10] c_cwest[11]
 
-    Default coefficients:
-      beta_i  = 2.6  (Neu 1974 heavy-impurity limit, hard-coded)
-      alpha_e = 0.71 (Braginskii Z_eff=1 limit, hard-coded)
+    Ion coefficient: DIVIMP CIOPTN=1/3 mass- and charge-dependent beta_i.
+    The background-ion mass is read from a single-ion plasma background;
+    ion_mass_amu overrides it and defaults to deuterium for backgrounds
+    without species metadata.  Electron coefficient alpha_e = 0.71.
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -90,7 +92,9 @@ class FixForceThermal : public Fix {
   // ion thermal force
   int have_ion_thermal_;
   CollGridSrc srcGradTiR_, srcGradTiZ_;
-  double beta_i_;  // coefficient (default 2.6)
+  double ion_mass_amu_;
+  double ion_mass_kg_;
+  int ion_mass_explicit_;
 
   // electron thermal force
   int have_elec_thermal_;
@@ -107,6 +111,9 @@ class FixForceThermal : public Fix {
   double pd_grad(const std::vector<double> &mesh_grad,
                  const std::vector<double> &regular_grad,
                  const class Particle::OnePart &p) const;
+  static double ion_thermal_coefficient(double impurity_mass_kg,
+                                        double background_ion_mass_kg,
+                                        double charge_state);
   void kick_half(double dt_half);
 };
 

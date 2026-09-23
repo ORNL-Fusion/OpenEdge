@@ -1,0 +1,23 @@
+seed                20260923
+dimension           3
+boundary            o o o
+global              gridcut 0.0 comm/sort no
+global              move no
+
+create_box          -0.5 0.5 -0.5 0.5 -0.5 0.5
+create_grid         1 1 1
+
+species             input/impurities.species B+ B2+ B3+ B4+ C+ C2+ C3+ C4+
+read_particles      input/particles.in 0
+
+fix                 pd background constant static yes bz 1.0 grad_ti_z 1.0
+global              pusher plasma pd mode boris subcycles 1
+fix                 fth force/thermal 1 background pd ion_mass_amu 2.0 &
+                    ion_thermal yes elec_thermal no
+
+dump                dp particle all 1 output/particles.* id type vx vy vz
+dump_modify         dp first yes format float %.17g
+
+timestep            1.0e-6
+stats               1
+run                 1

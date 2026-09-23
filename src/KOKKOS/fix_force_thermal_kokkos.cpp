@@ -253,7 +253,7 @@ void FixForceThermalKokkos::kick_device(double dt_half)
   dt_half_   = dt_half;
   echarge_   = update->echarge;
   alpha_e_k_ = alpha_e_;
-  beta_i_k_  = beta_i_;
+  ion_mass_kg_k_ = ion_mass_kg_;
 
   const int nlocal = particle->nlocal;
 
@@ -310,7 +310,9 @@ void FixForceThermalKokkos::kick_device(double dt_half)
         if (have_ion_thermal_) {
           const double gr = pd_grad(pd_->mesh_grad_ti_r, pd_->grad_ti_r, parts[i]);
           const double gz = pd_grad(pd_->mesh_grad_ti_z, pd_->grad_ti_z, parts[i]);
-          a_par += beta_i_ * Z2 * update->echarge * (gr*bR + gz*bZc) / m_Z;
+          const double beta_i =
+              ion_thermal_coefficient(m_Z, ion_mass_kg_, Z);
+          a_par += beta_i * update->echarge * (gr*bR + gz*bZc) / m_Z;
         }
         if (have_elec_thermal_) {
           const double gr = pd_grad(pd_->mesh_grad_te_r, pd_->grad_te_r, parts[i]);
@@ -418,7 +420,8 @@ void FixForceThermalKokkos::operator()(TagFixForceThermal,
   if (use_gradti_ && mc >= 0 && mc < (int) d_gtir_cell.extent(0)) {
     const double grad_par_Ti =
         d_gtir_cell(mc) * bhat_R_cyl + d_gtiz_cell(mc) * bhat_Z_cyl;
-    a_par += beta_i_k_ * Z2 * echarge_ * grad_par_Ti / m_Z;
+    const double beta_i = ion_thermal_coefficient_k(m_Z, Z);
+    a_par += beta_i * echarge_ * grad_par_Ti / m_Z;
   }
   if (use_gradte_ && mc >= 0 && mc < (int) d_gter_cell.extent(0)) {
     const double grad_par_Te =
@@ -431,7 +434,8 @@ void FixForceThermalKokkos::operator()(TagFixForceThermal,
       return RasterKokkos::sample(f, ras_r0_, ras_dr_, ras_nr_, ras_z0_, ras_dz_, ras_nz_, R, Z); };
     if (has_ras_gradti_) {
       const double grad_par_Ti = ras(d_ras_gti_r) * bhat_R_cyl + ras(d_ras_gti_z) * bhat_Z_cyl;
-      a_par += beta_i_k_ * Z2 * echarge_ * grad_par_Ti / m_Z;
+      const double beta_i = ion_thermal_coefficient_k(m_Z, Z);
+      a_par += beta_i * echarge_ * grad_par_Ti / m_Z;
     }
     if (has_ras_gradte_) {
       const double grad_par_Te = ras(d_ras_gte_r) * bhat_R_cyl + ras(d_ras_gte_z) * bhat_Z_cyl;
