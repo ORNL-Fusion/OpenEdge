@@ -89,7 +89,22 @@ class FixForceThermalKokkos : public FixForceThermal, public KokkosBase {
   DAT::t_float_2d_lr d_equ_br, d_equ_bt, d_equ_bz;
 
   // kick scalars
-  double dt_half_, echarge_, alpha_e_k_, beta_i_k_;
+  double dt_half_, echarge_, alpha_e_k_, ion_mass_kg_k_;
+
+  KOKKOS_INLINE_FUNCTION
+  double ion_thermal_coefficient_k(double impurity_mass_kg,
+                                   double charge_state) const
+  {
+    const double mu = impurity_mass_kg /
+                      (impurity_mass_kg + ion_mass_kg_k_);
+    const double sqrt_mu = Kokkos::sqrt(mu);
+    const double mu_3_2 = mu * sqrt_mu;
+    const double mu_5_2 = mu * mu * sqrt_mu;
+    const double Z2 = charge_state * charge_state;
+    return -3.0 * (1.0 - mu - 5.0 * Kokkos::sqrt(2.0) *
+                   (1.1 * mu_5_2 - 0.35 * mu_3_2) * Z2) /
+           (2.6 - 2.0 * mu + 5.4 * mu * mu);
+  }
 
   void kick_device(double dt_half);
 };

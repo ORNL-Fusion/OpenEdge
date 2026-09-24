@@ -22,7 +22,9 @@ bsource = {background} fix-ID or {bfield} BxSRC BySRC BzSRC :l
     field components (T) in OpenEdge coordinate order; each is
     {c_ID\[col\]} or {p_name} :pre
 one or more keyword/value pairs must be appended :l
-keyword = {ion_thermal} or {elec_thermal} :l
+keyword = {ion_mass_amu}, {ion_thermal}, or {elec_thermal} :l
+  {ion_mass_amu} value = background-ion mass in amu; overrides the
+    single-ion mass stored by {fix background}
   {ion_thermal} values = \[yes/no\] \[gradTiR_SRC gradTiZ_SRC\]
     yes/no = enable or disable the ion thermal force (default yes
       when the keyword is present)
@@ -47,13 +49,24 @@ The force acts along the local magnetic field and is proportional to
 the parallel gradient of the background ion and electron
 temperatures:
 
-F_par = beta_i Z^2 e grad_par(Ti) + alpha_e Z^2 e grad_par(Te) :pre
+F_par = beta_i(mu,Z) e grad_par(Ti) + alpha_e Z^2 e grad_par(Te) :pre
 
-with beta_i = 2.6 (ion thermal force, heavy-impurity limit) and
-alpha_e = 0.71 (electron thermal force, Z_eff = 1). Both coefficients
-are fixed. Z is the particle charge state and grad_par is the
-component of the gradient along the unit vector of B. Both terms point
-toward higher temperature, i.e. typically toward the core. The
+The ion coefficient matches DIVIMP {CIOPTN=1/3}:
+
+beta_i = -3 [1-mu-5 sqrt(2) Z^2 (1.1 mu^(5/2)-0.35 mu^(3/2))]
+             / [2.6-2 mu+5.4 mu^2]
+mu = m_Z / (m_Z + m_i) :pre
+
+Here m_Z and Z are the impurity mass and charge state and m_i is the
+background-ion mass. With a single-ion plasma file, m_i is read from
+{ion_species/mass_amu}; {ion_mass_amu} overrides it. A multi-ion
+background requires the override because this fix cannot infer which
+species supplies the DIVIMP main-ion coefficient. Backgrounds without
+species metadata use deuterium (2.01410177811 amu).
+
+The electron coefficient remains alpha_e = 0.71 (Braginskii Z_eff=1).
+grad_par is the component of the gradient along the unit vector of B.
+Both terms point toward higher temperature, i.e. typically toward the core. The
 {ion_thermal} and {elec_thermal} keywords select which of the two
 terms are applied; at least one must be enabled.
 
@@ -101,4 +114,5 @@ background"_fix_background.html, "global"_global.html
 [Default:]
 
 A channel keyword given without yes/no is enabled. Neither channel is
-active unless its keyword appears.
+active unless its keyword appears. {ion_mass_amu} defaults to the
+single-ion background metadata, or 2.01410177811 amu when unavailable.

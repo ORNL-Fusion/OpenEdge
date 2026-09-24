@@ -43,6 +43,11 @@ using namespace SPARTA_NS;
 #define INVOKED_PER_GRID 16
 enum { INT, DOUBLE };
 
+namespace {
+constexpr double AMU_KG = 1.66053906660e-27;
+constexpr double DEUTERIUM_MASS_AMU = 2.01410177811;
+}
+
 /* ---------------------------------------------------------------------- */
 
 FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
@@ -52,7 +57,9 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
   pd_(nullptr),
   have_ion_thermal_(0),
   have_elec_thermal_(0),
-  beta_i_(2.6),
+  ion_mass_amu_(DEUTERIUM_MASS_AMU),
+  ion_mass_kg_(DEUTERIUM_MASS_AMU * AMU_KG),
+  ion_mass_explicit_(0),
   alpha_e_(0.71)
 {
   // fix ID thermal_force Nevery {bfield BxSRC BySRC BzSRC | background FIXID}
@@ -87,7 +94,16 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
   // optional keywords
   while (iarg < narg) {
 
-    if (strcmp(arg[iarg], "ion_thermal") == 0) {
+    if (strcmp(arg[iarg], "ion_mass_amu") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix force/thermal: ion_mass_amu needs a value");
+      ion_mass_amu_ = input->numeric(FLERR, arg[iarg+1]);
+      if (!std::isfinite(ion_mass_amu_) || ion_mass_amu_ <= 0.0)
+        error->all(FLERR, "fix force/thermal: ion_mass_amu must be positive");
+      ion_mass_explicit_ = 1;
+      iarg += 2;
+
+    } else if (strcmp(arg[iarg], "ion_thermal") == 0) {
       iarg++;
       int enabled = 1;
       if (iarg < narg && (strcmp(arg[iarg], "yes") == 0 || strcmp(arg[iarg], "no") == 0)) {
@@ -104,6 +120,7 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
         parse_compute_src(arg[iarg++], srcGradTiR_, "gradTiR");
         parse_compute_src(arg[iarg++], srcGradTiZ_, "gradTiZ");
       } else if (iarg < narg &&
+                 strcmp(arg[iarg], "ion_mass_amu") != 0 &&
                  strcmp(arg[iarg], "ion_thermal") != 0 &&
                  strcmp(arg[iarg], "elec_thermal") != 0) {
         error->all(FLERR,
@@ -127,6 +144,7 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
         parse_compute_src(arg[iarg++], srcGradTeR_, "gradTeR");
         parse_compute_src(arg[iarg++], srcGradTeZ_, "gradTeZ");
       } else if (iarg < narg &&
+                 strcmp(arg[iarg], "ion_mass_amu") != 0 &&
                  strcmp(arg[iarg], "ion_thermal") != 0 &&
                  strcmp(arg[iarg], "elec_thermal") != 0) {
         error->all(FLERR,
@@ -245,6 +263,14 @@ void FixForceThermal::init()
       error->all(FLERR,
         "fix force/thermal: background fix must be style background");
     pd_->init();
+    if (have_ion_thermal_ && !ion_mass_explicit_) {
+      if (pd_->ion_mass_amu.size() == 1) {
+        ion_mass_amu_ = pd_->ion_mass_amu[0];
+      } else if (pd_->ion_mass_amu.size() > 1) {
+        error->all(FLERR,
+          "fix force/thermal: multi-ion background requires ion_mass_amu");
+      }
+    }
   } else {
     bind(srcBx_, "Bx");
     bind(srcBy_, "By");
@@ -259,6 +285,7 @@ void FixForceThermal::init()
     bind(srcGradTeR_, "gradTeR");
     bind(srcGradTeZ_, "gradTeZ");
   }
+  ion_mass_kg_ = ion_mass_amu_ * AMU_KG;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -321,7 +348,7 @@ void FixForceThermal::end_of_step()
    Apply half-kick from thermal forces.
 
    Per-particle parallel acceleration:
-     a_par = (beta_i * Z^2 * QE * grad_par_Ti
+     a_par = (beta_i(mu,Z) * QE * grad_par_Ti
             + alpha_e * Z^2 * QE * grad_par_Te) / m_Z
 
    B-field is in SPARTA coordinate order:
@@ -414,7 +441,8 @@ void FixForceThermal::kick_half(double dt_half)
           : read_src(srcGradTiZ_, ip, icell);
         grad_par_Ti = gTiR * bhat_R_cyl + gTiZ * bhat_Z_cyl;
       }
-      a_par += beta_i_ * Z2 * QE * grad_par_Ti / m_Z;
+      const double beta_i = ion_thermal_coefficient(m_Z, ion_mass_kg_, Z);
+      a_par += beta_i * QE * grad_par_Ti / m_Z;
     }
 
     if (have_elec_thermal_) {
@@ -451,6 +479,28 @@ void FixForceThermal::kick_half(double dt_half)
     p.v[1] += a_par * bhat1 * dt_half;
     p.v[2] += a_par * bhat2 * dt_half;
   }
+}
+
+/* ----------------------------------------------------------------------
+   DIVIMP CIOPTN=1/3 ion-temperature-gradient coefficient.
+
+   This is KBETAS from tau.f.  It already contains the charge-state
+   dependence, so callers must not multiply it by Z^2 again.
+------------------------------------------------------------------------- */
+
+double FixForceThermal::ion_thermal_coefficient(
+    double impurity_mass_kg, double background_ion_mass_kg,
+    double charge_state)
+{
+  const double mu = impurity_mass_kg /
+                    (impurity_mass_kg + background_ion_mass_kg);
+  const double sqrt_mu = std::sqrt(mu);
+  const double mu_3_2 = mu * sqrt_mu;
+  const double mu_5_2 = mu * mu * sqrt_mu;
+  const double Z2 = charge_state * charge_state;
+  return -3.0 * (1.0 - mu - 5.0 * std::sqrt(2.0) *
+                 (1.1 * mu_5_2 - 0.35 * mu_3_2) * Z2) /
+         (2.6 - 2.0 * mu + 5.4 * mu * mu);
 }
 
 /* ---------------------------------------------------------------------- */
