@@ -4,7 +4,7 @@
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-orange.svg)](BUILD_CMAKE.md)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-green.svg)](BUILD_CMAKE.md)
 [![GPU](https://img.shields.io/badge/GPU-Kokkos%20%2F%20CUDA-76B900.svg)](BUILD_CMAKE.md)
-[![package parity](https://github.com/ORNL-Fusion/OpenEdge/actions/workflows/parity.yml/badge.svg?branch=main)](https://github.com/ORNL-Fusion/OpenEdge/actions/workflows/parity.yml)
+[![package parity](https://github.com/ORNL-Fusion/OpenEdge/actions/workflows/parity.yml/badge.svg?branch=development)](https://github.com/ORNL-Fusion/OpenEdge/actions/workflows/parity.yml)
 
 <!-- TODO(badges): add docs and DOI badges once hosted documentation
      and a Zenodo DOI exist. -->
@@ -45,7 +45,7 @@ make -j$(nproc)     # -> ./src/spa_mpi
 ## Version policy
 
 For production and reproducible simulations, use the latest tagged release.
-The `main` branch is under active development and may change input behavior.
+The `development` branch is under active development and may change input behavior.
 
 ```bash
 git clone --branch 26.09 --depth 1 https://github.com/ORNL-Fusion/OpenEdge.git
