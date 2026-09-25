@@ -42,6 +42,25 @@ make -j$(nproc)     # -> ./src/spa_mpi
 - **Users manual:** [doc/Manual.html](doc/Manual.html); rebuild the HTML or a
   local PDF with `make -C doc html` or `make -C doc pdf`
 
+## Version policy
+
+For production and reproducible simulations, use the latest tagged release.
+The `main` branch is under active development and may change input behavior.
+
+```bash
+git clone --branch 26.09 --depth 1 https://github.com/ORNL-Fusion/OpenEdge.git
+```
+
+Existing checkouts can select the release with:
+
+```bash
+git fetch --tags
+git switch --detach 26.09
+```
+
+OpenEdge prints its tag and commit at startup; record this information with
+simulation results.
+
 ## License
 
 [GPL-2.0](LICENSE)
