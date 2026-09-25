@@ -34,6 +34,13 @@ enum{PKEEP,PINSERT,PDONE,PDISCARD,PENTRY,PEXIT,PSURF};  // several files
 /* ---------------------------------------------------------------------- */
 
 FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
+  FixReflectPsi(sparta, narg, arg, false)
+{}
+
+/* ---------------------------------------------------------------------- */
+
+FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg,
+                             bool allow_impurity_options) :
   Fix(sparta, narg, arg)
 {
   if (narg < 4)
@@ -88,6 +95,20 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
         error->all(FLERR, "fix reflect/psi: missing mixture ID");
       mixture_id = arg[iarg + 1];
       iarg += 2;
+    } else if (allow_impurity_options &&
+               (strcmp(arg[iarg], "model") == 0 ||
+                strcmp(arg[iarg], "profile") == 0 ||
+                strcmp(arg[iarg], "response") == 0 ||
+                strcmp(arg[iarg], "response_out") == 0 ||
+                strcmp(arg[iarg], "processes") == 0 ||
+                strcmp(arg[iarg], "element") == 0 ||
+                strcmp(arg[iarg], "radial_cells") == 0 ||
+                strcmp(arg[iarg], "edge_stretch") == 0 ||
+                strcmp(arg[iarg], "sol_diffusivity") == 0 ||
+                strcmp(arg[iarg], "sol_velocity") == 0)) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix core/impurity: missing keyword value");
+      iarg += 2;
     } else {
       char msg[256];
       snprintf(msg, sizeof(msg),
@@ -131,10 +152,11 @@ FixReflectPsi::FixReflectPsi(SPARTA *sparta, int narg, char **arg) :
   }
 
   if (comm->me == 0) {
+    const char *style_name = allow_impurity_options ? "core/impurity" : "reflect/psi";
     if (!equ_path.empty())
-      printf("fix reflect/psi: equ %s\n", equ_path.c_str());
+      printf("fix %s: equ %s\n", style_name, equ_path.c_str());
     else
-      printf("fix reflect/psi: background %s\n", plasma_fix_id.c_str());
+      printf("fix %s: background %s\n", style_name, plasma_fix_id.c_str());
     printf("  grid: %d x %d, R=[%.4f,%.4f], Z=[%.4f,%.4f]\n",
            nw_, nh_, r_grid_.front(), r_grid_.back(),
            z_grid_.front(), z_grid_.back());
@@ -186,8 +208,9 @@ FixReflectPsi::~FixReflectPsi()
   // init() hands Update raw pointers into fix-owned vectors; clear them
   // so an unfix followed by another run cannot reflect through dangling
   // storage
-  if (update && update->psi_reflect_flag) {
+  if (update && update->psi_reflect_fix == this) {
     update->psi_reflect_flag = 0;
+    update->psi_reflect_fix = nullptr;
     update->psi_r_grid = nullptr;
     update->psi_z_grid = nullptr;
     update->psi_rz = nullptr;
@@ -205,6 +228,10 @@ int FixReflectPsi::setmask()
 
 void FixReflectPsi::init()
 {
+  if (update->psi_reflect_flag && update->psi_reflect_fix != this)
+    error->all(FLERR,
+      "Only one fix reflect/psi or fix core/impurity may be active");
+
   // Pass equilibrium data pointers to update for use in mover
   update->psi_reflect_flag = 1;
   update->psi_reflect_action = action_;
@@ -254,15 +281,27 @@ void FixReflectPsi::tally_absorb(int ispecies, int iparticle)
   if (row < 0 || row >= nrows_ || iparticle < 0 ||
       iparticle >= particle->nlocal) return;
 
-  double marker_weight = update->fnum;
+  const double weight = marker_weight(iparticle);
+  absorbed_events_local_[row] += 1.0;
+  absorbed_physical_local_[row] += weight;
+  reduced_step_ = -1;
+}
+
+/* ----------------------------------------------------------------------
+   Physical population carried by one marker.  Shared with derived core
+   boundary models so absorption and return tallies use identical semantics.
+------------------------------------------------------------------------- */
+
+double FixReflectPsi::marker_weight(int iparticle)
+{
+  double weight = update->fnum;
+  if (iparticle < 0 || iparticle >= particle->nlocal) return weight;
   if (pweight_index_ >= 0) {
     pweight_ewhich_ = particle->ewhich[pweight_index_];
     const double candidate = particle->edvec[pweight_ewhich_][iparticle];
-    if (candidate > 0.0 && std::isfinite(candidate)) marker_weight = candidate;
+    if (candidate > 0.0 && std::isfinite(candidate)) weight = candidate;
   }
-  absorbed_events_local_[row] += 1.0;
-  absorbed_physical_local_[row] += marker_weight;
-  reduced_step_ = -1;
+  return weight;
 }
 
 /* ----------------------------------------------------------------------

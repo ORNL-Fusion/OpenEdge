@@ -221,7 +221,7 @@ class SurfReactSurfacePWI : public SurfReact {
   // BCA-derived HDF5 with the same schema works).
   std::string trim_dir;
   KKHostOnly<std::vector<Reflection::Table>> trim_tables;
-  std::map<std::string, int> trim_index;
+  KKHostOnly<std::map<std::string, int>> trim_index;
   int load_or_get_trim_table(const char *name);
 
   struct ReactionI {
@@ -238,7 +238,7 @@ class SurfReactSurfacePWI : public SurfReact {
   // (-1 if fix particle/weight is absent).
   int pweight_ewhich;
   KKHostOnly<std::vector<ProcessLibrary::TrimSputterTable>> sput_tables;
-  std::map<std::string,int> sput_index;
+  KKHostOnly<std::map<std::string,int>> sput_index;
   int load_or_get_sputter_table(const char *name);
 
   int emit_sputtered(Particle::OnePart *&ip, int isurf, double *norm,

@@ -121,8 +121,11 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
   // plan neighbor and must always run exchange_uniform.
   const int use_a2a = (!neighflag || nprocs <= OE_A2A_MAXPROCS) && !sparta->kokkos->comm_serial;
   if (any_entryexit_out && !use_a2a) {
-    MPI_Allreduce(&entryexit_in,any_entryexit_out,1,MPI_INT,MPI_MAX,world);
-    if (!*any_entryexit_out) return particle->nlocal;
+    int local[2] = {entryexit_in,nmigrate > 0};
+    int global[2] = {0,0};
+    MPI_Allreduce(local,global,2,MPI_INT,MPI_MAX,world);
+    *any_entryexit_out = global[0];
+    if (!global[0] && !global[1]) return particle->nlocal;
     any_entryexit_out = nullptr;
   }
   GridKokkos* grid_kk = (GridKokkos*) grid;

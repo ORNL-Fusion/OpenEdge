@@ -331,21 +331,29 @@ cannot overcome the barrier are reflected back into the plasma
 (prompt redeposition), with the escape deceleration charged once per
 sheath transit.
 </P>
-<P>The sheath scales are set automatically from the local plasma.  The
-angle between B and the wall normal gives the magnetic-presheath
-thickness L_MPS = rho_i * tan(alpha), evaluated at the particle
-position and clamped so that it stays finite at grazing incidence.
-The engagement distance is dmax = max(5 L_MPS, 10 lambda_D); the
-<I>dmax</I> value overrides it with a fixed distance, and 0 restores the
-automatic choice.  The wall potential is the Bohm floating-wall
-value 0.5 * Te * ln( (mD / (2 pi me)) / (1 + Ti/Te) ), where mD is
-the background ion mass set by <I>mD_amu</I>.  The potential profile is a
-combined Coulette-Manfredi kinetic fit close to the wall and a
-Borodkina magnetic-presheath tail beyond about 60 lambda_D, blended
-linearly between 60 and 120 lambda_D.  When the sheath is active the
-per-particle electron density used by the volume chemistry models is
-also reduced by the Boltzmann factor exp(-phi(d)/Te) inside dmax, so
-ionization sources fall off correctly through the presheath.
+<P>The sheath potential follows Borodkina et al, Contrib. Plasma Phys.
+56 (2016) 640-645.  Alpha is the angle between B and the wall normal,
+rho_cs = sqrt((Te+Ti)/mD)/omega_ci, and
+L_MPS = 3 rho_cs sin(alpha), using k=3 from the paper's k=2-3 range.
+The wall drop is the floating value
+0.5 * Te * ln( (mD / (2 pi me)) / (1 + Ti/Te) ).  At and above the
+critical angle alpha* of eq. (3), the Debye sheath vanishes and
+phi(d) = phi_wall exp(-2d/L_MPS).  This is the branch used by grazing
+tokamak targets and the Chankin benchmark.
+</P>
+<P>Below alpha*, OpenEdge uses the piecewise Debye-sheath and MPS solution
+and the a, Q, and interface-position closure of Borodkina et al,
+Russian Physics Journal 58 (2015) 438-445.  The published closure is
+recovered for Ti=Te and L_MPS=2 rho_cs sin(alpha); OpenEdge retains the
+general Ti/Te term and the 2016 k=3 choice.  Potential and field are
+continuous at the interface.  The automatic engagement distance extends
+10 rho_cs sin(alpha) beyond the interface, with a minimum of 20 lambda_D;
+<I>dmax</I> overrides it and 0 restores the automatic choice.  The profile and
+Boris integration were validated against the W redeposition and
+impact-energy tables of Chankin et al, PPCF 56 (2014) 025003.  When
+the sheath is active the per-particle electron density used by volume
+chemistry is reduced by exp(-phi(d)/Te).  The Kokkos pusher does not
+yet implement this profile and refuses the sheath.
 </P>
 <P>The <I>waveform</I> value drives the wall potential of RF-biased surfaces.
 Its first argument names a per-surface custom attribute (see the

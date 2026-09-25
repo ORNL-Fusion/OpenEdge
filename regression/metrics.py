@@ -75,9 +75,10 @@ def main():
         except (OSError, ValueError): ref = {}
         new = {}
         for k, v in metrics.items():
-            tol = ref.get(k, {}).get('tol', default_tol(k)) if k in ref else default_tol(k)
-            new[k] = {'value': v, 'tol': tol}
-            if k in ref and 'note' in ref[k]: new[k]['note'] = ref[k]['note']
+            old = ref.get(k, {})
+            new[k] = dict(old)
+            new[k]['value'] = v
+            new[k]['tol'] = old.get('tol', default_tol(k))
         json.dump(new, open(sys.argv[3], 'w'), indent=1); print(f'reference written: {len(new)} metrics'); return 0
     if cmd == 'compare':
         ref = json.load(open(sys.argv[3]))

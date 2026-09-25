@@ -1,0 +1,104 @@
+<HTML>
+<CENTER><A HREF = "https://github.com/ORNL-Fusion/OpenEdge">OpenEdge WWW Site</A> - <A HREF = "Manual.html">OpenEdge Documentation</A> - <A HREF = "Section_commands.html#comm">OpenEdge Commands</A>
+</CENTER>
+
+
+
+
+
+
+<HR>
+
+<H3>fix store/force command
+</H3>
+<P><B>Syntax:</B>
+</P>
+<PRE>fix ID store/force channel keyword value ...
+</PRE>
+<UL><LI>ID is documented in <A HREF = "fix.html">fix</A> command
+
+<LI>store/force = style name of this fix command
+
+<LI>channel = <I>electric/plasma</I> or <I>electric/sheath</I> or <I>magnetic</I> or
+  <I>thermal/ion</I> or <I>thermal/electron</I> or <I>coulomb/background</I> or
+  <I>coulomb/binary</I>
+
+<LI>zero or more keyword/value pairs may be appended
+
+<LI>keyword = <I>id_max</I>
+
+<PRE>  <I>id_max</I> value = largest particle ID to record, or 0 for every particle
+</PRE>
+
+</UL>
+<P><B>Examples:</B>
+</P>
+<P>fix fEplasma store/force electric/plasma
+fix fEsheath store/force electric/sheath
+fix fBmag store/force magnetic
+fix fTion store/force thermal/ion
+fix fTelec store/force thermal/electron
+fix fNanbu store/force coulomb/background id_max 10000
+</P>
+<PRE>dump dforce particle all 10 forces.dump id type x y z &
+  f_fEplasma<B>1</B> f_fEplasma<B>2</B> f_fEplasma<B>3</B> &
+  f_fEsheath<B>1</B> f_fEsheath<B>2</B> f_fEsheath<B>3</B>
+</PRE>
+<P><B>Description:</B>
+</P>
+<P>Store one named transport-force contribution for every selected
+particle.  This is analogous to LAMMPS <I>fix store/force</I>, but the
+<I>channel</I> argument keeps OpenEdge mechanisms separate instead of
+storing a single lumped vector.
+</P>
+<P>The fix exposes a three-column per-particle array in newtons.  Its
+components are available to <A HREF = "dump.html">dump particle</A> and other
+per-particle consumers as <I>f_ID<B>1</B></I>, <I>f_ID<B>2</B></I>, and <I>f_ID<B>3</B></I>.  The
+components use OpenEdge storage-coordinate order.  In the common 2d
+axisymmetric layout, (x,y,z)=(Z,R,phi), so the force order is
+(F_Z,F_R,F_phi).
+</P>
+<P>Values are reset at the start of each timestep.  Every participating
+operator records the momentum change it actually applied and divides
+by that operator's integration interval.  Multiple applications or
+subcycles in one timestep are accumulated.  Thus the electric and
+magnetic channels reproduce the Boris electric kick and residual
+rotation impulse, and the sheath channel reproduces the separate
+sheath impulse.  The ion and electron thermal terms are recorded
+independently even when one <I>fix force/thermal</I> applies both.
+</P>
+<P>The Coulomb channels are effective stochastic forces: the exact Nanbu
+momentum kick divided by the collision interval.  A single value is
+not a deterministic fluid drag force.  Use a signed ensemble or time
+average when comparing it to a mean friction model.
+</P>
+<P>This fix deliberately does not record wall collisions, surface
+chemistry, core reflection, cross-field diffusion, or pinch.  Those
+operations are boundary events or spatial transport increments rather
+than force terms supplied to the velocity pushers.
+</P>
+<P>Only one fix may store a given channel.  <I>id_max 0</I> records all
+particles.  A positive <I>id_max</I> leaves particles with larger IDs at
+zero and can limit diagnostic work, though the underlying custom
+arrays still exist for all local particles so they migrate correctly.
+</P>
+<P><B>Restrictions:</B>
+</P>
+<P>This command is part of the OPENEDGE package and currently supports
+the CPU path only.  The electric and magnetic channels require the
+Boris pusher.  Guiding-center force decomposition is not yet
+available.
+</P>
+<P><B>Related commands:</B>
+</P>
+<P><A HREF = "dump.html">dump</A>, <A HREF = "global.html">global pusher</A>, <A HREF = "fix_force_thermal.html">fix
+force/thermal</A>, <A HREF = "fix_coulomb_background.html">fix
+coulomb/background</A>, <A HREF = "fix_coulomb_binary.html">fix
+coulomb/binary</A>
+</P>
+<P><B>Default:</B>
+</P>
+<P>id_max = 0
+</P>
+<!-- PAGE BREAK -->
+</HTML>

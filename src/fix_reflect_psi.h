@@ -55,11 +55,16 @@ namespace SPARTA_NS {
 class FixReflectPsi : public Fix {
  public:
   FixReflectPsi(class SPARTA *, int, char **);
-  ~FixReflectPsi();
-  int  setmask();
-  void init();
+  ~FixReflectPsi() override;
+  int  setmask() override;
+  void init() override;
   double compute_vector(int) override;
   double compute_scalar() override;
+
+  // Extension hook used by core/impurity after an exact outside-to-inside
+  // crossing has been reflected.  The base boundary is species preserving.
+  virtual void post_reflect(int) {}
+  virtual bool changes_species_on_reflect() const { return false; }
 
   // Called by the particle mover immediately before an absorbed particle is
   // discarded. The tally is species resolved and uses physical marker weight.
@@ -85,6 +90,10 @@ class FixReflectPsi : public Fix {
   void tally_absorb_bulk(int ispecies, double nevents, double weight);
 
  protected:
+  // Derived boundary models reuse the geometry/parser and may add their own
+  // keyword pairs.  The public reflect/psi style remains strict.
+  FixReflectPsi(class SPARTA *, int, char **, bool allow_impurity_options);
+
   int action_;                 // PSI_ACTION_REFLECT or PSI_ACTION_ABSORB
   double psi_threshold_;     // normalized psi boundary
   int imix_;                  // mixture restriction, -1 = every species
@@ -117,6 +126,7 @@ class FixReflectPsi : public Fix {
   void read_equ_file(const std::string &path);
   void load_from_background(const std::string &fix_id);
   int row_for_species(int ispecies) const;
+  double marker_weight(int iparticle);
   void reduce_tallies();
 };
 

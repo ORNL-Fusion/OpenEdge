@@ -35,7 +35,25 @@
 #include "memory.h"
 #include "error.h"
 
+#ifndef SPARTA_GIT_COMMIT
+#define SPARTA_GIT_COMMIT "(unknown)"
+#endif
+#ifndef SPARTA_GIT_BRANCH
+#define SPARTA_GIT_BRANCH "(unknown)"
+#endif
+#ifndef OPENEDGE_GIT_DESCRIBE
+#define OPENEDGE_GIT_DESCRIBE "(unknown)"
+#endif
+
 using namespace SPARTA_NS;
+
+static void print_openedge_banner(FILE *stream, const char *version)
+{
+  if (!stream) return;
+  fprintf(stream,"SPARTA-OPENEDGE (%s)\n",version);
+  fprintf(stream,"OpenEdge revision: %s (%s)\n",
+          OPENEDGE_GIT_DESCRIBE,SPARTA_GIT_COMMIT);
+}
 
 /* ----------------------------------------------------------------------
    start up SPARTA
@@ -253,8 +271,8 @@ SPARTA::SPARTA(int narg, char **arg, MPI_Comm communicator)
     }
 
     if (universe->me == 0) {
-      if (screen) fprintf(screen,"SPARTA-OPENDGE (%s)\n",universe->version);
-      if (logfile) fprintf(logfile,"SPARTA-OPENEDGE (%s)\n",universe->version);
+      print_openedge_banner(screen,universe->version);
+      print_openedge_banner(logfile,universe->version);
     }
 
   // universe is one or more worlds, as setup by partition switch
@@ -328,12 +346,12 @@ SPARTA::SPARTA(int narg, char **arg, MPI_Comm communicator)
 
     if (universe->me == 0) {
       if (universe->uscreen) {
-        fprintf(universe->uscreen,"SPARTA-OPENEDGE (%s)\n",universe->version);
+        print_openedge_banner(universe->uscreen,universe->version);
         fprintf(universe->uscreen,"Running on %d partitions of processors\n",
                 universe->nworlds);
       }
       if (universe->ulogfile) {
-        fprintf(universe->ulogfile,"SPARTA-OPENEDGE (%s)\n",universe->version);
+        print_openedge_banner(universe->ulogfile,universe->version);
         fprintf(universe->ulogfile,"Running on %d partitions of processors\n",
                 universe->nworlds);
       }
@@ -341,11 +359,11 @@ SPARTA::SPARTA(int narg, char **arg, MPI_Comm communicator)
 
     if (me == 0) {
       if (screen) {
-        fprintf(screen,"SPARTA-OPENEDGE  (%s)\n",universe->version);
+        print_openedge_banner(screen,universe->version);
         fprintf(screen,"Processor partition = %d\n",universe->iworld);
       }
       if (logfile) {
-        fprintf(logfile,"SPARTA-OPENEDGE (%s)\n",universe->version);
+        print_openedge_banner(logfile,universe->version);
         fprintf(logfile,"Processor partition = %d\n",universe->iworld);
       }
     }
@@ -583,13 +601,6 @@ void SPARTA::destroy()
    so a plain (non-git, e.g. tarball) build still compiles and prints
    sensibly.  Keeping the fallbacks here makes -help self-contained.
 ------------------------------------------------------------------------- */
-
-#ifndef SPARTA_GIT_COMMIT
-#define SPARTA_GIT_COMMIT "(unknown)"
-#endif
-#ifndef SPARTA_GIT_BRANCH
-#define SPARTA_GIT_BRANCH "(unknown)"
-#endif
 
 /* return a short descriptor of the compiler used to build SPARTA */
 

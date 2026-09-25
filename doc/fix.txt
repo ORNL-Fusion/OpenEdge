@@ -96,6 +96,7 @@ styles available in OpenEdge:
 "particulate/thermal"_fix_particulate_thermal.html - heating, evaporation and sublimation of dust grains and droplets
 "print"_fix_print.html - print text and variables during a simulation
 "reflect/psi"_fix_reflect_psi.html - reflect particles that cross a normalized-flux (psi) boundary
+"store/force"_fix_store_force.html - store one named per-particle transport-force contribution
 "surf/temp"_fix_surf_temp.html - compute per-surf temperatures dynamically
 "surface/emit/puff"_fix_surface_emit_puff.html - emit a gas puff from surfaces at a prescribed rate
 "surface/emit/recycle"_fix_surface_emit_recycle.html - emit recycled neutrals from surfaces at the plasma wall flux

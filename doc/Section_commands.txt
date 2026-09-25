@@ -224,6 +224,7 @@ set of fixes, each referencing the background fix:
 
 "global pusher"_global.html for the Boris or guiding-center mover and the sheath model
 "fix coulomb/background"_fix_coulomb_background.html, "fix force/thermal"_fix_force_thermal.html, "fix cross_field_diffusion"_fix_cross_field_diffusion.html for forces on ions
+"fix store/force"_fix_store_force.html to dump those velocity-pusher mechanisms as separate per-particle vectors
 "fix volume/chem/adas"_fix_volume_chem_adas.html for atomic processes
 "surf_collide"_surf_collide.html and "surf_react"_surf_react.html for wall models, attached with "surf_modify"_surf_modify.html
 "fix surface/emit/recycle"_fix_surface_emit_recycle.html, "fix surface/emit/source"_fix_surface_emit_source.html, "fix surface/emit/puff"_fix_surface_emit_puff.html for wall and gas sources
@@ -298,7 +299,7 @@ Transport:
 "fix coulomb/binary"_fix_coulomb_binary.html, "fix cross_field_diffusion"_fix_cross_field_diffusion.html,
 "fix force/thermal"_fix_force_thermal.html, "fix force/gravity"_fix_force_gravity.html,
 "fix neutral/collide/background"_fix_neutral_collide_background.html,
-"fix reflect/psi"_fix_reflect_psi.html, "fix particle/weight"_fix_particle_weight.html
+"fix reflect/psi"_fix_reflect_psi.html, "fix particle/weight"_fix_particle_weight.html,
 
 Atomic processes:
 
@@ -475,6 +476,7 @@ Kokkos version are marked (k).
 "particulate/thermal"_fix_particulate_thermal.html,
 "print"_fix_print.html,
 "reflect/psi"_fix_reflect_psi.html,
+"store/force"_fix_store_force.html,
 "surf/temp"_fix_surf_temp.html,
 "surface/emit/puff"_fix_surface_emit_puff.html,
 "surface/emit/recycle"_fix_surface_emit_recycle.html,

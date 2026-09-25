@@ -1495,6 +1495,8 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   Particle::OnePart &particle_i = d_particles[i];
   pflag = particle_i.flag;
 
+  if (pflag == PDISCARD) return;
+
   Particle::OnePart iorig;
   Particle::OnePart *ipart,*jpart;
   jpart = NULL;
@@ -1866,9 +1868,14 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
     }
 
     if (DIM == 1) {
-      if (x[1] == lo[1] && (pflag == PEXIT || v[1] < 0.0)) {
-        frac = 0.0;
-        outface = YLO;
+      // see Update::move: a particle on the lower face with v[1] >= 0 cannot
+      // re-enter r < lo; the tangential double root of axi_horizontal_line
+      // (v[1] == 0, v[2] != 0) otherwise ping-pongs it between two cells.
+      if (x[1] == lo[1]) {
+        if (pflag == PEXIT || v[1] < 0.0) {
+          frac = 0.0;
+          outface = YLO;
+        }
       } else if (GeometryKokkos::
                  axi_horizontal_line(dtremain,x,v,lo[1],itmp,tc,tmp)) {
         newfrac = tc/dtremain;
@@ -1878,7 +1885,8 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
         }
       }
 
-      if (x[1] == hi[1] && (pflag == PEXIT || v[1] > 0.0)) {
+      if (x[1] == hi[1] &&
+          (pflag == PEXIT || v[1] > 0.0 || (v[1] == 0.0 && v[2] != 0.0))) {
         frac = 0.0;
         outface = YHI;
       } else {
@@ -2993,6 +3001,10 @@ void UpdateKokkos::bind_oe_psi()
   if (psi_reflect_flag) {
     if (!psi_reflect_fix)
       error->all(FLERR,"fix reflect/psi: no fix bound for the device mover");
+    if (psi_reflect_fix->changes_species_on_reflect())
+      error->all(FLERR,
+        "fix core/impurity is not yet supported by the Kokkos particle mover; "
+        "use the CPU OpenEdge executable");
     const std::vector<double> &rg = psi_reflect_fix->psi_r_grid();
     const std::vector<double> &zg = psi_reflect_fix->psi_z_grid();
     const std::vector<double> &pm = psi_reflect_fix->psi_map();
@@ -3444,12 +3456,12 @@ void UpdateKokkos::bind_oe_midx_map()
    PARTICLE: nearest-surf element for the particle's cell from
    compute nearest_surf/grid, refined against the cell's own csurfs by
    particle distance; geometry (raw normal + centroid) comes from the
-   CHOSEN element; the plasma-derived Coulette-Manfredi coefficients and
+   CHOSEN element; the plasma-derived Borodkina coefficients and
    d_max come from a per-ELEMENT cache built once at the element centroid
    (fix-background static plasma) or per-particle (compute provider).
    The old per-CELL device cache froze geometry + plasma at the
    cell-center-nearest element, used the removed tan(alpha) d_max formula
-   and missed the CM fit's 90-alpha convention — the prime suspect for
+   and missed the sheath fit's 90-alpha convention — the prime suspect for
    the soft PWI impact ladder in gate 6.
 
    Here:
@@ -3561,7 +3573,7 @@ void UpdateKokkos::build_oe_sheath_cache()
     oe_col_y0 = pd->column_y0;
 
     const int nsurf_all = surf->nlocal + surf->nghost;
-    const int ncols = 12;
+    const int ncols = 13;
     k_oe_sheath_elem = DAT::tdual_float_2d_lr("oe_sheath_elem",
                                               nsurf_all,ncols);
     auto h_elem = k_oe_sheath_elem.h_view;
@@ -3587,14 +3599,15 @@ void UpdateKokkos::build_oe_sheath_cache()
       h_elem(m,1)  = C.d_max;
       h_elem(m,2)  = C.phi_total;
       h_elem(m,3)  = cf.lambdaD_m;
-      h_elem(m,4)  = cf.lmps_m;
-      h_elem(m,5)  = cf.inv_lD;
-      h_elem(m,6)  = cf.inv_lmps;
-      h_elem(m,7)  = cf.K1_scaled;
-      h_elem(m,8)  = cf.K2;
-      h_elem(m,9)  = cf.phi_cm_slow_eV;
-      h_elem(m,10) = cf.phi_cm_fast_eV;
-      h_elem(m,11) = cf.e_slow_at_anchor_vpm;
+      h_elem(m,4)  = cf.phi_mps_eV;
+      h_elem(m,5)  = cf.te_eV;
+      h_elem(m,6)  = cf.lambda_w;
+      h_elem(m,7)  = cf.a_ds;
+      h_elem(m,8)  = cf.q_ds;
+      h_elem(m,9)  = cf.xi_mps;
+      h_elem(m,10) = cf.inv_lambdaD;
+      h_elem(m,11) = cf.inv_mps;
+      h_elem(m,12) = cf.pure_mps;
       n_active++;
     }
 
@@ -3667,7 +3680,7 @@ void UpdateKokkos::build_oe_sheath_cache()
    - E (mesh -grad phi) is re-queried per subcycle at the current position.
    - Spatial sheath, CPU-parity rev 2 (2026-08-26): per-particle nearest
      element (cell map + csurfs refinement by particle distance), geometry
-     from the CHOSEN tri (raw normal + centroid), Coulette-Manfredi
+     from the CHOSEN tri (raw normal + centroid), Borodkina
      coefficients from the per-element cache (fix provider) or prepared
      per particle (compute provider / footprint fallback). Applied as the
      CPU's energy-consistent potential impulse AFTER each position update
@@ -3925,11 +3938,11 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
     gcell = d_sinfo[d_cells[icell].isplit].icell;
 
   // ---- spatial sheath (2D twin of push_boris_2d): geometry in cylindrical
-  //      (R,Z), per-element cached Coulette-Manfredi coefficients from the
+  //      (R,Z), per-element cached Borodkina coefficients from the
   //      fix provider, per-particle fallback for the compute provider ----
   bool sh_active = false;
   double sh_nR = 0.0, sh_nZ = 0.0, sh_sR = 0.0, sh_sZ = 0.0, sh_dmax = 0.0;
-  SheathModelsKokkos::CMCoeffs sh_c = {};
+  SheathModelsKokkos::SheathCoeffs sh_c = {};
   int sh_midx2 = -1;
   if (oe_sheath_provider && gcell >= 0 &&
       gcell < (int) d_oe_midx_gcell.extent(0)) {
@@ -3966,14 +3979,15 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
         sh_dmax           = d_oe_sheath_elem(midx,1);
         sh_c.phi_total_eV = d_oe_sheath_elem(midx,2);
         sh_c.lambdaD_m    = d_oe_sheath_elem(midx,3);
-        sh_c.lmps_m       = d_oe_sheath_elem(midx,4);
-        sh_c.inv_lD       = d_oe_sheath_elem(midx,5);
-        sh_c.inv_lmps     = d_oe_sheath_elem(midx,6);
-        sh_c.K1_scaled    = d_oe_sheath_elem(midx,7);
-        sh_c.K2           = d_oe_sheath_elem(midx,8);
-        sh_c.phi_slow_eV  = d_oe_sheath_elem(midx,9);
-        sh_c.phi_fast_eV  = d_oe_sheath_elem(midx,10);
-        sh_c.e_anchor_vpm = d_oe_sheath_elem(midx,11);
+        sh_c.phi_mps_eV   = d_oe_sheath_elem(midx,4);
+        sh_c.te_eV        = d_oe_sheath_elem(midx,5);
+        sh_c.lambda_w     = d_oe_sheath_elem(midx,6);
+        sh_c.a_ds         = d_oe_sheath_elem(midx,7);
+        sh_c.q_ds         = d_oe_sheath_elem(midx,8);
+        sh_c.xi_mps       = d_oe_sheath_elem(midx,9);
+        sh_c.inv_lambdaD  = d_oe_sheath_elem(midx,10);
+        sh_c.inv_mps      = d_oe_sheath_elem(midx,11);
+        sh_c.pure_mps     = (int) d_oe_sheath_elem(midx,12);
         sh_active = true;
       } else if (oe_sheath_provider == 2) {
         // CPU push_boris_2d parity: with the per-element cache enabled
@@ -4010,10 +4024,10 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
           const double nvec[3] = {sh_nR, sh_nZ, 0.0};
           SheathModelsKokkos::ChoduraMetrics cm =
             SheathModelsKokkos::chodura_metrics(0.0, 1.0, bvec, nvec);
-          sh_dmax = SheathModelsKokkos::auto_dmax(te, ti, ne, bmag, cm.alpha_deg,
-                                                  oe_sheath_mD_amu, oe_sheath_dmax_user);
-          sh_c = SheathModelsKokkos::prepare_coulette_manfredi(
+          sh_c = SheathModelsKokkos::prepare_borodkina(
                      te, ti, ne, bmag, cm.alpha_deg, oe_sheath_mD_amu, 0.0);
+          sh_dmax = (oe_sheath_dmax_user > 0.0)
+              ? oe_sheath_dmax_user : sh_c.mps_end_m;
           sh_active = true;
         }
       }
@@ -4523,12 +4537,12 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
     }
   }
 
-  // --- Sheath prefetch: per-particle element choice + CM coefficients ---
+  // --- Sheath prefetch: per-particle element choice + Borodkina coefficients ---
   bool sh_active = false;
   double sh_nx = 0.0, sh_ny = 0.0, sh_nz = 0.0;
   double sh_sref[3] = {0.0, 0.0, 0.0};
   double sh_dmax = 0.0;
-  SheathModelsKokkos::CMCoeffs sh_c = {};
+  SheathModelsKokkos::SheathCoeffs sh_c = {};
   int sh_midx_dbg = -1, sh_cache_dbg = 0;
 
   if (oe_sheath_provider && gcell >= 0 &&
@@ -4576,14 +4590,15 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
         sh_dmax           = d_oe_sheath_elem(midx,1);
         sh_c.phi_total_eV = d_oe_sheath_elem(midx,2);
         sh_c.lambdaD_m    = d_oe_sheath_elem(midx,3);
-        sh_c.lmps_m       = d_oe_sheath_elem(midx,4);
-        sh_c.inv_lD       = d_oe_sheath_elem(midx,5);
-        sh_c.inv_lmps     = d_oe_sheath_elem(midx,6);
-        sh_c.K1_scaled    = d_oe_sheath_elem(midx,7);
-        sh_c.K2           = d_oe_sheath_elem(midx,8);
-        sh_c.phi_slow_eV  = d_oe_sheath_elem(midx,9);
-        sh_c.phi_fast_eV  = d_oe_sheath_elem(midx,10);
-        sh_c.e_anchor_vpm = d_oe_sheath_elem(midx,11);
+        sh_c.phi_mps_eV   = d_oe_sheath_elem(midx,4);
+        sh_c.te_eV        = d_oe_sheath_elem(midx,5);
+        sh_c.lambda_w     = d_oe_sheath_elem(midx,6);
+        sh_c.a_ds         = d_oe_sheath_elem(midx,7);
+        sh_c.q_ds         = d_oe_sheath_elem(midx,8);
+        sh_c.xi_mps       = d_oe_sheath_elem(midx,9);
+        sh_c.inv_lambdaD  = d_oe_sheath_elem(midx,10);
+        sh_c.inv_mps      = d_oe_sheath_elem(midx,11);
+        sh_c.pure_mps     = (int) d_oe_sheath_elem(midx,12);
         sh_active = true;
         sh_cache_dbg = 1;
       } else {
@@ -4643,13 +4658,12 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
               SheathModelsKokkos::chodura_metrics(0.0, 1.0, bvec, nvec);
             alpha_deg = cm.alpha_deg;
           }
-          sh_dmax = SheathModelsKokkos::auto_dmax(te, ti, ne, bmag, alpha_deg,
-                                                  oe_sheath_mD_amu,
-                                                  oe_sheath_dmax_user);
-          sh_c = SheathModelsKokkos::prepare_coulette_manfredi(
+          sh_c = SheathModelsKokkos::prepare_borodkina(
                      te, ti, ne, bmag, alpha_deg, oe_sheath_mD_amu, 0.0);
+          sh_dmax = (oe_sheath_dmax_user > 0.0)
+              ? oe_sheath_dmax_user : sh_c.mps_end_m;
           // require B > 0 like the CPU fallback and the cache builders:
-          // with B = 0, auto_dmax's rho_i blows up and a spurious
+          // with B = 0, rho_i blows up and a spurious
           // alpha = 90 sheath would engulf the whole domain
           sh_active = (bmag > 0.0);
         }
@@ -5066,7 +5080,7 @@ void UpdateKokkos::restore()
    supported mask exactly: tri-constant mesh scalars (miss = 0, the CPU
    empty-structured fallback), B through the mesh -> equilibrium chain
    with the column-axis shift, and the sheath Boltzmann ne correction
-   (nearest group element in the parent cell, CM potential at the
+   (nearest group element in the parent cell, Borodkina potential at the
    particle's wall distance). Runs instead of the host fill — no
    particle/custom host round-trip.
 ------------------------------------------------------------------------- */
@@ -5257,8 +5271,8 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
     d_pc_bz(i) = B[2];
   }
 
-  // Boltzmann ne correction: ne_local = ne * exp(-phi/Te), phi = the CM
-  // sheath potential at the particle's wall distance (CPU
+  // Boltzmann ne correction: ne_local = ne * exp(-phi/Te), phi = the
+  // Borodkina sheath potential at the particle's wall distance (CPU
   // cache_plasma_particles tail; element refinement as in the mover)
   double ne_out = ne;
   if (oe_pc_csg && te > 0.0 && ne > 0.0) {
@@ -5350,13 +5364,12 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
               SheathModelsKokkos::chodura_metrics(0.0, 1.0, B, nvec);
             alpha_deg = cm.alpha_deg;
           }
-          const double d_max = SheathModelsKokkos::auto_dmax(
-              te, ti, ne, bmag, alpha_deg,
-              oe_sheath_mD_amu, oe_sheath_dmax_user);
-          if (dpart > 0.0 && dpart < d_max) {
-            SheathModelsKokkos::CMCoeffs c =
-              SheathModelsKokkos::prepare_coulette_manfredi(
+          SheathModelsKokkos::SheathCoeffs c =
+              SheathModelsKokkos::prepare_borodkina(
                   te, ti, ne, bmag, alpha_deg, oe_sheath_mD_amu, 0.0);
+          const double d_max = (oe_sheath_dmax_user > 0.0)
+              ? oe_sheath_dmax_user : c.mps_end_m;
+          if (dpart > 0.0 && dpart < d_max) {
             const double phi = SheathModelsKokkos::phi_at_distance(c, dpart);
             if (phi > 0.0) ne_out = ne * Kokkos::exp(-phi / te);
           }

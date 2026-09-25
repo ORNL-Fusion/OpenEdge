@@ -154,6 +154,8 @@ class Stats : protected Pointers {
   void compute_nattempt();
   void compute_nreact();
   void compute_nsreact();
+  void compute_nmoveiter();
+  void compute_nmoveinner();
 
   void compute_npave();
   void compute_ntouchave();

@@ -47,6 +47,40 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "fix_reflect_psi.h"
 #include "memory.h"
 #include "error.h"
+#include <csignal>
+#include <execinfo.h>
+#include <unistd.h>
+
+// ---------------------------------------------------------------------------
+// Mover diagnostics for stalls. Update::move() keeps these file-scope values
+// current (rank, timestep, move/migrate iteration, particle index/id, cell,
+// flag, advection-loop iteration, stage: 0 outside move, 1 advecting,
+// 2 migrating). On SIGUSR1 every rank prints them plus a backtrace to stderr,
+// which is what a stall watchdog sends before terminating a hung run
+// (launch/eos/stall_watchdog.sh). ptrace attach is disabled on some clusters,
+// so the process reports on itself.
+// ---------------------------------------------------------------------------
+namespace {
+  volatile sig_atomic_t g_mdiag_rank = -1;
+  volatile long long g_mdiag_step = -1;
+  volatile int g_mdiag_outer = 0, g_mdiag_inner = 0, g_mdiag_pindex = -1;
+  volatile int g_mdiag_pid = -1, g_mdiag_icell = -1, g_mdiag_flag = -1, g_mdiag_stage = 0;
+
+  void move_diag_signal_handler(int)
+  {
+    char buf[320];
+    int n = snprintf(buf, sizeof(buf),
+      "\n[move-diag] rank %d SIGUSR1: step %lld stage %d outer_iter %d inner_iter %d "
+      "particle index %d id %d icell %d flag %d\n",
+      (int) g_mdiag_rank, (long long) g_mdiag_step, (int) g_mdiag_stage,
+      (int) g_mdiag_outer, (int) g_mdiag_inner, (int) g_mdiag_pindex,
+      (int) g_mdiag_pid, (int) g_mdiag_icell, (int) g_mdiag_flag);
+    if (n > 0) { ssize_t r = write(STDERR_FILENO, buf, (size_t) n); (void) r; }
+    void *frames[64];
+    const int nf = backtrace(frames, 64);
+    backtrace_symbols_fd(frames, nf, STDERR_FILENO);
+  }
+}
 #include <algorithm>
 #include <chrono>
 #include <iostream>
@@ -78,37 +112,6 @@ inline void xyz_to_rz(const double xyz[3], int dim, int axi, double &R, double &
     R = std::sqrt(xyz[0] * xyz[0] + xyz[1] * xyz[1]);
     Z = xyz[2];
   }
-}
-
-// Physics-derived sheath engagement cut-off distance, in meters.
-//   max( 5 * L_MPS, 10 * lambdaD )
-// where L_MPS = rho_i * tan(alpha_n), with alpha_n = angle(B, wall
-// normal) as returned by chodura_metrics. If user_ceiling > 0 it is
-// applied as an additional upper bound (legacy `global sheath dmax`).
-inline double sheath_auto_dmax(double te_eV, double ti_eV, double ne_m3,
-                                double bmag_T, double alpha_deg,
-                                double mD_amu, double user_ceiling)
-{
-  constexpr double QE_LOC   = 1.602176634e-19;
-  constexpr double AMU_LOC  = 1.66053906660e-27;
-  constexpr double EPS0_LOC = 8.8541878128e-12;
-  const double mD_kg = std::max(mD_amu * AMU_LOC, 1.0e-99);
-  const double lambdaD = std::sqrt(EPS0_LOC * std::max(te_eV, 1.0e-12)
-                                   / (std::max(ne_m3, 1.0e-60) * QE_LOC));
-  // vth_d: 1D effective thermal speed for rho_i (not Bohm cs).
-  const double vth_d = std::sqrt(std::max(te_eV + ti_eV, 0.0) * QE_LOC
-                                 / (2.0 * mD_kg));
-  const double omega_ci = QE_LOC * std::max(std::fabs(bmag_T), 1.0e-20) / mD_kg;
-  const double rho_i = vth_d / std::max(omega_ci, 1.0e-99);
-  // MPS normal-direction thickness is a few rho_i, roughly angle-independent
-  // (Chodura ~sqrt(6) rho_i; grazing-incidence PIC shows a few rho_i). The
-  // former rho_i*tan(alpha_from_normal) factor diverged at grazing incidence
-  // (tan 88deg ~ 28) and engulfed the whole domain in "sheath".
-  (void)alpha_deg;
-  // user_ceiling (global pusher sheath dmax) > 0 sets the extent explicitly
-  // (e.g. to cover the long MPS tail at grazing incidence); 0 = auto.
-  if (user_ceiling > 0.0) return user_ceiling;
-  return std::max(5.0 * rho_i, 10.0 * lambdaD);
 }
 
 inline void grad_from_fix(const FixBackground *pd, const std::vector<double> &field,
@@ -271,6 +274,12 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
 {
   MPI_Comm_rank(world,&me);
   MPI_Comm_size(world,&nprocs);
+
+  move_guard_inner_max = 200000;
+  move_guard_repeat_max = 1000;
+  move_guard_outer_max = 100000;
+  move_inner_max_one = 0;
+  move_inner_max_running = 0;
 
   ntimestep = 0;
   runflag = 0;
@@ -438,6 +447,8 @@ void Update::set_units(const char *style)
 
 void Update::init()
 {
+  g_mdiag_rank = me;
+  signal(SIGUSR1, move_diag_signal_handler);
   // init the Update class if borisorming a run, else just return
   // only set first_update if a run is being borisormed
 
@@ -1414,13 +1425,11 @@ void Update::cache_plasma_particles()
             alpha_deg = cm.alpha_deg;
           }
 
-          const double d_max = sheath_auto_dmax(te, ti, ne, bmag, alpha_deg,
-                                                sheath_mD_amu, sheath_dmax);
+          const SheathModels::SheathProfile sr =
+            SheathModels::sheath_at_distance(d_particle, te, ti, ne, bmag,
+                                             alpha_deg, sheath_mD_amu, 0.0);
+          const double d_max = (sheath_dmax > 0.0) ? sheath_dmax : sr.extent_m;
           if (d_particle > 0.0 && d_particle < d_max) {
-            SheathModels::BorodkinaSheathResult sr =
-              SheathModels::coulette_manfredi_sheath_at_distance(
-                d_particle, te, ti, ne, bmag,
-                alpha_deg, sheath_mD_amu, 0.0);
 
             // Boltzmann: ne_local = ne * exp(-phi/Te), phi = esheath_eV (positive)
             if (sr.esheath_eV > 0.0 && te > 0.0) {
@@ -1445,6 +1454,9 @@ template < int DIM, int SURF, int OPT > void Update::move()
   bool hitflag;
   int m,icell,icell_original,nmask,outface,bflag,nflag,pflag,itmp;
   int side,minside,minsurf,nsurf,cflag,isurf,exclude,stuck_iterate;
+  int guard_iter,guard_repeat,guard_prev_cell,guard_prev_flag;
+  double guard_prev_x0,guard_prev_x1,guard_prev_x2;
+  double guard_prev_n0,guard_prev_n1,guard_prev_n2,guard_prev_dt;
   int pstart,pstop,entryexit,any_entryexit,reaction;
   surfint *csurfs;
   cellint *neigh;
@@ -1492,6 +1504,9 @@ template < int DIM, int SURF, int OPT > void Update::move()
   // counters
 
   niterate = 0;
+  move_inner_max_one = 0;
+  g_mdiag_step = (long long) ntimestep;
+  g_mdiag_stage = 0;
   ntouch_one = ncomm_one = 0;
   nboundary_one = nexit_one = 0;
   nscheck_one = nscollide_one = 0;
@@ -1594,6 +1609,9 @@ template < int DIM, int SURF, int OPT > void Update::move()
   while (1) {
 
     niterate++;
+    g_mdiag_outer = niterate;
+    g_mdiag_stage = 1;
+    if (niterate > move_guard_outer_max) move_guard_outer_report(pstart,pstop);
     particles = particle->particles;
     nmigrate = 0;
     entryexit = 0;
@@ -1892,6 +1910,11 @@ template < int DIM, int SURF, int OPT > void Update::move()
             vkick2 = (DIM == 3) ? pseudo[2] : 0.0;
             has_kick = 1;
 
+            // Derived core-boundary models may transform the reflected
+            // marker (e.g. Feng charge-state return).  The exact contour
+            // crossing and geometric bounce remain owned by this mover.
+            psi_reflect_fix->post_reflect(i);
+
             // A psi reflection is a velocity-changing boundary event. Any
             // stored guiding-center state must be rebuilt on the next step.
             pusher->invalidate_gc(i, Pusher::GC_INVAL_BOUNDARY);
@@ -1966,10 +1989,40 @@ template < int DIM, int SURF, int OPT > void Update::move()
       ntouch_one++;
 
       // advect one particle from cell to cell and thru surf collides til done
+      // guard: abort with a report if the advection loop stops making progress
+      // (identical state repeated) or exceeds the hard iteration cap
 
-      //int iterate = 0;
+      guard_iter = guard_repeat = 0;
+      guard_prev_cell = guard_prev_flag = -2;
+      guard_prev_x0 = guard_prev_x1 = guard_prev_x2 = 0.0;
+      guard_prev_n0 = guard_prev_n1 = guard_prev_n2 = 0.0;
+      guard_prev_dt = -1.0;
+      g_mdiag_pindex = i;
+      g_mdiag_pid = particles[i].id;
 
       while (1) {
+
+        guard_iter++;
+        g_mdiag_inner = guard_iter;
+        g_mdiag_icell = icell;
+        g_mdiag_flag = particles[i].flag;
+        if (icell == guard_prev_cell && particles[i].flag == guard_prev_flag &&
+            x[0] == guard_prev_x0 && x[1] == guard_prev_x1 && x[2] == guard_prev_x2 &&
+            xnew[0] == guard_prev_n0 && xnew[1] == guard_prev_n1 &&
+            xnew[2] == guard_prev_n2 && dtremain == guard_prev_dt) guard_repeat++;
+        else guard_repeat = 0;
+        guard_prev_cell = icell; guard_prev_flag = particles[i].flag;
+        guard_prev_x0 = x[0]; guard_prev_x1 = x[1]; guard_prev_x2 = x[2];
+        guard_prev_n0 = xnew[0]; guard_prev_n1 = xnew[1]; guard_prev_n2 = xnew[2];
+        guard_prev_dt = dtremain;
+        if (guard_repeat >= move_guard_repeat_max)
+          move_guard_report("advection loop repeats an identical state",
+                            i,icell,x,xnew,v,dtremain,guard_iter,guard_repeat,
+                            stuck_iterate,outface,frac,minparam);
+        if (guard_iter >= move_guard_inner_max)
+          move_guard_report("advection loop exceeded the iteration cap",
+                            i,icell,x,xnew,v,dtremain,guard_iter,guard_repeat,
+                            stuck_iterate,outface,frac,minparam);
 
 #ifdef MOVE_DEBUG
         if (DIM == 3) {
@@ -2055,9 +2108,18 @@ template < int DIM, int SURF, int OPT > void Update::move()
         }
 
         if (DIM == 1) {
-          if (x[1] == lo[1] && (pflag == PEXIT || v[1] < 0.0)) {
-            frac = 0.0;
-            outface = YLO;
+          // A particle starting exactly on the lower cylindrical face with
+          // v[1] >= 0 can never re-enter r < lo (r(t)^2 = lo^2 + 2 lo v1 t +
+          // |v_yz|^2 t^2 >= lo^2), so the circle test is skipped for it:
+          // axi_horizontal_line() returns the tangential double root t = 0
+          // when v[1] == 0 and v[2] != 0, which sent the particle back and
+          // forth between two cells with dtremain unchanged (EOS job 3007,
+          // C2+ on r = 1.5105 with v = (5229, 0, -12041), 200000 iterations).
+          if (x[1] == lo[1]) {
+            if (pflag == PEXIT || v[1] < 0.0) {
+              frac = 0.0;
+              outface = YLO;
+            }
           } else if (Geometry::
                      axi_horizontal_line(dtremain,x,v,lo[1],itmp,tc,tmp)) {
             newfrac = tc/dtremain;
@@ -2067,7 +2129,10 @@ template < int DIM, int SURF, int OPT > void Update::move()
             }
           }
 
-          if (x[1] == hi[1] && (pflag == PEXIT || v[1] > 0.0)) {
+          // On the upper face, azimuthal motion (v[2] != 0) with v[1] >= 0
+          // leaves the cell at t = 0 just as v[1] > 0 does.
+          if (x[1] == hi[1] &&
+              (pflag == PEXIT || v[1] > 0.0 || (v[1] == 0.0 && v[2] != 0.0))) {
             frac = 0.0;
             outface = YHI;
           } else {
@@ -2406,7 +2471,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
                   pd = dynamic_cast<FixBackground *>(modify->fix[pusher->pusher_plasma_fidx]);
                 }
                 if (cp || pd) {
-                  // unified evaluator first (CM base + RF waveform at the
+                  // unified evaluator first (Borodkina base + RF waveform at the
                   // exact collision time); inline floating-potential
                   // fallback for non-cached plasma sources
                   const double phi_uni =
@@ -2952,6 +3017,8 @@ template < int DIM, int SURF, int OPT > void Update::move()
 
       // END of while loop over advection of single particle
 
+      if (guard_iter > move_inner_max_one) move_inner_max_one = guard_iter;
+
 #ifdef MOVE_DEBUG
       if (ntimestep == MOVE_DEBUG_STEP &&
           (MOVE_DEBUG_ID == particles[i].id ||
@@ -3022,6 +3089,7 @@ post_move_bookkeeping:
 
     if (any_entryexit) {
       timer->stamp(TIME_MOVE);
+      g_mdiag_stage = 2;
       pstart = comm->migrate_particles(nmigrate,mlist);
       timer->stamp(TIME_COMM);
       pstop = particle->nlocal;
@@ -3078,6 +3146,9 @@ post_move_bookkeeping:
   // accumulate running totals
 
   niterate_running += niterate;
+  if (move_inner_max_one > move_inner_max_running)
+    move_inner_max_running = move_inner_max_one;
+  g_mdiag_stage = 0;
   nmove_running += particle->nlocal;
   ntouch_running += ntouch_one;
   ncomm_running += ncomm_one;
@@ -3608,6 +3679,21 @@ void Update::global(int narg, char **arg)
       // reallocate paged data structs for variable-length cell info
       grid->allocate_surf_arrays();
       iarg += 2;
+    } else if (strcmp(arg[iarg],"move_guard") == 0) {
+      // global move_guard [inner N] [repeat N] [outer N]
+      iarg++;
+      int nset = 0;
+      while (iarg+1 < narg) {
+        if (strcmp(arg[iarg],"inner") == 0) move_guard_inner_max = atoi(arg[iarg+1]);
+        else if (strcmp(arg[iarg],"repeat") == 0) move_guard_repeat_max = atoi(arg[iarg+1]);
+        else if (strcmp(arg[iarg],"outer") == 0) move_guard_outer_max = atoi(arg[iarg+1]);
+        else break;
+        if (move_guard_inner_max <= 0 || move_guard_repeat_max <= 0 ||
+            move_guard_outer_max <= 0)
+          error->all(FLERR,"global move_guard values must be > 0");
+        iarg += 2; nset++;
+      }
+      if (nset == 0) error->all(FLERR,"Illegal global move_guard command");
     } else if (strcmp(arg[iarg],"gridcut") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal global command");
       grid->cutoff = input->numeric(FLERR,arg[iarg+1]);
@@ -3688,9 +3774,8 @@ void Update::global(int narg, char **arg)
     //                         [geom <nearest_surf/grid-ID>]
     //                         [mD_amu <amu>]]
     //
-    // Sheath dmax / pot_mult / model are auto: dmax = max(5*L_MPS, 10*lambdaD);
-    // pot_mult = 0 -> Bohm-Stangeby floating wall; model is the combined
-    // Coulette-Manfredi (close to wall) + Borodkina tail (s > 60 lambdaD).
+    // Sheath dmax and floating potential are set by the Borodkina profile;
+    // dmax can still override the automatic engagement distance.
     } else if (strcmp(arg[iarg], "pusher") == 0) {
       pusher->global_keyword(narg, arg, iarg);
 
@@ -3795,4 +3880,86 @@ int Update::have_mem_limit()
     mem_limit_flag = 1;
 
   return mem_limit_flag;
+}
+
+/* ----------------------------------------------------------------------
+   Mover guard reports. Both print the offending state on this rank to
+   stderr and the screen, then abort with error->one(). Diagnosis first:
+   a marker that stopped making progress is never silently deleted.
+------------------------------------------------------------------------- */
+
+void Update::move_guard_report(const char *why, int i, int icell,
+                               double *x, double *xnew, double *v,
+                               double dtremain, int guard_iter,
+                               int guard_repeat, int stuck_iterate,
+                               int outface, double frac, double minparam)
+{
+  Particle::OnePart *p = &particle->particles[i];
+  Grid::ChildCell *cells = grid->cells;
+  const char *spname = (p->ispecies >= 0 && p->ispecies < particle->nspecies)
+    ? particle->species[p->ispecies].id : "?";
+  char buf[2048];
+  int n = 0;
+  n += snprintf(buf+n, sizeof(buf)-n,
+    "\n[move-guard] %s\n"
+    "  rank %d step " BIGINT_FORMAT " dt %.6e  move/migrate iteration %d\n"
+    "  particle index %d id %d species %d (%s) flag %d weight %.6e\n"
+    "  advection iterations %d  identical-state repeats %d  stuck_iterate %d\n"
+    "  outface %d frac %.17g minparam %.17g dtremain %.17g\n"
+    "  x    = (%.17g, %.17g, %.17g)\n"
+    "  xnew = (%.17g, %.17g, %.17g)\n"
+    "  v    = (%.17g, %.17g, %.17g)  |v| %.6e\n",
+    why, me, ntimestep, dt, niterate, i, p->id, p->ispecies, spname, p->flag,
+    p->weight, guard_iter, guard_repeat, stuck_iterate, outface, frac, minparam,
+    dtremain, x[0], x[1], x[2], xnew[0], xnew[1], xnew[2], v[0], v[1], v[2],
+    sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]));
+  if (icell >= 0 && icell < grid->nlocal + grid->nghost) {
+    n += snprintf(buf+n, sizeof(buf)-n,
+      "  icell %d id " CELLINT_FORMAT " owner proc %d nsurf %d nsplit %d\n"
+      "  cell lo (%.17g, %.17g, %.17g) hi (%.17g, %.17g, %.17g)\n",
+      icell, cells[icell].id, cells[icell].proc, cells[icell].nsurf,
+      cells[icell].nsplit, cells[icell].lo[0], cells[icell].lo[1],
+      cells[icell].lo[2], cells[icell].hi[0], cells[icell].hi[1],
+      cells[icell].hi[2]);
+  } else {
+    n += snprintf(buf+n, sizeof(buf)-n, "  icell %d (not a local/ghost cell)\n", icell);
+  }
+  if (update->sheath_bank_custom >= 0) {
+    double *bank = particle->edvec[particle->ewhich[update->sheath_bank_custom]];
+    if (bank) n += snprintf(buf+n, sizeof(buf)-n, "  sheath energy bank %.6e J\n", bank[i]);
+  }
+  fputs(buf, stderr); fflush(stderr);
+  if (screen && screen != stderr) { fputs(buf, screen); fflush(screen); }
+  if (logfile) { fputs(buf, logfile); fflush(logfile); }
+  error->one(FLERR, "Mover guard triggered (see [move-guard] report above)");
+}
+
+void Update::move_guard_outer_report(int pstart, int pstop)
+{
+  Particle::OnePart *particles = particle->particles;
+  Grid::ChildCell *cells = grid->cells;
+  char buf[4096];
+  int n = snprintf(buf, sizeof(buf),
+    "\n[move-guard] move/migrate loop exceeded %d iterations on step "
+    BIGINT_FORMAT " (rank %d, %d particles received this iteration)\n",
+    move_guard_outer_max, ntimestep, me, pstop-pstart);
+  int shown = 0;
+  for (int i = pstart; i < pstop && shown < 20; i++) {
+    const int f = particles[i].flag;
+    if (f != PENTRY && f != PEXIT) continue;
+    const int ic = particles[i].icell;
+    const int owner = (ic >= 0 && ic < grid->nlocal + grid->nghost) ? cells[ic].proc : -1;
+    n += snprintf(buf+n, sizeof(buf)-n,
+      "  id %d flag %s icell %d owner %d dtremain %.6e x (%.9g, %.9g, %.9g) "
+      "v (%.9g, %.9g, %.9g)\n",
+      particles[i].id, f == PENTRY ? "PENTRY" : "PEXIT", ic, owner,
+      particles[i].dtremain, particles[i].x[0], particles[i].x[1],
+      particles[i].x[2], particles[i].v[0], particles[i].v[1], particles[i].v[2]);
+    shown++;
+    if ((size_t) n > sizeof(buf) - 256) break;
+  }
+  fputs(buf, stderr); fflush(stderr);
+  if (screen && screen != stderr) { fputs(buf, screen); fflush(screen); }
+  if (logfile) { fputs(buf, logfile); fflush(logfile); }
+  error->one(FLERR, "Mover guard triggered: move/migrate loop did not converge");
 }

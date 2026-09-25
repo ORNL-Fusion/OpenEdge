@@ -59,10 +59,9 @@ mu = m_Z / (m_Z + m_i) :pre
 
 Here m_Z and Z are the impurity mass and charge state and m_i is the
 background-ion mass. With a single-ion plasma file, m_i is read from
-{ion_species/mass_amu}; {ion_mass_amu} overrides it. A multi-ion
-background requires the override because this fix cannot infer which
-species supplies the DIVIMP main-ion coefficient. Backgrounds without
-species metadata use deuterium (2.01410177811 amu).
+{ion_species/mass_amu}; {ion_mass_amu} overrides it. Multi-ion
+backgrounds and backgrounds without species metadata use deuterium
+(2.01410177811 amu) unless overridden.
 
 The electron coefficient remains alpha_e = 0.71 (Braginskii Z_eff=1).
 grad_par is the component of the gradient along the unit vector of B.
@@ -115,4 +114,5 @@ background"_fix_background.html, "global"_global.html
 
 A channel keyword given without yes/no is enabled. Neither channel is
 active unless its keyword appears. {ion_mass_amu} defaults to the
-single-ion background metadata, or 2.01410177811 amu when unavailable.
+single-ion background metadata, or 2.01410177811 amu when the background
+has multiple ion species or no species metadata.

@@ -162,6 +162,33 @@ def read_oedge_nc(nc_file: Path) -> dict:
     else:
         pot = np.zeros_like(kes)
 
+    # DIVIMP stores KES internally as E * EFACT with EFACT = QTIM**2 * e/m_i
+    # (tau.f, "MULTIPLY BY ITERATION TIME FACTORS"; the same factor DIVIMP's
+    # own utilities divide out, e.g. comsrc/utility2.f). divimp_netcdf.f90
+    # writes that scaled array labelled "V/m". Remove the factor when the raw
+    # magnitude says it is still there; a physical divertor field is
+    # 1e0..1e5 V/m, the scaled one is 1e-14..1e-8.
+    crmi = float(ds.variables["CRMI"][:]) if "CRMI" in ds.variables else None
+    kes_raw_max = float(np.nanmax(np.abs(kes)))
+    kes_efact = None
+    if "QTIM" in ds.variables and crmi is not None:
+        qtim_e = float(ds.variables["QTIM"][:])
+        kes_efact = qtim_e * qtim_e * (1.602176634e-19 / 1.66053906660e-27) / crmi
+        if kes_raw_max < 1.0e-3:
+            kes = kes / kes_efact
+            print(f"  KES: removed DIVIMP EFACT={kes_efact:.3e} (QTIM={qtim_e:.2e} s, "
+                  f"CRMI={crmi:g} amu): max |E_par| {kes_raw_max:.2e} -> "
+                  f"{float(np.nanmax(np.abs(kes))):.2e} V/m")
+        else:
+            print(f"  KES: max |E_par| = {kes_raw_max:.2e} V/m already physical; not rescaled")
+    elif kes_raw_max < 1.0e-3:
+        raise ValueError(
+            f"KES max = {kes_raw_max:.2e}: looks EFACT-scaled but QTIM/CRMI are missing "
+            "from the netCDF, so it cannot be converted to V/m")
+    if float(np.nanmax(np.abs(kes))) > 1.0e6:
+        raise ValueError(
+            f"KES max = {float(np.nanmax(np.abs(kes))):.3g} V/m after scaling: not physical")
+
     # DIVIMP stores KVHS internally as v*QTIM, but some OUT/netCDF exports
     # already undo the scaling. Decide by Mach number: divide by QTIM only
     # if the raw field is far below sonic (i.e. still carries the QTIM
@@ -224,7 +251,7 @@ def read_oedge_nc(nc_file: Path) -> dict:
         e_rad=e_rad, pot=pot,
         tegs=tegs, tigs=tigs,
         # Metadata
-        crmb=crmb, r0=r0, z0=z0,
+        crmb=crmb, crmi=crmi, qtim=qtim, kes_efact=kes_efact, r0=r0, z0=z0,
         irsep=irsep, irwall=irwall, irtrap=irtrap,
     )
 
@@ -373,6 +400,7 @@ def convert_oedge_to_openedge(
     nc_file: Path,
     equ_file: Path,
     plasma_out: Path = Path("plasma.h5"),
+    skip_flow_check: bool = False,
 ):
     print(f"Reading OEDGE file: {nc_file}")
     oedge = read_oedge_nc(nc_file)
@@ -459,6 +487,65 @@ def convert_oedge_to_openedge(
     safe_bp   = np.where(cell_bpol > 1e-12, cell_bpol, 1e-12)
     psihat_r_c =  cell_bz / safe_bp
     psihat_z_c = -cell_br / safe_bp
+
+    # ---- Orientation of DIVIMP's field-line coordinate s versus b-hat ----
+    # DIVIMP signs KVHS and KES along +s, i.e. along increasing knot index
+    # ik, and never uses the direction of B. OpenEdge multiplies parr_flow
+    # and e_par by b-hat reconstructed from psi, whose poloidal direction
+    # depends on the sign conventions of the .equ file. Determine per ring
+    # whether b_pol runs along +ik or -ik and fold that sign into the
+    # scalars, so that parr_flow * b-hat is the physical flow.
+    rs, zs, nks = oedge["rs"], oedge["zs"], oedge["nks"]
+    ring_sign = np.zeros(int(oedge["nrs"]) + 1, dtype=np.float64)
+    for ir in np.unique(cell_ir):
+        sel = np.where(cell_ir == ir)[0]
+        if sel.size < 2:
+            ring_sign[ir] = 1.0
+            continue
+        ik = cell_ik[sel]
+        order = np.argsort(ik)
+        sel, ik = sel[order], ik[order]
+        dR = np.gradient(rs[ir, ik]); dZ = np.gradient(zs[ir, ik])
+        dots = dR * cell_br[sel] + dZ * cell_bz[sel]
+        ring_sign[ir] = 1.0 if np.mean(np.sign(dots)) >= 0.0 else -1.0
+    s_sign = ring_sign[cell_ir]
+    n_flip = int(np.sum(ring_sign[np.unique(cell_ir)] < 0))
+    print(f"Ring orientation: b_pol anti-parallel to +s (increasing ik) on "
+          f"{n_flip} of {np.unique(cell_ir).size} rings -> KVHS and KES multiplied by ring sign")
+    mesh_parr_flow = mesh_parr_flow * s_sign
+    mesh_e_par = mesh_e_par * s_sign
+    mesh_ions_upar = mesh_parr_flow[np.newaxis, :]
+
+    # Sanity check: on rings ending on the targets (SOL + PFR) the oriented
+    # flow at the first and last knot must point toward that end of the ring.
+    irsep = oedge["irsep"]
+    n_ok = n_tot = 0
+    for ir in np.unique(cell_ir):
+        if ir + 1 < irsep:      # cell_ir is 0-based, IRSEP is 1-based
+            continue
+        sel = np.where(cell_ir == ir)[0]
+        if sel.size < 3:
+            continue
+        ik = cell_ik[sel]
+        first, last = sel[np.argmin(ik)], sel[np.argmax(ik)]
+        nxt, prv = sel[np.argsort(ik)[1]], sel[np.argsort(ik)[-2]]
+        for c, nb in ((first, nxt), (last, prv)):
+            to_end = np.array([rs[ir, cell_ik[c]] - rs[ir, cell_ik[nb]],
+                               zs[ir, cell_ik[c]] - zs[ir, cell_ik[nb]]])
+            v = mesh_parr_flow[c] * np.array([bhat_r_c[c], bhat_z_c[c]])
+            if np.linalg.norm(v) == 0.0:
+                continue
+            n_tot += 1
+            n_ok += int(np.dot(v, to_end) > 0.0)
+    frac = n_ok / max(n_tot, 1)
+    print(f"Flow check: oriented flow points into the target at {n_ok}/{n_tot} ring ends ({frac:.0%})")
+    if frac < 0.9:
+        msg = (f"only {frac:.0%} of ring ends have the background flow entering the target; "
+               "check the .equ psi sign / ring ordering (use --skip-flow-check to override)")
+        if skip_flow_check:
+            print("WARNING: " + msg)
+        else:
+            raise RuntimeError(msg)
 
     # Per-species ion arrays (shape (nion, ncell)) -- single ion for OEDGE.
     mesh_ions_dens = mesh_dens_i[np.newaxis, :]
@@ -559,8 +646,18 @@ def convert_oedge_to_openedge(
         f.create_dataset("mesh/ions/dens",      data=mesh_ions_dens)
         f.create_dataset("mesh/ions/temp",      data=mesh_ions_temp)
         f.create_dataset("mesh/ions/parr_flow", data=mesh_ions_upar)
+        f.create_dataset("mesh/oedge_s_sign", data=s_sign)
+        f.create_dataset("mesh/oedge_ring", data=cell_ir.astype(np.int32))
+        f.create_dataset("mesh/oedge_knot", data=cell_ik.astype(np.int32))
 
         f.attrs["source"] = f"OEDGE: {Path(nc_file).name}"
+        f.attrs["converter_version"] = 2
+        f.attrs["parallel_sign_oriented_along_bhat"] = 1
+        f.attrs["kes_efact_removed"] = float(oedge["kes_efact"] or 0.0)
+        if oedge["qtim"] is not None:
+            f.attrs["qtim"] = float(oedge["qtim"])
+        if oedge["crmi"] is not None:
+            f.attrs["crmi"] = float(oedge["crmi"])
         f.attrs["r0"] = oedge["r0"]
         f.attrs["z0"] = oedge["z0"]
 
@@ -581,6 +678,8 @@ def _build_parser():
     p.add_argument("--equ-file", type=Path, required=True,
                    help="Equilibrium .equ file for B-field reconstruction.")
     p.add_argument("--plasma-out", type=Path, default=Path("plasma.h5"))
+    p.add_argument("--skip-flow-check", action="store_true",
+                   help="Warn instead of failing when the oriented flow does not enter the targets.")
     return p
 
 
@@ -590,6 +689,7 @@ def main():
         nc_file=args.nc_file,
         equ_file=args.equ_file,
         plasma_out=args.plasma_out,
+        skip_flow_check=args.skip_flow_check,
     )
 
 

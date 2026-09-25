@@ -27,8 +27,8 @@
 
 <LI>value = <I>dist</I> or <I>surfid</I> or <I>surfidx</I> or <I>nx</I> or <I>ny</I> or <I>nz</I> 
 
-<PRE>  dist = perpendicular distance from the cell center to the nearest
-    surface element (distance units)
+<PRE>  dist = Euclidean distance from the cell center to the nearest point
+    on a finite surface element (distance units)
   surfid = surface ID of the nearest element
   surfidx = index of the nearest element in the local surface list
   nx,ny,nz = components of the nearest element's normal, oriented
@@ -55,13 +55,12 @@ of this style, and by near-wall diagnostics such as wall-distance
 maps.
 </P>
 <P>For each cell the compute loops over the eligible surface elements
-and selects the element whose plane (line in 2d) is closest to the
-cell center, measured as the perpendicular distance from the center
-to the infinite plane containing the element.  Using the plane
-distance rather than the distance to the bounded element selects the
-plasma-facing face consistently when a cell is much larger than the
-surface features it overlaps, e.g. a thin slab inside a coarse cell.
-The <I>dist</I> value is that perpendicular distance.
+and selects the finite line segment (2d) or finite triangle (3d) with
+the smallest Euclidean distance to the cell center.  The closest point
+may lie in the element interior, on an edge, or at a vertex.  Treating
+an element as an infinite line or plane can incorrectly select a short
+tile far beyond its endpoint and can extend a spatial sheath into
+remote plasma.  The <I>dist</I> value is the finite-element distance.
 </P>
 <P>The <I>surfid</I> value is the ID of the selected element as assigned when
 the surface was read in, and <I>surfidx</I> is its index in the processor's

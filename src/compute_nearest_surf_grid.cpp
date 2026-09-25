@@ -157,32 +157,25 @@ void ComputeNearestSurfGrid::compute_per_grid()
 
     const double *lo = cells[icell].lo;
     const double *hi = cells[icell].hi;
-    const double ctr[3] = {
+    double ctr[3] = {
       0.5 * (lo[0] + hi[0]),
       0.5 * (lo[1] + hi[1]),
       (dim == 3) ? 0.5 * (lo[2] + hi[2]) : 0.0
     };
 
-    // For sheath workflows, use perpendicular distance from cell center to the
-    // triangle plane.  This correctly selects the plasma-facing surface even when
-    // multiple triangles (top, bottom, side faces of a slab) have similar
-    // bounding-box distances — which happens whenever a cell is much larger than
-    // the surface feature (e.g. 1×1×N grid with a thin slab surface).
+    // Use distance to the finite element, not to its infinite supporting
+    // line/plane.  The latter can select a short divertor tile far beyond an
+    // endpoint and make its sheath extend through otherwise remote plasma.
     for (int m = 0; m < nsurf_all; ++m) {
       if (!eligible[m]) continue;
       double d = DIST_BIG;
       if (dim == 2) {
-        // 2D: perpendicular distance from cell center to the line
-        const double lnx = lines[m].norm[0];
-        const double lny = lines[m].norm[1];
-        d = std::fabs((ctr[0] - lines[m].p1[0]) * lnx +
-                      (ctr[1] - lines[m].p1[1]) * lny);
+        d = std::sqrt(Geometry::distsq_point_line(
+            ctr, lines[m].p1, lines[m].p2));
       } else {
-        // 3D: perpendicular distance from cell center to the triangle plane
-        const double *tn = tris[m].norm;
-        d = std::fabs((ctr[0] - tris[m].p1[0]) * tn[0] +
-                      (ctr[1] - tris[m].p1[1]) * tn[1] +
-                      (ctr[2] - tris[m].p1[2]) * tn[2]);
+        d = std::sqrt(Geometry::distsq_point_tri(
+            ctr, tris[m].p1, tris[m].p2,
+            tris[m].p3, tris[m].norm));
       }
       if (d < mind) {
         mind = d;
@@ -255,11 +248,14 @@ void ComputeNearestSurfGrid::compute_per_grid()
 
 void ComputeNearestSurfGrid::reallocate()
 {
-  // Change detection: cell count AND first-cell id (a balance/migration
-  // can relabel cells while keeping nlocal equal on a rank).
-  const cellint id0 = (grid->nlocal > 0 && grid->cells) ? grid->cells[0].id : -1;
-  if (grid->nlocal == nglocal && id0 == stamp_id0_) return;
-  stamp_id0_ = id0;
+  // This is the grid-change callback (balance, adapt, migration). It used to
+  // skip the rebuild when the local cell count and the first cell id were
+  // unchanged, but an RCB rebalance can reorder or replace the other cells
+  // while preserving both, which left midx_grid (and the per-cell surface
+  // distances the sheath and PMI code rely on) aligned with the OLD cell
+  // ordering. Always invalidate; the per-cell grid customs still carry the
+  // cached results with the cells, so the recompute is cheap.
+  stamp_id0_ = (grid->nlocal > 0 && grid->cells) ? grid->cells[0].id : -1;
   memory->destroy(vector_grid);
   memory->destroy(array_grid);
   memory->destroy(midx_grid);

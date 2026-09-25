@@ -56,6 +56,7 @@
 #include "update.h"
 #include "pusher.h"
 #include "fix_background.h"
+#include "fix_store_force.h"
 #include "openedge_geom.h"
 
 using namespace SPARTA_NS;
@@ -72,6 +73,8 @@ FixCoulombBase::FixCoulombBase(SPARTA *sparta, int narg, char **arg) :
   use_background_(0),
   plasma_fix_id_(),
   pd_(nullptr),
+  store_coulomb_background_(nullptr),
+  store_coulomb_binary_(nullptr),
   do_binary_(0),
   have_background_(0),
   iarg_after_common_(0),
@@ -230,6 +233,10 @@ void FixCoulombBase::init()
     bind_compute(srcBy_,     "By");
     bind_compute(srcBz_,     "Bz");
   }
+  store_coulomb_background_ = find_store_force(
+    modify, FixStoreForce::COULOMB_BACKGROUND);
+  store_coulomb_binary_ = find_store_force(
+    modify, FixStoreForce::COULOMB_BINARY);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -472,6 +479,21 @@ void FixCoulombBase::nanbu_collisions_cell(int icell, int np)
     vB[0] += mA_frac * dg0;
     vB[1] += mA_frac * dg1;
     vB[2] += mA_frac * dg2;
+
+    if (store_coulomb_binary_) {
+      const double dpA[3] = {
+        -mA * mB_frac * dg0,
+        -mA * mB_frac * dg1,
+        -mA * mB_frac * dg2
+      };
+      const double dpB[3] = {
+         mB * mA_frac * dg0,
+         mB * mA_frac * dg1,
+         mB * mA_frac * dg2
+      };
+      store_coulomb_binary_->add_impulse(idxA, dpA, dt);
+      store_coulomb_binary_->add_impulse(idxB, dpB, dt);
+    }
   }
 }
 
@@ -665,6 +687,15 @@ void FixCoulombBase::nanbu_background_cell(int icell, int np)
     v[0] -= m_bg_frac * dg0;
     v[1] -= m_bg_frac * dg1;
     v[2] -= m_bg_frac * dg2;
+
+    if (store_coulomb_background_) {
+      const double dp[3] = {
+        -m_test * m_bg_frac * dg0,
+        -m_test * m_bg_frac * dg1,
+        -m_test * m_bg_frac * dg2
+      };
+      store_coulomb_background_->add_impulse(idx, dp, dt);
+    }
 
     if (gc_part) {
       const double Bv_l[3] = {Bx, By, Bz};

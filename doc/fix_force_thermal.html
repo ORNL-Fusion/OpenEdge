@@ -70,9 +70,9 @@ mu = m_Z / (m_Z + m_i)
 </PRE>
 <P>Here m_Z and Z are the impurity mass and charge state and m_i is the
 background-ion mass. With a single-ion plasma file, m_i is read from
-<I>ion_species/mass_amu</I>; <I>ion_mass_amu</I> overrides it. A multi-ion
-background requires the override. Backgrounds without species metadata
-use deuterium (2.01410177811 amu).
+<I>ion_species/mass_amu</I>; <I>ion_mass_amu</I> overrides it. Multi-ion
+backgrounds and backgrounds without species metadata use deuterium
+(2.01410177811 amu) unless overridden.
 </P>
 <P>The electron coefficient remains alpha_e = 0.71 (Braginskii Z_eff=1).
 grad_par is the component of the gradient along the unit vector of B.
@@ -125,7 +125,8 @@ background</A>, <A HREF = "global.html">global</A>
 </P>
 <P>A channel keyword given without yes/no is enabled. Neither channel is
 active unless its keyword appears. <I>ion_mass_amu</I> defaults to the
-single-ion background metadata, or 2.01410177811 amu when unavailable.
+single-ion background metadata, or 2.01410177811 amu when the background
+has multiple ion species or no species metadata.
 </P>
 <!-- PAGE BREAK -->
 </HTML>

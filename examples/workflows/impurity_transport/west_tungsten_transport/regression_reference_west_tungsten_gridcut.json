@@ -5,42 +5,42 @@
   "note": "reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
  },
  "CPU": {
-  "value": 2.1757298,
+  "value": 1.023932,
   "tol": null,
   "note": "reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
  },
  "Np": {
-  "value": 8313.0,
+  "value": 7439.0,
   "tol": 0.05,
-  "note": "GPU runs sit 1.5-3.1 % below the CPU reference (8055, 8190 vs 8313 on 2026-09-13; RNG-stream and atomic-order spread), 3 % was flaky; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
+  "note": "Borodkina CPU baseline (2026-09-25); run-to-run spread ~3 %, 5 % band; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
  },
  "c_cwNtot": {
-  "value": 56441019000000.0,
+  "value": 50144729000000.0,
   "tol": 0.05,
   "note": "reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
  },
  "c_cwN0": {
-  "value": 9938627400000.0,
+  "value": 10260253000000.0,
   "tol": 0.1,
-  "note": "~8000 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
+  "note": "~7400 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
  },
  "c_cwN1": {
-  "value": 24765692000000.0,
+  "value": 21463069000000.0,
   "tol": 0.1,
-  "note": "~8000 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
+  "note": "~7400 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
  },
  "c_cwN2": {
-  "value": 18034645000000.0,
+  "value": 15063907000000.0,
   "tol": 0.1,
-  "note": "~8000 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
+  "note": "~7400 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
  },
  "c_cwN3": {
-  "value": 3489609000000.0,
+  "value": 3254485000000.0,
   "tol": 0.25,
   "note": "W3+ density at 1000 steps: small population; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
  },
  "c_cwN4": {
-  "value": 212446390000.0,
+  "value": 103015770000.0,
   "tol": 0.8,
   "note": "W4+ density at 1000 steps: very small population; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
  },
@@ -59,43 +59,43 @@
  "c_cwN7": {
   "value": 0.0,
   "tol": 0.05,
-  "abs": 500000000000.0,
-  "note": "high charge state, zero in the reference; a few markers may appear; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
+  "note": "high charge state, zero in the reference; a few markers may appear; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer",
+  "abs": 500000000000.0
  },
  "c_cwN8": {
   "value": 0.0,
   "tol": 0.05,
-  "abs": 500000000000.0,
-  "note": "high charge state, zero in the reference; a few markers may appear; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
+  "note": "high charge state, zero in the reference; a few markers may appear; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer",
+  "abs": 500000000000.0
  },
  "c_cwN9": {
   "value": 0.0,
   "tol": 0.05,
-  "abs": 500000000000.0,
-  "note": "high charge state, zero in the reference; a few markers may appear; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
+  "note": "high charge state, zero in the reference; a few markers may appear; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer",
+  "abs": 500000000000.0
  },
  "c_cwN10": {
   "value": 0.0,
   "tol": 0.05,
-  "abs": 500000000000.0,
-  "note": "high charge state, zero in the reference; a few markers may appear; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
+  "note": "high charge state, zero in the reference; a few markers may appear; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer",
+  "abs": 500000000000.0
  },
  "c_cwN15": {
   "value": 0.0,
   "tol": 0.05,
-  "abs": 500000000000.0,
-  "note": "high charge state, zero in the reference; a few markers may appear; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
+  "note": "high charge state, zero in the reference; a few markers may appear; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer",
+  "abs": 500000000000.0
  },
  "c_cwN20": {
   "value": 0.0,
   "tol": 0.05,
-  "abs": 500000000000.0,
-  "note": "high charge state, zero in the reference; a few markers may appear; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
+  "note": "high charge state, zero in the reference; a few markers may appear; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer",
+  "abs": 500000000000.0
  },
  "loop_particles": {
-  "value": 8313,
+  "value": 7439,
   "tol": 0.05,
-  "note": "GPU runs sit 1.5-3.1 % below the CPU reference (8055, 8190 vs 8313 on 2026-09-13; RNG-stream and atomic-order spread), 3 % was flaky; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
+  "note": "Borodkina CPU baseline (2026-09-25); run-to-run spread ~3 %, 5 % band; reference = base west_tungsten_transport: gridcut 0.02 (cut-cell ghost decomposition) must not change the answer"
  },
  "host_fallback_calls": {
   "value": 0,

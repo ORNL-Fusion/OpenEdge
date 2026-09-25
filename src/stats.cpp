@@ -643,6 +643,10 @@ void Stats::set_fields(int narg, char **arg)
       addfield("Nreact",&Stats::compute_nreact,BIGINT);
     } else if (strcmp(arg[i],"nsreact") == 0) {
       addfield("Nsreact",&Stats::compute_nsreact,BIGINT);
+    } else if (strcmp(arg[i],"nmoveiter") == 0) {
+      addfield("Nmoveiter",&Stats::compute_nmoveiter,BIGINT);
+    } else if (strcmp(arg[i],"nmoveinner") == 0) {
+      addfield("Nmoveinner",&Stats::compute_nmoveinner,BIGINT);
 
     } else if (strcmp(arg[i],"npave") == 0) {
       addfield("Npave",&Stats::compute_npave,FLOAT);
@@ -1017,6 +1021,12 @@ int Stats::evaluate_keyword(char *word, double *answer)
   } else if (strcmp(word,"nscoll") == 0) {
     compute_nscoll();
     dvalue = bivalue;
+  } else if (strcmp(word,"nmoveiter") == 0) {
+    compute_nmoveiter();
+    dvalue = bivalue;
+  } else if (strcmp(word,"nmoveinner") == 0) {
+    compute_nmoveinner();
+    dvalue = bivalue;
   } else if (strcmp(word,"nscheck") == 0) {
     compute_nscheck();
     dvalue = bivalue;
@@ -1324,6 +1334,24 @@ void Stats::compute_nsreact()
 {
   bigint n = surf->nreact_one;
   MPI_Allreduce(&n,&bivalue,1,MPI_SPARTA_BIGINT,MPI_SUM,world);
+}
+
+/* ----------------------------------------------------------------------
+   move/migrate iterations of the last step (collective, same on all ranks)
+   and the largest per-particle advection-loop iteration count on any rank.
+   Both are diagnostics for the mover guards (global move_guard).
+------------------------------------------------------------------------- */
+
+void Stats::compute_nmoveiter()
+{
+  bigint n = update->niterate;
+  MPI_Allreduce(&n,&bivalue,1,MPI_SPARTA_BIGINT,MPI_MAX,world);
+}
+
+void Stats::compute_nmoveinner()
+{
+  bigint n = update->move_inner_max_one;
+  MPI_Allreduce(&n,&bivalue,1,MPI_SPARTA_BIGINT,MPI_MAX,world);
 }
 
 /* ---------------------------------------------------------------------- */

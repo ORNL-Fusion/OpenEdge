@@ -65,6 +65,7 @@ FixStyle(force/thermal,FixForceThermal)
 namespace SPARTA_NS {
 
 class FixBackground;
+class FixStoreForce;
 
 class FixForceThermal : public Fix {
  public:
@@ -100,6 +101,8 @@ class FixForceThermal : public Fix {
   int have_elec_thermal_;
   CollGridSrc srcGradTeR_, srcGradTeZ_;
   double alpha_e_;  // coefficient (default 0.71)
+  FixStoreForce *store_thermal_ion_;
+  FixStoreForce *store_thermal_electron_;
 
   // helper methods
   void parse_compute_src(const char *tok, CollGridSrc &dst, const char *label);

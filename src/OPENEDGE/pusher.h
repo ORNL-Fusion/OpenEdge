@@ -34,6 +34,7 @@
 namespace SPARTA_NS {
 
 namespace GCAPusher { struct GCAFields; }
+class FixStoreForce;
 
 // Value-like materialization of a stored guiding-center state: physical
 // position ON the gyro-circle and the velocity at that phase. The API
@@ -110,11 +111,11 @@ class Pusher : protected Pointers {
   int gca_chi_custom;
 
   // ---- Spatial-sheath per-wall-element coefficient cache -------------
-  // The Coulette-Manfredi sheath coefficients (and the geometry, plasma,
+  // The sheath coefficients (and the geometry, plasma,
   // Chodura angle and cut-off distance they derive from) depend only on
   // the wall element, all of which are invariant when the background
   // plasma is static. Without the cache the pusher re-queries the plasma
-  // mesh and re-runs sheath_prepare_coulette_manfredi for every near-wall
+  // mesh and re-runs SheathModels::sheath_prepare for every near-wall
   // particle every step; with it, each wall element is evaluated once
   // (at its midpoint, the physical sheath-edge location) and reused.
   // Enabled only for a static fix-background plasma; other plasma sources
@@ -142,9 +143,36 @@ class Pusher : protected Pointers {
   long   sheath_diag_nreflect;  // boundary mode: outbound ions reflected
   long   sheath_diag_nescape;   // boundary mode: outbound ions decelerated
 
+  // Optional, independently named per-particle force stores. These remain
+  // null unless the input deck defines the corresponding fix store/force.
+  FixStoreForce *store_electric_plasma;
+  FixStoreForce *store_electric_sheath;
+  FixStoreForce *store_magnetic;
+
   // ---- Methods (were on Update) --------------------------------------
   void init();
   void global_keyword(int narg, char **arg, int &iarg);
+  // Guarded entry points: validate the particle state before and after the
+  // push (finite x, v, xnew, dt > 0, mass > 0, finite q/m) and abort with a
+  // report on failure. The *_impl routines hold the integrators.
+  void validate_push_state(const char *who, int i, int icell, double dt,
+                           const double *x, const double *v, const double *xnew,
+                           double charge, double mass);
+  void sheath_state_abort(const char *why, int i, int isub, int midx,
+                          double d_max, double phi_total,
+                          const SheathModels::SheathEmagCoeffs &c,
+                          double d_old, double d_new, double vn,
+                          double phi_old, double phi_new, double dKE_J,
+                          double charge, double mass, double bank);
+  void push_boris_2d_impl(int i, int icell, double dt,
+                          double *x, double *v, double *xnew,
+                          double charge, double mass);
+  void push_boris_3d_impl(int i, int icell, double dt,
+                          double *x, double *v, double *xnew,
+                          double charge, double mass);
+  void push_hybrid_3d_impl(int i, int icell, double dt,
+                           double *x, double *v, double *xnew,
+                           double charge, double mass);
   void push_boris_2d(int i, int icell, double dt,
                      double *x, double *v, double *xnew,
                      double charge, double mass);
@@ -183,8 +211,8 @@ class Pusher : protected Pointers {
   bool apply_gc_displacement(int i, const double *dx);
   void invalidate_gc(int i, int reason);
   // Unified sheath wall potential for surface element midx at the exact
-  // event time (t_offset seconds into the current step): Coulette-
-  // Manfredi base + RF waveform, from the per-element cache. Returns
+  // event time (t_offset seconds into the current step): sheath
+  // base + RF waveform, from the per-element cache. Returns
   // < 0 when no cached sheath is available (caller falls back).
   double sheath_phi_wall(int midx, double t_offset);
 };

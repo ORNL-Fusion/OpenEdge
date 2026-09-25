@@ -130,6 +130,7 @@ struct SurfHit2D {
 
                          // current step counters
   int niterate;          // iterations of move/comm
+  int move_inner_max_one;    // max per-particle advection-loop iterations this step
   int ntouch_one;        // particle-cell touches
   int ncomm_one;         // particles migrating to new procs
   int nboundary_one;     // particles colliding with global boundary
@@ -139,6 +140,7 @@ struct SurfHit2D {
 
   bigint first_running_step; // timestep running counts start on
   int niterate_running;      // running count of move/comm interations
+  int move_inner_max_running; // max per-particle advection-loop iterations over the run
   bigint nmove_running;      // running count of total particle moves
   bigint ntouch_running;     // running count of current step counters
   bigint ncomm_running;
@@ -152,15 +154,13 @@ struct SurfHit2D {
   // call sites use pusher->mode, pusher->push_boris_*, etc.
   class Pusher *pusher;
 
-  // Sheath overlay applied during the pusher. dmax / pot_mult / model are
-  // computed internally (auto): dmax = max(5*L_MPS, 10*lambdaD); pot_mult
-  // = 0 -> Bohm-Stangeby floating wall; model is the combined Coulette-
-  // Manfredi (close to wall) + Borodkina tail (s > 60 lambdaD).
+  // Sheath overlay applied during the pusher. The Borodkina profile sets the
+  // floating potential and automatic engagement distance.
   int sheath_flag;             // 1 if per-particle sheath is active
   char *sheath_geom_cid;       // compute ID for nearest_surf/grid
   int sheath_geom_cidx;        // resolved compute index for geometry
   double sheath_mD_amu;        // ion mass in amu (default D = 2.014)
-  double sheath_dmax;          // sheath extent [m] set explicitly; 0 = auto max(5*rho_i,10*lambda_D)
+  double sheath_dmax;          // sheath extent [m] set explicitly; 0 = model default
   int sheath_kick;             // 1 = apply sheath as velocity kick at wall
   int sheath_boundary;         // 1 = sub-grid sheath-as-boundary (impact kick
                                //     + outbound potential-barrier reflection)
@@ -244,6 +244,15 @@ struct SurfHit2D {
   double *psi_rz;             // psi(R,Z) [psi_nh * psi_nw]
 
   int nstuck;                // # of particles stuck on surfs and deleted
+
+  // Mover guards (global move_guard inner N repeat N outer N). A particle
+  // whose advection loop exceeds move_guard_inner_max iterations, or repeats an
+  // identical (cell, x, xnew, dtremain, flag) state move_guard_repeat_max times
+  // in a row, aborts the run with a diagnostic report instead of spinning; the
+  // move/migrate loop aborts after move_guard_outer_max iterations.
+  int move_guard_inner_max;
+  int move_guard_repeat_max;
+  int move_guard_outer_max;
   int ncaplost;              // # deleted after a periodic-cap teleport landed in
                              //   a cell this rank does not store (not owned/ghost)
   int naxibad;               // # of particles where axisymm move was bad
@@ -289,6 +298,9 @@ struct SurfHit2D {
   virtual void setup();
   virtual void run(int);
   void global(int, char **);
+  void move_guard_report(const char *, int, int, double *, double *, double *,
+                         double, int, int, int, int, double, double);
+  void move_guard_outer_report(int, int);
   void reset_timestep(int, char **);
 
   int split3d(int, double *);

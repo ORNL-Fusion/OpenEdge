@@ -36,6 +36,7 @@
 #include "update.h"
 #include "pusher.h"
 #include "fix_background.h"
+#include "fix_store_force.h"
 #include "openedge_geom.h"
 
 using namespace SPARTA_NS;
@@ -60,7 +61,9 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
   ion_mass_amu_(DEUTERIUM_MASS_AMU),
   ion_mass_kg_(DEUTERIUM_MASS_AMU * AMU_KG),
   ion_mass_explicit_(0),
-  alpha_e_(0.71)
+  alpha_e_(0.71),
+  store_thermal_ion_(nullptr),
+  store_thermal_electron_(nullptr)
 {
   // fix ID thermal_force Nevery {bfield BxSRC BySRC BzSRC | background FIXID}
   //     [keywords...]
@@ -266,9 +269,6 @@ void FixForceThermal::init()
     if (have_ion_thermal_ && !ion_mass_explicit_) {
       if (pd_->ion_mass_amu.size() == 1) {
         ion_mass_amu_ = pd_->ion_mass_amu[0];
-      } else if (pd_->ion_mass_amu.size() > 1) {
-        error->all(FLERR,
-          "fix force/thermal: multi-ion background requires ion_mass_amu");
       }
     }
   } else {
@@ -286,6 +286,10 @@ void FixForceThermal::init()
     bind(srcGradTeZ_, "gradTeZ");
   }
   ion_mass_kg_ = ion_mass_amu_ * AMU_KG;
+  store_thermal_ion_ = find_store_force(
+    modify, FixStoreForce::THERMAL_ION);
+  store_thermal_electron_ = find_store_force(
+    modify, FixStoreForce::THERMAL_ELECTRON);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -423,7 +427,8 @@ void FixForceThermal::kick_half(double dt_half)
                                  bhat_phi_unused);
 
     // accumulate parallel acceleration
-    double a_par = 0.0;
+    double a_ion = 0.0;
+    double a_electron = 0.0;
     const double Z2 = Z * Z;
 
     if (have_ion_thermal_) {
@@ -442,7 +447,7 @@ void FixForceThermal::kick_half(double dt_half)
         grad_par_Ti = gTiR * bhat_R_cyl + gTiZ * bhat_Z_cyl;
       }
       const double beta_i = ion_thermal_coefficient(m_Z, ion_mass_kg_, Z);
-      a_par += beta_i * QE * grad_par_Ti / m_Z;
+      a_ion = beta_i * QE * grad_par_Ti / m_Z;
     }
 
     if (have_elec_thermal_) {
@@ -460,7 +465,26 @@ void FixForceThermal::kick_half(double dt_half)
           : read_src(srcGradTeZ_, ip, icell);
         grad_par_Te = gTeR * bhat_R_cyl + gTeZ * bhat_Z_cyl;
       }
-      a_par += alpha_e_ * Z2 * QE * grad_par_Te / m_Z;
+      a_electron = alpha_e_ * Z2 * QE * grad_par_Te / m_Z;
+    }
+
+    const double a_par = a_ion + a_electron;
+    if (store_thermal_ion_ || store_thermal_electron_) {
+      const double dp_ion[3] = {
+        m_Z * a_ion * bhat0 * dt_half,
+        m_Z * a_ion * bhat1 * dt_half,
+        m_Z * a_ion * bhat2 * dt_half
+      };
+      const double dp_electron[3] = {
+        m_Z * a_electron * bhat0 * dt_half,
+        m_Z * a_electron * bhat1 * dt_half,
+        m_Z * a_electron * bhat2 * dt_half
+      };
+      const double interval = 2.0 * dt_half;
+      if (store_thermal_ion_)
+        store_thermal_ion_->add_impulse(ip, dp_ion, interval);
+      if (store_thermal_electron_)
+        store_thermal_electron_->add_impulse(ip, dp_electron, interval);
     }
 
     if (a_par == 0.0) continue;

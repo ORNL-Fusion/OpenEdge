@@ -41,6 +41,7 @@
 #include "compute_nearest_surf_grid.h"
 #include "compute_plasma_fields.h"
 #include "fix_background.h"
+#include "fix_store_force.h"
 #include "geometry.h"
 #include "input.h"
 #include "memory.h"
@@ -67,6 +68,63 @@ enum {NOFIELD, CFIELD, PFIELD, GFIELD};   // matches update.cpp
 // golden-ratio conjugate: decorrelates the per-particle-id gyro-phase
 // seed used when reconstructing full v from guiding-center state
 const double GCA_PHASE_GOLDEN = 0.6180339887498949;
+
+// Accumulate the exact momentum changes made inside one Boris call and
+// publish one equivalent force per mechanism on every exit path.  The
+// destructor is intentional: the subcycle surface/cell guards return early.
+class StoredPusherForces {
+ public:
+  StoredPusherForces(FixStoreForce *plasma, FixStoreForce *sheath,
+                     FixStoreForce *magnetic, int iparticle, double mass,
+                     double interval) :
+    plasma_(plasma && plasma->enabled(iparticle) ? plasma : nullptr),
+    sheath_(sheath && sheath->enabled(iparticle) ? sheath : nullptr),
+    magnetic_(magnetic && magnetic->enabled(iparticle) ? magnetic : nullptr),
+    iparticle_(iparticle), mass_(mass), interval_(interval)
+  {
+    for (int k = 0; k < 3; ++k)
+      dp_plasma_[k] = dp_sheath_[k] = dp_magnetic_[k] = 0.0;
+  }
+
+  ~StoredPusherForces()
+  {
+    if (plasma_) plasma_->add_impulse(iparticle_, dp_plasma_, interval_);
+    if (sheath_) sheath_->add_impulse(iparticle_, dp_sheath_, interval_);
+    if (magnetic_) magnetic_->add_impulse(iparticle_, dp_magnetic_, interval_);
+  }
+
+  bool stores_boris() const { return plasma_ || magnetic_; }
+  bool stores_sheath() const { return sheath_ != nullptr; }
+
+  void add_plasma_dv(const double dv[3])
+  {
+    if (plasma_)
+      for (int k = 0; k < 3; ++k) dp_plasma_[k] += mass_ * dv[k];
+  }
+
+  void add_magnetic_dv(const double dv[3])
+  {
+    if (magnetic_)
+      for (int k = 0; k < 3; ++k) dp_magnetic_[k] += mass_ * dv[k];
+  }
+
+  void add_sheath_dv(const double dv[3])
+  {
+    if (sheath_)
+      for (int k = 0; k < 3; ++k) dp_sheath_[k] += mass_ * dv[k];
+  }
+
+ private:
+  FixStoreForce *plasma_;
+  FixStoreForce *sheath_;
+  FixStoreForce *magnetic_;
+  int iparticle_;
+  double mass_;
+  double interval_;
+  double dp_plasma_[3];
+  double dp_sheath_[3];
+  double dp_magnetic_[3];
+};
 
 // A1 flux weight p(phi) ~ max(-vn(phi),0) with vn = a + cx cos + cy sin:
 // deterministic golden-sequence rejection seeded by the hash phase.
@@ -188,31 +246,6 @@ inline MagneticFieldFileDataParams query_bfield_from_fix(const FixBackground *pd
   return pd->query_bfield_at_point(xyz, icell, iparticle);
 }
 
-inline double sheath_auto_dmax(double te_eV, double ti_eV, double ne_m3,
-                                double bmag_T, double alpha_deg,
-                                double mD_amu, double user_ceiling)
-{
-  constexpr double QE_LOC   = 1.602176634e-19;
-  constexpr double AMU_LOC  = 1.66053906660e-27;
-  constexpr double EPS0_LOC = 8.8541878128e-12;
-  const double mD_kg = std::max(mD_amu * AMU_LOC, 1.0e-99);
-  const double lambdaD = std::sqrt(EPS0_LOC * std::max(te_eV, 1.0e-12)
-                                   / (std::max(ne_m3, 1.0e-60) * QE_LOC));
-  // vth_d: 1D effective thermal speed for rho_i (not Bohm cs).
-  const double vth_d = std::sqrt(std::max(te_eV + ti_eV, 0.0) * QE_LOC
-                                 / (2.0 * mD_kg));
-  const double omega_ci = QE_LOC * std::max(std::fabs(bmag_T), 1.0e-20) / mD_kg;
-  const double rho_i = vth_d / std::max(omega_ci, 1.0e-99);
-  // MPS normal-direction thickness is a few rho_i, roughly angle-independent
-  // (Chodura ~sqrt(6) rho_i; grazing-incidence PIC shows a few rho_i). The
-  // former rho_i*tan(alpha_from_normal) factor diverged at grazing incidence
-  // (tan 88deg ~ 28) and engulfed the whole domain in "sheath".
-  (void)alpha_deg;
-  // user_ceiling (global pusher sheath dmax) > 0 sets the extent explicitly
-  // (e.g. to cover the long MPS tail at grazing incidence); 0 = auto.
-  if (user_ceiling > 0.0) return user_ceiling;
-  return std::max(5.0 * rho_i, 10.0 * lambdaD);
-}
 
 // Additional attracting potential drop carried by a target surface tile.
 // The custom array is [Vdc, Vrf_peak, phase_rad], with wall voltage measured
@@ -265,6 +298,9 @@ Pusher::Pusher(SPARTA *sparta) : Pointers(sparta)
   sheath_diag_esum = 0.0;
   sheath_diag_nreflect = 0;
   sheath_diag_nescape = 0;
+  store_electric_plasma = NULL;
+  store_electric_sheath = NULL;
+  store_magnetic = NULL;
   pusher_dump_flag    = 0;
   pusher_dump_every   = 1;
   pusher_bad_dt_check = 1;
@@ -313,7 +349,7 @@ void Pusher::resolve_skip_species()
    Build one spatial-sheath cache entry for wall element `midx`.
 
    Evaluates the geometry, plasma (Te, Ti, ne), B, Chodura angle, cut-off
-   distance and Coulette-Manfredi coefficients at the wall element MIDPOINT
+   distance and Borodkina sheath coefficients at the wall element MIDPOINT
    — the physical sheath edge — rather than at a particle position. For a
    static fix-background plasma every input is invariant, so this runs once
    per element and is reused by every near-wall particle for the whole run.
@@ -348,13 +384,33 @@ void Pusher::build_sheath_cache_entry(int midx, SheathElemCache &C)
   auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
   if (!pd) return;
 
-  // Plasma at the wall midpoint (sheath-edge conditions).
+  // Plasma at the wall midpoint (sheath-edge conditions). A wall element that
+  // coincides with the edge of the plasma mesh (OEDGE polygons end exactly on
+  // the target) can miss the point-in-triangle lookup and return zero, which
+  // silently disabled the sheath on the whole DIII-D outer shelf. Retry a few
+  // small steps along the plasma-side normal before giving up.
   PlasmaFileParams pf = query_plasma_from_fix(pd, xmid_slot, dim, axi);
+  double xq_slot[3] = {xmid_slot[0], xmid_slot[1], 0.0};   // accepted query point
+  {
+    static const double retry_m[] = {2.5e-4, 1.0e-3, 3.0e-3};
+    for (double delta : retry_m) {
+      if (pf.temp_e > 0.0 && pf.dens_e > 0.0) break;
+      xq_slot[0] = xmid_slot[0] + n_slot[0] * delta;
+      xq_slot[1] = xmid_slot[1] + n_slot[1] * delta;
+      pf = query_plasma_from_fix(pd, xq_slot, dim, axi);
+    }
+  }
   const double te = pf.temp_e, ti = pf.temp_i, ne = pf.dens_e;
 
-  // B at the wall midpoint (cylindrical), for |B| and the Chodura angle.
+  // B for |B| and the Chodura angle, sampled at the SAME accepted point as
+  // the plasma: a mesh-only B field misses the wall midpoint exactly like
+  // the thermodynamic lookup does when the mesh ends on the target.
   double Br = 0.0, Bz = 0.0, Bt = 0.0;
-  if (pd->has_bfield) pd->bfield_at(C.sR, C.sZ, Br, Bz, Bt);
+  if (pd->has_bfield) {
+    double Rq = C.sR, Zq = C.sZ;
+    OpenEdge::sparta_to_RZ(xq_slot, dim, axi, Rq, Zq, 0.0, 0.0);
+    pd->bfield_at(Rq, Zq, Br, Bz, Bt);
+  }
   const double bmag = std::sqrt(Br*Br + Bz*Bz + Bt*Bt);
 
   if (!(te > 0.0 && ne > 0.0 && bmag > 0.0)) return;   // stays inactive
@@ -365,10 +421,9 @@ void Pusher::build_sheath_cache_entry(int midx, SheathElemCache &C)
     SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
   const double alpha_deg = cm.alpha_deg;
 
-  C.d_max  = sheath_auto_dmax(te, ti, ne, bmag, alpha_deg,
-                              update->sheath_mD_amu, update->sheath_dmax);
-  C.coeffs = SheathModels::sheath_prepare_coulette_manfredi(
-                 te, ti, ne, bmag, alpha_deg, update->sheath_mD_amu, 0.0);
+  C.coeffs = SheathModels::sheath_prepare(te, ti, ne, bmag, alpha_deg,
+                                          update->sheath_mD_amu, 0.0);
+  C.d_max  = (update->sheath_dmax > 0.0) ? update->sheath_dmax : C.coeffs.mps_end_m;
   // Total sheath potential drop (V) = potential at the wall (d=0), used as
   // the escape barrier in sheath boundary mode.
   C.phi_total = SheathModels::sheath_phi_at_distance(C.coeffs, 0.0);
@@ -393,7 +448,7 @@ void Pusher::build_sheath_cache_entry(int midx, SheathElemCache &C)
 /* ----------------------------------------------------------------------
    3D twin of build_sheath_cache_entry: one entry per wall TRIANGLE.
 
-   Caches only the plasma-derived quantities (d_max, Coulette-Manfredi
+   Caches only the plasma-derived quantities (d_max, Borodkina sheath
    coefficients, phi_total) evaluated at the triangle CENTROID — the
    physical sheath edge. Geometry (normal, centroid reference point) is
    cheap and stays per-particle in push_boris_3d, so the 2D-specific
@@ -418,17 +473,31 @@ void Pusher::build_sheath_cache_entry_3d(int midx, SheathElemCache &C)
   auto *pd = dynamic_cast<FixBackground *>(modify->fix[pusher_plasma_fidx]);
   if (!pd) return;
 
-  // Plasma at the triangle centroid (sheath-edge conditions).
+  // Plasma at the triangle centroid (sheath-edge conditions), retried a few
+  // small steps along the plasma-side normal when the centroid sits on the
+  // edge of the plasma mesh and the lookup returns zero (see 2-D twin).
   PlasmaFileParams pf = query_plasma_from_fix(pd, xmid, 3,
                                               domain->axisymmetric);
+  double xq[3] = {xmid[0], xmid[1], xmid[2]};   // accepted query point
+  {
+    static const double retry_m[] = {2.5e-4, 1.0e-3, 3.0e-3};
+    for (double delta : retry_m) {
+      if (pf.temp_e > 0.0 && pf.dens_e > 0.0) break;
+      xq[0] = xmid[0] + nx * delta; xq[1] = xmid[1] + ny * delta;
+      xq[2] = xmid[2] + nz * delta;
+      pf = query_plasma_from_fix(pd, xq, 3, domain->axisymmetric);
+    }
+  }
   const double te = pf.temp_e, ti = pf.temp_i, ne = pf.dens_e;
 
-  // B at the centroid via the FULL point query (mesh -> equilibrium ->
-  // constant/bcart); the (R,Z)-only bfield_at overload cannot serve a
-  // Cartesian bcart field, which silently deactivated the sheath here.
-  MagneticFieldFileDataParams Bq = pd->query_bfield_at_point(xmid);
-  const double rx = xmid[0] - pd->column_x0;
-  const double ry = xmid[1] - pd->column_y0;
+  // B via the FULL point query (mesh -> equilibrium -> constant/bcart) at
+  // the SAME accepted point as the plasma, so a mesh-only B field does not
+  // miss a centroid that sits on the mesh edge. The (R,Z)-only bfield_at
+  // overload cannot serve a Cartesian bcart field, which silently
+  // deactivated the sheath here before.
+  MagneticFieldFileDataParams Bq = pd->query_bfield_at_point(xq);
+  const double rx = xq[0] - pd->column_x0;
+  const double ry = xq[1] - pd->column_y0;
   const double rxy = std::sqrt(rx*rx + ry*ry);
   double bvec[3];
   if (rxy > 1.0e-20) {
@@ -448,10 +517,9 @@ void Pusher::build_sheath_cache_entry_3d(int midx, SheathElemCache &C)
   SheathModels::ChoduraMetrics cm =
     SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
 
-  C.d_max  = sheath_auto_dmax(te, ti, ne, bmag, cm.alpha_deg,
-                              update->sheath_mD_amu, update->sheath_dmax);
-  C.coeffs = SheathModels::sheath_prepare_coulette_manfredi(
-                 te, ti, ne, bmag, cm.alpha_deg, update->sheath_mD_amu, 0.0);
+  C.coeffs = SheathModels::sheath_prepare(te, ti, ne, bmag, cm.alpha_deg,
+                                          update->sheath_mD_amu, 0.0);
+  C.d_max  = (update->sheath_dmax > 0.0) ? update->sheath_dmax : C.coeffs.mps_end_m;
   C.phi_total = SheathModels::sheath_phi_at_distance(C.coeffs, 0.0);
   C.state = 1;
 }
@@ -460,9 +528,9 @@ void Pusher::build_sheath_cache_entry_3d(int midx, SheathElemCache &C)
    Boris pusher for 2D (x,y) positions with full 3-component velocity
 ------------------------------------------------------------------------- */
 
-void Pusher::push_boris_2d(int i, int icell, double dt,
-                           double *x, double *v, double *xnew,
-                           double charge, double mass)
+void Pusher::push_boris_2d_impl(int i, int icell, double dt,
+                                double *x, double *v, double *xnew,
+                                double charge, double mass)
 {
   if (mass <= 0.0) error->all(FLERR, "Boris pusher requires positive particle mass");
   // skip mixture (dust grains): pure advection even when charged
@@ -484,6 +552,9 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
   const double qm = (charge * update->echarge) / mass;
   const int nsub = (pusher_subcycles > 0) ? pusher_subcycles : 1;
   const double dt_sub = dt / static_cast<double>(nsub);
+  StoredPusherForces stored_forces(
+    store_electric_plasma, store_electric_sheath, store_magnetic,
+    i, mass, update->dt);
 
   const int dim = domain->dimension;
   const bool axi = domain->axisymmetric;
@@ -583,7 +654,7 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
   }
 
   // --- Pre-fetch sheath data for the spatial-sheath E-field. Geometry,
-  //     plasma and the derived Coulette-Manfredi coefficients are constant
+  //     plasma and the derived sheath coefficients are constant
   //     across subcycles; for a static fix-background plasma they are also
   //     constant per wall element across the whole run, so they come from a
   //     per-element cache (build once, reuse for every near-wall particle).
@@ -622,8 +693,7 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
           int m = static_cast<int>(cs[j]);
           if (!(surf->lines[m].mask & sbit)) continue;
           Surf::Line *ln = &surf->lines[m];
-          const double d = std::fabs((x[0]-ln->p1[0])*ln->norm[0] +
-                                     (x[1]-ln->p1[1])*ln->norm[1]);
+          const double d = Geometry::distsq_point_line(x, ln->p1, ln->p2);
           if (d < best_d) { best_d = d; best_m = m; }
         }
         if (best_m >= 0) midx = best_m;
@@ -695,12 +765,9 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
           SheathModels::ChoduraMetrics cm =
             SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
           const double sh_alpha_deg = cm.alpha_deg;
-          sh_d_max = sheath_auto_dmax(sh_te, sh_ti, sh_ne, sh_bmag,
-                                      sh_alpha_deg, update->sheath_mD_amu,
-                                      update->sheath_dmax);
-          sh_coeffs = SheathModels::sheath_prepare_coulette_manfredi(
-                          sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
-                          update->sheath_mD_amu, 0.0);
+          sh_coeffs = SheathModels::sheath_prepare(sh_te, sh_ti, sh_ne, sh_bmag,
+                                                   sh_alpha_deg, update->sheath_mD_amu, 0.0);
+          sh_d_max = (update->sheath_dmax > 0.0) ? update->sheath_dmax : sh_coeffs.mps_end_m;
           sh_phi_total = SheathModels::sheath_phi_at_distance(sh_coeffs, 0.0);
           sh_active = 1;
         }
@@ -715,6 +782,8 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
   // product, always recomputed. The signed distance seeds the running
   // d used by the spatial-mode potential impulse in the subcycle loop.
   double sh_d_cur = 0.0;
+  double sh_geom_x_cur[3] = {xcur[0], xcur[1], 0.0};
+  double sh_geom_d_cur = 1.0e20;
   if (sh_active) {
     double R0 = 0.0, Z0 = 0.0;
     const double xyz0[3] = {xcur[0], xcur[1], 0.0};
@@ -722,7 +791,10 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
     const double d0 = (R0 - sh_sR)*sh_nR + (Z0 - sh_sZ)*sh_nZ;
     sh_d0_sign = (d0 >= 0.0) ? 1.0 : -1.0;
     sh_d_cur = d0;
-    sheath_diag_nactive++;
+    Surf::Line *ln = &surf->lines[sh_midx];
+    sh_geom_d_cur = std::sqrt(
+        Geometry::distsq_point_line(sh_geom_x_cur, ln->p1, ln->p2));
+    if (sh_geom_d_cur <= sh_d_max) sheath_diag_nactive++;
   }
 
   // --- Sheath BOUNDARY mode: sub-grid potential barrier (prompt redep) ---
@@ -737,13 +809,16 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
   // sheath band — a vn-sign re-arm would charge oblique-field ions
   // repeatedly, since normal gyro-velocity flips sign inside the band.
   // barrier engages only inside the sheath band (see boris3D twin)
+  const double v_before_boundary_sheath[3] = {
+    vcur[0], vcur[1], vcur[2]
+  };
   if (update->sheath_boundary && sh_active && update->sheath_paid_custom >= 0 &&
-      sh_d0_sign > 0.0 && sh_d_cur > sh_d_max) {
+      sh_d0_sign > 0.0 && sh_geom_d_cur > sh_d_max) {
     int *st = particle->eivec[particle->ewhich[update->sheath_paid_custom]];
     if (st) st[i] = SH_OUTSIDE;   // verified band exit: transit complete
   }
   if (update->sheath_boundary && sh_active && sh_d0_sign > 0.0 &&
-      sh_d_cur <= sh_d_max) {
+      sh_geom_d_cur <= sh_d_max && sh_d_cur <= sh_d_max) {
     // unified evaluator (cache path); prefetch value as fallback
     double phi_here = sheath_phi_wall(sh_midx, 0.0);
     if (phi_here < 0.0) phi_here = sh_phi_total;
@@ -778,6 +853,14 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
                                        0.0, vcur[0], vcur[1], vcur[2]);
     }
     }
+  }
+  if (stored_forces.stores_sheath()) {
+    const double dv_sheath[3] = {
+      vcur[0] - v_before_boundary_sheath[0],
+      vcur[1] - v_before_boundary_sheath[1],
+      vcur[2] - v_before_boundary_sheath[2]
+    };
+    stored_forces.add_sheath_dv(dv_sheath);
   }
 
   const double Brhs[3] = {B[0], B[2], B[1]};
@@ -825,8 +908,33 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
     double vR = 0.0, vZ = 0.0, vphi = 0.0;
     OpenEdge::sparta_v_to_RZphi(vcur, dim, axi, 0.0, vR, vZ, vphi);
     double vrhs[3] = {vR, vphi, vZ};
+    const double vrhs_before[3] = {vrhs[0], vrhs[1], vrhs[2]};
 
     BorisGrid::push_velocity(qm, dt_sub, Erhs, Brhs, vrhs);
+
+    if (stored_forces.stores_boris()) {
+      // Boris applies two explicit E half-kicks; their combined impulse is
+      // q E dt. The remaining exact momentum change is the magnetic rotation.
+      const double dv_e_rhs[3] = {
+        qm * Erhs[0] * dt_sub,
+        qm * Erhs[1] * dt_sub,
+        qm * Erhs[2] * dt_sub
+      };
+      const double dv_b_rhs[3] = {
+        vrhs[0] - vrhs_before[0] - dv_e_rhs[0],
+        vrhs[1] - vrhs_before[1] - dv_e_rhs[1],
+        vrhs[2] - vrhs_before[2] - dv_e_rhs[2]
+      };
+      double dv_e_slot[3], dv_b_slot[3];
+      OpenEdge::RZphi_force_to_sparta(
+        dv_e_rhs[0], dv_e_rhs[2], dv_e_rhs[1], dim, axi, 0.0,
+        dv_e_slot[0], dv_e_slot[1], dv_e_slot[2]);
+      OpenEdge::RZphi_force_to_sparta(
+        dv_b_rhs[0], dv_b_rhs[2], dv_b_rhs[1], dim, axi, 0.0,
+        dv_b_slot[0], dv_b_slot[1], dv_b_slot[2]);
+      stored_forces.add_plasma_dv(dv_e_slot);
+      stored_forces.add_magnetic_dv(dv_b_slot);
+    }
 
     OpenEdge::RZphi_force_to_sparta(vrhs[0], vrhs[2], vrhs[1], dim, axi, 0.0,
                                      vcur[0], vcur[1], vcur[2]);
@@ -847,12 +955,27 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
     // matches the position update above exactly in planar 2D; in axi
     // (position applied by the outer move) it is the same straight-line
     // prediction the move will take.
+    const double v_before_spatial_sheath[3] = {
+      vcur[0], vcur[1], vcur[2]
+    };
+    double sh_geom_x_new[3] = {
+      sh_geom_x_cur[0] + vcur[0] * dt_sub,
+      sh_geom_x_cur[1] + vcur[1] * dt_sub,
+      0.0
+    };
+    double sh_geom_d_new = sh_geom_d_cur;
+    if (sh_active) {
+      Surf::Line *ln = &surf->lines[sh_midx];
+      sh_geom_d_new = std::sqrt(
+          Geometry::distsq_point_line(sh_geom_x_new, ln->p1, ln->p2));
+    }
     if (sh_active && !update->sheath_boundary) {
       const double vn = vrhs[0]*sh_nR + vrhs[2]*sh_nZ;
       const double d_old = sh_d_cur;
       const double d_new = d_old + vn * dt_sub;
       sh_d_cur = d_new;
-      if (std::min(d_old, d_new) < sh_d_max) {
+      if (std::min(sh_geom_d_cur, sh_geom_d_new) < sh_d_max &&
+          std::min(d_old, d_new) < sh_d_max) {
         const double phi_old_geo = SheathModels::sheath_phi_at_distance(
             sh_coeffs, std::max(d_old, 0.0));
         // first engagement this move: phi_old = last move's stored phi, so
@@ -863,6 +986,12 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
             sh_coeffs, std::max(d_new, 0.0));
         double dKE_J =
             std::fabs(charge) * update->echarge * (phi_new - phi_old);
+        if (!(std::isfinite(dKE_J) && std::isfinite(vn) && std::isfinite(phi_new) &&
+              std::isfinite(phi_old) && std::isfinite(d_old) && std::isfinite(d_new)))
+          sheath_state_abort("sheath potential update produced a non-finite value",
+                             i, isub, sh_midx, sh_d_max, sh_phi_total, sh_coeffs,
+                             d_old, d_new, vn, phi_old, phi_new, dKE_J, charge, mass,
+                             sh_bank_vec ? sh_bank_vec[i] : 0.0);
         // lifetime ledger cap: net energy given may never exceed Z e phi_tot
         if (sh_bank_vec && dKE_J > 0.0) {
           const double room =
@@ -887,7 +1016,20 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
               xcur[0] -= (d_new - d_old) * sh_nR;
               xcur[1] -= (d_new - d_old) * sh_nZ;
             }
+            Surf::Line *ln = &surf->lines[sh_midx];
+            const double nmag = std::hypot(ln->norm[0], ln->norm[1]);
+            if (nmag > 0.0) {
+              sh_geom_x_new[0] -= (d_new - d_old) * ln->norm[0] / nmag;
+              sh_geom_x_new[1] -= (d_new - d_old) * ln->norm[1] / nmag;
+              sh_geom_d_new = std::sqrt(Geometry::distsq_point_line(
+                  sh_geom_x_new, ln->p1, ln->p2));
+            }
           }
+          if (!std::isfinite(vn_new))
+            sheath_state_abort("sheath velocity update produced a non-finite value",
+                               i, isub, sh_midx, sh_d_max, sh_phi_total, sh_coeffs,
+                               d_old, d_new, vn, phi_old, phi_new, dKE_J, charge, mass,
+                               sh_bank_vec ? sh_bank_vec[i] : 0.0);
           const double dvn = vn_new - vn;
           vrhs[0] += dvn * sh_nR;
           vrhs[2] += dvn * sh_nZ;
@@ -905,6 +1047,17 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
           sh_phiprev_vec[i] = 1.0 + SheathModels::sheath_phi_at_distance(
               sh_coeffs, std::max(sh_d_cur, 0.0));
       } else if (sh_phiprev_vec) sh_phiprev_vec[i] = 1.0;
+    }
+    sh_geom_x_cur[0] = sh_geom_x_new[0];
+    sh_geom_x_cur[1] = sh_geom_x_new[1];
+    sh_geom_d_cur = sh_geom_d_new;
+    if (stored_forces.stores_sheath()) {
+      const double dv_sheath[3] = {
+        vcur[0] - v_before_spatial_sheath[0],
+        vcur[1] - v_before_spatial_sheath[1],
+        vcur[2] - v_before_spatial_sheath[2]
+      };
+      stored_forces.add_sheath_dv(dv_sheath);
     }
 
     if (pusher_dump_flag && (update->ntimestep % pusher_dump_every == 0) && i == 0) {
@@ -1016,9 +1169,9 @@ void Pusher::push_boris_2d(int i, int icell, double dt,
    Boris pusher for 3D cartesian coordinates
 ------------------------------------------------------------------------- */
 
-void Pusher::push_boris_3d(int i, int icell, double dt,
-                            double *x, double *v, double *xnew,
-                            double charge, double mass)
+void Pusher::push_boris_3d_impl(int i, int icell, double dt,
+                                 double *x, double *v, double *xnew,
+                                 double charge, double mass)
 {
   if (mass <= 0.0) error->all(FLERR, "Boris pusher requires positive particle mass");
 
@@ -1045,6 +1198,9 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
 
   double xcur[3] = {x[0], x[1], x[2]};
   double vcur[3] = {v[0], v[1], v[2]};
+  StoredPusherForces stored_forces(
+    store_electric_plasma, store_electric_sheath, store_magnetic,
+    i, mass, update->dt);
 
   // --- Pre-fetch per-particle sheath data from grid-cached computes ---
   // Grid cell's cached nearest-surface geometry and plasma parameters.
@@ -1095,14 +1251,12 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
           if (dim == 2) {
             if (!(surf->lines[m].mask & sbit)) continue;
             Surf::Line *ln = &surf->lines[m];
-            d = std::fabs((x[0]-ln->p1[0])*ln->norm[0] +
-                          (x[1]-ln->p1[1])*ln->norm[1]);
+            d = Geometry::distsq_point_line(x, ln->p1, ln->p2);
           } else {
             if (!(surf->tris[m].mask & sbit)) continue;
             Surf::Tri *tr = &surf->tris[m];
-            d = std::fabs((x[0]-tr->p1[0])*tr->norm[0] +
-                          (x[1]-tr->p1[1])*tr->norm[1] +
-                          (x[2]-tr->p1[2])*tr->norm[2]);
+            d = Geometry::distsq_point_tri(
+                x, tr->p1, tr->p2, tr->p3, tr->norm);
           }
           if (d < best_d) { best_d = d; best_m = m; }
         }
@@ -1138,7 +1292,7 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
         }
 
         // ---- Cached path (static fix-background plasma): d_max and the
-        // Coulette-Manfredi coefficients come from the per-element cache,
+        // Sheath coefficients come from the per-element cache,
         // built once at the triangle centroid. Skips the ~16-field plasma
         // query + B query + Chodura prep on EVERY particle-move — the
         // dominant sheath cost in 3D. Mirrors the push_boris_2d cache.
@@ -1225,7 +1379,7 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
           }
 
           // require B > 0 like the 2D fallback and the cache builders:
-          // with B = 0, sheath_auto_dmax's rho_i blows up and a spurious
+          // with B = 0, the sheath extent (10 rho_i) blows up and a spurious
           // alpha = 90 sheath would engulf the whole domain
           sh_active = (sh_bmag > 0.0);
         }
@@ -1239,27 +1393,34 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
   // reverse-field deceleration that causes energy loss.
   double sh_d0_sign = 0.0;
   double sh_d0 = 0.0;
+  double sh_geom_d0 = 1.0e20;
   if (sh_active) {
     sh_d0 =
       (xcur[0] - sh_sref[0]) * sh_nx
     + (xcur[1] - sh_sref[1]) * sh_ny
     + (xcur[2] - sh_sref[2]) * sh_nz;
     sh_d0_sign = (sh_d0 >= 0.0) ? 1.0 : -1.0;
-    sheath_diag_nactive++;   // 3D near-wall count (2D counts in its own block)
+    if (domain->dimension == 2) {
+      Surf::Line *ln = &surf->lines[sh_midx];
+      sh_geom_d0 = std::sqrt(
+          Geometry::distsq_point_line(xcur, ln->p1, ln->p2));
+    } else {
+      Surf::Tri *tr = &surf->tris[sh_midx];
+      sh_geom_d0 = std::sqrt(Geometry::distsq_point_tri(
+          xcur, tr->p1, tr->p2, tr->p3, tr->norm));
+    }
   }
 
-  // Physics-derived sheath cut-off distance and Coulette-Manfredi
+  // Physics-derived sheath cut-off distance and Borodkina sheath
   // coefficients, hoisted out of the subcycle loop (Te, ne, B, alpha are
   // constant across subcycles). Skipped when the per-element cache already
   // supplied both (sh_from_cache).
   if (sh_active && !sh_from_cache) {
-    sh_d_max = sheath_auto_dmax(sh_te, sh_ti, sh_ne, sh_bmag,
-                                sh_alpha_deg, update->sheath_mD_amu,
-                                update->sheath_dmax);
-    sh_coeffs = SheathModels::sheath_prepare_coulette_manfredi(
-                    sh_te, sh_ti, sh_ne, sh_bmag, sh_alpha_deg,
-                    update->sheath_mD_amu, 0.0);
+    sh_coeffs = SheathModels::sheath_prepare(sh_te, sh_ti, sh_ne, sh_bmag,
+                                             sh_alpha_deg, update->sheath_mD_amu, 0.0);
+    sh_d_max = (update->sheath_dmax > 0.0) ? update->sheath_dmax : sh_coeffs.mps_end_m;
   }
+  if (sh_active && sh_geom_d0 <= sh_d_max) sheath_diag_nactive++;
 
   // Per-particle sheath trace (parity debugging): OE_SHEATH_TRACE_ID=<id>
   static const long sh_trace_id =
@@ -1303,13 +1464,16 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
   // re-armed only when the particle actually LEAVES the sheath band —
   // with oblique B the normal gyro-velocity changes sign inside the band
   // and a vn-sign re-arm would charge the barrier repeatedly.
+  const double v_before_boundary_sheath[3] = {
+    vcur[0], vcur[1], vcur[2]
+  };
   if (update->sheath_boundary && sh_active && update->sheath_paid_custom >= 0 &&
-      sh_d0_sign > 0.0 && sh_d0 > sh_d_max) {
+      sh_d0_sign > 0.0 && sh_geom_d0 > sh_d_max) {
     int *st = particle->eivec[particle->ewhich[update->sheath_paid_custom]];
     if (st) st[i] = SH_OUTSIDE;   // verified band exit: transit complete
   }
   if (update->sheath_boundary && sh_active && sh_d0_sign > 0.0 &&
-      sh_d0 <= sh_d_max) {
+      sh_geom_d0 <= sh_d_max && sh_d0 <= sh_d_max) {
     // unified evaluator (cache path); per-particle coeffs fallback for
     // non-static plasma sources
     double sh_phi_total = sheath_phi_wall(sh_midx, 0.0);
@@ -1344,6 +1508,14 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
         vcur[2] -= dvn * sh_nz;
       }
     }
+  }
+  if (stored_forces.stores_sheath()) {
+    const double dv_sheath[3] = {
+      vcur[0] - v_before_boundary_sheath[0],
+      vcur[1] - v_before_boundary_sheath[1],
+      vcur[2] - v_before_boundary_sheath[2]
+    };
+    stored_forces.add_sheath_dv(dv_sheath);
   }
 
   // Cache B-field once via point query at initial position.
@@ -1431,8 +1603,23 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
     }
 
     double xold[3] = {xcur[0], xcur[1], xcur[2]};
+    const double v_before_boris[3] = {vcur[0], vcur[1], vcur[2]};
 
     BorisGrid::push_velocity(qm, dt_sub, E, B, vcur);
+    if (stored_forces.stores_boris()) {
+      const double dv_e[3] = {
+        qm * E[0] * dt_sub,
+        qm * E[1] * dt_sub,
+        qm * E[2] * dt_sub
+      };
+      const double dv_b[3] = {
+        vcur[0] - v_before_boris[0] - dv_e[0],
+        vcur[1] - v_before_boris[1] - dv_e[1],
+        vcur[2] - v_before_boris[2] - dv_e[2]
+      };
+      stored_forces.add_plasma_dv(dv_e);
+      stored_forces.add_magnetic_dv(dv_b);
+    }
     xcur[0] += vcur[0] * dt_sub;
     xcur[1] += vcur[1] * dt_sub;
     xcur[2] += vcur[2] * dt_sub;
@@ -1445,6 +1632,9 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
     // Outbound ions that cannot climb the remaining potential reflect
     // elastically at the turning point. Skipped when both endpoints are
     // beyond d_max (phi variation there is negligible and symmetric).
+    const double v_before_spatial_sheath[3] = {
+      vcur[0], vcur[1], vcur[2]
+    };
     if (sh_active && !update->sheath_kick && !update->sheath_boundary) {
       const double d_old =
         (xold[0] - sh_sref[0]) * sh_nx
@@ -1454,7 +1644,22 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
         (xcur[0] - sh_sref[0]) * sh_nx
       + (xcur[1] - sh_sref[1]) * sh_ny
       + (xcur[2] - sh_sref[2]) * sh_nz;
-      if (std::min(d_old, d_new) < sh_d_max) {
+      double geom_d_old, geom_d_new;
+      if (domain->dimension == 2) {
+        Surf::Line *ln = &surf->lines[sh_midx];
+        geom_d_old = std::sqrt(
+            Geometry::distsq_point_line(xold, ln->p1, ln->p2));
+        geom_d_new = std::sqrt(
+            Geometry::distsq_point_line(xcur, ln->p1, ln->p2));
+      } else {
+        Surf::Tri *tr = &surf->tris[sh_midx];
+        geom_d_old = std::sqrt(Geometry::distsq_point_tri(
+            xold, tr->p1, tr->p2, tr->p3, tr->norm));
+        geom_d_new = std::sqrt(Geometry::distsq_point_tri(
+            xcur, tr->p1, tr->p2, tr->p3, tr->norm));
+      }
+      if (std::min(geom_d_old, geom_d_new) < sh_d_max &&
+          std::min(d_old, d_new) < sh_d_max) {
         const double phi_old_geo = SheathModels::sheath_phi_at_distance(
             sh_coeffs, std::max(d_old, 0.0));
         // first engagement this move: phi_old = last move's stored phi, so
@@ -1465,6 +1670,12 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
             sh_coeffs, std::max(d_new, 0.0));
         double dKE_J =
             std::fabs(charge) * update->echarge * (phi_new - phi_old);
+        if (!(std::isfinite(dKE_J) && std::isfinite(phi_new) &&
+              std::isfinite(phi_old) && std::isfinite(d_old) && std::isfinite(d_new)))
+          sheath_state_abort("sheath potential update produced a non-finite value",
+                             i, isub, sh_midx, sh_d_max, sh_phi_tot_sp, sh_coeffs,
+                             d_old, d_new, 0.0, phi_old, phi_new, dKE_J, charge, mass,
+                             sh_bank_vec ? sh_bank_vec[i] : 0.0);
         if (sh_trace)
           printf("SHTRACE cpu step %lld sub %d eng: d_old=%.9e d_new=%.9e "
                  "phi_old=%.9e phi_new=%.9e dKE=%.9e bank=%.9e\n",
@@ -1497,6 +1708,11 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
             sh_d_fin = d_old;
             sheath_diag_nreflect++;   // spatial-mode turning point
           }
+          if (!std::isfinite(vn_new))
+            sheath_state_abort("sheath velocity update produced a non-finite value",
+                               i, isub, sh_midx, sh_d_max, sh_phi_tot_sp, sh_coeffs,
+                               d_old, d_new, vn, phi_old, phi_new, dKE_J, charge, mass,
+                               sh_bank_vec ? sh_bank_vec[i] : 0.0);
           const double dvn = vn_new - vn;
           vcur[0] += dvn * sh_nx;
           vcur[1] += dvn * sh_ny;
@@ -1513,6 +1729,14 @@ void Pusher::push_boris_3d(int i, int icell, double dt,
           sh_phiprev_vec[i] = 1.0 + SheathModels::sheath_phi_at_distance(
               sh_coeffs, std::max(sh_d_fin, 0.0));
       } else if (sh_phiprev_vec) sh_phiprev_vec[i] = 1.0;
+    }
+    if (stored_forces.stores_sheath()) {
+      const double dv_sheath[3] = {
+        vcur[0] - v_before_spatial_sheath[0],
+        vcur[1] - v_before_spatial_sheath[1],
+        vcur[2] - v_before_spatial_sheath[2]
+      };
+      stored_forces.add_sheath_dv(dv_sheath);
     }
 
     if (pusher_dump_flag && (update->ntimestep % pusher_dump_every == 0) && i == 0) {
@@ -1773,9 +1997,9 @@ bool Pusher::sample_gca_fields(const double *xpos, int icell, int i,
    where L_B = B / |grad B| and rho_L = v_perp / (|q/m| * B)
 ------------------------------------------------------------------------- */
 
-void Pusher::push_hybrid_3d(int i, int icell, double dt,
-                              double *x, double *v, double *xnew,
-                              double charge, double mass)
+void Pusher::push_hybrid_3d_impl(int i, int icell, double dt,
+                                  double *x, double *v, double *xnew,
+                                  double charge, double mass)
 {
   if (mass <= 0.0) error->all(FLERR, "Hybrid pusher requires positive particle mass");
 
@@ -2207,6 +2431,12 @@ void Pusher::push_hybrid_3d(int i, int icell, double dt,
 
 void Pusher::init()
 {
+  store_electric_plasma = find_store_force(
+    modify, FixStoreForce::ELECTRIC_PLASMA);
+  store_electric_sheath = find_store_force(
+    modify, FixStoreForce::ELECTRIC_SHEATH);
+  store_magnetic = find_store_force(modify, FixStoreForce::MAGNETIC);
+
   if (pusher_mode != PUSHER_HYBRID && pusher_mode != PUSHER_GCA) return;
 
   // Axi: the GCA path advances the guiding center in cylindrical (R,Z)
@@ -2296,7 +2526,7 @@ void Pusher::register_gca_custom()
 
 /* ----------------------------------------------------------------------
    Unified sheath wall potential: ONE evaluator for the inbound wall kick
-   and the outbound barrier — Coulette-Manfredi base + RF waveform at the
+   and the outbound barrier — Borodkina sheath base + RF waveform at the
    exact event time, from the per-element cache. Divergent per-site
    formulas passed the static test only because they reduce to the same
    floating potential there; RF breaks that silently.
@@ -2645,4 +2875,102 @@ void Pusher::global_keyword(int narg, char **arg, int &iarg)
         error->all(FLERR, "global pusher sheath kick|boundary|spatial requires geom <ID>");
     } else break;  // next keyword belongs to a different global option
   }
+}
+
+/* ----------------------------------------------------------------------
+   Finite-state validation around every push (Boris 2-D/3-D, hybrid/GCA).
+   A non-finite position, velocity or endpoint, a non-positive or
+   non-finite dt or mass, or a non-finite charge-to-mass ratio aborts the
+   run with a report instead of handing a poisoned marker to the mover,
+   where it can spin the advection loop. Diagnosis first: markers are not
+   silently discarded.
+------------------------------------------------------------------------- */
+
+void Pusher::validate_push_state(const char *who, int i, int icell, double dt,
+                                 const double *x, const double *v,
+                                 const double *xnew, double charge, double mass)
+{
+  const bool ok =
+    std::isfinite(x[0]) && std::isfinite(x[1]) && std::isfinite(x[2]) &&
+    std::isfinite(v[0]) && std::isfinite(v[1]) && std::isfinite(v[2]) &&
+    std::isfinite(xnew[0]) && std::isfinite(xnew[1]) && std::isfinite(xnew[2]) &&
+    std::isfinite(dt) && dt > 0.0 && std::isfinite(mass) && mass > 0.0 &&
+    std::isfinite(charge) && std::isfinite(charge * update->echarge / mass);
+  if (ok) return;
+  Particle::OnePart *p = &particle->particles[i];
+  const char *spname = (p->ispecies >= 0 && p->ispecies < particle->nspecies)
+    ? particle->species[p->ispecies].id : "?";
+  char buf[1536];
+  int n = snprintf(buf, sizeof(buf),
+    "\n[pusher-guard] %s: non-finite or invalid particle state\n"
+    "  rank %d step " BIGINT_FORMAT " particle index %d id %d species %d (%s) flag %d icell %d\n"
+    "  dt %.17g mass %.17g charge %.17g q/m %.17g\n"
+    "  x    = (%.17g, %.17g, %.17g)\n"
+    "  v    = (%.17g, %.17g, %.17g)\n"
+    "  xnew = (%.17g, %.17g, %.17g)\n",
+    who, comm->me, update->ntimestep, i, p->id, p->ispecies, spname, p->flag, icell,
+    dt, mass, charge, charge * update->echarge / mass,
+    x[0], x[1], x[2], v[0], v[1], v[2], xnew[0], xnew[1], xnew[2]);
+  if (icell >= 0 && icell < grid->nlocal + grid->nghost)
+    n += snprintf(buf+n, sizeof(buf)-n, "  cell id " CELLINT_FORMAT " owner %d\n",
+                  grid->cells[icell].id, grid->cells[icell].proc);
+  if (update->sheath_bank_custom >= 0) {
+    double *bank = particle->edvec[particle->ewhich[update->sheath_bank_custom]];
+    if (bank) n += snprintf(buf+n, sizeof(buf)-n, "  sheath energy bank %.6e J\n", bank[i]);
+  }
+  fputs(buf, stderr); fflush(stderr);
+  if (screen && screen != stderr) { fputs(buf, screen); fflush(screen); }
+  if (logfile) { fputs(buf, logfile); fflush(logfile); }
+  error->one(FLERR, "Pusher guard triggered (see [pusher-guard] report above)");
+}
+
+void Pusher::sheath_state_abort(const char *why, int i, int isub, int midx,
+                                double d_max, double phi_total,
+                                const SheathModels::SheathEmagCoeffs &c,
+                                double d_old, double d_new, double vn,
+                                double phi_old, double phi_new, double dKE_J,
+                                double charge, double mass, double bank)
+{
+  Particle::OnePart *p = &particle->particles[i];
+  char buf[1536];
+  snprintf(buf, sizeof(buf),
+    "\n[pusher-guard] %s\n"
+    "  rank %d step " BIGINT_FORMAT " subcycle %d particle index %d id %d species %d icell %d\n"
+    "  wall element %d d_max %.6e phi_total %.6e V  coeffs: lambdaD %.6e "
+    "lmps %.6e rho_i %.6e phi_total_eV %.6e fd %.6e\n"
+    "  d_old %.17g d_new %.17g vn %.17g phi_old %.17g phi_new %.17g dKE_J %.17g\n"
+    "  charge %.17g mass %.17g energy bank %.6e J\n"
+    "  x (%.9g, %.9g, %.9g) v (%.9g, %.9g, %.9g)\n",
+    why, comm->me, update->ntimestep, isub, i, p->id, p->ispecies, p->icell,
+    midx, d_max, phi_total, c.lambdaD_m, c.lmps_m, c.rho_i_m, c.phi_total_eV, c.fd,
+    d_old, d_new, vn, phi_old, phi_new, dKE_J, charge, mass, bank,
+    p->x[0], p->x[1], p->x[2], p->v[0], p->v[1], p->v[2]);
+  fputs(buf, stderr); fflush(stderr);
+  if (screen && screen != stderr) { fputs(buf, screen); fflush(screen); }
+  if (logfile) { fputs(buf, logfile); fflush(logfile); }
+  error->one(FLERR, "Pusher guard triggered (see [pusher-guard] report above)");
+}
+
+void Pusher::push_boris_2d(int i, int icell, double dt, double *x, double *v,
+                           double *xnew, double charge, double mass)
+{
+  validate_push_state("push_boris_2d (entry)", i, icell, dt, x, v, xnew, charge, mass);
+  push_boris_2d_impl(i, icell, dt, x, v, xnew, charge, mass);
+  validate_push_state("push_boris_2d (exit)", i, icell, dt, x, v, xnew, charge, mass);
+}
+
+void Pusher::push_boris_3d(int i, int icell, double dt, double *x, double *v,
+                           double *xnew, double charge, double mass)
+{
+  validate_push_state("push_boris_3d (entry)", i, icell, dt, x, v, xnew, charge, mass);
+  push_boris_3d_impl(i, icell, dt, x, v, xnew, charge, mass);
+  validate_push_state("push_boris_3d (exit)", i, icell, dt, x, v, xnew, charge, mass);
+}
+
+void Pusher::push_hybrid_3d(int i, int icell, double dt, double *x, double *v,
+                            double *xnew, double charge, double mass)
+{
+  validate_push_state("push_hybrid_3d (entry)", i, icell, dt, x, v, xnew, charge, mass);
+  push_hybrid_3d_impl(i, icell, dt, x, v, xnew, charge, mass);
+  validate_push_state("push_hybrid_3d (exit)", i, icell, dt, x, v, xnew, charge, mass);
 }

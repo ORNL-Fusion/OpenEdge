@@ -227,6 +227,7 @@ set of fixes, each referencing the background fix:
 </P>
 <UL><LI><A HREF = "global.html">global pusher</A> for the Boris or guiding-center mover and the sheath model
 <LI><A HREF = "fix_coulomb_background.html">fix coulomb/background</A>, <A HREF = "fix_force_thermal.html">fix force/thermal</A>, <A HREF = "fix_cross_field_diffusion.html">fix cross_field_diffusion</A> for forces on ions
+<LI><A HREF = "fix_store_force.html">fix store/force</A> to dump those velocity-pusher mechanisms as separate per-particle vectors
 <LI><A HREF = "fix_volume_chem_adas.html">fix volume/chem/adas</A> for atomic processes
 <LI><A HREF = "surf_collide.html">surf_collide</A> and <A HREF = "surf_react.html">surf_react</A> for wall models, attached with <A HREF = "surf_modify.html">surf_modify</A>
 <LI><A HREF = "fix_surface_emit_recycle.html">fix surface/emit/recycle</A>, <A HREF = "fix_surface_emit_source.html">fix surface/emit/source</A>, <A HREF = "fix_surface_emit_puff.html">fix surface/emit/puff</A> for wall and gas sources
@@ -301,7 +302,7 @@ section</A> lists all commands alphabetically.
 <A HREF = "fix_coulomb_binary.html">fix coulomb/binary</A>, <A HREF = "fix_cross_field_diffusion.html">fix cross_field_diffusion</A>,
 <A HREF = "fix_force_thermal.html">fix force/thermal</A>, <A HREF = "fix_force_gravity.html">fix force/gravity</A>,
 <A HREF = "fix_neutral_collide_background.html">fix neutral/collide/background</A>,
-<A HREF = "fix_reflect_psi.html">fix reflect/psi</A>, <A HREF = "fix_particle_weight.html">fix particle/weight</A>
+<A HREF = "fix_reflect_psi.html">fix reflect/psi</A>, <A HREF = "fix_particle_weight.html">fix particle/weight</A>,
 </P>
 <P>Atomic processes:
 </P>
@@ -395,12 +396,13 @@ Kokkos version are marked (k).
 <DIV ALIGN=center><TABLE  BORDER=1 >
 <TR ALIGN="center"><TD ><A HREF = "fix_ablate.html">ablate</A></TD><TD ><A HREF = "fix_adapt.html">adapt (k)</A></TD><TD ><A HREF = "fix_ambipolar.html">ambipolar (k)</A></TD><TD ><A HREF = "fix_ave_grid.html">ave/grid (k)</A></TD><TD ><A HREF = "fix_ave_histo.html">ave/histo (k)</A></TD></TR>
 <TR ALIGN="center"><TD ><A HREF = "fix_ave_histo.html">ave/histo/weight (k)</A></TD><TD ><A HREF = "fix_ave_surf.html">ave/surf</A></TD><TD ><A HREF = "fix_ave_time.html">ave/time</A></TD><TD ><A HREF = "fix_background.html">background</A></TD><TD ><A HREF = "fix_balance.html">balance (k)</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "fix_bfield_particle.html">bfield/particle</A></TD><TD ><A HREF = "fix_coulomb_background.html">coulomb/background</A></TD><TD ><A HREF = "fix_coulomb_binary.html">coulomb/binary</A></TD><TD ><A HREF = "fix_cross_field_diffusion.html">cross_field_diffusion</A></TD><TD ><A HREF = "fix_dt_reset.html">dt/reset (k)</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "fix_efield_particle.html">efield/particle</A></TD><TD ><A HREF = "fix_emit_face.html">emit/face (k)</A></TD><TD ><A HREF = "fix_emit_surf.html">emit/surf</A></TD><TD ><A HREF = "fix_force_gravity.html">force/gravity</A></TD><TD ><A HREF = "fix_force_thermal.html">force/thermal</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "fix_grid_check.html">grid/check (k)</A></TD><TD ><A HREF = "fix_halt.html">halt</A></TD><TD ><A HREF = "fix_move_surf.html">move/surf (k)</A></TD><TD ><A HREF = "fix_neutral_collide_background.html">neutral/collide/background</A></TD><TD ><A HREF = "fix_particle_weight.html">particle/weight</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "fix_particulate_charge.html">particulate/charge</A></TD><TD ><A HREF = "fix_particulate_drag.html">particulate/drag</A></TD><TD ><A HREF = "fix_particulate_emit.html">particulate/emit</A></TD><TD ><A HREF = "fix_particulate_thermal.html">particulate/thermal</A></TD><TD ><A HREF = "fix_print.html">print</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "fix_reflect_psi.html">reflect/psi</A></TD><TD ><A HREF = "fix_surf_temp.html">surf/temp</A></TD><TD ><A HREF = "fix_surface_emit_puff.html">surface/emit/puff</A></TD><TD ><A HREF = "fix_surface_emit_recycle.html">surface/emit/recycle</A></TD><TD ><A HREF = "fix_surface_emit_source.html">surface/emit/source</A></TD></TR>
-<TR ALIGN="center"><TD ><A HREF = "fix_surface_state_lm.html">surface/state/lm</A></TD><TD ><A HREF = "fix_temp_global_rescale.html">temp/global/rescale</A></TD><TD ><A HREF = "fix_temp_rescale.html">temp/rescale (k)</A></TD><TD ><A HREF = "fix_vibmode.html">vibmode (k)</A></TD><TD ><A HREF = "fix_volume_chem_adas.html">volume/chem/adas</A> 
+<TR ALIGN="center"><TD ><A HREF = "fix_bfield_particle.html">bfield/particle</A></TD><TD ><A HREF = "fix_coulomb_background.html">coulomb/background</A></TD><TD ><A HREF = "fix_coulomb_binary.html">coulomb/binary</A></TD><TD ><A HREF = "fix_cross_field_diffusion.html">cross_field_diffusion</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "fix_dt_reset.html">dt/reset (k)</A></TD><TD ><A HREF = "fix_efield_particle.html">efield/particle</A></TD><TD ><A HREF = "fix_emit_face.html">emit/face (k)</A></TD><TD ><A HREF = "fix_emit_surf.html">emit/surf</A></TD><TD ><A HREF = "fix_force_gravity.html">force/gravity</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "fix_force_thermal.html">force/thermal</A></TD><TD ><A HREF = "fix_grid_check.html">grid/check (k)</A></TD><TD ><A HREF = "fix_halt.html">halt</A></TD><TD ><A HREF = "fix_move_surf.html">move/surf (k)</A></TD><TD ><A HREF = "fix_neutral_collide_background.html">neutral/collide/background</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "fix_particle_weight.html">particle/weight</A></TD><TD ><A HREF = "fix_particulate_charge.html">particulate/charge</A></TD><TD ><A HREF = "fix_particulate_drag.html">particulate/drag</A></TD><TD ><A HREF = "fix_particulate_emit.html">particulate/emit</A></TD><TD ><A HREF = "fix_particulate_thermal.html">particulate/thermal</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "fix_print.html">print</A></TD><TD ><A HREF = "fix_reflect_psi.html">reflect/psi</A></TD><TD ><A HREF = "fix_store_force.html">store/force</A></TD><TD ><A HREF = "fix_surf_temp.html">surf/temp</A></TD><TD ><A HREF = "fix_surface_emit_puff.html">surface/emit/puff</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "fix_surface_emit_recycle.html">surface/emit/recycle</A></TD><TD ><A HREF = "fix_surface_emit_source.html">surface/emit/source</A></TD><TD ><A HREF = "fix_surface_state_lm.html">surface/state/lm</A></TD><TD ><A HREF = "fix_temp_global_rescale.html">temp/global/rescale</A></TD><TD ><A HREF = "fix_temp_rescale.html">temp/rescale (k)</A></TD></TR>
+<TR ALIGN="center"><TD ><A HREF = "fix_vibmode.html">vibmode (k)</A></TD><TD ><A HREF = "fix_volume_chem_adas.html">volume/chem/adas</A>
 </TD></TR></TABLE></DIV>
 
 <HR>

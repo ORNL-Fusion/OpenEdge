@@ -75,6 +75,7 @@ class NanbuScatterTable {
 
 class RanKnuth;
 class FixBackground;
+class FixStoreForce;
 
 class FixCoulombBase : public Fix {
  public:
@@ -97,6 +98,8 @@ class FixCoulombBase : public Fix {
   int use_background_;
   std::string plasma_fix_id_;
   FixBackground *pd_;
+  FixStoreForce *store_coulomb_background_;
+  FixStoreForce *store_coulomb_binary_;
 
   // mode flags set by subclass ctors
   int do_binary_;        // FixCoulombBinary sets to 1
