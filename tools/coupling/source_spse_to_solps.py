@@ -145,7 +145,7 @@ def set_b2mn_flags(run_dir, updates):
     for line in lines:
         replaced = False
         for key, val in updates.items():
-            if f"'{key}'" in line:
+            if line.lstrip().startswith(f"'{key}'"):     # not commented-out copies
                 comment = ""
                 if "#" in line:
                     comment = " # " + line.split("#", 1)[1].strip()
@@ -201,6 +201,10 @@ def main():
     conv = cfg.get("oe_convergence", {})
     rel_tol = conv.get("rel_tol", 0.02)
     window = conv.get("window", 3)
+    n_avg = int(exp.get("average_last_windows", 1))
+    # dump (xc, yc) is (R, Z) for a cartesian deck and (Z, R) for an
+    # axisymmetric one: follow the geometry the plasma file was built with
+    geometry = cfg.get("plasma_build", {}).get("geometry", "cart").lower()
 
     # -- 1/2. read dumps + convergence -------------------------------------
     files = source_dump_files(out_dir)
@@ -219,15 +223,33 @@ def main():
         print("   WARNING: int Sp dV still drifting -- run OpenEdge longer "
               "or relax rel_tol. Using the last snapshot anyway.")
 
-    # -- take the converged (last) snapshot --------------------------------
+    # -- take the converged snapshot: last one, or the mean of the last n_avg
+    # (rows aligned by cell id: per-rank dump order changes with each balance)
     step, df = read_grid_dump(files[-1])
+    df = df.sort_values("id").reset_index(drop=True)
+    if n_avg > 1:
+        stack = [df]
+        for p in files[-n_avg:-1]:
+            _, d = read_grid_dump(p)
+            d = d.sort_values("id").reset_index(drop=True)
+            if not np.array_equal(d["id"].to_numpy(), df["id"].to_numpy()):
+                sys.exit(f"cell id sets differ between {p} and {files[-1]}")
+            stack.append(d)
+        for col in (SP_COL, SE_COL):
+            df[col] = np.mean([d[col].to_numpy() for d in stack], axis=0)
+        print(f"\naveraging the last {len(stack)} dumps "
+              f"(steps {source_dump_files(out_dir)[-len(stack)].rsplit('.', 1)[1]}..{step})")
     vol = df["vol"].to_numpy()
     xc = df["xc"].to_numpy()
     yc = df["yc"].to_numpy()
+    if geometry in ("axi", "axisymmetric"):   # SPARTA axi layout: x = Z, y = R
+        xc, yc = yc, xc
+    elif geometry not in ("cart", "cartesian"):
+        sys.exit(f"plasma_build.geometry must be axi or cart, got {geometry!r}")
     Sp_tot = df[SP_COL].to_numpy() * vol      # [Li/s] per cell
     Qe_tot = df[SE_COL].to_numpy() * vol      # [W]    per cell
     intSp_oe, intQe_oe = float(Sp_tot.sum()), float(Qe_tot.sum())
-    print(f"\nusing snapshot step {step}: "
+    print(f"\nusing snapshot step {step} (geometry={geometry}): "
           f"int Sp = {intSp_oe:.6e} Li/s, int Qe = {intQe_oe:.6e} W")
 
     if check_only:

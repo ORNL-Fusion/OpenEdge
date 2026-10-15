@@ -125,16 +125,22 @@ def build_plasma(cfg, coupled, base, run_dir, plasma_out, dry=False):
                        os.path.join(HERE, "..", "converters", "convert_solps_plasma.py"))
     converter = os.path.abspath(converter)
     b2fgmtry = absp(pb.get("b2fgmtry", "solps/baserun/b2fgmtry"))
-    equ_file = absp(pb.get("equ_file", "solps/baserun/dg.equ"))
     b2fstate = pick_b2fstate(run_dir)
 
     cmd = [sys.executable, converter, run_dir,
            "--b2fgmtry", b2fgmtry,
            "--b2fstate", b2fstate,
-           "--equ-file", equ_file,
            "--plasma-out", plasma_out,
            "--geometry", pb.get("geometry", "cart"),
            "--heatflux", pb.get("heatflux", "total")]
+    if pb.get("gfile"):                       # EFIT gfile for B and psi
+        cmd += ["--gfile", absp(pb["gfile"])]
+    else:
+        cmd += ["--equ-file", absp(pb.get("equ_file", "solps/baserun/dg.equ"))]
+    if pb.get("gap_extrapolate"):             # exponential wall-gap extension
+        cmd += ["--gap-extrapolate",
+                "--gap-lambda-n", str(pb.get("gap_lambda_n", "fit")),
+                "--gap-lambda-t", str(pb.get("gap_lambda_t", "fit"))]
     wall_in = pb.get("wall_in")
     if wall_in:
         wall_in = absp(wall_in)
@@ -256,7 +262,11 @@ def main():
     cc = cfg["cases"][case]
     out_dir = absp(cc["oe_output_dir"])
     solps_run_dir = absp(cc["solps_run_dir"])
-    plasma_out = absp(os.path.join("openedge", "plasma", f"plasma_{base}.h5"))
+    pb_out = cfg.get("plasma_build", {}).get("output")   # file the deck reads
+    plasma_out = absp(pb_out) if pb_out else \
+        absp(os.path.join("openedge", "plasma", f"plasma_{base}.h5"))
+    do_wlld = bool(loop.get("wlld", True))     # liquid-metal surface legs
+    do_tsurf = bool(loop.get("tsurf", True))
     strip_dir = absp(cfg.get("tsurf_leg", {}).get("strip_dir", "openedge/strip_csv"))
 
     max_iters = int(loop.get("max_iters", 8))
@@ -267,7 +277,7 @@ def main():
     check_conv = False  # convergence-stop disabled: always run to max_iters
 
     oneshot = os.path.join(HERE, "oneshot_driver.py")
-    work = absp(os.path.join(f"loop_{case}"))
+    work = absp(loop.get("work_dir", f"loop_{case}"))   # iteration archives
     conv_csv = os.path.join(work, "convergence.csv")
 
     print(f"== loop driver  case='{case}' (base='{base}') ==")
@@ -280,6 +290,7 @@ def main():
     else:
         print(f"  loop converge : DISABLED (run all {max_iters} iters; int Sp recorded only)")
     print(f"  archive_state : {archive_state}  archive_full : {archive_full}")
+    print(f"  surface legs  : wlld={do_wlld} tsurf={do_tsurf}")
 
     if not args.dry:
         os.makedirs(work, exist_ok=True)
@@ -357,8 +368,10 @@ def main():
 
         # --- rebuild SOLPS-derived inputs for the next OE run -------------
         build_plasma(cfg, coupled, base, solps_run_dir, plasma_out, dry=args.dry)
-        run_wlld(cfg, coupled, solps_run_dir, dry=args.dry)
-        build_tsurf(cfg_path, coupled, case, dry=args.dry)
+        if do_wlld:
+            run_wlld(cfg, coupled, solps_run_dir, dry=args.dry)
+        if do_tsurf:
+            build_tsurf(cfg_path, coupled, case, dry=args.dry)
         it += 1
 
     print("\n== loop summary ==")

@@ -135,7 +135,8 @@ def main():
     rel_tol = conv.get("rel_tol", 0.02)
     window = conv.get("window", 3)
     poll = conv.get("poll_seconds", 15)
-    max_steps = conv.get("max_steps")     # None -> use deck's Nrun default
+    max_steps = conv.get("max_steps")     # None -> use the deck's default
+    steps_var = conv.get("steps_var", "Nrun")   # deck variable holding the step count
 
     log_path = os.path.join(deck_dir, "log.openedge")
     here = os.path.dirname(os.path.abspath(__file__))
@@ -147,7 +148,7 @@ def main():
     inner = [mpirun, "-np", str(np_oe), binary, "-in", os.path.basename(deck),
              "-log", log_path]
     if max_steps:
-        inner += ["-var", "Nrun", str(max_steps)]
+        inner += ["-var", steps_var, str(max_steps)]
 
     # droplet emission rate -> per-leg per-step count (deck uses `n ${ndrop}`).
     # Each emitted macro-droplet = 1 physical droplet, so the physical rate is
