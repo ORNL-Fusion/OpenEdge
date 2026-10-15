@@ -5,7 +5,7 @@ in.openedge is the canonical deck (edit it directly); it pulls the generated
 `variable srate` / `variable nweight` lines via `include input/srate.deck`.
 Re-run this script only when the source-rate data or the knobs below change.
 
-S_PLOT is Erin's measured Li source rate for shot 14457, digitized from the
+S_PLOT is the measured Li source rate for shot 14457, digitized from the
 plots in ipd_source_demo.html — REPLACE with her CSV/MDS export when it
 arrives. Plot time axis = arrival-at-plasma time (light-gate signal already
 shifted by the 360 ms transit). Total 8.81 mg = 7.645e20 atoms.

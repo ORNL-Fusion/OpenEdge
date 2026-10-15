@@ -161,7 +161,7 @@ def plot_history(logfile=None):
     """Per-species inventory vs time from the stats block in log.openedge.
 
     Needs stats_style step cpu np c_cnt[1..5] (grain, Li, Li+, Li2+, Li3+).
-    Time axis is shot time (matches Erin's IPD plots): sim starts at
+    Time axis is shot time (matches the IPD plots): sim starts at
     shot -200 ms, the powder's in-vessel flight time — Li appears near 0.
     """
     path = Path(logfile) if logfile else ROOT / "log.openedge"

@@ -4,7 +4,6 @@
 # Run from this directory (writes output/ and log.openedge) and analyse:
 #   mpirun -np 4 ~/build_oe/src/spa_mac_mpi -in in.openedge
 #   /Users/42d/venvs/openedge-env/bin/python scripts/build_13589_2_li_notebook.py
-# EOS: scripts/sync_eos.sh push; sbatch scripts/launch_eos.slurm; scripts/sync_eos.sh pull <run>
 # Defaults: 0.4 s = 200 ms powder flight + 20 ms ramp + 9 steady 20 ms windows.
 # The run only produces the SOLPS sources: Li is removed at ionization
 # (chem_mode neutral) and Sp/Qe are dumped per 20 ms window. `-var chem_mode

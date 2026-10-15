@@ -2,3 +2,6 @@
 solps/
 coupling/solps/
 coupling/loop_*/
+# local cluster scripts, not for the repo
+scripts/launch_eos.slurm
+scripts/sync_eos.sh

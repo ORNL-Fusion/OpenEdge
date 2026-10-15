@@ -5,7 +5,7 @@
 # flux rebuilt as in SOLPS-routines calc_fht, exponential extension into the
 # wall gap.  The central hole inside the SOLPS core boundary stays vacuum; the
 # decks absorb at that contour (input/st40_core.surf, psi_N 0.615 = inner B2 row).
-# ../solps/baserun is Erin's Oct 14 baserun.zip (the regridded b2fgmtry that the
+# ../solps/baserun is the Oct 14 baserun.zip (the regridded b2fgmtry that the
 # run used); the zip's original baserun carried the stale August grid.
 set -euo pipefail
 cd "$(dirname "$0")/.."
