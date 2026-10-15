@@ -632,6 +632,15 @@ def convert_oedge_to_openedge(
         f.create_dataset("mesh/e_r", data=mesh_e_r)
         f.create_dataset("mesh/e_z", data=mesh_e_z)
         f.create_dataset("mesh/e_t", data=mesh_e_t)
+        # Electric-field decomposition diagnostics.  These make it possible
+        # to compare the native OEDGE scalars with the final OpenEdge vector
+        # without reconstructing the ring/knot mapping externally.
+        f.create_dataset("mesh/e_rad_native", data=mesh_e_rad)
+        f.create_dataset("mesh/e_rad_projected_r", data=mesh_e_rad * psihat_r_c)
+        f.create_dataset("mesh/e_rad_projected_z", data=mesh_e_rad * psihat_z_c)
+        f.create_dataset("mesh/e_parallel_native", data=mesh_e_par)
+        f.create_dataset("mesh/e_parallel_projected_r", data=mesh_e_par * bhat_r_c)
+        f.create_dataset("mesh/e_parallel_projected_z", data=mesh_e_par * bhat_z_c)
 
         f.create_dataset("mesh/vtx_br",   data=mesh_vtx_br)
         f.create_dataset("mesh/vtx_bz",   data=mesh_vtx_bz)
