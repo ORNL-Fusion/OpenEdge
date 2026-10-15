@@ -1,0 +1,4 @@
+# SOLPS data and coupling run products live outside git
+solps/
+coupling/solps/
+coupling/loop_*/

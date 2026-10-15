@@ -1,0 +1,7 @@
+# Li first ionization only (kinetic, ADAS scd/acd). Li+ is not stripped
+# further; higher stages are left to SOLPS in the coupled runs.
+Li --> Li+
+I A 1.0 0.0 0.0 0.0 0.0
+
+Li+ --> Li
+R A 1.0 0.0 0.0 0.0 0.0

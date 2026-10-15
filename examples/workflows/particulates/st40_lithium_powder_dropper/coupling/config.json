@@ -1,0 +1,58 @@
+{
+    "_comment": "ST40 Li powder dropper <-> SOLPS-ITER coupling. Paths are relative to coupled_dir unless absolute. OPENEDGE_ROOT/OPENEDGE_BUILD/OPENEDGE_SOLPS_DIR come from the environment (run_coupling.sh exports defaults).",
+    "coupled_dir": "${OPENEDGE_ROOT}/examples/workflows/particulates/st40_lithium_powder_dropper",
+    "solps_base_dir": "coupling/solps/baserun",
+    "solps_run_script": "coupling/run_solps.csh",
+    "openedge_binary": "${OPENEDGE_BUILD}/src/spa_mpi",
+    "mpirun": "mpirun",
+    "case": "st40",
+    "cases": {
+        "st40": {
+            "oe_deck": "openedge/in.openedge",
+            "oe_output_dir": "openedge/output",
+            "solps_run_dir": "coupling/solps/st40"
+        }
+    },
+    "oe_convergence": {
+        "_comment": "OpenEdge runs to nsteps (deck default 200000) unless the stats scalar c_cSp_tot plateaus first; the source handed over is the average of the last average_last_windows dumps",
+        "metric": "int_Sp",
+        "steps_var": "nsteps",
+        "max_steps": 200000,
+        "rel_tol": 0.05,
+        "window": 10,
+        "poll_seconds": 30
+    },
+    "source_export": {
+        "sna_prefix": "source2d",
+        "she_prefix": "she2d",
+        "write_energy": true,
+        "max_map_dist_m": 0.05,
+        "average_last_windows": 9,
+        "li_species": "Li+"
+    },
+    "plasma_build": {
+        "_comment": "same recipe as openedge/scripts/build_background_13589_2.sh; output is the file the deck reads",
+        "b2fgmtry": "coupling/solps/baserun/b2fgmtry",
+        "gfile": "solps/run_dir/gfiles/g013589.00176.geqdsk",
+        "wall_in": "openedge/input/st40_wall_axi.surf",
+        "geometry": "axi",
+        "heatflux": "total",
+        "gap_extrapolate": true,
+        "gap_lambda_n": "fit",
+        "gap_lambda_t": "fit",
+        "output": "openedge/input/plasma_13589.h5"
+    },
+    "loop": {
+        "case": "st40",
+        "max_iters": 5,
+        "work_dir": "coupling/loop_st40",
+        "wlld": false,
+        "tsurf": false,
+        "archive_full": true,
+        "archive_state": false
+    },
+    "solps_ntim": 2000,
+    "dt_oe": 2e-06,
+    "mpi_np_openedge": 16,
+    "mpi_np_solps": 16
+}

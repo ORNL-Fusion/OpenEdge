@@ -1,2 +1,8 @@
 output/
 log.*
+solps/
+output_smoke/
+runs/
+slurm-*.out
+coupling/solps/
+coupling/loop_*/
