@@ -806,6 +806,28 @@ def read_eirene_mesh(run_path: Path):
 # Main conversion
 # ==========================================================================
 
+def _fit_sol_decay_lengths(ne, te_eV, rc, zc, nx, ny, nrows=6):
+    """Median e-folding length [m] of ne and Te over the outer nrows B2 rows.
+
+    Per poloidal column: least-squares slope of log(field) against the
+    cumulative centre-to-centre distance along iy; columns where the field
+    does not fall outward are skipped.  Returns (lambda_n, lambda_T)."""
+    rows = np.arange(ny + 1 - nrows, ny + 1)
+    lam = {"n": [], "t": []}
+    for ix in range(1, nx + 1):
+        d = np.r_[0.0, np.cumsum(np.hypot(np.diff(rc[ix, rows]), np.diff(zc[ix, rows])))]
+        for key, fld in (("n", ne), ("t", te_eV)):
+            v = fld[ix, rows]
+            if np.any(v <= 0) or v[-1] >= v[0]:
+                continue
+            slope = np.polyfit(d, np.log(v), 1)[0]
+            if slope < 0:
+                lam[key].append(-1.0 / slope)
+    ln = float(np.median(lam["n"])) if lam["n"] else 0.03
+    lt = float(np.median(lam["t"])) if lam["t"] else 0.03
+    return ln, lt
+
+
 def convert_solps_to_openedge(
     run_path: Path,
     plasma_out: Path,
@@ -827,6 +849,9 @@ def convert_solps_to_openedge(
     wall_source: str = "auto",
     geometry: str = "cart",
     heatflux: str = "none",
+    gap_extrapolate: bool = False,
+    gap_lambda_n: str = "0.03",
+    gap_lambda_t: str = "0.03",
 ) -> None:
     """
     Convert SOLPS run directory to OpenEdge plasma.h5 (B-field embedded).
@@ -1686,6 +1711,113 @@ def convert_solps_to_openedge(
     else:
         print("fort.31 absent; /wall_flux/ will not be written")
 
+    # -- Optional plasma heat flux for fix particulate/thermal (heating flux).
+    # |q| from the SOLPS face energy flux over the parallel contact area;
+    # stored as q_par with q_perp = 0 (consumers use sqrt(q_par^2+q_perp^2)).
+    # Padded to the full (nx+2)(ny+2) Fortran-flat layout like mesh/temp_e.
+    mesh_q_par = None
+    mesh_q_perp = None
+    if heatflux != "none":
+        from convert_solps_heatflux import compute_heatflux_cell_center
+        _rc, _zc, _qmag = compute_heatflux_cell_center(
+            run_path, method=heatflux, b2fgmtry_path=b2fgmtry_path,
+            b2fstate_path=b2fstate_file)
+        _qfull = np.zeros((nx + 2, ny + 2), dtype=np.float64)
+        _qfull[1:-1, 1:-1] = np.nan_to_num(_qmag, nan=0.0,
+                                           posinf=0.0, neginf=0.0)
+        mesh_q_par = _qfull.reshape(ncell_flat, order="F")
+        mesh_q_perp = np.zeros_like(mesh_q_par)
+        print(f"mesh/q_par written (heatflux={heatflux}): peak "
+              f"{mesh_q_par.max():.3e} W/m^2, nonzero "
+              f"{int(np.count_nonzero(mesh_q_par))}/{mesh_q_par.size}")
+
+    # -- Optional exponential extension into the unmapped (wall-gap) triangles.
+    # Each triangle without a fort.35 host cell gets a virtual cell appended
+    # after the native (nx+2)(ny+2) cells, filled from the nearest native
+    # triangle's cell with exp(-d/lambda) decay (d = centroid distance).
+    # Density-like fields use lambda_n, temperatures lambda_T, heat flux
+    # n*T^1.5 (sheath-limited). E-field and gradients are zero in the gap.
+    gap_distance = np.zeros(ntri_eirene, dtype=np.float64)
+    gap_src = np.array([], dtype=np.int64)
+    n_native_cells = ncell_flat
+    if gap_extrapolate:
+        from scipy.spatial import cKDTree as _KD
+        lam_fit_n, lam_fit_t = _fit_sol_decay_lengths(
+            ne, te_eV, rc, zc, nx, ny, nrows=6)
+        print(f"SOL decay lengths fitted from the outer 6 B2 rows: "
+              f"lambda_n = {lam_fit_n*100:.2f} cm, lambda_T = {lam_fit_t*100:.2f} cm")
+        lam_n = lam_fit_n if str(gap_lambda_n) == "fit" else float(gap_lambda_n)
+        lam_t = lam_fit_t if str(gap_lambda_t) == "fit" else float(gap_lambda_t)
+        gap_idx = np.flatnonzero(mesh_cell_idx < 0)
+        nat_idx = np.flatnonzero(mesh_cell_idx >= 0)
+        # Sources are native triangles outside the separatrix (psi_N >= 1):
+        # at the X-points the private-flux corner touches core cells and a
+        # bare nearest-neighbour search would seed the gap with core plasma.
+        try:
+            _psin = (_interp_regular_to_points(
+                np.asarray(equ_dict["equ_r"]), np.asarray(equ_dict["equ_z"]),
+                np.asarray(equ_dict["equ_psi"]),
+                np.column_stack([centroid_r[nat_idx], centroid_z[nat_idx]]))
+                - float(equ_dict["psi_axis"])) / (float(equ_dict["psib"]) - float(equ_dict["psi_axis"]))
+            _sol = nat_idx[np.isfinite(_psin) & (_psin >= 1.0)]
+        except Exception as _exc:  # no usable psi normalisation
+            print(f"gap extension: psi_N source filter unavailable ({_exc})")
+            _sol = np.array([], dtype=np.int64)
+        if _sol.size >= 0.1 * nat_idx.size:
+            nat_idx = _sol
+        else:
+            print("gap extension: psi_N >= 1 selects too few native triangles; "
+                  "using all native triangles as sources")
+        if gap_idx.size > 0 and nat_idx.size > 0:
+            tree = _KD(np.column_stack([centroid_r[nat_idx], centroid_z[nat_idx]]))
+            dist, j = tree.query(np.column_stack([centroid_r[gap_idx],
+                                                   centroid_z[gap_idx]]))
+            gap_src = mesh_cell_idx[nat_idx[j]].astype(np.int64)
+            gap_distance[gap_idx] = dist
+            dec_n = np.exp(-dist / lam_n)
+            dec_t = np.exp(-dist / lam_t)
+            cat = np.concatenate
+            mesh_ne = cat([mesh_ne, mesh_ne[gap_src] * dec_n])
+            mesh_ni = cat([mesh_ni, mesh_ni[gap_src] * dec_n])
+            mesh_te = cat([mesh_te, mesh_te[gap_src] * dec_t])
+            mesh_ti = cat([mesh_ti, mesh_ti[gap_src] * dec_t])
+            mesh_upar = cat([mesh_upar, mesh_upar[gap_src] * dec_n])
+            mesh_ions_dens = cat([mesh_ions_dens, mesh_ions_dens[:, gap_src] * dec_n], axis=1)
+            mesh_ions_temp = cat([mesh_ions_temp, mesh_ions_temp[:, gap_src] * dec_t], axis=1)
+            mesh_ions_upar = cat([mesh_ions_upar, mesh_ions_upar[:, gap_src] * dec_n], axis=1)
+            zeros = np.zeros(gap_idx.size, dtype=np.float64)
+            mesh_grad_te_r = cat([mesh_grad_te_r, zeros]); mesh_grad_te_z = cat([mesh_grad_te_z, zeros])
+            mesh_grad_ti_r = cat([mesh_grad_ti_r, zeros]); mesh_grad_ti_z = cat([mesh_grad_ti_z, zeros])
+            mesh_e_r = cat([mesh_e_r, zeros]); mesh_e_z = cat([mesh_e_z, zeros]); mesh_e_t = cat([mesh_e_t, zeros])
+            mesh_wall_face_area = cat([mesh_wall_face_area, zeros])
+            if mesh_q_par is not None:
+                # Heat flux decays from the nearest SOL-side cell that carries
+                # flux: target-adjacent gap cells must not inherit the zero
+                # of a guard column or a stagnation cell.
+                q_ok = nat_idx[mesh_q_par[mesh_cell_idx[nat_idx]] > 0]
+                if q_ok.size == 0:
+                    q_ok = nat_idx
+                tq = _KD(np.column_stack([centroid_r[q_ok], centroid_z[q_ok]]))
+                dq, jq = tq.query(np.column_stack([centroid_r[gap_idx], centroid_z[gap_idx]]))
+                q_src = mesh_cell_idx[q_ok[jq]]
+                mesh_q_par = cat([mesh_q_par, mesh_q_par[q_src]
+                                  * np.exp(-dq / lam_n) * np.exp(-1.5 * dq / lam_t)])
+                mesh_q_perp = cat([mesh_q_perp, zeros])
+            mesh_cell_idx[gap_idx] = ncell_flat + np.arange(gap_idx.size, dtype=np.int32)
+            tri_source_kind[gap_idx] = 3
+            print(f"Gap extension: {gap_idx.size} unmapped triangles -> virtual cells, "
+                  f"lambda_n = {lam_n*100:.2f} cm, lambda_T = {lam_t*100:.2f} cm, "
+                  f"distance median {np.median(dist)*100:.1f} cm, max {dist.max()*100:.1f} cm, "
+                  f"min density factor {dec_n.min():.2e}")
+
+    def _ext(values, mode="copy"):
+        """Append the virtual-cell entries to a native per-cell fort.31 array."""
+        values = np.asarray(values, dtype=np.float64)
+        if gap_src.size == 0:
+            return values
+        tail = values[gap_src] if mode == "copy" else np.zeros(gap_src.size)
+        return np.concatenate([values, tail])
+
     # -- Write plasma.h5 --
     with h5py.File(plasma_out, "w") as f:
         # Embedded equilibrium: raw .equ / GEQDSK-derived psi map on its
@@ -1722,18 +1854,18 @@ def convert_solps_to_openedge(
         f.create_dataset("b2/cell_polygons", data=cell_polys)
         f.create_dataset("b2/r_center", data=rc.reshape(ncell_flat, order="F"))
         f.create_dataset("b2/z_center", data=zc.reshape(ncell_flat, order="F"))
-        f.create_dataset("b2/dens_e", data=mesh_ne)
-        f.create_dataset("b2/temp_e", data=mesh_te)
-        f.create_dataset("b2/dens_i", data=mesh_ni)
-        f.create_dataset("b2/temp_i", data=mesh_ti)
-        f.create_dataset("b2/parr_flow", data=mesh_upar)
-        f.create_dataset("b2/grad_te_r", data=mesh_grad_te_r)
-        f.create_dataset("b2/grad_te_z", data=mesh_grad_te_z)
-        f.create_dataset("b2/grad_ti_r", data=mesh_grad_ti_r)
-        f.create_dataset("b2/grad_ti_z", data=mesh_grad_ti_z)
-        f.create_dataset("b2/e_r", data=mesh_e_r)
-        f.create_dataset("b2/e_z", data=mesh_e_z)
-        f.create_dataset("b2/e_t", data=mesh_e_t)
+        f.create_dataset("b2/dens_e", data=mesh_ne[:ncell_flat])
+        f.create_dataset("b2/temp_e", data=mesh_te[:ncell_flat])
+        f.create_dataset("b2/dens_i", data=mesh_ni[:ncell_flat])
+        f.create_dataset("b2/temp_i", data=mesh_ti[:ncell_flat])
+        f.create_dataset("b2/parr_flow", data=mesh_upar[:ncell_flat])
+        f.create_dataset("b2/grad_te_r", data=mesh_grad_te_r[:ncell_flat])
+        f.create_dataset("b2/grad_te_z", data=mesh_grad_te_z[:ncell_flat])
+        f.create_dataset("b2/grad_ti_r", data=mesh_grad_ti_r[:ncell_flat])
+        f.create_dataset("b2/grad_ti_z", data=mesh_grad_ti_z[:ncell_flat])
+        f.create_dataset("b2/e_r", data=mesh_e_r[:ncell_flat])
+        f.create_dataset("b2/e_z", data=mesh_e_z[:ncell_flat])
+        f.create_dataset("b2/e_t", data=mesh_e_t[:ncell_flat])
         f.create_dataset("b2/b_r", data=b2_br)
         f.create_dataset("b2/b_z", data=b2_bz)
         f.create_dataset("b2/b_t", data=b2_bt)
@@ -1750,7 +1882,18 @@ def convert_solps_to_openedge(
         f.create_dataset("mesh/vtx_btor", data=mesh_vtx_bt)
         f.create_dataset("mesh/triangles", data=mesh_tri)
         f.create_dataset("mesh/cell_index", data=mesh_cell_idx)
-        f.create_dataset("mesh/tri_source_kind", data=tri_source_kind)
+        ds_kind = f.create_dataset("mesh/tri_source_kind", data=tri_source_kind)
+        ds_kind.attrs["labels"] = "0=vacuum,1=native_fort35,2=filled_vacuum,3=gap_extrapolated"
+        f.create_dataset("mesh/gap_distance", data=gap_distance)
+        f.attrs["n_native_cells"] = int(n_native_cells)
+        f.attrs["n_gap_cells"] = int(gap_src.size)
+        if gap_src.size > 0:
+            f.attrs["gap_lambda_n_m"] = float(lam_n)
+            f.attrs["gap_lambda_t_m"] = float(lam_t)
+            f.attrs["gap_lambda_fit_n_m"] = float(lam_fit_n)
+            f.attrs["gap_lambda_fit_t_m"] = float(lam_fit_t)
+            f.attrs["gap_model"] = ("nearest SOL-side native triangle; n,ni,upar*exp(-d/ln), "
+                                    "T*exp(-d/lt), q*exp(-d/ln)*exp(-1.5 d/lt); E=grad=0")
         f.create_dataset("mesh/wall_gap_mask", data=wall_gap_mask)
         f.create_dataset("mesh/dens_e", data=mesh_ne)
         f.create_dataset("mesh/temp_e", data=mesh_te)
@@ -1758,26 +1901,11 @@ def convert_solps_to_openedge(
         f.create_dataset("mesh/temp_i", data=mesh_ti)
         f.create_dataset("mesh/parr_flow", data=mesh_upar)
 
-        # Optional: plasma heat flux INTO plasma.h5 for fix droplet/evaporate.
-        # Reuse the SOLPS-face-flux computation; |q| -> q_par, q_perp=0 (the
-        # droplet model uses |q|=sqrt(q_par^2+q_perp^2)). Padded to the full
-        # (nx+2)(ny+2) Fortran-flat layout so it aligns with mesh/temp_e.
-        if heatflux != "none":
-            from convert_solps_heatflux import compute_heatflux_cell_center
-            _rc, _zc, _qmag = compute_heatflux_cell_center(
-                run_path, method=heatflux, b2fgmtry_path=b2fgmtry_path)
-            _qfull = np.zeros((nx + 2, ny + 2), dtype=np.float64)
-            _qfull[1:-1, 1:-1] = np.nan_to_num(_qmag, nan=0.0,
-                                               posinf=0.0, neginf=0.0)
-            mesh_q_par = _qfull.reshape(ncell_flat, order="F")
-            mesh_q_perp = np.zeros_like(mesh_q_par)
+        if mesh_q_par is not None:
             f.create_dataset("mesh/q_par",  data=mesh_q_par)
             f.create_dataset("mesh/q_perp", data=mesh_q_perp)
-            f.create_dataset("b2/q_par",  data=mesh_q_par)
-            f.create_dataset("b2/q_perp", data=mesh_q_perp)
-            print(f"mesh/q_par written (heatflux={heatflux}): peak "
-                  f"{mesh_q_par.max():.3e} W/m^2, nonzero "
-                  f"{int(np.count_nonzero(mesh_q_par))}/{mesh_q_par.size}")
+            f.create_dataset("b2/q_par",  data=mesh_q_par[:ncell_flat])
+            f.create_dataset("b2/q_perp", data=mesh_q_perp[:ncell_flat])
         f.create_dataset("mesh/grad_te_r", data=mesh_grad_te_r)
         f.create_dataset("mesh/grad_te_z", data=mesh_grad_te_z)
         f.create_dataset("mesh/grad_ti_r", data=mesh_grad_ti_r)
@@ -1826,16 +1954,16 @@ def convert_solps_to_openedge(
         if ft31 is not None:
             if ft31.pob is not None:
                 f.create_dataset("mesh/pob",
-                                 data=ft31.pob.reshape(-1, order="F"))
+                                 data=_ext(ft31.pob.reshape(-1, order="F"), "copy"))
             if ft31.volb is not None:
                 f.create_dataset("mesh/volb",
-                                 data=ft31.volb.reshape(-1, order="F"))
+                                 data=_ext(ft31.volb.reshape(-1, order="F"), "zero"))
             if ft31.rrb is not None:
                 f.create_dataset("mesh/rrb",
-                                 data=ft31.rrb.reshape(-1, order="F"))
+                                 data=_ext(ft31.rrb.reshape(-1, order="F"), "copy"))
             if ft31.zib is not None:
                 f.create_dataset("mesh/zeff",
-                                 data=ft31.zib[:, :, 0].reshape(-1, order="F"))
+                                 data=_ext(ft31.zib[:, :, 0].reshape(-1, order="F"), "copy"))
 
         # ---- /fort31 group: SOLPS-ITER's per-B2-cell plasma (for EIRENE)
         # Written verbatim from fort.31 so downstream consumers can pull
@@ -2059,12 +2187,27 @@ def _build_parser():
                         "x=R, y=Z; pairs with 'boundary o o p'. axi: "
                         "x=Z, y=R; pairs with 'boundary o ao p'.")
     p.add_argument("--heatflux", default="none",
-                   choices=["none", "total", "jeremy_no_jv", "jeremy_total",
-                            "vector_mag"],
+                   choices=["none", "total", "no_jv", "fluid", "vector_mag",
+                            "jeremy_no_jv", "jeremy_total"],
                    help="Also write plasma heat flux INTO plasma.h5 as "
                         "mesh/q_par (=|q| from SOLPS face fluxes) + mesh/q_perp=0, "
-                        "for fix droplet/evaporate. 'total' = |fht/sxprl| parallel "
-                        "heat flux (recommended). Default none.")
+                        "for fix particulate/thermal. 'total' = |fht/pbs| parallel "
+                        "heat flux with fht = fhe+fhi+fhj+fnt+fhp+fhm rebuilt as in "
+                        "SOLPS-routines calc_fht when b2fstate lacks fht "
+                        "(recommended); 'no_jv' drops the current term; 'fluid' "
+                        "is fhe+fhi only. Default none.")
+    p.add_argument("--gap-extrapolate", action="store_true",
+                   help="Fill EIRENE triangles without a B2 host cell (wall gap, "
+                        "divertor corners) with exponentially decayed plasma from "
+                        "the nearest native triangle (virtual cells, "
+                        "mesh/tri_source_kind=3, mesh/gap_distance).")
+    p.add_argument("--gap-lambda-n", default="0.03",
+                   help="Density/flow decay length in m for --gap-extrapolate, "
+                        "or 'fit' to use the median e-folding length of the "
+                        "outer 6 B2 rows. Default 0.03 (Lore NF 2023).")
+    p.add_argument("--gap-lambda-t", default="0.03",
+                   help="Temperature decay length in m for --gap-extrapolate, "
+                        "or 'fit'. Default 0.03.")
     p.add_argument("--core-out", type=Path, default=None,
                    help="If given, also write a SPARTA surface file tracing "
                         "the psi_norm=<--psi-norm-core> contour around the "
@@ -2100,6 +2243,9 @@ def main():
         wall_source=args.wall_source,
         geometry=args.geometry,
         heatflux=args.heatflux,
+        gap_extrapolate=args.gap_extrapolate,
+        gap_lambda_n=args.gap_lambda_n,
+        gap_lambda_t=args.gap_lambda_t,
     )
 
     # Optional: trace the psi_norm=<level> contour from the equilibrium

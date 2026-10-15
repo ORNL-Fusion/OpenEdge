@@ -7,12 +7,13 @@ b2fstate/b2fgmtry, and writes heatflux.h5.
 
 Usage:
     python solps_heatflux2openedge.py /path/to/solps_run \\
-        --heatflux-out heatflux.h5 --method jeremy_no_jv --nr 300 --nz 300
+        --heatflux-out heatflux.h5 --method total --nr 300 --nz 300
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 import h5py
@@ -24,127 +25,258 @@ from convert_solps_plasma import b2f_read_dims, b2f_extract, read_b2fgmtry, \
     _cell_centers_from_corners, _regular_grid, _interp_field
 
 
-def compute_heatflux_cell_center(run_path: Path, method: str = "jeremy_no_jv",
-                                 b2fgmtry_path: Path | None = None) -> tuple:
-    """
-    Compute heat-flux from SOLPS face fluxes on a cell-centered grid.
+def _read_b2mn_value(run_path: Path, key: str, default: float = 0.0) -> float:
+    """Return a numeric b2mn.dat switch (quoted 'key' 'value' lines)."""
+    b2mn = run_path / "b2mn.dat"
+    if not b2mn.exists():
+        return default
+    pat = re.compile(r"^\s*'" + re.escape(key) + r"'\s+'([^']*)'")
+    with b2mn.open("r", errors="ignore") as handle:
+        for line in handle:
+            m = pat.match(line)
+            if m:
+                try:
+                    return float(m.group(1))
+                except ValueError:
+                    return default
+    return default
 
-    Methods:
-      - jeremy_no_jv: |(fht_x - fhj_x)/sxprl|
-      - jeremy_total: |fht_x/sxprl|
-      - vector_mag:   sqrt((fht_x/sx)^2 + (fht_y/sy)^2)
+
+def _ionization_potentials() -> list[np.ndarray]:
+    """Per-element single-step ionization potentials [eV]; row Z-1 holds Z values.
+
+    Table copied from ORNL-Fusion SOLPS-routines (Matlab/utility)."""
+    path = Path(__file__).resolve().parent / "ionization_potentials.txt"
+    table = []
+    with path.open("r") as handle:
+        for line in handle:
+            vals = [float(t.replace("d", "e").replace("D", "E")) for t in line.split()]
+            table.append(np.asarray(vals, dtype=float))
+    return table
+
+
+def _b2_neighbour_index(gmtry: dict, name: str, nx: int, ny: int) -> np.ndarray:
+    """leftix/leftiy/bottomix/bottomiy as 0-based (nx+2, ny+2) arrays; -1 = none."""
+    arr = np.asarray(gmtry[name], dtype=float).reshape(nx + 2, ny + 2, order="F")
+    return arr.astype(int) + 1
+
+
+def compute_fht(run_path: Path, b2fgmtry_path: Path | None = None,
+                b2fstate_path: Path | None = None) -> tuple[np.ndarray, dict]:
+    """
+    Total SOLPS energy flux through cell faces, W, shape (nx+2, ny+2, 2).
+
+    Port of calc_fht from ORNL-Fusion SOLPS-routines (J. Lore):
+      fht = fhe + fhi + fhj + fnt + fhp + fhm
+    with fhj the current term (-fch*phi), fnt the kinetic enthalpy carried
+    by the particle fluxes, fhp the ionization potential energy and fhm the
+    drift kinetic energy.  Returns (fht, components).  If b2fstate already
+    carries fht it is returned as is with the components that exist.
+    """
+    b2fstate = b2fstate_path if b2fstate_path is not None else run_path / "b2fstate"
+    b2fgmtry = b2fgmtry_path if b2fgmtry_path is not None else run_path / "b2fgmtry"
+    nx, ny, ns = b2f_read_dims(b2fstate)
+    nx2, ny2 = nx + 2, ny + 2
+
+    def field(name):
+        return b2f_extract(name, b2fstate)
+
+    fhe = field("fhe")
+    fhi = field("fhi")
+    components = {"fhe": fhe, "fhi": fhi}
+    try:
+        fht = field("fht")
+        print("fht read directly from b2fstate")
+        return fht, components
+    except KeyError:
+        pass
+
+    te = field("te")           # J
+    ti = field("ti")
+    po = field("po")
+    fch = field("fch")          # A, (nx2, ny2, 2)
+    kinrgy = field("kinrgy")    # J, (nx2, ny2, ns)
+    if kinrgy.ndim == 2:
+        kinrgy = kinrgy[:, :, None]
+    fna_raw = field("fna")      # (nx2, ny2, 2*ns): index 2*s + dir
+    fna = fna_raw.reshape(nx2, ny2, 2, ns, order="F")
+    try:
+        ua = field("ua")
+        if ua.ndim == 2:
+            ua = ua[:, :, None]
+    except KeyError:
+        ua = np.zeros((nx2, ny2, ns))
+    zamin = np.asarray(b2f_extract("zamin", b2fstate, reshape=False), dtype=float)
+    zamax = np.asarray(b2f_extract("zamax", b2fstate, reshape=False), dtype=float)
+    zn = np.asarray(b2f_extract("zn", b2fstate, reshape=False), dtype=float)
+
+    # fne reconstructed from the current and the charge-weighted ion fluxes
+    # (SOLPS-routines read_b2fstate; exact only when rza is uniform).
+    ev = 1.602176487e-19
+    fne = -fch / ev
+    for s in range(ns):
+        fne = fne + zamax[s] * fna[:, :, :, s]
+
+    gm = read_b2fgmtry(str(b2fgmtry))
+    leftix = _b2_neighbour_index(gm, "leftix", nx, ny)
+    leftiy = _b2_neighbour_index(gm, "leftiy", nx, ny)
+    bottomix = _b2_neighbour_index(gm, "bottomix", nx, ny)
+    bottomiy = _b2_neighbour_index(gm, "bottomiy", nx, ny)
+    boris = _read_b2mn_value(run_path, "b2news_BoRiS", 0.0)
+
+    table = _ionization_potentials()
+    rpt = np.zeros(ns)
+    for s in range(ns):
+        charge, z = int(round(zamin[s])), int(round(zn[s]))
+        if charge > 0:
+            rpt[s] = table[z - 1][charge - 1]
+
+    # neighbour-averaged quantities on the west (dir 0) and south (dir 1) faces
+    def west(a):
+        out = np.zeros_like(a)
+        ok = leftix >= 0
+        out[ok] = a[leftix[ok], leftiy[ok]]
+        return out, ok
+
+    def south(a):
+        out = np.zeros_like(a)
+        ok = bottomiy >= 0
+        out[ok] = a[bottomix[ok], bottomiy[ok]]
+        return out, ok
+
+    te_w, okw = west(te)
+    te_s, oks = south(te)
+    ti_w, _ = west(ti)
+    ti_s, _ = south(ti)
+    po_w, _ = west(po)
+    po_s, _ = south(po)
+
+    fhj = np.zeros((nx2, ny2, 2))
+    fnt = np.zeros((nx2, ny2, 2))
+    fhj[:, :, 0] = np.where(okw, -0.5 * fch[:, :, 0] * (po + po_w), 0.0)
+    fhj[:, :, 1] = np.where(oks, -0.5 * fch[:, :, 1] * (po + po_s), 0.0)
+    fnt[:, :, 0] = np.where(okw, 0.5 * fne[:, :, 0] * (te + te_w), 0.0)
+    fnt[:, :, 1] = np.where(oks, 0.5 * fne[:, :, 1] * (te + te_s), 0.0)
+    fnt_eonly = fnt.copy()
+
+    fhm = np.zeros((nx2, ny2, 2))
+    fhp = np.zeros((nx2, ny2, 2))
+    for s in range(ns):
+        k_w, _ = west(kinrgy[:, :, s])
+        k_s, _ = south(kinrgy[:, :, s])
+        # cvsa (viscous kinetic term) is not written to b2fstate: zero, as in
+        # SOLPS-routines when the field is absent.
+        fhm[:, :, 0] += np.where(okw, 0.5 * fna[:, :, 0, s] * (k_w + kinrgy[:, :, s]), 0.0)
+        fhm[:, :, 1] += np.where(oks, 0.5 * fna[:, :, 1, s] * (k_s + kinrgy[:, :, s]), 0.0)
+        fhp[:, :, 0] += np.where(okw, fna[:, :, 0, s] * rpt[s] * ev, 0.0)
+        fhp[:, :, 1] += np.where(oks, fna[:, :, 1, s] * rpt[s] * ev, 0.0)
+        fnt[:, :, 0] += np.where(okw, 0.5 * fna[:, :, 0, s] * (ti_w + ti), 0.0)
+        fnt[:, :, 1] += np.where(oks, 0.5 * fna[:, :, 1, s] * (ti_s + ti), 0.0)
+
+    fnt = fnt * (1.0 - boris)
+    fhm = fhm * (1.0 - boris)
+    fht = fhe + fhi + fhj + fnt + fhp + fhm
+    components.update({"fhj": fhj, "fnt": fnt, "fnt_eonly": fnt_eonly,
+                       "fhp": fhp, "fhm": fhm})
+    print("fht reconstructed (fhe+fhi+fhj+fnt+fhp+fhm; SOLPS-routines calc_fht)")
+    return fht, components
+
+
+def compute_heatflux_cell_center(run_path: Path, method: str = "total",
+                                 b2fgmtry_path: Path | None = None,
+                                 b2fstate_path: Path | None = None) -> tuple:
+    """
+    Compute heat-flux density from SOLPS face fluxes on a cell-centered grid.
+
+    Methods (all use the parallel contact area |pbs_x| = sx*Bpol/B):
+      - total:        |fht_x / pbs_x|, fht = total energy flux (compute_fht)
+      - no_jv:        |(fht_x - fhj_x) / pbs_x|, total without the current term
+      - fluid:        |(fhe_x + fhi_x) / pbs_x|, electron+ion fluid fluxes only
+      - vector_mag:   sqrt((fht_x/sx)^2 + (fht_y/sy)^2) (deposited-style, legacy)
+    Legacy aliases: jeremy_total -> total, jeremy_no_jv -> no_jv.
 
     Returns (rc, zc, qmag) where rc/zc are cell centers and qmag is heat flux.
     """
-    if method == "total":          # friendly alias for jeremy_total
-        method = "jeremy_total"
+    aliases = {"jeremy_total": "total", "jeremy_no_jv": "no_jv"}
+    method = aliases.get(method, method)
+    if method not in ("total", "no_jv", "fluid", "vector_mag"):
+        raise ValueError(f"Unknown heatflux method: {method}")
 
-    b2fstate = run_path / "b2fstate"
+    b2fstate = b2fstate_path if b2fstate_path is not None else run_path / "b2fstate"
     b2fgmtry = b2fgmtry_path if b2fgmtry_path is not None else (run_path / "b2fgmtry")
 
     nx, ny, ns = b2f_read_dims(b2fstate)
     gmtry = read_b2fgmtry(str(b2fgmtry))
     rc, zc = _cell_centers_from_corners(gmtry["crx"], gmtry["cry"], nx, ny)
 
-    # Total heat flux: use fht if available, otherwise fhe + fhi
-    try:
-        fht = b2f_extract("fht", b2fstate)  # (nx+2, ny+2, 2)
-    except KeyError:
-        fhe = b2f_extract("fhe", b2fstate)
-        fhi = b2f_extract("fhi", b2fstate)
-        if fhe.ndim == 2:
-            fhe = fhe.reshape(nx + 2, ny + 2, -1, order="F")
-        if fhi.ndim == 2:
-            fhi = fhi.reshape(nx + 2, ny + 2, -1, order="F")
-        fht = fhe + fhi
-        print("Using fhe + fhi as total heat flux (fht not in b2fstate)")
+    if method == "fluid":
+        flux = b2f_extract("fhe", b2fstate) + b2f_extract("fhi", b2fstate)
+        print("heatflux=fluid: fhe + fhi only (no current, kinetic or "
+              "potential-energy terms)")
+    else:
+        try:
+            fht, comp = compute_fht(run_path, b2fgmtry, b2fstate)
+        except KeyError as exc:
+            print(f"WARNING: cannot reconstruct fht ({exc}); falling back to "
+                  "fhe + fhi, which under-estimates the target heat flux")
+            fht = b2f_extract("fhe", b2fstate) + b2f_extract("fhi", b2fstate)
+            comp = {}
+        flux = fht
+        if method == "no_jv":
+            if "fhj" in comp:
+                flux = fht - comp["fhj"]
+            else:
+                print("fhj unavailable; no_jv equals total")
 
-    # Parallel contact area from geometry: pbs(:,:,0) = (B_x/|B|) * sx.
+    # Parallel contact area from geometry: pbs(:,:,0) = (B_pol/|B|) * sx.
     try:
-        pbs = b2f_extract("pbs", b2fgmtry)  # (nx+2, ny+2, 2)
+        pbs = b2f_extract("pbs", b2fgmtry)
         if pbs.ndim == 2:
             pbs = pbs.reshape(nx + 2, ny + 2, -1, order="F")
         sxprl = np.abs(pbs[:, :, 0])
     except KeyError as exc:
         raise KeyError(
             "Variable 'pbs' not found in b2fgmtry; cannot compute SOLPS "
-            "parallel heat flux. For deposited target heat flux use fht/sx "
-            "outside this converter."
+            "parallel heat flux."
         ) from exc
 
-    # Poloidal face areas used only for the legacy vector_mag option.
-    try:
-        sx = b2f_extract("sx", b2fstate)    # (nx+2, ny+2)
-    except KeyError:
-        try:
-            gs = b2f_extract("gs", b2fgmtry)  # (nx+2, ny+2, 3)
-            if gs.ndim == 2:
-                gs = gs.reshape(nx + 2, ny + 2, -1, order="F")
-            sx = gs[:, :, 0]  # poloidal face area
-            print("Using gs(:,:,0) from b2fgmtry as poloidal face area")
-        except KeyError:
-            sx = b2f_extract("hx", b2fgmtry)
-            print("WARNING: Using hx from b2fgmtry as face area fallback (gs not found)")
-
-    if fht.ndim == 2:
-        fht = fht.reshape(nx + 2, ny + 2, -1, order="F")
-
-    # Clip guard cells (ix=0,nx+1 and iy=0,ny+1) which have unphysical
-    # face areas and can produce extreme heat flux density values.
-    s = np.s_[1:-1, 1:-1]  # interior slice
+    # Face -> cell: a cell's value is the mean of its two poloidal faces
+    # (west face ix, east face ix+1).  Average on the full (nx+2, ny+2)
+    # array first so the last real column keeps its target face, then drop
+    # the guard cells (ix=0,nx+1 and iy=0,ny+1).
+    s = np.s_[1:-1, 1:-1]
     rc, zc = rc[s], zc[s]
-    fht = fht[s]
-    sxprl = sxprl[s]
-    sx = sx[s]
 
-    qx = np.divide(
-        fht[:, :, 0], sxprl,
-        out=np.full_like(sxprl, np.nan),
-        where=sxprl > 0,
-    )
+    def _cell_mean_x(face):
+        return 0.5 * (face[:-1, :] + face[1:, :])[1:nx + 1, 1:ny + 1]
 
-    if method == "jeremy_no_jv":
+    def _cell_mean_y(face):
+        return 0.5 * (face[:, :-1] + face[:, 1:])[1:nx + 1, 1:ny + 1]
+
+    if method in ("total", "no_jv", "fluid"):
+        qx = np.divide(flux[:, :, 0], sxprl, out=np.full_like(sxprl, np.nan),
+                       where=sxprl > 0)
+        return rc, zc, np.abs(_cell_mean_x(qx))
+
+    # vector_mag: poloidal/radial face areas
+    def _face_area(state_name, gs_col, h_name):
         try:
-            fhj = b2f_extract("fhj", b2fstate)
-            if fhj.ndim == 2:
-                fhj = fhj.reshape(nx + 2, ny + 2, -1, order="F")
-            fhj = fhj[s]
-            qx = np.divide(
-                fht[:, :, 0] - fhj[:, :, 0], sxprl,
-                out=np.full_like(sxprl, np.nan),
-                where=sxprl > 0,
-            )
-        except KeyError:
-            print("fhj not in b2fstate — falling back to jeremy_total method")
-
-    if method in ("jeremy_no_jv", "jeremy_total"):
-        qx_c = 0.5 * (qx + np.roll(qx, -1, axis=0))
-        qx_c[-1, :] = np.nan
-        return rc, zc, np.abs(qx_c)
-
-    if method == "vector_mag":
-        try:
-            sy = b2f_extract("sy", b2fstate)
+            return b2f_extract(state_name, b2fstate)
         except KeyError:
             try:
                 gs = b2f_extract("gs", b2fgmtry)
                 if gs.ndim == 2:
                     gs = gs.reshape(nx + 2, ny + 2, -1, order="F")
-                sy = gs[:, :, 1]  # radial face area
-                print("Using gs(:,:,1) from b2fgmtry as radial face area")
+                print(f"Using gs(:,:,{gs_col}) from b2fgmtry as face area")
+                return gs[:, :, gs_col]
             except KeyError:
-                sy = b2f_extract("hy", b2fgmtry)
-                print("WARNING: Using hy from b2fgmtry as radial face area fallback")
-        sy = sy[s]
-        qx = np.divide(fht[:, :, 0], sx, out=np.full_like(sx, np.nan), where=sx > 0)
-        qy = np.divide(fht[:, :, 1], sy, out=np.full_like(sy, np.nan), where=sy > 0)
-        qx_c = 0.5 * (qx + np.roll(qx, -1, axis=0))
-        qx_c[-1, :] = np.nan
-        qy_c = 0.5 * (qy + np.roll(qy, -1, axis=1))
-        qy_c[:, -1] = np.nan
-        return rc, zc, np.sqrt(qx_c**2 + qy_c**2)
-
-    raise ValueError(f"Unknown heatflux method: {method}")
+                print(f"WARNING: Using {h_name} from b2fgmtry as face area fallback")
+                return b2f_extract(h_name, b2fgmtry)
+    sx = _face_area("sx", 0, "hx")
+    sy = _face_area("sy", 1, "hy")
+    qx = np.divide(flux[:, :, 0], sx, out=np.full_like(sx, np.nan), where=sx > 0)
+    qy = np.divide(flux[:, :, 1], sy, out=np.full_like(sy, np.nan), where=sy > 0)
+    return rc, zc, np.hypot(_cell_mean_x(qx), _cell_mean_y(qy))
 
 
 def convert_solps_heatflux(
@@ -156,7 +288,7 @@ def convert_solps_heatflux(
     rmax: float | None = None,
     zmin: float | None = None,
     zmax: float | None = None,
-    method: str = "jeremy_no_jv",
+    method: str = "total",
     plot: bool = False,
     plot_out: Path | None = None,
 ) -> None:
@@ -238,8 +370,9 @@ def main():
     p.add_argument("--rmax", type=float, default=None)
     p.add_argument("--zmin", type=float, default=None)
     p.add_argument("--zmax", type=float, default=None)
-    p.add_argument("--method", default="jeremy_total",
-                   choices=["jeremy_no_jv", "jeremy_total", "vector_mag"])
+    p.add_argument("--method", default="total",
+                   choices=["total", "no_jv", "fluid", "vector_mag",
+                            "jeremy_no_jv", "jeremy_total"])
     p.add_argument("--plot", action="store_true")
     p.add_argument("--plot-out", type=Path, default=None)
     args = p.parse_args()

@@ -12,7 +12,7 @@ plasma.h5 (`mesh/vtx_b*` on the unstructured mesh plus the embedded
 | `convert_solps_plasma.py` | SOLPS-ITER (`b2fgmtry`, `b2fstate`) | Reads SOLPS binary-text files directly (no quixote). Outputs plasma + B-field + multi-ion species + Eirene triangular mesh. |
 | `convert_oedge_plasma.py` | OEDGE/DIVIMP (`.nc`) | Reads OEDGE NetCDF background file. Requires a companion `.equ` equilibrium file for B-field reconstruction. |
 | `convert_s3x_plasma.py` | SOLEDGE3X (HDF5) | Reads SOLEDGE3X triangle-based mesh/data files. |
-| `convert_solps_heatflux.py` | SOLPS-ITER | Extracts wall heat flux from SOLPS face-centred fluxes. |
+| `convert_solps_heatflux.py` | SOLPS-ITER | Parallel heat-flux density from SOLPS face fluxes over the parallel contact area; rebuilds the total energy flux (fhe+fhi+fhj+fnt+fhp+fhm, SOLPS-routines `calc_fht`) when b2fstate lacks `fht`. Methods `total` (default), `no_jv`, `fluid`, `vector_mag`. Used by `convert_solps_plasma.py --heatflux`. |
 | `gen_plasma_sweep.py` | single plasma.h5 | Generates plasma parameter sweeps. |
 | `create_surf_from_solps.py` | SOLPS mesh | Extracts wall geometry from SOLPS mesh for SPARTA surface files. |
 
