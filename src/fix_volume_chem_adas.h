@@ -58,11 +58,22 @@ public:
     // are diagnostics, not coupled state.
     void reset_tally();
 
+    // Per-cell source array migrates with fix balance / grid adapt
+    // (gridmigrate=1); same contract as FixAveGrid.
+    int pack_grid_one(int, char *, int) override;
+    int unpack_grid_one(int, char *) override;
+    void copy_grid_one(int, int) override;
+    void add_grid_one() override;
+    void reset_grid_count(int) override;
+    void grid_changed() override;
+    void grow_src(int);
+
 // Per-cell source-term output for Gkeyll / external coupling.
   // Per-grid output layout: 6 columns in summary mode, 20 in detailed
   // mode (see init() where size_per_grid_cols is set).
 // Allocated lazily when grid->nlocal changes (see ensure_src_alloc).
 int maxgrid_src = 0;
+int nglocal_src = 0;   // cells currently owned (tracked through migration)
 
 // Output units for the 20-column per-cell source tally (array_grid):
 //   TALLY_COUNTS: raw cumulative event totals since the fix was created.

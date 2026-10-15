@@ -548,6 +548,8 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
                               //   MUST be non-zero (SIGFPE otherwise).
   array_grid         = NULL;
   maxgrid_src        = 0;
+  nglocal_src        = 0;
+  gridmigrate        = 1;     // array_grid rows follow cells across balance
 
 }
 
@@ -602,6 +604,96 @@ void FixVolumeChemAdas::reset_tally()
   if (array_grid && maxgrid_src > 0)
     memset(&array_grid[0][0], 0,
            sizeof(double) * maxgrid_src * size_per_grid_cols);
+}
+
+/* ---------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   per-cell array migration (fix balance, grid adapt): rows of
+   size_per_grid_cols doubles, split cells carry their sub-cells too.
+   Keeps array_grid sized to the owned cells so readers (fix ave/grid,
+   dump grid) never index past it in the same end_of_step as a balance.
+------------------------------------------------------------------------- */
+
+void FixVolumeChemAdas::grow_src(int nnew)
+{
+  if (nglocal_src + nnew < maxgrid_src) return;
+  int oldmax = maxgrid_src;
+  while (maxgrid_src < nglocal_src + nnew)
+    maxgrid_src += MAX(1024, maxgrid_src / 4);
+  memory->grow(array_grid, maxgrid_src, size_per_grid_cols,
+               "volume/chem/adas:array_grid(src)");
+  memset(&array_grid[oldmax][0], 0,
+         sizeof(double) * (maxgrid_src - oldmax) * size_per_grid_cols);
+}
+
+int FixVolumeChemAdas::pack_grid_one(int icell, char *buf, int memflag)
+{
+  char *ptr = buf;
+  Grid::ChildCell *cells = grid->cells;
+  Grid::SplitInfo *sinfo = grid->sinfo;
+  const size_t rowbytes = size_per_grid_cols * sizeof(double);
+
+  if (memflag) memcpy(ptr, array_grid[icell], rowbytes);
+  ptr += rowbytes;
+  if (cells[icell].nsplit > 1) {
+    int isplit = cells[icell].isplit;
+    int nsplit = cells[icell].nsplit;
+    for (int i = 0; i < nsplit; i++) {
+      if (memflag) memcpy(ptr, array_grid[sinfo[isplit].csubs[i]], rowbytes);
+      ptr += rowbytes;
+    }
+  }
+  return ptr - buf;
+}
+
+int FixVolumeChemAdas::unpack_grid_one(int icell, char *buf)
+{
+  char *ptr = buf;
+  Grid::ChildCell *cells = grid->cells;
+  Grid::SplitInfo *sinfo = grid->sinfo;
+  const size_t rowbytes = size_per_grid_cols * sizeof(double);
+
+  grow_src(1);
+  memcpy(array_grid[icell], ptr, rowbytes);
+  ptr += rowbytes;
+  nglocal_src++;
+  if (cells[icell].nsplit > 1) {
+    int isplit = cells[icell].isplit;
+    int nsplit = cells[icell].nsplit;
+    grow_src(nsplit);
+    for (int i = 0; i < nsplit; i++) {
+      memcpy(array_grid[sinfo[isplit].csubs[i]], ptr, rowbytes);
+      ptr += rowbytes;
+    }
+    nglocal_src += nsplit;
+  }
+  return ptr - buf;
+}
+
+void FixVolumeChemAdas::copy_grid_one(int icell, int jcell)
+{
+  memcpy(array_grid[jcell], array_grid[icell],
+         size_per_grid_cols * sizeof(double));
+}
+
+void FixVolumeChemAdas::add_grid_one()
+{
+  grow_src(1);
+  memset(array_grid[nglocal_src], 0, size_per_grid_cols * sizeof(double));
+  nglocal_src++;
+}
+
+void FixVolumeChemAdas::reset_grid_count(int nlocal)
+{
+  nglocal_src = nlocal;
+}
+
+void FixVolumeChemAdas::grid_changed()
+{
+  nglocal_src = 0;
+  grow_src(grid->nlocal);
+  nglocal_src = grid->nlocal;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -793,6 +885,7 @@ if (maxgrid_src > 0) {
   memset(&array_grid[0][0], 0,
          sizeof(double) * maxgrid_src * size_per_grid_cols);
 }
+nglocal_src = grid->nlocal;
 
 // initialize SPARTA RNG (same pattern as fix_coll_nanbu)
 if (!rng_adas) {
@@ -995,6 +1088,7 @@ void FixVolumeChemAdas::end_of_step_no_average()
   // subsequent accumulate + normalize yields an instantaneous rate over the
   // current `nevery` window.
   const int ncols = size_per_grid_cols;  // 6 (summary) or 20 (detailed)
+  nglocal_src = nglocal;
   if (grid->maxlocal > maxgrid_src) {
     const int oldmax = maxgrid_src;
     maxgrid_src = grid->maxlocal;
