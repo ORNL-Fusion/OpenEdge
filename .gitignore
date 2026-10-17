@@ -144,3 +144,6 @@ examples/workflows/particulates/cat_liquid_metal_divertor/jeremy_cases_generated
 # regression runner outputs (references are versioned)
 examples/**/regression_metrics_*.json
 examples/**/regression.log
+
+# local cluster launch bundles (NERSC), kept out of the repo like the EOS scripts
+**/.nersc_bundle_patch/
