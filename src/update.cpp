@@ -43,6 +43,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "fix_cross_field_diffusion.h"
 #include "fix_force_thermal.h"
 #include "fix_coulomb_base.h"
+#include "fix_droplet_drag.h"
 #include "fix_volume_chem_adas.h"
 #include "fix_reflect_psi.h"
 #include "memory.h"
@@ -815,10 +816,16 @@ void Update::init()
       } else if (strcmp(s,"particulate/charge") == 0 ||
                  strcmp(s,"particulate/drag") == 0 ||
                  strcmp(s,"particulate/thermal") == 0) {
-        // Particulate physics queries FixBackground directly at the grain
-        // position. Mark these known fixes so a grain-only deck does not
-        // trigger the legacy PCACHE_ALL fallback and request an absolute B
-        // vector that its unmagnetized particles never consume.
+        // Grain fixes read Te/Ti/ne/ni and the parallel flow from the
+        // cache (FixBackground::sample_from_particle_cache) when a pusher
+        // fills it; without a pusher they sample FixBackground directly.
+        pcache_need_mask |= PCACHE_TE | PCACHE_NE | PCACHE_TI | PCACHE_NI |
+                            PCACHE_VPAR | PCACHE_BFIELD;
+        if (strcmp(s,"particulate/drag") == 0) {
+          FixDropletDrag *fdr = dynamic_cast<FixDropletDrag *>(modify->fix[ifix]);
+          if (!fdr || fdr->needs_efield()) pcache_need_mask |= PCACHE_EFIELD;
+        }
+        note_cad(modify->fix[ifix]->nevery);
         recognized = 1;
       }
     }

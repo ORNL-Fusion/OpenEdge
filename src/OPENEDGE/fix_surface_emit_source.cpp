@@ -25,6 +25,7 @@
 #include "memory.h"
 #include "error.h"
 #include "compute_surface_physical_sputter.h"
+#include "fix_walldyn_matrix.h"
 
 #include <cmath>
 #include <vector>
@@ -191,6 +192,8 @@ FixSurfaceEmitSource::FixSurfaceEmitSource(SPARTA *sparta, int narg, char **arg)
   flux_thresh = 0.0;
   pweight_index = -1;
   pweight_ewhich = -1;
+  matrix_fix_id = NULL;
+  matrix_fix = NULL;
   conc_attr = NULL;
   conc_col = 0;
   conc_index = -1;
@@ -243,6 +246,7 @@ FixSurfaceEmitSource::~FixSurfaceEmitSource()
   delete [] model_tsurf_name;
   delete [] file_path;
   delete [] file_section;
+  delete [] matrix_fix_id;
 
   for (int i = 0; i < ntaskmax; i++) {
     delete [] tasks[i].ntargetsp;
@@ -263,6 +267,13 @@ FixSurfaceEmitSource::~FixSurfaceEmitSource()
 void FixSurfaceEmitSource::init()
 {
   FixEmit::init();
+
+  if (matrix_fix_id) {
+    int ifix = modify->find_fix(matrix_fix_id);
+    if (ifix < 0 || !(matrix_fix =
+        dynamic_cast<FixWalldynMatrix *>(modify->fix[ifix])))
+      error->all(FLERR,"Fix surface/emit/source matrix ID is not a walldyn/matrix fix");
+  }
 
   // bind the optional concentration-multiplier custom array (created by
   // surf_react surface/pwi at its init; both run before the first step)
@@ -991,6 +1002,8 @@ void FixSurfaceEmitSource::perform_task()
           if (nfix_update_custom)
             modify->update_custom(particle->nlocal-1,temp_thermal,
                                   temp_rot,temp_vib,vstream);
+          if (matrix_fix)
+            matrix_fix->record_emit(particle->nlocal-1,isurf);
         }
         nsingle += nactual;
       }
@@ -1113,6 +1126,8 @@ void FixSurfaceEmitSource::perform_task()
         if (nfix_update_custom)
           modify->update_custom(particle->nlocal-1,temp_thermal,
                                 temp_rot,temp_vib,vstream);
+        if (matrix_fix)
+          matrix_fix->record_emit(particle->nlocal-1,isurf);
       }
       nsingle += nactual;
     }
@@ -1147,6 +1162,14 @@ void FixSurfaceEmitSource::grow_task()
 
 int FixSurfaceEmitSource::option(int narg, char **arg)
 {
+  if (strcmp(arg[0],"matrix") == 0) {
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/source command");
+    delete [] matrix_fix_id;
+    matrix_fix_id = new char[strlen(arg[1])+1];
+    strcpy(matrix_fix_id,arg[1]);
+    return 2;
+  }
+
   if (strcmp(arg[0],"conc_scale") == 0) {
     // multiply the per-surf flux by column <col> of a per-surf custom
     // DOUBLE array (e.g. the surface/pwi mixing-zone concentrations):

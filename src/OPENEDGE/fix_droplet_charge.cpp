@@ -555,8 +555,9 @@ void FixDropletCharge::apply_charge_update()
     if (fixed_mode_) { qvec[ip] = fixed_zd_; continue; }
 
     PlasmaPointSample plasma;
-    pd_->sample_point(p.x, plasma, p.icell, ip,
-                      PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B);
+    const unsigned request = PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B;
+    if (!pd_->sample_from_particle_cache(ip, plasma, request))
+      pd_->sample_point(p.x, plasma, p.icell, ip, request);
     const double Te = std::max(plasma.te, 0.0);
     const double Ti = std::max(plasma.ti, 0.0);
     const double Ne = std::max(plasma.ne, 0.0);

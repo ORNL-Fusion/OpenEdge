@@ -33,6 +33,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include "timer.h"
+#include <cmath>
 #include "fix_adapt.h"
 
 using namespace SPARTA_NS;
@@ -95,6 +96,7 @@ FixBalance::FixBalance(SPARTA *sparta, int narg, char **arg) :
   rcbflip = 0;
   emptyweight_auto = 0;
   emptyweight = ZEROPARTICLE;
+  spwt_on = 0;
 
   while (iarg < narg) {
     if (strcmp(arg[iarg],"axes") == 0) {
@@ -130,6 +132,17 @@ FixBalance::FixBalance(SPARTA *sparta, int narg, char **arg) :
         emptyweight_auto = 0;
       }
       iarg += 2;
+    } else if (strcmp(arg[iarg],"species_weight") == 0) {
+      if (iarg+3 > narg) error->all(FLERR,"Illegal fix balance command");
+      int isp = particle->find_species(arg[iarg+1]);
+      if (isp < 0) error->all(FLERR,"Fix balance species_weight: unknown species");
+      double w = atof(arg[iarg+2]);
+      if (!std::isfinite(w) || w <= 0.0)
+        error->all(FLERR,"Fix balance species_weight must be a finite number > 0");
+      if ((int) spwt.size() < particle->nspecies) spwt.resize(particle->nspecies,1.0);
+      spwt[isp] = w;
+      spwt_on = 1;
+      iarg += 3;
     } else error->all(FLERR,"Illegal fix balance command");
   }
 
@@ -278,7 +291,10 @@ void FixBalance::end_of_step()
     }
 
     double *wt = NULL;
-    if (rcbwt == PARTICLE) {
+    if (rcbwt == PARTICLE && spwt_on) {
+      memory->create(wt,nglocal,"balance:wt");
+      nbalance = weighted_cell_counts(wt);
+    } else if (rcbwt == PARTICLE) {
       if (!particle->sorted) particle->sort();
       memory->create(wt,nglocal,"balance:wt");
       int n;
@@ -396,6 +412,8 @@ double FixBalance::imbalance_factor(double &maxcost)
   if (bstyle == BISECTION && rcbwt == TIME) {
     timer_cost();
     mycost = my_timer_cost;
+  } else if (bstyle == BISECTION && rcbwt == PARTICLE && spwt_on) {
+    mycost = weighted_local_count();
   } else mycost = particle->nlocal;
 
   MPI_Allreduce(&mycost,&totalcost,1,MPI_DOUBLE,MPI_SUM,world);
@@ -428,6 +446,42 @@ double FixBalance::compute_vector(int i)
 
 /* -------------------------------------------------------------------- */
 
+double FixBalance::weighted_local_count()
+{
+  if ((int) spwt.size() < particle->nspecies) spwt.resize(particle->nspecies,1.0);
+  Particle::OnePart *particles = particle->particles;
+  const int nlocal = particle->nlocal;
+  double sum = 0.0;
+  for (int i = 0; i < nlocal; i++) sum += spwt[particles[i].ispecies];
+  return sum;
+}
+
+// per parent cell: sum of species weights of its particles (sub-cells of a
+// split cell are folded into the parent), empty cells get the empty weight
+int FixBalance::weighted_cell_counts(double *&wt)
+{
+  if ((int) spwt.size() < particle->nspecies) spwt.resize(particle->nspecies,1.0);
+  Grid::ChildCell *cells = grid->cells;
+  Grid::SplitInfo *sinfo = grid->sinfo;
+  Particle::OnePart *particles = particle->particles;
+  const int nglocal = grid->nlocal;
+  const int nlocal = particle->nlocal;
+  std::vector<double> wc(nglocal, 0.0);
+  for (int i = 0; i < nlocal; i++) {
+    int ic = particles[i].icell;
+    if (ic < 0 || ic >= nglocal) continue;
+    if (cells[ic].nsplit <= 0) ic = sinfo[cells[ic].isplit].icell;
+    wc[ic] += spwt[particles[i].ispecies];
+  }
+  const double zero_weight = empty_cell_weight();
+  int n = 0;
+  for (int icell = 0; icell < nglocal; icell++) {
+    if (cells[icell].nsplit <= 0) continue;
+    wt[n++] = (wc[icell] > 0.0) ? wc[icell] : zero_weight;
+  }
+  return n;
+}
+
 double FixBalance::empty_cell_weight()
 {
   if (!emptyweight_auto) return emptyweight;
@@ -445,9 +499,12 @@ double FixBalance::empty_cell_weight()
   bigint nparent_global = 0;
   MPI_Allreduce(&nparent_local, &nparent_global, 1, MPI_SPARTA_BIGINT,
                 MPI_SUM, world);
-  bigint nparticle_local = particle->nlocal;
-  bigint nparticle_global = 0;
-  MPI_Allreduce(&nparticle_local, &nparticle_global, 1, MPI_SPARTA_BIGINT,
+  // with species weights the population is measured in the same cost units
+  // as the occupied cells, so the empty floor stays 25% of the real load
+  double nparticle_local = (rcbwt == PARTICLE && spwt_on)
+      ? weighted_local_count() : (double) particle->nlocal;
+  double nparticle_global = 0.0;
+  MPI_Allreduce(&nparticle_local, &nparticle_global, 1, MPI_DOUBLE,
                 MPI_SUM, world);
   const double empty_total = 1.0 + 0.25 * nparticle_global;
   return nparent_global > 0

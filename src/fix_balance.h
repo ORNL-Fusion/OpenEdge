@@ -22,6 +22,7 @@ FixStyle(balance,FixBalance)
 #define SPARTA_FIX_BALANCE_H
 
 #include "fix.h"
+#include <vector>
 
 namespace SPARTA_NS {
 
@@ -53,6 +54,13 @@ class FixBalance : public Fix {
 
   class RanKnuth *random;
   class RCB *rcb;
+
+  // species_weight keyword: per-species cost weight for `rcb part`, so a
+  // cell's weight and the imbalance trigger count cost, not particles
+  std::vector<double> spwt;
+  int spwt_on;
+  double weighted_local_count();
+  int weighted_cell_counts(double *&);     // returns # of eligible cells
 
   double imbalance_factor(double &);
   double empty_cell_weight();

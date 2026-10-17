@@ -36,6 +36,7 @@
 #include "modify.h"
 #include "openedge_geom.h"
 #include "particle.h"
+#include "update.h"
 
 #include <H5Cpp.h>
 #include <algorithm>
@@ -2251,6 +2252,94 @@ double FixBackground::interp2D(const std::vector<double> &field,
 }
 
 /* ---------------------------------------------------------------------- */
+
+bool FixBackground::sample_from_particle_cache(int ip,
+                                               PlasmaPointSample &sample,
+                                               unsigned request) const
+{
+  // E comes from the cache when it is filled (PCACHE_EFIELD), or is
+  // "absent" when the background has no E data; neutrals are served only
+  // when the background has none (has_neutral false, as sample_point).
+  const bool no_efield = !const_has_efield &&
+      (mesh_e_r.empty() || mesh_e_z.empty() || mesh_e_t.empty());
+  const bool no_neutral = dens_n.empty() && mesh_nn.empty() &&
+                          temp_n.empty() && mesh_tn.empty();
+  unsigned servable = PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B | PLASMA_NEED_B;
+  if (no_efield || (update->pcache_need_mask & Update::PCACHE_EFIELD))
+    servable |= PLASMA_NEED_E;
+  if (no_neutral) servable |= PLASMA_NEED_NEUTRAL;
+  if (request & ~servable) return false;
+  if (provider_mode == 1) return false;        // zones3d keeps its own path
+  if (!update->plasma_cache_flag) return false;
+  if (ip < 0 || ip >= particle->nlocal) return false;
+
+  int need = Update::PCACHE_TE | Update::PCACHE_NE |
+             Update::PCACHE_TI | Update::PCACHE_NI;
+  if (request & (PLASMA_NEED_FLOW_B | PLASMA_NEED_B)) need |= Update::PCACHE_BFIELD;
+  if (request & PLASMA_NEED_FLOW_B) need |= Update::PCACHE_VPAR;
+  if ((update->pcache_need_mask & need) != need) return false;
+
+  auto vec = [&](int idx) -> const double * {
+    if (idx < 0 || particle->ewhich[idx] < 0) return (const double *) nullptr;
+    return particle->edvec[particle->ewhich[idx]];
+  };
+  const double *te_v = vec(update->pc_te_custom);
+  const double *ti_v = vec(update->pc_ti_custom);
+  const double *ne_v = vec(update->pc_ne_custom);
+  const double *ni_v = vec(update->pc_ni_custom);
+  if (!te_v || !ti_v || !ne_v || !ni_v) return false;
+  // a particle created this step has not been through the cache yet
+  if (!(te_v[ip] > 0.0)) return false;
+
+  sample = PlasmaPointSample{};
+  sample.te = te_v[ip];
+  sample.ti = ti_v[ip];
+  sample.ne = ne_v[ip];
+  sample.ni = (dens_i.empty() && mesh_ni.empty()) ? sample.ne : ni_v[ip];
+
+  if (request & (PLASMA_NEED_FLOW_B | PLASMA_NEED_B)) {
+    const double *bx_v = vec(update->pc_bx_custom);
+    const double *by_v = vec(update->pc_by_custom);
+    const double *bz_v = vec(update->pc_bz_custom);
+    if (!bx_v || !by_v || !bz_v) return false;
+    const int dim = domain->dimension;
+    const bool axi = domain->axisymmetric || OpenEdge::oe_force_axi_rz;
+    if (dim == 3 && !axi) {           // cache holds Cartesian components
+      sample.b[0] = bx_v[ip]; sample.b[1] = by_v[ip]; sample.b[2] = bz_v[ip];
+    } else {                          // 2-D cache holds (Br, Bz, Bt)
+      OpenEdge::RZphi_force_to_sparta(bx_v[ip], by_v[ip], bz_v[ip], dim, axi,
+                                      0.0, sample.b[0], sample.b[1], sample.b[2]);
+    }
+    sample.bmag = std::sqrt(sample.b[0]*sample.b[0] + sample.b[1]*sample.b[1] +
+                            sample.b[2]*sample.b[2]);
+    sample.has_b = sample.bmag > 1.0e-12;
+  }
+  if (request & PLASMA_NEED_FLOW_B) {
+    const double *vp_v = vec(update->pc_vpar_custom);
+    if (!vp_v) return false;
+    sample.upar = vp_v[ip];
+    if (sample.has_b) {
+      const double invb = 1.0 / sample.bmag;
+      for (int k = 0; k < 3; k++) sample.flow[k] = sample.upar * sample.b[k] * invb;
+    }
+  }
+  if ((request & PLASMA_NEED_E) && !no_efield) {
+    const double *ex_v = vec(update->pc_ex_custom);
+    const double *ey_v = vec(update->pc_ey_custom);
+    const double *ez_v = vec(update->pc_ez_custom);
+    if (!ex_v || !ey_v || !ez_v) return false;
+    const int dim = domain->dimension;
+    const bool axi = domain->axisymmetric || OpenEdge::oe_force_axi_rz;
+    if (dim == 3 && !axi) {
+      sample.e[0] = ex_v[ip]; sample.e[1] = ey_v[ip]; sample.e[2] = ez_v[ip];
+    } else {                          // 2-D cache holds (Er, Ez, Et)
+      OpenEdge::RZphi_force_to_sparta(ex_v[ip], ey_v[ip], ez_v[ip], dim, axi,
+                                      0.0, sample.e[0], sample.e[1], sample.e[2]);
+    }
+    sample.has_e = true;
+  }
+  return true;
+}
 
 bool FixBackground::sample_point(const double xyz[3],
                                  PlasmaPointSample &sample,

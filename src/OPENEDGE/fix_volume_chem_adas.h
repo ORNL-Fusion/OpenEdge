@@ -75,6 +75,21 @@ public:
 int maxgrid_src = 0;
 int nglocal_src = 0;   // cells currently owned (tracked through migration)
 
+// Sparse tally: only rows written in a call are zeroed and normalized, so
+// the per-step cost scales with particles, not cells. cell_stamp[icell] ==
+// tally_epoch marks a row already listed in touched_cells this call.
+std::vector<int> touched_cells;
+std::vector<int> cell_stamp;
+int  tally_epoch = 0;
+bool tally_full_reset = true;   // set when rows moved (balance/adapt)
+inline double *tally_row(int icell) {
+  if (cell_stamp[icell] != tally_epoch) {
+    cell_stamp[icell] = tally_epoch;
+    touched_cells.push_back(icell);
+  }
+  return array_grid[icell];
+}
+
 // Output units for the 20-column per-cell source tally (array_grid):
 //   TALLY_COUNTS: raw cumulative event totals since the fix was created.
 //                 count col = events, m*v col = [kg m/s], 0.5 m v^2 col = [J].

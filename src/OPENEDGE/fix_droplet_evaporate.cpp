@@ -541,7 +541,8 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
   if (physics_model_ == ParticulateModel::DIS2021 && heating_mode_ != 0)
     request |= PLASMA_NEED_FLOW_B;
   PlasmaPointSample plasma;
-  pd_->sample_point(xs, plasma, ip->icell, idrop, request);
+  if (!pd_->sample_from_particle_cache(idrop, plasma, request))
+    pd_->sample_point(xs, plasma, ip->icell, idrop, request);
 
   const double QE = 1.602176634e-19;
   const double ME = 9.1093837015e-31;

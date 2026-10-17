@@ -23,6 +23,8 @@ FixStyle(surface/emit/source,FixSurfaceEmitSource)
 
 namespace SPARTA_NS {
 
+class FixWalldynMatrix;
+
 class FixSurfaceEmitSource : public FixEmit {
  public:
   FixSurfaceEmitSource(class SPARTA *, int, char **);
@@ -59,6 +61,8 @@ class FixSurfaceEmitSource : public FixEmit {
   double flux_thresh;         // minimum flux to emit (skip tasks below this)
   int pweight_index;          // index of pweight custom attribute (-1 if none)
   int pweight_ewhich;         // index into edvec for pweight
+  char *matrix_fix_id;        // optional source-provenance matrix fix ID
+  FixWalldynMatrix *matrix_fix;
 
   // copies of data from other classes
 

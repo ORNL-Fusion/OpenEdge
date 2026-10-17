@@ -32,6 +32,7 @@ class FixDropletCharge;
 
 class FixDropletDrag : public Fix {
  public:
+  bool needs_efield() const { return efield_on_ != 0; }   // for the plasma-cache mask
   FixDropletDrag(class SPARTA *, int, char **);
   ~FixDropletDrag() override;
 

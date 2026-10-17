@@ -604,6 +604,8 @@ void FixVolumeChemAdas::reset_tally()
   if (array_grid && maxgrid_src > 0)
     memset(&array_grid[0][0], 0,
            sizeof(double) * maxgrid_src * size_per_grid_cols);
+  touched_cells.clear();
+  tally_full_reset = true;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -625,6 +627,7 @@ void FixVolumeChemAdas::grow_src(int nnew)
                "volume/chem/adas:array_grid(src)");
   memset(&array_grid[oldmax][0], 0,
          sizeof(double) * (maxgrid_src - oldmax) * size_per_grid_cols);
+  cell_stamp.resize(maxgrid_src, 0);
 }
 
 int FixVolumeChemAdas::pack_grid_one(int icell, char *buf, int memflag)
@@ -687,6 +690,7 @@ void FixVolumeChemAdas::add_grid_one()
 void FixVolumeChemAdas::reset_grid_count(int nlocal)
 {
   nglocal_src = nlocal;
+  tally_full_reset = true;
 }
 
 void FixVolumeChemAdas::grid_changed()
@@ -694,6 +698,7 @@ void FixVolumeChemAdas::grid_changed()
   nglocal_src = 0;
   grow_src(grid->nlocal);
   nglocal_src = grid->nlocal;
+  tally_full_reset = true;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -881,6 +886,9 @@ if (grid->maxlocal > maxgrid_src) {
   memory->grow(array_grid, maxgrid_src, size_per_grid_cols,
                "volume/chem/adas:array_grid(src)");
 }
+cell_stamp.resize(maxgrid_src, 0);
+touched_cells.clear();
+tally_full_reset = true;
 if (maxgrid_src > 0) {
   memset(&array_grid[0][0], 0,
          sizeof(double) * maxgrid_src * size_per_grid_cols);
@@ -987,7 +995,7 @@ void FixVolumeChemAdas::end_of_step()
   }
 
   nreact_one = 0;
-  if (!particle->sorted) particle->sort();
+  if (rate_cache_mode == 1 && !particle->sorted) particle->sort();
   end_of_step_no_average();
   nreact_running += nreact_one;
 }
@@ -1098,10 +1106,21 @@ void FixVolumeChemAdas::end_of_step_no_average()
       memset(&array_grid[oldmax][0], 0,
              sizeof(double) * (maxgrid_src - oldmax) * ncols);
     }
+    cell_stamp.resize(maxgrid_src, 0);
   }
+  // RATE mode: zero only the rows written last call (all others are already
+  // zero); after a grid change rows have moved, so zero everything once.
   if (tally_units == TALLY_RATE && maxgrid_src > 0) {
-    memset(&array_grid[0][0], 0, sizeof(double) * maxgrid_src * ncols);
+    if (tally_full_reset) {
+      memset(&array_grid[0][0], 0, sizeof(double) * maxgrid_src * ncols);
+    } else {
+      for (size_t k = 0; k < touched_cells.size(); k++)
+        memset(array_grid[touched_cells[k]], 0, sizeof(double) * ncols);
+    }
   }
+  tally_full_reset = false;
+  touched_cells.clear();
+  tally_epoch++;
 
   // Read Te/ne/Ti/vpar/B from per-particle plasma cache. The cache is
   // populated by update.cpp from the configured plasma provider; the
@@ -1174,21 +1193,19 @@ void FixVolumeChemAdas::end_of_step_no_average()
         }
       }
     } else {
-      // Particle mode (default): rates recomputed per particle.
-      for (int icell = 0; icell < nglocal; icell++) {
-        if (cinfo[icell].count == 0) continue;
-        int ip = cinfo[icell].first;
-        while (ip >= 0) {
-          const double Te_eV = std::max(te_vec[ip], 1e-6);
-          const double ne_m3 = std::max(ne_vec[ip], 0.0);
-          const double Ti_eV = ti_vec ? std::max(ti_vec[ip], 0.0) : 0.0;
-          const double vp = vpar_vec ? vpar_vec[ip] : 0.0;
-          const double Bx = bx_vec ? bx_vec[ip] : 0.0;
-          const double By = by_vec ? by_vec[ip] : 0.0;
-          const double Bz = bz_vec ? bz_vec[ip] : 0.0;
-          attempt(&particles[ip], ip, Te_eV, ne_m3, Ti_eV, vp, Bx, By, Bz);
-          ip = next[ip];
-        }
+      // Particle mode (default): rates recomputed per particle. Walk the
+      // particle array directly (no per-cell list, no sort): new particles
+      // are deferred and deletions compressed after the loop.
+      const int np = particle->nlocal;
+      for (int ip = 0; ip < np; ip++) {
+        const double Te_eV = std::max(te_vec[ip], 1e-6);
+        const double ne_m3 = std::max(ne_vec[ip], 0.0);
+        const double Ti_eV = ti_vec ? std::max(ti_vec[ip], 0.0) : 0.0;
+        const double vp = vpar_vec ? vpar_vec[ip] : 0.0;
+        const double Bx = bx_vec ? bx_vec[ip] : 0.0;
+        const double By = by_vec ? by_vec[ip] : 0.0;
+        const double Bz = bz_vec ? bz_vec[ip] : 0.0;
+        attempt(&particles[ip], ip, Te_eV, ne_m3, Ti_eV, vp, Bx, By, Bz);
       }
     }
   }
@@ -1216,7 +1233,8 @@ void FixVolumeChemAdas::end_of_step_no_average()
     const double fnum     = update->fnum;
     if (window_s > 0.0 && fnum > 0.0) {
       const double num = fnum / window_s;
-      for (int icell = 0; icell < nglocal; icell++) {
+      for (size_t k = 0; k < touched_cells.size(); k++) {
+        const int icell = touched_cells[k];
         const double vol = cinfo[icell].volume;
         if (vol <= 0.0) {
           double *row = array_grid[icell];
@@ -1575,7 +1593,7 @@ void FixVolumeChemAdas::spawn_volume_recombination()
 
       // Tally into array_grid in the same row layout as attempt().
       if (array_grid && icell < maxgrid_src) {
-        double *row = array_grid[icell];
+        double *row = tally_row(icell);
         if (output_mode == OUT_DETAILED) {
           // Recombination column = index 1 in the {ioniz, recomb, CX, dissoc}
           // bucket layout (col 0..3 count, 4..7 mvx, 8..11 mvy, 12..15 mvz,
@@ -1939,7 +1957,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
       }
       if (rtype_off >= 0) {
         const double ke  = 0.5 * m * (vx0*vx0 + vy0*vy0 + vz0*vz0);
-        double *row = array_grid[icell];
+        double *row = tally_row(icell);
         row[rtype_off]         += scale;
         row[4  + rtype_off]    += m * vx0 * scale;
         row[8  + rtype_off]    += m * vy0 * scale;
@@ -2066,7 +2084,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
       }
       }
 
-      double *row = array_grid[icell];
+      double *row = tally_row(icell);
       row[0] += dSp  * scale;
       row[1] += dSmx * scale;
       row[2] += dSmy * scale;

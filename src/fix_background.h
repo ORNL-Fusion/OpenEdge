@@ -109,6 +109,11 @@ class FixBackground : public Fix {
   bool sample_point(const double xyz[3], PlasmaPointSample &sample,
                     int icell = -1, int iparticle = -1,
                     unsigned request = PLASMA_NEED_ALL) const;
+  // Same contract served from the per-particle cache that
+  // Update::cache_plasma_particles() fills once per step (THERMO, FLOW_B,
+  // B only). false = not cached for this particle/request: call sample_point.
+  bool sample_from_particle_cache(int iparticle, PlasmaPointSample &sample,
+                                  unsigned request) const;
   bool is_zones3d() const { return provider_mode == 1; }
   // strict hinted mesh-cell lookup (no extrapolation halo); -1 outside
   int mesh_cell_for(double R, double Z, int icell = -1,

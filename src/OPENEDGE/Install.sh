@@ -44,6 +44,8 @@ action () {
 # --- Override files (exist in base SPARTA) ---
 override update.cpp
 override update.h
+override fix_balance.cpp
+override fix_balance.h
 override input.cpp
 override input.h
 override particle.cpp
@@ -116,6 +118,8 @@ action fix_store_force.cpp
 action fix_store_force.h
 action fix_particle_weight.cpp
 action fix_particle_weight.h
+action fix_walldyn_matrix.cpp
+action fix_walldyn_matrix.h
 action fix_population_control.cpp
 action fix_population_control.h
 action fix_reflect_psi.cpp

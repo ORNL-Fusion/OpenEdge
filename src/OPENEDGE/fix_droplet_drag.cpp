@@ -279,7 +279,8 @@ void FixDropletDrag::kick_half(double dt_half)
     if (neutrals_on_) request |= PLASMA_NEED_NEUTRAL;
     if (efield_on_) request |= PLASMA_NEED_E;
     PlasmaPointSample plasma;
-    pd_->sample_point(p.x, plasma, p.icell, ip, request);
+    if (!pd_->sample_from_particle_cache(ip, plasma, request))
+      pd_->sample_point(p.x, plasma, p.icell, ip, request);
 
     const double Ti_eV = std::max(plasma.ti, 0.0);
     const double Ni    = std::max(plasma.ni, 0.0);
