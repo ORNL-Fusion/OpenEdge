@@ -1,8 +1,8 @@
 /* ----------------------------------------------------------------------
-   OpenEdge: fix droplet/charge — OML charging against background.
+   OpenEdge: fix particulate/charge — OML charging against background.
 ------------------------------------------------------------------------- */
 
-#include "fix_droplet_charge.h"
+#include "fix_particulate_charge.h"
 #include "fix_background.h"
 #include "grain_material.h"
 #include "random_knuth.h"
@@ -29,20 +29,20 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-FixDropletCharge::FixDropletCharge(SPARTA *sparta, int narg, char **arg) :
+FixParticulateCharge::FixParticulateCharge(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg)
 {
-  // fix ID droplet/charge Nevery background PD [keywords...]
+  // fix ID particulate/charge Nevery background PD [keywords...]
   if (narg < 5)
     error->all(FLERR,
-      "Illegal fix droplet/charge command "
+      "Illegal fix particulate/charge command "
       "(need: Nevery background PD)");
 
   int iarg = 2;
   nevery = input->inumeric(FLERR, arg[iarg++]);
 
   if (strcmp(arg[iarg++], "background") != 0)
-    error->all(FLERR, "fix droplet/charge: argument 4 must be 'background'");
+    error->all(FLERR, "fix particulate/charge: argument 4 must be 'background'");
   plasma_fix_id_ = std::string(arg[iarg++]);
 
   while (iarg < narg) {
@@ -63,12 +63,12 @@ FixDropletCharge::FixDropletCharge(SPARTA *sparta, int narg, char **arg) :
       seed_radius = input->numeric(FLERR, arg[iarg+1]); iarg += 2;
     } else if (strcmp(arg[iarg], "mass") == 0) {
       seed_mass = input->numeric(FLERR, arg[iarg+1]);
-      if (seed_mass <= 0.0) error->all(FLERR, "fix droplet/charge: mass must be > 0");
+      if (seed_mass <= 0.0) error->all(FLERR, "fix particulate/charge: mass must be > 0");
       iarg += 2;
     } else if (strcmp(arg[iarg], "ion_mass_amu") == 0) {
       ion_mass_amu = input->numeric(FLERR, arg[iarg+1]);
       if (ion_mass_amu <= 0.0)
-        error->all(FLERR, "fix droplet/charge: ion_mass_amu must be > 0");
+        error->all(FLERR, "fix particulate/charge: ion_mass_amu must be > 0");
       iarg += 2;
     } else if (strcmp(arg[iarg], "ion_charge_state") == 0) {
       ion_charge_state = input->numeric(FLERR, arg[iarg+1]);
@@ -78,24 +78,24 @@ FixDropletCharge::FixDropletCharge(SPARTA *sparta, int narg, char **arg) :
       iarg += 2;
     } else if (strcmp(arg[iarg], "fixed_charge") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR, "fix droplet/charge: fixed_charge <Zd>");
+        error->all(FLERR, "fix particulate/charge: fixed_charge <Zd>");
       fixed_zd_ = input->numeric(FLERR, arg[iarg+1]);
       fixed_mode_ = 1;
       iarg += 2;
     } else if (strcmp(arg[iarg], "validity") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR, "fix droplet/charge: validity warn|error|no");
+        error->all(FLERR, "fix particulate/charge: validity warn|error|no");
       if      (strcmp(arg[iarg+1], "warn")  == 0) validity_mode = 1;
       else if (strcmp(arg[iarg+1], "error") == 0) validity_mode = 2;
       else if (strcmp(arg[iarg+1], "no")    == 0) validity_mode = 0;
-      else error->all(FLERR, "fix droplet/charge: validity warn|error|no");
+      else error->all(FLERR, "fix particulate/charge: validity warn|error|no");
       iarg += 2;
     } else if (strcmp(arg[iarg], "see") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR, "fix droplet/charge: see yes|no");
+        error->all(FLERR, "fix particulate/charge: see yes|no");
       if      (strcmp(arg[iarg+1], "yes") == 0) see_on = 1;
       else if (strcmp(arg[iarg+1], "no")  == 0) see_on = 0;
-      else error->all(FLERR, "fix droplet/charge: see must be yes or no");
+      else error->all(FLERR, "fix particulate/charge: see must be yes or no");
       iarg += 2;
     } else if (strcmp(arg[iarg], "see_model") == 0) {
       if (iarg + 1 >= narg)
@@ -129,39 +129,39 @@ FixDropletCharge::FixDropletCharge(SPARTA *sparta, int narg, char **arg) :
     } else if (strcmp(arg[iarg], "thermionic") == 0) {
       if      (strcmp(arg[iarg+1], "yes") == 0) thermionic_on = 1;
       else if (strcmp(arg[iarg+1], "no")  == 0) thermionic_on = 0;
-      else error->all(FLERR, "fix droplet/charge: thermionic must be yes or no");
+      else error->all(FLERR, "fix particulate/charge: thermionic must be yes or no");
       iarg += 2;
     } else if (strcmp(arg[iarg], "richardson_A") == 0) {
       richardson_A = input->numeric(FLERR, arg[iarg+1]);
       if (richardson_A < 0.0)
-        error->all(FLERR, "fix droplet/charge: richardson_A must be >= 0");
+        error->all(FLERR, "fix particulate/charge: richardson_A must be >= 0");
       ra_set_ = 1;
       iarg += 2;
     } else if (strcmp(arg[iarg], "work_function_eV") == 0) {
       work_function_eV = input->numeric(FLERR, arg[iarg+1]);
       if (work_function_eV <= 0.0)
-        error->all(FLERR, "fix droplet/charge: work_function_eV must be > 0");
+        error->all(FLERR, "fix particulate/charge: work_function_eV must be > 0");
       wf_set_ = 1;
       iarg += 2;
     } else if (strcmp(arg[iarg], "temp") == 0) {
       seed_temp = input->numeric(FLERR, arg[iarg+1]); iarg += 2;
     } else if (strcmp(arg[iarg], "mixture") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR, "fix droplet/charge: missing mixture ID");
+        error->all(FLERR, "fix particulate/charge: missing mixture ID");
       imix = particle->find_mixture(arg[iarg+1]);
-      if (imix < 0) error->all(FLERR, "fix droplet/charge: unknown mixture ID");
+      if (imix < 0) error->all(FLERR, "fix particulate/charge: unknown mixture ID");
       iarg += 2;
     } else if (strcmp(arg[iarg], "material") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR, "fix droplet/charge: missing material name");
+        error->all(FLERR, "fix particulate/charge: missing material name");
       if (strlen(arg[iarg+1]) >= sizeof(mat_name_))
-        error->all(FLERR, "fix droplet/charge: material name too long");
+        error->all(FLERR, "fix particulate/charge: material name too long");
       strcpy(mat_name_, arg[iarg+1]);
       iarg += 2;
     } else {
       char msg[200];
       snprintf(msg, sizeof(msg),
-               "fix droplet/charge: unknown keyword '%s'", arg[iarg]);
+               "fix particulate/charge: unknown keyword '%s'", arg[iarg]);
       error->all(FLERR, msg);
     }
   }
@@ -175,9 +175,9 @@ FixDropletCharge::FixDropletCharge(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixDropletCharge::~FixDropletCharge() {}
+FixParticulateCharge::~FixParticulateCharge() {}
 
-int FixDropletCharge::setmask()
+int FixParticulateCharge::setmask()
 {
   int mask = 0;
   mask |= START_OF_STEP;
@@ -187,20 +187,20 @@ int FixDropletCharge::setmask()
 
 /* ---------------------------------------------------------------------- */
 
-void FixDropletCharge::init()
+void FixParticulateCharge::init()
 {
   const int ifix = modify->find_fix(plasma_fix_id_.c_str());
   if (ifix < 0) {
     char msg[200];
     snprintf(msg, sizeof(msg),
-             "fix droplet/charge: background fix '%s' not found",
+             "fix particulate/charge: background fix '%s' not found",
              plasma_fix_id_.c_str());
     error->all(FLERR, msg);
   }
   pd_ = dynamic_cast<FixBackground *>(modify->fix[ifix]);
   if (!pd_)
     error->all(FLERR,
-      "fix droplet/charge: background fix must be style background");
+      "fix particulate/charge: background fix must be style background");
   pd_->init();
 
   // Optional grain material: supplies thermionic work function and
@@ -208,7 +208,7 @@ void FixDropletCharge::init()
   if (mat_name_[0]) {
     mat_ = grain_material_find(mat_name_);
     if (!mat_)
-      error->all(FLERR, "fix droplet/charge: unknown material");
+      error->all(FLERR, "fix particulate/charge: unknown material");
     if (!wf_set_ && mat_->work_function_eV > 0.0)
       work_function_eV = mat_->work_function_eV;
     if (!ra_set_ && mat_->richardson_A > 0.0)
@@ -306,7 +306,7 @@ void FixDropletCharge::init()
       "explicit_mask=0x%llx\n", mat_->name, mat_->provenance_id,
       static_cast<unsigned long long>(mat_->explicit_mask));
   if (physics_model_ == ParticulateModel::DUSTT2005 && see_on && comm->me == 0)
-    error->warning(FLERR, "fix droplet/charge: see yes is EXPERIMENTAL "
+    error->warning(FLERR, "fix particulate/charge: see yes is EXPERIMENTAL "
                    "(Sternglass electron-impact channel only; no IIEE/"
                    "backscattering, no positive-potential branch, no "
                    "heat-balance coupling)");
@@ -319,23 +319,23 @@ void FixDropletCharge::init()
     qcustom = particle->find_custom((char *) "particulate_charge");
 }
 
-void FixDropletCharge::start_of_step()
+void FixParticulateCharge::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
   apply_charge_update();
 }
 
-void FixDropletCharge::end_of_step()
+void FixParticulateCharge::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
   apply_charge_update();
 }
 
-double FixDropletCharge::memory_usage() { return 0.0; }
+double FixParticulateCharge::memory_usage() { return 0.0; }
 
 /* ---------------------------------------------------------------------- */
 
-bool FixDropletCharge::make_dis_parameters(
+bool FixParticulateCharge::make_dis_parameters(
   const double Te_eV, const double Ti_eV,
   const double ne_m3, const double ni_m3,
   const double Td_K, const double rd_m, const double u_mach,
@@ -364,7 +364,7 @@ bool FixDropletCharge::make_dis_parameters(
   return true;
 }
 
-bool FixDropletCharge::evaluate_dis_state(
+bool FixParticulateCharge::evaluate_dis_state(
   const double Te_eV, const double Ti_eV,
   const double ne_m3, const double ni_m3,
   const double Td_K, const double rd_m, const double u_mach,
@@ -382,7 +382,7 @@ bool FixDropletCharge::evaluate_dis_state(
   return !heat || ParticulateModel::dis_heat_flux(p, current, 13.6, *heat);
 }
 
-bool FixDropletCharge::solve_dis_state(
+bool FixParticulateCharge::solve_dis_state(
   const double Te_eV, const double Ti_eV,
   const double ne_m3, const double ni_m3,
   const double Td_K, const double rd_m, const double u_mach,
@@ -399,7 +399,7 @@ bool FixDropletCharge::solve_dis_state(
 
 /* ---------------------------------------------------------------------- */
 
-bool FixDropletCharge::solve_phi_oml(double Te_eV, double Ti_eV,
+bool FixParticulateCharge::solve_phi_oml(double Te_eV, double Ti_eV,
                                      double ne_m3, double ni_m3,
                                      double Td_K, double rd_m,
                                      double u_mach, double &phi_V) const
@@ -464,7 +464,7 @@ bool FixDropletCharge::solve_phi_oml(double Te_eV, double Ti_eV,
     if (see_frac > 0.95 && !see_sat_warned_) {
       see_sat_warned_ = 1;
       if (comm->me == 0)
-        error->warning(FLERR, "fix droplet/charge: SEE yield near/above "
+        error->warning(FLERR, "fix particulate/charge: SEE yield near/above "
                        "unity — the negative-potential OML branch is "
                        "outside its validity range (positive-potential/"
                        "space-charge model not implemented)");
@@ -526,7 +526,7 @@ bool FixDropletCharge::solve_phi_oml(double Te_eV, double Ti_eV,
 
 /* ---------------------------------------------------------------------- */
 
-void FixDropletCharge::apply_charge_update()
+void FixParticulateCharge::apply_charge_update()
 {
   const double eps0 = 8.8541878128e-12;
   const double qe   = update->echarge;
@@ -615,7 +615,7 @@ void FixDropletCharge::apply_charge_update()
       if (rl > 1.0) {
         val_nviol_++;
         if (validity_mode == 2)
-          error->one(FLERR, "fix droplet/charge: OML validity violated "
+          error->one(FLERR, "fix particulate/charge: OML validity violated "
                      "(R_d > lambda_D; validity error requested)");
         if (!val_warned_ && comm->me == 0) {
           val_warned_ = 1;
@@ -626,7 +626,7 @@ void FixDropletCharge::apply_charge_update()
               "the DIS surface-potential model (DIS A6-A7 finite-size "
               "g_fit remains active in particulate/drag)");
           else
-            error->warning(FLERR, "fix droplet/charge: R_d > lambda_D — "
+            error->warning(FLERR, "fix particulate/charge: R_d > lambda_D — "
                            "OML charging exceeds its formal small-grain "
                            "validity range");
         }
@@ -686,7 +686,7 @@ void FixDropletCharge::apply_charge_update()
     }
     split_list_.clear();
     // fragments are appended outside the per-cell lists; see the same note
-    // in FixDropletEvaporate::spawn_evap_atoms()
+    // in FixParticulateThermal::spawn_evap_atoms()
     particle->sorted = 0;
   }
 }

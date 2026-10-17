@@ -18,7 +18,7 @@ using namespace SPARTA_NS;
    Built-in materials.
 
    Li: values carried over verbatim from the original hardcoded droplet
-   model ("Sergey's model", fix_droplet_evaporate) so legacy decks are
+   model ("Sergey's model", fix_particulate_thermal) so legacy decks are
    bit-compatible: rho 534, cp 4200, Antoine log10 p[mmHg] = 5.055
    - 8023/T, hvap 1.47e5 J/mol. Emissivity for liquid Li is low (~0.1).
 

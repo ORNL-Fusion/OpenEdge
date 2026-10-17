@@ -42,12 +42,12 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(particulate/thermal,FixDropletEvaporate)
+FixStyle(particulate/thermal,FixParticulateThermal)
 
 #else
 
-#ifndef SPARTA_FIX_EVAP_H
-#define SPARTA_FIX_EVAP_H
+#ifndef SPARTA_FIX_PARTICULATE_THERMAL_H
+#define SPARTA_FIX_PARTICULATE_THERMAL_H
 
 #include "fix.h"
 #include "particulate_model_kernels.h"
@@ -56,13 +56,13 @@ FixStyle(particulate/thermal,FixDropletEvaporate)
 namespace SPARTA_NS {
 
 class FixBackground;
-class FixDropletCharge;
+class FixParticulateCharge;
 class RanKnuth;
 
-class FixDropletEvaporate : public Fix {
+class FixParticulateThermal : public Fix {
  public:
-  FixDropletEvaporate(class SPARTA*, int, char**);
-  ~FixDropletEvaporate() override;
+  FixParticulateThermal(class SPARTA*, int, char**);
+  ~FixParticulateThermal() override;
   int setmask() override;
   void init() override;
   double memory_usage() override;
@@ -116,7 +116,7 @@ class FixDropletEvaporate : public Fix {
   std::string plasma_fix_id_;
   FixBackground *pd_;
   std::string charge_fix_id_;
-  FixDropletCharge *charge_fix_;
+  FixParticulateCharge *charge_fix_;
 
   // Optional volumetric material source on grain evaporation.
   // When emit_imix >= 0, each grain spawns Maxwellian atoms in its

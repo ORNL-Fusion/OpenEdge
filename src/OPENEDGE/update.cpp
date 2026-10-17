@@ -43,7 +43,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "fix_cross_field_diffusion.h"
 #include "fix_force_thermal.h"
 #include "fix_coulomb_base.h"
-#include "fix_droplet_drag.h"
+#include "fix_particulate_drag.h"
 #include "fix_volume_chem_adas.h"
 #include "fix_reflect_psi.h"
 #include "memory.h"
@@ -822,7 +822,7 @@ void Update::init()
         pcache_need_mask |= PCACHE_TE | PCACHE_NE | PCACHE_TI | PCACHE_NI |
                             PCACHE_VPAR | PCACHE_BFIELD;
         if (strcmp(s,"particulate/drag") == 0) {
-          FixDropletDrag *fdr = dynamic_cast<FixDropletDrag *>(modify->fix[ifix]);
+          FixParticulateDrag *fdr = dynamic_cast<FixParticulateDrag *>(modify->fix[ifix]);
           if (!fdr || fdr->needs_efield()) pcache_need_mask |= PCACHE_EFIELD;
         }
         note_cad(modify->fix[ifix]->nevery);
@@ -995,7 +995,7 @@ void Update::run(int nsteps)
 
     // Early-exit on empty domain — disabled. Was added for fix
     // volume/chem/adas Mode A exhaustion but kills emit-only decks
-    // (fix droplet/emit with nevery > 1) at step 1 before the first
+    // (fix particulate/emit with nevery > 1) at step 1 before the first
     // emission can fire. Re-enable behind a flag if Mode A needs it.
     // {
     //   bigint nlocal = particle->nlocal;
@@ -1581,7 +1581,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
     }
   }
 
-  // Per-particle charge override from fix droplet/charge (custom DOUBLE
+  // Per-particle charge override from fix particulate/charge (custom DOUBLE
   // vector "particulate_charge"). Cache only the ewhich INDEX, not the array
   // pointer: add_particle (mid-move migration receives) can reallocate
   // edvec, and a pointer captured here would dangle — intermittent MPI-only

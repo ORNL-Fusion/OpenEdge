@@ -7,9 +7,9 @@
     https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
-#include "fix_droplet_evaporate.h"
+#include "fix_particulate_thermal.h"
 #include "fix_background.h"
-#include "fix_droplet_charge.h"
+#include "fix_particulate_charge.h"
 #include "update.h"
 #include "grid.h"
 #include "particle.h"
@@ -61,7 +61,7 @@ namespace {
 
 /* ---------------------------------------------------------------------- */
 
-FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
+FixParticulateThermal::FixParticulateThermal(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta, narg, arg),
   heatflux_scale(1.0),
   rocket_eta(0.0),
@@ -262,14 +262,14 @@ FixDropletEvaporate::FixDropletEvaporate(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixDropletEvaporate::~FixDropletEvaporate()
+FixParticulateThermal::~FixParticulateThermal()
 {
   delete random;
 }
 
 /* ---------------------------------------------------------------------- */
 
-int FixDropletEvaporate::setmask()
+int FixParticulateThermal::setmask()
 {
   int mask = 0;
   mask |= START_OF_STEP;
@@ -279,7 +279,7 @@ int FixDropletEvaporate::setmask()
 
 /* ---------------------------------------------------------------------- */
 
-void FixDropletEvaporate::init()
+void FixParticulateThermal::init()
 {
   const int ifix = modify->find_fix(plasma_fix_id_.c_str());
   if (ifix < 0) {
@@ -368,7 +368,7 @@ void FixDropletEvaporate::init()
     }
   }
 
-  // OML heating uses the grain's OML charge when fix droplet/charge is
+  // OML heating uses the grain's OML charge when fix particulate/charge is
   // active (custom vector registered by that fix); else chi defaults.
   dq_custom_ = particle->find_custom((char *) "particulate_charge");
   if (physics_model_ == ParticulateModel::DIS2021 &&
@@ -386,7 +386,7 @@ void FixDropletEvaporate::init()
     if (iqfix < 0)
       error->all(FLERR,
         "fix particulate/thermal: referenced charge fix was not found");
-    charge_fix_ = dynamic_cast<FixDropletCharge *>(modify->fix[iqfix]);
+    charge_fix_ = dynamic_cast<FixParticulateCharge *>(modify->fix[iqfix]);
     if (!charge_fix_ ||
         charge_fix_->physics_model() != ParticulateModel::DIS2021)
       error->all(FLERR,
@@ -424,21 +424,21 @@ void FixDropletEvaporate::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixDropletEvaporate::start_of_step()
+void FixParticulateThermal::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
   evap_half(0.5 * update->dt);
 }
 
-void FixDropletEvaporate::end_of_step()
+void FixParticulateThermal::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
   evap_half(0.5 * update->dt);
 }
 
-double FixDropletEvaporate::memory_usage() { return 0.0; }
+double FixParticulateThermal::memory_usage() { return 0.0; }
 
-double FixDropletEvaporate::compute_scalar()
+double FixParticulateThermal::compute_scalar()
 {
   double global = 0.0;
   MPI_Allreduce(&evap_atoms_local_, &global, 1, MPI_DOUBLE, MPI_SUM, world);
@@ -451,7 +451,7 @@ double FixDropletEvaporate::compute_scalar()
      [2] cumulative DUSTT terminal remainder, in atom equivalents
 ------------------------------------------------------------------------- */
 
-double FixDropletEvaporate::compute_vector(int index)
+double FixParticulateThermal::compute_vector(int index)
 {
   double local = 0.0;
   if (index == 0) local = evap_atoms_local_;
@@ -463,7 +463,7 @@ double FixDropletEvaporate::compute_vector(int index)
 
 /* ---------------------------------------------------------------------- */
 
-void FixDropletEvaporate::evap_half(double dt_half)
+void FixParticulateThermal::evap_half(double dt_half)
 {
   if ((update->ntimestep % nevery) != 0) return;
 
@@ -502,7 +502,7 @@ void FixDropletEvaporate::evap_half(double dt_half)
    where Qs = sqrt(q_par^2 + q_perp^2) at the droplet position, pulled
    from fix background. Rocket force uses -grad(Te) as the recoil axis.
 ------------------------------------------------------------------------- */
-void FixDropletEvaporate::droplet_evaporation_model(int idrop,
+void FixParticulateThermal::droplet_evaporation_model(int idrop,
                                         const double dt_half)
 {
   // Material properties from the grain-material registry (default Li,
@@ -612,7 +612,7 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
                           heat.secondary_cooling_W_m2);
     } else {
       // Normalized floating potential chi = e*phi/Te (<= 0). Use the OML
-      // charge from fix droplet/charge when present; else the canonical
+      // charge from fix particulate/charge when present; else the canonical
       // hydrogenic floating value chi ~ -2.5.
       double chi = -2.5;
       if (dq_custom_ >= 0) {
@@ -877,7 +877,7 @@ void FixDropletEvaporate::droplet_evaporation_model(int idrop,
    Spawn evaporated atoms in the droplet's cell. Called only when
    emit_imix >= 0. Lambda = area * Gevap_atoms * dt / fnum.
 ------------------------------------------------------------------------- */
-void FixDropletEvaporate::spawn_evap_atoms(int idrop, double area,
+void FixParticulateThermal::spawn_evap_atoms(int idrop, double area,
                                             double Gevap_atoms, double TK,
                                             double dt_half)
 {

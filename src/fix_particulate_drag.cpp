@@ -3,9 +3,9 @@
    Background plasma at particle position pulled from fix background.
 ------------------------------------------------------------------------- */
 
-#include "fix_droplet_drag.h"
+#include "fix_particulate_drag.h"
 #include "fix_background.h"
-#include "fix_droplet_charge.h"
+#include "fix_particulate_charge.h"
 #include "grain_material.h"
 #include "update.h"
 #include "grid.h"
@@ -27,7 +27,7 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-FixDropletDrag::FixDropletDrag(SPARTA *sparta, int narg, char **arg)
+FixParticulateDrag::FixParticulateDrag(SPARTA *sparta, int narg, char **arg)
     : Fix(sparta, narg, arg)
 {
   // fix ID drag Nevery A_bg Z_bg background PD [keywords...]
@@ -127,9 +127,9 @@ FixDropletDrag::FixDropletDrag(SPARTA *sparta, int narg, char **arg)
 
 /* ---------------------------------------------------------------------- */
 
-FixDropletDrag::~FixDropletDrag() {}
+FixParticulateDrag::~FixParticulateDrag() {}
 
-int FixDropletDrag::setmask()
+int FixParticulateDrag::setmask()
 {
   int mask = 0;
   mask |= START_OF_STEP;
@@ -139,7 +139,7 @@ int FixDropletDrag::setmask()
 
 /* ---------------------------------------------------------------------- */
 
-void FixDropletDrag::init()
+void FixParticulateDrag::init()
 {
   if (use_gravity) {
     for (int k = 0; k < modify->nfix; ++k)
@@ -175,7 +175,7 @@ void FixDropletDrag::init()
     if (iqfix < 0)
       error->all(FLERR,
         "fix particulate/drag: referenced charge fix was not found");
-    charge_fix_ = dynamic_cast<FixDropletCharge *>(modify->fix[iqfix]);
+    charge_fix_ = dynamic_cast<FixParticulateCharge *>(modify->fix[iqfix]);
     if (!charge_fix_ ||
         charge_fix_->physics_model() != ParticulateModel::DIS2021)
       error->all(FLERR,
@@ -240,13 +240,13 @@ void FixDropletDrag::init()
 
 /* ---------------------------------------------------------------------- */
 
-void FixDropletDrag::start_of_step()
+void FixParticulateDrag::start_of_step()
 {
   if (update->ntimestep % nevery) return;
   kick_half(0.5 * update->dt);
 }
 
-void FixDropletDrag::end_of_step()
+void FixParticulateDrag::end_of_step()
 {
   if (update->ntimestep % nevery) return;
   kick_half(0.5 * update->dt);
@@ -254,7 +254,7 @@ void FixDropletDrag::end_of_step()
 
 /* ---------------------------------------------------------------------- */
 
-void FixDropletDrag::kick_half(double dt_half)
+void FixParticulateDrag::kick_half(double dt_half)
 {
   const int nlocal = particle->nlocal;
   Particle::OnePart * const parts = particle->particles;
@@ -450,7 +450,7 @@ void FixDropletDrag::kick_half(double dt_half)
 
 /* ---------------------------------------------------------------------- */
 
-double FixDropletDrag::ion_drag_nu(double Ni, double Ti_eV, double rd_m) const
+double FixParticulateDrag::ion_drag_nu(double Ni, double Ti_eV, double rd_m) const
 {
   // nu = F_Epstein/(M_d |V_i - v|) = m_i n_i v_Ti sigma_d / M_d
   //    = (3/4) rho_g v_Ti / (rho_d R_d),  v_Ti = sqrt(2 T_i / m_i)
@@ -463,12 +463,12 @@ double FixDropletDrag::ion_drag_nu(double Ni, double Ti_eV, double rd_m) const
   return 0.75 * (rho_g * vti) / (rho_d * rd_m);
 }
 
-double FixDropletDrag::coulomb_multiplier(double u) const
+double FixParticulateDrag::coulomb_multiplier(double u) const
 {
   return coulomb_multiplier(u, chi_coulomb, delta_ite, ln_lambda_coulomb);
 }
 
-double FixDropletDrag::coulomb_multiplier(double u, double chi, double delta,
+double FixParticulateDrag::coulomb_multiplier(double u, double chi, double delta,
                                           double lnlam) const
 {
   const double sqrt_pi    = std::sqrt(MY_PI);

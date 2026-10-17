@@ -10,7 +10,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include <cmath>
 #include "stdlib.h"
 #include "string.h"
-#include "fix_droplet_emit.h"
+#include "fix_particulate_emit.h"
 #include "update.h"
 #include "compute.h"
 #include "domain.h"
@@ -43,18 +43,18 @@ enum{INT,DOUBLE};                                        // several files
 
 /* ---------------------------------------------------------------------- */
 
-FixDropletEmit::FixDropletEmit(SPARTA *sparta, int narg, char **arg) :
+FixParticulateEmit::FixParticulateEmit(SPARTA *sparta, int narg, char **arg) :
   FixEmit(sparta, narg, arg)
 {
-  if (narg < 4) error->all(FLERR,"Illegal fix emit/dropletcommand");
+  if (narg < 4) error->all(FLERR,"Illegal fix particulate/emit command");
 
   imix = particle->find_mixture(arg[2]);
   if (imix < 0)
-    error->all(FLERR,"Fix emit/dropletmixture ID does not exist");
+    error->all(FLERR,"Fix particulate/emit mixture ID does not exist");
 
   int igroup = surf->find_group(arg[3]);
   if (igroup < 0)
-    error->all(FLERR,"Fix emit/dropletgroup ID does not exist");
+    error->all(FLERR,"Fix particulate/emit group ID does not exist");
   groupbit = surf->bitmask[igroup];
 
   // optional args
@@ -95,22 +95,22 @@ FixDropletEmit::FixDropletEmit(SPARTA *sparta, int narg, char **arg) :
   // error checks
 
   if (!surf->exist)
-    error->all(FLERR,"Fix emit/dropletrequires surface elements");
+    error->all(FLERR,"Fix particulate/emit requires surface elements");
   if (surf->implicit)
-    error->all(FLERR,"Fix emit/dropletnot allowed for implicit surfaces");
+    error->all(FLERR,"Fix particulate/emit not allowed for implicit surfaces");
   if (planar_flag && domain->dimension != 2)
-    error->all(FLERR,"fix emit/droplet: planar yes requires dimension 2");
+    error->all(FLERR,"fix particulate/emit: planar yes requires dimension 2");
   if ((npmode == CONSTANT || npmode == VARIABLE) && perspecies)
-    error->all(FLERR,"Cannot use fix emit/dropletwith n a constant or variable "
+    error->all(FLERR,"Cannot use fix particulate/emit with n a constant or variable "
                "with perspecies yes");
 
   int custom_any = 0;
   if (nrho_custom_flag || temp_custom_flag || vstream_custom_flag ||
       speed_custom_flag || fractions_custom_flag) custom_any = 1;
   if (custom_any && npmode != FLOW)
-    error->all(FLERR,"Cannot use fix emit/dropletwith n != 0 and custom options");
+    error->all(FLERR,"Cannot use fix particulate/emit with n != 0 and custom options");
   if (custom_any && subsonic)
-    error->all(FLERR,"Cannot use fix emit/dropletwith subsonic and custom options");
+    error->all(FLERR,"Cannot use fix particulate/emit with subsonic and custom options");
 
   if (custom_any) flag_custom_surf_changed = 1;
 
@@ -132,7 +132,7 @@ FixDropletEmit::FixDropletEmit(SPARTA *sparta, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixDropletEmit::~FixDropletEmit()
+FixParticulateEmit::~FixParticulateEmit()
 {
   if (copymode) return;
 
@@ -165,7 +165,7 @@ FixDropletEmit::~FixDropletEmit()
 
 /* ---------------------------------------------------------------------- */
 
-void FixDropletEmit::init()
+void FixParticulateEmit::init()
 {
   // invoke FixEmit::init() to set flags
 
@@ -198,7 +198,7 @@ void FixDropletEmit::init()
     dir_n_[0] /= dn; dir_n_[1] /= dn; dir_n_[2] /= dn;
     if (planar_flag && dim == 2) {
       if (std::fabs(dir_n_[2]) > 1.0e-12)
-        error->all(FLERR,"fix emit/droplet: planar yes requires dir dphi = 0");
+        error->all(FLERR,"fix particulate/emit: planar yes requires dir dphi = 0");
       dir_t1_[0] = dir_n_[1];
       dir_t1_[1] = -dir_n_[0];
       dir_t1_[2] = 0.0;
@@ -256,9 +256,9 @@ void FixDropletEmit::init()
   if (npmode == VARIABLE) {
     npvar = input->variable->find(npstr);
     if (npvar < 0)
-      error->all(FLERR,"Fix emit/dropletvariable name does not exist");
+      error->all(FLERR,"Fix particulate/emit variable name does not exist");
     if (!input->variable->equal_style(npvar))
-      error->all(FLERR,"Fix emit/droplet variable is invalid style");
+      error->all(FLERR,"Fix particulate/emit variable is invalid style");
   }
 
   // check custom per-surf vectors or arrays
@@ -267,18 +267,18 @@ void FixDropletEmit::init()
     nrho_custom_index = surf->find_custom(nrho_custom_id);
     if (nrho_custom_index < 0) error->all(FLERR,"Could not find fix surf/emit nrho custom attribute");
     if (surf->etype[nrho_custom_index] != DOUBLE)
-      error->all(FLERR,"Fix emit/dropletnrho custom attribute must be floating point");
+      error->all(FLERR,"Fix particulate/emit nrho custom attribute must be floating point");
     if (surf->esize[nrho_custom_index] != 0)
-      error->all(FLERR,"Fix emit/dropletnrho custom attribute must be a vector");
+      error->all(FLERR,"Fix particulate/emit nrho custom attribute must be a vector");
   }
 
   if (temp_custom_flag) {
     temp_custom_index = surf->find_custom(temp_custom_id);
     if (temp_custom_index < 0) error->all(FLERR,"Could not find fix surf/emit temp custom attribute");
     if (surf->etype[temp_custom_index] != DOUBLE)
-      error->all(FLERR,"Fix emit/droplettemp custom attribute must be floating point");
+      error->all(FLERR,"Fix particulate/emit temp custom attribute must be floating point");
     if (surf->esize[temp_custom_index] != 0)
-      error->all(FLERR,"Fix emit/droplettemp custom attribute must be a vector");
+      error->all(FLERR,"Fix particulate/emit temp custom attribute must be a vector");
   }
 
   if (vstream_custom_flag) {
@@ -286,18 +286,18 @@ void FixDropletEmit::init()
     if (vstream_custom_index < 0)
       error->all(FLERR,"Could not find fix surf/emit vstream custom attribute");
     if (surf->etype[vstream_custom_index] != DOUBLE)
-      error->all(FLERR,"Fix emit/dropletvstream custom attribute must be floating point");
+      error->all(FLERR,"Fix particulate/emit vstream custom attribute must be floating point");
     if (surf->esize[vstream_custom_index] != 3)
-      error->all(FLERR,"Fix emit/dropletvstream custom attribute must be an array with 3 columns");
+      error->all(FLERR,"Fix particulate/emit vstream custom attribute must be an array with 3 columns");
   }
 
   if (speed_custom_flag) {
     speed_custom_index = surf->find_custom(speed_custom_id);
     if (speed_custom_index < 0) error->all(FLERR,"Could not find fix surf/emit speed custom attribute");
     if (surf->etype[speed_custom_index] != DOUBLE)
-      error->all(FLERR,"Fix emit/dropletspeed custom attribute must be floating point");
+      error->all(FLERR,"Fix particulate/emit speed custom attribute must be floating point");
     if (surf->esize[speed_custom_index] != 0)
-      error->all(FLERR,"Fix emit/dropletspeed custom attribute must be a vector");
+      error->all(FLERR,"Fix particulate/emit speed custom attribute must be a vector");
   }
 
   if (fractions_custom_flag) {
@@ -305,9 +305,9 @@ void FixDropletEmit::init()
     if (fractions_custom_index < 0)
       error->all(FLERR,"Could not find fix surf/emit fractions custom attribute");
     if (surf->etype[fractions_custom_index] != DOUBLE)
-      error->all(FLERR,"Fix emit/dropletfractions custom attribute must be floating point");
+      error->all(FLERR,"Fix particulate/emit fractions custom attribute must be floating point");
     if (surf->esize[fractions_custom_index] != nspecies)
-      error->all(FLERR,"Fix emit/dropletfractions custom attribute must be an array "
+      error->all(FLERR,"Fix particulate/emit fractions custom attribute must be an array "
                  "with columns = # of species in mixture");
   }
 
@@ -330,7 +330,7 @@ void FixDropletEmit::init()
       }
 
       if (nunset == 0) {
-        if (sum != 1.0) error->all(FLERR,"Fix emit/dropletcustom fractions do not sum to 1.0");
+        if (sum != 1.0) error->all(FLERR,"Fix particulate/emit custom fractions do not sum to 1.0");
       } else {
         newfrac = (1.0 - sum) / nunset;
         for (isp = 0; isp < nspecies; isp++) {
@@ -352,7 +352,7 @@ void FixDropletEmit::init()
    invoked after custom per-surf attributes have changed (fix custom)
 ------------------------------------------------------------------------- */
 
-void FixDropletEmit::grid_changed()
+void FixParticulateEmit::grid_changed()
 {
   // if any custom attributes are used,
   // ensure owned custom values are spread to nlocal+nghost surfs
@@ -417,7 +417,7 @@ void FixDropletEmit::grid_changed()
    invoked by fix custom after it resets per-surf custom attributes
 ------------------------------------------------------------------------- */
 
-void FixDropletEmit::custom_surf_changed()
+void FixParticulateEmit::custom_surf_changed()
 {
   grid_changed();
 }
@@ -427,7 +427,7 @@ void FixDropletEmit::custom_surf_changed()
    add them to tasks list and increment ntasks
 ------------------------------------------------------------------------- */
 
-void FixDropletEmit::create_task(int icell)
+void FixParticulateEmit::create_task(int icell)
 {
   int i,m,isurf,isp,npoint,isplit,subcell;
   double indot,area,areaone,ntargetsp;
@@ -623,7 +623,7 @@ void FixDropletEmit::create_task(int icell)
       if (tasks[ntask].ntarget == 0.0) continue;
       if (tasks[ntask].ntarget >= MAXSMALLINT)
         error->one(FLERR,
-                   "Fix emit/dropletinsertion count exceeds 32-bit int");
+                   "Fix particulate/emit insertion count exceeds 32-bit int");
     }
 
     // initialize other task values with mixture or per-surf custom properties
@@ -654,7 +654,7 @@ void FixDropletEmit::create_task(int icell)
    insert particles in grid cells with emitting surface elements
 ------------------------------------------------------------------------- */
 
-void FixDropletEmit::perform_task()
+void FixParticulateEmit::perform_task()
 {
   if (!twopass) perform_task_onepass();
   else perform_task_twopass();
@@ -666,7 +666,7 @@ void FixDropletEmit::perform_task()
    but uses random #s differently than Kokkos, so insertions are different
 ------------------------------------------------------------------------- */
 
-void FixDropletEmit::perform_task_onepass()
+void FixParticulateEmit::perform_task_onepass()
 {
   int i,m,n,pcell,isurf,ninsert,nactual,isp,ispecies,ntri,id;
   double indot,scosine,rn,ntarget,vr,alpha,beta;
@@ -689,7 +689,7 @@ void FixDropletEmit::perform_task_onepass()
   double npcurrent;
   if (npmode == VARIABLE) {
     npcurrent = input->variable->compute_equal(npvar);
-    if (npcurrent <= 0.0) error->all(FLERR,"Fix emit/dropletNp <= 0.0");
+    if (npcurrent <= 0.0) error->all(FLERR,"Fix particulate/emit Np <= 0.0");
   }
 
   // insert particles for each task = cell/surf pair
@@ -1014,7 +1014,7 @@ void FixDropletEmit::perform_task_onepass()
    this uses random #s the same as Kokkos, for easier debugging
 ------------------------------------------------------------------------- */
 
-void FixDropletEmit::perform_task_twopass()
+void FixParticulateEmit::perform_task_twopass()
 {
   int i,m,n,pcell,isurf,ninsert,nactual,isp,ispecies,ntri,id;
   double indot,scosine,rn,ntarget,vr,alpha,beta;
@@ -1037,7 +1037,7 @@ void FixDropletEmit::perform_task_twopass()
   double npcurrent;
   if (npmode == VARIABLE) {
     npcurrent = input->variable->compute_equal(npvar);
-    if (npcurrent <= 0.0) error->all(FLERR,"Fix emit/dropletNp <= 0.0");
+    if (npcurrent <= 0.0) error->all(FLERR,"Fix particulate/emit Np <= 0.0");
   }
 
   // insert particles for each task = cell/surf pair
@@ -1367,7 +1367,7 @@ void FixDropletEmit::perform_task_twopass()
    recalculate task properties based on subsonic BC
 ------------------------------------------------------------------------- */
 
-void FixDropletEmit::subsonic_inflow()
+void FixParticulateEmit::subsonic_inflow()
 {
   // for grid cells that are part of tasks:
   // calculate local nrho, vstream, and thermal temperature
@@ -1429,7 +1429,7 @@ void FixDropletEmit::subsonic_inflow()
     }
     if (tasks[i].ntarget >= MAXSMALLINT)
       error->one(FLERR,
-                 "Fix emit/dropletsubsonic insertion count exceeds 32-bit int");
+                 "Fix particulate/emit subsonic insertion count exceeds 32-bit int");
   }
 }
 
@@ -1438,7 +1438,7 @@ void FixDropletEmit::subsonic_inflow()
    store count and linked list, same as for particle sorting
 ------------------------------------------------------------------------- */
 
-void FixDropletEmit::subsonic_sort()
+void FixParticulateEmit::subsonic_sort()
 {
   int i,icell;
 
@@ -1495,7 +1495,7 @@ void FixDropletEmit::subsonic_sort()
    first compute for grid cells, then adjust due to boundary conditions
 ------------------------------------------------------------------------- */
 
-void FixDropletEmit::subsonic_grid()
+void FixParticulateEmit::subsonic_grid()
 {
   int m,ip,np,icell,ispecies;
   double mass,masstot,gamma,ke;
@@ -1621,7 +1621,7 @@ void FixDropletEmit::subsonic_grid()
    grow task list
 ------------------------------------------------------------------------- */
 
-void FixDropletEmit::grow_task()
+void FixParticulateEmit::grow_task()
 {
   int oldmax = ntaskmax;
   ntaskmax += DELTATASK;
@@ -1662,7 +1662,7 @@ void FixDropletEmit::grow_task()
    reallocate nspecies arrays
 ------------------------------------------------------------------------- */
 
-void FixDropletEmit::realloc_nspecies()
+void FixParticulateEmit::realloc_nspecies()
 {
   if (perspecies) {
     for (int i = 0; i < ntask; i++) {
@@ -1682,10 +1682,10 @@ void FixDropletEmit::realloc_nspecies()
    process keywords specific to this class
 ------------------------------------------------------------------------- */
 
-int FixDropletEmit::option(int narg, char **arg)
+int FixParticulateEmit::option(int narg, char **arg)
 {
   if (strcmp(arg[0],"n") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/dropletcommand");
+    if (2 > narg) error->all(FLERR,"Illegal fix particulate/emit command");
 
     if (strstr(arg[1],"v_") == arg[1]) {
       npmode = VARIABLE;
@@ -1701,19 +1701,19 @@ int FixDropletEmit::option(int narg, char **arg)
   }
 
   if (strcmp(arg[0],"normal") == 0) {
-    if (2 > narg) error->all(FLERR,"Illegal fix emit/dropletcommand");
+    if (2 > narg) error->all(FLERR,"Illegal fix particulate/emit command");
     if (strcmp(arg[1],"yes") == 0) normalflag = 1;
     else if (strcmp(arg[1],"no") == 0) normalflag = 0;
-    else error->all(FLERR,"Illegal fix emit/dropletcommand");
+    else error->all(FLERR,"Illegal fix particulate/emit command");
     return 2;
   }
 
   if (strcmp(arg[0],"subsonic") == 0) {
-    if (3 > narg) error->all(FLERR,"Illegal fix emit/dropletcommand");
+    if (3 > narg) error->all(FLERR,"Illegal fix particulate/emit command");
     subsonic = 1;
     subsonic_style = PTBOTH;
     psubsonic = input->numeric(FLERR,arg[1]);
-    if (psubsonic < 0.0) error->all(FLERR,"Illegal fix emit/dropletcommand");
+    if (psubsonic < 0.0) error->all(FLERR,"Illegal fix particulate/emit command");
     if (strcmp(arg[2],"NULL") == 0) subsonic_style = PONLY;
     else {
       tsubsonic = input->numeric(FLERR,arg[2]);
@@ -1730,12 +1730,12 @@ int FixDropletEmit::option(int narg, char **arg)
   }
 
   if (strcmp(arg[0],"custom") == 0) {
-    if (3 > narg) error->all(FLERR,"Illegal fix emit/dropletcommand");
+    if (3 > narg) error->all(FLERR,"Illegal fix particulate/emit command");
 
     if (strcmp(arg[1],"density") == 0) {
       nrho_custom_flag = 1;
       if (strstr(arg[2],"s_") != arg[2])
-        error->all(FLERR,"Illegal fix emit/dropletcommand");
+        error->all(FLERR,"Illegal fix particulate/emit command");
       int n = strlen(arg[2]);
       delete [] nrho_custom_id;
       nrho_custom_id = new char[n];
@@ -1744,7 +1744,7 @@ int FixDropletEmit::option(int narg, char **arg)
     } else if (strcmp(arg[1],"temperature") == 0) {
       temp_custom_flag = 1;
       if (strstr(arg[2],"s_") != arg[2])
-        error->all(FLERR,"Illegal fix emit/dropletcommand");
+        error->all(FLERR,"Illegal fix particulate/emit command");
       int n = strlen(arg[2]);
       delete [] temp_custom_id;
       temp_custom_id = new char[n];
@@ -1753,7 +1753,7 @@ int FixDropletEmit::option(int narg, char **arg)
     } else if (strcmp(arg[1],"vstream") == 0) {
       vstream_custom_flag = 1;
       if (strstr(arg[2],"s_") != arg[2])
-        error->all(FLERR,"Illegal fix emit/dropletcommand");
+        error->all(FLERR,"Illegal fix particulate/emit command");
       int n = strlen(arg[2]);
       delete [] vstream_custom_id;
       vstream_custom_id = new char[n];
@@ -1762,7 +1762,7 @@ int FixDropletEmit::option(int narg, char **arg)
     } else if (strcmp(arg[1],"speed") == 0) {
       speed_custom_flag = 1;
       if (strstr(arg[2],"s_") != arg[2])
-        error->all(FLERR,"Illegal fix emit/dropletcommand");
+        error->all(FLERR,"Illegal fix particulate/emit command");
       int n = strlen(arg[2]);
       delete [] speed_custom_id;
       speed_custom_id = new char[n];
@@ -1771,21 +1771,21 @@ int FixDropletEmit::option(int narg, char **arg)
     } else if (strcmp(arg[1],"fractions") == 0) {
       fractions_custom_flag = 1;
       if (strstr(arg[2],"s_") != arg[2])
-        error->all(FLERR,"Illegal fix emit/dropletcommand");
+        error->all(FLERR,"Illegal fix particulate/emit command");
       int n = strlen(arg[2]);
       delete [] fractions_custom_id;
       fractions_custom_id = new char[n];
       strcpy(fractions_custom_id,&arg[2][2]);
 
-    } else error->all(FLERR,"Illegal fix emit/dropletcommand");
+    } else error->all(FLERR,"Illegal fix particulate/emit command");
     return 3;
   }
 
-  error->all(FLERR,"Illegal fix emit/dropletcommand");
+  error->all(FLERR,"Illegal fix particulate/emit command");
   return 0;
 }
 
-void FixDropletEmit::options2(int narg, char **arg)
+void FixParticulateEmit::options2(int narg, char **arg)
 {
   // defaults (match FixEmit)
   nevery = 1;
@@ -1796,49 +1796,49 @@ void FixDropletEmit::options2(int narg, char **arg)
   while (iarg < narg) {
 
     if (strcmp(arg[iarg], "nevery") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: nevery needs an integer");
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix particulate/emit: nevery needs an integer");
       nevery = atoi(arg[iarg+1]);
-      if (nevery <= 0) error->all(FLERR,"Illegal fix emit/droplet: nevery must be > 0");
+      if (nevery <= 0) error->all(FLERR,"Illegal fix particulate/emit: nevery must be > 0");
       iarg += 2;
       continue;
     }
 
     if (strcmp(arg[iarg], "perspecies") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: perspecies yes|no");
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix particulate/emit: perspecies yes|no");
       if      (strcmp(arg[iarg+1], "yes") == 0) perspecies = 1;
       else if (strcmp(arg[iarg+1], "no")  == 0) perspecies = 0;
-      else error->all(FLERR,"Illegal fix emit/droplet: perspecies yes|no");
+      else error->all(FLERR,"Illegal fix particulate/emit: perspecies yes|no");
       iarg += 2;
       continue;
     }
 
     if (strcmp(arg[iarg], "region") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: region <id>");
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix particulate/emit: region <id>");
       int iregion = domain->find_region(arg[iarg+1]);
-      if (iregion < 0) error->all(FLERR,"Fix emit/droplet: region ID does not exist");
+      if (iregion < 0) error->all(FLERR,"Fix particulate/emit: region ID does not exist");
       region = domain->regions[iregion];
       iarg += 2;
       continue;
     }
 
     if (strcmp(arg[iarg], "magVelocity") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: magVelocity <value>");
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix particulate/emit: magVelocity <value>");
       magVelocity = atof(arg[iarg+1]);
       if (!std::isfinite(magVelocity) || magVelocity < 0.0)
-        error->all(FLERR,"Illegal fix emit/droplet: magVelocity must be >= 0");
+        error->all(FLERR,"Illegal fix particulate/emit: magVelocity must be >= 0");
       user_mag_velocity = 1;
       iarg += 2;
       continue;
     }
 
     if (strcmp(arg[iarg], "incidentAngle") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: incidentAngle <deg>");
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix particulate/emit: incidentAngle <deg>");
       incidentAngle = atof(arg[iarg+1]);
       if (!std::isfinite(incidentAngle))
-        error->all(FLERR,"Illegal fix emit/droplet: incidentAngle not finite");
+        error->all(FLERR,"Illegal fix particulate/emit: incidentAngle not finite");
       // If you expect degrees in the input, convert to radians:
       if (incidentAngle < 0.0 || incidentAngle > 180.0)
-        error->all(FLERR,"Illegal fix emit/droplet: incidentAngle must be in [0, 180] degrees");
+        error->all(FLERR,"Illegal fix particulate/emit: incidentAngle must be in [0, 180] degrees");
       iarg += 2;
       continue;
     }
@@ -1847,10 +1847,10 @@ void FixDropletEmit::options2(int narg, char **arg)
     // [0, half-angle] about the surface normal. Overridden by a fixed
     // incidentAngle; overrides angle cosine/uniform.
     if (strcmp(arg[iarg], "cone") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: cone <half-angle deg>");
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix particulate/emit: cone <half-angle deg>");
       cone_half = atof(arg[iarg+1]);
       if (!std::isfinite(cone_half) || cone_half < 0.0 || cone_half > 90.0)
-        error->all(FLERR,"Illegal fix emit/droplet: cone half-angle must be in [0, 90] degrees");
+        error->all(FLERR,"Illegal fix particulate/emit: cone half-angle must be in [0, 90] degrees");
       iarg += 2;
       continue;
     }
@@ -1861,7 +1861,7 @@ void FixDropletEmit::options2(int narg, char **arg)
     // Cartesian (R, Z, phi) like fix drag gravity, mapped to slots.
     if (strcmp(arg[iarg], "dir") == 0) {
       if (iarg + 3 >= narg)
-        error->all(FLERR,"Illegal fix emit/droplet: dir <dR dZ dphi>");
+        error->all(FLERR,"Illegal fix particulate/emit: dir <dR dZ dphi>");
       dir_input_[0] = input->numeric(FLERR, arg[iarg+1]);
       dir_input_[1] = input->numeric(FLERR, arg[iarg+2]);
       dir_input_[2] = input->numeric(FLERR, arg[iarg+3]);
@@ -1869,7 +1869,7 @@ void FixDropletEmit::options2(int narg, char **arg)
                                   dir_input_[1]*dir_input_[1] +
                                   dir_input_[2]*dir_input_[2]);
       if (!(dn > 0.0))
-        error->all(FLERR,"fix emit/droplet: dir vector must be non-zero");
+        error->all(FLERR,"fix particulate/emit: dir vector must be non-zero");
       dirflag_ = 1;
       iarg += 4;
       continue;
@@ -1877,10 +1877,10 @@ void FixDropletEmit::options2(int narg, char **arg)
 
     if (strcmp(arg[iarg], "planar") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR,"Illegal fix emit/droplet: planar yes|no");
+        error->all(FLERR,"Illegal fix particulate/emit: planar yes|no");
       if      (strcmp(arg[iarg+1], "yes") == 0) planar_flag = 1;
       else if (strcmp(arg[iarg+1], "no")  == 0) planar_flag = 0;
-      else error->all(FLERR,"Illegal fix emit/droplet: planar yes|no");
+      else error->all(FLERR,"Illegal fix particulate/emit: planar yes|no");
       iarg += 2;
       continue;
     }
@@ -1889,9 +1889,9 @@ void FixDropletEmit::options2(int narg, char **arg)
     // mixture-temperature Maxwellian; angular spread still uses
     // incidentAngle if set, else uniform [0, 90 deg) about the normal.
     if (strcmp(arg[iarg], "nweight") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: nweight <N>");
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix particulate/emit: nweight <N>");
       nweight_ = input->numeric(FLERR, arg[iarg+1]);
-      if (nweight_ <= 0.0) error->all(FLERR,"fix emit/droplet: nweight must be > 0");
+      if (nweight_ <= 0.0) error->all(FLERR,"fix particulate/emit: nweight must be > 0");
       nw_custom_ = particle->find_custom((char *) "grain_nweight");
       if (nw_custom_ < 0)
         nw_custom_ = particle->add_custom((char *) "grain_nweight",DOUBLE,0);
@@ -1899,19 +1899,19 @@ void FixDropletEmit::options2(int narg, char **arg)
       continue;
     }
     if (strcmp(arg[iarg], "vmin") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: vmin <m/s>");
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix particulate/emit: vmin <m/s>");
       vmin = atof(arg[iarg+1]);
       if (!std::isfinite(vmin) || vmin < 0.0)
-        error->all(FLERR,"Illegal fix emit/droplet: vmin must be finite and >= 0");
+        error->all(FLERR,"Illegal fix particulate/emit: vmin must be finite and >= 0");
       user_speed_range = 1;
       iarg += 2;
       continue;
     }
     if (strcmp(arg[iarg], "vmax") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: vmax <m/s>");
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix particulate/emit: vmax <m/s>");
       vmax = atof(arg[iarg+1]);
       if (!std::isfinite(vmax) || vmax < 0.0)
-        error->all(FLERR,"Illegal fix emit/droplet: vmax must be finite and >= 0");
+        error->all(FLERR,"Illegal fix particulate/emit: vmax must be finite and >= 0");
       user_speed_range = 1;
       iarg += 2;
       continue;
@@ -1922,22 +1922,22 @@ void FixDropletEmit::options2(int narg, char **arg)
     // 'uniform' = polar angle uniform in [0, 90 deg) (legacy default).
     // Ignored when 'incidentAngle' is also set (fixed angle wins).
     if (strcmp(arg[iarg], "angle") == 0) {
-      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix emit/droplet: angle cosine|uniform");
+      if (iarg + 1 >= narg) error->all(FLERR,"Illegal fix particulate/emit: angle cosine|uniform");
       if      (strcmp(arg[iarg+1], "cosine")  == 0) angle_cosine = 1;
       else if (strcmp(arg[iarg+1], "uniform") == 0) angle_cosine = 0;
-      else error->all(FLERR,"Illegal fix emit/droplet: angle must be cosine or uniform");
+      else error->all(FLERR,"Illegal fix particulate/emit: angle must be cosine or uniform");
       iarg += 2;
       continue;
     }
 
     // delegate any other keywords ("normal", "n", custom stuff) to the base hook
     int consumed = option(narg - iarg, &arg[iarg]);
-    if (consumed <= 0) error->all(FLERR,"Illegal fix emit/droplet option");
+    if (consumed <= 0) error->all(FLERR,"Illegal fix particulate/emit option");
     iarg += consumed;
   }
 }
 
-void FixDropletEmit::sample_tangent(double vt, double theta,
+void FixParticulateEmit::sample_tangent(double vt, double theta,
                                     double &va, double &vb)
 {
   if (planar_flag) {
@@ -1955,7 +1955,7 @@ void FixDropletEmit::sample_tangent(double vt, double theta,
    re-fetched per call: add_particle can reallocate it.
 ------------------------------------------------------------------------- */
 
-void FixDropletEmit::stamp_nweight(int i)
+void FixParticulateEmit::stamp_nweight(int i)
 {
   if (nw_custom_ < 0) return;
   const int ew = particle->ewhich[nw_custom_];

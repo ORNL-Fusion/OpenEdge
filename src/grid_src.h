@@ -1,7 +1,7 @@
 /* ----------------------------------------------------------------------
     OpenEdge:
     Shared per-grid source descriptor used by multiple fixes
-    (coll/nanbu, drag, viscous, droplet/charge).
+    (coll/nanbu, drag, viscous, particulate/charge).
 
     CollGridSrc maps a source quantity to either:
       - a SPARTA compute  (c_ID[col])

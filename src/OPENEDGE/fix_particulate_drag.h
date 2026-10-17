@@ -15,10 +15,10 @@
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
-FixStyle(particulate/drag,FixDropletDrag)
+FixStyle(particulate/drag,FixParticulateDrag)
 #else
-#ifndef SPARTA_FIX_DROPLET_DRAG_H
-#define SPARTA_FIX_DROPLET_DRAG_H
+#ifndef SPARTA_FIX_PARTICULATE_DRAG_H
+#define SPARTA_FIX_PARTICULATE_DRAG_H
 
 #include "fix.h"
 #include "particle.h"
@@ -28,13 +28,13 @@ FixStyle(particulate/drag,FixDropletDrag)
 namespace SPARTA_NS {
 
 class FixBackground;
-class FixDropletCharge;
+class FixParticulateCharge;
 
-class FixDropletDrag : public Fix {
+class FixParticulateDrag : public Fix {
  public:
   bool needs_efield() const { return efield_on_ != 0; }   // for the plasma-cache mask
-  FixDropletDrag(class SPARTA *, int, char **);
-  ~FixDropletDrag() override;
+  FixParticulateDrag(class SPARTA *, int, char **);
+  ~FixParticulateDrag() override;
 
   int  setmask() override;
   void init() override;
@@ -48,7 +48,7 @@ class FixDropletDrag : public Fix {
   std::string plasma_fix_id_;
   FixBackground *pd_ = nullptr;
   std::string charge_fix_id_;
-  FixDropletCharge *charge_fix_ = nullptr;
+  FixParticulateCharge *charge_fix_ = nullptr;
 
   double A_background      = 2.0;
   double Z_background      = 1.0;

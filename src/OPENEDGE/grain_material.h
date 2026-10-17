@@ -2,7 +2,7 @@
    OpenEdge: grain material registry — dust/droplet/powder properties.
 
    One place for the solid/liquid material data consumed by the grain
-   physics fixes (droplet/evaporate, droplet/drag, droplet/charge, ...).
+   physics fixes (particulate/thermal, particulate/drag, particulate/charge, ...).
    Built-in materials: Li, B. Decks can add or override with the
    `material` command:
 

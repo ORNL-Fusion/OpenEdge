@@ -20,12 +20,12 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(particulate/emit,FixDropletEmit)
+FixStyle(particulate/emit,FixParticulateEmit)
 
 #else
 
-#ifndef SPARTA_FIX_EMIT_DROPLET_
-#define SPARTA_FIX_DROPLET_EMIT_H
+#ifndef SPARTA_FIX_PARTICULATE_EMIT_H
+#define SPARTA_FIX_PARTICULATE_EMIT_H
 
 #include "fix_emit.h"
 #include "surf.h"
@@ -33,10 +33,10 @@ FixStyle(particulate/emit,FixDropletEmit)
 
 namespace SPARTA_NS {
 
-class FixDropletEmit : public FixEmit {
+class FixParticulateEmit : public FixEmit {
  public:
-  FixDropletEmit(class SPARTA *, int, char **);
-  ~FixDropletEmit();
+  FixParticulateEmit(class SPARTA *, int, char **);
+  ~FixParticulateEmit();
   void init();
 
   void grid_changed() override;

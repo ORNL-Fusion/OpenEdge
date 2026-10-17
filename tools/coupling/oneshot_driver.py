@@ -30,7 +30,7 @@ import subprocess
 def droplet_n_per_leg(de, dt):
     """Per-leg droplet count per emit step for the deck's `n ${ndrop}`.
 
-    Each macro-droplet = 1 physical droplet (fix_droplet_evaporate.cpp:302),
+    Each macro-droplet = 1 physical droplet (fix_particulate_thermal.cpp:302),
     so physical rate R = 2*n_per_leg / (nevery*dt). Precedence:
       enabled=false                 -> 0   (no_mist cases)
       explicit n_per_leg            -> that integer (feasibility cap escape hatch)

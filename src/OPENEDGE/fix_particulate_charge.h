@@ -1,9 +1,9 @@
 /* ----------------------------------------------------------------------
-   OpenEdge: fix droplet/charge — OML charging of droplets against a
+   OpenEdge: fix particulate/charge — OML charging of droplets against a
    plasma background carried by fix background.
 
    Syntax:
-     fix ID droplet/charge Nevery background PD \
+     fix ID particulate/charge Nevery background PD \
          [model dustt2005|dis2021] \
          [see_model none|dustt2005|kollath_smirnov2007|young_dekker] \
          [see_angular yes|no] \
@@ -20,12 +20,12 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(particulate/charge,FixDropletCharge)
+FixStyle(particulate/charge,FixParticulateCharge)
 
 #else
 
-#ifndef SPARTA_FIX_DROPLET_CHARGE_H
-#define SPARTA_FIX_DROPLET_CHARGE_H
+#ifndef SPARTA_FIX_PARTICULATE_CHARGE_H
+#define SPARTA_FIX_PARTICULATE_CHARGE_H
 
 #include "fix.h"
 #include "particulate_model_kernels.h"
@@ -36,10 +36,10 @@ namespace SPARTA_NS {
 
 class FixBackground;
 
-class FixDropletCharge : public Fix {
+class FixParticulateCharge : public Fix {
  public:
-  FixDropletCharge(class SPARTA *, int, char **);
-  ~FixDropletCharge() override;
+  FixParticulateCharge(class SPARTA *, int, char **);
+  ~FixParticulateCharge() override;
 
   int  setmask() override;
   void init() override;
