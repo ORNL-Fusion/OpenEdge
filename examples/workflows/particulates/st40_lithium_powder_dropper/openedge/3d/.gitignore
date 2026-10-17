@@ -1,0 +1,9 @@
+# generated geometry (scripts/make_geometry.py); keep only the small *.inc and dropper patch
+input/*_3d.stl
+input/*_3d.surf
+log.*
+output*/
+runs/
+input/plasma_*.h5
+*.mp4
+stdout.openedge
