@@ -118,8 +118,6 @@ action fix_store_force.cpp
 action fix_store_force.h
 action fix_particle_weight.cpp
 action fix_particle_weight.h
-action fix_walldyn_matrix.cpp
-action fix_walldyn_matrix.h
 action fix_neutral_collide_background.cpp
 action fix_neutral_collide_background.h
 action fix_population_control.cpp
