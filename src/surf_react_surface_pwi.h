@@ -48,6 +48,11 @@ class SurfReactSurfacePWI : public SurfReact {
   int match_reactant(char *, int);
   int match_product(char *, int);
 
+  // <attr>_conc custom index (-1 if no adens_surf) and a counter bumped on
+  // every rewrite of it, so consumers rebuild only when it changed
+  int conc_custom_index() const { return sconc_index; }
+  bigint conc_generation() const { return conc_gen; }
+
   struct OneReaction {
     int active;
     int type;                      // EXCHANGE, DISSOCIATION, RECOMBINATION, TRIM_REFLECT, ABSORB_REEMIT, SPUTTER
@@ -105,6 +110,7 @@ class SurfReactSurfacePWI : public SurfReact {
   int sigma_nevery;                // sync interval in steps (default 1)
   int sigma_ncols;                 // = particle->nspecies at init
   bigint sigma_nsurf;              // total surf count
+  bigint conc_gen;                 // see conc_generation()
   double *sigma_delta;             // [nsurf*ncols] local unsynced increments
   double *sigma_buf;               // allreduce receive buffer
   double *sigma_comp;              // compensated-sum residual for material state
@@ -138,6 +144,8 @@ class SurfReactSurfacePWI : public SurfReact {
   int sigma_feedback;              // 0 = ignore mat weights (Y,R without feedback)
   int sconc_index;                 // custom index of <attr>_conc
   int substrate_isp;               // species index of the substrate (default W)
+  char *substrate_name;            // `substrate <species>`, NULL = automatic
+  int substrate_warned;            // same-material layer warning printed
   KKHostOnly<std::vector<int>> mat_of;         // species -> material group (by element)
   KKHostOnly<std::vector<std::string>> sigma_init_names;   // species with initial sigma
   KKHostOnly<std::vector<double>> sigma_init_vals;         //   (boronization layers etc.)

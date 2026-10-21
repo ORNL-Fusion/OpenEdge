@@ -1,0 +1,60 @@
+# surface/emit/source conc_scale on a depleting layer: a 1e14 B layer on a W
+# wedge patch erodes under the plasma (adens_erosion) while emitted B redeposits
+# on bare faces.  Emission must follow the live reaction-zone concentration with
+# a frozen (static yes) or live (static no) sputter compute; no rebalance.
+
+variable    case     index static_no
+variable    cstatic  index no
+variable    nsteps   index 2000
+variable    nevery   index 10
+variable    nlaunch  index 200
+variable    beam     index 2e20
+variable    inp      string ../deposit_tagging/input
+
+shell       mkdir output
+seed        7893
+dimension   3
+global      gridcut 0.0 comm/sort no
+boundary    o o o
+create_box  1.82 3.21 -0.004 0.048 -0.95 0.81
+create_grid 110 4 140
+balance_grid rcb cell
+
+global      fnum 5e9
+global      surfmax 3000
+timestep    1e-8
+species     ${inp}/slag.species W W+ W2+ W3+ B B+ B2+ B3+ B4+ B5+ D O
+mixture     bSource B frac 1.0
+
+read_surf   ${inp}/west_wedge.surf group duct particle check
+group       plate surf id 1:4056
+group       caps surf id 4057:5066
+group       coated surf id 1800:1900
+
+surf_collide pcoll diffuse 300.0 1.0
+surf_react  pwi surface/pwi ${inp}/slag_w_compound.recycle twall 773.15 &
+            adens_surf adens adens_init B 1e14 adens_init_group coated &
+            rzone 1e15 strata 12 minthick 0.05 adens_erosion cpmiB 0 B &
+            adens_nevery ${nevery}
+surf_modify plate collide pcoll react pwi
+surf_collide PERIODIC toroidal 0.79
+surf_modify caps collide PERIODIC
+
+fix         pd background file ${inp}/plasma.h5 static yes
+compute     cpmiB surface/physical/sputter plate background pd &
+            target B projectiles D,O mass_amu 2.01410177811 static ${cstatic} erosion_flux
+fix         pw particle/weight
+fix         femitB surface/emit/source bSource plate cpmiB conc_scale adens_conc 5 &
+            perspecies no nlaunch_total ${nlaunch} model thompson 5.73 emax 55 nevery ${nevery}
+
+# a uniform B source on the whole wall: its atoms redeposit on initially bare
+# faces (zero-to-positive concentration); it is not concentration-scaled
+fix         fbeam surface/emit/source bSource plate constant ${beam} perspecies no &
+            nlaunch_total 50 model fixed_energy 5.0 nevery ${nevery}
+
+run         0 post no
+dump        dsurf surf plate ${nevery} output/${case}.surf.*.dump id area s_adens[5] s_adens_conc[5] c_cpmiB
+dump        dpart particle all ${nevery} output/${case}.part.*.dump id type p_pweight
+stats       500
+stats_style step cpu np nscoll nsreact f_femitB[2]
+run         ${nsteps}

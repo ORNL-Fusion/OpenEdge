@@ -90,7 +90,12 @@ the compute is static its values are cached.  <I>conc_scale</I> multiplies
 the flux of each element by a column of a custom per-surf array,
 typically a reaction-zone concentration written by <A HREF = "surf_react_surface_pwi.html">surf_react
 surface/pwi</A>, so that the emitted flux of
-a material is the erosion flux times its local concentration.  In
+a material is the erosion flux times its local concentration.  The
+concentration is read live: with a static compute only the flux is
+cached, and the per-element sources are re-weighted whenever
+surf_react surface/pwi updates its concentrations (every
+<I>adens_nevery</I> steps).  <I>conc_scale</I> requires a compute; it is an
+error in <I>constant</I> and <I>file</I> mode.  In
 <I>constant</I> mode every element carries the same flux.  In <I>file</I> mode
 the file has the SPARTA inflow format: a section header line (NAME),
 then "NIJ ni nj", "NV nv", "VALUES name ..." with names among nrho,
@@ -164,7 +169,8 @@ cumulative number of particles emitted since the start of the run.
 per-surf output.  <I>n</I> > 0 and <I>nlaunch_total</I> cannot be combined with
 <I>perspecies yes</I>; <I>n</I> > 0, <I>nlaunch</I> and <I>nlaunch_total</I> are mutually
 exclusive.  <I>nlaunch</I> and <I>nlaunch_total</I> require <A HREF = "fix_particle_weight.html">fix
-particle/weight</A>.  The <I>conc_scale</I> and
+particle/weight</A>.  <I>conc_scale</I> requires
+compute mode.  The <I>conc_scale</I> and
 <I>thermal_tsurf</I> custom attributes must exist when the fix is
 initialized.
 </P>

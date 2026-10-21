@@ -71,6 +71,8 @@ class FixSurfaceEmitSourceKokkos : public FixSurfaceEmitSource,
   int cache_rebuilds_;            // device-side task-source cache rebuilds after grid_changed()
 
   void upload_tasks();
+  void upload_task_source();
+  int src_version_uploaded_;      // weights_version held in d_t_src
 
   // ---- static task views (uploaded per task build) ----
   DAT::t_int_1d d_t_pcell, d_t_isurf, d_t_npoint;

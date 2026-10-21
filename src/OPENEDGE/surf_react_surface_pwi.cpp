@@ -124,7 +124,10 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   sigma_zone = 1.0e19;
   sigma_feedback = 1;
   sconc_index = -1;
+  conc_gen = 0;
   substrate_isp = -1;
+  substrate_name = NULL;
+  substrate_warned = 0;
   sigma_init_group = NULL;
   sigma_init_bit = 0;
   dep_delta = dep_buf = NULL;
@@ -214,6 +217,13 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
         sigma_ero_noconc.push_back(1);
         iarg++;
       } else sigma_ero_noconc.push_back(0);
+    } else if (strcmp(arg[iarg],"substrate") == 0) {
+      // bulk material under all layers (default: W if declared, else species 0)
+      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
+      delete [] substrate_name;
+      substrate_name = new char[strlen(arg[iarg+1]) + 1];
+      strcpy(substrate_name, arg[iarg+1]);
+      iarg += 2;
     } else if (strcmp(arg[iarg],"adens_init") == 0 ||
                strcmp(arg[iarg],"sigma_init") == 0) {
       // initial areal density for a species (e.g. a boronization layer),
@@ -394,6 +404,7 @@ SurfReactSurfacePWI::~SurfReactSurfacePWI()
   delete [] R_attr;
   delete [] sigma_attr;
   delete [] sigma_init_group;
+  delete [] substrate_name;
   delete [] ehist_file;
   delete [] ehist_all;
   delete [] ehist_sput;
@@ -564,8 +575,24 @@ void SurfReactSurfacePWI::init()
     if (sconc_index < 0) sconc_index = surf->add_custom(dname, DOUBLE, sigma_ncols);
     surf->spread_custom(sconc_index);
     if (substrate_isp < 0) {
-      substrate_isp = particle->find_species((char *) "W");
-      if (substrate_isp < 0) substrate_isp = 0;
+      const char *how;
+      if (substrate_name) {
+        substrate_isp = particle->find_species(substrate_name);
+        if (substrate_isp < 0)
+          error->all(FLERR,"surf_react surface/pwi substrate: unknown species");
+        how = "explicit";
+      } else {
+        substrate_isp = particle->find_species((char *) "W");
+        how = "automatic: W declared";
+        if (substrate_isp < 0) { substrate_isp = 0; how = "automatic: first species"; }
+      }
+      if (comm->me == 0) {
+        char msg[200];
+        snprintf(msg,sizeof(msg),"surf_react surface/pwi: substrate %s (%s)\n",
+                 particle->species[substrate_isp].id, how);
+        if (screen) fputs(msg,screen);
+        if (logfile) fputs(msg,logfile);
+      }
     }
 
     // group species into materials by ELEMENT (strip charge-state suffix:
@@ -618,6 +645,33 @@ void SurfReactSurfacePWI::init()
         }
       }
     }
+    // per face, the first applied layer with a positive amount is the
+    // deepest; of the substrate's own modeled material it has no boundary
+    if (!substrate_warned && sigma_fresh) {
+      substrate_warned = 1;
+      int nsame = 0;
+      std::vector<std::pair<int,double>> layers;
+      for (int i = 0; i < surf->nown; i++) {
+        collect_init_layers(i, layers);
+        for (auto &l : layers) {
+          if (l.second <= 0.0) continue;
+          if (mat_of[l.first] == mat_of[substrate_isp]) nsame++;
+          break;
+        }
+      }
+      int all = 0;
+      MPI_Allreduce(&nsame,&all,1,MPI_INT,MPI_SUM,world);
+      if (all && comm->me == 0) {
+        const char *sub = particle->species[substrate_isp].id;
+        char msg[300];
+        snprintf(msg,sizeof(msg),"surf_react surface/pwi: on %d surfaces the deepest "
+                 "seeded layer is the substrate material %s; it erodes into more %s "
+                 "and never exposes a different material (set `substrate`)",
+                 all, sub, sub);
+        error->warning(FLERR,msg);
+      }
+    }
+
     snprintf(dname,sizeof(dname),"%s_ero",sigma_attr);
     sero_index = surf->find_custom(dname);
     if (sero_index < 0) sero_index = surf->add_custom(dname, DOUBLE, 0);
@@ -728,9 +782,26 @@ void SurfReactSurfacePWI::init()
           strata_state[i].pack(sb[i]);
         }
       } else {
-        // restart: rebuild stacks from the persisted custom
-        for (int i = 0; i < surf->nown; i++)
+        // restart: rebuild stacks from the persisted custom; the bulk
+        // (deepest) stratum must still be the selected substrate
+        int mismatch = 0;
+        for (int i = 0; i < surf->nown; i++) {
           strata_state[i].unpack(sb[i]);
+          const auto &L = strata_state[i].layers;
+          if (L.empty()) continue;
+          const auto &comp = L.back().composition;
+          int top = (int) (std::max_element(comp.begin(), comp.end()) - comp.begin());
+          if (top != sub_m) mismatch++;
+        }
+        int all = 0;
+        MPI_Allreduce(&mismatch,&all,1,MPI_INT,MPI_SUM,world);
+        if (all && comm->me == 0) {
+          char msg[256];
+          snprintf(msg,sizeof(msg),"surf_react surface/pwi: %d restored strata "
+                   "stacks have a bulk stratum other than the substrate %s",
+                   all, particle->species[substrate_isp].id);
+          error->warning(FLERR,msg);
+        }
       }
       surf->estatus[strata_index] = 0;
       surf->spread_custom(strata_index);
@@ -1669,6 +1740,7 @@ void SurfReactSurfacePWI::derive_sigma_conc()
     surf->spread_custom(strata_index);
     surf->estatus[sconc_index] = 0;
     surf->spread_custom(sconc_index);
+    conc_gen++;
     return;
   }
   for (int i = 0; i < nsown; i++) {
@@ -1697,6 +1769,7 @@ void SurfReactSurfacePWI::derive_sigma_conc()
   }
   surf->estatus[sconc_index] = 0;
   surf->spread_custom(sconc_index);
+  conc_gen++;
 }
 
 /* ---------------------------------------------------------------------- */

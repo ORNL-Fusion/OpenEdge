@@ -1,0 +1,55 @@
+# Two surface/pwi models write one concentration array (adens_nevery 100 and
+# ${nevery}); the static emitter must follow every update.  Large marker budget
+# so every source face is resolved each event.
+
+variable    case     index two_writers
+variable    cstatic  index yes
+variable    nsteps   index 100
+variable    nevery   index 10
+variable    nlaunch  index 20000
+variable    beam     index 2e20
+variable    inp      string ../deposit_tagging/input
+
+shell       mkdir output
+seed        7893
+dimension   3
+global      gridcut 0.0 comm/sort no
+boundary    o o o
+create_box  1.82 3.21 -0.004 0.048 -0.95 0.81
+create_grid 110 4 140
+balance_grid rcb cell
+
+global      fnum 5e9
+global      surfmax 3000
+timestep    1e-8
+species     ${inp}/slag.species W W+ W2+ W3+ B B+ B2+ B3+ B4+ B5+ D O
+mixture     bSource B frac 1.0
+
+read_surf   ${inp}/west_wedge.surf group duct particle check
+group       plate surf id 1:4056
+group       caps surf id 4057:5066
+group       coated surf id 1800:1900
+
+surf_collide pcoll diffuse 300.0 1.0
+surf_react  pwi surface/pwi ${inp}/slag_w_compound.recycle twall 773.15 &
+            adens_surf adens adens_init B 1e14 adens_init_group coated &
+            rzone 1e15 adens_nevery 100
+surf_react pwi_fast surface/pwi ${inp}/slag_w_compound.recycle twall 773.15 &
+            adens_surf adens rzone 1e15 adens_erosion cpmiB 0 B adens_nevery ${nevery}
+surf_modify plate collide pcoll react pwi_fast
+surf_collide PERIODIC toroidal 0.79
+surf_modify caps collide PERIODIC
+
+fix         pd background file ${inp}/plasma.h5 static yes
+compute     cpmiB surface/physical/sputter plate background pd &
+            target B projectiles D,O mass_amu 2.01410177811 static ${cstatic} erosion_flux
+fix         pw particle/weight
+fix         femitB surface/emit/source bSource plate cpmiB conc_scale adens_conc 5 &
+            perspecies no nlaunch_total ${nlaunch} model thompson 5.73 emax 55 nevery ${nevery}
+
+run         0 post no
+dump        dsurf surf plate ${nevery} output/${case}.surf.*.dump id area s_adens[5] s_adens_conc[5] c_cpmiB
+dump        dpart particle all ${nevery} output/${case}.part.*.dump id type p_pweight
+stats       500
+stats_style step cpu np nscoll nsreact f_femitB[2]
+run         ${nsteps}

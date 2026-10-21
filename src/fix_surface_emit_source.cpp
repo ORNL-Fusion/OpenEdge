@@ -25,6 +25,7 @@
 #include "memory.h"
 #include "error.h"
 #include "compute_surface_physical_sputter.h"
+#include "surf_react_surface_pwi.h"
 
 #include <cmath>
 #include <vector>
@@ -223,6 +224,10 @@ FixSurfaceEmitSource::FixSurfaceEmitSource(SPARTA *sparta, int narg, char **arg)
 
   cached_source_total = 0.0;
   task_source_cached = 0;
+  conc_gen_seen = -1;
+  conc_pwi.clear();
+  conc_pwi_resolved = 0;
+  weights_version = 0;
 
   flux_localghost = NULL;
   flux_n_localghost = 0;
@@ -274,7 +279,13 @@ void FixSurfaceEmitSource::init()
       error->all(FLERR,"Fix surface/emit/source conc_scale: attribute must be DOUBLE");
     if (surf->esize[conc_index] < conc_col)
       error->all(FLERR,"Fix surface/emit/source conc_scale: column out of range");
+    if (file_mode || const_mode)
+      error->all(FLERR,"Fix surface/emit/source conc_scale requires a per-surf "
+                       "flux compute (not file or constant mode)");
   }
+  conc_pwi_resolved = 0;
+  conc_pwi.clear();
+  conc_gen_seen = -1;
 
   if (file_mode) {
     // File mode: no compute, no flux_index, no nlaunch* paths.
@@ -366,10 +377,17 @@ double FixSurfaceEmitSource::flux_for_surface(surfint isurf)
   // owned surfaces.
   if (!flux_localghost) return 0.0;
   if (isurf < 0 || isurf >= flux_n_localghost) return 0.0;
-  double f = flux_localghost[isurf];
-  if (conc_index >= 0)
-    f *= surf->edarray_local[surf->ewhich[conc_index]][isurf][conc_col-1];
-  return f;
+  return flux_localghost[isurf] * conc_factor(isurf);
+}
+
+/* ----------------------------------------------------------------------
+   conc_scale multiplier of surf isurf (local+ghost index), 1 if unused
+------------------------------------------------------------------------- */
+
+double FixSurfaceEmitSource::conc_factor(surfint isurf) const
+{
+  if (conc_index < 0) return 1.0;
+  return surf->edarray_local[surf->ewhich[conc_index]][isurf][conc_col-1];
 }
 
 /* ----------------------------------------------------------------------
@@ -422,7 +440,11 @@ void FixSurfaceEmitSource::grid_changed()
   // spread flux (surf local+ghost layout may have changed)
   task_source_cached = 0;
   cached_task_source.clear();
+  cached_task_flux.clear();
+  cached_task_raw.clear();
   cached_source_total = 0.0;
+  conc_gen_seen = -1;
+  weights_version++;
   flux_spread_valid = 0;
 
   // for mode CONSTANT, set per-task ntarget to area fraction
@@ -627,26 +649,12 @@ void FixSurfaceEmitSource::create_task(int icell)
 double FixSurfaceEmitSource::compute_task_source(std::vector<double> &task_source,
                                                  Compute *c)
 {
-  const int dimension = domain->dimension;
   const double dt = update->dt * nevery;
   task_source.assign(ntask,0.0);
 
   double source_total_me = 0.0;
   for (int i = 0; i < ntask; i++) {
-    const int isurf = tasks[i].isurf;
-    double flux;
-    if (file_mode) {
-      double *vs = tasks[i].vstream;
-      double *nrm = (dimension == 2)
-                    ? surf->lines[isurf].norm
-                    : surf->tris[isurf].norm;
-      double vn = vs[0]*nrm[0] + vs[1]*nrm[1] + vs[2]*nrm[2];
-      flux = tasks[i].nrho * (vn > 0.0 ? vn : -vn);
-    } else if (const_mode) {
-      flux = const_flux;
-    } else {
-      flux = flux_for_surface(isurf);
-    }
+    const double flux = task_flux(i,c,1);
     if (!std::isfinite(flux) || flux <= 0.0) continue;
     if (flux < flux_thresh) continue;
 
@@ -659,8 +667,30 @@ double FixSurfaceEmitSource::compute_task_source(std::vector<double> &task_sourc
 
   double source_total = 0.0;
   MPI_Allreduce(&source_total_me,&source_total,1,MPI_DOUBLE,MPI_SUM,world);
-  (void) c;
   return source_total;
+}
+
+/* ----------------------------------------------------------------------
+   flux of task i (file / constant / spread compute flux); with_conc
+   applies the conc_scale factor
+------------------------------------------------------------------------- */
+
+double FixSurfaceEmitSource::task_flux(int i, Compute *c, int with_conc)
+{
+  (void) c;
+  const int isurf = tasks[i].isurf;
+  if (file_mode) {
+    double *vs = tasks[i].vstream;
+    double *nrm = (domain->dimension == 2) ? surf->lines[isurf].norm
+                                           : surf->tris[isurf].norm;
+    double vn = vs[0]*nrm[0] + vs[1]*nrm[1] + vs[2]*nrm[2];
+    return tasks[i].nrho * (vn > 0.0 ? vn : -vn);
+  }
+  if (const_mode) return const_flux;
+  if (!flux_localghost || isurf < 0 || isurf >= flux_n_localghost) return 0.0;
+  double f = flux_localghost[isurf];
+  if (with_conc) f *= conc_factor(isurf);
+  return f;
 }
 
 /* ----------------------------------------------------------------------
@@ -697,10 +727,66 @@ int FixSurfaceEmitSource::build_task_source_cache()
     }
   }
 
-  std::vector<double> task_source;
-  cached_source_total = compute_task_source(task_source,c);
-  cached_task_source = task_source;
+  if (conc_index < 0) {
+    std::vector<double> task_source;
+    cached_source_total = compute_task_source(task_source,c);
+    cached_task_source = task_source;
+  } else {
+    const double dt = update->dt * nevery;
+    cached_task_flux.assign(ntask,0.0);
+    cached_task_raw.assign(ntask,0.0);
+    for (int i = 0; i < ntask; i++) {
+      const double flux = task_flux(i,c,0);
+      if (!std::isfinite(flux) || flux <= 0.0) continue;
+      cached_task_flux[i] = flux;
+      cached_task_raw[i] = flux * tasks[i].area * dt;
+    }
+    conc_gen_seen = -1;
+  }
   task_source_cached = 1;
+  weights_version++;
+  refresh_conc_weights();
+  return 1;
+}
+
+/* ----------------------------------------------------------------------
+   static path + conc_scale: re-weight the cached strengths by the live
+   concentration when any surface/pwi writing that attribute updated it
+   (summed generations), or on every call when it has no known writer.
+   Collective.
+   Returns 1 when cached_task_source changed.
+------------------------------------------------------------------------- */
+
+int FixSurfaceEmitSource::refresh_conc_weights()
+{
+  if (!task_source_cached || conc_index < 0) return 0;
+  if (!conc_pwi_resolved) {
+    conc_pwi.clear();
+    for (int k = 0; k < surf->nsr; k++) {
+      auto *pwi = dynamic_cast<SurfReactSurfacePWI *>(surf->sr[k]);
+      if (pwi && pwi->conc_custom_index() == conc_index) conc_pwi.push_back(pwi);
+    }
+    conc_pwi_resolved = 1;
+  }
+  bigint gen = 0;
+  for (auto *pwi : conc_pwi) gen += pwi->conc_generation();
+  if (!conc_pwi.empty() && conc_gen_seen >= 0 && gen == conc_gen_seen) return 0;
+
+  cached_task_source.assign(ntask,0.0);
+  double total_me = 0.0;
+  for (int i = 0; i < ntask; i++) {
+    if (cached_task_raw[i] <= 0.0) continue;
+    const double cf = conc_factor(tasks[i].isurf);
+    const double flux = cached_task_flux[i] * cf;
+    if (!std::isfinite(flux) || flux <= 0.0 || flux < flux_thresh) continue;
+    const double s = cached_task_raw[i] * cf;
+    if (!std::isfinite(s) || s <= 0.0) continue;
+    cached_task_source[i] = s;
+    total_me += s;
+  }
+  MPI_Allreduce(&total_me,&cached_source_total,1,MPI_DOUBLE,MPI_SUM,world);
+  conc_gen_seen = conc_pwi.empty() ? -1 : gen;
+  weights_version++;
   return 1;
 }
 
@@ -781,6 +867,7 @@ void FixSurfaceEmitSource::perform_task()
       // reuse or (after grid_changed) rebuild the cache — flux and dt are
       // constant for static sources
       build_task_source_cache();
+      refresh_conc_weights();
       if (cached_source_total <= 0.0) return;
       source_total = cached_source_total;
       task_source_ptr = cached_task_source.data();

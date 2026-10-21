@@ -78,7 +78,12 @@ the compute is static its values are cached.  {conc_scale} multiplies
 the flux of each element by a column of a custom per-surf array,
 typically a reaction-zone concentration written by "surf_react
 surface/pwi"_surf_react_surface_pwi.html, so that the emitted flux of
-a material is the erosion flux times its local concentration.  In
+a material is the erosion flux times its local concentration.  The
+concentration is read live: with a static compute only the flux is
+cached, and the per-element sources are re-weighted whenever
+surf_react surface/pwi updates its concentrations (every
+{adens_nevery} steps).  {conc_scale} requires a compute; it is an
+error in {constant} and {file} mode.  In
 {constant} mode every element carries the same flux.  In {file} mode
 the file has the SPARTA inflow format: a section header line (NAME),
 then "NIJ ni nj", "NV nv", "VALUES name ..." with names among nrho,
@@ -152,7 +157,8 @@ This command is part of the OPENEDGE package.  It requires explicit
 per-surf output.  {n} > 0 and {nlaunch_total} cannot be combined with
 {perspecies yes}; {n} > 0, {nlaunch} and {nlaunch_total} are mutually
 exclusive.  {nlaunch} and {nlaunch_total} require "fix
-particle/weight"_fix_particle_weight.html.  The {conc_scale} and
+particle/weight"_fix_particle_weight.html.  {conc_scale} requires
+compute mode.  The {conc_scale} and
 {thermal_tsurf} custom attributes must exist when the fix is
 initialized.
 

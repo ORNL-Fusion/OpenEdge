@@ -23,7 +23,7 @@
 
 <LI>zero or more keyword/value pairs may be appended 
 
-<LI>keyword = <I>twall</I> or <I>twall_surf</I> or <I>trim_dir</I> or <I>R_surf</I> or <I>ehist</I> or <I>roughness_dm</I> or <I>adens_surf</I> or <I>adens_init</I> or <I>adens_init_file</I> or <I>adens_init_group</I> or <I>deposit_as</I> or <I>rzone</I> or <I>adens_erosion</I> or <I>adens_implant</I> or <I>conc_feedback</I> or <I>adens_nevery</I> or <I>strata</I> or <I>strata_dens</I> 
+<LI>keyword = <I>twall</I> or <I>twall_surf</I> or <I>trim_dir</I> or <I>R_surf</I> or <I>ehist</I> or <I>roughness_dm</I> or <I>adens_surf</I> or <I>adens_init</I> or <I>adens_init_file</I> or <I>adens_init_group</I> or <I>substrate</I> or <I>deposit_as</I> or <I>rzone</I> or <I>adens_erosion</I> or <I>adens_implant</I> or <I>conc_feedback</I> or <I>adens_nevery</I> or <I>strata</I> or <I>strata_dens</I> or <I>ledger_reset</I>
 
 <PRE>  <I>twall</I> value = wall temperature in Kelvin
   <I>twall_surf</I> value = name of a custom per-surf vector with the wall
@@ -49,7 +49,10 @@
     scale = multiplier applied to the file values (> 0)
   <I>adens_init_group</I> value = surface group ID the initial layers are
     restricted to
+  <I>substrate</I> value = species ID of the bulk material under all layers
   <I>deposit_as</I> values = element species
+  <I>ledger_reset</I> = no value; zero the runtime ledgers of a restart
+    written before they became incremental (see below)
     element = element symbol whose retained atoms are re-tagged
     species = species ID that holds the redeposited material
   <I>rzone</I> value = reaction-zone areal density in atoms/m^2
@@ -213,6 +216,15 @@ deposition) and <attr>_ero (gross removal), which start at zero and
 exclude the seeded layers, and <attr>_conc, the reaction-zone
 concentration of every species.  All persist across restarts.
 </P>
+<P>Restart compatibility: <attr>_net, <attr>_dep and <attr>_ero are signed
+runtime deltas, not total areal densities; analysis that wants the
+total reads the material array itself.  Files written before the
+ledgers became incremental hold absolute totals in <attr>_net and are
+refused on read, because the marker custom <attr>_ledgerv they lack
+is now written with every ledger.  Add <I>ledger_reset</I> to accept such a
+file: the three ledgers are zeroed on every surface and the marker is
+created, while the material array and strata are kept.
+</P>
 <P>Concentrations are c_i = adens_i/<I>rzone</I>; the remainder of the zone
 is bulk substrate.  They weight the <I>T</I> and <I>S</I> channels that carry a
 <I>mat</I> species (linear weighting of a pure-pair coefficient) and give
@@ -229,6 +241,30 @@ pure-target endpoint.
 snapshot) or from a two-column id/value file, scaled and clipped at
 zero.  Both apply once, when the array is first created, and can be
 restricted to one surface group with <I>adens_init_group</I>.
+</P>
+<P><I>substrate</I> names the bulk material below the reaction zone and the
+strata.  Without it the substrate is W when a W species is declared,
+otherwise the first declared species; the choice is written to the
+screen and log.  If the deepest seeded layer (the first positive layer
+actually applied to each surface) is the substrate's own modeled
+material, it erodes into more of itself and never exposes a different
+material; a warning reports the number of affected surfaces when layers
+are freshly seeded.  Materials are as modeled: a <I>deposit_as</I>
+species such as Wd is a different material from W. For a boron layer
+on a graphite tile declare C and use <I>substrate C</I>. On restart a
+warning flags stacks whose deepest stratum is not the substrate.
+</P>
+<P>Reading the inventory: redeposited ions credit their own charge-state
+column (B+, B2+, ...), while <I>adens_erosion</I> debits its configured
+species column (often the neutral species) and sputtering debits the
+column of its product material, so a single column can go negative
+while the material is present.  A material's areal density is the
+signed sum of its charge-state columns, e.g.  s_adens[5] + ... +
+s_adens[10] for B to B5+ declared at positions 5 to 10. The
+<attr>_conc columns already hold the pooled material fraction: read
+one column of the material, do not sum them.  With <I>deposit_as</I> the
+deposit species has its own columns, and the bulk erosion bookkeeping
+of the substrate is not part of the deposited inventory.
 </P>
 <P><I>deposit_as</I> tracks redeposited atoms of an element as a material of
 their own: retained atoms whose species starts with <I>element</I> (all
@@ -311,6 +347,7 @@ compute</I> require per-surf computes with the requested column.
 </P>
 <P>The option defaults are rzone = 1.0e19, conc_feedback = yes,
 adens_nevery = 1, roughness_dm = 0.0, strata off with minthick = 0.5,
+substrate = W if declared, else the first species,
 and for adens_implant rcoef = 0.0, alpha = 100.0, depth = 0.0.  No
 wall temperature, R_surf, ehist, adens_surf or trim_dir is set by
 default.

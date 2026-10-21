@@ -16,7 +16,7 @@ ID = user-assigned name for the surface reaction model :ulb,l
 surface/pwi = style name of this surface reaction model :l
 infile = file listing the surface reaction channels (format below) :l
 zero or more keyword/value pairs may be appended :l
-keyword = {twall} or {twall_surf} or {trim_dir} or {R_surf} or {ehist} or {roughness_dm} or {adens_surf} or {adens_init} or {adens_init_file} or {adens_init_group} or {deposit_as} or {rzone} or {adens_erosion} or {adens_implant} or {conc_feedback} or {adens_nevery} or {strata} or {strata_dens} or {ledger_reset} :l
+keyword = {twall} or {twall_surf} or {trim_dir} or {R_surf} or {ehist} or {roughness_dm} or {adens_surf} or {adens_init} or {adens_init_file} or {adens_init_group} or {substrate} or {deposit_as} or {rzone} or {adens_erosion} or {adens_implant} or {conc_feedback} or {adens_nevery} or {strata} or {strata_dens} or {ledger_reset} :l
   {twall} value = wall temperature in Kelvin
   {twall_surf} value = name of a custom per-surf vector with the wall
     temperature of each element in Kelvin
@@ -41,6 +41,7 @@ keyword = {twall} or {twall_surf} or {trim_dir} or {R_surf} or {ehist} or {rough
     scale = multiplier applied to the file values (> 0)
   {adens_init_group} value = surface group ID the initial layers are
     restricted to
+  {substrate} value = species ID of the bulk material under all layers
   {deposit_as} values = element species
   {ledger_reset} = no value; zero the runtime ledgers of a restart
     written before they became incremental (see below)
@@ -232,6 +233,30 @@ snapshot) or from a two-column id/value file, scaled and clipped at
 zero.  Both apply once, when the array is first created, and can be
 restricted to one surface group with {adens_init_group}.
 
+{substrate} names the bulk material below the reaction zone and the
+strata.  Without it the substrate is W when a W species is declared,
+otherwise the first declared species; the choice is written to the
+screen and log.  If the deepest seeded layer (the first positive layer
+actually applied to each surface) is the substrate's own modeled
+material, it erodes into more of itself and never exposes a different
+material; a warning reports the number of affected surfaces when layers
+are freshly seeded.  Materials are as modeled: a {deposit_as}
+species such as Wd is a different material from W. For a boron layer
+on a graphite tile declare C and use {substrate C}. On restart a
+warning flags stacks whose deepest stratum is not the substrate.
+
+Reading the inventory: redeposited ions credit their own charge-state
+column (B+, B2+, ...), while {adens_erosion} debits its configured
+species column (often the neutral species) and sputtering debits the
+column of its product material, so a single column can go negative
+while the material is present.  A material's areal density is the
+signed sum of its charge-state columns, e.g.  s_adens\[5\] + ... +
+s_adens\[10\] for B to B5+ declared at positions 5 to 10. The
+<attr>_conc columns already hold the pooled material fraction: read
+one column of the material, do not sum them.  With {deposit_as} the
+deposit species has its own columns, and the bulk erosion bookkeeping
+of the substrate is not part of the deposited inventory.
+
 {deposit_as} tracks redeposited atoms of an element as a material of
 their own: retained atoms whose species starts with {element} (all
 charge states) are credited to the {species} column, and erosion of
@@ -313,6 +338,7 @@ compute} require per-surf computes with the requested column.
 
 The option defaults are rzone = 1.0e19, conc_feedback = yes,
 adens_nevery = 1, roughness_dm = 0.0, strata off with minthick = 0.5,
+substrate = W if declared, else the first species,
 and for adens_implant rcoef = 0.0, alpha = 100.0, depth = 0.0.  No
 wall temperature, R_surf, ehist, adens_surf or trim_dir is set by
 default.

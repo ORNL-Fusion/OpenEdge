@@ -64,6 +64,7 @@ FixSurfaceEmitSourceKokkos::FixSurfaceEmitSourceKokkos(SPARTA *sparta,
   dev_announced_ = 0;
   host_warm_calls_ = 0;
   cache_rebuilds_ = 0;
+  src_version_uploaded_ = -1;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -207,12 +208,7 @@ void FixSurfaceEmitSourceKokkos::upload_tasks()
   Kokkos::deep_copy(d_t_path,h_path);
   Kokkos::deep_copy(d_t_frac,h_frac);
 
-  // static per-task source (nlaunch_total mode, frozen upstream)
-  d_t_src = DAT::t_float_1d(Kokkos::view_alloc("emit:src",
-                Kokkos::WithoutInitializing), nt > 0 ? nt : 1);
-  auto h_src = Kokkos::create_mirror_view(d_t_src);
-  for (int i = 0; i < nt; i++) h_src(i) = cached_task_source[i];
-  Kokkos::deep_copy(d_t_src,h_src);
+  upload_task_source();
 
   // mixture cumulative fractions + species map
   nspecies_mix_ = nspecies;
@@ -231,6 +227,23 @@ void FixSurfaceEmitSourceKokkos::upload_tasks()
   Kokkos::deep_copy(d_mix_sp,h_msp);
 
   tasks_uploaded_ = 1;
+}
+
+/* ----------------------------------------------------------------------
+   per-task source strength (nlaunch_total, static upstream); re-sent when
+   conc_scale re-weights it (weights_version)
+------------------------------------------------------------------------- */
+
+void FixSurfaceEmitSourceKokkos::upload_task_source()
+{
+  const int nt = ntask;
+  if ((int) d_t_src.extent(0) != (nt > 0 ? nt : 1))
+    d_t_src = DAT::t_float_1d(Kokkos::view_alloc("emit:src",
+                  Kokkos::WithoutInitializing), nt > 0 ? nt : 1);
+  auto h_src = Kokkos::create_mirror_view(d_t_src);
+  for (int i = 0; i < nt; i++) h_src(i) = cached_task_source[i];
+  Kokkos::deep_copy(d_t_src,h_src);
+  src_version_uploaded_ = weights_version;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -301,8 +314,10 @@ void FixSurfaceEmitSourceKokkos::perform_task()
               update->ntimestep,host_warm_calls_,ntask);
   }
 
+  refresh_conc_weights();
   if (cached_source_total <= 0.0) return;   // no source anywhere (CPU returns too)
   if (!tasks_uploaded_) upload_tasks();
+  else if (src_version_uploaded_ != weights_version) upload_task_source();
   if (ntask_ == 0 && ntask == 0) return;
 
   ParticleKokkos *particle_kk = (ParticleKokkos *) particle;

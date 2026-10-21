@@ -104,9 +104,9 @@ class FixSurfaceEmitSource : public FixEmit {
   double norm_vstream[3];  // direction of mixture vstream
 
   // Cached per-task source strengths for nlaunch_total mode.
-  // When the upstream surface/physical/sputter compute is in static_cache mode,
-  // task_source[] and source_total never change, so we build them once
-  // and reuse them across timesteps.
+  // With a static upstream (static yes, file, constant) the flux never
+  // changes; with conc_scale the strengths are re-weighted on concentration
+  // updates (refresh_conc_weights).
   std::vector<double> cached_task_source;
   double cached_source_total;
   int task_source_cached;        // 0 = stale, 1 = valid
@@ -118,6 +118,19 @@ class FixSurfaceEmitSource : public FixEmit {
   // warm-up emission (OpenEdge 2026-09-15).
   double compute_task_source(std::vector<double> &task_source, class Compute *c);
   int build_task_source_cache();
+
+  // static path with conc_scale: flux and strength before the concentration
+  // factor; cached_task_source is re-weighted only when the concentration
+  // writers (every surf_react surface/pwi on that attribute) report a new
+  // generation; their summed generation is the cache key
+  std::vector<double> cached_task_flux, cached_task_raw;
+  bigint conc_gen_seen;          // -1 = re-weight on next refresh
+  std::vector<class SurfReactSurfacePWI *> conc_pwi;
+  int conc_pwi_resolved;
+  int weights_version;           // bumped whenever cached_task_source changes
+  double conc_factor(surfint) const;
+  double task_flux(int, class Compute *, int);
+  int refresh_conc_weights();
 
   // Per-surface flux replicated across ranks (canonical SPARTA pattern: the
   // upstream compute writes array_surf only at this rank's owned surfaces, so
