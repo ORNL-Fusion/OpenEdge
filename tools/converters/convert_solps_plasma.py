@@ -978,6 +978,28 @@ def convert_solps_to_openedge(
     ion_names = []
     ion_masses = np.zeros(nion, dtype=np.float64)
     ion_charges = np.zeros(nion, dtype=np.int32)
+    # psi_axis: the "extremum farthest from psib" rule can pick a corner of the
+    # equilibrium grid (CAT: a grid corner at 10.45 Wb/rad while the axis is at
+    # -2.88), which inverts psi_N.  Take instead the interior local extremum of
+    # psi closest to the centroid of the innermost real B2 ring (iy = 1); the
+    # sign convention then follows from psib automatically.
+    try:
+        from scipy.ndimage import minimum_filter as _minf, maximum_filter as _maxf
+        _pe = np.asarray(equ_dict["equ_psi"]); _re = np.asarray(equ_dict["equ_r"]); _ze = np.asarray(equ_dict["equ_z"])
+        _Rg, _Zg = np.meshgrid(_re, _ze)
+        _ext = ((_pe == _minf(_pe, 5)) | (_pe == _maxf(_pe, 5)))
+        _ext &= (_Rg > _re.min() + 0.05 * np.ptp(_re)) & (_Rg < _re.max() - 0.05 * np.ptp(_re)) & \
+                (_Zg > _ze.min() + 0.05 * np.ptp(_ze)) & (_Zg < _ze.max() - 0.05 * np.ptp(_ze))
+        _kk, _jj = np.where(_ext)
+        if _kk.size:
+            _R0 = float(np.mean(rc[1:nx + 1, 1])); _Z0 = float(np.mean(zc[1:nx + 1, 1]))
+            _d = np.hypot(_re[_jj] - _R0, _ze[_kk] - _Z0); _m = int(np.argmin(_d))
+            _old = float(equ_dict.get("psi_axis", np.nan))
+            equ_dict["psi_axis"] = float(_pe[_kk[_m], _jj[_m]]); equ_dict["rmagx"] = float(_re[_jj[_m]]); equ_dict["zmagx"] = float(_ze[_kk[_m]])
+            print(f"psi_axis = {equ_dict['psi_axis']:.4f} at (R,Z) = ({equ_dict['rmagx']:.3f}, {equ_dict['zmagx']:.3f}) "
+                  f"[nearest interior extremum to the B2 core ring; previous rule gave {_old:.4f}]; psib = {float(equ_dict['psib']):.4f}")
+    except Exception as _exc:
+        print(f"psi_axis correction skipped: {_exc}")
 
     for k, sidx in enumerate(ion_indices):
         # Isotope disambiguation already happened in _build_species_metadata,
@@ -1017,12 +1039,41 @@ def convert_solps_to_openedge(
     ni_flat = main_dens_raw.reshape(ncell_flat, order="F")
     upar_flat = main_upar_raw.reshape(ncell_flat, order="F")
 
-    # Per-triangle cell index into the flat B2.5 array
+    # Per-triangle cell index into the flat B2.5 array.
+    # GEOMETRIC mapping (2026-10-23): each EIRENE triangle is assigned the B2.5
+    # cell whose quadrilateral contains its centroid.  The fort.35 (ix, iy)
+    # columns are NOT used: their poloidal index follows EIRENE's own
+    # numbering (extra columns at the grid cuts) and their radial index is
+    # the 1-based real-cell row, so the old "subtract 1" mapping put every
+    # triangle one row inward and up to four cells sideways (checked on the
+    # CAT and ST40 cases: 0 of 12k triangles lay inside the cell they were
+    # mapped to).  fort.35 is kept only as a consistency diagnostic.
+    from scipy.spatial import cKDTree as _KDmap
+    from matplotlib.path import Path as _MPath
+    _cr = mesh_vtx_r[mesh_tri].mean(axis=1); _cz = mesh_vtx_z[mesh_tri].mean(axis=1)
+    _rcf = rc.reshape(ncell_flat, order="F"); _zcf = zc.reshape(ncell_flat, order="F")
+    _area = 0.5 * np.abs(np.sum(cell_polys[:, :, 0] * np.roll(cell_polys[:, :, 1], -1, axis=1)
+                                - np.roll(cell_polys[:, :, 0], -1, axis=1) * cell_polys[:, :, 1], axis=1))
+    _live = np.flatnonzero(_area > 1e-12)
+    _tree = _KDmap(np.column_stack([_rcf[_live], _zcf[_live]]))
+    _k = min(16, _live.size)
+    _, _cand = _tree.query(np.column_stack([_cr, _cz]), k=_k)
+    _cand = np.atleast_2d(_cand) if _k > 1 else _cand[:, None]
+    _paths = {}
     mesh_cell_idx = np.full(ntri_eirene, -1, dtype=np.int32)
     for t in range(ntri_eirene):
-        ix, iy = int(b2_ix[t]), int(b2_iy[t])
-        if ix >= 0 and iy >= 0 and ix < nx + 2 and iy < ny + 2:
-            mesh_cell_idx[t] = iy * (nx + 2) + ix
+        for jj in _cand[t]:
+            cc = int(_live[jj])
+            pth = _paths.get(cc)
+            if pth is None:
+                pth = _MPath(cell_polys[cc]); _paths[cc] = pth
+            if pth.contains_point((_cr[t], _cz[t])):
+                mesh_cell_idx[t] = cc
+                break
+    _f35 = (b2_ix >= 0) & (b2_iy >= 0)
+    print(f"Eirene -> B2.5 geometric mapping: {int((mesh_cell_idx >= 0).sum())} triangles inside a B2 cell, "
+          f"{int((mesh_cell_idx < 0).sum())} outside the B2 grid "
+          f"(fort.35 flagged {int(_f35.sum())} as plasma; {int(((mesh_cell_idx >= 0) != _f35).sum())} differ)")
 
     has_cell_native = mesh_cell_idx >= 0
     tri_source_kind = np.zeros(ntri_eirene, dtype=np.int8)
@@ -1769,46 +1820,78 @@ def convert_solps_to_openedge(
             print("gap extension: psi_N >= 1 selects too few native triangles; "
                   "using all native triangles as sources")
         if gap_idx.size > 0 and nat_idx.size > 0:
-            tree = _KD(np.column_stack([centroid_r[nat_idx], centroid_z[nat_idx]]))
-            dist, j = tree.query(np.column_stack([centroid_r[gap_idx],
-                                                   centroid_z[gap_idx]]))
-            gap_src = mesh_cell_idx[nat_idx[j]].astype(np.int64)
+            # Sources are the native/gap INTERFACE EDGES (edges of a native
+            # triangle whose neighbour is unmapped or missing), not native
+            # centroids: at the strike-point corner the nearest centroid can
+            # belong to the dense SOL row next door, and a centroid distance
+            # starts the decay with a jump at the grid edge.  Each gap
+            # triangle blends its k nearest interface edges (inverse-distance
+            # weights, exact point-to-segment distance), which also removes
+            # the poloidal staircase of a single nearest-neighbour copy.
+            nat_set = np.zeros(ntri_eirene, dtype=bool); nat_set[nat_idx] = True
+            edge_a, edge_b, edge_owner_tri = [], [], []
+            for t in nat_idx:
+                tri_row = mesh_tri[t]
+                for a, b in [(tri_row[0], tri_row[1]), (tri_row[1], tri_row[2]), (tri_row[2], tri_row[0])]:
+                    e = (int(min(a, b)), int(max(a, b)))
+                    nb = [o for o in tri_neighbors[t] if a in mesh_tri[o] and b in mesh_tri[o]]
+                    if len(nb) == 0 or not nat_set[nb[0]]:
+                        edge_a.append(a); edge_b.append(b); edge_owner_tri.append(t)
+            edge_a = np.asarray(edge_a); edge_b = np.asarray(edge_b); edge_owner_tri = np.asarray(edge_owner_tri)
+            pa_ = np.column_stack([mesh_vtx_r[edge_a], mesh_vtx_z[edge_a]]); pb_ = np.column_stack([mesh_vtx_r[edge_b], mesh_vtx_z[edge_b]])
+            mid = 0.5 * (pa_ + pb_)
+            k_src = min(3, len(mid))
+            tree = _KD(mid)
+            dmid, jk = tree.query(np.column_stack([centroid_r[gap_idx], centroid_z[gap_idx]]), k=k_src)
+            if k_src == 1:
+                dmid = dmid[:, None]; jk = jk[:, None]
+            # exact point-to-segment distances
+            P = np.column_stack([centroid_r[gap_idx], centroid_z[gap_idx]])
+            dseg = np.empty_like(dmid)
+            for kk in range(k_src):
+                A = pa_[jk[:, kk]]; B = pb_[jk[:, kk]]; AB = B - A; L2 = np.maximum((AB * AB).sum(1), 1e-18)
+                tt = np.clip(((P - A) * AB).sum(1) / L2, 0.0, 1.0); Q = A + tt[:, None] * AB
+                dseg[:, kk] = np.hypot(*(P - Q).T)
+            w = 1.0 / (dseg + 2e-3) ** 2; w /= w.sum(1, keepdims=True)
+            src_cells = mesh_cell_idx[edge_owner_tri[jk]]                 # (ngap, k)
+            dist = dseg[:, 0]
+            gap_src = src_cells[:, 0].astype(np.int64)                     # nearest edge owner: used for the fort.31 copies
             gap_distance[gap_idx] = dist
-            dec_n = np.exp(-dist / lam_n)
-            dec_t = np.exp(-dist / lam_t)
+            dec_n = np.exp(-dseg / lam_n); dec_t = np.exp(-dseg / lam_t)
+
+            def _blend(per_cell, dec):
+                v = np.asarray(per_cell, dtype=np.float64)
+                if v.ndim == 1:
+                    return (w * v[src_cells] * dec).sum(1)
+                return np.stack([(w * v[s][src_cells] * dec).sum(1) for s in range(v.shape[0])], axis=0)
+
             cat = np.concatenate
-            mesh_ne = cat([mesh_ne, mesh_ne[gap_src] * dec_n])
-            mesh_ni = cat([mesh_ni, mesh_ni[gap_src] * dec_n])
-            mesh_te = cat([mesh_te, mesh_te[gap_src] * dec_t])
-            mesh_ti = cat([mesh_ti, mesh_ti[gap_src] * dec_t])
-            mesh_upar = cat([mesh_upar, mesh_upar[gap_src] * dec_n])
-            mesh_ions_dens = cat([mesh_ions_dens, mesh_ions_dens[:, gap_src] * dec_n], axis=1)
-            mesh_ions_temp = cat([mesh_ions_temp, mesh_ions_temp[:, gap_src] * dec_t], axis=1)
-            mesh_ions_upar = cat([mesh_ions_upar, mesh_ions_upar[:, gap_src] * dec_n], axis=1)
+            mesh_ne = cat([mesh_ne, _blend(mesh_ne, dec_n)])
+            mesh_ni = cat([mesh_ni, _blend(mesh_ni, dec_n)])
+            mesh_te = cat([mesh_te, _blend(mesh_te, dec_t)])
+            mesh_ti = cat([mesh_ti, _blend(mesh_ti, dec_t)])
+            mesh_upar = cat([mesh_upar, _blend(mesh_upar, dec_n)])
+            mesh_ions_dens = cat([mesh_ions_dens, _blend(mesh_ions_dens, dec_n)], axis=1)
+            mesh_ions_temp = cat([mesh_ions_temp, _blend(mesh_ions_temp, dec_t)], axis=1)
+            mesh_ions_upar = cat([mesh_ions_upar, _blend(mesh_ions_upar, dec_n)], axis=1)
             zeros = np.zeros(gap_idx.size, dtype=np.float64)
             mesh_grad_te_r = cat([mesh_grad_te_r, zeros]); mesh_grad_te_z = cat([mesh_grad_te_z, zeros])
             mesh_grad_ti_r = cat([mesh_grad_ti_r, zeros]); mesh_grad_ti_z = cat([mesh_grad_ti_z, zeros])
             mesh_e_r = cat([mesh_e_r, zeros]); mesh_e_z = cat([mesh_e_z, zeros]); mesh_e_t = cat([mesh_e_t, zeros])
             mesh_wall_face_area = cat([mesh_wall_face_area, zeros])
             if mesh_q_par is not None:
-                # Heat flux decays from the nearest SOL-side cell that carries
-                # flux: target-adjacent gap cells must not inherit the zero
-                # of a guard column or a stagnation cell.
-                q_ok = nat_idx[mesh_q_par[mesh_cell_idx[nat_idx]] > 0]
-                if q_ok.size == 0:
-                    q_ok = nat_idx
-                tq = _KD(np.column_stack([centroid_r[q_ok], centroid_z[q_ok]]))
-                dq, jq = tq.query(np.column_stack([centroid_r[gap_idx], centroid_z[gap_idx]]))
-                q_src = mesh_cell_idx[q_ok[jq]]
-                mesh_q_par = cat([mesh_q_par, mesh_q_par[q_src]
-                                  * np.exp(-dq / lam_n) * np.exp(-1.5 * dq / lam_t)])
+                # Heat flux: same edge sources, but an edge whose owner carries
+                # no flux (guard column, stagnation cell) is skipped in the blend.
+                qv = np.asarray(mesh_q_par, dtype=np.float64)[src_cells]
+                wq = w * (qv > 0); wq_sum = wq.sum(1); wq = np.where(wq_sum[:, None] > 0, wq / np.maximum(wq_sum, 1e-300)[:, None], w)
+                mesh_q_par = cat([mesh_q_par, (wq * qv * np.exp(-dseg / lam_n) * np.exp(-1.5 * dseg / lam_t)).sum(1)])
                 mesh_q_perp = cat([mesh_q_perp, zeros])
             mesh_cell_idx[gap_idx] = ncell_flat + np.arange(gap_idx.size, dtype=np.int32)
             tri_source_kind[gap_idx] = 3
-            print(f"Gap extension: {gap_idx.size} unmapped triangles -> virtual cells, "
-                  f"lambda_n = {lam_n*100:.2f} cm, lambda_T = {lam_t*100:.2f} cm, "
-                  f"distance median {np.median(dist)*100:.1f} cm, max {dist.max()*100:.1f} cm, "
-                  f"min density factor {dec_n.min():.2e}")
+            print(f"Gap extension: {gap_idx.size} unmapped triangles -> virtual cells from {len(mid)} interface edges "
+                  f"(k={k_src} inverse-distance blend), lambda_n = {lam_n*100:.2f} cm, lambda_T = {lam_t*100:.2f} cm, "
+                  f"edge distance median {np.median(dist)*100:.1f} cm, max {dist.max()*100:.1f} cm, "
+                  f"min density factor {np.exp(-dist.max()/lam_n):.2e}")
 
     def _ext(values, mode="copy"):
         """Append the virtual-cell entries to a native per-cell fort.31 array."""
