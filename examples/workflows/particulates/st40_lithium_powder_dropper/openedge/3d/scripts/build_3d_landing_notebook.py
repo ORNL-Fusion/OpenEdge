@@ -272,6 +272,85 @@ np.atleast_1d(ax)[0].set_ylabel("Z [m]")
 plt.tight_layout(); plt.show()
 print(f"averaged {len(suse)} snapshots, steps {int(re.findall(r'\\d+', suse[0])[-1])}..{int(re.findall(r'\\d+', suse[-1])[-1])}")"""))
 
+    c.append(new_markdown_cell("""## Synthetic line-integrated Li I / Li II signals
+
+Brightness along each chord, B(t) = (1/4pi) sum over markers within RC of the chord of
+weight x n_e x PEC(Te, ne) / (pi RC^2)  [photons m^-2 s^-1 sr^-1], from the particle snapshots
+(every ndump steps). Li I 670.8 nm = Li excitation + Li+ recombination; Li II 548.5 nm =
+Li+ excitation + Li2+ recombination (open-ADAS pec96 in `database/processes.h5`). Te, ne at each
+marker from the plasma file. Chords: the ST40 Avantes lines of sight (#6/#8 midplane through the IPD
+sector, #7 at machine phi 135 deg, 65 deg from the IPD, looking up at the upper divertor), read off the diagnostic
+layout; machine phi counter-clockwise = sim +phi is assumed. Measured traces: shot 14449 Avantes ch6/7/8,
+`../input/14449_avantes_lines.csv`."""))
+    c.append(new_code_cell("""import h5py
+from matplotlib.tri import Triangulation
+from scipy.interpolate import RegularGridInterpolator
+def xyz(R, phi_deg, Z):
+    return np.array([R * np.cos(np.radians(phi_deg)), R * np.sin(np.radians(phi_deg)), Z])
+PHI_IPD = 70.0                                       # machine toroidal angle of the IPD = sim phi 0
+# Avantes lines of sight from the ST40 diagnostic layout (E. Tinacba, Oct 27 2026), read by eye (+-3 cm, +-3 deg):
+# (R, machine phi, Z) at both ends; assumes machine phi (counter-clockwise from above) = sim +phi
+CHORDS = {
+    "OMP":      (xyz(1.00, 68.0 - PHI_IPD, 0.00), xyz(0.15, 72.0 - PHI_IPD, 0.00)),    # #6 Li II, #8 Li I ("LINES", port S2)
+    "Divertor": (xyz(1.00, 135.0 - PHI_IPD, -0.22), xyz(0.22, 135.0 - PHI_IPD, 1.17)), # #7 Li II ("DIV SRVY"), phi 135 deg (Erin)
+}
+RC = 0.02                                            # chord radius [m]
+_m = re.search(r"sim t = 0 is shot (-?[\\d.]+) ms", open(CASE / "input/srate_3d.deck").read())
+T0_MS = (float(_m.group(1)) if _m else 40.0) if PULSE else 0.0   # shot time of sim t = 0 (make_srate.py)
+
+ROOT = CASE.parents[5]                               # repository root
+db = h5py.File(ROOT / "database/processes.h5", "r")
+def pec(key):
+    g = db[f"volume/pec/li/96/{key}"]
+    f = RegularGridInterpolator((g["temperature"][()], g["density"][()]), g["coefficient"][()],
+                                bounds_error=False, fill_value=None)
+    lo, hi = (g["temperature"][0], g["density"][0]), (g["temperature"][-1], g["density"][-1])
+    return lambda te, ne: 10 ** f(np.column_stack([np.clip(np.log10(te), lo[0], hi[0]),
+                                                   np.clip(np.log10(ne), lo[1], hi[1])])) * 1e-6   # m^3/s
+LINES = {"Li I":  [(2, pec("li0_6710_pec")), (3, pec("li0_6710_recom_pec"))],   # (marker type, PEC)
+         "Li II": [(3, pec("li1_5486_pec")), (4, pec("li1_5486_recom_pec"))]}
+pf = h5py.File(CASE / re.search(r"variable plasma\\s+index\\s+(\\S+)", deck).group(1), "r")["mesh"]
+cidx = pf["cell_index"][()]
+tf = Triangulation(pf["vtx_r"][()], pf["vtx_z"][()], pf["triangles"][()]).get_trifinder()
+TE, NE = pf["temp_e"][()], pf["dens_e"][()]
+
+def near_chord(P, a, b):
+    d = b - a; L = np.linalg.norm(d); u = d / L
+    s = (P - a) @ u
+    return (s >= 0) & (s <= L) & (np.linalg.norm(P - a - np.outer(s, u), axis=1) < RC)
+
+tms, SIG = [], {(ch, ln): [] for ch in CHORDS for ln in LINES}
+for f in sfiles:
+    m = pv.read(f); P = np.asarray(m.points); typ = np.asarray(m["type"])
+    k = tf(np.hypot(P[:, 0], P[:, 1]), P[:, 2]); inside = (k >= 0) & (cidx[np.maximum(k, 0)] >= 0)
+    te = np.where(inside, TE[cidx[np.maximum(k, 0)]], 0.0); ne = np.where(inside, NE[cidx[np.maximum(k, 0)]], 0.0)
+    tms.append(int(re.findall(r"\\d+", f)[-1]) * DT * 1e3 + T0_MS)
+    for ch, (a, b) in CHORDS.items():
+        sel = near_chord(P, a, b) & inside & (ne > 0)
+        for ln, terms in LINES.items():
+            tot = 0.0
+            for t, fn in terms:
+                q = sel & (typ == t)
+                if q.any(): tot += (FNUM * ne[q] * fn(te[q], ne[q])).sum()
+            SIG[(ch, ln)].append(tot / (4 * np.pi) / (np.pi * RC**2))
+tms = np.array(tms)
+panels = [("OMP", "Li II"), ("Divertor", "Li II"), ("OMP", "Li I")]
+MEAS = {("OMP", "Li II"): "omp_li2", ("Divertor", "Li II"): "div_li2", ("OMP", "Li I"): "omp_li1"}
+mfile = CASE.parent / "input/14449_avantes_lines.csv"          # measured, shot 14449 (Avantes ch6/7/8)
+meas = np.genfromtxt(mfile, delimiter=",", names=True, skip_header=1) if mfile.exists() else None
+fig, ax = plt.subplots(3, 1, figsize=(7, 9), sharex=True)
+for a, key in zip(ax, panels):
+    a.plot(tms, np.array(SIG[key]), ".-", ms=3, label="OpenEdge")
+    a.set(title=f"{key[0]}: {key[1]}", ylabel=r"ph m$^{-2}$ s$^{-1}$ sr$^{-1}$")
+    if meas is not None:
+        b = a.twinx(); b.plot(meas["time_ms"], meas[MEAS[key]], "k.-", ms=3, lw=0.8, label="shot 14449 (Avantes)")
+        b.set_ylabel("counts", color="0.3"); b.set_ylim(0, None)
+        a.legend(handles=a.get_lines() + b.get_lines(), loc="upper right", fontsize=10)
+ax[-1].set_xlabel("shot time [ms]")
+plt.tight_layout(); plt.show()
+for key in panels:
+    v = np.array(SIG[key]); print(f"{key[0]:9s} {key[1]:6s} peak {v.max():.3e} at {tms[v.argmax()]:.0f} ms")"""))
+
     c.append(new_markdown_cell("""## Summary
 
 - Most of the ablated lithium is ionized; the wall load is dominated by Li ions (Li+, Li2+, Li3+), with

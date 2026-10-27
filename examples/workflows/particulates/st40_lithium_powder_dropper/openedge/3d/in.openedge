@@ -10,6 +10,7 @@ variable nemit     index 200
 variable outdir    index output
 variable chem_mode index kinetic          # kinetic | neutral (use fnum 2e11)
 variable vtk       index 1                # 1 = .vtu dumps (VTK build), 0 = text
+variable emis      index 0                # 1 = Li I / Li II emissivity maps in li_dens
 variable fnum      index 2.0e13
 variable nstats    index 5000
 variable gspecies  index input/grains_r25.species
@@ -117,19 +118,36 @@ variable Li_total_flux surf v_Li0_flux+v_Li_ion_flux
 
 # window-averaged number densities: grains, Li, Li+, Li2+, Li3+
 compute cli grid/weighted all liplot nrho_w
-fix     fli ave/grid all 10 ${nrep} ${nwin} c_cli[*] ave one
+# line emissivity maps [photons/m^3/s, 4pi] (-var emis 1, ~4x slower): Li I 670.8 nm (Li excitation
+# + Li+ recombination), Li II 548.5 nm (Li+ excitation + Li2+ recombination); ADAS PEC in processes.h5
+variable dens  string "f_fli[1] f_fli[2] f_fli[3] f_fli[4] f_fli[5]"
+variable emis1 string ""
+variable emis2 string ""
+if "${emis} == 1" then &
+   "compute cpl    plasma/fields all background pd dens_e temp_e" &
+   "compute cLiI   volume/emissivity/grid all liplot pec li 96 li0_6710_pec plasma_compute cpl" &
+   "compute cLiIr  volume/emissivity/grid all liplot pec li 96 li0_6710_recom_pec plasma_compute cpl" &
+   "compute cLiII  volume/emissivity/grid all liplot pec li 96 li1_5486_pec plasma_compute cpl" &
+   "compute cLiIIr volume/emissivity/grid all liplot pec li 96 li1_5486_recom_pec plasma_compute cpl" &
+   "fix     fli ave/grid all 10 ${nrep} ${nwin} c_cli[*] c_cLiI[2] c_cLiIr[3] c_cLiII[3] c_cLiIIr[4] ave one" &
+   "variable LiI_emis  grid f_fli[6]+f_fli[7]" &
+   "variable LiII_emis grid f_fli[8]+f_fli[9]" &
+   "variable emis1 string v_LiI_emis" &
+   "variable emis2 string v_LiII_emis" &
+else &
+   "fix     fli ave/grid all 10 ${nrep} ${nwin} c_cli[*] ave one"
 
 variable land string "v_area v_grain_flux v_Li0_flux v_Li1_flux v_Li2_flux v_Li3_flux v_Li_ion_flux v_Li_total_flux"
 if "${vtk} == 1" then &
    "dump dland surf/vtk wall ${nwin} ${outdir}/landing.*.vtu id ${land}" &
-   "dump dgrid grid/vtk all ${ndens} ${outdir}/li_dens.*.vtu id f_fli[*]" &
+   "dump dgrid grid/vtk all ${ndens} ${outdir}/li_dens.*.vtu id ${dens} ${emis1} ${emis2}" &
    "dump dpart particle/vtk all ${ndump} ${outdir}/state.*.vtu id type x y z vx vy vz" &
    "dump_modify dland binary yes" &
    "dump_modify dgrid binary yes" &
    "dump_modify dpart binary yes" &
 else &
    "dump dland surf wall ${nwin} ${outdir}/landing id v1x v1y v1z v2x v2y v2z v3x v3y v3z ${land}" &
-   "dump dgrid grid all ${ndens} ${outdir}/li_dens id xc yc zc f_fli[*]" &
+   "dump dgrid grid all ${ndens} ${outdir}/li_dens id xc yc zc ${dens} ${emis1} ${emis2}" &
    "dump dpart particle all ${ndump} ${outdir}/state id type x y z vx vy vz"
 
 compute cnt count liplot/droplet liplot/Li liplot/Li+ liplot/Li2+ liplot/Li3+
