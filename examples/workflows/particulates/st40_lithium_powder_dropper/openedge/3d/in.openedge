@@ -3,7 +3,7 @@
 # Geometry: scripts/make_geometry.py. Run from this directory:
 #   mpirun -np 4 ~/build_oe_vtk97/src/spa_mac_mpi -in in.openedge
 variable dt        index 2.0e-6
-variable nsteps    index 200000
+variable nsteps    index 250000             # 25 x 20 ms srate blocks
 variable ndump     index 1000
 variable nwin      index 10000            # 20 ms averaging window
 variable nemit     index 200
@@ -75,10 +75,10 @@ if "${chem_mode} == kinetic" then &
 else "global ${pusher}"
 
 # ---- powder injection, grain physics, Li chemistry --------------------------
-# 50 macro-grains x 8 real grains per 400 us = 3.0e21 atoms/s
-variable ngrain  index 50
-variable nweight index 8
-variable nsrc    index ${ngrain}           # or v_srate (measured pulse)
+# feed = measured shot 14449 source rate (input/srate_3d.deck, nweight 80).
+# Constant 3.0e21 atoms/s instead: -var nsrc 50 -var nweight 8
+variable nweight index 80
+variable nsrc    index v_srate
 include  input/srate_3d.deck
 
 fix fdrop particulate/emit droplet dropper nevery ${nemit} n ${nsrc} &
@@ -106,22 +106,20 @@ compute cland surf/weighted wall liplot n nwt nflux
 fix     fland ave/surf wall 10 ${nrep} ${nwin} c_cland[*] ave one
 compute carea property/surf wall area
 
-variable area       surf c_carea                          # m^2
-variable grain_hits surf f_fland[1]                       # markers per step
-variable grain_rate surf f_fland[1]*${nweight}/${dt}      # grains/s
-variable Li_hits    surf f_fland[4]                       # markers per step
-variable Li_flux    surf f_fland[6]                       # atoms/m^2/s
-variable Li_rate    surf f_fland[6]*c_carea               # atoms/s
-variable Li1_rate   surf f_fland[9]*c_carea               # Li+ atoms/s
-variable Li2_rate   surf f_fland[12]*c_carea              # Li2+ atoms/s
-variable Li3_rate   surf f_fland[15]*c_carea              # Li3+ atoms/s
-variable Lion_rate  surf v_Li1_rate+v_Li2_rate+v_Li3_rate  # all ions, atoms/s
+variable area          surf c_carea                                  # m^2
+variable grain_flux    surf f_fland[3]*${nweight}/${fnum}            # grains/m^2/s
+variable Li0_flux      surf f_fland[6]                               # neutral Li, atoms/m^2/s
+variable Li1_flux      surf f_fland[9]                               # Li+
+variable Li2_flux      surf f_fland[12]                              # Li2+
+variable Li3_flux      surf f_fland[15]                              # Li3+
+variable Li_ion_flux   surf v_Li1_flux+v_Li2_flux+v_Li3_flux
+variable Li_total_flux surf v_Li0_flux+v_Li_ion_flux
 
 # window-averaged number densities: grains, Li, Li+, Li2+, Li3+
 compute cli grid/weighted all liplot nrho_w
 fix     fli ave/grid all 10 ${nrep} ${nwin} c_cli[*] ave one
 
-variable land string "v_area v_grain_hits v_grain_rate v_Li_hits v_Li_flux v_Li_rate v_Li1_rate v_Li2_rate v_Li3_rate v_Lion_rate"
+variable land string "v_area v_grain_flux v_Li0_flux v_Li1_flux v_Li2_flux v_Li3_flux v_Li_ion_flux v_Li_total_flux"
 if "${vtk} == 1" then &
    "dump dland surf/vtk wall ${nwin} ${outdir}/landing.*.vtu id ${land}" &
    "dump dgrid grid/vtk all ${ndens} ${outdir}/li_dens.*.vtu id f_fli[*]" &
