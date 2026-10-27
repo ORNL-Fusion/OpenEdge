@@ -41,8 +41,7 @@ class ComputePropertySurf : public Compute {
 
   int firstflag;             // 1 until cglobal is setup
   int nsown;                 // # of surf elements owned by this proc
-  int nchoose;               // # of surf elements output by this proc
-  int *cglobal;              // indices of global elements for nchoose
+  int *cglobal;              // lines/tris index of each owned element
 
   typedef void (ComputePropertySurf::*FnPtrPack)(int);
   FnPtrPack *pack_choice;              // ptrs to pack functions

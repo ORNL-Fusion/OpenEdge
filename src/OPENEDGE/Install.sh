@@ -54,6 +54,8 @@ override variable.cpp
 override variable.h
 override compute_grid.cpp
 override compute_grid.h
+override compute_property_surf.cpp
+override compute_property_surf.h
 override dump_particle.cpp
 override dump_particle.h
 override sparta.cpp
