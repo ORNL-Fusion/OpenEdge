@@ -1,43 +1,27 @@
-# ST40 Li powder dropper, full 3-D torus: where do the Li atoms go?
-# Same physics as ../in.openedge (grains ablate, Li removed at ionization,
-# everything absorbed at the walls), only the geometry is 3-D:
-#   x = R cos phi, y = R sin phi, z = Z; dropper = a patch at phi = 0.
-# Geometry: scripts/make_geometry.py -> input/st40_*_3d.surf, .stl, *.inc
-# The grid is only a container here (plasma is sampled per particle on the
-# SOLPS mesh, landing is per triangle), and the chem fix touches every cell
-# every step: 3 cm cells cost 1 ms/step, 2 cm cells 4 ms/step on 4 ranks.
-# Run from this directory:
+# ST40 Li powder dropper, full 3-D torus: where do the grains and Li land?
+# x = R cos phi, y = R sin phi, z = Z; dropper = patch at phi = 0.
+# Geometry: scripts/make_geometry.py. Run from this directory:
 #   mpirun -np 4 ~/build_oe_vtk97/src/spa_mac_mpi -in in.openedge
-# vtk 1 writes .vtu dumps (needs a VTK build); vtk 0 writes text dumps.
 variable dt        index 2.0e-6
 variable nsteps    index 200000
-variable ndump     index 5000
+variable ndump     index 1000
 variable nwin      index 10000            # 20 ms averaging window
 variable nemit     index 200
 variable outdir    index output
-variable chem_mode index kinetic          # kinetic (Li+..Li3+ transported) | neutral (Li removed at ionization, fnum 2e11)
-variable vtk       index 1
+variable chem_mode index kinetic          # kinetic | neutral (use fnum 2e11)
+variable vtk       index 1                # 1 = .vtu dumps (VTK build), 0 = text
 variable fnum      index 2.0e13
 variable nstats    index 5000
-# knobs: grain species file (RADIUS; the ST40 "50 um" powder is taken as the
-#   diameter -> r = 25 um, mass ~ r^3), nweight = real grains per macro-grain
-#   (8 at r 25 keeps the feed at 3.0e21 atoms/s), grain model, plasma file,
-#   efield / coulself yes|no (Z_d e E, Coulomb part of the ion drag), and
-#   nsrc = ${ngrain} (constant feed) or v_srate (measured 14449 pulse:
-#   -var nsrc v_srate -var nweight 80 -var nsteps 250000).
 variable gspecies  index input/grains_r25.species
 variable pmodel    index dustt2005
-variable plasma    index input/plasma_farsol.h5    # SOLPS 13589 with the far-SOL plateau replaced (scripts/far_sol_decay.py)
+variable plasma    index input/plasma_farsol.h5
 variable efield    index yes
 variable coulself  index yes
-# load balance: a grain costs ~10 Li atoms per step (drag, charging,
-# evaporation), so weight grains in the particle count the balancer sees.
-# grain_wt 1 = plain particle count.
-variable grain_wt  index 10
-variable ion_wt    index 1                # Li+ weight (kinetic mode)
-variable balwt     index time             # rcb time (measured cost) | part (weighted count)
+variable grain_wt  index 10               # balance weight of a grain
+variable ion_wt    index 1                # balance weight of Li+
+variable balwt     index time             # rcb time | part
 variable nrep      equal ${nwin}/10
-variable ndens     equal 2*${nwin}         # grid density dump, a multiple of nwin
+variable ndens     equal 2*${nwin}
 
 shell mkdir ${outdir}
 
@@ -59,9 +43,7 @@ species     ../input/atoms.species Li Li+ Li2+ Li3+
 mixture     droplet droplet frac 1.0
 mixture     livapor Li frac 1.0
 
-# ---- wall and core torus absorb everything ---------------------------------
-# The core hole in plasma.h5 is vacuum; grains never reach it (checked), but
-# Li+ following field lines in kinetic mode would, so the core torus is a sink.
+# ---- surfaces: wall and core absorb everything ------------------------------
 read_surf   input/st40_wall_3d.surf group wall particle check
 read_surf   input/st40_core_3d.surf group core
 include     input/st40_groups.inc        # group dropper
@@ -70,27 +52,19 @@ surf_collide absorb vanish
 surf_modify  wall collide absorb
 surf_modify  core collide absorb
 
-# ---- plume refinement -------------------------------------------------------
-# The grains sweep toroidally (towards -phi) while they fall, so the plume is
-# an annular sector, not a column. Refine it one level (1.5 cm) so fix balance
-# can split the dense cells: 200k-step run on 4 ranks had Modify 411..2229 s
-# across ranks. Sector: R 0.45-1.01, Z 0.10-0.90, phi -110..+10 deg.
+# ---- refine the plume sector (R 0.45-1.01, Z 0.10-0.90, phi -110..+10) ------
 region r_out cylinder z 0 0 1.01 0.10 0.90
 region r_in  cylinder z 0 0 0.45 0.10 0.90 side out
-region p_lo  plane 0 0 0 0.9397 -0.3420 0     # phi >= -110
-region p_hi  plane 0 0 0 0.1736 -0.9848 0     # phi <= +10
+region p_lo  plane 0 0 0 0.9397 -0.3420 0
+region p_hi  plane 0 0 0 0.1736 -0.9848 0
 region plume intersect 4 r_out r_in p_lo p_hi
 adapt_grid   all refine random 1.0 0.0 region plume center maxlevel 2 cells 2 2 2
 balance_grid rcb cell
 
-# ---- background: the 2-D SOLPS map, looked up in (R, Z) --------------------
+# ---- background and transport -----------------------------------------------
 fix         pd background file ${plasma} static yes
 global      phi_track yes
 
-# ---- plasma transport ------------------------------------------------------
-# The pusher also fills the per-particle Te/ne cache the chem fix reads, so it
-# is always on; the sheath (nearest_surf/grid over ~1M cells) only matters for
-# Li+ and is kinetic-mode only.
 variable pusher string "pusher plasma pd mode gca gca_switch 2.5 gca_integrator rk4 subcycles 1 bad_dt_check yes bad_dt_limit 0.5 gc_wall flux skip droplet"
 if "${chem_mode} == kinetic" then &
    "compute cgeom nearest_surf/grid all wall dist surfid nx ny nz" &
@@ -100,13 +74,12 @@ if "${chem_mode} == kinetic" then &
    "fix fth   force/thermal 1 background pd ion_thermal yes elec_thermal yes ion_mass_amu 2.0" &
 else "global ${pusher}"
 
-# ---- powder injection, grain physics, Li chemistry -------------------------
-# Constant feed: 50 macro-grains x nweight real grains per 400 us = 3.0e21 atoms/s
-# (r 25 um: 3.04e15 atoms/grain x 8; r 50 um: 2.43e16 x 1).
+# ---- powder injection, grain physics, Li chemistry --------------------------
+# 50 macro-grains x 8 real grains per 400 us = 3.0e21 atoms/s
 variable ngrain  index 50
 variable nweight index 8
-variable nsrc    index ${ngrain}
-include  input/srate_3d.deck              # defines v_srate (unused unless nsrc = v_srate)
+variable nsrc    index ${ngrain}           # or v_srate (measured pulse)
+include  input/srate_3d.deck
 
 fix fdrop particulate/emit droplet dropper nevery ${nemit} n ${nsrc} &
           nweight ${nweight} perspecies no normal no vmin 1.0 vmax 1.5 &
@@ -119,54 +92,50 @@ fix fevap particulate/thermal 1 droplet background pd model ${pmodel} &
           heatflux/scale 1.0 &
           rocket_eta 0.0 emit_into livapor heating oml ion_mass_amu 2.0 &
           material Li
-fix fchem volume/chem/adas 1 Li ../input/li.reactions mode ${chem_mode} &
-          source_species Li units rate output summary
+fix fchem volume/chem/adas 1 Li ../input/li.reactions mode ${chem_mode}
 
-# emptyweight auto: the stock 0.1 per empty cell is ~40k virtual particles on
-# this grid, more than the real population; auto scales it to the population
 fix fbal balance 1000 1.1 rcb ${balwt} emptyweight auto species_weight droplet ${grain_wt} species_weight Li+ ${ion_wt}
 
 # ---- diagnostics ------------------------------------------------------------
 fix     fpw particle/weight
-mixture liplot droplet Li group SELF
+mixture liplot droplet Li Li+ Li2+ Li3+ group SELF
 
-# where the grains and the Li atoms land, per triangle and 20 ms window.
-# ave/surf samples single steps every 10: wall hits/fluxes are per-step
-# averages, but the emitter's bursts (every 200 steps, always sampled) show
-# up on the dropper triangles 10x inflated: exclude them (the notebook does).
-# compute surf orders columns by group then value: f_fland[1] grain hits per
-# step, [2] grain flux (fnum-normalised, ignore), [3] Li hits per step,
-# [4] Li number flux [atoms/m^2/s] (fnum atoms per Li macroparticle).
-compute cland surf wall liplot n nflux
+# wall landing per triangle, averaged over each 20 ms window
+# f_fland columns: n nwt nflux for droplet, Li, Li+, Li2+, Li3+
+compute cland surf/weighted wall liplot n nwt nflux
 fix     fland ave/surf wall 10 ${nrep} ${nwin} c_cland[*] ave one
+compute carea property/surf wall area
 
-# window-averaged number densities: grains, Li
+variable area       surf c_carea                          # m^2
+variable grain_hits surf f_fland[1]                       # markers per step
+variable grain_rate surf f_fland[1]*${nweight}/${dt}      # grains/s
+variable Li_hits    surf f_fland[4]                       # markers per step
+variable Li_flux    surf f_fland[6]                       # atoms/m^2/s
+variable Li_rate    surf f_fland[6]*c_carea               # atoms/s
+variable Li1_rate   surf f_fland[9]*c_carea               # Li+ atoms/s
+variable Li2_rate   surf f_fland[12]*c_carea              # Li2+ atoms/s
+variable Li3_rate   surf f_fland[15]*c_carea              # Li3+ atoms/s
+variable Lion_rate  surf v_Li1_rate+v_Li2_rate+v_Li3_rate  # all ions, atoms/s
+
+# window-averaged number densities: grains, Li, Li+, Li2+, Li3+
 compute cli grid/weighted all liplot nrho_w
-fix     fli ave/grid all 10 ${nrep} ${nwin} c_cli[1] c_cli[2] ave one
+fix     fli ave/grid all 10 ${nrep} ${nwin} c_cli[*] ave one
 
-# landing map every window; the grid density (~1M cells, 37 MB per binary
-# file) every ndens, particle states every ndump
+variable land string "v_area v_grain_hits v_grain_rate v_Li_hits v_Li_flux v_Li_rate v_Li1_rate v_Li2_rate v_Li3_rate v_Lion_rate"
 if "${vtk} == 1" then &
-   "dump dland surf/vtk wall ${nwin} ${outdir}/landing.*.vtu id f_fland[*]" &
-   "dump dgrid grid/vtk all ${ndens} ${outdir}/li_dens.*.vtu id f_fli[1] f_fli[2]" &
+   "dump dland surf/vtk wall ${nwin} ${outdir}/landing.*.vtu id ${land}" &
+   "dump dgrid grid/vtk all ${ndens} ${outdir}/li_dens.*.vtu id f_fli[*]" &
    "dump dpart particle/vtk all ${ndump} ${outdir}/state.*.vtu id type x y z vx vy vz" &
    "dump_modify dland binary yes" &
    "dump_modify dgrid binary yes" &
    "dump_modify dpart binary yes" &
 else &
-   "dump dland surf wall ${nwin} ${outdir}/landing id v1x v1y v1z v2x v2y v2z v3x v3y v3z f_fland[*]" &
-   "dump dgrid grid all ${ndens} ${outdir}/li_dens id xc yc zc f_fli[1] f_fli[2]" &
+   "dump dland surf wall ${nwin} ${outdir}/landing id v1x v1y v1z v2x v2y v2z v3x v3y v3z ${land}" &
+   "dump dgrid grid all ${ndens} ${outdir}/li_dens id xc yc zc f_fli[*]" &
    "dump dpart particle all ${ndump} ${outdir}/state id type x y z vx vy vz"
 
-# ionization total [atoms/s] = per-cell rate x cell volume, summed (a plain
-# sum of the per-cell rates would scale with the number of cells)
-compute  cvol property/grid all vol
-variable vSp grid f_fchem[1]*c_cvol
-compute  cSp_tot reduce sum v_vSp
-compute cnt count liplot/droplet liplot/Li
+compute cnt count liplot/droplet liplot/Li liplot/Li+ liplot/Li2+ liplot/Li3+
 stats ${nstats}
-# f_fbal[1] = max weighted particles on a rank (compare with np*wt/nprocs),
-# f_fbal[2] = imbalance before the last rebalance
-stats_style step cpu np nscoll nsreact c_cnt[1] c_cnt[2] c_cSp_tot f_fbal[1] f_fbal[2]
+stats_style step cpu np nscoll nsreact c_cnt[*] f_fbal[1] f_fbal[2]
 
 run ${nsteps}

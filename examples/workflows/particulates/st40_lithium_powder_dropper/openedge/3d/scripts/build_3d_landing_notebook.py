@@ -2,10 +2,10 @@
 """Generate and execute notebooks/st40_3d_landing.ipynb.
 
 Where the Li atoms and the grains land in the full-torus run of
-3d/in.openedge: inventories and ionization rate from the log, the
+3d/in.openedge: inventories from the log, the
 per-triangle landing map (landing.*.vtu) unwrapped in toroidal angle and
 poloidal wall coordinate, poloidal and toroidal deposition profiles, the
-Li/grain atom balance, the toroidal sweep of the plume and the core-hole
+grain wall fraction, the toroidal sweep of the plume and the core-hole
 check from the particle states.
 
     python scripts/build_3d_landing_notebook.py [--outdir output_prod] [--log log.prod]
@@ -28,16 +28,11 @@ def build(outdir: str, log: str, steady_from: int, steady_to: int, atoms_per_gra
     c.append(new_markdown_cell(f"""# ST40 Li powder dropper, full 3-D torus: where does the lithium land?
 
 Run of `3d/in.openedge` (constant feed 3.0e21 atoms/s from the dropper patch at
-phi = 0, `chem_mode neutral`: Li is removed at ionization, everything that reaches
-the wall is absorbed), read from `{outdir}` and `{log}`.
+phi = 0, absorbing walls), read from `{outdir}` and `{log}`.
 Coordinates: x = R cos phi, y = R sin phi, z = Z. Each `landing.<step>.vtu` is one
-20 ms window: per wall triangle, `compute surf` columns [1] grain hits,
-[2] grain "flux" (fnum-normalised, not used), [3] Li hits, [4] Li number flux
-[atoms/m^2/s]. `fix ave/surf` samples single timesteps every NEVERY steps and averages
-them, so wall hits and fluxes are unbiased per-step averages. The emitter writes its
-grains into the tally of the dropper triangles, and because the emission cadence is a
-multiple of NEVERY those bursts are always sampled: the dropper triangles are excluded
-from the grain landing. Comparison window = ({steady_from}, {steady_to}] (steady only if the inventories are flat there)."""))
+20 ms window with per-triangle fields `v_area` [m^2], `v_grain_hits`, `v_grain_rate`
+[grains/s], `v_Li_hits`, `v_Li_flux` [atoms/m^2/s] and `v_Li_rate` [atoms/s]
+(pweight-aware `compute surf/weighted`, emission not tallied). Comparison window = ({steady_from}, {steady_to}] (steady only if the inventories are flat there)."""))
 
     c.append(new_code_cell(f"""import re, glob
 from pathlib import Path
@@ -70,7 +65,13 @@ if CASE_JSON.exists():
     cj = json.load(open(CASE_JSON))
     NWEIGHT = float(cj.get("nweight", NWEIGHT)); ATOMS_PER_GRAIN = float(cj.get("atoms_per_grain", ATOMS_PER_GRAIN)); FEED = float(cj.get("feed", FEED))
     print("matrix case:", cj)
-plt.rcParams.update({{"font.size": 11, "figure.dpi": 110}})
+plt.rcParams.update({{
+    "font.family": "serif", "font.serif": ["STIX Two Text", "STIXGeneral", "DejaVu Serif"],
+    "mathtext.fontset": "stix", "font.size": 15, "axes.labelsize": 16, "axes.titlesize": 15,
+    "xtick.labelsize": 13, "ytick.labelsize": 13, "legend.fontsize": 11,
+    "xtick.direction": "in", "ytick.direction": "in", "legend.frameon": False,
+    "figure.dpi": 110, "savefig.dpi": 220,
+}})
 print("reading", OUT, LOG.name)
 
 def read_loop(path):
@@ -108,11 +109,10 @@ s_mid_d = s_mid - s0
 phi_c = (np.arange(NPHI) - NPHI // 2) * DPHI          # strip centres, dropper at 0
 seg_mid = 0.5 * (WALL + np.roll(WALL, -1, axis=0))      # (R, Z) of each segment"""))
 
-    c.append(new_markdown_cell("## Inventories, ionization rate and load balance from the log"))
+    c.append(new_markdown_cell("## Inventories from the log"))
     c.append(new_code_cell("""cols = rows = None
 if not LOG.exists():
-    print("no log for this run: inventories and ionization rate unavailable (log was overwritten)")
-    SP_STEADY = float("nan")
+    print("no log for this run: inventories unavailable (log was overwritten)")
 for line in (open(LOG) if LOG.exists() else []):
     t = line.split()
     if t[:2] == ["Step", "CPU"]: cols = t; rows = []; continue
@@ -123,41 +123,36 @@ if cols is None: rows = []
 S = {k: np.array([r[i] for r in rows]) for i, k in enumerate(cols)} if cols else {}
 if S:
   t_ms = S["Step"] * DT * 1e3
-  fig, ax = plt.subplots(1, 3, figsize=(15, 3.8))
-  ax[0].plot(t_ms, S["c_cnt[1]"], label="grains"); ax[0].plot(t_ms, S["c_cnt[2]"], label="Li atoms")
-  ax[0].set(xlabel="time [ms]", ylabel="macroparticles in flight"); ax[0].legend()
-  ax[1].plot(t_ms, S["c_cSp_tot"] / 1e21)
-  if FEED > 0: ax[1].axhline(FEED / 1e21, ls="--", c="k", lw=0.8)
-  ax[1].set(xlabel="time [ms]", ylabel="ionization rate [1e21 atoms/s]"); ax[1].axvspan(STEADY_FROM * DT * 1e3, STEADY_TO * DT * 1e3, color="0.9")
-  ax[2].plot(t_ms, S["f_fbal[1]"], label="max weighted particles on a rank"); ax[2].plot(t_ms, S["f_fbal[2]"] * S["f_fbal[1]"].max() / 2, label="imbalance (scaled)")
-  ax[2].set(xlabel="time [ms]"); ax[2].legend(fontsize=9)
+  names = ["grains", "Li", "Li$^+$", "Li$^{2+}$", "Li$^{3+}$"]
+  fig, ax = plt.subplots(figsize=(8, 4.5))
+  for i, n in enumerate(names, 1):
+      if f"c_cnt[{i}]" in S: ax.plot(t_ms, S[f"c_cnt[{i}]"], label=n)
+  ax.set(xlabel="time [ms]", ylabel="macroparticles in flight", yscale="log", ylim=(1, None)); ax.legend()
+  ax.axvspan(STEADY_FROM * DT * 1e3, STEADY_TO * DT * 1e3, color="0.9")
   plt.tight_layout(); plt.show()
   steady = (S["Step"] > STEADY_FROM) & (S["Step"] <= STEADY_TO)
-  SP_STEADY = S["c_cSp_tot"][steady].mean()
-  print(f"steady ionization {SP_STEADY:.3e} atoms/s {pct(SP_STEADY)}; "
-        f"grains {S['c_cnt[1]'][steady].mean():.0f}, Li {S['c_cnt[2]'][steady].mean():.0f} in flight")"""))
+  print("steady, in flight: " + ", ".join(f"{n.replace('$', '')} {S[f'c_cnt[{i}]'][steady].mean():.0f}"
+                                         for i, n in enumerate(names, 1) if f"c_cnt[{i}]" in S))"""))
 
     c.append(new_markdown_cell("""## Landing map
 
 Triangle ids follow `make_geometry.py`: 2-D segment k owns ids `2*NPHI*k+1 .. 2*NPHI*(k+1)`,
 strip j the pair `2*NPHI*k + 2*j + 1, +2`, so the wall is a regular (segment, strip) lattice.
-Per quad: Li deposition rate = sum over its two triangles of flux x area [atoms/s];
-grain rate = hits per step / dt x nweight [grains/s]."""))
+Per quad: Li deposition and grain landing rates = sum of `v_Li_rate` / `v_grain_rate`
+over its two triangles."""))
     c.append(new_code_cell("""def load_landing(path):
     m = pv.read(path)
     order = np.argsort(np.asarray(m["id"]))
     ids = np.asarray(m["id"])[order]
     assert ids[0] == 1 and ids[-1] == 2 * NPHI * NSEG
-    P = np.asarray(m.points); T = m.cells.reshape(-1, 4)[:, 1:][order]
-    v0, v1, v2 = P[T[:, 0]], P[T[:, 1]], P[T[:, 2]]
-    area = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1)
-    n_grain = np.asarray(m["f_fland[1]"])[order]                   # hits per step (sampled)
-    li_flux = np.asarray(m["f_fland[4]"])[order]                   # atoms/m^2/s
-    n_grain[np.isin(ids, drop_ids)] = 0.0                          # emission bursts, not landings
+    area = np.asarray(m["v_area"])[order]                          # m^2
+    li_rate = np.asarray(m["v_Li_rate"])[order]                    # atoms/s
+    gr_rate = np.asarray(m["v_grain_rate"])[order]                 # grains/s
     k = (ids - 1) // (2 * NPHI); j = ((ids - 1) % (2 * NPHI)) // 2
     def quad(v):
         a = np.zeros((NSEG, NPHI)); np.add.at(a, (k, j), v); return a
-    return dict(area=quad(area), li_rate=quad(li_flux * area), grain_rate=quad(n_grain) / DT * NWEIGHT)
+    ions = {k: quad(np.asarray(m[f"v_{k}_rate"])[order]) for k in ("Li1", "Li2", "Li3") if f"v_{k}_rate" in m.cell_data}
+    return dict(area=quad(area), li_rate=quad(li_rate), grain_rate=quad(gr_rate), **ions)
 
 files = sorted(glob.glob(str(OUT / "landing.*.vtu")), key=lambda p: int(re.findall(r"\\d+", p)[-1]))
 steps = np.array([int(re.findall(r"\\d+", p)[-1]) for p in files])
@@ -170,57 +165,38 @@ GR = np.mean([d["grain_rate"] for d in L], axis=0)     # grains/s per quad
 LI_FLUX = LI / AREA
 li_wall = LI.sum(); gr_wall = GR.sum()
 print(f"Li to wall  {li_wall:.3e} atoms/s  {pct(li_wall)}")
-print(f"grains to wall {gr_wall:.3e} grains/s (dropper triangles excluded)")
-print(f"ionized {SP_STEADY:.3e} atoms/s {pct(SP_STEADY)}")
+print(f"grains to wall {gr_wall:.3e} grains/s")
+ION = {k: np.mean([d[k] for d in L], axis=0) for k in ("Li1", "Li2", "Li3") if k in L[0]}
+for k, lab in (("Li1", "Li+"), ("Li2", "Li2+"), ("Li3", "Li3+")):
+    if k in ION: print(f"{lab} to wall {ION[k].sum():.3e} atoms/s  {pct(ION[k].sum())}")
 if FEED > 0:
     GRAIN_FEED = FEED / ATOMS_PER_GRAIN
-    print(f"fed {GRAIN_FEED:.3e} grains/s: {100*gr_wall/GRAIN_FEED:.0f}% of the grains reach the wall; "
-          f"by difference {100*(FEED-SP_STEADY-li_wall)/FEED:.0f}% of the fed lithium reaches the wall as unablated grain mass "
-          "(steady inventories: feed = ionized + Li atoms to wall + grain mass to wall)")"""))
-
-    c.append(new_code_cell("""fig, ax = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
-ext = [phi_c[0] - DPHI/2, phi_c[-1] + DPHI/2, s_edge[0] - s0, s_edge[-1] - s0]
-pos = LI_FLUX > 0
-edges_phi = np.append(phi_c - DPHI/2, phi_c[-1] + DPHI/2)
-if pos.any():
-    im = ax[0].pcolormesh(edges_phi, s_edge - s0, np.where(pos, LI_FLUX, np.nan),
-                          norm=LogNorm(vmin=max(LI_FLUX[pos].min(), LI_FLUX[pos].max() * 1e-4), vmax=LI_FLUX[pos].max()), cmap="inferno")
-    fig.colorbar(im, ax=ax[0], label="Li flux to wall [atoms/m$^2$/s]")
-else:
-    ax[0].text(0, 0.5, "no Li reached the wall in the window", color="w", ha="center")
-gpos = GR > 0
-if gpos.any():
-    im2 = ax[1].pcolormesh(edges_phi, s_edge - s0, np.where(gpos, GR / AREA, np.nan), norm=LogNorm(), cmap="viridis")
-    fig.colorbar(im2, ax=ax[1], label="grain flux to wall [grains/m$^2$/s]")
-else:
-    ax[1].text(0, 0.5, "no grain reached the wall in the window", color="w", ha="center")
-for a in ax:
-    a.plot(0, 0, "w*", ms=12, mec="k"); a.set_ylabel("wall coordinate from dropper s [m]"); a.set_facecolor("0.15")
-    a.set_xlim(-180, 180)
-ax[0].set_title("steady-state landing map, unwrapped (phi, s); dropper at the star")
-ax[1].set_xlabel("toroidal angle phi [deg]")
-plt.tight_layout(); plt.show()"""))
+    print(f"fed {GRAIN_FEED:.3e} grains/s: {100*gr_wall/GRAIN_FEED:.0f}% of the grains reach the wall")"""))
 
     c.append(new_markdown_cell("## Poloidal and toroidal deposition profiles"))
-    c.append(new_code_cell("""pol = LI.sum(axis=1) / seg_len                 # atoms/s per m of poloidal wall (all phi)
-tor = LI.sum(axis=0)                           # atoms/s per strip
-gpol = GR.sum(axis=1) / seg_len
+    c.append(new_code_cell("""LION = sum(ION.values()) if ION else np.zeros_like(LI)   # Li+ + Li2+ + Li3+, atoms/s per quad
+LTOT = LI + LION                               # all lithium to the wall
+pol, ipol, gpol = LTOT.sum(axis=1) / seg_len, LION.sum(axis=1) / seg_len, GR.sum(axis=1) / seg_len
+npol = LI.sum(axis=1) / seg_len
+tor, itor, ntor = LTOT.sum(axis=0), LION.sum(axis=0), LI.sum(axis=0)
 fig, ax = plt.subplots(1, 3, figsize=(16, 4.2))
-ax[0].step(s_mid_d, pol / 1e18, where="mid", label="Li atoms [1e18 atoms/s/m]"); ax[0].step(s_mid_d, gpol / 1e5, where="mid", label="grains [1e5 grains/s/m]")
-ax[0].set(xlabel="wall coordinate from dropper s [m]", ylabel="deposition per m of wall"); ax[0].legend(); ax[0].axvline(0, c="k", lw=0.6)
-ax[1].step(phi_c, tor / 1e18, where="mid"); ax[1].set(xlabel="toroidal angle phi [deg]", ylabel="Li deposition per 1.5 deg strip [1e18 atoms/s]", xlim=(-180, 180)); ax[1].axvline(0, c="k", lw=0.6)
-cum = np.cumsum(tor[::-1])[::-1] / tor.sum()   # fraction landing at angles >= phi
-ax[2].plot(phi_c, np.cumsum(tor) / tor.sum()); ax[2].set(xlabel="toroidal angle phi [deg]", ylabel="cumulative Li fraction", xlim=(-180, 180)); ax[2].grid(alpha=0.3)
+ax[0].step(s_mid_d, ipol / 1e18, where="mid", label="Li ions"); ax[0].step(s_mid_d, npol / 1e18, where="mid", label="Li atoms")
+ax[0].step(s_mid_d, gpol / 1e5, where="mid", label="grains [$10^5$ s$^{-1}$ m$^{-1}$]")
+ax[0].set(xlabel="wall coordinate from dropper s [m]", ylabel=r"deposition [$10^{18}$ s$^{-1}$ m$^{-1}$]"); ax[0].legend(); ax[0].axvline(0, c="k", lw=0.6)
+ax[1].step(phi_c, itor / 1e18, where="mid", label="Li ions"); ax[1].step(phi_c, ntor / 1e18, where="mid", label="Li atoms")
+ax[1].set(xlabel=r"toroidal angle $\\phi$ [deg]", ylabel=r"Li per 1.5$^\\circ$ [$10^{18}$ s$^{-1}$]", xlim=(-180, 180)); ax[1].axvline(0, c="k", lw=0.6); ax[1].legend()
+ax[2].plot(phi_c, np.cumsum(tor) / tor.sum()); ax[2].set(xlabel=r"toroidal angle $\\phi$ [deg]", ylabel="cumulative Li fraction (all)", xlim=(-180, 180)); ax[2].grid(alpha=0.3)
 plt.tight_layout(); plt.show()
 w = tor / tor.sum() if tor.sum() > 0 else np.full_like(tor, np.nan)
 phi_mean = (w * phi_c).sum(); phi_sd = np.sqrt((w * (phi_c - phi_mean) ** 2).sum())
 p5, p95 = np.interp([0.05, 0.95], np.cumsum(w), phi_c) if tor.sum() > 0 else (np.nan, np.nan)
+print(f"all Li (ions + atoms) to wall {LTOT.sum():.3e} atoms/s {pct(LTOT.sum())}")
 print(f"Li lands at phi = {phi_mean:.1f} deg (mean), spatial spread sd {phi_sd:.1f} deg, 90% between {p5:.0f} and {p95:.0f} deg")
 top = np.argsort(pol)[::-1][:5]
 for k in top:
-    print(f"  s = {s_mid_d[k]:+.3f} m  (R={seg_mid[k,0]:.3f}, Z={seg_mid[k,1]:+.3f})  {100*LI[k].sum()/li_wall:.1f}% of the Li")"""))
+    print(f"  s = {s_mid_d[k]:+.3f} m  (R={seg_mid[k,0]:.3f}, Z={seg_mid[k,1]:+.3f})  {100*LTOT[k].sum()/LTOT.sum():.1f}% of the Li")"""))
 
-    c.append(new_code_cell("""# poloidal view: the 2-D wall coloured by its toroidally integrated Li deposition
+    c.append(new_code_cell("""# poloidal view: the 2-D wall coloured by its toroidally integrated Li deposition (ions + atoms)
 from matplotlib.collections import LineCollection
 segs = np.stack([WALL, np.roll(WALL, -1, axis=0)], axis=1)
 fig, ax = plt.subplots(figsize=(6, 8))
@@ -228,39 +204,19 @@ lc = LineCollection(segs, cmap="inferno", norm=LogNorm(vmin=max(pol[pol > 0].min
 lc.set_array(np.where(pol > 0, pol, np.nan)); ax.add_collection(lc)
 ax.plot(*np.vstack([CORE, CORE[:1]]).T, "c--", lw=0.8, label="core contour (vacuum inside)")
 ax.plot(seg_mid[drop_k, 0], seg_mid[drop_k, 1], "w*", ms=14, mec="k", label="dropper")
-fig.colorbar(lc, ax=ax, label="Li deposition, all phi [atoms/s/m]")
-ax.set(xlabel="R [m]", ylabel="Z [m]", aspect="equal", xlim=(0.1, 1.05), ylim=(-0.95, 0.95)); ax.legend(loc="lower left", fontsize=9)
+fig.colorbar(lc, ax=ax, label=r"Li deposition (ions + atoms), all $\\phi$ [atoms/s/m]")
+ax.set(xlabel="R [m]", ylabel="Z [m]", aspect="equal", xlim=(0.1, 1.05), ylim=(-0.95, 0.95)); ax.legend(loc="lower left")
 plt.show()"""))
 
-    c.append(new_markdown_cell("""## The plume: toroidal sweep and the core-hole check
-
-The core contour (psi_N 0.615) is vacuum in `plasma.h5` and there is no surface
-there in this deck, so a grain that crossed it would keep falling unheated. Check
-every particle state for grains inside it."""))
-    c.append(new_code_cell("""core_path = MplPath(CORE)
-sfiles = sorted(glob.glob(str(OUT / "state.*.vtu")), key=lambda p: int(re.findall(r"\\d+", p)[-1]))
-rows = []
-for f in sfiles:
-    m = pv.read(f); P = np.asarray(m.points); typ = np.asarray(m["type"])
-    g = P[typ == 1]
-    if len(g) == 0: rows.append((int(re.findall(r"\\d+", f)[-1]), 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan)); continue
-    R = np.hypot(g[:, 0], g[:, 1]); phi = np.degrees(np.arctan2(g[:, 1], g[:, 0]))
-    inside = core_path.contains_points(np.column_stack([R, g[:, 2]]))
-    d = np.min(np.hypot(R[:, None] - CORE[None, :, 0], g[:, 2][:, None] - CORE[None, :, 1]), axis=1)
-    rows.append((int(re.findall(r"\\d+", f)[-1]), len(g), inside.sum(), d.min(), np.percentile(phi, 1), np.median(phi), np.percentile(phi, 99), g[:, 2].min()))
-print(" step   grains  in_core  min_dist_to_core[m]  phi 1% / median / 99% [deg]  Zmin[m]")
-for r in rows:
-    print(f"{r[0]:>6d} {r[1]:>8d} {r[2]:>8d} {r[3]:>14.3f}        {r[4]:>6.1f} / {r[5]:>6.1f} / {r[6]:>6.1f}      {r[7]:+.3f}")
-total_in = sum(r[2] for r in rows)
-print("RESULT: no grain observed inside the core contour at any saved snapshot (every ndump steps)" if total_in == 0 else f"RESULT: {total_in} grain samples inside the core contour: extrapolate the background into the core or restore the core torus")"""))
-
-    c.append(new_code_cell("""m = pv.read(sfiles[-1]); P = np.asarray(m.points); typ = np.asarray(m["type"])
+    c.append(new_markdown_cell("## The plume: last particle snapshot"))
+    c.append(new_code_cell("""sfiles = sorted(glob.glob(str(OUT / "state.*.vtu")), key=lambda p: int(re.findall(r"\\d+", p)[-1]))
+m = pv.read(sfiles[-1]); P = np.asarray(m.points); typ = np.asarray(m["type"])
 g, li = P[typ == 1], P[typ == 2]
 fig, ax = plt.subplots(1, 2, figsize=(14, 7))
 ax[0].plot(*np.vstack([WALL, WALL[:1]]).T, "k-", lw=1); ax[0].plot(*np.vstack([CORE, CORE[:1]]).T, "c--", lw=0.8)
 ax[0].scatter(np.hypot(li[:, 0], li[:, 1]), li[:, 2], s=1, c="r", alpha=0.3, label=f"Li ({len(li)})")
 ax[0].scatter(np.hypot(g[:, 0], g[:, 1]), g[:, 2], s=1, c="k", alpha=0.3, label=f"grains ({len(g)})")
-ax[0].set(xlabel="R [m]", ylabel="Z [m]", aspect="equal", title=f"poloidal projection, step {steps[-1]}"); ax[0].legend(markerscale=8, fontsize=9)
+ax[0].set(xlabel="R [m]", ylabel="Z [m]", aspect="equal", title=f"poloidal projection, step {steps[-1]}"); ax[0].legend(markerscale=8)
 th = np.linspace(0, 2 * np.pi, 361)
 for r in (WALL[:, 0].min(), WALL[:, 0].max()): ax[1].plot(r * np.cos(th), r * np.sin(th), "k-", lw=0.8)
 ax[1].scatter(li[:, 0], li[:, 1], s=1, c="r", alpha=0.3); ax[1].scatter(g[:, 0], g[:, 1], s=1, c="k", alpha=0.3)
@@ -268,36 +224,51 @@ ax[1].plot([0, 1.05], [0, 0], "b:", lw=1); ax[1].text(1.0, 0.03, "dropper phi=0"
 ax[1].set(xlabel="x [m]", ylabel="y [m]", aspect="equal", title="top view: the plume sweeps towards negative phi")
 plt.tight_layout(); plt.show()"""))
 
-    c.append(new_markdown_cell("## Lithium cloud: toroidal distribution of the Li atoms (last density window)"))
-    c.append(new_code_cell("""dfiles = sorted(glob.glob(str(OUT / "li_dens.*.vtu")), key=lambda p: int(re.findall(r"\\d+", p)[-1]))
-dstep = int(re.findall(r"\\d+", dfiles[-1])[-1])
-d = pv.read(dfiles[-1]); cc = d.cell_centers().points
-vol = np.asarray(d.compute_cell_sizes(length=False, area=False, volume=True)["Volume"])
-n_li = np.asarray(d["f_fli[2]"]) * vol                      # Li atoms per cell (pweight-weighted density)
-n_gr = np.asarray(d["f_fli[1]"]) * vol / FNUM * NWEIGHT       # grains per cell (grain pweight = fnum per macro-grain)
-phi_cell = np.degrees(np.arctan2(cc[:, 1], cc[:, 0])); R_cell = np.hypot(cc[:, 0], cc[:, 1])
-bins = np.arange(-180, 181, 3)
-fig, ax = plt.subplots(1, 2, figsize=(14, 4))
-ax[0].hist(phi_cell, bins=bins, weights=n_li, histtype="step", color="r", label="Li atoms"); ax[0].set(xlabel="phi [deg]", ylabel="atoms per 3 deg", title=f"Li atoms in flight, window ending at step {dstep}")
-ax[0].legend()
-ax[1].hist(phi_cell, bins=bins, weights=n_gr, histtype="step", color="k", label="grains"); ax[1].set(xlabel="phi [deg]", ylabel="grains per 3 deg"); ax[1].legend()
+    c.append(new_markdown_cell("""## 2-D (R, Z) distributions, toroidally averaged
+
+Marker positions from the `state.*.vtu` snapshots in the steady window, binned on
+1.5 cm (R, Z) bins: density = markers x weight / (2 pi R dR dZ) / snapshots
+(fnum atoms per Li or Li-ion marker, nweight real grains per grain marker)."""))
+    c.append(new_code_cell("""sfiles = sorted(glob.glob(str(OUT / "state.*.vtu")), key=lambda p: int(re.findall(r"\\d+", p)[-1]))
+suse = [f for f in sfiles if STEADY_FROM < int(re.findall(r"\\d+", f)[-1]) <= STEADY_TO] or sfiles[-1:]
+names = ["grains", "Li", "Li$^+$", "Li$^{2+}$", "Li$^{3+}$"]
+weight = [NWEIGHT, FNUM, FNUM, FNUM, FNUM]          # real grains / atoms per marker
+units = ["grains m$^{-3}$"] + ["m$^{-3}$"] * 4
+dR = dZ = 0.015
+rb = np.arange(0.1, 1.05 + dR, dR); zb = np.arange(-0.95, 0.95 + dZ, dZ)
+ring = 2 * np.pi * 0.5 * (rb[:-1] + rb[1:])[:, None] * dR * dZ
+NB = np.zeros((5, len(rb) - 1, len(zb) - 1))
+for f in suse:
+    m = pv.read(f); P = np.asarray(m.points); typ = np.asarray(m["type"]); R = np.hypot(P[:, 0], P[:, 1])
+    for t in range(1, 6):
+        NB[t - 1] += np.histogram2d(R[typ == t], P[typ == t, 2], bins=[rb, zb])[0]
+NB *= np.array(weight)[:, None, None] / ring / len(suse)
+show = [t for t in range(5) if NB[t].any()]
+fig, ax = plt.subplots(1, len(show), figsize=(3.6 * len(show), 6.5), sharey=True)
+for a, t in zip(np.atleast_1d(ax), show):
+    H = np.where(NB[t] > 0, NB[t], np.nan)
+    im = a.pcolormesh(rb, zb, H.T, norm=LogNorm(vmin=np.nanmax(H) * 1e-3, vmax=np.nanmax(H)), cmap="inferno")
+    a.plot(*np.vstack([WALL, WALL[:1]]).T, "k-", lw=0.8); a.plot(*np.vstack([CORE, CORE[:1]]).T, "c--", lw=0.6)
+    a.set(xlabel="R [m]", aspect="equal", title=names[t], xlim=(0.1, 1.05), ylim=(-0.95, 0.95))
+    fig.colorbar(im, ax=a, orientation="horizontal", pad=0.08, label=units[t])
+np.atleast_1d(ax)[0].set_ylabel("Z [m]")
 plt.tight_layout(); plt.show()
-print(f"Li atoms in flight {n_li.sum():.3e} (= {n_li.sum()/FNUM:.0f} macroparticles), grains {n_gr.sum():.0f}")"""))
+print(f"averaged {len(suse)} snapshots, steps {int(re.findall(r'\\d+', suse[0])[-1])}..{int(re.findall(r'\\d+', suse[-1])[-1])}")"""))
 
     c.append(new_markdown_cell("""## Summary
 
-- Steady ionization fraction and the Li wall deposition rate are printed above with the atom balance.
-- The landing map is an arc towards negative phi: the grains pick up toroidal velocity from ion drag while
-  falling, and the Li they emit ionizes within millimetres of the grain, so the deposition follows the grain
-  trajectories rather than the Li atoms' own motion.
-- The core-hole check table says whether a grain was ever seen inside the vacuum core at a saved snapshot."""))
+- Most of the ablated lithium is ionized; the wall load is dominated by Li ions (Li+, Li2+, Li3+), with
+  neutral Li atoms a small fraction. Rates are printed above as % of the feed.
+- Grains reach the wall partly ablated: the grain wall fraction counts grains, not lithium mass.
+- The ions fill a scrape-off-layer ring around the core; neutral Li stays close to the grain path, which
+  sweeps towards negative phi as the grains pick up toroidal velocity from ion drag."""))
     return new_notebook(cells=c, metadata={"kernelspec": {"name": "python3", "display_name": "Python 3", "language": "python"}})
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--outdir", default="output_prod", help="run output directory, relative to 3d/")
-    ap.add_argument("--log", default="log.prod", help="log file of that run")
+    ap.add_argument("--log", default="output/stdout.openedge", help="log file of that run")
     ap.add_argument("--steady-from", type=int, default=120000, help="first step of the steady-state average")
     ap.add_argument("--steady-to", type=int, default=200000, help="last step of the steady-state average")
     ap.add_argument("--output", type=Path, default=ROOT / "notebooks/st40_3d_landing.ipynb")

@@ -39,7 +39,9 @@ mpirun -np 4 ~/build_oe_vtk97/src/spa_mac_mpi -in in.openedge
 ```
 
 Same deck knobs as 2-D. Outputs: `landing.<step>.vtu` (per wall triangle and 20 ms window:
-[1] grain hits/step, [3] Li hits/step, [4] Li flux [atoms/m^2/s]; the dropper triangles carry the emission bursts, exclude them; no core sink, check the plume stays out of the core hole), `li_dens.*.vtu`, `state.*.vtu`.
+`v_area` [m^2], `v_grain_hits`, `v_grain_rate` [grains/s], `v_Li_hits`, `v_Li_flux`
+[atoms/m^2/s], `v_Li_rate` [atoms/s]; absorbing walls, so flux = deposition),
+`li_dens.*.vtu`, `state.*.vtu`.
 Analysis: `python scripts/build_3d_landing_notebook.py --outdir <run> --log <log>` -> `notebooks/st40_3d_landing.ipynb`.
 Camera comparison: `python scripts/make_camera_video.py output --video <ST40 mp4>` -> `sim_vs_camera.mp4`
 (synthetic pinhole view next to the fast-camera frame; camera position and time offset are flags).
