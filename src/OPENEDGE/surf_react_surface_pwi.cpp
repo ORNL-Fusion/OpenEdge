@@ -1540,6 +1540,13 @@ void SurfReactSurfacePWI::sync_sigma()
   double *netvec = surf->edvec[surf->ewhich[snet_index]];
   double *erovec = surf->edvec[surf->ewhich[sero_index]];
 
+  // strata mixing-zone depth [m] of owned surf i, as in derive_sigma_conc()
+  auto zone_depth = [&](int i) {
+    double dens = strata_state[i].surface_density();
+    if (dens <= 0.0) dens = mat_dens[mat_root_of[substrate_isp]];
+    return sigma_zone / dens;
+  };
+
   surfint gid;
   for (int i = 0; i < nsown; i++) {
     bigint m = me + (bigint) i*nprocs;
@@ -1563,15 +1570,24 @@ void SurfReactSurfacePWI::sync_sigma()
     // (charge states pool). Positive net -> surface deposition (low-E
     // redeposition sticks at the top); negative -> preferential
     // erosion, bounded by what the stack actually exposes.
+    // A debit the zone cannot cover is returned to the material's root
+    // column, so column and stack stay equal.
+    double shortfall = 0.0;
     if (strata_K > 0) {
       for (int mm = 0; mm < nmat; mm++) {
         double net = 0.0;
+        int root = -1;
         for (int j = 0; j < sigma_ncols; j++)
-          if (mat_root_of[j] == mm) net += sigma_buf[base + j];
+          if (mat_root_of[j] == mm) {
+            net += sigma_buf[base + j];
+            if (mat_of[j] == j) root = j;
+          }
         if (net > 0.0)
           strata_state[i].deposit(mm, net, mat_dens[mm]);
-        else if (net < 0.0)
-          strata_state[i].erode_species(mm, -net);
+        else if (net < 0.0) {
+          double gap = -net - strata_state[i].erode_species(mm, -net, zone_depth(i));
+          if (gap > 0.0 && root >= 0) { sig[i][root] += gap; shortfall += gap; }
+        }
       }
     }
 
@@ -1583,6 +1599,7 @@ void SurfReactSurfacePWI::sync_sigma()
     double particle_net = 0.0;
     for (int j = 0; j < sigma_ncols; j++)
       particle_net += sigma_buf[base + j];
+    particle_net += shortfall;
     const double particle_dep = dep_buf[gid - 1];
     netvec[i] += particle_net;
     depvec[i] += particle_dep;
@@ -1611,6 +1628,10 @@ void SurfReactSurfacePWI::sync_sigma()
       double *fvec = ce->vector_surf;
       for (int i = 0; i < nsown; i++) {
         double d = fvec[i] * (noconc ? 1.0 : conck[i][isp]) * debit_dt;
+        // strata: the stack yields at most what its zone holds; the
+        // column is debited by the same amount so the two agree
+        if (strata_K > 0 && d > 0.0)
+          d = strata_state[i].erode_species(mat_root_of[isp], d, zone_depth(i));
         bigint m = me + (bigint) i*nprocs;
         surfint id = (dim == 2) ? surf->lines[m].id : surf->tris[m].id;
         bigint idx = ((bigint) id - 1) * sigma_ncols + isp;
@@ -1621,14 +1642,16 @@ void SurfReactSurfacePWI::sync_sigma()
         sig[i][isp] = next;
         netvec[i] -= d;
         erovec[i] += d;
-        if (strata_K > 0 && d > 0.0)
-          strata_state[i].erode_species(mat_root_of[isp], d);
       }
     } else {
       double **farr = ce->array_surf;
       int icol = sigma_ero_col[k] - 1;
       for (int i = 0; i < nsown; i++) {
         double d = farr[i][icol] * (noconc ? 1.0 : conck[i][isp]) * debit_dt;
+        // strata: the stack yields at most what its zone holds; the
+        // column is debited by the same amount so the two agree
+        if (strata_K > 0 && d > 0.0)
+          d = strata_state[i].erode_species(mat_root_of[isp], d, zone_depth(i));
         bigint m = me + (bigint) i*nprocs;
         surfint id = (dim == 2) ? surf->lines[m].id : surf->tris[m].id;
         bigint idx = ((bigint) id - 1) * sigma_ncols + isp;
@@ -1639,8 +1662,6 @@ void SurfReactSurfacePWI::sync_sigma()
         sig[i][isp] = next;
         netvec[i] -= d;
         erovec[i] += d;
-        if (strata_K > 0 && d > 0.0)
-          strata_state[i].erode_species(mat_root_of[isp], d);
       }
     }
   }

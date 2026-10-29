@@ -1,0 +1,49 @@
+# strata: a B layer buried under a thin Wd deposit, eroded by the background
+# (adens_erosion, no particles).  B lies inside the reaction zone, so it is
+# exposed: the stack and the s_adens[B] column must drain together, exposing
+# the W substrate, while the un-eroded Wd stays put.  minthick 1e-5 A keeps
+# these thin layers as separate strata (a Wd stratum sitting on top of B).
+
+variable    nsteps   index 3000
+variable    nevery   index 10
+variable    case     index fine
+variable    inp      string ../deposit_tagging/input
+
+shell       mkdir output
+seed        7893
+dimension   3
+global      gridcut 0.0 comm/sort no
+boundary    o o o
+create_box  1.82 3.21 -0.004 0.048 -0.95 0.81
+create_grid 110 4 140
+balance_grid rcb cell
+
+global      fnum 5e9
+global      surfmax 3000
+timestep    1e-8
+species     ${inp}/slag.species W W+ W2+ W3+ B B+ B2+ B3+ B4+ B5+ D O Wd
+
+read_surf   ${inp}/west_wedge.surf group duct particle check
+group       plate surf id 1:4056
+group       caps surf id 4057:5066
+group       coated surf id 1800:1900
+
+surf_collide pcoll diffuse 300.0 1.0
+# first adens_init entry is the deepest layer: B coating, then Wd on top
+surf_react  pwi surface/pwi ${inp}/slag_w_compound.recycle twall 773.15 &
+            adens_surf adens adens_init B 1e15 adens_init Wd 2e14 adens_init_group coated &
+            rzone 1e15 strata 12 minthick 1e-5 deposit_as W Wd &
+            adens_erosion cpmiB 0 B adens_nevery ${nevery}
+surf_modify plate collide pcoll react pwi
+surf_collide PERIODIC toroidal 0.79
+surf_modify caps collide PERIODIC
+
+fix         pd background file ${inp}/plasma.h5 static yes
+compute     cpmiB surface/physical/sputter plate background pd &
+            target B projectiles D,O mass_amu 2.01410177811 static yes erosion_flux
+
+run         0 post no
+dump        dsurf surf coated 500 output/${case}.surf.*.dump id area s_adens[5] s_adens[13] &
+            s_adens_conc[1] s_adens_conc[5] s_adens_conc[13] c_cpmiB s_adens_strata[*]
+stats       500
+run         ${nsteps}

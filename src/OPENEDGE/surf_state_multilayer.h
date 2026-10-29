@@ -69,10 +69,10 @@ struct SurfaceElementState {
   void deposit(int species, double amount, double density = 0.0);
 
   // Preferential sputtering: remove `amount` [atoms/m^2] of one
-  // species from the top of the stack. Returns the amount actually
-  // removed (bounded by surface availability -- never goes negative,
-  // which retires the one-sync overshoot at the stack level).
-  double erode_species(int species, double amount);
+  // species from the mixing zone, the top `depth` [m] of the stack
+  // (the same window get_surface_composition() samples), top down.
+  // Returns the amount actually removed (never more than the zone holds).
+  double erode_species(int species, double amount, double depth);
 
   // Add implanted atoms at a given depth (SI)
   // species: species index (0-based)

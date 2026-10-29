@@ -121,31 +121,42 @@ void SurfaceElementState::deposit(int species, double amount, double density)
 
 /* ---------------------------------------------------------------------- */
 
-double SurfaceElementState::erode_species(int species, double amount)
+double SurfaceElementState::erode_species(int species, double amount, double depth)
 {
   if (species < 0 || species >= nspecies || amount <= 0.0) return 0.0;
 
+  // Walk the mixing zone top down: a species buried under a thin layer
+  // of another material is still exposed if it lies within `depth`.
+  // The zone is measured on the pre-call stack, so one call never takes
+  // more than the zone held when the concentration was sampled.
   double removed = 0.0;
-  while (removed < amount && !layers.empty()) {
-    SurfaceLayer &top = layers.front();
-    double a_layer = top.density * top.thickness;   // atoms/m^2
-    if (a_layer <= 0.0) { layers.erase(layers.begin()); continue; }
-    double a_sp = a_layer * top.composition[species];
-    if (a_sp <= 0.0) break;      // species not exposed at the surface
-
-    double take = std::min(a_sp, amount - removed);
-    double a_new = a_layer - take;
-    if (a_new <= 1.0e-30) {      // stratum fully consumed
+  double z = 0.0;                                   // pre-call depth of layer top [m]
+  size_t i = 0;
+  while (removed < amount && i < layers.size() && z < depth) {
+    SurfaceLayer &lyr = layers[i];
+    double a_layer = lyr.density * lyr.thickness;   // atoms/m^2
+    if (a_layer <= 0.0) { layers.erase(layers.begin() + i); continue; }
+    const double t0 = lyr.thickness;
+    // only the part of a straddling layer inside the zone is exposed
+    double frac = std::min(1.0, (depth - z) / t0);
+    double a_sp = a_layer * lyr.composition[species];
+    double take = std::min(a_sp * frac, amount - removed);
+    z += t0;
+    if (take > 0.0) {
+      double a_new = a_layer - take;
+      if (a_new <= 1.0e-30) {                       // stratum fully consumed
+        removed += take;
+        layers.erase(layers.begin() + i);
+        continue;
+      }
+      // remove `take` of `species`; other species' areal content unchanged
+      for (int s = 0; s < nspecies; s++)
+        lyr.composition[s] *= a_layer / a_new;
+      lyr.composition[species] = (a_sp - take) / a_new;
+      lyr.thickness = a_new / lyr.density;
       removed += take;
-      layers.erase(layers.begin());
-      continue;
     }
-    // remove `take` of `species`; other species' areal content unchanged
-    for (int s = 0; s < nspecies; s++)
-      top.composition[s] *= a_layer / a_new;
-    top.composition[species] = (a_sp - take) / a_new;
-    top.thickness = a_new / top.density;
-    removed += take;
+    i++;
   }
   return removed;
 }
