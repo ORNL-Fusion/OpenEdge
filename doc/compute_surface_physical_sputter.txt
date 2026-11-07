@@ -160,9 +160,10 @@ is disabled.  It requires {iead none} and cannot be combined with
 
 {wall_flux_cutoff} is the search radius used when the background
 provides wall-flux samples (smooth B, Te, Ti along the wall) and the
-compute looks up the nearest samples to an element; the interpolated
-flux is rescaled per sample so that its integral over the elements
-matches the sample totals.  {boundary} names
+compute looks up the nearest samples to an element; on a 2-D
+axisymmetric wall the interpolated flux is rescaled per sample so that
+its integral over the elements matches the sample totals (see the
+{wall_flux_rescale} keyword of "fix background"_fix_background.html).  {boundary} names
 a text file of R Z points (one pair per line, # comments allowed)
 forming a polygon; for backgrounds without a mesh, elements whose
 midpoint falls outside the polygon are skipped.  {debug_interp} prints

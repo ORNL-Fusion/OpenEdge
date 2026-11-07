@@ -18,7 +18,7 @@ source = {file path} or {constant} :l
   {file} arg = path = HDF5 plasma file written by an OpenEdge converter
   {constant} = spatially uniform plasma defined by the keywords below :pre
 zero or more keyword/value pairs may be appended :l
-keyword = {equilibrium} or {static} or {format} or {flow_sign} or {b_sign} or {cs_model} or {outside} or {precision} or {mesh_triangle_cache} or {mesh_lookup_diagnostics} or {rz_axes} or {column_axis} or {r_bounds} or {z_bounds} or {dens_e} or {temp_e} or {dens_i} or {temp_i} or {dens_n} or {temp_n} or {er} or {et} or {ez} or {epar} or {upar} or {upar_r} or {upar_t} or {upar_z} or {grad_te_r} or {grad_te_t} or {grad_te_z} or {grad_ti_r} or {grad_ti_t} or {grad_ti_z} or {br} or {bz} or {bt} or {bcart} :l
+keyword = {equilibrium} or {static} or {format} or {flow_sign} or {b_sign} or {cs_model} or {outside} or {precision} or {mesh_triangle_cache} or {wall_flux_rescale} or {mesh_lookup_diagnostics} or {rz_axes} or {column_axis} or {r_bounds} or {z_bounds} or {dens_e} or {temp_e} or {dens_i} or {temp_i} or {dens_n} or {temp_n} or {er} or {et} or {ez} or {epar} or {upar} or {upar_r} or {upar_t} or {upar_z} or {grad_te_r} or {grad_te_t} or {grad_te_z} or {grad_ti_r} or {grad_ti_t} or {grad_ti_z} or {br} or {bz} or {bt} or {bcart} :l
   {equilibrium} value = path = standalone equilibrium (psi map) file
   {static} value = {yes} or {no}
     yes = read the plasma data once, at the first run, and keep it
@@ -38,6 +38,10 @@ keyword = {equilibrium} or {static} or {format} or {flow_sign} or {b_sign} or {c
   {precision} value = {single} = storage precision of the zones3d file
   {mesh_triangle_cache} value = {yes} or {no}
     yes = store a per-particle hint of the last mesh triangle found
+  {wall_flux_rescale} value = {auto} or {yes} or {no}
+    auto = rescale the /wall_flux/ interpolation only on a 2-D axisymmetric wall
+    yes = always rescale it so each sample's gamma*area is conserved on the surf elements
+    no = use the plain inverse-distance interpolation
   {mesh_lookup_diagnostics} value = {yes} or {no}
     yes = print lookup counters at the end of each run
   {rz_axes} value = {axi} or {planar}
@@ -116,6 +120,17 @@ is re-read at the start of every "run"_run.html command, which is
 what a coupled outer loop that rewrites the plasma file between runs
 needs.  With {static yes} the file is read once and kept for all
 subsequent runs.
+
+The {wall_flux_rescale} keyword controls the conservative rescale of
+the /wall_flux/ samples onto the surface elements.  Each element takes
+the inverse-distance interpolation of its nearest samples; with the
+rescale, the flux on the elements nearest a sample is scaled so that
+their summed flux times area equals the sample's gamma times its
+(full toroidal ring) area.  That is exact for a 2-D axisymmetric wall,
+which resamples the same rings.  It is wrong for a 3-D deck that covers
+part of the torus (a periodic wedge) or whose faces are not the sample
+wall (shaped monoblocks, gap sidewalls), so {auto} applies it only on a
+2-D axisymmetric wall.
 
 The {mesh_triangle_cache} keyword enables a per-particle hint that
 remembers the mesh triangle in which the particle was last found, so
@@ -226,7 +241,8 @@ pusher"_global.html, "fix reflect/psi"_fix_reflect_psi.html,
 [Default:]
 
 The keyword defaults are static = no, format = legacy, b_sign = 0,
-outside = fail, mesh_triangle_cache = yes, mesh_lookup_diagnostics =
+outside = fail, mesh_triangle_cache = yes, wall_flux_rescale = auto,
+mesh_lookup_diagnostics =
 no, column_axis = 0 0, r_bounds = 0 1, z_bounds = 0 1, and rz_axes
 follows the domain (axi for an axisymmetric domain, planar
 otherwise).  {flow_sign} and {cs_model} have no default.  All

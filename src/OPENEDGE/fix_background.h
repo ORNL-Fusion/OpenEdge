@@ -350,6 +350,7 @@ class FixBackground : public Fix {
   // ---- Configuration ----
   int is_static;                   // 1 = never reload
   int mesh_triangle_cache;         // 1 = validate/reuse particle/cell tri hints
+  int wall_flux_rescale;           // -1 auto (2-D axisymmetric only), 0 off, 1 on
   int mesh_lookup_diagnostics;     // 1 = print cache/load summary after run
   int source_mode;                 // 0=file, 1=constant
   std::string plasma_path;

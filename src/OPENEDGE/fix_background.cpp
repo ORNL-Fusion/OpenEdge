@@ -134,6 +134,7 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
   has_qheatflux = 0;
   is_static = 0;
   mesh_triangle_cache = 1;
+  wall_flux_rescale = -1;
   mesh_lookup_diagnostics = 0;
   mesh_tri_custom = -1;
   mesh_hint_hits = 0;
@@ -260,6 +261,14 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
       if (strcmp(arg[iarg + 1], "yes") == 0) mesh_triangle_cache = 1;
       else if (strcmp(arg[iarg + 1], "no") == 0) mesh_triangle_cache = 0;
       else error->all(FLERR, "fix background: mesh_triangle_cache must be yes or no");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "wall_flux_rescale") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "fix background: wall_flux_rescale needs auto/yes/no");
+      if (strcmp(arg[iarg + 1], "auto") == 0) wall_flux_rescale = -1;
+      else if (strcmp(arg[iarg + 1], "yes") == 0) wall_flux_rescale = 1;
+      else if (strcmp(arg[iarg + 1], "no") == 0) wall_flux_rescale = 0;
+      else error->all(FLERR, "fix background: wall_flux_rescale must be auto, yes or no");
       iarg += 2;
     } else if (strcmp(arg[iarg], "mesh_lookup_diagnostics") == 0) {
       if (iarg + 1 >= narg)
@@ -1720,6 +1729,11 @@ const std::vector<double> &FixBackground::wall_flux_scale(double max_dist,
   const int dim = domain->dimension;
   const bool axi = domain->axisymmetric;
   if (dim == 2 && !axi) return wf_scale;          // planar: no element area
+  // auto: only a 2-D axisymmetric wall resamples the same rings as the
+  // samples; a 3-D deck (a periodic wedge, shaped PFU faces, gap sidewalls)
+  // does not, so matching gamma*ring-area there inflates the flux.
+  if (wall_flux_rescale == 0) return wf_scale;
+  if (wall_flux_rescale < 0 && !(dim == 2 && axi)) return wf_scale;
   if (surf->distributed) return wf_scale;         // needs the global surf list
 
   std::vector<double> acc(static_cast<size_t>(nsp) * N, 0.0);
