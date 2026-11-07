@@ -16,7 +16,7 @@ ID is documented in "compute"_compute.html command :ulb,l
 property/surf = style name of this compute command :l
 group-ID = group ID for which surface elements to perform calculation on :l
 input = one or more surface element attributes :l
-  possible attributes = id, v1x, v1y, v1z, v2x, v2y, v2z, v3x, v2y, v3z, xc, yc, zc, area, normx, normy, normz :pre
+  possible attributes = id, v1x, v1y, v1z, v2x, v2y, v2z, v3x, v2y, v3z, xc, yc, zc, area, normx, normy, normz, s_name, s_name\[N\] :pre
   
   id = surface element ID
   v1x,v1y,v1z = coords of first line end point or triangle corner point
@@ -24,7 +24,9 @@ input = one or more surface element attributes :l
   v3x,v3y,v3z = coords of third triangle corner point
   xc,yc,zc = coords of center of line segment or triangle
   area = length of line segment or area of triangle
-  normx, normy, normz = unit normal vector for line segment or triangle :pre
+  normx, normy, normz = unit normal vector for line segment or triangle
+  s_name = custom per-surf floating-point vector with name
+  s_name\[N\] = Nth column of custom per-surf floating-point array with name :pre
 :ule
 
 [Examples:]

@@ -67,6 +67,11 @@ class ComputePropertySurf : public Compute {
   void pack_normx(int);
   void pack_normy(int);
   void pack_normz(int);
+
+  // s_name / s_name[N]: per-surf custom DOUBLE vector or array column
+  int *custom_index;
+  int *custom_col;
+  void pack_custom(int);
 };
 
 }

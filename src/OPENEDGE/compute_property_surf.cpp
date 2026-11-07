@@ -45,10 +45,43 @@ ComputePropertySurf::ComputePropertySurf(SPARTA *sparta, int narg, char **arg) :
   // customize a new keyword by adding to if statement
 
   pack_choice = new FnPtrPack[nvalues];
+  custom_index = new int[nvalues];
+  custom_col = new int[nvalues];
+  for (int k = 0; k < nvalues; k++) custom_index[k] = custom_col[k] = -1;
 
   int i;
   for (int iarg = 3; iarg < narg; iarg++) {
     i = iarg-3;
+
+    // s_name or s_name[N]: custom per-surf DOUBLE vector or array column
+    // (e.g. a prescribed per-element flux read by read_surf ... custom)
+    if (strncmp(arg[iarg],"s_",2) == 0) {
+      int n = strlen(arg[iarg]);
+      char *suffix = new char[n];
+      strcpy(suffix,&arg[iarg][2]);
+      int col = 0;
+      char *ptr = strchr(suffix,'[');
+      if (ptr) {
+        if (suffix[n-3] != ']')
+          error->all(FLERR,"Invalid custom attribute in compute property/surf command");
+        col = atoi(ptr+1);
+        *ptr = '\0';
+      }
+      int index = surf->find_custom(suffix);
+      if (index < 0)
+        error->all(FLERR,"Compute property/surf custom attribute does not exist");
+      if (surf->etype[index] != 1)
+        error->all(FLERR,"Compute property/surf custom attribute must be DOUBLE");
+      if (col == 0 && surf->esize[index] != 0)
+        error->all(FLERR,"Compute property/surf custom array needs a column, s_name[N]");
+      if (col > 0 && (surf->esize[index] == 0 || col > surf->esize[index]))
+        error->all(FLERR,"Compute property/surf custom column out of range");
+      delete [] suffix;
+      custom_index[i] = index;
+      custom_col[i] = col;
+      pack_choice[i] = &ComputePropertySurf::pack_custom;
+      continue;
+    }
 
     // check for invalid fields in 2d
 
@@ -119,6 +152,8 @@ ComputePropertySurf::~ComputePropertySurf()
 {
   if (copymode) return;
   delete [] pack_choice;
+  delete [] custom_index;
+  delete [] custom_col;
   memory->destroy(cglobal);
   memory->destroy(vector_surf);
   memory->destroy(array_surf);
@@ -191,6 +226,44 @@ bigint ComputePropertySurf::memory_usage()
    the surf property is packed into buf starting at n with stride nvalues
    customize a new keyword by adding a method
 ------------------------------------------------------------------------- */
+
+void ComputePropertySurf::pack_custom(int n)
+{
+  // custom per-surf data are stored per owned element, same order as cglobal
+  int m;
+  const int index = custom_index[n];
+  const int col = custom_col[n];
+  double *vector = NULL;
+  double **array = NULL;
+  if (col == 0) vector = surf->edvec[surf->ewhich[index]];
+  else array = surf->edarray[surf->ewhich[index]];
+
+  if (dimension == 2) {
+    Surf::Line *lines;
+    if (distributed) lines = surf->mylines;
+    else lines = surf->lines;
+    for (int i = 0; i < nsown; i++) {
+      m = cglobal[i];
+      if (lines[m].mask & groupbit)
+        buf[n] = (col == 0) ? vector[i] : array[i][col-1];
+      else buf[n] = 0.0;
+      n += nvalues;
+    }
+  } else if (dimension == 3) {
+    Surf::Tri *tris;
+    if (distributed) tris = surf->mytris;
+    else tris = surf->tris;
+    for (int i = 0; i < nsown; i++) {
+      m = cglobal[i];
+      if (tris[m].mask & groupbit)
+        buf[n] = (col == 0) ? vector[i] : array[i][col-1];
+      else buf[n] = 0.0;
+      n += nvalues;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------- */
 
 void ComputePropertySurf::pack_id(int n)
 {
