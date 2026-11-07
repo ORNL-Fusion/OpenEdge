@@ -425,7 +425,7 @@ parameter to 1.0.  Using a surf_collide vanish command is simpler.
 
 :line
 
-The {partial_recycle} style is the {diffuse} style with EIRENE-style
+The {partial_recycle} style is the {diffuse} style with stochastic
 partial recycling.  It takes the same {Tsurf} and {acc} arguments as
 {diffuse}.  For every particle that hits the surface a uniform random
 number u is drawn: if u >= R the particle is deleted (pumped), else it

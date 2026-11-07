@@ -95,7 +95,7 @@ Define a plasma-wall interaction model for surface elements.  When a
 particle hits a surface the channels listed in {infile} for its
 species are probed in order; one of them fires and sets the outgoing
 species, velocity and internal energy, or deletes the particle.  The
-model reproduces the wall options of EIRENE: BCA (TRIM) reflection
+model offers the wall options of coupled neutral transport: BCA (TRIM) reflection
 tables for the prompt scattering fraction, absorb-and-re-emit with a
 recycling coefficient and molecular fraction for the remainder,
 additive physical sputtering, plus simple fixed-energy channels.  It
@@ -123,7 +123,8 @@ product.  TYPE is one letter (upper or lower case):
 T table            reflection: probability R_N(E,theta) and outgoing
                    energy/angles from the BCA table {table}
                    (1 reactant, 1 product); optional keywords
-                   {mat} species, {conc} species, {rtable} table
+                   {mat} species, {conc} species, {rtable} table,
+                   {scale} f (probability f R_N)
 A R \[f_mol\]        absorb and re-emit thermally with recycling
                    coefficient R and molecular fraction f_mol
                    (1 reactant, 1 product)
@@ -154,6 +155,18 @@ processes.h5 database (pair names in lower case, e.g. d_on_w).  If
 instead.  Missing tables are an error at initialization.  The
 reflected velocity is sampled from the energy and angle quantiles of
 the table, so the shape of the BCA distribution is preserved.
+
+{scale} multiplies the {T} probability, which puts the prompt
+reflection inside a recycling coefficient:
+with {R} 1-R listed first, {T} ... {scale} R and {A} 1.0 f_mol last, a
+fraction 1-R of the incident flux is retained, R R_N returns promptly
+and R (1-R_N) thermally.  Listing {T} first without {scale}, then {R}
+1-R and {A} 1.0 f_mol, gives instead a prompt fraction R_N, a retained
+fraction 1-R and a thermal remainder R-R_N, i.e. a total return of
+max(R_N, R).  An {A} line may name two products, molecule then atom
+({H+ --> H2 + H}); an ion reactant always returns as the named
+products, never as itself, and with a molecular fraction below one the
+atom product is required.
 
 {A} with reactant == product returns the particle with probability R
 and deletes it (pumps it) with probability 1-R.  With reactant !=

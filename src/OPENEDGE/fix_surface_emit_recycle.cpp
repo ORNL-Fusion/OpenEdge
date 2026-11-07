@@ -8,6 +8,7 @@
 #include "string.h"
 #include "fix_surface_emit_recycle.h"
 #include "fix_background.h"
+#include "surf_react_surface_pwi.h"
 #include "update.h"
 #include "compute.h"
 #include "domain.h"
@@ -44,6 +45,7 @@ namespace {
   constexpr double QE    = 1.602176634e-19;   // C
   constexpr double AMU   = 1.66053906660e-27; // kg
   constexpr double KB    = 1.380649e-23;      // J/K
+  constexpr double ME    = 9.1093837015e-31;  // kg
 }
 
 /* ---------------------------------------------------------------------- */
@@ -79,10 +81,18 @@ FixSurfaceEmitRecycle::FixSurfaceEmitRecycle(SPARTA *sparta, int narg, char **ar
   if (!plasma)
     error->all(FLERR,"Fix emit/surf/recycle requires a fix background");
 
-  // defaults
-  mass_amu   = 2.0;     // D+ (main ion)
-  R_recycle  = 0.99;    // total recycling coefficient; 1% pumped
-  twall      = 400.0;   // K
+  // no physics defaults: mass, and R/twall without pwi, must be given;
+  // the wall-flux search radius is derived from the sample spacing
+  mass_amu   = 0.0;
+  R_recycle  = -1.0;
+  twall      = 0.0;
+  wall_flux_cutoff = 0.0;
+  impact_model = IMPACT_MAXWELL;
+  wall_flux_ispec  = 0;
+  pwi_id = NULL;
+  pwi = NULL;
+  pwi_species = -1;
+  ion_charge = 1.0;
 
   int iarg = 5;
   options(narg-iarg, &arg[iarg]);
@@ -118,6 +128,7 @@ FixSurfaceEmitRecycle::~FixSurfaceEmitRecycle()
     delete [] tasks[i].fracarea;
   }
   memory->sfree(tasks);
+  delete [] pwi_id;
 
   if (dimension == 3) delete cut3d;
   else delete cut2d;
@@ -150,6 +161,32 @@ void FixSurfaceEmitRecycle::init()
   // Unmatched mixture species fall back to the scalar twall. A name listed
   // in twall_species_names that is not present in this mixture is an error
   // (fail loudly rather than silently ignoring).
+  if (mass_amu <= 0.0)
+    error->all(FLERR,"fix surface/emit/recycle: mass <amu> is required");
+  if (!pwi_id && R_recycle < 0.0)
+    error->all(FLERR,"fix surface/emit/recycle: R <coefficient> is required without pwi");
+  if (!pwi_id && twall <= 0.0)
+    error->all(FLERR,"fix surface/emit/recycle: twall <K> is required without pwi");
+  if (wall_flux_cutoff <= 0.0 && plasma->has_wall_flux()) {
+    // twice the largest nearest-neighbour spacing of the wall samples,
+    // so every wall element reaches at least one sample
+    const FixBackground::WallFluxData &wf = plasma->wall_flux;
+    double dmax = 0.0;
+    for (int i = 0; i < wf.n; i++) {
+      double dmin = 1.0e300;
+      for (int j = 0; j < wf.n; j++) {
+        if (j == i) continue;
+        const double d = std::hypot(wf.r[i]-wf.r[j], wf.z[i]-wf.z[j]);
+        if (d < dmin) dmin = d;
+      }
+      if (dmin < 1.0e300 && dmin > dmax) dmax = dmin;
+    }
+    wall_flux_cutoff = 2.0 * dmax;
+    if (comm->me == 0) {
+      if (screen)  fprintf(screen,  "fix surface/emit/recycle: wall_flux_cutoff %g m from the sample spacing\n", wall_flux_cutoff);
+      if (logfile) fprintf(logfile, "fix surface/emit/recycle: wall_flux_cutoff %g m from the sample spacing\n", wall_flux_cutoff);
+    }
+  }
   twall_by_species.assign(nspecies, twall);
   const int *mix_species = particle->mixture[imix]->species;
   for (size_t k = 0; k < twall_species_names.size(); k++) {
@@ -171,7 +208,38 @@ void FixSurfaceEmitRecycle::init()
     twall_by_species[slot] = twall_species_values[k];
   }
 
+  // pwi mode: the mixture names the incident ion; the surf_react does the rest
+  pwi = NULL;
+  if (pwi_id) {
+    int isr = surf->find_react(pwi_id);
+    if (isr < 0)
+      error->all(FLERR,"fix surface/emit/recycle pwi: surf_react ID does not exist");
+    pwi = dynamic_cast<SurfReactSurfacePWI *>(surf->sr[isr]);
+    if (!pwi)
+      error->all(FLERR,"fix surface/emit/recycle pwi: surf_react must be surface/pwi");
+    if (nspecies != 1)
+      error->all(FLERR,"fix surface/emit/recycle pwi: the mixture must hold "
+                 "exactly one species, the incident ion");
+    pwi_species = mix_species[0];
+    ion_charge = particle->species[pwi_species].charge;
+    if (ion_charge <= 0.0)
+      error->all(FLERR,"fix surface/emit/recycle pwi: the mixture species must be an ion");
+  }
+
   grid_changed();
+}
+
+/* ----------------------------------------------------------------------
+   mean ion impact energy: Chankin 2014 eq. (4), the floating sheath of the
+   main ion (mass_amu) plus 2 Ti, as in compute surface/physical/sputter
+------------------------------------------------------------------------- */
+
+double FixSurfaceEmitRecycle::impact_energy_eV(double te_eV, double ti_eV) const
+{
+  if (!(te_eV > 0.0)) return 2.0 * std::max(ti_eV, 0.0);
+  const double mi_over_me = (mass_amu * AMU) / ME;
+  const double psi_over_te = 0.5 * std::log(mi_over_me / (2.0 * MY_PI * (1.0 + ti_eV / te_eV)));
+  return 2.0 * std::max(ti_eV, 0.0) + ion_charge * std::max(psi_over_te, 0.0) * te_eV;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -357,8 +425,9 @@ void FixSurfaceEmitRecycle::create_task(int icell)
     tasks[ntask].ntarget = 0.0;
     tasks[ntask].sin_alpha = 1.0;
     tasks[ntask].sin_alpha_generation = -1;
+    tasks[ntask].wf_generation = -1;
 
-    // Topological wall->plasma-cell lookup (EIRENE-style):
+    // Topological wall->plasma-cell lookup:
     // Owning B2 cell for this SPARTA wall surface. Three strategies,
     // tried in order:
     //  (1) Topological: plasma.h5 has an explicit mesh/wall_surf_cell
@@ -444,97 +513,114 @@ void FixSurfaceEmitRecycle::create_task(int icell)
 
 double FixSurfaceEmitRecycle::emission_rate_per_surface(int itask)
 {
-  const int cell = tasks[itask].plasma_cell;
-  if (cell < 0) return 0.0;
-  // Defensive bounds check: a plasma reload with a smaller mesh between
-  // grid-triggered task rebuilds could leave cell >= mesh_ncell here.
-  // perform_task's generation check should normally have already rebuilt
-  // tasks by now, but this guard makes the read OOB-safe regardless.
-  if (cell >= plasma->mesh_ncell) return 0.0;
+  Task &t = tasks[itask];
+  const double R = t.rmid;
+  const double Z = t.zmid;
 
-  // Compute the Bohm wall flux from the B2 plasma state (ne, Te, Ti at
-  // the cached sheath-edge cell) and the B2 cell's toroidally-integrated
-  // wall face area, then distribute to this SPARTA surface by area share
-  // within the cell:
-  //     Gamma_wall = ne * cs * sin(alpha_B)    cs = sqrt((Te+Ti)/mi)
-  //     dot_N_cell = 0.5 * R * Gamma_wall * face_area_2pi_R
-  // (Bohm criterion; see Stangeby 2000, ch. 2). sin(alpha_B) is the
-  // geometric projection of B onto the wall inward normal. face area
-  // is 2*pi*R_face * poloidal_edge_length (axisymmetric).
-
-  // Pull plasma quantities directly from the mesh arrays
-  const double ne = plasma->mesh_ne[cell];
-  const double te = plasma->mesh_te[cell];
-  const double ti = plasma->mesh_ti.empty() ? te : plasma->mesh_ti[cell];
-
-  if (!std::isfinite(ne) || !std::isfinite(te)) return 0.0;
-  if (ne <= 0.0 || te <= 0.0) return 0.0;
-
-  // For B-field projection, use the wall midpoint (field changes slowly)
-  const double R = tasks[itask].rmid;
-  const double Z = tasks[itask].zmid;
-
-  const double ti_eff = std::isfinite(ti) && ti > 0.0 ? ti : te;
-  const double cs_arg = (te + ti_eff) * QE / (mass_amu * AMU);
-  if (cs_arg <= 0.0) return 0.0;
-  const double cs = std::sqrt(cs_arg);
-
-  // The task midpoint and normal are static between grid_changed() calls,
-  // and FixBackground::generation changes on every plasma reload. Cache the
-  // projection once per task/generation instead of repeating an unstructured
-  // triangle search for every wall task on every timestep.
-  if (tasks[itask].sin_alpha_generation != plasma->generation) {
+  // |B.n|/|B| at the wall midpoint, cached per plasma generation (also the
+  // impact angle handed to the pwi model)
+  if (t.sin_alpha_generation != plasma->generation) {
     double sin_alpha = 1.0;
     if (plasma->has_bfield) {
       double Br, Bz, Bt;
-      plasma->bfield_at(R, Z, Br, Bz, Bt, tasks[itask].icell);
+      plasma->bfield_at(R, Z, Br, Bz, Bt, t.icell);
       const double Bmag = std::sqrt(Br*Br + Bz*Bz + Bt*Bt);
       if (Bmag > 0.0) {
-        const double proj = Br * tasks[itask].inward[0]
-                          + Bz * tasks[itask].inward[1];
+        const double proj = Br * t.inward[0] + Bz * t.inward[1];
         sin_alpha = std::fabs(proj) / Bmag;
         if (sin_alpha > 1.0) sin_alpha = 1.0;
       }
     }
-    tasks[itask].sin_alpha = sin_alpha;
-    tasks[itask].sin_alpha_generation = plasma->generation;
-  }
-  const double sin_alpha = tasks[itask].sin_alpha;
-
-  // Surface area used in the flux calculation, in preference order:
-  //  (1) Per-wall-segment aggregated area mesh/wall_surf_area[isurf] —
-  //      sums the B2 face area of every B2 boundary face that chose this
-  //      wall segment as its nearest. Preserves the full SOLPS wall flux
-  //      budget when the SPARTA wall is coarser than the B2 grid (multiple
-  //      B2 cells per wall segment). Multiplied by area_share so refined
-  //      sub-segments split it correctly.
-  //  (2) Per-cell B2 face area (legacy: when only mesh_wall_face_area
-  //      is available, before the converter started writing surf_area).
-  //  (3) Raw SPARTA surface area (approximate, for non-SOLPS tests).
-  double gamma_area;
-  const int isurf_i = static_cast<int>(tasks[itask].isurf);
-  if (plasma->has_mesh_wall_surf_cell &&
-      isurf_i >= 0 &&
-      isurf_i < static_cast<int>(plasma->mesh_wall_surf_area.size()) &&
-      plasma->mesh_wall_surf_area[isurf_i] > 0.0) {
-    gamma_area = plasma->mesh_wall_surf_area[isurf_i] * tasks[itask].area_share;
-  } else if (plasma->has_mesh_wall_face_area &&
-             cell < static_cast<int>(plasma->mesh_wall_face_area.size()) &&
-             plasma->mesh_wall_face_area[cell] > 0.0) {
-    gamma_area = plasma->mesh_wall_face_area[cell] * tasks[itask].area_share;
-  } else {
-    gamma_area = tasks[itask].area;
+    t.sin_alpha = sin_alpha;
+    t.sin_alpha_generation = plasma->generation;
   }
 
-  const double gamma = ne * cs * sin_alpha;
-  const double dot_N = 0.5 * R_recycle * gamma * gamma_area;
+  double gamma = 0.0;        // ion flux density into the wall [m^-2 s^-1]
+  double gamma_area = 0.0;   // area it applies to [m^2]
+  bool have_gamma = false;
 
-  // Per-cell particle weighting (stock fix_emit_surf does the same —
+  // (a) plasma-code wall tallies: /wall_flux/ samples of the background,
+  //     3-point inverse-distance weighted within wall_flux_cutoff; the
+  //     flux is a density, so it multiplies the geometric element area
+  if (plasma->has_wall_flux()) {
+    if (t.wf_generation != plasma->generation) {
+      t.wf_gamma = plasma->query_wall_flux_at_point(R, Z, wall_flux_ispec,
+                                                    wall_flux_cutoff);
+      double te = 0.0, ti = 0.0;
+      if (!plasma->query_wall_te_ti_at_point(R, Z, te, ti, wall_flux_cutoff))
+        te = ti = 0.0;
+      t.wf_te = te;
+      t.wf_ti = ti;
+      t.wf_generation = plasma->generation;
+    }
+    if (t.wf_gamma > 0.0) {
+      gamma = t.wf_gamma;
+      gamma_area = t.area;
+      t.te_imp = t.wf_te;
+      t.ti_imp = t.wf_ti;
+      have_gamma = true;
+    }
+  }
+
+  // (b) Bohm reconstruction from the wall-adjacent plasma cell:
+  //     Gamma = ne cs sin(alpha_B), cs = sqrt((Te+Ti)/mi) (Stangeby ch. 2),
+  //     over the plasma-code wall face area when the converter wrote one
+  if (!have_gamma) {
+    const int cell = t.plasma_cell;
+    if (cell < 0) return 0.0;
+    // Defensive bounds check: a plasma reload with a smaller mesh between
+    // grid-triggered task rebuilds could leave cell >= mesh_ncell here.
+    if (cell >= plasma->mesh_ncell) return 0.0;
+
+    const double ne = plasma->mesh_ne[cell];
+    const double te = plasma->mesh_te[cell];
+    const double ti = plasma->mesh_ti.empty() ? te : plasma->mesh_ti[cell];
+    if (!std::isfinite(ne) || !std::isfinite(te)) return 0.0;
+    if (ne <= 0.0 || te <= 0.0) return 0.0;
+    const double ti_eff = std::isfinite(ti) && ti > 0.0 ? ti : te;
+    const double cs_arg = (te + ti_eff) * QE / (mass_amu * AMU);
+    if (cs_arg <= 0.0) return 0.0;
+    const double cs = std::sqrt(cs_arg);
+    t.te_imp = te;
+    t.ti_imp = ti_eff;
+
+    // Surface area used in the flux calculation, in preference order:
+    //  (1) Per-wall-segment aggregated area mesh/wall_surf_area[isurf] -
+    //      sums the B2 face area of every B2 boundary face that chose this
+    //      wall segment as its nearest. Preserves the full SOLPS wall flux
+    //      budget when the SPARTA wall is coarser than the B2 grid (multiple
+    //      B2 cells per wall segment). Multiplied by area_share so refined
+    //      sub-segments split it correctly.
+    //  (2) Per-cell B2 face area (legacy: when only mesh_wall_face_area
+    //      is available, before the converter started writing surf_area).
+    //  (3) Raw SPARTA surface area (approximate, for non-SOLPS tests).
+    const int isurf_i = static_cast<int>(t.isurf);
+    if (plasma->has_mesh_wall_surf_cell &&
+        isurf_i >= 0 &&
+        isurf_i < static_cast<int>(plasma->mesh_wall_surf_area.size()) &&
+        plasma->mesh_wall_surf_area[isurf_i] > 0.0) {
+      gamma_area = plasma->mesh_wall_surf_area[isurf_i] * t.area_share;
+    } else if (plasma->has_mesh_wall_face_area &&
+               cell < static_cast<int>(plasma->mesh_wall_face_area.size()) &&
+               plasma->mesh_wall_face_area[cell] > 0.0) {
+      gamma_area = plasma->mesh_wall_face_area[cell] * t.area_share;
+    } else {
+      gamma_area = t.area;
+    }
+    gamma = ne * cs * t.sin_alpha;
+  }
+
+  // thermal mixture emission: 0.5 R Gamma A (two atoms make one molecule);
+  // pwi mode: the full ion flux, the surf_react applies R and the 2 -> 1
+  const double dot_N = pwi ? gamma * gamma_area
+                           : 0.5 * R_recycle * gamma * gamma_area;
+
+  // Per-cell particle weighting (stock fix_emit_surf does the same -
   // line 573 of src/fix_emit_surf.cpp). With `global weight cell` in
   // axisymmetric mode or any user-imposed variable cell weight, a cell
   // with weight w represents w physical particles per sim particle, so
   // sim-particle injection rate must divide by w.
-  const int icell = tasks[itask].icell;
+  const int icell = t.icell;
   const double wcell = (icell >= 0) ? grid->cinfo[icell].weight : 1.0;
   const double inv_wcell = (wcell > 0.0) ? 1.0 / wcell : 1.0;
   // scale by nevery: firing every N steps must inject N steps of flux
@@ -574,6 +660,10 @@ void FixSurfaceEmitRecycle::perform_task()
   int nsurf_tally = update->nsurf_tally;
   Compute **slist_active = update->slist_active;
   int nfix_update_custom = modify->n_update_custom;
+
+  // pwi mode: ions retained by the wall are removed after the loop
+  int *dellist = NULL;
+  int ndel = 0, maxdel = 0;
 
   for (i = 0; i < ntask; i++) {
     pcell = tasks[i].pcell;
@@ -626,6 +716,90 @@ void FixSurfaceEmitRecycle::perform_task()
 
       if (region && !region->match(x)) continue;
 
+      if (pwi) {
+        // incident ion at the sheath impact energy, coming in along the
+        // field line (angle from the normal = 90 - alpha_B, within the
+        // TRIM table range), handed to the surface/pwi lottery: reflected
+        // as a fast atom, re-emitted thermally with R, or retained
+        const double mion = particle->species[pwi_species].mass;
+        const double E_th = 2.0 * std::max(tasks[i].ti_imp, 0.0);
+        const double E_sh = impact_energy_eV(tasks[i].te_imp, tasks[i].ti_imp) - E_th;
+        const double phi = MY_2PI * random->uniform();
+        const double ca = std::cos(phi), sa = std::sin(phi);
+        double sin_a = std::min(1.0, std::max(tasks[i].sin_alpha, 0.0));
+        const double cos_a = std::sqrt(std::max(0.0, 1.0 - sin_a*sin_a));
+        if (impact_model == IMPACT_MAXWELL) {
+          // Maxwellian flux at Ti drifting at the isothermal sound speed
+          // along the field line into the wall; the floating-sheath drop
+          // of that flux, Te/2 ln(mi/(pi me (1+Ti/Te))), is added to the
+          // normal velocity component only
+          const double ti = std::max(tasks[i].ti_imp, 1.0e-3);
+          const double te = std::max(tasks[i].te_imp, 0.0);
+          const double sig = std::sqrt(ti * QE / mion);
+          const double c_s = std::sqrt((te + ti) * QE / mion);
+          double e_sh = 0.0;
+          if (te > 0.0) {
+            const double arg = (mion / ME) / (MY_PI * (1.0 + ti / te));
+            e_sh = ion_charge * 0.5 * std::log(arg) * te;
+            if (e_sh < 0.0) e_sh = 0.0;
+          }
+          const double u_n = c_s * sin_a;            // drift into the wall
+          const double u_t = c_s * cos_a;            // drift along the wall
+          const double vn_max = u_n + 4.0 * sig;
+          double vn = 0.0;
+          for (int it = 0; it < 200; it++) {
+            const double g = random->gaussian();
+            vn = u_n + sig * g;
+            if (vn > 0.0 && random->uniform() * vn_max < vn) break;
+            vn = 0.0;
+          }
+          if (vn <= 0.0) vn = std::max(u_n, sig);
+          vn = std::sqrt(vn*vn + 2.0 * e_sh * QE / mion);
+          const double vt1 = u_t + sig * random->gaussian();
+          const double vt2 = sig * random->gaussian();
+          for (int k = 0; k < 3; k++)
+            v[k] = -(vn * normal[k] + vt1 * (ca*atan[k] + sa*btan[k])
+                     + vt2 * (-sa*atan[k] + ca*btan[k]));
+        } else {
+          // thermal part 2 Ti along the field line (normal component
+          // sin_alpha), sheath part Z e phi_sh added to the normal motion:
+          // total energy = impact_energy_eV, angle bent toward the normal
+          const double v_th = std::sqrt(2.0 * std::max(E_th, 1.0e-3) * QE / mion);
+          const double v_sh2 = 2.0 * std::max(E_sh, 0.0) * QE / mion;
+          const double v_tan = v_th * cos_a;
+          const double v_nrm = std::sqrt(v_th*sin_a*v_th*sin_a + v_sh2);
+          for (int k = 0; k < 3; k++)
+            v[k] = -(v_nrm * normal[k] + v_tan * (ca*atan[k] + sa*btan[k]));
+        }
+        id = MAXSMALLINT * random->uniform();
+        particle->add_particle(id, pwi_species, pcell, x, v, 0.0, 0.0);
+        const int ipart = particle->nlocal - 1;
+        p = &particle->particles[ipart];
+        p->flag = PSURF + 1 + isurf;
+        p->dtremain = dt * random->uniform();
+        if (nfix_update_custom)
+          modify->update_custom(ipart, tasks[i].te_imp, tasks[i].te_imp,
+                                tasks[i].te_imp, v);
+
+        Particle::OnePart *ip = p;
+        Particle::OnePart *jp = NULL;
+        int velreset = 0;
+        pwi->react(ip, isurf, normal, jp, velreset);
+        if (ip == NULL) {
+          if (ndel == maxdel) {
+            maxdel += 1024;
+            memory->grow(dellist, maxdel, "surface/emit/recycle:dellist");
+          }
+          dellist[ndel++] = ipart;
+        } else {
+          nactual++;
+          if (nsurf_tally)
+            for (int k = 0; k < nsurf_tally; k++)
+              slist_active[k]->surf_tally(ip->dtremain, isurf, pcell, 0, NULL, ip, NULL);
+        }
+        continue;
+      }
+
       // Maxwellian flux velocity at per-species twall, inward along normal.
       // v_perp ~ Rayleigh ~ sqrt(-ln U) * vscale
       // v_parallel ~ two independent Gaussians (tangential)
@@ -668,6 +842,9 @@ void FixSurfaceEmitRecycle::perform_task()
     }
     nsingle += nactual;
   }
+
+  if (ndel) particle->compress_reactions(ndel, dellist);
+  memory->destroy(dellist);
 }
 
 /* ----------------------------------------------------------------------
@@ -685,6 +862,8 @@ void FixSurfaceEmitRecycle::grow_task()
   for (int i = oldmax; i < ntaskmax; i++) {
     tasks[i].path = NULL;
     tasks[i].fracarea = NULL;
+    tasks[i].wf_generation = -1;
+    tasks[i].sin_alpha_generation = -1;
   }
 }
 
@@ -715,6 +894,35 @@ int FixSurfaceEmitRecycle::option(int narg, char **arg)
       error->all(FLERR,"fix surface/emit/recycle twall must be > 0");
     return 2;
   }
+  if (strcmp(arg[0], "pwi") == 0) {
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/recycle command");
+    delete [] pwi_id;
+    int n = strlen(arg[1]) + 1;
+    pwi_id = new char[n];
+    strcpy(pwi_id, arg[1]);
+    return 2;
+  }
+  if (strcmp(arg[0], "impact") == 0) {
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/recycle command");
+    if (strcmp(arg[1], "sheath") == 0) impact_model = IMPACT_SHEATH;
+    else if (strcmp(arg[1], "maxwell") == 0) impact_model = IMPACT_MAXWELL;
+    else error->all(FLERR,"fix surface/emit/recycle impact must be sheath|maxwell");
+    return 2;
+  }
+  if (strcmp(arg[0], "wall_flux_cutoff") == 0) {
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/recycle command");
+    wall_flux_cutoff = atof(arg[1]);
+    if (wall_flux_cutoff <= 0.0)
+      error->all(FLERR,"fix surface/emit/recycle wall_flux_cutoff must be > 0");
+    return 2;
+  }
+  if (strcmp(arg[0], "wall_flux_species") == 0) {
+    if (2 > narg) error->all(FLERR,"Illegal fix surface/emit/recycle command");
+    wall_flux_ispec = atoi(arg[1]) - 1;
+    if (wall_flux_ispec < 0)
+      error->all(FLERR,"fix surface/emit/recycle wall_flux_species must be >= 1");
+    return 2;
+  }
   if (strcmp(arg[0], "twall_species") == 0) {
     // twall_species <sp1> <T1> [<sp2> <T2> ...]
     // Consume pairs until end of args or a non-pair (next keyword) shows up.
@@ -725,7 +933,10 @@ int FixSurfaceEmitRecycle::option(int narg, char **arg)
       const char *name = arg[consumed];
       // stop if name is actually a keyword this fix would recognise next
       if (strcmp(name, "mass") == 0 || strcmp(name, "R") == 0 ||
-          strcmp(name, "twall") == 0 || strcmp(name, "twall_species") == 0)
+          strcmp(name, "twall") == 0 || strcmp(name, "twall_species") == 0 ||
+          strcmp(name, "pwi") == 0 || strcmp(name, "wall_flux_cutoff") == 0 ||
+          strcmp(name, "wall_flux_species") == 0 || strcmp(name, "nevery") == 0 ||
+          strcmp(name, "region") == 0)
         break;
       const double t = atof(arg[consumed + 1]);
       if (t <= 0.0)

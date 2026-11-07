@@ -18,13 +18,20 @@ mix-ID = ID of mixture to use when creating particles :l
 group-ID = ID of surface group that emits particles :l
 fix-ID = ID of the "fix background"_fix_background.html supplying the plasma :l
 zero or more keyword/value pairs may be appended :l
-keyword = {mass} or {R} or {twall} or {twall_species} or {nevery} or {region} :l
-  {mass} value = main-ion mass in amu used for the sound speed
-  {R} value = total recycling coefficient (0 to 1)
-  {twall} value = emission temperature in Kelvin
+keyword = {mass} or {R} or {twall} or {twall_species} or {pwi} or {impact} or {wall_flux_cutoff} or {wall_flux_species} or {nevery} or {region} :l
+  {mass} value = main-ion mass in amu used for the sound speed (required)
+  {R} value = total recycling coefficient (0 to 1; required without {pwi})
+  {twall} value = emission temperature in Kelvin (required without {pwi})
   {twall_species} values = sp1 T1 \[sp2 T2 ...\]
     sp = species ID in the mixture
     T = emission temperature in Kelvin for that species
+  {pwi} value = ID of a "surf_react surface/pwi"_surf_react_surface_pwi.html
+  {impact} value = {sheath} or {maxwell} = ion velocity model handed to the pwi lottery
+    model that processes every recycled ion
+  {wall_flux_cutoff} value = search radius in m for the /wall_flux/ samples (default: twice the largest sample spacing)
+    of the background (default 0.05)
+  {wall_flux_species} value = N = column of /wall_flux/gamma_i to use
+    (default 1, the main ion)
   {nevery} value = Nevery = emit every this many timesteps
   {region} value = region-ID = only emit from surface elements in region :pre
 :ule
@@ -33,7 +40,8 @@ keyword = {mass} or {R} or {twall} or {twall_species} or {nevery} or {region} :l
 
 fix rec surface/emit/recycle dgas wall pd
 fix rec surface/emit/recycle dgas wall pd R 0.98 twall 500.0 &
-    twall_species D 23210.0 D2 500.0 :pre
+    twall_species D 23210.0 D2 500.0
+fix rec surface/emit/recycle hion wall pd mass 1.008 pwi wallPWI :pre
 
 [Description:]
 
@@ -70,11 +78,41 @@ temperature.  Every species named in {twall_species} must exist in
 the mixture.  The pairs are consumed until the next keyword or the end
 of the command.
 
-The fast (BCA) reflection channel is not part of this fix; use
-"surf_react surface/pwi"_surf_react_surface_pwi.html for it on the
-same surface group.  The particles created by this fix pass through
-the surface collision and reaction models assigned to the element, so
-they are tallied like other emitted particles.
+When the background file carries the wall tallies of the plasma code
+(the /wall_flux/ group written by the converters: ion flux density,
+Te and Ti per wall element), those are used instead of the Bohm
+reconstruction: the flux of each element is the inverse-distance
+average of the three nearest samples within {wall_flux_cutoff},
+multiplied by the geometric element area, and the sample Te and Ti
+set the impact energy.  This is required for backgrounds in which the
+cells next to the wall are not the sheath entrance, e.g. the penalized
+region of some fluid-code meshes, where the Bohm estimate is far too large.
+
+With {pwi} the thermal mixture emission is replaced by the full wall
+model of the named "surf_react surface/pwi"_surf_react_surface_pwi.html,
+which recycles the bulk ions through the full wall model: the mixture must hold
+exactly one species, the incident ion, and the fix emits the full ion
+flux Gamma A as ions arriving at the wall with the mean sheath impact
+energy (2 Ti plus the floating-sheath drop of the {mass} main ion,
+Chankin 2014).  With {impact maxwell} (default) the ion velocity is
+drawn from the Maxwellian flux at Ti drifting at the isothermal sound
+speed along the field line into the wall, and the floating-sheath drop
+of that flux, Te/2 ln(mi/(pi me (1+Ti/Te))) per charge, is added to
+the velocity component normal to the wall; this is the standard
+sheath-entrance model of coupled neutral transport (on a limiter
+plasma it gives a prompt-reflection fraction of 0.25 of the incident
+ions).  With {impact sheath} the thermal part is a single 2 Ti speed
+along the field line and the Chankin sheath drop is added to the
+normal motion, which gives a more grazing incidence (0.32 here).  Each ion
+is handed to the surface/pwi lottery before it moves: a {T} channel
+reflects it as a fast atom with the BCA energy and angle, an {A}
+channel re-emits it thermally as atom or molecule with the recycling
+coefficient of the table (so {R} of this fix is not used), {S}
+channels sputter the wall material, and retained ions are removed.
+Without {pwi} the fast (BCA) reflection channel is not part of this
+fix.  The particles created by this fix pass through the surface
+collision and reaction models assigned to the element, so they are
+tallied like other emitted particles.
 
 At initialization the fix prints, once, the number of emission tasks
 and the global Bohm-flux rate it will use.  Emission tasks are

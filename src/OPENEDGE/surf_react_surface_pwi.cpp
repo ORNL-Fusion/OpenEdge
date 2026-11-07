@@ -1090,6 +1090,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
         p_this = Reflection::R_N_interp(tv, E_in_eV, theta_in_deg);
         if (r->mat_isp >= 0) p_this *= mat_conc(isurf, r->mat_isp);
       }
+      p_this *= r->tscale;   // `scale f`: prompt reflection inside a recycling coefficient
     } else {
       p_this = r->prob;
     }
@@ -1170,7 +1171,7 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
         }
       case ABSORB_REEMIT:
         {
-          // EIRENE-style stochastic recycling. Reactant has already been
+          // Stochastic recycling. Reactant has already been
           // absorbed; we now roll for: atomic re-emission, molecular
           // re-emission, or retained (pumped).
           //
@@ -1197,9 +1198,17 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
             R_rec = r->energy[0];
           }
           double f_mol = r->energy[1];
-          int sp_atom = ip->ispecies;    // same as reactant
-          int sp_mol  = r->products[0];  // the named product (may == reactant)
+          // returning species: molecule = first product; atom = second
+          // product if given, else the reactant for a neutral, else the
+          // first product (an ion never comes back as itself)
+          const bool ion_in = (particle->species[ip->ispecies].charge != 0.0);
+          int sp_mol  = r->products[0];
+          int sp_atom = (r->nproduct >= 2) ? r->products[1]
+                      : (ion_in ? sp_mol : ip->ispecies);
           bool has_mol_channel = (sp_mol != sp_atom);
+          if (ion_in && r->nproduct < 2 && f_mol > 0.0 && f_mol < 1.0)
+            error->one(FLERR, "surface/pwi: ion absorb/re-emit with a molecular "
+                              "fraction needs the atom product too, e.g. H+ --> H2 + H");
 
           double u = random->uniform();
           double p_atom, p_mol;
@@ -2055,10 +2064,10 @@ void SurfReactSurfacePWI::readfile(char *fname)
       if (r->nreactant != 1 || r->nproduct != 1)
         error->all(FLERR, "TRIM reflect recycle reaction needs 1 reactant, 1 product");
     } else if (r->type == ABSORB_REEMIT) {
-      if (r->nreactant != 1 || r->nproduct != 1)
-        error->all(FLERR, "Absorb/re-emit recycle reaction needs 1 reactant, 1 product "
-                          "(product = returning species; same as reactant for simple "
-                          "return, or D2 if atomic-to-molecular conversion allowed)");
+      if (r->nreactant != 1 || (r->nproduct != 1 && r->nproduct != 2))
+        error->all(FLERR, "Absorb/re-emit recycle reaction needs 1 reactant and 1 or 2 "
+                          "products (molecule [+ atom]; an ion reactant returns as the "
+                          "named products, never as itself)");
     } else if (r->type == SPUTTER) {
       if (r->nreactant != 1 || r->nproduct != 1)
         error->all(FLERR, "Sputter recycle reaction needs 1 reactant, 1 product "
@@ -2083,6 +2092,7 @@ void SurfReactSurfacePWI::readfile(char *fname)
       }
       r->trim_table = it;
       r->prob = 0.0;
+      r->tscale = 1.0;
 
       // optional keywords:
       //   mat <species>   linear concentration weighting of the pure R
@@ -2112,13 +2122,22 @@ void SurfReactSurfacePWI::readfile(char *fname)
           if (r->refl_tbl < 0 || sput_tables[r->refl_tbl].NC <= 0)
             error->all(FLERR, "T reaction rtable needs a 3D R(E,theta,c) "
                        "table in processes.h5");
+        } else if (strcmp(word,"scale") == 0) {
+          // scale f: probability f*R_N, e.g. f = R to put the prompt
+          // reflection inside a recycling coefficient R
+          // (list `R 1-R` before it and `A 1.0 f_mol` after it)
+          word = strtok(NULL, " \t\n");
+          if (!word) error->all(FLERR, "Missing value after 'scale' in T reaction");
+          r->tscale = input->numeric(FLERR, word);
+          if (r->tscale < 0.0 || r->tscale > 1.0)
+            error->all(FLERR, "T reaction scale must be in [0,1]");
         } else {
-          error->all(FLERR, "Unknown keyword in T reaction (expect mat/conc/rtable)");
+          error->all(FLERR, "Unknown keyword in T reaction (expect mat/conc/rtable/scale)");
         }
       }
 
     } else if (r->type == ABSORB_REEMIT) {
-      // EIRENE-style absorb-and-re-emit: catch-all after TRIM.
+      // Absorb-and-re-emit: catch-all after TRIM.
       // Syntax: A <R> [<f_mol>]
       //   R     = recycling coefficient (0..1). Fraction R returned, (1-R) pumped.
       //   f_mol = fraction of returned atoms that come back in molecular form
@@ -2231,7 +2250,7 @@ void SurfReactSurfacePWI::readfile(char *fname)
 
 /* ----------------------------------------------------------------------
    Load a reflection table from trim_dir/<name>.h5, or return cached.
-   HDF5 schema matches database/surface/trim/*.h5 (EIRENE rdtrim.f-style,
+   HDF5 schema matches database/surface/trim/*.h5 (rdtrim-style,
    but any BCA-generated file on the same (E, theta, q) grid layout works).
    Returns index into trim_tables, or -1 on failure.
 ------------------------------------------------------------------------- */
@@ -2437,7 +2456,7 @@ void SurfReactSurfacePWI::sample_thermal_flux_velocity(double *v,
    Build outgoing velocity from TRIM sample_reflection output.
    v_in is the incident velocity; norm is the outward surface normal.
    cos_polar is w.r.t. the outward normal; cos_azim is w.r.t. the
-   plane containing (norm, v_in) -- this is EIRENE's convention.
+   plane containing (norm, v_in), the TRIM-table convention.
 ------------------------------------------------------------------------- */
 
 void SurfReactSurfacePWI::sample_reflected_velocity(double *v_out,
@@ -2456,8 +2475,8 @@ void SurfReactSurfacePWI::sample_reflected_velocity(double *v_out,
 
   // build orthonormal basis (n_hat, t_in_hat, b_hat) where t_in_hat is
   // the tangential component of -v_in (so cos_azim = 1 -> forward-scatter
-  // direction along the incident projection). This matches how EIRENE
-  // labels its azimuthal quantile axis.
+  // direction along the incident projection), matching the azimuthal
+  // quantile axis of the TRIM tables.
   double nlen = sqrt(norm[0]*norm[0] + norm[1]*norm[1] + norm[2]*norm[2]);
   double nh[3] = {norm[0]/nlen, norm[1]/nlen, norm[2]/nlen};
   double vn = v_in[0]*nh[0] + v_in[1]*nh[1] + v_in[2]*nh[2];

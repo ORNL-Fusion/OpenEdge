@@ -61,6 +61,22 @@ class FixSurfaceEmitRecycle : public FixEmit {
   std::vector<double>      twall_species_values;
   std::vector<double>      twall_by_species;
 
+  // /wall_flux/ samples of the background (plasma-code wall tallies) are
+  // used in place of the Bohm reconstruction when present
+  double wall_flux_cutoff;   // search radius [m] for the samples
+  enum { IMPACT_SHEATH, IMPACT_MAXWELL };
+  int    impact_model;       // ion velocity model handed to the pwi lottery
+  int    wall_flux_ispec;    // column of /wall_flux/gamma_i (0 = main ion)
+
+  // optional: hand every recycled ion to a surf_react surface/pwi (TRIM
+  // reflection, absorb/re-emit with R, additive sputtering) instead of the
+  // thermal mixture emission; the mixture then names the incident ion
+  char  *pwi_id;
+  class SurfReactSurfacePWI *pwi;
+  int    pwi_species;        // global species index of the incident ion
+  double ion_charge;         // its charge state, for the sheath drop
+  double impact_energy_eV(double te_eV, double ti_eV) const;
+
   // copies of data from other classes
   int dimension, nspecies;
   double fnum;
@@ -89,6 +105,9 @@ class FixSurfaceEmitRecycle : public FixEmit {
                                  // to the same plasma_cell), for
                                  // area-weighted distribution of the
                                  // per-cell B2 wall face area budget.
+    double wf_gamma, wf_te, wf_ti; // cached /wall_flux/ samples at the midpoint
+    int    wf_generation;        // FixBackground generation of the cache
+    double te_imp, ti_imp;       // Te, Ti used for the impact energy (pwi)
   };
 
   Task *tasks;

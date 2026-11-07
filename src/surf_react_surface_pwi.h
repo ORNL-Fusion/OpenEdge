@@ -1,7 +1,7 @@
 /* ----------------------------------------------------------------------
     OpenEdge: Plasma-wall interaction (PWI) surface reaction model.
 
-    Unified handler for EIRENE-style wall recycling: TRIM reflection,
+    Unified handler for wall recycling: TRIM reflection,
     fixed-fraction re-emission, absorb-and-re-emit with recycling
     coefficient R and molecular fraction f_mol, and the simpler
     Franck-Condon / thermal exchange channels. Species- and material-
@@ -62,6 +62,7 @@ class SurfReactSurfacePWI : public SurfReact {
     double prob;                   // fixed recycling probability (0 to 1); ignored for TRIM_REFLECT
     double *energy;                // return energy per product [eV]; ignored for TRIM_REFLECT
     int trim_table;                // index into trim_tables, -1 if not a TRIM reaction
+    double tscale;                 // T channel: multiplier of R_N (`scale f`, default 1)
     // SPUTTER channel: additive Eckstein yield Y_WW(E,theta), emits the
     // product species with a Thompson energy. Not part of the reflect/absorb
     // first-to-fire lottery.
@@ -225,7 +226,7 @@ class SurfReactSurfacePWI : public SurfReact {
   KKHostOnly<std::vector<class Compute *>> imp_compute;
 
   // reflection-table support (shared format with surf_react pmi; tables
-  // from database/surface/trim/*.h5, originally EIRENE TRIM but any
+  // from database/surface/trim/*.h5, TRIM-derived but any
   // BCA-derived HDF5 with the same schema works).
   std::string trim_dir;
   KKHostOnly<std::vector<Reflection::Table>> trim_tables;
