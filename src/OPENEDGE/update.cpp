@@ -1043,11 +1043,24 @@ void Update::run(int nsteps)
       timer->stamp(TIME_MODIFY);
     }
 
-    // all output
+    // all output; a fix may request an early exit (fix volume/chem/adas
+    // stop_on_exhaust): honoured at the first step where every dump writes
 
+    bool dumps_done = true;
+    for (int idump = 0; idump < output->ndump; idump++)
+      if (output->next_dump[idump] != ntimestep) dumps_done = false;
     if (ntimestep == output->next) {
       output->write(ntimestep);
       timer->stamp(TIME_OUTPUT);
+    }
+    if (early_exit_requested && dumps_done) {
+      early_exit_requested = 0;
+      nsteps = i;
+      if (comm->me == 0 && screen)
+        fprintf(screen, "Early exit requested by a fix at step " BIGINT_FORMAT "\n", ntimestep);
+      if (comm->me == 0 && logfile)
+        fprintf(logfile, "Early exit requested by a fix at step " BIGINT_FORMAT "\n", ntimestep);
+      break;
     }
   }
 
@@ -1839,6 +1852,50 @@ template < int DIM, int SURF, int OPT > void Update::move()
               v[1] = -v[1];
             } else {
               v[0] = -v[0];
+            }
+            // Reversing v_R alone does not move a parallel-only guiding-centre
+            // marker (it ignores v_R), so a marker that is already inside
+            // would be rejected on every step and stay frozen forever
+            // (2026-10-22 audit: ~24 % of markers frozen at psi 0.935-0.939
+            // after 5 ms). Push it back outside the contour along grad(psi),
+            // represented as a chord pseudo-velocity like a reflection.
+            {
+              const int ncoord = (DIM == 3) ? 3 : 2;
+              const double h = 1.0e-4;
+              double g[3] = {0.0, 0.0, 0.0}, g2 = 0.0;
+              for (int k = 0; k < ncoord; k++) {
+                double xp[3] = {x[0], x[1], x[2]}, xm[3] = {x[0], x[1], x[2]};
+                xp[k] += h; xm[k] -= h;
+                g[k] = (psi_reflect_fix->psi_norm_at_sparta(xp) -
+                        psi_reflect_fix->psi_norm_at_sparta(xm)) / (2.0*h);
+                g2 += g[k]*g[k];
+              }
+              if (g2 > 0.0 && dtremain > 0.0) {
+                const double psi0 = psi_reflect_fix->psi_norm_at_sparta(x);
+                double target[3] = {x[0], x[1], x[2]};
+                double dpsi = (psi_reflect_threshold - psi0) + 1.0e-6;
+                int ok = 0;
+                for (int iter = 0; iter < 12; iter++) {
+                  for (int k = 0; k < ncoord; k++)
+                    target[k] = x[k] + dpsi*g[k]/g2;
+                  if (psi_reflect_fix->psi_norm_at_sparta(target) >=
+                      psi_reflect_threshold) { ok = 1; break; }
+                  dpsi *= 2.0;
+                }
+                if (ok) {
+                  double pseudo[3] = {0.0, 0.0, 0.0};
+                  for (int k = 0; k < ncoord; k++) {
+                    const double veff = (target[k]-x[k])/dtremain;
+                    pseudo[k] = veff - v[k];
+                    v[k] = veff;
+                    xnew[k] = target[k];
+                  }
+                  vkick0 = pseudo[0];
+                  vkick1 = pseudo[1];
+                  vkick2 = (DIM == 3) ? pseudo[2] : 0.0;
+                  has_kick = 1;
+                }
+              }
             }
             psi_reflect_fix->tally_inside_start(particles[i].ispecies);
             pusher->invalidate_gc(i, Pusher::GC_INVAL_BOUNDARY);
