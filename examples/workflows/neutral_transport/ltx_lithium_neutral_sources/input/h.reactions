@@ -1,0 +1,48 @@
+# Volumetric reactions for H/H2/H+ neutral transport (ADAS h rates, Janev H2 dissociation)
+# H ionization (ADAS SCD, Z=1)
+H --> H+
+I A 1.0 0.0 0.0 0.0 0.0
+
+# H+ recombination (ADAS ACD, Z=1)
+H+ --> H
+R A 1.0 0.0 0.0 0.0 0.0
+
+# Ion-side CX: kinetic H+ loses charge to background H (EIRENE-style
+# ion-to-neutral conversion). Inactive in Mode A since kinetic H+ is
+# deleted on ionization.
+H+ --> H
+E A 1.0 0.0 0.0 0.0 0.0
+
+# Neutral-side CX: kinetic H exchanges with background H+ plasma.
+# Species unchanged; velocity resampled at local Ti. This is the
+# EIRENE-dominant CX channel for puff neutrals in Mode A.
+H --> H
+E A 1.0 0.0 0.0 0.0 0.0
+
+# Molecular chain = EIRENE AMJUEL-level-1 cards (HYDHEL H.2 rate fits, Te in eV;
+# fc = Franck-Condon energy per heavy product, eel = electron energy loss per event).
+# A charged product not transported by the fix (H+) is tallied as a bulk-ion source.
+
+# H2 dissociation (2.2.5): H + H, 3 eV each, -10.5 eV electrons
+H2 --> H + H
+D J -2.787217511174e+01 1.052252660075e+01 -4.973212347860e+00 1.451198183114e+00 -3.062790554644e-01 4.433379509258e-02 -4.096344172875e-03 2.159670289222e-04 -4.928545325189e-06 fc 3.0 eel 10.5
+
+# H2 ionization (2.2.9): H2+ kept as a kinetic test ion, -15.4 eV electrons
+H2 --> H2+
+D J -3.568640293666e+01 1.733468989961e+01 -7.767469363538e+00 2.211579405415e+00 -4.169840174384e-01 5.088289820867e-02 -3.832737518325e-03 1.612863120371e-04 -2.893391904431e-06 fc 0.0 eel 15.4
+
+# H2 dissociative ionization (2.2.10): H + H+, 5 eV each, -25 eV electrons
+H2 --> H + H+
+D J -3.834597006782e+01 1.426322356722e+01 -5.826468569506e+00 1.727940947913e+00 -3.598120866343e-01 4.822199350494e-02 -3.909402993006e-03 1.738776657690e-04 -3.252844486351e-06 fc 5.0 eel 25.0
+
+# H2+ dissociation (2.2.12): H + H+, 4.3 eV each, -10.5 eV electrons
+H2+ --> H + H+
+D J -1.781416067709e+01 2.277799785711e+00 -1.266868411626e+00 4.296170447419e-01 -9.609908013189e-02 1.387958040699e-02 -1.231349039470e-03 6.042383126281e-05 -1.247521040900e-06 fc 4.3 eel 10.5
+
+# H2+ dissociative ionization (2.2.11): H+ + H+, 0.25 eV each, -15.5 eV electrons
+H2+ --> H+ + H+
+D J -3.746192301092e+01 1.559355031108e+01 -6.693238367093e+00 1.981700292134e+00 -4.044820889297e-01 5.352391623039e-02 -4.317451841436e-03 1.918499873454e-04 -3.591779705419e-06 fc 0.25 eel 15.5
+
+# H2+ dissociative recombination (2.2.14): H + H (EIRENE takes energies from AMJUEL H.8; 3 eV, 0 used here)
+H2+ --> H + H
+D J -1.670435653561e+01 -6.035644995682e-01 -1.942745783445e-08 -2.005952284492e-07 2.962996104431e-08 2.134293274971e-08 -6.353973401838e-09 6.152557460831e-10 -2.025361858319e-11 fc 3.0 eel 0.0

@@ -1,0 +1,7 @@
+# data: SOLEDGE3X source files and the converted background are rebuilt by scripts/build_background.sh
+input/s3x/
+input/plasma_ltx.h5
+output/
+log.*
+notebooks/*.ipynb
+notebooks/.ipynb_checkpoints/

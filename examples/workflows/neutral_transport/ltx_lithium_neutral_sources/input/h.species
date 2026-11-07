@@ -1,0 +1,6 @@
+# hydrogen for the recycling strata: molecule, atom, main ion
+# ID  Molwt  Molmass  rotDOF  RotRel  vibDOF  VibRel  VibTemp  specwt  charge
+H2    2.016   3.347e-27  2  1.0  2  1.0  6332.0  1.0  0.0
+H     1.008   1.674e-27  0  0.0  0  0.0  0.0     1.0  0.0
+H+    1.008   1.673e-27  0  0.0  0  0.0  0.0     1.0  1.0
+H2+   2.016   3.346e-27  2  1.0  2  1.0  6332.0  1.0  1.0

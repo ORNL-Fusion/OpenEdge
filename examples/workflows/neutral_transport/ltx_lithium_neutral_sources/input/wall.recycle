@@ -1,0 +1,48 @@
+# Li wall of LTX-beta as in the S3X-EIRENE run. EIRENE semantics for the
+# recycling coefficient R = 0.5 (S3X eirene_coupling.txt): prompt TRIM
+# reflection with the unscaled R_N(E,theta) of EIRENE's H_on_Li_1.00 table
+# (processes.h5 /surface/reflection/h_on_li), then a fraction 1-R retained,
+# and the remainder R - R_N returned thermally at the wall temperature, 95 %
+# as H2. The lottery of surf_react surface/pwi uses absolute cumulative
+# probabilities, so the order T, R, A gives a total return of max(R_N, R),
+# atoms R_N and molecules R - R_N. The S3X balance confirms it: of the 0.5 x
+# 6.34e20 /s returned, 45 % come back as fast atoms (R_N ~ 0.22 at ~100 eV).
+# Li sputtering by the H atoms that hit the wall is additive (S channel).
+
+# H+ from the plasma (handed over by fix surface/emit/recycle ... pwi)
+H+ --> H
+T h_on_li
+
+H+ --> NULL
+R 0.5
+
+H+ --> H2 + H
+A 1.0 0.95
+
+# H atoms: same pipeline, plus physical sputtering of the Li wall
+H --> H
+T h_on_li
+
+H --> NULL
+R 0.5
+
+H --> H2
+A 1.0 0.95
+
+H --> Li
+S H_on_Li
+
+# H2: no molecular reflection table, half retained, half returned as H2
+H2 --> NULL
+R 0.5
+
+H2 --> H2
+A 1.0
+
+# H2+ test ions neutralise as thermal H2
+H2+ --> H2
+A 1.0
+
+# Li atoms that come back to the wall stick
+Li --> Li
+A 0.0

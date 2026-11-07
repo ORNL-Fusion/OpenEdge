@@ -1,0 +1,104 @@
+# LTX-beta: neutral sources on the SOLEDGE3X plasma, computed the way a coupled
+# neutral code does it. One batch of every source is emitted at step 1 and
+# followed until it is gone; the chem fixes accumulate the steady-state source
+# moments and densities per cell (units flight), one dump at the end.
+#
+#   Li: H+ wall flux x Bohdansky yield, Thompson energies (cerosionLi -> femitLi)
+#   H : H+ wall flux recycled through the Li wall (TRIM reflection, thermal
+#       re-emission as H2, R = 0.5), H2 puff, ionization / CX / molecular chain
+#
+#   ./scripts/build_background.sh                      # input/plasma_ltx.h5, input/ltx_wall_axi.surf
+#   mpirun -np 4 ~/build_oe/src/spa_mac_mpi -in in.openedge
+#   python scripts/export_sources.py && python scripts/build_notebook.py --execute
+
+variable dt        index 2.0e-7      # Li ionizes within a few us of the wall
+variable nbatch    index 200000      # Li trajectories in the batch
+variable fnum_h    index 1.0e9       # H particles per macroparticle (~1.4e5 recycled H+ per batch)
+variable nflight   index 8000        # upper bound on the flight; the run stops once the batch is exhausted
+variable nout      index 100         # output cadence (steps); the final dump is the steady-state source
+variable nexhaust  index 10          # stop at the next output when fewer batch particles are left
+variable puff      index 6.1e20      # H2 puff [atoms/s]; 7.0e20 nominal, 13 % of which the reference run retains at the puff element
+variable Twall     index 500.0       # Li wall temperature [K]
+variable Es_Li     index 1.67        # Li surface binding energy [eV], Thompson spectrum
+variable mH        index 1.00794
+variable rough     index 89          # roughness_dm 89: yields at normal incidence
+variable outdir    index output
+
+shell mkdir ${outdir}
+
+# ---- domain: x = Z, y = R; wall spans R 0.13-0.67 m, Z +-0.375 m ------------
+seed        12345
+dimension   2
+boundary    o ao p
+global      gridcut 0.0 comm/sort no fnum ${fnum_h}
+timestep    ${dt}
+create_box  -0.40 0.40  0.0 0.70  -0.05 0.05
+create_grid 160 140 1
+balance_grid rcb cell
+
+# ---- species ----------------------------------------------------------------
+species     input/atoms.species Li Li+ Li2+ Li3+
+species     input/h.species H2 H H+ H2+
+mixture     livapor Li frac 1.0
+mixture     hion    H+ frac 1.0
+mixture     puffH2  H2 frac 1.0 temp ${Twall}
+mixture     h2ion   H2+ frac 1.0
+
+# ---- wall: SOLEDGE3X contour; pump segments at the bottom; puff at the inboard midplane
+read_surf   input/ltx_wall_axi.surf group wall particle check
+region      rpump block -0.385 -0.360 0.300 0.390 INF INF
+region      rpuff block -0.0115 0.0115 0.125 0.1335 INF INF
+group       pump    surf region rpump center
+group       puffgrp surf region rpuff center
+surf_collide wallColl diffuse ${Twall} 1.0
+surf_react   wallPWI surface/pwi input/wall.recycle twall ${Twall} roughness_dm ${rough}
+surf_modify  wall collide wallColl react wallPWI
+surf_collide pumpColl partial_recycle ${Twall} 1.0 r 0.95 return_species H2
+surf_modify  pump collide pumpColl react none
+adapt_grid   all refine surf wall 0.001 maxlevel 2 cells 2 2 1
+balance_grid rcb cell
+
+# ---- plasma background and particle motion ----------------------------------
+fix     pd    background file input/plasma_ltx.h5 static yes
+fix     fcore reflect/psi background pd psi_norm 0.11 action absorb     # core boundary of the plasma mesh
+# no ion is pushed here: the pusher line only names the plasma the particles
+# sample (Te, ne, Ti, flow, B per particle for the chemistry); H2+ flies
+# ballistically. No sheath model: with one, the cached ne of every particle
+# within the sheath extent is Boltzmann-depleted, neutrals included, which the
+# reference neutral code does not do (-1.3 % Li, -50 W Q_i here).
+global  pusher plasma pd skip h2ion
+fix     fpw   particle/weight
+
+# ---- sources -----------------------------------------------------------------
+# Li erosion by the H+ wall flux: 1 erosion flux [Li/m^2/s], 2 erosion rate [Li/s],
+# 3 H+ flux [m^-2 s^-1], 4 H+ impact energy [eV], 5 yield
+compute cerosionLi surface/physical/sputter wall background pd &
+        target Li projectiles H mass_amu ${mH} projectile_slots 1 1 static yes iead none roughness_dm ${rough} &
+        erosion_flux erosion_rate nflux_species 1 incident_energy_species 1 sputter_yield_species 1
+variable npuff equal 0.5*v_puff*v_dt/v_fnum_h
+fix femitLi   surface/emit/source  livapor wall cerosionLi perspecies no nlaunch_total ${nbatch} model thompson ${Es_Li} emax 30 nevery 1
+fix frecycleH surface/emit/recycle hion wall pd mass ${mH} pwi wallPWI nevery 1
+fix fpuffH2   surface/emit/puff    puffH2 puffgrp n ${npuff} perspecies no normal no nevery 1
+
+# ---- volume chemistry = the neutral sources: columns 1-6 Sp Sm_x Sm_y Sm_z Qe Qi,
+# then the density of each source species (Li | H H2 H2+)
+fix fsourceLi volume/chem/adas 1 Li input/li.reactions mode neutral source_species Li units flight
+# the hydrogen outlives the lithium: it decides when the flight is over
+fix fsourceH  volume/chem/adas 1 H  input/h.reactions  mode neutral source_species H H2 H2+ &
+              units flight stop_on_exhaust yes exhaust_threshold ${nexhaust}
+fix fbal balance 1000 1.1 rcb part
+
+# ---- output -----------------------------------------------------------------
+dump dLi grid all ${nout} ${outdir}/source_Li.* id xc yc xlo ylo xhi yhi vol f_fsourceLi[*]
+dump dH  grid all ${nout} ${outdir}/source_H.*  id xc yc xlo ylo xhi yhi vol f_fsourceH[*]
+dump dW  surf wall ${nout} ${outdir}/wall.*     id v1x v1y v2x v2y c_cerosionLi[*]
+compute cLi count Li
+compute cH  count H H2 H2+
+stats       ${nout}
+stats_style step cpu np c_cLi c_cH[1] c_cH[2] c_cH[3]
+
+run 1
+unfix femitLi
+unfix frecycleH
+unfix fpuffH2
+run ${nflight}

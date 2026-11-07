@@ -1,0 +1,6 @@
+# atomic Li vapor + Li ions (charge states to 3+)
+# ID Molwt(amu) Molmass(kg) RotDOF RotRel VibDOF VibRel VibTemp(K) speciesWt charge
+Li     6.94    1.15225e-26     0  0.0  0  0.0  0.0  1.0  0.0
+Li+    6.94    1.15225e-26     0  0.0  0  0.0  0.0  1.0  1.0
+Li2+   6.94    1.15225e-26     0  0.0  0  0.0  0.0  1.0  2.0
+Li3+   6.94    1.15225e-26     0  0.0  0  0.0  0.0  1.0  3.0
