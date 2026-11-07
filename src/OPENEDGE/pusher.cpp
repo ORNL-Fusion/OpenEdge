@@ -2003,6 +2003,16 @@ void Pusher::push_hybrid_3d_impl(int i, int icell, double dt,
 {
   if (mass <= 0.0) error->all(FLERR, "Hybrid pusher requires positive particle mass");
 
+  // A ballistic (non-GC) move makes x a physical position again: clear the
+  // GC mode so a later rebuild (e.g. re-ionisation of a recombined GCA ion)
+  // applies the first-order gyro-offset instead of treating x as the GC.
+  auto mark_position_physical = [&]() {
+    if (gca_mode_custom >= 0)
+      particle->edvec[particle->ewhich[gca_mode_custom]][i] = 0.0;
+    if (gca_valid_custom >= 0)
+      particle->edvec[particle->ewhich[gca_valid_custom]][i] = 0.0;
+  };
+
   // skip mixture (dust grains): pure advection even when charged — their
   // forces (gravity, drag, ablation) live in the grain fixes
   if (pusher_skip_flag &&
@@ -2010,6 +2020,7 @@ void Pusher::push_hybrid_3d_impl(int i, int icell, double dt,
     xnew[0] = x[0] + v[0] * dt;
     xnew[1] = x[1] + v[1] * dt;
     xnew[2] = x[2] + v[2] * dt;
+    mark_position_physical();
     return;
   }
 
@@ -2018,6 +2029,7 @@ void Pusher::push_hybrid_3d_impl(int i, int icell, double dt,
     xnew[0] = x[0] + v[0] * dt;
     xnew[1] = x[1] + v[1] * dt;
     xnew[2] = x[2] + v[2] * dt;
+    mark_position_physical();
     return;
   }
 
@@ -2227,7 +2239,15 @@ void Pusher::push_hybrid_3d_impl(int i, int icell, double dt,
       gca.mu = (gca_mu_vec[i] > 0.0) ? gca_mu_vec[i] : 0.0;
     } else {
       const double vinit[3] = {v[0], v[1], lh2d ? -v[2] : v[2]};
-      gca = GCAPusher::init_from_particle(x, vinit, mass, qm, Fk.B);
+      // After a GC step the stored position already is the guiding centre
+      // (xnew = X); a reset of that state (boundary, chemistry, collision
+      // invalidation leaves gca_mode = 1) must not add the gyro-offset
+      // again. qm = 0 keeps X = x and still derives v_par and mu from the
+      // current velocity. Genuine full-orbit -> GCA transitions keep the
+      // first-order offset.
+      const bool x_is_gc = have_gca_state && gca_mode_vec[i] > 0.5;
+      gca = GCAPusher::init_from_particle(x, vinit, mass, x_is_gc ? 0.0 : qm,
+                                          Fk.B);
     }
 
     // GCA integration.
@@ -2954,6 +2974,9 @@ void Pusher::sheath_state_abort(const char *why, int i, int isub, int midx,
 void Pusher::push_boris_2d(int i, int icell, double dt, double *x, double *v,
                            double *xnew, double charge, double mass)
 {
+  // xnew is an output buffer (loop-local in the mover, uninitialised for the
+  // first particle of a step); seed it so the entry guard checks real state.
+  xnew[0] = x[0]; xnew[1] = x[1]; xnew[2] = x[2];
   validate_push_state("push_boris_2d (entry)", i, icell, dt, x, v, xnew, charge, mass);
   push_boris_2d_impl(i, icell, dt, x, v, xnew, charge, mass);
   validate_push_state("push_boris_2d (exit)", i, icell, dt, x, v, xnew, charge, mass);
@@ -2962,6 +2985,9 @@ void Pusher::push_boris_2d(int i, int icell, double dt, double *x, double *v,
 void Pusher::push_boris_3d(int i, int icell, double dt, double *x, double *v,
                            double *xnew, double charge, double mass)
 {
+  // xnew is an output buffer (loop-local in the mover, uninitialised for the
+  // first particle of a step); seed it so the entry guard checks real state.
+  xnew[0] = x[0]; xnew[1] = x[1]; xnew[2] = x[2];
   validate_push_state("push_boris_3d (entry)", i, icell, dt, x, v, xnew, charge, mass);
   push_boris_3d_impl(i, icell, dt, x, v, xnew, charge, mass);
   validate_push_state("push_boris_3d (exit)", i, icell, dt, x, v, xnew, charge, mass);
@@ -2970,6 +2996,9 @@ void Pusher::push_boris_3d(int i, int icell, double dt, double *x, double *v,
 void Pusher::push_hybrid_3d(int i, int icell, double dt, double *x, double *v,
                             double *xnew, double charge, double mass)
 {
+  // xnew is an output buffer (loop-local in the mover, uninitialised for the
+  // first particle of a step); seed it so the entry guard checks real state.
+  xnew[0] = x[0]; xnew[1] = x[1]; xnew[2] = x[2];
   validate_push_state("push_hybrid_3d (entry)", i, icell, dt, x, v, xnew, charge, mass);
   push_hybrid_3d_impl(i, icell, dt, x, v, xnew, charge, mass);
   validate_push_state("push_hybrid_3d (exit)", i, icell, dt, x, v, xnew, charge, mass);
