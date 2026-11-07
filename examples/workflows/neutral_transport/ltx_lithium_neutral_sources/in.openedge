@@ -21,7 +21,7 @@ variable puff      index 6.1e20      # H2 puff [atoms/s]; 7.0e20 nominal, 13 % o
 variable Twall     index 500.0       # Li wall temperature [K]
 variable Es_Li     index 1.67        # Li surface binding energy [eV], Thompson spectrum
 variable mH        index 1.00794
-variable rough     index 89          # roughness_dm 89: yields at normal incidence
+variable rough     index 89          # roughness_dm 89: bulk-ion erosion yield at normal incidence
 variable outdir    index output
 
 shell mkdir ${outdir}
@@ -51,7 +51,9 @@ region      rpuff block -0.0115 0.0115 0.125 0.1335 INF INF
 group       pump    surf region rpump center
 group       puffgrp surf region rpuff center
 surf_collide wallColl diffuse ${Twall} 1.0
-surf_react   wallPWI surface/pwi input/wall.recycle twall ${Twall} roughness_dm ${rough}
+# atoms sputter at their true incidence angle (roughness_dm 0); only the bulk-ion
+# erosion compute below uses the flux-averaged normal-incidence yield
+surf_react   wallPWI surface/pwi input/wall.recycle twall ${Twall} roughness_dm 0
 surf_modify  wall collide wallColl react wallPWI
 surf_collide pumpColl partial_recycle ${Twall} 1.0 r 0.95 return_species H2
 surf_modify  pump collide pumpColl react none

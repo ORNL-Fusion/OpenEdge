@@ -39,10 +39,11 @@ Results against the SOLEDGE3X-EIRENE tallies of the same plasma
 
 | quantity | OpenEdge | reference |
 |---|---|---|
-| H⁺ to the wall | 7.1e20 /s | 6.8e20 /s |
-| H⁺ source | 7.69e20 /s | 7.42e20 /s |
+| H⁺ to the wall | 6.83e20 /s | 6.83e20 /s |
+| H⁺ source | 7.60e20 /s | 7.42e20 /s |
 | H⁺ born via H₂⁺ | 2.65e20 /s | 2.64e20 /s |
-| Q_e(H) | −3.52 kW | −3.28 kW |
+| Q_e(H) | −3.49 kW | −3.28 kW |
 | Q_i(H) | −0.86 kW (± 10 W over seeds) | −0.87 kW |
-| Li eroded by H⁺ | 1.80e19 /s | 1.88e19 /s |
-| Li ionized | 2.04e19 /s | 2.38e19 /s (incl. 0.57e19 from atom sputtering) |
+| Li eroded by H⁺ | 1.73e19 /s | 1.88e19 /s |
+| Li eroded by H atoms | 0.60e19 /s | 0.57e19 /s |
+| Li ionized | 2.24e19 /s | 2.38e19 /s |
