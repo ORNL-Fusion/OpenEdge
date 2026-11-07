@@ -374,7 +374,7 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
   // constant ...` — the pcache picks it up automatically and the
   // sheath Boltzmann correction (when active) flows through.
 
-  // --- Optional Mode A (EIRENE-semantics) keywords ---
+  // --- Optional Mode A (neutral-transport semantics) keywords ---
   //   mode neutral                         -> delete particle on ionization
   //   source_species <sp1> [sp2] ...       -> species to count for exhaustion
   //   stop_on_exhaust yes|no               -> halt run when source species = 0
@@ -382,8 +382,8 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
     if (strcmp(arg[iarg], "mode") == 0) {
       if (iarg + 1 >= narg)
         error->all(FLERR, "fix volume/chem/adas: mode requires a value (kinetic|neutral)");
-      if (strcmp(arg[iarg+1], "neutral") == 0) eirene_mode = 1;
-      else if (strcmp(arg[iarg+1], "kinetic") == 0) eirene_mode = 0;
+      if (strcmp(arg[iarg+1], "neutral") == 0) neutral_mode = 1;
+      else if (strcmp(arg[iarg+1], "kinetic") == 0) neutral_mode = 0;
       else error->all(FLERR, "fix volume/chem/adas: unknown mode (use kinetic|neutral)");
       iarg += 2;
     } else if (strcmp(arg[iarg], "rate_cache") == 0) {
@@ -448,15 +448,21 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
       iarg += 2;
     } else if (strcmp(arg[iarg], "units") == 0) {
       if (iarg + 1 >= narg)
-        error->all(FLERR, "fix volume/chem/adas: units requires counts|rate|eirene");
+        error->all(FLERR, "fix volume/chem/adas: units requires counts|rate|flight|batch|batch_fix");
       if (strcmp(arg[iarg+1], "counts") == 0) {
         tally_units = TALLY_COUNTS;
         iarg += 2;
       } else if (strcmp(arg[iarg+1], "rate") == 0) {
         tally_units = TALLY_RATE;
         iarg += 2;
+      } else if (strcmp(arg[iarg+1], "flight") == 0) {
+        // single-flight batch: every event adds pweight/(V dt) and nothing is
+        // reset, so at the end of the flight the array is the steady-state
+        // source of one time step's emission; densities accumulate likewise
+        tally_units = TALLY_FLIGHT;
+        iarg += 2;
       } else if (strcmp(arg[iarg+1], "batch") == 0) {
-        // Batch (EIRENE-style MC): `units batch <N_trajectories> <R_puff>`
+        // Batch Monte Carlo: `units batch <N_trajectories> <R_puff>`
         if (iarg + 3 >= narg)
           error->all(FLERR, "fix volume/chem/adas: units batch requires N R_puff");
         batch_N      = atoi(arg[iarg+2]);
@@ -466,7 +472,7 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
         tally_units = TALLY_BATCH;
         iarg += 4;
       } else if (strcmp(arg[iarg+1], "batch_fix") == 0) {
-        // EIRENE-batch auto-scaled from a paired emit fix:
+        // Batch auto-scaled from a paired emit fix:
         //   `units batch_fix <emit_fix_id> <R_puff>`
         if (iarg + 3 >= narg)
           error->all(FLERR, "fix volume/chem/adas: units batch_fix requires <fix_id> R_puff");
@@ -537,12 +543,16 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
   // Per-grid source tally layout depends on `output` keyword:
   //   OUT_SUMMARY  (default): 6 cols {Sp, Sm_x, Sm_y, Sm_z, Qe, Qi},
   //                 signed plasma-frame moments, ready for fluid coupling.
-  //   OUT_DETAILED (diagnostic): 20 cols = {count, m vx, m vy, m vz, 0.5 m v^2}
-  //                 x {ioniz, recomb, CX, dissoc}, unsigned raw event tally
-  //                 (legacy layout for per-reaction debugging).
+  //   OUT_DETAILED (diagnostic): 28 cols = {count, m vx, m vy, m vz, 0.5 m v^2,
+  //                 Qi, Qe} x {ioniz, recomb, CX, dissoc}; the first five are
+  //                 unsigned raw event tallies, Qi/Qe the signed per-type
+  //                 plasma energy sources.
   // See docs/neutral_plasma_coupling/main.tex for per-reaction formulas.
+  // Trailing columns: the density of each source_species (m^-3), filled
+  // with units flight (accumulated over the flight) and zero otherwise.
   per_grid_flag      = 1;
-  size_per_grid_cols = (output_mode == OUT_SUMMARY) ? 6 : 20;
+  ncols_base         = (output_mode == OUT_SUMMARY) ? 6 : 28;
+  size_per_grid_cols = ncols_base + nsrc_species;
   per_grid_freq      = 1;     // tally is updated every step; dump_grid
                               //   does  (nevery % per_grid_freq)  so this
                               //   MUST be non-zero (SIGFPE otherwise).
@@ -932,7 +942,23 @@ for (int k = 0; k < nsrc_species; k++) {
   }
   source_species.push_back(sp);
 }
-if (stop_on_exhaust && source_species.empty() && eirene_mode && comm->me == 0) {
+// A charged dissociation product that this fix does not transport is the
+// bulk ion: tallied as a plasma source and not created as a particle.
+for (int i = 0; i < nlist; i++) {
+  OneReaction *r = &rlist[i];
+  for (int k = 0; k < r->nproduct; k++) {
+    r->bulkprod[k] = 0;
+    if (!r->active || r->type != DISSOCIATION) continue;
+    const int sp = r->products[k];
+    if (sp < 0 || particle->species[sp].charge <= 0.0) continue;
+    bool tracked = false;
+    for (int j = 0; j < (int) source_species.size(); j++)
+      if (source_species[j] == sp) tracked = true;
+    r->bulkprod[k] = tracked ? 0 : 1;
+  }
+}
+check_molecular_chain();
+if (stop_on_exhaust && source_species.empty() && neutral_mode && comm->me == 0) {
   error->warning(FLERR,
     "fix volume/chem/adas: stop_on_exhaust requested without source_species; "
     "run will rely on SPARTA's built-in nglobal==0 termination");
@@ -969,7 +995,7 @@ if (volume_source_id) {
     rec_product_isp.push_back(r->products[0]);
   }
   nrec_active = static_cast<int>(rec_ridx.size());
-  if (eirene_mode && nrec_active == 0 && chan_recombination && comm->me == 0) {
+  if (neutral_mode && nrec_active == 0 && chan_recombination && comm->me == 0) {
     error->warning(FLERR,
       "fix volume/chem/adas: volume_source set but no active recombination "
       "reaction found in the reactions file -- volume source is a no-op");
@@ -1214,7 +1240,7 @@ void FixVolumeChemAdas::end_of_step_no_average()
   // Adds raw events into array_grid before the RATE normalization below so
   // the same fnum/(vol*window) scaling applies. Spawned particles go onto
   // deferred_particles and get created by the existing add_particle loop.
-  if (eirene_mode && nrec_active > 0 &&
+  if (neutral_mode && nrec_active > 0 &&
       (volume_source_cidx >= 0 || volume_source_fidx >= 0)) {
     spawn_volume_recombination();
   }
@@ -1248,6 +1274,25 @@ void FixVolumeChemAdas::end_of_step_no_average()
     }
   }
 
+  // units flight: accumulate the density of each source species, sum over
+  // the flight of pweight/V = steady-state density of one step's emission
+  if (tally_units == TALLY_FLIGHT && !source_species.empty() && array_grid) {
+    const int np = particle->nlocal;
+    for (int i = 0; i < np; i++) {
+      const int sp = particles[i].ispecies;
+      int k = -1;
+      for (size_t s = 0; s < source_species.size(); s++)
+        if (source_species[s] == sp) { k = (int) s; break; }
+      if (k < 0) continue;
+      const int icell = particles[i].icell;
+      if (icell < 0 || icell >= maxgrid_src) continue;
+      const double vol = cinfo[icell].volume;
+      if (vol <= 0.0) continue;
+      const double w = (pweight_ewhich >= 0) ? particle->edvec[pweight_ewhich][i] : update->fnum;
+      tally_row(icell)[ncols_base + k] += w / vol;
+    }
+  }
+
   // Mode A: remove particles flagged for deletion on ionization.
   // Do this BEFORE spawning deferred (dissociation) products so the new
   // particles get stable indices at the end of the array.
@@ -1277,7 +1322,7 @@ void FixVolumeChemAdas::end_of_step_no_average()
   // Mode A: optional stop-when-exhausted across the global source-species pool.
   // Only required when non-source-species particles remain (e.g. impurities);
   // the pure-neutral case is already handled by Update::run's nglobal==0 break.
-  if (eirene_mode && stop_on_exhaust && !source_species.empty()) {
+  if (neutral_mode && stop_on_exhaust && !source_species.empty()) {
     bigint alive_local = 0;
     Particle::OnePart *pp = particle->particles;
     const int np = particle->nlocal;
@@ -1720,7 +1765,8 @@ void FixVolumeChemAdas::compute_species_lambdas(int isp, double Te_eV, double ne
                           rate_log10_cm3s, ReactionType::Recombination);
     } else if (r->type == EXCHANGE) {
       if (atomic_number == 1 && Ti_eV > 0.0) {
-        // HYDHEL H.3 3.1.8 (D-D+ resonant CX). Partner = D+ (~ne).
+        // HYDHEL H.3 3.1.8 (D-D+ resonant CX). Partner = D+ (~ne). Cell
+        // value at E_atom = 1.5 Ti; attempt() redoes it per particle.
         rate_log10_cm3s = log10_sigmav_cx_hh_cm3s(Ti_eV, 1.5 * Ti_eV);
       } else {
         // Impurity-H CX (ADAS CCD): partner is the NEUTRAL D atom, not
@@ -1809,6 +1855,20 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
     for (int i = 0; i < nchan; ++i) {
       lambda[i] = cached_lambda[i];
       ridx_map[i] = cached_ridx_map[i];
+    }
+    // hydrogen CX depends on the atom's own energy (the cell value was
+    // evaluated at 1.5 Ti): redo that channel for this particle
+    if (atomic_number == 1 && Ti_eV > 0.0) {
+      for (int i = 0; i < nchan; ++i) {
+        if (rlist[ridx_map[i]].type != EXCHANGE) continue;
+        const double m_atom = particle->species[isp].mass;
+        const double v2p = ip->v[0]*ip->v[0] + ip->v[1]*ip->v[1] + ip->v[2]*ip->v[2];
+        const double E_atom_eV = 0.5 * m_atom * v2p / 1.602176634e-19;
+        const double lam = computeReactionLambda(
+          log10_sigmav_cx_hh_cm3s(Ti_eV, E_atom_eV), dt_chem, ne_m3);
+        lambda_total += lam - lambda[i];
+        lambda[i] = lam;
+      }
     }
   } else {
     for (int i = 0; i < n && nchan < 16; ++i) {
@@ -1900,6 +1960,34 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
   tally_reactions[best_idx]++;
   nreact_one++;
 
+  // CX: draw the partner-ion velocity first so the tally below debits the
+  // ion fluid exactly what the neutral carries away (collision estimator).
+  double v_post[3] = {ip->v[0], ip->v[1], ip->v[2]};
+  const bool do_cx = (rchosen->type == EXCHANGE) && Ti_eV > 0.0;
+  if (do_cx)
+    sample_cx_velocity(rchosen->products[0], Ti_eV, vpar, bx, by, bz,
+                       ip->v, v_post);
+
+  // Dissociation: back-to-back Franck-Condon kick in the parent frame,
+  // drawn now so bulk-ion products can be tallied with their real velocity.
+  const bool do_dissoc = (rchosen->type == DISSOCIATION);
+  double vprod[2][3] = {{ip->v[0], ip->v[1], ip->v[2]},
+                        {ip->v[0], ip->v[1], ip->v[2]}};
+  if (do_dissoc && rchosen->efc > 0.0) {
+    const double eV_to_J_fc = 1.602176634e-19;
+    const double m0 = particle->species[rchosen->products[0]].mass;
+    const double v_FC = (m0 > 0.0)
+      ? std::sqrt(2.0 * rchosen->efc * eV_to_J_fc / m0) : 0.0;
+    const double costh = 1.0 - 2.0 * rng_adas->uniform();
+    const double sinth = std::sqrt(std::max(0.0, 1.0 - costh*costh));
+    const double phi   = MY_2PI * rng_adas->uniform();
+    const double kx = v_FC * sinth * std::cos(phi);
+    const double ky = v_FC * sinth * std::sin(phi);
+    const double kz = v_FC * costh;
+    vprod[0][0] += kx; vprod[0][1] += ky; vprod[0][2] += kz;
+    vprod[1][0] -= kx; vprod[1][1] -= ky; vprod[1][2] -= kz;
+  }
+
   // Per-cell source-term tally. Layout depends on output_mode; see
   // docs/neutral_plasma_coupling/main.tex for the full physics.
   //
@@ -1930,6 +2018,12 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
       const double vol = grid->cinfo[icell].volume;
       const double w   = batch_R_puff / static_cast<double>(batch_N_cached);
       scale = (vol > 0.0) ? (w / vol) : 0.0;
+    } else if (tally_units == TALLY_FLIGHT) {
+      const double vol = grid->cinfo[icell].volume;
+      double w = update->fnum;
+      if (pweight_ewhich >= 0 && ip_index >= 0)
+        w = particle->edvec[pweight_ewhich][ip_index];
+      scale = (vol > 0.0 && update->dt > 0.0) ? w / (vol * update->dt) : 0.0;
     } else if (tally_units == TALLY_RATE && pweight_ewhich >= 0 &&
                ip_index >= 0) {
       // Weight the event by the reacting particle's real-particle count
@@ -1947,27 +2041,9 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
     const double vy0 = ip->v[1];
     const double vz0 = ip->v[2];
 
-    if (output_mode == OUT_DETAILED) {
-      int rtype_off = -1;
-      switch (rchosen->type) {
-        case IONIZATION:     rtype_off = 0; break;
-        case RECOMBINATION:  rtype_off = 1; break;
-        case EXCHANGE:       rtype_off = 2; break;
-        case DISSOCIATION:   rtype_off = 3; break;
-      }
-      if (rtype_off >= 0) {
-        const double ke  = 0.5 * m * (vx0*vx0 + vy0*vy0 + vz0*vz0);
-        double *row = tally_row(icell);
-        row[rtype_off]         += scale;
-        row[4  + rtype_off]    += m * vx0 * scale;
-        row[8  + rtype_off]    += m * vy0 * scale;
-        row[12 + rtype_off]    += m * vz0 * scale;
-        row[16 + rtype_off]    += ke        * scale;
-      }
-    } else {
-      // OUT_SUMMARY: signed plasma-frame moments.
+    {
+      // signed plasma-frame moments (both output modes)
       constexpr double eV_to_J = 1.602176634e-19;
-      constexpr double E_diss_D2_eV = 4.478;    // bond energy, D2 -> 2D
 
       // Ion velocity approximation: fluid parallel flow v_par * b_hat.
       const double Bmag = std::sqrt(bx*bx + by*by + bz*bz);
@@ -2027,9 +2103,9 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
         dSmy = +m * vy0;
         dSmz = +m * vz0;
         dQe  = -E_eff_eV * eV_to_J;
-        // EIRENE convention: ionization adds the neutral's KE to the ion
+        // Ionization adds the neutral's KE to the ion
         // fluid. Thermalisation to local Ti happens later as a fluid
-        // process, not from EIRENE. No thermal subtraction here.
+        // process, not here. No thermal subtraction.
         dQi  = +0.5 * m * v2;
         break;
       }
@@ -2060,47 +2136,75 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
       }
       case EXCHANGE: {
         dSp  = 0.0;
-        dSmx = +m * (vx0 - vix);
-        dSmy = +m * (vy0 - viy);
-        dSmz = +m * (vz0 - viz);
+        // pre minus post velocity of the exchanged atom: consistent with
+        // the sigma*v-weighted sampling, not the analytic 3/2 Ti mean
+        const double vp2 = v_post[0]*v_post[0] + v_post[1]*v_post[1]
+                         + v_post[2]*v_post[2];
+        dSmx = +m * (vx0 - v_post[0]);
+        dSmy = +m * (vy0 - v_post[1]);
+        dSmz = +m * (vz0 - v_post[2]);
         dQe  = 0.0;
-        // Model 1 (analytical mean) for all CX channels: dQi = drift KE
-        // swap minus thermal 3/2 Ti. Previous Model 2 (sigma*v-sampled
-        // v_post) over-weighted high v_rel and inflated per-event |dQi|
-        // by ~2x at SOL temperatures.
-        dQi = +0.5 * m * (v2 - vi2) - 1.5 * Ti_J;
+        dQi  = +0.5 * m * (v2 - vp2);
         break;
       }
       case DISSOCIATION: {
-        // Only D2 / H2 / T2 currently supported (4.478 eV).  Other molecular
-        // species would need a species-specific bond energy; for now use this
-        // single constant and accept that any future addition requires a
-        // local edit here.  See LaTeX doc Sec. 4.4 for discussion.
+        // electron loss per event from the reaction file (default 4.478 eV);
+        // bulk-ion products enter the ion fluid with their full velocity
         dSp  = 0.0;
         dSmx = dSmy = dSmz = 0.0;
-        dQe  = -E_diss_D2_eV * eV_to_J;
+        dQe  = -rchosen->eel * eV_to_J;
         dQi  = 0.0;
+        for (int k = 0; k < rchosen->nproduct && k < 2; k++) {
+          if (!rchosen->bulkprod[k]) continue;
+          const double mk = particle->species[rchosen->products[k]].mass;
+          const double *vk = vprod[k];
+          dSp  += 1.0;
+          dSmx += mk * vk[0];
+          dSmy += mk * vk[1];
+          dSmz += mk * vk[2];
+          dQi  += 0.5 * mk * (vk[0]*vk[0] + vk[1]*vk[1] + vk[2]*vk[2]);
+        }
         break;
       }
       }
 
       double *row = tally_row(icell);
-      row[0] += dSp  * scale;
-      row[1] += dSmx * scale;
-      row[2] += dSmy * scale;
-      row[3] += dSmz * scale;
-      row[4] += dQe  * scale;
-      row[5] += dQi  * scale;
+      if (output_mode == OUT_SUMMARY) {
+        row[0] += dSp  * scale;
+        row[1] += dSmx * scale;
+        row[2] += dSmy * scale;
+        row[3] += dSmz * scale;
+        row[4] += dQe  * scale;
+        row[5] += dQi  * scale;
+      } else {
+        int rtype_off = -1;
+        switch (rchosen->type) {
+          case IONIZATION:     rtype_off = 0; break;
+          case RECOMBINATION:  rtype_off = 1; break;
+          case EXCHANGE:       rtype_off = 2; break;
+          case DISSOCIATION:   rtype_off = 3; break;
+        }
+        if (rtype_off >= 0) {
+          const double ke = 0.5 * m * v2;
+          row[rtype_off]      += scale;
+          row[4  + rtype_off] += m * vx0 * scale;
+          row[8  + rtype_off] += m * vy0 * scale;
+          row[12 + rtype_off] += m * vz0 * scale;
+          row[16 + rtype_off] += ke * scale;
+          row[20 + rtype_off] += dQi * scale;
+          row[24 + rtype_off] += dQe * scale;
+        }
+      }
     }
   }
 
-  // Mode A (EIRENE semantics): neutral is consumed on ionization.
+  // Mode A (neutral mode): neutral is consumed on ionization.
   // Defer deletion -- we are iterating the cell's linked list via Particle::next,
   // so actually removing ip now would invalidate that traversal. The caller
   // compresses the particle array after the cell loop completes.
   // NB: only IONIZATION terminates; CX/DISSOCIATION still run their species
   // swap + velocity re-sampling below so neutral-neutral chains keep working.
-  if (eirene_mode && rchosen->type == IONIZATION) {
+  if (neutral_mode && rchosen->type == IONIZATION) {
     dellist.push_back(ip_index);
     return 1;
   }
@@ -2111,79 +2215,91 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
   if (update->pusher)
     update->pusher->invalidate_gc(ip_index, Pusher::GC_INVAL_SPECIES);
 
-  // Assign first product
-  ip->ispecies = rchosen->products[0];
-
-  // CX products: shifted Maxwellian at local Ti + bulk flow (EIRENE-like).
-  // Dissociation products: isotropic Franck-Condon kick in the parent CM
-  // frame. The molecular potential releases ~3 eV/atom for D2 -> 2D,
-  // independent of plasma Ti; resampling dissociation at Ti would give
-  // products 3-10x too energetic in a hot SOL.
-  const double vpx_parent = ip->v[0];
-  const double vpy_parent = ip->v[1];
-  const double vpz_parent = ip->v[2];
-
-  double fc_kick_x = 0.0, fc_kick_y = 0.0, fc_kick_z = 0.0;
-  const bool do_cx     = (rchosen->type == EXCHANGE) && Ti_eV > 0.0;
-  const bool do_dissoc = (rchosen->type == DISSOCIATION);
-
   if (do_cx) {
-    const double kB = 1.380649e-23;
-    const double eV_to_J = 1.602176634e-19;
-    const double Ti_K = Ti_eV * eV_to_J / kB;
-    const double m_prod = particle->species[rchosen->products[0]].mass;
-    const double v_th = (m_prod > 0.0) ? std::sqrt(kB * Ti_K / m_prod) : 0.0;
+    ip->ispecies = rchosen->products[0];
+    ip->v[0] = v_post[0];
+    ip->v[1] = v_post[1];
+    ip->v[2] = v_post[2];
+    return 1;
+  }
 
-    const double Bmag = std::sqrt(bx*bx + by*by + bz*bz);
-    double vfx = 0.0, vfy = 0.0, vfz = 0.0;
-    if (Bmag > 1e-30) {
-      const double invB = 1.0 / Bmag;
-      vfx = vpar * bx * invB;
-      vfy = vpar * by * invB;
-      vfz = vpar * bz * invB;
+  if (do_dissoc) {
+    // keep the first transported product in ip, defer the second one,
+    // drop the particle when every product went to the bulk plasma
+    int keep = -1;
+    for (int k = 0; k < rchosen->nproduct && k < 2; k++) {
+      if (rchosen->bulkprod[k]) continue;
+      if (keep < 0) { keep = k; continue; }
+      DeferredParticle dp;
+      dp.x[0] = ip->x[0]; dp.x[1] = ip->x[1]; dp.x[2] = ip->x[2];
+      dp.v[0] = vprod[k][0]; dp.v[1] = vprod[k][1]; dp.v[2] = vprod[k][2];
+      dp.species = rchosen->products[k];
+      dp.icell = ip->icell;
+      deferred_particles.push_back(dp);
     }
+    if (keep < 0) {
+      dellist.push_back(ip_index);
+      return 1;
+    }
+    ip->ispecies = rchosen->products[keep];
+    ip->v[0] = vprod[keep][0];
+    ip->v[1] = vprod[keep][1];
+    ip->v[2] = vprod[keep][2];
+    return 1;
+  }
 
-    if (atomic_number == 1) {
-      // Hydrogen: cross-section-weighted post-CX velocity sampling. The
-      // bulk-ion partner velocity is rejection-sampled from the drifting
-      // Maxwellian weighted by sigma_CX(E_rel)*v_rel. Post-CX neutral
-      // takes the sampled ion velocity. SGCVMX is a conservative upper
-      // bound on sigma*v across the relevant E_rel range.
-      const double E_lab_factor = 0.5 * m_prod / eV_to_J;
-      constexpr double SGCVMX = 1.2e-13;
-      double v_post_x = 0.0, v_post_y = 0.0, v_post_z = 0.0;
-      int icount = 0;
-      while (true) {
-        const double u1 = std::max(rng_adas->uniform(), 1e-30);
-        const double u2 = rng_adas->uniform();
-        const double u3 = rng_adas->uniform();
-        const double u4 = std::max(rng_adas->uniform(), 1e-30);
-        const double g1 = std::sqrt(-2.0 * std::log(u1)) * std::cos(MY_2PI * u2);
-        const double g2 = std::sqrt(-2.0 * std::log(u1)) * std::sin(MY_2PI * u2);
-        const double g3 = std::sqrt(-2.0 * std::log(u4)) * std::cos(MY_2PI * u3);
-        v_post_x = vfx + v_th * g1;
-        v_post_y = vfy + v_th * g2;
-        v_post_z = vfz + v_th * g3;
+  // other types: species swap, velocity kept; a second product is a copy
+  ip->ispecies = rchosen->products[0];
+  if (rchosen->nproduct == 2) {
+    DeferredParticle dp;
+    dp.x[0] = ip->x[0]; dp.x[1] = ip->x[1]; dp.x[2] = ip->x[2];
+    dp.v[0] = ip->v[0]; dp.v[1] = ip->v[1]; dp.v[2] = ip->v[2];
+    dp.species = rchosen->products[1];
+    dp.icell = ip->icell;
+    deferred_particles.push_back(dp);
+  }
 
-        const double dvx = v_post_x - vpx_parent;
-        const double dvy = v_post_y - vpy_parent;
-        const double dvz = v_post_z - vpz_parent;
-        const double vrel_sq = dvx*dvx + dvy*dvy + dvz*dvz;
-        const double vrel    = std::sqrt(vrel_sq);
-        const double E_lab   = E_lab_factor * vrel_sq;
-        const double sigma   = sigma_cx_hh_m2(E_lab);
-        const double sgv     = sigma * vrel;
+  return 1;
+}
 
-        if (rng_adas->uniform() * SGCVMX < sgv) break;
-        if (++icount >= 500) break;
-      }
-      ip->v[0] = v_post_x;
-      ip->v[1] = v_post_y;
-      ip->v[2] = v_post_z;
-      // Per-event dQi tallied above via Model 1 in the EXCHANGE case.
-    } else {
-      // Impurity-H CX (Z>=2): simple shifted-Maxwellian draw. dQi is
-      // tallied in the per-event block above using the analytical mean.
+/* ----------------------------------------------------------------------
+   Post-CX neutral velocity = velocity of the bulk ion it exchanged with.
+   Hydrogen: rejection-sampled from the drifting Maxwellian weighted by
+   sigma_CX(E_rel)*v_rel. Impurities: plain shifted Maxwellian.
+------------------------------------------------------------------------- */
+
+void FixVolumeChemAdas::sample_cx_velocity(int sp_prod, double Ti_eV,
+                                           double vpar, double bx,
+                                           double by, double bz,
+                                           const double *v_parent,
+                                           double *v_post)
+{
+  const double kB = 1.380649e-23;
+  const double eV_to_J = 1.602176634e-19;
+  const double Ti_K = Ti_eV * eV_to_J / kB;
+  const double m_prod = particle->species[sp_prod].mass;
+  const double v_th = (m_prod > 0.0) ? std::sqrt(kB * Ti_K / m_prod) : 0.0;
+
+  const double Bmag = std::sqrt(bx*bx + by*by + bz*bz);
+  double vfx = 0.0, vfy = 0.0, vfz = 0.0;
+  if (Bmag > 1e-30) {
+    const double invB = 1.0 / Bmag;
+    vfx = vpar * bx * invB;
+    vfy = vpar * by * invB;
+    vfz = vpar * bz * invB;
+  }
+
+  if (atomic_number == 1) {
+    // Hydrogen: cross-section-weighted post-CX velocity sampling. The
+    // bulk-ion partner velocity is rejection-sampled from the drifting
+    // Maxwellian weighted by sigma_CX(E_rel)*v_rel. Post-CX neutral
+    // takes the sampled ion velocity. SGCVMX is a conservative upper
+    // bound on sigma*v across the relevant E_rel range.
+    const double E_lab_factor = 0.5 * m_prod / eV_to_J;
+    constexpr double SGCVMX = 1.2e-13;
+    double v_post_x = 0.0, v_post_y = 0.0, v_post_z = 0.0;
+    int icount = 0;
+    while (true) {
       const double u1 = std::max(rng_adas->uniform(), 1e-30);
       const double u2 = rng_adas->uniform();
       const double u3 = rng_adas->uniform();
@@ -2191,52 +2307,94 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
       const double g1 = std::sqrt(-2.0 * std::log(u1)) * std::cos(MY_2PI * u2);
       const double g2 = std::sqrt(-2.0 * std::log(u1)) * std::sin(MY_2PI * u2);
       const double g3 = std::sqrt(-2.0 * std::log(u4)) * std::cos(MY_2PI * u3);
-      ip->v[0] = vfx + v_th * g1;
-      ip->v[1] = vfy + v_th * g2;
-      ip->v[2] = vfz + v_th * g3;
-    }
-  }
-  else if (do_dissoc) {
-    const double E_FC_eV = 3.0;
-    const double eV_to_J = 1.602176634e-19;
-    const double m_prod = particle->species[rchosen->products[0]].mass;
-    const double v_FC = (m_prod > 0.0)
-                        ? std::sqrt(2.0 * E_FC_eV * eV_to_J / m_prod) : 0.0;
+      v_post_x = vfx + v_th * g1;
+      v_post_y = vfy + v_th * g2;
+      v_post_z = vfz + v_th * g3;
 
-    const double u1 = rng_adas->uniform();
+      const double dvx = v_post_x - v_parent[0];
+      const double dvy = v_post_y - v_parent[1];
+      const double dvz = v_post_z - v_parent[2];
+      const double vrel_sq = dvx*dvx + dvy*dvy + dvz*dvz;
+      const double vrel    = std::sqrt(vrel_sq);
+      const double E_lab   = E_lab_factor * vrel_sq;
+      const double sigma   = sigma_cx_hh_m2(E_lab);
+      const double sgv     = sigma * vrel;
+
+      if (rng_adas->uniform() * SGCVMX < sgv) break;
+      if (++icount >= 500) break;
+    }
+    v_post[0] = v_post_x;
+    v_post[1] = v_post_y;
+    v_post[2] = v_post_z;
+  } else {
+    // Impurity-H CX (Z>=2): plain shifted-Maxwellian draw.
+    const double u1 = std::max(rng_adas->uniform(), 1e-30);
     const double u2 = rng_adas->uniform();
-    const double costh = 1.0 - 2.0 * u1;
-    const double sinth = std::sqrt(std::max(0.0, 1.0 - costh*costh));
-    const double phi   = MY_2PI * u2;
-    fc_kick_x = v_FC * sinth * std::cos(phi);
-    fc_kick_y = v_FC * sinth * std::sin(phi);
-    fc_kick_z = v_FC * costh;
-
-    ip->v[0] = vpx_parent + fc_kick_x;
-    ip->v[1] = vpy_parent + fc_kick_y;
-    ip->v[2] = vpz_parent + fc_kick_z;
+    const double u3 = rng_adas->uniform();
+    const double u4 = std::max(rng_adas->uniform(), 1e-30);
+    const double g1 = std::sqrt(-2.0 * std::log(u1)) * std::cos(MY_2PI * u2);
+    const double g2 = std::sqrt(-2.0 * std::log(u1)) * std::sin(MY_2PI * u2);
+    const double g3 = std::sqrt(-2.0 * std::log(u4)) * std::cos(MY_2PI * u3);
+    v_post[0] = vfx + v_th * g1;
+    v_post[1] = vfy + v_th * g2;
+    v_post[2] = vfz + v_th * g3;
   }
+}
 
-  // For dissociation with 2 products: defer creation of second particle.
-  // Back-to-back kick in the CM frame keeps p1+p2 = m_parent * v_parent.
-  if (rchosen->nproduct == 2) {
-    DeferredParticle dp;
-    dp.x[0] = ip->x[0]; dp.x[1] = ip->x[1]; dp.x[2] = ip->x[2];
+/* ----------------------------------------------------------------------
+   Molecular-chain completeness. A molecule with only the neutral
+   dissociation channel, or default product/electron energies, gives the
+   wrong ion energy source (LTX, Nov 2026); a transported molecular ion
+   with no reactions never returns its particles to the plasma.
+------------------------------------------------------------------------- */
 
-    if (do_dissoc) {
-      dp.v[0] = vpx_parent - fc_kick_x;
-      dp.v[1] = vpy_parent - fc_kick_y;
-      dp.v[2] = vpz_parent - fc_kick_z;
-    } else {
-      dp.v[0] = ip->v[0]; dp.v[1] = ip->v[1]; dp.v[2] = ip->v[2];
+void FixVolumeChemAdas::check_molecular_chain()
+{
+  if (comm->me != 0) return;
+  char msg[256];
+  for (int i = 0; i < nlist; i++) {
+    OneReaction *r = &rlist[i];
+    if (!r->active || r->type != DISSOCIATION) continue;
+    if (!r->efc_set || !r->eel_set) {
+      snprintf(msg, sizeof(msg),
+               "fix volume/chem/adas: reaction %s --> %s uses default energies "
+               "(fc %.3g eV, eel %.3g eV); give fc/eel on the reaction line",
+               r->id_reactants[0], r->id_products[0], r->efc, r->eel);
+      error->warning(FLERR, msg);
     }
-
-    dp.species = rchosen->products[1];
-    dp.icell = ip->icell;
-    deferred_particles.push_back(dp);
   }
-
-  return 1;
+  for (int isp = 0; isp < particle->nspecies; isp++) {
+    const int n = reactions[isp].n;
+    int ndiss = 0, nion = 0;
+    for (int i = 0; i < n; i++) {
+      OneReaction *r = &rlist[reactions[isp].list[i]];
+      if (!r->active || r->type != DISSOCIATION) continue;
+      ndiss++;
+      for (int k = 0; k < r->nproduct; k++)
+        if (r->products[k] >= 0 && particle->species[r->products[k]].charge > 0.0)
+          nion++;
+    }
+    const double qsp = particle->species[isp].charge;
+    if (ndiss > 0 && qsp <= 0.0 && nion == 0) {
+      snprintf(msg, sizeof(msg),
+               "fix volume/chem/adas: molecule %s has only neutral dissociation; "
+               "a full molecular chain also needs %s --> %s+ and dissociative ionization",
+               particle->species[isp].id, particle->species[isp].id,
+               particle->species[isp].id);
+      error->warning(FLERR, msg);
+    }
+    if (qsp > 0.0 && n == 0) {
+      bool transported = false;
+      for (size_t j = 0; j < source_species.size(); j++)
+        if (source_species[j] == isp) transported = true;
+      if (transported) {
+        snprintf(msg, sizeof(msg),
+                 "fix volume/chem/adas: transported ion %s has no reactions; "
+                 "it would never return to the plasma", particle->species[isp].id);
+        error->one(FLERR, msg);
+      }
+    }
+  }
 }
 
 void FixVolumeChemAdas::readfile(char *fname)
@@ -2283,6 +2441,10 @@ void FixVolumeChemAdas::readfile(char *fname)
         r->products = new int[MAXPRODUCT];
         r->coeff = new double[MAXCOEFF];
         r->id = NULL;
+        r->efc = 3.0;        // Franck-Condon energy per product [eV]
+        r->eel = 4.478;      // electron energy loss per event [eV]
+        r->efc_set = r->eel_set = 0;
+        r->bulkprod[0] = r->bulkprod[1] = r->bulkprod[2] = 0;
       }
     }
 
@@ -2411,10 +2573,23 @@ void FixVolumeChemAdas::readfile(char *fname)
       r->coeff[i] = input->numeric(FLERR,word);
     }
 
-    word = strtok(NULL," \t\n\r");
-    if (word) {
-      print_reaction(copy1,copy2);
-      error->all(FLERR,"Too many coefficients in a reaction formula");
+    // optional: fc <eV> (Franck-Condon energy per heavy product),
+    //           eel <eV> (electron energy loss per event)
+    while ((word = strtok(NULL," \t\n\r"))) {
+      char *val = strtok(NULL," \t\n\r");
+      if (!val) {
+        print_reaction(copy1,copy2);
+        error->all(FLERR,"Missing value after fc/eel in reaction file");
+      }
+      if (strcmp(word,"fc") == 0) {
+        r->efc = input->numeric(FLERR,val); r->efc_set = 1;
+      } else if (strcmp(word,"eel") == 0) {
+        r->eel = input->numeric(FLERR,val); r->eel_set = 1;
+      }
+      else {
+        print_reaction(copy1,copy2);
+        error->all(FLERR,"Too many coefficients in a reaction formula");
+      }
     }
 
     nlist++;

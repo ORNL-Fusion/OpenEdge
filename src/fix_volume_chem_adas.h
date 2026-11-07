@@ -102,14 +102,14 @@ inline double *tally_row(int icell) {
 // so the array_grid always holds a window-average and not a running total.
 // This plays nicely with `fix ave/grid ... f_fchem[*] ave running` for
 // smoothed rates ready to hand to Gkeyll / SOLPS.
-// TALLY_BATCH: batch-weighted rate (EIRENE-style Monte Carlo). A one-shot
+// TALLY_BATCH: batch-weighted rate (single-flight Monte Carlo). A one-shot
 // puff launches N_batch trajectories representing a physical emission rate
 // R_puff [atoms/s]. Each event carries a weight w = R_puff / N_batch
 // (physical events/s per trajectory); per-cell contributions are divided by
 // cell volume so array_grid stores the steady-state source rate directly.
 // Tally is cumulative across the run and *does not* reset per window -- the
 // final value after all trajectories have terminated is the steady-state
-// Gkeyll/SOLPS source (what EIRENE returns to S3X/SOLPS each coupling call).
+// source a fluid or kinetic plasma code receives per coupling call.
 //
 // TALLY_BATCH_FIX: same semantics but N_batch is pulled at tally time from
 // the cumulative emit count of a paired emit fix (e.g. fix surface/emit/puff).
@@ -117,7 +117,8 @@ inline double *tally_row(int icell) {
 // `stop_at_np` cap on the emit fix -- the chem fix reads it directly. Value
 // is cached at the start of every chem nevery step, so scaling tracks the
 // ramp-up phase. Post-ramp (latched), N is constant and the scaling is exact.
-enum { TALLY_COUNTS, TALLY_RATE, TALLY_BATCH, TALLY_BATCH_FIX };
+enum { TALLY_COUNTS, TALLY_RATE, TALLY_BATCH, TALLY_BATCH_FIX, TALLY_FLIGHT };
+int    ncols_base    = 6;      // source columns before the per-species densities
 int    tally_units   = TALLY_COUNTS;
 
 // Per-particle weight (fix particle/weight "pweight" custom attribute), the
@@ -147,14 +148,14 @@ char  *batch_fix_id  = nullptr;// emit fix ID (TALLY_BATCH_FIX)
 int    batch_fix_idx = -1;     // resolved index in modify->fix[]
 bigint batch_N_cached = 0;     // cached N from emit fix this chem step
 
-// Mode A (EIRENE-semantics) state.
-//   eirene_mode     = 1 -> delete particle on IONIZATION instead of relabeling
+// Mode A (neutral mode) state.
+//   neutral_mode     = 1 -> delete particle on IONIZATION instead of relabeling
 //   stop_on_exhaust = 1 -> stop the run when source_species population hits 0
 //                          (redundant with SPARTA's built-in nglobal==0 check
 //                          for pure-neutral runs, but needed when kinetic
 //                          impurities remain alongside vanishing neutrals).
 //   source_species  = resolved species indices matching src_species_names.
-int    eirene_mode     = 0;
+int    neutral_mode     = 0;
 int    stop_on_exhaust = 0;
 // Channel toggles (default: all on). Each reaction's type is matched
 // against these flags at init; disabled reactions are flagged inactive
@@ -170,7 +171,7 @@ int    chan_dissociation = 1;
 // i.e. wait for the population to literally hit zero). Setting a nonzero
 // threshold (e.g. 10% of batch) skips the slow-converging tail where per-step
 // cost stays high but source-moment contributions are negligible. Closer to
-// what EIRENE gets for free by tracing trajectories independently.
+// what a trajectory-by-trajectory neutral code gets for free.
 // exhaust_armed is set to 1 the first time alive_global > exhaust_threshold
 // (batch ramp-up is detectable -- prevents spurious exit at step 1 when
 // population is still empty before the puff has loaded).
@@ -228,7 +229,7 @@ protected:
     int icompute;
     virtual void end_of_step_no_average();
     // Spawn new neutral D macroparticles from background-D+ recombination.
-    // Called inside end_of_step_no_average(); guarded by eirene_mode and
+    // Called inside end_of_step_no_average(); guarded by neutral_mode and
     // a resolved volume_source. See header comment on volume_source_id.
     void spawn_volume_recombination();
 
@@ -292,6 +293,9 @@ protected:
         int* reactants, * products;
         double* coeff;
         char* id;
+        double efc, eel;     // Franck-Condon / electron loss [eV]
+        int efc_set, eel_set;
+        int bulkprod[3];     // product k goes to the bulk ion fluid
     };
 
     OneReaction* rlist;
@@ -312,6 +316,10 @@ protected:
     // .cpp) is skipped and the cached values are used instead. Used by the
     // `rate_cache cell` mode to amortize the per-(cell,species) rate work
     // across all particles of that species in the cell.
+    void check_molecular_chain();
+    void sample_cx_velocity(int sp_prod, double Ti_eV, double vpar,
+                            double bx, double by, double bz,
+                            const double *v_parent, double *v_post);
     int attempt(Particle::OnePart* ip, int ip_index,
                 double Te_eV, double ne_m3,
                 double Ti_eV = 0.0, double vpar = 0.0,
