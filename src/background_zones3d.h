@@ -77,6 +77,7 @@ class BackgroundZones3D {
     std::vector<float> te, ti, ne, ni;
     std::vector<float> mach, bmag;
     std::vector<float> trace_r, trace_phi, trace_z;
+    std::vector<float> epar;     // optional E_par along +trace [V/m]; empty if absent
     std::vector<HashPlane> hashes;
 
     size_t vertex_index(int ir, int ip, int it) const

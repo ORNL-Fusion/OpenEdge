@@ -291,6 +291,10 @@ void BackgroundZones3D::read_rank0(const std::string &path)
     read_float_dataset(cell, "trace_r", cshape, zone.trace_r);
     read_float_dataset(cell, "trace_phi", cshape, zone.trace_phi);
     read_float_dataset(cell, "trace_z", cshape, zone.trace_z);
+    // Optional parallel electric field along +trace (V/m). Files without it
+    // keep the previous behaviour: no E from this provider.
+    if (has_link(cell.getId(), "epar_trace_Vm"))
+      read_float_dataset(cell, "epar_trace_Vm", cshape, zone.epar);
     zones_.push_back(std::move(zone));
   }
 }
@@ -330,6 +334,7 @@ void BackgroundZones3D::broadcast(MPI_Comm world, int me)
     bcast_vector(zone.trace_r, MPI_FLOAT, world, me);
     bcast_vector(zone.trace_phi, MPI_FLOAT, world, me);
     bcast_vector(zone.trace_z, MPI_FLOAT, world, me);
+    bcast_vector(zone.epar, MPI_FLOAT, world, me);
     zone.phi_start = zone.phi.front();
     zone.phi_end = zone.phi.back();
   }
@@ -746,6 +751,17 @@ bool BackgroundZones3D::sample(const double xyz[3], PlasmaPointSample &out,
     out.flow[2] = upar * ez;
   }
  gradients:
+  if ((request & PLASMA_NEED_E) && !zone.epar.empty()) {
+    // E = E_par e_trace; like the gradients, independent of the B sign.
+    const double cp = std::cos(phi), sp = std::sin(phi);
+    const double er = zone.trace_r[c], ep = zone.trace_phi[c];
+    const double ex = er * cp - ep * sp, ey = er * sp + ep * cp;
+    const double epar = zone.epar[c];
+    out.e[0] = epar * ex;
+    out.e[1] = epar * ey;
+    out.e[2] = epar * zone.trace_z[c];
+    out.has_e = true;
+  }
   if (request & PLASMA_NEED_GRAD_TE)
     parallel_gradient(zone, loc.ir, loc.ip, loc.it, zone.te, phi,
                       out.grad_te);

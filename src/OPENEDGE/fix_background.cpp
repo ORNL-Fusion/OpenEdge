@@ -2832,6 +2832,16 @@ bool FixBackground::query_efield_at_point(const double xyz[3],
     ER = const_e_r; EZ = const_e_z; Et = const_e_t;
     return true;
   }
+  if (provider_mode == 1) {   // zones3d: optional cell E_par along the field trace
+    PlasmaPointSample sample;
+    if (!zones3d->sample(xyz, sample, PLASMA_NEED_E) || !sample.has_e) return false;
+    const double phi = std::atan2(xyz[1], xyz[0]);
+    const double cp = std::cos(phi), sp = std::sin(phi);
+    ER = sample.e[0] * cp + sample.e[1] * sp;
+    Et = -sample.e[0] * sp + sample.e[1] * cp;
+    EZ = sample.e[2];
+    return true;
+  }
   if (mesh_e_r.empty() || mesh_e_z.empty() || mesh_e_t.empty()) return false;
 
   const int dim = domain->dimension;
