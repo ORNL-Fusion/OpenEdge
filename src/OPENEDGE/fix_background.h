@@ -277,6 +277,15 @@ class FixBackground : public Fix {
   bool has_wall_flux() const { return !wall_flux.empty(); }
   int wall_flux_nspec() const { return wall_flux.nspec; }
 
+  // Per-sample rescale that makes the inverse-distance interpolation of
+  // the wall flux conservative on the surf elements: the flux integrated
+  // over the elements nearest to a sample equals that sample's gamma*area.
+  // (nspec, N) row-major; built lazily for one (max_dist, knn) pair.
+  const std::vector<double> &wall_flux_scale(double max_dist, int knn = 3) const;
+  mutable std::vector<double> wf_scale;
+  mutable double wf_scale_cutoff = -1.0;
+  mutable int wf_scale_knn = -1;
+
   // Per-species ion flux density (m^-2 s^-1, positive = into wall) at
   // (R, Z), inverse-distance-weighted over the K nearest source points
   // within max_dist. Returns 0 if no source within cutoff or wall_flux
@@ -284,6 +293,9 @@ class FixBackground : public Fix {
   double query_wall_flux_at_point(double R, double Z, int ispec,
                                   double max_dist = 0.05,
                                   int knn = 3) const;
+  // the raw interpolation and the index of the nearest sample (-1 if none)
+  double wall_flux_idw(double R, double Z, int ispec, double max_dist,
+                       int knn, int &inearest) const;
 
   // Bulk Te, Ti (eV) at the wall sample nearest (R, Z). Returns false
   // if /wall_flux/te or /ti is absent or no source within max_dist.

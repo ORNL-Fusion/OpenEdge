@@ -83,8 +83,10 @@ When the background file carries the wall tallies of the plasma code
 Te and Ti per wall element), those are used instead of the Bohm
 reconstruction: the flux of each element is the inverse-distance
 average of the three nearest samples within {wall_flux_cutoff},
-multiplied by the geometric element area, and the sample Te and Ti
-set the impact energy.  This is required for backgrounds in which the
+rescaled per sample so that the flux integrated over the elements
+nearest to a sample equals that sample's own total (the interpolation
+alone is not conservative on a finer wall), multiplied by the geometric
+element area; the sample Te and Ti set the impact energy.  This is required for backgrounds in which the
 cells next to the wall are not the sheath entrance, e.g. the penalized
 region of some fluid-code meshes, where the Bohm estimate is far too large.
 

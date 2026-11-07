@@ -30,6 +30,7 @@
 #include "comm.h"
 #include "compute_plasma_fields.h"
 #include "domain.h"
+#include "surf.h"
 #include "error.h"
 #include "grid.h"
 #include "input.h"
@@ -1650,6 +1651,18 @@ void FixBackground::load_plasma_h5()
 double FixBackground::query_wall_flux_at_point(double R, double Z, int ispec,
                                                 double max_dist, int knn) const
 {
+  int inear = -1;
+  const double g = wall_flux_idw(R, Z, ispec, max_dist, knn, inear);
+  if (g <= 0.0 || inear < 0) return g;
+  const std::vector<double> &sc = wall_flux_scale(max_dist, knn);
+  if (sc.empty()) return g;
+  return g * sc[static_cast<size_t>(ispec) * wall_flux.n + inear];
+}
+
+double FixBackground::wall_flux_idw(double R, double Z, int ispec,
+                                    double max_dist, int knn, int &inearest) const
+{
+  inearest = -1;
   if (wall_flux.empty() || ispec < 0 || ispec >= wall_flux.nspec) return 0.0;
   if (knn < 1) knn = 1;
   if (knn > 8) knn = 8;
@@ -1683,7 +1696,88 @@ double FixBackground::query_wall_flux_at_point(double R, double Z, int ispec,
     gsum += w * wall_flux.gamma_i[
         static_cast<size_t>(ispec) * wall_flux.n + best_i[k]];
   }
+  inearest = best_i[0];
   return (wsum > 0.0) ? (gsum / wsum) : 0.0;
+}
+
+/* ----------------------------------------------------------------------
+   conservative rescale of the wall-flux interpolation: every surf element
+   is assigned to its nearest sample; the interpolated flux times element
+   area, summed over the elements of a sample, is scaled to the sample's
+   own gamma*area. Needs the sample areas and an axisymmetric or 3-D wall.
+------------------------------------------------------------------------- */
+
+const std::vector<double> &FixBackground::wall_flux_scale(double max_dist,
+                                                          int knn) const
+{
+  if (!wf_scale.empty() && wf_scale_cutoff == max_dist && wf_scale_knn == knn)
+    return wf_scale;
+  wf_scale.clear();
+  wf_scale_cutoff = max_dist;
+  wf_scale_knn = knn;
+  const int N = wall_flux.n, nsp = wall_flux.nspec;
+  if (N == 0 || wall_flux.area.empty() || !surf->exist) return wf_scale;
+  const int dim = domain->dimension;
+  const bool axi = domain->axisymmetric;
+  if (dim == 2 && !axi) return wf_scale;          // planar: no element area
+  if (surf->distributed) return wf_scale;         // needs the global surf list
+
+  std::vector<double> acc(static_cast<size_t>(nsp) * N, 0.0);
+  std::vector<int> count(N, 0);
+  for (int i = 0; i < surf->nsurf; i++) {
+    double xc[3] = {0.0, 0.0, 0.0}, area = 0.0;
+    if (dim == 2) {
+      const Surf::Line &l = surf->lines[i];
+      for (int k = 0; k < 3; k++) xc[k] = 0.5 * (l.p1[k] + l.p2[k]);
+      const double len = std::sqrt((l.p2[0]-l.p1[0])*(l.p2[0]-l.p1[0]) +
+                                   (l.p2[1]-l.p1[1])*(l.p2[1]-l.p1[1]));
+      area = 2.0 * 3.14159265358979323846 * xc[1] * len;   // y = R in axisymmetric decks
+    } else {
+      const Surf::Tri &t = surf->tris[i];
+      double a[3], b[3], c[3];
+      for (int k = 0; k < 3; k++) {
+        xc[k] = (t.p1[k] + t.p2[k] + t.p3[k]) / 3.0;
+        a[k] = t.p2[k] - t.p1[k];
+        b[k] = t.p3[k] - t.p1[k];
+      }
+      c[0] = a[1]*b[2] - a[2]*b[1];
+      c[1] = a[2]*b[0] - a[0]*b[2];
+      c[2] = a[0]*b[1] - a[1]*b[0];
+      area = 0.5 * std::sqrt(c[0]*c[0] + c[1]*c[1] + c[2]*c[2]);
+    }
+    double R, Z;
+    OpenEdge::sparta_to_RZ(xc, dim, axi, R, Z, column_x0, column_y0);
+    for (int s = 0; s < nsp; s++) {
+      int inear = -1;
+      const double g = wall_flux_idw(R, Z, s, max_dist, knn, inear);
+      if (inear < 0) continue;
+      acc[static_cast<size_t>(s) * N + inear] += g * area;
+      if (s == 0) count[inear]++;
+    }
+  }
+  wf_scale.assign(static_cast<size_t>(nsp) * N, 1.0);
+  double ref_tot = 0.0, idw_tot = 0.0, lost = 0.0;
+  int nlost = 0;
+  for (int s = 0; s < nsp; s++) {
+    for (int k = 0; k < N; k++) {
+      const size_t id = static_cast<size_t>(s) * N + k;
+      const double ref = wall_flux.gamma_i[id] * wall_flux.area[k];
+      if (acc[id] > 0.0) wf_scale[id] = ref / acc[id];
+      if (s == 0) {
+        ref_tot += ref; idw_tot += acc[id];
+        if (count[k] == 0 && ref > 0.0) { nlost++; lost += ref; }
+      }
+    }
+  }
+  if (comm->me == 0) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "fix background: wall_flux rescaled to the samples: "
+             "species 0 total %.4g (interpolation gave %.4g) /s, %d of %d samples "
+             "reach no element (%.3g /s not emitted)\n", ref_tot, idw_tot, nlost, N, lost);
+    if (screen) fputs(msg, screen);
+    if (logfile) fputs(msg, logfile);
+  }
+  return wf_scale;
 }
 
 bool FixBackground::query_wall_te_ti_at_point(double R, double Z,

@@ -241,6 +241,7 @@ class ComputeSurfacePhysicalSputter : public Compute {
   std::vector<double> wall_flux_r, wall_flux_z;
   std::vector<double> wall_flux_te, wall_flux_ti;
   std::vector<double> wall_flux_gamma_i;
+  std::vector<double> wall_flux_scale_vec;   // per-sample conservative rescale
   std::vector<double> wall_flux_b_r, wall_flux_b_z, wall_flux_b_t;
   // Cutoff distance [m] for IDW point-query of wall_flux. SPARTA
   // segments farther than this from any source point fall back to the

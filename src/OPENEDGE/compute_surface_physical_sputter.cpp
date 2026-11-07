@@ -626,6 +626,7 @@ void ComputeSurfacePhysicalSputter::load_plasma_from_fix(const FixBackground *pd
   wall_flux_te    = pd->wall_flux.te;
   wall_flux_ti    = pd->wall_flux.ti;
   wall_flux_gamma_i = pd->wall_flux.gamma_i;
+  wall_flux_scale_vec = pd->wall_flux_scale(wall_flux_cutoff, 3);   // conservative on the surf elements
   wall_flux_b_r   = pd->wall_flux.b_r;
   wall_flux_b_z   = pd->wall_flux.b_z;
   wall_flux_b_t   = pd->wall_flux.b_t;
@@ -2009,7 +2010,9 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
               static_cast<size_t>(s) * wall_flux_n + ibest[k]];
         }
         if (wsum > 0.0) {
-          const double gw = gsum / wsum;
+          double gw = gsum / wsum;
+          if (gw > 0.0 && !wall_flux_scale_vec.empty())
+            gw *= wall_flux_scale_vec[static_cast<size_t>(s) * wall_flux_n + ibest[0]];
           if (gw > 0.0) {
             if (incidence_mode == 0) {
               g = gw;
