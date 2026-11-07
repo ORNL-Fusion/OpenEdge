@@ -112,6 +112,72 @@ def _wall_and_config_from_mesh(mesh_file, ref_file):
                 br2d, bz2d, bt2d, psisep, psicore)
 
 
+
+def _build_wall_flux_s3x(mesh_file, data_file, T0, tri_br, tri_bz, tri_bt, ion_inds):
+    """/wall_flux/ samples from the SOLEDGE3X wall tallies.
+
+    plasmaFinal.h5 /walls/wall1/spec*/{fluxn,T} are per wall element in the
+    order of meshEIRENE.h5 /wall/triSequence1/tri (element k sits on face
+    triFace[seq[k]-1] of triangle triNum[seq[k]-1]; face f joins knots
+    (f-1)%3 and f%3 of the triangle, 0-based).  fluxn is the ion flux into
+    the wall element in particles per second (it equals
+    /elt1/particleFluxes/incPlasma and its plain sum is EIRENE's
+    IncPlToWall); it is divided by the toroidal element area here.
+    Returns None when the files lack the wall tallies.
+    """
+    with h5py.File(mesh_file, "r") as m, h5py.File(data_file, "r") as d:
+        if "wall/triNum" not in m or "walls/wall1" not in d:
+            return None
+        kr = np.asarray(m["knots/R"][...], dtype=np.float64).reshape(-1)
+        kz = np.asarray(m["knots/Z"][...], dtype=np.float64).reshape(-1)
+        if np.nanmax(np.abs(kr)) > 20.0:          # cm -> m
+            kr, kz = kr / 100.0, kz / 100.0
+        tk = np.asarray(m["triangles/tri_knots"][...], dtype=np.int64) - 1   # (3, ntri)
+        tri_num = np.asarray(m["wall/triNum"][...]).reshape(-1) - 1
+        tri_face = np.asarray(m["wall/triFace"][...]).reshape(-1)
+        seq = np.asarray(m["wall/triSequence1/tri"][...]).reshape(-1) - 1
+        w = d["walls/wall1"]
+        spec_keys = [k for k in w.keys() if re.fullmatch(r"spec\d+", k)]
+        if "spec0" not in spec_keys:
+            return None
+        n = len(seq)
+        if w["spec0/T"].size != n:
+            return None
+        te = np.asarray(w["spec0/T"][...], dtype=np.float64).reshape(-1) * T0
+        gam, ti = [], None
+        for sidx in ion_inds:
+            g = w.get(f"spec{sidx}/fluxn")
+            gam.append(np.zeros(n) if g is None else
+                       np.maximum(np.asarray(g[...], dtype=np.float64).reshape(-1), 0.0))
+            if ti is None and f"spec{sidx}/T" in w:
+                ti = np.asarray(w[f"spec{sidx}/T"][...], dtype=np.float64).reshape(-1) * T0
+        if ti is None:
+            ti = te.copy()
+    t = tri_num[seq]
+    f = tri_face[seq]
+    idx = np.arange(n)
+    k1 = tk[(f - 1) % 3, t]
+    k2 = tk[f % 3, t]
+    k3 = tk[(f + 1) % 3, t]
+    r1, z1, r2, z2 = kr[k1], kz[k1], kr[k2], kz[k2]
+    rm, zm = 0.5 * (r1 + r2), 0.5 * (z1 + z2)
+    length = np.hypot(r2 - r1, z2 - z1)
+    nr = (z2 - z1) / np.maximum(length, 1e-30)
+    nz = -(r2 - r1) / np.maximum(length, 1e-30)
+    flip = (nr * (kr[k3] - rm) + nz * (kz[k3] - zm)) > 0.0    # must point away from the plasma-side vertex
+    nr[flip] *= -1.0
+    nz[flip] *= -1.0
+    arc = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(rm), np.diff(zm)))])
+    area = 2.0 * np.pi * rm * length
+    out = dict(r=rm, z=zm, s=arc, gamma_i=np.vstack(gam) / np.maximum(area, 1e-30)[None, :],
+               te=te, ti=ti, area=area, normal_r=nr, normal_z=nz)
+    if tri_br is not None and len(tri_br) > t.max():
+        out["b_r"] = np.asarray(tri_br)[t]
+        out["b_z"] = np.asarray(tri_bz)[t]
+        out["b_t"] = np.asarray(tri_bt)[t]
+    return out
+
+
 def _write_sparta_surface_polyline(path, rvals, zvals, title="surface geometry",
                                     geometry="cart"):
     """Write a closed polyline into SPARTA 2D surface text format.
@@ -953,6 +1019,25 @@ def interpolate_and_save_plasma_field(
             f.create_dataset('mesh/tri_source_kind', data=mesh_tri_source_kind)
             f.create_dataset('mesh/wall_gap_mask',   data=mesh_wall_gap_mask)
 
+            # /wall_flux/: the S3X wall ion flux, Te, Ti per wall element, so
+            # compute surface/physical/sputter uses the solver's own wall flux
+            # instead of a Bohm reconstruction from the wall-adjacent triangle
+            # (which is far too large where the penalized region, not the
+            # plasma, touches the wall).
+            try:
+                wf = None if zone_native else _build_wall_flux_s3x(
+                    mesh_file, data_file, T0, tri_br_src, tri_bz_src, tri_bt_src, ion_inds)
+            except Exception as exc:
+                print(f"WARNING: /wall_flux/ not written ({exc})")
+                wf = None
+            if wf is not None:
+                from _wall_flux import write_wall_flux_h5
+                write_wall_flux_h5(f, wf, source="SOLEDGE3X", extraction="walls/wall1 spec*/fluxn,T",
+                                   species_names=ion_names)
+                tot = (wf["gamma_i"] * wf["area"][None, :]).sum(axis=1)
+                print(f"/wall_flux/ written: {len(wf['r'])} wall elements, ion flux to wall "
+                      + ", ".join(f"{nm} {v:.3e}/s" for nm, v in zip(ion_names, tot)))
+
         # B-field is embedded in plasma.h5 above (br/bt/bz datasets); no
         # separate bfield.h5 is produced.
 
@@ -984,6 +1069,12 @@ def _build_parser():
                    help="SOLEDGE3X species index of the main ion (spec0=electrons; "
                         "typically spec1 for D+). Used to label the 'main ion' "
                         "metadata in plasma.h5.")
+    p.add_argument("--main-ion-name", type=str, default=None,
+                   help="Label of the main ion in plasma.h5 (default D+). "
+                        "Use H+ for hydrogen runs; the element prefix picks "
+                        "the sputter yield tables.")
+    p.add_argument("--main-ion-mass", type=float, default=None,
+                   help="Main-ion mass in amu (default 2.014; 1.008 for H+).")
     p.add_argument("--gfile", type=str, default=None,
                    help="Optional GEQDSK override for B-field (fallback path).")
     p.add_argument("--equ-file", type=str, default=None,
@@ -1008,6 +1099,12 @@ def _build_parser():
 def main():
     args = _build_parser().parse_args()
     base = args.run_path
+    ion_metadata = None
+    if args.main_ion_name or args.main_ion_mass:
+        ion_metadata = {args.main_ion_spec: {
+            "name": args.main_ion_name or "D+",
+            "mass_amu": args.main_ion_mass or 2.01410177811,
+            "z": 1}}
     interpolate_and_save_plasma_field(
         ref_file=os.path.join(base, "refParam_raptorX.h5"),
         mesh_file=os.path.join(base, "meshEIRENE.h5"),
@@ -1016,6 +1113,7 @@ def main():
         wall_file=None,
         plasma_out_file=args.plasma_out,
         main_ion_spec=args.main_ion_spec,
+        ion_metadata=ion_metadata,
         use_mesh_wall=True,
         wall_sparta_file=args.wall_out,
         config_file=os.path.join(base, "mesh.h5"),
