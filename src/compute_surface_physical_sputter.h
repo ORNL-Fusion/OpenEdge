@@ -69,7 +69,7 @@ class ComputeSurfacePhysicalSputter : public Compute {
 
   // Eckstein analytic sputter mode (no surface HDF5 table).
   // When eckstein_mode != 0, sputter yields are computed from the
-  // EIRENE Bohdansky-1993 + Yamamura formulas with the coefficient
+  // Bohdansky-1993 + Yamamura formulas with the coefficient
   // table in eckstein_sputter_data.h.
   int eckstein_mode;
   std::string eckstein_name;        // e.g. "O_on_W"

@@ -13,8 +13,8 @@
    Quantile levels RAAR = [0.1, 0.3, 0.5, 0.7, 0.9] (midpoints of five
    equal-width probability bins). Historical note: the first generation
    of tables in database/surface/trim/*.h5 were regenerated from
-   EIRENE's rdtrim.f database; the file format and sampler math match
-   eirmod_reflec.f (subroutine EIRENE_REFLEC, lines 614-870) so any
+   the TRIM rdtrim database; the file format and sampler math follow
+   the standard REFLEC sampler so any
    table produced on the same (E,theta,q) grid layout plugs in.
 
    Sampling:
@@ -137,7 +137,7 @@ REFLECT_HD void locate_quantile(const double *raar, int nR, double u,
   // find first i with raar[i] >= u; clamp to range
   int i = 1;
   while (i < nR - 1 && raar[i] < u) i++;
-  // EIRENE keeps i_hi >= 1, so extrapolates past the 0.1 and 0.9 tails
+  // keep i_hi >= 1, so extrapolate past the 0.1 and 0.9 tails
   i_hi = i;
   i_lo = i_hi - 1;
   double d = raar[i_hi] - raar[i_lo];
@@ -197,7 +197,7 @@ REFLECT_HD double sample_E_out(const View &t,
 
   double E_out = rff1 + fQ1 * (rff2 - rff1);
 
-  // clamp to Eout_min/Eout_max at the (iE_lo, iW_lo) bin (same as EIRENE)
+  // clamp to Eout_min/Eout_max at the (iE_lo, iW_lo) bin
   double emin = t.Eout_min[idx2(iE_lo, iW_lo, NTHETA)];
   double emax = t.Eout_max[idx2(iE_lo, iW_lo, NTHETA)];
   if (emax <= 0.0) emax = 1.0e30;
@@ -240,7 +240,7 @@ REFLECT_HD double sample_cos_polar(const View &t,
       }
     }
   }
-  // Clamp as EIRENE does (eirmod_reflec.f line 812): max 85 deg from normal.
+  // Clamp to the table range: max 85 deg from normal.
   if (c < 0.08716)   c = 0.08716;
   if (c > 0.999999)  c = 0.999999;
   return c;

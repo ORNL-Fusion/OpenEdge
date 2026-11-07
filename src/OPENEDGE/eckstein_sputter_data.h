@@ -1,14 +1,13 @@
 /* ----------------------------------------------------------------------
-   Auto-generated from EIRENE's canonical SPUTER parameter database.
+   Auto-generated from the SPUTER parameter database (Bohdansky/Yamamura fits).
    DO NOT EDIT BY HAND.  Regenerate with:
        python3 tools/sputter/parse_eirene_sputer.py \
-           --input /home/cloud/local/solps/solps-iter-3.0.8-devel/modules/Eirene/Database/Surfacedata/SPUTER \
+           --input <path to the SPUTER parameter file> \
            --output src/OPENEDGE/eckstein_sputter_data.h
 
    Source: W. Eckstein, C. Garcia-Rosales, J. Roth, W. Ottenberger,
            "Sputtering Data", IPP 9/82, Feb 1993, Table 3, page 335.
-   EIRENE reader:  modules/Eirene/.../eirmod_sputer.f  (EIRENE_SPUTER)
-   Used verbatim by SOLPS-ITER and SOLEDGE3X.
+   The same coefficients the edge fluid codes use.
 
    Fields per entry (IPP 9/82 Bohdansky-1993 formula):
        Z1, M1   projectile atomic number and mass (amu)
@@ -31,7 +30,7 @@ struct SputterDataEntry {
   double Es, Eth, Q, ETF;
 };
 
-static const SputterDataEntry EIRENE_SPUTTER_TABLE[] = {
+static const SputterDataEntry SPUTER_TABLE[] = {
   {"H_on_Li",    1,    1.0080,    3,    6.9400,  1.670,    6.2200,    0.1000,      185.000},
   {"D_on_Li",    1,    2.0140,    3,    6.9400,  1.670,    6.9200,    0.1600,      209.000},
   {"T_on_Li",    1,    3.0160,    3,    6.9400,  1.670,    8.0300,    0.2100,      232.000},
@@ -328,7 +327,7 @@ static const SputterDataEntry EIRENE_SPUTTER_TABLE[] = {
   {"Xe_on_U",   54,  131.2930,   92,  238.0290,  5.420,   28.9400,   33.5300,  1395148.000},
 };
 
-static const int N_EIRENE_SPUTTER = sizeof(EIRENE_SPUTTER_TABLE) / sizeof(EIRENE_SPUTTER_TABLE[0]);
+static const int N_SPUTER = sizeof(SPUTER_TABLE) / sizeof(SPUTER_TABLE[0]);
 
 }  // namespace Eckstein
 }  // namespace SPARTA_NS

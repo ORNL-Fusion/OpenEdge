@@ -1,7 +1,7 @@
 /* ----------------------------------------------------------------------
    OpenEdge: surf_collide partial_recycle
 
-   EIRENE-style partial recycling. Per particle hitting the surface, sample
+   Partial recycling. Per particle hitting the surface, sample
    u ~ U(0,1):
        u < (1-R)  -> vanish (count toward pumped throughput)
        else       -> diffuse re-emit at twall, optionally as a different

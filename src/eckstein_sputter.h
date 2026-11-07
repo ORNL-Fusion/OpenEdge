@@ -1,5 +1,5 @@
 /* ----------------------------------------------------------------------
-   OpenEdge: EIRENE-equivalent analytic sputter formulas and shorthand
+   OpenEdge: analytic sputter formulas (SPUTER database) and shorthand
    lookup, used by compute surface/physical/sputter (CPU and Kokkos).
 
    Host/device header shared by the CPU and GPU react() paths.  All
@@ -10,8 +10,8 @@
    ------------------------------------------------------------------
    Sputter model
    ------------------------------------------------------------------
-   Formula and parameters match EIRENE verbatim - this is the same
-   physical-sputter path that SOLPS-ITER / SOLEDGE3X use (modpys=2 in
+   Formula and parameters match the SPUTER database verbatim - the same
+   physical-sputter path the edge fluid codes use (modpys=2 in
    eirmod_sputer.f):
 
        Y(E, 0) = Q * (1 - (Eth/E)^(2/3)) * (1 - Eth/E)^2
@@ -29,7 +29,7 @@
 
    The fit parameters (Q, Eth, ETF, Es) for 286 (projectile, target)
    pairs are in eckstein_sputter_data.h and are parsed directly from
-   EIRENE's SPUTER database file:
+   the SPUTER database file:
 
        W. Eckstein, C. Garcia-Rosales, J. Roth, W. Ottenberger,
        "Sputtering Data", IPP 9/82, Feb 1993, Table 3, page 335.
@@ -40,15 +40,15 @@
    ------------------------------------------------------------------
    Reflection model
    ------------------------------------------------------------------
-   EIRENE does NOT use an analytic fit for reflection - it reads per-
+   Reference codes do NOT use an analytic fit for reflection - they read per-
    combination TRIM tables (12 energies x 7 angles of R_N plus quantile
    distributions, see eirmod_sputer.f / rdtrim.f).  Mapping those
    tables into a simple analytic form is not trivial and would diverge
-   from EIRENE.  For now this header provides a small placeholder fit
+   from TRIM.  For now this header provides a small placeholder fit
    (Thomas/Eckstein universal form) so the existing pmi "R" branch has
    numbers to work with; by default R_N for W->W is tiny (a few %) and
    very weakly E-dependent, which is already a good approximation for
-   test_west_axi.  Follow-up work can port the real EIRENE TRIM tables.
+   test_west_axi.  reflection_tables.h now carries the real TRIM tables.
 ------------------------------------------------------------------------- */
 
 #ifndef SPARTA_ECKSTEIN_SPUTTER_H
@@ -76,14 +76,14 @@ static constexpr double YAMAMURA_F       = 2.0;
 static constexpr double YAMAMURA_COS_OPT = 0.26;
 
 // Reflection model: keep the simple universal form, as "reflection
-// from EIRENE" is a tables problem we'll tackle separately.  See
+// from TRIM" is a tables problem handled by reflection_tables.h.  See
 // note at top of file.
 static constexpr int NCOEFF_ECKSTEIN = 12;
 
 
 // ---- parameter structs ----
 
-// Sputter parameters pulled from EIRENE's SPUTER file.  Layout matches
+// Sputter parameters pulled from the SPUTER file.  Layout matches
 // eckstein_sputter_data.h SputterDataEntry.
 struct SputterParams {
   double Z1, M1, Z2, M2;
@@ -94,7 +94,7 @@ struct SputterParams {
 };
 
 // Reflection parameters: thin placeholder for a Thomas-style fit.
-// Replaced in a follow-up when we import EIRENE TRIM tables.
+// Superseded by the TRIM tables in reflection_tables.h.
 struct ReflectParams {
   double Z1, M1, Z2, M2;
   double a1, a2, a3, a4, a5, a6;
@@ -103,7 +103,7 @@ struct ReflectParams {
 };
 
 
-// ---- sputter: EIRENE Bohdansky-1993 + Yamamura angular ----
+// ---- sputter: Bohdansky-1993 + Yamamura angular ----
 
 ECK_HOST_DEVICE
 double sn_KrC(double eps)
@@ -142,7 +142,7 @@ double yamamura_angular_factor(double theta_deg)
   if (c < 1e-3) c = 1e-3;
   double arg = -YAMAMURA_F * log(c)
              + YAMAMURA_F * (1.0 - 1.0 / c) * YAMAMURA_COS_OPT;
-  if (arg < -500.0) arg = -500.0;   // same clamp as EIRENE
+  if (arg < -500.0) arg = -500.0;   // same clamp as the SPUTER reference
   return exp(arg);
 }
 
@@ -207,9 +207,9 @@ double reflection_RN(double E_eV, double theta_deg, const ReflectParams &p)
 
 inline bool lookup_sputter(const char *name, SputterParams &out)
 {
-  for (int i = 0; i < N_EIRENE_SPUTTER; ++i) {
-    if (std::strcmp(name, EIRENE_SPUTTER_TABLE[i].name) == 0) {
-      const SputterDataEntry &e = EIRENE_SPUTTER_TABLE[i];
+  for (int i = 0; i < N_SPUTER; ++i) {
+    if (std::strcmp(name, SPUTER_TABLE[i].name) == 0) {
+      const SputterDataEntry &e = SPUTER_TABLE[i];
       out.Z1 = e.Z1; out.M1 = e.M1; out.Z2 = e.Z2; out.M2 = e.M2;
       out.Es = e.Es; out.Eth = e.Eth; out.Q = e.Q; out.ETF = e.ETF;
       return true;

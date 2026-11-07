@@ -1,6 +1,6 @@
 /* ----------------------------------------------------------------------
     OpenEdge: fix surface/emit/puff
-    Cold-gas puff emission from a surface group (EIRENE-style injection).
+    Cold-gas puff emission from a surface group.
     No PMI compute is required; each timestep injects `n` particles per
     rank distributed across active surf-cell tasks proportional to surf
     area, using a cosine-law angular distribution from the surface normal
@@ -75,7 +75,7 @@ class FixSurfaceEmitPuff : public FixEmit {
   // is clamped against the remaining global quota so final count = N_cap
   // within +/- (nprocs - 1) particles (and exactly N for single-rank emit).
   //
-  // This is the "EIRENE batch" semantics: N = number of MC trajectories.
+  // Batch semantics: N = number of MC trajectories.
   // If you care about current-Np instead, wrap the fix with a SPARTA
   // variable+jump loop in the input deck.
   bigint stop_at_np;

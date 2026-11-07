@@ -1,7 +1,7 @@
 /* ----------------------------------------------------------------------
    OpenEdge: surf_collide partial_recycle
 
-   EIRENE-style partial recycling: per particle hitting the surface, with
+   Partial recycling: per particle hitting the surface, with
    probability (1-R) the particle is absorbed (vanishes, counted as pumped
    throughput); with probability R it is diffusely re-emitted at twall,
    optionally as a different species (e.g. atomic D arriving recombines on

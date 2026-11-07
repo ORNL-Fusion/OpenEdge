@@ -1331,7 +1331,7 @@ int ComputeSurfacePhysicalSputter::find_nearest_mapped_triangle(double r, double
 {
   // Nearest-centroid fallback for wall points that fall in the vacuum gap
   // between the B2.5 plasma domain and the physical wall.  This is the
-  // normal situation in SOLPS: Eirene fills the gap with unmapped triangles,
+  // normal situation in SOLPS: the gap is filled with unmapped triangles,
   // so strict point-in-triangle on mapped cells misses wall locations.
   const int nm = static_cast<int>(mapped_idx.size());
   double best_d2 = max_dist * max_dist;
@@ -2036,7 +2036,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
       // sin_alpha = |B.n|/|B| = cos(theta_from_normal) = sin(alpha_B).
       const double a_deg = std::asin(std::min(1.0, sin_alpha)) * 180.0 / M_PI;
       angle_deg[s] = a_deg;
-      // Yamamura (EIRENE COSIN convention) expects theta measured from the
+      // Yamamura (COSIN convention) expects theta measured from the
       // surface normal: cos(theta_deg) must go to 1 at normal incidence.
       // theta_from_normal = 90 - alpha_B.
       const double theta_deg = 90.0 - a_deg;
