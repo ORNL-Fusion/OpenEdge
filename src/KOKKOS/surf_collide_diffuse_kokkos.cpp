@@ -323,14 +323,20 @@ void SurfCollideDiffuseKokkos::post_collide()
     }
   }
 
-  Kokkos::deep_copy(h_scalars,d_scalars);
+  Kokkos::deep_copy(DeviceType(),h_scalars,d_scalars);   // async; UpdateKokkos fences once for all styles
 
+
+  d_particles = {};
+}
+
+/* ---------------------------------------------------------------------- */
+
+void SurfCollideDiffuseKokkos::post_collide_apply()
+{
   int m = surf->find_collide(id);
   auto sc = surf->sc[m]; // can't modify the copy directly, use the original
   sc->nsingle += h_nsingle();
   surf->nreact_one += h_nreact_one();
-
-  d_particles = {};
 }
 
 /* ---------------------------------------------------------------------- */

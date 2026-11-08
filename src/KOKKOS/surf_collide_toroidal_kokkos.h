@@ -34,7 +34,8 @@ class SurfCollideToroidalKokkos : public SurfCollideToroidal {
   SurfCollideToroidalKokkos(class SPARTA *);
   ~SurfCollideToroidalKokkos() {}
   void pre_collide();
-  void post_collide();
+  void post_collide();          // issues the async counter readback
+  void post_collide_apply();    // after one fence: folds the counters into the host tallies
 
  private:
   DAT::tdual_int_scalar k_nsingle;

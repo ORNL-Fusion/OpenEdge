@@ -44,7 +44,8 @@ class SurfCollideSpecularKokkos : public SurfCollideSpecular {
   ~SurfCollideSpecularKokkos();
   void init();
   void pre_collide();
-  void post_collide();
+  void post_collide();          // issues the async counter readback
+  void post_collide_apply();    // after one fence: folds the counters into the host tallies
   void backup();
   void restore();
 

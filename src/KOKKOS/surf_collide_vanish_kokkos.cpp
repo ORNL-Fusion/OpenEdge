@@ -49,10 +49,13 @@ void SurfCollideVanishKokkos::pre_collide()
 
 void SurfCollideVanishKokkos::post_collide()
 {
-  Kokkos::deep_copy(h_nsingle,d_nsingle);
+  Kokkos::deep_copy(DeviceType(),h_nsingle,d_nsingle);   // async; UpdateKokkos fences once for all styles
+}
 
-  // can't modify the copy directly, use the original
+/* ---------------------------------------------------------------------- */
 
+void SurfCollideVanishKokkos::post_collide_apply()
+{
   int m = surf->find_collide(id);
   auto sc = surf->sc[m];
   sc->nsingle += h_nsingle();

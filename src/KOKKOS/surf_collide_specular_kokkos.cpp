@@ -164,8 +164,13 @@ void SurfCollideSpecularKokkos::post_collide()
   ParticleKokkos* particle_kk = (ParticleKokkos*) particle;
   if (ambi_flag || vibmode_flag) particle_kk->modify(Device,CUSTOM_MASK);
 
-  Kokkos::deep_copy(h_scalars,d_scalars);
+  Kokkos::deep_copy(DeviceType(),h_scalars,d_scalars);   // async; UpdateKokkos fences once for all styles
+}
 
+/* ---------------------------------------------------------------------- */
+
+void SurfCollideSpecularKokkos::post_collide_apply()
+{
   int m = surf->find_collide(id);
   auto sc = surf->sc[m]; // can't modify the copy directly, use the original
   sc->nsingle += h_nsingle();

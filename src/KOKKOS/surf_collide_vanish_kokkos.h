@@ -33,7 +33,8 @@ class SurfCollideVanishKokkos : public SurfCollideVanish {
   SurfCollideVanishKokkos(class SPARTA *);
   ~SurfCollideVanishKokkos() {}
   void pre_collide();
-  void post_collide();
+  void post_collide();          // issues the async counter readback
+  void post_collide_apply();    // after one fence: folds the counters into the host tallies
 
  private:
 

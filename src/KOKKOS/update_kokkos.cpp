@@ -1177,7 +1177,7 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
       h_nlocal() = particle->nlocal;
       if (continue_loop_flag) h_nmigrate() = nmigrate;
 
-      Kokkos::deep_copy(d_scalars,h_scalars);
+      Kokkos::deep_copy(DeviceType(),d_scalars,h_scalars);   // OpenEdge perf: async, ordered before the move kernel on the same instance
 
       copymode = 1;
 
@@ -1357,6 +1357,21 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
           sc_kk_transparent_copy[ntrans].obj.post_collide();
           ntrans++;
         }
+      }
+    }
+    // OpenEdge perf: the styles issued their counter readbacks asynchronously;
+    // one fence, then fold them (was 2 global fences per style per pass)
+    if (surf->nsc > 0) {
+      DeviceType().fence();
+      int nspec,ndiff,nvan,npist,ntrans,ntor;
+      nspec = ndiff = nvan = npist = ntrans = ntor = 0;
+      for (int n = 0; n < surf->nsc; n++) {
+        if (strcmp(surf->sc[n]->style,"toroidal") == 0) sc_kk_toroidal_copy[ntor++].obj.post_collide_apply();
+        else if (strcmp(surf->sc[n]->style,"specular") == 0) sc_kk_specular_copy[nspec++].obj.post_collide_apply();
+        else if (strcmp(surf->sc[n]->style,"diffuse") == 0) sc_kk_diffuse_copy[ndiff++].obj.post_collide_apply();
+        else if (strcmp(surf->sc[n]->style,"vanish") == 0) sc_kk_vanish_copy[nvan++].obj.post_collide_apply();
+        else if (strcmp(surf->sc[n]->style,"piston") == 0) sc_kk_piston_copy[npist++].obj.post_collide_apply();
+        else if (strcmp(surf->sc[n]->style,"transparent") == 0) sc_kk_transparent_copy[ntrans++].obj.post_collide_apply();
       }
     }
 
@@ -4993,8 +5008,8 @@ void UpdateKokkos::backup()
           Kokkos::view_alloc("update:sheath_phiprev_backup",
                              Kokkos::WithoutInitializing),
           d_oe_sheath_phiprev.extent(0));
-    Kokkos::deep_copy(d_oe_sheath_bank_backup,d_oe_sheath_bank);
-    Kokkos::deep_copy(d_oe_sheath_phiprev_backup,d_oe_sheath_phiprev);
+    Kokkos::deep_copy(DeviceType(),d_oe_sheath_bank_backup,d_oe_sheath_bank);      // async D2D (OpenEdge perf)
+    Kokkos::deep_copy(DeviceType(),d_oe_sheath_phiprev_backup,d_oe_sheath_phiprev);
   }
   // Phase B: the hybrid mover writes the GC-state customs; snapshot them too
   if (oe_has_gca_customs) {
@@ -5005,7 +5020,7 @@ void UpdateKokkos::backup()
         d_oe_gca_backup[k] = DAT::t_float_1d(
             Kokkos::view_alloc("update:gca_backup",Kokkos::WithoutInitializing),
             src[k]->extent(0));
-      Kokkos::deep_copy(d_oe_gca_backup[k],*src[k]);
+      Kokkos::deep_copy(DeviceType(),d_oe_gca_backup[k],*src[k]);   // async D2D
     }
   }
 
