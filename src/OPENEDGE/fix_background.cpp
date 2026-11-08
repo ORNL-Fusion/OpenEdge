@@ -38,6 +38,7 @@
 #include "openedge_geom.h"
 #include "particle.h"
 #include "update.h"
+#include "sparta_masks.h"
 
 #include <H5Cpp.h>
 #include <algorithm>
@@ -121,6 +122,15 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
   // pattern as FixEmit). cell_mesh_cell is rebuilt from current grid
   // state after migration — no per-cell pack/unpack needed.
   gridmigrate = 1;
+  // Kokkos: this fix has no per-step particle hooks and its per-grid hooks
+  // (base no-ops) touch no particle data, so the ModifyKokkos per-grid
+  // wrappers must not sync particles for it. With the default ALL_MASK a
+  // Host sync+modify fires per migrating cell and, alternating with the
+  // Device-side chem fix (PARTICLE|CUSTOM masks), copied the whole particle
+  // array and every custom vector host<->device once per cell during fix
+  // balance (6-15 s per rebalance at ~6000 cells/rank on Perlmutter A100).
+  datamask_read = EMPTY_MASK;
+  datamask_modify = EMPTY_MASK;
   cell_mesh_stamp_id = -1;
   cell_mesh_stamp_n  = -1;
 

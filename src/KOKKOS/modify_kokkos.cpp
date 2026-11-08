@@ -193,14 +193,23 @@ int ModifyKokkos::pack_grid_one(int icell, char *buf, int memflag)
   char *ptr = buf;
   for (int i = 0; i < n_pergrid; i++) {
     int j = list_pergrid[i];
-    particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
+    // OpenEdge: the per-grid hooks move per-cell fix arrays, never particles.
+    // Kokkos fixes sync their own per-grid views (FixAveGridKokkos::
+    // pergrid_sync); syncing particles here for them is (a) a full
+    // host<->device particle round trip per migrating cell when a host fix
+    // with ALL_MASK alternates with a device fix (6-15 s per rebalance on
+    // the WEST deck at 4 A100 ranks), and (b) unsafe under auto_sync, whose
+    // blanket modify(Host) pushes a stale host mirror over the device
+    // particles that CommKokkos::migrate_cells has just migrated.
+    const int pgsync = !fix[j]->kokkos_flag;
+    if (pgsync) particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
     int prev_auto_sync = sparta->kokkos->auto_sync;
     if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
 
     ptr += fix[list_pergrid[i]]->pack_grid_one(icell,ptr,memflag);
 
     sparta->kokkos->auto_sync = prev_auto_sync;
-    particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+    if (pgsync) particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
   }
   return ptr-buf;
 }
@@ -215,14 +224,16 @@ int ModifyKokkos::unpack_grid_one(int icell, char *buf)
   char *ptr = buf;
   for (int i = 0; i < n_pergrid; i++) {
     int j = list_pergrid[i];
-    particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
+    // OpenEdge: no particle sync for Kokkos fixes (see pack_grid_one)
+    const int pgsync = !fix[j]->kokkos_flag;
+    if (pgsync) particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
     int prev_auto_sync = sparta->kokkos->auto_sync;
     if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
 
     ptr += fix[list_pergrid[i]]->unpack_grid_one(icell,ptr);
 
     sparta->kokkos->auto_sync = prev_auto_sync;
-    particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+    if (pgsync) particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
   }
   return ptr-buf;
 }
@@ -236,14 +247,16 @@ void ModifyKokkos::copy_grid_one(int icell, int jcell)
 {
   for (int i = 0; i < n_pergrid; i++) {
     int j = list_pergrid[i];
-    particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
+    // OpenEdge: no particle sync for Kokkos fixes (see pack_grid_one)
+    const int pgsync = !fix[j]->kokkos_flag;
+    if (pgsync) particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
     int prev_auto_sync = sparta->kokkos->auto_sync;
     if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
 
     fix[j]->copy_grid_one(icell,jcell);
 
     sparta->kokkos->auto_sync = prev_auto_sync;
-    particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+    if (pgsync) particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
   }
 }
 
@@ -256,14 +269,16 @@ void ModifyKokkos::add_grid_one()
 {
   for (int i = 0; i < n_pergrid; i++) {
     int j = list_pergrid[i];
-    particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
+    // OpenEdge: no particle sync for Kokkos fixes (see pack_grid_one)
+    const int pgsync = !fix[j]->kokkos_flag;
+    if (pgsync) particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
     int prev_auto_sync = sparta->kokkos->auto_sync;
     if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
 
     fix[j]->add_grid_one();
 
     sparta->kokkos->auto_sync = prev_auto_sync;
-    particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+    if (pgsync) particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
   }
 }
 
@@ -276,14 +291,16 @@ void ModifyKokkos::reset_grid_count(int nlocal)
 {
   for (int i = 0; i < n_pergrid; i++) {
     int j = list_pergrid[i];
-    particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
+    // OpenEdge: no particle sync for Kokkos fixes (see pack_grid_one)
+    const int pgsync = !fix[j]->kokkos_flag;
+    if (pgsync) particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
     int prev_auto_sync = sparta->kokkos->auto_sync;
     if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
 
     fix[j]->reset_grid_count(nlocal);
 
     sparta->kokkos->auto_sync = prev_auto_sync;
-    particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+    if (pgsync) particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
   }
 }
 
@@ -296,14 +313,16 @@ void ModifyKokkos::grid_changed()
 {
   for (int i = 0; i < n_pergrid; i++) {
     int j = list_pergrid[i];
-    particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
+    // OpenEdge: no particle sync for Kokkos fixes (see pack_grid_one)
+    const int pgsync = !fix[j]->kokkos_flag;
+    if (pgsync) particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
     int prev_auto_sync = sparta->kokkos->auto_sync;
     if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
 
     fix[j]->grid_changed();
 
     sparta->kokkos->auto_sync = prev_auto_sync;
-    particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+    if (pgsync) particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
   }
 }
 
