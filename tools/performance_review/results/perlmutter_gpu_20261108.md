@@ -362,6 +362,57 @@ Projected single-case targets, 4 cooperating A100, per step (kernels today 0.54 
 no new critical path appears. Each stage follows the item-1/2 protocol (three repeats on one and
 four GPUs, re-profile, regression + parity) before it is retained.
 
+## 15. Item 3: pinned control block (measured, two variants)
+
+Persistent pinned host staging (`OEPinnedSpace` = CudaHostPinnedSpace under CUDA, HostSpace otherwise,
+`kokkos_type.h`) for every small control transfer: the move loop's 15-int control block (upload and
+per-attempt readback), the six surface-collide counter readbacks (now issued inside the attempt
+loop so the one per-attempt fence covers them; the style hooks are split into `post_collide_issue`,
+`post_collide`, `post_collide_apply`), the PWI tally readback, the emission counters, and the
+migration `pmeta` readback. Host views keep their types; the pinned view is a staging copy next to
+them, and the host<->pinned transfer is a `memcpy`. Device-side ordering is unchanged (one instance);
+diagnostic values (pcache diag, sheath diag) stay on the device as before.
+
+Three unprofiled repeats each, 20000 steps, same node and deck, same session:
+
+| binary | 1 A100 loop s | 4 A100 loop s |
+|---|---|---|
+| item 2 (eac15682) | 29.35 29.27 29.39 | 31.13 31.21 30.89 |
+| pinned block, host<->pinned via Kokkos deep_copy (rejected) | 30.88 30.84 31.12 | 33.69 33.56 33.58 |
+| pinned block, host<->pinned via memcpy (retained candidate) | 27.99 27.91 27.97 | 29.80 29.65 29.44 |
+
+The first variant is slower by 5-8 % in every repeat: a Kokkos `deep_copy` between pageable and
+pinned host views is a cudaMemcpy with fences, which re-introduced the synchronisation it was meant
+to remove. The memcpy variant gains 4.7 % on both one and four GPUs; reactions 1064907-1069380 and
+surface reactions 378833-379621, within noise.
+
+Profile, rank 0 of 4, 5000 steps, item 2 vs retained candidate: copy calls unchanged (36
+cudaMemcpyAsync per step: 15.5 H2D, 17.7 D2H, 12 D2D), bytes unchanged (H2D 434 kB, D2H 40 kB, D2D
+9.3 MB per step), kernels 0.54 ms per step both. Host blocking time per step moved and shrank: item
+2 cudaMemcpyAsync 0.59 ms + stream/event/device syncs 0.21 ms = 0.80 ms; candidate cudaMemcpyAsync
+0.24 ms + cudaStreamSynchronize 0.30 ms + event/device 0.17 ms = 0.71 ms. The copies no longer
+stall individually; the explicit fences now carry the wait for the GPU. The projected 0.6 ms saving
+was not realised: the measured saving is about 0.09 ms per step (1.4 s per 20000 steps), because most
+of what the staged copies had been waiting for was the kernels themselves. Regression on the retained candidate (GPU `--kk` incl. kokkos_parity): 21 passed, 0 failed, 1 skipped
+(`results/perlmutter_gpu_20261108/regression_gpu_item3.txt`). Committed as f806e9ac; binary kept as
+`$PSCRATCH/oe-perf-tools/spa_kokkos_cuda_item3_f806e9ac`.
+
+## 16. Production rerun on the retained binary (f806e9ac = items 1-3)
+
+Same deck (gridcut 0.035), same node class, 100000 steps from a fresh start:
+
+| metric | before items 1-3 (6e663da3) | retained (f806e9ac) | 48 CPU ranks | gain over 48 cores |
+|---|---|---|---|---|
+| single case, 4 cooperating A100, loop | 199.2 s | 165.0 s (1.75 ms/step late, 179k markers) | 636.1 s | 3.9x |
+| single case, 1 A100 with dumps every 20k, loop | 249 s | 225 s | 636.1 s | 2.8x |
+| 4 cases per node (1 GPU each), wall incl. setup | 312 s | 241 s | about 680 s per case | 59.8 vs 5.3 cases per node-hour: 11.3x |
+
+Items 1-3 together took 17 % off the single-case 4-GPU production run and 10 % off the single-GPU
+run. The campaign figure now exceeds 10x per node-hour on this deck; the single-case figure stands at
+3.9x, with 0.54 ms of kernels inside a 1.65 ms step at 4 ranks (loop/steps). The remaining host
+share is the per-pass structure itself (2.1 move launches, migration plan and exchange, 10 fences)
+and the fix kernels; those are the shared-gather and fusion items, not yet started.
+
 ## 7. Reproduction
 
 ```bash
