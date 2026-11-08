@@ -1,0 +1,22 @@
+== i1_gpu1_r2
+Loop time of 31.3668 on 1 procs for 20000 steps with 83742 particles
+Performance: 637.616 timesteps/s, 53.395 Mparticle-step/s
+Move    | 15.955     | 15.955     | 15.955     |   0.0 | 50.86
+Coll    | 0.26901    | 0.26901    | 0.26901    |   0.0 |  0.86
+Sort    | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 1.5029     | 1.5029     | 1.5029     |   0.0 |  4.79
+Modify  | 6.7678     | 6.7678     | 6.7678     |   0.0 | 21.58
+Output  | 0.2107     | 0.2107     | 0.2107     |   0.0 |  0.67
+Pcache  | 0.8837     | 0.8837     | 0.8837     |   0.0 |  2.82
+SReact  | 1.134      | 1.134      | 1.134      |   0.0 |  3.62
+Chem    | 2.6218     | 2.6218     | 2.6218     |   0.0 |  8.36
+Adens   | 0.70258    | 0.70258    | 0.70258    |   0.0 |  2.24
+Other   |            | 1.32       |            |       |  4.21
+
+Particle moves    = 873335365 (873M)
+Particle comm iterations/step: 1
+Particles: 83742 ave 83742 max 83742 min
+step cpu_s np | s_per_1000
+     0      0.00      0 |   0.00
+  8000     11.10  35741 |   1.49
+ 18000     27.53  76297 |   1.81

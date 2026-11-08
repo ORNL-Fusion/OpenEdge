@@ -283,6 +283,85 @@ fills through an execution-space `deep_copy(exec, view, 0)` (item 2, mechanical)
 block shared by update/collide/PWI/comm read once per pass (rest of item 1), then the migration
 plan skip and the kernel fusion. Regression on this binary (GPU `--kk`, incl. kokkos_parity): 21 passed, 0 failed, 1 skipped (`results/perlmutter_gpu_20261108/regression_gpu_item1.txt`); the CPU binary is untouched by item 1.
 
+## 12. Reconciled timing table and checkpoint
+
+Every wall-time figure in this report, keyed by what changed between them. All runs:
+`prevention_fixed_on`, 20000 steps from a fresh start unless marked 100k, same node class
+(A100 node, 64 Milan cores), binaries from this tree. "deck" is the gridcut of
+`in.fresh_history`; "code" is the commit whose source the binary was built from.
+
+| code | deck | 48 CPU | 4 CPU | 1 A100 | 4 A100 | 4 A100 100k | 48 CPU 100k |
+|---|---|---|---|---|---|---|---|
+| 540f0719 (base + build fixes) | gridcut 0.0 | 38.4 s (24k markers, 64598 lost) | 439.2 s | 33.4 s | 179.3 s | 800.6 s | 288.4 s (47k, 316847 lost) |
+| 6e663da3 (+ per-grid sync fix) | gridcut 0.0 | | | | 43.2 s | 236.2 s | |
+| 6e663da3 | gridcut 0.035 | 66.8 s (84k markers) | | 33.7 s | 36.3 s | 199.2 s (180k) | 636.1 s (144k) |
+| 32b3f05b (+ item 1) | gridcut 0.035 | | | 31.4 s | 33.6 s | | |
+
+The 48-rank CPU figures at gridcut 0.0 are not comparable with anything else (lost population);
+the first two GPU rows at gridcut 0.0 are comparable with each other only. Speed-ups quoted in the
+text: 179.3/43.2 = 4.15x and 800.6/236.2 = 3.39x (sync fix, gridcut 0.0); 66.8/33.6 = 2.0x
+(1 node vs 48 cores, 20k steps) and 636/199 = 3.2x (100k steps) on the corrected deck.
+
+Checkpoint (branch `perf-review`, tracking `origin/development`, nothing pushed):
+
+| commit | content | validation |
+|---|---|---|
+| 540f0719 | build fixes from the EOS review (cmake compile options, ADAS Kokkos eirene_mode) | builds CUDA+OpenMP and CPU |
+| 6e663da3 | correctness/performance: no particle sync around per-grid hooks of Kokkos fixes; fix background EMPTY masks | GPU regression 21/0/1 incl. kokkos_parity; CPU 20/0/2 |
+| 32b3f05b | performance item 1: async collide counter readbacks, one fence per pass | GPU regression 21/0/1 incl. kokkos_parity; CPU suite not rerun (no CPU-path file touched: the change is confined to `src/KOKKOS/`) |
+| 7204f483 | tools/performance_review (this report, raw data, scripts) | n/a |
+
+Binaries of 32b3f05b: `spa_kokkos_cuda_perlmutter` sha256 7d5927baab7f2020..., `spa_mpi` 97d66cd0edadd93b...
+(copies kept as `$PSCRATCH/oe-perf-tools/spa_kokkos_cuda_item1_32b3f05b`). Skipped in every
+regression pass: `st40_core_species_boundary` (its input deck is not in this checkout) and, in CPU
+mode, `kokkos_parity` (needs the --kk binary; it ran and passed in the GPU passes).
+
+## 13. Item 2 done: asynchronous fills and small copies (commit eac15682)
+
+Three unprofiled repeats per configuration, 20000 steps, gridcut 0.035, same node:
+
+| binary | 1 A100 loop s (3 repeats) | 4 A100 loop s (3 repeats) |
+|---|---|---|
+| item 1 (32b3f05b) | 31.54 31.37 31.41 | 33.29 33.18 33.51 |
+| item 2 (eac15682) | 29.27 29.17 29.11 | 31.64 31.13 31.16 |
+
+Repeat spread is below 0.3 s, the change is 2.2 s (7 %) on one GPU and 2.0 s (6 %) on four; reactions
+1067089-1068734 and surface reactions 379027-380153 across all runs, i.e. within the run-to-run noise.
+Re-profile (rank 0 of 4, steady window): 88 Kokkos events per step (232 at the start, 131 after
+item 1), 16 fence events per step (105, 61), median step 1.68 ms (2.54, 1.74); cudaDeviceSynchronize
+has left the API top list, cudaMemcpyAsync is now the largest host item (36 per step, 0.6 ms): these
+are the control copies that still target pageable host views, so the driver stages them synchronously.
+GPU regression 21/0/1 incl. kokkos_parity. Retained.
+
+## 14. Measured production latency, campaign throughput, projected targets
+
+Measured (code eac15682 unless stated, deck gridcut 0.035, prevention_fixed_on):
+
+| metric | value | reference |
+|---|---|---|
+| single case, 4 A100, 20k steps | 31.3 s (1.57 ms/step) | 48 CPU ranks 66.8 s: 2.1x |
+| single case, 1 A100, 20k steps | 29.2 s (1.46 ms/step) | 2.3x |
+| single case, 4 A100, 100k steps (code 6e663da3) | 199 s, 2.05 ms/step at 180k markers | 48 CPU ranks 636 s: 3.2x |
+| single case, 1 A100, 100k steps with dumps (code 6e663da3) | 249 s | 2.6x |
+| campaign, 4 cases per node, 100k steps (code 6e663da3) | 46 cases per node-hour | 48 CPU ranks 5.3: 8.7x (10.2x on loop time) |
+
+The 100k-step figures predate items 1 and 2 (those were measured at 20k steps); scaling their 13 %
+onto the 100k runs is a projection, not a measurement.
+
+Projected single-case targets, 4 cooperating A100, per step (kernels today 0.54 ms of 1.57 ms):
+
+| stage | expected step | basis |
+|---|---|---|
+| pinned control block: all control scalars/counters in CudaHostPinnedSpace views, one async readback per pass | 1.2-1.3 ms | 36 pageable cudaMemcpyAsync per step at ~15 us each |
+| migration plan skip when the global leaver count is zero (all ranks call the Allreduce; a rank with no leavers may still receive) | 1.1-1.2 ms | 1.8-2.3 passes per step; second and third passes often move nothing |
+| shared exact gather: per-particle triangle hint written by the pcache fill, tested first with the same containment predicate in the 16 device query sites, bucket walk as fallback | 0.9-1.0 ms | pcache + three force kernels re-walk the bucket; CPU hint hit rate 99.55 % |
+| selective fusion: start-of-step (emit, cd fill, thermal half kick) and end-of-step (chem, coulomb, thermal half kick) kernels sharing one location | 0.6-0.7 ms | 6 launches + 6 syncs per step; operator order within each phase preserved as a sequence inside the kernel |
+| continuation queue: reaction products pushed in the same pass | 0.5-0.6 ms | 2.1 move launches per step today |
+
+0.5 ms/step stays an experimental target: it assumes every stage lands at the optimistic end and
+no new critical path appears. Each stage follows the item-1/2 protocol (three repeats on one and
+four GPUs, re-profile, regression + parity) before it is retained.
+
 ## 7. Reproduction
 
 ```bash
