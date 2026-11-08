@@ -55,6 +55,7 @@ CommKokkos::CommKokkos(SPARTA *sparta) : Comm(sparta),
   p_pmeta = t_pinned_int_1d("comm:pmeta_pinned",1);
 
   oe_comm_timing_every = 0; oe_ct_calls = 0; oe_ct_last = -1;
+  oe_ct_empty_global = oe_ct_empty_local = 0;
   oe_nsend_sum = oe_nrecv_sum = 0;
   for (int i = 0; i < 7; i++) oe_ct[i] = 0.0;
   if (const char *e = getenv("OE_COMM_TIMING")) oe_comm_timing_every = atoi(e);
@@ -70,8 +71,8 @@ void CommKokkos::oe_comm_timing_report()
   for (int i = 0; i < 7; i++) loc[i] = oe_ct[i];
   for (int i = 0; i < 6; i++) loc[7+i] = ik->oe_xt[i];
   MPI_Allreduce(loc,mx,13,MPI_DOUBLE,MPI_MAX,world);
-  bigint sums[2] = {oe_nsend_sum,oe_nrecv_sum}, gsum[2];
-  MPI_Allreduce(sums,gsum,2,MPI_SPARTA_BIGINT,MPI_SUM,world);
+  bigint sums[4] = {oe_nsend_sum,oe_nrecv_sum,oe_ct_empty_local,oe_ct_empty_global}, gsum[4];
+  MPI_Allreduce(sums,gsum,4,MPI_SPARTA_BIGINT,MPI_SUM,world);
   if (me != 0) return;
   const char *nm[7] = {"pack","compress","plan","grow+sync","exchange","unpack","total"};
   const char *xn[6] = {"irecv","packbuf","send","self","waitall","h2d"};
@@ -81,6 +82,9 @@ void CommKokkos::oe_comm_timing_report()
     fprintf(out,"[comm-timing] step " BIGINT_FORMAT " cumulative seconds (rank0 / max-rank), "
             "%d calls, particles sent " BIGINT_FORMAT " recv " BIGINT_FORMAT " (all ranks)\n",
             update->ntimestep,oe_ct_calls,gsum[0],gsum[1]);
+    fprintf(out,"  passes with nothing to exchange on any rank: " BIGINT_FORMAT " of %d per rank; "
+            "passes with nothing leaving a rank: " BIGINT_FORMAT " (summed over ranks)\n",
+            gsum[3]/nprocs,oe_ct_calls,gsum[2]);
     for (int i = 0; i < 7; i++)
       fprintf(out,"  %-10s %9.3f / %9.3f\n",nm[i],loc[i],mx[i]);
     fprintf(out,"  exchange_uniform:");
@@ -273,7 +277,9 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
   }
   if (oe_comm_timing_every) { double t = MPI_Wtime(); oe_ct[2] += t - oe_t; oe_t = t; }
 
+  if (nmigrate == 0) oe_ct_empty_local++;
   if (use_a2a && nsend == 0 && nrecv == 0) {   // Alltoall plan, empty on every side: nothing to exchange
+    oe_ct_empty_global++;
     d_plist = {};
     if (oe_comm_timing_every) { double t = MPI_Wtime(); oe_ct[6] += t - oe_t0; oe_ct_calls++;
       if (update->ntimestep % oe_comm_timing_every == 0 && update->ntimestep != oe_ct_last) { oe_ct_last = update->ntimestep; oe_comm_timing_report(); } }

@@ -545,6 +545,131 @@ bool query_scalars_at_point(
 }
 
 /* ===================================================================
+   OpenEdge perf (2026-11-08): per-particle triangle hint. The CPU keeps a
+   validated "last triangle" per particle (fix background custom
+   oe_mesh_tri_<id>, tri+1, 0 = none); the device twins below test that
+   triangle first. A hint is accepted only when the point is STRICTLY
+   inside it (all barycentric coordinates beyond the 1e-10 band): such a
+   point lies in exactly one triangle of a proper mesh, so the answer is
+   the one the bucket walk would return. Points inside the band (shared
+   edges, vertices) and misses fall through to the bucket walk, which
+   keeps the original first-hit order. Pure acceleration, no result change.
+   =================================================================== */
+
+KOKKOS_INLINE_FUNCTION
+bool tri_contains_strictly(int t, double R, double Z,
+                           const DAT::t_float_1d &mesh_vtx_r,
+                           const DAT::t_float_1d &mesh_vtx_z,
+                           const DAT::t_int_1d &mesh_tri)
+{
+  const int v0 = mesh_tri(3*t+0), v1 = mesh_tri(3*t+1), v2 = mesh_tri(3*t+2);
+  const double r0 = mesh_vtx_r(v0), z0 = mesh_vtx_z(v0);
+  const double r1 = mesh_vtx_r(v1), z1 = mesh_vtx_z(v1);
+  const double r2 = mesh_vtx_r(v2), z2 = mesh_vtx_z(v2);
+  const double d  = (r1-r0)*(z2-z0) - (r2-r0)*(z1-z0);
+  if (Kokkos::fabs(d) < 1e-30) return false;
+  const double a  = ((R-r0)*(z2-z0) - (r2-r0)*(Z-z0)) / d;
+  const double bb = ((r1-r0)*(Z-z0) - (R-r0)*(z1-z0)) / d;
+  return (a > 1e-10 && bb > 1e-10 && (a+bb) < 1.0-1e-10);
+}
+
+KOKKOS_INLINE_FUNCTION
+int locate_tri_at_point(const double xyz[3], int dim, int axisymmetric,
+    const DAT::t_float_1d &, const DAT::t_float_1d &, const DAT::t_int_1d &,
+    const DAT::t_int_1d &, const DAT::t_int_1d &, double, double, double, double, int, int, int);
+
+/* hint: in = tri index or -1; out = the located triangle (unchanged on a miss) */
+KOKKOS_INLINE_FUNCTION
+int locate_tri_hinted(
+    const double xyz[3], int dim, int axisymmetric, int &hint,
+    const DAT::t_float_1d &mesh_vtx_r,
+    const DAT::t_float_1d &mesh_vtx_z,
+    const DAT::t_int_1d &mesh_tri,
+    const DAT::t_int_1d &hash_offset,
+    const DAT::t_int_1d &hash_entries,
+    double hash_rmin, double hash_zmin,
+    double hash_dr,   double hash_dz,
+    int hash_nr, int hash_nz, int ntri)
+{
+  if (ntri <= 0) return -1;
+  if (hint >= 0 && hint < ntri) {
+    double R, Z;
+    if (axisymmetric)      { Z = xyz[0]; R = xyz[1]; }
+    else if (dim == 2)     { R = xyz[0]; Z = xyz[1]; }
+    else                   { R = Kokkos::sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]);
+                             Z = xyz[2]; }
+    if (tri_contains_strictly(hint, R, Z, mesh_vtx_r, mesh_vtx_z, mesh_tri)) return hint;
+  }
+  const int t = locate_tri_at_point(xyz, dim, axisymmetric, mesh_vtx_r, mesh_vtx_z, mesh_tri,
+                                    hash_offset, hash_entries, hash_rmin, hash_zmin,
+                                    hash_dr, hash_dz, hash_nr, hash_nz, ntri);
+  if (t >= 0) hint = t;
+  return t;
+}
+
+/* hinted twin of query_bfield_at_point: identical result, hint-first location */
+KOKKOS_INLINE_FUNCTION
+bool query_bfield_at_point_hinted(
+    const double xyz[3], int dim, int axisymmetric, int &hint,
+    const DAT::t_float_1d &mesh_vtx_r,
+    const DAT::t_float_1d &mesh_vtx_z,
+    const DAT::t_int_1d &mesh_tri,
+    const DAT::t_float_1d &mesh_tri_br,
+    const DAT::t_float_1d &mesh_tri_bz,
+    const DAT::t_float_1d &mesh_tri_bt,
+    const DAT::t_int_1d &hash_offset,
+    const DAT::t_int_1d &hash_entries,
+    double hash_rmin, double hash_zmin,
+    double hash_dr,   double hash_dz,
+    int hash_nr, int hash_nz, int ntri,
+    double B[3])
+{
+  B[0] = 0.0; B[1] = 0.0; B[2] = 0.0;
+  const int tri = locate_tri_hinted(xyz, dim, axisymmetric, hint, mesh_vtx_r, mesh_vtx_z, mesh_tri,
+                                    hash_offset, hash_entries, hash_rmin, hash_zmin,
+                                    hash_dr, hash_dz, hash_nr, hash_nz, ntri);
+  if (tri < 0) return false;
+  const double bR = mesh_tri_br(tri), bZ = mesh_tri_bz(tri), bphi = mesh_tri_bt(tri);
+  if (axisymmetric)  { B[0] = bZ;  B[1] = bR;  B[2] = bphi; }
+  else if (dim == 2) { B[0] = bR;  B[1] = bZ;  B[2] = bphi; }
+  else {
+    const double rxy = Kokkos::sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1]);
+    double cphi = 1.0, sphi = 0.0;
+    if (rxy > 1.0e-20) { cphi = xyz[0] / rxy; sphi = xyz[1] / rxy; }
+    B[0] = bR * cphi - bphi * sphi;
+    B[1] = bR * sphi + bphi * cphi;
+    B[2] = bZ;
+  }
+  return true;
+}
+
+/* hinted twin of query_scalars_at_point */
+KOKKOS_INLINE_FUNCTION
+bool query_scalars_at_point_hinted(
+    const double xyz[3], int dim, int axisymmetric, int &hint,
+    const DAT::t_float_1d &mesh_vtx_r,
+    const DAT::t_float_1d &mesh_vtx_z,
+    const DAT::t_int_1d &mesh_tri,
+    const DAT::t_float_1d &mesh_tri_f1,
+    const DAT::t_float_1d &mesh_tri_f2,
+    const DAT::t_float_1d &mesh_tri_f3,
+    const DAT::t_int_1d &hash_offset,
+    const DAT::t_int_1d &hash_entries,
+    double hash_rmin, double hash_zmin,
+    double hash_dr,   double hash_dz,
+    int hash_nr, int hash_nz, int ntri,
+    double out[3])
+{
+  out[0] = 0.0; out[1] = 0.0; out[2] = 0.0;
+  const int tri = locate_tri_hinted(xyz, dim, axisymmetric, hint, mesh_vtx_r, mesh_vtx_z, mesh_tri,
+                                    hash_offset, hash_entries, hash_rmin, hash_zmin,
+                                    hash_dr, hash_dz, hash_nr, hash_nz, ntri);
+  if (tri < 0) return false;
+  out[0] = mesh_tri_f1(tri); out[1] = mesh_tri_f2(tri); out[2] = mesh_tri_f3(tri);
+  return true;
+}
+
+/* ===================================================================
    Bare triangle locator: same CSR-hash containment search as the two
    query functions above, returning the TRI INDEX so callers can fetch
    arbitrary per-tri fields (gate 9: coulomb drag + thermal force read

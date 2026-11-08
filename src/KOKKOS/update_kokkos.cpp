@@ -1138,6 +1138,13 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
             particle->ewhich[sheath_phiprev_custom]].k_view.d_view;
         oe_has_sheath_customs = 1;
       }
+      oe_has_tri_hint = 0;   // per-particle triangle hint (grow-safe rebind every attempt)
+      if (oe_tri_hint_custom >= 0 && oe_has_mesh_b) {
+        particle_kk->sync(Device,CUSTOM_MASK);
+        d_oe_tri_hint = particle_kk->k_eivec.h_view[
+            particle->ewhich[oe_tri_hint_custom]].k_view.d_view;
+        oe_has_tri_hint = 1;
+      }
       // OpenEdge: incident pweight for compute surf/weighted/kk (the CPU
       // stamps update->tally_pweight before each surf_tally batch)
       oe_has_tally_pw = 0;
@@ -3173,6 +3180,7 @@ void UpdateKokkos::build_oe_mesh_from_fix()
   if (pusher->pusher_plasma_fidx < 0) return;
   FixBackground *pd =
     dynamic_cast<FixBackground*>(modify->fix[pusher->pusher_plasma_fidx]);
+  oe_tri_hint_custom = pd ? pd->mesh_tri_custom_index() : -1;   // device twin of the CPU particle tri hint
   const int have_mesh_b = pd && pd->has_mesh && pd->mesh_nvtx > 0 &&
     pd->mesh_ntri > 0 &&
     (int) pd->mesh_tri_br.size() == pd->mesh_ntri;
@@ -4520,6 +4528,9 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
   // --- B point-query once at the start position (CPU caches B the same
   //     way); dispatch mesh > equilibrium > cell-center columns ---
   double B_cached[3] = {0.0, 0.0, 0.0};
+  // per-particle triangle hint (written by the pcache fill at this position;
+  // local copy follows the subcycle positions, result identical to the walk)
+  int tri_hint = (oe_has_tri_hint) ? d_oe_tri_hint(i) - 1 : -1;
   {
     // column-axis offset (3D linear-device decks): CPU point queries
     // subtract it via sparta_to_RZ; shift once so R and the
@@ -4531,12 +4542,10 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
     bool got_B = false;
     if (oe_has_const_b == 2) got_B = oe_const_bfield_slot(xq, B_cached);   // CPU precedence: Cartesian constant B first, cylindrical last
     if (!got_B && oe_has_mesh_b) {
-      got_B = MeshKokkos::query_bfield_at_point(
-          xq, oe_dim, oe_axisymmetric,
+      got_B = MeshKokkos::query_bfield_at_point_hinted(
+          xq, oe_dim, oe_axisymmetric, tri_hint,
           d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
           d_oe_mesh_tri_br, d_oe_mesh_tri_bz, d_oe_mesh_tri_bt,
-          d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
-          d_oe_mesh_tri_zmin, d_oe_mesh_tri_zmax,
           d_oe_hash_offset, d_oe_hash_entries,
           oe_mesh_hash_rmin, oe_mesh_hash_zmin,
           oe_mesh_hash_dr,   oe_mesh_hash_dz,
@@ -4666,8 +4675,8 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
           if (oe_dim == 3 && !oe_axisymmetric) {
             xqs[0] -= oe_col_x0; xqs[1] -= oe_col_y0;
           }
-          if (MeshKokkos::query_scalars_at_point(
-                xqs, oe_dim, oe_axisymmetric,
+          if (MeshKokkos::query_scalars_at_point_hinted(
+                xqs, oe_dim, oe_axisymmetric, tri_hint,
                 d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
                 d_oe_mesh_tri_te, d_oe_mesh_tri_ti, d_oe_mesh_tri_ne,
                 d_oe_hash_offset, d_oe_hash_entries,
@@ -4787,12 +4796,10 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
       if (oe_dim == 3 && !oe_axisymmetric) {
         xqe[0] -= oe_col_x0; xqe[1] -= oe_col_y0;
       }
-      if (MeshKokkos::query_bfield_at_point(
-            xqe, oe_dim, oe_axisymmetric,
+      if (MeshKokkos::query_bfield_at_point_hinted(
+            xqe, oe_dim, oe_axisymmetric, tri_hint,
             d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
             d_oe_mesh_tri_er, d_oe_mesh_tri_ez, d_oe_mesh_tri_et,
-            d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
-            d_oe_mesh_tri_zmin, d_oe_mesh_tri_zmax,
             d_oe_hash_offset, d_oe_hash_entries,
             oe_mesh_hash_rmin, oe_mesh_hash_zmin,
             oe_mesh_hash_dr,   oe_mesh_hash_dz,
@@ -5160,6 +5167,11 @@ void UpdateKokkos::cache_plasma_particles_device()
   if (m & PCACHE_NE)   d_pc_ne   = edvec(pc_ne_custom);
   if (m & PCACHE_NI)   d_pc_ni   = edvec(pc_ni_custom);
   if (m & PCACHE_VPAR) d_pc_vpar = edvec(pc_vpar_custom);
+  oe_has_tri_hint = 0;   // per-particle triangle hint, written by the fill below
+  if (oe_tri_hint_custom >= 0) {
+    d_oe_tri_hint = particle_kk->k_eivec.h_view[particle->ewhich[oe_tri_hint_custom]].k_view.d_view;
+    oe_has_tri_hint = 1;
+  }
   if (m & PCACHE_BFIELD) {
     d_pc_bx = edvec(pc_bx_custom);
     d_pc_by = edvec(pc_by_custom);
@@ -5212,13 +5224,15 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
   // tri-constant plasma scalars (CPU mesh_cell_for at the particle
   // position; a miss = the CPU empty-structured-grid fallback = 0)
   double te = 0.0, ti = 0.0, ne = 0.0, ni = 0.0, vpar = 0.0;
-  const int tri = (oe_has_mesh_plasma && oe_mesh_ntri > 0) ? MeshKokkos::locate_tri_at_point(
-      xq, oe_dim, oe_axisymmetric,
+  int tri_hint = (oe_has_tri_hint) ? d_oe_tri_hint(i) - 1 : -1;
+  const int tri = (oe_has_mesh_plasma && oe_mesh_ntri > 0) ? MeshKokkos::locate_tri_hinted(
+      xq, oe_dim, oe_axisymmetric, tri_hint,
       d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
       d_oe_hash_offset, d_oe_hash_entries,
       oe_mesh_hash_rmin, oe_mesh_hash_zmin,
       oe_mesh_hash_dr,   oe_mesh_hash_dz,
       oe_mesh_hash_nr, oe_mesh_hash_nz, oe_mesh_ntri) : -1;
+  if (oe_has_tri_hint && tri >= 0) d_oe_tri_hint(i) = tri + 1;   // CPU convention: tri+1, 0 = none
   if (tri >= 0) {
     te = d_oe_mesh_tri_te(tri);
     ti = d_oe_mesh_tri_ti(tri);
@@ -5246,12 +5260,10 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
     bool got_B = false;
     if (oe_has_const_b == 2) got_B = oe_const_bfield_slot(xq, B);   // CPU precedence: Cartesian constant B first, cylindrical last
     if (!got_B && oe_has_mesh_b) {
-      got_B = MeshKokkos::query_bfield_at_point(
-          xq, oe_dim, oe_axisymmetric,
+      got_B = MeshKokkos::query_bfield_at_point_hinted(
+          xq, oe_dim, oe_axisymmetric, tri_hint,
           d_oe_mesh_vtx_r, d_oe_mesh_vtx_z, d_oe_mesh_tri,
           d_oe_mesh_tri_br, d_oe_mesh_tri_bz, d_oe_mesh_tri_bt,
-          d_oe_mesh_tri_rmin, d_oe_mesh_tri_rmax,
-          d_oe_mesh_tri_zmin, d_oe_mesh_tri_zmax,
           d_oe_hash_offset, d_oe_hash_entries,
           oe_mesh_hash_rmin, oe_mesh_hash_zmin,
           oe_mesh_hash_dr,   oe_mesh_hash_dz,

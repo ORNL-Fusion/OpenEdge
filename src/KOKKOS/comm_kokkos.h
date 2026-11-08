@@ -45,6 +45,7 @@ class CommKokkos : public Comm {
   // pproc D2H), 1 compress, 2 plan (create/augment_data_uniform), 3 grow + sync,
   // 4 exchange_uniform, 5 unpack kernel, 6 total
   int oe_comm_timing_every, oe_ct_calls;
+  bigint oe_ct_empty_global, oe_ct_empty_local;   // migrate passes with nothing to exchange anywhere / nothing leaving this rank
   double oe_ct[7];
   bigint oe_ct_last, oe_nsend_sum, oe_nrecv_sum;
   void oe_comm_timing_report();

@@ -416,6 +416,9 @@ class UpdateKokkos : public Update {
   DAT::t_float_1d d_oe_tally_pw;   // pweight custom for weighted surf tallies
   int oe_has_tally_pw;
   DAT::t_float_1d d_oe_sheath_bank;
+  DAT::t_int_1d d_oe_tri_hint;        // per-particle mesh triangle hint (custom ivec, tri+1, 0 = none)
+  int oe_tri_hint_custom = -1;        // custom index on the host, -1 = none
+  int oe_has_tri_hint = 0;
   DAT::t_float_1d d_oe_sheath_phiprev;
   DAT::t_float_1d d_oe_sheath_bank_backup;
   DAT::t_float_1d d_oe_sheath_phiprev_backup;
