@@ -1,0 +1,153 @@
+diff --git a/src/KOKKOS/modify_kokkos.cpp b/src/KOKKOS/modify_kokkos.cpp
+index 9b55ad11..90d5ba4b 100644
+--- a/src/KOKKOS/modify_kokkos.cpp
++++ b/src/KOKKOS/modify_kokkos.cpp
+@@ -193,14 +193,23 @@ int ModifyKokkos::pack_grid_one(int icell, char *buf, int memflag)
+   char *ptr = buf;
+   for (int i = 0; i < n_pergrid; i++) {
+     int j = list_pergrid[i];
+-    particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
++    // OpenEdge: the per-grid hooks move per-cell fix arrays, never particles.
++    // Kokkos fixes sync their own per-grid views (FixAveGridKokkos::
++    // pergrid_sync); syncing particles here for them is (a) a full
++    // host<->device particle round trip per migrating cell when a host fix
++    // with ALL_MASK alternates with a device fix (6-15 s per rebalance on
++    // the WEST deck at 4 A100 ranks), and (b) unsafe under auto_sync, whose
++    // blanket modify(Host) pushes a stale host mirror over the device
++    // particles that CommKokkos::migrate_cells has just migrated.
++    const int pgsync = !fix[j]->kokkos_flag;
++    if (pgsync) particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
+     int prev_auto_sync = sparta->kokkos->auto_sync;
+     if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
+ 
+     ptr += fix[list_pergrid[i]]->pack_grid_one(icell,ptr,memflag);
+ 
+     sparta->kokkos->auto_sync = prev_auto_sync;
+-    particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
++    if (pgsync) particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+   }
+   return ptr-buf;
+ }
+@@ -215,14 +224,16 @@ int ModifyKokkos::unpack_grid_one(int icell, char *buf)
+   char *ptr = buf;
+   for (int i = 0; i < n_pergrid; i++) {
+     int j = list_pergrid[i];
+-    particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
++    // OpenEdge: no particle sync for Kokkos fixes (see pack_grid_one)
++    const int pgsync = !fix[j]->kokkos_flag;
++    if (pgsync) particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
+     int prev_auto_sync = sparta->kokkos->auto_sync;
+     if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
+ 
+     ptr += fix[list_pergrid[i]]->unpack_grid_one(icell,ptr);
+ 
+     sparta->kokkos->auto_sync = prev_auto_sync;
+-    particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
++    if (pgsync) particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+   }
+   return ptr-buf;
+ }
+@@ -236,14 +247,16 @@ void ModifyKokkos::copy_grid_one(int icell, int jcell)
+ {
+   for (int i = 0; i < n_pergrid; i++) {
+     int j = list_pergrid[i];
+-    particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
++    // OpenEdge: no particle sync for Kokkos fixes (see pack_grid_one)
++    const int pgsync = !fix[j]->kokkos_flag;
++    if (pgsync) particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
+     int prev_auto_sync = sparta->kokkos->auto_sync;
+     if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
+ 
+     fix[j]->copy_grid_one(icell,jcell);
+ 
+     sparta->kokkos->auto_sync = prev_auto_sync;
+-    particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
++    if (pgsync) particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+   }
+ }
+ 
+@@ -256,14 +269,16 @@ void ModifyKokkos::add_grid_one()
+ {
+   for (int i = 0; i < n_pergrid; i++) {
+     int j = list_pergrid[i];
+-    particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
++    // OpenEdge: no particle sync for Kokkos fixes (see pack_grid_one)
++    const int pgsync = !fix[j]->kokkos_flag;
++    if (pgsync) particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
+     int prev_auto_sync = sparta->kokkos->auto_sync;
+     if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
+ 
+     fix[j]->add_grid_one();
+ 
+     sparta->kokkos->auto_sync = prev_auto_sync;
+-    particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
++    if (pgsync) particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+   }
+ }
+ 
+@@ -276,14 +291,16 @@ void ModifyKokkos::reset_grid_count(int nlocal)
+ {
+   for (int i = 0; i < n_pergrid; i++) {
+     int j = list_pergrid[i];
+-    particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
++    // OpenEdge: no particle sync for Kokkos fixes (see pack_grid_one)
++    const int pgsync = !fix[j]->kokkos_flag;
++    if (pgsync) particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
+     int prev_auto_sync = sparta->kokkos->auto_sync;
+     if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
+ 
+     fix[j]->reset_grid_count(nlocal);
+ 
+     sparta->kokkos->auto_sync = prev_auto_sync;
+-    particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
++    if (pgsync) particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+   }
+ }
+ 
+@@ -296,14 +313,16 @@ void ModifyKokkos::grid_changed()
+ {
+   for (int i = 0; i < n_pergrid; i++) {
+     int j = list_pergrid[i];
+-    particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
++    // OpenEdge: no particle sync for Kokkos fixes (see pack_grid_one)
++    const int pgsync = !fix[j]->kokkos_flag;
++    if (pgsync) particle_kk->sync(fix[j]->execution_space,fix[j]->datamask_read);
+     int prev_auto_sync = sparta->kokkos->auto_sync;
+     if (!fix[j]->kokkos_flag) sparta->kokkos->auto_sync = 1;
+ 
+     fix[j]->grid_changed();
+ 
+     sparta->kokkos->auto_sync = prev_auto_sync;
+-    particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
++    if (pgsync) particle_kk->modify(fix[j]->execution_space,fix[j]->datamask_modify);
+   }
+ }
+ 
+diff --git a/src/fix_background.cpp b/src/fix_background.cpp
+index ee8af798..ad4ad683 100644
+--- a/src/fix_background.cpp
++++ b/src/fix_background.cpp
+@@ -38,6 +38,7 @@
+ #include "openedge_geom.h"
+ #include "particle.h"
+ #include "update.h"
++#include "sparta_masks.h"
+ 
+ #include <H5Cpp.h>
+ #include <algorithm>
+@@ -121,6 +122,15 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
+   // pattern as FixEmit). cell_mesh_cell is rebuilt from current grid
+   // state after migration — no per-cell pack/unpack needed.
+   gridmigrate = 1;
++  // Kokkos: this fix has no per-step particle hooks and its per-grid hooks
++  // (base no-ops) touch no particle data, so the ModifyKokkos per-grid
++  // wrappers must not sync particles for it. With the default ALL_MASK a
++  // Host sync+modify fires per migrating cell and, alternating with the
++  // Device-side chem fix (PARTICLE|CUSTOM masks), copied the whole particle
++  // array and every custom vector host<->device once per cell during fix
++  // balance (6-15 s per rebalance at ~6000 cells/rank on Perlmutter A100).
++  datamask_read = EMPTY_MASK;
++  datamask_modify = EMPTY_MASK;
+   cell_mesh_stamp_id = -1;
+   cell_mesh_stamp_n  = -1;
+ 

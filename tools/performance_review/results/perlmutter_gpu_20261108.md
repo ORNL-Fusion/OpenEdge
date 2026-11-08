@@ -1,0 +1,299 @@
+# OpenEdge on Perlmutter A100: where the GPU time goes (2026-11-08)
+
+Source: `origin/development` a508aff6 (= perf_handoff/BASE_COMMIT.txt, latest on GitHub) +
+`uncommitted_build_fixes.patch` + the per-grid sync fix described in section 5
+(`experiments/kokkos_pergrid_sync.patch`, uncommitted on branch `perf-review`).
+Binaries built today: `$PSCRATCH/openedge-build-a508aff-gpu/src/spa_kokkos_cuda_perlmutter`
+(nvcc_wrapper, sm_80, Kokkos CUDA+OpenMP, GTL-linked, `-lineinfo`) and
+`$PSCRATCH/openedge-build-a508aff-cpu/src/spa_mpi` (Cray MPICH, `-O3 -g`). The pre-existing
+`openedge-build-kkhost4` binary is an OpenMP host build from 2026-09-21 (85 source files behind)
+and was not used.
+
+Case: `west_mb8_continuous_ops_20260922`, from the bundle under
+`$PSCRATCH/slag_mb_pilot_source_on_matched/` (the checkout's `examples/wip` has no `production/`
+directory). The brief's `teprobe_fixed_off` case does not exist in this bundle's `case_matrix.csv`;
+`prevention_fixed_on` (fresh start, fixed strike point, external W injection on) was used
+instead, through the unmodified `run_case.sh` with `RUN_STEPS_OVERRIDE`, output cadence = run
+length, `DENSITY_REPEAT = steps/250`, `CHECKPOINT_STEPS_OVERRIDE=0`, `STATS_EVERY=1000`.
+A wrapper (`results/perlmutter_gpu_20261108/oe_wrap.py`) only changes `post no` to `post yes` in
+the generated schedule copy and appends the Kokkos arguments
+`-k on g 4 -sf kk -pk kokkos react/retry yes gpu/aware yes comm threaded` (the production IPC line
+from `scripts/perlmutter_gpu_env.sh`). Production inputs were not modified.
+
+All runs on one GPU node (nid200341, 4x A100 40 GB, 64 Milan cores), interactive allocation
+61003229. CPU runs use the same node (plain `spa_mpi`, 4/8/48 ranks, 1 thread each).
+Raw tables, profiles, counter output and scripts: `results/perlmutter_gpu_20261108/`.
+Run directories: `$PSCRATCH/openedge-runs/perf_review_20261108/<tag>/`.
+
+## 1. Which per-step kernels run on the device (hypothesis 1 of the brief)
+
+Hypothesis 1 ("no Kokkos versions of fix_background, pusher, update, surf_react_surface_pwi") is
+out of date. The source has `src/KOKKOS/update_kokkos.cpp` (5381 lines: OpenEdge move loop, Boris
+pusher `oe_boris3d`, spatial sheath, device pcache fill), `pusher_kokkos.h` (device mesh queries
+`MeshKokkos::locate_tri_at_point`, `query_bfield_at_point`, `query_scalars_at_point`),
+`surf_react_surface_pwi_kokkos.cpp`, and Kokkos versions of every fix in the deck except
+`fix background` and `fix particle/weight`, which have no per-step hooks. The runtime confirms
+it: the run prints `pcache: DEVICE fill active (mask 0x37, sheath ne correction)`,
+`mesh B/E bound from fix background: 59936 tris`, `chem device path active`,
+`cross_field_diffusion device fill`, `device emission ACTIVE from step 1`, and the end-of-run
+ledger `Kokkos host fallbacks this run` lists only `finject` (surface/emit/source, thermal model,
+nevery 1000: 20 host calls per rank in 20000 steps).
+
+| Operation (deck) | Where | Host<->device traffic per step |
+|---|---|---|
+| background lookup for the pusher (pcache fill, `TagUpdatePcacheFill`) | device, every step (sheath forces nevery 1); one CSR hash-bucket walk per particle, no hint | none |
+| move loop + Boris + sheath + surf collide/react (`TagUpdateMove`, 2.7 passes/step) | device | 60 B scalars D2H+H2D per pass; react/retry backups D2D: particles 2.1 MB + PWI sigma 2.2 MB + 4 small per pass |
+| fix volume/chem/adas | device | event counters D2H (4 B x 2) + events |
+| fix coulomb/background, force/thermal (2 half kicks), cross_field_diffusion | device | dx_cd 97 kB H2D |
+| fix surface/emit/source femit | device | 2 counters D2H |
+| fix surface/emit/source finject (thermal model) | host, every 1000 steps | full particle round trip |
+| PWI ledger (sigma_nevery 100) | device deltas, host fold + Allreduce | 2.2 MB D2H + conc 2.2 MB H2D per pass on the following step |
+| stats (compute reduce is a host compute) | host, every 1000 steps | full particle D2H |
+| fix balance rcb part 1000 | host RCB, device particle migration | see section 5 |
+| compute surface/physical/sputter (static yes) | host, cached once | none |
+| dumps, restart | host, output steps only | particle D2H |
+
+So particles do not bounce between host and device every step. What dominates is (a) a load-balance
+pathology in the multi-rank Kokkos path and (b) a per-step fixed cost of synchronisations.
+
+## 2. Wall time, 20000 steps from a fresh start
+
+| run | ranks | loop s | ms/step | final markers | Mp-step/s | note |
+|---|---|---|---|---|---|---|
+| cpu4 | 4 CPU | 439.2 | 22.0 | 83186 | 3.8 | |
+| cpu8 | 8 CPU | 244.5 | 12.2 | 83084 | 6.8 | |
+| cpu48 | 48 CPU | 38.4 | 1.9 | 24454 | 12.7 | 64598 markers lost at the periodic caps |
+| gpu1 | 1 A100 | 33.4 | 1.7 | 83842 | 50.2 | |
+| gpu4 (unpatched) | 4 A100 | 179.3 | 9.0 | 83767 | 9.3 | Modify 79 % = fix balance |
+| gpu4 no-rebalance control | 4 A100 | 44.0 | 2.2 | 83848 | 38.1 | balance 1000 -> 1000000 in a generated copy |
+| gpu4 patched (section 5) | 4 A100 | 43.2 | 2.2 | 83840 | 38.8 | fix balance active, 20 rebalances |
+
+The 48-rank CPU run is not the same physics: the production deck ships `global gridcut 0.0` with
+`surf_collide PERIODIC toroidal`, and at 48 ranks 64598 markers (317k in 100k steps) are dropped
+with "Particles lost at periodic caps (teleport target not local)". The 4- and 8-rank CPU runs and
+all GPU runs lose none, so their populations are 3.4x larger. The cap loss is the decomposition
+dependence already documented for the monoblock case; the deck needs `gridcut 0.035`.
+
+Steady-state production regime, 100000 steps (fix balance active, marker count saturating):
+
+| run | loop s | ms/step late | markers at 100k | lost at caps |
+|---|---|---|---|---|
+| cpu48_100k | 288.4 | 3.3 | 46715 | 316847 |
+| gpu4_100k (unpatched) | 800.6 | 8.5 (Modify 590 s) | 179467 | 0 |
+| gpu4p_100k (patched) | 236.2 | 2.5 | 180135 | 0 |
+
+## 3. Per-step cost on the device (nsys + Kokkos Tools, 4 ranks, rank 0, 5000 steps)
+
+Kokkos-label NVTX connector (`kp_nvtx.cpp`) + `nsys -t cuda,nvtx`; steady-state window of 400 steps
+away from rebalances:
+
+| quantity | per step (rank 0 of 4, ~20k markers) |
+|---|---|
+| GPU kernel time | 0.56 ms (18 launches) |
+| Kokkos events | 232 (35 deep_copy fence pairs, 16 kernels, 2.7 move passes) |
+| cudaDeviceSynchronize (host) | 140 calls, 1.1 ms |
+| cudaMemcpy (host, blocking) | 63 calls, 1.1 ms |
+| H2D | 21 copies, 0.48 MB (dx_cd 97 kB x1, 81 kB x3.6, rest <4 kB) |
+| D2H | 23 copies, 25 kB (scalars, counters) |
+| D2D | 16 copies, 12.8 MB (react/retry backups: particles 2.1 MB + sigma 2.2 MB + dep/sheath per pass) |
+| wall per step | 2.5 ms (median) |
+
+The step is latency bound: kernels occupy the GPU 0.56 ms of 2.5 ms; the rest is ~140 host-side
+synchronisations (every `deep_copy` of a scalar or small view fences twice) and three move passes
+per step each with backup, launch, scalar readback and migration plan. The move kernel itself runs
+at 78 us per pass for 20k particles. One rank alone (gpu1) is faster than four at this size
+(1.7 vs 2.2 ms/step) because the migration (2.3 passes/step, Comm 33 % at 4 ranks) and the
+imbalance (Move min/max 11.5/17.3 s) cost more than the 4x smaller per-rank kernels gain. Kernel
+time grows slowly with N (patched gpu4_100k: 2.5 ms/step at 180k markers vs 2.2 at 80k), so the
+node pays off only once there are well over 100k markers per rank.
+
+Top kernels by GPU time (rank 0, 5000 steps): `TagUpdateMove` 0.83 s, `TagUpdatePcacheFill`
+0.63 s, `TagFixForceThermal` 0.34 s, `TagFixCoulombBg` 0.30 s, `TagFixCrossFieldDiffusion` 0.18 s,
+`TagFixChemAdas` 0.10 s, migration kernels 0.25 s. Pcache fill + the three force fixes each walk the
+mesh hash bucket again per particle (5 to 6 locations per particle per step); the subagent
+inventory and `pusher_kokkos.h:557-600` confirm there is no per-particle hint on the device.
+
+## 4. The rebalance pathology (why 4 GPUs were 5x slower than 1)
+
+`OE_FIX_TIMING=1000` on the unpatched 4-rank run: `fbal balance` 41.76 s of the 42.99 s Modify
+bucket in 5000 steps (5 calls); `OE_CELLMIG_DIAG=1`: `migrate_cells` 15.3 / 6.4 / 6.8 / 6.8 / 5.9 s
+per call on rank 0 with `nmigrate=0` on that rank; inside `migrate_cells_only` the time is in
+`pack` 4-10 s, `compress` 0.5-5.6 s, `unpack` 0.1-4.7 s on the ranks that send or receive cells and
+in `plan` (waiting in `Irregular::create_data_variable`) on the others. In the 100k-step run the
+per-1000-step time alternates 4.1 s / 12 s with the rebalance volume; Modify is 590 s of 800 s.
+
+gdb stack sampling of rank 0 during rebalances (`gdb_stack_samples_gpu4_rebalance.txt`, 46
+samples): `ModifyKokkos::unpack_grid_one` -> `ParticleKokkos::sync` -> `DualView::sync_device`
+-> `cudaMemcpy` / `cudaDeviceSynchronize`, plus `Irregular::create_data_variable` ->
+`MPI_Reduce_scatter` waits. The NVTX trace of the rebalance step on rank 0 counts 297 full particle
+array D2H copies (2.1 MB each), 297 H2D, 5940 custom-vector H2D copies (131 kB each) and 891
+ivector copies: one round trip per migrating cell.
+
+Mechanism (`src/KOKKOS/modify_kokkos.cpp:191-310`): every per-grid hook (`pack_grid_one`,
+`unpack_grid_one`, `copy_grid_one`, called once per migrating cell) brackets each gridmigrate fix
+with `particle_kk->sync(fix->execution_space, fix->datamask_read)` and `modify(..., datamask_modify)`.
+`fix background` sets `gridmigrate = 1` only to receive `grid_changed()` and has no Kokkos class,
+so it carries the base-class `ALL_MASK` masks and Host space; `fix volume/chem/adas/kk` is also
+gridmigrate (rate-cache rows follow cells) with Device space and `PARTICLE|SPECIES|CUSTOM`. Per cell
+the pair therefore does sync(Host, ALL) D2H, modify(Host, ALL), sync(Device, P|S|C) H2D. At ~6000
+cells per rank (4 ranks on the 88x7x42 grid) that is 6-15 s per rebalance; at 48 ranks (580 cells)
+it is 12x smaller, which is why the CPU-node comparisons never showed it. This is the same trap
+recorded for `surface/emit/source/kk` on 2026-09-08, through a different pair of fixes.
+
+## 5. Fix applied (uncommitted, branch `perf-review`), validation
+
+1. `src/fix_background.cpp` and `src/OPENEDGE/fix_background.cpp`: `datamask_read = datamask_modify
+   = EMPTY_MASK` (the fix has no per-step particle hooks and its per-grid hooks are the base no-ops).
+   Alone this ABORTS at the first rebalance ("particle cell index out of range after rebalance"):
+   the chem fix's `sync(Device)` then runs under `auto_sync = 1`, whose blanket `modify(Host)` pushes
+   the stale host mirror over the particles that `CommKokkos::migrate_cells` had just migrated on
+   the device. The old ping-pong had been masking this.
+2. `src/KOKKOS/modify_kokkos.cpp`: the six per-grid wrappers (`pack/unpack/copy/add_grid_one`,
+   `reset_grid_count`, `grid_changed`) skip the particle `sync`/`modify` for fixes with
+   `kokkos_flag` (they sync their own per-grid views, as `FixAveGridKokkos::pergrid_sync` does);
+   host fixes keep the upstream behaviour.
+
+Result: fix balance 0.142 s per 5 calls (28 ms per rebalance, `migrate_cells` 8 ms), 4-rank loop
+179.3 -> 43.2 s for 20000 steps, identical to the no-rebalance control; tallies unchanged within
+noise (reactions 1068891 vs 1069166, surface reactions 379848 vs 380064, markers 83767 vs 83840).
+`tools/check_package_parity.sh`: ok. Regression with the patched binaries (`regression/run_regression.sh`, 4 ranks, srun in the
+allocation): GPU `--kk` 21 passed / 0 failed / 1 skipped (st40 input absent) including kokkos_parity
+(CPU==GPU) and pwi_deposit_tagging; CPU 20 passed / 0 failed / 2 skipped (st40, parity needs --kk).
+Logs: `results/perlmutter_gpu_20261108/regression_{gpu,cpu}_patched.txt`.
+
+## 6. What is left, ranked by measured share
+
+| # | item | evidence | expected effect | risk / effort |
+|---|---|---|---|---|
+| 1 | Per-grid sync fix above | 75 % of 4-rank wall, 100 % of the 4-vs-1 GPU inversion | done: 4.1x on this deck; production 48-rank CPU-node equivalent now 1 node = 4 A100 at 2.2 ms/step vs 48 cores at 1.9-3.3 ms/step with 3.4x more markers retained | none to physics; regression 21/21 GPU, 20/20 CPU |
+| 2 | Fence/launch floor: 35 deep_copy fence pairs + 140 cudaDeviceSynchronize per step | 1.1 ms of the 2.5 ms step is host-side sync at 20k markers; kernels 0.56 ms | scalar readbacks through pinned buffers and async copies on the move stream; merge the three collider `nsingle` readbacks and the PWI scalars; one combined event readback for chem | medium: ordering of retry/rollback; 3-5 days |
+| 3 | react/retry backups each pass: sigma 2.2 MB + particles 2.1 MB D2D, 2.7 passes/step | 12.8 MB/step D2D, 16 copies and fences; sigma backup is the full global surf array per pass | snapshot only the active-particle range and a sparse sigma journal | medium: rollback exactness; 3-5 days |
+| 4 | Move passes and migration: 2.3-2.7 passes/step, each with plan Alltoall and scalar round trips (Comm 33 % at 4 ranks) | gpu4 patched: Comm 14.1 s of 43 s | fold entry/exit scalars into one pinned readback per pass; skip the migration plan when no rank has leavers (one Allreduce is already paid) | low; 2 days |
+| 5 | Repeated hash-bucket walks per particle (pcache, Boris B, E per subcycle, coulomb, thermal, cd) | pcache fill kernel 0.63 s vs move 0.83 s (rank 0, 5000 steps); no device hint | device per-particle hint (last triangle) as on the CPU, or one shared location per step | low with exact fallback; 3-5 days |
+| 6 | `finject` host emission every 1000 steps (thermal model) and the stats `compute reduce` host sync | 2 full particle round trips per 1000 steps | port the thermal emission model; a reduce/kk compute | low; 1-2 days |
+| 7 | Deck: `gridcut 0.0` with toroidal caps | 65k-317k markers lost at 48 ranks, none at 4 | fixed in the NERSC bundle deck (section 8); EOS decks still at 0.0 | physics of the campaign |
+
+## 8. Deck fix: gridcut 0.035 (applied 2026-11-08 on the NERSC bundle copy)
+
+`in.fresh_history` shipped `global gridcut 0.0` with `surf_collide PERIODIC toroidal` caps; the cap
+teleport needs the far cap's cell to be stored locally, so at 48 ranks 64598 markers (20000 steps)
+and 316847 (100000 steps) were dropped silently as "lost at periodic caps". Set to `gridcut 0.035`
+(the cap distance, box y extent; backup `in.fresh_history.pre_gridcut_20261108`, bundle manifest
+refreshed, `verify_bundle.sh` OK). `in.restart_history` inherits gridcut from the restart file.
+Re-measured with the patched binaries:
+
+| run (gridcut 0.035) | loop s | ms/step late | markers | lost at caps | boundary exits | c_cWtotal at end |
+|---|---|---|---|---|---|---|
+| cpu48_gc, 20k steps | 66.8 | 3.3 | 83871 | 0 | 15 | |
+| gpu4p_gc, 20k steps | 36.3 | 1.8 | 83707 | 0 | 13 | |
+| gpu1_gc, 20k steps | 33.7 | 1.7 | 83502 | 0 | 15 | |
+| cpu48_gc_100k | 636.1 | 7.5 | 144174 | 0 | 48771 | 2.509e13 |
+| gpu4p_gc_100k | 199.2 | 2.05 | 179946 | 0 | 40037 | 2.514e13 |
+
+With the losses removed the 48-rank CPU run carries the same population as the 4-rank runs and takes
+66.8 s instead of 38.4 s for 20000 steps; one GPU node is now 1.8x (20k steps) to 3.2x (100k steps)
+faster than 48 CPU cores on the same deck, and 4 A100 are only 7 % faster than 1 A100 at 84k
+markers. The GPU run also lost the 1.8 comm passes per step it had been spending on cap teleports
+(2.3 before). Open check for the physics owner: at 100k steps the CPU and GPU runs differ in marker
+count (144k vs 180k) while the weighted W inventory `c_cWtotal` agrees to 0.2 %, and both show
+40-49k open-boundary exits over 100k steps (13-15 in the first 20k), i.e. markers leave through the
+open box faces once the population has filled the wedge; that is the leak the EOS side is probing.
+Tables: `results/perlmutter_gpu_20261108/finish_*_gc*.txt`.
+
+## 9. Concurrency sweep: cases per node-hour versus single-case latency
+
+Production is a campaign of independent cases, so throughput per node matters as much as the
+latency of one case. Single-rank runs on one GPU each, gridcut 0.035, patched binary, allocation
+61006018 (nid200292). "wall" is from `run_case.sh` start to the end of the log (setup about 15 s
+for 20k steps, 60 s for 100k steps with dumps); loop is SPARTA's loop time.
+
+| configuration | cases | loop per case | wall per case | batch wall | cases per node-hour |
+|---|---|---|---|---|---|
+| 1 case alone, 1 A100, 20k steps | 1 | 33.7 s | 50 s | 50 s | 72 |
+| 4 cases, 1 per GPU, 20k steps | 4 | 32.5-32.7 s | 45-46 s | 54 s | 267 |
+| 8 cases, 2 per GPU (no MPS), 20k steps | 8 | 95.6 s mean, 633 s max | 24-659 s | 659 s | 44 |
+| 4 cases, 1 per GPU, 100k steps, dumps every 20k | 4 | 248-250 s | 311-312 s | 312 s | 46 |
+| 48 CPU ranks, 20k steps (production line, 1 case per node) | 1 | 66.8 s | 72 s | 72 s | 50 |
+| 48 CPU ranks, 100k steps | 1 | 636 s | about 680 s | 680 s | 5.3 |
+
+Four cases per node run at full single-GPU speed (the node has 64 cores; each case used 8). Two
+processes per GPU without MPS time-slice the device and one of each pair stalls (633 s loop), so
+oversubscription needs MPS and was not pursued. The 16-run batch in the raw data (`conc4_*`)
+serialised on the GPU gres and only shows that 16 serial runs all take 33.3 s.
+
+In the realistic 100k-step interval (population grows to 180k markers, dumps and restart every
+20k steps, output 0.8 % of the loop), one GPU node completes 4 cases in 312 s against one case in
+about 680 s on 48 CPU cores: 8.7x the cases per node-hour including setup, 10.2x on loop time.
+The single-case latency gain is 2.5x (249 vs 636 s loop) with one GPU per case, or 3.2x with four
+cooperating GPUs (199 s). The campaign-level 10x is therefore available today by packing four
+cases per node; the per-case 10x needs the per-step work below.
+
+## 10. Per-step critical path (what a single-case 10x needs)
+
+Non-overlapping budget of one step at 4 cooperating ranks, rank 0, 20k markers per rank, from the
+NVTX trace (steady window) and nsys API sums; the step takes 2.2 ms wall:
+
+| component | per step | evidence |
+|---|---|---|
+| GPU kernel execution | 0.56 ms | cuda_gpu_kern_sum; move 2x78 us, pcache 125 us, thermal 2x42 us, coulomb 76 us, cd 46 us, chem 25 us, migration ~50 us |
+| host blocking in fences | ~0.7 ms | 140 cudaDeviceSynchronize/step (5.4 s / 5000 steps); 35 deep_copy fence pairs + 14 scalar-copy pairs + 16 scalar-to-scalar pairs |
+| small blocking copies (control scalars, counters) | ~0.3 ms | 63 cudaMemcpy/step: update scalars H2D+D2H per pass, 4 collide pre-zero + 4 readbacks per pass, PWI scalars, chem counters, emit counters, comm pmeta |
+| migration plan and imbalance wait | ~0.3-0.5 ms | Comm 26-33 % of the loop at 4 ranks (7-14 s / 20k steps), 1.8-2.3 passes per step, Alltoall per pass |
+| launch and host bookkeeping | ~0.3 ms | 16 launches, view rebinding, functor copies per pass |
+
+Order of work agreed on 2026-11-08, each item measured on 1 GPU and on 4 cooperating GPUs before
+the next, with the regression suite and the gpu_parity stage after each:
+1. compact control readbacks: one device control block zeroed with one async fill per pass and
+   read back with one copy; collide counters read once per step instead of per pass;
+2. asynchronous copies on the same execution-space instance for every fill and backup that is
+   not consumed by the host, one fence before each host consumer;
+3. persistent buffers (no per-pass view allocation in migration/backups; already partly done);
+4. backups restricted to the state that rollback needs (active particle range, sparse sigma journal);
+then continuation queues (one pass per step for reaction products) and a shared exact gather
+(one triangle location per particle per phase shared by pcache, Boris B/E, coulomb, thermal, cd).
+0.5 ms/step is the experimental target: 0.3 ms of kernels after fusion plus 0.2 ms of host work.
+
+## 11. Item 1 done: compact control readbacks (uncommitted, measured)
+
+Change (files `src/KOKKOS/surf_collide_{diffuse,vanish,transparent,toroidal,specular,piston}_kokkos.{h,cpp}`,
+`src/KOKKOS/update_kokkos.cpp`): each surface-collide style's `post_collide()` now only issues its
+counter readback as an execution-space copy and a new `post_collide_apply()` folds it into the host
+tallies; `UpdateKokkos::move` fences once per pass for all styles instead of two global fences per
+style. The move loop's per-pass scalar upload and the react/retry sheath and GC custom backups are
+execution-space copies too (ordered on the same instance ahead of the move kernel). Semantics are
+unchanged: every host consumer still sits behind a fence.
+
+| run, 20000 steps, gridcut 0.035 | before item 1 | after item 1 |
+|---|---|---|
+| 1 A100 loop | 33.7 s | 31.4 s (-7 %) |
+| 4 A100 loop | 36.3 s | 33.6 s (-7 %) |
+| 4 A100 Move bucket (avg) | 12.9 s | 10.7 s |
+| Kokkos events per step, steady state, rank 0 | 232 | 131 |
+| fence events per step | 105 | 61 |
+| cudaDeviceSynchronize per step (whole 5000-step run) | 141 | 25 |
+| median step wall, rank 0 of 4 | 2.54 ms | 1.74 ms |
+| reactions / surface reactions (4 ranks) | 1067565 / 379708 | 1064744 / 378582 |
+
+The per-step wall at 4 ranks is now 1.68 ms (loop/steps) against 0.54 ms of kernels. What remains
+in the steady-state trace, per step: 12 value fills (`deep_copy(view, 0)` in the fixes, chem, emit,
+PWI: 0.27 ms of fences), 10 small view copies (comm pmeta and index_send, PWI scalars, chem event
+readbacks, dx_cd upload: 0.24 ms), the two blocking scalar readbacks after the move kernel (0.25 ms,
+mostly waiting for the kernel itself), and the fix kernels. Next edits in the agreed order: value
+fills through an execution-space `deep_copy(exec, view, 0)` (item 2, mechanical), a pinned control
+block shared by update/collide/PWI/comm read once per pass (rest of item 1), then the migration
+plan skip and the kernel fusion. Regression on this binary (GPU `--kk`, incl. kokkos_parity): 21 passed, 0 failed, 1 skipped (`results/perlmutter_gpu_20261108/regression_gpu_item1.txt`); the CPU binary is untouched by item 1.
+
+## 7. Reproduction
+
+```bash
+# allocation: salloc --no-shell -q interactive -C gpu -N 1 -t 4:00:00 -A m5186_g --gpus-per-node=4
+export OE_JOBID=<jobid>
+results/perlmutter_gpu_20261108/run_one.sh gpu  gpu4   4 20000     # CUDA GTL binary, IPC launch line
+results/perlmutter_gpu_20261108/run_one.sh cpu  cpu48 48 20000     # spa_mpi
+OE_FIX_TIMING=1000 OE_CELLMIG_DIAG=1 results/perlmutter_gpu_20261108/run_one.sh gpu gpu4_ft 4 5000
+OE_NSYS_RANKS=0 results/perlmutter_gpu_20261108/run_one.sh gpu-nsys gpu4_nsys 4 5000   # kp_nvtx.so + nsys
+results/perlmutter_gpu_20261108/nsys_summary.sh <run>/profile_gen/nsys_r0.nsys-rep 5000
+```
+The shell that launches these may itself live inside a Slurm job (jupyter node): `run_one.sh`
+unsets every `SLURM_*` variable before setting the allocation id, and everything `srun` execs
+must be on `$PSCRATCH`, not in a node-local `/tmp`.

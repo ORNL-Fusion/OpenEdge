@@ -1,0 +1,892 @@
+sampling pid 1184651
+=== SAMPLE 1794158400.772873521
+#0  0x00007f1aeda3b035 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#1  0x00007f1aeda3de94 in MPIR_Wait_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aed9523cf in MPID_Wait.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aed969091 in MPIC_Wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aed969b1c in MPIC_Sendrecv () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aed894196 in MPIR_Reduce_scatter_intra_recursive_halving () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x00007f1aed9460fe in MPIR_Reduce_scatter_allcomm_auto () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#7  0x00007f1aed9462ce in MPIR_Reduce_scatter_impl () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#8  0x00007f1aed946ac7 in MPIR_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#9  0x00007f1aed590c67 in PMPI_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#10 0x00000000006f3f08 in SPARTA_NS::Irregular::create_data_uniform (this=0x665fd80, n=0, proclist=0x6e62da0, sort=0) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:248
+#11 0x00000000006f5ea9 in SPARTA_NS::Irregular::create_data_variable (this=this@entry=0x665fd80, n=n@entry=0, proclist=0x6e62da0, sizes=0x6e67730, recvsize=@0x7fffe42976d8: 0, sort=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:586
+#12 0x00000000007b972b in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0xa2406d0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:744
+#13 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#14 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#15 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#16 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#17 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#18 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#19 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#20 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#21 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158404.667807025
+#0  0x00007f1af27ebf30 in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af27f0f72 in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af2692228 in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af2588f4e in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af2770832 in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af2769350 in cuMemcpy () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af2049f11 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#7  0x00007f1af2017584 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#8  0x00007f1af2075f15 in cudaMemcpy () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#9  0x0000000000d07dc8 in Kokkos::Impl::CudaInternal::cuda_memcpy_wrapper<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, dst=0x7f1a915e5080, src=0xc441700, count=65536, kind=cudaMemcpyDefault) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Error.hpp:63
+#10 Kokkos::Impl::DeepCopyCuda (dst=0x7f1a915e5080, src=0xc441700, n=n@entry=65536) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.cpp:62
+#11 0x0000000000afe98d in Kokkos::Impl::DeepCopy<Kokkos::CudaSpace, Kokkos::HostSpace, Kokkos::Cuda, void>::DeepCopy (this=<optimized out>, dst=<optimized out>, src=<optimized out>, n=65536) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.hpp:476
+#12 Kokkos::deep_copy<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void, int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>(Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void> const&, Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks> const&, std::enable_if<((is_void_v<Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::specialize>)&&(is_void_v<Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::specialize>))&&((((unsigned int)Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::rank)!=(0))), void>::type*) (dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1786
+#13 0x0000000000b0b716 in Kokkos::DualView<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x7a8b748) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:737
+#14 Kokkos::DualView<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x7a8b748) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:720
+#15 Kokkos::DualView<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device (this=0x7a8b748) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:747
+#16 SPARTA_NS::ParticleKokkos::sync (this=0x6637590, space=<optimized out>, mask=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/particle_kokkos.cpp:867
+#17 0x0000000000af3a7a in SPARTA_NS::ModifyKokkos::unpack_grid_one (this=0x665ec40, icell=7680, buf=0xddc6e60 "") at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:218
+#18 0x00000000006de77a in SPARTA_NS::Grid::unpack_one (this=<optimized out>, buf=0xddc6d68 "\0327", ownflag=ownflag@entry=1, partflag=partflag@entry=0, surfflag=surfflag@entry=1, sortflag=sortflag@entry=0) at /global/homes/d/diawa/OpenEdge/src/grid_comm.cpp:386
+#19 0x00000000007b99c9 in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0xa2406d0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:776
+#20 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#21 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#22 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#23 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#24 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+=== SAMPLE 1794158407.629722199
+#0  0x00007f1af26bd3fb in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af261d227 in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af2628955 in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af270563f in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af26f43f0 in cuCtxSynchronize () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af200fc4b in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#6  0x00007f1af204c385 in cudaDeviceSynchronize () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#7  0x0000000000d0e471 in operator() (__closure=<optimized out>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:153
+#8  Kokkos::Tools::Experimental::Impl::profile_fence_event<Kokkos::Cuda, Kokkos::Impl::cuda_device_synchronize(const std::string&)::<lambda()> > (name=..., func=..., reason=Kokkos::Tools::Experimental::GlobalDeviceSynchronization) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Profiling.hpp:213
+#9  Kokkos::Impl::cuda_device_synchronize (name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:139
+#10 0x0000000000ce291d in Kokkos::Impl::ExecSpaceManager::static_fence (this=0x52721e0 <Kokkos::Impl::ExecSpaceManager::get_instance()::space_initializer>, name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Core.cpp:243
+#11 0x0000000000ce2bf5 in (anonymous namespace)::fence_internal (name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Core.cpp:819
+#12 0x0000000000afdfe7 in Kokkos::deep_copy<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void, double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>(Kokkos::View<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void> const&, Kokkos::View<double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks> const&, std::enable_if<((is_void_v<Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::specialize>)&&(is_void_v<Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::specialize>))&&((((unsigned int)Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::rank)!=(0))), void>::type*) (dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1782
+#13 0x0000000000b0b666 in Kokkos::DualView<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x7a69d98) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:737
+#14 Kokkos::DualView<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x7a69d98) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:720
+#15 Kokkos::DualView<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device (this=0x7a69d98) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:747
+#16 SPARTA_NS::ParticleKokkos::sync (this=0x6637590, space=<optimized out>, mask=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/particle_kokkos.cpp:877
+#17 0x0000000000af3a7a in SPARTA_NS::ModifyKokkos::unpack_grid_one (this=0x665ec40, icell=8421, buf=0xddfddb8 "") at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:218
+#18 0x00000000006de77a in SPARTA_NS::Grid::unpack_one (this=<optimized out>, buf=0xddfdcc8 "}\f", ownflag=ownflag@entry=1, partflag=partflag@entry=0, surfflag=surfflag@entry=1, sortflag=sortflag@entry=0) at /global/homes/d/diawa/OpenEdge/src/grid_comm.cpp:386
+#19 0x00000000007b99c9 in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0xa2406d0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:776
+#20 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#21 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#22 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#23 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#24 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+=== SAMPLE 1794158410.751315437
+#0  0x00007f1af208adc9 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#1  0x00007f1af203742f in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#2  0x00007f1af2050c4a in cudaSetDevice () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#3  0x0000000000d07db1 in Kokkos::Impl::CudaInternal::set_cuda_device (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.hpp:186
+#4  Kokkos::Impl::CudaInternal::cuda_memcpy_wrapper<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, dst=0x7f1aa81d1880, src=0xbeb2500, count=131072, kind=cudaMemcpyDefault) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.hpp:364
+#5  Kokkos::Impl::DeepCopyCuda (dst=0x7f1aa81d1880, src=0xbeb2500, n=n@entry=131072) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.cpp:62
+#6  0x0000000000afe00d in Kokkos::Impl::DeepCopy<Kokkos::CudaSpace, Kokkos::HostSpace, Kokkos::Cuda, void>::DeepCopy (this=<optimized out>, dst=<optimized out>, src=<optimized out>, n=131072) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.hpp:476
+#7  Kokkos::deep_copy<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void, double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>(Kokkos::View<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void> const&, Kokkos::View<double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks> const&, std::enable_if<((is_void_v<Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::specialize>)&&(is_void_v<Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::specialize>))&&((((unsigned int)Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::rank)!=(0))), void>::type*) (dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1786
+#8  0x0000000000b0b666 in Kokkos::DualView<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x7a69d08) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:737
+#9  Kokkos::DualView<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x7a69d08) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:720
+#10 Kokkos::DualView<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device (this=0x7a69d08) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:747
+#11 SPARTA_NS::ParticleKokkos::sync (this=0x6637590, space=<optimized out>, mask=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/particle_kokkos.cpp:877
+#12 0x0000000000af3a7a in SPARTA_NS::ModifyKokkos::unpack_grid_one (this=0x665ec40, icell=9105, buf=0xde302a8 "") at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:218
+#13 0x00000000006de77a in SPARTA_NS::Grid::unpack_one (this=<optimized out>, buf=0xde301a8 "\325B", ownflag=ownflag@entry=1, partflag=partflag@entry=0, surfflag=surfflag@entry=1, sortflag=sortflag@entry=0) at /global/homes/d/diawa/OpenEdge/src/grid_comm.cpp:386
+#14 0x00000000007b99c9 in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0xa2406d0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:776
+#15 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#16 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#17 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#18 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#19 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#20 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#21 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#22 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#23 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158413.720003806
+#0  0x00007f1af25ec694 in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af269422a in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af27e0b8e in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af27e7f8d in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af337b77a in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af259974c in ?? () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af332a77a in ?? () from /usr/lib64/libcuda.so.1
+#7  0x00007f1af2588ee5 in ?? () from /usr/lib64/libcuda.so.1
+#8  0x00007f1af2770832 in ?? () from /usr/lib64/libcuda.so.1
+#9  0x00007f1af2769350 in cuMemcpy () from /usr/lib64/libcuda.so.1
+#10 0x00007f1af2049f11 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#11 0x00007f1af2017584 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#12 0x00007f1af2075f15 in cudaMemcpy () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#13 0x0000000000d07dc8 in Kokkos::Impl::CudaInternal::cuda_memcpy_wrapper<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, dst=0x7f1aa43b0480, src=0x7578bc0, count=131072, kind=cudaMemcpyDefault) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Error.hpp:63
+#14 Kokkos::Impl::DeepCopyCuda (dst=0x7f1aa43b0480, src=0x7578bc0, n=n@entry=131072) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.cpp:62
+#15 0x0000000000afe00d in Kokkos::Impl::DeepCopy<Kokkos::CudaSpace, Kokkos::HostSpace, Kokkos::Cuda, void>::DeepCopy (this=<optimized out>, dst=<optimized out>, src=<optimized out>, n=131072) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.hpp:476
+#16 Kokkos::deep_copy<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void, double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>(Kokkos::View<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void> const&, Kokkos::View<double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks> const&, std::enable_if<((is_void_v<Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::specialize>)&&(is_void_v<Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::specialize>))&&((((unsigned int)Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::rank)!=(0))), void>::type*) (dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1786
+#17 0x0000000000b0b666 in Kokkos::DualView<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x7a69e70) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:737
+#18 Kokkos::DualView<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x7a69e70) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:720
+#19 Kokkos::DualView<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device (this=0x7a69e70) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:747
+#20 SPARTA_NS::ParticleKokkos::sync (this=0x6637590, space=<optimized out>, mask=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/particle_kokkos.cpp:877
+#21 0x0000000000af3a7a in SPARTA_NS::ModifyKokkos::unpack_grid_one (this=0x665ec40, icell=9758, buf=0xde60190 "") at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:218
+#22 0x00000000006de77a in SPARTA_NS::Grid::unpack_one (this=<optimized out>, buf=0xde600a0 "\250\021", ownflag=ownflag@entry=1, partflag=partflag@entry=0, surfflag=surfflag@entry=1, sortflag=sortflag@entry=0) at /global/homes/d/diawa/OpenEdge/src/grid_comm.cpp:386
+#23 0x00000000007b99c9 in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0xa2406d0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:776
+#24 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+=== SAMPLE 1794158416.085896581
+#0  0x00007f1af25ec674 in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af269422a in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af27e0b8e in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af27e89f7 in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af27e8ae5 in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af337baa1 in ?? () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af259974c in ?? () from /usr/lib64/libcuda.so.1
+#7  0x00007f1af332a77a in ?? () from /usr/lib64/libcuda.so.1
+#8  0x00007f1af2588ee5 in ?? () from /usr/lib64/libcuda.so.1
+#9  0x00007f1af2770832 in ?? () from /usr/lib64/libcuda.so.1
+#10 0x00007f1af2769350 in cuMemcpy () from /usr/lib64/libcuda.so.1
+#11 0x00007f1af2049f11 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#12 0x00007f1af2017584 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#13 0x00007f1af2075f15 in cudaMemcpy () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#14 0x0000000000d07dc8 in Kokkos::Impl::CudaInternal::cuda_memcpy_wrapper<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, dst=0xc5f8d40, src=0x7f1a99c00080, count=2097152, kind=cudaMemcpyDefault) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Error.hpp:63
+#15 Kokkos::Impl::DeepCopyCuda (dst=0xc5f8d40, src=0x7f1a99c00080, n=n@entry=2097152) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.cpp:62
+#16 0x0000000000b0228d in Kokkos::Impl::DeepCopy<Kokkos::HostSpace, Kokkos::CudaSpace, Kokkos::OpenMP, void>::DeepCopy (this=<optimized out>, dst=<optimized out>, src=<optimized out>, n=2097152) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.hpp:553
+#17 Kokkos::deep_copy<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks, SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>(Kokkos::View<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks> const&, Kokkos::View<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void> const&, std::enable_if<((is_void_v<Kokkos::ViewTraits<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::specialize>)&&(is_void_v<Kokkos::ViewTraits<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::specialize>))&&((((unsigned int)Kokkos::ViewTraits<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::rank)!=(0))), void>::type*) (dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1786
+#18 0x0000000000b0af08 in Kokkos::DualView<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_host_impl<>() (this=0x6637778) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:706
+#19 Kokkos::DualView<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_host_impl<>() (this=0x6637778) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:689
+#20 Kokkos::DualView<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_host (this=0x6637778) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:716
+#21 SPARTA_NS::ParticleKokkos::sync (this=0x6637590, space=space@entry=SPARTA_NS::Host, mask=1) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/particle_kokkos.cpp:886
+#22 0x0000000000b0c113 in SPARTA_NS::ParticleKokkos::modify (this=<optimized out>, space=<optimized out>, mask=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/particle_kokkos.cpp:957
+#23 0x0000000000af3b60 in SPARTA_NS::ModifyKokkos::unpack_grid_one (this=0x665ec40, icell=10461, buf=0xde94520 "") at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:225
+#24 0x00000000006de77a in SPARTA_NS::Grid::unpack_one (this=<optimized out>, buf=0xde943c0 "TI", ownflag=ownflag@entry=1, partflag=partflag@entry=0, surfflag=surfflag@entry=1, sortflag=sortflag@entry=0) at /global/homes/d/diawa/OpenEdge/src/grid_comm.cpp:386
+=== SAMPLE 1794158418.414476773
+#0  0x00007f1af27d0a07 in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af25ea37b in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af261d029 in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af2628955 in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af270563f in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af26f43f0 in cuCtxSynchronize () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af200fc4b in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#7  0x00007f1af204c385 in cudaDeviceSynchronize () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#8  0x0000000000d0e471 in operator() (__closure=<optimized out>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:153
+#9  Kokkos::Tools::Experimental::Impl::profile_fence_event<Kokkos::Cuda, Kokkos::Impl::cuda_device_synchronize(const std::string&)::<lambda()> > (name=..., func=..., reason=Kokkos::Tools::Experimental::GlobalDeviceSynchronization) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Profiling.hpp:213
+#10 Kokkos::Impl::cuda_device_synchronize (name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:139
+#11 0x0000000000ce291d in Kokkos::Impl::ExecSpaceManager::static_fence (this=0x52721e0 <Kokkos::Impl::ExecSpaceManager::get_instance()::space_initializer>, name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Core.cpp:243
+#12 0x0000000000ce2bf5 in (anonymous namespace)::fence_internal (name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Core.cpp:819
+#13 0x0000000000afdfe7 in Kokkos::deep_copy<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void, double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>(Kokkos::View<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void> const&, Kokkos::View<double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks> const&, std::enable_if<((is_void_v<Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::specialize>)&&(is_void_v<Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::specialize>))&&((((unsigned int)Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<double*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::rank)!=(0))), void>::type*) (dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1782
+#14 0x0000000000b0b666 in Kokkos::DualView<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x7a69e70) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:737
+#15 Kokkos::DualView<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x7a69e70) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:720
+#16 Kokkos::DualView<double*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device (this=0x7a69e70) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:747
+#17 SPARTA_NS::ParticleKokkos::sync (this=0x6637590, space=<optimized out>, mask=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/particle_kokkos.cpp:877
+#18 0x0000000000af3a7a in SPARTA_NS::ModifyKokkos::unpack_grid_one (this=0x665ec40, icell=11139, buf=0xdec54e0 "") at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:218
+#19 0x00000000006de77a in SPARTA_NS::Grid::unpack_one (this=<optimized out>, buf=0xdec53f0 "\017\025", ownflag=ownflag@entry=1, partflag=partflag@entry=0, surfflag=surfflag@entry=1, sortflag=sortflag@entry=0) at /global/homes/d/diawa/OpenEdge/src/grid_comm.cpp:386
+#20 0x00000000007b99c9 in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0xa2406d0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:776
+#21 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#22 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#23 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#24 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+=== SAMPLE 1794158421.510053599
+#0  0x00007f1aecf981c3 in __pthread_mutex_unlock_usercnt () from /lib64/libc.so.6
+#1  0x00007f1af27ebf75 in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af27f0f72 in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af2692228 in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af2588f4e in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af2770832 in ?? () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af2769350 in cuMemcpy () from /usr/lib64/libcuda.so.1
+#7  0x00007f1af2049f11 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#8  0x00007f1af2017584 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#9  0x00007f1af2075f15 in cudaMemcpy () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#10 0x0000000000d07dc8 in Kokkos::Impl::CudaInternal::cuda_memcpy_wrapper<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, dst=0x7f1a90fd4880, src=0xc4517c0, count=65536, kind=cudaMemcpyDefault) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Error.hpp:63
+#11 Kokkos::Impl::DeepCopyCuda (dst=0x7f1a90fd4880, src=0xc4517c0, n=n@entry=65536) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.cpp:62
+#12 0x0000000000afe98d in Kokkos::Impl::DeepCopy<Kokkos::CudaSpace, Kokkos::HostSpace, Kokkos::Cuda, void>::DeepCopy (this=<optimized out>, dst=<optimized out>, src=<optimized out>, n=65536) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.hpp:476
+#13 Kokkos::deep_copy<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void, int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>(Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void> const&, Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks> const&, std::enable_if<((is_void_v<Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::specialize>)&&(is_void_v<Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::specialize>))&&((((unsigned int)Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::rank)!=(0))), void>::type*) (dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1786
+#14 0x0000000000b0b716 in Kokkos::DualView<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x7a8b790) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:737
+#15 Kokkos::DualView<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x7a8b790) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:720
+#16 Kokkos::DualView<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device (this=0x7a8b790) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:747
+#17 SPARTA_NS::ParticleKokkos::sync (this=0x6637590, space=<optimized out>, mask=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/particle_kokkos.cpp:867
+#18 0x0000000000af3a7a in SPARTA_NS::ModifyKokkos::unpack_grid_one (this=0x665ec40, icell=11845, buf=0xdef9788 "") at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:218
+#19 0x00000000006de77a in SPARTA_NS::Grid::unpack_one (this=<optimized out>, buf=0xdef95e0 "{B", ownflag=ownflag@entry=1, partflag=partflag@entry=0, surfflag=surfflag@entry=1, sortflag=sortflag@entry=0) at /global/homes/d/diawa/OpenEdge/src/grid_comm.cpp:386
+#20 0x00000000007b99c9 in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0xa2406d0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:776
+#21 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#22 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#23 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#24 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+=== SAMPLE 1794158424.497970724
+#0  0x00007f1af2823aa9 in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af2629364 in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af27d0fbf in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af264c7e0 in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af272ec7c in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af271c130 in cuEventSynchronize () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af20132d2 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#7  0x00007f1af2055698 in cudaEventSynchronize () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#8  0x00000000009a4914 in Kokkos::Impl::CudaInternal::cuda_event_synchronize_wrapper<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, event=0x635c4e0) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Error.hpp:63
+#9  Kokkos::Impl::CudaParallelLaunchKernelInvoker<Kokkos::Impl::ParallelFor<SPARTA_NS::FixCrossFieldDiffusionKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixCrossFieldDiffusion>, Kokkos::Cuda>, Kokkos::LaunchBounds<0u, 0u>, (Kokkos::Impl::Experimental::CudaLaunchMechanism)1>::invoke_kernel (driver=..., grid=..., block=..., shmem=shmem@entry=0, cuda_instance=cuda_instance@entry=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp:586
+#10 0x00000000009a6d8b in Kokkos::Impl::CudaParallelLaunchImpl<Kokkos::Impl::ParallelFor<SPARTA_NS::FixCrossFieldDiffusionKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixCrossFieldDiffusion>, Kokkos::Cuda>, Kokkos::LaunchBounds<0u, 0u>, (Kokkos::Impl::Experimental::CudaLaunchMechanism)1>::launch_kernel (driver=..., grid=..., block=..., shmem=0, cuda_instance=<optimized out>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/tpls/desul/include/desul/atomics/Lock_Array_CUDA.hpp:127
+#11 Kokkos::Impl::CudaParallelLaunch<Kokkos::Impl::ParallelFor<SPARTA_NS::FixCrossFieldDiffusionKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixCrossFieldDiffusion>, Kokkos::Cuda>, Kokkos::LaunchBounds<0u, 0u>, (Kokkos::Impl::Experimental::CudaLaunchMechanism)1, false>::CudaParallelLaunch<Kokkos::Impl::ParallelFor<SPARTA_NS::FixCrossFieldDiffusionKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixCrossFieldDiffusion>, Kokkos::Cuda> const&, dim3&, dim3&, int, Kokkos::Impl::CudaInternal*> (this=<optimized out>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp:720
+#12 Kokkos::Impl::ParallelFor<SPARTA_NS::FixCrossFieldDiffusionKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixCrossFieldDiffusion>, Kokkos::Cuda>::execute (this=0x7fffe4299760) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Parallel_Range.hpp:108
+#13 Kokkos::parallel_for<Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixCrossFieldDiffusion>, SPARTA_NS::FixCrossFieldDiffusionKokkos, void> (str=..., policy=..., functor=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_Parallel.hpp:146
+#14 0x00000000009a273c in Kokkos::parallel_for<Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixCrossFieldDiffusion>, SPARTA_NS::FixCrossFieldDiffusionKokkos> (policy=..., functor=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_Parallel.hpp:155
+#15 SPARTA_NS::FixCrossFieldDiffusionKokkos::start_of_step (this=0x7856b20) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_cross_field_diffusion_kokkos.cpp:233
+#16 0x0000000000af459d in SPARTA_NS::ModifyKokkos::start_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:106
+#17 0x0000000000c12b7e in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:705
+#18 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#19 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#20 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#21 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158426.757438449
+#0  0x00007f1aed01b38a in process_vm_readv () from /lib64/libc.so.6
+#1  0x00007f1aedbb907e in MPIDI_CRAY_Common_lmt_unpack () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aedbba56b in MPIDI_CRAY_Common_lmt_ctrl_send_rts_cb () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aedae6679 in MPIDIG_send_target_msg_cb () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aeda2cedc in MPIDI_POSIX_progress_recv.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aeda32b06 in MPIDI_POSIX_progress.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x00007f1aeda3995c in MPIDI_progress_test () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#7  0x00007f1aeda3b044 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#8  0x00007f1aeda3de94 in MPIR_Wait_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#9  0x00007f1aed9523cf in MPID_Wait.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#10 0x00007f1aed969091 in MPIC_Wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#11 0x00007f1aed969b03 in MPIC_Sendrecv () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#12 0x00007f1aed87d5b0 in MPIR_Allreduce_intra_reduce_scatter_allgather () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#13 0x00007f1aed940e1a in MPIR_Allreduce_allcomm_auto () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#14 0x00007f1aed94116e in MPIR_Allreduce_impl () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#15 0x00007f1aed9ab12b in MPIR_CRAY_Allreduce () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#16 0x00007f1aed52cb45 in PMPI_Allreduce () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#17 0x00000000004ee729 in SPARTA_NS::Surf::spread_own2local_reduce (this=<optimized out>, n=<optimized out>, type=<optimized out>, in=0x7a25500, out=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/surf_comm.cpp:622
+#18 0x00000000004ef06f in SPARTA_NS::Surf::spread_own2local (this=<optimized out>, n=<optimized out>, type=<optimized out>, in=<optimized out>, out=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/surf_comm.cpp:551
+#19 0x0000000000cdb4c6 in SPARTA_NS::SurfKokkos::spread_custom (this=0x665bf50, index=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/surf_custom_kokkos.cpp:508
+#20 0x0000000000504c90 in SPARTA_NS::SurfReactSurfacePWI::sync_sigma (this=this@entry=0x7883970) at /global/homes/d/diawa/OpenEdge/src/surf_react_surface_pwi.cpp:1726
+#21 0x0000000000514dac in SPARTA_NS::SurfReactSurfacePWI::tally_update (this=0x7883970) at /global/homes/d/diawa/OpenEdge/src/surf_react_surface_pwi.cpp:1814
+#22 0x0000000000bf04f8 in SPARTA_NS::SurfReactSurfacePWIKokkos::tally_update (this=0x7883970) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/surf_react_surface_pwi_kokkos.cpp:447
+#23 0x0000000000520b94 in SPARTA_NS::Update::collide_react_update (this=this@entry=0x635e980) at /global/homes/d/diawa/OpenEdge/src/update.cpp:3430
+#24 0x0000000000c13055 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:827
+=== SAMPLE 1794158429.841180151
+#0  0x00007f1af282b8db in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af25ea6c3 in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af26291bb in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af33690d7 in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af3369525 in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af25f6e24 in ?? () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af27e0b6d in ?? () from /usr/lib64/libcuda.so.1
+#7  0x00007f1af27e89f7 in ?? () from /usr/lib64/libcuda.so.1
+#8  0x00007f1af27e8c0b in ?? () from /usr/lib64/libcuda.so.1
+#9  0x00007f1af337baa1 in ?? () from /usr/lib64/libcuda.so.1
+#10 0x00007f1af259974c in ?? () from /usr/lib64/libcuda.so.1
+#11 0x00007f1af332a77a in ?? () from /usr/lib64/libcuda.so.1
+#12 0x00007f1af2588ee5 in ?? () from /usr/lib64/libcuda.so.1
+#13 0x00007f1af2770832 in ?? () from /usr/lib64/libcuda.so.1
+#14 0x00007f1af2769350 in cuMemcpy () from /usr/lib64/libcuda.so.1
+#15 0x00007f1af2049f11 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#16 0x00007f1af2017584 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#17 0x00007f1af2075f15 in cudaMemcpy () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#18 0x0000000000d07dc8 in Kokkos::Impl::CudaInternal::cuda_memcpy_wrapper<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, dst=0x7fffe42999e0, src=0x7f1acb9b0a80, count=4, kind=cudaMemcpyDefault) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Error.hpp:63
+#19 Kokkos::Impl::DeepCopyCuda (dst=dst@entry=0x7fffe42999e0, src=0x7f1acb9b0a80, n=n@entry=4) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.cpp:62
+#20 0x0000000000a31aa2 in Kokkos::Impl::DeepCopy<Kokkos::HostSpace, Kokkos::CudaSpace, Kokkos::OpenMP, void>::DeepCopy (this=<optimized out>, dst=0x7fffe42999e0, src=<optimized out>, n=4) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.hpp:553
+#21 Kokkos::deep_copy<int, Kokkos::Cuda> (dst=@0x7fffe42999e0: 0, src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1555
+#22 0x0000000000a3c0dd in SPARTA_NS::FixSurfaceEmitSourceKokkos::perform_task (this=0x75407d0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_surface_emit_source_kokkos.cpp:394
+#23 0x0000000000741186 in SPARTA_NS::FixEmit::start_of_step (this=0x75407d0) at /global/homes/d/diawa/OpenEdge/src/fix_emit.cpp:94
+#24 SPARTA_NS::FixEmit::start_of_step (this=0x75407d0) at /global/homes/d/diawa/OpenEdge/src/fix_emit.cpp:89
+=== SAMPLE 1794158432.101793297
+#0  0x00007fffe4355b67 in clock_gettime ()
+#1  0x00007f1aecfdd2c9 in clock_gettime@GLIBC_2.2.5 () from /lib64/libc.so.6
+#2  0x00007f1af26e3644 in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af25f70fc in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af261d052 in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af2628955 in ?? () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af270563f in ?? () from /usr/lib64/libcuda.so.1
+#7  0x00007f1af26f43f0 in cuCtxSynchronize () from /usr/lib64/libcuda.so.1
+#8  0x00007f1af200fc4b in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#9  0x00007f1af204c385 in cudaDeviceSynchronize () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#10 0x0000000000d0e471 in operator() (__closure=<optimized out>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:153
+#11 Kokkos::Tools::Experimental::Impl::profile_fence_event<Kokkos::Cuda, Kokkos::Impl::cuda_device_synchronize(const std::string&)::<lambda()> > (name=..., func=..., reason=Kokkos::Tools::Experimental::GlobalDeviceSynchronization) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Profiling.hpp:213
+#12 Kokkos::Impl::cuda_device_synchronize (name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:139
+#13 0x0000000000ce291d in Kokkos::Impl::ExecSpaceManager::static_fence (this=0x52721e0 <Kokkos::Impl::ExecSpaceManager::get_instance()::space_initializer>, name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Core.cpp:243
+#14 0x0000000000ce2bf5 in (anonymous namespace)::fence_internal (name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Core.cpp:819
+#15 0x0000000000bfaad7 in Kokkos::deep_copy<int [15], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks, int [15], Kokkos::LayoutLeft, Kokkos::Cuda, void>(Kokkos::View<int [15], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks> const&, Kokkos::View<int [15], Kokkos::LayoutLeft, Kokkos::Cuda, void> const&, std::enable_if<((is_void_v<Kokkos::ViewTraits<int [15], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::specialize>)&&(is_void_v<Kokkos::ViewTraits<int [15], Kokkos::LayoutLeft, Kokkos::Cuda, void>::specialize>))&&((((unsigned int)Kokkos::ViewTraits<int [15], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<int [15], Kokkos::LayoutLeft, Kokkos::Cuda, void>::rank)!=(0))), void>::type*) (dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1782
+#16 0x0000000000c36b3d in SPARTA_NS::UpdateKokkos::move<3, 1, 1, 0> (this=0x635e980) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:1213
+#17 0x0000000000c12d92 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:794
+#18 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#19 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#20 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#21 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158434.515113896
+#0  0x00007f1aeda32af9 in MPIDI_POSIX_progress.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#1  0x00007f1aeda3995c in MPIDI_progress_test () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aeda3b044 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aeda3de94 in MPIR_Wait_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aed9523cf in MPID_Wait.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aed969091 in MPIC_Wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x00007f1aed969b1c in MPIC_Sendrecv () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#7  0x00007f1aed894196 in MPIR_Reduce_scatter_intra_recursive_halving () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#8  0x00007f1aed9460fe in MPIR_Reduce_scatter_allcomm_auto () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#9  0x00007f1aed9462ce in MPIR_Reduce_scatter_impl () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#10 0x00007f1aed946ac7 in MPIR_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#11 0x00007f1aed590c67 in PMPI_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#12 0x00000000006f3f08 in SPARTA_NS::Irregular::create_data_uniform (this=0x665fd80, n=0, proclist=0x6e62da0, sort=0) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:248
+#13 0x00000000006f5ea9 in SPARTA_NS::Irregular::create_data_variable (this=this@entry=0x665fd80, n=n@entry=0, proclist=0x6e62da0, sizes=0x6e67730, recvsize=@0x7fffe42976d8: 0, sort=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:586
+#14 0x00000000007b972b in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0x8cc81a0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:744
+#15 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#16 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#17 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#18 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#19 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#20 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#21 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#22 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#23 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158436.898176700
+#0  0x00007f1aeda3997a in MPIDI_progress_test () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#1  0x00007f1aeda3b044 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aeda3de94 in MPIR_Wait_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aed9523cf in MPID_Wait.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aed969091 in MPIC_Wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aed969b1c in MPIC_Sendrecv () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x00007f1aed894196 in MPIR_Reduce_scatter_intra_recursive_halving () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#7  0x00007f1aed9460fe in MPIR_Reduce_scatter_allcomm_auto () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#8  0x00007f1aed9462ce in MPIR_Reduce_scatter_impl () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#9  0x00007f1aed946ac7 in MPIR_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#10 0x00007f1aed590c67 in PMPI_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#11 0x00000000006f3f08 in SPARTA_NS::Irregular::create_data_uniform (this=0x665fd80, n=0, proclist=0x6e62da0, sort=0) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:248
+#12 0x00000000006f5ea9 in SPARTA_NS::Irregular::create_data_variable (this=this@entry=0x665fd80, n=n@entry=0, proclist=0x6e62da0, sizes=0x6e67730, recvsize=@0x7fffe42976d8: 0, sort=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:586
+#13 0x00000000007b972b in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0x8cc81a0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:744
+#14 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#15 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#16 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#17 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#18 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#19 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#20 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#21 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#22 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158439.303056869
+#0  0x00007f1aedb29f0a in MPID_ST_progress_queue () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#1  0x00007f1aeda39659 in MPIDI_progress_test () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aeda3b044 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aeda3de94 in MPIR_Wait_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aed9523cf in MPID_Wait.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aed969091 in MPIC_Wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x00007f1aed969b1c in MPIC_Sendrecv () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#7  0x00007f1aed894196 in MPIR_Reduce_scatter_intra_recursive_halving () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#8  0x00007f1aed9460fe in MPIR_Reduce_scatter_allcomm_auto () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#9  0x00007f1aed9462ce in MPIR_Reduce_scatter_impl () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#10 0x00007f1aed946ac7 in MPIR_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#11 0x00007f1aed590c67 in PMPI_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#12 0x00000000006f3f08 in SPARTA_NS::Irregular::create_data_uniform (this=0x665fd80, n=0, proclist=0x6e62da0, sort=0) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:248
+#13 0x00000000006f5ea9 in SPARTA_NS::Irregular::create_data_variable (this=this@entry=0x665fd80, n=n@entry=0, proclist=0x6e62da0, sizes=0x6e67730, recvsize=@0x7fffe42976d8: 0, sort=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:586
+#14 0x00000000007b972b in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0x8cc81a0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:744
+#15 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#16 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#17 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#18 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#19 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#20 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#21 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#22 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#23 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158441.608044939
+#0  0x00007f1af25ea6c3 in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af26291bb in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af33690d7 in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af3369525 in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af25f6e24 in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af27e0b6d in ?? () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af27e89f7 in ?? () from /usr/lib64/libcuda.so.1
+#7  0x00007f1af27e8c0b in ?? () from /usr/lib64/libcuda.so.1
+#8  0x00007f1af337baa1 in ?? () from /usr/lib64/libcuda.so.1
+#9  0x00007f1af259974c in ?? () from /usr/lib64/libcuda.so.1
+#10 0x00007f1af2599f3a in ?? () from /usr/lib64/libcuda.so.1
+#11 0x00007f1af259a0f4 in ?? () from /usr/lib64/libcuda.so.1
+#12 0x00007f1af2770a1a in ?? () from /usr/lib64/libcuda.so.1
+#13 0x00007f1af2769410 in cuMemcpyAsync () from /usr/lib64/libcuda.so.1
+#14 0x00007f1af204a069 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#15 0x00007f1af2017688 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#16 0x00007f1af207882c in cudaMemcpyAsync () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#17 0x0000000000d07eb9 in Kokkos::Impl::CudaInternal::cuda_memcpy_async_wrapper<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, dst=0xa318444, src=0x7f1acb9b5080, count=4, kind=cudaMemcpyDefault, stream=0x0) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.hpp:191
+#18 Kokkos::Impl::DeepCopyAsyncCuda (instance=..., dst=0xa318444, src=0x7f1acb9b5080, n=n@entry=4) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.cpp:68
+#19 0x0000000000a52436 in Kokkos::Impl::DeepCopy<Kokkos::HostSpace, Kokkos::CudaSpace, Kokkos::Cuda, void>::DeepCopy (this=<optimized out>, instance=..., dst=<optimized out>, src=<optimized out>, n=4) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.hpp:486
+#20 Kokkos::deep_copy<Kokkos::Cuda, int, Kokkos::LayoutRight, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::MemoryTraits<0u>, int, Kokkos::Cuda>(Kokkos::Cuda const&, Kokkos::View<int, Kokkos::LayoutRight, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::MemoryTraits<0u> > const&, Kokkos::View<int, Kokkos::Cuda> const&, std::enable_if<(((Kokkos::is_execution_space<Kokkos::Cuda>::value&&(is_void_v<Kokkos::ViewTraits<int, Kokkos::LayoutRight, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::MemoryTraits<0u> >::specialize>))&&(is_void_v<Kokkos::ViewTraits<int, Kokkos::Cuda>::specialize>))&&(((unsigned int)Kokkos::ViewTraits<int, Kokkos::LayoutRight, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::MemoryTraits<0u> >::rank)==((unsigned int)(0))))&&(((unsigned int)Kokkos::ViewTraits<int, Kokkos::Cuda>::rank)==((unsigned int)(0))), void>::type*) (exec_space=..., dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:2759
+#21 0x0000000000a5de59 in SPARTA_NS::FixVolumeChemAdasKokkos::end_of_step (this=0x75284b0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_volume_chem_adas_kokkos.cpp:575
+#22 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#23 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#24 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+=== SAMPLE 1794158443.946058075
+#0  0x0000000000c200ac in Kokkos::Impl::SharedAllocationTracker::SharedAllocationTracker (this=0x7fffe4297a80, rhs=..., enable_tracking=true) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_SharedAlloc.hpp:574
+#1  Kokkos::Impl::ViewTracker<Kokkos::View<unsigned int*, Kokkos::CudaSpace> >::ViewTracker (this=0x7fffe4297a80, vt=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/View/Kokkos_ViewTracker.hpp:49
+#2  Kokkos::View<unsigned int*, Kokkos::CudaSpace>::View (this=0x7fffe4297a80, other=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/View/Kokkos_ViewLegacy.hpp:885
+#3  Kokkos::Experimental::UniqueToken<Kokkos::Cuda, (Kokkos::Experimental::UniqueTokenScope)1>::UniqueToken (this=0x7fffe4297a80) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_UniqueToken.hpp:63
+#4  Kokkos::Experimental::ScatterView<double**, Kokkos::LayoutRight, Kokkos::Cuda, Kokkos::Experimental::ScatterSum, Kokkos::Experimental::ScatterDuplicated, Kokkos::Experimental::ScatterAtomic>::ScatterView (this=0x7fffe4297a80) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_ScatterView.hpp:948
+#5  SPARTA_NS::ComputeBoundaryKokkos::ComputeBoundaryKokkos (this=0x7fffe4297668) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/compute_boundary_kokkos.h:31
+#6  0x0000000000c26d0f in SPARTA_NS::KKCopy<SPARTA_NS::ComputeBoundaryKokkos>::KKCopy (this=0x7fffe4297668) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/kokkos_copy.h:26
+#7  SPARTA_NS::UpdateKokkos::UpdateKokkos (this=0x7fffe42864f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.h:65
+#8  0x0000000000c30f12 in Kokkos::Impl::ParallelFor<SPARTA_NS::UpdateKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagUpdateMove<3, 1, 1, 0, 1> >, Kokkos::Cuda>::ParallelFor (this=0x7fffe42864f0, arg_functor=..., arg_policy=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Parallel_Range.hpp:112
+#9  Kokkos::Impl::construct_with_shared_allocation_tracking_disabled<Kokkos::Impl::ParallelFor<SPARTA_NS::UpdateKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagUpdateMove<3, 1, 1, 0, 1> >, Kokkos::Cuda>, SPARTA_NS::UpdateKokkos const&, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagUpdateMove<3, 1, 1, 0, 1> > const&> () at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_SharedAlloc.hpp:665
+#10 Kokkos::parallel_for<Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagUpdateMove<3, 1, 1, 0, 1> >, SPARTA_NS::UpdateKokkos, void> (str=..., policy=..., functor=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_Parallel.hpp:142
+#11 0x0000000000c36a72 in Kokkos::parallel_for<Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagUpdateMove<3, 1, 1, 0, 1> >, SPARTA_NS::UpdateKokkos> (policy=..., functor=...) at /usr/include/c++/14/bits/basic_string.tcc:242
+#12 SPARTA_NS::UpdateKokkos::move<3, 1, 1, 0> (this=0x635e980) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:1193
+#13 0x0000000000c12d92 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:794
+#14 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#15 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#16 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#17 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158448.351024230
+#0  0x00007f1af282b8ff in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af25ea6c3 in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af26291bb in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af33690d7 in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af3369525 in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af25f6bae in ?? () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af27e0b6d in ?? () from /usr/lib64/libcuda.so.1
+#7  0x00007f1af27e89f7 in ?? () from /usr/lib64/libcuda.so.1
+#8  0x00007f1af27e8c0b in ?? () from /usr/lib64/libcuda.so.1
+#9  0x00007f1af337baa1 in ?? () from /usr/lib64/libcuda.so.1
+#10 0x00007f1af259974c in ?? () from /usr/lib64/libcuda.so.1
+#11 0x00007f1af2599f3a in ?? () from /usr/lib64/libcuda.so.1
+#12 0x00007f1af259a0f4 in ?? () from /usr/lib64/libcuda.so.1
+#13 0x00007f1af2770a1a in ?? () from /usr/lib64/libcuda.so.1
+#14 0x00007f1af2769410 in cuMemcpyAsync () from /usr/lib64/libcuda.so.1
+#15 0x00007f1af204a069 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#16 0x00007f1af2017688 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#17 0x00007f1af207882c in cudaMemcpyAsync () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#18 0x0000000000d07eb9 in Kokkos::Impl::CudaInternal::cuda_memcpy_async_wrapper<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, dst=0xb61b8c0, src=0x7f1a911fd080, count=80, kind=cudaMemcpyDefault, stream=0x0) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.hpp:191
+#19 Kokkos::Impl::DeepCopyAsyncCuda (instance=..., dst=0xb61b8c0, src=src@entry=0x7f1a911fd080, n=80) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.cpp:68
+#20 0x0000000000a553c2 in Kokkos::Impl::DeepCopy<Kokkos::HostSpace, Kokkos::CudaSpace, Kokkos::Cuda, void>::DeepCopy (this=<optimized out>, instance=..., dst=<optimized out>, src=0x7f1a911fd080, n=<optimized out>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.hpp:487
+#21 Kokkos::deep_copy<Kokkos::Cuda, int*, Kokkos::LayoutRight, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::MemoryTraits<0u>, int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::Cuda, Kokkos::CudaSpace>, Kokkos::MemoryTraits<0u> >(Kokkos::Cuda const&, Kokkos::View<int*, Kokkos::LayoutRight, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::MemoryTraits<0u> > const&, Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::Cuda, Kokkos::CudaSpace>, Kokkos::MemoryTraits<0u> > const&, std::enable_if<((Kokkos::is_execution_space<Kokkos::Cuda>::value&&(is_void_v<Kokkos::ViewTraits<int*, Kokkos::LayoutRight, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::MemoryTraits<0u> >::specialize>))&&(is_void_v<Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::Cuda, Kokkos::CudaSpace>, Kokkos::MemoryTraits<0u> >::specialize>))&&((((unsigned int)Kokkos::ViewTraits<int*, Kokkos::LayoutRight, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::MemoryTraits<0u> >::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::Cuda, Kokkos::CudaSpace>, Kokkos::MemoryTraits<0u> >::rank)!=(0))), void>::type*) (exec_space=..., dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:2932
+#22 0x0000000000a5e61f in SPARTA_NS::FixVolumeChemAdasKokkos::end_of_step (this=0x75284b0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_volume_chem_adas_kokkos.cpp:601
+#23 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#24 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+=== SAMPLE 1794158450.694429251
+#0  0x00007f1af26e3671 in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af25f70fc in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af261d052 in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af2628955 in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af270563f in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af26f43f0 in cuCtxSynchronize () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af200fc4b in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#7  0x00007f1af204c385 in cudaDeviceSynchronize () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#8  0x0000000000d0e471 in operator() (__closure=<optimized out>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:153
+#9  Kokkos::Tools::Experimental::Impl::profile_fence_event<Kokkos::Cuda, Kokkos::Impl::cuda_device_synchronize(const std::string&)::<lambda()> > (name=..., func=..., reason=Kokkos::Tools::Experimental::GlobalDeviceSynchronization) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Profiling.hpp:213
+#10 Kokkos::Impl::cuda_device_synchronize (name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:139
+#11 0x0000000000ce291d in Kokkos::Impl::ExecSpaceManager::static_fence (this=0x52721e0 <Kokkos::Impl::ExecSpaceManager::get_instance()::space_initializer>, name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Core.cpp:243
+#12 0x0000000000ce2bf5 in (anonymous namespace)::fence_internal (name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Core.cpp:819
+#13 0x0000000000ad8007 in Kokkos::deep_copy<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void, int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>(Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void> const&, Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks> const&, std::enable_if<((is_void_v<Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::specialize>)&&(is_void_v<Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::specialize>))&&((((unsigned int)Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<int*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::rank)!=(0))), void>::type*) (dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1782
+#14 0x0000000000ade77c in Kokkos::DualView<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x631eaf0) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:737
+#15 Kokkos::DualView<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x631eaf0) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:720
+#16 Kokkos::DualView<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device (this=0x631eaf0) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:747
+#17 SPARTA_NS::IrregularKokkos::exchange_uniform (this=this@entry=0x631e930, d_sendbuf_in=..., nbytes_in=nbytes_in@entry=304, d_recvbuf_ptr=<optimized out>, d_recvbuf_in=...) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/irregular_kokkos.cpp:517
+#18 0x00000000007bc591 in SPARTA_NS::CommKokkos::migrate_particles (this=this@entry=0x663b950, nmigrate=<optimized out>, plist=plist@entry=0x74dbac0, d_plist_in=..., entryexit_in=entryexit_in@entry=1, any_entryexit_out=<optimized out>, any_entryexit_out@entry=0x7fffe429997c) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/View/Hooks/Kokkos_ViewHooks.hpp:83
+#19 0x0000000000c36ef7 in SPARTA_NS::UpdateKokkos::move<3, 1, 1, 0> (this=0x635e980) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/View/Hooks/Kokkos_ViewHooks.hpp:83
+#20 0x0000000000c12d92 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:794
+#21 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#22 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#23 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#24 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158453.276169053
+#0  0x00007f1aeda32af9 in MPIDI_POSIX_progress.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#1  0x00007f1aeda3995c in MPIDI_progress_test () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aeda3b044 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aeda3de94 in MPIR_Wait_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aed9523cf in MPID_Wait.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aed969091 in MPIC_Wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x00007f1aed969b1c in MPIC_Sendrecv () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#7  0x00007f1aed894196 in MPIR_Reduce_scatter_intra_recursive_halving () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#8  0x00007f1aed9460fe in MPIR_Reduce_scatter_allcomm_auto () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#9  0x00007f1aed9462ce in MPIR_Reduce_scatter_impl () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#10 0x00007f1aed946ac7 in MPIR_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#11 0x00007f1aed590c67 in PMPI_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#12 0x00000000006f3f08 in SPARTA_NS::Irregular::create_data_uniform (this=0x665fd80, n=0, proclist=0x6e62da0, sort=0) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:248
+#13 0x00000000006f5ea9 in SPARTA_NS::Irregular::create_data_variable (this=this@entry=0x665fd80, n=n@entry=0, proclist=0x6e62da0, sizes=0x6e67730, recvsize=@0x7fffe42976d8: 0, sort=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:586
+#14 0x00000000007b972b in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0xdca3a20) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:744
+#15 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#16 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#17 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#18 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#19 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#20 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#21 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#22 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#23 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158455.632540628
+#0  0x00007f1aeda32af9 in MPIDI_POSIX_progress.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#1  0x00007f1aeda3995c in MPIDI_progress_test () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aeda3b044 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aeda3de94 in MPIR_Wait_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aed9523cf in MPID_Wait.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aed969091 in MPIC_Wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x00007f1aed969b1c in MPIC_Sendrecv () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#7  0x00007f1aed894196 in MPIR_Reduce_scatter_intra_recursive_halving () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#8  0x00007f1aed9460fe in MPIR_Reduce_scatter_allcomm_auto () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#9  0x00007f1aed9462ce in MPIR_Reduce_scatter_impl () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#10 0x00007f1aed946ac7 in MPIR_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#11 0x00007f1aed590c67 in PMPI_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#12 0x00000000006f3f08 in SPARTA_NS::Irregular::create_data_uniform (this=0x665fd80, n=0, proclist=0x6e62da0, sort=0) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:248
+#13 0x00000000006f5ea9 in SPARTA_NS::Irregular::create_data_variable (this=this@entry=0x665fd80, n=n@entry=0, proclist=0x6e62da0, sizes=0x6e67730, recvsize=@0x7fffe42976d8: 0, sort=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:586
+#14 0x00000000007b972b in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0xdca3a20) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:744
+#15 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#16 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#17 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#18 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#19 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#20 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#21 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#22 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#23 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158458.024260971
+#0  0x00007f1aeda39619 in MPIDI_progress_test () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#1  0x00007f1aeda3b044 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aeda3de94 in MPIR_Wait_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aed9523cf in MPID_Wait.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aed969091 in MPIC_Wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aed969b1c in MPIC_Sendrecv () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x00007f1aed894196 in MPIR_Reduce_scatter_intra_recursive_halving () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#7  0x00007f1aed9460fe in MPIR_Reduce_scatter_allcomm_auto () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#8  0x00007f1aed9462ce in MPIR_Reduce_scatter_impl () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#9  0x00007f1aed946ac7 in MPIR_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#10 0x00007f1aed590c67 in PMPI_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#11 0x00000000006f3f08 in SPARTA_NS::Irregular::create_data_uniform (this=0x665fd80, n=0, proclist=0x6e62da0, sort=0) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:248
+#12 0x00000000006f5ea9 in SPARTA_NS::Irregular::create_data_variable (this=this@entry=0x665fd80, n=n@entry=0, proclist=0x6e62da0, sizes=0x6e67730, recvsize=@0x7fffe42976d8: 0, sort=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:586
+#13 0x00000000007b972b in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0xdca3a20) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:744
+#14 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#15 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#16 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#17 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#18 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#19 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#20 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#21 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#22 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158460.493795485
+#0  0x0000000000649ce8 in SPARTA_NS::FixBackground::interp2D (this=0x7548120, field=..., R=2.1125532537666358, Z=<optimized out>, icell=icell@entry=11913, iparticle=iparticle@entry=-1) at /global/homes/d/diawa/OpenEdge/src/fix_background.cpp:2360
+#1  0x00000000006b808b in SPARTA_NS::FixVolumeChemAdas::neutral_dens_at_cell (this=this@entry=0x75284b0, icell=icell@entry=11913) at /global/homes/d/diawa/OpenEdge/src/fix_volume_chem_adas.cpp:1727
+#2  0x0000000000a5852b in SPARTA_NS::FixVolumeChemAdasKokkos::build_nn_cell (this=this@entry=0x75284b0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_volume_chem_adas_kokkos.cpp:379
+#3  0x0000000000a5f358 in SPARTA_NS::FixVolumeChemAdasKokkos::end_of_step (this=0x75284b0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_volume_chem_adas_kokkos.cpp:460
+#4  0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#5  0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#6  0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#7  0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#8  0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#9  0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158463.001584157
+#0  0x00007f1af282b941 in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af25ea6c3 in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af26291bb in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af33690d7 in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af3369525 in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af25f6e24 in ?? () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af261d052 in ?? () from /usr/lib64/libcuda.so.1
+#7  0x00007f1af2628955 in ?? () from /usr/lib64/libcuda.so.1
+#8  0x00007f1af270563f in ?? () from /usr/lib64/libcuda.so.1
+#9  0x00007f1af26f43f0 in cuCtxSynchronize () from /usr/lib64/libcuda.so.1
+#10 0x00007f1af200fc4b in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#11 0x00007f1af204c385 in cudaDeviceSynchronize () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#12 0x0000000000d0e471 in operator() (__closure=<optimized out>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:153
+#13 Kokkos::Tools::Experimental::Impl::profile_fence_event<Kokkos::Cuda, Kokkos::Impl::cuda_device_synchronize(const std::string&)::<lambda()> > (name=..., func=..., reason=Kokkos::Tools::Experimental::GlobalDeviceSynchronization) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Profiling.hpp:213
+#14 Kokkos::Impl::cuda_device_synchronize (name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:139
+#15 0x0000000000ce291d in Kokkos::Impl::ExecSpaceManager::static_fence (this=0x52721e0 <Kokkos::Impl::ExecSpaceManager::get_instance()::space_initializer>, name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Core.cpp:243
+#16 0x0000000000ce2bf5 in (anonymous namespace)::fence_internal (name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Core.cpp:819
+#17 0x0000000000bfaad7 in Kokkos::deep_copy<int [15], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks, int [15], Kokkos::LayoutLeft, Kokkos::Cuda, void>(Kokkos::View<int [15], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks> const&, Kokkos::View<int [15], Kokkos::LayoutLeft, Kokkos::Cuda, void> const&, std::enable_if<((is_void_v<Kokkos::ViewTraits<int [15], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::specialize>)&&(is_void_v<Kokkos::ViewTraits<int [15], Kokkos::LayoutLeft, Kokkos::Cuda, void>::specialize>))&&((((unsigned int)Kokkos::ViewTraits<int [15], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<int [15], Kokkos::LayoutLeft, Kokkos::Cuda, void>::rank)!=(0))), void>::type*) (dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1782
+#18 0x0000000000c36b3d in SPARTA_NS::UpdateKokkos::move<3, 1, 1, 0> (this=0x635e980) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:1213
+#19 0x0000000000c12d92 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:794
+#20 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#21 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#22 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#23 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158465.297459896
+#0  0x00007f1af282b8cf in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af25ea6c3 in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af26291bb in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af33690d7 in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af3369525 in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af25f6e24 in ?? () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af26bd723 in ?? () from /usr/lib64/libcuda.so.1
+#7  0x00007f1af331e355 in ?? () from /usr/lib64/libcuda.so.1
+#8  0x00007f1af27741d7 in ?? () from /usr/lib64/libcuda.so.1
+#9  0x00007f1af276a9c0 in cuStreamSynchronize () from /usr/lib64/libcuda.so.1
+#10 0x00007f1af20128b3 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#11 0x00007f1af207bc18 in cudaStreamSynchronize () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#12 0x0000000000d0ea90 in Kokkos::Impl::CudaInternal::cuda_stream_synchronize_wrapper<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, stream=0x631ecf0) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Error.hpp:63
+#13 operator() (__closure=<optimized out>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:165
+#14 Kokkos::Tools::Experimental::Impl::profile_fence_event<Kokkos::Cuda, Kokkos::Impl::cuda_stream_synchronize(cudaStream_t, const CudaInternal*, const std::string&)::<lambda()> > (name=..., devIDTag=..., func=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Profiling.hpp:200
+#15 Kokkos::Impl::cuda_stream_synchronize (stream=0x631ecf0, ptr=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:160
+#16 0x0000000000d0ec08 in Kokkos::Impl::CudaInternal::fence (this=<optimized out>, name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:259
+#17 0x0000000000d0ed18 in Kokkos::Cuda::fence (this=<optimized out>, name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:723
+#18 0x0000000000addbf7 in SPARTA_NS::IrregularKokkos::exchange_uniform (this=this@entry=0x631e930, d_sendbuf_in=..., nbytes_in=nbytes_in@entry=304, d_recvbuf_ptr=<optimized out>, d_recvbuf_in=...) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/irregular_kokkos.cpp:525
+#19 0x00000000007bc591 in SPARTA_NS::CommKokkos::migrate_particles (this=this@entry=0x663b950, nmigrate=<optimized out>, plist=plist@entry=0x74dbac0, d_plist_in=..., entryexit_in=entryexit_in@entry=0, any_entryexit_out=<optimized out>, any_entryexit_out@entry=0x7fffe429997c) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/View/Hooks/Kokkos_ViewHooks.hpp:83
+#20 0x0000000000c36ef7 in SPARTA_NS::UpdateKokkos::move<3, 1, 1, 0> (this=0x635e980) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/View/Hooks/Kokkos_ViewHooks.hpp:83
+#21 0x0000000000c12d92 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:794
+#22 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#23 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#24 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+=== SAMPLE 1794158467.730571293
+#0  0x00007f1af25ec7a0 in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af269422a in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af27e0b8e in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af27e89f7 in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af27e8c0b in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af337baa1 in ?? () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af259974c in ?? () from /usr/lib64/libcuda.so.1
+#7  0x00007f1af332a77a in ?? () from /usr/lib64/libcuda.so.1
+#8  0x00007f1af2588ee5 in ?? () from /usr/lib64/libcuda.so.1
+#9  0x00007f1af2770832 in ?? () from /usr/lib64/libcuda.so.1
+#10 0x00007f1af2769350 in cuMemcpy () from /usr/lib64/libcuda.so.1
+#11 0x00007f1af2049f11 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#12 0x00007f1af2017584 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#13 0x00007f1af2075f15 in cudaMemcpy () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#14 0x0000000000d07dc8 in Kokkos::Impl::CudaInternal::cuda_memcpy_wrapper<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, dst=0x7881a00, src=0x7f1acb9b5280, count=8, kind=cudaMemcpyDefault) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Error.hpp:63
+#15 Kokkos::Impl::DeepCopyCuda (dst=0x7881a00, src=0x7f1acb9b5280, n=n@entry=8) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.cpp:62
+#16 0x0000000000b78168 in Kokkos::Impl::DeepCopy<Kokkos::HostSpace, Kokkos::CudaSpace, Kokkos::OpenMP, void>::DeepCopy (this=<optimized out>, dst=<optimized out>, src=<optimized out>, n=8) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.hpp:553
+#17 Kokkos::deep_copy<int [2], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks, int [2], Kokkos::LayoutLeft, Kokkos::Cuda, void>(Kokkos::View<int [2], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks> const&, Kokkos::View<int [2], Kokkos::LayoutLeft, Kokkos::Cuda, void> const&, std::enable_if<((is_void_v<Kokkos::ViewTraits<int [2], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::specialize>)&&(is_void_v<Kokkos::ViewTraits<int [2], Kokkos::LayoutLeft, Kokkos::Cuda, void>::specialize>))&&((((unsigned int)Kokkos::ViewTraits<int [2], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<int [2], Kokkos::LayoutLeft, Kokkos::Cuda, void>::rank)!=(0))), void>::type*) (dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1786
+#18 0x0000000000b78eeb in SPARTA_NS::SurfCollideDiffuseKokkos::post_collide (this=this@entry=0x6362fd8) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/surf_collide_diffuse_kokkos.cpp:326
+#19 0x0000000000c39011 in SPARTA_NS::UpdateKokkos::move<3, 1, 1, 0> (this=0x635e980) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:1348
+#20 0x0000000000c12d92 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:794
+#21 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#22 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#23 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#24 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158470.017347739
+#0  0x00007f1af25ec674 in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af269422a in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af27e0b8e in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af27e7f8d in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af337b77a in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af259974c in ?? () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af332a77a in ?? () from /usr/lib64/libcuda.so.1
+#7  0x00007f1af2588ee5 in ?? () from /usr/lib64/libcuda.so.1
+#8  0x00007f1af2770832 in ?? () from /usr/lib64/libcuda.so.1
+#9  0x00007f1af2769350 in cuMemcpy () from /usr/lib64/libcuda.so.1
+#10 0x00007f1af2049f11 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#11 0x00007f1af2017584 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#12 0x00007f1af2075f15 in cudaMemcpy () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#13 0x0000000000d07dc8 in Kokkos::Impl::CudaInternal::cuda_memcpy_wrapper<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, dst=0x7f1a99c00080, src=0xc5f8d40, count=2097152, kind=cudaMemcpyDefault) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Error.hpp:63
+#14 Kokkos::Impl::DeepCopyCuda (dst=0x7f1a99c00080, src=0xc5f8d40, n=n@entry=2097152) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.cpp:62
+#15 0x0000000000aff30d in Kokkos::Impl::DeepCopy<Kokkos::CudaSpace, Kokkos::HostSpace, Kokkos::Cuda, void>::DeepCopy (this=<optimized out>, dst=<optimized out>, src=<optimized out>, n=2097152) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_CudaSpace.hpp:476
+#16 Kokkos::deep_copy<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void, SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>(Kokkos::View<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void> const&, Kokkos::View<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks> const&, std::enable_if<((is_void_v<Kokkos::ViewTraits<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::specialize>)&&(is_void_v<Kokkos::ViewTraits<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::specialize>))&&((((unsigned int)Kokkos::ViewTraits<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::rank)!=(0))), void>::type*) (dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1786
+#17 0x0000000000b0ae03 in Kokkos::DualView<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x6637778) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:737
+#18 Kokkos::DualView<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device_impl<>() (this=0x6637778) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:720
+#19 Kokkos::DualView<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>::sync_device (this=0x6637778) at /global/homes/d/diawa/OpenEdge/lib/kokkos/containers/src/Kokkos_DualView.hpp:747
+#20 SPARTA_NS::ParticleKokkos::sync (this=0x6637590, space=<optimized out>, mask=7) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/particle_kokkos.cpp:860
+#21 0x0000000000af3971 in SPARTA_NS::ModifyKokkos::copy_grid_one (this=0x665ec40, icell=12699, jcell=12654) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:239
+#22 0x00000000006df3dd in SPARTA_NS::Grid::compress (this=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/grid_comm.cpp:719
+#23 0x00000000007b969c in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=35, cellbase=cellbase@entry=0x7758980) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:735
+#24 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=35) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+=== SAMPLE 1794158472.443298780
+#0  0x00007f1aedbb3e57 in MPIDI_POSIX_eager_recv_begin () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#1  0x00007f1aeda2cc0f in MPIDI_POSIX_progress_recv.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aeda32b06 in MPIDI_POSIX_progress.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aeda3995c in MPIDI_progress_test () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aeda3b044 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aeda3de94 in MPIR_Wait_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x00007f1aed9523cf in MPID_Wait.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#7  0x00007f1aed969091 in MPIC_Wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#8  0x00007f1aed969b1c in MPIC_Sendrecv () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#9  0x00007f1aed894196 in MPIR_Reduce_scatter_intra_recursive_halving () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#10 0x00007f1aed9460fe in MPIR_Reduce_scatter_allcomm_auto () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#11 0x00007f1aed9462ce in MPIR_Reduce_scatter_impl () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#12 0x00007f1aed946ac7 in MPIR_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#13 0x00007f1aed590c67 in PMPI_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#14 0x00000000006f3f08 in SPARTA_NS::Irregular::create_data_uniform (this=0x665fd80, n=35, proclist=0x6e62da0, sort=0) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:248
+#15 0x00000000006f5ea9 in SPARTA_NS::Irregular::create_data_variable (this=this@entry=0x665fd80, n=n@entry=35, proclist=0x6e62da0, sizes=0x6e67730, recvsize=@0x7fffe42976d8: 0, sort=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:586
+#16 0x00000000007b972b in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=35, cellbase=cellbase@entry=0x7758980) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:744
+#17 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=35) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#18 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#19 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#20 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#21 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#22 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#23 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#24 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+=== SAMPLE 1794158474.909714664
+#0  0x00007f1aedaba54d in MPIR_Progress_hook_exec_all () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#1  0x00007f1aeda397b2 in MPIDI_progress_test () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aeda3b044 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aeda3de94 in MPIR_Wait_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aed9523cf in MPID_Wait.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aed969091 in MPIC_Wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x00007f1aed969b1c in MPIC_Sendrecv () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#7  0x00007f1aed894196 in MPIR_Reduce_scatter_intra_recursive_halving () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#8  0x00007f1aed9460fe in MPIR_Reduce_scatter_allcomm_auto () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#9  0x00007f1aed9462ce in MPIR_Reduce_scatter_impl () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#10 0x00007f1aed946ac7 in MPIR_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#11 0x00007f1aed590c67 in PMPI_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#12 0x00000000006f3f08 in SPARTA_NS::Irregular::create_data_uniform (this=0x665fd80, n=35, proclist=0x6e62da0, sort=0) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:248
+#13 0x00000000006f5ea9 in SPARTA_NS::Irregular::create_data_variable (this=this@entry=0x665fd80, n=n@entry=35, proclist=0x6e62da0, sizes=0x6e67730, recvsize=@0x7fffe42976d8: 0, sort=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:586
+#14 0x00000000007b972b in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=35, cellbase=cellbase@entry=0x7758980) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:744
+#15 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=35) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#16 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#17 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#18 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#19 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#20 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#21 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#22 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#23 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158477.384480824
+#0  0x00007f1af25ea6c3 in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af26291bb in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af33690d7 in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af3369525 in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af25f6e24 in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af261d052 in ?? () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af2628955 in ?? () from /usr/lib64/libcuda.so.1
+#7  0x00007f1af270563f in ?? () from /usr/lib64/libcuda.so.1
+#8  0x00007f1af26f43f0 in cuCtxSynchronize () from /usr/lib64/libcuda.so.1
+#9  0x00007f1af200fc4b in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#10 0x00007f1af204c385 in cudaDeviceSynchronize () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#11 0x0000000000d0e471 in operator() (__closure=<optimized out>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:153
+#12 Kokkos::Tools::Experimental::Impl::profile_fence_event<Kokkos::Cuda, Kokkos::Impl::cuda_device_synchronize(const std::string&)::<lambda()> > (name=..., func=..., reason=Kokkos::Tools::Experimental::GlobalDeviceSynchronization) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Profiling.hpp:213
+#13 Kokkos::Impl::cuda_device_synchronize (name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:139
+#14 0x0000000000ce291d in Kokkos::Impl::ExecSpaceManager::static_fence (this=0x52721e0 <Kokkos::Impl::ExecSpaceManager::get_instance()::space_initializer>, name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Core.cpp:243
+#15 0x0000000000ce2bf5 in (anonymous namespace)::fence_internal (name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Core.cpp:819
+#16 0x0000000000bfaad7 in Kokkos::deep_copy<int [15], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks, int [15], Kokkos::LayoutLeft, Kokkos::Cuda, void>(Kokkos::View<int [15], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks> const&, Kokkos::View<int [15], Kokkos::LayoutLeft, Kokkos::Cuda, void> const&, std::enable_if<((is_void_v<Kokkos::ViewTraits<int [15], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::specialize>)&&(is_void_v<Kokkos::ViewTraits<int [15], Kokkos::LayoutLeft, Kokkos::Cuda, void>::specialize>))&&((((unsigned int)Kokkos::ViewTraits<int [15], Kokkos::LayoutLeft, Kokkos::Device<Kokkos::OpenMP, Kokkos::HostSpace>, Kokkos::Experimental::EmptyViewHooks>::rank)!=(0))||(((unsigned int)Kokkos::ViewTraits<int [15], Kokkos::LayoutLeft, Kokkos::Cuda, void>::rank)!=(0))), void>::type*) (dst=..., src=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_CopyViews.hpp:1782
+#17 0x0000000000c36b3d in SPARTA_NS::UpdateKokkos::move<3, 1, 1, 0> (this=0x635e980) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:1213
+#18 0x0000000000c12d92 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:794
+#19 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#20 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#21 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#22 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158479.694398305
+#0  0x00007f1af336902d in ?? () from /usr/lib64/libcuda.so.1
+#1  0x00007f1af262930c in ?? () from /usr/lib64/libcuda.so.1
+#2  0x00007f1af3369222 in ?? () from /usr/lib64/libcuda.so.1
+#3  0x00007f1af25f6e24 in ?? () from /usr/lib64/libcuda.so.1
+#4  0x00007f1af26bd723 in ?? () from /usr/lib64/libcuda.so.1
+#5  0x00007f1af331e355 in ?? () from /usr/lib64/libcuda.so.1
+#6  0x00007f1af27741d7 in ?? () from /usr/lib64/libcuda.so.1
+#7  0x00007f1af276a9c0 in cuStreamSynchronize () from /usr/lib64/libcuda.so.1
+#8  0x00007f1af20128b3 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#9  0x00007f1af207bc18 in cudaStreamSynchronize () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#10 0x0000000000d0ea90 in Kokkos::Impl::CudaInternal::cuda_stream_synchronize_wrapper<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, stream=0x631ecf0) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Error.hpp:63
+#11 operator() (__closure=<optimized out>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:165
+#12 Kokkos::Tools::Experimental::Impl::profile_fence_event<Kokkos::Cuda, Kokkos::Impl::cuda_stream_synchronize(cudaStream_t, const CudaInternal*, const std::string&)::<lambda()> > (name=..., devIDTag=..., func=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/impl/Kokkos_Profiling.hpp:200
+#13 Kokkos::Impl::cuda_stream_synchronize (stream=0x631ecf0, ptr=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>, name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:160
+#14 0x0000000000d0ec08 in Kokkos::Impl::CudaInternal::fence (this=<optimized out>, name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:259
+#15 0x0000000000d0ed18 in Kokkos::Cuda::fence (this=<optimized out>, name=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.cpp:723
+#16 0x0000000000addbf7 in SPARTA_NS::IrregularKokkos::exchange_uniform (this=this@entry=0x631e930, d_sendbuf_in=..., nbytes_in=nbytes_in@entry=304, d_recvbuf_ptr=<optimized out>, d_recvbuf_in=...) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/irregular_kokkos.cpp:525
+#17 0x00000000007bc591 in SPARTA_NS::CommKokkos::migrate_particles (this=this@entry=0x663b950, nmigrate=<optimized out>, plist=plist@entry=0x74dbac0, d_plist_in=..., entryexit_in=entryexit_in@entry=1, any_entryexit_out=<optimized out>, any_entryexit_out@entry=0x7fffe429997c) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/View/Hooks/Kokkos_ViewHooks.hpp:83
+#18 0x0000000000c36ef7 in SPARTA_NS::UpdateKokkos::move<3, 1, 1, 0> (this=0x635e980) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/View/Hooks/Kokkos_ViewHooks.hpp:83
+#19 0x0000000000c12d92 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:794
+#20 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#21 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#22 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#23 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158482.034284282
+#0  0x00007f1aedb29f0a in MPID_ST_progress_queue () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#1  0x00007f1aeda39659 in MPIDI_progress_test () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aeda3b044 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aeda3ede5 in MPIR_Waitall_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aeda3fb6b in MPIR_Waitall () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aed6f69ad in PMPI_Waitall () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x0000000000ade755 in SPARTA_NS::IrregularKokkos::exchange_uniform (this=this@entry=0x631e930, d_sendbuf_in=..., nbytes_in=nbytes_in@entry=304, d_recvbuf_ptr=<optimized out>, d_recvbuf_in=...) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/irregular_kokkos.cpp:579
+#7  0x00000000007bc591 in SPARTA_NS::CommKokkos::migrate_particles (this=this@entry=0x663b950, nmigrate=<optimized out>, plist=plist@entry=0x74dbac0, d_plist_in=..., entryexit_in=entryexit_in@entry=1, any_entryexit_out=<optimized out>, any_entryexit_out@entry=0x7fffe429997c) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/View/Hooks/Kokkos_ViewHooks.hpp:83
+#8  0x0000000000c36ef7 in SPARTA_NS::UpdateKokkos::move<3, 1, 1, 0> (this=0x635e980) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/View/Hooks/Kokkos_ViewHooks.hpp:83
+#9  0x0000000000c12d92 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:794
+#10 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#11 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#12 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#13 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158484.316853814
+#0  0x00007f1af200d860 in pthread_once@plt () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#1  0x00007f1af208adc9 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#2  0x00007f1af2029c67 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#3  0x00007f1af20111d5 in ?? () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#4  0x00007f1af2050dc8 in cudaSetDevice () from /opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9/lib64/libcudart.so.12
+#5  0x0000000000a40982 in Kokkos::Impl::CudaInternal::set_cuda_device (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.hpp:186
+#6  Kokkos::Impl::CudaInternal::get_stream<true> (this=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Instance.hpp:192
+#7  Kokkos::Impl::CudaParallelLaunchKernelInvoker<Kokkos::Impl::ParallelFor<SPARTA_NS::FixSurfaceEmitSourceKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixSurfEmitSource>, Kokkos::Cuda>, Kokkos::LaunchBounds<0u, 0u>, (Kokkos::Impl::Experimental::CudaLaunchMechanism)1>::invoke_kernel (driver=..., grid=..., block=..., shmem=shmem@entry=0, cuda_instance=cuda_instance@entry=0x529c960 <Kokkos::Impl::CudaInternal::singleton()::self>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp:601
+#8  0x0000000000a43855 in Kokkos::Impl::CudaParallelLaunchImpl<Kokkos::Impl::ParallelFor<SPARTA_NS::FixSurfaceEmitSourceKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixSurfEmitSource>, Kokkos::Cuda>, Kokkos::LaunchBounds<0u, 0u>, (Kokkos::Impl::Experimental::CudaLaunchMechanism)1>::launch_kernel (driver=..., grid=..., block=..., shmem=0, cuda_instance=<optimized out>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/tpls/desul/include/desul/atomics/Lock_Array_CUDA.hpp:127
+#9  Kokkos::Impl::CudaParallelLaunch<Kokkos::Impl::ParallelFor<SPARTA_NS::FixSurfaceEmitSourceKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixSurfEmitSource>, Kokkos::Cuda>, Kokkos::LaunchBounds<0u, 0u>, (Kokkos::Impl::Experimental::CudaLaunchMechanism)1, false>::CudaParallelLaunch<Kokkos::Impl::ParallelFor<SPARTA_NS::FixSurfaceEmitSourceKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixSurfEmitSource>, Kokkos::Cuda> const&, dim3&, dim3&, int, Kokkos::Impl::CudaInternal*> (this=<optimized out>) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp:720
+#10 Kokkos::Impl::ParallelFor<SPARTA_NS::FixSurfaceEmitSourceKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixSurfEmitSource>, Kokkos::Cuda>::execute (this=0x7fffe4298440) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_Parallel_Range.hpp:108
+#11 Kokkos::parallel_for<Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixSurfEmitSource>, SPARTA_NS::FixSurfaceEmitSourceKokkos, void> (str=..., policy=..., functor=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_Parallel.hpp:146
+#12 0x0000000000a3c08d in Kokkos::parallel_for<Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::TagFixSurfEmitSource>, SPARTA_NS::FixSurfaceEmitSourceKokkos> (policy=..., functor=...) at /global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Kokkos_Parallel.hpp:155
+#13 SPARTA_NS::FixSurfaceEmitSourceKokkos::perform_task (this=0x75407d0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_surface_emit_source_kokkos.cpp:388
+#14 0x0000000000741186 in SPARTA_NS::FixEmit::start_of_step (this=0x75407d0) at /global/homes/d/diawa/OpenEdge/src/fix_emit.cpp:94
+#15 SPARTA_NS::FixEmit::start_of_step (this=0x75407d0) at /global/homes/d/diawa/OpenEdge/src/fix_emit.cpp:89
+#16 0x0000000000af459d in SPARTA_NS::ModifyKokkos::start_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:106
+#17 0x0000000000c12b7e in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:705
+#18 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#19 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#20 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#21 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158486.662433811
+#0  0x00007f1aeda32adb in MPIDI_POSIX_progress.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#1  0x00007f1aeda3995c in MPIDI_progress_test () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aeda3b044 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aeda3de94 in MPIR_Wait_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aed9523cf in MPID_Wait.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aed969091 in MPIC_Wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x00007f1aed969b1c in MPIC_Sendrecv () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#7  0x00007f1aed894196 in MPIR_Reduce_scatter_intra_recursive_halving () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#8  0x00007f1aed9460fe in MPIR_Reduce_scatter_allcomm_auto () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#9  0x00007f1aed9462ce in MPIR_Reduce_scatter_impl () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#10 0x00007f1aed946ac7 in MPIR_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#11 0x00007f1aed590c67 in PMPI_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#12 0x00000000006f3f08 in SPARTA_NS::Irregular::create_data_uniform (this=0x665fd80, n=0, proclist=0x6e62da0, sort=0) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:248
+#13 0x00000000006f5ea9 in SPARTA_NS::Irregular::create_data_variable (this=this@entry=0x665fd80, n=n@entry=0, proclist=0x6e62da0, sizes=0x6e67730, recvsize=@0x7fffe42976d8: 0, sort=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:586
+#14 0x00000000007b972b in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0x8cc5330) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:744
+#15 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#16 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#17 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#18 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#19 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#20 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#21 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#22 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#23 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158488.989536140
+#0  0x00007f1aeda3b035 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#1  0x00007f1aeda3de94 in MPIR_Wait_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aed9523cf in MPID_Wait.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aed969091 in MPIC_Wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aed969b1c in MPIC_Sendrecv () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aed894196 in MPIR_Reduce_scatter_intra_recursive_halving () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x00007f1aed9460fe in MPIR_Reduce_scatter_allcomm_auto () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#7  0x00007f1aed9462ce in MPIR_Reduce_scatter_impl () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#8  0x00007f1aed946ac7 in MPIR_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#9  0x00007f1aed590c67 in PMPI_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#10 0x00000000006f3f08 in SPARTA_NS::Irregular::create_data_uniform (this=0x665fd80, n=0, proclist=0x6e62da0, sort=0) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:248
+#11 0x00000000006f5ea9 in SPARTA_NS::Irregular::create_data_variable (this=this@entry=0x665fd80, n=n@entry=0, proclist=0x6e62da0, sizes=0x6e67730, recvsize=@0x7fffe42976d8: 0, sort=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:586
+#12 0x00000000007b972b in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0x8cc5330) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:744
+#13 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#14 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#15 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#16 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#17 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#18 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#19 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#20 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#21 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158491.333842184
+#0  0x00007f1aeda32af9 in MPIDI_POSIX_progress.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#1  0x00007f1aeda3995c in MPIDI_progress_test () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#2  0x00007f1aeda3b044 in MPID_Progress_wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#3  0x00007f1aeda3de94 in MPIR_Wait_state () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#4  0x00007f1aed9523cf in MPID_Wait.constprop.0 () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#5  0x00007f1aed969091 in MPIC_Wait () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#6  0x00007f1aed969b1c in MPIC_Sendrecv () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#7  0x00007f1aed894196 in MPIR_Reduce_scatter_intra_recursive_halving () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#8  0x00007f1aed9460fe in MPIR_Reduce_scatter_allcomm_auto () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#9  0x00007f1aed9462ce in MPIR_Reduce_scatter_impl () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#10 0x00007f1aed946ac7 in MPIR_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#11 0x00007f1aed590c67 in PMPI_Reduce_scatter () from /opt/cray/pe/lib64/libmpi_gnu_123.so.12
+#12 0x00000000006f3f08 in SPARTA_NS::Irregular::create_data_uniform (this=0x665fd80, n=0, proclist=0x6e62da0, sort=0) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:248
+#13 0x00000000006f5ea9 in SPARTA_NS::Irregular::create_data_variable (this=this@entry=0x665fd80, n=n@entry=0, proclist=0x6e62da0, sizes=0x6e67730, recvsize=@0x7fffe42976d8: 0, sort=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/irregular.cpp:586
+#14 0x00000000007b972b in SPARTA_NS::CommKokkos::migrate_cells_only (this=this@entry=0x663b950, nmigrate=nmigrate@entry=0, cellbase=cellbase@entry=0x8cc5330) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:744
+#15 0x00000000007c155e in SPARTA_NS::CommKokkos::migrate_cells (this=<optimized out>, nmigrate=0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/comm_kokkos.cpp:555
+#16 0x0000000000661f6a in SPARTA_NS::FixBalance::end_of_step (this=this@entry=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/fix_balance.cpp:356
+#17 0x000000000098f8be in SPARTA_NS::FixBalanceKokkos::end_of_step (this=0x631e6f0) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/fix_balance_kokkos.cpp:121
+#18 0x0000000000af5146 in SPARTA_NS::ModifyKokkos::end_of_step (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/modify_kokkos.cpp:140
+#19 0x0000000000c12f00 in SPARTA_NS::UpdateKokkos::run (this=<optimized out>, nsteps=5000) at /global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp:834
+#20 0x00000000004c9014 in SPARTA_NS::Run::command (this=<optimized out>, narg=<optimized out>, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/run.cpp:186
+#21 0x000000000049568b in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/run.h:17
+#22 0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#23 0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158493.725259675
+#0  0x00000000005c4212 in SPARTA_NS::ComputeSurfacePhysicalSputter::rebuild_mesh_cache (this=this@entry=0x78d1f30) at /usr/include/c++/14/bits/stl_vector.h:1141
+#1  0x00000000005c6694 in SPARTA_NS::ComputeSurfacePhysicalSputter::load_plasma_from_fix (this=0x78d1f30, pd=0x7548120) at /global/homes/d/diawa/OpenEdge/src/compute_surface_physical_sputter.cpp:642
+#2  0x00000000005cd47e in SPARTA_NS::ComputeSurfacePhysicalSputter::init (this=0x78d1f30) at /global/homes/d/diawa/OpenEdge/src/compute_surface_physical_sputter.cpp:1379
+#3  0x000000000049ea3c in SPARTA_NS::Modify::init (this=0x665ec40) at /global/homes/d/diawa/OpenEdge/src/modify.cpp:125
+#4  0x00000000004ca593 in SPARTA_NS::SPARTA::init (this=0x605e260) at /global/homes/d/diawa/OpenEdge/src/sparta.cpp:572
+#5  0x0000000000555caf in SPARTA_NS::WriteRestart::command (this=0x7fffe429a7b0, narg=1, arg=0x78838a0) at /global/homes/d/diawa/OpenEdge/src/write_restart.cpp:103
+#6  0x0000000000495570 in SPARTA_NS::Input::execute_command (this=this@entry=0x635d780) at /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/include/write_restart.h:17
+#7  0x0000000000496009 in SPARTA_NS::Input::file (this=0x635d780) at /global/homes/d/diawa/OpenEdge/src/input.cpp:238
+#8  0x0000000000461fda in main (argc=<optimized out>, argv=<optimized out>) at /global/homes/d/diawa/OpenEdge/src/main.cpp:57
+=== SAMPLE 1794158495.593712038
+=== SAMPLE 1794158496.135354231
+=== SAMPLE 1794158496.655076530
+=== SAMPLE 1794158497.146071399
+=== SAMPLE 1794158497.682885646
+=== SAMPLE 1794158498.177268596
+=== SAMPLE 1794158498.655298386
+=== SAMPLE 1794158499.160049796
+=== SAMPLE 1794158499.650284405

@@ -1,0 +1,48 @@
+Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls   s/call   s/call  name    
+ 12.29    136.14   136.14 8865853786     0.00     0.00  SPARTA_NS::FixBackground::walk_mesh_triangle(int, double, double, int&) const
+  9.05    236.37   100.23 69698740     0.00     0.00  SPARTA_NS::FixCoulombBase::nanbu_background_cell(int, int)
+  7.55    320.04    83.67 813428302     0.00     0.00  SPARTA_NS::Pusher::push_boris_3d_impl(int, int, double, double*, double*, double*, double, double)
+  6.89    396.41    76.37 3729819802     0.00     0.00  SPARTA_NS::FixBackground::query_bfield_at_point(double const*, int, int, bool) const
+  6.71    470.74    74.33 11396809932     0.00     0.00  Geometry::distsq_point_line(double*, double*, double*)
+  6.15    538.88    68.14  1920000     0.00     0.00  SPARTA_NS::FixForceThermal::kick_half(double)
+  6.02    605.58    66.70 4399646702     0.00     0.00  Geometry::distsq_point_tri(double*, double*, double*, double*, double*)
+  5.82    670.02    64.44 2950953464     0.00     0.00  SPARTA_NS::FixBackground::sample_point(double const*, SPARTA_NS::PlasmaPointSample&, int, int, unsigned int) const
+  3.11    704.47    34.45 7043731635     0.00     0.00  SPARTA_NS::FixBackground::find_mesh_triangle(double, double, int, int) const
+  3.05    738.27    33.80   960000     0.00     0.00  SPARTA_NS::FixCrossFieldDiffusion::pd_interp(std::vector<double, std::allocator<double> > const&, int, SPARTA_NS::Particle::OnePart const&) const
+  2.89    770.33    32.06 2265200284     0.00     0.00  SPARTA_NS::FixVolumeChemAdas::interpolateRateData(int, double, int, double, double, double&, SPARTA_NS::ReactionType)
+  2.84    801.83    31.50   960000     0.00     0.00  SPARTA_NS::Update::cache_plasma_particles()
+  2.54    829.98    28.15 813497519     0.00     0.00  SPARTA_NS::FixVolumeChemAdas::attempt(SPARTA_NS::Particle::OnePart*, int, double, double, double, double, double, double, double, double const*, int const*, int, double)
+  2.51    857.84    27.86 8800790442     0.00     0.00  SPARTA_NS::RanKnuth::uniform()
+  2.39    884.34    26.50   960000     0.00     0.00  void SPARTA_NS::Update::move<3, 1, 0>()
+  2.04    906.99    22.65 5901906928     0.00     0.00  SPARTA_NS::FixForceThermal::pd_grad(std::vector<double, std::allocator<double> > const&, std::vector<double, std::allocator<double> > const&, SPARTA_NS::Particle::OnePart const&) const
+  1.80    926.89    19.90 5043004987     0.00     0.00  SPARTA_NS::FixBackground::interp2D(std::vector<double, std::allocator<double> > const&, double, double, int, int) const
+  1.63    944.99    18.10 43123007     0.00     0.00  SPARTA_NS::FixBackground::find_mesh_triangle_hash(double, double, bool) const
+  1.55    962.16    17.17 2265200284     0.00     0.00  SPARTA_NS::FixVolumeChemAdas::setupInterpolation(SPARTA_NS::ReactionType, int, unsigned long, double, double, double&, double&, double&, double&, double&, double&, double&, double&)
+  1.52    978.95    16.79 849411527     0.00     0.00  SPARTA_NS::SheathModels::sheath_prepare_borodkina(double, double, double, double, double, double, double)
+  1.21    992.30    13.36 2861462454     0.00     0.00  Geometry::line_tri_intersect(double*, double*, double*, double*, double*, double*, double*, double&, int&)
+  1.17   1005.22    12.92 1475411840     0.00     0.00  SPARTA_NS::RanKnuth::gaussian()
+  1.06   1016.97    11.75 1626856604     0.00     0.00  SPARTA_NS::Pusher::validate_push_state(char const*, int, int, double, double const*, double const*, double const*, double, double)
+  1.00   1028.10    11.13 737705920     0.00     0.00  SPARTA_NS::FixBackground::psi_norm_gradient_at(double, double, double&, double&) const
+  0.72   1036.05     7.95 849411527     0.00     0.00  SPARTA_NS::SheathModels::chodura_metrics(double, double, double const*, double const*)
+  0.59   1042.54     6.49 813829670     0.00     0.00  SPARTA_NS::FixBackground::bfield_at_xyz(double const*, double&, double&, double&, int, int) const
+  0.52   1048.28     5.74 737705920     0.00     0.00  SPARTA_NS::FixBackground::query_efield_at_point(double const*, double&, double&, double&, int, int) const
+  0.45   1053.28     5.00 813428302     0.00     0.00  SPARTA_NS::Pusher::push_boris_3d(int, int, double, double*, double*, double*, double, double)
+  0.38   1057.51     4.23 808456560     0.00     0.00  SPARTA_NS::SheathModels::sheath_at_distance(double, double, double, double, double, double, double, double)
+  0.36   1061.45     3.94 736253122     0.00     0.00  SPARTA_NS::FixVolumeChemAdas::neutral_dens_at_cell(int)
+  0.34   1065.26     3.81 813829670     0.00     0.00  (anonymous namespace)::make_pd_stencil(SPARTA_NS::FixBackground const*, double, double)
+  0.34   1069.00     3.74      336     0.01     0.01  SPARTA_NS::Surf::check_watertight_3d_all()
+  0.29   1072.16     3.16 736525882     0.00     0.00  SPARTA_NS::Pusher::materialize_orbit(int, double const*, double, double, double)
+  0.28   1075.29     3.13 816652362     0.00     0.00  SPARTA_NS::FixBackground::mesh_cell_for(double, double, int, int) const
+  0.28   1078.35     3.06   960000     0.00     0.00  SPARTA_NS::FixCoulombBase::end_of_step()
+  0.23   1080.87     2.52 832972884     0.00     0.00  SPARTA_NS::SheathModels::sheath_phi_at_distance(SPARTA_NS::SheathModels::SheathEmagCoeffs const&, double)
+  0.22   1083.33     2.46                             Geometry::point_in_tri(double*, double*, double*, double*, double*)
+  0.16   1085.07     1.74      576     0.00     0.00  SPARTA_NS::FixBackground::build_mesh_index()
+  0.15   1086.72     1.65   960000     0.00     0.00  SPARTA_NS::FixVolumeChemAdas::end_of_step_no_average()
+  0.15   1088.34     1.62   960000     0.00     0.00  SPARTA_NS::FixSurfaceEmitSource::perform_task()
+  0.14   1089.92     1.58   960048     0.00     0.00  SPARTA_NS::ComputeNearestSurfGrid::compute_per_grid()
+  0.12   1091.29     1.37   960048     0.00     0.00  SPARTA_NS::Particle::sort()
+  0.10   1092.43     1.14                             SPARTA_NS::FixBackground::mesh_field_for(std::vector<double, std::allocator<double> > const&) const

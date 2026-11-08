@@ -1,0 +1,4 @@
+== conc2b_0
+Loop time of 18.728 on 1 procs for 0 steps with 0 particles
+step cpu_s np | s_per_1000
+     0      0.00      0 |   0.00

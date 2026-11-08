@@ -1,0 +1,112 @@
+[fix-timing] step 5000 cumulative seconds (rank0 / max-rank), calls
+  -        async-drain                      start     0.037             end     0.028   (leading-fence wait: async kernels from earlier phases)
+  -        loop-wall                        start     0.986             end     1.368   (entry->exit wall of ModifyKokkos loops; TIME_MODIFY bucket so far 1.384)
+  femit    surface/emit/source              start     0.388 /     0.388 (5000)   end     0.000 /     0.000 (0)
+  finject  surface/emit/source              start     0.024 /     0.024 (5000)   end     0.000 /     0.000 (0)
+  fchem    volume/chem/adas                 start     0.000 /     0.000 (0)   end     0.554 /     0.645 (5000)
+  fcd      cross_field_diffusion            start     0.295 /     0.358 (5000)   end     0.000 /     0.000 (0)
+  fcoul    coulomb/background               start     0.000 /     0.000 (0)   end     0.378 /     0.450 (5000)
+  fth      force/thermal                    start     0.238 /     0.285 (5000)   end     0.242 /     0.291 (5000)
+  fbal     balance                          start     0.000 /     0.000 (0)   end     0.142 /     0.142 (5)
+  fWdens   ave/grid                         start     0.000 /     0.000 (0)   end     0.002 /     0.002 (20)
+    5000    10.942681    23458       16           20        99765          100          497 5.2309896e+12         6608    1.3344701            5 
+OE_CELLMIG_CELLS rank=3 nlocal 6950 -> 4546 t(pack 0.001, compress 0.002, plan 0.000, exchange 0.001, pregrow 0.000, unpack 0.001) s
+OE_CELLMIG rank=3 step=1000 cells: nglocal 6950 -> 4546, sent 2618, kept 3850 | particles: 114 -> compress 0 + recv 1692 (mig 114) | sources 1 | t(host prep 0.001, dev migrate 0.002, cells 0.006, remap 0.000) s
+OE_CELLMIG_CELLS rank=2 nlocal 6953 -> 3540 t(pack 0.001, compress 0.000, plan 0.001, exchange 0.002, pregrow 0.000, unpack 0.001) s
+OE_CELLMIG rank=2 step=1000 cells: nglocal 6953 -> 3540, sent 6103, kept 440 | particles: 3909 -> compress 1721 + recv 114 (mig 2188) | sources 1 | t(host prep 0.001, dev migrate 0.003, cells 0.007, remap 0.000) s
+OE_CELLMIG_CELLS rank=1 nlocal 6962 -> 7513 t(pack 0.001, compress 0.001, plan 0.001, exchange 0.001, pregrow 0.000, unpack 0.004) s
+OE_CELLMIG rank=1 step=1000 cells: nglocal 6962 -> 7513, sent 4890, kept 1696 | particles: 2400 -> compress 1096 + recv 496 (mig 1304) | sources 1 | t(host prep 0.001, dev migrate 0.003, cells 0.010, remap 0.000) s
+OE_CELLMIG_CELLS rank=0 nlocal 6980 -> 12246 t(pack 0.000, compress 0.000, plan 0.004, exchange 0.002, pregrow 0.004, unpack 0.004) s
+OE_CELLMIG rank=0 step=1000 cells: nglocal 6980 -> 12246, sent 0, kept 6980 | particles: 1 -> compress 1 + recv 1304 (mig 0) | sources 1 | t(host prep 0.001, dev migrate 0.001, cells 0.015, remap 0.000) s
+OE_BALANCE rank=2 step=1000 nmigrate=6103 t(rcb+assign 0.006, unset/remove ghosts 0.000, migrate_cells 0.011, setup_owned 0.007, acquire_ghosts 0.001, reset_neighbors 0.008) s
+OE_BALANCE rank=0 step=1000 nmigrate=0 t(rcb+assign 0.003, unset/remove ghosts 0.000, migrate_cells 0.018, setup_owned 0.000, acquire_ghosts 0.001, reset_neighbors 0.008) s
+OE_BALANCE rank=1 step=1000 nmigrate=4890 t(rcb+assign 0.004, unset/remove ghosts 0.000, migrate_cells 0.014, setup_owned 0.005, acquire_ghosts 0.003, reset_neighbors 0.005) s
+OE_BALANCE rank=3 step=1000 nmigrate=2618 t(rcb+assign 0.007, unset/remove ghosts 0.000, migrate_cells 0.009, setup_owned 0.009, acquire_ghosts 0.001, reset_neighbors 0.008) s
+OE_BALANCE rank=3 step=1000 t(notify_changed 0.001) s
+OE_BALANCE rank=2 step=1000 t(notify_changed 0.001) s
+OE_BALANCE rank=1 step=1000 t(notify_changed 0.001) s
+OE_BALANCE rank=0 step=1000 t(notify_changed 0.002) s
+OE_BALANCE_KK rank=2 step=1000 t(sync+counts 0.003, FixBalance::end_of_step 0.034, wrap 0.001, hash 0.000) s
+OE_BALANCE_KK rank=3 step=1000 t(sync+counts 0.002, FixBalance::end_of_step 0.036, wrap 0.001, hash 0.000) s
+OE_BALANCE_KK rank=1 step=1000 t(sync+counts 0.005, FixBalance::end_of_step 0.032, wrap 0.001, hash 0.001) s
+OE_BALANCE_KK rank=0 step=1000 t(sync+counts 0.004, FixBalance::end_of_step 0.031, wrap 0.001, hash 0.001) s
+OE_CELLMIG_CELLS rank=2 nlocal 3540 -> 3707 t(pack 0.000, compress 0.001, plan 0.002, exchange 0.000, pregrow 0.000, unpack 0.000) s
+OE_CELLMIG rank=2 step=2000 cells: nglocal 3540 -> 3707, sent 8, kept 3532 | particles: 2145 -> compress 1746 + recv 1308 (mig 399) | sources 1 | t(host prep 0.001, dev migrate 0.002, cells 0.005, remap 0.000) s
+OE_CELLMIG_CELLS rank=3 nlocal 4546 -> 4365 t(pack 0.000, compress 0.002, plan 0.002, exchange 0.000, pregrow 0.000, unpack 0.000) s
+OE_CELLMIG rank=3 step=2000 cells: nglocal 4546 -> 4365, sent 181, kept 4365 | particles: 4429 -> compress 2916 + recv 0 (mig 1513) | sources 0 | t(host prep 0.001, dev migrate 0.002, cells 0.005, remap 0.000) s
+OE_CELLMIG_CELLS rank=1 nlocal 7513 -> 7207 t(pack 0.000, compress 0.003, plan 0.001, exchange 0.000, pregrow 0.000, unpack 0.000) s
+OE_CELLMIG rank=1 step=2000 cells: nglocal 7513 -> 7207, sent 300, kept 7193 | particles: 2770 -> compress 2072 + recv 604 (mig 698) | sources 2 | t(host prep 0.001, dev migrate 0.001, cells 0.005, remap 0.000) s
+OE_CELLMIG_CELLS rank=0 nlocal 12246 -> 12566 t(pack 0.000, compress 0.000, plan 0.003, exchange 0.000, pregrow 0.000, unpack 0.001) s
+OE_CELLMIG rank=0 step=2000 cells: nglocal 12246 -> 12566, sent 0, kept 12246 | particles: 1454 -> compress 1454 + recv 698 (mig 0) | sources 1 | t(host prep 0.001, dev migrate 0.000, cells 0.007, remap 0.000) s
+OE_BALANCE rank=0 step=2000 nmigrate=0 t(rcb+assign 0.001, unset/remove ghosts 0.000, migrate_cells 0.009, setup_owned 0.000, acquire_ghosts 0.001, reset_neighbors 0.008) s
+OE_BALANCE rank=1 step=2000 nmigrate=300 t(rcb+assign 0.003, unset/remove ghosts 0.000, migrate_cells 0.008, setup_owned 0.001, acquire_ghosts 0.001, reset_neighbors 0.008) s
+OE_BALANCE rank=2 step=2000 nmigrate=8 t(rcb+assign 0.004, unset/remove ghosts 0.000, migrate_cells 0.008, setup_owned 0.001, acquire_ghosts 0.001, reset_neighbors 0.008) s
+OE_BALANCE rank=3 step=2000 nmigrate=181 t(rcb+assign 0.003, unset/remove ghosts 0.000, migrate_cells 0.008, setup_owned 0.001, acquire_ghosts 0.001, reset_neighbors 0.008) s
+OE_BALANCE rank=3 step=2000 t(notify_changed 0.000) s
+OE_BALANCE rank=2 step=2000 t(notify_changed 0.001) s
+OE_BALANCE rank=1 step=2000 t(notify_changed 0.002) s
+OE_BALANCE rank=0 step=2000 t(notify_changed 0.002) s
+OE_BALANCE_KK rank=2 step=2000 t(sync+counts 0.001, FixBalance::end_of_step 0.024, wrap 0.001, hash 0.000) s
+OE_BALANCE_KK rank=3 step=2000 t(sync+counts 0.002, FixBalance::end_of_step 0.023, wrap 0.001, hash 0.000) s
+OE_BALANCE_KK rank=1 step=2000 t(sync+counts 0.002, FixBalance::end_of_step 0.023, wrap 0.001, hash 0.001) s
+OE_BALANCE_KK rank=0 step=2000 t(sync+counts 0.004, FixBalance::end_of_step 0.022, wrap 0.001, hash 0.001) s
+OE_CELLMIG_CELLS rank=2 nlocal 3707 -> 3870 t(pack 0.000, compress 0.000, plan 0.003, exchange 0.000, pregrow 0.000, unpack 0.000) s
+OE_CELLMIG rank=2 step=3000 cells: nglocal 3707 -> 3870, sent 0, kept 3707 | particles: 3626 -> compress 3626 + recv 619 (mig 0) | sources 1 | t(host prep 0.000, dev migrate 0.001, cells 0.004, remap 0.000) s
+OE_CELLMIG_CELLS rank=3 nlocal 4365 -> 4183 t(pack 0.000, compress 0.002, plan 0.001, exchange 0.000, pregrow 0.000, unpack 0.000) s
+OE_CELLMIG rank=3 step=3000 cells: nglocal 4365 -> 4183, sent 182, kept 4183 | particles: 5419 -> compress 4125 + recv 0 (mig 1294) | sources 0 | t(host prep 0.001, dev migrate 0.001, cells 0.004, remap 0.000) s
+OE_CELLMIG_CELLS rank=1 nlocal 7207 -> 6926 t(pack 0.000, compress 0.002, plan 0.000, exchange 0.000, pregrow 0.000, unpack 0.000) s
+OE_CELLMIG rank=1 step=3000 cells: nglocal 7207 -> 6926, sent 286, kept 6907 | particles: 3771 -> compress 3138 + recv 675 (mig 633) | sources 1 | t(host prep 0.001, dev migrate 0.001, cells 0.005, remap 0.000) s
+OE_CELLMIG_CELLS rank=0 nlocal 12566 -> 12866 t(pack 0.000, compress 0.000, plan 0.002, exchange 0.000, pregrow 0.000, unpack 0.001) s
+OE_CELLMIG rank=0 step=3000 cells: nglocal 12566 -> 12866, sent 0, kept 12566 | particles: 2363 -> compress 2363 + recv 633 (mig 0) | sources 1 | t(host prep 0.002, dev migrate 0.000, cells 0.005, remap 0.000) s
+OE_BALANCE rank=0 step=3000 nmigrate=0 t(rcb+assign 0.001, unset/remove ghosts 0.000, migrate_cells 0.007, setup_owned 0.000, acquire_ghosts 0.001, reset_neighbors 0.008) s
+OE_BALANCE rank=1 step=3000 nmigrate=286 t(rcb+assign 0.002, unset/remove ghosts 0.000, migrate_cells 0.007, setup_owned 0.001, acquire_ghosts 0.001, reset_neighbors 0.008) s
+OE_BALANCE rank=2 step=3000 nmigrate=0 t(rcb+assign 0.002, unset/remove ghosts 0.000, migrate_cells 0.006, setup_owned 0.001, acquire_ghosts 0.001, reset_neighbors 0.008) s
+OE_BALANCE rank=3 step=3000 nmigrate=182 t(rcb+assign 0.001, unset/remove ghosts 0.000, migrate_cells 0.006, setup_owned 0.001, acquire_ghosts 0.001, reset_neighbors 0.008) s
+OE_BALANCE rank=3 step=3000 t(notify_changed 0.000) s
+OE_BALANCE rank=2 step=3000 t(notify_changed 0.001) s
+OE_BALANCE rank=1 step=3000 t(notify_changed 0.001) s
+OE_BALANCE rank=0 step=3000 t(notify_changed 0.002) s
+OE_BALANCE_KK rank=2 step=3000 t(sync+counts 0.001, FixBalance::end_of_step 0.021, wrap 0.001, hash 0.000) s
+OE_BALANCE_KK rank=3 step=3000 t(sync+counts 0.002, FixBalance::end_of_step 0.020, wrap 0.001, hash 0.000) s
+OE_BALANCE_KK rank=1 step=3000 t(sync+counts 0.001, FixBalance::end_of_step 0.021, wrap 0.001, hash 0.001) s
+OE_BALANCE_KK rank=0 step=3000 t(sync+counts 0.002, FixBalance::end_of_step 0.019, wrap 0.001, hash 0.001) s
+OE_CELLMIG_CELLS rank=2 nlocal 3870 -> 3775 t(pack 0.000, compress 0.000, plan 0.003, exchange 0.000, pregrow 0.000, unpack 0.000) s
+OE_CELLMIG rank=2 step=4000 cells: nglocal 3870 -> 3775, sent 107, kept 3763 | particles: 4640 -> compress 4470 + recv 1023 (mig 170) | sources 1 | t(host prep 0.001, dev migrate 0.001, cells 0.005, remap 0.000) s
+OE_CELLMIG_CELLS rank=3 nlocal 4183 -> 4132 t(pack 0.000, compress 0.000, plan 0.003, exchange 0.000, pregrow 0.000, unpack 0.000) s
+OE_CELLMIG rank=3 step=4000 cells: nglocal 4183 -> 4132, sent 158, kept 4025 | particles: 6496 -> compress 5116 + recv 170 (mig 1380) | sources 1 | t(host prep 0.001, dev migrate 0.001, cells 0.005, remap 0.000) s
+OE_CELLMIG_CELLS rank=1 nlocal 6926 -> 6840 t(pack 0.000, compress 0.002, plan 0.000, exchange 0.000, pregrow 0.000, unpack 0.000) s
+OE_CELLMIG rank=1 step=4000 cells: nglocal 6926 -> 6840, sent 222, kept 6694 | particles: 5114 -> compress 4540 + recv 357 (mig 574) | sources 1 | t(host prep 0.001, dev migrate 0.001, cells 0.005, remap 0.000) s
+OE_CELLMIG_CELLS rank=0 nlocal 12866 -> 13098 t(pack 0.000, compress 0.000, plan 0.002, exchange 0.000, pregrow 0.000, unpack 0.001) s
+OE_CELLMIG rank=0 step=4000 cells: nglocal 12866 -> 13098, sent 0, kept 12866 | particles: 3210 -> compress 3210 + recv 574 (mig 0) | sources 1 | t(host prep 0.001, dev migrate 0.001, cells 0.006, remap 0.000) s
+OE_BALANCE rank=0 step=4000 nmigrate=0 t(rcb+assign 0.001, unset/remove ghosts 0.000, migrate_cells 0.008, setup_owned 0.000, acquire_ghosts 0.001, reset_neighbors 0.009) s
+OE_BALANCE rank=1 step=4000 nmigrate=222 t(rcb+assign 0.001, unset/remove ghosts 0.000, migrate_cells 0.007, setup_owned 0.001, acquire_ghosts 0.001, reset_neighbors 0.009) s
+OE_BALANCE rank=2 step=4000 nmigrate=107 t(rcb+assign 0.002, unset/remove ghosts 0.000, migrate_cells 0.007, setup_owned 0.001, acquire_ghosts 0.001, reset_neighbors 0.009) s
+OE_BALANCE rank=3 step=4000 nmigrate=158 t(rcb+assign 0.002, unset/remove ghosts 0.000, migrate_cells 0.007, setup_owned 0.001, acquire_ghosts 0.001, reset_neighbors 0.009) s
+OE_BALANCE rank=3 step=4000 t(notify_changed 0.000) s
+OE_BALANCE rank=2 step=4000 t(notify_changed 0.001) s
+OE_BALANCE rank=1 step=4000 t(notify_changed 0.002) s
+OE_BALANCE rank=0 step=4000 t(notify_changed 0.002) s
+OE_BALANCE_KK rank=2 step=4000 t(sync+counts 0.001, FixBalance::end_of_step 0.021, wrap 0.001, hash 0.000) s
+OE_BALANCE_KK rank=3 step=4000 t(sync+counts 0.001, FixBalance::end_of_step 0.021, wrap 0.001, hash 0.000) s
+OE_BALANCE_KK rank=1 step=4000 t(sync+counts 0.002, FixBalance::end_of_step 0.020, wrap 0.001, hash 0.001) s
+OE_BALANCE_KK rank=0 step=4000 t(sync+counts 0.002, FixBalance::end_of_step 0.020, wrap 0.001, hash 0.001) s
+OE_CELLMIG_CELLS rank=2 nlocal 3775 -> 3760 t(pack 0.000, compress 0.001, plan 0.002, exchange 0.000, pregrow 0.000, unpack 0.000) s
+OE_CELLMIG rank=2 step=5000 cells: nglocal 3775 -> 3760, sent 116, kept 3639 | particles: 5596 -> compress 5141 + recv 1467 (mig 455) | sources 1 | t(host prep 0.001, dev migrate 0.001, cells 0.004, remap 0.000) s
+OE_CELLMIG_CELLS rank=3 nlocal 4132 -> 4011 t(pack 0.000, compress 0.001, plan 0.003, exchange 0.000, pregrow 0.000, unpack 0.000) s
+OE_CELLMIG rank=3 step=5000 cells: nglocal 4132 -> 4011, sent 121, kept 4011 | particles: 7826 -> compress 6359 + recv 0 (mig 1467) | sources 0 | t(host prep 0.001, dev migrate 0.001, cells 0.004, remap 0.000) s
+OE_CELLMIG_CELLS rank=1 nlocal 6840 -> 6664 t(pack 0.000, compress 0.002, plan 0.000, exchange 0.000, pregrow 0.000, unpack 0.000) s
+OE_CELLMIG rank=1 step=5000 cells: nglocal 6840 -> 6664, sent 290, kept 6528 | particles: 6126 -> compress 5526 + recv 455 (mig 600) | sources 1 | t(host prep 0.001, dev migrate 0.001, cells 0.005, remap 0.000) s
+OE_CELLMIG_CELLS rank=0 nlocal 13098 -> 13410 t(pack 0.000, compress 0.000, plan 0.002, exchange 0.000, pregrow 0.000, unpack 0.001) s
+OE_CELLMIG rank=0 step=5000 cells: nglocal 13098 -> 13410, sent 0, kept 13098 | particles: 3910 -> compress 3910 + recv 600 (mig 0) | sources 1 | t(host prep 0.001, dev migrate 0.000, cells 0.006, remap 0.000) s
+OE_BALANCE rank=0 step=5000 nmigrate=0 t(rcb+assign 0.001, unset/remove ghosts 0.000, migrate_cells 0.008, setup_owned 0.000, acquire_ghosts 0.001, reset_neighbors 0.009) s
+OE_BALANCE rank=1 step=5000 nmigrate=290 t(rcb+assign 0.002, unset/remove ghosts 0.000, migrate_cells 0.007, setup_owned 0.001, acquire_ghosts 0.001, reset_neighbors 0.009) s
+OE_BALANCE rank=2 step=5000 nmigrate=116 t(rcb+assign 0.002, unset/remove ghosts 0.000, migrate_cells 0.006, setup_owned 0.002, acquire_ghosts 0.001, reset_neighbors 0.009) s
+OE_BALANCE rank=3 step=5000 nmigrate=121 t(rcb+assign 0.002, unset/remove ghosts 0.000, migrate_cells 0.006, setup_owned 0.002, acquire_ghosts 0.001, reset_neighbors 0.009) s
+OE_BALANCE rank=3 step=5000 t(notify_changed 0.000) s
+OE_BALANCE rank=2 step=5000 t(notify_changed 0.001) s
+OE_BALANCE rank=1 step=5000 t(notify_changed 0.001) s
+OE_BALANCE rank=0 step=5000 t(notify_changed 0.002) s
+OE_BALANCE_KK rank=3 step=5000 t(sync+counts 0.001, FixBalance::end_of_step 0.022, wrap 0.001, hash 0.000) s
+OE_BALANCE_KK rank=2 step=5000 t(sync+counts 0.001, FixBalance::end_of_step 0.021, wrap 0.001, hash 0.000) s
+OE_BALANCE_KK rank=1 step=5000 t(sync+counts 0.001, FixBalance::end_of_step 0.021, wrap 0.001, hash 0.001) s
+OE_BALANCE_KK rank=0 step=5000 t(sync+counts 0.002, FixBalance::end_of_step 0.020, wrap 0.001, hash 0.001) s

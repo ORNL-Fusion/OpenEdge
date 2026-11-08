@@ -1,0 +1,22 @@
+== conc1_0
+Loop time of 32.5105 on 1 procs for 20000 steps with 83749 particles
+Performance: 615.185 timesteps/s, 51.521 Mparticle-step/s
+Move    | 17.672     | 17.672     | 17.672     |   0.0 | 54.36
+Coll    | 0.2687     | 0.2687     | 0.2687     |   0.0 |  0.83
+Sort    | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 1.4316     | 1.4316     | 1.4316     |   0.0 |  4.40
+Modify  | 6.5539     | 6.5539     | 6.5539     |   0.0 | 20.16
+Output  | 0.20756    | 0.20756    | 0.20756    |   0.0 |  0.64
+Pcache  | 0.7815     | 0.7815     | 0.7815     |   0.0 |  2.40
+SReact  | 1.0552     | 1.0552     | 1.0552     |   0.0 |  3.25
+Chem    | 2.5164     | 2.5164     | 2.5164     |   0.0 |  7.74
+Adens   | 0.7051     | 0.7051     | 0.7051     |   0.0 |  2.17
+Other   |            | 1.318      |            |       |  4.05
+
+Particle moves    = 875451615 (875M)
+Particle comm iterations/step: 1
+Particles: 83749 ave 83749 max 83749 min
+step cpu_s np | s_per_1000
+     0      0.00      0 |   0.00
+  8000     11.47  35934 |   1.55
+ 18000     28.54  76255 |   1.87

@@ -1,0 +1,36 @@
+diff --git a/src/OPENEDGE/fix_background.cpp b/src/OPENEDGE/fix_background.cpp
+index ee8af79..c8662c2 100644
+--- a/src/OPENEDGE/fix_background.cpp
++++ b/src/OPENEDGE/fix_background.cpp
+@@ -2172,6 +2172,13 @@ int FixBackground::find_mesh_triangle(double R, double Z, int icell,
+ 
+   int particle_tri = -1;
+   if (particle_hints) particle_tri = particle_hints[iparticle] - 1;
++  // A preceding scalar query already resolved this exact point. Reuse
++  // it for B/E only while the particle's warm-start hint is unchanged.
++  // Keep the scalar memo independent: field queries at intermediate
++  // pusher positions must not replace it or change edge tie-breaking.
++  if (particle_tri >= 0 && particle_tri == memo_tri &&
++      iparticle == memo_ip && R == memo_R && Z == memo_Z)
++    return particle_tri;
+   int nhops = 0;
+   const int particle_walk = walk_mesh_triangle(particle_tri, R, Z, nhops);
+   if (particle_walk >= 0) {
+diff --git a/src/fix_background.cpp b/src/fix_background.cpp
+index ee8af79..c8662c2 100644
+--- a/src/fix_background.cpp
++++ b/src/fix_background.cpp
+@@ -2172,6 +2172,13 @@ int FixBackground::find_mesh_triangle(double R, double Z, int icell,
+ 
+   int particle_tri = -1;
+   if (particle_hints) particle_tri = particle_hints[iparticle] - 1;
++  // A preceding scalar query already resolved this exact point. Reuse
++  // it for B/E only while the particle's warm-start hint is unchanged.
++  // Keep the scalar memo independent: field queries at intermediate
++  // pusher positions must not replace it or change edge tie-breaking.
++  if (particle_tri >= 0 && particle_tri == memo_tri &&
++      iparticle == memo_ip && R == memo_R && Z == memo_Z)
++    return particle_tri;
+   int nhops = 0;
+   const int particle_walk = walk_mesh_triangle(particle_tri, R, Z, nhops);
+   if (particle_walk >= 0) {

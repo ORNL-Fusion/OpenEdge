@@ -1,0 +1,1417 @@
+{
+  "backend": "OpenMP, one thread per MPI rank",
+  "ranks": 8,
+  "steps": 20000,
+  "initialization_included": true,
+  "traffic_metric": "requested deep_copy payload; not measured memory-bus or PCIe bytes",
+  "totals": {
+    "for:": {
+      "calls": 4253346,
+      "calls_per_rank_step": 26.5834125,
+      "requested_bytes": 0,
+      "requested_bytes_per_rank_step": 0.0
+    },
+    "reduce:": {
+      "calls": 0,
+      "calls_per_rank_step": 0.0,
+      "requested_bytes": 0,
+      "requested_bytes_per_rank_step": 0.0
+    },
+    "scan:": {
+      "calls": 0,
+      "calls_per_rank_step": 0.0,
+      "requested_bytes": 0,
+      "requested_bytes_per_rank_step": 0.0
+    },
+    "fence:": {
+      "calls": 10759734,
+      "calls_per_rank_step": 67.2483375,
+      "requested_bytes": 0,
+      "requested_bytes_per_rank_step": 0.0
+    },
+    "copy:": {
+      "calls": 10183102,
+      "calls_per_rank_step": 63.6443875,
+      "requested_bytes": 2074899656044,
+      "requested_bytes_per_rank_step": 12968122.850275
+    }
+  },
+  "events": {
+    "copy:Host:(none)->Host:SurfCollide:nsingle": {
+      "calls": 1352211,
+      "requested_bytes": 5408844
+    },
+    "copy:Host:(none)->Host:chem:ev_count": {
+      "calls": 160000,
+      "requested_bytes": 640000
+    },
+    "copy:Host:(none)->Host:emit:nsingle": {
+      "calls": 125000,
+      "requested_bytes": 500000
+    },
+    "copy:Host:(none)->Host:oe_pc_diag": {
+      "calls": 156861,
+      "requested_bytes": 3764664
+    },
+    "copy:Host:(none)->Host:surf_collide_diffuse:scalars": {
+      "calls": 450737,
+      "requested_bytes": 3605896
+    },
+    "copy:Host:->Host:": {
+      "calls": 16120,
+      "requested_bytes": 0
+    },
+    "copy:Host:Kokkos::Random_XorShift64::locks->Host:Kokkos::Random_XorShift64::locks": {
+      "calls": 576,
+      "requested_bytes": 147456
+    },
+    "copy:Host:Kokkos::Random_XorShift64::state->Host:Kokkos::Random_XorShift64::state": {
+      "calls": 576,
+      "requested_bytes": 294912
+    },
+    "copy:Host:Scalar->Host:UnorderedMap - hash list": {
+      "calls": 376,
+      "requested_bytes": 12870928
+    },
+    "copy:Host:Scalar->Host:UnorderedMap - next index": {
+      "calls": 376,
+      "requested_bytes": 12426720
+    },
+    "copy:Host:Scalar->Host:collide:scalars_mirror": {
+      "calls": 450737,
+      "requested_bytes": 27044220
+    },
+    "copy:Host:Scalar->Host:compute_grid_weighted:tally": {
+      "calls": 808,
+      "requested_bytes": 22498760
+    },
+    "copy:Host:Scalar->Host:surf_react_pwi:conc_isp": {
+      "calls": 24,
+      "requested_bytes": 8928
+    },
+    "copy:Host:Scalar->Host:surf_react_pwi:dep_delta": {
+      "calls": 1600,
+      "requested_bytes": 217574400
+    },
+    "copy:Host:Scalar->Host:surf_react_pwi:mat_isp": {
+      "calls": 24,
+      "requested_bytes": 8928
+    },
+    "copy:Host:Scalar->Host:surf_react_pwi:prod2": {
+      "calls": 24,
+      "requested_bytes": 8928
+    },
+    "copy:Host:Scalar->Host:surf_react_pwi:refl_tbl": {
+      "calls": 24,
+      "requested_bytes": 8928
+    },
+    "copy:Host:Scalar->Host:surf_react_pwi:scalars": {
+      "calls": 320024,
+      "requested_bytes": 120329024
+    },
+    "copy:Host:Scalar->Host:surf_react_pwi:sigma_delta": {
+      "calls": 1600,
+      "requested_bytes": 3481190400
+    },
+    "copy:Host:Scalar->Host:surf_react_pwi:su_NE": {
+      "calls": 24,
+      "requested_bytes": 96
+    },
+    "copy:Host:Scalar->Host:surf_react_pwi:su_NL": {
+      "calls": 24,
+      "requested_bytes": 96
+    },
+    "copy:Host:Scalar->Host:surf_react_pwi:su_NT": {
+      "calls": 24,
+      "requested_bytes": 96
+    },
+    "copy:Host:Scalar->Host:surf_react_pwi:su_ax": {
+      "calls": 24,
+      "requested_bytes": 192
+    },
+    "copy:Host:Scalar->Host:surf_react_pwi:su_kind": {
+      "calls": 24,
+      "requested_bytes": 96
+    },
+    "copy:Host:Scalar->Host:surf_react_pwi:yscale": {
+      "calls": 24,
+      "requested_bytes": 17856
+    },
+    "copy:Host:Scalar->Host:update:dx_cd": {
+      "calls": 156861,
+      "requested_bytes": 25647132912
+    },
+    "copy:Host:SurfCollide:nsingle->Host:SurfCollide:nsingle": {
+      "calls": 1352211,
+      "requested_bytes": 5408844
+    },
+    "copy:Host:ave/grid:tally->Host:ave/grid:tally": {
+      "calls": 10,
+      "requested_bytes": 486448
+    },
+    "copy:Host:ave/grid:vector_grid->Host:ave/grid:vector_grid": {
+      "calls": 10,
+      "requested_bytes": 486448
+    },
+    "copy:Host:chem:cx->Host:chem:cx": {
+      "calls": 24,
+      "requested_bytes": 3409920
+    },
+    "copy:Host:chem:ev_cell->Host:chem:ev_cell_h": {
+      "calls": 136420,
+      "requested_bytes": 3829436
+    },
+    "copy:Host:chem:ev_count->Host:chem:cnt_host": {
+      "calls": 160000,
+      "requested_bytes": 640000
+    },
+    "copy:Host:chem:ev_ridx->Host:chem:ev_ridx_h": {
+      "calls": 136420,
+      "requested_bytes": 3829436
+    },
+    "copy:Host:chem:ev_vals->Host:chem:ev_vals_h": {
+      "calls": 136420,
+      "requested_bytes": 45953232
+    },
+    "copy:Host:chem:gD_cx->Host:chem:gD_cx": {
+      "calls": 24,
+      "requested_bytes": 2304
+    },
+    "copy:Host:chem:gD_ion->Host:chem:gD_ion": {
+      "calls": 24,
+      "requested_bytes": 2304
+    },
+    "copy:Host:chem:gD_plt->Host:chem:gD_plt": {
+      "calls": 24,
+      "requested_bytes": 2304
+    },
+    "copy:Host:chem:gD_prb->Host:chem:gD_prb": {
+      "calls": 24,
+      "requested_bytes": 2304
+    },
+    "copy:Host:chem:gD_rec->Host:chem:gD_rec": {
+      "calls": 24,
+      "requested_bytes": 2304
+    },
+    "copy:Host:chem:gT_cx->Host:chem:gT_cx": {
+      "calls": 24,
+      "requested_bytes": 3840
+    },
+    "copy:Host:chem:gT_ion->Host:chem:gT_ion": {
+      "calls": 24,
+      "requested_bytes": 3840
+    },
+    "copy:Host:chem:gT_plt->Host:chem:gT_plt": {
+      "calls": 24,
+      "requested_bytes": 3840
+    },
+    "copy:Host:chem:gT_prb->Host:chem:gT_prb": {
+      "calls": 24,
+      "requested_bytes": 3840
+    },
+    "copy:Host:chem:gT_rec->Host:chem:gT_rec": {
+      "calls": 24,
+      "requested_bytes": 3840
+    },
+    "copy:Host:chem:ion->Host:chem:ion": {
+      "calls": 24,
+      "requested_bytes": 3409920
+    },
+    "copy:Host:chem:ion_pot->Host:chem:ion_pot": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "copy:Host:chem:nn_cell->Host:chem:nn_cell": {
+      "calls": 160,
+      "requested_bytes": 4455200
+    },
+    "copy:Host:chem:plt->Host:chem:plt": {
+      "calls": 24,
+      "requested_bytes": 3409920
+    },
+    "copy:Host:chem:prb->Host:chem:prb": {
+      "calls": 24,
+      "requested_bytes": 3409920
+    },
+    "copy:Host:chem:rcoeff->Host:chem:rcoeff": {
+      "calls": 24,
+      "requested_bytes": 86400
+    },
+    "copy:Host:chem:rec->Host:chem:rec": {
+      "calls": 24,
+      "requested_bytes": 3409920
+    },
+    "copy:Host:collide:scalars_mirror->Host:update:scalars": {
+      "calls": 450737,
+      "requested_bytes": 27044220
+    },
+    "copy:Host:coul:A_tab->Host:coul:A_tab": {
+      "calls": 24,
+      "requested_bytes": 153792
+    },
+    "copy:Host:coul:s_tab->Host:coul:s_tab": {
+      "calls": 24,
+      "requested_bytes": 153792
+    },
+    "copy:Host:emit:cumm->Host:emit:cumm": {
+      "calls": 160,
+      "requested_bytes": 1280
+    },
+    "copy:Host:emit:frac->Host:emit:frac": {
+      "calls": 160,
+      "requested_bytes": 6058840
+    },
+    "copy:Host:emit:isurf->Host:emit:isurf": {
+      "calls": 160,
+      "requested_bytes": 853500
+    },
+    "copy:Host:emit:mixsp->Host:emit:mixsp": {
+      "calls": 160,
+      "requested_bytes": 640
+    },
+    "copy:Host:emit:newn->Host:Scalar": {
+      "calls": 125000,
+      "requested_bytes": 500000
+    },
+    "copy:Host:emit:newn_host->Host:emit:newn": {
+      "calls": 125000,
+      "requested_bytes": 500000
+    },
+    "copy:Host:emit:npoint->Host:emit:npoint": {
+      "calls": 160,
+      "requested_bytes": 853500
+    },
+    "copy:Host:emit:nsingle->Host:Scalar": {
+      "calls": 125000,
+      "requested_bytes": 500000
+    },
+    "copy:Host:emit:path->Host:emit:path": {
+      "calls": 160,
+      "requested_bytes": 18175960
+    },
+    "copy:Host:emit:pcell->Host:emit:pcell": {
+      "calls": 160,
+      "requested_bytes": 853500
+    },
+    "copy:Host:emit:poff->Host:emit:poff": {
+      "calls": 160,
+      "requested_bytes": 854000
+    },
+    "copy:Host:emit:src->Host:emit:src": {
+      "calls": 160,
+      "requested_bytes": 1707000
+    },
+    "copy:Host:emit:tan1->Host:emit:tan1": {
+      "calls": 160,
+      "requested_bytes": 5121000
+    },
+    "copy:Host:emit:tan2->Host:emit:tan2": {
+      "calls": 160,
+      "requested_bytes": 5121000
+    },
+    "copy:Host:emit:vstream->Host:emit:vstream": {
+      "calls": 160,
+      "requested_bytes": 5121000
+    },
+    "copy:Host:entries->Host:csplits.entries": {
+      "calls": 154,
+      "requested_bytes": 555632
+    },
+    "copy:Host:entries->Host:csubs.entries": {
+      "calls": 154,
+      "requested_bytes": 179964
+    },
+    "copy:Host:entries->Host:csurfs.entries": {
+      "calls": 176,
+      "requested_bytes": 7329932
+    },
+    "copy:Host:fth:cell_mesh_cell->Host:fth:cell_mesh_cell": {
+      "calls": 154,
+      "requested_bytes": 2154828
+    },
+    "copy:Host:grid:cells->Host:grid:cells": {
+      "calls": 1,
+      "requested_bytes": 1966080
+    },
+    "copy:Host:grid:cinfo->Host:grid:cinfo": {
+      "calls": 1,
+      "requested_bytes": 1048576
+    },
+    "copy:Host:oe_equ_br->Host:oe_equ_br": {
+      "calls": 16,
+      "requested_bytes": 11520000
+    },
+    "copy:Host:oe_equ_bt->Host:oe_equ_bt": {
+      "calls": 16,
+      "requested_bytes": 11520000
+    },
+    "copy:Host:oe_equ_bz->Host:oe_equ_bz": {
+      "calls": 16,
+      "requested_bytes": 11520000
+    },
+    "copy:Host:oe_equ_psi->Host:oe_equ_psi": {
+      "calls": 16,
+      "requested_bytes": 11520000
+    },
+    "copy:Host:oe_equ_r->Host:oe_equ_r": {
+      "calls": 16,
+      "requested_bytes": 38400
+    },
+    "copy:Host:oe_equ_z->Host:oe_equ_z": {
+      "calls": 16,
+      "requested_bytes": 38400
+    },
+    "copy:Host:oe_hash_entries->Host:oe_hash_entries": {
+      "calls": 16,
+      "requested_bytes": 29108736
+    },
+    "copy:Host:oe_hash_offset->Host:oe_hash_offset": {
+      "calls": 16,
+      "requested_bytes": 4194368
+    },
+    "copy:Host:oe_mesh_tri->Host:oe_mesh_tri": {
+      "calls": 16,
+      "requested_bytes": 11507712
+    },
+    "copy:Host:oe_mesh_tri_br->Host:oe_mesh_tri_br": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_bt->Host:oe_mesh_tri_bt": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_bz->Host:oe_mesh_tri_bz": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_er->Host:oe_mesh_tri_er": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_et->Host:oe_mesh_tri_et": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_ez->Host:oe_mesh_tri_ez": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_ne->Host:oe_mesh_tri_ne": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_ni->Host:oe_mesh_tri_ni": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_rmax->Host:oe_mesh_tri_rmax": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_rmin->Host:oe_mesh_tri_rmin": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_te->Host:oe_mesh_tri_te": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_ti->Host:oe_mesh_tri_ti": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_upar->Host:oe_mesh_tri_upar": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_zmax->Host:oe_mesh_tri_zmax": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_tri_zmin->Host:oe_mesh_tri_zmin": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_mesh_vtx_r->Host:oe_mesh_vtx_r": {
+      "calls": 16,
+      "requested_bytes": 3926656
+    },
+    "copy:Host:oe_mesh_vtx_z->Host:oe_mesh_vtx_z": {
+      "calls": 16,
+      "requested_bytes": 3926656
+    },
+    "copy:Host:oe_meshcell_gter->Host:oe_meshcell_gter": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_meshcell_gtez->Host:oe_meshcell_gtez": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_meshcell_gtir->Host:oe_meshcell_gtir": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_meshcell_gtiz->Host:oe_meshcell_gtiz": {
+      "calls": 16,
+      "requested_bytes": 7671808
+    },
+    "copy:Host:oe_pc_diag->Host:oe_pc_diag": {
+      "calls": 1576,
+      "requested_bytes": 37824
+    },
+    "copy:Host:particle:dvector->Host:": {
+      "calls": 13704,
+      "requested_bytes": 0
+    },
+    "copy:Host:particle:dvector->Host:particle:dvector": {
+      "calls": 320,
+      "requested_bytes": 20971520
+    },
+    "copy:Host:particle:dvector->Host:update:sheath_bank_backup": {
+      "calls": 443885,
+      "requested_bytes": 58180894720
+    },
+    "copy:Host:particle:dvector->Host:update:sheath_phiprev_backup": {
+      "calls": 443885,
+      "requested_bytes": 58180894720
+    },
+    "copy:Host:particle:ivector->Host:particle:ivector": {
+      "calls": 48,
+      "requested_bytes": 1572864
+    },
+    "copy:Host:particle:lists_mirror->Host:particle:lists": {
+      "calls": 467524,
+      "requested_bytes": 136712624
+    },
+    "copy:Host:particle:particles->Host:update:particles_backup": {
+      "calls": 443885,
+      "requested_bytes": 872713420800
+    },
+    "copy:Host:row_map->Host:csplits.row_map": {
+      "calls": 154,
+      "requested_bytes": 90368
+    },
+    "copy:Host:row_map->Host:csubs.row_map": {
+      "calls": 154,
+      "requested_bytes": 90368
+    },
+    "copy:Host:row_map->Host:csurfs.row_map": {
+      "calls": 176,
+      "requested_bytes": 2823112
+    },
+    "copy:Host:surf:darray->Host:surf:darray": {
+      "calls": 1,
+      "requested_bytes": 393216
+    },
+    "copy:Host:surf:dvector->Host:surf:dvector": {
+      "calls": 2,
+      "requested_bytes": 262144
+    },
+    "copy:Host:surf:ivector->Host:surf:ivector": {
+      "calls": 1,
+      "requested_bytes": 65536
+    },
+    "copy:Host:surf_collide_diffuse:scalars->Host:surf_collide_diffuse:scalars_mirror": {
+      "calls": 450737,
+      "requested_bytes": 3605896
+    },
+    "copy:Host:surf_react_pwi:Rrec->Host:surf_react_pwi:Rrec": {
+      "calls": 24,
+      "requested_bytes": 17856
+    },
+    "copy:Host:surf_react_pwi:area->Host:surf_react_pwi:area": {
+      "calls": 24,
+      "requested_bytes": 3263616
+    },
+    "copy:Host:surf_react_pwi:conc_isp->Host:surf_react_pwi:conc_isp": {
+      "calls": 24,
+      "requested_bytes": 8928
+    },
+    "copy:Host:surf_react_pwi:dep_delta->Host:surf_react_pwi:dep_bak": {
+      "calls": 450737,
+      "requested_bytes": 61293020208
+    },
+    "copy:Host:surf_react_pwi:dep_delta->Host:surf_react_pwi:dep_delta": {
+      "calls": 1600,
+      "requested_bytes": 217574400
+    },
+    "copy:Host:surf_react_pwi:e0->Host:surf_react_pwi:e0": {
+      "calls": 24,
+      "requested_bytes": 17856
+    },
+    "copy:Host:surf_react_pwi:e1->Host:surf_react_pwi:e1": {
+      "calls": 24,
+      "requested_bytes": 17856
+    },
+    "copy:Host:surf_react_pwi:gid0->Host:surf_react_pwi:gid0": {
+      "calls": 24,
+      "requested_bytes": 1631808
+    },
+    "copy:Host:surf_react_pwi:list->Host:surf_react_pwi:list": {
+      "calls": 24,
+      "requested_bytes": 4608
+    },
+    "copy:Host:surf_react_pwi:mat_isp->Host:surf_react_pwi:mat_isp": {
+      "calls": 24,
+      "requested_bytes": 8928
+    },
+    "copy:Host:surf_react_pwi:nreact->Host:surf_react_pwi:nreact": {
+      "calls": 24,
+      "requested_bytes": 1536
+    },
+    "copy:Host:surf_react_pwi:prob->Host:surf_react_pwi:prob": {
+      "calls": 24,
+      "requested_bytes": 17856
+    },
+    "copy:Host:surf_react_pwi:prod->Host:surf_react_pwi:prod": {
+      "calls": 24,
+      "requested_bytes": 8928
+    },
+    "copy:Host:surf_react_pwi:prod2->Host:surf_react_pwi:prod2": {
+      "calls": 24,
+      "requested_bytes": 8928
+    },
+    "copy:Host:surf_react_pwi:refl_tbl->Host:surf_react_pwi:refl_tbl": {
+      "calls": 24,
+      "requested_bytes": 8928
+    },
+    "copy:Host:surf_react_pwi:scalars->Host:surf_react_pwi:scalars_bak": {
+      "calls": 450737,
+      "requested_bytes": 169477112
+    },
+    "copy:Host:surf_react_pwi:scalars->Host:surf_react_pwi:scalars_mirror": {
+      "calls": 160000,
+      "requested_bytes": 60160000
+    },
+    "copy:Host:surf_react_pwi:sconc->Host:surf_react_pwi:sconc": {
+      "calls": 4475,
+      "requested_bytes": 9736454400
+    },
+    "copy:Host:surf_react_pwi:sigma_delta->Host:surf_react_pwi:sigma_bak": {
+      "calls": 450737,
+      "requested_bytes": 980688323328
+    },
+    "copy:Host:surf_react_pwi:sigma_delta->Host:surf_react_pwi:sigma_delta": {
+      "calls": 1600,
+      "requested_bytes": 3481190400
+    },
+    "copy:Host:surf_react_pwi:spp->Host:surf_react_pwi:spp": {
+      "calls": 24,
+      "requested_bytes": 71424
+    },
+    "copy:Host:surf_react_pwi:sput->Host:surf_react_pwi:sput": {
+      "calls": 24,
+      "requested_bytes": 8928
+    },
+    "copy:Host:surf_react_pwi:su_E->Host:surf_react_pwi:su_E": {
+      "calls": 24,
+      "requested_bytes": 38400
+    },
+    "copy:Host:surf_react_pwi:su_NE->Host:surf_react_pwi:su_NE": {
+      "calls": 24,
+      "requested_bytes": 96
+    },
+    "copy:Host:surf_react_pwi:su_NL->Host:surf_react_pwi:su_NL": {
+      "calls": 24,
+      "requested_bytes": 96
+    },
+    "copy:Host:surf_react_pwi:su_NT->Host:surf_react_pwi:su_NT": {
+      "calls": 24,
+      "requested_bytes": 96
+    },
+    "copy:Host:surf_react_pwi:su_Y->Host:surf_react_pwi:su_Y": {
+      "calls": 24,
+      "requested_bytes": 7680000
+    },
+    "copy:Host:surf_react_pwi:su_ax->Host:surf_react_pwi:su_ax": {
+      "calls": 24,
+      "requested_bytes": 192
+    },
+    "copy:Host:surf_react_pwi:su_kind->Host:surf_react_pwi:su_kind": {
+      "calls": 24,
+      "requested_bytes": 96
+    },
+    "copy:Host:surf_react_pwi:su_th->Host:surf_react_pwi:su_th": {
+      "calls": 24,
+      "requested_bytes": 38400
+    },
+    "copy:Host:surf_react_pwi:tr_E->Host:surf_react_pwi:tr_E": {
+      "calls": 24,
+      "requested_bytes": 2304
+    },
+    "copy:Host:surf_react_pwi:tr_Emax->Host:surf_react_pwi:tr_Emax": {
+      "calls": 24,
+      "requested_bytes": 16128
+    },
+    "copy:Host:surf_react_pwi:tr_Emin->Host:surf_react_pwi:tr_Emin": {
+      "calls": 24,
+      "requested_bytes": 16128
+    },
+    "copy:Host:surf_react_pwi:tr_Eq->Host:surf_react_pwi:tr_Eq": {
+      "calls": 24,
+      "requested_bytes": 80640
+    },
+    "copy:Host:surf_react_pwi:tr_RN->Host:surf_react_pwi:tr_RN": {
+      "calls": 24,
+      "requested_bytes": 16128
+    },
+    "copy:Host:surf_react_pwi:tr_ca->Host:surf_react_pwi:tr_ca": {
+      "calls": 24,
+      "requested_bytes": 2016000
+    },
+    "copy:Host:surf_react_pwi:tr_cp->Host:surf_react_pwi:tr_cp": {
+      "calls": 24,
+      "requested_bytes": 403200
+    },
+    "copy:Host:surf_react_pwi:tr_raar->Host:surf_react_pwi:tr_raar": {
+      "calls": 24,
+      "requested_bytes": 960
+    },
+    "copy:Host:surf_react_pwi:tr_th->Host:surf_react_pwi:tr_th": {
+      "calls": 24,
+      "requested_bytes": 1344
+    },
+    "copy:Host:surf_react_pwi:trim->Host:surf_react_pwi:trim": {
+      "calls": 24,
+      "requested_bytes": 8928
+    },
+    "copy:Host:surf_react_pwi:type->Host:surf_react_pwi:type": {
+      "calls": 24,
+      "requested_bytes": 8928
+    },
+    "copy:Host:surf_react_pwi:yscale->Host:surf_react_pwi:yscale": {
+      "calls": 24,
+      "requested_bytes": 17856
+    },
+    "copy:Host:update:scalars->Host:collide:scalars_mirror": {
+      "calls": 450737,
+      "requested_bytes": 27044220
+    },
+    "fence:Bitset::deep_copy: fence after copy operation": {
+      "calls": 176,
+      "requested_bytes": 0
+    },
+    "fence:Bitset::deep_copy: fence before copy operation": {
+      "calls": 176,
+      "requested_bytes": 0
+    },
+    "fence:HostSpace fence": {
+      "calls": 943259,
+      "requested_bytes": 0
+    },
+    "fence:HostSpace::impl_deallocate before free": {
+      "calls": 16373,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::DualView<>::sync: fence after syncing DualView": {
+      "calls": 656,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::OpenMP::fence: Unnamed Instance Fence": {
+      "calls": 296420,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::UnorderedMap::deep_copy_view: fence after copy to dst.": {
+      "calls": 176,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::View::destruction before deallocate": {
+      "calls": 144,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::View::initialization via memset": {
+      "calls": 8620,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::create_mirror_view_and_copy: fence before returning src view": {
+      "calls": 812,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::deep_copy: copy between contiguous views, fence due to null argument": {
+      "calls": 22972,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::deep_copy: copy between contiguous views, fence due to same spans": {
+      "calls": 14807,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::deep_copy: copy between contiguous views, post deep copy fence": {
+      "calls": 2868413,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::deep_copy: copy between contiguous views, pre view equality check": {
+      "calls": 2868473,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::deep_copy: copy into scalar, post copy fence": {
+      "calls": 250000,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::deep_copy: copy into scalar, pre copy fence": {
+      "calls": 250000,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::deep_copy: scalar copy, post copy fence": {
+      "calls": 932622,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::deep_copy: scalar copy, pre copy fence": {
+      "calls": 932622,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::deep_copy: scalar to scalar copy, pre copy fence": {
+      "calls": 1352211,
+      "requested_bytes": 0
+    },
+    "fence:Kokkos::resize(View)": {
+      "calls": 802,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::destruction []": {
+      "calls": 144,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [DualView::modified_flags] via memset": {
+      "calls": 2128,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [Kokkos::Random_XorShift64::locks] via memset": {
+      "calls": 576,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [Kokkos::Random_XorShift64::state] via memset": {
+      "calls": 576,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [SurfCollide:nsingle] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [UnorderedMap - bitset] via memset": {
+      "calls": 376,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [UnorderedMap - keys] via memset": {
+      "calls": 376,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [UnorderedMap - scalars] via memset": {
+      "calls": 376,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [UnorderedMap - size] via memset": {
+      "calls": 376,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [UnorderedMap - values] via memset": {
+      "calls": 376,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [ave/grid:numap] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [ave/grid:tally] via memset": {
+      "calls": 18,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [ave/grid:umap] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [ave/grid:uomap] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [ave/grid:vector_grid] via memset": {
+      "calls": 18,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [chem:cnt_host] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [chem:ev_count] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [chem:rlst] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [chem:rnc] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [chem:rnp] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [chem:roff] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [chem:rp1] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [chem:rprod] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [chem:rstyle] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [chem:rtype] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [chem:sp2] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [collide:scalars_mirror] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [comm:pmeta] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [compute/grid_weighted:unique] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [compute_grid_weighted:tally] via memset": {
+      "calls": 330,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [compute_grid_weighted:vector_grid] via memset": {
+      "calls": 330,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [coul:A_tab] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [coul:s_tab] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [counts] via memset": {
+      "calls": 424,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [csplits.entries] via memset": {
+      "calls": 124,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [csplits.row_map] via memset": {
+      "calls": 154,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [csubs.entries] via memset": {
+      "calls": 124,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [csubs.row_map] via memset": {
+      "calls": 154,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [csurfs.entries] via memset": {
+      "calls": 176,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [csurfs.row_map] via memset": {
+      "calls": 176,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [emit:newn] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [emit:newn_host] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [emit:nsingle] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [entries] via memset": {
+      "calls": 424,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [grid:edcol] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [grid:ewhich] via memset": {
+      "calls": 32,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [grid:plevels] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [irregular:index_send] via memset": {
+      "calls": 170,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [last_value] via memset": {
+      "calls": 484,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [nearest_surf:array] via memset": {
+      "calls": 9,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [nearest_surf:midx] via memset": {
+      "calls": 9,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_equ_br] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_equ_bt] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_equ_bz] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_equ_psi] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_equ_r] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_equ_z] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_hash_entries] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_hash_offset] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_br] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_bt] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_bz] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_er] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_et] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_ez] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_ne] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_ni] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_rmax] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_rmin] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_te] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_ti] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_upar] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_zmax] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_tri_zmin] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_vtx_r] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_mesh_vtx_z] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_meshcell_gter] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_meshcell_gtez] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_meshcell_gtir] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_meshcell_gtiz] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_midx_gcell] via memset": {
+      "calls": 168,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_pc_diag] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [oe_sheath_elem] via memset": {
+      "calls": 168,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [particle:dvector] via memset": {
+      "calls": 160,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [particle:ewhich] via memset": {
+      "calls": 184,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [particle:ivector] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [particle:mlist] via memset": {
+      "calls": 9,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [particle:reorder_pass] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [particle:resize] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [particle:resize_mirror] via memset": {
+      "calls": 16,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [particle:species2group] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf/spread:edarray_local_array] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf/spread:edvec_local_vec] via memset": {
+      "calls": 32,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf:darray] via memset": {
+      "calls": 33,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf:dvector] via memset": {
+      "calls": 50,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf:edcol] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf:ewhich] via memset": {
+      "calls": 56,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf:ivector] via memset": {
+      "calls": 9,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_collide_diffuse:scalars] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_collide_diffuse:scalars_mirror] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:Rrec] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:area] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:conc_isp] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:dep_bak] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:dep_delta] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:e0] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:e1] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:gid0] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:list] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:mat_isp] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:nreact] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:prob] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:prod2] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:prod] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:refl_tbl] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:scalars] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:scalars_bak] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:scalars_mirror] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:sconc] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:sigma_bak] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:sigma_delta] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:spp] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:sput] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:su_E] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:su_NE] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:su_NL] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:su_NT] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:su_Y] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:su_ax] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:su_kind] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:su_th] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:tr_E] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:tr_Emax] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:tr_Emin] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:tr_Eq] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:tr_RN] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:tr_ca] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:tr_cp] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:tr_raar] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:tr_th] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:trim] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:type] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [surf_react_pwi:yscale] via memset": {
+      "calls": 24,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [update:dx_cd] via memset": {
+      "calls": 316,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::View::initialization [update:scalars] via memset": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::ViewCopy-1D": {
+      "calls": 791,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::ViewCopy-2D": {
+      "calls": 11,
+      "requested_bytes": 0
+    },
+    "for:Kokkos::ViewFill-1D": {
+      "calls": 2245705,
+      "requested_bytes": 0
+    },
+    "for:SPARTA_NS::ComputeGridWeightedKokkos/SPARTA_NS::TagComputeGridWeighted_NRHO_W": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:SPARTA_NS::ComputeGridWeightedKokkos/SPARTA_NS::TagComputeGridWeighted_compute_per_grid_atomic<0>": {
+      "calls": 808,
+      "requested_bytes": 0
+    },
+    "for:SPARTA_NS::FixAveGridKokkos/SPARTA_NS::TagFixAveGrid_Add_ctally": {
+      "calls": 640,
+      "requested_bytes": 0
+    },
+    "for:SPARTA_NS::FixAveGridKokkos/SPARTA_NS::TagFixAveGrid_Zero_tally": {
+      "calls": 8,
+      "requested_bytes": 0
+    },
+    "for:SPARTA_NS::FixCoulombBackgroundKokkos/SPARTA_NS::TagFixCoulombBg": {
+      "calls": 156862,
+      "requested_bytes": 0
+    },
+    "for:SPARTA_NS::FixCrossFieldDiffusionKokkos/SPARTA_NS::TagFixCrossFieldDiffusion": {
+      "calls": 156861,
+      "requested_bytes": 0
+    },
+    "for:SPARTA_NS::FixForceThermalKokkos/SPARTA_NS::TagFixForceThermal": {
+      "calls": 313723,
+      "requested_bytes": 0
+    },
+    "for:SPARTA_NS::FixSurfaceEmitSourceKokkos/SPARTA_NS::TagFixSurfEmitSource": {
+      "calls": 125000,
+      "requested_bytes": 0
+    },
+    "for:SPARTA_NS::FixVolumeChemAdasKokkos/SPARTA_NS::TagFixChemAdas": {
+      "calls": 156862,
+      "requested_bytes": 0
+    },
+    "for:SPARTA_NS::ParticleKokkos/SPARTA_NS::TagParticleCompressReactions": {
+      "calls": 476792,
+      "requested_bytes": 0
+    },
+    "for:SPARTA_NS::UpdateKokkos/SPARTA_NS::TagUpdateMove<3, 1, 1, 0, 0>": {
+      "calls": 450737,
+      "requested_bytes": 0
+    },
+    "for:SPARTA_NS::UpdateKokkos/SPARTA_NS::TagUpdatePcacheFill": {
+      "calls": 156861,
+      "requested_bytes": 0
+    }
+  }
+}

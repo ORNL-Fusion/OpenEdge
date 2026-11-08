@@ -1,0 +1,581 @@
+event	calls	bytes
+copy:Cuda:SurfCollide:nsingle->Host:SurfCollide:nsingle_mirror	41439	165756
+copy:Cuda:ave/grid:tally->Host:ave/grid:tally_mirror	8	758168
+copy:Cuda:ave/grid:vector_grid->Host:ave/grid:vector_grid_mirror	4	375160
+copy:Cuda:chem:ev_cell->Host:chem:ev_cell_h	4000	308340
+copy:Cuda:chem:ev_count->Host:chem:cnt_host	5000	20000
+copy:Cuda:chem:ev_ridx->Host:chem:ev_ridx_h	4000	308340
+copy:Cuda:chem:ev_vals->Host:chem:ev_vals_h	4000	3700080
+copy:Cuda:comm:cellmig_plist->Host:comm:cellmig_plist_h	1	8
+copy:Cuda:comm:pmeta->Host:comm:pmeta_mirror	5906	233184
+copy:Cuda:compute_grid_weighted:tally->Host:compute_grid_weighted:tally_mirror	6	576168
+copy:Cuda:emit:newn->Host:Scalar	5000	20000
+copy:Cuda:emit:nsingle->Host:Scalar	5000	20000
+copy:Cuda:grid:cells->Host:grid:cells	10	15001344
+copy:Cuda:grid:cells->Host:grid:cells_mirror	1	2097152
+copy:Cuda:grid:cinfo->Host:grid:cinfo_mirror	1	1048576
+copy:Cuda:oe_pc_diag->Host:oe_pc_diag_mirror	40	960
+copy:Cuda:particle:cellcount->Host:particle:cellcount	5	234396
+copy:Cuda:particle:dvector->Cuda:update:sheath_bank_backup	13813	1810497536
+copy:Cuda:particle:dvector->Cuda:update:sheath_phiprev_backup	13813	1810497536
+copy:Cuda:particle:dvector->Host:particle:dvector_mirror	240	28835840
+copy:Cuda:particle:ivector->Host:particle:ivector_mirror	36	2162688
+copy:Cuda:particle:particles->Cuda:update:particles_backup	13813	28967960576
+copy:Cuda:particle:particles->Host:particle:particles_mirror	6554	13744734208
+copy:Cuda:particle:resize->Host:particle:resize_mirror	15	60
+copy:Cuda:surf:darray->Host:surf:darray_mirror	1	393216
+copy:Cuda:surf:dvector->Host:surf:dvector_mirror	2	262144
+copy:Cuda:surf:ivector->Host:surf:ivector_mirror	1	65536
+copy:Cuda:surf_collide_diffuse:scalars->Host:surf_collide_diffuse:scalars_mirror	13813	110504
+copy:Cuda:surf_react_pwi:dep_delta->Cuda:surf_react_pwi:dep_bak	13813	1878346992
+copy:Cuda:surf_react_pwi:dep_delta->Host:surf_react_pwi:dep_delta_mirror	50	6799200
+copy:Cuda:surf_react_pwi:scalars->Cuda:surf_react_pwi:scalars_bak	13813	5193688
+copy:Cuda:surf_react_pwi:scalars->Host:surf_react_pwi:scalars_mirror	5000	1880000
+copy:Cuda:surf_react_pwi:sigma_delta->Cuda:surf_react_pwi:sigma_bak	13813	30053551872
+copy:Cuda:surf_react_pwi:sigma_delta->Host:surf_react_pwi:sigma_delta_mirror	50	108787200
+copy:Cuda:update:scalars->Host:collide:scalars_mirror	13813	828780
+copy:Host:(none)->Cuda:SurfCollide:nsingle	41439	165756
+copy:Host:(none)->Cuda:chem:ev_count	5000	20000
+copy:Host:(none)->Cuda:emit:nsingle	5000	20000
+copy:Host:(none)->Cuda:oe_pc_diag	4000	96000
+copy:Host:(none)->Cuda:surf_collide_diffuse:scalars	13813	110504
+copy:Host:->Cuda:	27	5520
+copy:Host:Kokkos::Random_XorShift64::locks_mirror->Cuda:Kokkos::Random_XorShift64::locks	73	64585728
+copy:Host:Kokkos::Random_XorShift64::state_mirror->Cuda:Kokkos::Random_XorShift64::state	73	129171456
+copy:Host:Scalar->Cuda:UnorderedMap - hash list	10	745600
+copy:Host:Scalar->Cuda:UnorderedMap - next index	10	711208
+copy:Host:Scalar->Cuda:comm:pmeta	5906	23624
+copy:Host:Scalar->Cuda:compute_grid_weighted:tally	26	2502872
+copy:Host:Scalar->Cuda:particle:cellcount	15	734776
+copy:Host:Scalar->Cuda:particle:resize	10	40
+copy:Host:Scalar->Cuda:surf_react_pwi:dep_delta	50	6799200
+copy:Host:Scalar->Cuda:surf_react_pwi:scalars	10003	3761128
+copy:Host:Scalar->Cuda:surf_react_pwi:sigma_delta	50	108787200
+copy:Host:Scalar->Cuda:update:dx_cd	4000	266986224
+copy:Host:Scalar->Host:UnorderedMap - hash list	7	743284
+copy:Host:Scalar->Host:UnorderedMap - next index	7	709660
+copy:Host:Scalar->Host:collide:scalars_mirror	13813	828780
+copy:Host:Scalar->Host:surf_react_pwi:conc_isp_mirror	3	1116
+copy:Host:Scalar->Host:surf_react_pwi:mat_isp_mirror	3	1116
+copy:Host:Scalar->Host:surf_react_pwi:prod2_mirror	3	1116
+copy:Host:Scalar->Host:surf_react_pwi:refl_tbl_mirror	3	1116
+copy:Host:Scalar->Host:surf_react_pwi:su_NE_mirror	3	12
+copy:Host:Scalar->Host:surf_react_pwi:su_NL_mirror	3	12
+copy:Host:Scalar->Host:surf_react_pwi:su_NT_mirror	3	12
+copy:Host:Scalar->Host:surf_react_pwi:su_ax_mirror	3	24
+copy:Host:Scalar->Host:surf_react_pwi:su_kind_mirror	3	12
+copy:Host:Scalar->Host:surf_react_pwi:yscale_mirror	3	2232
+copy:Host:ave/grid:numap_mirror->Cuda:ave/grid:numap	1	8
+copy:Host:ave/grid:tally_mirror->Cuda:ave/grid:tally	9	859376
+copy:Host:ave/grid:umap_mirror->Cuda:ave/grid:umap	1	8
+copy:Host:ave/grid:uomap_mirror->Cuda:ave/grid:uomap	1	8
+copy:Host:ave/grid:vector_grid_mirror->Cuda:ave/grid:vector_grid	9	859376
+copy:Host:chem:cx_mirror->Cuda:chem:cx	3	426240
+copy:Host:chem:gD_cx_mirror->Cuda:chem:gD_cx	3	288
+copy:Host:chem:gD_ion_mirror->Cuda:chem:gD_ion	3	288
+copy:Host:chem:gD_plt_mirror->Cuda:chem:gD_plt	3	288
+copy:Host:chem:gD_prb_mirror->Cuda:chem:gD_prb	3	288
+copy:Host:chem:gD_rec_mirror->Cuda:chem:gD_rec	3	288
+copy:Host:chem:gT_cx_mirror->Cuda:chem:gT_cx	3	480
+copy:Host:chem:gT_ion_mirror->Cuda:chem:gT_ion	3	480
+copy:Host:chem:gT_plt_mirror->Cuda:chem:gT_plt	3	480
+copy:Host:chem:gT_prb_mirror->Cuda:chem:gT_prb	3	480
+copy:Host:chem:gT_rec_mirror->Cuda:chem:gT_rec	3	480
+copy:Host:chem:ion_mirror->Cuda:chem:ion	3	426240
+copy:Host:chem:ion_pot_mirror->Cuda:chem:ion_pot	3	0
+copy:Host:chem:nn_cell_mirror->Cuda:chem:nn_cell	5	468792
+copy:Host:chem:plt_mirror->Cuda:chem:plt	3	426240
+copy:Host:chem:prb_mirror->Cuda:chem:prb	3	426240
+copy:Host:chem:rcoeff_mirror->Cuda:chem:rcoeff	3	10800
+copy:Host:chem:rec_mirror->Cuda:chem:rec	3	426240
+copy:Host:chem:rlst_mirror->Cuda:chem:rlst	3	540
+copy:Host:chem:rnc_mirror->Cuda:chem:rnc	3	1080
+copy:Host:chem:rnp_mirror->Cuda:chem:rnp	3	1080
+copy:Host:chem:roff_mirror->Cuda:chem:roff	3	204
+copy:Host:chem:rp1_mirror->Cuda:chem:rp1	3	1080
+copy:Host:chem:rprod_mirror->Cuda:chem:rprod	3	1080
+copy:Host:chem:rstyle_mirror->Cuda:chem:rstyle	3	1080
+copy:Host:chem:rtype_mirror->Cuda:chem:rtype	3	1080
+copy:Host:chem:sp2_mirror->Cuda:chem:sp2	3	192
+copy:Host:collide:scalars_mirror->Cuda:update:scalars	13813	828780
+copy:Host:comm:cellmig_enc_mirror->Cuda:comm:cellmig_enc	5	234396
+copy:Host:comm:cellmig_pbase_mirror->Cuda:comm:cellmig_pbase	5	20
+copy:Host:comm:cellmig_pstart_mirror->Cuda:comm:cellmig_pstart	5	40
+copy:Host:compute/grid_weighted:unique_mirror->Cuda:compute/grid_weighted:unique	2	8
+copy:Host:coul:A_tab_mirror->Cuda:coul:A_tab	3	19224
+copy:Host:coul:s_tab_mirror->Cuda:coul:s_tab	3	19224
+copy:Host:emit:cumm_mirror->Cuda:emit:cumm	5	40
+copy:Host:emit:frac_mirror->Cuda:emit:frac	5	681104
+copy:Host:emit:isurf_mirror->Cuda:emit:isurf	5	96496
+copy:Host:emit:mixsp_mirror->Cuda:emit:mixsp	5	20
+copy:Host:emit:newn_host->Cuda:emit:newn	5000	20000
+copy:Host:emit:npoint_mirror->Cuda:emit:npoint	5	96496
+copy:Host:emit:path_mirror->Cuda:emit:path	5	2043312
+copy:Host:emit:pcell_mirror->Cuda:emit:pcell	5	96496
+copy:Host:emit:poff_mirror->Cuda:emit:poff	5	96516
+copy:Host:emit:src_mirror->Cuda:emit:src	5	192992
+copy:Host:emit:tan1_mirror->Cuda:emit:tan1	5	578976
+copy:Host:emit:tan2_mirror->Cuda:emit:tan2	5	578976
+copy:Host:emit:vstream_mirror->Cuda:emit:vstream	5	578976
+copy:Host:entries->Cuda:csplits.entries	7	76524
+copy:Host:entries->Cuda:csubs.entries	7	22984
+copy:Host:entries->Cuda:csurfs.entries	7	923140
+copy:Host:fth:cell_mesh_cell_mirror->Cuda:fth:cell_mesh_cell	5	234396
+copy:Host:grid:cells_mirror->Cuda:grid:cells	12	20971520
+copy:Host:grid:cinfo_mirror->Cuda:grid:cinfo	8	6815744
+copy:Host:grid:edarray_mirror->Cuda:grid:edarray	1	0
+copy:Host:grid:edarray_mirror->Cuda:grid:edarray_mirror	5	520
+copy:Host:grid:edcol_mirror->Cuda:grid:edcol	3	12
+copy:Host:grid:edvec_mirror->Cuda:grid:edvec_mirror	7	720
+copy:Host:grid:eiarray_mirror->Cuda:grid:eiarray	5	0
+copy:Host:grid:eivec_mirror->Cuda:grid:eivec	2	0
+copy:Host:grid:eivec_mirror->Cuda:grid:eivec_mirror	4	288
+copy:Host:grid:ewhich_mirror->Cuda:grid:ewhich	1	4
+copy:Host:grid:ewhich_mirror->Cuda:grid:ewhich_mirror_mirror	3	36
+copy:Host:grid:plevels_mirror->Cuda:grid:plevels	2	2048
+copy:Host:grid:sinfo_mirror->Cuda:grid:sinfo	6	2359296
+copy:Host:irregular:index_send_mirror->Cuda:irregular:index_send	6262	332116
+copy:Host:nearest_surf:array_mirror->Cuda:nearest_surf:array	6	3276800
+copy:Host:nearest_surf:midx_mirror->Cuda:nearest_surf:midx	6	327680
+copy:Host:oe_equ_br_mirror->Cuda:oe_equ_br	2	1440000
+copy:Host:oe_equ_bt_mirror->Cuda:oe_equ_bt	2	1440000
+copy:Host:oe_equ_bz_mirror->Cuda:oe_equ_bz	2	1440000
+copy:Host:oe_equ_psi_mirror->Cuda:oe_equ_psi	2	1440000
+copy:Host:oe_equ_r_mirror->Cuda:oe_equ_r	2	4800
+copy:Host:oe_equ_z_mirror->Cuda:oe_equ_z	2	4800
+copy:Host:oe_hash_entries_mirror->Cuda:oe_hash_entries	2	3638592
+copy:Host:oe_hash_offset_mirror->Cuda:oe_hash_offset	2	524296
+copy:Host:oe_mesh_tri_br_mirror->Cuda:oe_mesh_tri_br	2	958976
+copy:Host:oe_mesh_tri_bt_mirror->Cuda:oe_mesh_tri_bt	2	958976
+copy:Host:oe_mesh_tri_bz_mirror->Cuda:oe_mesh_tri_bz	2	958976
+copy:Host:oe_mesh_tri_er_mirror->Cuda:oe_mesh_tri_er	2	958976
+copy:Host:oe_mesh_tri_et_mirror->Cuda:oe_mesh_tri_et	2	958976
+copy:Host:oe_mesh_tri_ez_mirror->Cuda:oe_mesh_tri_ez	2	958976
+copy:Host:oe_mesh_tri_mirror->Cuda:oe_mesh_tri	2	1438464
+copy:Host:oe_mesh_tri_ne_mirror->Cuda:oe_mesh_tri_ne	2	958976
+copy:Host:oe_mesh_tri_ni_mirror->Cuda:oe_mesh_tri_ni	2	958976
+copy:Host:oe_mesh_tri_rmax_mirror->Cuda:oe_mesh_tri_rmax	2	958976
+copy:Host:oe_mesh_tri_rmin_mirror->Cuda:oe_mesh_tri_rmin	2	958976
+copy:Host:oe_mesh_tri_te_mirror->Cuda:oe_mesh_tri_te	2	958976
+copy:Host:oe_mesh_tri_ti_mirror->Cuda:oe_mesh_tri_ti	2	958976
+copy:Host:oe_mesh_tri_upar_mirror->Cuda:oe_mesh_tri_upar	2	958976
+copy:Host:oe_mesh_tri_zmax_mirror->Cuda:oe_mesh_tri_zmax	2	958976
+copy:Host:oe_mesh_tri_zmin_mirror->Cuda:oe_mesh_tri_zmin	2	958976
+copy:Host:oe_mesh_vtx_r_mirror->Cuda:oe_mesh_vtx_r	2	490832
+copy:Host:oe_mesh_vtx_z_mirror->Cuda:oe_mesh_vtx_z	2	490832
+copy:Host:oe_meshcell_gter_mirror->Cuda:oe_meshcell_gter	2	958976
+copy:Host:oe_meshcell_gtez_mirror->Cuda:oe_meshcell_gtez	2	958976
+copy:Host:oe_meshcell_gtir_mirror->Cuda:oe_meshcell_gtir	2	958976
+copy:Host:oe_meshcell_gtiz_mirror->Cuda:oe_meshcell_gtiz	2	958976
+copy:Host:oe_midx_gcell_mirror->Cuda:oe_midx_gcell	6	262316
+copy:Host:oe_sheath_elem_mirror->Cuda:oe_sheath_elem	6	10606752
+copy:Host:particle:dvector_mirror->Cuda:particle:dvector	130900	17154703360
+copy:Host:particle:edarray_mirror->Cuda:particle:edarray	46	0
+copy:Host:particle:edvec_mirror->Cuda:particle:edvec	3	0
+copy:Host:particle:edvec_mirror->Cuda:particle:edvec_mirror	64	64800
+copy:Host:particle:eiarray_mirror->Cuda:particle:eiarray	46	0
+copy:Host:particle:eivec_mirror->Cuda:particle:eivec_mirror	49	10152
+copy:Host:particle:ewhich_mirror->Cuda:particle:ewhich	1	4
+copy:Host:particle:ewhich_mirror->Cuda:particle:ewhich_mirror_mirror	22	1100
+copy:Host:particle:ivector_mirror->Cuda:particle:ivector	19635	1286602752
+copy:Host:particle:particles_mirror->Cuda:particle:particles	6544	13723762688
+copy:Host:particle:species2group_mirror->Cuda:particle:species2group	2	640
+copy:Host:particle:species_mirror->Cuda:particle:species	6546	21785088
+copy:Host:row_map->Cuda:csplits.row_map	7	11520
+copy:Host:row_map->Cuda:csubs.row_map	7	11520
+copy:Host:row_map->Cuda:csurfs.row_map	7	326420
+copy:Host:surf/spread:edarray_local_array_mirror->Cuda:surf/spread:edarray_local_array	150	489542400
+copy:Host:surf/spread:edvec_local_vec_mirror->Cuda:surf/spread:edvec_local_vec	151	20533584
+copy:Host:surf:darray_mirror->Cuda:surf:darray	16	12436608
+copy:Host:surf:dvector_mirror->Cuda:surf:dvector	22	811072
+copy:Host:surf:edarray_mirror->Cuda:surf:edarray	8	0
+copy:Host:surf:edarray_mirror->Cuda:surf:edarray_mirror	16	2808
+copy:Host:surf:edcol_mirror->Cuda:surf:edcol	3	12
+copy:Host:surf:edcol_mirror->Cuda:surf:edcol_mirror_mirror	4	36
+copy:Host:surf:edvec_mirror->Cuda:surf:edvec	10	0
+copy:Host:surf:edvec_mirror->Cuda:surf:edvec_mirror	15	2736
+copy:Host:surf:eiarray_mirror->Cuda:surf:eiarray	21	0
+copy:Host:surf:eivec_mirror->Cuda:surf:eivec	21	0
+copy:Host:surf:ewhich_mirror->Cuda:surf:ewhich	1	4
+copy:Host:surf:ewhich_mirror->Cuda:surf:ewhich_mirror_mirror	6	108
+copy:Host:surf:ivector_mirror->Cuda:surf:ivector	1	32768
+copy:Host:surf:tris_mirror->Cuda:surf:tris	6	13369344
+copy:Host:surf_react_pwi:Rrec_mirror->Cuda:surf_react_pwi:Rrec	3	2232
+copy:Host:surf_react_pwi:area_mirror->Cuda:surf_react_pwi:area	3	407952
+copy:Host:surf_react_pwi:conc_isp_mirror->Cuda:surf_react_pwi:conc_isp	3	1116
+copy:Host:surf_react_pwi:e0_mirror->Cuda:surf_react_pwi:e0	3	2232
+copy:Host:surf_react_pwi:e1_mirror->Cuda:surf_react_pwi:e1	3	2232
+copy:Host:surf_react_pwi:gid0_mirror->Cuda:surf_react_pwi:gid0	3	203976
+copy:Host:surf_react_pwi:list_mirror->Cuda:surf_react_pwi:list	3	576
+copy:Host:surf_react_pwi:mat_isp_mirror->Cuda:surf_react_pwi:mat_isp	3	1116
+copy:Host:surf_react_pwi:nreact_mirror->Cuda:surf_react_pwi:nreact	3	192
+copy:Host:surf_react_pwi:prob_mirror->Cuda:surf_react_pwi:prob	3	2232
+copy:Host:surf_react_pwi:prod2_mirror->Cuda:surf_react_pwi:prod2	3	1116
+copy:Host:surf_react_pwi:prod_mirror->Cuda:surf_react_pwi:prod	3	1116
+copy:Host:surf_react_pwi:refl_tbl_mirror->Cuda:surf_react_pwi:refl_tbl	3	1116
+copy:Host:surf_react_pwi:sconc_mirror->Cuda:surf_react_pwi:sconc	136	295901184
+copy:Host:surf_react_pwi:spp_mirror->Cuda:surf_react_pwi:spp	3	8928
+copy:Host:surf_react_pwi:sput_mirror->Cuda:surf_react_pwi:sput	3	1116
+copy:Host:surf_react_pwi:su_E_mirror->Cuda:surf_react_pwi:su_E	3	4800
+copy:Host:surf_react_pwi:su_NE_mirror->Cuda:surf_react_pwi:su_NE	3	12
+copy:Host:surf_react_pwi:su_NL_mirror->Cuda:surf_react_pwi:su_NL	3	12
+copy:Host:surf_react_pwi:su_NT_mirror->Cuda:surf_react_pwi:su_NT	3	12
+copy:Host:surf_react_pwi:su_Y_mirror->Cuda:surf_react_pwi:su_Y	3	960000
+copy:Host:surf_react_pwi:su_ax_mirror->Cuda:surf_react_pwi:su_ax	3	24
+copy:Host:surf_react_pwi:su_kind_mirror->Cuda:surf_react_pwi:su_kind	3	12
+copy:Host:surf_react_pwi:su_th_mirror->Cuda:surf_react_pwi:su_th	3	4800
+copy:Host:surf_react_pwi:tr_E_mirror->Cuda:surf_react_pwi:tr_E	3	288
+copy:Host:surf_react_pwi:tr_Emax_mirror->Cuda:surf_react_pwi:tr_Emax	3	2016
+copy:Host:surf_react_pwi:tr_Emin_mirror->Cuda:surf_react_pwi:tr_Emin	3	2016
+copy:Host:surf_react_pwi:tr_Eq_mirror->Cuda:surf_react_pwi:tr_Eq	3	10080
+copy:Host:surf_react_pwi:tr_RN_mirror->Cuda:surf_react_pwi:tr_RN	3	2016
+copy:Host:surf_react_pwi:tr_ca_mirror->Cuda:surf_react_pwi:tr_ca	3	252000
+copy:Host:surf_react_pwi:tr_cp_mirror->Cuda:surf_react_pwi:tr_cp	3	50400
+copy:Host:surf_react_pwi:tr_raar_mirror->Cuda:surf_react_pwi:tr_raar	3	120
+copy:Host:surf_react_pwi:tr_th_mirror->Cuda:surf_react_pwi:tr_th	3	168
+copy:Host:surf_react_pwi:trim_mirror->Cuda:surf_react_pwi:trim	3	1116
+copy:Host:surf_react_pwi:type_mirror->Cuda:surf_react_pwi:type	3	1116
+copy:Host:surf_react_pwi:yscale_mirror->Cuda:surf_react_pwi:yscale	3	2232
+fence:Bitset::deep_copy: fence after copy operation	14	0
+fence:Bitset::deep_copy: fence before copy operation	14	0
+fence:HostSpace fence	14779	0
+fence:HostSpace::impl_deallocate before free	2414	0
+fence:Kokkos::Cuda::fence(): Unnamed Instance Fence	20975	0
+fence:Kokkos::Impl::ParallelReduce<Cuda, RangePolicy>::execute: Result Not Device Accessible	5	0
+fence:Kokkos::UnorderedMap::deep_copy_view: fence after copy to dst.	14	0
+fence:Kokkos::View::destruction before deallocate	75	0
+fence:Kokkos::View::initialization via memset	1325	0
+fence:Kokkos::create_mirror_view_and_copy: fence before returning src view	42	0
+fence:Kokkos::deep_copy: copy between contiguous views, post deep copy fence	516262	0
+fence:Kokkos::deep_copy: copy between contiguous views, pre view equality check	516686	0
+fence:Kokkos::deep_copy: copy into scalar, post copy fence	20000	0
+fence:Kokkos::deep_copy: copy into scalar, pre copy fence	20000	0
+fence:Kokkos::deep_copy: scalar copy, post copy fence	67874	0
+fence:Kokkos::deep_copy: scalar copy, pre copy fence	67874	0
+fence:Kokkos::deep_copy: scalar to scalar copy, post copy fence	82908	0
+fence:Kokkos::deep_copy: scalar to scalar copy, pre copy fence	82908	0
+fence:Kokkos::fence: Unnamed Global Fence	20	0
+fence:Kokkos::parallel_reduce: fence due to result being value, not view	5	0
+fence:Kokkos::parallel_scan: fence due to result being a value, not a view	5	0
+fence:Kokkos::resize(View)	218	0
+fence:SharedAllocationRecord<Kokkos::CudaSpace, void>::SharedAllocationRecord(): fence after copying header from HostSpace	860	0
+for:Kokkos::View::destruction []	75	0
+for:Kokkos::View::initialization [DualView::modified_flags] via memset	172	0
+for:Kokkos::View::initialization [Kokkos::Random_XorShift64::locks] via memset	73	0
+for:Kokkos::View::initialization [Kokkos::Random_XorShift64::state] via memset	73	0
+for:Kokkos::View::initialization [Kokkos::UniqueToken<Cuda>::m_locks] via memset	1	0
+for:Kokkos::View::initialization [SurfCollide:nsingle] via memset	3	0
+for:Kokkos::View::initialization [SurfCollide:nsingle_mirror] via memset	3	0
+for:Kokkos::View::initialization [UnorderedMap - bitset] via memset	17	0
+for:Kokkos::View::initialization [UnorderedMap - keys] via memset	17	0
+for:Kokkos::View::initialization [UnorderedMap - scalars] via memset	17	0
+for:Kokkos::View::initialization [UnorderedMap - size] via memset	17	0
+for:Kokkos::View::initialization [UnorderedMap - values] via memset	17	0
+for:Kokkos::View::initialization [ave/grid:numap] via memset	1	0
+for:Kokkos::View::initialization [ave/grid:numap_mirror] via memset	1	0
+for:Kokkos::View::initialization [ave/grid:tally] via memset	4	0
+for:Kokkos::View::initialization [ave/grid:tally_mirror] via memset	4	0
+for:Kokkos::View::initialization [ave/grid:umap] via memset	1	0
+for:Kokkos::View::initialization [ave/grid:umap_mirror] via memset	1	0
+for:Kokkos::View::initialization [ave/grid:uomap] via memset	1	0
+for:Kokkos::View::initialization [ave/grid:uomap_mirror] via memset	1	0
+for:Kokkos::View::initialization [ave/grid:vector_grid] via memset	4	0
+for:Kokkos::View::initialization [ave/grid:vector_grid_mirror] via memset	4	0
+for:Kokkos::View::initialization [chem:cnt_host] via memset	1	0
+for:Kokkos::View::initialization [chem:cx_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:ev_count] via memset	1	0
+for:Kokkos::View::initialization [chem:gD_cx_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:gD_ion_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:gD_plt_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:gD_prb_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:gD_rec_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:gT_cx_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:gT_ion_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:gT_plt_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:gT_prb_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:gT_rec_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:ion_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:nn_cell_mirror] via memset	5	0
+for:Kokkos::View::initialization [chem:plt_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:prb_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:rcoeff_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:rec_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:rlst] via memset	3	0
+for:Kokkos::View::initialization [chem:rlst_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:rnc] via memset	3	0
+for:Kokkos::View::initialization [chem:rnc_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:rnp] via memset	3	0
+for:Kokkos::View::initialization [chem:rnp_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:roff] via memset	3	0
+for:Kokkos::View::initialization [chem:roff_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:rp1] via memset	3	0
+for:Kokkos::View::initialization [chem:rp1_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:rprod] via memset	3	0
+for:Kokkos::View::initialization [chem:rprod_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:rstyle] via memset	3	0
+for:Kokkos::View::initialization [chem:rstyle_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:rtype] via memset	3	0
+for:Kokkos::View::initialization [chem:rtype_mirror] via memset	3	0
+for:Kokkos::View::initialization [chem:sp2] via memset	3	0
+for:Kokkos::View::initialization [chem:sp2_mirror] via memset	3	0
+for:Kokkos::View::initialization [collide:scalars_mirror] via memset	1	0
+for:Kokkos::View::initialization [comm:cellmig_enc_mirror] via memset	5	0
+for:Kokkos::View::initialization [comm:cellmig_pbase_mirror] via memset	5	0
+for:Kokkos::View::initialization [comm:cellmig_pstart_mirror] via memset	5	0
+for:Kokkos::View::initialization [comm:pmeta] via memset	1	0
+for:Kokkos::View::initialization [comm:pmeta_mirror] via memset	1	0
+for:Kokkos::View::initialization [compute/grid_weighted:unique] via memset	2	0
+for:Kokkos::View::initialization [compute/grid_weighted:unique_mirror] via memset	2	0
+for:Kokkos::View::initialization [compute_grid_weighted:tally] via memset	12	0
+for:Kokkos::View::initialization [compute_grid_weighted:tally_mirror] via memset	12	0
+for:Kokkos::View::initialization [compute_grid_weighted:vector_grid] via memset	12	0
+for:Kokkos::View::initialization [compute_grid_weighted:vector_grid_mirror] via memset	12	0
+for:Kokkos::View::initialization [coul:A_tab] via memset	3	0
+for:Kokkos::View::initialization [coul:A_tab_mirror] via memset	3	0
+for:Kokkos::View::initialization [coul:s_tab] via memset	3	0
+for:Kokkos::View::initialization [coul:s_tab_mirror] via memset	3	0
+for:Kokkos::View::initialization [counts] via memset	21	0
+for:Kokkos::View::initialization [csplits.entries] via memset	7	0
+for:Kokkos::View::initialization [csplits.row_map] via memset	7	0
+for:Kokkos::View::initialization [csubs.entries] via memset	7	0
+for:Kokkos::View::initialization [csubs.row_map] via memset	7	0
+for:Kokkos::View::initialization [csurfs.entries] via memset	7	0
+for:Kokkos::View::initialization [csurfs.row_map] via memset	7	0
+for:Kokkos::View::initialization [emit:cumm_mirror] via memset	5	0
+for:Kokkos::View::initialization [emit:frac_mirror] via memset	5	0
+for:Kokkos::View::initialization [emit:isurf_mirror] via memset	5	0
+for:Kokkos::View::initialization [emit:mixsp_mirror] via memset	5	0
+for:Kokkos::View::initialization [emit:newn] via memset	1	0
+for:Kokkos::View::initialization [emit:newn_host] via memset	1	0
+for:Kokkos::View::initialization [emit:npoint_mirror] via memset	5	0
+for:Kokkos::View::initialization [emit:nsingle] via memset	1	0
+for:Kokkos::View::initialization [emit:path_mirror] via memset	5	0
+for:Kokkos::View::initialization [emit:pcell_mirror] via memset	5	0
+for:Kokkos::View::initialization [emit:poff_mirror] via memset	5	0
+for:Kokkos::View::initialization [emit:src_mirror] via memset	5	0
+for:Kokkos::View::initialization [emit:tan1_mirror] via memset	5	0
+for:Kokkos::View::initialization [emit:tan2_mirror] via memset	5	0
+for:Kokkos::View::initialization [emit:vstream_mirror] via memset	5	0
+for:Kokkos::View::initialization [entries] via memset	21	0
+for:Kokkos::View::initialization [fth:cell_mesh_cell_mirror] via memset	5	0
+for:Kokkos::View::initialization [grid:edcol] via memset	1	0
+for:Kokkos::View::initialization [grid:edcol_mirror] via memset	1	0
+for:Kokkos::View::initialization [grid:ewhich] via memset	1	0
+for:Kokkos::View::initialization [grid:ewhich_mirror] via memset	4	0
+for:Kokkos::View::initialization [grid:ewhich_mirror_mirror] via memset	3	0
+for:Kokkos::View::initialization [grid:plevels] via memset	2	0
+for:Kokkos::View::initialization [grid:plevels_mirror] via memset	2	0
+for:Kokkos::View::initialization [irregular:index_send] via memset	7	0
+for:Kokkos::View::initialization [irregular:index_send_mirror] via memset	7	0
+for:Kokkos::View::initialization [last_value] via memset	21	0
+for:Kokkos::View::initialization [nearest_surf:array] via memset	2	0
+for:Kokkos::View::initialization [nearest_surf:array_mirror] via memset	2	0
+for:Kokkos::View::initialization [nearest_surf:midx] via memset	2	0
+for:Kokkos::View::initialization [nearest_surf:midx_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_equ_br] via memset	2	0
+for:Kokkos::View::initialization [oe_equ_br_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_equ_bt] via memset	2	0
+for:Kokkos::View::initialization [oe_equ_bt_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_equ_bz] via memset	2	0
+for:Kokkos::View::initialization [oe_equ_bz_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_equ_psi] via memset	2	0
+for:Kokkos::View::initialization [oe_equ_psi_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_equ_r] via memset	2	0
+for:Kokkos::View::initialization [oe_equ_r_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_equ_z] via memset	2	0
+for:Kokkos::View::initialization [oe_equ_z_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_hash_entries] via memset	2	0
+for:Kokkos::View::initialization [oe_hash_entries_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_hash_offset] via memset	2	0
+for:Kokkos::View::initialization [oe_hash_offset_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_br] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_br_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_bt] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_bt_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_bz] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_bz_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_er] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_er_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_et] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_et_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_ez] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_ez_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_ne] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_ne_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_ni] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_ni_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_rmax] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_rmax_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_rmin] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_rmin_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_te] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_te_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_ti] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_ti_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_upar] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_upar_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_zmax] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_zmax_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_zmin] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_tri_zmin_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_vtx_r] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_vtx_r_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_vtx_z] via memset	2	0
+for:Kokkos::View::initialization [oe_mesh_vtx_z_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_meshcell_gter] via memset	2	0
+for:Kokkos::View::initialization [oe_meshcell_gter_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_meshcell_gtez] via memset	2	0
+for:Kokkos::View::initialization [oe_meshcell_gtez_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_meshcell_gtir] via memset	2	0
+for:Kokkos::View::initialization [oe_meshcell_gtir_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_meshcell_gtiz] via memset	2	0
+for:Kokkos::View::initialization [oe_meshcell_gtiz_mirror] via memset	2	0
+for:Kokkos::View::initialization [oe_midx_gcell] via memset	6	0
+for:Kokkos::View::initialization [oe_midx_gcell_mirror] via memset	6	0
+for:Kokkos::View::initialization [oe_pc_diag] via memset	1	0
+for:Kokkos::View::initialization [oe_pc_diag_mirror] via memset	40	0
+for:Kokkos::View::initialization [oe_sheath_elem] via memset	6	0
+for:Kokkos::View::initialization [oe_sheath_elem_mirror] via memset	6	0
+for:Kokkos::View::initialization [particle:dvector] via memset	20	0
+for:Kokkos::View::initialization [particle:dvector_mirror] via memset	20	0
+for:Kokkos::View::initialization [particle:ewhich] via memset	1	0
+for:Kokkos::View::initialization [particle:ewhich_mirror] via memset	23	0
+for:Kokkos::View::initialization [particle:ewhich_mirror_mirror] via memset	22	0
+for:Kokkos::View::initialization [particle:ivector] via memset	3	0
+for:Kokkos::View::initialization [particle:ivector_mirror] via memset	3	0
+for:Kokkos::View::initialization [particle:mlist] via memset	2	0
+for:Kokkos::View::initialization [particle:mlist_mirror] via memset	2	0
+for:Kokkos::View::initialization [particle:reorder_pass] via memset	2	0
+for:Kokkos::View::initialization [particle:reorder_pass_mirror] via memset	2	0
+for:Kokkos::View::initialization [particle:resize] via memset	2	0
+for:Kokkos::View::initialization [particle:resize_mirror] via memset	2	0
+for:Kokkos::View::initialization [particle:species2group] via memset	1	0
+for:Kokkos::View::initialization [particle:species2group_mirror] via memset	1	0
+for:Kokkos::View::initialization [surf/spread:edarray_local_array] via memset	3	0
+for:Kokkos::View::initialization [surf/spread:edarray_local_array_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf/spread:edvec_local_vec] via memset	4	0
+for:Kokkos::View::initialization [surf/spread:edvec_local_vec_mirror] via memset	4	0
+for:Kokkos::View::initialization [surf:darray] via memset	5	0
+for:Kokkos::View::initialization [surf:darray_mirror] via memset	5	0
+for:Kokkos::View::initialization [surf:dvector] via memset	8	0
+for:Kokkos::View::initialization [surf:dvector_mirror] via memset	8	0
+for:Kokkos::View::initialization [surf:edcol] via memset	1	0
+for:Kokkos::View::initialization [surf:edcol_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf:edcol_mirror_mirror] via memset	2	0
+for:Kokkos::View::initialization [surf:ewhich] via memset	1	0
+for:Kokkos::View::initialization [surf:ewhich_mirror] via memset	7	0
+for:Kokkos::View::initialization [surf:ewhich_mirror_mirror] via memset	6	0
+for:Kokkos::View::initialization [surf:ivector] via memset	2	0
+for:Kokkos::View::initialization [surf:ivector_mirror] via memset	2	0
+for:Kokkos::View::initialization [surf_collide_diffuse:scalars] via memset	1	0
+for:Kokkos::View::initialization [surf_collide_diffuse:scalars_mirror] via memset	1	0
+for:Kokkos::View::initialization [surf_react_pwi:Rrec] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:Rrec_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:area] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:area_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:conc_isp] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:conc_isp_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:dep_bak] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:dep_delta] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:dep_delta_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:e0] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:e0_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:e1] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:e1_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:gid0] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:gid0_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:list] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:list_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:mat_isp] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:mat_isp_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:nreact] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:nreact_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:prob] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:prob_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:prod2] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:prod2_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:prod] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:prod_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:refl_tbl] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:refl_tbl_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:scalars] via memset	1	0
+for:Kokkos::View::initialization [surf_react_pwi:scalars_bak] via memset	1	0
+for:Kokkos::View::initialization [surf_react_pwi:scalars_mirror] via memset	1	0
+for:Kokkos::View::initialization [surf_react_pwi:sconc] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:sconc_mirror] via memset	136	0
+for:Kokkos::View::initialization [surf_react_pwi:sigma_bak] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:sigma_delta] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:sigma_delta_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:spp] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:spp_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:sput] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:sput_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_E] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_E_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_NE] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_NE_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_NL] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_NL_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_NT] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_NT_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_Y] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_Y_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_ax] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_ax_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_kind] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_kind_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_th] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:su_th_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_E] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_E_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_Emax] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_Emax_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_Emin] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_Emin_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_Eq] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_Eq_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_RN] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_RN_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_ca] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_ca_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_cp] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_cp_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_raar] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_raar_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_th] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:tr_th_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:trim] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:trim_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:type] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:type_mirror] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:yscale] via memset	3	0
+for:Kokkos::View::initialization [surf_react_pwi:yscale_mirror] via memset	3	0
+for:Kokkos::View::initialization [update:dx_cd] via memset	6	0
+for:Kokkos::View::initialization [update:scalars] via memset	1	0
+for:Kokkos::ViewCopy-1D	105	0
+for:Kokkos::ViewCopy-2D	4	0
+for:Kokkos::ViewFill-1D	52	0
+for:SPARTA_NS::CommKokkos/SPARTA_NS::TagCommMigrateParticles<1, 1>	5906	0
+for:SPARTA_NS::CommKokkos/SPARTA_NS::TagCommMigrateUnpackParticles<1>	6267	0
+for:SPARTA_NS::ComputeGridWeightedKokkos/SPARTA_NS::TagComputeGridWeighted_NRHO_W	1	0
+for:SPARTA_NS::ComputeGridWeightedKokkos/SPARTA_NS::TagComputeGridWeighted_compute_per_grid_atomic<1>	26	0
+for:SPARTA_NS::FixAveGridKokkos/SPARTA_NS::TagFixAveGrid_Add_ctally	20	0
+for:SPARTA_NS::FixAveGridKokkos/SPARTA_NS::TagFixAveGrid_Zero_tally	1	0
+for:SPARTA_NS::FixCoulombBackgroundKokkos/SPARTA_NS::TagFixCoulombBg	4001	0
+for:SPARTA_NS::FixCrossFieldDiffusionKokkos/SPARTA_NS::TagFixCrossFieldDiffusion	4000	0
+for:SPARTA_NS::FixForceThermalKokkos/SPARTA_NS::TagFixForceThermal	8001	0
+for:SPARTA_NS::FixSurfaceEmitSourceKokkos/SPARTA_NS::TagFixSurfEmitSource	5000	0
+for:SPARTA_NS::FixVolumeChemAdasKokkos/SPARTA_NS::TagFixChemAdas	4001	0
+for:SPARTA_NS::IrregularKokkos/SPARTA_NS::TagIrregularPackBuffer	5708	0
+for:SPARTA_NS::ParticleKokkos/SPARTA_NS::TagParticleCompressMigrateDevice	5906	0
+for:SPARTA_NS::ParticleKokkos/SPARTA_NS::TagParticleSort<1, 0>	15	0
+for:SPARTA_NS::UpdateKokkos/SPARTA_NS::TagUpdateMove<3, 1, 1, 0, 1>	13813	0
+for:SPARTA_NS::UpdateKokkos/SPARTA_NS::TagUpdatePcacheFill	4000	0
+for:cm_init	5906	0
+for:cm_mark	5906	0
+reduce:CombinedFunctorReducer<__nv_hdl_wrapper_t<false, false, false, __nv_dl_tag<void (SPARTA_NS::CommKokkos::*)(int), &SPARTA_NS::CommKokkos::migrate_cells, 4>, void(int, int&), const int, Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>, Kokkos::View<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>, const int, Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>, Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>, const int>, FunctorAnalysis<FunctorPatternInterface::REDUCE, Kokkos::RangePolicy<Kokkos::Cuda>, __nv_hdl_wrapper_t<false, false, false, __nv_dl_tag<void (SPARTA_NS::CommKokkos::*)(int), &SPARTA_NS::CommKokkos::migrate_cells, 4>, void(int, int&), const int, Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>, Kokkos::View<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>, const int, Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>, Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void>, const int>, int>::Reducer, void>	5	0
+scan:__nv_hdl_wrapper_t<false, false, false, __nv_dl_tag<void (SPARTA_NS::CommKokkos::*)(int), &SPARTA_NS::CommKokkos::migrate_cells, 1>, void(int, int&, bool), Kokkos::View<SPARTA_NS::Particle::OnePart*, Kokkos::LayoutLeft, Kokkos::Cuda, void>, const int, Kokkos::View<SPARTA_NS::Grid::ChildCell*, Kokkos::LayoutLeft, Kokkos::Cuda, void>, const int, Kokkos::View<int*, Kokkos::LayoutLeft, Kokkos::Cuda, void> >	5	0
+scan:cm_holes	5906	0
+scan:cm_kept	5906	0

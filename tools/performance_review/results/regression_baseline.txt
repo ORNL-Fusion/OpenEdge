@@ -1,0 +1,56 @@
+========================================================================
+  OpenEdge Regression Tests
+  Executable: /scratch/home_eos/42d/oe_perf_review_20261107/build_gprof/src/spa_perf
+  MPI ranks:  4
+  Steps:      1000
+========================================================================
+
+ionization_recombination                 PASS (metrics within reference) 
+efield_polarization                      PASS (metrics within reference) 
+coulomb_background                       PASS (metrics within reference) 
+coulomb_binary                           PASS (metrics within reference) 
+dustt2005_uniform_plasma                 PASS (metrics within reference) 
+dis2021_uniform_comparison               PASS (metrics within reference) 
+pusher_gca                               PASS (metrics within reference) 
+pusher_boris                             PASS (metrics within reference) 
+pusher_hybrid_axiring                    PASS (metrics within reference) 
+st40_core_species_boundary               SKIP (no dir)
+constant_flux                            PASS (metrics within reference) 
+d2_chemistry                             PASS (metrics within reference) 
+dustt2005_cat_transport                  PASS (metrics within reference) 
+west_boron_powder_dropper                PASS (metrics within reference) 
+cat_liquid_metal_divertor                PASS (metrics within reference) 
+west_tungsten_transport                  PASS (metrics within reference) 
+rfpie_tungsten_transport                 PASS (metrics within reference) 
+west_tungsten_gridcut                    PASS (metrics within reference) 
+west_tungsten_memlimit                   PASS (metrics within reference) 
+rfpie_rebalance_probe                    PASS (metrics within reference) (placement probe: 0 checks, none bad)
+kokkos_parity                            SKIP (needs --kk and --parity-cpu-exe)
+pwi_deposit_tagging                      PASS
+
+========================================================================
+  Results: 20 passed, 0 failed, 2 skipped
+========================================================================
+  PASS  ionization_recombination  (metrics within reference) 
+  PASS  efield_polarization  (metrics within reference) 
+  PASS  coulomb_background  (metrics within reference) 
+  PASS  coulomb_binary  (metrics within reference) 
+  PASS  dustt2005_uniform_plasma  (metrics within reference) 
+  PASS  dis2021_uniform_comparison  (metrics within reference) 
+  PASS  pusher_gca  (metrics within reference) 
+  PASS  pusher_boris  (metrics within reference) 
+  PASS  pusher_hybrid_axiring  (metrics within reference) 
+  SKIP  st40_core_species_boundary  (directory not found)
+  PASS  constant_flux  (metrics within reference) 
+  PASS  d2_chemistry  (metrics within reference) 
+  PASS  dustt2005_cat_transport  (metrics within reference) 
+  PASS  west_boron_powder_dropper  (metrics within reference) 
+  PASS  cat_liquid_metal_divertor  (metrics within reference) 
+  PASS  west_tungsten_transport  (metrics within reference) 
+  PASS  rfpie_tungsten_transport  (metrics within reference) 
+  PASS  west_tungsten_gridcut  (metrics within reference) 
+  PASS  west_tungsten_memlimit  (metrics within reference) 
+  PASS  rfpie_rebalance_probe  (metrics within reference) (placement probe: 0 checks, none bad)
+  SKIP  kokkos_parity  (needs --kk and --parity-cpu-exe <cpu binary>)
+  PASS  pwi_deposit_tagging  (ledger invariants, bw smoke skipped)
+

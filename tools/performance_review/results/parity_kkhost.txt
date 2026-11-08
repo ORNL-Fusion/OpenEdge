@@ -1,0 +1,169 @@
+Kokkos host fallbacks this run: none
+grid/weighted columns at step 0:
+  f_avg[1]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[2]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[3]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[4]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[5]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[6]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[7]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[8]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[9]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[10]      max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[11]      max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[12]      max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[13]      max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[14]      max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[15]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[16]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[17]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[18]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[19]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[20]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[21]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[22]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[23]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[24]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[25]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[26]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[27]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[28]      max rel diff 0.00e+00  nonzero cells cpu  42789 gpu  42789  OK
+  f_avg[29]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[30]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[31]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[32]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[33]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[34]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[35]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[36]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[37]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[38]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[39]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[40]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[41]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[42]      max rel diff 0.00e+00  nonzero cells cpu  42741 gpu  42741  OK
+  f_avg[43]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+  f_avg[44]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+  f_avg[45]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+  f_avg[46]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+  f_avg[47]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+  f_avg[48]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+  f_avg[49]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+  f_avg[50]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+  f_avg[51]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+  f_avg[52]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+  f_avg[53]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+  f_avg[54]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+  f_avg[55]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+  f_avg[56]      max rel diff 0.00e+00  nonzero cells cpu  29061 gpu  29061  OK
+force/thermal kick after 1 step: particles kicked (cpu) 199974/199974, max |dv| 1.654e+00 m/s, max rel diff cpu-gpu 5.50e-13  OK
+PARITY PASS
+Kokkos host fallbacks this run (host calls summed over ranks):
+  pusher plasma cache (pcache)       calls 20        ranks 4/4  steps 1-5  unsupported cache slots (gradients / E-field)
+Loop time of 0.078878 on 4 procs for 5 steps with 192406 particles
+step   0: surfs hit     0  totals f_avs[1]=0 f_avs[2]=0 f_avs[3]=0 f_avs[4]=0 f_avs[5]=0 f_avs[6]=0 f_avs[7]=0 f_avs[8]=0 f_avs[9]=0 f_avs[10]=0 f_avs[11]=0 f_avs[12]=0 f_avs[13]=0 f_avs[14]=0 f_avs[15]=0 f_avs[16]=0 f_avs[17]=0 f_avs[18]=0 f_avs[19]=0 f_avs[20]=0 f_avs[21]=0 f_avs[22]=0 f_avs[23]=0 f_avs[24]=0  max rel diff 0.00e+00  OK
+step   1: surfs hit   134  totals f_avs[1]=0 f_avs[2]=0 f_avs[3]=0 f_avs[4]=0 f_avs[5]=0 f_avs[6]=0 f_avs[7]=67 f_avs[8]=6.7e+11 f_avs[9]=2.451e+25 f_avs[10]=2.451e+25 f_avs[11]=7.544 f_avs[12]=7.544 f_avs[13]=70 f_avs[14]=7e+11 f_avs[15]=2.564e+25 f_avs[16]=2.564e+25 f_avs[17]=7.891 f_avs[18]=7.891 f_avs[19]=23 f_avs[20]=2.3e+11 f_avs[21]=8.472e+24 f_avs[22]=8.472e+24 f_avs[23]=2.607 f_avs[24]=2.607  max rel diff 0.00e+00  OK
+step   2: surfs hit   125  totals f_avs[1]=0 f_avs[2]=0 f_avs[3]=0 f_avs[4]=0 f_avs[5]=0 f_avs[6]=0 f_avs[7]=77 f_avs[8]=7.7e+11 f_avs[9]=2.822e+25 f_avs[10]=2.822e+25 f_avs[11]=8.686 f_avs[12]=8.686 f_avs[13]=52 f_avs[14]=5.2e+11 f_avs[15]=1.904e+25 f_avs[16]=1.904e+25 f_avs[17]=5.86 f_avs[18]=5.86 f_avs[19]=28 f_avs[20]=2.8e+11 f_avs[21]=1.027e+25 f_avs[22]=1.027e+25 f_avs[23]=3.161 f_avs[24]=3.161  max rel diff 0.00e+00  OK
+step   3: surfs hit   123  totals f_avs[1]=0 f_avs[2]=0 f_avs[3]=0 f_avs[4]=0 f_avs[5]=0 f_avs[6]=0 f_avs[7]=65 f_avs[8]=6.5e+11 f_avs[9]=2.377e+25 f_avs[10]=2.377e+25 f_avs[11]=7.317 f_avs[12]=7.317 f_avs[13]=56 f_avs[14]=5.6e+11 f_avs[15]=2.048e+25 f_avs[16]=2.048e+25 f_avs[17]=6.302 f_avs[18]=6.302 f_avs[19]=29 f_avs[20]=2.9e+11 f_avs[21]=1.06e+25 f_avs[22]=1.06e+25 f_avs[23]=3.261 f_avs[24]=3.261  max rel diff 0.00e+00  OK
+step   4: surfs hit   130  totals f_avs[1]=0 f_avs[2]=0 f_avs[3]=0 f_avs[4]=0 f_avs[5]=0 f_avs[6]=0 f_avs[7]=64 f_avs[8]=6.4e+11 f_avs[9]=2.357e+25 f_avs[10]=2.357e+25 f_avs[11]=7.254 f_avs[12]=7.254 f_avs[13]=62 f_avs[14]=6.2e+11 f_avs[15]=2.286e+25 f_avs[16]=2.286e+25 f_avs[17]=7.037 f_avs[18]=7.037 f_avs[19]=33 f_avs[20]=3.3e+11 f_avs[21]=1.214e+25 f_avs[22]=1.214e+25 f_avs[23]=3.735 f_avs[24]=3.735  max rel diff 0.00e+00  OK
+step   5: surfs hit   117  totals f_avs[1]=0 f_avs[2]=0 f_avs[3]=0 f_avs[4]=0 f_avs[5]=0 f_avs[6]=0 f_avs[7]=63 f_avs[8]=6.3e+11 f_avs[9]=2.329e+25 f_avs[10]=2.329e+25 f_avs[11]=7.169 f_avs[12]=7.169 f_avs[13]=56 f_avs[14]=5.6e+11 f_avs[15]=2.059e+25 f_avs[16]=2.059e+25 f_avs[17]=6.337 f_avs[18]=6.337 f_avs[19]=29 f_avs[20]=2.9e+11 f_avs[21]=1.07e+25 f_avs[22]=1.07e+25 f_avs[23]=3.294 f_avs[24]=3.294  max rel diff 0.00e+00  OK
+SURF PARITY PASS
+Kokkos host fallbacks this run: none
+Loop time of 0.0886257 on 4 procs for 2 steps with 114591 particles
+Performance: 22.567 timesteps/s, 2.586 Mparticle-step/s
+particles per step  cpu {0: 200000, 1: 114591, 2: 114591}  gpu {0: 200000, 1: 114591, 2: 114591}
+  count after thinning identical and reduced: OK
+  cpu step1 vs step0 (conservation)    max rel diff over columns 0.00e+00  OK
+  cpu vs gpu step1                     max rel diff over columns 0.00e+00  OK
+  cpu vs gpu step2                     max rel diff over columns 0.00e+00  OK
+POP PARITY PASS
+Kokkos host fallbacks this run: none
+Loop time of 0.220568 on 4 procs for 5 steps with 198720 particles
+Performance: 22.669 timesteps/s, 4.505 Mparticle-step/s
+writer (GPU, step 5 before write_restart): 198694 particles, columns ['id', 'type', 'x', 'y', 'z', 'vx', 'vy', 'vz', 'p_pweight']
+  reader cpu: 198694 particles, id set identical: OK
+    type       bitwise equal OK  (nonzero 198694)
+    x          bitwise equal OK  (nonzero 198694)
+    y          bitwise equal OK  (nonzero 198694)
+    z          bitwise equal OK  (nonzero 198694)
+    vx         bitwise equal OK  (nonzero 198694)
+    vy         bitwise equal OK  (nonzero 198694)
+    vz         bitwise equal OK  (nonzero 198694)
+    p_pweight  bitwise equal OK  (nonzero 198694)
+  reader gpu: 198694 particles, id set identical: OK
+    type       bitwise equal OK  (nonzero 198694)
+    x          bitwise equal OK  (nonzero 198694)
+    y          bitwise equal OK  (nonzero 198694)
+    z          bitwise equal OK  (nonzero 198694)
+    vx         bitwise equal OK  (nonzero 198694)
+    vy         bitwise equal OK  (nonzero 198694)
+    vz         bitwise equal OK  (nonzero 198694)
+    p_pweight  bitwise equal OK  (nonzero 198694)
+RESTART PASS
+grid/weighted columns at step 0:
+  f_avg[1]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[2]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[3]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[4]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[5]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[6]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[7]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[8]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[9]       max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[10]      max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[11]      max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[12]      max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[13]      max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[14]      max rel diff 0.00e+00  nonzero cells cpu      0 gpu      0  OK (empty)
+  f_avg[15]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[16]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[17]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[18]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[19]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[20]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[21]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[22]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[23]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[24]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[25]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[26]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[27]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[28]      max rel diff 0.00e+00  nonzero cells cpu  41477 gpu  41477  OK
+  f_avg[29]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[30]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[31]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[32]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[33]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[34]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[35]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[36]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[37]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[38]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[39]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[40]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[41]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[42]      max rel diff 0.00e+00  nonzero cells cpu  41251 gpu  41251  OK
+  f_avg[43]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+  f_avg[44]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+  f_avg[45]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+  f_avg[46]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+  f_avg[47]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+  f_avg[48]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+  f_avg[49]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+  f_avg[50]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+  f_avg[51]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+  f_avg[52]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+  f_avg[53]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+  f_avg[54]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+  f_avg[55]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+  f_avg[56]      max rel diff 0.00e+00  nonzero cells cpu  28212 gpu  28212  OK
+force/thermal kick after 1 step: particles kicked (cpu) 198694/198694, max |dv| 1.654e+00 m/s, max rel diff cpu-gpu 5.50e-13  OK
+PARITY PASS
+Kokkos host fallbacks this run (host calls summed over ranks):
+  pusher plasma cache (pcache)       calls 4         ranks 4/4  steps 1-1  unsupported cache slots (gradients / E-field)
+Loop time of 0.0974865 on 4 procs for 1 steps with 199738 particles
+particles: step0 cpu 199974 gpu 199974, step1 cpu 199712 gpu 199712, matched at step1 199712
+  same particle set after one moving step: OK
+  Boris dv under constant E+B: kicked 199712/199712, max |dv| 2.300e+01 m/s, max rel diff cpu-gpu 3.95e-14  OK
+  positions after one step: max rel diff 2.26e-19  OK
+EFIELD PARITY PASS
