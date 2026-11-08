@@ -386,8 +386,14 @@ pinned host views is a cudaMemcpy with fences, which re-introduced the synchroni
 to remove. The memcpy variant gains 4.7 % on both one and four GPUs; reactions 1064907-1069380 and
 surface reactions 378833-379621, within noise.
 
-Profile, rank 0 of 4, 5000 steps, item 2 vs retained candidate: copy calls unchanged (36
-cudaMemcpyAsync per step: 15.5 H2D, 17.7 D2H, 12 D2D), bytes unchanged (H2D 434 kB, D2H 40 kB, D2D
+Profile, rank 0 of 4, 5000 steps, item 2 vs retained candidate. Counting scopes: the host API
+issues 36.0 cudaMemcpyAsync + 1.2 cudaMemcpy + 8.1 cudaMemcpyToSymbolAsync = 45.3 copy calls per
+step; the GPU-side memory operations are 15.5 H2D + 17.7 D2H + 12.0 D2D = 45.2 per step, the same
+set seen from the device. The 8.1 ToSymbol copies are Kokkos functor-argument uploads to constant
+memory (one per `cuda_parallel_launch_constant_memory` launch), so only 7.4 of the H2D operations
+carry data. Copy calls and bytes are unchanged by the pinned block (H2D 434 kB, D2H 40 kB, D2D
+9.3 MB per step), as intended: it changes how the host waits, not what moves. Kernels 0.54 ms per
+step in both. Bytes unchanged (H2D 434 kB, D2H 40 kB, D2D
 9.3 MB per step), kernels 0.54 ms per step both. Host blocking time per step moved and shrank: item
 2 cudaMemcpyAsync 0.59 ms + stream/event/device syncs 0.21 ms = 0.80 ms; candidate cudaMemcpyAsync
 0.24 ms + cudaStreamSynchronize 0.30 ms + event/device 0.17 ms = 0.71 ms. The copies no longer
@@ -412,6 +418,29 @@ run. The campaign figure now exceeds 10x per node-hour on this deck; the single-
 3.9x, with 0.54 ms of kernels inside a 1.65 ms step at 4 ranks (loop/steps). The remaining host
 share is the per-pass structure itself (2.1 move launches, migration plan and exchange, 10 fences)
 and the fix kernels; those are the shared-gather and fusion items, not yet started.
+
+## 17. Migration-plan skipping: measured, not implemented
+
+`OE_COMM_TIMING` with two new counters (commit pending with the gather work), 20000 steps, gridcut 0.035:
+
+| | 4 A100 | 1 A100 |
+|---|---|---|
+| migrate passes per rank | 56034 (2.8 per step) | 39999 (2.0 per step) |
+| passes with nothing to exchange on any rank | 36714 (65 %) | 39999 (100 %) |
+| passes with nothing leaving a given rank (summed over ranks) | 145645 of 224136 | 20021 |
+| plan (Alltoall) seconds, rank 0 / slowest rank | 1.84 / 6.67 | 0.01 |
+| exchange seconds | 2.37 | 0 |
+| migrate total seconds, rank 0 / slowest | 6.32 / 11.27 | 1.28 |
+
+Two thirds of the passes move nothing anywhere (reaction-product continuation passes and settled
+entry/exit passes), and each still pays the counts Alltoall. That Alltoall is also the only thing
+that establishes global emptiness: a rank with no leavers may still receive, so participation
+cannot be dropped, and any cheaper test (an Allreduce of the leaver count) is itself a collective
+of the same order at 4 ranks. The avoidable part is therefore the Alltoall call overhead alone,
+about 33 us per pass on rank 0 (1.84 s / 56034), i.e. under 0.06 ms per step, while the 4.8 s
+difference between rank 0 and the slowest rank in `plan` is imbalance wait that any collective
+would absorb. Not worth a code path. The lever that this measurement does expose is the pass count:
+2.8 migrate passes per step at 4 ranks (2.0 at 1 rank, all empty) is the continuation-queue item.
 
 ## 7. Reproduction
 
