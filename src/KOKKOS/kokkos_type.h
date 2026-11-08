@@ -80,6 +80,17 @@ typedef Kokkos::HostSpace::execution_space SPAHostType;
 
 typedef SPADeviceType DeviceType;
 
+// OpenEdge: pinned host staging for the small per-step control transfers. A
+// cudaMemcpyAsync into pageable host memory is staged synchronously by the
+// driver; into pinned memory it is enqueued and only the explicit fence waits.
+#ifdef KOKKOS_ENABLE_CUDA
+typedef Kokkos::CudaHostPinnedSpace OEPinnedSpace;
+#else
+typedef Kokkos::HostSpace OEPinnedSpace;
+#endif
+typedef Kokkos::View<int, Kokkos::LayoutRight, OEPinnedSpace> t_pinned_int_scalar;
+typedef Kokkos::View<int*, Kokkos::LayoutRight, OEPinnedSpace> t_pinned_int_1d;
+
 // set ExecutionSpace stuct with variable "space"
 
 template<class Device>

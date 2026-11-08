@@ -52,6 +52,7 @@ CommKokkos::CommKokkos(SPARTA *sparta) : Comm(sparta),
   k_pmeta = DAT::tdual_int_1d("comm:pmeta",1);
   d_pmeta = k_pmeta.view_device();
   h_pmeta = k_pmeta.view_host();
+  p_pmeta = t_pinned_int_1d("comm:pmeta_pinned",1);
 
   oe_comm_timing_every = 0; oe_ct_calls = 0; oe_ct_last = -1;
   oe_nsend_sum = oe_nrecv_sum = 0;
@@ -179,6 +180,7 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
     k_pmeta = DAT::tdual_int_1d(Kokkos::view_alloc("comm:pmeta",Kokkos::WithoutInitializing),maxpproc+1);
     d_pmeta = k_pmeta.view_device();
     h_pmeta = k_pmeta.view_host();
+    p_pmeta = t_pinned_int_1d(Kokkos::view_alloc("comm:pmeta_pinned",Kokkos::WithoutInitializing),maxpproc+1);
   }
   pproc = h_pmeta.data()+1;
   //if (maxsendbuf == 0 || nmigrate*nbytes_total > maxsendbuf) { // this doesn't work, not sure why
@@ -240,8 +242,9 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
   if (nmigrate) {
     particle_kk->modify(Device,PARTICLE_MASK);
     const auto n1 = std::make_pair(0,nmigrate+1);
-    Kokkos::deep_copy(DeviceType(),Kokkos::subview(h_pmeta,n1),Kokkos::subview(d_pmeta,n1));
-    DeviceType().fence();   // one fence (was two global fences)
+    Kokkos::deep_copy(DeviceType(),Kokkos::subview(p_pmeta,n1),Kokkos::subview(d_pmeta,n1));   // async into pinned staging
+    DeviceType().fence();
+    memcpy(h_pmeta.data(),p_pmeta.data(),(nmigrate+1)*sizeof(int));   // pinned staging -> host (plain memcpy)
     nsend = h_pmeta(0);
   }
   d_particles = t_particle_1d(); // destroy reference to reduce memory use

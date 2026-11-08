@@ -49,6 +49,7 @@ SurfReactSurfacePWIKokkos::SurfReactSurfacePWIKokkos(SPARTA *sparta, int narg,
   d_tally_single = Kokkos::subview(d_scalars,std::make_pair(1,nlist+1));
 
   h_scalars = HAT::t_int_1d("surf_react_pwi:scalars_mirror",nlist+1);
+  p_scalars = t_pinned_int_1d("surf_react_pwi:scalars_pinned",nlist+1);
 
   d_scalars_bak = DAT::t_int_1d("surf_react_pwi:scalars_bak",nlist+1);
 
@@ -431,8 +432,9 @@ void SurfReactSurfacePWIKokkos::tally_reset()
 
 void SurfReactSurfacePWIKokkos::tally_update()
 {
-  Kokkos::deep_copy(DeviceType(),h_scalars,d_scalars);
-  DeviceType().fence();   // one fence for the readback (was two global fences)
+  Kokkos::deep_copy(DeviceType(),p_scalars,d_scalars);   // async into pinned staging
+  DeviceType().fence();
+  memcpy(h_scalars.data(),p_scalars.data(),h_scalars.span()*sizeof(int));   // host <-> pinned staging (plain memcpy)
   nsingle += h_scalars(0);
   for (int i = 0; i < nlist; i++) tally_single[i] += h_scalars(i+1);
   Kokkos::deep_copy(DeviceType(),d_scalars,0);   // async fill; the host copy above is complete

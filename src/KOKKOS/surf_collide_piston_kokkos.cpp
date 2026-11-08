@@ -16,6 +16,7 @@
    Contributing author: Alan Stagg (Sandia)
 ------------------------------------------------------------------------- */
 
+#include <cstring>
 #include "surf_collide_piston_kokkos.h"
 #include "fix.h"
 #include "modify.h"
@@ -46,6 +47,7 @@ SurfCollidePistonKokkos::SurfCollidePistonKokkos(SPARTA *sparta, int narg, char 
   d_nreact_one = Kokkos::subview(d_scalars,1);
 
   h_scalars = t_host_int_2("surf_collide_piston:scalars_mirror");
+  p_scalars = t_pinned_int_1d("surf_collide_piston:scalars_pinned",2);
   h_nsingle = Kokkos::subview(h_scalars,0);
   h_nreact_one = Kokkos::subview(h_scalars,1);
 }
@@ -168,13 +170,20 @@ void SurfCollidePistonKokkos::post_collide()
   ParticleKokkos* particle_kk = (ParticleKokkos*) particle;
   if (ambi_flag || vibmode_flag) particle_kk->modify(Device,CUSTOM_MASK);
 
-  Kokkos::deep_copy(DeviceType(),h_scalars,d_scalars);   // async; UpdateKokkos fences once for all styles
+}
+
+/* ---------------------------------------------------------------------- */
+
+void SurfCollidePistonKokkos::post_collide_issue()
+{
+  Kokkos::deep_copy(DeviceType(),p_scalars,d_scalars);   // async into pinned staging; UpdateKokkos fences once
 }
 
 /* ---------------------------------------------------------------------- */
 
 void SurfCollidePistonKokkos::post_collide_apply()
 {
+  memcpy(h_scalars.data(),p_scalars.data(),h_scalars.span()*sizeof(int));   // host <-> pinned staging (plain memcpy)
   int m = surf->find_collide(id);
   auto sc = surf->sc[m]; // can't modify the copy directly, use the original
   sc->nsingle += h_nsingle();

@@ -77,6 +77,7 @@ class CommKokkos : public Comm {
   DAT::tdual_int_1d k_pmeta;
   DAT::t_int_1d d_pmeta;
   HAT::t_int_1d h_pmeta;
+  t_pinned_int_1d p_pmeta;   // pinned staging for the per-pass pmeta readback
   DAT::t_int_1d d_cellmig_plist;       // particles in migrating cells (device cell migration)
   class Irregular *ibalance;           // own comm plan for the rebalance migration (never the per-step neighbor plan)
   void migrate_cells_only(int, int *);

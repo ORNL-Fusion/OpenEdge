@@ -112,6 +112,7 @@ UpdateKokkos::UpdateKokkos(SPARTA *sparta) : Update(sparta),
 
   d_scalars = t_int_14("update:scalars");
   h_scalars = t_host_int_14("collide:scalars_mirror");
+  p_scalars = t_pinned_int_1d("update:scalars_pinned",d_scalars.extent(0));
 
   d_ncomm_one     = Kokkos::subview(d_scalars,0);
   d_nexit_one     = Kokkos::subview(d_scalars,1);
@@ -1097,7 +1098,7 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
         error->all(FLERR,"Kokkos currently supports two instances of each surface collide method");
     }
 
-    Kokkos::deep_copy(Kokkos::DefaultHostExecutionSpace(),h_scalars,0);   // host fill without a global fence
+    memset(h_scalars.data(),0,h_scalars.span()*sizeof(int));   // host fill, no Kokkos fence   // host fill without a global fence
 
     if (!continue_loop_flag) {
       nmigrate = 0;
@@ -1177,7 +1178,9 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
       h_nlocal() = particle->nlocal;
       if (continue_loop_flag) h_nmigrate() = nmigrate;
 
-      Kokkos::deep_copy(DeviceType(),d_scalars,h_scalars);   // OpenEdge perf: async, ordered before the move kernel on the same instance
+      // control block: host -> pinned staging -> device (true async upload)
+      memcpy(p_scalars.data(),h_scalars.data(),p_scalars.span()*sizeof(int));   // host <-> pinned staging (plain memcpy)
+      Kokkos::deep_copy(DeviceType(),d_scalars,p_scalars);
 
       copymode = 1;
 
@@ -1210,8 +1213,23 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
 
       copymode = 0;
 
-      Kokkos::deep_copy(DeviceType(),h_scalars,d_scalars);
-      DeviceType().fence();   // the one fence per attempt the host needs (was two global fences)
+      // surface-collide counters: issue their readbacks now so the single fence
+      // below covers them too (the host folds them after the attempt loop)
+      if (surf->nsc > 0) {
+        int nspec,ndiff,nvan,npist,ntrans,ntor;
+        nspec = ndiff = nvan = npist = ntrans = ntor = 0;
+        for (int n = 0; n < surf->nsc; n++) {
+          if (strcmp(surf->sc[n]->style,"toroidal") == 0) sc_kk_toroidal_copy[ntor++].obj.post_collide_issue();
+          else if (strcmp(surf->sc[n]->style,"specular") == 0) sc_kk_specular_copy[nspec++].obj.post_collide_issue();
+          else if (strcmp(surf->sc[n]->style,"diffuse") == 0) sc_kk_diffuse_copy[ndiff++].obj.post_collide_issue();
+          else if (strcmp(surf->sc[n]->style,"vanish") == 0) sc_kk_vanish_copy[nvan++].obj.post_collide_issue();
+          else if (strcmp(surf->sc[n]->style,"piston") == 0) sc_kk_piston_copy[npist++].obj.post_collide_issue();
+          else if (strcmp(surf->sc[n]->style,"transparent") == 0) sc_kk_transparent_copy[ntrans++].obj.post_collide_issue();
+        }
+      }
+      Kokkos::deep_copy(DeviceType(),p_scalars,d_scalars);   // control block D2H into pinned staging
+      DeviceType().fence();   // the one fence per attempt: control block + collide counters
+      memcpy(h_scalars.data(),p_scalars.data(),h_scalars.span()*sizeof(int));   // host <-> pinned staging (plain memcpy)
 
       if (h_retry()) {
         int nlocal_new = h_nlocal();
@@ -1224,7 +1242,7 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
 
         //  reset counters
 
-        Kokkos::deep_copy(Kokkos::DefaultHostExecutionSpace(),h_scalars,0);
+        memset(h_scalars.data(),0,h_scalars.span()*sizeof(int));   // host fill, no Kokkos fence
         reduce = UPDATE_REDUCE();
         h_retry() = 1;
 
@@ -1362,8 +1380,7 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
     }
     // OpenEdge perf: the styles issued their counter readbacks asynchronously;
     // one fence, then fold them (was 2 global fences per style per pass)
-    if (surf->nsc > 0) {
-      DeviceType().fence();
+    if (surf->nsc > 0) {   // counters already on the host (fenced inside the attempt loop)
       int nspec,ndiff,nvan,npist,ntrans,ntor;
       nspec = ndiff = nvan = npist = ntrans = ntor = 0;
       for (int n = 0; n < surf->nsc; n++) {

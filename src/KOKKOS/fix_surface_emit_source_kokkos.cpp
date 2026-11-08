@@ -379,7 +379,7 @@ void FixSurfaceEmitSourceKokkos::perform_task()
     d_new_count = Kokkos::View<int, DeviceType>("emit:newn");
     d_nsingle   = Kokkos::View<int, DeviceType>("emit:nsingle");
   }
-  if (!h_newn_.data()) h_newn_ = Kokkos::View<int, Kokkos::HostSpace>("emit:newn_host");
+  if (!h_newn_.data()) h_newn_ = t_pinned_int_scalar("emit:newn_host");
   h_newn_() = particle->nlocal;
   Kokkos::deep_copy(DeviceType(),d_new_count, h_newn_);   // async view->view (source stays alive)
   Kokkos::deep_copy(DeviceType(),d_nsingle, 0);            // memset
@@ -391,8 +391,8 @@ void FixSurfaceEmitSourceKokkos::perform_task()
 
   // two async readbacks into persistent host views and one fence (was two blocking
   // scalar copies with two global fences each)
-  if (!h_newn_rb_.data()) h_newn_rb_ = Kokkos::View<int, Kokkos::HostSpace>("emit:newn_rb");
-  if (!h_nsingle_rb_.data()) h_nsingle_rb_ = Kokkos::View<int, Kokkos::HostSpace>("emit:nsingle_rb");
+  if (!h_newn_rb_.data()) h_newn_rb_ = t_pinned_int_scalar("emit:newn_rb");
+  if (!h_nsingle_rb_.data()) h_nsingle_rb_ = t_pinned_int_scalar("emit:nsingle_rb");
   Kokkos::deep_copy(DeviceType(),h_newn_rb_, d_new_count);
   Kokkos::deep_copy(DeviceType(),h_nsingle_rb_, d_nsingle);
   DeviceType().fence();

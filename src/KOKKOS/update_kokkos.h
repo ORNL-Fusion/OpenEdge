@@ -466,6 +466,7 @@ class UpdateKokkos : public Update {
   typedef tdual_int_14::t_host t_host_int_14;
   t_int_14 d_scalars;
   t_host_int_14 h_scalars;
+  t_pinned_int_1d p_scalars;   // pinned staging for the per-pass control block
 
   DAT::t_int_scalar d_ntouch_one;     HAT::t_int_scalar h_ntouch_one;
   DAT::t_int_scalar d_nexit_one;      HAT::t_int_scalar h_nexit_one;

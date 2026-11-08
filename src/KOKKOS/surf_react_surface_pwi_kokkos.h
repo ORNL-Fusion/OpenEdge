@@ -74,6 +74,7 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
 
   // ---- device-resident reaction data (flattened in init) ----
 
+  t_pinned_int_1d p_scalars;        // pinned staging for the per-step tally readback
   DAT::t_int_1d d_reactions_n;      // [nspecies] # reactions per species
   DAT::t_int_2d d_list;             // [nspecies][nmax] -> reaction index
 

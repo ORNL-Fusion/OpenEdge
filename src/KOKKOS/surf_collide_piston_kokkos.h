@@ -44,7 +44,8 @@ class SurfCollidePistonKokkos : public SurfCollidePiston {
   ~SurfCollidePistonKokkos();
   void init();
   void pre_collide();
-  void post_collide();          // issues the async counter readback
+  void post_collide_issue();    // issues the async counter readback into pinned staging
+  void post_collide();          // flags only (no device transfer)
   void post_collide_apply();    // after one fence: folds the counters into the host tallies
   void backup();
   void restore();
@@ -56,6 +57,7 @@ class SurfCollidePistonKokkos : public SurfCollidePiston {
   typedef tdual_int_2::t_host t_host_int_2;
   t_int_2 d_scalars;
   t_host_int_2 h_scalars;
+  t_pinned_int_1d p_scalars;   // pinned staging (2 ints)
 
   DAT::t_int_scalar d_nsingle;
   DAT::t_int_scalar d_nreact_one;

@@ -34,7 +34,8 @@ class SurfCollideTransparentKokkos : public SurfCollideTransparent {
   ~SurfCollideTransparentKokkos() {}
 
   void pre_collide();
-  void post_collide();          // issues the async counter readback
+  void post_collide_issue();    // issues the async counter readback into pinned staging
+  void post_collide();          // flags only (no device transfer)
   void post_collide_apply();    // after one fence: folds the counters into the host tallies
 
  private:
@@ -42,6 +43,7 @@ class SurfCollideTransparentKokkos : public SurfCollideTransparent {
   DAT::tdual_int_scalar k_nsingle;
   DAT::t_int_scalar d_nsingle;
   HAT::t_int_scalar h_nsingle;
+  t_pinned_int_scalar p_nsingle;   // pinned staging
 
  public:
 
