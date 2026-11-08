@@ -147,3 +147,5 @@ examples/**/regression.log
 
 # local cluster launch bundles (NERSC), kept out of the repo like the EOS scripts
 **/.nersc_bundle_patch/
+/doc/html_sphinx/
+/doc/src/_build/

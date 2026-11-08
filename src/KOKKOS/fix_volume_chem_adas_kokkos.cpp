@@ -195,8 +195,6 @@ void FixVolumeChemAdasKokkos::init()
 
   if (getenv("OE_CHEM_HOST")) {
     device_ok = 0; why = "OE_CHEM_HOST env override";
-  } else if (eirene_mode) {
-    device_ok = 0; why = "eirene_mode";
   } else if (volume_source_cidx >= 0 || volume_source_fidx >= 0) {
     device_ok = 0; why = "volume_source";
   } else if (tally_units == TALLY_BATCH || tally_units == TALLY_BATCH_FIX) {
@@ -856,7 +854,7 @@ void FixVolumeChemAdasKokkos::operator()(TagFixChemAdas, const int &i) const
   for (int c = 0; c < 6; c++) d_ev_vals(slot,c) = vals[c];
 
   // ---- apply the reaction to the particle ----
-  // (no eirene_mode, no GC state to invalidate — hybrid errors out under
+  // (no GC state to invalidate — hybrid errors out under
   // Kokkos; single product only, enforced at init)
   p.ispecies = d_r_product0(best_idx);
   // species/charge change invalidates the stored guiding-center state

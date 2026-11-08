@@ -30,3 +30,17 @@ clean:
 	rm -f $(HTML) Manual.pdf
 
 .PHONY: html pdf clean
+
+# Sphinx manual (Read the Docs): doc/*.txt -> doc/src/*.rst -> doc/html_sphinx
+#   make rst      regenerate doc/src/*.rst from the .txt sources
+#   make sphinx   build the HTML manual with Sphinx into doc/html_sphinx
+# Needs `pip install -r doc/utils/requirements.txt`.
+SPHINX ?= sphinx-build
+
+rst:
+	$(PY) utils/txt2rst.py -o src $(SOURCES)
+
+sphinx: rst
+	$(SPHINX) -W --keep-going -b html src html_sphinx
+
+.PHONY: rst sphinx

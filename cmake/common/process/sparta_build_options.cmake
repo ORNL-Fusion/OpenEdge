@@ -290,11 +290,13 @@ set(SPARTA_DEFAULT_CXX_COMPILE_FLAGS ${SPARTA_CXX_COMPILE_FLAGS}
                                      ${SPARTA_DEFAULT_CXX_COMPILE_FLAGS})
 # ################### BEGIN COMBINE CXX FLAGS ####################
 
-if(BUILD_MPI)
-  set_property(
-    TARGET ${TARGET_SPARTA_BUILD_MPI}
-    PROPERTY INTERFACE_COMPILE_OPTIONS ${SPARTA_DEFAULT_CXX_COMPILE_FLAGS})
-endif()
+# Keep project options on the project directory, not an imported MPI
+# dependency. The combined Kokkos build otherwise loses feature options;
+# missing SPARTA_KOKKOS selects dummy classes alongside the real classes.
+# This also applies the project definitions to builds using MPI stubs.
+foreach(flag IN LISTS SPARTA_DEFAULT_CXX_COMPILE_FLAGS)
+  add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:${flag}>")
+endforeach()
 
 if(SPARTA_CTEST_CONFIGS)
   string(REPLACE " " ";" SPARTA_CTEST_CONFIGS "${SPARTA_CTEST_CONFIGS}")
