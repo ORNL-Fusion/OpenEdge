@@ -1097,7 +1097,7 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
         error->all(FLERR,"Kokkos currently supports two instances of each surface collide method");
     }
 
-    Kokkos::deep_copy(h_scalars,0);
+    Kokkos::deep_copy(Kokkos::DefaultHostExecutionSpace(),h_scalars,0);   // host fill without a global fence
 
     if (!continue_loop_flag) {
       nmigrate = 0;
@@ -1210,7 +1210,8 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
 
       copymode = 0;
 
-      Kokkos::deep_copy(h_scalars,d_scalars);
+      Kokkos::deep_copy(DeviceType(),h_scalars,d_scalars);
+      DeviceType().fence();   // the one fence per attempt the host needs (was two global fences)
 
       if (h_retry()) {
         int nlocal_new = h_nlocal();
@@ -1223,7 +1224,7 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
 
         //  reset counters
 
-        Kokkos::deep_copy(h_scalars,0);
+        Kokkos::deep_copy(Kokkos::DefaultHostExecutionSpace(),h_scalars,0);
         reduce = UPDATE_REDUCE();
         h_retry() = 1;
 

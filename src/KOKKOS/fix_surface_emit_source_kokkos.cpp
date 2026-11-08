@@ -389,9 +389,14 @@ void FixSurfaceEmitSourceKokkos::perform_task()
       Kokkos::RangePolicy<DeviceType,TagFixSurfEmitSource>(0,ntask),*this);
   copymode = 0;   // the blocking deep_copy of the counters below synchronizes
 
-  int nnew_total = 0, nsingle_dev = 0;
-  Kokkos::deep_copy(nnew_total, d_new_count);
-  Kokkos::deep_copy(nsingle_dev, d_nsingle);
+  // two async readbacks into persistent host views and one fence (was two blocking
+  // scalar copies with two global fences each)
+  if (!h_newn_rb_.data()) h_newn_rb_ = Kokkos::View<int, Kokkos::HostSpace>("emit:newn_rb");
+  if (!h_nsingle_rb_.data()) h_nsingle_rb_ = Kokkos::View<int, Kokkos::HostSpace>("emit:nsingle_rb");
+  Kokkos::deep_copy(DeviceType(),h_newn_rb_, d_new_count);
+  Kokkos::deep_copy(DeviceType(),h_nsingle_rb_, d_nsingle);
+  DeviceType().fence();
+  int nnew_total = h_newn_rb_(), nsingle_dev = h_nsingle_rb_();
   if (nnew_total > (int) particle_kk->k_particles.d_view.extent(0))
     error->one(FLERR,"fix surface/emit/source/kk: device emission overran the "
                "particle array (pre-grow capacity too small)");

@@ -215,7 +215,7 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
   // OpenEdge perf (2026-09-14): counter + destination list in one view, zeroed on
   // the device and read back with one D2H copy of nmigrate+1 ints (was: counter
   // H2D, kernel, fence, full pproc D2H, counter D2H). Nothing to pack: no launches.
-  if (nmigrate) Kokkos::deep_copy(Kokkos::subview(d_pmeta,0),0);
+  if (nmigrate) Kokkos::deep_copy(DeviceType(),Kokkos::subview(d_pmeta,0),0);   // async fill
 
   copymode = 1;
   if (!nmigrate) {
@@ -240,7 +240,8 @@ int CommKokkos::migrate_particles(int nmigrate, int *plist, const DAT::t_int_1d 
   if (nmigrate) {
     particle_kk->modify(Device,PARTICLE_MASK);
     const auto n1 = std::make_pair(0,nmigrate+1);
-    Kokkos::deep_copy(Kokkos::subview(h_pmeta,n1),Kokkos::subview(d_pmeta,n1));   // fences
+    Kokkos::deep_copy(DeviceType(),Kokkos::subview(h_pmeta,n1),Kokkos::subview(d_pmeta,n1));
+    DeviceType().fence();   // one fence (was two global fences)
     nsend = h_pmeta(0);
   }
   d_particles = t_particle_1d(); // destroy reference to reduce memory use

@@ -170,7 +170,7 @@ void FixCrossFieldDiffusionKokkos::start_of_step()
   if ((int) update_kk->d_dx_cd.extent(0) < update->cd_nmax)
     update_kk->d_dx_cd =
         DAT::t_float_2d_lr("update:dx_cd",update->cd_nmax,3);
-  Kokkos::deep_copy(update_kk->d_dx_cd,0.0);
+  Kokkos::deep_copy(DeviceType(),update_kk->d_dx_cd,0.0);   // async fill, ordered before the kernel on the same instance
   update->cd_flag = 1;
   update_kk->oe_cd_dev = 1;   // run() skips its host->device upload
 

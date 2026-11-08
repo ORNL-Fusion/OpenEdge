@@ -420,7 +420,7 @@ void SurfReactSurfacePWIKokkos::tally_reset()
 {
   SurfReact::tally_reset();
 
-  Kokkos::deep_copy(d_scalars,0);
+  Kokkos::deep_copy(DeviceType(),d_scalars,0);   // async fill
 }
 
 /* ----------------------------------------------------------------------
@@ -431,10 +431,11 @@ void SurfReactSurfacePWIKokkos::tally_reset()
 
 void SurfReactSurfacePWIKokkos::tally_update()
 {
-  Kokkos::deep_copy(h_scalars,d_scalars);
+  Kokkos::deep_copy(DeviceType(),h_scalars,d_scalars);
+  DeviceType().fence();   // one fence for the readback (was two global fences)
   nsingle += h_scalars(0);
   for (int i = 0; i < nlist; i++) tally_single[i] += h_scalars(i+1);
-  Kokkos::deep_copy(d_scalars,0);
+  Kokkos::deep_copy(DeviceType(),d_scalars,0);   // async fill; the host copy above is complete
 
   if (sigma_on && update->ntimestep % sigma_nevery == 0) {
     timer->stamp(TIME_SREACT);
