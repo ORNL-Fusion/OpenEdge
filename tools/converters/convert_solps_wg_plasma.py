@@ -15,7 +15,8 @@ vacuum-fill / wall-gap machinery is unnecessary: every polygonal B2
 cell is fan-triangulated directly and each triangle indexes its parent
 cell's plasma values. B on mesh vertices comes from the GEQDSK
 equilibrium. Gradients (thermal force) and E = -grad(po) are computed
-per cell by least squares over face-adjacent neighbours.
+per cell by least squares over face-adjacent neighbours. The ion fluxes
+through the wall faces are written to /wall_flux/ (see _wall_flux.py).
 
 Usage:
   python convert_solps_wg_plasma.py RUN_DIR --b2fgmtry BASERUN/b2fgmtry \
@@ -39,6 +40,7 @@ from convert_solps_plasma_eirene import (  # noqa: E402
     _ordered_loops_from_edges,
     _read_geqdsk_bfield,
 )
+from _wall_flux import write_wall_flux_h5  # noqa: E402
 
 EV = 1.602176634e-19
 
@@ -118,17 +120,83 @@ def lsq_gradient(values, rc, zc, nbrs):
     return gr, gz
 
 
-def wall_loop(vtx_r, vtx_z, tri):
-    """Ordered wall polyline = longest boundary loop of the triangulation."""
+def _wall_loop_indices(tri):
+    """Vertex indices of the longest boundary loop of the triangulation."""
     edge_count = {}
     for t in tri:
         for a, b in ((t[0], t[1]), (t[1], t[2]), (t[2], t[0])):
             e = (int(min(a, b)), int(max(a, b)))
             edge_count[e] = edge_count.get(e, 0) + 1
     boundary = [e for e, n in edge_count.items() if n == 1]
-    loops = _ordered_loops_from_edges(boundary)
-    loop = max(loops, key=len)
+    return max(_ordered_loops_from_edges(boundary), key=len)
+
+
+def wall_loop(vtx_r, vtx_z, tri):
+    """Ordered wall polyline = longest boundary loop of the triangulation."""
+    loop = _wall_loop_indices(tri)
     return np.asarray([vtx_r[i] for i in loop]), np.asarray([vtx_z[i] for i in loop])
+
+
+def wall_flux_wg(geo, state, tri, ion_idx, te, ti, vbr, vbz, vbt):
+    """Per-ion flux density through the wall faces, in wall-loop order.
+
+    One sample per labelled face (fcLbl > 0). The flux is the sum of both
+    fna components over the face area, positive from the interior cell into
+    the guard cell; te/ti are the guard-cell (boundary) values.
+    Returns None when the state has no face fluxes or the labelled faces do
+    not form the wall loop.
+    """
+    if "fna" not in state:
+        return None
+    nfc = int(geo["nFc"])
+    lbl = np.asarray(geo["fcLbl"]).ravel()
+    area = np.asarray(geo["fcS"], dtype=np.float64).ravel()
+    fv = np.asarray(geo["fcVx"], dtype=np.int64) - 1
+    fc = np.asarray(geo["fcCv"], dtype=np.int64) - 1
+    vtx = np.asarray(geo["Vertices"], dtype=np.float64)
+    cells = np.asarray(geo["Faces"], dtype=np.float64)
+    interior = np.isfinite(cells).sum(axis=1) >= 3        # guard cells have no polygon
+
+    loop = list(_wall_loop_indices(tri))
+    if loop[0] == loop[-1]:
+        loop = loop[:-1]
+    n = len(loop)
+    face_of = {(int(min(u, v)), int(max(u, v))): i
+               for i, (u, v) in enumerate(fv) if lbl[i] > 0}
+    try:
+        faces = np.array([face_of[(min(loop[i], loop[(i + 1) % n]),
+                                   max(loop[i], loop[(i + 1) % n]))]
+                          for i in range(n)])
+    except KeyError:
+        return None
+
+    in0 = interior[fc[faces, 0]]
+    cv_in = np.where(in0, fc[faces, 0], fc[faces, 1])
+    cv_gd = np.where(in0, fc[faces, 1], fc[faces, 0])
+    sign = np.where(in0, 1.0, -1.0)
+    fna = np.asarray(state["fna"], dtype=np.float64).reshape((nfc, 2, -1), order="F")
+    gamma = np.stack([sign * fna[faces, :, i].sum(axis=1) / area[faces]
+                      for i in ion_idx])
+
+    pa, pb = vtx[fv[faces, 0]], vtx[fv[faces, 1]]
+    mid = 0.5 * (pa + pb)
+    length = np.hypot(*(pb - pa).T)
+    nrm = np.column_stack([(pb - pa)[:, 1], -(pb - pa)[:, 0]]) / length[:, None]
+    cen = np.array([vtx[row[np.isfinite(row)].astype(np.int64) - 1].mean(axis=0)
+                    for row in cells[cv_in]])
+    nrm[np.einsum("ij,ij->i", nrm, mid - cen) < 0] *= -1.0   # out of the plasma
+
+    def face_avg(v):
+        return 0.5 * (v[fv[faces, 0]] + v[fv[faces, 1]])
+
+    return {
+        "r": mid[:, 0], "z": mid[:, 1],
+        "s": np.cumsum(length) - 0.5 * length,
+        "gamma_i": gamma,
+        "te": te[cv_gd], "ti": ti[cv_gd], "area": area[faces],
+        "normal_r": nrm[:, 0], "normal_z": nrm[:, 1],
+        "b_r": face_avg(vbr), "b_z": face_avg(vbz), "b_t": face_avg(vbt),
+    }
 
 
 def convert(run_path: Path, b2fgmtry: Path, gfile: Path, plasma_out: Path):
@@ -203,6 +271,14 @@ def convert(run_path: Path, b2fgmtry: Path, gfile: Path, plasma_out: Path):
     # wall
     wr, wz = wall_loop(vtx_r, vtx_z, tri)
     print(f"wall loop: {wr.size} points")
+    wflux = wall_flux_wg(geo, state, tri, ion_idx, te, ti, vbr, vbz, vbt)
+    if wflux is None:
+        print("/wall_flux/ skipped: no fna or labelled wall faces do not match the wall loop")
+    else:
+        k = int(np.argmax(wflux["gamma_i"][0]))
+        print(f"/wall_flux/: N={wflux['r'].size}, peak main-ion flux "
+              f"{wflux['gamma_i'][0, k]:.3e} /m2/s at R,Z = "
+              f"{wflux['r'][k]:.3f}, {wflux['z'][k]:.3f}")
 
     ncell = ncv
     with h5py.File(plasma_out, "w") as f:
@@ -260,6 +336,10 @@ def convert(run_path: Path, b2fgmtry: Path, gfile: Path, plasma_out: Path):
                          data=np.stack([ua[:, i] for i in ion_idx]))
         f.create_dataset("wall/r", data=wr)
         f.create_dataset("wall/z", data=wz)
+        if wflux is not None:
+            write_wall_flux_h5(f, wflux, source=str(run_path),
+                               extraction="SOLPS-WG b2fstate fna on fcLbl>0 faces / fcS",
+                               species_names=ion_names)
         f.attrs["grid"] = "wide"
         f.attrs["source_run"] = str(run_path)
     print(f"wrote {plasma_out}")
