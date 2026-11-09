@@ -1,0 +1,40 @@
+step 1500 pass 1 kind first pstart 0 pstop 3230 moved 3230 products 0 nmigrate 4 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1500 pass 1 migrate: received 14 any_entryexit 0
+step 1501 pass 1 kind first pstart 0 pstop 3240 moved 3240 products 0 nmigrate 3 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1501 pass 1 migrate: received 12 any_entryexit 0
+step 1502 pass 1 kind first pstart 0 pstop 3249 moved 3249 products 0 nmigrate 6 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1502 pass 1 migrate: received 5 any_entryexit 0
+step 1503 pass 1 kind first pstart 0 pstop 3248 moved 3248 products 0 nmigrate 10 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1503 pass 1 migrate: received 9 any_entryexit 0
+step 1504 pass 1 kind first pstart 0 pstop 3247 moved 3247 products 0 nmigrate 6 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1504 pass 1 migrate: received 14 any_entryexit 0
+step 1505 pass 1 kind first pstart 0 pstop 3255 moved 3255 products 0 nmigrate 5 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1505 pass 1 migrate: received 11 any_entryexit 0
+step 1506 pass 1 kind first pstart 0 pstop 3261 moved 3261 products 0 nmigrate 11 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1506 pass 1 migrate: received 8 any_entryexit 0
+step 1507 pass 1 kind first pstart 0 pstop 3258 moved 3258 products 0 nmigrate 7 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1507 pass 1 migrate: received 10 any_entryexit 0
+step 1508 pass 1 kind first pstart 0 pstop 3261 moved 3261 products 0 nmigrate 7 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1508 pass 1 migrate: received 12 any_entryexit 0
+step 1509 pass 1 kind first pstart 0 pstop 3266 moved 3266 products 0 nmigrate 7 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1509 pass 1 migrate: received 6 any_entryexit 0
+step 1510 pass 1 kind first pstart 0 pstop 3265 moved 3265 products 0 nmigrate 3 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1510 pass 1 migrate: received 8 any_entryexit 0
+step 1511 pass 1 kind first pstart 0 pstop 3270 moved 3270 products 0 nmigrate 8 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1511 pass 1 migrate: received 7 any_entryexit 0
+step 1512 pass 1 kind first pstart 0 pstop 3269 moved 3269 products 0 nmigrate 5 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1512 pass 1 migrate: received 15 any_entryexit 0
+step 1513 pass 1 kind first pstart 0 pstop 3279 moved 3279 products 0 nmigrate 7 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1513 pass 1 migrate: received 8 any_entryexit 0
+step 1514 pass 1 kind first pstart 0 pstop 3280 moved 3280 products 0 nmigrate 8 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1514 pass 1 migrate: received 7 any_entryexit 0
+step 1515 pass 1 kind first pstart 0 pstop 3279 moved 3279 products 0 nmigrate 6 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1515 pass 1 migrate: received 11 any_entryexit 0
+step 1516 pass 1 kind first pstart 0 pstop 3284 moved 3284 products 0 nmigrate 4 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1516 pass 1 migrate: received 12 any_entryexit 0
+step 1517 pass 1 kind first pstart 0 pstop 3292 moved 3292 products 0 nmigrate 5 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1517 pass 1 migrate: received 8 any_entryexit 0
+step 1518 pass 1 kind first pstart 0 pstop 3295 moved 3295 products 0 nmigrate 7 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1518 pass 1 migrate: received 13 any_entryexit 0
+step 1519 pass 1 kind first pstart 0 pstop 3301 moved 3301 products 0 nmigrate 6 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1519 pass 1 migrate: received 8 any_entryexit 0

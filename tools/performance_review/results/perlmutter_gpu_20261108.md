@@ -624,6 +624,167 @@ Remaining candidates after today, with what each needs first:
    fence, one Alltoall and the migrate bookkeeping per step on every rank);
 3. campaign side: nothing blocks running 4 cases per node today (71 cases per node-hour).
 
+## 26. Sheath formulation audit (track 2 of the revised plan)
+
+Scope: the Borodkina coefficient routine used by the compute-provider spatial sheath
+(`sheath_models.cpp::sheath_prepare_borodkina` on the CPU, `sheath_models_kokkos.h::prepare_borodkina`
+on the device). A line-by-line diff of the two bodies shows only `std::max` vs `Kokkos::fmax` and
+constants-as-functions; the algorithm, units (eV, m^-3, T, amu; lambda_D and rho_i in metres) and
+every clamp are identical, so the finding below is a property of the model as implemented, not of
+the port. Angle convention: `alpha_normal_deg` is the angle between B and the surface normal
+(0 = normal incidence), clamped to [0, 89.999]; the mover converts the Chodura metric
+(`chodura_metrics`, acos(|b.n|)) into it, consistent with the CPU pusher. The host census
+(`results/perlmutter_gpu_20261108/sheath_window_census.cpp`) over all 59936 mesh triangles that carry
+plasma, mD = 2 amu, pot_mult 0:
+
+| alpha (deg) | pure MPS branch | discriminant < 0 | `a` clamped to 1e-12 | window > 1 m | median window | p99 window |
+|---|---|---|---|---|---|---|
+| 0 to 45 | 0 % | 0.1-0.2 % | 0.1-0.2 % | 0.1-0.2 % | 0.6-1.7 mm | 2.3-4.7 cm |
+| 60 | 0 % | 0.3 % | 0.7 % | 0.3 % | 2.1 mm | 2.3 cm |
+| 70 | 0 % | 0.7 % | 2.2 % | 0.7 % | 2.3 mm | 2.3 cm |
+| 80 | 0 % | 12.3 % | 21.8 % | 12.3 % | 2.5 mm | 9.4e9 m |
+| 85 | 0.1 % | 25.8 % | 56.7 % | 25.8 % | 2.5 mm | 1.0e10 m |
+| 89 | 100 % | 0 | 0 | 0 | 1.5 mm | 8.8 mm |
+
+Mechanism (non-pure-MPS branch, i.e. alpha below alpha_star which is about 87-89 deg here):
+`wall_slope = sqrt(max(2 e^{lambda_w} + 4 cos(alpha) ion_root + c1, 0))` goes negative for near
+grazing alpha (c1 = slope_mps^2 - 6 cos alpha dominates as the Debye-sheath drop shrinks), is
+clamped to 0, which makes `a = (slope_mps - wall_slope)/denom` negative (denom = lambda_w -
+lambda_mps < 0), clamped to 1e-12; then q = 0, the ratio in `xi_mps = -log(ratio)/a` is clamped to
+1e-300 and xi_mps = 690/1e-12, so `mps_end_m = xi_mps lambda_D` is of order 1e10 m. In words: the
+matched Debye-sheath/magnetic-presheath solution does not exist in this regime and the clamps turn
+"no solution" into "infinite window". Consequences for the physics owner to weigh:
+1. for those (triangle, angle) pairs the potential `phi_at_distance` is applied at any distance
+   (the `dpart < d_max` guard never trips); its exponential tails keep the effect small far away,
+   but the regime is exactly the near-grazing divertor incidence where the sheath matters most;
+2. the natural exact repair is to fall back to the pure-MPS branch (window 10 rho_i sin alpha,
+   no Debye-sheath term) when the discriminant is negative or `a` is clamped, which is what the
+   model already does for alpha >= alpha_star; that is a physics decision, not made here;
+3. coefficient reuse without a new cutoff: for a given (triangle, element) pair the whole
+   `SheathCoeffs` set is a function of (te, ti, ne, |B|, alpha) only, so it can be memoised per
+   pair on the device exactly as computed today (window included); what cannot be done exactly
+   is a distance-based skip, until (2) bounds the window.
+
+## 27. The second move pass: trace and exact alternative (track 1 of the revised plan)
+
+Instrumentation (env `OE_PASS_TRACE=lo,hi`, one line per pass per rank, kept in the tree): pass
+kind, particles moved, products created, leavers, local entry/exit flag, and three cause counters at
+the device sites that set PEXIT/PENTRY: left the stored ghost region (unknown neighbour), cap
+teleport into a remote-owned ghost cell, entered an empty ghost cell. Window: steps 1500-1519 of a
+2000-step run, gridcut 0.035, about 8.6k markers in total (raw files
+`results/perlmutter_gpu_20261108/oe_pass_trace_rank*.txt`).
+
+| per step and rank, 4 ranks | first pass | entry/exit pass | product pass |
+|---|---|---|---|
+| passes per step | 1.00 | 0.65 | 0.25-0.45 |
+| particles moved per pass | 1319-3033 | 3.6-16.1 | 1.0-1.4 |
+| leavers (migrated) per pass | 12-15 | 0 | 13-17 (the first-pass leavers, counted at the pass that migrates) |
+| hand-off causes per step | teleport 0.05-0.45, unknown neighbour 0, empty ghost 0 | | |
+| migrate calls per step | 1.65 | | |
+| any_entryexit true | 13 of 20 steps | | |
+
+At 1 rank: 1.00 first pass, 0.85 product passes (2.2 particles each), no entry/exit passes.
+
+What the second pass is for. Under gridcut >= 0 a particle keeps moving through stored ghost
+cells; a pass ends a particle early (flag PEXIT/PENTRY, `dtremain` kept) only when (1) its next cell
+is not stored on this rank, (2) the stored ghost cell has no geometry (nsurf < 0), or (3) the
+toroidal-cap `surf_collide` teleported it into a stored cell owned by another rank. The flag rides
+in the migration Alltoall; if any rank flagged any particle, every rank runs another full pass
+(pre-collide copies, backup, kernel, control readback, fence, migrate plan) to finish the handful
+of received particles. On this deck causes (1) and (2) never occur (the ghost layer is seven cells
+deep), so the entry/exit pass exists only because of (3). The receiver's treatment of a PEXIT
+particle is `xnew = x + dtremain v` with no new push, surface tests in the target cell, then the
+normal end-of-step migration: exactly what the sender would compute itself if it kept moving the
+particle in that stored ghost cell, as it already does for every particle that drifts into a ghost
+cell. The collective therefore establishes only "someone has a remainder to finish", and that
+remainder is locally resolvable whenever the target cell carries geometry. Non-distributed surfaces
+(all ranks hold all surfs, tallies via atomics and a reduction) make surface collisions in ghost
+cells exact today.
+
+Exact alternative implemented for measurement (CPU mover `src/update.cpp` + mirror, device mover
+`update_kokkos.cpp`): after a cap teleport, continue locally in any stored cell with nsurf >= 0
+(owned or ghost); ghost cells without geometry still hand off. Expected effect on this deck: the
+entry/exit pass disappears (its 0.65-1.0 passes per step cost a control fence, a plan Alltoall, the
+migration bookkeeping and the pre/post-collide copies on every rank for 4-16 particles), i.e. a
+share of the Comm bucket (27 % of the 4-rank step) plus one pass of Move overhead. The product
+pass (1-2 particles) is the other locally resolvable pass: moving a product in the parent's thread
+right after it is created (in-kernel continuation) would remove it; not implemented yet.
+Measurement of the teleport change, three interleaved repeats vs 5efd24d8, nid008445, 2026-11-09:
+
+| binary | 1 A100 loop s | 4 A100 loop s | comm iterations per step (4 ranks) | Move / Comm buckets r1 (4 ranks) |
+|---|---|---|---|---|
+| 5efd24d8 | 26.12 26.05 26.04 | 28.42 28.60 28.50 | 1.79 | 7.95 / 8.30 s |
+| local continuation after cap teleport | 26.02 26.08 26.02 | 26.93 26.96 26.97 | 1.00 | 6.47 / 8.03 s |
+
+5.5 % on four GPUs with the entry/exit pass eliminated (exactly one move pass and one migrate per
+step), unchanged on one GPU (no hand-offs there), reactions and surface reactions within noise,
+no cap losses. The Comm bucket barely moved because the one migrate per step still carries the
+plan and exchange; the saving is the second pass's Move-side overhead. GPU regression 21/0/1 incl. kokkos_parity, CPU regression 20/0/2 (the CPU mover changed too);
+post-change trace: 1.00 first pass, 0.2-0.6 product passes, 0 hand-offs, 1.00 migrate calls per
+step. Retained as 9e09bc5e (instrumentation in f7f717b3).
+
+## 28. Kernel characterization with Nsight Compute (track 3)
+
+`ncu --set full` on 5efd24d8, one GPU, steady launches of a 1500-step fresh-start run (about 2.5k
+markers at the sampled steps, so grids of 10-20 blocks of 128 threads; the per-thread figures are
+the point, the occupancy ones are a lower bound). DCGM had to be paused on the node (`dcgmi profile
+--pause`) before the profiler could attach. Raw export: `results/perlmutter_gpu_20261108/ncu_details_5efd24d8_1gpu.csv`.
+
+| kernel | duration | SM throughput | DRAM throughput | L1 / L2 hit | regs/thread | theoretical / achieved occupancy | warp cycles per issued instr. | divergent branches | local-memory spill requests |
+|---|---|---|---|---|---|---|---|---|---|
+| TagUpdateMove | 118 us | 0.45 % | 0.18 % | 74 / 83 % | 255 | 12.5 / 5.1 % | 15-18 | 12.6 | 1208 |
+| TagUpdatePcacheFill | 212 us | 2.9 % | 0.14 % | 87 / 82 % | 80 | 37.5 / 5.5 % | 7.9 | 5.7 | 0 |
+| TagFixCoulombBg | 92 us | 1.2 % | 0.20 % | 78 / 80 % | 102 | 25 / 4.7 % | 10.5 | 1.2 | 0 |
+| TagFixForceThermal | 48 us | 1.4 % | 0.29 % | 83 / 77 % | 72 | 43.8 / 4.9 % | 10.8 | 1.2 | 0 |
+| TagFixCrossFieldDiffusion | 55 us | 1.4 % | 0.28 % | 73 / 80 % | 90 | 31.3 / 4.9 % | 10.8 | 0.7 | 0 |
+| TagFixChemAdas | 36 us | 0.7 % | 0.56 % | 56 / 64 % | 96 | 31.3 / 5.4 % | 19.2 | 1.6 | 0 |
+
+Reading. No kernel is anywhere near a memory or compute roof (all throughputs below 3 %, L2 hit
+rates 64-83 %); "No Eligible" is 87-94 % of scheduler cycles, i.e. the SMs sit idle waiting on a
+few long-latency threads. The move kernel is register-capped at 255 registers with 1208 spill
+requests per launch and 12.6 divergent branches per warp; the pcache fill has 5.7 divergent
+branches (the csurfs refinement loop over cells with many surface triangles). Kernel durations do
+not scale with particle count (move 118 us at 2.5k markers, 78 us at 20k per rank; pcache 212 vs
+146 us): the time is set by the longest threads, not by the bulk. Conclusion for the layout
+question: particle-memory access is not the limiter, so an SoA/AoSoA conversion of `OnePart` is
+not supported by these measurements and is not proposed. What the data points at instead:
+1. move kernel register pressure and spills (255 regs): split the mover's rarely taken paths
+   (sheath impulse, toroidal teleport relocation, axisymmetric branches) out of the hot loop or
+   bound registers with a launch-bounds hint, then re-measure spills and duration;
+2. per-thread tail work: the surface-intersection and csurfs loops in cells with hundreds of
+   small triangles (monoblock surfaces) decide the kernel time; sorting particles by cell so a
+   warp shares a cell's surface list, or a per-cell surface bounding structure, attacks that tail;
+3. at production marker counts the grids are 10-20x larger, which lifts achieved occupancy but
+   not the per-thread latency chain; the two items above remain the levers.
+
+## 29. Checkpoint 9e09bc5e: production rerun and ranked proposals
+
+| metric, 100k steps, gridcut 0.035 | 6e663da3 | 5efd24d8 | 9e09bc5e | 48 CPU ranks | gain |
+|---|---|---|---|---|---|
+| single case, 4 A100, loop | 199.2 s | 156.3 s | 147.3 s (1.53 ms/step late, 180k markers, 1.00 comm iterations) | 636.1 s | 4.3x |
+| single case, 1 A100 with dumps, loop | 249 s | 186 s | 184 s | 636.1 s | 3.5x |
+| 4 cases per node, batch wall | 312 s | 202 s | 201 s | ~680 s per case | 71.6 vs 5.3 cases per node-hour: 13.5x |
+
+Four-rank bucket shares now: Move 27 %, Comm 29 %, Modify 17.5 %, Pcache 9 %, Chem 9 %, Adens 6 %.
+
+Ranked by removable critical-path time at 4 cooperating A100 (step 1.35 ms at 84k markers, 1.53 ms
+at 180k; kernels about 0.5 ms). Measured items are done; projections are marked.
+
+| # | item | status | removable time per step | basis |
+|---|---|---|---|---|
+| 1 | entry/exit pass (cap teleport hand-off) | measured, retained | 0.08 ms (28.5 -> 26.95 s / 20k) | section 27 |
+| 2 | one migrate per step still: plan Alltoall + exchange + pack/unpack bookkeeping for 12-15 leavers per rank | projected 0.15-0.25 ms | Comm 29 % = 0.4 ms; the fixed per-call cost measured in GPU_PORTING section 16 is 0.3-0.4 ms per migrate at 4 ranks; only a leaner exchange (one gather kernel, fewer fences) attacks it, not fewer calls |
+| 3 | move kernel register diet (255 regs, 1208 spill requests, 12.6 divergent branches) | projected 0.05-0.15 ms | ncu, section 28; the move kernel is 0.17 ms per step of launches |
+| 4 | per-cell surface tail (cells with hundreds of small triangles in the move and pcache loops) | projected 0.05-0.15 ms | kernel duration independent of particle count, section 28 |
+| 5 | product continuation in the parent's thread (0.25-0.85 product passes per step, 1-2 particles each) | projected 0.03-0.08 ms | each product pass is a full control round trip, section 27 |
+| 6 | sheath coefficient memo per (triangle, element) | blocked on the window decision | up to 0.1 ms | pcache fill 146 us per launch, section 23/26 |
+| 7 | SoA/AoSoA particle layout | not proposed | none indicated | throughputs below 3 % of any roof, section 28 |
+
+Sum of the projections (2-6) is 0.3-0.7 ms of a 1.35 ms step; even the optimistic end leaves the
+single case at about 6x, not 10x, because the remaining structure (one plan collective, one control
+fence and three to four host round trips per step) is SPARTA's step protocol. The campaign figure
+(13.5x) is not affected by any of this.
+
 ## 7. Reproduction
 
 ```bash

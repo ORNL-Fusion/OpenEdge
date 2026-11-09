@@ -1,0 +1,75 @@
+step 1500 pass 1 kind first pstart 0 pstop 1959 moved 1959 products 0 nmigrate 14 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1500 pass 1 migrate: received 9 any_entryexit 1
+step 1500 pass 2 kind entryexit pstart 1945 pstop 1954 moved 9 products 0 nmigrate 0 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1500 pass 2 migrate: received 0 any_entryexit 0
+step 1501 pass 1 kind first pstart 0 pstop 1962 moved 1962 products 1 nmigrate 16 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1501 pass 1 kind products pstart 1962 pstop 1963 moved 1 products 0 nmigrate 16 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1501 pass 1 migrate: received 5 any_entryexit 1
+step 1501 pass 2 kind entryexit pstart 1947 pstop 1952 moved 5 products 0 nmigrate 0 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1501 pass 2 migrate: received 0 any_entryexit 0
+step 1502 pass 1 kind first pstart 0 pstop 1959 moved 1959 products 0 nmigrate 17 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1502 pass 1 migrate: received 2 any_entryexit 1
+step 1502 pass 2 kind entryexit pstart 1942 pstop 1944 moved 2 products 0 nmigrate 0 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1502 pass 2 migrate: received 0 any_entryexit 0
+step 1503 pass 1 kind first pstart 0 pstop 1948 moved 1948 products 0 nmigrate 12 entryexit 1 causes unknown 0 teleport 1 empty 0
+step 1503 pass 1 migrate: received 7 any_entryexit 1
+step 1503 pass 2 kind entryexit pstart 1936 pstop 1943 moved 7 products 0 nmigrate 0 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1503 pass 2 migrate: received 0 any_entryexit 0
+step 1504 pass 1 kind first pstart 0 pstop 1952 moved 1952 products 1 nmigrate 15 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1504 pass 1 kind products pstart 1952 pstop 1953 moved 1 products 0 nmigrate 15 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1504 pass 1 migrate: received 9 any_entryexit 1
+step 1504 pass 2 kind entryexit pstart 1938 pstop 1947 moved 9 products 0 nmigrate 0 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1504 pass 2 migrate: received 0 any_entryexit 0
+step 1505 pass 1 kind first pstart 0 pstop 1961 moved 1961 products 2 nmigrate 23 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1505 pass 1 kind products pstart 1961 pstop 1963 moved 2 products 0 nmigrate 23 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1505 pass 1 migrate: received 5 any_entryexit 1
+step 1505 pass 2 kind entryexit pstart 1940 pstop 1945 moved 5 products 0 nmigrate 0 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1505 pass 2 migrate: received 0 any_entryexit 0
+step 1506 pass 1 kind first pstart 0 pstop 1954 moved 1954 products 0 nmigrate 9 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1506 pass 1 migrate: received 7 any_entryexit 1
+step 1506 pass 2 kind entryexit pstart 1945 pstop 1952 moved 7 products 0 nmigrate 0 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1506 pass 2 migrate: received 0 any_entryexit 0
+step 1507 pass 1 kind first pstart 0 pstop 1963 moved 1963 products 0 nmigrate 13 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1507 pass 1 migrate: received 4 any_entryexit 0
+step 1508 pass 1 kind first pstart 0 pstop 1964 moved 1964 products 0 nmigrate 12 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1508 pass 1 migrate: received 8 any_entryexit 1
+step 1508 pass 2 kind entryexit pstart 1952 pstop 1960 moved 8 products 0 nmigrate 0 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1508 pass 2 migrate: received 0 any_entryexit 0
+step 1509 pass 1 kind first pstart 0 pstop 1972 moved 1972 products 2 nmigrate 20 entryexit 1 causes unknown 0 teleport 1 empty 0
+step 1509 pass 1 kind products pstart 1972 pstop 1974 moved 2 products 0 nmigrate 20 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1509 pass 1 migrate: received 10 any_entryexit 1
+step 1509 pass 2 kind entryexit pstart 1954 pstop 1964 moved 10 products 0 nmigrate 0 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1509 pass 2 migrate: received 0 any_entryexit 0
+step 1510 pass 1 kind first pstart 0 pstop 1974 moved 1974 products 2 nmigrate 19 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1510 pass 1 kind products pstart 1974 pstop 1976 moved 2 products 0 nmigrate 19 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1510 pass 1 migrate: received 2 any_entryexit 0
+step 1511 pass 1 kind first pstart 0 pstop 1965 moved 1965 products 0 nmigrate 12 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1511 pass 1 migrate: received 5 any_entryexit 1
+step 1511 pass 2 kind entryexit pstart 1953 pstop 1958 moved 5 products 0 nmigrate 0 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1511 pass 2 migrate: received 0 any_entryexit 0
+step 1512 pass 1 kind first pstart 0 pstop 1964 moved 1964 products 0 nmigrate 17 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1512 pass 1 migrate: received 3 any_entryexit 0
+step 1513 pass 1 kind first pstart 0 pstop 1954 moved 1954 products 0 nmigrate 14 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1513 pass 1 migrate: received 4 any_entryexit 1
+step 1513 pass 2 kind entryexit pstart 1940 pstop 1944 moved 4 products 0 nmigrate 0 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1513 pass 2 migrate: received 0 any_entryexit 0
+step 1514 pass 1 kind first pstart 0 pstop 1957 moved 1957 products 2 nmigrate 20 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1514 pass 1 kind products pstart 1957 pstop 1959 moved 2 products 0 nmigrate 20 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1514 pass 1 migrate: received 11 any_entryexit 1
+step 1514 pass 2 kind entryexit pstart 1939 pstop 1950 moved 11 products 0 nmigrate 0 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1514 pass 2 migrate: received 0 any_entryexit 0
+step 1515 pass 1 kind first pstart 0 pstop 1956 moved 1956 products 1 nmigrate 13 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1515 pass 1 kind products pstart 1956 pstop 1957 moved 1 products 0 nmigrate 13 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1515 pass 1 migrate: received 4 any_entryexit 0
+step 1516 pass 1 kind first pstart 0 pstop 1962 moved 1962 products 1 nmigrate 12 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1516 pass 1 kind products pstart 1962 pstop 1963 moved 1 products 0 nmigrate 12 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1516 pass 1 migrate: received 8 any_entryexit 1
+step 1516 pass 2 kind entryexit pstart 1951 pstop 1959 moved 8 products 0 nmigrate 0 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1516 pass 2 migrate: received 0 any_entryexit 0
+step 1517 pass 1 kind first pstart 0 pstop 1972 moved 1972 products 1 nmigrate 16 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1517 pass 1 kind products pstart 1972 pstop 1973 moved 1 products 0 nmigrate 16 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1517 pass 1 migrate: received 8 any_entryexit 0
+step 1518 pass 1 kind first pstart 0 pstop 1975 moved 1975 products 0 nmigrate 10 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1518 pass 1 migrate: received 7 any_entryexit 0
+step 1519 pass 1 kind first pstart 0 pstop 1984 moved 1984 products 0 nmigrate 9 entryexit 0 causes unknown 0 teleport 0 empty 0
+step 1519 pass 1 migrate: received 4 any_entryexit 0
