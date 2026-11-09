@@ -499,7 +499,12 @@ backups are unchanged. Three interleaved repeats vs 5efd24d8, 2026-11-09, nid001
 | stage 2 (5efd24d8) | 26.30 26.21 26.05 | 28.40 28.37 28.57 |
 | item 5 | 25.76 25.70 25.52 | 28.47 28.45 28.37 |
 
-Gain 2.0 % on one GPU, flat on four; tallies within noise. Regression: REGRESSION_I6.
+Gain 2.0 % on one GPU, flat on four; tallies within noise. REJECTED on regression: the GPU suite failed
+`west_tungsten_memlimit` (c_cwN0, neutral-W inventory at step 999, 11.4 % off a 10 % band that is 4 sigma
+of the CPU spread), and in interleaved single-case reruns the item-5 binary failed 3 of 7 attempts while
+the stage-2 binary passed 6 of 6. The mechanism was not identified (the retry path restores exactly the
+range the pass moved; nothing outside it is written), so the change is not retained and the source is
+reverted to 5efd24d8. Lesson kept: a 2 % gain is not worth an unexplained regression signal.
 
 ## 21. Where the four-rank step stands and what is left
 
@@ -534,6 +539,58 @@ The triangle hint pays most where the kernels matter: the one-GPU 100k case gain
 186 s) against 4 % at 20000 steps, because at 180k markers per GPU the hinted lookups are a larger
 share of the step than at 84k. Campaign throughput per node is now 13.4x the 48-core line and the
 single-case latency 4.1x; 10x single-case needs 63.6 s, i.e. a further 2.5x on 156 s.
+
+## 23. pcache sheath early-out: measured, rejected, and a finding for the physics owner
+
+The pcache fill (146 us per launch, the largest kernel) spends its time in the per-particle sheath
+section: nearest-plane refinement over the cell's `csurfs` and `prepare_borodkina` for every
+particle, although the potential is only applied for wall distances below the window
+`mps_end_m`. An exact early-out (skip the section when the particle's lower-bound wall distance,
+cell-centre nearest-element distance minus the cell half-diagonal, exceeds a run-wide bound of
+the window) was implemented and built; the bound computed over the mesh plasma came out as
+1.76e10 m, so the skip never fires. A host evaluation of `prepare_borodkina` over all 59936 mesh
+triangles (`results/perlmutter_gpu_20261108/sheath_window_host_test.cpp`) shows why:
+
+| incidence alpha (deg) | median mps_end_m | p90 | p99 | max |
+|---|---|---|---|---|
+| 0 | 5.9e-4 m | 1.1e-2 | 4.7e-2 | 4.9e8 |
+| 45 | 1.7e-3 | 7.0e-3 | 2.3e-2 | 1.7e10 |
+| 75 | 2.3e-3 | 1.0e-2 | 8.4e9 | 1.7e10 |
+| 85 | 2.5e-3 | 7.8e9 | 1.0e10 | 1.4e10 |
+| 89.999 | 1.5e-3 | 5.7e-3 | 8.8e-3 | 1.1e-2 |
+
+Example: te 1.66 eV, ti 6.1 eV, ne 1.55e17 m^-3, B 4.2 T, alpha 75 -> mps_end 1.7e10 m with
+lambda_D 2.4e-5 m, rho_i 9.5e-5 m (the `xi_mps = -log(ratio)/a` branch with the ratio clamped at
+1e-300). This is the shared CPU/GPU model (the device function is a line-for-line port), so it is
+not a GPU bug and was not changed here, but it means that for a sizeable fraction of
+(triangle, angle) combinations the sheath potential is evaluated at any distance from the wall
+(its exponential tail makes the effect small, not zero), and that no distance-based shortcut is
+exact. Physics owner to decide whether the window should be capped (e.g. at a few lambda_D
+multiples); a cap would also make the early-out available. The experiment is reverted; the
+checkpoint remains 5efd24d8.
+
+## 24. Status at the end of 2026-11-09
+
+Retained chain on `perf-review` (not pushed): 540f0719 build fixes, 6e663da3 per-grid sync fix,
+32b3f05b item 1, eac15682 item 2, f806e9ac item 3, 78335f65 hint stage 1, 5efd24d8 hint stage 2,
+plus the tooling commits. Measured and rejected: pinned block via Kokkos host deep_copy, migration
+plan skip, range-restricted backup (regression signal), pcache sheath early-out (no finite bound).
+
+| metric | start (6e663da3, corrected deck) | now (5efd24d8) | 48 CPU ranks | gain |
+|---|---|---|---|---|
+| single case, 4 A100, 100k steps | 199 s | 156 s | 636 s | 4.1x |
+| single case, 1 A100, 100k steps with dumps | 249 s | 186 s | 636 s | 3.4x |
+| campaign, 4 cases per node, 100k steps | 46 cases per node-hour | 71 | 5.3 | 13.4x |
+| per-step wall, 4 ranks, 84k markers | 1.82 ms | 1.42 ms | | kernels 0.50 ms |
+
+Single-case 10x needs 63.6 s on the 100k run, a further 2.5x. What is left on the host side is
+SPARTA's own pass structure under gridcut >= 0 (2.1 move launches and 2.8 migrate calls per step
+with one Alltoall each); on the device side the pcache sheath section and the move kernel.
+Candidates, in the order they should be tried: start/end-of-step fix fusion (6 launches and syncs
+to 2; expected 0.1 ms per step), a device memo of the sheath coefficients per (triangle, element)
+pair for the compute-provider sheath (replaces per-particle `prepare_borodkina`; needs the window
+decision above), and the entry/exit pass (owner-side completion of received particles without a
+full extra pass, a SPARTA-level change). None of these is expected to reach 2.5x alone.
 
 ## 7. Reproduction
 
