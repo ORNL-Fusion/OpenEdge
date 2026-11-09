@@ -1,0 +1,117 @@
+== per-step totals over 5000 steps (profiled process only)
+GPU kernel time: 2.505 s total, 0.501 ms/step, 15.5 launches/step, 28 distinct kernels
+memop [CUDA memcpy Host-to-Device]    0.210 s      15.5/step
+memop [CUDA memcpy Device-to-Device]    0.162 s      11.9/step
+memop [CUDA memcpy Device-to-Host]    0.136 s      17.6/step
+memop [CUDA memset]                   0.080 s      14.5/step
+memop [CUDA memcpy Peer-to-Peer]      0.002 s       0.2/step
+bytes [CUDA memcpy Device-to-Device]    46419.7 MB total      9283.9 kB/step
+bytes [CUDA memcpy Host-to-Device]     2193.3 MB total       438.7 kB/step
+bytes [CUDA memset]                     671.2 MB total       134.2 kB/step
+bytes [CUDA memcpy Device-to-Host]      194.1 MB total        38.8 kB/step
+bytes [CUDA memcpy Peer-to-Peer]          2.6 MB total         0.5 kB/step
+-- CUDA API (host) top by time
+  cudaStreamSynchronize                   1.351 s      8.5 calls/step
+  cudaMemcpyAsync                         1.174 s     36.0 calls/step
+  cudaEventSynchronize                    0.553 s      8.1 calls/step
+  cudaLaunchKernel                        0.447 s     15.5 calls/step
+  cudaMemsetAsync                         0.240 s     14.5 calls/step
+  cudaMemcpyToSymbolAsync                 0.190 s      8.1 calls/step
+  cudaMemcpy                              0.140 s      1.2 calls/step
+  cudaEventRecord                         0.122 s      9.3 calls/step
+  cudaDeviceSynchronize                   0.078 s      2.7 calls/step
+  cudaMalloc                              0.074 s      0.2 calls/step
+  cudaFree                                0.039 s      0.2 calls/step
+  cudaEventQuery                          0.022 s      3.4 calls/step
+-- top kernels by time
+    0.685 s    1.76/step      78.0 us  void Kokkos::Impl::cuda_parallel_launch_global_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::UpdateKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::
+    0.583 s    0.80/step     145.6 us  void Kokkos::Impl::cuda_parallel_launch_global_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::UpdateKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::
+    0.299 s    1.60/step      37.3 us  void Kokkos::Impl::cuda_parallel_launch_constant_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::FixForceThermalKokkos, Kokkos::RangePolicy<Kokkos::Cuda, 
+    0.293 s    0.80/step      73.1 us  void Kokkos::Impl::cuda_parallel_launch_constant_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::FixCoulombBackgroundKokkos, Kokkos::RangePolicy<Kokkos::C
+    0.174 s    0.80/step      43.5 us  void Kokkos::Impl::cuda_parallel_launch_constant_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::FixCrossFieldDiffusionKokkos, Kokkos::RangePolicy<Kokkos:
+    0.100 s    0.80/step      25.0 us  void Kokkos::Impl::cuda_parallel_launch_constant_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::FixVolumeChemAdasKokkos, Kokkos::RangePolicy<Kokkos::Cuda
+    0.073 s    0.80/step      18.3 us  void Kokkos::Impl::cuda_parallel_launch_constant_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::CommKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::
+    0.066 s    1.00/step      13.2 us  void Kokkos::Impl::cuda_parallel_launch_constant_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::FixSurfaceEmitSourceKokkos, Kokkos::RangePolicy<Kokkos::C
+    0.056 s    0.77/step      14.6 us  void Kokkos::Impl::cuda_parallel_launch_constant_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::IrregularKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA
+    0.053 s    0.74/step      14.4 us  void Kokkos::Impl::cuda_parallel_launch_constant_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::CommKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_NS::
+    0.052 s    0.80/step      12.9 us  void Kokkos::Impl::cuda_parallel_launch_constant_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::ParticleKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_
+    0.029 s    1.60/step       3.7 us  void Kokkos::Impl::cuda_parallel_launch_local_memory<Kokkos::Impl::ParallelScan<SPARTA_NS::ParticleKokkos::compress_migrate_kokkos(int, const Kokkos::
+    0.029 s    1.60/step       3.6 us  void Kokkos::Impl::cuda_parallel_launch_local_memory<Kokkos::Impl::ParallelScan<SPARTA_NS::ParticleKokkos::compress_migrate_kokkos(int, const Kokkos::
+    0.006 s    0.80/step       1.5 us  void Kokkos::Impl::cuda_parallel_launch_local_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::ParticleKokkos::compress_migrate_kokkos(int, const Kokkos::V
+    0.006 s    0.80/step       1.4 us  void Kokkos::Impl::cuda_parallel_launch_local_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::ParticleKokkos::compress_migrate_kokkos(int, const Kokkos::V
+    0.000 s    0.00/step       4.3 us  void Kokkos::Impl::cuda_parallel_launch_constant_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::ComputeGridWeightedKokkos, Kokkos::RangePolicy<Kokkos::Cu
+    0.000 s    0.00/step       3.4 us  void Kokkos::Impl::cuda_parallel_launch_constant_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::FixAveGridKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPART
+    0.000 s    0.00/step       4.8 us  void Kokkos::Impl::cuda_parallel_launch_local_memory<Kokkos::Impl::ParallelScanWithTotal<SPARTA_NS::CommKokkos::migrate_cells(int)::[lambda(int, int &
+    0.000 s    0.00/step       8.8 us  void Kokkos::Impl::cuda_parallel_launch_local_memory<Kokkos::Impl::ParallelReduce<Kokkos::Impl::CombinedFunctorReducer<SPARTA_NS::CommKokkos::migrate_
+    0.000 s    0.00/step       3.4 us  void Kokkos::Impl::cuda_parallel_launch_constant_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::ParticleKokkos, Kokkos::RangePolicy<Kokkos::Cuda, SPARTA_
+    0.000 s    0.00/step       2.0 us  void Kokkos::Impl::cuda_parallel_launch_local_memory<Kokkos::Impl::ParallelFor<Kokkos::Impl::ViewFill<Kokkos::View<unsigned int *, Kokkos::LayoutRight
+    0.000 s    0.00/step      24.1 us  desul::<unnamed>::init_lock_arrays_cuda_kernel()
+    0.000 s    0.00/step       5.3 us  void Kokkos::Impl::cuda_parallel_launch_local_memory<Kokkos::Impl::ParallelFor<Kokkos::Impl::ViewCopy<Kokkos::View<double **, Kokkos::LayoutRight, Kok
+    0.000 s    0.00/step       2.1 us  void Kokkos::Impl::cuda_parallel_launch_local_memory<Kokkos::Impl::ParallelFor<Kokkos::Impl::ViewCopy<Kokkos::View<double *, Kokkos::LayoutLeft, Kokko
+    0.000 s    0.00/step       3.7 us  void Kokkos::Impl::cuda_parallel_launch_constant_memory<Kokkos::Impl::ParallelFor<SPARTA_NS::ComputeGridWeightedKokkos, Kokkos::RangePolicy<Kokkos::Cu
+-- top NVTX (Kokkos labels, host-side range time) by time
+    1.391 s    8.16/step  :fence:Kokkos::Cuda::fence(): Unnamed Instance Fence
+    0.599 s    1.60/step  :for:SPARTA_NS::FixForceThermalKokkos/SPARTA_NS::TagFixForceThermal
+    0.270 s    1.99/step  :for:SPARTA_NS::UpdateKokkos/SPARTA_NS::TagUpdateMove<3, 1, 1, 0, 1>
+    0.239 s    0.80/step  :for:SPARTA_NS::FixVolumeChemAdasKokkos/SPARTA_NS::TagFixChemAdas
+    0.145 s    1.00/step  :for:SPARTA_NS::FixSurfaceEmitSourceKokkos/SPARTA_NS::TagFixSurfEmitSource
+    0.138 s    1.00/step  :copy:Cuda:chem:ev_count->Host:chem:cnt_host:4
+    0.136 s    5.96/step  :copy:Cuda:SurfCollide:nsingle->CudaHostPinned:SurfCollide:nsingle_pinned:4
+    0.112 s    0.80/step  :for:SPARTA_NS::UpdateKokkos/SPARTA_NS::TagUpdatePcacheFill
+    0.105 s    5.96/step  :copy:Host:(none)->Cuda:SurfCollide:nsingle:4
+    0.101 s    1.99/step  :copy:Cuda:particle:particles->Cuda:update:particles_backup:2097152
+    0.097 s    1.99/step  :copy:Cuda:surf_react_pwi:sigma_delta->Cuda:surf_react_pwi:sigma_bak:2175744
+    0.095 s    0.80/step  :for:SPARTA_NS::FixCoulombBackgroundKokkos/SPARTA_NS::TagFixCoulombBg
+    0.094 s    0.80/step  :for:SPARTA_NS::CommKokkos/SPARTA_NS::TagCommMigrateParticles<1, 1>
+    0.083 s    0.80/step  :for:SPARTA_NS::FixCrossFieldDiffusionKokkos/SPARTA_NS::TagFixCrossFieldDiffusion
+    0.082 s    0.77/step  :for:SPARTA_NS::IrregularKokkos/SPARTA_NS::TagIrregularPackBuffer
+    0.082 s    0.80/step  :for:SPARTA_NS::ParticleKokkos/SPARTA_NS::TagParticleCompressMigrateDevice
+    0.081 s    0.80/step  :for:SPARTA_NS::CommKokkos/SPARTA_NS::TagCommMigrateUnpackParticles<1>
+    0.075 s    1.99/step  :copy:Cuda:particle:dvector->Cuda:update:sheath_bank_backup:131072
+    0.069 s    1.99/step  :copy:Cuda:surf_react_pwi:scalars->Cuda:surf_react_pwi:scalars_bak:376
+    0.067 s    1.99/step  :copy:Cuda:particle:dvector->Cuda:update:sheath_phiprev_backup:131072
+    0.065 s    1.99/step  :copy:Cuda:surf_react_pwi:dep_delta->Cuda:surf_react_pwi:dep_bak:135984
+    0.062 s    1.99/step  :copy:Cuda:surf_collide_diffuse:scalars->CudaHostPinned:surf_collide_diffuse:scalars_pinned:8
+    0.060 s    0.51/step  :copy:Host:irregular:index_send_mirror->Cuda:irregular:index_send:48
+    0.057 s    1.99/step  :copy:CudaHostPinned:update:scalars_pinned->Cuda:update:scalars:60
+    0.057 s    1.99/step  :copy:Host:(none)->Cuda:surf_collide_diffuse:scalars:8
+    0.052 s    2.00/step  :copy:Host:(none)->Cuda:surf_react_pwi:scalars:376
+    0.050 s    2.33/step  :fence:Kokkos::deep_copy: copy between contiguous views, post deep copy fence
+    0.046 s    0.80/step  :scan:cm_holes
+    0.045 s    1.99/step  :copy:Cuda:update:scalars->CudaHostPinned:update:scalars_pinned:60
+    0.044 s    0.80/step  :scan:cm_kept
+    0.042 s    2.42/step  :fence:Kokkos::deep_copy: copy between contiguous views, pre view equality check
+    0.033 s    1.00/step  :copy:CudaHostPinned:emit:newn_host->Cuda:emit:newn:4
+    0.032 s    0.80/step  :for:cm_init
+    0.032 s    1.00/step  :copy:Cuda:surf_react_pwi:scalars->CudaHostPinned:surf_react_pwi:scalars_pinned:376
+    0.030 s    1.00/step  :copy:Cuda:emit:newn->CudaHostPinned:emit:newn_rb:4
+    0.026 s    0.80/step  :for:cm_mark
+    0.025 s    0.01/step  :copy:Host:surf/spread:edarray_local_array_mirror->Cuda:surf/spread:edarray_local_array:5439360
+    0.023 s    1.00/step  :copy:Cuda:emit:nsingle->CudaHostPinned:emit:nsingle_rb:4
+    0.023 s    1.00/step  :copy:Host:(none)->Cuda:chem:ev_count:4
+    0.023 s    0.02/step  :for:Kokkos::ViewCopy-1D
+-- kernel time attributed to NVTX range (nvtx_kern_sum)
+    0.685 s    0.00/step  :for:SPARTA_NS::UpdateKokkos/SPARTA_NS::TagUpdateMove<3, 1, 1, 0, 1>
+    0.583 s    0.00/step  :for:SPARTA_NS::UpdateKokkos/SPARTA_NS::TagUpdatePcacheFill
+    0.299 s    0.00/step  :for:SPARTA_NS::FixForceThermalKokkos/SPARTA_NS::TagFixForceThermal
+    0.293 s    0.00/step  :for:SPARTA_NS::FixCoulombBackgroundKokkos/SPARTA_NS::TagFixCoulombBg
+    0.174 s    0.00/step  :for:SPARTA_NS::FixCrossFieldDiffusionKokkos/SPARTA_NS::TagFixCrossFieldDiffusion
+    0.100 s    0.00/step  :for:SPARTA_NS::FixVolumeChemAdasKokkos/SPARTA_NS::TagFixChemAdas
+    0.073 s    0.00/step  :for:SPARTA_NS::CommKokkos/SPARTA_NS::TagCommMigrateParticles<1, 1>
+    0.066 s    0.00/step  :for:SPARTA_NS::FixSurfaceEmitSourceKokkos/SPARTA_NS::TagFixSurfEmitSource
+    0.056 s    0.00/step  :for:SPARTA_NS::IrregularKokkos/SPARTA_NS::TagIrregularPackBuffer
+    0.053 s    0.00/step  :for:SPARTA_NS::CommKokkos/SPARTA_NS::TagCommMigrateUnpackParticles<1>
+    0.052 s    0.00/step  :for:SPARTA_NS::ParticleKokkos/SPARTA_NS::TagParticleCompressMigrateDevice
+    0.029 s    0.00/step  :scan:cm_kept
+    0.029 s    0.00/step  :scan:cm_holes
+    0.006 s    0.00/step  :for:cm_mark
+    0.006 s    0.00/step  :for:cm_init
+    0.000 s    0.00/step  :for:SPARTA_NS::ComputeGridWeightedKokkos/SPARTA_NS::TagComputeGridWeighted_compute_per_grid_atomic<1>
+    0.000 s    0.00/step  :for:SPARTA_NS::FixAveGridKokkos/SPARTA_NS::TagFixAveGrid_Add_ctally
+    0.000 s    0.00/step  :scan:__nv_hdl_wrapper_t<false, false, false, __nv_dl_tag<void (SPARTA_NS::CommKokkos::*)(int), &SPARTA_NS::CommKokkos::migrate_cells, 1>, v
+    0.000 s    0.00/step  :red:CombinedFunctorReducer<__nv_hdl_wrapper_t<false, false, false, __nv_dl_tag<void (SPARTA_NS::CommKokkos::*)(int), &SPARTA_NS::CommKokkos
+    0.000 s    0.00/step  :for:SPARTA_NS::ParticleKokkos/SPARTA_NS::TagParticleSort<1, 0>
+    0.000 s    0.00/step  :for:Kokkos::ViewFill-1D
+Traceback (most recent call last):
+  File "<stdin>", line 34, in <module>
+TypeError: 'NoneType' object is not subscriptable

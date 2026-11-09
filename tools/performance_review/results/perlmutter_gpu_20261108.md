@@ -442,6 +442,99 @@ difference between rank 0 and the slowest rank in `plan` is imbalance wait that 
 would absorb. Not worth a code path. The lever that this measurement does expose is the pass count:
 2.8 migrate passes per step at 4 ranks (2.0 at 1 rank, all empty) is the continuation-queue item.
 
+## 18. Item 4: shared exact gather, stage 1 (triangle hint in the pcache fill and the mover)
+
+Design. The CPU keeps a validated per-particle "last triangle" (`fix background` custom
+`oe_mesh_tri_<id>`, int, tri+1, 0 = none) that follows the particle through sorting, cloning,
+migration and rebalance because it is a SPARTA custom. The device now reads the same custom:
+`MeshKokkos::locate_tri_hinted` tests the hinted triangle first and accepts it only when the point
+is strictly inside (every barycentric coordinate beyond the 1e-10 band). A strictly interior point
+lies in exactly one triangle of a proper mesh, so the answer equals the bucket walk's; points in the
+band (shared edges, vertices) and misses fall through to the unchanged CSR bucket walk, which keeps
+the original first-hit order. This is a location hint only, not a cache of interpolated fields:
+every query still reads the fields of the triangle found at the queried position, including the
+per-subcycle E query at intermediate pusher positions (a local copy of the hint follows them). The
+pcache fill writes the hint back; the mover reads it. Stage 1 covers the pcache fill (plasma scalars
++ B), the mover's start-position B, per-subcycle mesh E and the sheath scalar fallback.
+
+Three interleaved unprofiled repeats vs f806e9ac, 20000 steps, gridcut 0.035 (first two repeats
+2026-11-08 on nid003348, third 2026-11-09 on nid001044):
+
+| binary | 1 A100 loop s | 4 A100 loop s | 4 A100 Move bucket avg |
+|---|---|---|---|
+| item 3 (f806e9ac) | 28.34 28.02 28.19 | 29.41 29.17 29.27 | 8.59 8.59 8.57 |
+| item 4 stage 1 | 27.05 26.91 26.91 | 29.07 29.07 29.02 | 7.99 8.07 7.98 |
+
+Gain 4.3 % on one GPU, 0.8 % on four (the four-rank step is latency bound; the kernels it shortens
+are a smaller share there). Kernel time per step at 4 ranks 0.542 -> 0.511 ms. Reactions and
+surface reactions within the run-to-run band. GPU regression 21/0/1 incl. kokkos_parity. Retained.
+Stage 2 (hint read in the coulomb, thermal and cross-field kernels) is measured next.
+
+## 19. Item 4 stage 2: hint read in the coulomb, thermal and cross-field kernels
+
+The three force fixes bind the same custom (read-only; the pcache fill owns the write) and use the
+hinted locator and B query. Three interleaved repeats vs 78335f65 (stage 1), 2026-11-09, nid001044:
+
+| binary | 1 A100 loop s | 4 A100 loop s | 4 A100 Modify bucket r1 |
+|---|---|---|---|
+| stage 1 (78335f65) | 27.04 26.90 27.16 | 28.73 28.59 28.54 | 5.05 s |
+| stage 2 | 26.16 26.22 26.12 | 28.54 28.77 28.77 | 4.78 s |
+
+Gain 3.2 % on one GPU, flat on four (the fix kernels are 0.1 ms of a 1.43 ms step there and the
+step is latency bound). Retained for the one-GPU-per-case campaign configuration; it does not
+regress the four-rank case. Note the node-to-node spread: today's four-rank stage-1 baseline (28.6 s)
+is below yesterday's stage-1 measurement on another node (29.05 s), which is why every comparison
+is made from interleaved repeats on the same node. GPU regression 21/0/1 incl. kokkos_parity. Retained (commit below).
+
+## 20. Item 5: react/retry backups restricted to the moved range
+
+`UpdateKokkos::backup/restore` now snapshot and roll back only `[pstart,pstop)`, the particles the
+pass moves (plus the same range of the sheath and GC customs); the kernel never writes other
+particles, products appended past `nlocal` are discarded by the retry anyway, and an empty pass
+(entry/exit passes on ranks that received nothing) copies nothing. The PWI sigma/dep and collider
+backups are unchanged. Three interleaved repeats vs 5efd24d8, 2026-11-09, nid001044:
+
+| binary | 1 A100 loop s | 4 A100 loop s |
+|---|---|---|
+| stage 2 (5efd24d8) | 26.30 26.21 26.05 | 28.40 28.37 28.57 |
+| item 5 | 25.76 25.70 25.52 | 28.47 28.45 28.37 |
+
+Gain 2.0 % on one GPU, flat on four; tallies within noise. Regression: REGRESSION_I6.
+
+## 21. Where the four-rank step stands and what is left
+
+At 4 cooperating A100 the step is 1.42 ms (28.4 s / 20000) with 0.50 ms of kernels; at 1 A100 the
+step is 1.28 ms. The host-side remainder is now dominated by SPARTA's own pass structure under
+`gridcut >= 0`: about 2.1 move launches, 2.8 migrate calls (one plan Alltoall each, 65 % of them
+exchanging nothing) and the per-pass control fence. Reaction-product continuation passes are rare
+(0.08 per step), so a continuation queue would not pay here; the second pass per step is the
+entry/exit pass that any rank's particle crossing out of the ghost layer forces on all ranks.
+
+Kernel side (rank 0, per launch): pcache fill 146 us is now the largest kernel, ahead of the move
+(74-78 us). Its cost is the per-particle sheath section: nearest-plane refinement over the cell's
+`csurfs` and `prepare_borodkina` for every particle, although the potential is only applied when
+the wall distance is below the window `mps_end_m` (about 10 rho_i sin alpha plus a few Debye
+lengths). An exact early-out needs a run-wide upper bound of that window (max over the mesh of
+rho_i and lambda_D) so that particles farther from the cell's nearest element than the bound skip
+the refinement and the coefficient prep; the result is unchanged because phi is not applied there.
+That and the start/end-of-step fusion (6 launches and their syncs into 2) are the next items; both
+are measured with the same protocol before being retained.
+
+## 22. Production rerun on 5efd24d8 (items 1-4, hint stages 1-2)
+
+Same deck (gridcut 0.035), 100000 steps from a fresh start, nid001044, 2026-11-09:
+
+| metric | 6e663da3 (before items) | f806e9ac (items 1-3) | 5efd24d8 (+ hint 1-2) | 48 CPU ranks | gain |
+|---|---|---|---|---|---|
+| single case, 4 A100, loop | 199.2 s | 165.0 s | 156.3 s (1.65 ms/step late, 180k markers) | 636.1 s | 4.1x |
+| single case, 1 A100 with dumps every 20k, loop | 249 s | 225 s | 186 s | 636.1 s | 3.4x |
+| 4 cases per node (1 GPU each), batch wall incl. setup | 312 s | 241 s | 202 s | about 680 s per case | 71.3 vs 5.3 cases per node-hour: 13.4x |
+
+The triangle hint pays most where the kernels matter: the one-GPU 100k case gained 17 % (225 to
+186 s) against 4 % at 20000 steps, because at 180k markers per GPU the hinted lookups are a larger
+share of the step than at 84k. Campaign throughput per node is now 13.4x the 48-core line and the
+single-case latency 4.1x; 10x single-case needs 63.6 s, i.e. a further 2.5x on 156 s.
+
 ## 7. Reproduction
 
 ```bash
