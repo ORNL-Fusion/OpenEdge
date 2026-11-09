@@ -464,7 +464,7 @@ class UpdateKokkos : public Update {
   ComputeBoundaryKokkos tmp_compute_boundary_kk;
   ComputeSurfKokkos tmp_compute_surf_kk;
 
-  typedef Kokkos::DualView<int[15], DeviceType::array_layout, DeviceType> tdual_int_14;
+  typedef Kokkos::DualView<int[18], DeviceType::array_layout, DeviceType> tdual_int_14;   // 15-17: pass-cause counters (OE_PASS_TRACE)
   typedef tdual_int_14::t_dev t_int_14;
   typedef tdual_int_14::t_host t_host_int_14;
   t_int_14 d_scalars;
@@ -482,6 +482,11 @@ class UpdateKokkos : public Update {
   DAT::t_int_scalar d_nreact_one;     HAT::t_int_scalar h_nreact_one;
   DAT::t_int_scalar d_nstuck;         HAT::t_int_scalar h_nstuck;
   DAT::t_int_scalar d_ncaplost;       HAT::t_int_scalar h_ncaplost;
+  // OpenEdge pass trace: why particles need another move pass (counted per pass)
+  DAT::t_int_scalar d_oe_pexit_unknown;  HAT::t_int_scalar h_oe_pexit_unknown;   // left the stored ghost region
+  DAT::t_int_scalar d_oe_pexit_teleport; HAT::t_int_scalar h_oe_pexit_teleport;  // cap teleport into a remote-owned ghost cell
+  DAT::t_int_scalar d_oe_pentry_empty;   HAT::t_int_scalar h_oe_pentry_empty;    // entered an empty ghost cell
+  FILE *oe_pass_trace_fp = nullptr; bigint oe_pass_trace_lo = -1, oe_pass_trace_hi = -1;
   DAT::t_int_scalar d_naxibad;        HAT::t_int_scalar h_naxibad;
   DAT::t_int_scalar d_error_flag;     HAT::t_int_scalar h_error_flag;
   DAT::t_int_scalar d_retry;          HAT::t_int_scalar h_retry;

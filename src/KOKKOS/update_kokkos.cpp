@@ -129,6 +129,9 @@ UpdateKokkos::UpdateKokkos(SPARTA *sparta) : Update(sparta),
   d_retry         = Kokkos::subview(d_scalars,12);
   d_nlocal        = Kokkos::subview(d_scalars,13);
   d_ncaplost      = Kokkos::subview(d_scalars,14);
+  d_oe_pexit_unknown  = Kokkos::subview(d_scalars,15);
+  d_oe_pexit_teleport = Kokkos::subview(d_scalars,16);
+  d_oe_pentry_empty   = Kokkos::subview(d_scalars,17);
 
   h_ncomm_one     = Kokkos::subview(h_scalars,0);
   h_nexit_one     = Kokkos::subview(h_scalars,1);
@@ -142,6 +145,14 @@ UpdateKokkos::UpdateKokkos(SPARTA *sparta) : Update(sparta),
   h_nstuck        = Kokkos::subview(h_scalars,9);
   h_naxibad       = Kokkos::subview(h_scalars,10);
   h_ncaplost      = Kokkos::subview(h_scalars,14);
+  h_oe_pexit_unknown  = Kokkos::subview(h_scalars,15);
+  h_oe_pexit_teleport = Kokkos::subview(h_scalars,16);
+  h_oe_pentry_empty   = Kokkos::subview(h_scalars,17);
+  if (const char *e = getenv("OE_PASS_TRACE")) {   // "lo,hi" step window; one file per rank
+    long lo = -1, hi = -1; if (sscanf(e,"%ld,%ld",&lo,&hi) == 2) { oe_pass_trace_lo = lo; oe_pass_trace_hi = hi;
+      char fn[512]; snprintf(fn,sizeof(fn),"%s/oe_pass_trace_rank%d.txt",getenv("OE_PASS_TRACE_DIR") ? getenv("OE_PASS_TRACE_DIR") : ".",comm->me);
+      oe_pass_trace_fp = fopen(fn,"w"); }
+  }
   h_error_flag    = Kokkos::subview(h_scalars,11);
   h_retry         = Kokkos::subview(h_scalars,12);
   h_nlocal        = Kokkos::subview(h_scalars,13);
@@ -1264,6 +1275,11 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
     if (oe_has_sheath_customs || oe_has_gca_customs || sheath_paid_custom >= 0)
       particle_kk->modify(Device,CUSTOM_MASK);   // sheath_paid is written in every sheath mode
     d_particles = t_particle_1d(); // destroy reference to reduce memory use
+    if (oe_pass_trace_fp && ntimestep >= oe_pass_trace_lo && ntimestep <= oe_pass_trace_hi)
+      fprintf(oe_pass_trace_fp,"step " BIGINT_FORMAT " pass %d kind %s pstart %d pstop %d moved %d products %d nmigrate %d entryexit %d causes unknown %d teleport %d empty %d\n",
+              ntimestep,niterate,continue_loop_flag ? "products" : (niterate == 1 ? "first" : "entryexit"),
+              pstart,pstop,pstop-pstart,h_nlocal()-pstop,h_nmigrate(),h_entryexit(),
+              h_oe_pexit_unknown(),h_oe_pexit_teleport(),h_oe_pentry_empty());
 
     k_mlist.modify_device();
 
@@ -1433,6 +1449,8 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
                                                     entryexit,&any_entryexit);
     timer->stamp(TIME_COMM);
     pstop = particle->nlocal;
+    if (oe_pass_trace_fp && ntimestep >= oe_pass_trace_lo && ntimestep <= oe_pass_trace_hi)
+      fprintf(oe_pass_trace_fp,"step " BIGINT_FORMAT " pass %d migrate: received %d any_entryexit %d\n",ntimestep,niterate,pstop-pstart,any_entryexit);
     if (pstop-pstart > maxmigrate) {
       maxmigrate = pstop-pstart;
       memoryKK->destroy_kokkos(k_mlist,mlist);
@@ -2401,6 +2419,7 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
                 particle_i.flag = PEXIT;
                 particle_i.dtremain = dtremain;
                 d_entryexit() = 1;
+                Kokkos::atomic_inc(&d_oe_pexit_teleport());
                 if (has_kick) {   // mid-move migration strip (see PEXIT below)
                   v[0] -= vkick0;
                   v[1] -= vkick1;
@@ -2768,6 +2787,7 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
       particle_i.flag = PEXIT;
       particle_i.dtremain = dtremain;
       d_entryexit() = 1;
+      Kokkos::atomic_inc(&d_oe_pexit_unknown());
       // strip the cross-field kick before migrating mid-move: the
       // receiver rebuilds xnew = x + dtremain*v and cannot strip later
       if (has_kick) {
@@ -2786,6 +2806,7 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
       particle_i.flag = PENTRY;
       particle_i.dtremain = dtremain;
       d_entryexit() = 1;
+      Kokkos::atomic_inc(&d_oe_pentry_empty());
       // same mid-move migration strip as the PEXIT case above
       if (has_kick) {
         v[0] -= vkick0;
