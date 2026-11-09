@@ -2701,7 +2701,11 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 int newcell = grid->id_find_child(0,0,
                                   domain->boxlo,domain->boxhi,x);
                 if (newcell >= 0) {
-                  if (cells[newcell].proc == me) {
+                  // OpenEdge (2026-11-09): continue locally in any stored cell
+                  // that carries geometry (owned or ghost with nsurf >= 0); see
+                  // the device mover for the reasoning. Ghost cells without
+                  // geometry still hand off (PEXIT).
+                  if (cells[newcell].proc == me || cells[newcell].nsurf >= 0) {
                     if (DIM == 3 && SURF) {
                       if (cells[newcell].nsplit > 1 &&
                           cells[newcell].nsurf >= 0)

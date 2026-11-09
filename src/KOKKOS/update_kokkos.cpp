@@ -2401,7 +2401,15 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
             else
               reduce.nscollide_one++;
             if (newcell >= 0) {
-              if (d_cells[newcell].proc == me) {
+              // OpenEdge (2026-11-09): a teleport target that this rank stores
+              // WITH geometry (owned, or a ghost cell with nsurf >= 0) is moved
+              // locally, exactly like a particle that drifts into a ghost cell;
+              // the remainder of the step is a straight segment plus surface
+              // tests, which the receiver would have computed identically
+              // (PEXIT re-forms xnew = x + dtremain*v with no new push). This
+              // removes the entry/exit pass on decks where cap teleports were
+              // its only cause. Ghost cells without geometry still hand off.
+              if (d_cells[newcell].proc == me || d_cells[newcell].nsurf >= 0) {
                 if (SURF) {
                   if (d_cells[newcell].nsplit > 1 &&
                       d_cells[newcell].nsurf >= 0)
