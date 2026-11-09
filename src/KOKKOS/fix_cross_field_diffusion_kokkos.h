@@ -70,6 +70,8 @@ class FixCrossFieldDiffusionKokkos : public FixCrossFieldDiffusion,
   t_species_1d d_species;
   DAT::t_float_2d_lr d_dx;                 // UpdateKokkos::d_dx_cd
   DAT::t_float_1d d_vtx_r, d_vtx_z;
+  DAT::t_int_1d d_tri_hint_;   // per-particle mesh triangle hint (custom ivec, tri+1), read-only here
+  int has_hint_ = 0;
   DAT::t_int_1d d_tri;
   DAT::t_float_1d d_tri_br, d_tri_bz, d_tri_bt;
   DAT::t_float_1d d_tri_te;

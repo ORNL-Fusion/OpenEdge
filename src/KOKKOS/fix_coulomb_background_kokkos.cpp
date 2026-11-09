@@ -185,6 +185,18 @@ void FixCoulombBackgroundKokkos::end_of_step()
   col_y0_ = pd_ ? pd_->column_y0 : 0.0;
 
   d_vtx_r    = update_kk->d_oe_mesh_vtx_r;
+
+  has_hint_ = 0;   // triangle hint written by the pcache fill (UpdateKokkos); exact, hint-first location
+
+  if (update_kk->oe_tri_hint_custom >= 0) {
+
+    particle_kk->sync(Device,CUSTOM_MASK);
+
+    d_tri_hint_ = particle_kk->k_eivec.h_view[particle->ewhich[update_kk->oe_tri_hint_custom]].k_view.d_view;
+
+    has_hint_ = 1;
+
+  }
   d_vtx_z    = update_kk->d_oe_mesh_vtx_z;
   d_tri      = update_kk->d_oe_mesh_tri;
   d_tri_te   = update_kk->d_oe_mesh_tri_te;
@@ -277,11 +289,12 @@ void FixCoulombBackgroundKokkos::operator()(TagFixCoulombBg,
   // R and the cyl->Cartesian rotation both see column coordinates
   double xq[3] = {p.x[0], p.x[1], p.x[2]};
   if (dim_ == 3 && !axisym_) { xq[0] -= col_x0_; xq[1] -= col_y0_; }
+  const int th0 = has_hint_ ? d_tri_hint_(i) - 1 : -1; int th = th0;
 
   // plasma at the particle position (tri-constant, mesh branch of
   // interp2D; a miss = CPU's empty-structured-grid fallback = zeros)
-  const int tri = (ntri_ > 0) ? MeshKokkos::locate_tri_at_point(
-      xq, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
+  const int tri = (ntri_ > 0) ? MeshKokkos::locate_tri_hinted(
+      xq, dim_, axisym_, th, d_vtx_r, d_vtx_z, d_tri,
       d_hash_off, d_hash_ent, hash_rmin_, hash_zmin_,
       hash_dr_, hash_dz_, hash_nr_, hash_nz_, ntri_) : -1;
 
@@ -302,10 +315,9 @@ void FixCoulombBackgroundKokkos::operator()(TagFixCoulombBg,
   }
 
   double B[3] = {0.0,0.0,0.0};
-  const bool gotB = MeshKokkos::query_bfield_at_point(
-      xq, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
+  const bool gotB = MeshKokkos::query_bfield_at_point_hinted(
+      xq, dim_, axisym_, th, d_vtx_r, d_vtx_z, d_tri,
       d_tri_br, d_tri_bz, d_tri_bt,
-      d_tri_rmin, d_tri_rmax, d_tri_zmin, d_tri_zmax,
       d_hash_off, d_hash_ent, hash_rmin_, hash_zmin_,
       hash_dr_, hash_dz_, hash_nr_, hash_nz_, ntri_, B);
   if (!gotB && has_equ_) {

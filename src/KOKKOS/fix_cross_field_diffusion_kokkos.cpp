@@ -181,6 +181,18 @@ void FixCrossFieldDiffusionKokkos::start_of_step()
   d_dx        = update_kk->d_dx_cd;
 
   d_vtx_r    = update_kk->d_oe_mesh_vtx_r;
+
+  has_hint_ = 0;   // triangle hint written by the pcache fill (UpdateKokkos); exact, hint-first location
+
+  if (update_kk->oe_tri_hint_custom >= 0) {
+
+    particle_kk->sync(Device,CUSTOM_MASK);
+
+    d_tri_hint_ = particle_kk->k_eivec.h_view[particle->ewhich[update_kk->oe_tri_hint_custom]].k_view.d_view;
+
+    has_hint_ = 1;
+
+  }
   d_vtx_z    = update_kk->d_oe_mesh_vtx_z;
   d_tri      = update_kk->d_oe_mesh_tri;
   d_tri_br   = update_kk->d_oe_mesh_tri_br;
@@ -251,13 +263,13 @@ void FixCrossFieldDiffusionKokkos::operator()(TagFixCrossFieldDiffusion,
   double xq[3];
   if (dim_ != 3) { xq[0] = p.x[0]; xq[1] = p.x[1]; xq[2] = 0.0; }
   else { xq[0] = p.x[0] - col_x0_; xq[1] = p.x[1] - col_y0_; xq[2] = p.x[2]; }
+  const int th0 = has_hint_ ? d_tri_hint_(i) - 1 : -1; int th = th0;
 
   // B at the particle: mesh -> equilibrium chain (CPU pd_bfield_sparta)
   double B[3] = {0.0, 0.0, 0.0};
-  bool got_B = MeshKokkos::query_bfield_at_point(
-      xq, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
+  bool got_B = MeshKokkos::query_bfield_at_point_hinted(
+      xq, dim_, axisym_, th, d_vtx_r, d_vtx_z, d_tri,
       d_tri_br, d_tri_bz, d_tri_bt,
-      d_tri_rmin, d_tri_rmax, d_tri_zmin, d_tri_zmax,
       d_hash_off, d_hash_ent, hash_rmin_, hash_zmin_,
       hash_dr_, hash_dz_, hash_nr_, hash_nz_, ntri_, B);
   if (!got_B && has_equ_) {
@@ -280,8 +292,8 @@ void FixCrossFieldDiffusionKokkos::operator()(TagFixCrossFieldDiffusion,
     D_local = D_perp_;
   } else if (diff_model_ == 2) {
     double te = 0.0;
-    const int tri = (ntri_ > 0) ? MeshKokkos::locate_tri_at_point(
-        xq, dim_, axisym_, d_vtx_r, d_vtx_z, d_tri,
+    const int tri = (ntri_ > 0) ? MeshKokkos::locate_tri_hinted(
+      xq, dim_, axisym_, th, d_vtx_r, d_vtx_z, d_tri,
         d_hash_off, d_hash_ent, hash_rmin_, hash_zmin_,
         hash_dr_, hash_dz_, hash_nr_, hash_nz_, ntri_) : -1;
     if (tri >= 0 && d_tri_te.extent(0) > 0) te = d_tri_te(tri);
