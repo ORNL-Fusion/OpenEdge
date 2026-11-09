@@ -571,6 +571,10 @@ checkpoint remains 5efd24d8.
 
 ## 24. Status at the end of 2026-11-09
 
+Validation of the checkpoint: GPU regression 21/0/1 incl. kokkos_parity (per stage), CPU regression on
+5efd24d8 20 passed / 0 failed / 2 skipped (`results/perlmutter_gpu_20261108/regression_cpu_5efd24d8.txt`).
+Binaries rebuilt from 5efd24d8: spa_kokkos_cuda_perlmutter d3982cfb8078619e..., spa_mpi 5633ac1280a4a46d....
+
 Retained chain on `perf-review` (not pushed): 540f0719 build fixes, 6e663da3 per-grid sync fix,
 32b3f05b item 1, eac15682 item 2, f806e9ac item 3, 78335f65 hint stage 1, 5efd24d8 hint stage 2,
 plus the tooling commits. Measured and rejected: pinned block via Kokkos host deep_copy, migration
