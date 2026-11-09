@@ -596,6 +596,34 @@ pair for the compute-provider sheath (replaces per-particle `prepare_borodkina`;
 decision above), and the entry/exit pass (owner-side completion of received particles without a
 full extra pass, a SPARTA-level change). None of these is expected to reach 2.5x alone.
 
+## 25. Selective kernel fusion, stage A: measured, rejected
+
+Coulomb drag and thermal half-kick fused into one end-of-step launch (each fix split into
+prepare / body / finish; the fused functor calls the two per-particle bodies in deck order; no
+particle creation or cross-particle reads are involved, so the sequence per particle equals the two
+sequential launches). Three interleaved repeats vs 5efd24d8, nid200412, 2026-11-09:
+
+| binary | 1 A100 loop s | 4 A100 loop s | Modify / Coll buckets r1 (4 ranks) |
+|---|---|---|---|
+| 5efd24d8 | 25.96 25.87 25.97 | 28.59 28.54 28.29 | 4.80 / 0.27 s |
+| fused coulomb+thermal | 26.18 25.71 25.72 | 28.76 28.60 28.77 | 4.49 / 0.36 s |
+
+No gain on one GPU and 0.8 % slower on four. The two kernels were already issued back to back on
+the same stream with no fence between them, so the launch that fusion removes was not on the
+critical path; what fusion adds is a larger functor upload (two fix objects per launch). Rejected
+and reverted. The same argument applies to the other adjacent async pairs (cd + thermal at start
+of step, chem + coulomb), so the fusion item is closed: launch count is not the remaining cost on
+this deck, the per-pass control fence and SPARTA's second (entry/exit) pass are.
+
+Remaining candidates after today, with what each needs first:
+1. sheath coefficient memo per (triangle, element) for the compute-provider sheath, replacing
+   per-particle `prepare_borodkina` in the 146 us pcache fill: needs the window-cap decision of
+   section 23 from the physics owner (otherwise the memo must carry the unbounded window as is);
+2. entry/exit pass: finish received particles on the owner without a full extra pass of the move
+   loop (SPARTA-level change to `Update::move` under gridcut >= 0; the pass costs one control
+   fence, one Alltoall and the migrate bookkeeping per step on every rank);
+3. campaign side: nothing blocks running 4 cases per node today (71 cases per node-hour).
+
 ## 7. Reproduction
 
 ```bash
