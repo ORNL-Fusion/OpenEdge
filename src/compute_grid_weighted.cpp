@@ -37,6 +37,11 @@
         nfrac_w     Sum(pweight)_group   / Sum(pweight)_cell
         massfrac_w  Sum(pweight*m)_group / Sum(pweight*m)_cell
 
+      radiated power (needs `adas fix-ID`, a fix volume/chem/adas):
+        pradtot_w  Sum(pweight*ne*L)                   [W]
+        prad_w     Sum(pweight*ne*L) * cellweight / V  [W/m^3]
+        L = PLT + PRB of the particle's charge state at its own Te, ne
+
     Requires `fix particle/weight` to provide the `pweight` custom.
 ------------------------------------------------------------------------- */
 
@@ -49,6 +54,7 @@
 #include "modify.h"
 #include "memory.h"
 #include "error.h"
+#include "fix_volume_chem_adas.h"
 
 using namespace SPARTA_NS;
 
@@ -57,13 +63,14 @@ using namespace SPARTA_NS;
 enum{N_W,NRHO_W,MASSRHO_W,PXRHO_W,PYRHO_W,PZRHO_W,KERHO_W,
      MASS_W,NFRAC_W,MASSFRAC_W,
      U_W,V_W,W_W,USQ_W,VSQ_W,WSQ_W,
-     KE_W,TEMP_W,EROT_W,EVIB_W,TROT_W,TVIB_W};
+     KE_W,TEMP_W,EROT_W,EVIB_W,TROT_W,TVIB_W,
+     PRADTOT_W,PRAD_W};
 
 // internal accumulators (per-group tally quantities)
 
 enum{WCOUNT,WMASSSUM,WMVX,WMVY,WMVZ,WMVSQ,
      WMVXSQ,WMVYSQ,WMVZSQ,
-     WEROT,WEVIB,WDOFROT,WDOFVIB,LASTSIZE};
+     WEROT,WEVIB,WDOFROT,WDOFVIB,WPRAD,LASTSIZE};
 
 // sentinels for cell-level (not per-group) tallies, replaced with
 // real column indices in reset_map()
@@ -91,8 +98,16 @@ ComputeGridWeighted::ComputeGridWeighted(SPARTA *sparta, int narg,
     error->all(FLERR,"Compute grid/weighted mixture ID does not exist");
   ngroup = particle->mixture[imix]->ngroup;
 
+  // optional "adas fix-ID" pair may appear anywhere in the value list
+
   nvalue = narg - 4;
+  for (int i = 4; i < narg; i++)
+    if (strcmp(arg[i],"adas") == 0) nvalue -= 2;
+  if (nvalue < 1) error->all(FLERR,"Illegal compute grid/weighted command");
   value = new int[nvalue];
+  id_adas = NULL;
+  fadas = NULL;
+  prad_flag = 0;
 
   npergroup = 0;
   cellcount_w = cellmass_w = 0;
@@ -104,6 +119,16 @@ ComputeGridWeighted::ComputeGridWeighted(SPARTA *sparta, int narg,
   int ivalue = 0;
   int iarg = 4;
   while (iarg < narg) {
+    if (strcmp(arg[iarg],"adas") == 0) {
+      if (iarg+1 >= narg || id_adas)
+        error->all(FLERR,"Illegal compute grid/weighted command");
+      int n = strlen(arg[iarg+1]) + 1;
+      id_adas = new char[n];
+      strcpy(id_adas,arg[iarg+1]);
+      iarg += 2;
+      continue;
+    }
+
     if (strcmp(arg[iarg],"n_w") == 0) {
       value[ivalue] = N_W;
       set_map(ivalue,WCOUNT);
@@ -192,11 +217,24 @@ ComputeGridWeighted::ComputeGridWeighted(SPARTA *sparta, int narg,
       set_map(ivalue,WEVIB);
       set_map(ivalue,WDOFVIB);
 
+    } else if (strcmp(arg[iarg],"pradtot_w") == 0) {
+      value[ivalue] = PRADTOT_W;
+      set_map(ivalue,WPRAD);
+      prad_flag = 1;
+    } else if (strcmp(arg[iarg],"prad_w") == 0) {
+      value[ivalue] = PRAD_W;
+      set_map(ivalue,WPRAD);
+      prad_flag = 1;
+
     } else error->all(FLERR,"Illegal compute grid/weighted command");
 
     ivalue++;
     iarg++;
   }
+
+  if (prad_flag && !id_adas)
+    error->all(FLERR,"Compute grid/weighted prad_w/pradtot_w require "
+               "the adas fix-ID keyword");
 
   // setup output: ngroup*nvalue logical columns; cell-level extras (if
   // requested) are appended in reset_map().
@@ -227,6 +265,7 @@ ComputeGridWeighted::~ComputeGridWeighted()
   delete [] value;
   delete [] unique;
   delete [] nmap;
+  delete [] id_adas;
   memory->destroy(map);
   memory->destroy(vector_grid);
   memory->destroy(tally);
@@ -250,6 +289,19 @@ void ComputeGridWeighted::init()
     error->all(FLERR,
       "Number of groups in compute grid/weighted mixture has changed");
 
+  // radiated power: bind the ADAS fix that owns the PLT/PRB tables
+
+  fadas = NULL;
+  if (prad_flag) {
+    int ifix = modify->find_fix(id_adas);
+    if (ifix < 0)
+      error->all(FLERR,"Compute grid/weighted adas fix ID does not exist");
+    fadas = dynamic_cast<FixVolumeChemAdas *>(modify->fix[ifix]);
+    if (!fadas)
+      error->all(FLERR,"Compute grid/weighted adas fix is not "
+                 "a fix volume/chem/adas");
+  }
+
   eprefactor  = 0.5 * update->mvv2e;
   tprefactor  = update->mvv2e / (3.0 * update->boltz);
   rvprefactor = 2.0 * update->mvv2e / update->boltz;
@@ -272,8 +324,20 @@ void ComputeGridWeighted::compute_per_grid()
   pweight_ewhich = particle->ewhich[pweight_index];
   double *pweight_dvec = particle->edvec[pweight_ewhich];
 
+  // radiated power reads Te, ne from the per-particle plasma cache
+
+  double *te_vec = NULL;
+  double *ne_vec = NULL;
+  if (prad_flag) {
+    if (!update->plasma_cache_flag)
+      error->all(FLERR,"Compute grid/weighted prad_w/pradtot_w require "
+                 "the per-particle plasma cache");
+    te_vec = particle->edvec[particle->ewhich[update->pc_te_custom]];
+    ne_vec = particle->edvec[particle->ewhich[update->pc_ne_custom]];
+  }
+
   int i,j,k,m,ispecies,igroup,icell;
-  double mass,pw;
+  double mass,pw,prad;
   double *v,*vec;
 
   for (i = 0; i < nglocal; i++)
@@ -294,6 +358,10 @@ void ComputeGridWeighted::compute_per_grid()
     mass = species[ispecies].mass;
     v = particles[i].v;
     pw = pweight_dvec[i];
+    prad = 0.0;
+    if (prad_flag)
+      prad = pw * ne_vec[i] *
+        fadas->radiation_coeff(ispecies,te_vec[i],ne_vec[i]);
 
     vec = tally[icell];
     if (cellmass_w) vec[cellmass_w] += pw * mass;
@@ -341,6 +409,9 @@ void ComputeGridWeighted::compute_per_grid()
       case WDOFVIB:
         vec[k++] += pw * species[ispecies].vibdof;
         break;
+      case WPRAD:
+        vec[k++] += prad;
+        break;
       }
     }
   }
@@ -384,6 +455,7 @@ void ComputeGridWeighted::post_process_grid(int index, int nsample,
   switch (value[ivalue]) {
 
   case N_W:
+  case PRADTOT_W:
     {
       int wcount = emap[0];
       for (int icell = lo; icell < hi; icell++) {
@@ -407,6 +479,7 @@ void ComputeGridWeighted::post_process_grid(int index, int nsample,
     }
 
   case NRHO_W:
+  case PRAD_W:
     {
       int wcount = emap[0];
       for (int icell = lo; icell < hi; icell++) {

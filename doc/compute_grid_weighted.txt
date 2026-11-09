@@ -10,14 +10,14 @@ compute grid/weighted command :h3
 
 [Syntax:]
 
-compute ID grid/weighted group-ID mix-ID value1 value2 ... :pre
+compute ID grid/weighted group-ID mix-ID value1 value2 ... keyword arg :pre
 
 ID is documented in "compute"_compute.html command :ulb,l
 grid/weighted = style name of this compute command :l
 group-ID = group ID for which grid cells to perform calculation on :l
 mix-ID = mixture ID to perform calculation on :l
 one or more values can be appended :l
-value = {n_w} or {nrho_w} or {mass_w} or {massrho_w} or {nfrac_w} or {massfrac_w} or {u_w} or {v_w} or {w_w} or {usq_w} or {vsq_w} or {wsq_w} or {ke_w} or {temp_w} or {erot_w} or {evib_w} or {trot_w} or {tvib_w} or {pxrho_w} or {pyrho_w} or {pzrho_w} or {kerho_w} :l
+value = {n_w} or {nrho_w} or {mass_w} or {massrho_w} or {nfrac_w} or {massfrac_w} or {u_w} or {v_w} or {w_w} or {usq_w} or {vsq_w} or {wsq_w} or {ke_w} or {temp_w} or {erot_w} or {evib_w} or {trot_w} or {tvib_w} or {pxrho_w} or {pyrho_w} or {pzrho_w} or {kerho_w} or {pradtot_w} or {prad_w} :l
   n_w = weighted particle count
   nrho_w = weighted number density
   mass_w = weighted mean mass
@@ -33,7 +33,14 @@ value = {n_w} or {nrho_w} or {mass_w} or {massrho_w} or {nfrac_w} or {massfrac_w
   trot_w = weighted rotational temperature
   tvib_w = weighted vibrational temperature
   pxrho_w,pyrho_w,pzrho_w = weighted x,y,z momentum density
-  kerho_w = weighted kinetic energy density :pre
+  kerho_w = weighted kinetic energy density
+  pradtot_w = radiated power of the particles in the cell
+  prad_w = radiated power density :pre
+zero or one keyword/arg pair can be appended :l
+keyword = {adas} :l
+  {adas} arg = fix-ID
+    fix-ID = ID of the "fix volume/chem/adas"_fix_volume_chem_adas.html that
+      owns the radiation tables (required by pradtot_w and prad_w) :pre
 :ule
 
 [Examples:]
@@ -43,6 +50,11 @@ mixture LiAll Li Li+ Li2+ Li3+
 compute cgw grid/weighted all LiAll nrho_w u_w v_w temp_w nfrac_w
 fix 1 ave/grid all 10 100 1000 c_cgw\[*\]
 dump 1 grid all 1000 tmp.grid id f_1\[*\] :pre
+
+fix fchem volume/chem/adas 1 W auto
+mixture allW W W+ W2+ W3+ group wsum
+compute cprad grid/weighted all allW prad_w pradtot_w adas fchem
+compute Prad reduce sum c_cprad\[2\] :pre
 
 [Description:]
 
@@ -107,6 +119,25 @@ massfrac_w = Sum_group(p_i m_i) / Sum_cell(p_i m_i) :pre
 
 All ratios evaluate to zero in a cell whose denominator is zero.
 
+The radiated-power values sum the radiation of every particle at its
+own position:
+
+pradtot_w = Sum(p_i ne_i L_i)
+prad_w = W * Sum(p_i ne_i L_i) / V :pre
+
+where ne_i and Te_i are the electron density and temperature at
+particle i, read from the per-particle plasma cache, and L_i =
+PLT(Te_i,ne_i) + PRB(Te_i,ne_i) is the ADAS line plus
+recombination/bremsstrahlung power coefficient of the particle's
+charge state, taken from the tables of the "fix
+volume/chem/adas"_fix_volume_chem_adas.html named by the {adas}
+keyword.  Te and ne are clamped to the table range.  Species that take
+part in no active reaction of that fix contribute zero.  In a cell
+with uniform plasma {prad_w} equals ne times the sum over charge
+states of nrho_w times L; where the plasma varies inside a cell, each
+particle uses its local values.  The radiation is a diagnostic and is
+not removed from the background plasma.
+
 :line
 
 [Output info:]
@@ -132,6 +163,7 @@ compute grid values: {n_w} is a count of physical particles,
 {nrho_w} a number density, {massrho_w} a mass density, the velocity
 values are in velocity units, the energies in energy units, and the
 temperatures in temperature units; the fractions are dimensionless.
+{pradtot_w} is in W and {prad_w} in W/m^3 (SI units).
 
 :line
 
@@ -146,10 +178,17 @@ that the {pweight} attribute exists; the compute stops with an error
 otherwise.  The number of groups in the mixture must not change after
 the compute is defined.
 
+{pradtot_w} and {prad_w} require the {adas} keyword and an active
+per-particle plasma cache (see "fix
+volume/chem/adas"_fix_volume_chem_adas.html).  The cache is filled
+during the first timestep, so both values are zero at step 0.  They
+are not available with the KOKKOS variant of this compute.
+
 [Related commands:]
 
 "fix particle/weight"_fix_particle_weight.html, "compute
 grid"_compute_grid.html, "fix ave/grid"_fix_ave_grid.html, "fix
-surface/emit/source"_fix_surface_emit_source.html
+surface/emit/source"_fix_surface_emit_source.html, "fix
+volume/chem/adas"_fix_volume_chem_adas.html
 
 [Default:] none
