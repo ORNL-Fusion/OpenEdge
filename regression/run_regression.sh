@@ -6,9 +6,11 @@
 #  A test passes if the run exits 0, its log contains no ERROR lines, and
 #  (when <case>/regression_reference.json exists) its end-of-run metrics
 #  are within the stored tolerances (regression/metrics.py).
-#  Record: name|dir|deck|required-data-file|flags|args|envs
-#  (flags: nokk = skip under --kk; args: extra command-line args, e.g. -var gridcut 0.02;
-#   envs: VAR=value pairs exported for the run, e.g. OE_CELLMIG_DIAG=2)
+#  Record: name|dir|deck|required-data-file|flags|args|envs|check
+#  (flags: nokk = skip under --kk, nocap = keep the deck's own run length;
+#   args: extra command-line args, e.g. -var gridcut 0.02;
+#   envs: VAR=value pairs exported for the run, e.g. OE_CELLMIG_DIAG=2;
+#   check: script run in the case dir after the run, exit 0 = PASS, e.g. scripts/check.py o2)
 #
 #  Usage:
 #    ./regression/run_regression.sh [--np N] [--exe PATH] [--filter PATTERN]
@@ -134,11 +136,16 @@ declare -a TESTS=(
   "west_tungsten_memlimit|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5||-var memlimit 1"
   # rebalance placement probe (audit item 2 leftover): rfpie rebalancing every 100 steps under OE_CELLMIG_DIAG=2
   "rfpie_rebalance_probe|workflows/impurity_transport/rfpie_tungsten_transport|in.openedge|input/plasma_he.h5||-var baltimeevery 100 -var balpartevery 50|OE_CELLMIG_DIAG=2"
+  # planar sheath impacts (Boris + sheath spatial): <E>, <theta> of O2+/O3+/D+ vs reference.json
+  "sheath_planar_o2|verification/sheath/planar_impact|in.planar||nokk nocap|-var case o2||scripts/check_planar.py o2"
+  "sheath_planar_o3|verification/sheath/planar_impact|in.planar||nokk nocap|-var case o3||scripts/check_planar.py o3"
+  "sheath_planar_d1|verification/sheath/planar_impact|in.planar||nokk nocap|-var case d1||scripts/check_planar.py d1"
 )
 
 # -----------------------------------------------------------------------
-#  Temporary input with a bounded total step count. Initialization `run 0`
-#  commands are preserved; multiple advancing runs share the requested budget.
+#  Temporary input with a bounded total step count (nsteps "" keeps the deck's
+#  runs). Initialization `run 0` commands are preserved; multiple advancing
+#  runs share the requested budget.
 #  comm/sort is forced on so a run is bit-reproducible at a given rank count
 #  (migration order otherwise reorders particles and the RNG stream).
 # -----------------------------------------------------------------------
@@ -151,7 +158,7 @@ make_regression_input() {
   awk -v total="$nsteps" -v nruns="$nruns" '
     BEGIN { remaining = total; seen = 0 }
     $1 == "global" { sub(/comm\/sort[ \t]+no/, "comm/sort yes") }
-    $1 == "run" && $2 != "0" {
+    $1 == "run" && $2 != "0" && total != "" {
       seen++
       if (seen < nruns) {
         later = nruns - seen
@@ -187,7 +194,7 @@ echo "========================================================================"
 echo ""
 
 for entry in "${TESTS[@]}"; do
-  IFS='|' read -r name testdir infile requires flags xargs xenvs <<< "$entry"
+  IFS='|' read -r name testdir infile requires flags xargs xenvs xcheck <<< "$entry"
   # legacy 4-field form: "nokk" in the requires slot means no data file
   if [[ "$requires" == "nokk" ]]; then flags="nokk"; requires=""; fi
 
@@ -249,6 +256,7 @@ for entry in "${TESTS[@]}"; do
   if [[ "$testdir" == workflows/* && $case_nsteps -gt $WORKFLOW_MAX_STEPS ]]; then
     case_nsteps=$WORKFLOW_MAX_STEPS
   fi
+  if [[ "$flags" == *nocap* ]]; then case_nsteps=""; fi
   tmpinput=$(make_regression_input "$dir/$infile" "$case_nsteps")
 
   logfile="$dir/regression.log"
@@ -274,6 +282,13 @@ for entry in "${TESTS[@]}"; do
     else probe_note="(placement probe: $(grep -c OE_CELLMIG_CHECK "$logfile") checks, none bad)"; fi
   fi
 
+  # case-specific check script (PASS/FAIL by exit code), output appended to the log
+  check_note=""
+  if [[ $ok -eq 1 && -n "$xcheck" ]]; then
+    if (cd "$dir" && "$PY" $xcheck >> "$logfile" 2>&1); then check_note="(check script passed)"
+    else ok=0; check_note="(check script failed: $(tail -1 "$logfile"))"; fi
+  fi
+
   # end-of-run metrics: extract, then compare against the stored reference
   # (or write the reference with --update-ref)
   metrics_note=""
@@ -281,7 +296,7 @@ for entry in "${TESTS[@]}"; do
     # keyed by case name: several cases can share one directory
     mfile="$dir/regression_metrics_${name}_$MODE.json"
     reffile="$dir/regression_reference_${name}.json"
-    if "$PY" "$METRICS" extract "$logfile" "$mfile" --np "$NP" --nsteps "$case_nsteps" 2>/dev/null; then
+    if "$PY" "$METRICS" extract "$logfile" "$mfile" --np "$NP" --nsteps "${case_nsteps:-0}" 2>/dev/null; then
       if [[ $UPDATE_REF -eq 1 ]]; then
         "$PY" "$METRICS" update "$mfile" "$reffile" > /dev/null && metrics_note="(reference updated)"
       elif [[ -f "$reffile" ]]; then
@@ -301,11 +316,11 @@ for entry in "${TESTS[@]}"; do
   fi
 
   if [[ $ok -eq 1 ]]; then
-    RESULTS+=("PASS  $name  $metrics_note $probe_note")
-    echo "PASS $metrics_note $probe_note"
+    RESULTS+=("PASS  $name  $metrics_note $check_note $probe_note")
+    echo "PASS $metrics_note $check_note $probe_note"
     ((PASS++))
   else
-    RESULTS+=("FAIL  $name  $metrics_note $probe_note")
+    RESULTS+=("FAIL  $name  $metrics_note $check_note $probe_note")
     echo "FAIL"
     ((FAIL++))
     if [[ "$VERBOSE" -eq 1 ]]; then
