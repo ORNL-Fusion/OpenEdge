@@ -147,18 +147,11 @@ static double flux_phase_sample(double a, double cx, double cy, double u0)
   return u0;
 }
 
-inline void xyz_to_rz(const double xyz[3], int dim, int axi, double &R, double &Z)
+inline void xyz_to_rz(const FixBackground *pd, const double xyz[3], int dim, int axi,
+                      double &R, double &Z)
 {
-  if (axi) {              // 2D true axi: SPARTA x = Z-axis, y = R-radial
-    Z = xyz[0];
-    R = xyz[1];
-  } else if (dim == 2) {  // 2D Cartesian (legacy)
-    R = xyz[0];
-    Z = xyz[1];
-  } else {                // 3D Cartesian
-    R = std::sqrt(xyz[0] * xyz[0] + xyz[1] * xyz[1]);
-    Z = xyz[2];
-  }
+  // shared mapping: honours the background's column axis offset in 3-D
+  OpenEdge::sparta_to_RZ(xyz, dim, axi != 0, R, Z, pd->column_x0, pd->column_y0);
 }
 
 inline void grad_from_fix(const FixBackground *pd, const std::vector<double> &field,
@@ -216,7 +209,7 @@ inline PlasmaFileParams query_plasma_from_fix(const FixBackground *pd,
   }
 
   double R, Z;
-  xyz_to_rz(xyz, dim, axi, R, Z);
+  xyz_to_rz(pd, xyz, dim, axi, R, Z);
 
   P.temp_e = pd->interp2D(pd->temp_e, R, Z, icell);
   P.dens_e = pd->interp2D(pd->dens_e, R, Z, icell);
