@@ -4,7 +4,7 @@
   "tol": null
  },
  "CPU": {
-  "value": 0.008944571,
+  "value": 0.001548,
   "tol": null
  },
  "Np": {
@@ -17,6 +17,14 @@
  },
  "host_fallback_calls": {
   "value": 0,
+  "tol": null
+ },
+ "np": {
+  "value": 4,
+  "tol": null
+ },
+ "nsteps": {
+  "value": 1000,
   "tol": null
  }
 }

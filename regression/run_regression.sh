@@ -139,6 +139,8 @@ declare -a TESTS=(
 # -----------------------------------------------------------------------
 #  Temporary input with a bounded total step count. Initialization `run 0`
 #  commands are preserved; multiple advancing runs share the requested budget.
+#  comm/sort is forced on so a run is bit-reproducible at a given rank count
+#  (migration order otherwise reorders particles and the RNG stream).
 # -----------------------------------------------------------------------
 make_regression_input() {
   local infile="$1"
@@ -148,6 +150,7 @@ make_regression_input() {
   nruns=$(awk '$1 == "run" && $2 != "0" { n++ } END { print n + 0 }' "$infile")
   awk -v total="$nsteps" -v nruns="$nruns" '
     BEGIN { remaining = total; seen = 0 }
+    $1 == "global" { sub(/comm\/sort[ \t]+no/, "comm/sort yes") }
     $1 == "run" && $2 != "0" {
       seen++
       if (seen < nruns) {
@@ -278,7 +281,7 @@ for entry in "${TESTS[@]}"; do
     # keyed by case name: several cases can share one directory
     mfile="$dir/regression_metrics_${name}_$MODE.json"
     reffile="$dir/regression_reference_${name}.json"
-    if "$PY" "$METRICS" extract "$logfile" "$mfile" 2>/dev/null; then
+    if "$PY" "$METRICS" extract "$logfile" "$mfile" --np "$NP" --nsteps "$case_nsteps" 2>/dev/null; then
       if [[ $UPDATE_REF -eq 1 ]]; then
         "$PY" "$METRICS" update "$mfile" "$reffile" > /dev/null && metrics_note="(reference updated)"
       elif [[ -f "$reffile" ]]; then
@@ -290,6 +293,7 @@ for entry in "${TESTS[@]}"; do
         else
           metrics_note="(metrics within reference)"
         fi
+        if echo "$cmp_out" | grep -q WARNING; then metrics_note="$metrics_note (np/nsteps differ from the reference)"; fi
       else
         metrics_note="(no reference)"
       fi

@@ -4,7 +4,7 @@
   "tol": null
  },
  "CPU": {
-  "value": 0.21487101,
+  "value": 0.157803,
   "tol": null
  },
  "Np": {
@@ -12,11 +12,11 @@
   "tol": 0.03
  },
  "c_Tavg_1": {
-  "value": 114492.06,
+  "value": 114162.35,
   "tol": 0.05
  },
  "c_Tavg_2": {
-  "value": 60037.583,
+  "value": 60083.536,
   "tol": 0.05
  },
  "loop_particles": {
@@ -25,6 +25,14 @@
  },
  "host_fallback_calls": {
   "value": 0,
+  "tol": null
+ },
+ "np": {
+  "value": 4,
+  "tol": null
+ },
+ "nsteps": {
+  "value": 1000,
   "tol": null
  }
 }
