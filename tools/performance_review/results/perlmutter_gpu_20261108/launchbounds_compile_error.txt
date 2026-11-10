@@ -1,0 +1,3 @@
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(468): error: expression preceding parentheses of apparent call must have (pointer-to-) function type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type

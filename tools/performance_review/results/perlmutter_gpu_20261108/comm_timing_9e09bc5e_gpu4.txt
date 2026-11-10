@@ -1,0 +1,11 @@
+[comm-timing] step 20000 cumulative seconds (rank0 / max-rank), 40018 calls, particles sent 2319570 recv 2319570 (all ranks)
+  passes with nothing to exchange on any rank: 20826 of 40018 per rank; passes with nothing leaving a rank: 81861 (summed over ranks)
+  pack           0.880 /     1.305
+  compress       0.604 /     0.648
+  plan           1.774 /     6.511
+  grow+sync      0.011 /     0.016
+  exchange       2.407 /     2.407
+  unpack         0.588 /     0.770
+  total          6.267 /    11.145
+  exchange_uniform:  irecv 0.012/0.015  packbuf 0.564/0.872  send 0.580/0.992  self 0.001/0.001  waitall 0.815/0.815  h2d 0.001/0.001
+   20000    26.633669    83810       23           13       399434          100         2003 1.9246194e+13        23677    1.1892614           20 

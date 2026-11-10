@@ -1,0 +1,57 @@
+========================================================================
+  OpenEdge Regression Tests
+  Executable: /pscratch/sd/d/diawa/openedge-build-a508aff-gpu/src/spa_kokkos_cuda_perlmutter
+  MPI ranks:  4
+  Kokkos:     -k on g 4 -sf kk -pk kokkos react/retry yes gpu/aware yes comm threaded  (backend: gpu)
+  Steps:      1000
+========================================================================
+
+ionization_recombination                 PASS (metrics within reference) 
+efield_polarization                      PASS (metrics within reference) 
+coulomb_background                       PASS (metrics within reference) 
+coulomb_binary                           PASS (metrics within reference) 
+dustt2005_uniform_plasma                 PASS (metrics within reference) 
+dis2021_uniform_comparison               PASS (metrics within reference) 
+pusher_gca                               PASS (metrics within reference) 
+pusher_boris                             PASS (metrics within reference) 
+pusher_hybrid_axiring                    PASS (metrics within reference) 
+st40_core_species_boundary               SKIP (no deck)
+constant_flux                            PASS (metrics within reference) 
+d2_chemistry                             PASS (metrics within reference) 
+dustt2005_cat_transport                  PASS (metrics within reference) 
+west_boron_powder_dropper                PASS (metrics within reference) 
+cat_liquid_metal_divertor                PASS (metrics within reference) 
+west_tungsten_transport                  PASS (metrics within reference) 
+rfpie_tungsten_transport                 PASS (metrics within reference) 
+west_tungsten_gridcut                    PASS (metrics within reference) 
+west_tungsten_memlimit                   PASS (metrics within reference) 
+rfpie_rebalance_probe                    PASS (metrics within reference) (placement probe: 24 checks, none bad)
+kokkos_parity                            PASS
+pwi_deposit_tagging                      PASS
+
+========================================================================
+  Results: 21 passed, 0 failed, 1 skipped
+========================================================================
+  PASS  ionization_recombination  (metrics within reference) 
+  PASS  efield_polarization  (metrics within reference) 
+  PASS  coulomb_background  (metrics within reference) 
+  PASS  coulomb_binary  (metrics within reference) 
+  PASS  dustt2005_uniform_plasma  (metrics within reference) 
+  PASS  dis2021_uniform_comparison  (metrics within reference) 
+  PASS  pusher_gca  (metrics within reference) 
+  PASS  pusher_boris  (metrics within reference) 
+  PASS  pusher_hybrid_axiring  (metrics within reference) 
+  SKIP  st40_core_species_boundary  (input file in.openedge not found)
+  PASS  constant_flux  (metrics within reference) 
+  PASS  d2_chemistry  (metrics within reference) 
+  PASS  dustt2005_cat_transport  (metrics within reference) 
+  PASS  west_boron_powder_dropper  (metrics within reference) 
+  PASS  cat_liquid_metal_divertor  (metrics within reference) 
+  PASS  west_tungsten_transport  (metrics within reference) 
+  PASS  rfpie_tungsten_transport  (metrics within reference) 
+  PASS  west_tungsten_gridcut  (metrics within reference) 
+  PASS  west_tungsten_memlimit  (metrics within reference) 
+  PASS  rfpie_rebalance_probe  (metrics within reference) (placement probe: 24 checks, none bad)
+  PASS  kokkos_parity  (grid/weighted + thermal kick CPU==GPU)
+  PASS  pwi_deposit_tagging  (ledger invariants, bw smoke skipped)
+

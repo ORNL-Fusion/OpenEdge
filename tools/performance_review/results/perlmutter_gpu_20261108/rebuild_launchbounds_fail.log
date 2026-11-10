@@ -1,0 +1,34 @@
+[  8%] Built target sparta_kokkos_cuda_perlmutter_PRE_BUILD
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(468): error: expression preceding parentheses of apparent call must have (pointer-to-) function type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(468): error: expression preceding parentheses of apparent call must have (pointer-to-) function type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(468): error: expression preceding parentheses of apparent call must have (pointer-to-) function type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(468): error: expression preceding parentheses of apparent call must have (pointer-to-) function type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(468): error: expression preceding parentheses of apparent call must have (pointer-to-) function type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(468): error: expression preceding parentheses of apparent call must have (pointer-to-) function type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(468): error: expression preceding parentheses of apparent call must have (pointer-to-) function type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(468): error: expression preceding parentheses of apparent call must have (pointer-to-) function type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(468): error: expression preceding parentheses of apparent call must have (pointer-to-) function type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(468): error: expression preceding parentheses of apparent call must have (pointer-to-) function type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(468): error: expression preceding parentheses of apparent call must have (pointer-to-) function type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(433): error: more than one instance of overloaded function "Kokkos::Impl::cuda_parallel_launch_global_memory" matches the required type
+/global/homes/d/diawa/OpenEdge/lib/kokkos/core/src/Cuda/Kokkos_Cuda_KernelLaunch.hpp(468): error: expression preceding parentheses of apparent call must have (pointer-to-) function type
+24 errors detected in the compilation of "/global/homes/d/diawa/OpenEdge/src/KOKKOS/update_kokkos.cpp".
+gmake[2]: *** [src/KOKKOS/CMakeFiles/pkg_kokkos.dir/build.make:1098: src/KOKKOS/CMakeFiles/pkg_kokkos.dir/update_kokkos.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:547: src/KOKKOS/CMakeFiles/pkg_kokkos.dir/all] Error 2
+gmake: *** [Makefile:136: all] Error 2
+GPU_REBUILD_RC=2
+[ 20%] Built target sparta_mpi_PRE_BUILD
+[ 99%] Built target sparta_mpi
+CPU_REBUILD_RC=0
+REBUILD_DONE

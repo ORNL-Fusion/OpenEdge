@@ -773,8 +773,8 @@ at 180k; kernels about 0.5 ms). Measured items are done; projections are marked.
 | # | item | status | removable time per step | basis |
 |---|---|---|---|---|
 | 1 | entry/exit pass (cap teleport hand-off) | measured, retained | 0.08 ms (28.5 -> 26.95 s / 20k) | section 27 |
-| 2 | one migrate per step still: plan Alltoall + exchange + pack/unpack bookkeeping for 12-15 leavers per rank | projected 0.15-0.25 ms | Comm 29 % = 0.4 ms; the fixed per-call cost measured in GPU_PORTING section 16 is 0.3-0.4 ms per migrate at 4 ranks; only a leaner exchange (one gather kernel, fewer fences) attacks it, not fewer calls |
-| 3 | move kernel register diet (255 regs, 1208 spill requests, 12.6 divergent branches) | projected 0.05-0.15 ms | ncu, section 28; the move kernel is 0.17 ms per step of launches |
+| 2 | one migrate per step still: plan Alltoall + exchange + pack/unpack bookkeeping for 12-15 leavers per rank (the second, globally-empty call per step is now skipped: section 30, 0.015 ms measured) | projected 0.15-0.25 ms | Comm 29 % = 0.4 ms; the fixed per-call cost measured in GPU_PORTING section 16 is 0.3-0.4 ms per migrate at 4 ranks; only a leaner exchange (one gather kernel, fewer fences) attacks it, not fewer calls |
+| 3 | move kernel register diet (255 regs, 1208 spill requests, 12.6 divergent branches) | projected 0.05-0.15 ms | ncu, section 28; the move kernel is 0.17 ms per step of launches; `LaunchBounds` does not compile with Kokkos 4.5.1 for this functor (section 30) |
 | 4 | per-cell surface tail (cells with hundreds of small triangles in the move and pcache loops) | projected 0.05-0.15 ms | kernel duration independent of particle count, section 28 |
 | 5 | product continuation in the parent's thread (0.25-0.85 product passes per step, 1-2 particles each) | projected 0.03-0.08 ms | each product pass is a full control round trip, section 27 |
 | 6 | sheath coefficient memo per (triangle, element) | blocked on the window decision | up to 0.1 ms | pcache fill 146 us per launch, section 23/26 |
@@ -784,6 +784,57 @@ Sum of the projections (2-6) is 0.3-0.7 ms of a 1.35 ms step; even the optimisti
 single case at about 6x, not 10x, because the remaining structure (one plan collective, one control
 fence and three to four host round trips per step) is SPARTA's step protocol. The campaign figure
 (13.5x) is not affected by any of this.
+
+## 30. Migrate fixed cost: launch bounds (rejected at compile) and the empty post-move migration (retained)
+
+Two experiments against item 2/3 of the section 29 table, 2026-11-10, jupyter node nid001296 and
+allocation 61089693 (nid200381).
+
+**Comm breakdown at the 9e09bc5e checkpoint** (`OE_COMM_TIMING`, 4 ranks, 20000 steps, loop
+26.63 s, `comm_timing_9e09bc5e_gpu4.txt`): 40018 migrate calls per rank, i.e. two per step: the
+in-loop migration of the single pass, and the post-move call in `run()`. 20826 of the 40018 are
+empty on every rank (the post-move ones: the pass loop clears `nmigrate` before it exits). Per-call
+sections, rank 0 / slowest rank in seconds: pack 0.88 / 1.31, compress 0.60 / 0.65, plan
+1.77 / 6.51, exchange 2.41 / 2.41 (packbuf 0.56, send 0.58, waitall 0.82), unpack 0.59 / 0.77,
+total 6.27 / 11.15. The plan column (one `MPI_Alltoall` per call) is where the slowest rank waits.
+
+**Launch bounds on the move kernel (rejected).** `Kokkos::LaunchBounds<128,3>` on the CUDA
+`TagUpdateMove` policy (section 28 saw 255 registers, spills and 12.5 % theoretical occupancy)
+does not compile with the bundled Kokkos 4.5.1: the `UpdateKokkos` functor is launched through
+the global-memory mechanism and the `LaunchBounds` specialisation of
+`CudaParallelLaunchKernelFunc` is ambiguous there (`launchbounds_compile_error.txt`,
+`Kokkos_Cuda_KernelLaunch.hpp:433`). A register cap would need `maxrregcount` for the whole
+translation unit or a Kokkos patch; not pursued. The line was reverted, no binary was produced.
+
+**Skipping the empty post-move migration (retained).** With `gridcut >= 0` the move loop migrates
+inside its pass loop and exits only when the entry/exit flag is zero on every rank (the flag rides
+the plan Alltoall under the one-Alltoall plan, or the separate `MPI_Allreduce` under the neighbor
+plan), so at `run()`'s post-move call every rank holds `nmigrate == 0` and the call is a globally
+empty migration. The move loop now records that exit (`oe_move_drained`) and `run()` skips the
+call on every rank; the decision is a function of the same uniform loop exit, so plan
+participation stays consistent (the section 17 neighbor-plan rule is about per-rank skipping,
+which this is not). The `gridcut < 0` path (no in-loop migration) is unchanged.
+`OE_SKIP_POST_MIGRATE=0` restores the call for A/B runs on the same binary.
+
+Three interleaved repeats, same binary, 20000 steps (`finish_{b11,i11}_gpu{1,4}_r{1,2,3}.txt`):
+
+| | r1 | r2 | r3 | Comm (r1) |
+|---|---|---|---|---|
+| 1 A100, call kept (b11) | 26.00 | 26.05 | 26.06 | 1.31 s |
+| 1 A100, call skipped (i11) | 26.06 | 25.87 | 25.95 | 1.28 s |
+| 4 A100, call kept (b11) | 26.66 | 26.72 | 26.92 | 7.97 s |
+| 4 A100, call skipped (i11) | 26.43 | 26.44 | 26.42 | 7.48 s |
+
+Four ranks: 26.77 -> 26.43 s (1.3 %, 0.015 ms per step, all three skipped runs below all three
+kept runs); one rank: within noise, as expected for a one-rank Alltoall. Reaction, surface-reaction
+and marker counts stay within the usual run-to-run spread. Retained: it is exact, removes one
+collective per step and its bookkeeping, and costs nothing.
+
+**What this says about item 2 of section 29.** Removing 20000 globally-empty calls recovered
+0.5 s of Comm at 4 ranks, i.e. 0.025 ms per empty call. The 0.3-0.4 ms per-call figure quoted
+there is therefore the cost of a *non-empty* migration (pack, compress, plan, exchange, unpack of
+12-15 leavers per rank), not a fixed per-call overhead: the remaining Comm time is in the one
+migration per step that actually moves particles, and only a leaner exchange attacks it.
 
 ## 7. Reproduction
 
