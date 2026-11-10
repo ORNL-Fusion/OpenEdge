@@ -883,8 +883,10 @@ void Pusher::push_boris_2d_impl(int i, int icell, double dt,
       const double bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
       const double bad = std::fabs(qm) * bmag * dt_sub;
       if (bad > pusher_bad_dt_limit) {
-        if (comm->me == 0)
-          error->warning(FLERR, "OpenEdge Boris warning: |q/m|*|B|*dt_sub is large");
+        // from the detecting rank: rank 0 may never see such a particle
+        fprintf(stderr, "WARNING on proc %d: OpenEdge Boris warning: "
+                "|q/m|*|B|*dt_sub is large (step " BIGINT_FORMAT ")\n",
+                comm->me, update->ntimestep);
         pusher_bad_dt_warned = 1;
       }
     }
@@ -1596,8 +1598,10 @@ void Pusher::push_boris_3d_impl(int i, int icell, double dt,
       const double bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
       const double bad = std::fabs(qm) * bmag * dt_sub;
       if (bad > pusher_bad_dt_limit) {
-        if (comm->me == 0)
-          error->warning(FLERR, "OpenEdge Boris warning: |q/m|*|B|*dt_sub is large");
+        // from the detecting rank: rank 0 may never see such a particle
+        fprintf(stderr, "WARNING on proc %d: OpenEdge Boris warning: "
+                "|q/m|*|B|*dt_sub is large (step " BIGINT_FORMAT ")\n",
+                comm->me, update->ntimestep);
         pusher_bad_dt_warned = 1;
       }
     }

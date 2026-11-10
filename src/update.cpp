@@ -3646,7 +3646,7 @@ void Update::global(int narg, char **arg)
     } 
       // --------------- E field ----------------
     else if (strcmp(arg[iarg],"efield") == 0) {
-      if (iarg+1 > narg) error->all(FLERR,"Illegal global command");
+      if (iarg+2 > narg) error->all(FLERR,"Illegal global command");
 
       if (strcmp(arg[iarg+1],"none") == 0) {
         efstyle = NOFIELD;
@@ -3679,7 +3679,7 @@ void Update::global(int narg, char **arg)
 
     // --------------- B field ----------------
     else if (strcmp(arg[iarg],"bfield") == 0) {
-      if (iarg+1 > narg) error->all(FLERR,"Illegal global command");
+      if (iarg+2 > narg) error->all(FLERR,"Illegal global command");
 
       if (strcmp(arg[iarg+1],"none") == 0) {
         bfstyle = NOFIELD;
@@ -3797,6 +3797,7 @@ void Update::global(int narg, char **arg)
       else error->all(FLERR,"Illegal global command");
       iarg += 2;
     } else if (strcmp(arg[iarg],"particle/reorder") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal global command");
       reorder_period = input->inumeric(FLERR,arg[iarg+1]);
       if (reorder_period < 0) error->all(FLERR,"Illegal global command");
       iarg += 2;

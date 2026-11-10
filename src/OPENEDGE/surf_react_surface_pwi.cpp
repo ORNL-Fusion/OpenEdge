@@ -850,7 +850,7 @@ void SurfReactSurfacePWI::init()
       if (sigma_ero_col[k] == 0 && ce->size_per_surf_cols != 0)
         error->all(FLERR,"surf_react surface/pwi adens_erosion: compute produces an "
                    "array; give a column number");
-      if (sigma_ero_col[k] > 0 && sigma_ero_col[k] > ce->size_per_surf_cols)
+      if (sigma_ero_col[k] < 0 || sigma_ero_col[k] > ce->size_per_surf_cols)
         error->all(FLERR,"surf_react surface/pwi adens_erosion: column out of range");
       int isp = particle->find_species((char *) sigma_ero_species[k].c_str());
       if (isp < 0)
@@ -875,6 +875,11 @@ void SurfReactSurfacePWI::init()
         imp_compute[k] = modify->compute[ic];
         if (!imp_compute[k]->per_surf_flag)
           error->all(FLERR,"surf_react surface/pwi adens_implant: compute is not per-surf");
+        if (imp_col[k] == 0 && imp_compute[k]->size_per_surf_cols != 0)
+          error->all(FLERR,"surf_react surface/pwi adens_implant: compute produces an "
+                     "array; give a column number");
+        if (imp_col[k] < 0 || imp_col[k] > imp_compute[k]->size_per_surf_cols)
+          error->all(FLERR,"surf_react surface/pwi adens_implant: column out of range");
       }
     }
   }
