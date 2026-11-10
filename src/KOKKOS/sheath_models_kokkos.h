@@ -15,7 +15,7 @@ KOKKOS_INLINE_FUNCTION constexpr double ME()   { return 9.1093837015e-31; }
 KOKKOS_INLINE_FUNCTION constexpr double AMU()  { return 1.66053906660e-27; }
 KOKKOS_INLINE_FUNCTION constexpr double EPS0() { return 8.8541878128e-12; }
 KOKKOS_INLINE_FUNCTION constexpr double PI()   { return 3.14159265358979323846; }
-KOKKOS_INLINE_FUNCTION constexpr double KMPS() { return 3.0; }
+KOKKOS_INLINE_FUNCTION constexpr double KMPS() { return 2.0; }   // keep equal to sheath_models.cpp
 
 struct ChoduraMetrics {
   double bdotn;

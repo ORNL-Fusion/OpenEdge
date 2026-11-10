@@ -114,6 +114,7 @@ class FixReflectPsi : public Fix {
   // Equilibrium data
   int nw_, nh_;
   double psi_axis_, psib_;
+  double column_x0_ = 0.0, column_y0_ = 0.0;   // 3-D column axis of the background
   std::vector<double> r_grid_, z_grid_;
   std::vector<double> psirz_;   // [nh * nw], row-major [z][r]
 

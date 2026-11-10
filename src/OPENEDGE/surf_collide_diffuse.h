@@ -45,6 +45,7 @@ class SurfCollideDiffuse : public SurfCollide {
   double px,py,pz;           // point to rotate surface around
   int tflag,rflag;           // flags for translation and rotation
   int trflag;                // 1 if either tflag or rflag is set
+  int elastic_flag;          // 1 = re-emit at the incident speed (cosine law), Tsurf unused
 
   Surf::Line *lines;
   Surf::Tri *tris;

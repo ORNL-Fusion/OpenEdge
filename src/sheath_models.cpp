@@ -17,7 +17,7 @@ constexpr double ME = 9.1093837015e-31;
 constexpr double AMU = 1.66053906660e-27;
 constexpr double EPS0 = 8.8541878128e-12;
 constexpr double PI = 3.14159265358979323846;
-constexpr double KMPS = 3.0;
+constexpr double KMPS = 2.0;   // L_MPS = k rho_cs sin(alpha); k = 2 as in Borodkina 2015/PYEAD (was 3, Nov 2026)
 }
 
 ChoduraMetrics chodura_metrics(double upar_ms, double cs_ms,
@@ -146,6 +146,47 @@ double sheath_phi_at_distance(const SheathEmagCoeffs &c, double dist_m)
   }
   const double dmps = d - c.xi_mps * c.lambdaD_m;
   return c.phi_mps_eV * std::exp(-dmps * c.inv_mps);
+}
+
+void sheath_turning_step(const SheathEmagCoeffs &c, double q_abs, double mass,
+                         double vn, double dt, double d0,
+                         double &vn_new, double &dd)
+{
+  auto phi = [&](double d) { return sheath_phi_at_distance(c, std::max(d, 0.0)); };
+  if (!(vn > 0.0) || !(dt > 0.0) || !(mass > 0.0) || !(q_abs > 0.0)) {
+    vn_new = vn;
+    dd = vn * dt;
+    return;
+  }
+  const double k_over_q = 0.5 * mass * vn * vn / q_abs;      // climb available, in volts
+  const double phi0 = phi(d0);
+  const double phi_t = phi0 - k_over_q;                      // potential at the turning point
+  double lo = d0, hi = d0 + vn * dt;
+  if (phi(hi) >= phi_t) {                                     // no turning point in reach (caller
+    vn_new = std::sqrt(std::max(vn * vn + 2.0 * q_abs * (phi(hi) - phi0) / mass, 0.0));
+    dd = vn * dt;                                             // misjudged); plain exact step
+    return;
+  }
+  for (int it = 0; it < 48; it++) {                           // phi decreases outward
+    const double mid = 0.5 * (lo + hi);
+    if (phi(mid) > phi_t) lo = mid; else hi = mid;
+  }
+  const double d_t = 0.5 * (lo + hi);
+  const double climb = d_t - d0;
+  double a = (climb > 1.0e-12) ? vn * vn / (2.0 * climb)      // mean deceleration over the climb
+                               : q_abs * sheath_emag_at_distance(c, d_t) / mass;
+  if (!(a > 0.0)) a = q_abs * sheath_emag_at_distance(c, d_t) / mass;
+  const double t1 = (a > 0.0) ? vn / a : dt;                  // time to the turning point
+  double d_f;
+  if (t1 >= dt) {                                             // still climbing at the end of the step
+    d_f = d0 + vn * dt - 0.5 * a * dt * dt;
+    vn_new = std::sqrt(std::max(vn * vn + 2.0 * q_abs * (phi(d_f) - phi0) / mass, 0.0));
+  } else {                                                    // turned, falling back for t2
+    const double t2 = dt - t1;
+    d_f = d_t - 0.5 * a * t2 * t2;
+    vn_new = -std::sqrt(std::max(2.0 * q_abs * (phi(d_f) - phi_t) / mass, 0.0));
+  }
+  dd = d_f - d0;
 }
 
 double sheath_emag_at_distance(const SheathEmagCoeffs &c, double dist_m)

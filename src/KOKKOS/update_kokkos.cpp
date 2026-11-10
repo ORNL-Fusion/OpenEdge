@@ -2434,8 +2434,9 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
                 exclude = -1;
                 continue;
               } else {
+                // PENTRY, not PEXIT: the receiver keeps the surface checks
                 icell = newcell;
-                particle_i.flag = PEXIT;
+                particle_i.flag = PENTRY;
                 particle_i.dtremain = dtremain;
                 d_entryexit() = 1;
                 Kokkos::atomic_inc(&d_oe_pexit_teleport());

@@ -2,7 +2,7 @@
    Borodkina sheath model, Russian Phys. J. 58 (2015) 438-445 and
    Contrib. Plasma Phys. 56 (2016) 640-645.
    Alpha is measured from the wall normal. The 2015 closure is recovered
-   at Ti=Te and k=2; OpenEdge uses its Ti/Te generalization and k=3.
+   at Ti=Te and k=2; OpenEdge uses its Ti/Te generalization with k=2.
 ------------------------------------------------------------------------- */
 
 #ifndef OPENEDGE_SHEATH_MODELS_H
@@ -54,6 +54,17 @@ SheathEmagCoeffs sheath_prepare_borodkina(double te_eV, double ti_eV,
 
 double sheath_emag_at_distance(const SheathEmagCoeffs &c, double dist_m);
 double sheath_phi_at_distance(const SheathEmagCoeffs &c, double dist_m);
+
+// Normal motion across a turning point inside one substep, exact in energy.
+// An ion at distance d0 moving outward with normal velocity vn > 0 cannot pay
+// for the climb to d0 + vn*dt.  The turning distance comes from the potential
+// itself, the fall-back from a constant deceleration fitted to that climb,
+// and the end velocity from phi at the actual end position, so the result
+// stays exact however coarse the substep is relative to the sheath.
+// q_abs is |charge| in C; returns the end normal velocity and displacement.
+void sheath_turning_step(const SheathEmagCoeffs &c, double q_abs, double mass,
+                         double vn, double dt, double d0,
+                         double &vn_new, double &dd);
 
 struct SheathProfile {
   double esheath_eV = 0.0;

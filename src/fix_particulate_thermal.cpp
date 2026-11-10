@@ -104,7 +104,8 @@ FixParticulateThermal::FixParticulateThermal(SPARTA *sparta, int narg, char **ar
       "Illegal fix evaporation command "
       "(need: Nevery MIXTURE background PD)");
 
-  nevery = atoi(arg[2]);
+  nevery = input->inumeric(FLERR, arg[2]);
+  if (nevery < 1) error->all(FLERR,"fix particulate/thermal: nevery must be >= 1");
   imix   = particle->find_mixture(arg[3]);
   if (imix < 0) error->all(FLERR,"Fix evaporation: unknown mixture ID");
 
@@ -229,8 +230,7 @@ FixParticulateThermal::FixParticulateThermal(SPARTA *sparta, int narg, char **ar
 
   if (emit_imix >= 0) {
     random = new RanKnuth(update->ranmaster->uniform());
-    double seed = comm->me + 1;
-    random->reset(seed, comm->me, 100);
+    random->reset(update->ranmaster->uniform(), comm->me, 100);   // deck seed, distinct per rank
   }
 
   heating_q_custom_ = particle->find_custom((char *) "droplet_heating_q");
@@ -427,13 +427,13 @@ void FixParticulateThermal::init()
 void FixParticulateThermal::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
-  evap_half(0.5 * update->dt);
+  evap_half(0.5 * nevery * update->dt);   // applied every nevery steps
 }
 
 void FixParticulateThermal::end_of_step()
 {
   if ((update->ntimestep % nevery) != 0) return;
-  evap_half(0.5 * update->dt);
+  evap_half(0.5 * nevery * update->dt);   // applied every nevery steps
 }
 
 double FixParticulateThermal::memory_usage() { return 0.0; }

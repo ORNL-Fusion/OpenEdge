@@ -89,6 +89,7 @@ FixNeutralCollideBackground::FixNeutralCollideBackground(SPARTA *sparta,
     error->all(FLERR,"fix neutral/collide/background: no channel given");
 
   rng = new RanKnuth(update->ranmaster->uniform());
+  rng->reset(update->ranmaster->uniform(), comm->me, 100);   // distinct stream per rank
 
   ncollide = 0;
   mass_p_current = 0.0;

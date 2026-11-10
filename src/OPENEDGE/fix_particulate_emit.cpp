@@ -167,6 +167,12 @@ FixParticulateEmit::~FixParticulateEmit()
 
 void FixParticulateEmit::init()
 {
+  // cell weighting clones/deletes grains as they cross cells (a grain is
+  // one physical object, not a cloud of fnum atoms)
+  if (grid->cellweightflag)
+    error->all(FLERR,"fix particulate/emit: global weight cell is not "
+               "allowed with particulates");
+
   // invoke FixEmit::init() to set flags
 
   FixEmit::init();
@@ -500,6 +506,9 @@ void FixParticulateEmit::create_task(int icell)
     else {
       isplit = cells[icell].isplit;
       subcell = sinfo[isplit].csplits[i];
+      // subcell = -1 if the surf did not end up in a polygon (see
+      // create_surfmap() in cut2d/cut3d): skip it, as fix emit/surf does
+      if (subcell < 0) continue;
       tasks[ntask].pcell = sinfo[isplit].csubs[subcell];
     }
 
@@ -1693,7 +1702,8 @@ int FixParticulateEmit::option(int narg, char **arg)
       npstr = new char[n];
       strcpy(npstr,&arg[1][2]);
     } else {
-      np = atoi(arg[1]);
+      np = input->inumeric(FLERR,arg[1]);     // rejects "0.5"; 0 = flow mode
+      if (np < 0) error->all(FLERR,"Illegal fix particulate/emit command: n < 0");
       if (np == 0) npmode = FLOW;
       else npmode = CONSTANT;
     }

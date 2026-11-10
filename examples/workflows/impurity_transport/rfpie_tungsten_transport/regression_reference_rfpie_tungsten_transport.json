@@ -4,11 +4,11 @@
   "tol": null
  },
  "CPU": {
-  "value": 9.9486454,
+  "value": 7.612006,
   "tol": null
  },
  "Np": {
-  "value": 83800.0,
+  "value": 83645.0,
   "tol": 0.03
  },
  "Nscoll": {
@@ -20,11 +20,19 @@
   "tol": null
  },
  "loop_particles": {
-  "value": 83800,
+  "value": 83645,
   "tol": 0.03
  },
  "host_fallback_calls": {
   "value": 0,
+  "tol": null
+ },
+ "np": {
+  "value": 4,
+  "tol": null
+ },
+ "nsteps": {
+  "value": 1000,
   "tol": null
  }
 }

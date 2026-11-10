@@ -41,6 +41,9 @@ ComputeGridWeightedKokkos::ComputeGridWeightedKokkos(SPARTA *sparta,
   ComputeGridWeighted(sparta, narg, arg)
 {
   kokkos_flag = 1;
+  if (prad_flag)
+    error->all(FLERR,"Compute grid/weighted/kk does not support "
+               "prad_w / pradtot_w");
 
   k_unique = DAT::tdual_int_1d("compute/grid_weighted:unique",npergroup);
   for (int m = 0; m < npergroup; m++)

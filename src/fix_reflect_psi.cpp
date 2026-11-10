@@ -12,6 +12,7 @@
 #include "domain.h"
 #include "error.h"
 #include "fix_background.h"
+#include "openedge_geom.h"
 #include "memory.h"
 #include "mixture.h"
 #include "modify.h"
@@ -192,6 +193,8 @@ void FixReflectPsi::load_from_background(const std::string &fix_id)
       "fix reflect/psi: background fix does not expose psi. "
       "Make sure plasma.h5 contains /psi + /psicore + /psisep");
 
+  column_x0_ = pd->column_x0;
+  column_y0_ = pd->column_y0;
   nw_ = pd->equ_jm;
   nh_ = pd->equ_km;
   r_grid_ = pd->equ_r;
@@ -574,16 +577,8 @@ double FixReflectPsi::psi_norm_gradient(double R, double Z,
 double FixReflectPsi::psi_norm_at_sparta(const double xyz[3]) const
 {
   double R, Z;
-  if (domain->dimension == 3) {
-    R = std::hypot(xyz[0], xyz[1]);
-    Z = xyz[2];
-  } else if (domain->axisymmetric) {
-    Z = xyz[0];
-    R = xyz[1];
-  } else {
-    R = xyz[0];
-    Z = xyz[1];
-  }
+  OpenEdge::sparta_to_RZ(xyz, domain->dimension, domain->axisymmetric, R, Z,
+                         column_x0_, column_y0_);
   return psi_norm_at_point(R, Z);
 }
 
@@ -613,16 +608,8 @@ bool FixReflectPsi::segment_crossing(const double x0[3], const double x1[3],
     xc[k] = x0[k] + fraction*(x1[k]-x0[k]);
 
   double R, Z;
-  if (domain->dimension == 3) {
-    R = std::hypot(xc[0], xc[1]);
-    Z = xc[2];
-  } else if (domain->axisymmetric) {
-    Z = xc[0];
-    R = xc[1];
-  } else {
-    R = xc[0];
-    Z = xc[1];
-  }
+  OpenEdge::sparta_to_RZ(xc, domain->dimension, domain->axisymmetric, R, Z,
+                         column_x0_, column_y0_);
   double gR, gZ;
   psi_norm_gradient(R, Z, gR, gZ);
 

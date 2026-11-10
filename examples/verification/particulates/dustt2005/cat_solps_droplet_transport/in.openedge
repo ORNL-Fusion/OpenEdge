@@ -17,7 +17,6 @@ global              gridcut 0.0 comm/sort no
 create_box          -3.8 3.8 0 5.7 -0.05 0.05
 create_grid         40 30 1
 balance_grid        rcb cell
-global              weight cell radius
 global fnum 0.0000001
 
 # Species and geometry

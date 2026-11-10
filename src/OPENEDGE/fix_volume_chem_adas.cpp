@@ -786,6 +786,15 @@ void FixVolumeChemAdas::init()
     }
   }
 
+  // species of this fix's element, for radiation_coeff()
+  rad_species.assign(particle->nspecies, 0);
+  for (int m = 0; m < nlist; m++) {
+    const OneReaction *r = &rlist[m];
+    if (!r->active) continue;
+    for (int i = 0; i < r->nreactant; i++) rad_species[r->reactants[i]] = 1;
+    for (int i = 0; i < r->nproduct; i++) rad_species[r->products[i]] = 1;
+  }
+
   if (comm->me == 0) {
     auto report = [&](const char *label, int active, int total, int enabled) {
       if (total == 0) return;
@@ -2488,7 +2497,7 @@ void FixVolumeChemAdas::readfile(char *fname)
           strcpy(r->id_reactants[r->nreactant],word);
           r->nreactant++;
         } else {
-          if (r->nreactant == MAXPRODUCT) {
+          if (r->nproduct == MAXPRODUCT) {
             print_reaction(copy1,copy2);
             error->all(FLERR,"Too many products in a reaction formula");
           }
@@ -2736,13 +2745,54 @@ void FixVolumeChemAdas::interpolateRateData(int atomic_number, double charge, in
   double f00, f01, f10, f11;
   bool success = setupInterpolation(reactionType, atomic_number, charge_idx, te, ne, x0, x1, y0, y1, f00, f01, f10, f11);
   if (!success) {
-      rate_final = 0.0;
+      // no table / charge row: log10 k = -300 (k = 0); 0.0 would mean k = 1 cm^3/s
+      static int warned = 0;
+      if (!warned && comm->me == 0)
+        error->warning(FLERR,"fix volume/chem/adas: rate table missing for a "
+                       "requested element/charge/reaction; rate set to zero");
+      warned = 1;
+      rate_final = -300.0;
       return;
   }
 
   MathExtra::bilinearInterpolate(x0, x1, y0, y1, f00, f01, f10, f11, te, ne, rate_final);
 }
 
+
+/* ----------------------------------------------------------------------
+   line (PLT) + recombination/bremsstrahlung (PRB) power coefficient of a
+   species [W m^3]; Te and ne are clamped to the table range
+------------------------------------------------------------------------- */
+
+double FixVolumeChemAdas::radiation_coeff(int isp, double te_eV, double ne_m3)
+{
+  if (isp < 0 || isp >= static_cast<int>(rad_species.size()) ||
+      !rad_species[isp]) return 0.0;
+  if (!(te_eV > 0.0) || !(ne_m3 > 0.0)) return 0.0;
+  auto it = materials_rate_data.find(atomic_number);
+  if (it == materials_rate_data.end()) return 0.0;
+  const RateData &rd = it->second;
+  const int q = static_cast<int>(std::max(0.0, particle->species[isp].charge) + 0.5);
+
+  auto lookup = [&](ReactionType type, int row, int nq,
+                    const std::vector<double> &gt,
+                    const std::vector<double> &gd) -> double {
+    if (row < 0 || row >= nq || gt.size() < 2 || gd.size() < 2) return 0.0;
+    const double lt = std::min(std::max(std::log10(te_eV), gt.front()), gt.back());
+    const double ln = std::min(std::max(std::log10(ne_m3 * 1.0e-6), gd.front()),
+                               gd.back());
+    double log10_wcm3 = 0.0;
+    interpolateRateData(atomic_number, row, 0, lt, ln, log10_wcm3, type);
+    return std::pow(10.0, log10_wcm3) * 1.0e-6;      // W cm^3 -> W m^3
+  };
+
+  // PLT row q: line radiation of charge state q.
+  // PRB row q-1: recombination + bremsstrahlung of charge state q.
+  return lookup(ReactionType::LineRadiation, q, rd.plt_nQ,
+                rd.gridT_plt, rd.gridD_plt) +
+         lookup(ReactionType::RecombRadiation, q - 1, rd.prb_nQ,
+                rd.gridT_prb, rd.gridD_prb);
+}
 
 /*----------------------------------------------------------------------
    find indices for bilinear interpolation

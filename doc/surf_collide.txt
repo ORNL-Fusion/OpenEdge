@@ -17,10 +17,14 @@ style = {specular} or {diffuse} or {cll} or {adiabatic} or {impulsive} or {td} o
 args = arguments for specific style :l
   {specular} or {specular/kk} args = noslip (optional)
     noslip = reflect all velocity components off surface (not just normal component)
-  {diffuse} or {diffuse/kk} args = Tsurf acc
+  {diffuse} or {diffuse/kk} args = Tsurf acc keyword value ...
     Tsurf = temperature of surface (temperature units)
             Tsurf can be a variable or custom per-surf attribute (see below)
     acc = accommodation coefficient
+    optional keywords (diffuse only) = {temp/freq} or {translate} or {rotate} or {elastic}
+      {elastic} value = {yes} or {no} (default no)
+        yes = re-emit at the incident speed with a cosine angular law;
+              Tsurf then only sets the internal energies
   {cll} args = Tsurf acc_n acc_t acc_rot acc_vib
     Tsurf = temperature of surface (temperature units)
             Tsurf can be a variable or custom per-surf attribute (see below)
@@ -228,6 +232,14 @@ the direction of the outward surface normal and the plane tangent to
 the surface given by:
 
 :c,image(Eqs/diffuse_normal.jpg)
+
+With {elastic yes} the particle instead keeps its incident speed and
+leaves in a direction sampled from a cosine law about the surface
+normal; {Tsurf} then only sets the rotational and vibrational
+energies.  This was the behaviour of the {diffuse} style between
+August and November 2026; the default is the thermal re-emission
+above, which is also what {diffuse/kk} computes ({elastic yes} is not
+available with {diffuse/kk}).
 
 :line
 

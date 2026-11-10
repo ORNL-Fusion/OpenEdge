@@ -51,6 +51,10 @@ public:
       return false;
     }
 
+    // PLT + PRB power coefficient [W m^3] of species isp at Te [eV] and
+    // ne [m^-3]; 0 for species outside this fix's reaction chain.
+    double radiation_coeff(int isp, double te_eV, double ne_m3);
+
     // Zero the 20-column per-cell source tally (array_grid). Called between
     // outer coupling iterations so each Gkeyll/SOLPS handoff sees a fresh
     // accumulation from the new puff, not a sum over previous iterations.
@@ -341,6 +345,8 @@ protected:
     double neutral_dens_at_cell(int icell);
     class FixBackground *nn_pd = nullptr;
     int nn_pd_resolved = 0;
+
+    std::vector<char> rad_species;   // 1 if the species is in an active reaction
 
     void compute_species_lambdas(int isp, double Te_eV, double ne_m3,
                                   double Ti_eV, int icell,

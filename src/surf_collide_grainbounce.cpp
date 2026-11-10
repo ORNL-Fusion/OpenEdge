@@ -55,7 +55,7 @@ SurfCollideGrainBounce::SurfCollideGrainBounce(SPARTA *sparta, int narg,
   }
 
   random_ = new RanKnuth(update->ranmaster->uniform());
-  random_->reset(comm->me + 1, comm->me, 100);
+  random_->reset(update->ranmaster->uniform(), comm->me, 100);   // deck seed, distinct per rank
 }
 
 SurfCollideGrainBounce::~SurfCollideGrainBounce()

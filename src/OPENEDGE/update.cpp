@@ -101,18 +101,11 @@ enum{NOFIELD,CFIELD,PFIELD,GFIELD};             // several files
 
 namespace {
 
-inline void xyz_to_rz(const double xyz[3], int dim, int axi, double &R, double &Z)
+inline void xyz_to_rz(const FixBackground *pd, const double xyz[3], int dim, int axi,
+                      double &R, double &Z)
 {
-  if (axi) {          // 2D true axi: SPARTA x = Z-axis, y = R-radial
-    Z = xyz[0];
-    R = xyz[1];
-  } else if (dim == 2) {  // 2D Cartesian (legacy)
-    R = xyz[0];
-    Z = xyz[1];
-  } else {            // 3D Cartesian
-    R = std::sqrt(xyz[0] * xyz[0] + xyz[1] * xyz[1]);
-    Z = xyz[2];
-  }
+  // shared mapping: honours the background's column axis offset in 3-D
+  OpenEdge::sparta_to_RZ(xyz, dim, axi != 0, R, Z, pd->column_x0, pd->column_y0);
 }
 
 inline void grad_from_fix(const FixBackground *pd, const std::vector<double> &field,
@@ -166,7 +159,7 @@ inline PlasmaFileParams query_plasma_from_fix(const FixBackground *pd, const dou
   }
 
   double R, Z;
-  xyz_to_rz(xyz, dim, axi, R, Z);
+  xyz_to_rz(pd, xyz, dim, axi, R, Z);
 
   P.temp_e = pd->interp2D(pd->temp_e, R, Z, icell);
   P.dens_e = pd->interp2D(pd->dens_e, R, Z, icell);
@@ -575,6 +568,8 @@ void Update::init()
                  "global sheath: geometry compute must be style nearest_surf/grid");
   }
   if (sheath_flag) {
+    if (!pusher->pusher_plasma_cid)
+      error->all(FLERR,"global pusher sheath requires plasma <ID>");
     pusher->pusher_plasma_cidx = modify->find_compute(pusher->pusher_plasma_cid);
     pusher->pusher_plasma_fidx = -1;
     if (pusher->pusher_plasma_cidx >= 0) {
@@ -1219,7 +1214,7 @@ void Update::cache_plasma_particles()
       } else {
       // ---- legacy fix background path: shared bilinear stencil ----
       double R, Z;
-      xyz_to_rz(x, dim, domain->axisymmetric, R, Z);
+      xyz_to_rz(pd, x, dim, domain->axisymmetric, R, Z);
       const PdStencil2D st = make_pd_stencil(pd, R, Z);
       int mesh_cell;
       if (pd->has_mesh && need_plasma) {
@@ -1393,17 +1388,17 @@ void Update::cache_plasma_particles()
           for (int j = 0; j < pc->nsurf; j++) {
             int m = static_cast<int>(cs[j]);
             double d;
+            // true point-to-element distance, as the pusher uses (an
+            // infinite-plane distance can pick a far element whose plane
+            // happens to pass near the particle)
             if (dim == 2) {
               if (!(surf->lines[m].mask & sbit)) continue;
               Surf::Line *ln = &surf->lines[m];
-              d = std::fabs((x[0]-ln->p1[0])*ln->norm[0] +
-                            (x[1]-ln->p1[1])*ln->norm[1]);
+              d = Geometry::distsq_point_line(const_cast<double *>(x), ln->p1, ln->p2);
             } else {
               if (!(surf->tris[m].mask & sbit)) continue;
               Surf::Tri *tr = &surf->tris[m];
-              d = std::fabs((x[0]-tr->p1[0])*tr->norm[0] +
-                            (x[1]-tr->p1[1])*tr->norm[1] +
-                            (x[2]-tr->p1[2])*tr->norm[2]);
+              d = Geometry::distsq_point_tri(const_cast<double *>(x), tr->p1, tr->p2, tr->p3, tr->norm);
             }
             if (d < best_d) { best_d = d; best_m = m; }
           }
@@ -1438,8 +1433,14 @@ void Update::cache_plasma_particles()
 
           double alpha_deg = 90.0;
           if (bmag > 0.0) {
+            // bx,by,bz are (Br,Bz,Bt) in 2-D; in axisymmetric slots the
+            // normal is (n_Z, n_R), so map it to (n_R, n_Z) as the pusher does
             double bvec[3] = {bx, by, bz};
             double nvec[3] = {sh_nx, sh_ny, sh_nz};
+            if (dim == 2 && domain->axisymmetric) {
+              nvec[0] = sh_ny;
+              nvec[1] = sh_nx;
+            }
             SheathModels::ChoduraMetrics cm =
               SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
             alpha_deg = cm.alpha_deg;
@@ -2720,9 +2721,12 @@ template < int DIM, int SURF, int OPT > void Update::move()
                     nscollide_one++;
                     continue;
                   } else {
+                    // PENTRY, not PEXIT: the receiver must keep the surface
+                    // checks for this cell (PEXIT skips them), the particle
+                    // now sits on the far cap inside it
                     icell = newcell;
                     particles[i].icell = icell;
-                    particles[i].flag = PEXIT;
+                    particles[i].flag = PENTRY;
                     particles[i].dtremain = dtremain;
                     entryexit = 1;
                     nscollide_one++;
@@ -3646,7 +3650,7 @@ void Update::global(int narg, char **arg)
     } 
       // --------------- E field ----------------
     else if (strcmp(arg[iarg],"efield") == 0) {
-      if (iarg+1 > narg) error->all(FLERR,"Illegal global command");
+      if (iarg+2 > narg) error->all(FLERR,"Illegal global command");
 
       if (strcmp(arg[iarg+1],"none") == 0) {
         efstyle = NOFIELD;
@@ -3679,7 +3683,7 @@ void Update::global(int narg, char **arg)
 
     // --------------- B field ----------------
     else if (strcmp(arg[iarg],"bfield") == 0) {
-      if (iarg+1 > narg) error->all(FLERR,"Illegal global command");
+      if (iarg+2 > narg) error->all(FLERR,"Illegal global command");
 
       if (strcmp(arg[iarg+1],"none") == 0) {
         bfstyle = NOFIELD;
@@ -3797,6 +3801,7 @@ void Update::global(int narg, char **arg)
       else error->all(FLERR,"Illegal global command");
       iarg += 2;
     } else if (strcmp(arg[iarg],"particle/reorder") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal global command");
       reorder_period = input->inumeric(FLERR,arg[iarg+1]);
       if (reorder_period < 0) error->all(FLERR,"Illegal global command");
       iarg += 2;

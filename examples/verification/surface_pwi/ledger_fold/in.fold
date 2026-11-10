@@ -1,0 +1,67 @@
+# surf_react surface/pwi ledger folding: the per-surf s_adens ledgers are folded
+# every adens_nevery steps and must also be folded before every dump, at the end
+# of a run and before a restart is written, so dumps at steps that are not
+# multiples of adens_nevery agree with an every-step fold.
+#   -var nevery N      adens_nevery (1 = fold every step, the reference)
+#   -var restart 1     read output/fold_<case>.restart back and dump the ledger
+
+variable    case     index n1
+variable    nevery   index 1
+variable    restart  index 0
+variable    nsteps   index 350
+variable    dumpevery index 70
+variable    inp      string ../deposit_tagging/input
+
+shell       mkdir output
+seed        12345
+dimension   3
+boundary    o o o
+global      gridcut 0.0 comm/sort yes
+global      fnum 1e14
+timestep    1e-6
+
+if "${restart} == 1" then "jump SELF fromrestart"
+
+create_box  0 1 0 1 0 1
+create_grid 4 4 4
+balance_grid rcb cell
+
+species     ${inp}/w.species W Wd
+mixture     wbeam W frac 1.0 nrho 1.0e19 temp 3.0e6 vstream 0.0 0.0 0.0
+
+read_surf   ${inp}/plate.surf group plate particle check
+read_surf   ${inp}/source.surf group source particle check
+surf_collide vac vanish
+surf_collide wall diffuse 773.15 1.0
+surf_react  pwi surface/pwi ${inp}/w_plain.recycle twall 773.15 adens_surf adens &
+            rzone 1e17 strata 12 minthick 0.05 adens_nevery ${nevery}
+surf_modify plate collide wall react pwi
+surf_modify source collide vac
+
+fix         pw particle/weight
+fix         femit surface/emit/source wbeam source constant 1.0e22 perspecies no &
+            normal no nlaunch_total 200 nevery 1 model thermal
+
+run         0 post no
+dump        dsig surf plate ${dumpevery} output/${case}.*.dump id s_adens[*] &
+            s_adens_net s_adens_dep s_adens_ero
+stats       100
+stats_style step cpu np nscoll nsreact
+run         ${nsteps}
+write_restart output/fold_${case}.restart
+jump        SELF done
+
+label       fromrestart
+read_restart output/fold_${case}.restart
+surf_collide vac vanish
+surf_collide wall diffuse 773.15 1.0
+surf_react  pwi surface/pwi ${inp}/w_plain.recycle twall 773.15 adens_surf adens &
+            rzone 1e17 strata 12 minthick 0.05 adens_nevery ${nevery}
+surf_modify plate collide wall react pwi
+surf_modify source collide vac
+run         0 post no
+dump        dsig surf plate 1 output/${case}_restart.*.dump id s_adens[*] &
+            s_adens_net s_adens_dep s_adens_ero
+run         0
+
+label       done

@@ -92,6 +92,7 @@ FixCoulombBase::FixCoulombBase(SPARTA *sparta, int narg, char **arg) :
 
   int iarg = 2;
   nevery = input->inumeric(FLERR, arg[iarg++]);
+  if (nevery < 1) error->all(FLERR,"fix coulomb/*: nevery must be >= 1");
 
   if (strcmp(arg[iarg], "background") == 0) {
     iarg++;

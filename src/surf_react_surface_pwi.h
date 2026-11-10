@@ -109,6 +109,7 @@ class SurfReactSurfacePWI : public SurfReact {
   char *sigma_attr;                // name of per-surf custom attribute, NULL if unused
   int sindex_custom;               // surf->find_custom index, -1 if unset
   int sigma_nevery;                // sync interval in steps (default 1)
+  bigint sigma_last_fold;          // step of the last ledger fold
   int sigma_ncols;                 // = particle->nspecies at init
   bigint sigma_nsurf;              // total surf count
   bigint conc_gen;                 // see conc_generation()

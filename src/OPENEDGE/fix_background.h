@@ -407,6 +407,9 @@ class FixBackground : public Fix {
   int const_has_efield;
   double const_dens_n, const_temp_n;        // uniform neutrals (nn/tn, eV)
   int const_has_neutrals;
+  // constant mode `ions N name mass_amu frac ...`: ion slots at frac*ni
+  std::vector<std::string> const_ion_names;
+  std::vector<double> const_ion_mass, const_ion_frac;
   double const_br, const_bz, const_bt;
   int const_has_bfield;
   double const_bcart[3];   // uniform Cartesian B (3D tilted-field decks)

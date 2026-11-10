@@ -57,6 +57,7 @@ override compute_grid.h
 override compute_property_surf.cpp
 override compute_property_surf.h
 override dump_particle.cpp
+override read_restart.cpp
 override dump_particle.h
 override sparta.cpp
 override sparta.h
@@ -152,6 +153,8 @@ action process_library.h
 action pusher.cpp
 action pusher.h
 action reflection_tables.h
+action sheath_iead.cpp
+action sheath_iead.h
 action sheath_models.cpp
 action sheath_models.h
 action surface_incidence.cpp

@@ -97,6 +97,7 @@ class FixSurfaceEmitRecycle : public FixEmit {
     int    pcell;
     int    npoint;
     double rmid, zmid;          // segment midpoint (for plasma query)
+    double phimid;              // element azimuth about the column axis (3-D)
     double inward[3];           // unit inward normal (flip of outward)
     int    plasma_cell;         // cached SOLPS cell index (-1 if none)
     double sin_alpha;           // cached |B dot n|/|B| at wall midpoint

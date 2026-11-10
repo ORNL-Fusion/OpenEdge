@@ -125,3 +125,73 @@ W9+ --> W
 S W_on_W
 W10+ --> W
 S W_on_W
+
+W11+ --> W
+T w_on_w
+W11+ --> W
+A 0.0
+
+W12+ --> W
+T w_on_w
+W12+ --> W
+A 0.0
+
+W13+ --> W
+T w_on_w
+W13+ --> W
+A 0.0
+
+W14+ --> W
+T w_on_w
+W14+ --> W
+A 0.0
+
+W15+ --> W
+T w_on_w
+W15+ --> W
+A 0.0
+
+W16+ --> W
+T w_on_w
+W16+ --> W
+A 0.0
+
+W17+ --> W
+T w_on_w
+W17+ --> W
+A 0.0
+
+W18+ --> W
+T w_on_w
+W18+ --> W
+A 0.0
+
+W19+ --> W
+T w_on_w
+W19+ --> W
+A 0.0
+
+W20+ --> W
+T w_on_w
+W20+ --> W
+A 0.0
+W11+ --> W
+S W_on_W
+W12+ --> W
+S W_on_W
+W13+ --> W
+S W_on_W
+W14+ --> W
+S W_on_W
+W15+ --> W
+S W_on_W
+W16+ --> W
+S W_on_W
+W17+ --> W
+S W_on_W
+W18+ --> W
+S W_on_W
+W19+ --> W
+S W_on_W
+W20+ --> W
+S W_on_W

@@ -21,7 +21,7 @@ background fix-ID = "fix background"_fix_background.html supplying the plasma :l
 eckstein name = optional; use the single analytic Eckstein entry {name}
   (e.g. O_on_W) instead of {target} and {projectiles} :l
 zero or more keyword/value pairs may be appended :l
-keyword = {target} or {target_like} or {yield_scale} or {projectiles} or {impurity} or {mass_amu} or {us} or {tsurf} or {compound} or {conc} or {roughness_dm} or {projectile_slots} or {static} or {incidence} or {visibility} or {iead} or {sheath_waveform} or {wall_flux_cutoff} or {boundary} or {debug_interp} or {nflux_species} or {incident_angle_species} or {incident_energy_species} or {sputter_yield_species} or {sputter_flux_species} or {sputter_flux_total} or {erosion_flux} or {sputter_rate_total} or {erosion_rate} :l
+keyword = {target} or {target_like} or {yield_scale} or {projectiles} or {impurity} or {mass_amu} or {us} or {tsurf} or {compound} or {conc} or {roughness_dm} or {projectile_slots} or {static} or {incidence} or {visibility} or {iead} or {iead_markers} or {iead_bins} or {iead_drift} or {iead_dump} or {sheath_waveform} or {wall_flux_cutoff} or {boundary} or {debug_interp} or {nflux_species} or {incident_angle_species} or {incident_energy_species} or {sputter_yield_species} or {sputter_flux_species} or {sputter_flux_total} or {erosion_flux} or {sputter_rate_total} or {erosion_rate} :l
   {target} value = element symbol of the wall material (e.g. W, Li, B)
   {target_like} value = element whose yield data stand in for {target}
   {yield_scale} value = multiplier applied to every yield
@@ -45,7 +45,11 @@ keyword = {target} or {target_like} or {yield_scale} or {projectiles} or {impuri
   {incidence} value = {poloidal} or {full3d} or {directed3d}
   {visibility} value = custom per-surf vector holding a field-line
     visibility fraction from 0 (shadowed) to 1 (visible)
-  {iead} value = {auto} or {none} or path to an IEAD table file
+  {iead} value = {auto} or {inline} or {none} or path to an IEAD table file
+  {iead_markers} value = N = test ions per inline histogram (default 2000)
+  {iead_bins} values = nE ntheta = inline histogram bins (default 120 30)
+  {iead_drift} value = {cs2} or {cs} or {flow} = entrance drift of the inline test ions
+  {iead_dump} value = file = write the inline histograms of rank 0 to file
   {sheath_waveform} values = attr frequency_hz phase_samples
     attr = custom per-surf array of 3 columns (V_dc, V_rf, phase)
     frequency_hz = frequency of the RF sheath voltage (>= 0)
@@ -143,6 +147,26 @@ evaluates Y at the mean impact (E, 90 - alpha_B); a file path uses that
 file as the light-ion table.  Since the mean impact angle at a
 divertor target is very grazing, the convolved yield is typically
 much larger than the mean-impact yield.
+
+{iead inline} builds the distribution for each wall element inside
+the compute instead of reading the database: {iead_markers} test ions
+of the slot's mass and charge start at the sheath edge of the element
+as a Maxwellian at the local Ti drifting along B into the wall, and
+follow the Boris rotation in the local B plus the spatial Borodkina
+sheath of "global pusher"_global.html until they hit the wall; their
+impacts are binned in energy and angle from the normal ({iead_bins})
+and <Y> = sum f Y.  The drift is the slot's parallel flow in the
+wall-adjacent cell ({flow}, default: impurities reach the sheath
+friction-locked to the main-ion flow, which the plasma code sets by
+its Bohm condition), falling back to the isothermal Bohm-Chodura speed
+sqrt(e(Te+Ti)/mD) ({cs}) when the background has no per-species flow;
+{cs2} = sqrt(e(Te+Ti)/(2 mD)) reproduces the SHEATH-built database.  Histograms are cached on the local
+conditions quantized to 1 % in Te, Ti, ne, |B| and drift and to 0.25
+degrees in angle, so neighbouring elements share one histogram; a
+histogram costs about one second at 2000 markers.  {iead inline} needs the {target}/{projectiles}
+form.  {iead_dump} writes every cached histogram (a "# ..." line with
+the conditions, impact count, escape fraction and means, then nE rows
+of ntheta weights) whenever new ones were added.
 
 {compound} selects composition-resolved (3d) yield tables named
 <projectile>_on_<mix>_<target>; the composition coordinate is read

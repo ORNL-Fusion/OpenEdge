@@ -4,40 +4,40 @@
   "tol": null
  },
  "CPU": {
-  "value": 0.968382,
+  "value": 1.030484,
   "tol": null
  },
  "Np": {
-  "value": 7439.0,
+  "value": 7326.0,
   "tol": 0.05,
   "note": "Borodkina CPU baseline (2026-09-25); run-to-run spread ~3 %, 5 % band"
  },
  "c_cwNtot": {
-  "value": 50144729000000.0,
+  "value": 50125823000000.0,
   "tol": 0.05
  },
  "c_cwN0": {
-  "value": 10260253000000.0,
+  "value": 9418536800000.0,
   "tol": 0.1,
   "note": "~7400 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma"
  },
  "c_cwN1": {
-  "value": 21463069000000.0,
+  "value": 21160773000000.0,
   "tol": 0.1,
   "note": "~7400 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma"
  },
  "c_cwN2": {
-  "value": 15063907000000.0,
+  "value": 16231899000000.0,
   "tol": 0.1,
   "note": "~7400 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma"
  },
  "c_cwN3": {
-  "value": 3254485000000.0,
+  "value": 3213453300000.0,
   "tol": 0.25,
   "note": "W3+ density at 1000 steps: small population"
  },
  "c_cwN4": {
-  "value": 103015770000.0,
+  "value": 101160380000.0,
   "tol": 1.0,
   "note": "W4+ density at 1000 steps: a few markers, band 0-2x"
  },
@@ -90,12 +90,20 @@
   "abs": 500000000000.0
  },
  "loop_particles": {
-  "value": 7439,
+  "value": 7326,
   "tol": 0.05,
   "note": "Borodkina CPU baseline (2026-09-25); run-to-run spread ~3 %, 5 % band"
  },
  "host_fallback_calls": {
   "value": 0,
+  "tol": null
+ },
+ "np": {
+  "value": 4,
+  "tol": null
+ },
+ "nsteps": {
+  "value": 1000,
   "tol": null
  }
 }

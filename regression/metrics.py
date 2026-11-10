@@ -9,6 +9,8 @@ against a stored reference with per-metric tolerances, or (re)write the referenc
 Metrics: the last row of the last stats block (Step, Np and every stats column)
 plus `loop_particles` (from "Loop time of ... with N particles") and
 `host_fallback_calls` (from the Kokkos fallback report, informational only).
+`extract --np N --nsteps S` records the rank count and step budget; `compare`
+warns when the run's differ from the reference's.
 Default tolerances: 3 % on particle counts, 5 % on other columns, exact for
 metrics whose reference value is 0 unless the reference gives an 'abs' bound. Edit the reference file to tighten or
 loosen individual metrics; tolerances survive `update`.
@@ -16,19 +18,19 @@ loosen individual metrics; tolerances survive `update`.
 import sys, json, re, math
 PARTICLE_KEYS = ('Np', 'loop_particles')
 # per-step event counters (last step only) are Poisson noise, not regression metrics
-INFO_KEYS = ('Step', 'CPU', 'host_fallback_calls', 'Nscoll', 'Nsreact', 'Nattempt', 'Ncoll', 'Nreact', 'Ntouch', 'Ncomm', 'Nbound', 'Nexit')
+INFO_KEYS = ('Step', 'CPU', 'host_fallback_calls', 'Nscoll', 'Nsreact', 'Nattempt', 'Ncoll', 'Nreact', 'Ntouch', 'Ncomm', 'Nbound', 'Nexit', 'np', 'nsteps')
 
-def extract(logpath):
+def extract(logpath, np_=None, nsteps=None):
     lines = open(logpath, errors='ignore').read().splitlines()
-    header = None; last = None; loop_np = None; fb = 0
+    header = None; rows = []; loop_np = None; fb = 0
     for l in lines:
         t = l.split()
         if not t: continue
         if t[0] == 'Step' and len(t) > 1:
-            header = t; last = None; continue
+            header = t; rows = []; continue
         if header and len(t) == len(header):
             try:
-                vals = [float(x) for x in t]; last = vals
+                rows.append([float(x) for x in t])
             except ValueError:
                 pass
         m = re.match(r'Loop time of \S+ on \d+ procs for \d+ steps with (\d+) particles', l)
@@ -36,10 +38,12 @@ def extract(logpath):
         m = re.match(r'\s+\S.*\bcalls (\d+)\s+ranks', l)
         if m: fb += int(m.group(1))
     out = {}
-    if header and last:
-        for k, v in zip(header, last): out[k] = v
+    if header and rows:
+        for k, v in zip(header, rows[-1]): out[k] = v
     if loop_np is not None: out['loop_particles'] = loop_np
     out['host_fallback_calls'] = fb
+    if np_ is not None: out['np'] = np_
+    if nsteps is not None: out['nsteps'] = nsteps
     return out
 
 def default_tol(key):
@@ -48,6 +52,9 @@ def default_tol(key):
 
 def compare(metrics, ref):
     fails = []; lines = []
+    for key in ('np', 'nsteps'):
+        if key in ref and key in metrics and ref[key]['value'] != metrics[key]:
+            lines.append(f'  WARNING {key} {metrics[key]:g} differs from the reference ({ref[key]["value"]:g})')
     for key, spec in ref.items():
         tol = spec.get('tol'); r = spec['value']
         if tol is None:
@@ -68,7 +75,10 @@ def compare(metrics, ref):
 def main():
     cmd = sys.argv[1]
     if cmd == 'extract':
-        json.dump(extract(sys.argv[2]), open(sys.argv[3], 'w'), indent=1); return 0
+        opts = dict(zip(sys.argv[4::2], sys.argv[5::2]))
+        np_ = int(opts['--np']) if '--np' in opts else None
+        nsteps = int(opts['--nsteps']) if '--nsteps' in opts else None
+        json.dump(extract(sys.argv[2], np_, nsteps), open(sys.argv[3], 'w'), indent=1); return 0
     metrics = json.load(open(sys.argv[2]))
     if cmd == 'update':
         try: ref = json.load(open(sys.argv[3]))

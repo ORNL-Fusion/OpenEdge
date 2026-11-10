@@ -18,6 +18,8 @@
 #include "eckstein_sputter_data.h"
 #include "eckstein_sputter.h"
 #include "iead_table.h"
+#include "sheath_iead.h"
+#include "input.h"
 #include "database_paths.h"
 #include "surface_incidence.h"
 
@@ -86,7 +88,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
         "sputter_flux_total", "sputter_rate_total",
         "erosion_flux", "erosion_rate",
         "background", "boundary", "impurity",
-        "iead",
+        "iead", "iead_markers", "iead_bins", "iead_drift", "iead_dump",
         "debug_interp",
         nullptr};
     for (int i = 0; kws[i]; i++) if (strcmp(t, kws[i]) == 0) return true;
@@ -388,8 +390,34 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       iarg += 4 + imp_Zmax;
     } else if (strcmp(arg[iarg],"iead") == 0) {
       if (iarg+1 >= narg)
-        error->all(FLERR,"iead needs auto|<path.h5>|none");
+        error->all(FLERR,"iead needs auto|inline|<path.h5>|none");
       iead_arg = std::string(arg[iarg+1]);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"iead_markers") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"iead_markers needs N");
+      iead_markers = input->inumeric(FLERR,arg[iarg+1]);
+      if (iead_markers < 10) error->all(FLERR,"iead_markers must be >= 10");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"iead_bins") == 0) {
+      if (iarg+2 >= narg) error->all(FLERR,"iead_bins needs nE ntheta");
+      iead_nE = input->inumeric(FLERR,arg[iarg+1]);
+      iead_nT = input->inumeric(FLERR,arg[iarg+2]);
+      if (iead_nE < 2 || iead_nT < 2) error->all(FLERR,"iead_bins must be >= 2");
+      iarg += 3;
+    } else if (strcmp(arg[iarg],"iead_dump") == 0) {
+      if (iarg+1 >= narg) error->all(FLERR,"iead_dump needs a file name");
+      iead_dump_file = std::string(arg[iarg+1]);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"iead_drift") == 0) {
+      // entrance drift along B: flow = the slot's parallel flow at the wall
+      // cell (default; impurities are friction-locked to the D flow), falling
+      // back to cs = sqrt(e(Te+Ti)/mD) (Bohm-Chodura); cs2 = sqrt(e(Te+Ti)/(2 mD))
+      // only reproduces the SHEATH-built database
+      if (iarg+1 >= narg) error->all(FLERR,"iead_drift needs cs2|cs|flow");
+      if (strcmp(arg[iarg+1],"cs2") == 0) iead_drift = 0;
+      else if (strcmp(arg[iarg+1],"cs") == 0) iead_drift = 1;
+      else if (strcmp(arg[iarg+1],"flow") == 0) iead_drift = 2;
+      else error->all(FLERR,"iead_drift needs cs2|cs|flow");
       iarg += 2;
     } else if (strcmp(arg[iarg],"debug_interp") == 0) {
       if (iarg+2 >= narg) error->all(FLERR,"debug_interp needs E(eV) angle(deg)");
@@ -914,6 +942,23 @@ void ComputeSurfacePhysicalSputter::load_iead_if_requested()
         "compute surface/physical/sputter: sheath_waveform requires iead none");
   } else if (iead_arg.empty()) iead_arg = "auto";
   if (iead_arg == "none") return;
+  if (iead_arg == "inline") {
+    if (!api_new)
+      error->all(FLERR,"compute surface/physical/sputter: iead inline needs "
+                 "the target/projectiles form");
+    iead_inline.reset(new SheathIead(iead_markers, iead_nE, iead_nT,
+                                     update->sheath_mD_amu, iead_drift));
+    iead_inline->dmax_override = update->sheath_dmax;
+    if (getenv("OE_IEAD_SCALE_FRAC")) iead_inline->scale_frac = atof(getenv("OE_IEAD_SCALE_FRAC"));   // convergence tests
+    if (comm->me == 0 && (screen || logfile)) {
+      const char *dr[] = {"cs2", "cs", "flow"};
+      if (screen) fprintf(screen, "IEAD inline: %d markers, %d x %d bins, drift %s\n",
+                          iead_markers, iead_nE, iead_nT, dr[iead_drift]);
+      if (logfile) fprintf(logfile, "IEAD inline: %d markers, %d x %d bins, drift %s\n",
+                           iead_markers, iead_nE, iead_nT, dr[iead_drift]);
+    }
+    return;
+  }
 
   // Decide which tables we need based on projectile_elements (filled by
   // resolve_projectile_tables for the api_new path) or fall back to a
@@ -2085,6 +2130,20 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
         IeadTable *tbl = iead_for_slot(s);
         const bool use_iead = tbl &&
             tbl->find_z_slot(z_inc) >= 0 && te_eV > 0.0;
+        // inline IEAD: orbits through the local sheath for this slot
+        const SheathIead::Hist *ih = nullptr;
+        if (iead_inline && te_eV > 0.0 && api_new &&
+            s < static_cast<int>(slot_to_table.size()) && slot_to_table[s] >= 0) {
+          double ne_el = 0.0;
+          if (mesh_cell >= 0) ne_el = mesh_ne.empty() ? ni : mesh_ne[mesh_cell];
+          else ne_el = interp2D(dens_i, r, z);
+          if (!(ne_el > 0.0)) ne_el = ni;
+          const double bvec[3] = {br_loc, bz_loc, bt_loc};
+          const double nvec[3] = {nr_surf, nz_surf, nt_surf};
+          const double mslot = per_proj_M1[slot_to_table[s]] * AMU;
+          ih = &iead_inline->get(te_eV, ti_eV, ne_el, bvec, nvec, mslot, z_inc,
+                                 std::fabs(upar_s));
+        }
         const double tau_local = ti_eV / std::max(te_eV, 1.0e-30);
         const double psi_local = theta_deg;   // angle from wall normal
 
@@ -2115,7 +2174,11 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
             for (int ic = 0; ic < st.NC; ic++) {
               const double cv = st.C[ic];
               double yb;
-              if (use_iead)
+              if (ih)
+                yb = iead_inline->convolve(*ih, [&](double e_eV, double th_deg) {
+                       const double th = (th_deg > rough_dm) ? th_deg - rough_dm : 0.0;
+                       return st.yield(e_eV, th, cv); });
+              else if (use_iead)
                 yb = tbl->convolve_yield(
                     tau_local, psi_local, z_inc, te_eV,
                     [&](double e_eV, double th_deg) {
@@ -2129,6 +2192,8 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
               cs_ybar[(size_t(i)*ns + s)*slice_nc + ic] = yb;
             }
             ys = 0.0;
+          } else if (ih) {
+            ys = iead_inline->convolve(*ih, pair_yield);
           } else if (use_iead) {
             ys = tbl->convolve_yield(
                 tau_local, psi_local, z_inc, te_eV,
@@ -2292,6 +2357,18 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
   }
 
   if (static_cache) cache_valid = 1;
+
+  if (iead_inline && comm->me == 0 && iead_inline->cache_size() != iead_dumped) {
+    if (!iead_dump_file.empty()) iead_inline->dump(iead_dump_file.c_str());
+    iead_dumped = iead_inline->cache_size();
+    const size_t nhigh = iead_inline->n_high_escape();
+    if (screen) fprintf(screen, "IEAD inline: %zu histograms on rank 0, %.2f s%s\n",
+                        iead_dumped, iead_inline->seconds(),
+                        nhigh ? " (WARNING: some with > 50 % non-impacting markers, see iead_dump)" : "");
+    if (logfile) fprintf(logfile, "IEAD inline: %zu histograms on rank 0, %.2f s%s\n",
+                         iead_dumped, iead_inline->seconds(),
+                         nhigh ? " (WARNING: some with > 50 % non-impacting markers, see iead_dump)" : "");
+  }
 
   if (compound) {
     slices_valid = 1;

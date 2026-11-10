@@ -47,6 +47,10 @@ class ComputeGridWeighted : public Compute {
   int cellcount_w,cellmass_w; // 1 if total cell weight/mass is tallied
                               // (for nfrac_w / massfrac_w)
 
+  int prad_flag;                     // 1 if prad_w / pradtot_w requested
+  char *id_adas;                     // ID of the fix volume/chem/adas
+  class FixVolumeChemAdas *fadas;    // owner of the PLT/PRB tables
+
   double eprefactor;         // velocity^2 to energy
   double tprefactor;         // KE to temperature
   double rvprefactor;        // rot/vib energy to temperature

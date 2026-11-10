@@ -744,6 +744,7 @@ int Particle::add_particle(int id, int ispecies, int icell,
   if (ncustom) zero_custom(nlocal);
 
   nlocal++;
+  sorted = 0;        // per-cell lists no longer cover this particle
   return reallocflag;
 }
 
@@ -762,6 +763,7 @@ int Particle::add_particle()
 
   if (ncustom) zero_custom(nlocal);
   nlocal++;
+  sorted = 0;        // per-cell lists no longer cover this particle
   return reallocflag;
 }
 
@@ -782,6 +784,7 @@ int Particle::clone_particle(int index)
   if (ncustom) copy_custom(nlocal,index);
 
   nlocal++;
+  sorted = 0;        // per-cell lists no longer cover this particle
   return reallocflag;
 }
 
