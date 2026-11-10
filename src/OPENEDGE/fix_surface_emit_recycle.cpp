@@ -316,6 +316,9 @@ void FixSurfaceEmitRecycle::create_task(int icell)
     else {
       isplit = cells[icell].isplit;
       subcell = sinfo[isplit].csplits[i];
+      // subcell = -1 if the surf did not end up in a polygon (see
+      // create_surfmap() in cut2d/cut3d): skip it, as fix emit/surf does
+      if (subcell < 0) continue;
       tasks[ntask].pcell = sinfo[isplit].csubs[subcell];
     }
 
