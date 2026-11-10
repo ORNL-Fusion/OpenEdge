@@ -1006,21 +1006,28 @@ void Pusher::push_boris_2d_impl(int i, int icell, double dt,
             vn_new = (vn >= 0.0) ? std::sqrt(s2) : -std::sqrt(s2);
             if (sh_bank_vec) sh_bank_vec[i] += dKE_J;
           } else {
-            // turning point: elastic reflection. Bounce the ledger AND the
-            // position back to d_old — the climb to d_new was never paid
-            // for, so keeping it would let the ion descend from unpaid
-            // height and pump energy on every bounce.
-            vn_new = -vn;
-            sh_d_cur = d_old;
+            // turning point inside this subcycle: the straight-line step
+            // overshoots the climb the ion can pay for. Let the ion turn and
+            // fall back with the energy taken from phi at its actual end
+            // position (SheathModels::sheath_turning_step), and book that
+            // energy. (Reflecting v_n with a position reset made grazing
+            // impacts ~9 deg too normal: a gyrating ion reaches v_n ~ 0
+            // twice per gyro-period.)
+            double dd;
+            SheathModels::sheath_turning_step(sh_coeffs, std::fabs(charge) * update->echarge,
+                                              mass, vn, dt_sub, d_old, vn_new, dd);
+            const double corr = dd - (d_new - d_old);
+            sh_d_cur = d_old + dd;
+            if (sh_bank_vec) sh_bank_vec[i] += 0.5 * mass * (vn_new*vn_new - vn*vn);
             if (!axi) {
-              xcur[0] -= (d_new - d_old) * sh_nR;
-              xcur[1] -= (d_new - d_old) * sh_nZ;
+              xcur[0] += corr * sh_nR;
+              xcur[1] += corr * sh_nZ;
             }
             Surf::Line *ln = &surf->lines[sh_midx];
             const double nmag = std::hypot(ln->norm[0], ln->norm[1]);
             if (nmag > 0.0) {
-              sh_geom_x_new[0] -= (d_new - d_old) * ln->norm[0] / nmag;
-              sh_geom_x_new[1] -= (d_new - d_old) * ln->norm[1] / nmag;
+              sh_geom_x_new[0] += corr * ln->norm[0] / nmag;
+              sh_geom_x_new[1] += corr * ln->norm[1] / nmag;
               sh_geom_d_new = std::sqrt(Geometry::distsq_point_line(
                   sh_geom_x_new, ln->p1, ln->p2));
             }
@@ -1697,15 +1704,22 @@ void Pusher::push_boris_3d_impl(int i, int icell, double dt,
             vn_new = (vn >= 0.0) ? std::sqrt(s2) : -std::sqrt(s2);
             if (sh_bank_vec) sh_bank_vec[i] += dKE_J;
           } else {
-            // turning point: elastic reflection. Bounce the position back
-            // to d_old — the climb to d_new was never paid for, so keeping
-            // it would let the ion descend from unpaid height and pump
-            // energy on every bounce.
-            vn_new = -vn;
-            xcur[0] -= (d_new - d_old) * sh_nx;
-            xcur[1] -= (d_new - d_old) * sh_ny;
-            xcur[2] -= (d_new - d_old) * sh_nz;
-            sh_d_fin = d_old;
+            // turning point inside this subcycle: the straight-line step
+            // overshoots the climb the ion can pay for. Let the ion turn and
+            // fall back with the energy taken from phi at its actual end
+            // position (SheathModels::sheath_turning_step), and book that
+            // energy. (Reflecting v_n with a position reset made grazing
+            // impacts ~9 deg too normal: a gyrating ion reaches v_n ~ 0
+            // twice per gyro-period.)
+            double dd;
+            SheathModels::sheath_turning_step(sh_coeffs, std::fabs(charge) * update->echarge,
+                                              mass, vn, dt_sub, d_old, vn_new, dd);
+            const double corr = dd - (d_new - d_old);
+            xcur[0] += corr * sh_nx;
+            xcur[1] += corr * sh_ny;
+            xcur[2] += corr * sh_nz;
+            sh_d_fin = d_old + dd;
+            if (sh_bank_vec) sh_bank_vec[i] += 0.5 * mass * (vn_new*vn_new - vn*vn);
             sheath_diag_nreflect++;   // spatial-mode turning point
           }
           if (!std::isfinite(vn_new))
