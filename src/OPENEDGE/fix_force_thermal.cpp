@@ -420,7 +420,8 @@ void FixForceThermal::kick_half(double dt_half)
     // are always (grad_T_R, grad_T_Z); no toroidal component.
     const double bhat_sparta[3] = {bhat0, bhat1, bhat2};
     const double phi_p = (dim == 3)
-                          ? std::atan2(p.x[1], p.x[0]) : 0.0;
+                          ? std::atan2(p.x[1] - (pd_ ? pd_->column_y0 : 0.0),
+                                       p.x[0] - (pd_ ? pd_->column_x0 : 0.0)) : 0.0;
     double bhat_R_cyl, bhat_Z_cyl, bhat_phi_unused;
     OpenEdge::sparta_v_to_RZphi(bhat_sparta, dim, domain->axisymmetric,
                                  phi_p, bhat_R_cyl, bhat_Z_cyl,
