@@ -38,6 +38,7 @@ FixParticulateDrag::FixParticulateDrag(SPARTA *sparta, int narg, char **arg)
 
   int iarg = 2;
   nevery       = input->inumeric(FLERR, arg[iarg++]);
+  if (nevery < 1) error->all(FLERR,"fix particulate/drag: nevery must be >= 1");
   A_background = input->numeric (FLERR, arg[iarg++]);
   Z_background = input->inumeric(FLERR, arg[iarg++]);
 
@@ -243,13 +244,13 @@ void FixParticulateDrag::init()
 void FixParticulateDrag::start_of_step()
 {
   if (update->ntimestep % nevery) return;
-  kick_half(0.5 * update->dt);
+  kick_half(0.5 * nevery * update->dt);   // applied every nevery steps
 }
 
 void FixParticulateDrag::end_of_step()
 {
   if (update->ntimestep % nevery) return;
-  kick_half(0.5 * update->dt);
+  kick_half(0.5 * nevery * update->dt);   // applied every nevery steps
 }
 
 /* ---------------------------------------------------------------------- */
