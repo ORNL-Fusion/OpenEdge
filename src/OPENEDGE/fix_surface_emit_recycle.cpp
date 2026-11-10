@@ -368,6 +368,7 @@ void FixSurfaceEmitRecycle::create_task(int icell)
       tasks[ntask].inward[0] = normal[0];
       tasks[ntask].inward[1] = normal[1];
       tasks[ntask].inward[2] = 0.0;
+      tasks[ntask].phimid = 0.0;
 
     } else {
       normal = tris[isurf].norm;
@@ -416,8 +417,11 @@ void FixSurfaceEmitRecycle::create_task(int icell)
         cz += path[3*k + 2];
       }
       cx /= npoint; cy /= npoint; cz /= npoint;
-      tasks[ntask].rmid = sqrt(cx*cx + cy*cy);
-      tasks[ntask].zmid = cz;
+      const double cxyz[3] = {cx, cy, cz};
+      OpenEdge::sparta_to_RZ(cxyz, dimension, domain->axisymmetric,
+                             tasks[ntask].rmid, tasks[ntask].zmid,
+                             plasma->column_x0, plasma->column_y0);
+      tasks[ntask].phimid = atan2(cy - plasma->column_y0, cx - plasma->column_x0);
 
       tasks[ntask].inward[0] = normal[0];
       tasks[ntask].inward[1] = normal[1];
@@ -529,7 +533,12 @@ double FixSurfaceEmitRecycle::emission_rate_per_surface(int itask)
       plasma->bfield_at(R, Z, Br, Bz, Bt, t.icell);
       const double Bmag = std::sqrt(Br*Br + Bz*Bz + Bt*Bt);
       if (Bmag > 0.0) {
-        const double proj = Br * t.inward[0] + Bz * t.inward[1];
+        // (Br,Bz,Bt) into the SPARTA slots at the element (axi: x=Z, y=R;
+        // 3-D: rotated by the element azimuth), then dot the inward normal
+        double bx, by, bz;
+        OpenEdge::RZphi_force_to_sparta(Br, Bz, Bt, domain->dimension,
+                                        domain->axisymmetric, t.phimid, bx, by, bz);
+        const double proj = bx * t.inward[0] + by * t.inward[1] + bz * t.inward[2];
         sin_alpha = std::fabs(proj) / Bmag;
         if (sin_alpha > 1.0) sin_alpha = 1.0;
       }
