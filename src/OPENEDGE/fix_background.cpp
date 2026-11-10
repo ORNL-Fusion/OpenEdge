@@ -305,6 +305,20 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
     } else if (strcmp(arg[iarg], "ti") == 0 || strcmp(arg[iarg], "temp_i") == 0) {
       parse_scalar(const_temp_i, arg[iarg]);
       const_has_temp_i = 1;
+    } else if (strcmp(arg[iarg], "ions") == 0) {
+      // ions N name1 mass1 frac1 ... : named ion slots (element and charge
+      // from the name, e.g. O3+), each at frac*ni and ti, drifting at parr_flow
+      if (iarg+1 >= narg) error->all(FLERR,"fix background constant ions: need N");
+      const int nions_c = input->inumeric(FLERR, arg[iarg+1]);
+      if (nions_c < 1 || iarg+1+3*nions_c >= narg)
+        error->all(FLERR,"fix background constant ions: need N name mass_amu frac per ion");
+      for (int k = 0; k < nions_c; k++) {
+        const_ion_names.push_back(arg[iarg+2+3*k]);
+        const_ion_mass.push_back(input->numeric(FLERR, arg[iarg+3+3*k]));
+        const_ion_frac.push_back(input->numeric(FLERR, arg[iarg+4+3*k]));
+      }
+      iarg += 2 + 3*nions_c;
+      continue;
     } else if (strcmp(arg[iarg], "nn") == 0 || strcmp(arg[iarg], "dens_n") == 0) {
       parse_scalar(const_dens_n, arg[iarg]);
       const_has_neutrals = 1;
@@ -1162,6 +1176,28 @@ void FixBackground::load_constant_profile()
   if (const_has_neutrals) {
     dens_n.assign(n, const_dens_n);
     temp_n.assign(n, const_temp_n);
+  }
+
+  // named ion slots (constant ... ions N name mass frac ...)
+  nion = static_cast<int>(const_ion_names.size());
+  if (nion > 0) {
+    ion_names = const_ion_names;
+    ion_mass_amu = const_ion_mass;
+    ion_elements.clear(); ion_charge_z.clear();
+    ions_dens.assign(static_cast<size_t>(nion) * n, 0.0);
+    ions_temp.assign(static_cast<size_t>(nion) * n, ti_uniform);
+    ions_upar.assign(static_cast<size_t>(nion) * n, const_parr_flow);
+    for (int s = 0; s < nion; s++) {
+      const std::string &name = ion_names[s];
+      size_t k = name.size();
+      while (k > 0 && (name[k-1] == '+' || name[k-1] == '-' || isdigit(name[k-1]))) --k;
+      ion_elements.push_back(name.substr(0, k));
+      int zc = 1;
+      if (name.size() > k + 1) zc = atoi(name.substr(k, name.size() - k - 1).c_str());
+      ion_charge_z.push_back(std::max(zc, 1));
+      for (size_t j = 0; j < n; j++)
+        ions_dens[static_cast<size_t>(s) * n + j] = const_ion_frac[s] * ni_uniform;
+    }
   }
 
   // constant-B scalars are consumed directly by bfield_at()/query_bfield_*

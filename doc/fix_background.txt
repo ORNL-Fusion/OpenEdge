@@ -18,7 +18,7 @@ source = {file path} or {constant} :l
   {file} arg = path = HDF5 plasma file written by an OpenEdge converter
   {constant} = spatially uniform plasma defined by the keywords below :pre
 zero or more keyword/value pairs may be appended :l
-keyword = {equilibrium} or {static} or {format} or {flow_sign} or {b_sign} or {cs_model} or {outside} or {precision} or {mesh_triangle_cache} or {wall_flux_rescale} or {mesh_lookup_diagnostics} or {rz_axes} or {column_axis} or {r_bounds} or {z_bounds} or {dens_e} or {temp_e} or {dens_i} or {temp_i} or {dens_n} or {temp_n} or {er} or {et} or {ez} or {epar} or {upar} or {upar_r} or {upar_t} or {upar_z} or {grad_te_r} or {grad_te_t} or {grad_te_z} or {grad_ti_r} or {grad_ti_t} or {grad_ti_z} or {br} or {bz} or {bt} or {bcart} :l
+keyword = {equilibrium} or {static} or {format} or {flow_sign} or {b_sign} or {cs_model} or {outside} or {precision} or {mesh_triangle_cache} or {wall_flux_rescale} or {mesh_lookup_diagnostics} or {rz_axes} or {column_axis} or {r_bounds} or {z_bounds} or {dens_e} or {temp_e} or {dens_i} or {temp_i} or {dens_n} or {temp_n} or {ions} or {er} or {et} or {ez} or {epar} or {upar} or {upar_r} or {upar_t} or {upar_z} or {grad_te_r} or {grad_te_t} or {grad_te_z} or {grad_ti_r} or {grad_ti_t} or {grad_ti_z} or {br} or {bz} or {bt} or {bcart} :l
   {equilibrium} value = path = standalone equilibrium (psi map) file
   {static} value = {yes} or {no}
     yes = read the plasma data once, at the first run, and keep it
@@ -57,6 +57,9 @@ keyword = {equilibrium} or {static} or {format} or {flow_sign} or {b_sign} or {c
   {temp_i} (or {ti}) value = ion temperature (eV)
   {dens_n} (or {nn}) value = neutral density (m^-3)
   {temp_n} (or {tn}) value = neutral temperature (eV)
+  {ions} values = N name1 mass1 frac1 ... nameN massN fracN
+    name = ion name with charge state, e.g. D+ or O3+ (element and Z are read from it)
+    mass = ion mass (amu), frac = density as a fraction of {dens_i}
   {er},{et},{ez} value = cylindrical electric field component (V/m)
   {epar} value = parallel electric field (V/m)
   {upar} (or {parr_flow}) value = parallel flow speed (m/s)
@@ -205,7 +208,12 @@ benchmarks.  Any keyword that is not given is zero.  The {r_bounds}
 and {z_bounds} keywords set the (R,Z) rectangle over which the
 constant plasma is defined; the upper bound must exceed the lower
 bound.  The {dens_n} and {temp_n} keywords define a uniform neutral
-background in addition to the ions and electrons.
+background in addition to the ions and electrons.  {ions} adds named
+ion slots (as /ion_species in a plasma file) at frac x {dens_i}, the
+ion temperature and the parallel flow of the constant plasma, so
+consumers that resolve ions per species, such as the {projectiles} form
+of "compute surface/physical/sputter"_compute_surface_physical_sputter.html,
+work without a plasma file.
 
 The {br}, {bz}, and {bt} keywords define a uniform B in cylindrical
 components.  In 3d the toroidal and radial components rotate with
