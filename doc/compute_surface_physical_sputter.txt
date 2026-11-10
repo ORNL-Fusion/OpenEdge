@@ -155,13 +155,15 @@ as a Maxwellian at the local Ti drifting along B into the wall, and
 follow the Boris rotation in the local B plus the spatial Borodkina
 sheath of "global pusher"_global.html until they hit the wall; their
 impacts are binned in energy and angle from the normal ({iead_bins})
-and <Y> = sum f Y.  The drift is the background sound speed
-sqrt(e(Te+Ti)/(2 mD)) as in the database ({cs2}, default),
-sqrt(e(Te+Ti)/mD) ({cs}), or the slot's parallel flow with the {cs2}
-fallback ({flow}).  Histograms are cached on the exact local
-conditions (Te, Ti, ne, |B|, angle, mass, Z, drift), so elements that
-share a plasma cell share one histogram; a histogram costs about one
-second at 2000 markers.  {iead inline} needs the {target}/{projectiles}
+and <Y> = sum f Y.  The drift is the slot's parallel flow in the
+wall-adjacent cell ({flow}, default: impurities reach the sheath
+friction-locked to the main-ion flow, which the plasma code sets by
+its Bohm condition), falling back to the isothermal Bohm-Chodura speed
+sqrt(e(Te+Ti)/mD) ({cs}) when the background has no per-species flow;
+{cs2} = sqrt(e(Te+Ti)/(2 mD)) reproduces the SHEATH-built database.  Histograms are cached on the local
+conditions quantized to 1 % in Te, Ti, ne, |B| and drift and to 0.25
+degrees in angle, so neighbouring elements share one histogram; a
+histogram costs about one second at 2000 markers.  {iead inline} needs the {target}/{projectiles}
 form.  {iead_dump} writes every cached histogram (a "# ..." line with
 the conditions, impact count, escape fraction and means, then nE rows
 of ntheta weights) whenever new ones were added.

@@ -20,6 +20,10 @@ class RanKnuth;
 
 class SheathIead {
  public:
+  // conditions are quantized before lookup: Te, Ti, ne, |B|, drift to the
+  // nearest 1 % (log steps), the angle to 0.25 deg, so neighbouring elements
+  // of one plasma cell share a histogram (per-triangle B interpolation would
+  // otherwise make every triangle unique)
   struct Key {
     double te, ti, ne, bmag, alpha_deg, mass, upar;
     int Z;
@@ -30,6 +34,8 @@ class SheathIead {
     double emax = 0.0;                 // bins: E in [0, emax], theta in [0, 90]
     std::vector<double> f;             // nE*nT, sums to 1 over the impacts
     double escape_frac = 0.0;          // launched ions that left outward
+    double d_launch = 0.0, dt = 0.0;   // launch distance and substep used
+    long nstep_max = 0;
     double e_mean = 0.0, th_mean = 0.0;
     long nimpact = 0;
     double ec(int ie) const { return (ie + 0.5) * emax / nE; }
@@ -37,13 +43,14 @@ class SheathIead {
   };
 
   // drift: 0 = sqrt(e(Te+Ti)/(2 mD)) (SHEATH tracker / database convention),
-  //        1 = sqrt(e(Te+Ti)/mD), 2 = the value passed per call (slot flow)
+  //        1 = sqrt(e(Te+Ti)/mD) (Bohm-Chodura), 2 = the value passed per call
+  //        (slot flow), falling back to 1 when it is <= 0
   SheathIead(int nmarkers, int nE, int nT, double mD_amu, int drift_mode,
              int seed = 20261110);
   ~SheathIead();
 
   // b, n in any common frame; only |b.n| matters. upar is used in drift
-  // mode 2 (m/s, magnitude; falls back to mode 0 when <= 0).
+  // mode 2 (m/s, magnitude; falls back to mode 1 when <= 0).
   const Hist &get(double te_eV, double ti_eV, double ne_m3, const double b[3],
                   const double n[3], double mass_kg, int Z, double upar = 0.0);
 

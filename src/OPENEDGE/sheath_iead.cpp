@@ -50,9 +50,11 @@ void SheathIead::dump(const char *path) const
   for (const auto &kv : cache) {
     const Key &k = kv.first; const Hist &h = kv.second;
     fprintf(fp, "# te %g ti %g ne %g B %g alpha %g Z %d mass %g upar %g "
-            "nimpact %ld escape %g e_mean %g th_mean %g emax %g nE %d nT %d\n",
+            "nimpact %ld escape %g e_mean %g th_mean %g emax %g nE %d nT %d "
+            "dmax %g dt %g nstep_max %ld\n",
             k.te, k.ti, k.ne, k.bmag, k.alpha_deg, k.Z, k.mass, k.upar,
-            h.nimpact, h.escape_frac, h.e_mean, h.th_mean, h.emax, h.nE, h.nT);
+            h.nimpact, h.escape_frac, h.e_mean, h.th_mean, h.emax, h.nE, h.nT,
+            h.d_launch, h.dt, h.nstep_max);
     for (int ie = 0; ie < h.nE; ie++) {
       for (int it = 0; it < h.nT; it++)
         fprintf(fp, "%s%.6e", it ? " " : "", h.f[static_cast<size_t>(ie) * h.nT + it]);
@@ -72,11 +74,15 @@ const SheathIead::Hist &SheathIead::get(double te, double ti, double ne,
   if (bmag > 0.0 && nmag > 0.0)
     cosa = std::fabs(b[0]*n[0] + b[1]*n[1] + b[2]*n[2]) / (bmag * nmag);
   cosa = std::min(1.0, cosa);
+  auto q = [](double v) {   // 1 % log quantization, 0 stays 0
+    if (!(v > 0.0)) return 0.0;
+    return std::exp(std::round(std::log(v) / 0.01) * 0.01);
+  };
   Key k;
-  k.te = te; k.ti = ti; k.ne = ne; k.bmag = bmag;
-  k.alpha_deg = std::acos(cosa) * 180.0 / PI;
+  k.te = q(te); k.ti = q(ti); k.ne = q(ne); k.bmag = q(bmag);
+  k.alpha_deg = std::round(std::acos(cosa) * 180.0 / PI * 4.0) / 4.0;
   k.mass = mass; k.Z = Z;
-  k.upar = (drift_mode == 2 && upar > 0.0) ? upar : 0.0;
+  k.upar = (drift_mode == 2 && upar > 0.0) ? q(upar) : 0.0;
   auto it = cache.find(k);
   if (it != cache.end()) return it->second;
   const auto t0 = std::chrono::steady_clock::now();
@@ -102,8 +108,8 @@ SheathIead::Hist SheathIead::compute(const Key &k)
   const double mD = mD_amu * AMU;
   double u;
   if (k.upar > 0.0) u = k.upar;
-  else if (drift_mode == 1) u = std::sqrt(QE * (k.te + k.ti) / mD);
-  else u = std::sqrt(QE * (k.te + k.ti) / (2.0 * mD));
+  else if (drift_mode == 0) u = std::sqrt(QE * (k.te + k.ti) / (2.0 * mD));
+  else u = std::sqrt(QE * (k.te + k.ti) / mD);
 
   // local frame: wall at z = 0, normal +z, B in the x-z plane into the wall
   const double a = k.alpha_deg * PI / 180.0;
@@ -111,29 +117,46 @@ SheathIead::Hist SheathIead::compute(const Key &k)
   const double B[3] = {k.bmag * bhat[0], 0.0, k.bmag * bhat[2]};
   const double E0[3] = {0.0, 0.0, 0.0};
 
-  // substep: gyro-phase and sheath-scale resolution
+  // substep: gyro-phase resolution only. The potential impulse is exact in
+  // energy for any step, and at grazing incidence the presheath sheet
+  // (L_MPS = 2 rho_s sin(alpha_graze)) is far thinner than a gyro-orbit:
+  // the pusher crosses it in one substep too. Without B the launch
+  // distance sets the step.
   const double vmax = u + 4.0 * sig + std::sqrt(2.0 * q * c.phi_total_eV / k.mass);
-  const double scale = c.pure_mps ? c.lmps_m
-                                  : std::min(c.lmps_m, c.lambdaD_m);
-  double dt = (k.bmag > 0.0) ? OMEGA_DT / (qm * k.bmag) : 1e300;
-  if (vmax > 0.0 && scale > 0.0) dt = std::min(dt, SCALE_FRAC * scale / vmax);
+  double dt = (k.bmag > 0.0) ? OMEGA_DT / (qm * k.bmag)
+                             : SCALE_FRAC * d_max / std::max(vmax, 1.0);
   if (!(dt > 0.0) || !std::isfinite(dt)) dt = 1e-12;
 
   h.emax = k.Z * c.phi_total_eV
          + 0.5 * k.mass * (u + 4.0 * sig) * (u + 4.0 * sig) / QE + 8.0 * k.ti;
   const double rho = (k.bmag > 0.0) ? (u + 3.0 * sig) / (qm * k.bmag) : d_max;
-  const double z_escape = 2.0 * d_max + 4.0 * rho;
+  // launch where the potential has decayed (10 L_MPS + 20 lambda_D, as the
+  // SHEATH tracker) plus a gyro-orbit margin along the normal, but never
+  // beyond the pusher's d_max: at grazing incidence the sheet is microns
+  // thick while d_max is 10 rho_s, and markers started there would mostly
+  // drift along the wall
+  double d_launch = 10.0 * c.lmps_m + 20.0 * c.lambdaD_m + 2.0 * rho * std::cos(a);
+  if (!(d_launch > 0.0) || d_launch > d_max) d_launch = d_max;
+  const double z_escape = 2.0 * d_launch + 4.0 * rho;
+  // an ion that has not reached the wall after 20 gyro-periods plus 10
+  // normal transit times never will in this model (it drifts along the
+  // wall); count it as not impacting instead of running to MAX_STEPS
+  const double u_n = std::max(u * std::cos(a), 0.1 * sig);
+  double t_max = 10.0 * d_launch / u_n;
+  if (k.bmag > 0.0) t_max += 20.0 * 2.0 * PI / (qm * k.bmag);
+  const long nstep_max = std::min(MAX_STEPS, static_cast<long>(t_max / dt) + 1);
+  h.d_launch = d_launch; h.dt = dt; h.nstep_max = nstep_max;
 
   random->reset(seed, 0, 100);   // same sequence for every histogram: rank-independent
   long nimp = 0, nesc = 0;
   double esum = 0.0, thsum = 0.0;
   for (int m = 0; m < nmarkers; m++) {
-    double x[3] = {0.0, 0.0, d_max};
+    double x[3] = {0.0, 0.0, d_launch};
     double v[3] = {sig * random->gaussian() + u * bhat[0],
                    sig * random->gaussian() + u * bhat[1],
                    sig * random->gaussian() + u * bhat[2]};
     bool impacted = false;
-    for (long is = 0; is < MAX_STEPS; is++) {
+    for (long is = 0; is < nstep_max; is++) {
       const double z_old = x[2];
       BorisGrid::push_velocity(qm, dt, E0, B, v);
       x[0] += v[0] * dt; x[1] += v[1] * dt; x[2] += v[2] * dt;

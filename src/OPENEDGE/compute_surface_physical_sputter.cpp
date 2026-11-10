@@ -409,8 +409,10 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       iead_dump_file = std::string(arg[iarg+1]);
       iarg += 2;
     } else if (strcmp(arg[iarg],"iead_drift") == 0) {
-      // entrance drift along B: cs2 = sqrt(e(Te+Ti)/(2 mD)) (database
-      // convention), cs = sqrt(e(Te+Ti)/mD), flow = slot parallel flow
+      // entrance drift along B: flow = the slot's parallel flow at the wall
+      // cell (default; impurities are friction-locked to the D flow), falling
+      // back to cs = sqrt(e(Te+Ti)/mD) (Bohm-Chodura); cs2 = sqrt(e(Te+Ti)/(2 mD))
+      // only reproduces the SHEATH-built database
       if (iarg+1 >= narg) error->all(FLERR,"iead_drift needs cs2|cs|flow");
       if (strcmp(arg[iarg+1],"cs2") == 0) iead_drift = 0;
       else if (strcmp(arg[iarg+1],"cs") == 0) iead_drift = 1;

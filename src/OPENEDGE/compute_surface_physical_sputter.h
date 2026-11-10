@@ -178,7 +178,7 @@ class ComputeSurfacePhysicalSputter : public Compute {
   // "inline": per-element IEAD from test-ion orbits through the local
   // Borodkina sheath (sheath_iead.h) instead of the database
   std::unique_ptr<class SheathIead> iead_inline;
-  int iead_markers = 2000, iead_nE = 120, iead_nT = 30, iead_drift = 0;
+  int iead_markers = 2000, iead_nE = 120, iead_nT = 30, iead_drift = 2;   // drift: flow
   std::string iead_dump_file;              // rank 0 writes its cache (iead_dump)
   size_t iead_dumped = 0;
   std::unique_ptr<IeadTable> iead_light;
