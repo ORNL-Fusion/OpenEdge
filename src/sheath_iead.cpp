@@ -71,9 +71,8 @@ void SheathIead::dump(const char *path) const
   fclose(fp);
 }
 
-const SheathIead::Hist &SheathIead::get(double te, double ti, double ne,
-                                        const double b[3], const double n[3],
-                                        double mass, int Z, double upar)
+SheathIead::Key SheathIead::make_key(double te, double ti, double ne, const double b[3],
+                                     const double n[3], double mass, int Z, double upar) const
 {
   const double bmag = std::sqrt(b[0]*b[0] + b[1]*b[1] + b[2]*b[2]);
   const double nmag = std::sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
@@ -90,13 +89,84 @@ const SheathIead::Hist &SheathIead::get(double te, double ti, double ne,
   k.alpha_deg = std::round(std::acos(cosa) * 180.0 / PI * 4.0) / 4.0;
   k.mass = mass; k.Z = Z;
   k.upar = (drift_mode == 2 && upar > 0.0) ? q(upar) : 0.0;
+  return k;
+}
+
+const SheathIead::Hist &SheathIead::get(double te, double ti, double ne,
+                                        const double b[3], const double n[3],
+                                        double mass, int Z, double upar)
+{
+  const Key k = make_key(te, ti, ne, b, n, mass, Z, upar);
   auto it = cache.find(k);
   if (it != cache.end()) return it->second;
+  if (collecting) { pending.insert(k); return empty; }
   const auto t0 = std::chrono::steady_clock::now();
   Hist h = compute(k);
   cpu_seconds += std::chrono::duration<double>(
       std::chrono::steady_clock::now() - t0).count();
   return cache.emplace(k, std::move(h)).first->second;
+}
+
+// 8 doubles per key, 8 + nE*nT doubles per histogram
+static const int KEY_LEN = 8;
+
+void SheathIead::distribute(MPI_Comm world)
+{
+  int me, nprocs;
+  MPI_Comm_rank(world, &me);
+  MPI_Comm_size(world, &nprocs);
+  // union of the pending keys of all ranks
+  std::vector<double> mine;
+  for (const Key &k : pending) {
+    const double v[KEY_LEN] = {k.te, k.ti, k.ne, k.bmag, k.alpha_deg, k.mass, k.upar, double(k.Z)};
+    mine.insert(mine.end(), v, v + KEY_LEN);
+  }
+  pending.clear();
+  int nmine = static_cast<int>(mine.size());
+  std::vector<int> counts(nprocs), displs(nprocs);
+  MPI_Allgather(&nmine, 1, MPI_INT, counts.data(), 1, MPI_INT, world);
+  int total = 0;
+  for (int p = 0; p < nprocs; p++) { displs[p] = total; total += counts[p]; }
+  if (total == 0) return;
+  std::vector<double> all(total);
+  MPI_Allgatherv(mine.data(), nmine, MPI_DOUBLE, all.data(), counts.data(), displs.data(),
+                 MPI_DOUBLE, world);
+  std::set<Key> keys;
+  for (int i = 0; i + KEY_LEN <= total; i += KEY_LEN) {
+    Key k;
+    k.te = all[i]; k.ti = all[i+1]; k.ne = all[i+2]; k.bmag = all[i+3];
+    k.alpha_deg = all[i+4]; k.mass = all[i+5]; k.upar = all[i+6]; k.Z = int(all[i+7]);
+    if (!cache.count(k)) keys.insert(k);
+  }
+  std::vector<Key> order(keys.begin(), keys.end());   // identical order on every rank
+  // my slice
+  const int hlen = 8 + nE * nT;
+  std::vector<double> hmine;
+  const auto t0 = std::chrono::steady_clock::now();
+  for (size_t i = me; i < order.size(); i += nprocs) {
+    Hist h = compute(order[i]);
+    hmine.push_back(double(i)); hmine.push_back(h.emax); hmine.push_back(h.escape_frac);
+    hmine.push_back(h.e_mean); hmine.push_back(h.th_mean); hmine.push_back(double(h.nimpact));
+    hmine.push_back(h.d_launch); hmine.push_back(h.dt);
+    hmine.insert(hmine.end(), h.f.begin(), h.f.end());
+  }
+  cpu_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  nmine = static_cast<int>(hmine.size());
+  MPI_Allgather(&nmine, 1, MPI_INT, counts.data(), 1, MPI_INT, world);
+  total = 0;
+  for (int p = 0; p < nprocs; p++) { displs[p] = total; total += counts[p]; }
+  all.assign(total, 0.0);
+  MPI_Allgatherv(hmine.data(), nmine, MPI_DOUBLE, all.data(), counts.data(), displs.data(),
+                 MPI_DOUBLE, world);
+  for (int i = 0; i + hlen <= total; i += hlen) {
+    Hist h;
+    const size_t idx = static_cast<size_t>(all[i]);
+    h.nE = nE; h.nT = nT; h.emax = all[i+1]; h.escape_frac = all[i+2];
+    h.e_mean = all[i+3]; h.th_mean = all[i+4]; h.nimpact = static_cast<long>(all[i+5]);
+    h.d_launch = all[i+6]; h.dt = all[i+7];
+    h.f.assign(all.begin() + i + 8, all.begin() + i + hlen);
+    if (idx < order.size()) cache.emplace(order[idx], std::move(h));
+  }
 }
 
 SheathIead::Hist SheathIead::compute(const Key &k)

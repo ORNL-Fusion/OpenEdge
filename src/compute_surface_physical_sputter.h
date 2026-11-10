@@ -28,6 +28,7 @@ class ComputeSurfacePhysicalSputter : public Compute {
   ~ComputeSurfacePhysicalSputter();
   void init();
   void compute_per_surf();
+  void compute_per_surf_body();
   bigint memory_usage();
 
   // True when the per-surf output is frozen (static mode + already built).

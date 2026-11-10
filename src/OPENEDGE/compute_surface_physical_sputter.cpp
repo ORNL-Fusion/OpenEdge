@@ -1656,6 +1656,24 @@ double ComputeSurfacePhysicalSputter::interp_yield(double e_eV, double a_deg) co
 
 void ComputeSurfacePhysicalSputter::compute_per_surf()
 {
+  // iead inline: a first pass only collects the histogram keys the owned
+  // elements need, distribute() builds them one-per-rank and all-gathers,
+  // the second pass finds everything cached (every rank otherwise rebuilt
+  // the same ~hundreds of histograms: the setup did not scale with ranks)
+  if (iead_inline && !(static_cache && cache_valid)) {
+    iead_inline->collecting = 1;
+    compute_per_surf_body();
+    iead_inline->collecting = 0;
+    size_t npend = iead_inline->pending_count(), nall = 0;
+    MPI_Allreduce(&npend, &nall, 1, MPI_UNSIGNED_LONG, MPI_SUM, world);
+    if (nall > 0) iead_inline->distribute(world);
+    cache_valid = 0;
+  }
+  compute_per_surf_body();
+}
+
+void ComputeSurfacePhysicalSputter::compute_per_surf_body()
+{
   // Physical constants
   const double QE  = 1.602176634e-19;   // elementary charge [C]
   const double AMU = 1.66053906660e-27;  // atomic mass unit [kg]

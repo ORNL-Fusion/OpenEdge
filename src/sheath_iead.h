@@ -12,7 +12,10 @@
 #define OPENEDGE_SHEATH_IEAD_H
 
 #include <map>
+#include <set>
 #include <vector>
+
+#include <mpi.h>
 
 namespace SPARTA_NS {
 
@@ -68,6 +71,15 @@ class SheathIead {
   size_t n_high_escape() const;        // histograms with > 50 % non-impacting markers
   // every cached histogram: a "# ..." header line then nE rows of nT weights
   void dump(const char *path) const;
+
+  // Distributed build: with collecting = 1, get() only records the keys it
+  // would need and returns an empty histogram; distribute() then gathers the
+  // keys of all ranks, computes each key on one rank only (round robin) and
+  // all-gathers the histograms into every cache. Keys are quantized, so all
+  // ranks agree on them.
+  int collecting = 0;
+  size_t pending_count() const { return pending.size(); }
+  void distribute(MPI_Comm world);
   double seconds() const { return cpu_seconds; }
   double dmax_override = 0.0;          // global pusher ... dmax, else mps_end_m
   double scale_frac = 0.05;            // max normal displacement per step / L_MPS
@@ -78,8 +90,12 @@ class SheathIead {
   double mD_amu;
   RanKnuth *random;
   std::map<Key, Hist> cache;
+  std::set<Key> pending;
+  Hist empty;
   double cpu_seconds = 0.0;
   Hist compute(const Key &k);
+  Key make_key(double te, double ti, double ne, const double b[3], const double n[3],
+               double mass, int Z, double upar) const;
 };
 
 }  // namespace SPARTA_NS
