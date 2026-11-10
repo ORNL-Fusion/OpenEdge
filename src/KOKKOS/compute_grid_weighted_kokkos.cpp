@@ -26,13 +26,14 @@ using namespace SPARTA_NS;
 enum{N_W,NRHO_W,MASSRHO_W,PXRHO_W,PYRHO_W,PZRHO_W,KERHO_W,
      MASS_W,NFRAC_W,MASSFRAC_W,
      U_W,V_W,W_W,USQ_W,VSQ_W,WSQ_W,
-     KE_W,TEMP_W,EROT_W,EVIB_W,TROT_W,TVIB_W};
+     KE_W,TEMP_W,EROT_W,EVIB_W,TROT_W,TVIB_W,
+     PRADTOT_W,PRAD_W};
 
 // internal accumulators (must match compute_grid_weighted.cpp)
 
 enum{WCOUNT,WMASSSUM,WMVX,WMVY,WMVZ,WMVSQ,
      WMVXSQ,WMVYSQ,WMVZSQ,
-     WEROT,WEVIB,WDOFROT,WDOFVIB,LASTSIZE};
+     WEROT,WEVIB,WDOFROT,WDOFVIB,WPRAD,LASTSIZE};
 
 /* ---------------------------------------------------------------------- */
 
@@ -41,9 +42,6 @@ ComputeGridWeightedKokkos::ComputeGridWeightedKokkos(SPARTA *sparta,
   ComputeGridWeighted(sparta, narg, arg)
 {
   kokkos_flag = 1;
-  if (prad_flag)
-    error->all(FLERR,"Compute grid/weighted/kk does not support "
-               "prad_w / pradtot_w");
 
   k_unique = DAT::tdual_int_1d("compute/grid_weighted:unique",npergroup);
   for (int m = 0; m < npergroup; m++)
@@ -63,6 +61,23 @@ ComputeGridWeightedKokkos::~ComputeGridWeightedKokkos()
   memoryKK->destroy_kokkos(k_tally,tally);
   vector_grid = NULL;
   tally = NULL;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void ComputeGridWeightedKokkos::init()
+{
+  ComputeGridWeighted::init();
+
+  // radiated power: device twin of fadas->radiation_coeff
+  rad_kk = AdasRadTablesKK();
+  if (prad_flag) {
+    FixVolumeChemAdasKokkos *fkk = dynamic_cast<FixVolumeChemAdasKokkos *>(fadas);
+    if (!fkk)
+      error->all(FLERR,"Compute grid/weighted/kk prad_w/pradtot_w require "
+                 "fix volume/chem/adas/kk");
+    rad_kk = fkk->rad_tables_kk();
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -92,6 +107,15 @@ void ComputeGridWeightedKokkos::compute_per_grid_kokkos()
   // get device view of pweight custom dvec
   pweight_ewhich = particle->ewhich[pweight_index];
   d_pweight = particle_kk->k_edvec.h_view[pweight_ewhich].k_view.d_view;
+
+  // radiated power reads Te, ne from the per-particle plasma cache
+  if (prad_flag) {
+    if (!update->plasma_cache_flag)
+      error->all(FLERR,"Compute grid/weighted prad_w/pradtot_w require "
+                 "the per-particle plasma cache");
+    d_pc_te = particle_kk->k_edvec.h_view[particle->ewhich[update->pc_te_custom]].k_view.d_view;
+    d_pc_ne = particle_kk->k_edvec.h_view[particle->ewhich[update->pc_ne_custom]].k_view.d_view;
+  }
 
   GridKokkos* grid_kk = (GridKokkos*) grid;
   d_cellcount = grid_kk->d_cellcount;
@@ -204,6 +228,10 @@ void ComputeGridWeightedKokkos::operator()(TagComputeGridWeighted_compute_per_gr
       case WDOFVIB:
         a_tally(icell,k++) += pw * d_species[ispecies].vibdof;
         break;
+      case WPRAD:
+        a_tally(icell,k++) += pw * d_pc_ne[i] *
+          rad_kk.coeff(ispecies,d_pc_te[i],d_pc_ne[i]);
+        break;
     }
   }
 }
@@ -274,6 +302,10 @@ void ComputeGridWeightedKokkos::operator()(TagComputeGridWeighted_compute_per_gr
       case WDOFVIB:
         d_tally(icell,k++) += pw * d_species[ispecies].vibdof;
         break;
+      case WPRAD:
+        d_tally(icell,k++) += pw * d_pc_ne[i] *
+          rad_kk.coeff(ispecies,d_pc_te[i],d_pc_ne[i]);
+        break;
       }
     }
   }
@@ -320,6 +352,7 @@ void ComputeGridWeightedKokkos::post_process_grid_kokkos(int index, int nsample,
   switch (value[ivalue]) {
 
   case N_W:
+  case PRADTOT_W:
     {
       wcount_col = emap[0];
       Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagComputeGridWeighted_N_W>(lo,hi),*this);
@@ -327,6 +360,7 @@ void ComputeGridWeightedKokkos::post_process_grid_kokkos(int index, int nsample,
     }
 
   case NRHO_W:
+  case PRAD_W:
     {
       wcount_col = emap[0];
       Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagComputeGridWeighted_NRHO_W>(lo,hi),*this);

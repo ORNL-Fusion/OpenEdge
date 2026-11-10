@@ -242,6 +242,47 @@ void FixVolumeChemAdasKokkos::init()
 }
 
 /* ----------------------------------------------------------------------
+   PLT/PRB tables and the per-species charge row for the radiated-power
+   tally of compute grid/weighted/kk (twin of radiation_coeff)
+------------------------------------------------------------------------- */
+
+AdasRadTablesKK FixVolumeChemAdasKokkos::rad_tables_kk()
+{
+  AdasRadTablesKK t;
+  const int nspecies = particle->nspecies;
+  t.rad_q = DAT::t_int_1d("chem:rad_q",nspecies);
+  auto h_q = Kokkos::create_mirror_view(t.rad_q);
+  auto mit = materials_rate_data.find(atomic_number);
+  for (int isp = 0; isp < nspecies; isp++) {
+    h_q(isp) = -1;
+    if (mit == materials_rate_data.end()) continue;
+    if (isp >= static_cast<int>(rad_species.size()) || !rad_species[isp]) continue;
+    h_q(isp) = static_cast<int>(std::max(0.0, particle->species[isp].charge) + 0.5);
+  }
+  Kokkos::deep_copy(t.rad_q,h_q);
+  if (mit == materials_rate_data.end()) return t;
+  const RateData &rd = mit->second;
+
+  auto up1 = [&](const std::vector<double> &v, const char *name) {
+    DAT::t_float_1d d(Kokkos::view_alloc(std::string(name),
+                                         Kokkos::WithoutInitializing),
+                      v.size());
+    auto h = Kokkos::create_mirror_view(d);
+    for (size_t i = 0; i < v.size(); i++) h(i) = v[i];
+    Kokkos::deep_copy(d,h);
+    return d;
+  };
+  t.plt = up1(rd.plt_coeff,"chem:rad_plt");
+  t.prb = up1(rd.prb_coeff,"chem:rad_prb");
+  t.gT_plt = up1(rd.gridT_plt,"chem:rad_gT_plt"); t.gD_plt = up1(rd.gridD_plt,"chem:rad_gD_plt");
+  t.gT_prb = up1(rd.gridT_prb,"chem:rad_gT_prb"); t.gD_prb = up1(rd.gridD_prb,"chem:rad_gD_prb");
+  // radiation_coeff uses the grid sizes as the validity test
+  t.plt_nQ = rd.plt_nQ; t.plt_nT = (int) rd.gridT_plt.size(); t.plt_nD = (int) rd.gridD_plt.size();
+  t.prb_nQ = rd.prb_nQ; t.prb_nT = (int) rd.gridT_prb.size(); t.prb_nD = (int) rd.gridD_prb.size();
+  return t;
+}
+
+/* ----------------------------------------------------------------------
    upload the ADAS tables and the reaction topology (static per run)
 ------------------------------------------------------------------------- */
 

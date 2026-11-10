@@ -53,6 +53,63 @@ namespace SPARTA_NS {
 
 struct TagFixChemAdas {};
 
+// PLT + PRB power coefficient on the device: twin of
+// FixVolumeChemAdas::radiation_coeff (same clamps, same bilinear form).
+// Handed to compute grid/weighted/kk for prad_w / pradtot_w.
+struct AdasRadTablesKK {
+  DAT::t_float_1d plt, prb, gT_plt, gD_plt, gT_prb, gD_prb;
+  DAT::t_int_1d rad_q;      // per species: charge row q, -1 = not in the chain
+  int plt_nQ = 0, plt_nT = 0, plt_nD = 0;
+  int prb_nQ = 0, prb_nT = 0, prb_nD = 0;
+
+  KOKKOS_INLINE_FUNCTION
+  double lookup(const DAT::t_float_1d &c, const DAT::t_float_1d &gT,
+                const DAT::t_float_1d &gD, int nQ, int nT, int nD,
+                int row, double log_te, double log_ne_cm) const {
+    if (row < 0 || row >= nQ || nT < 2 || nD < 2) return 0.0;
+    const double lt = Kokkos::fmin(Kokkos::fmax(log_te, gT(0)), gT(nT-1));
+    const double ln = Kokkos::fmin(Kokkos::fmax(log_ne_cm, gD(0)), gD(nD-1));
+    int tlo, thi, nlo, nhi;
+    if (lt <= gT(0)) { tlo = 0; thi = 1; }
+    else if (lt >= gT(nT-1)) { thi = nT-1; tlo = nT-2; }
+    else {
+      int lo = 0, hi = nT;
+      while (lo < hi) { const int mid = (lo+hi)/2; if (gT(mid) < lt) lo = mid+1; else hi = mid; }
+      thi = lo; tlo = lo-1;
+    }
+    if (ln <= gD(0)) { nlo = 0; nhi = 1; }
+    else if (ln >= gD(nD-1)) { nhi = nD-1; nlo = nD-2; }
+    else {
+      int lo = 0, hi = nD;
+      while (lo < hi) { const int mid = (lo+hi)/2; if (gD(mid) < ln) lo = mid+1; else hi = mid; }
+      nhi = lo; nlo = lo-1;
+    }
+    const double x0 = gT(tlo), x1 = gT(thi), y0 = gD(nlo), y1 = gD(nhi);
+    const double f00 = c(row*nT*nD + tlo*nD + nlo);
+    const double f01 = c(row*nT*nD + tlo*nD + nhi);
+    const double f10 = c(row*nT*nD + thi*nD + nlo);
+    const double f11 = c(row*nT*nD + thi*nD + nhi);
+    const double fx0 = ((x1 - lt) * f00 + (lt - x0) * f10) / (x1 - x0);
+    const double fx1 = ((x1 - lt) * f01 + (lt - x0) * f11) / (x1 - x0);
+    const double log10_wcm3 = ((y1 - ln) * fx0 + (ln - y0) * fx1) / (y1 - y0);
+    return Kokkos::pow(10.0, log10_wcm3) * 1.0e-6;      // W cm^3 -> W m^3
+  }
+
+  // [W m^3] of species isp at Te [eV], ne [m^-3]
+  KOKKOS_INLINE_FUNCTION
+  double coeff(int isp, double te_eV, double ne_m3) const {
+    if (isp < 0 || isp >= (int) rad_q.extent(0)) return 0.0;
+    const int q = rad_q(isp);
+    if (q < 0) return 0.0;
+    if (!(te_eV > 0.0) || !(ne_m3 > 0.0)) return 0.0;
+    const double lt = Kokkos::log10(te_eV);
+    const double ln = Kokkos::log10(ne_m3 * 1.0e-6);
+    // PLT row q: line radiation; PRB row q-1: recombination + bremsstrahlung
+    return lookup(plt,gT_plt,gD_plt,plt_nQ,plt_nT,plt_nD,q,lt,ln) +
+           lookup(prb,gT_prb,gD_prb,prb_nQ,prb_nT,prb_nD,q-1,lt,ln);
+  }
+};
+
 class FixVolumeChemAdasKokkos : public FixVolumeChemAdas, public KokkosBase {
  public:
 #ifndef SPARTA_KOKKOS_EXACT
@@ -67,6 +124,10 @@ class FixVolumeChemAdasKokkos : public FixVolumeChemAdas, public KokkosBase {
   ~FixVolumeChemAdasKokkos();
   void init() override;
   void end_of_step() override;
+
+  // device PLT/PRB tables for compute grid/weighted/kk (built on request,
+  // independent of whether the reaction kernel itself runs on the device)
+  AdasRadTablesKK rad_tables_kk();
 
   KOKKOS_INLINE_FUNCTION
   void operator()(TagFixChemAdas, const int &i) const;

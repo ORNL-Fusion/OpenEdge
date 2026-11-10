@@ -18,6 +18,7 @@ ComputeStyle(grid/weighted/kk,ComputeGridWeightedKokkos)
 #include "compute_grid_weighted.h"
 #include "kokkos_base.h"
 #include "kokkos_type.h"
+#include "fix_volume_chem_adas_kokkos.h"
 
 namespace SPARTA_NS {
 
@@ -36,6 +37,7 @@ class ComputeGridWeightedKokkos : public ComputeGridWeighted, public KokkosBase 
  public:
   ComputeGridWeightedKokkos(class SPARTA *, int, char **);
   ~ComputeGridWeightedKokkos();
+  void init();
   void compute_per_grid();
   void compute_per_grid_kokkos();
   int query_tally_grid_kokkos(DAT::t_float_2d_lr &);
@@ -93,6 +95,10 @@ class ComputeGridWeightedKokkos : public ComputeGridWeighted, public KokkosBase 
 
   // device-accessible pweight array
   DAT::t_float_1d d_pweight;
+
+  // radiated power (prad_w / pradtot_w): device ADAS tables + plasma cache
+  AdasRadTablesKK rad_kk;
+  DAT::t_float_1d d_pc_te, d_pc_ne;
 
   int wcount_col,wmass_col,wmom_col,wke_col;
   int ratio_num_col,ratio_den_col;
