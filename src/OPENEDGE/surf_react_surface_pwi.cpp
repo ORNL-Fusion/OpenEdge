@@ -29,6 +29,7 @@
 #include "surf_react_surface_pwi.h"
 #include "input.h"
 #include "update.h"
+#include "output.h"
 #include "timer.h"
 #include "domain.h"
 #include "comm.h"
@@ -106,6 +107,7 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   sigma_attr = NULL;
   sindex_custom = -1;
   sigma_nevery = 1;
+  sigma_last_fold = 0;
   sigma_ncols = 0;
   sigma_nsurf = 0;
   sigma_delta = NULL;
@@ -560,6 +562,7 @@ void SurfReactSurfacePWI::init()
       sigma_delta[i] = 0.0;
       sigma_comp[i] = 0.0;
     }
+    sigma_last_fold = update->ntimestep;
 
     // derived scalar customs: runtime signed net change, gross deposition,
     // and gross erosion.  Unlike the material-state array, these exclude
@@ -1534,6 +1537,10 @@ void SurfReactSurfacePWI::sync_sigma()
 {
   int n = (int) (sigma_nsurf * (bigint) sigma_ncols);
 
+  // background debits cover the steps since the previous fold
+  const double fold_steps = (double) (update->ntimestep - sigma_last_fold);
+  sigma_last_fold = update->ntimestep;
+
   MPI_Allreduce(sigma_delta,sigma_buf,n,MPI_DOUBLE,MPI_SUM,world);
   for (int i = 0; i < n; i++) sigma_delta[i] = 0.0;
   MPI_Allreduce(dep_delta,dep_buf,(int) sigma_nsurf,MPI_DOUBLE,MPI_SUM,world);
@@ -1627,7 +1634,7 @@ void SurfReactSurfacePWI::sync_sigma()
       ce->compute_per_surf();
       ce->post_process_surf();
     }
-    double debit_dt = update->dt * sigma_nevery;
+    double debit_dt = update->dt * fold_steps;
     // concentration-limited: the background erodes material isp only in
     // proportion to its surface concentration (owned conc array from the
     // previous derived pass; protective deposits shield the substrate).
@@ -1679,7 +1686,7 @@ void SurfReactSurfacePWI::sync_sigma()
   // background implantation + retention saturation (task 5)
   for (size_t k = 0; k < imp_species.size(); k++) {
     int isp = imp_isp[k];
-    double debit_dt = update->dt * sigma_nevery;
+    double debit_dt = update->dt * fold_steps;
     double **conck = surf->edarray[surf->ewhich[sconc_index]];
     double *fvec = NULL; double **farr = NULL; int icol = 0;
     if (imp_mode[k] == 0) {
@@ -1809,7 +1816,12 @@ void SurfReactSurfacePWI::derive_sigma_conc()
 void SurfReactSurfacePWI::tally_update()
 {
   SurfReact::tally_update();
-  if (sindex_custom >= 0 && update->ntimestep % sigma_nevery == 0) {
+  // fold every sigma_nevery steps, and also at the end of the run and on any
+  // step that writes a dump or restart, so no pending delta is ever dropped
+  const bigint ts = update->ntimestep;
+  const bool fold_due = (ts % sigma_nevery == 0) || ts == update->laststep ||
+                        ts == output->next_dump_any || ts == output->next_restart;
+  if (sindex_custom >= 0 && fold_due && ts > sigma_last_fold) {
     // areal-density ledger (Allreduce + owned fold + strata + debit):
     // its own Finish row "Adens", carved out of SReact
     timer->stamp(TIME_SREACT);
