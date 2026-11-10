@@ -54,6 +54,7 @@ SurfCollideDiffuse::SurfCollideDiffuse(SPARTA *sparta, int narg, char **arg) :
   // optional args
 
   tflag = rflag = 0;
+  elastic_flag = 0;
 
   int iarg = 4;
   while (iarg < narg) {
@@ -94,6 +95,12 @@ SurfCollideDiffuse::SurfCollideDiffuse(SPARTA *sparta, int narg, char **arg) :
 
       iarg += 7;
 
+    } else if (strcmp(arg[iarg],"elastic") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_collide diffuse command");
+      if (strcmp(arg[iarg+1],"yes") == 0) elastic_flag = 1;
+      else if (strcmp(arg[iarg+1],"no") == 0) elastic_flag = 0;
+      else error->all(FLERR,"Illegal surf_collide diffuse command");
+      iarg += 2;
     } else error->all(FLERR,"Illegal surf_collide diffuse command");
   }
 
@@ -231,69 +238,105 @@ void SurfCollideDiffuse::diffuse(Particle::OnePart *p, double *norm)
 
   if (random->uniform() > acc) {
     MathExtra::reflect3(p->v,norm);
-  // diffuse reflection
+    return;
+  }
+
+  double tangent1[3],tangent2[3];
+  Particle::Species *species = particle->species;
+  int ispecies = p->ispecies;
+  double *v = p->v;
+  double dot = MathExtra::dot3(v,norm);
+
+  // tangent1 = component of incident v tangential to the surface (random if
+  // the incidence is normal), tangent2 = norm x tangent1; both unit vectors
+
+  tangent1[0] = v[0] - dot*norm[0];
+  tangent1[1] = v[1] - dot*norm[1];
+  tangent1[2] = v[2] - dot*norm[2];
+  if (MathExtra::lensq3(tangent1) == 0.0) {
+    tangent2[0] = random->uniform();
+    tangent2[1] = random->uniform();
+    tangent2[2] = random->uniform();
+    MathExtra::cross3(norm,tangent2,tangent1);
+  }
+  MathExtra::norm3(tangent1);
+  MathExtra::cross3(norm,tangent1,tangent2);
+
+  // elastic yes: keep the incident speed, cosine-distributed direction about
+  // the normal; the surface temperature plays no role
+
+  if (elastic_flag) {
+    double vmag = MathExtra::len3(v);
+    if (vmag == 0.0) return;
+    double cosTheta = random->uniform();
+    double sinTheta = sqrt(std::max(0.0, 1.0 - cosTheta*cosTheta));
+    double phi = MY_2PI * random->uniform();
+    double cosPhi = cos(phi), sinPhi = sin(phi);
+    for (int k = 0; k < 3; k++)
+      v[k] = vmag * (sinTheta*cosPhi*tangent1[k] + sinTheta*sinPhi*tangent2[k] +
+                     cosTheta*norm[k]);
+    p->erot = particle->erot(ispecies,tsurf,random);
+    p->evib = particle->evib(ispecies,tsurf,random);
+    return;
+  }
+
+  // thermal re-emission at Tsurf (stock SPARTA):
   // vrm = most probable speed of species, eqns (4.1) and (4.7)
   // vperp = velocity component perpendicular to surface along norm, eqn (12.3)
   // vtan12 = 2 velocity components tangential to surface
-  // tangent1 = component of particle v tangential to surface,
-  //   check if tangent1 = 0 (normal collision), set randomly
-  // tangent2 = norm x tangent1 = orthogonal tangential direction
-  // tangent12 are both unit vectors
 
-  } else {
-    double tangent1[3],tangent2[3];
-    Particle::Species *species = particle->species;
-    int ispecies = p->ispecies;
+  double vrm = sqrt(2.0*update->boltz * tsurf / species[ispecies].mass);
+  double vperp = vrm * sqrt(-log(random->uniform()));
+  double theta = MY_2PI * random->uniform();
+  double vtangent = vrm * sqrt(-log(random->uniform()));
+  double vtan1 = vtangent * sin(theta);
+  double vtan2 = vtangent * cos(theta);
 
-    double *v = p->v;
-    double dot = MathExtra::dot3(v,norm);
-    double vmag = MathExtra::len3(v);
-    if (vmag == 0.0) return;
+  // add in translation or rotation vector if specified
+  // only keep portion of vector tangential to surface element
 
-    // component of v tangential to the surface
-    tangent1[0] = v[0] - dot * norm[0];
-    tangent1[1] = v[1] - dot * norm[1];
-    tangent1[2] = v[2] - dot * norm[2];
-
-       // if tangent1 is zero (normal incidence), pick a random tangential vector
-    if (MathExtra::lensq3(tangent1) == 0.0) {
-      tangent1[0] = random->uniform();
-      tangent1[1] = random->uniform();
-      tangent1[2] = random->uniform();
-      MathExtra::cross3(norm, tangent1, tangent1); // make it perpendicular
+  if (trflag) {
+    double beta_un,normalized_distbn_fn;
+    double vxdelta,vydelta,vzdelta;
+    if (tflag) {
+      vxdelta = vx; vydelta = vy; vzdelta = vz;
+      double dotw = vxdelta*norm[0] + vydelta*norm[1] + vzdelta*norm[2];
+      if (fabs(dotw) > 0.001) {
+        dotw /= vrm;
+        do {
+          do {
+            beta_un = (6.0*random->uniform() - 3.0);
+          } while (beta_un + dotw < 0.0);
+          normalized_distbn_fn = 2.0 * (beta_un + dotw) /
+            (dotw + sqrt(dotw*dotw + 2.0)) *
+            exp(0.5 + (0.5*dotw)*(dotw-sqrt(dotw*dotw + 2.0)) -
+                beta_un*beta_un);
+        } while (normalized_distbn_fn < random->uniform());
+        vperp = beta_un*vrm;
+      }
+    } else {
+      double *x = p->x;
+      vxdelta = wy*(x[2]-pz) - wz*(x[1]-py);
+      vydelta = wz*(x[0]-px) - wx*(x[2]-pz);
+      vzdelta = wx*(x[1]-py) - wy*(x[0]-px);
+      double dotw = vxdelta*norm[0] + vydelta*norm[1] + vzdelta*norm[2];
+      vxdelta -= dotw*norm[0];
+      vydelta -= dotw*norm[1];
+      vzdelta -= dotw*norm[2];
     }
-
-    MathExtra::norm3(tangent1);
-    MathExtra::cross3(norm, tangent1, tangent2);   // tangent2 = norm × tangent1
-
-    // sample hemisphere: cos(theta) ∈ [0,1], phi ∈ [0,2π)
-    double xi1 = random->uniform();
-    double xi2 = random->uniform();
-
-    double cosTheta = xi1;
-    double sinTheta = sqrt(std::max(0.0, 1.0 - cosTheta*cosTheta));
-    double phi      = MY_2PI * xi2;
-
-    double cosPhi = cos(phi);
-    double sinPhi = sin(phi);
-
- // outgoing direction in local basis
-    double dir[3];
-    dir[0] = sinTheta * cosPhi * tangent1[0] + sinTheta * sinPhi * tangent2[0] + cosTheta * norm[0];
-    dir[1] = sinTheta * cosPhi * tangent1[1] + sinTheta * sinPhi * tangent2[1] + cosTheta * norm[1];
-    dir[2] = sinTheta * cosPhi * tangent1[2] + sinTheta * sinPhi * tangent2[2] + cosTheta * norm[2];
-
-      MathExtra::norm3(dir);
-
-    // assign new velocity with same magnitude vmag
-    v[0] = vmag * dir[0];
-    v[1] = vmag * dir[1];
-    v[2] = vmag * dir[2];
-
-
-    p->erot = particle->erot(ispecies,tsurf,random);
-    p->evib = particle->evib(ispecies,tsurf,random);
+    v[0] = vperp*norm[0] + vtan1*tangent1[0] + vtan2*tangent2[0] + vxdelta;
+    v[1] = vperp*norm[1] + vtan1*tangent1[1] + vtan2*tangent2[1] + vydelta;
+    v[2] = vperp*norm[2] + vtan1*tangent1[2] + vtan2*tangent2[2] + vzdelta;
+  } else {
+    v[0] = vperp*norm[0] + vtan1*tangent1[0] + vtan2*tangent2[0];
+    v[1] = vperp*norm[1] + vtan1*tangent1[1] + vtan2*tangent2[1];
+    v[2] = vperp*norm[2] + vtan1*tangent1[2] + vtan2*tangent2[2];
   }
+
+  // initialize rot/vib energy
+
+  p->erot = particle->erot(ispecies,tsurf,random);
+  p->evib = particle->evib(ispecies,tsurf,random);
 }
 
 /* ----------------------------------------------------------------------

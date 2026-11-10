@@ -57,6 +57,8 @@ SurfCollideDiffuseKokkos::SurfCollideDiffuseKokkos(SPARTA *sparta, int narg, cha
 #endif
            )
 {
+  if (elastic_flag)
+    error->all(FLERR,"surf_collide diffuse/kk does not support elastic yes");
   kokkosable = 1;
 
   random_backup = NULL;
