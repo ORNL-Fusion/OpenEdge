@@ -142,6 +142,7 @@ declare -a TESTS=(
   "sheath_planar_o2|verification/sheath/planar_impact|in.planar||nokk nocap|-var case o2||scripts/check_planar.py o2"
   "sheath_planar_o3|verification/sheath/planar_impact|in.planar||nokk nocap|-var case o3||scripts/check_planar.py o3"
   "sheath_planar_d1|verification/sheath/planar_impact|in.planar||nokk nocap|-var case d1||scripts/check_planar.py d1"
+  "sheath_planar_inline|verification/sheath/planar_impact|in.inline||nokk nocap|||scripts/check_inline.py"
 )
 
 # -----------------------------------------------------------------------
