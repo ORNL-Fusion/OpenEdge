@@ -1388,17 +1388,17 @@ void Update::cache_plasma_particles()
           for (int j = 0; j < pc->nsurf; j++) {
             int m = static_cast<int>(cs[j]);
             double d;
+            // true point-to-element distance, as the pusher uses (an
+            // infinite-plane distance can pick a far element whose plane
+            // happens to pass near the particle)
             if (dim == 2) {
               if (!(surf->lines[m].mask & sbit)) continue;
               Surf::Line *ln = &surf->lines[m];
-              d = std::fabs((x[0]-ln->p1[0])*ln->norm[0] +
-                            (x[1]-ln->p1[1])*ln->norm[1]);
+              d = Geometry::distsq_point_line(const_cast<double *>(x), ln->p1, ln->p2);
             } else {
               if (!(surf->tris[m].mask & sbit)) continue;
               Surf::Tri *tr = &surf->tris[m];
-              d = std::fabs((x[0]-tr->p1[0])*tr->norm[0] +
-                            (x[1]-tr->p1[1])*tr->norm[1] +
-                            (x[2]-tr->p1[2])*tr->norm[2]);
+              d = Geometry::distsq_point_tri(const_cast<double *>(x), tr->p1, tr->p2, tr->p3, tr->norm);
             }
             if (d < best_d) { best_d = d; best_m = m; }
           }
@@ -1433,8 +1433,14 @@ void Update::cache_plasma_particles()
 
           double alpha_deg = 90.0;
           if (bmag > 0.0) {
+            // bx,by,bz are (Br,Bz,Bt) in 2-D; in axisymmetric slots the
+            // normal is (n_Z, n_R), so map it to (n_R, n_Z) as the pusher does
             double bvec[3] = {bx, by, bz};
             double nvec[3] = {sh_nx, sh_ny, sh_nz};
+            if (dim == 2 && domain->axisymmetric) {
+              nvec[0] = sh_ny;
+              nvec[1] = sh_nx;
+            }
             SheathModels::ChoduraMetrics cm =
               SheathModels::chodura_metrics(0.0, 1.0, bvec, nvec);
             alpha_deg = cm.alpha_deg;
