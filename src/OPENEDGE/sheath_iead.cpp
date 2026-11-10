@@ -17,8 +17,8 @@ constexpr double QE = 1.602176634e-19;
 constexpr double AMU = 1.66053906660e-27;
 constexpr double PI = 3.14159265358979323846;
 constexpr double OMEGA_DT = 0.05;      // gyro-phase advance per substep
-constexpr double SCALE_FRAC = 0.05;    // max normal displacement / sheath scale
-constexpr long MAX_STEPS = 200000;
+constexpr long MAX_STEPS = 4000000;   // hard cap; the transit-time cap below is the real limit
+constexpr int NSUB = 16;               // substeps of the wall-crossing step
 }
 
 bool SheathIead::Key::operator<(const Key &o) const
@@ -42,6 +42,13 @@ SheathIead::SheathIead(int nmarkers_, int nE_, int nT_, double mD_amu_,
 }
 
 SheathIead::~SheathIead() { delete random; }
+
+size_t SheathIead::n_high_escape() const
+{
+  size_t n = 0;
+  for (const auto &kv : cache) if (kv.second.escape_frac > 0.5) n++;
+  return n;
+}
 
 void SheathIead::dump(const char *path) const
 {
@@ -117,14 +124,14 @@ SheathIead::Hist SheathIead::compute(const Key &k)
   const double B[3] = {k.bmag * bhat[0], 0.0, k.bmag * bhat[2]};
   const double E0[3] = {0.0, 0.0, 0.0};
 
-  // substep: gyro-phase resolution only. The potential impulse is exact in
-  // energy for any step, and at grazing incidence the presheath sheet
-  // (L_MPS = 2 rho_s sin(alpha_graze)) is far thinner than a gyro-orbit:
-  // the pusher crosses it in one substep too. Without B the launch
-  // distance sets the step.
+  // substep: gyro-phase and presheath-scale resolution. The potential
+  // impulse is exact in energy for any step, but the impact ANGLE at
+  // grazing incidence needs the L_MPS sheet resolved (gyro-only steps
+  // make O3+ at 0.3 deg ~8 deg too oblique); the Debye sheath need not be.
   const double vmax = u + 4.0 * sig + std::sqrt(2.0 * q * c.phi_total_eV / k.mass);
-  double dt = (k.bmag > 0.0) ? OMEGA_DT / (qm * k.bmag)
-                             : SCALE_FRAC * d_max / std::max(vmax, 1.0);
+  double dt = (k.bmag > 0.0) ? OMEGA_DT / (qm * k.bmag) : 1e300;
+  const double scale = (c.lmps_m > 0.0) ? c.lmps_m : d_max;
+  if (vmax > 0.0 && scale > 0.0) dt = std::min(dt, scale_frac * scale / vmax);
   if (!(dt > 0.0) || !std::isfinite(dt)) dt = 1e-12;
 
   h.emax = k.Z * c.phi_total_eV
@@ -156,11 +163,12 @@ SheathIead::Hist SheathIead::compute(const Key &k)
                    sig * random->gaussian() + u * bhat[1],
                    sig * random->gaussian() + u * bhat[2]};
     bool impacted = false;
-    for (long is = 0; is < nstep_max; is++) {
+    // one Boris substep of length dtl plus the spatial-sheath impulse
+    // (pusher.cpp 3-D block); returns true when the wall was reached
+    auto advance = [&](double dtl) -> bool {
       const double z_old = x[2];
-      BorisGrid::push_velocity(qm, dt, E0, B, v);
-      x[0] += v[0] * dt; x[1] += v[1] * dt; x[2] += v[2] * dt;
-      // spatial-sheath impulse (pusher.cpp 3-D block)
+      BorisGrid::push_velocity(qm, dtl, E0, B, v);
+      x[0] += v[0] * dtl; x[1] += v[1] * dtl; x[2] += v[2] * dtl;
       if (std::min(z_old, x[2]) < d_max) {
         const double phi_old = SheathModels::sheath_phi_at_distance(c, std::max(z_old, 0.0));
         const double phi_new = SheathModels::sheath_phi_at_distance(c, std::max(x[2], 0.0));
@@ -173,13 +181,28 @@ SheathIead::Hist SheathIead::compute(const Key &k)
             vn_new = (vn >= 0.0) ? std::sqrt(s2) : -std::sqrt(s2);
           } else {
             double dd;
-            SheathModels::sheath_turning_step(c, q, k.mass, vn, dt, z_old, vn_new, dd);
+            SheathModels::sheath_turning_step(c, q, k.mass, vn, dtl, z_old, vn_new, dd);
             x[2] = z_old + dd;
           }
           v[2] = vn_new;
         }
       }
-      if (x[2] <= 0.0) { impacted = true; break; }
+      return x[2] <= 0.0;
+    };
+    for (long is = 0; is < nstep_max; is++) {
+      const double x0[3] = {x[0], x[1], x[2]};
+      const double v0[3] = {v[0], v[1], v[2]};
+      if (advance(dt)) {
+        // the wall was crossed inside this step: redo it in NSUB finer
+        // substeps so the impact velocity (angle) is read at the wall, not
+        // up to one gyro-step past it
+        x[0] = x0[0]; x[1] = x0[1]; x[2] = x0[2];
+        v[0] = v0[0]; v[1] = v0[1]; v[2] = v0[2];
+        impacted = false;
+        for (int js = 0; js < NSUB && !impacted; js++) impacted = advance(dt / NSUB);
+        if (!impacted) impacted = true;   // rounding: the full step did cross
+        break;
+      }
       if (x[2] > z_escape && v[2] > 0.0) break;
     }
     if (!impacted) { nesc++; continue; }

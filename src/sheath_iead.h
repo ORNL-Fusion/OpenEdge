@@ -65,10 +65,13 @@ class SheathIead {
   }
 
   size_t cache_size() const { return cache.size(); }
+  size_t n_high_escape() const;        // histograms with > 50 % non-impacting markers
   // every cached histogram: a "# ..." header line then nE rows of nT weights
   void dump(const char *path) const;
   double seconds() const { return cpu_seconds; }
   double dmax_override = 0.0;          // global pusher ... dmax, else mps_end_m
+  double scale_frac = 0.05;            // max normal displacement per step / L_MPS
+                                       // (0.1 -> 0.05 -> 0.025: O3+ at 0.3 deg 72 -> 70 -> 69 deg)
 
  private:
   int nmarkers, nE, nT, drift_mode, seed;

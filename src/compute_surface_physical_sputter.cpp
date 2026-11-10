@@ -949,6 +949,7 @@ void ComputeSurfacePhysicalSputter::load_iead_if_requested()
     iead_inline.reset(new SheathIead(iead_markers, iead_nE, iead_nT,
                                      update->sheath_mD_amu, iead_drift));
     iead_inline->dmax_override = update->sheath_dmax;
+    if (getenv("OE_IEAD_SCALE_FRAC")) iead_inline->scale_frac = atof(getenv("OE_IEAD_SCALE_FRAC"));   // convergence tests
     if (comm->me == 0 && (screen || logfile)) {
       const char *dr[] = {"cs2", "cs", "flow"};
       if (screen) fprintf(screen, "IEAD inline: %d markers, %d x %d bins, drift %s\n",
@@ -2360,10 +2361,13 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
   if (iead_inline && comm->me == 0 && iead_inline->cache_size() != iead_dumped) {
     if (!iead_dump_file.empty()) iead_inline->dump(iead_dump_file.c_str());
     iead_dumped = iead_inline->cache_size();
-    if (screen) fprintf(screen, "IEAD inline: %zu histograms on rank 0, %.2f s\n",
-                        iead_dumped, iead_inline->seconds());
-    if (logfile) fprintf(logfile, "IEAD inline: %zu histograms on rank 0, %.2f s\n",
-                         iead_dumped, iead_inline->seconds());
+    const size_t nhigh = iead_inline->n_high_escape();
+    if (screen) fprintf(screen, "IEAD inline: %zu histograms on rank 0, %.2f s%s\n",
+                        iead_dumped, iead_inline->seconds(),
+                        nhigh ? " (WARNING: some with > 50 % non-impacting markers, see iead_dump)" : "");
+    if (logfile) fprintf(logfile, "IEAD inline: %zu histograms on rank 0, %.2f s%s\n",
+                         iead_dumped, iead_inline->seconds(),
+                         nhigh ? " (WARNING: some with > 50 % non-impacting markers, see iead_dump)" : "");
   }
 
   if (compound) {
