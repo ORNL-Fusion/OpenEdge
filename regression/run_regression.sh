@@ -385,8 +385,9 @@ fi
 if [[ "pwi_ledger_fold" == $FILTER || "*" == "$FILTER" ]]; then
   printf "%-40s " "pwi_ledger_fold"
   fdir="$EXAMPLES_DIR/verification/surface_pwi/ledger_fold"
-  if [[ -n "$LAUNCHER" ]]; then lf="${LAUNCHER% *}"; else lf="mpirun -np"; fi   # run.sh appends the rank count
-  if (cd "$fdir" && SPA="$EXE" SPA_ARGS="${KKARGS[*]}" LAUNCH="$lf" NP="$NP" PYTHON="$PY" \
+  # a fixed launcher (srun ...) runs the one rank count it encodes; mpirun runs 1 and NP
+  if [[ -n "$LAUNCHER" ]]; then lf="$LAUNCHER"; nl="$NP"; else lf="mpirun -np {np}"; nl="1 $NP"; fi
+  if (cd "$fdir" && SPA="$EXE" SPA_ARGS="${KKARGS[*]}" LAUNCH="$lf" NP="$NP" NP_LIST="$nl" PYTHON="$PY" \
       bash run.sh > "$fdir/regression.log" 2>&1); then
     RESULTS+=("PASS  pwi_ledger_fold  (nevery 100 == nevery 1 at every dump, restart read-back)"); echo "PASS"; ((PASS++))
   else
