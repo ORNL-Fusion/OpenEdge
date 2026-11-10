@@ -184,6 +184,53 @@ double emag_at_distance(const SheathCoeffs &c, double dist_m)
   return c.phi_mps_eV * c.inv_mps * Kokkos::exp(-dmps * c.inv_mps);
 }
 
+// Normal motion across a turning point inside one substep, exact in energy.
+// Device mirror of SheathModels::sheath_turning_step (sheath_models.cpp);
+// keep the two in sync by hand.
+KOKKOS_INLINE_FUNCTION
+void turning_step(const SheathCoeffs &c, double q_abs, double mass,
+                  double vn, double dt, double d0,
+                  double &vn_new, double &dd)
+{
+  if (!(vn > 0.0) || !(dt > 0.0) || !(mass > 0.0) || !(q_abs > 0.0)) {
+    vn_new = vn;
+    dd = vn * dt;
+    return;
+  }
+  const double k_over_q = 0.5 * mass * vn * vn / q_abs;      // climb available, in volts
+  const double phi0 = phi_at_distance(c, Kokkos::fmax(d0, 0.0));
+  const double phi_t = phi0 - k_over_q;                      // potential at the turning point
+  double lo = d0, hi = d0 + vn * dt;
+  const double phi_hi = phi_at_distance(c, Kokkos::fmax(hi, 0.0));
+  if (phi_hi >= phi_t) {                                      // no turning point in reach
+    vn_new = Kokkos::sqrt(Kokkos::fmax(vn * vn + 2.0 * q_abs * (phi_hi - phi0) / mass, 0.0));
+    dd = vn * dt;
+    return;
+  }
+  for (int it = 0; it < 48; it++) {                           // phi decreases outward
+    const double mid = 0.5 * (lo + hi);
+    if (phi_at_distance(c, Kokkos::fmax(mid, 0.0)) > phi_t) lo = mid; else hi = mid;
+  }
+  const double d_t = 0.5 * (lo + hi);
+  const double climb = d_t - d0;
+  double a = (climb > 1.0e-12) ? vn * vn / (2.0 * climb)      // mean deceleration over the climb
+                               : q_abs * emag_at_distance(c, d_t) / mass;
+  if (!(a > 0.0)) a = q_abs * emag_at_distance(c, d_t) / mass;
+  const double t1 = (a > 0.0) ? vn / a : dt;                  // time to the turning point
+  double d_f;
+  if (t1 >= dt) {                                             // still climbing at the end of the step
+    d_f = d0 + vn * dt - 0.5 * a * dt * dt;
+    vn_new = Kokkos::sqrt(Kokkos::fmax(vn * vn + 2.0 * q_abs *
+               (phi_at_distance(c, Kokkos::fmax(d_f, 0.0)) - phi0) / mass, 0.0));
+  } else {                                                    // turned, falling back for t2
+    const double t2 = dt - t1;
+    d_f = d_t - 0.5 * a * t2 * t2;
+    vn_new = -Kokkos::sqrt(Kokkos::fmax(2.0 * q_abs *
+               (phi_at_distance(c, Kokkos::fmax(d_f, 0.0)) - phi_t) / mass, 0.0));
+  }
+  dd = d_f - d0;
+}
+
 }  // namespace SheathModelsKokkos
 }  // namespace SPARTA_NS
 

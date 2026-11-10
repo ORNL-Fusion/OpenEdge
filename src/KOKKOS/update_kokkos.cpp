@@ -3768,7 +3768,7 @@ void UpdateKokkos::build_oe_sheath_cache()
      CPU's energy-consistent potential impulse AFTER each position update
      — dKE = Z e [phi(d_new) - phi(d_old)], phi clamped at the wall, with
      the per-particle phi reference (sheath_phiprev) and lifetime bank cap
-     (sheath_bank) customs and elastic reflection at turning points. The
+     (sheath_bank) customs and the exact turning-point step. The
      old per-subcycle sheath E-force (removed from the CPU as
      non-conservative) is gone.
    - Per-subcycle guard: an in-cell wall hit clips xnew to the
@@ -4207,11 +4207,16 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
             vn_new = (vn >= 0.0) ? Kokkos::sqrt(s2) : -Kokkos::sqrt(s2);
             if (have_bank) d_oe_sheath_bank(i) += dKE_J;
           } else {
-            vn_new = -vn;
-            sh_d_cur = d_old;
+            // exact turning step, as the CPU (d82517ea)
+            double dd;
+            SheathModelsKokkos::turning_step(sh_c, Kokkos::fabs(charge) * oe_echarge,
+                                             mass, vn, dt_sub, d_old, vn_new, dd);
+            const double corr = dd - (d_new - d_old);
+            sh_d_cur = d_old + dd;
+            if (have_bank) d_oe_sheath_bank(i) += 0.5 * mass * (vn_new*vn_new - vn*vn);
             if (!axi) {
-              xcur[0] -= (d_new - d_old) * sh_nR;
-              xcur[1] -= (d_new - d_old) * sh_nZ;
+              xcur[0] += corr * sh_nR;
+              xcur[1] += corr * sh_nZ;
             }
             if (oe_sheath_diag) Kokkos::atomic_inc(&d_oe_shd_counts(2));
           }
@@ -4643,10 +4648,10 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
       for (int m = 0; m < nsurf_cell; m++) {
         const int ms = d_csurfs.entries(csurfs_begin + m);
         if (!(d_tris[ms].mask & oe_sheath_sgroupbit)) continue;
-        const double dpl = Kokkos::fabs(
-            (x[0]-d_tris[ms].p1[0])*d_tris[ms].norm[0] +
-            (x[1]-d_tris[ms].p1[1])*d_tris[ms].norm[1] +
-            (x[2]-d_tris[ms].p1[2])*d_tris[ms].norm[2]);
+        // true point-to-triangle distance, as CPU push_boris_3d
+        double xq[3] = {x[0],x[1],x[2]};
+        const double dpl = GeometryKokkos::distsq_point_tri(
+            xq,d_tris[ms].p1,d_tris[ms].p2,d_tris[ms].p3,d_tris[ms].norm);
         if (dpl < best_d) { best_d = dpl; best_m = ms; }
       }
       if (best_m >= 0) midx = best_m;
@@ -4795,8 +4800,16 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
     const double sh_d0 = (x[0]-sh_sref[0])*sh_nx + (x[1]-sh_sref[1])*sh_ny + (x[2]-sh_sref[2])*sh_nz;
     const double sh_d0_sign = (sh_d0 >= 0.0) ? 1.0 : -1.0;
     const bool paid_ok = oe_paid_on && i < (int) d_oe_paid.extent(0);
-    if (paid_ok && sh_d0_sign > 0.0 && sh_d0 > sh_dmax) d_oe_paid(i) = 0;   // SH_OUTSIDE
-    if (sh_d0_sign > 0.0 && sh_d0 <= sh_dmax) {
+    // true distance to the chosen element, as the CPU gates (sh_geom_d0)
+    double sh_geom_d0 = 1.0e20;
+    if (sh_midx_dbg >= 0) {
+      double xq[3] = {x[0],x[1],x[2]};
+      sh_geom_d0 = Kokkos::sqrt(GeometryKokkos::distsq_point_tri(
+          xq,d_tris[sh_midx_dbg].p1,d_tris[sh_midx_dbg].p2,
+          d_tris[sh_midx_dbg].p3,d_tris[sh_midx_dbg].norm));
+    }
+    if (paid_ok && sh_d0_sign > 0.0 && sh_geom_d0 > sh_dmax) d_oe_paid(i) = 0;   // SH_OUTSIDE
+    if (sh_d0_sign > 0.0 && sh_geom_d0 <= sh_dmax && sh_d0 <= sh_dmax) {
       double sh_phi_total = SheathModelsKokkos::phi_at_distance(sh_c, 0.0) +
                             oe_wave_drop(sh_midx_dbg, 0.0);
       if (sh_phi_total > 0.0) {
@@ -4867,7 +4880,7 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
     // Spatial-mode sheath: exact work of the sheath potential over this
     // subcycle's normal displacement, dKE = Z e [phi(d_new) - phi(d_old)],
     // phi clamped to phi(0) for d <= 0. Outbound ions that cannot climb
-    // the remaining potential reflect elastically at the turning point.
+    // the remaining potential take the exact turning-point step.
     // Line-for-line port of CPU pusher.cpp push_boris_3d.
     if (sh_active && !sheath_boundary) {   // spatial mode only (CPU guard)
       const double d_old =
@@ -4878,7 +4891,21 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
         (xcur[0] - sh_sref[0]) * sh_nx
       + (xcur[1] - sh_sref[1]) * sh_ny
       + (xcur[2] - sh_sref[2]) * sh_nz;
-      if (Kokkos::fmin(d_old, d_new) < sh_dmax) {
+      // CPU gate: the true distance to the chosen element must be inside
+      // the window too (an infinite plane can pass near a far particle)
+      double geom_d_old = 0.0, geom_d_new = 0.0;
+      if (sh_midx_dbg >= 0) {
+        double xo[3] = {xold[0],xold[1],xold[2]};
+        double xn[3] = {xcur[0],xcur[1],xcur[2]};
+        geom_d_old = Kokkos::sqrt(GeometryKokkos::distsq_point_tri(
+            xo,d_tris[sh_midx_dbg].p1,d_tris[sh_midx_dbg].p2,
+            d_tris[sh_midx_dbg].p3,d_tris[sh_midx_dbg].norm));
+        geom_d_new = Kokkos::sqrt(GeometryKokkos::distsq_point_tri(
+            xn,d_tris[sh_midx_dbg].p1,d_tris[sh_midx_dbg].p2,
+            d_tris[sh_midx_dbg].p3,d_tris[sh_midx_dbg].norm));
+      }
+      if (Kokkos::fmin(geom_d_old, geom_d_new) < sh_dmax &&
+          Kokkos::fmin(d_old, d_new) < sh_dmax) {
         const double phi_old_geo = SheathModelsKokkos::phi_at_distance(
             sh_c, Kokkos::fmax(d_old, 0.0));
         const double phi_old = sh_phi_pending ? sh_phi_ref : phi_old_geo;
@@ -4909,13 +4936,17 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
             vn_new = (vn >= 0.0) ? Kokkos::sqrt(s2) : -Kokkos::sqrt(s2);
             if (have_bank) d_oe_sheath_bank(i) += dKE_J;
           } else {
-            // turning point: elastic reflection; bounce the position back
-            // to d_old (the climb to d_new was never paid for)
-            vn_new = -vn;
-            xcur[0] -= (d_new - d_old) * sh_nx;
-            xcur[1] -= (d_new - d_old) * sh_ny;
-            xcur[2] -= (d_new - d_old) * sh_nz;
-            sh_d_fin = d_old;
+            // turning point inside this subcycle: exact turning step, as
+            // the CPU (SheathModels::sheath_turning_step, d82517ea)
+            double dd;
+            SheathModelsKokkos::turning_step(sh_c, Kokkos::fabs(charge) * oe_echarge,
+                                             mass, vn, dt_sub, d_old, vn_new, dd);
+            const double corr = dd - (d_new - d_old);
+            xcur[0] += corr * sh_nx;
+            xcur[1] += corr * sh_ny;
+            xcur[2] += corr * sh_nz;
+            sh_d_fin = d_old + dd;
+            if (have_bank) d_oe_sheath_bank(i) += 0.5 * mass * (vn_new*vn_new - vn*vn);
             if (oe_sheath_diag)
               Kokkos::atomic_inc(&d_oe_shd_counts(2));
           }
@@ -5401,16 +5432,16 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
             }
             double dpl;
             if (oe_dim != 3) {
+              // true point-to-element distance, as the CPU cache (f2eb6ea2)
               if (!(d_lines[ms].mask & oe_sheath_sgroupbit)) continue;
-              dpl = Kokkos::fabs(
-                  (p.x[0]-d_lines[ms].p1[0])*d_lines[ms].norm[0] +
-                  (p.x[1]-d_lines[ms].p1[1])*d_lines[ms].norm[1]);
+              double xq[3] = {p.x[0],p.x[1],p.x[2]};
+              dpl = GeometryKokkos::distsq_point_line(
+                  xq,d_lines[ms].p1,d_lines[ms].p2);
             } else {
               if (!(d_tris[ms].mask & oe_sheath_sgroupbit)) continue;
-              dpl = Kokkos::fabs(
-                  (p.x[0]-d_tris[ms].p1[0])*d_tris[ms].norm[0] +
-                  (p.x[1]-d_tris[ms].p1[1])*d_tris[ms].norm[1] +
-                  (p.x[2]-d_tris[ms].p1[2])*d_tris[ms].norm[2]);
+              double xq[3] = {p.x[0],p.x[1],p.x[2]};
+              dpl = GeometryKokkos::distsq_point_tri(
+                  xq,d_tris[ms].p1,d_tris[ms].p2,d_tris[ms].p3,d_tris[ms].norm);
             }
             if (dpl < best_d) { best_d = dpl; best_m = ms; }
           }
@@ -5445,7 +5476,10 @@ void UpdateKokkos::operator()(TagUpdatePcacheFill, const int &i) const
               Kokkos::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
           double alpha_deg = 90.0;
           if (bmag > 0.0) {
-            const double nvec[3] = {nx, ny, nz};
+            // axisymmetric slots: the normal is (n_Z, n_R); map it to
+            // (n_R, n_Z) as the pusher and the CPU cache do (f2eb6ea2)
+            double nvec[3] = {nx, ny, nz};
+            if (oe_dim == 2 && oe_axisymmetric) { nvec[0] = ny; nvec[1] = nx; }
             SheathModelsKokkos::ChoduraMetrics cm =
               SheathModelsKokkos::chodura_metrics(0.0, 1.0, B, nvec);
             alpha_deg = cm.alpha_deg;
