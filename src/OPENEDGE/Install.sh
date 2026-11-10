@@ -57,6 +57,7 @@ override compute_grid.h
 override compute_property_surf.cpp
 override compute_property_surf.h
 override dump_particle.cpp
+override read_restart.cpp
 override dump_particle.h
 override sparta.cpp
 override sparta.h

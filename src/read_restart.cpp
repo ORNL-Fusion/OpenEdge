@@ -1512,6 +1512,12 @@ void ReadRestart::assign_particles(int skipflag)
     if (p->nsplit <= 0)
       icell = sinfo[cells[icell].isplit].csubs[-p->nsplit];
     particle->add_particle(p->id,p->ispecies,icell,p->x,p->v,p->erot,p->evib);
+    // add_particle() takes mass/radius/temp from the species table;
+    // grains carry their own, restore them from the restart record
+    Particle::OnePart *np = &particle->particles[particle->nlocal-1];
+    np->mass = p->mass;
+    np->radius = p->radius;
+    np->temp = p->temp;
     ptr += nbytes_particle;
     if (ncustom) {
       particle->unpack_custom(ptr,particle->nlocal-1);
