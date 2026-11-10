@@ -175,6 +175,12 @@ class ComputeSurfacePhysicalSputter : public Compute {
   // each projectile element index to the appropriate table (or null when
   // no IEAD lookup applies to that element).
   std::string iead_arg;
+  // "inline": per-element IEAD from test-ion orbits through the local
+  // Borodkina sheath (sheath_iead.h) instead of the database
+  std::unique_ptr<class SheathIead> iead_inline;
+  int iead_markers = 2000, iead_nE = 120, iead_nT = 30, iead_drift = 0;
+  std::string iead_dump_file;              // rank 0 writes its cache (iead_dump)
+  size_t iead_dumped = 0;
   std::unique_ptr<IeadTable> iead_light;
   std::unique_ptr<IeadTable> iead_W;
   std::vector<IeadTable *> iead_per_proj;   // ptrs into iead_light/iead_W

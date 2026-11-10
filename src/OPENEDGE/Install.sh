@@ -153,6 +153,8 @@ action process_library.h
 action pusher.cpp
 action pusher.h
 action reflection_tables.h
+action sheath_iead.cpp
+action sheath_iead.h
 action sheath_models.cpp
 action sheath_models.h
 action surface_incidence.cpp
