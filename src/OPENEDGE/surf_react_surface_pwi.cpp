@@ -371,6 +371,8 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   tally_total_all = new int[nlist];
 
   random = new RanKnuth(update->ranmaster->uniform());
+  double seed = update->ranmaster->uniform();
+  random->reset(seed,comm->me,100);        // distinct stream per rank
 }
 
 /* ---------------------------------------------------------------------- */
@@ -492,6 +494,8 @@ void SurfReactSurfacePWI::init()
   // created here (not the constructor) so nspecies is final, and reused
   // if it already exists (e.g. from a restart file, which carries custom
   // attributes) so sigma accumulates across restarts.
+  if (dep_alias_elem.size() && !sigma_attr)
+    error->all(FLERR,"surf_react surface/pwi deposit_as requires adens_surf");
   if (sigma_attr) {
     if (surf->implicit)
       error->all(FLERR,"surf_react surface/pwi adens_surf requires explicit surfs");
@@ -500,8 +504,6 @@ void SurfReactSurfacePWI::init()
                  "distributed surfs");
 
     sigma_ncols = particle->nspecies;
-    if (dep_alias_elem.size() && !sigma_attr)
-      error->all(FLERR,"surf_react surface/pwi deposit_as requires adens_surf");
     // init-layer restriction (surf group) and per-surface seed files;
     // files are read only when the attribute is created (restarts
     // keep their persisted state, like adens_init)
