@@ -2717,9 +2717,12 @@ template < int DIM, int SURF, int OPT > void Update::move()
                     nscollide_one++;
                     continue;
                   } else {
+                    // PENTRY, not PEXIT: the receiver must keep the surface
+                    // checks for this cell (PEXIT skips them), the particle
+                    // now sits on the far cap inside it
                     icell = newcell;
                     particles[i].icell = icell;
-                    particles[i].flag = PEXIT;
+                    particles[i].flag = PENTRY;
                     particles[i].dtremain = dtremain;
                     entryexit = 1;
                     nscollide_one++;
