@@ -325,7 +325,8 @@ sheath transit.
 The sheath potential follows Borodkina et al, Contrib. Plasma Phys.
 56 (2016) 640-645.  Alpha is the angle between B and the wall normal,
 rho_cs = sqrt((Te+Ti)/mD)/omega_ci, and
-L_MPS = 3 rho_cs sin(alpha), using k=3 from the paper's k=2-3 range.
+L_MPS = 2 rho_cs sin(alpha), using k=2 from the paper's k=2-3 range
+(k=3 before November 2026).
 The wall drop is the floating value
 0.5 * Te * ln( (mD / (2 pi me)) / (1 + Ti/Te) ).  At and above the
 critical angle alpha* of eq. (3), the Debye sheath vanishes and
@@ -336,7 +337,7 @@ Below alpha*, OpenEdge uses the piecewise Debye-sheath and MPS solution
 and the a, Q, and interface-position closure of Borodkina et al,
 Russian Physics Journal 58 (2015) 438-445.  The published closure is
 recovered for Ti=Te and L_MPS=2 rho_cs sin(alpha); OpenEdge retains the
-general Ti/Te term and the 2016 k=3 choice.  Potential and field are
+general Ti/Te term with k=2.  Potential and field are
 continuous at the interface.  The automatic engagement distance extends
 10 rho_cs sin(alpha) beyond the interface, with a minimum of 20 lambda_D;
 {dmax} overrides it and 0 restores the automatic choice.  The profile and
