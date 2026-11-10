@@ -136,6 +136,8 @@ declare -a TESTS=(
   "west_tungsten_memlimit|workflows/impurity_transport/west_tungsten_transport|in.openedge|input/plasma.h5||-var memlimit 1"
   # rebalance placement probe (audit item 2 leftover): rfpie rebalancing every 100 steps under OE_CELLMIG_DIAG=2
   "rfpie_rebalance_probe|workflows/impurity_transport/rfpie_tungsten_transport|in.openedge|input/plasma_he.h5||-var baltimeevery 100 -var balpartevery 50|OE_CELLMIG_DIAG=2"
+  # toroidal periodic caps on a 10 deg wedge, y-slab partition: no particle lost or escaped
+  "wedge_periodic_caps|verification/wedge_periodic_caps|in.wedge|input/wedge.surf||||scripts/check_caps.py regression.log"
   # planar sheath impacts (Boris + sheath spatial): <E>, <theta> of O2+/O3+/D+ vs reference.json
   "sheath_planar_o2|verification/sheath/planar_impact|in.planar||nokk nocap|-var case o2||scripts/check_planar.py o2"
   "sheath_planar_o3|verification/sheath/planar_impact|in.planar||nokk nocap|-var case o3||scripts/check_planar.py o3"
