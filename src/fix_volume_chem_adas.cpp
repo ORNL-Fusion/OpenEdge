@@ -2497,7 +2497,7 @@ void FixVolumeChemAdas::readfile(char *fname)
           strcpy(r->id_reactants[r->nreactant],word);
           r->nreactant++;
         } else {
-          if (r->nreactant == MAXPRODUCT) {
+          if (r->nproduct == MAXPRODUCT) {
             print_reaction(copy1,copy2);
             error->all(FLERR,"Too many products in a reaction formula");
           }
@@ -2745,7 +2745,13 @@ void FixVolumeChemAdas::interpolateRateData(int atomic_number, double charge, in
   double f00, f01, f10, f11;
   bool success = setupInterpolation(reactionType, atomic_number, charge_idx, te, ne, x0, x1, y0, y1, f00, f01, f10, f11);
   if (!success) {
-      rate_final = 0.0;
+      // no table / charge row: log10 k = -300 (k = 0); 0.0 would mean k = 1 cm^3/s
+      static int warned = 0;
+      if (!warned && comm->me == 0)
+        error->warning(FLERR,"fix volume/chem/adas: rate table missing for a "
+                       "requested element/charge/reaction; rate set to zero");
+      warned = 1;
+      rate_final = -300.0;
       return;
   }
 
