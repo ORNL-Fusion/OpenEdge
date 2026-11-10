@@ -40,6 +40,7 @@ FixParticulateCharge::FixParticulateCharge(SPARTA *sparta, int narg, char **arg)
 
   int iarg = 2;
   nevery = input->inumeric(FLERR, arg[iarg++]);
+  if (nevery < 1) error->all(FLERR,"fix particulate/charge: nevery must be >= 1");
 
   if (strcmp(arg[iarg++], "background") != 0)
     error->all(FLERR, "fix particulate/charge: argument 4 must be 'background'");
@@ -312,7 +313,7 @@ void FixParticulateCharge::init()
                    "heat-balance coupling)");
   if (!random_) {
     random_ = new RanKnuth(update->ranmaster->uniform());
-    random_->reset(comm->me + 1, comm->me, 100);
+    random_->reset(update->ranmaster->uniform(), comm->me, 100);   // deck seed, distinct per rank
   }
 
   if (qcustom < 0)
