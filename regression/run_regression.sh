@@ -376,6 +376,23 @@ if [[ "pwi_deposit_tagging" == $FILTER || "*" == "$FILTER" ]]; then
 fi
 
 # -----------------------------------------------------------------------
+#  pwi_ledger_fold: surface/pwi ledgers folded before dumps/run end/restarts
+#  (adens_nevery 100 == adens_nevery 1 at every dump step, 1 and NP ranks)
+# -----------------------------------------------------------------------
+if [[ "pwi_ledger_fold" == $FILTER || "*" == "$FILTER" ]]; then
+  printf "%-40s " "pwi_ledger_fold"
+  fdir="$EXAMPLES_DIR/verification/surface_pwi/ledger_fold"
+  if [[ -n "$LAUNCHER" ]]; then lf="${LAUNCHER% *}"; else lf="mpirun -np"; fi   # run.sh appends the rank count
+  if (cd "$fdir" && SPA="$EXE" SPA_ARGS="${KKARGS[*]}" LAUNCH="$lf" NP="$NP" PYTHON="$PY" \
+      bash run.sh > "$fdir/regression.log" 2>&1); then
+    RESULTS+=("PASS  pwi_ledger_fold  (nevery 100 == nevery 1 at every dump, restart read-back)"); echo "PASS"; ((PASS++))
+  else
+    RESULTS+=("FAIL  pwi_ledger_fold  (see examples/verification/surface_pwi/ledger_fold/regression.log)"); echo "FAIL"; ((FAIL++))
+    if [[ "$VERBOSE" -eq 1 ]]; then tail -20 "$fdir/regression.log"; fi
+  fi
+fi
+
+# -----------------------------------------------------------------------
 #  Summary
 # -----------------------------------------------------------------------
 echo ""
