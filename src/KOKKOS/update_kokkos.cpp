@@ -325,6 +325,7 @@ void UpdateKokkos::init()
   oe_has_gca_customs  = 0;
   oe_gc_hooks = 31;
   if (const char *e = getenv("OE_GC_HOOKS")) oe_gc_hooks = atoi(e);
+  if (const char *e = getenv("OE_SKIP_POST_MIGRATE")) oe_skip_post_migrate = atoi(e);
   oe_bx_col = oe_by_col = oe_bz_col = -1;
 
   // OpenEdge Phase A: equilibrium-based point-query B (defaults off).
@@ -814,7 +815,15 @@ void UpdateKokkos::run(int nsteps)
       }
       auto mlist_small = k_mlist_small.view_host().data();
 
-      ((CommKokkos*)comm)->migrate_particles(nmigrate,mlist_small,k_mlist_small.view_device());
+      // OpenEdge perf (2026-11-10): with gridcut >= 0 the move loop migrates
+      // inside its pass loop and exits only when the entry/exit flag is zero on
+      // every rank (uniform exit: Alltoall flag or Allreduce), leaving nmigrate
+      // == 0 everywhere. This call is then a globally-empty migration (an
+      // Alltoall, or zero-length neighbor messages): half of all migrate calls
+      // on the WEST deck. Skip it on every rank; the decision is deterministic
+      // from the same uniform loop exit, so plan participation stays consistent.
+      if (!(oe_move_drained && oe_skip_post_migrate))
+        ((CommKokkos*)comm)->migrate_particles(nmigrate,mlist_small,k_mlist_small.view_device());
       if (cellweightflag) particle->post_weight();
       timer->stamp(TIME_COMM);
     }
@@ -966,6 +975,8 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
   // one or more loops over particles
   // first iteration = all my particles
   // subsequent iterations = received particles
+
+  oe_move_drained = 0;
 
   while (1) {
 
@@ -1457,7 +1468,7 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
       memoryKK->create_kokkos(k_mlist,mlist,maxmigrate,"particle:mlist");
     }
     nmigrate = 0;
-    if (!any_entryexit) break;
+    if (!any_entryexit) { oe_move_drained = 1; break; }
 
     // END of single move/migrate iteration
   }

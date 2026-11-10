@@ -418,6 +418,9 @@ class UpdateKokkos : public Update {
   DAT::t_float_1d d_oe_sheath_bank;
   DAT::t_int_1d d_oe_tri_hint;        // per-particle mesh triangle hint (custom ivec, tri+1, 0 = none)
   int oe_tri_hint_custom = -1;        // custom index on the host, -1 = none
+  int oe_move_drained = 0;            // move loop ended after an in-loop migration with a globally-zero
+                                      // entry/exit flag: every rank holds nmigrate == 0, nothing left to send
+  int oe_skip_post_migrate = 1;       // OE_SKIP_POST_MIGRATE=0 keeps the (globally empty) post-move migrate
   int oe_has_tri_hint = 0;
   DAT::t_float_1d d_oe_sheath_phiprev;
   DAT::t_float_1d d_oe_sheath_bank_backup;
