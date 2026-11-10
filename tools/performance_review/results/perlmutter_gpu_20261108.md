@@ -830,6 +830,18 @@ kept runs); one rank: within noise, as expected for a one-rank Alltoall. Reactio
 and marker counts stay within the usual run-to-run spread. Retained: it is exact, removes one
 collective per step and its bookkeeping, and costs nothing.
 
+**Production rerun at checkpoint 089ae219** (same protocol as section 29, 100000 steps from a fresh
+start, nid200381, 2026-11-10; `prod_i7_*` run directories):
+
+| metric, 100k steps, gridcut 0.035 | 9e09bc5e | 089ae219 | 48 CPU ranks | gain |
+|---|---|---|---|---|
+| single case, 4 A100, loop | 147.3 s | 143.9 s (180k markers, 1.00 comm iterations) | 636.1 s | 4.4x |
+| single case, 1 A100 with dumps every 20k, loop | 184 s | 183.6-185.6 s (four concurrent) | 636.1 s | 3.5x |
+| 4 cases per node, batch wall | 201 s | 203 s | ~680 s per case | 13.4x |
+
+Reactions 6.205 M vs 6.205 M, surface reactions 2.024 M vs 2.024 M (run-to-run spread). GPU
+regression on this binary: 21 pass, 0 fail (`regression_gpu_item7.txt`).
+
 **What this says about item 2 of section 29.** Removing 20000 globally-empty calls recovered
 0.5 s of Comm at 4 ranks, i.e. 0.025 ms per empty call. The 0.3-0.4 ms per-call figure quoted
 there is therefore the cost of a *non-empty* migration (pack, compress, plan, exchange, unpack of
