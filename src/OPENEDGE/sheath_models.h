@@ -2,7 +2,7 @@
    Borodkina sheath model, Russian Phys. J. 58 (2015) 438-445 and
    Contrib. Plasma Phys. 56 (2016) 640-645.
    Alpha is measured from the wall normal. The 2015 closure is recovered
-   at Ti=Te and k=2; OpenEdge uses its Ti/Te generalization and k=3.
+   at Ti=Te and k=2; OpenEdge uses its Ti/Te generalization with k=2.
 ------------------------------------------------------------------------- */
 
 #ifndef OPENEDGE_SHEATH_MODELS_H
