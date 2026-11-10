@@ -750,6 +750,15 @@ void FixBackground::reload()
   MPI_Bcast(grad_ti_t.data(), grid_n, MPI_DOUBLE, 0, world);
   MPI_Bcast(grad_ti_z.data(), grid_n, MPI_DOUBLE, 0, world);
   MPI_Bcast(epar.data(), grid_n, MPI_DOUBLE, 0, world);
+  {
+    int has_n = (comm->me == 0 && !dens_n.empty()) ? 1 : 0;
+    MPI_Bcast(&has_n, 1, MPI_INT, 0, world);
+    if (has_n) {
+      if (comm->me) { dens_n.resize(grid_n); temp_n.resize(grid_n); }
+      MPI_Bcast(dens_n.data(), grid_n, MPI_DOUBLE, 0, world);
+      MPI_Bcast(temp_n.data(), grid_n, MPI_DOUBLE, 0, world);
+    }
+  }
 
   // q_par / q_perp may be absent on either the regular grid or the mesh
   // (or both). Broadcast a per-component flag so non-root ranks know
