@@ -2715,6 +2715,83 @@ bool Pusher::apply_gc_displacement(int i, const double *dx)
   return true;
 }
 
+bool Pusher::guiding_centre(int i, const double *B, GuidingCentre &g) const
+{
+  g.mode = -1; g.stored = false;
+  if (gca_x_custom >= 0 && gca_valid_custom >= 0) {
+    const bool valid = particle->edvec[particle->ewhich[gca_valid_custom]][i] > 0.5;
+    const bool last_gca = gca_mode_custom >= 0 &&
+      particle->edvec[particle->ewhich[gca_mode_custom]][i] > 0.5;
+    if (valid) {
+      g.X[0] = particle->edvec[particle->ewhich[gca_x_custom]][i];
+      g.X[1] = particle->edvec[particle->ewhich[gca_y_custom]][i];
+      g.X[2] = particle->edvec[particle->ewhich[gca_z_custom]][i];
+      g.vpar = particle->edvec[particle->ewhich[gca_vpar_custom]][i];
+      g.mu = particle->edvec[particle->ewhich[gca_mu_custom]][i];
+      g.mode = last_gca ? 1 : 0;
+      g.stored = true;
+      return true;
+    }
+    // invalidated GCA state (collision, chemistry): the particle slot may
+    // already hold the guiding centre, so a full-orbit conversion would
+    // apply the gyro offset twice. Unavailable until the mover re-inits.
+    if (last_gca) { g.mode = 1; return false; }
+  }
+  if (!B) return false;
+  const Particle::OnePart &p = particle->particles[i];
+  const double mass = particle->species[p.ispecies].mass;
+  const double q = particle->species[p.ispecies].charge * update->echarge;
+  const double b2 = B[0]*B[0] + B[1]*B[1] + B[2]*B[2];
+  if (!(mass > 0.0) || q == 0.0 || !(b2 > 0.0) || !std::isfinite(b2)) return false;
+  // same conjugation as materialize_orbit for the left-handed 2D-cart slots
+  const bool lh2d = (domain->dimension == 2 && !domain->axisymmetric);
+  const double Bh[3] = {B[0], B[1], lh2d ? -B[2] : B[2]};
+  const double vh[3] = {p.v[0], p.v[1], lh2d ? -p.v[2] : p.v[2]};
+  GCAPusher::GCAState s = GCAPusher::init_from_particle(p.x, vh, mass, q/mass, Bh);
+  g.X[0] = s.X[0]; g.X[1] = s.X[1]; g.X[2] = (domain->dimension == 2) ? 0.0 : s.X[2];
+  g.vpar = s.v_par; g.mu = s.mu; g.mode = 0; g.stored = false;
+  return true;
+}
+
+bool Pusher::set_guiding_centre(int i, const double X[3], double vpar, double mu,
+                                const double B[3], double phase01)
+{
+  // guiding-centre markers exist only under the hybrid or gca pusher; the
+  // custom attributes can outlive a switch back to boris, so test the mode
+  if (pusher_mode == PUSHER_BORIS) return false;
+  if (gca_x_custom < 0 || gca_y_custom < 0 || gca_z_custom < 0 || gca_vpar_custom < 0 ||
+      gca_mu_custom < 0 || gca_mode_custom < 0 || gca_valid_custom < 0 || gca_chi_custom < 0)
+    return false;
+  const double Bmag = std::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
+  if (!std::isfinite(X[0] + X[1] + X[2] + vpar + mu + Bmag + phase01)) return false;
+  if (!(Bmag > 0.0) || !(mu >= 0.0)) return false;
+  Particle::OnePart &p = particle->particles[i];
+  const double mass = particle->species[p.ispecies].mass;
+  if (!(mass > 0.0)) return false;
+  // particle storage as the GCA branch leaves it: position = guiding
+  // centre, velocity = reconstruction at the given gyrophase (qm = 0:
+  // no gyro offset applied to the position)
+  GCAPusher::GCAState s; s.X[0] = X[0]; s.X[1] = X[1]; s.X[2] = X[2]; s.v_par = vpar; s.mu = mu;
+  const bool lh2d = (domain->dimension == 2 && !domain->axisymmetric);
+  const double Bh[3] = {B[0], B[1], lh2d ? -B[2] : B[2]};
+  double xd[3], vd[3];
+  GCAPusher::gca_to_particle(s, Bh, mass, 0.0, phase01, xd, vd);
+  if (lh2d) vd[2] = -vd[2];
+  if (!std::isfinite(vd[0] + vd[1] + vd[2])) return false;
+  // all checks passed: write
+  particle->edvec[particle->ewhich[gca_x_custom]][i] = X[0];
+  particle->edvec[particle->ewhich[gca_y_custom]][i] = X[1];
+  particle->edvec[particle->ewhich[gca_z_custom]][i] = X[2];
+  particle->edvec[particle->ewhich[gca_vpar_custom]][i] = vpar;
+  particle->edvec[particle->ewhich[gca_mu_custom]][i] = mu;
+  particle->edvec[particle->ewhich[gca_mode_custom]][i] = 1.0;
+  particle->edvec[particle->ewhich[gca_valid_custom]][i] = 1.0;
+  particle->edvec[particle->ewhich[gca_chi_custom]][i] = 0.0;
+  p.x[0] = X[0]; p.x[1] = X[1]; p.x[2] = (domain->dimension == 2) ? 0.0 : X[2];
+  p.v[0] = vd[0]; p.v[1] = vd[1]; p.v[2] = vd[2];
+  return true;
+}
+
 void Pusher::invalidate_gc(int i, int reason)
 {
   (void) reason;   // reasons feed diagnostics once operators land
