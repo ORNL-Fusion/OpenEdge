@@ -237,6 +237,8 @@ struct SurfHit2D {
   double psi_reflect_threshold;// normalized psi threshold
   int psi_reflect_imix;        // mixture restriction, -1 = every species
   FixReflectPsi *psi_reflect_fix; // owns species-resolved absorption ledger
+  int tag_index;               // fix particle/tag: custom "transit" index, -1 = off
+  int tag_groupbit;            // surf group whose hits set the flag (0 = none)
   int psi_nw, psi_nh;         // equilibrium grid dimensions
   double psi_axis, psi_bry;   // psi at axis and boundary
   double *psi_r_grid;         // R grid [psi_nw] (owned by fix, do not free)

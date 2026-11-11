@@ -89,6 +89,7 @@ styles available in OpenEdge:
 "halt"_fix_halt.html - stop the simulation early if a condition is met
 "move/surf"_fix_move_surf.html - move surfaces dynamically during a simulation
 "neutral/collide/background"_fix_neutral_collide_background.html - collisions of neutrals with the background plasma (ionization, charge exchange)
+"particle/tag"_fix_particle_tag.html - flag particles that hit a surface group or enter psiN below a threshold
 "particle/weight"_fix_particle_weight.html - per-particle statistical weights
 "particulate/charge"_fix_particulate_charge.html - charging of dust grains and droplets by the background plasma
 "particulate/drag"_fix_particulate_drag.html - plasma drag forces on dust grains and droplets

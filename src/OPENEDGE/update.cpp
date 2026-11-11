@@ -339,6 +339,8 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   psi_reflect_threshold = 1.0;
   psi_reflect_imix = -1;
   psi_reflect_fix = nullptr;
+  tag_index = -1;
+  tag_groupbit = 0;
   psi_nw = psi_nh = 0;
   psi_axis = psi_bry = 0.0;
   psi_r_grid = NULL;
@@ -2599,6 +2601,13 @@ template < int DIM, int SURF, int OPT > void Update::move()
               if (DIM != 3)
                 jpart = surf->sc[line->isc]->
                   collide(ipart,dtremain,minsurf,line->norm,line->isr,reaction);
+
+              // fix particle/tag: a hit on a tagged surf group (e.g. the
+              // core cut) marks the marker as transited; custom arrays
+              // may have been realloc'ed by the collision, re-fetch
+              if (tag_index >= 0 && tag_groupbit &&
+                  ((DIM == 3) ? (tri->mask & tag_groupbit) : (line->mask & tag_groupbit)))
+                particle->eivec[particle->ewhich[tag_index]][i] = 1;
 
               // re-fetch base unconditionally: a surf reaction may have
               // added particles (e.g. additive sputter emission) and
