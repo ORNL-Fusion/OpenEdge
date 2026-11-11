@@ -338,6 +338,7 @@ void UpdateKokkos::init()
   oe_psi_on = oe_psi_action = oe_pw_slot_on = 0;
   oe_swlog_on = oe_swlog_cap = 0;
   oe_kick_on = oe_paid_on = oe_wave_on = oe_kick_te_on = 0;
+  oe_tag_on = oe_tag_groupbit = 0;
   oe_has_raster = oe_has_ras_drag = oe_has_ras_gradte = oe_has_ras_gradti = 0;
   oe_ras_nr = oe_ras_nz = 0; oe_ras_r0 = oe_ras_dr = oe_ras_z0 = oe_ras_dz = 0.0;
   oe_psi_imix = -1; oe_psi_nw = oe_psi_nh = 0;
@@ -986,6 +987,13 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
     d_particles = particle_kk->k_particles.view_device();
 
     oe_paid_on = oe_wave_on = oe_kick_te_on = 0;
+    // fix particle/tag: device view of the transit flag (CPU: update.cpp hook)
+    oe_tag_on = 0;
+    if (tag_index >= 0 && tag_groupbit) {
+      particle_kk->sync(Device,CUSTOM_MASK);
+      d_oe_transit = particle_kk->k_eivec.h_view[particle->ewhich[tag_index]].k_view.d_view;
+      oe_tag_on = 1; oe_tag_groupbit = tag_groupbit;
+    }
     if (oe_kick_on) {   // sheath kick/boundary: paid state, pcache Te/Ti, RF waveform
       // 6f: in kick mode the device reads Te/Ti from the pusher plasma cache
       // (the CPU does a point query at impact); without the cache the kick
@@ -2362,6 +2370,11 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
             d_oe_gca_valid(i) = 0.0;
             if (jpart) d_oe_gca_valid((int) (jpart - d_particles.data())) = 0.0;
           }
+
+          // fix particle/tag: a hit on the tagged surf group marks the marker
+          if (oe_tag_on && i < (int) d_oe_transit.extent(0) &&
+              ((DIM == 3) ? (tri->mask & oe_tag_groupbit) : (line->mask & oe_tag_groupbit)))
+            d_oe_transit(i) = 1;
 
           if (jpart) {
             x = particle_i.x;
