@@ -262,9 +262,12 @@ class SurfReactSurfacePWI : public SurfReact {
   int ehist_nbin, ehist_every;
   double ehist_emax;
   double *ehist_all, *ehist_sput, *ahist_all, *ahist_sput;
+  double *ehist_tag, *ahist_tag;          // impacts of transited markers (fix particle/tag)
+  double *ehist_j, *ehist_jt;             // [nbin*nang] joint (E,theta): all, transited
   double **ehist_z;                       // [nspecies][nbin] per-species impact E
   int ehist_nsp;
-  void ehist_accumulate(double E_eV, double theta_deg, double pw, int sput,
+  bigint ehist_last_write;                // cumulative mode (every 0): written at dumps/run end
+  void ehist_accumulate(double E_eV, double theta_deg, double pw, int sput, int tag,
                         int isp);
   void ehist_write();
 

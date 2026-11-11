@@ -299,7 +299,7 @@ Transport:
 "fix coulomb/binary"_fix_coulomb_binary.html, "fix cross_field_diffusion"_fix_cross_field_diffusion.html,
 "fix force/thermal"_fix_force_thermal.html, "fix force/gravity"_fix_force_gravity.html,
 "fix neutral/collide/background"_fix_neutral_collide_background.html,
-"fix reflect/psi"_fix_reflect_psi.html, "fix particle/weight"_fix_particle_weight.html,
+"fix reflect/psi"_fix_reflect_psi.html, "fix particle/tag"_fix_particle_tag.html, "fix particle/weight"_fix_particle_weight.html,
 
 Atomic processes:
 
@@ -469,6 +469,7 @@ Kokkos version are marked (k).
 "halt"_fix_halt.html,
 "move/surf (k)"_fix_move_surf.html,
 "neutral/collide/background"_fix_neutral_collide_background.html,
+"particle/tag"_fix_particle_tag.html,
 "particle/weight"_fix_particle_weight.html,
 "particulate/charge"_fix_particulate_charge.html,
 "particulate/drag"_fix_particulate_drag.html,

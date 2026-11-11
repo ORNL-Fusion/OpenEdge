@@ -138,6 +138,8 @@ declare -a TESTS=(
   "rfpie_rebalance_probe|workflows/impurity_transport/rfpie_tungsten_transport|in.openedge|input/plasma_he.h5||-var baltimeevery 100 -var balpartevery 50|OE_CELLMIG_DIAG=2"
   # toroidal periodic caps on a 10 deg wedge, y-slab partition: no particle lost or escaped
   "wedge_periodic_caps|verification/wedge_periodic_caps|in.wedge|input/wedge.surf||||scripts/check_caps.py regression.log"
+  # fix particle/tag + surface/pwi ehist transit split (cumulative mode)
+  "pwi_transit_tag|verification/surface_pwi/transit_tag|in.transit|||||scripts/check_transit.py regression.log"
   # planar sheath impacts (Boris + sheath spatial): <E>, <theta> of O2+/O3+/D+ vs reference.json
   "sheath_planar_o2|verification/sheath/planar_impact|in.planar||nokk nocap|-var case o2||scripts/check_planar.py o2"
   "sheath_planar_o3|verification/sheath/planar_impact|in.planar||nokk nocap|-var case o3||scripts/check_planar.py o3"
@@ -385,8 +387,9 @@ fi
 if [[ "pwi_ledger_fold" == $FILTER || "*" == "$FILTER" ]]; then
   printf "%-40s " "pwi_ledger_fold"
   fdir="$EXAMPLES_DIR/verification/surface_pwi/ledger_fold"
-  if [[ -n "$LAUNCHER" ]]; then lf="${LAUNCHER% *}"; else lf="mpirun -np"; fi   # run.sh appends the rank count
-  if (cd "$fdir" && SPA="$EXE" SPA_ARGS="${KKARGS[*]}" LAUNCH="$lf" NP="$NP" PYTHON="$PY" \
+  # a fixed launcher (srun ...) runs the one rank count it encodes; mpirun runs 1 and NP
+  if [[ -n "$LAUNCHER" ]]; then lf="$LAUNCHER"; nl="$NP"; else lf="mpirun -np {np}"; nl="1 $NP"; fi
+  if (cd "$fdir" && SPA="$EXE" SPA_ARGS="${KKARGS[*]}" LAUNCH="$lf" NP="$NP" NP_LIST="$nl" PYTHON="$PY" \
       bash run.sh > "$fdir/regression.log" 2>&1); then
     RESULTS+=("PASS  pwi_ledger_fold  (nevery 100 == nevery 1 at every dump, restart read-back)"); echo "PASS"; ((PASS++))
   else

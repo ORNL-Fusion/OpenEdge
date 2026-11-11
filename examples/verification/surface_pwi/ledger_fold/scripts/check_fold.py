@@ -4,7 +4,7 @@ import glob, sys
 import numpy as np
 
 RTOL = 1e-9
-NP = sys.argv[1] if len(sys.argv) > 1 else "4"
+NP_LIST = sys.argv[1:] or ["1", "4"]     # rank counts run by run.sh
 
 def dump(path):
     lines = open(path).read().splitlines()
@@ -19,7 +19,7 @@ def check(ok, msg):
     global failed
     print(("  ok   " if ok else "  FAIL ") + msg); failed |= not ok
 
-for np_ in ("1", NP):
+for np_ in NP_LIST:
     steps = sorted(int(p.split(".")[-2]) for p in glob.glob(f"output/n1_np{np_}.*.dump"))
     check(steps == [0, 70, 140, 210, 280, 350], f"{np_} ranks: dumps at {steps}")
     for s in steps:

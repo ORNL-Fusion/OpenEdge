@@ -136,6 +136,7 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   trim_dir.clear();
   ehist_file = NULL;
   ehist_all = ehist_sput = ahist_all = ahist_sput = NULL;
+  ehist_tag = ahist_tag = ehist_j = ehist_jt = NULL; ehist_last_write = -1;
   ehist_z = NULL; ehist_nsp = 0;
   ehist_nbin = 0; ehist_every = 0; ehist_emax = 0.0;
 
@@ -176,10 +177,15 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       ehist_nbin = input->inumeric(FLERR,arg[iarg+2]);
       ehist_emax = input->numeric(FLERR,arg[iarg+3]);
       ehist_every = input->inumeric(FLERR,arg[iarg+4]);
-      if (ehist_nbin < 1 || ehist_emax <= 0.0 || ehist_every < 1)
+      // every 0 = cumulative: one growing histogram, written before dumps and at run end
+      if (ehist_nbin < 1 || ehist_emax <= 0.0 || ehist_every < 0)
         error->all(FLERR,"surf_react surface/pwi ehist: bad parameters");
       ehist_all = new double[ehist_nbin]();
       ehist_sput = new double[ehist_nbin]();
+      ehist_tag = new double[ehist_nbin]();
+      ahist_tag = new double[EHIST_NANG]();
+      ehist_j = new double[(size_t) ehist_nbin * EHIST_NANG]();
+      ehist_jt = new double[(size_t) ehist_nbin * EHIST_NANG]();
       ahist_all = new double[EHIST_NANG]();
       ahist_sput = new double[EHIST_NANG]();
       // per-species impact-E histograms (species must be defined first)
@@ -412,6 +418,10 @@ SurfReactSurfacePWI::~SurfReactSurfacePWI()
   delete [] ehist_file;
   delete [] ehist_all;
   delete [] ehist_sput;
+  delete [] ehist_tag;
+  delete [] ahist_tag;
+  delete [] ehist_j;
+  delete [] ehist_jt;
   delete [] ahist_all;
   delete [] ahist_sput;
   if (ehist_z) {
@@ -1055,7 +1065,14 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
     double pw_hist = update->fnum;
     if (pweight_ewhich >= 0)
       pw_hist = particle->edvec[particle->ewhich[pweight_ewhich]][ip - particle->particles];
-    ehist_accumulate(E_in_eV, theta_in_deg, pw_hist, nsput > 0, ip->ispecies);
+    {
+      int tagged = 0;
+      if (update->tag_index >= 0) {
+        const int ipi = static_cast<int>(ip - particle->particles);
+        tagged = particle->eivec[particle->ewhich[update->tag_index]][ipi];
+      }
+      ehist_accumulate(E_in_eV, theta_in_deg, pw_hist, nsput > 0, tagged, ip->ispecies);
+    }
   }
 
   OneReaction *r;
@@ -1833,8 +1850,12 @@ void SurfReactSurfacePWI::tally_update()
     sync_sigma();
     timer->stamp(TIME_ADENS);
   }
-  if (ehist_file && ehist_every > 0 &&
-      update->ntimestep % ehist_every == 0) ehist_write();
+  if (ehist_file) {
+    const bigint ts = update->ntimestep;
+    if (ehist_every > 0) { if (ts % ehist_every == 0) ehist_write(); }
+    else if (ts > ehist_last_write &&
+             (ts == update->laststep || ts == output->next_dump_any)) ehist_write();
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -2564,7 +2585,7 @@ int SurfReactSurfacePWI::readone(char *line1, char *line2, int &n1, int &n2)
 ------------------------------------------------------------------------- */
 
 void SurfReactSurfacePWI::ehist_accumulate(double E_eV, double theta_deg,
-                                           double pw, int sput, int isp)
+                                           double pw, int sput, int tag, int isp)
 {
   int ie = (int) (E_eV / ehist_emax * ehist_nbin);
   if (ie < 0) ie = 0;
@@ -2574,9 +2595,15 @@ void SurfReactSurfacePWI::ehist_accumulate(double E_eV, double theta_deg,
   if (ia >= EHIST_NANG) ia = EHIST_NANG - 1;
   ehist_all[ie] += pw;
   ahist_all[ia] += pw;
+  ehist_j[(size_t) ie * EHIST_NANG + ia] += pw;
   if (sput) {
     ehist_sput[ie] += pw;
     ahist_sput[ia] += pw;
+  }
+  if (tag) {
+    ehist_tag[ie] += pw;
+    ahist_tag[ia] += pw;
+    ehist_jt[(size_t) ie * EHIST_NANG + ia] += pw;
   }
   if (ehist_z && isp >= 0 && isp < ehist_nsp) ehist_z[isp][ie] += pw;
 }
@@ -2587,52 +2614,66 @@ void SurfReactSurfacePWI::ehist_accumulate(double E_eV, double theta_deg,
 
 void SurfReactSurfacePWI::ehist_write()
 {
-  int nz = (ehist_z) ? ehist_nsp*ehist_nbin : 0;
-  int ntot = 2*ehist_nbin + 2*EHIST_NANG + nz;
+  // layout: E all | E sput | E tag | A all | A sput | A tag | J all | J tag | S per species
+  const int nb = ehist_nbin, na = EHIST_NANG;
+  const size_t nj = (size_t) nb * na;
+  const int nz = (ehist_z) ? ehist_nsp*nb : 0;
+  const size_t ntot = 3*nb + 3*na + 2*nj + nz;
   double *loc = new double[ntot];
   double *glob = new double[ntot];
-  for (int i = 0; i < ehist_nbin; i++) {
-    loc[i] = ehist_all[i];
-    loc[ehist_nbin+i] = ehist_sput[i];
-  }
-  for (int i = 0; i < EHIST_NANG; i++) {
-    loc[2*ehist_nbin+i] = ahist_all[i];
-    loc[2*ehist_nbin+EHIST_NANG+i] = ahist_sput[i];
-  }
-  int off = 2*ehist_nbin + 2*EHIST_NANG;
+  size_t p = 0;
+  for (int i = 0; i < nb; i++) loc[p++] = ehist_all[i];
+  for (int i = 0; i < nb; i++) loc[p++] = ehist_sput[i];
+  for (int i = 0; i < nb; i++) loc[p++] = ehist_tag[i];
+  for (int i = 0; i < na; i++) loc[p++] = ahist_all[i];
+  for (int i = 0; i < na; i++) loc[p++] = ahist_sput[i];
+  for (int i = 0; i < na; i++) loc[p++] = ahist_tag[i];
+  for (size_t i = 0; i < nj; i++) loc[p++] = ehist_j[i];
+  for (size_t i = 0; i < nj; i++) loc[p++] = ehist_jt[i];
   for (int k = 0; k < ehist_nsp && ehist_z; k++)
-    for (int i = 0; i < ehist_nbin; i++)
-      loc[off + k*ehist_nbin + i] = ehist_z[k][i];
-  MPI_Reduce(loc,glob,ntot,MPI_DOUBLE,MPI_SUM,0,world);
+    for (int i = 0; i < nb; i++) loc[p++] = ehist_z[k][i];
+  MPI_Reduce(loc,glob,(int) ntot,MPI_DOUBLE,MPI_SUM,0,world);
   if (comm->me == 0) {
     FILE *fp = fopen(ehist_file,"a");
     if (fp) {
-      fprintf(fp,"# step %ld nbin %d emax %g nang %d dang 5\n",
-              (long) update->ntimestep, ehist_nbin, ehist_emax, EHIST_NANG);
-      for (int i = 0; i < ehist_nbin; i++)
-        fprintf(fp,"E %g %.6e %.6e\n",
-                (i+0.5)*ehist_emax/ehist_nbin, glob[i], glob[ehist_nbin+i]);
-      for (int i = 0; i < EHIST_NANG; i++)
-        fprintf(fp,"A %g %.6e %.6e\n",
-                (i+0.5)*5.0, glob[2*ehist_nbin+i],
-                glob[2*ehist_nbin+EHIST_NANG+i]);
+      const double *gE = glob, *gEs = glob + nb, *gEt = glob + 2*nb;
+      const double *gA = glob + 3*nb, *gAs = gA + na, *gAt = gA + 2*na;
+      const double *gJ = glob + 3*nb + 3*na, *gJt = gJ + nj, *gS = gJt + nj;
+      fprintf(fp,"# step %ld nbin %d emax %g nang %d dang 5 cumulative %d "
+              "columns all sput transit\n",
+              (long) update->ntimestep, nb, ehist_emax, na, ehist_every == 0);
+      for (int i = 0; i < nb; i++)
+        fprintf(fp,"E %g %.6e %.6e %.6e\n", (i+0.5)*ehist_emax/nb, gE[i], gEs[i], gEt[i]);
+      for (int i = 0; i < na; i++)
+        fprintf(fp,"A %g %.6e %.6e %.6e\n", (i+0.5)*5.0, gA[i], gAs[i], gAt[i]);
+      // joint (E, theta): non-empty cells only, "J Ecentre Acentre w_all w_transit"
+      for (int i = 0; i < nb; i++)
+        for (int j = 0; j < na; j++) {
+          const size_t q = (size_t) i * na + j;
+          if (gJ[q] > 0.0)
+            fprintf(fp,"J %g %g %.6e %.6e\n", (i+0.5)*ehist_emax/nb, (j+0.5)*5.0, gJ[q], gJt[q]);
+        }
       // per-species impact-E rows; skip species with no weight this window
       for (int k = 0; k < ehist_nsp && ehist_z; k++) {
         double tot = 0.0;
-        for (int i = 0; i < ehist_nbin; i++) tot += glob[off + k*ehist_nbin + i];
+        for (int i = 0; i < nb; i++) tot += gS[k*nb + i];
         if (tot <= 0.0) continue;
-        for (int i = 0; i < ehist_nbin; i++)
+        for (int i = 0; i < nb; i++)
           fprintf(fp,"S %s %g %.6e\n", particle->species[k].id,
-                  (i+0.5)*ehist_emax/ehist_nbin, glob[off + k*ehist_nbin + i]);
+                  (i+0.5)*ehist_emax/nb, gS[k*nb + i]);
       }
       fclose(fp);
     }
   }
-  for (int i = 0; i < ehist_nbin; i++) ehist_all[i] = ehist_sput[i] = 0.0;
-  for (int i = 0; i < EHIST_NANG; i++) ahist_all[i] = ahist_sput[i] = 0.0;
-  if (ehist_z)
-    for (int k = 0; k < ehist_nsp; k++)
-      for (int i = 0; i < ehist_nbin; i++) ehist_z[k][i] = 0.0;
+  ehist_last_write = update->ntimestep;
+  if (ehist_every > 0) {          // windowed: reset; cumulative keeps accumulating
+    for (int i = 0; i < nb; i++) ehist_all[i] = ehist_sput[i] = ehist_tag[i] = 0.0;
+    for (int i = 0; i < na; i++) ahist_all[i] = ahist_sput[i] = ahist_tag[i] = 0.0;
+    for (size_t i = 0; i < nj; i++) ehist_j[i] = ehist_jt[i] = 0.0;
+    if (ehist_z)
+      for (int k = 0; k < ehist_nsp; k++)
+        for (int i = 0; i < nb; i++) ehist_z[k][i] = 0.0;
+  }
   delete [] loc;
   delete [] glob;
 }

@@ -5,42 +5,42 @@
   "note": "reference = base west_tungsten_transport: mem/limit 1 MB (chunked balance/restart comm) must not change the answer"
  },
  "CPU": {
-  "value": 1.166027,
+  "value": 1.081909,
   "tol": null,
   "note": "reference = base west_tungsten_transport: mem/limit 1 MB (chunked balance/restart comm) must not change the answer"
  },
  "Np": {
-  "value": 7326.0,
+  "value": 7334.0,
   "tol": 0.05,
   "note": "Borodkina CPU baseline (2026-09-25); run-to-run spread ~3 %, 5 % band; reference = base west_tungsten_transport: mem/limit 1 MB (chunked balance/restart comm) must not change the answer"
  },
  "c_cwNtot": {
-  "value": 50125823000000.0,
+  "value": 95374450000000.0,
   "tol": 0.05,
   "note": "reference = base west_tungsten_transport: mem/limit 1 MB (chunked balance/restart comm) must not change the answer"
  },
  "c_cwN0": {
-  "value": 9418536800000.0,
+  "value": 18544350000000.0,
   "tol": 0.1,
   "note": "~7400 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma; reference = base west_tungsten_transport: mem/limit 1 MB (chunked balance/restart comm) must not change the answer"
  },
  "c_cwN1": {
-  "value": 21160773000000.0,
+  "value": 41553350000000.0,
   "tol": 0.1,
   "note": "~7400 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma; reference = base west_tungsten_transport: mem/limit 1 MB (chunked balance/restart comm) must not change the answer"
  },
  "c_cwN2": {
-  "value": 16231899000000.0,
+  "value": 29387541000000.0,
   "tol": 0.1,
   "note": "~7400 markers at 1000 steps: run-to-run spread ~3 %, band 4 sigma; reference = base west_tungsten_transport: mem/limit 1 MB (chunked balance/restart comm) must not change the answer"
  },
  "c_cwN3": {
-  "value": 3213453300000.0,
+  "value": 5613714500000.0,
   "tol": 0.25,
   "note": "W3+ density at 1000 steps: small population; reference = base west_tungsten_transport: mem/limit 1 MB (chunked balance/restart comm) must not change the answer"
  },
  "c_cwN4": {
-  "value": 101160380000.0,
+  "value": 275494950000.0,
   "tol": 0.8,
   "note": "W4+ density at 1000 steps: very small population; reference = base west_tungsten_transport: mem/limit 1 MB (chunked balance/restart comm) must not change the answer"
  },
@@ -93,7 +93,7 @@
   "abs": 500000000000.0
  },
  "loop_particles": {
-  "value": 7326,
+  "value": 7334,
   "tol": 0.05,
   "note": "Borodkina CPU baseline (2026-09-25); run-to-run spread ~3 %, 5 % band; reference = base west_tungsten_transport: mem/limit 1 MB (chunked balance/restart comm) must not change the answer"
  },

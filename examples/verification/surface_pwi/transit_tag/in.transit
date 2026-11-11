@@ -1,0 +1,43 @@
+# fix particle/tag + surface/pwi ehist transit split: two W populations hit a
+# W target; population B first bounces off a "core" plate (specular, group
+# core) and must arrive tagged, population A arrives untagged.
+#   A: created at z 0.30-0.40 moving -z at 6 km/s  (34 eV, theta 0)
+#   B: created at z 0.50-0.60 moving +z at 11 km/s (115 eV, theta 0) -> core plate at z 0.8 -> target
+
+shell       mkdir output
+shell       rm -f output/ehist.dat
+seed        2211
+dimension   3
+boundary    o o o
+global      gridcut 0.0 comm/sort yes
+global      fnum 1e14
+timestep    1e-6
+
+create_box  0 1 0 1 0 1
+create_grid 4 4 8
+balance_grid rcb cell
+
+species     ../deposit_tagging/input/w.species W Wd
+mixture     popA W frac 1.0 nrho 1.0e18 temp 1.0 vstream 0.0 0.0 -6000.0
+mixture     popB W frac 1.0 nrho 1.0e18 temp 1.0 vstream 0.0 0.0 11000.0
+
+read_surf   ../deposit_tagging/input/plate.surf group target particle check
+read_surf   ../deposit_tagging/input/plate.surf trans 0 0 0.6 invert group core particle check
+surf_collide wall diffuse 773.15 1.0
+surf_collide coreRefl specular
+surf_react  pwi surface/pwi input/w_absorb.recycle twall 773.15 &
+            ehist output/ehist.dat 100 200 0
+surf_modify target collide wall react pwi
+surf_modify core collide coreRefl
+
+fix         ftag particle/tag core
+fix         pw particle/weight
+
+region      ra block INF INF INF INF 0.30 0.40
+region      rb block INF INF INF INF 0.50 0.60
+create_particles popA n 8000 region ra
+create_particles popB n 8000 region rb
+
+stats       100
+stats_style step cpu np nscoll
+run         500

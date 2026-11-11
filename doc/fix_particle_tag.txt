@@ -1,0 +1,66 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix particle/tag command :h3
+
+[Syntax:]
+
+fix ID particle/tag group-ID keyword value ... :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+particle/tag = style name of this fix command :l
+group-ID = surface group whose hits mark a particle, or {none} :l
+zero or more keyword/value pairs may be appended :l
+keyword = {psi} or {nevery} :l
+  {psi} values = psiN fix-ID
+    psiN = normalized flux below which a particle is marked
+    fix-ID = ID of a "fix reflect/psi"_fix_reflect_psi.html that supplies psiN(x)
+  {nevery} value = N = steps between checks of the {psi} form (default 10) :pre
+:ule
+
+[Examples:]
+
+fix ftag particle/tag core
+fix ftag particle/tag none psi 0.9 fcore nevery 5 :pre
+
+[Description:]
+
+Create the per-particle integer attribute {transit} (0 or 1) and set it
+to 1, once and for all, when a particle hits a surface of {group-ID},
+for example the core cut of a wedge, or, with the {psi} keyword, when a
+check every {nevery} steps finds it inside psiN < {psiN}.  The flag
+stays with the particle through ionization and recombination, across
+restarts and across rebalancing; new particles start at 0.
+
+The surface form is applied inside the particle move at the moment of
+the surface collision, whatever collision model the surface carries,
+and costs nothing for particles that never hit the group.  The {psi}
+form costs one flux-map lookup per particle every {nevery} steps.  Both
+can be combined; the flag is set by whichever happens first.
+
+"surf_react surface/pwi"_surf_react_surface_pwi.html reads the flag:
+its {ehist} impact histograms carry a separate column for transited
+particles, so the energy-angle distribution of the ions reaching a wall
+area splits into locally recycled ions and ions that went through the
+core.  The attribute can also be dumped with
+"dump particle"_dump.html as {i_transit}.
+
+[Restrictions:]
+
+Only one fix particle/tag may be defined.  The {psi} form needs an
+active "fix reflect/psi"_fix_reflect_psi.html on a background with a
+flux map.
+
+[Related commands:]
+
+"surf_react surface/pwi"_surf_react_surface_pwi.html,
+"fix reflect/psi"_fix_reflect_psi.html
+
+[Default:]
+
+nevery = 10

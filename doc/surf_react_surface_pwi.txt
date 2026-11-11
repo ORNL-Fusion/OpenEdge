@@ -23,7 +23,7 @@ keyword = {twall} or {twall_surf} or {trim_dir} or {R_surf} or {ehist} or {rough
   {trim_dir} value = directory of per-pair reflection table files
   {R_surf} value = name of a custom per-surf vector with the recycling
     coefficient of each element (overrides R of every A channel)
-  {ehist} values = file nbins emax every
+  {ehist} values = file nbins emax every (every = 0: cumulative over the run)
     file = output file for impact energy/angle histograms
     nbins = number of energy bins from 0 to emax (overflow in last bin)
     emax = upper energy bound in eV
@@ -311,12 +311,18 @@ material.  Local updates are folded into the owned array every
 
 {ehist} records weight-carrying histograms of the incident energy and
 of the incident angle from the surface normal for every impact, split
-into all impacts and impacts that sputtered at least one atom, plus a
-per-species energy histogram.  Angle bins are 5 degrees wide.  A
-block is appended to the file and the histograms are reset every
-{every} steps; each block starts with a "# step ..." header and holds
-lines "E center w_all w_sput", "A center w_all w_sput" and per-species
-"S species center w" (species with no weight in the window omitted).
+into all impacts, impacts that sputtered at least one atom and impacts
+of particles flagged by "fix particle/tag"_fix_particle_tag.html
+(zero without that fix), plus the joint energy-angle histogram and a
+per-species energy histogram.  Angle bins are 5 degrees wide.  With
+{every} > 0 a block is appended to the file and the histograms are
+reset every {every} steps; with {every} = 0 the histograms accumulate
+over the whole run and a cumulative block is written before every dump
+and at the end of the run.  Each block starts with a "# step ..."
+header and holds lines "E center w_all w_sput w_transit", "A center
+w_all w_sput w_transit", the non-empty joint cells "J Ecenter Acenter
+w_all w_transit" and per-species "S species center w" (species with no
+weight omitted).
 
 :line
 
