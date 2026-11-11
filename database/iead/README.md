@@ -63,7 +63,28 @@ Fixed during the sweep: `Te = 40 eV`, `ne = 1e19 m^-3`, `|B| = 3 T`,
 conditions, so the IEAD shape in `(Ehat, theta)` is approximately
 universal in `(tau, psi, Z)`.
 
-## Projectile mass scheme — option 1 (no element axis, light table)
+## Per-element real-mass tables (2026-11-10 build, current)
+
+`iead_database_<El>.h5` for El = D, He, Li, Be, B, C, N, O, Ne, Ar (Z = 1..Z_El) and W
+(Z = 1..20), each at the element's real mass, built with `sheath_tracker_v2` after its
+sheath-entrance drift was corrected from sqrt((Te+Ti)/(2 m_D)) to the isothermal
+Bohm-Chodura speed sqrt((Te+Ti)/m_D) (impurities enter friction-locked to the D flow).
+Grid: tau = geomspace(0.3, 5, 11), psi = 90 - geomspace(0.5, 30, 13)[::-1], 50 000 ions per
+(cell, Z), 120 Etilde bins (upper edge per element, see `Etilde_bin_edges`), 30 theta bins;
+fixed Te = 40 eV, ne = 1e19, B = 3 T; extra dataset `n_hits` (impacting ions per cell);
+`f` stored float32 + gzip. Generator: `real_mass_<date>/iead_build_real_mass.py` (kept with
+the uncompressed originals, git-ignored). `compute surface/physical/sputter ... iead auto`
+takes the element file when it exists and falls back to the D-scaled light table below.
+
+Checks (planar W target, Te = Ti = 10 eV, ne = 1e20, B = 12 T, 3 deg): the O table built at
+50 eV / 8e19 / 12 T reproduces the 40 eV / 1e19 / 3 T table's yields to 0.02 % (the Etilde
+normalization is exact); against OpenEdge's inline sampler (`iead inline`, same drift, the
+pusher's Borodkina sheath) the table yields are 17-20 % higher (O2+ 0.0451 vs 0.0387, O3+
+0.0701 vs 0.0583), the Chodura/Stangeby-vs-Borodkina angle difference (4-6 deg). Relative to
+the previous light table (sqrt2-low drift, m_proj = 2Z amu) the D/O-sputtered W source of the
+WEST regression cases rises x1.9.
+
+## Previous light-table scheme (fallback) — option 1 (no element axis, light table)
 
 The IEAD shape in `(Etilde, theta)` is set by the dimensionless plasma
 / sheath state `(tau, psi)` and the projectile **charge** `Z`. The mass
