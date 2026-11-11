@@ -405,7 +405,9 @@ fi
 if [[ "core_transport" == $FILTER || "*" == "$FILTER" ]]; then
   printf "%-40s " "core_transport"
   cdir="$EXAMPLES_DIR/verification/core_transport"
-  if (cd "$cdir" && PYTHON="$PY" bash run.sh > "$cdir/regression.log" 2>&1); then
+  if [[ ! -f "$cdir/run.sh" ]]; then       # the case is kept local for now
+    RESULTS+=("SKIP  core_transport  (local case not present)"); echo "SKIP"; ((SKIP++))
+  elif (cd "$cdir" && PYTHON="$PY" bash run.sh > "$cdir/regression.log" 2>&1); then
     RESULTS+=("PASS  core_transport  (Aurora 1e-12, conservation 1e-10, positivity, volume, reservoir)"); echo "PASS"; ((PASS++))
   else
     RESULTS+=("FAIL  core_transport  (see examples/verification/core_transport/regression.log)"); echo "FAIL"; ((FAIL++))
