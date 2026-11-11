@@ -87,6 +87,10 @@ action compute_surf_weighted.cpp
 action compute_surf_weighted.h
 action compute_volume_emissivity_grid.cpp
 action compute_volume_emissivity_grid.h
+action core_transport_1d.cpp
+action core_transport_1d.h
+action core_transport_geometry.h
+action core_transport_reservoir.h
 action database_paths.cpp
 action database_paths.h
 action eckstein_sputter_data.h
@@ -119,6 +123,8 @@ action fix_force_thermal.cpp
 action fix_force_thermal.h
 action fix_store_force.cpp
 action fix_store_force.h
+action fix_core_transport.cpp
+action fix_core_transport.h
 action fix_particle_tag.cpp
 action fix_particle_tag.h
 action fix_particle_weight.cpp

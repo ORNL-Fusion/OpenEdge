@@ -1,0 +1,6 @@
+output/
+input/
+__pycache__/
+interface/*.json
+interface/*.log
+interface/figures/

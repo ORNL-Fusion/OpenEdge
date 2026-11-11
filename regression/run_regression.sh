@@ -399,6 +399,21 @@ if [[ "pwi_ledger_fold" == $FILTER || "*" == "$FILTER" ]]; then
 fi
 
 # -----------------------------------------------------------------------
+#  core_transport: CoreTransport1D (Linder scheme) vs the Aurora impden1
+#  references + particle conservation; compiles its own driver, no deck
+# -----------------------------------------------------------------------
+if [[ "core_transport" == $FILTER || "*" == "$FILTER" ]]; then
+  printf "%-40s " "core_transport"
+  cdir="$EXAMPLES_DIR/verification/core_transport"
+  if (cd "$cdir" && PYTHON="$PY" bash run.sh > "$cdir/regression.log" 2>&1); then
+    RESULTS+=("PASS  core_transport  (Aurora 1e-12, conservation 1e-10, positivity, volume, reservoir)"); echo "PASS"; ((PASS++))
+  else
+    RESULTS+=("FAIL  core_transport  (see examples/verification/core_transport/regression.log)"); echo "FAIL"; ((FAIL++))
+    if [[ "$VERBOSE" -eq 1 ]]; then tail -20 "$cdir/regression.log"; fi
+  fi
+fi
+
+# -----------------------------------------------------------------------
 #  Summary
 # -----------------------------------------------------------------------
 echo ""

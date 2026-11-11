@@ -46,6 +46,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "fix_particulate_drag.h"
 #include "fix_volume_chem_adas.h"
 #include "fix_reflect_psi.h"
+#include "fix_core_transport.h"
 #include "memory.h"
 #include "error.h"
 #include <csignal>
@@ -341,6 +342,9 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   psi_reflect_fix = nullptr;
   tag_index = -1;
   tag_groupbit = 0;
+  core_fix = nullptr;
+  core_groupbit = 0;
+  core_species = nullptr;
   psi_nw = psi_nh = 0;
   psi_axis = psi_bry = 0.0;
   psi_r_grid = NULL;
@@ -2595,12 +2599,24 @@ template < int DIM, int SURF, int OPT > void Update::move()
 
               const int nlocal_precollide = particle->nlocal;
 
+              // fix core/transport: a chain marker reaching the core cut
+              // is absorbed into the 1-D core model (tallied, discarded
+              // like surf_collide vanish, no collision or reaction)
+              if (core_groupbit &&
+                  ((DIM == 3) ? (tri->mask & core_groupbit) : (line->mask & core_groupbit)) &&
+                  core_species[particles[i].ispecies] >= 0) {
+                core_fix->absorb(i,minsurf);
+                ipart = NULL;
+                jpart = NULL;
+                reaction = 0;
+              } else {
               if (DIM == 3)
                 jpart = surf->sc[tri->isc]->
                   collide(ipart,dtremain,minsurf,tri->norm,tri->isr,reaction);
               if (DIM != 3)
                 jpart = surf->sc[line->isc]->
                   collide(ipart,dtremain,minsurf,line->norm,line->isr,reaction);
+              }
 
               // fix particle/tag: a hit on a tagged surf group (e.g. the
               // core cut) marks the marker as transited; custom arrays

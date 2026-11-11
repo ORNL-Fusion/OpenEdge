@@ -239,6 +239,9 @@ struct SurfHit2D {
   FixReflectPsi *psi_reflect_fix; // owns species-resolved absorption ledger
   int tag_index;               // fix particle/tag: custom "transit" index, -1 = off
   int tag_groupbit;            // surf group whose hits set the flag (0 = none)
+  class FixCoreTransport *core_fix;   // fix core/transport: absorbs chain markers
+  int core_groupbit;                  // at the core surf group (0 = off)
+  const int *core_species;            // charge state per species, -1 = not in chain
   int psi_nw, psi_nh;         // equilibrium grid dimensions
   double psi_axis, psi_bry;   // psi at axis and boundary
   double *psi_r_grid;         // R grid [psi_nw] (owned by fix, do not free)
