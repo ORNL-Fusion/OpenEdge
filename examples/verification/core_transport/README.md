@@ -109,3 +109,40 @@ The export (format v2) records the convention, the input coefficients, the facto
 coefficients, the solver and its step limit; `make_exported_pulse.py` verifies that
 effective = input x factor before writing a case. `python scripts/check_fix_options.py --exe <spa>`
 runs the option checks through the fix on the SPARC smoke inputs.
+
+## Auxiliary-layer exchange (verification status, 2026-11-11)
+
+`src/core_transport_exchange.h` (`CoreExchange`) is NOT yet wired into `fix core/transport`. The
+fix still uses the legacy absorb-and-deposit coupling; its Boris-only guard prevents unsupported
+use of that legacy coupling with the gca or hybrid pusher and does not enable the new coupling.
+
+    c++ -O2 -std=c++17 -I../../../src -o output/test_exchange scripts/test_exchange.cpp ../../../src/core_transport_1d.cpp
+    NMARK_SCALE=100 python scripts/check_exchange.py      # exit 0 PASS, 1 FAIL, 2 INCONCLUSIVE
+
+Setup: `CoreTransport1D` with a closed outer boundary plus `CoreExchange`, against a fine
+full-domain solve; markers with weights spread over a factor of 50; four states without reactions;
+three seeds; 450k markers; D_eff tau/h^2 = 0.5, rms marker step 0.3 h. Circular cylinder and
+elliptical cylinder (elongation 1.7, D_eff = g2 D with g2 = 1.144, conductance from the same
+flux operator).
+
+Budget fixed in advance: transfer error <= 0.005 of a state's inventory.
+
+| state | cylinder | ellipse | verdict |
+|---|---|---|---|
+| pulse in core | 0.0033-0.0038 | 0.0032-0.0042 | within budget |
+| pulse in markers | 0.0027-0.0029 | 0.0021-0.0035 | within budget |
+| uniform equilibrium | 0.0010-0.0022 | 0.0007-0.0016 | within budget |
+| heavy markers, empty layers | 0.0078-0.0141 | 0.0038-0.0051 | INCONCLUSIVE: reference 0.006-0.020 |
+
+Overall status: INCONCLUSIVE, because of the heavy-marker state (2,000 markers; the full-domain
+Brownian reference is itself above budget). That state is kept as a conservation and positivity
+stress test with unresolved statistical accuracy.
+
+Per-state conservation (core + markers + pending) 1e-12; core densities never negative; pending
+below one marker weight; the inventory change applied to the core equals the component's
+`core_change` in every run.
+
+Scope: the partition check keeps the markers in four lists inside one process (partition-independent
+decisions and reduction order, not an MPI run). The ellipse case redraws each marker's poloidal
+angle every step (flux-surface averaged mapping, not free 2-D diffusion or orbit behaviour).
+Diffusion only: no reactions, no pinch, no magnetic field.
