@@ -926,6 +926,7 @@ void ComputeSurfacePhysicalSputter::load_iead_if_requested()
 {
   iead_light.reset();
   iead_W.reset();
+  iead_elem.clear();
   iead_per_proj.clear();
 
   // IEAD convolution is ON by default ("auto"): yields are integrated over
@@ -1015,16 +1016,31 @@ void ComputeSurfacePhysicalSputter::load_iead_if_requested()
     error->all(FLERR, msg.c_str());
   }
 
-  // Build per-projectile dispatch table.
+  // Build per-projectile dispatch table. With `iead auto` a per-element
+  // real-mass table iead_database_<El>.h5 takes precedence over the
+  // D-scaled light table (and over iead_database_W.h5 for W).
   iead_per_proj.assign(static_cast<size_t>(std::max(1, npj)), nullptr);
   if (npj == 0) {
     iead_per_proj[0] = iead_light.get();   // legacy single-table path
   } else {
+    iead_elem.resize(npj);
     for (int ti = 0; ti < npj; ++ti) {
-      if (projectile_elements[ti] == "W")
-        iead_per_proj[ti] = iead_W ? iead_W.get() : iead_light.get();
-      else
-        iead_per_proj[ti] = iead_light.get();
+      const std::string &el = projectile_elements[ti];
+      if (iead_arg == "auto") {
+        const std::string p = resolve_iead_file(el);
+        if (!p.empty()) {
+          try {
+            iead_elem[ti] = load_iead_table_announce(p, el.c_str(),
+                                                     comm->me == 0 ? screen : nullptr,
+                                                     comm->me == 0 ? logfile : nullptr);
+          } catch (const std::exception &e) {
+            error->all(FLERR, (std::string("compute surface/physical/sputter: failed loading ") + p + ": " + e.what()).c_str());
+          }
+        }
+      }
+      if (iead_elem[ti]) iead_per_proj[ti] = iead_elem[ti].get();
+      else if (el == "W") iead_per_proj[ti] = iead_W ? iead_W.get() : iead_light.get();
+      else iead_per_proj[ti] = iead_light.get();
     }
   }
 }

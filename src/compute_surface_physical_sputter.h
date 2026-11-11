@@ -184,6 +184,7 @@ class ComputeSurfacePhysicalSputter : public Compute {
   size_t iead_dumped = 0;
   std::unique_ptr<IeadTable> iead_light;
   std::unique_ptr<IeadTable> iead_W;
+  std::vector<std::unique_ptr<IeadTable>> iead_elem;   // per-element real-mass tables (iead auto)
   std::vector<IeadTable *> iead_per_proj;   // ptrs into iead_light/iead_W
   void load_iead_if_requested();
   IeadTable *iead_for_slot(int s) const;

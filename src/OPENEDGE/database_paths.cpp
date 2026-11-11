@@ -113,8 +113,10 @@ std::string resolve_processes_file()
 
 std::string resolve_iead_file(const std::string &tag)
 {
+  // "light" = iead_database.h5 (D-scaled, m_proj = 2Z amu); any other tag is
+  // a per-element real-mass table iead_database_<tag>.h5 (W, O, Ne, ...)
   std::string filename = "iead_database.h5";
-  if (tag == "W") filename = "iead_database_W.h5";
+  if (tag != "light") filename = "iead_database_" + tag + ".h5";
   std::string p = openedge_database_dir() + "/iead/" + filename;
   return file_exists(p) ? p : std::string();
 }
