@@ -89,6 +89,7 @@ action compute_volume_emissivity_grid.cpp
 action compute_volume_emissivity_grid.h
 action core_transport_1d.cpp
 action core_transport_1d.h
+action core_transport_exchange.h
 action core_transport_geometry.h
 action core_transport_reservoir.h
 action database_paths.cpp

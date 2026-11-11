@@ -30,6 +30,7 @@
 #include "grid.h"
 #include "domain.h"
 #include "update.h"
+#include "pusher.h"
 #include "modify.h"
 #include "comm.h"
 #include "input.h"
@@ -225,6 +226,10 @@ int FixCoreTransport::setmask()
 void FixCoreTransport::init()
 {
   if (sparta->kokkos) error->all(FLERR,"fix core/transport is not ported to the Kokkos mover yet");
+  // returned markers are full-orbit particles and the core hand-off is by
+  // particle position: guiding-centre and hybrid pushers are not supported
+  if (update->pusher && update->pusher->pusher_mode != Pusher::PUSHER_BORIS)
+    error->all(FLERR,"fix core/transport supports the Boris pusher only (not gca or hybrid)");
   int ifix = modify->find_fix(pd_id);
   if (ifix < 0) error->all(FLERR,"fix core/transport: background fix ID not found");
   pd = dynamic_cast<FixBackground *>(modify->fix[ifix]);
