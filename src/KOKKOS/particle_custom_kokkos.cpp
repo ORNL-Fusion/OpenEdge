@@ -172,13 +172,18 @@ void ParticleKokkos::grow_custom(int index, int nold, int nnew)
         ? k_edvec.view_host()[ewhich[index]].k_view.need_sync_device()
         : k_edarray.view_host()[ewhich[index]].k_view.need_sync_device();
   }
-  auto restore_host = [&](auto &kv) {
-    // DualView::resize leaves a fresh, zero host mirror flagged "device
-    // newer". Under auto_sync a later blanket modify(Host) (see
-    // ParticleKokkos::sync) would push that zero mirror over the device
-    // data, so keep both sides identical after every resize.
+  auto restore_host = [&](auto &kv, bool kept_host) {
+    // DualView::resize preserves ONE side and leaves a fresh mirror on the
+    // other: the device when the device was current (after the wrap, where
+    // this vector is synced to the device just above), the HOST when the
+    // host held unsynced writes (before the wrap: read_restart unpacks the
+    // custom values on the host and grows chunk by chunk). Copy from the
+    // preserved side so both stay identical. Copying device -> host
+    // unconditionally zeroed every restart-read custom value except those
+    // of the last chunk (pweight, sheath_bank, ... after read_restart).
     (void) host_live;
-    Kokkos::deep_copy(kv.view_host(),kv.view_device());
+    if (kept_host) Kokkos::deep_copy(kv.view_device(),kv.view_host());
+    else Kokkos::deep_copy(kv.view_host(),kv.view_device());
     kv.clear_sync_state();
   };
 
@@ -203,15 +208,17 @@ void ParticleKokkos::grow_custom(int index, int nold, int nnew)
     if (esize[index] == 0) {
       int *ivector = eivec[ewhich[index]];
       auto k_ivector = k_eivec.view_host()[ewhich[index]].k_view;
+      const bool kept_host = k_ivector.need_sync_device();   // side DualView::resize will preserve
       memoryKK->grow_kokkos(k_ivector,ivector,nold+nnew,"particle:ivector");
-      restore_host(k_ivector);
+      restore_host(k_ivector,kept_host);
       k_eivec.view_host()[ewhich[index]].k_view = k_ivector;
       eivec[ewhich[index]] = ivector;
     } else {
       int **iarray = eiarray[ewhich[index]];
       auto k_iarray = k_eiarray.view_host()[ewhich[index]].k_view;
+      const bool kept_host = k_iarray.need_sync_device();   // side DualView::resize will preserve
       memoryKK->grow_kokkos(k_iarray,iarray,nold+nnew,esize[index],"particle:iarray");
-      restore_host(k_iarray);
+      restore_host(k_iarray,kept_host);
       k_eiarray.view_host()[ewhich[index]].k_view = k_iarray;
       eiarray[ewhich[index]] = iarray;
     }
@@ -220,15 +227,17 @@ void ParticleKokkos::grow_custom(int index, int nold, int nnew)
     if (esize[index] == 0) {
       double *dvector = edvec[ewhich[index]];
       auto k_dvector = k_edvec.view_host()[ewhich[index]].k_view;
+      const bool kept_host = k_dvector.need_sync_device();   // side DualView::resize will preserve
       memoryKK->grow_kokkos(k_dvector,dvector,nold+nnew,"particle:dvector");
-      restore_host(k_dvector);
+      restore_host(k_dvector,kept_host);
       k_edvec.view_host()[ewhich[index]].k_view = k_dvector;
       edvec[ewhich[index]] = dvector;
     } else {
       double **darray = edarray[ewhich[index]];
       auto k_darray = k_edarray.view_host()[ewhich[index]].k_view;
+      const bool kept_host = k_darray.need_sync_device();   // side DualView::resize will preserve
       memoryKK->grow_kokkos(k_darray,darray,nold+nnew,esize[index],"particle:darray");
-      restore_host(k_darray);
+      restore_host(k_darray,kept_host);
       k_edarray.view_host()[ewhich[index]].k_view = k_darray;
       edarray[ewhich[index]] = darray;
     }
