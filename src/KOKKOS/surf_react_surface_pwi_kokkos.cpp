@@ -12,6 +12,7 @@
 #include "string.h"
 #include "surf_react_surface_pwi_kokkos.h"
 #include "update.h"
+#include "output.h"
 #include "timer.h"
 #include "comm.h"
 #include "domain.h"
@@ -54,6 +55,7 @@ SurfReactSurfacePWIKokkos::SurfReactSurfacePWIKokkos(SPARTA *sparta, int narg,
 
   random_backup = NULL;
   pw_slot = -1;
+  tag_slot = -1;
   sigma_on = ehist_on = 0;
   conc_dev_on_ = conc_dirty_ = 0;
   dep_alias_on_ = 0;
@@ -407,7 +409,7 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
   // impact-energy histogram deltas
 
   if (ehist_on) {
-    int ntot = 2*nbin + 2*PWI_NANG + nsp*nbin;
+    int ntot = 3*nbin + 3*PWI_NANG + 2*nbin*PWI_NANG + nsp*nbin;
     d_ehist_delta = DAT::t_float_1d("surf_react_pwi:ehist_delta",ntot);
     h_ehist_delta = Kokkos::create_mirror_view(d_ehist_delta);
     d_ehist_bak = DAT::t_float_1d("surf_react_pwi:ehist_bak",ntot);
@@ -436,13 +438,24 @@ void SurfReactSurfacePWIKokkos::tally_update()
   for (int i = 0; i < nlist; i++) tally_single[i] += h_scalars(i+1);
   Kokkos::deep_copy(d_scalars,0);
 
-  if (sigma_on && update->ntimestep % sigma_nevery == 0) {
-    timer->stamp(TIME_SREACT);
-    fold_sigma();                 // device sigma/dep delta D2H -> "Adens"
-    timer->stamp(TIME_ADENS);
+  // same fold moments as the host (B3): every sigma_nevery steps and before
+  // dumps, restarts and the end of the run, so the host-side fold that
+  // follows sees the device deltas too
+  {
+    const bigint ts = update->ntimestep;
+    const bool fold_due = (ts % sigma_nevery == 0) || ts == update->laststep ||
+                          ts == output->next_dump_any || ts == output->next_restart;
+    if (sigma_on && fold_due) {
+      timer->stamp(TIME_SREACT);
+      fold_sigma();                 // device sigma/dep delta D2H -> "Adens"
+      timer->stamp(TIME_ADENS);
+    }
   }
-  if (ehist_on && ehist_every > 0 &&
-      update->ntimestep % ehist_every == 0) fold_ehist();
+  if (ehist_on) {   // same moments as the host writer (windowed, or cumulative at dumps / run end)
+    const bigint ts = update->ntimestep;
+    if (ehist_every > 0) { if (ts % ehist_every == 0) fold_ehist(); }
+    else if (ts == update->laststep || ts == output->next_dump_any) fold_ehist();
+  }
 
   SurfReactSurfacePWI::tally_update();
   // sync_sigma (inside the base tally_update) re-derives the per-surf
@@ -453,7 +466,8 @@ void SurfReactSurfacePWIKokkos::tally_update()
   // conc_dirty_ on the copy never reached the original and the conc table
   // (nsurf x ncols doubles) was re-uploaded every move pass. Own the flag
   // here, on the original: dirty only on the ledger-sync step.
-  if (conc_dev_on_) conc_dirty_ = (update->ntimestep % sigma_nevery == 0) ? 1 : 0;
+  if (conc_dev_on_) conc_dirty_ = (update->ntimestep % sigma_nevery == 0 || update->ntimestep == output->next_dump_any ||
+                                   update->ntimestep == output->next_restart || update->ntimestep == update->laststep) ? 1 : 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -475,19 +489,25 @@ void SurfReactSurfacePWIKokkos::fold_sigma()
 void SurfReactSurfacePWIKokkos::fold_ehist()
 {
   Kokkos::deep_copy(h_ehist_delta,d_ehist_delta);
+  const int offA = 3*nbin, offJ = 3*nbin + 3*PWI_NANG, nj = nbin*PWI_NANG;
   for (int i = 0; i < nbin; i++) {
     ehist_all[i] += h_ehist_delta(i);
     ehist_sput[i] += h_ehist_delta(nbin + i);
+    ehist_tag[i] += h_ehist_delta(2*nbin + i);
   }
   for (int i = 0; i < PWI_NANG; i++) {
-    ahist_all[i] += h_ehist_delta(2*nbin + i);
-    ahist_sput[i] += h_ehist_delta(2*nbin + PWI_NANG + i);
+    ahist_all[i] += h_ehist_delta(offA + i);
+    ahist_sput[i] += h_ehist_delta(offA + PWI_NANG + i);
+    ahist_tag[i] += h_ehist_delta(offA + 2*PWI_NANG + i);
+  }
+  for (int q = 0; q < nj; q++) {
+    ehist_j[q] += h_ehist_delta(offJ + q);
+    ehist_jt[q] += h_ehist_delta(offJ + nj + q);
   }
   if (ehist_z) {
-    int off = 2*nbin + 2*PWI_NANG;
     for (int k = 0; k < nsp; k++)
       for (int i = 0; i < nbin; i++)
-        ehist_z[k][i] += h_ehist_delta(off + k*nbin + i);
+        ehist_z[k][i] += h_ehist_delta(offJ + 2*nj + k*nbin + i);
   }
   Kokkos::deep_copy(d_ehist_delta,0.0);
 }
@@ -523,6 +543,7 @@ void SurfReactSurfacePWIKokkos::pre_react()
   // resolve the pweight edvec slot at move time: other modules can add
   // particle customs after init, which shifts ewhich values
   pw_slot = (pweight_ewhich >= 0) ? particle->ewhich[pweight_ewhich] : -1;
+  tag_slot = (update->tag_index >= 0) ? particle->ewhich[update->tag_index] : -1;
 
   // per-surf customs (twall_surf / R_surf): same binding as the diffuse
   // collider's per-surf temperature; sync only moves data when modified
@@ -564,6 +585,7 @@ void SurfReactSurfacePWIKokkos::backup()
   d_particles = particle_kk->k_particles.view_device();
   custom_ = particle_kk->device_custom();
   pw_slot = (pweight_ewhich >= 0) ? particle->ewhich[pweight_ewhich] : -1;
+  tag_slot = (update->tag_index >= 0) ? particle->ewhich[update->tag_index] : -1;
 
   Kokkos::deep_copy(DeviceType(),d_scalars_bak,d_scalars);
   if (sigma_on) {

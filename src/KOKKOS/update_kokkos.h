@@ -164,6 +164,8 @@ class UpdateKokkos : public Update {
   //  - RF waveform drop from the per-surf DOUBLE[3] custom (Vdc,Vrf,phase)
   int oe_kick_on, oe_paid_on, oe_wave_on, oe_kick_te_on;
   DAT::t_int_1d d_oe_paid;
+  int oe_tag_on, oe_tag_groupbit;      // fix particle/tag on the device
+  DAT::t_int_1d d_oe_transit;
   DAT::t_float_1d d_oe_kick_te, d_oe_kick_ti;
   DAT::t_float_2d_lr d_oe_wave;
   KOKKOS_INLINE_FUNCTION

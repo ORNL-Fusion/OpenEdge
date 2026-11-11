@@ -125,7 +125,7 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
 
   DAT::t_float_1d d_sigma_delta;    // [nsurf*ncols] like host sigma_delta
   DAT::t_float_1d d_dep_delta;      // [nsurf]
-  DAT::t_float_1d d_ehist_delta;    // [2*nbin + 2*NANG + nsp*nbin]
+  DAT::t_float_1d d_ehist_delta;    // [3*nbin + 3*NANG + 2*nbin*NANG + nsp*nbin] (all, sput, transit; joint all, transit)
   HAT::t_float_1d h_sigma_delta, h_dep_delta, h_ehist_delta;
 
   DAT::t_float_1d d_area;           // [nlocal+nghost] per-surf area
@@ -141,6 +141,7 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
   t_species_1d d_species;
   ParticleKokkos::DeviceCustom custom_;
   int pw_slot;                      // edvec slot of pweight, -1 if absent
+  int tag_slot;                     // eivec slot of transit (fix particle/tag), -1 if absent
 
   // ---- captured scalars ----
 
@@ -486,10 +487,12 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
     }
   }
 
-  // impact histogram: layout [all_E | sput_E | all_A | sput_A | perspecies_E]
+  // impact histogram: layout [all_E | sput_E | tag_E | all_A | sput_A | tag_A |
+  //                           joint_all(nbin*NANG) | joint_tag | perspecies_E]
+  // (same order as the host ehist_write)
 
   KOKKOS_INLINE_FUNCTION
-  void ehist_acc(double E_eV, double theta_deg, double pw, int sput,
+  void ehist_acc(double E_eV, double theta_deg, double pw, int sput, int tag,
                  int isp) const
   {
     int ie = (int) (E_eV / emax * nbin);
@@ -498,14 +501,21 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
     int ia = (int) (theta_deg / 5.0);
     if (ia < 0) ia = 0;
     if (ia >= PWI_NANG) ia = PWI_NANG - 1;
+    const int offA = 3*nbin, offJ = 3*nbin + 3*PWI_NANG, nj = nbin*PWI_NANG;
     Kokkos::atomic_add(&d_ehist_delta(ie), pw);
-    Kokkos::atomic_add(&d_ehist_delta(2*nbin + ia), pw);
+    Kokkos::atomic_add(&d_ehist_delta(offA + ia), pw);
+    Kokkos::atomic_add(&d_ehist_delta(offJ + ie*PWI_NANG + ia), pw);
     if (sput) {
       Kokkos::atomic_add(&d_ehist_delta(nbin + ie), pw);
-      Kokkos::atomic_add(&d_ehist_delta(2*nbin + PWI_NANG + ia), pw);
+      Kokkos::atomic_add(&d_ehist_delta(offA + PWI_NANG + ia), pw);
+    }
+    if (tag) {
+      Kokkos::atomic_add(&d_ehist_delta(2*nbin + ie), pw);
+      Kokkos::atomic_add(&d_ehist_delta(offA + 2*PWI_NANG + ia), pw);
+      Kokkos::atomic_add(&d_ehist_delta(offJ + nj + ie*PWI_NANG + ia), pw);
     }
     if (nsp > 0 && isp >= 0 && isp < nsp)
-      Kokkos::atomic_add(&d_ehist_delta(2*nbin + 2*PWI_NANG + isp*nbin + ie), pw);
+      Kokkos::atomic_add(&d_ehist_delta(offJ + 2*nj + isp*nbin + ie), pw);
   }
 
  public:
@@ -658,7 +668,8 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
     }
 
     if (ehist_on)
-      ehist_acc(E_in_eV, theta_in_deg, pw_inc, nsput_total > 0, ip->ispecies);
+      ehist_acc(E_in_eV, theta_in_deg, pw_inc, nsput_total > 0,
+                (tag_slot >= 0) ? custom_.get_ivec(tag_slot, i_idx) : 0, ip->ispecies);
 
     // ---- first-to-fire reflect/absorb lottery ----
 

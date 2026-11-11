@@ -116,6 +116,18 @@ class ParticleKokkos : public Particle {
     void set_dvec(int slot, int i, double value) const {
       k_edvec.view_device()[slot].k_view.view_device()[i] = value;
     }
+
+    // read/write one custom int vector (e.g. transit of fix particle/tag)
+
+    KOKKOS_INLINE_FUNCTION
+    int get_ivec(int slot, int i) const {
+      return k_eivec.view_device()[slot].k_view.view_device()[i];
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void set_ivec(int slot, int i, int value) const {
+      k_eivec.view_device()[slot].k_view.view_device()[i] = value;
+    }
   };
 
   DeviceCustom device_custom() {
