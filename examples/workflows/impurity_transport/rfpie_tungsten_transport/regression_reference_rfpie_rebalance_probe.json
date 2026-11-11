@@ -5,12 +5,12 @@
   "note": "reference = base rfpie_tungsten_transport: rebalancing every 100 steps must not change the answer"
  },
  "CPU": {
-  "value": 7.951358,
+  "value": 7.903753,
   "tol": null,
   "note": "reference = base rfpie_tungsten_transport: rebalancing every 100 steps must not change the answer"
  },
  "Np": {
-  "value": 83708.0,
+  "value": 83577.0,
   "tol": 0.03,
   "note": "reference = base rfpie_tungsten_transport: rebalancing every 100 steps must not change the answer"
  },
@@ -25,7 +25,7 @@
   "note": "reference = base rfpie_tungsten_transport: rebalancing every 100 steps must not change the answer"
  },
  "loop_particles": {
-  "value": 83708,
+  "value": 83577,
   "tol": 0.03,
   "note": "reference = base rfpie_tungsten_transport: rebalancing every 100 steps must not change the answer"
  },
