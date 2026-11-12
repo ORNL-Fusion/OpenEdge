@@ -83,7 +83,6 @@ styles available in OpenEdge:
 "efield/particle"_fix_efield_particle.html - acceleration of charged particles by the background electric field
 "emit/face"_fix_emit_face.html - emit particles at global boundaries
 "emit/surf"_fix_emit_surf.html - emit particles at surfaces
-"force/gravity"_fix_force_gravity.html - apply a constant gravitational acceleration
 "force/thermal"_fix_force_thermal.html - parallel friction and thermal forces on impurity ions
 "grid/check"_fix_grid_check.html - check if particles are in the correct grid cell
 "halt"_fix_halt.html - stop the simulation early if a condition is met

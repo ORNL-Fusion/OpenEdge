@@ -142,13 +142,6 @@ int FixParticulateDrag::setmask()
 
 void FixParticulateDrag::init()
 {
-  if (use_gravity) {
-    for (int k = 0; k < modify->nfix; ++k)
-      if (strcmp(modify->fix[k]->style, "gravity") == 0)
-        error->all(FLERR,
-          "fix drag: do not combine 'fix gravity' with 'gravity' inside fix drag");
-  }
-
   const int ifix = modify->find_fix(plasma_fix_id_.c_str());
   if (ifix < 0) {
     char msg[200];

@@ -107,7 +107,7 @@ dust grains and droplets with radius, mass and temperature state,
 "material"_material.html :ulb,l
 injection from surfaces, "fix particulate/emit"_fix_particulate_emit.html :l
 OML charging with thermionic and secondary-electron emission, "fix particulate/charge"_fix_particulate_charge.html :l
-ion, neutral, electric and gravitational forces, "fix particulate/drag"_fix_particulate_drag.html, "fix force/gravity"_fix_force_gravity.html :l
+ion, neutral, electric and gravitational forces, "fix particulate/drag"_fix_particulate_drag.html :l
 heating, phase change, evaporation and breakup, "fix particulate/thermal"_fix_particulate_thermal.html :l
 sticking or bouncing at walls, "surf_collide particulate/bounce"_surf_collide_particulate_bounce.html :ule,l
 

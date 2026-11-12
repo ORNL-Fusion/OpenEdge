@@ -297,7 +297,7 @@ Transport:
 
 "global pusher"_global.html, "fix coulomb/background"_fix_coulomb_background.html,
 "fix coulomb/binary"_fix_coulomb_binary.html, "fix cross_field_diffusion"_fix_cross_field_diffusion.html,
-"fix force/thermal"_fix_force_thermal.html, "fix force/gravity"_fix_force_gravity.html,
+"fix force/thermal"_fix_force_thermal.html,
 "fix neutral/collide/background"_fix_neutral_collide_background.html,
 "fix reflect/psi"_fix_reflect_psi.html, "fix particle/tag"_fix_particle_tag.html, "fix particle/weight"_fix_particle_weight.html,
 
@@ -463,7 +463,6 @@ Kokkos version are marked (k).
 "efield/particle"_fix_efield_particle.html,
 "emit/face (k)"_fix_emit_face.html,
 "emit/surf"_fix_emit_surf.html,
-"force/gravity"_fix_force_gravity.html,
 "force/thermal"_fix_force_thermal.html,
 "grid/check (k)"_fix_grid_check.html,
 "halt"_fix_halt.html,
