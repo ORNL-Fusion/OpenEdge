@@ -117,6 +117,15 @@ void ParticleKokkos::compress_migrate(int ndelete, int *dellist)
     h_slist = Kokkos::subview(h_lists,1,Kokkos::ALL);
   }
 
+  // d_mlist/d_slist are shared with compress_migrate_kokkos(), which points them at
+  // its own scratch views: rebind them to this routine's pair list on every call, or
+  // the copy kernel below reads the pairs of the last device migration (wrong
+  // particles copied, out-of-range reads when that list was shorter)
+  d_mlist = Kokkos::subview(d_lists,0,Kokkos::ALL);
+  d_slist = Kokkos::subview(d_lists,1,Kokkos::ALL);
+  h_mlist = Kokkos::subview(h_lists,0,Kokkos::ALL);
+  h_slist = Kokkos::subview(h_lists,1,Kokkos::ALL);
+
   // use next as a scratch vector
   // next is only used for upper locs from nlocal-ndelete to nlocal
   // next[i] = 0 if deleted particle, 1 otherwise
