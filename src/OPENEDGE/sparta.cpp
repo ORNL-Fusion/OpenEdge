@@ -739,7 +739,7 @@ void SPARTA::print_help()
   printf("  -h  or -help                      : print this help message and exit\n");
   printf("  -i  or -in <file>                 : read input from <file> (default: stdin)\n");
   printf("  -k  or -kokkos on/off ...         : enable/configure the KOKKOS package\n");
-  printf("  -l  or -log <file>/none           : write log to <file> (default: log.sparta)\n");
+  printf("  -l  or -log <file>/none           : write log to <file> (default: log.openedge)\n");
   printf("  -p  or -partition <n1> <n2> ...   : split procs into multiple partitions\n");
   printf("  -pk or -package <style> ...       : invoke a package command at startup\n");
   printf("  -pl or -plog <file>/none          : per-partition log file base name\n");

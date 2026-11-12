@@ -269,6 +269,16 @@ void FixSurfaceEmitSource::init()
 {
   FixEmit::init();
 
+  // a new particle first moves ballistically over U*nevery*dt, no chemistry
+  if (nevery > 1 && comm->me == 0)
+    for (int i = 0; i < modify->nfix; i++)
+      if (strncmp(modify->fix[i]->style,"volume/chem/adas",16) == 0) {
+        error->warning(FLERR,"Fix surface/emit/source with nevery > 1: new "
+                       "particles are not ionized during their first move; "
+                       "use nevery 1 when prompt redeposition matters");
+        break;
+      }
+
   // bind the optional concentration-multiplier custom array (created by
   // surf_react surface/pwi at its init; both run before the first step)
   if (conc_attr) {

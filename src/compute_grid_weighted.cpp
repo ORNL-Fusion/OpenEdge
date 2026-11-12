@@ -300,6 +300,10 @@ void ComputeGridWeighted::init()
     if (!fadas)
       error->all(FLERR,"Compute grid/weighted adas fix is not "
                  "a fix volume/chem/adas");
+    if (!fadas->has_radiation_tables())
+      error->all(FLERR,"Compute grid/weighted prad_w/pradtot_w: the adas fix has no "
+                 "radiation tables (volume/radiation/plt and prb in processes.h5) "
+                 "for its element");
   }
 
   eprefactor  = 0.5 * update->mvv2e;

@@ -229,7 +229,7 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
           static const std::map<int, std::string> z_to_sym = {
             {1,"d"}, {2,"he"}, {3,"li"}, {4,"be"}, {5,"b"}, {6,"c"},
             {7,"n"}, {8,"o"}, {10,"ne"}, {18,"ar"}, {26,"fe"}, {36,"kr"},
-            {42,"mo"}, {54,"xe"}, {73,"ta"}, {74,"w"},
+            {42,"mo"}, {54,"xe"}, {74,"w"},
           };
           auto it = z_to_sym.find(zc);
           if (it != z_to_sym.end()) elem_for_catalog = it->second;
@@ -300,7 +300,7 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
         static const std::map<int, std::string> z_to_sym = {
           {1,"h"}, {2,"he"}, {3,"li"}, {4,"be"}, {5,"b"}, {6,"c"},
           {7,"n"}, {8,"o"}, {10,"ne"}, {18,"ar"}, {26,"fe"}, {36,"kr"},
-          {42,"mo"}, {54,"xe"}, {73,"ta"}, {74,"w"},
+          {42,"mo"}, {54,"xe"}, {74,"w"},
         };
         auto it = z_to_sym.find(atomic_number);
         if (it != z_to_sym.end()) elem_sym = it->second;
@@ -332,6 +332,16 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
                   rd.prb_nQ, rd.prb_nT, rd.prb_nD);
           lib.load_ionization_potential(elem_sym, rd.ion_potential);
           loaded_from_processes = scd && acd;
+          // Q_e needs I_Z for every charge state: no silent zero
+          if (loaded_from_processes &&
+              (int) rd.ion_potential.size() < atomic_number) {
+            std::string msg = "fix volume/chem/adas: ionization potentials "
+              "for element '" + elem_sym + "' (Z=" +
+              std::to_string(atomic_number) + ") missing or incomplete in " +
+              processes_path + " (/volume/thresholds/ionization/" + elem_sym +
+              "/energy); the electron energy source needs them";
+            error->all(FLERR, msg.c_str());
+          }
           if (loaded_from_processes) {
             rd.Atomic_Number = std::vector<double>(1, (double)atomic_number);
             if (comm->me == 0)
@@ -485,7 +495,7 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
         tally_units = TALLY_BATCH_FIX;
         iarg += 4;
       } else {
-        error->all(FLERR, "fix volume/chem/adas: units must be counts|rate|batch|batch_fix");
+        error->all(FLERR, "fix volume/chem/adas: units must be counts|rate|flight|batch|batch_fix");
       }
     } else if (strcmp(arg[iarg], "output") == 0) {
       if (iarg + 1 >= narg)
@@ -810,6 +820,15 @@ void FixVolumeChemAdas::init()
     report("recombination", nR_active, nR_total, chan_recombination);
     report("cx",            nE_active, nE_total, chan_cx);
     report("dissociation",  nD_active, nD_total, chan_dissociation);
+    if (nE_active > 0 && chan_cx && atomic_number != 1) {
+      FixBackground *bg = nullptr;
+      for (int i = 0; i < modify->nfix && !bg; i++)
+        bg = dynamic_cast<FixBackground *>(modify->fix[i]);
+      if (!bg || (!bg->has_neutral_dens() && !bg->is_zones3d()))
+        error->warning(FLERR, "fix volume/chem/adas: charge-exchange reactions are "
+                       "active but the background has no neutral density "
+                       "(mesh/dens_n); charge exchange is off");
+    }
     if (!missing_species_samples.empty()) {
       printf("[volume/chem/adas] missing species (first %zu): ",
              missing_species_samples.size());
@@ -897,7 +916,7 @@ void FixVolumeChemAdas::init()
 // Plasma cache is the only source path; the gate check fires at the
 // first end_of_step (here is too early — update->init() runs after).
 
-// Allocate per-cell source-tally output (array_grid, 6 or 20 cols depending
+// Allocate per-cell source-tally output (array_grid, 6 or 28 cols depending
 // on output_mode) up front so dumps that fire at step 0
 // (dump_modify ... first yes) see a valid buffer.
 if (grid->maxlocal > maxgrid_src) {
@@ -1125,7 +1144,7 @@ void FixVolumeChemAdas::end_of_step_no_average()
   pweight_index  = particle->find_custom((char *) "pweight");
   pweight_ewhich = (pweight_index >= 0) ? particle->ewhich[pweight_index] : -1;
 
-  // Ensure per-cell source-tally array (20 columns) tracks current grid size.
+  // Ensure per-cell source-tally array (6 or 28 columns) tracks current grid size.
   // In TALLY_COUNTS mode this grows but never zeros across steps (cumulative).
   // In TALLY_RATE mode we additionally zero the whole buffer each call so the
   // subsequent accumulate + normalize yields an instantaneous rate over the
@@ -2008,7 +2027,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
   //     col 4 : Qe   (electron energy source, J)
   //     col 5 : Qi   (ion energy source, J)
   //
-  //   OUT_DETAILED (20 cols, unsigned per-reaction raw tally):
+  //   OUT_DETAILED (28 cols, unsigned per-reaction raw tally):
   //     col  0.. 3 = count  (ioniz, recomb, CX, dissoc)
   //     col  4.. 7 = sum(m*vx)
   //     col  8..11 = sum(m*vy)

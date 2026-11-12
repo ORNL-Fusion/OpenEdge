@@ -822,8 +822,7 @@ void FixSurfaceEmitRecycle::perform_task()
       vnmag = vscale_twall * std::sqrt(-std::log(random->uniform()));
 
       theta = MY_2PI * random->uniform();
-      vr = vscale_twall * std::sqrt(-std::log(random->uniform()))
-           / std::sqrt(2.0);
+      vr = vscale_twall * std::sqrt(-std::log(random->uniform()));
       vamag = vr * std::sin(theta);
       vbmag = vr * std::cos(theta);
 

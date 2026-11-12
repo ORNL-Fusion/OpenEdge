@@ -3,9 +3,8 @@
    Per-surface adatom desorption flux. Arrhenius (D-on-Li Yad model).
 ------------------------------------------------------------------------- 
    UNITS NOTE: this compute expects the bound Tsurf custom in degrees
-   CELSIUS (+273.15 is applied internally); compute surface/physical/
-   sputter expects KELVIN for its tsurf custom - do not bind one shared
-   attribute to both without converting.
+   CELSIUS (+273.15 is applied internally), as do compute surface/
+   physical/sputter and fix surface/emit/source for their tsurf customs.
 */
 
 #include "compute_surface_chemical_adatom.h"

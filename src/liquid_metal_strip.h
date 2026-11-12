@@ -32,7 +32,7 @@ namespace LiquidMetal {
 // ---------------------------------------------------------------
 
 static const double KB  = 1.380649e-23;       // Boltzmann [J/K]
-static const double MLI = 1.1526e-26;         // Li-7 atom mass [kg]
+static const double MLI = 1.1526e-26;         // natural Li (6.941 amu) [kg]
 static const double ATM_TO_PA = 101325.0;     // 1 atm in Pa
 static const double NA  = 6.02214076e23;      // Avogadro
 static const double EV  = 1.602176634e-19;    // J per eV
@@ -41,11 +41,12 @@ static const double PI  = 3.14159265358979323846;
 // ---------------------------------------------------------------
 // Antoine vapor pressure fit for Li
 // log10(P_atm) = ANTOINE_A - ANTOINE_B / T_K
-// Fitted from NIST thermodynamic data (298-1600 K range)
+// Liquid Li, same law as the Li entry of grain_material.cpp
+// (1 Pa at 797 K, 100 Pa at 995 K, 1 atm at 1587 K)
 // ---------------------------------------------------------------
 
-static const double ANTOINE_A = 5.66797;
-static const double ANTOINE_B = 8310.41;
+static const double ANTOINE_A = 5.055;
+static const double ANTOINE_B = 8023.0;
 
 // ---------------------------------------------------------------
 // Li evaporation flux: Antoine + Hertz-Knudsen
@@ -97,7 +98,7 @@ struct LiProperties {
   LiProperties() :
     vis(8.5e-7), rho(485.0), sigma_e(3.09e6),
     Cp(4200.0), k_th(49.6),
-    VM(1.17e-26), H_vap(145920.0) {}
+    VM(MLI), H_vap(145920.0) {}
 };
 
 // ------------------------------------------------------------------

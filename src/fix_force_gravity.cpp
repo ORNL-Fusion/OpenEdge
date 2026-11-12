@@ -18,6 +18,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "sparta_masks.h"
 #include "update.h"
 #include "particle.h"
+#include "mixture.h"
 #include "domain.h"
 #include "openedge_geom.h"
 #include "utils.h"
@@ -40,8 +41,10 @@ FixForceGravity::FixForceGravity(SPARTA *sparta, int narg, char **arg)
   datamask_read = PARTICLE_MASK | SPECIES_MASK;
   datamask_modify = PARTICLE_MASK;
 
-  // Expected: fix ID group-ID gravity g1 g2 g3
-  if (narg < 6)     error->all(FLERR, "Illegal fix force/gravity: need group-ID and 3 components (g1 g2 g3)");
+  // Expected: fix ID force/gravity mix-ID g1 g2 g3
+  if (narg < 6)     error->all(FLERR, "Illegal fix force/gravity: need mix-ID and 3 components (g1 g2 g3)");
+  imix = particle->find_mixture(arg[2]);
+  if (imix < 0) error->all(FLERR, "fix force/gravity: mixture ID does not exist");
   
   auto parse_or_die = [&](const char *tok, const char *label) -> double {
     errno = 0;
@@ -120,7 +123,9 @@ void FixForceGravity::half_kick(double dt_half)
   // The public contract is physical cylindrical (g_R,g_Z,g_phi), matching
   // all other OpenEdge particulate inputs. Convert to storage/Cartesian slots
   // at each particle so one deck works in 2D, axisymmetric, and 3D geometry.
+  const int *s2g = particle->mixture[imix]->species2group;
   for (int i = 0; i < nlocal; ++i) {
+    if (s2g[parts[i].ispecies] < 0) continue;
     const double phi = (!axi && dim == 3)
       ? std::atan2(parts[i].x[1], parts[i].x[0]) : 0.0;
     double gx = g_[0], gy = g_[1], gz = g_[2];

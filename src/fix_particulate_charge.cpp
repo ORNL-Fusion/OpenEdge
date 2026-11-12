@@ -597,8 +597,8 @@ void FixParticulateCharge::apply_charge_update()
 
     // Formal OML small-grain monitor. DIS 2021 explicitly applies its OML
     // surface potential beyond R_d/lambda_D=1 and extends the drag through
-    // the finite-size g_fit factor in Eqs. (A6)-(A7), implemented in
-    // particulate/drag. Keep the excursion visible without silently
+    // the finite-size g_fit factor in Eqs. (A6)-(A7), which is not
+    // implemented in particulate/drag. Keep the excursion visible without silently
     // substituting a different charging model and breaking code-to-code
     // reproducibility.
     if (validity_mode > 0) {
@@ -624,8 +624,8 @@ void FixParticulateCharge::apply_charge_update()
             error->warning(FLERR,
               "fix particulate/charge model dis2021: R_d > lambda_D "
               "exceeds the formal small-grain OML assumption; retaining "
-              "the DIS surface-potential model (DIS A6-A7 finite-size "
-              "g_fit remains active in particulate/drag)");
+              "the DIS surface-potential model (the DIS A6-A7 finite-size "
+              "g_fit drag factor is not implemented)");
           else
             error->warning(FLERR, "fix particulate/charge: R_d > lambda_D — "
                            "OML charging exceeds its formal small-grain "

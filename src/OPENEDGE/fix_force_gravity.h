@@ -36,6 +36,7 @@ public:
   double memory_usage() override;
 
 private:
+  int imix;        // mixture whose species feel gravity
   // User-specified physical cylindrical components (g_R,g_Z,g_phi).
   double g_[3] = {0.0, 0.0, 0.0};
   int frame_cyl_ = 1;      // frame cyl (default) | cart: apply to x,y,z slots

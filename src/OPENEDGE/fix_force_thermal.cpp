@@ -266,6 +266,15 @@ void FixForceThermal::init()
       error->all(FLERR,
         "fix force/thermal: background fix must be style background");
     pd_->init();
+    // a requested thermal force needs its gradient data
+    if (!pd_->is_zones3d()) {
+      if (have_ion_thermal_ && pd_->mesh_grad_ti_r.empty() && pd_->grad_ti_r.empty())
+        error->all(FLERR, "fix force/thermal: ion thermal force requested but the "
+                   "background has no Ti gradient (mesh/grad_ti_r, mesh/grad_ti_z)");
+      if (have_elec_thermal_ && pd_->mesh_grad_te_r.empty() && pd_->grad_te_r.empty())
+        error->all(FLERR, "fix force/thermal: electron thermal force requested but the "
+                   "background has no Te gradient (mesh/grad_te_r, mesh/grad_te_z)");
+    }
     if (have_ion_thermal_ && !ion_mass_explicit_) {
       if (pd_->ion_mass_amu.size() == 1) {
         ion_mass_amu_ = pd_->ion_mass_amu[0];

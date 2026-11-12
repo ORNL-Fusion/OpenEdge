@@ -4,7 +4,7 @@
     This code built on top of SPARTA, a parallel DSMC code.
 
     compute volume/emissivity/grid — per-grid volumetric line emissivity
-      emissivity = ne * nz * PEC(Te, ne)   [photons/m^3/s/sr]
+      emissivity = ne * nz * PEC(Te, ne)   [photons/m^3/s]
 
     Syntax:
       compute ID volume/emissivity/grid group-ID mixture-ID \
@@ -326,7 +326,7 @@ void ComputeVolumeEmissivityGrid::post_process_grid(
     double wt = cinfo[icell].weight / vol;
     double nz = wt * wsum / nsample;
 
-    // emissivity [photons/m^3/s/sr]
+    // emissivity [photons/m^3/s]
     vec[k] = ne * nz * pec_val;
     k += nstride;
   }

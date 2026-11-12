@@ -97,6 +97,9 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
 
   int iarg_start;
   if (strcmp(arg[3],"file") == 0) {
+    // the file source carries no B field, which init() requires
+    error->all(FLERR,"compute surface/physical/sputter: the file source is "
+               "not supported; use background fix-ID");
     if (narg < 6) error->all(FLERR,"compute surface/physical/sputter: file needs plasma.h5");
     plasma_path = std::string(arg[4]);
     int after = try_parse_eckstein(5);
@@ -128,7 +131,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       iarg_start = after;
     }
   } else {
-    error->all(FLERR,"compute surface/physical/sputter: first keyword must be 'file' or 'background'");
+    error->all(FLERR,"compute surface/physical/sputter: first keyword must be 'background'");
     iarg_start = 6;  // unreachable, suppress warning
   }
 
@@ -253,9 +256,9 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       if (target_us <= 0.0) error->all(FLERR,"us must be > 0");
       iarg += 2;
     } else if (strcmp(arg[iarg],"tsurf") == 0) {
-      // Per-face surface temperature (surf custom vector, Kelvin) fed to
-      // T-dependent yield tables; without it a T table evaluates at its
-      // coldest slice (room-temperature/solid data).
+      // Per-face surface temperature (surf custom vector, degrees Celsius
+      // like Tsurf_lm; converted to K here) fed to T-dependent yield tables;
+      // without it a T table evaluates at its coldest slice.
       if (iarg+1 >= narg) error->all(FLERR,"tsurf needs custom surf name");
       tsurf_attr = arg[iarg+1];
       iarg += 2;
@@ -443,6 +446,12 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       error->all(FLERR,"compute surface/physical/sputter: compound is not "
                  "supported with the virtual impurity path");
   }
+  // the virtual impurity takes its yield from the eckstein entry or the
+  // yield file; target/projectiles tables are per projectile slot only
+  if (has_impurity && !target_element.empty())
+    error->all(FLERR,"compute surface/physical/sputter: impurity has no "
+               "yield with target/projectiles (use the eckstein or "
+               "yield-file form)");
   if (!sheath_waveform_attr.empty() &&
       (!compound_mix.empty() || has_impurity))
     error->all(FLERR,
@@ -877,6 +886,18 @@ void ComputeSurfacePhysicalSputter::resolve_projectile_tables(const FixBackgroun
     error->all(FLERR,
         "compute surface/physical/sputter: no plasma ion slots match the projectiles list "
         "(check /ion_species/elements in plasma.h5)");
+  // every requested projectile must exist in the background
+  for (size_t i = 0; i < N; i++) {
+    bool found = false;
+    for (int s = 0; s < pd->nion && !found; s++) found = (slot_to_table[s] == static_cast<int>(i));
+    if (!found) {
+      std::string msg = "compute surface/physical/sputter: projectile '" + projectile_elements[i] +
+          "' matches no plasma ion species (/ion_species/elements in plasma.h5 has:";
+      for (const auto &e : pd->ion_elements) msg += " " + e;
+      msg += ")";
+      error->all(FLERR, msg.c_str());
+    }
+  }
 
   // Auto-set the inclusive projectile slot range so in_projectile_slots()
   // returns true exactly for slots the user asked about.
@@ -2195,7 +2216,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf_body()
           const ProcessLibrary::TrimSputterTable &st = per_proj_sput_tbl[ti];
           // T-dependent tables: interpolate at the face temperature when
           // tsurf is given; tface 0 clamps to the coldest slice
-          const double tface = tsurf_vec ? tsurf_vec[i] : 0.0;
+          const double tface = tsurf_vec ? tsurf_vec[i] + 273.15 : 0.0;
           auto pair_yield = [&](double e_eV, double th_deg) {
             const double th = (th_deg > rough_dm) ? th_deg - rough_dm : 0.0;
             return st.valid() ? st.yield_at_T(e_eV, th, tface)

@@ -24,6 +24,9 @@
     https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
+#include <vector>
+#include <string>
+#include <cctype>
 #include "math.h"
 #include "string.h"
 #include "surf_react_surface_pwi.h"
@@ -157,9 +160,8 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       strcpy(twall_attr, arg[iarg+1]);
       iarg += 2;
     } else if (strcmp(arg[iarg],"trim_dir") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_react surface/pwi command");
-      trim_dir = arg[iarg+1];
-      iarg += 2;
+      error->all(FLERR,"surf_react surface/pwi: trim_dir is no longer "
+                 "supported; tables are read from processes.h5");
     } else if (strcmp(arg[iarg],"R_surf") == 0) {
       // per-surface recycling coefficient. When set, the R value of any
       // A-type reaction is overridden by the per-surf attribute lookup.
@@ -377,6 +379,7 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   tally_total = new int[nlist];
   tally_single_all = new int[nlist];
   tally_total_all = new int[nlist];
+  size_vector = 2 + 2*nlist;
 
   random = new RanKnuth(update->ranmaster->uniform());
   double seed = update->ranmaster->uniform();
@@ -1108,9 +1111,12 @@ int SurfReactSurfacePWI::react(Particle::OnePart *&ip, int isurf, double *norm,
         const double th_eff =
             (theta_in_deg > rough_dm) ? theta_in_deg - rough_dm : 0.0;
         double cval = (r->conc_isp >= 0) ? mat_conc(isurf, r->conc_isp) : 1.0;
+        // below the table's lowest energy use its first row (the zero
+        // below E_min is a sputter-threshold rule, wrong for reflection)
+        const double E_r = std::max(E_in_eV, sput_tables[r->refl_tbl].E.front());
         p_this = (sput_tables[r->refl_tbl].NT > 0)
-            ? sput_tables[r->refl_tbl].yield_at_T(E_in_eV, th_eff, twall_eff)
-            : sput_tables[r->refl_tbl].yield(E_in_eV, th_eff, cval);
+            ? sput_tables[r->refl_tbl].yield_at_T(E_r, th_eff, twall_eff)
+            : sput_tables[r->refl_tbl].yield(E_r, th_eff, cval);
         if (p_this < 0.0) p_this = 0.0;
         if (p_this > 1.0) p_this = 1.0;
       } else {
@@ -1947,6 +1953,38 @@ void SurfReactSurfacePWI::init_reactions()
     if (!r->active) continue;
     int i = r->reactants[0];
     reactions[i].list[reactions[i].n++] = m;
+  }
+
+  // report what survived species matching; a charge state without a
+  // reaction is handed to the collide model as an ion
+  if (comm->me == 0) {
+    auto element = [](const char *id) {
+      std::string e;
+      for (const char *c = id; *c && std::isalpha(static_cast<unsigned char>(*c)); c++) e += *c;
+      return e;
+    };
+    std::vector<std::string> covered;
+    for (int i = 0; i < nspecies; i++)
+      if (reactions[i].n > 0) covered.push_back(element(particle->species[i].id));
+    std::string orphans;
+    int norphan = 0;
+    for (int i = 0; i < nspecies; i++) {
+      if (reactions[i].n > 0 || particle->species[i].charge == 0.0) continue;
+      const std::string e = element(particle->species[i].id);
+      if (std::find(covered.begin(), covered.end(), e) == covered.end()) continue;
+      if (norphan++ < 8) orphans += std::string(norphan > 1 ? "," : "") + particle->species[i].id;
+    }
+    char msg[512];
+    snprintf(msg, sizeof(msg), "surf_react surface/pwi: %d of %d reactions active%s\n",
+             ntot, nlist_recycle,
+             ntot < nlist_recycle ? " (the rest name undefined species)" : "");
+    if (screen) fputs(msg, screen);
+    if (logfile) fputs(msg, logfile);
+    if (norphan) {
+      snprintf(msg, sizeof(msg), "surf_react surface/pwi: %d charge state(s) have no wall "
+               "reaction and will bounce as ions (first: %s)", norphan, orphans.c_str());
+      error->warning(FLERR, msg);
+    }
   }
 }
 

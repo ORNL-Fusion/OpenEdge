@@ -3,9 +3,8 @@
    Per-surface bulk evaporation flux. Antoine + Hertz-Knudsen.
 ------------------------------------------------------------------------- 
    UNITS NOTE: this compute expects the bound Tsurf custom in degrees
-   CELSIUS (+273.15 is applied internally); compute surface/physical/
-   sputter expects KELVIN for its tsurf custom - do not bind one shared
-   attribute to both without converting.
+   CELSIUS (+273.15 is applied internally), as do compute surface/
+   physical/sputter and fix surface/emit/source for their tsurf customs.
 */
 
 #include "compute_surface_chemical_evaporation.h"
@@ -94,7 +93,7 @@ void ComputeSurfaceChemicalEvaporation::init()
     char msg[256];
     snprintf(msg, sizeof(msg),
       "compute surface/chemical/evaporation: surf custom '%s' not found "
-      "(register it with fix surface/state/liquid_metal or similar)",
+      "(register it with fix surface/state/lm or similar)",
       tsurf_name);
     error->all(FLERR, msg);
   }
@@ -139,7 +138,7 @@ void ComputeSurfaceChemicalEvaporation::compute_per_surf()
       continue;
     }
 
-    // Tsurf is stored in degrees C (matches fix surface/state/liquid_metal).
+    // Tsurf is stored in degrees C (matches fix surface/state/lm).
     vector_surf[i] = LiquidMetal::li_evap_flux(tvec[i], sticking);
   }
 }

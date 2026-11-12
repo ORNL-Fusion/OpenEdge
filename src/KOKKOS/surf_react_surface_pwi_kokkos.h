@@ -687,9 +687,11 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
           // R(E,theta_eff,c) -- CPU `rtable`; roughness shift as on CPU
           const int it = d_refl_tbl(m);
           const double cval = (d_conc_isp(m) >= 0) ? mat_conc_dev(isurf, d_conc_isp(m)) : 1.0;
+          // clamp to the table's lowest energy (CPU twin)
+          const double E_r = (E_in_eV > d_su_E(it,0)) ? E_in_eV : d_su_E(it,0);
           p_this = (d_su_kind(it) == 2)
-            ? sput_yield_lead(it, E_in_eV, theta_eff, twall_eff)
-            : sput_yield_lead(it, E_in_eV, theta_eff, cval);
+            ? sput_yield_lead(it, E_r, theta_eff, twall_eff)
+            : sput_yield_lead(it, E_r, theta_eff, cval);
           if (p_this < 0.0) p_this = 0.0;
           if (p_this > 1.0) p_this = 1.0;
         } else {

@@ -55,6 +55,13 @@ public:
     // ne [m^-3]; 0 for species outside this fix's reaction chain.
     double radiation_coeff(int isp, double te_eV, double ne_m3);
 
+    // true when both radiation tables (PLT, PRB) were loaded for the element
+    bool has_radiation_tables() const {
+      auto it = materials_rate_data.find(atomic_number);
+      return it != materials_rate_data.end() &&
+             it->second.plt_nQ > 0 && it->second.prb_nQ > 0;
+    }
+
     // Zero the 20-column per-cell source tally (array_grid). Called between
     // outer coupling iterations so each Gkeyll/SOLPS handoff sees a fresh
     // accumulation from the new puff, not a sum over previous iterations.
@@ -138,7 +145,7 @@ int    pweight_ewhich = -1;
 //   OUT_SUMMARY  (default): 6 cols = {Sp, Sm_x, Sm_y, Sm_z, Qe, Qi}, signs per
 //                 Sec.4 of docs/neutral_plasma_coupling/main.tex -- signed
 //                 plasma-frame source moments, ready to feed a fluid solver.
-//   OUT_DETAILED (diagnostic): 20 cols = quantity x reaction cross-product
+//   OUT_DETAILED (diagnostic): 28 cols = quantity x reaction cross-product
 //                 {count, m vx, m vy, m vz, 0.5 m v^2} x
 //                 {ioniz, recomb, CX, dissoc}, unsigned raw tally (legacy
 //                 layout, kept for per-reaction debugging). No Eeff folding,
