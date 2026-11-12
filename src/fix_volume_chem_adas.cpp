@@ -2232,11 +2232,33 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
     return 1;
   }
 
-  // species/charge change invalidates the stored guiding-center state
-  // (q/m-dependent v_par and mu are meaningless across the swap; the
-  // pusher re-inits from the resampled v on the next step)
-  if (update->pusher)
-    update->pusher->invalidate_gc(ip_index, Pusher::GC_INVAL_SPECIES);
+  // Stored guiding-centre state across the swap. An electron-impact
+  // change between two charged states leaves the heavy particle's
+  // velocity alone, so v_par and mu stay valid: keep the state. The slot
+  // velocity of a GCA marker is a step chord, not a physical velocity, so
+  // a rebuild from it would discard the marker's energy. Recombination to
+  // a neutral gets the physical velocity of the orbit (random gyrophase)
+  // before the state goes. CX sets its own velocity; dissociation products
+  // still start from the slot velocity.
+  if (update->pusher && update->pusher->pusher_mode != Pusher::PUSHER_BORIS) {
+    const double q_old = particle->species[ip->ispecies].charge;
+    const double q_new = particle->species[rchosen->products[0]].charge;
+    const bool keeps_velocity = !do_cx && !do_dissoc;
+    Pusher::GuidingCentre gc;
+    const bool stored = keeps_velocity && q_old != 0.0 &&
+      update->pusher->guiding_centre(ip_index,nullptr,gc) && gc.stored;
+    if (stored && q_new == 0.0) {
+      GCAPusher::GCAFields F;
+      const double m = particle->species[ip->ispecies].mass;
+      if (m > 0.0 && update->pusher->sample_gca_fields(ip->x,ip->icell,ip_index,F)) {
+        MaterializedOrbit mo = update->pusher->materialize_orbit(
+          ip_index,F.B,q_old*update->echarge/m,m,rng_adas->uniform());
+        if (mo.valid) { ip->v[0] = mo.v[0]; ip->v[1] = mo.v[1]; ip->v[2] = mo.v[2]; }
+      }
+    }
+    if (!stored || q_new == 0.0)
+      update->pusher->invalidate_gc(ip_index, Pusher::GC_INVAL_SPECIES);
+  }
 
   if (do_cx) {
     ip->ispecies = rchosen->products[0];
