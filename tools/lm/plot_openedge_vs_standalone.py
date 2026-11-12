@@ -48,8 +48,8 @@ plt.rcParams.update({
 KB = 1.380649e-23
 MLI = 1.1526e-26
 ATM_TO_PA = 101325.0
-ANTOINE_A = 5.66797
-ANTOINE_B = 8310.41
+ANTOINE_A = 5.055
+ANTOINE_B = 8023.0
 
 
 def li_evap_flux(T_C, sticking=1.0):
