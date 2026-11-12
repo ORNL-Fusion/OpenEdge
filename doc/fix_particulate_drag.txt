@@ -87,8 +87,7 @@ positive neutral density and temperature; otherwise it contributes
 zero. {efield yes} applies the acceleration Z_d e E / m_d from the
 local electric field and the particulate charge. {gravity} adds a
 constant acceleration given in physical (R, Z, phi) components, mapped
-to the active storage layout. Do not apply gravity both here and
-through "fix gravity"_fix_force_gravity.html.
+to the active storage layout.
 
 The {radius}, {mass} and {temp} keywords fill in particulate state
 that is missing on a particle; values already present are not
@@ -99,8 +98,7 @@ replaced.
 [Restrictions:]
 
 This fix is part of the OPENEDGE package. It requires a "fix
-background"_fix_background.html. The {gravity} keyword cannot be
-combined with a "fix gravity"_fix_force_gravity.html command. Model
+background"_fix_background.html. Model
 {dis2021} requires a {material} defined by a "material"_material.html
 command with a {provenance} string and an explicit rho; with
 {coulomb/self yes} it also requires {charge} naming a fix
@@ -111,9 +109,8 @@ defined before this fix.
 [Related commands:]
 
 "fix particulate/charge"_fix_particulate_charge.html, "fix
-particulate/thermal"_fix_particulate_thermal.html, "fix
-gravity"_fix_force_gravity.html, "material"_material.html, "fix
-background"_fix_background.html
+particulate/thermal"_fix_particulate_thermal.html,
+"material"_material.html, "fix background"_fix_background.html
 
 [Default:]
 

@@ -74,8 +74,8 @@ PARAM_SETS = {
         ],
     },
     "openedge": {
-        "antoine_a": 5.66797,
-        "antoine_b": 8310.41,
+        "antoine_a": 5.055,
+        "antoine_b": 8023.0,
         "pressure_unit": "atm",
         "alpha": 1.0,
         "f_neut": 0.35,

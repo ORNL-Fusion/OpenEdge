@@ -268,7 +268,7 @@ void SurfCollideDiffuse::diffuse(Particle::OnePart *p, double *norm)
   if (elastic_flag) {
     double vmag = MathExtra::len3(v);
     if (vmag == 0.0) return;
-    double cosTheta = random->uniform();
+    double cosTheta = sqrt(random->uniform());   // cosine law
     double sinTheta = sqrt(std::max(0.0, 1.0 - cosTheta*cosTheta));
     double phi = MY_2PI * random->uniform();
     double cosPhi = cos(phi), sinPhi = sin(phi);

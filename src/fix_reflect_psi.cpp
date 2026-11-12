@@ -615,10 +615,10 @@ bool FixReflectPsi::segment_crossing(const double x0[3], const double x1[3],
 
   if (domain->dimension == 3) {
     if (R <= 1.0e-30) return false;
-    normal[0] = gR*xc[0]/R;
-    normal[1] = gR*xc[1]/R;
+    normal[0] = gR*(xc[0]-column_x0_)/R;
+    normal[1] = gR*(xc[1]-column_y0_)/R;
     normal[2] = gZ;
-  } else if (domain->axisymmetric) {
+  } else if (OpenEdge::use_axi_rz(domain->axisymmetric)) {
     normal[0] = gZ;
     normal[1] = gR;
     normal[2] = 0.0;

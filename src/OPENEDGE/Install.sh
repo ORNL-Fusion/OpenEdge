@@ -67,8 +67,6 @@ override surf_collide_diffuse.h
 # --- New OpenEdge files ---
 action background_zones3d.cpp
 action background_zones3d.h
-action compute_eflux_grid.cpp
-action compute_eflux_grid.h
 action compute_grid_weighted.cpp
 action compute_grid_weighted.h
 action compute_impact_energy.cpp
@@ -87,6 +85,11 @@ action compute_surf_weighted.cpp
 action compute_surf_weighted.h
 action compute_volume_emissivity_grid.cpp
 action compute_volume_emissivity_grid.h
+action core_transport_1d.cpp
+action core_transport_1d.h
+action core_transport_exchange.h
+action core_transport_geometry.h
+action core_transport_reservoir.h
 action database_paths.cpp
 action database_paths.h
 action eckstein_sputter_data.h
@@ -113,12 +116,12 @@ action fix_particulate_thermal.cpp
 action fix_particulate_thermal.h
 action fix_efield_particle.cpp
 action fix_efield_particle.h
-action fix_force_gravity.cpp
-action fix_force_gravity.h
 action fix_force_thermal.cpp
 action fix_force_thermal.h
 action fix_store_force.cpp
 action fix_store_force.h
+action fix_core_transport.cpp
+action fix_core_transport.h
 action fix_particle_tag.cpp
 action fix_particle_tag.h
 action fix_particle_weight.cpp
@@ -167,8 +170,6 @@ action surf_collide_partial_recycle.cpp
 action surf_collide_partial_recycle.h
 action surf_collide_toroidal.cpp
 action surf_collide_toroidal.h
-action surf_react_mpex.cpp
-action surf_react_mpex.h
 action surf_react_surface_pwi.cpp
 action surf_react_surface_pwi.h
 action surf_state_multilayer.cpp

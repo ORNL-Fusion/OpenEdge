@@ -229,7 +229,7 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
           static const std::map<int, std::string> z_to_sym = {
             {1,"d"}, {2,"he"}, {3,"li"}, {4,"be"}, {5,"b"}, {6,"c"},
             {7,"n"}, {8,"o"}, {10,"ne"}, {18,"ar"}, {26,"fe"}, {36,"kr"},
-            {42,"mo"}, {54,"xe"}, {73,"ta"}, {74,"w"},
+            {42,"mo"}, {54,"xe"}, {74,"w"},
           };
           auto it = z_to_sym.find(zc);
           if (it != z_to_sym.end()) elem_for_catalog = it->second;
@@ -300,7 +300,7 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
         static const std::map<int, std::string> z_to_sym = {
           {1,"h"}, {2,"he"}, {3,"li"}, {4,"be"}, {5,"b"}, {6,"c"},
           {7,"n"}, {8,"o"}, {10,"ne"}, {18,"ar"}, {26,"fe"}, {36,"kr"},
-          {42,"mo"}, {54,"xe"}, {73,"ta"}, {74,"w"},
+          {42,"mo"}, {54,"xe"}, {74,"w"},
         };
         auto it = z_to_sym.find(atomic_number);
         if (it != z_to_sym.end()) elem_sym = it->second;
@@ -332,6 +332,16 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
                   rd.prb_nQ, rd.prb_nT, rd.prb_nD);
           lib.load_ionization_potential(elem_sym, rd.ion_potential);
           loaded_from_processes = scd && acd;
+          // Q_e needs I_Z for every charge state: no silent zero
+          if (loaded_from_processes &&
+              (int) rd.ion_potential.size() < atomic_number) {
+            std::string msg = "fix volume/chem/adas: ionization potentials "
+              "for element '" + elem_sym + "' (Z=" +
+              std::to_string(atomic_number) + ") missing or incomplete in " +
+              processes_path + " (/volume/thresholds/ionization/" + elem_sym +
+              "/energy); the electron energy source needs them";
+            error->all(FLERR, msg.c_str());
+          }
           if (loaded_from_processes) {
             rd.Atomic_Number = std::vector<double>(1, (double)atomic_number);
             if (comm->me == 0)
@@ -485,7 +495,7 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
         tally_units = TALLY_BATCH_FIX;
         iarg += 4;
       } else {
-        error->all(FLERR, "fix volume/chem/adas: units must be counts|rate|batch|batch_fix");
+        error->all(FLERR, "fix volume/chem/adas: units must be counts|rate|flight|batch|batch_fix");
       }
     } else if (strcmp(arg[iarg], "output") == 0) {
       if (iarg + 1 >= narg)
@@ -810,6 +820,15 @@ void FixVolumeChemAdas::init()
     report("recombination", nR_active, nR_total, chan_recombination);
     report("cx",            nE_active, nE_total, chan_cx);
     report("dissociation",  nD_active, nD_total, chan_dissociation);
+    if (nE_active > 0 && chan_cx && atomic_number != 1) {
+      FixBackground *bg = nullptr;
+      for (int i = 0; i < modify->nfix && !bg; i++)
+        bg = dynamic_cast<FixBackground *>(modify->fix[i]);
+      if (!bg || (!bg->has_neutral_dens() && !bg->is_zones3d()))
+        error->warning(FLERR, "fix volume/chem/adas: charge-exchange reactions are "
+                       "active but the background has no neutral density "
+                       "(mesh/dens_n); charge exchange is off");
+    }
     if (!missing_species_samples.empty()) {
       printf("[volume/chem/adas] missing species (first %zu): ",
              missing_species_samples.size());
@@ -897,7 +916,7 @@ void FixVolumeChemAdas::init()
 // Plasma cache is the only source path; the gate check fires at the
 // first end_of_step (here is too early — update->init() runs after).
 
-// Allocate per-cell source-tally output (array_grid, 6 or 20 cols depending
+// Allocate per-cell source-tally output (array_grid, 6 or 28 cols depending
 // on output_mode) up front so dumps that fire at step 0
 // (dump_modify ... first yes) see a valid buffer.
 if (grid->maxlocal > maxgrid_src) {
@@ -1125,7 +1144,7 @@ void FixVolumeChemAdas::end_of_step_no_average()
   pweight_index  = particle->find_custom((char *) "pweight");
   pweight_ewhich = (pweight_index >= 0) ? particle->ewhich[pweight_index] : -1;
 
-  // Ensure per-cell source-tally array (20 columns) tracks current grid size.
+  // Ensure per-cell source-tally array (6 or 28 columns) tracks current grid size.
   // In TALLY_COUNTS mode this grows but never zeros across steps (cumulative).
   // In TALLY_RATE mode we additionally zero the whole buffer each call so the
   // subsequent accumulate + normalize yields an instantaneous rate over the
@@ -1430,8 +1449,6 @@ void FixVolumeChemAdas::spawn_volume_recombination()
   const int   sp_prod  = rec_product_isp[0];
   const double m_prod  = particle->species[sp_prod].mass;
 
-  constexpr double eV_to_J = 1.602176634e-19;
-  constexpr double kB      = 1.380649e-23;
 
   auto mit = materials_rate_data.find(atomic_number);
   const bool have_tables = (mit != materials_rate_data.end());
@@ -1545,9 +1562,9 @@ void FixVolumeChemAdas::spawn_volume_recombination()
         viy = vpar * by * invB;
         viz = vpar * bz * invB;
       }
-      const double Ti_J = std::max(Ti_eV, 0.0) * eV_to_J;
-      const double Ti_K = Ti_J / kB;
-      const double v_th = (m_prod > 0.0) ? std::sqrt(kB * Ti_K / m_prod) : 0.0;
+      const double Ti_J = std::max(Ti_eV, 0.0) * PhysConst::QE;
+      const double Ti_K = Ti_J / PhysConst::KB;
+      const double v_th = (m_prod > 0.0) ? std::sqrt(PhysConst::KB * Ti_K / m_prod) : 0.0;
 
       double E_rad_J = 0.0;
       if (have_rad) {
@@ -1872,7 +1889,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
         if (rlist[ridx_map[i]].type != EXCHANGE) continue;
         const double m_atom = particle->species[isp].mass;
         const double v2p = ip->v[0]*ip->v[0] + ip->v[1]*ip->v[1] + ip->v[2]*ip->v[2];
-        const double E_atom_eV = 0.5 * m_atom * v2p / 1.602176634e-19;
+        const double E_atom_eV = 0.5 * m_atom * v2p / PhysConst::QE;
         const double lam = computeReactionLambda(
           log10_sigmav_cx_hh_cm3s(Ti_eV, E_atom_eV), dt_chem, ne_m3);
         lambda_total += lam - lambda[i];
@@ -1908,8 +1925,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
           const double m_atom = particle->species[isp].mass;
           const double vx0p = ip->v[0], vy0p = ip->v[1], vz0p = ip->v[2];
           const double v2p  = vx0p*vx0p + vy0p*vy0p + vz0p*vz0p;
-          constexpr double eV_to_J_local = 1.602176634e-19;
-          const double E_atom_eV = 0.5 * m_atom * v2p / eV_to_J_local;
+          const double E_atom_eV = 0.5 * m_atom * v2p / PhysConst::QE;
           rate_log10_cm3s = log10_sigmav_cx_hh_cm3s(Ti_eV, E_atom_eV);
         } else {
           // Impurity-H CX (ADAS CCD): partner = NEUTRAL D (mesh/dens_n).
@@ -1983,10 +1999,9 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
   double vprod[2][3] = {{ip->v[0], ip->v[1], ip->v[2]},
                         {ip->v[0], ip->v[1], ip->v[2]}};
   if (do_dissoc && rchosen->efc > 0.0) {
-    const double eV_to_J_fc = 1.602176634e-19;
     const double m0 = particle->species[rchosen->products[0]].mass;
     const double v_FC = (m0 > 0.0)
-      ? std::sqrt(2.0 * rchosen->efc * eV_to_J_fc / m0) : 0.0;
+      ? std::sqrt(2.0 * rchosen->efc * PhysConst::QE / m0) : 0.0;
     const double costh = 1.0 - 2.0 * rng_adas->uniform();
     const double sinth = std::sqrt(std::max(0.0, 1.0 - costh*costh));
     const double phi   = MY_2PI * rng_adas->uniform();
@@ -2008,7 +2023,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
   //     col 4 : Qe   (electron energy source, J)
   //     col 5 : Qi   (ion energy source, J)
   //
-  //   OUT_DETAILED (20 cols, unsigned per-reaction raw tally):
+  //   OUT_DETAILED (28 cols, unsigned per-reaction raw tally):
   //     col  0.. 3 = count  (ioniz, recomb, CX, dissoc)
   //     col  4.. 7 = sum(m*vx)
   //     col  8..11 = sum(m*vy)
@@ -2052,7 +2067,6 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
 
     {
       // signed plasma-frame moments (both output modes)
-      constexpr double eV_to_J = 1.602176634e-19;
 
       // Ion velocity approximation: fluid parallel flow v_par * b_hat.
       const double Bmag = std::sqrt(bx*bx + by*by + bz*bz);
@@ -2069,7 +2083,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
       // Reactant charge state (neutral=0 for ionization, q=charge for recomb).
       const size_t q = static_cast<size_t>(
                          std::max(0.0, particle->species[isp0].charge));
-      const double Ti_J = Ti_eV * eV_to_J;
+      const double Ti_J = Ti_eV * PhysConst::QE;
 
       // Rate tables live in materials_rate_data[atomic_number], not the
       // unused default `rate_data` member.  The loader writes there (see
@@ -2104,14 +2118,14 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
           if (std::isfinite(plt_log10) && std::isfinite(scd_log10)) {
             // PLT [log10 W cm^3] - SCD [log10 cm^3/s] = log10 (W s) = log10 J
             const double J_per_event = std::pow(10.0, plt_log10 - scd_log10);
-            E_eff_eV += J_per_event / eV_to_J;
+            E_eff_eV += J_per_event / PhysConst::QE;
           }
         }
         dSp  = +1.0;
         dSmx = +m * vx0;
         dSmy = +m * vy0;
         dSmz = +m * vz0;
-        dQe  = -E_eff_eV * eV_to_J;
+        dQe  = -E_eff_eV * PhysConst::QE;
         // Ionization adds the neutral's KE to the ion
         // fluid. Thermalisation to local Ti happens later as a fluid
         // process, not here. No thermal subtraction.
@@ -2132,14 +2146,14 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
                               acd_log10, ReactionType::Recombination);
           if (std::isfinite(prb_log10) && std::isfinite(acd_log10)) {
             const double J_per_event = std::pow(10.0, prb_log10 - acd_log10);
-            E_rec_loss_eV = J_per_event / eV_to_J;
+            E_rec_loss_eV = J_per_event / PhysConst::QE;
           }
         }
         dSp  = -1.0;
         dSmx = -m * vix;
         dSmy = -m * viy;
         dSmz = -m * viz;
-        dQe  = -E_rec_loss_eV * eV_to_J;
+        dQe  = -E_rec_loss_eV * PhysConst::QE;
         dQi  = -(0.5 * m * vi2 + 1.5 * Ti_J);   // drift KE + thermal (3/2 kB Ti)
         break;
       }
@@ -2161,7 +2175,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
         // bulk-ion products enter the ion fluid with their full velocity
         dSp  = 0.0;
         dSmx = dSmy = dSmz = 0.0;
-        dQe  = -rchosen->eel * eV_to_J;
+        dQe  = -rchosen->eel * PhysConst::QE;
         dQi  = 0.0;
         for (int k = 0; k < rchosen->nproduct && k < 2; k++) {
           if (!rchosen->bulkprod[k]) continue;
@@ -2218,11 +2232,33 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
     return 1;
   }
 
-  // species/charge change invalidates the stored guiding-center state
-  // (q/m-dependent v_par and mu are meaningless across the swap; the
-  // pusher re-inits from the resampled v on the next step)
-  if (update->pusher)
-    update->pusher->invalidate_gc(ip_index, Pusher::GC_INVAL_SPECIES);
+  // Stored guiding-centre state across the swap. An electron-impact
+  // change between two charged states leaves the heavy particle's
+  // velocity alone, so v_par and mu stay valid: keep the state. The slot
+  // velocity of a GCA marker is a step chord, not a physical velocity, so
+  // a rebuild from it would discard the marker's energy. Recombination to
+  // a neutral gets the physical velocity of the orbit (random gyrophase)
+  // before the state goes. CX sets its own velocity; dissociation products
+  // still start from the slot velocity.
+  if (update->pusher && update->pusher->pusher_mode != Pusher::PUSHER_BORIS) {
+    const double q_old = particle->species[ip->ispecies].charge;
+    const double q_new = particle->species[rchosen->products[0]].charge;
+    const bool keeps_velocity = !do_cx && !do_dissoc;
+    Pusher::GuidingCentre gc;
+    const bool stored = keeps_velocity && q_old != 0.0 &&
+      update->pusher->guiding_centre(ip_index,nullptr,gc) && gc.stored;
+    if (stored && q_new == 0.0) {
+      GCAPusher::GCAFields F;
+      const double m = particle->species[ip->ispecies].mass;
+      if (m > 0.0 && update->pusher->sample_gca_fields(ip->x,ip->icell,ip_index,F)) {
+        MaterializedOrbit mo = update->pusher->materialize_orbit(
+          ip_index,F.B,q_old*update->echarge/m,m,rng_adas->uniform());
+        if (mo.valid) { ip->v[0] = mo.v[0]; ip->v[1] = mo.v[1]; ip->v[2] = mo.v[2]; }
+      }
+    }
+    if (!stored || q_new == 0.0)
+      update->pusher->invalidate_gc(ip_index, Pusher::GC_INVAL_SPECIES);
+  }
 
   if (do_cx) {
     ip->ispecies = rchosen->products[0];
@@ -2283,11 +2319,9 @@ void FixVolumeChemAdas::sample_cx_velocity(int sp_prod, double Ti_eV,
                                            const double *v_parent,
                                            double *v_post)
 {
-  const double kB = 1.380649e-23;
-  const double eV_to_J = 1.602176634e-19;
-  const double Ti_K = Ti_eV * eV_to_J / kB;
+  const double Ti_K = Ti_eV * PhysConst::QE / PhysConst::KB;
   const double m_prod = particle->species[sp_prod].mass;
-  const double v_th = (m_prod > 0.0) ? std::sqrt(kB * Ti_K / m_prod) : 0.0;
+  const double v_th = (m_prod > 0.0) ? std::sqrt(PhysConst::KB * Ti_K / m_prod) : 0.0;
 
   const double Bmag = std::sqrt(bx*bx + by*by + bz*bz);
   double vfx = 0.0, vfy = 0.0, vfz = 0.0;
@@ -2304,7 +2338,7 @@ void FixVolumeChemAdas::sample_cx_velocity(int sp_prod, double Ti_eV,
     // Maxwellian weighted by sigma_CX(E_rel)*v_rel. Post-CX neutral
     // takes the sampled ion velocity. SGCVMX is a conservative upper
     // bound on sigma*v across the relevant E_rel range.
-    const double E_lab_factor = 0.5 * m_prod / eV_to_J;
+    const double E_lab_factor = 0.5 * m_prod / PhysConst::QE;
     constexpr double SGCVMX = 1.2e-13;
     double v_post_x = 0.0, v_post_y = 0.0, v_post_z = 0.0;
     int icount = 0;

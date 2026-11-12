@@ -4,7 +4,8 @@ Verifies the `surf_react surface/pwi` keywords `deposit_as`, `adens_init_file`,
 `adens_init_group`, the `S`-channel `yscale`, and the
 `compute surface/physical/sputter` keywords `target_like` / `yield_scale`.
 
-A hot W beam (`model thermal`, 3e6 K) from a source plane deposits on a W
+A W beam (`model thermal`, 1e6 K, mean impact energy ~170 eV, well below unit
+self-sputter yield so net deposition is robust) from a source plane deposits on a W
 plate while W self-sputtering (RustBCA `w_on_w`) erodes it.
 
 | case | deck | what it checks |

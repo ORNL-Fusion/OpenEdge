@@ -165,6 +165,27 @@ def ip_filename(symbol: str) -> str:
     return f"ADAS_ionization_potentials_{symbol[0].upper() + symbol[1:].lower()}"
 
 
+def nist_ip_filename(symbol: str) -> str:
+    return f"NIST_ionization_energies_{symbol[0].upper() + symbol[1:].lower()}.txt"
+
+
+def load_nist_ionization_energies(path: Path, Z: int) -> np.ndarray:
+    """Parse a NIST ASD ionization-energy table (tab-delimited, format=3).
+
+    Rows are "Z" "Sp. Name" "Ion Charge" "Prefix" "Energy (eV)" "Suffix".
+    Returns Z floats (eV) indexed by the charge before ionization.
+    """
+    vals = np.full(Z, np.nan)
+    for line in path.read_text().splitlines():
+        cols = [c.strip().strip('"') for c in line.split("\t")]
+        if len(cols) < 5 or not cols[0].isdigit() or int(cols[0]) != Z:
+            continue
+        vals[int(cols[2])] = float(cols[4])
+    if np.isnan(vals).any():
+        raise RuntimeError(f"{path}: missing charge states for Z={Z}")
+    return vals
+
+
 def build_element(symbol: str, Z: int, adf11_dir: Path, ip_dir: Path,
                   year: str, out_dir: Path, verbose: bool = True) -> Path:
     out_path = out_dir / f"ADAS_Rates_{Z}.h5"

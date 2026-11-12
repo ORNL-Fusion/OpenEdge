@@ -7,6 +7,30 @@
 https://github.com/ORNL-Fusion/OpenEdge
 ------------------------------------------------------------------------- */
 
+// Physical constants, SI (CODATA 2018): the one definition for the code.
+// Standalone tools define SPARTA_CONSTANTS_ONLY to take this block alone.
+#ifndef SPARTA_PHYS_CONST
+#define SPARTA_PHYS_CONST
+namespace SPARTA_NS {
+namespace PhysConst {
+  constexpr double QE       = 1.602176634e-19;    // elementary charge [C], J per eV
+  constexpr double KB       = 1.380649e-23;       // Boltzmann [J/K]
+  constexpr double AMU      = 1.66053906660e-27;  // atomic mass unit [kg]
+  constexpr double ME       = 9.1093837015e-31;   // electron mass [kg]
+  constexpr double MP       = 1.67262192369e-27;  // proton mass [kg]
+  constexpr double EPS0     = 8.8541878128e-12;   // vacuum permittivity [F/m]
+  constexpr double NA       = 6.02214076e23;      // Avogadro [1/mol]
+  constexpr double SIGMA_SB = 5.670374419e-8;     // Stefan-Boltzmann [W/m^2/K^4]
+  constexpr double CLIGHT   = 299792458.0;        // speed of light [m/s]
+  constexpr double HBAR     = 1.054571817e-34;    // reduced Planck [J s]
+  constexpr double EV2K     = QE / KB;            // eV to Kelvin
+  constexpr double KB_EV    = KB / QE;            // Boltzmann [eV/K]
+}
+}
+#endif
+
+#ifndef SPARTA_CONSTANTS_ONLY
+
 #ifndef SPARTA_UPDATE_H
 #define SPARTA_UPDATE_H
 
@@ -239,6 +263,12 @@ struct SurfHit2D {
   FixReflectPsi *psi_reflect_fix; // owns species-resolved absorption ledger
   int tag_index;               // fix particle/tag: custom "transit" index, -1 = off
   int tag_groupbit;            // surf group whose hits set the flag (0 = none)
+  class FixCoreTransport *core_fix;   // fix core/transport: absorbs chain markers
+  int core_groupbit;                  // at the core surf group (0 = off)
+  int core_neutral_groupbit;          // auxiliary coupling: chain neutrals are absorbed here
+  const int *core_species;            // charge state per species, -1 = not in chain
+  int gc_sync_groupbit;               // surf group that reflects guiding centres: the
+                                      // stored GC follows the reflected path (0 = off)
   int psi_nw, psi_nh;         // equilibrium grid dimensions
   double psi_axis, psi_bry;   // psi at axis and boundary
   double *psi_r_grid;         // R grid [psi_nw] (owned by fix, do not free)
@@ -515,6 +545,8 @@ static double dist_point_tri(const double p[3], const double a[3],
 }
 
 #endif
+
+#endif   // SPARTA_CONSTANTS_ONLY
 
 /* ERROR/WARNING messages:
 

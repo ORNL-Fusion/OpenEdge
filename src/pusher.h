@@ -185,6 +185,34 @@ class Pusher : protected Pointers {
   bool sample_gca_fields(const double *xpos, int icell, int i,
                          GCAPusher::GCAFields &F);
   void register_gca_custom();
+
+  // ---- Guiding-centre state API (for operators that work on guiding
+  // centres, e.g. the core exchange) ---------------------------------
+  // mode: branch that integrated the last step (0 Boris, 1 GCA, -1 unknown).
+  // stored: true = the persistent (X, v_par, mu) of a marker whose GC
+  // state is valid; false = lowest-order local-field map of a Boris
+  // marker (X = x + v x b/Omega, uniform-field accurate, error
+  // O(rho_L/L_B)).
+  struct GuidingCentre { double X[3], vpar, mu; int mode; bool stored; };
+  // Read. B = local field in slot coordinates, needed only for the
+  // converted case. Returns false when no guiding centre is available:
+  // no field for a Boris marker, an uncharged marker, or a GCA marker
+  // whose state was invalidated (g.mode = 1 then; its slot may already
+  // hold the guiding centre, so it is never converted as a full orbit).
+  bool guiding_centre(int i, const double *B, GuidingCentre &g) const;
+  // Write the complete state of a marker created as a guiding centre:
+  // custom X, v_par, mu, mode = GCA, valid, gyroangle 0; the particle
+  // sits at X with the velocity reconstructed at gyrophase phase01.
+  // Returns false and writes NOTHING under the boris pusher, without
+  // the GC attributes, or for non-finite / unphysical inputs.
+  bool set_guiding_centre(int i, const double X[3], double vpar, double mu,
+                          const double B[3], double phase01);
+  // Boundary operation for a guiding-centre marker reflected at an
+  // internal surface (e.g. the core cut): move the stored X to the
+  // position the reflected path ends at, keep v_par and mu. Without it
+  // the next push restarts from the pre-reflection X. Returns false
+  // (nothing written) if the marker has no valid GC state.
+  bool sync_gc_position(int i, const double *x);
   void log_switch(int id, int oldmode, int newmode, const char *reason,
                   double d_start, double d_end, double d_sw,
                   double e_pre, double e_post, int replay);
@@ -210,6 +238,11 @@ class Pusher : protected Pointers {
   bool apply_parallel_impulse(int i, double dvpar);
   bool apply_gc_displacement(int i, const double *dx);
   void invalidate_gc(int i, int reason);
+  // rotation about the z axis (periodic cap): stored position only
+  void rotate_gc(int i, double c, double s);
+  // marker on the GCA branch with a valid state: X = stored guiding centre
+  // (the end point of its step). false leaves X untouched
+  bool gca_end_point(int i, double *X) const;
   // Unified sheath wall potential for surface element midx at the exact
   // event time (t_offset seconds into the current step): sheath
   // base + RF waveform, from the per-element cache. Returns
@@ -454,6 +487,19 @@ inline void gca_perp_basis(const double bhat[3], double e1[3], double e2[3])
   e2[0] = bhat[1]*e1[2] - bhat[2]*e1[1];
   e2[1] = bhat[2]*e1[0] - bhat[0]*e1[2];
   e2[2] = bhat[0]*e1[1] - bhat[1]*e1[0];
+}
+
+// Thermal guiding centre at temperature kT [J] for a marker created in
+// a VOLUME (not a flux through a surface): v_par Gaussian with variance
+// kT/m, perpendicular energy exponential with mean kT (two degrees of
+// freedom), mu = E_perp/B. u1..u3 uniform in (0,1).
+inline void sample_thermal_gc(double kT, double mass, double Bmag,
+                              double u1, double u2, double u3,
+                              double &vpar, double &mu)
+{
+  const double a1 = (u1 > 1e-300) ? u1 : 1e-300, a3 = (u3 > 1e-300) ? u3 : 1e-300;
+  vpar = std::sqrt(kT/mass) * std::sqrt(-2.0*std::log(a1)) * std::cos(2.0*M_PI*u2);
+  mu = (Bmag > 0.0) ? -kT*std::log(a3)/Bmag : 0.0;
 }
 
 inline void gca_to_particle(const GCAState &state, const double B[3],

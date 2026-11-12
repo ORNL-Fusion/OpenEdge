@@ -33,6 +33,7 @@ SurfReactStyle(surface/pwi/kk,SurfReactSurfacePWIKokkos)
 #define SPARTA_SURF_REACT_SURFACE_PWI_KOKKOS_H
 
 #include "kokkos_type.h"
+#include "update.h"
 #include "surf_react_surface_pwi.h"
 #include "particle_kokkos.h"
 #include "rand_pool_wrap.h"
@@ -51,8 +52,8 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
 
   static constexpr int PWI_NANG = 18;      // = base EHIST_NANG (5-deg bins)
   static constexpr double PWI_2PI = 6.283185307179586;
-  static constexpr double PWI_EV2J = 1.602176634e-19;
-  static constexpr double PWI_KB = 1.380649e-23;
+  static constexpr double PWI_EV2J = PhysConst::QE;
+  static constexpr double PWI_KB = PhysConst::KB;
 
   SurfReactSurfacePWIKokkos(class SPARTA *, int, char **);
   SurfReactSurfacePWIKokkos(class SPARTA *);   // KKCopy shallow copy
@@ -688,9 +689,11 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
           // R(E,theta_eff,c) -- CPU `rtable`; roughness shift as on CPU
           const int it = d_refl_tbl(m);
           const double cval = (d_conc_isp(m) >= 0) ? mat_conc_dev(isurf, d_conc_isp(m)) : 1.0;
+          // clamp to the table's lowest energy (CPU twin)
+          const double E_r = (E_in_eV > d_su_E(it,0)) ? E_in_eV : d_su_E(it,0);
           p_this = (d_su_kind(it) == 2)
-            ? sput_yield_lead(it, E_in_eV, theta_eff, twall_eff)
-            : sput_yield_lead(it, E_in_eV, theta_eff, cval);
+            ? sput_yield_lead(it, E_r, theta_eff, twall_eff)
+            : sput_yield_lead(it, E_r, theta_eff, cval);
           if (p_this < 0.0) p_this = 0.0;
           if (p_this > 1.0) p_this = 1.0;
         } else {

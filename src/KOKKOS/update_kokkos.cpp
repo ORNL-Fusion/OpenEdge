@@ -2292,8 +2292,8 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
                 sk_te = d_oe_kick_te(i); sk_ti = d_oe_kick_ti(i);
               }
               if (phi_uni >= 0.0 || sk_te > 0.0) {
-                const double QE_k = 1.602176634e-19, ME_k = 9.1093837015e-31;
-                const double AMU_k = 1.66053906660e-27, PI_k = 3.14159265358979323846;
+                const double QE_k = PhysConst::QE, ME_k = PhysConst::ME;
+                const double AMU_k = PhysConst::AMU, PI_k = 3.14159265358979323846;
                 const double mD_kg = oe_sheath_mD_amu * AMU_k;
                 const double ti_ratio = (sk_te > 0.0 && sk_ti > 0.0) ? (sk_ti / sk_te) : 0.0;
                 const double phi_float_mult = (sk_te > 0.0)

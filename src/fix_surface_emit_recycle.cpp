@@ -42,10 +42,6 @@ enum{PKEEP,PINSERT,PDONE,PDISCARD,PENTRY,PEXIT,PSURF};
 #define DELTATASK 256
 
 namespace {
-  constexpr double QE    = 1.602176634e-19;   // C
-  constexpr double AMU   = 1.66053906660e-27; // kg
-  constexpr double KB    = 1.380649e-23;      // J/K
-  constexpr double ME    = 9.1093837015e-31;  // kg
 }
 
 /* ---------------------------------------------------------------------- */
@@ -187,6 +183,10 @@ void FixSurfaceEmitRecycle::init()
       if (logfile) fprintf(logfile, "fix surface/emit/recycle: wall_flux_cutoff %g m from the sample spacing\n", wall_flux_cutoff);
     }
   }
+  if (!plasma->has_wall_flux() && comm->me == 0)
+    error->warning(FLERR,"fix surface/emit/recycle: background has no "
+                   "/wall_flux samples; ion wall flux reconstructed as "
+                   "ne*cs*sin(alpha)");
   twall_by_species.assign(nspecies, twall);
   const int *mix_species = particle->mixture[imix]->species;
   for (size_t k = 0; k < twall_species_names.size(); k++) {
@@ -237,7 +237,7 @@ void FixSurfaceEmitRecycle::init()
 double FixSurfaceEmitRecycle::impact_energy_eV(double te_eV, double ti_eV) const
 {
   if (!(te_eV > 0.0)) return 2.0 * std::max(ti_eV, 0.0);
-  const double mi_over_me = (mass_amu * AMU) / ME;
+  const double mi_over_me = (mass_amu * PhysConst::AMU) / PhysConst::ME;
   const double psi_over_te = 0.5 * std::log(mi_over_me / (2.0 * MY_PI * (1.0 + ti_eV / te_eV)));
   return 2.0 * std::max(ti_eV, 0.0) + ion_charge * std::max(psi_over_te, 0.0) * te_eV;
 }
@@ -590,7 +590,7 @@ double FixSurfaceEmitRecycle::emission_rate_per_surface(int itask)
     if (!std::isfinite(ne) || !std::isfinite(te)) return 0.0;
     if (ne <= 0.0 || te <= 0.0) return 0.0;
     const double ti_eff = std::isfinite(ti) && ti > 0.0 ? ti : te;
-    const double cs_arg = (te + ti_eff) * QE / (mass_amu * AMU);
+    const double cs_arg = (te + ti_eff) * PhysConst::QE / (mass_amu * PhysConst::AMU);
     if (cs_arg <= 0.0) return 0.0;
     const double cs = std::sqrt(cs_arg);
     t.te_imp = te;
@@ -747,11 +747,11 @@ void FixSurfaceEmitRecycle::perform_task()
           // normal velocity component only
           const double ti = std::max(tasks[i].ti_imp, 1.0e-3);
           const double te = std::max(tasks[i].te_imp, 0.0);
-          const double sig = std::sqrt(ti * QE / mion);
-          const double c_s = std::sqrt((te + ti) * QE / mion);
+          const double sig = std::sqrt(ti * PhysConst::QE / mion);
+          const double c_s = std::sqrt((te + ti) * PhysConst::QE / mion);
           double e_sh = 0.0;
           if (te > 0.0) {
-            const double arg = (mion / ME) / (MY_PI * (1.0 + ti / te));
+            const double arg = (mion / PhysConst::ME) / (MY_PI * (1.0 + ti / te));
             e_sh = ion_charge * 0.5 * std::log(arg) * te;
             if (e_sh < 0.0) e_sh = 0.0;
           }
@@ -766,7 +766,7 @@ void FixSurfaceEmitRecycle::perform_task()
             vn = 0.0;
           }
           if (vn <= 0.0) vn = std::max(u_n, sig);
-          vn = std::sqrt(vn*vn + 2.0 * e_sh * QE / mion);
+          vn = std::sqrt(vn*vn + 2.0 * e_sh * PhysConst::QE / mion);
           const double vt1 = u_t + sig * random->gaussian();
           const double vt2 = sig * random->gaussian();
           for (int k = 0; k < 3; k++)
@@ -776,8 +776,8 @@ void FixSurfaceEmitRecycle::perform_task()
           // thermal part 2 Ti along the field line (normal component
           // sin_alpha), sheath part Z e phi_sh added to the normal motion:
           // total energy = impact_energy_eV, angle bent toward the normal
-          const double v_th = std::sqrt(2.0 * std::max(E_th, 1.0e-3) * QE / mion);
-          const double v_sh2 = 2.0 * std::max(E_sh, 0.0) * QE / mion;
+          const double v_th = std::sqrt(2.0 * std::max(E_th, 1.0e-3) * PhysConst::QE / mion);
+          const double v_sh2 = 2.0 * std::max(E_sh, 0.0) * PhysConst::QE / mion;
           const double v_tan = v_th * cos_a;
           const double v_nrm = std::sqrt(v_th*sin_a*v_th*sin_a + v_sh2);
           for (int k = 0; k < 3; k++)
@@ -817,13 +817,12 @@ void FixSurfaceEmitRecycle::perform_task()
       // v_parallel ~ two independent Gaussians (tangential)
       const double mspec = particle->species[ispecies].mass;
       const double t_emit = twall_by_species[isp];
-      const double vscale_twall = std::sqrt(2.0 * KB * t_emit / mspec);
+      const double vscale_twall = std::sqrt(2.0 * PhysConst::KB * t_emit / mspec);
 
       vnmag = vscale_twall * std::sqrt(-std::log(random->uniform()));
 
       theta = MY_2PI * random->uniform();
-      vr = vscale_twall * std::sqrt(-std::log(random->uniform()))
-           / std::sqrt(2.0);
+      vr = vscale_twall * std::sqrt(-std::log(random->uniform()));
       vamag = vr * std::sin(theta);
       vbmag = vr * std::cos(theta);
 

@@ -31,8 +31,10 @@ clean:
 
 .PHONY: html pdf clean
 
-# Sphinx manual (Read the Docs): doc/*.txt -> doc/src/*.rst -> doc/html_sphinx
-#   make rst      regenerate doc/src/*.rst from the .txt sources
+# Sphinx manual (Read the Docs): doc/src/*.rst -> doc/html_sphinx
+# Pages that start with ".. hand-edited" are maintained in doc/src and are
+# the source of truth; the remaining (stock SPARTA) pages come from doc/*.txt.
+#   make rst      regenerate the non-hand-edited doc/src/*.rst from .txt
 #   make sphinx   build the HTML manual with Sphinx into doc/html_sphinx
 # Needs `pip install -r doc/utils/requirements.txt`.
 SPHINX ?= sphinx-build

@@ -42,7 +42,6 @@ FixCoulombBackground::FixCoulombBackground(SPARTA *sparta, int narg, char **arg)
     error->all(FLERR, "fix coulomb/background: extra arguments");
 
   // precompute background mass and charge
-  const double amu = 1.66053906660e-27;  // kg
-  m_bg_ = A_bg_ * amu;
+  m_bg_ = A_bg_ * PhysConst::AMU;
   q_bg_ = Z_bg_ * update->echarge;
 }

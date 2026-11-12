@@ -168,7 +168,7 @@ int main(int argc, char **argv) {
     double Te = interp_solps(xq, 1);
     double Ti = interp_solps(xq, 2);
     double cs = (Te + Ti > 0.0)
-                ? std::sqrt(LiquidMetal::EV * (Te + Ti) / m_ion_kg) : 0.0;
+                ? std::sqrt(SPARTA_NS::PhysConst::QE * (Te + Ti) / m_ion_kg) : 0.0;
     double gamma_Dp = ne * cs;
     double adat = LiquidMetal::li_adatom_flux(s.Tsurf_dim[n], gamma_Dp);
     double Wtot = s.Q_net[n];

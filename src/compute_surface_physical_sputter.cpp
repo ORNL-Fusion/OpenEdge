@@ -97,6 +97,9 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
 
   int iarg_start;
   if (strcmp(arg[3],"file") == 0) {
+    // the file source carries no B field, which init() requires
+    error->all(FLERR,"compute surface/physical/sputter: the file source is "
+               "not supported; use background fix-ID");
     if (narg < 6) error->all(FLERR,"compute surface/physical/sputter: file needs plasma.h5");
     plasma_path = std::string(arg[4]);
     int after = try_parse_eckstein(5);
@@ -128,7 +131,7 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       iarg_start = after;
     }
   } else {
-    error->all(FLERR,"compute surface/physical/sputter: first keyword must be 'file' or 'background'");
+    error->all(FLERR,"compute surface/physical/sputter: first keyword must be 'background'");
     iarg_start = 6;  // unreachable, suppress warning
   }
 
@@ -253,9 +256,9 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       if (target_us <= 0.0) error->all(FLERR,"us must be > 0");
       iarg += 2;
     } else if (strcmp(arg[iarg],"tsurf") == 0) {
-      // Per-face surface temperature (surf custom vector, Kelvin) fed to
-      // T-dependent yield tables; without it a T table evaluates at its
-      // coldest slice (room-temperature/solid data).
+      // Per-face surface temperature (surf custom vector, degrees Celsius
+      // like Tsurf_lm; converted to K here) fed to T-dependent yield tables;
+      // without it a T table evaluates at its coldest slice.
       if (iarg+1 >= narg) error->all(FLERR,"tsurf needs custom surf name");
       tsurf_attr = arg[iarg+1];
       iarg += 2;
@@ -443,6 +446,12 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       error->all(FLERR,"compute surface/physical/sputter: compound is not "
                  "supported with the virtual impurity path");
   }
+  // the virtual impurity takes its yield from the eckstein entry or the
+  // yield file; target/projectiles tables are per projectile slot only
+  if (has_impurity && !target_element.empty())
+    error->all(FLERR,"compute surface/physical/sputter: impurity has no "
+               "yield with target/projectiles (use the eckstein or "
+               "yield-file form)");
   if (!sheath_waveform_attr.empty() &&
       (!compound_mix.empty() || has_impurity))
     error->all(FLERR,
@@ -648,6 +657,13 @@ void ComputeSurfacePhysicalSputter::load_plasma_from_fix(const FixBackground *pd
   mesh_ions_upar = pd->mesh_ions_upar;
   // Copy /wall_flux/ scatter (empty if plasma.h5 didn't have it).
   wall_flux_n     = pd->wall_flux.n;
+  static bool warned_no_wall_flux = false;
+  if (wall_flux_n == 0 && !warned_no_wall_flux && comm->me == 0) {
+    warned_no_wall_flux = true;
+    error->warning(FLERR,"compute surface/physical/sputter: background has "
+                   "no /wall_flux samples; ion wall flux reconstructed as "
+                   "ne*cs*sin(alpha)");
+  }
   wall_flux_nspec = pd->wall_flux.nspec;
   wall_flux_r     = pd->wall_flux.r;
   wall_flux_z     = pd->wall_flux.z;
@@ -877,6 +893,18 @@ void ComputeSurfacePhysicalSputter::resolve_projectile_tables(const FixBackgroun
     error->all(FLERR,
         "compute surface/physical/sputter: no plasma ion slots match the projectiles list "
         "(check /ion_species/elements in plasma.h5)");
+  // every requested projectile must exist in the background
+  for (size_t i = 0; i < N; i++) {
+    bool found = false;
+    for (int s = 0; s < pd->nion && !found; s++) found = (slot_to_table[s] == static_cast<int>(i));
+    if (!found) {
+      std::string msg = "compute surface/physical/sputter: projectile '" + projectile_elements[i] +
+          "' matches no plasma ion species (/ion_species/elements in plasma.h5 has:";
+      for (const auto &e : pd->ion_elements) msg += " " + e;
+      msg += ")";
+      error->all(FLERR, msg.c_str());
+    }
+  }
 
   // Auto-set the inclusive projectile slot range so in_projectile_slots()
   // returns true exactly for slots the user asked about.
@@ -1691,9 +1719,6 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
 void ComputeSurfacePhysicalSputter::compute_per_surf_body()
 {
   // Physical constants
-  const double QE  = 1.602176634e-19;   // elementary charge [C]
-  const double AMU = 1.66053906660e-27;  // atomic mass unit [kg]
-  const double ME  = 9.1093837015e-31;   // electron mass [kg]
 
   invoked_per_surf = update->ntimestep;
   const bool compound = !compound_mix.empty();
@@ -2048,7 +2073,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf_body()
       // of Y(E,theta), so the smoothness gain dominates the accuracy hit.
       const double ti_for_E = wf_te_ti_ok ? ti_bulk : ti;
       const double ti_eV = (std::isfinite(ti_for_E) && ti_for_E > 0.0) ? ti_for_E : 0.0;
-      const double cs_arg = (te_eV + ti_eV) * QE / (mass_amu * AMU);
+      const double cs_arg = (te_eV + ti_eV) * PhysConst::QE / (mass_amu * PhysConst::AMU);
       const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
 
       // Per-species wall-face flux. When /wall_flux/ is present in
@@ -2129,7 +2154,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf_body()
       // mi_bg is the *background* ion mass (sets the sheath); uses mass_amu
       // (default D = 2.014 amu). Do NOT use the impurity mass here.
       // For D+, Ti=Te this reduces to |e*dpsi| = 2.84*Te.
-      const double mi_over_me_bg = (mass_amu * AMU) / ME;
+      const double mi_over_me_bg = (mass_amu * PhysConst::AMU) / PhysConst::ME;
       const double ti_ratio = ti_eV / std::max(te_eV, 1.0e-30);
       const double psi_over_Te = 0.5 *
         std::log(mi_over_me_bg / (2.0 * M_PI * (1.0 + ti_ratio)));
@@ -2174,7 +2199,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf_body()
           if (!(ne_el > 0.0)) ne_el = ni;
           const double bvec[3] = {br_loc, bz_loc, bt_loc};
           const double nvec[3] = {nr_surf, nz_surf, nt_surf};
-          const double mslot = per_proj_M1[slot_to_table[s]] * AMU;
+          const double mslot = per_proj_M1[slot_to_table[s]] * PhysConst::AMU;
           ih = &iead_inline->get(te_eV, ti_eV, ne_el, bvec, nvec, mslot, z_inc,
                                  std::fabs(upar_s));
         }
@@ -2195,7 +2220,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf_body()
           const ProcessLibrary::TrimSputterTable &st = per_proj_sput_tbl[ti];
           // T-dependent tables: interpolate at the face temperature when
           // tsurf is given; tface 0 clamps to the coldest slice
-          const double tface = tsurf_vec ? tsurf_vec[i] : 0.0;
+          const double tface = tsurf_vec ? tsurf_vec[i] + 273.15 : 0.0;
           auto pair_yield = [&](double e_eV, double th_deg) {
             const double th = (th_deg > rough_dm) ? th_deg - rough_dm : 0.0;
             return st.valid() ? st.yield_at_T(e_eV, th, tface)
@@ -2298,7 +2323,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf_body()
 
           // Chankin 2014 eq. (4): see main loop above for derivation.
           // mi_bg = mass_amu (background D+), NOT imp_mass_amu.
-          const double mi_over_me_bg = (mass_amu * AMU) / ME;
+          const double mi_over_me_bg = (mass_amu * PhysConst::AMU) / PhysConst::ME;
           const double ti_ratio = ti_imp / std::max(te_loc, 1.0e-30);
           const double psi_over_Te = 0.5 *
             std::log(mi_over_me_bg / (2.0 * M_PI * (1.0 + ti_ratio)));
@@ -2306,7 +2331,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf_body()
                                static_cast<double>(Z) * psi_over_Te * te_loc;
 
           // Isothermal ion sound speed with impurity mass.
-          const double cs_arg = (te_loc + ti_imp) * QE / (imp_mass_amu * AMU);
+          const double cs_arg = (te_loc + ti_imp) * PhysConst::QE / (imp_mass_amu * PhysConst::AMU);
           const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
 
           // Bohm flux

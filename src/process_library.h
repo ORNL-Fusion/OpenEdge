@@ -86,8 +86,8 @@ class ProcessLibrary {
   // Dims come from the file (NE, NTHETA, NQ) -- caller does NOT assume
   // compile-time constants.  `pair` is e.g. "d_on_w", "c_on_c".
   struct TrimReflectionTable {
-    std::vector<double> E;              // [NE]        log(E_in) grid, eV
-    std::vector<double> theta;          // [NTHETA]    incidence-angle grid, rad
+    std::vector<double> E;              // [NE]        E_in grid, eV
+    std::vector<double> theta;          // [NTHETA]    incidence-angle grid, deg from normal
     std::vector<double> raar;           // [NQ]        quantile axis
     std::vector<double> R_N;            // [NE*NTHETA]
     std::vector<double> Eout_min;       // [NE*NTHETA]

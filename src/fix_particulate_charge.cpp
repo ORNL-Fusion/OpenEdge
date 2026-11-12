@@ -350,7 +350,7 @@ bool FixParticulateCharge::make_dis_parameters(
   p.Td_K = Td_K;
   p.radius_m = rd_m;
   p.relative_mach = u_mach;
-  p.ion_mass_kg = ion_mass_amu * 1.66053906660e-27;
+  p.ion_mass_kg = ion_mass_amu * PhysConst::AMU;
   p.ion_charge_state = ion_charge_state;
   p.work_function_eV = work_function_eV;
   p.richardson_A = richardson_A;
@@ -434,9 +434,8 @@ bool FixParticulateCharge::solve_phi_oml(double Te_eV, double Ti_eV,
   auto thermionic_current = [&]() -> double {
     if (!thermionic_on) return 0.0;
     if (!(Td_K > 0.0) || richardson_A <= 0.0 || work_function_eV <= 0.0) return 0.0;
-    const double eps0 = 8.8541878128e-12;
     const double W_inf_J = work_function_eV * qe;
-    const double dW = (qe * qe) / (16.0 * MY_PI * eps0 * rd_m);
+    const double dW = (qe * qe) / (16.0 * MY_PI * PhysConst::EPS0 * rd_m);
     const double W_rd = std::max(0.0, W_inf_J - dW);
     return area_emit * richardson_A * Td_K * Td_K
            * std::exp(-W_rd / (kB * Td_K));
@@ -529,7 +528,6 @@ bool FixParticulateCharge::solve_phi_oml(double Te_eV, double Ti_eV,
 
 void FixParticulateCharge::apply_charge_update()
 {
-  const double eps0 = 8.8541878128e-12;
   const double qe   = update->echarge;
   auto *parts = particle->particles;
   const int nlocal = particle->nlocal;
@@ -571,7 +569,7 @@ void FixParticulateCharge::apply_charge_update()
     {
       const double ion_mass = ion_mass_amu *
         (physics_model_ == ParticulateModel::DIS2021
-          ? 1.66053906660e-27 : update->proton_mass);
+          ? PhysConst::AMU : update->proton_mass);
       const double vti = std::sqrt(2.0 * (Ti * qe) / ion_mass);
       if (vti > 0.0) {
         const double d0 = p.v[0]-plasma.flow[0];
@@ -589,7 +587,7 @@ void FixParticulateCharge::apply_charge_update()
       continue;
     }
 
-    const double qd_coulomb = 4.0 * MY_PI * eps0 * rd * phi_s;
+    const double qd_coulomb = 4.0 * MY_PI * PhysConst::EPS0 * rd * phi_s;
     const double zd         = qd_coulomb / qe;
     if (!std::isfinite(zd)) continue;
 
@@ -597,13 +595,12 @@ void FixParticulateCharge::apply_charge_update()
 
     // Formal OML small-grain monitor. DIS 2021 explicitly applies its OML
     // surface potential beyond R_d/lambda_D=1 and extends the drag through
-    // the finite-size g_fit factor in Eqs. (A6)-(A7), implemented in
-    // particulate/drag. Keep the excursion visible without silently
+    // the finite-size g_fit factor in Eqs. (A6)-(A7), which is not
+    // implemented in particulate/drag. Keep the excursion visible without silently
     // substituting a different charging model and breaking code-to-code
     // reproducibility.
     if (validity_mode > 0) {
-      const double eps0v = 8.8541878128e-12;
-      const double lamD = std::sqrt(eps0v * (Te * qe) / (Ne * qe * qe));
+      const double lamD = std::sqrt(PhysConst::EPS0 * (Te * qe) / (Ne * qe * qe));
       const double rl = rd / lamD;
       if (rl > val_max_rl_) val_max_rl_ = rl;
       const double Bm = plasma.bmag;
@@ -624,8 +621,8 @@ void FixParticulateCharge::apply_charge_update()
             error->warning(FLERR,
               "fix particulate/charge model dis2021: R_d > lambda_D "
               "exceeds the formal small-grain OML assumption; retaining "
-              "the DIS surface-potential model (DIS A6-A7 finite-size "
-              "g_fit remains active in particulate/drag)");
+              "the DIS surface-potential model (the DIS A6-A7 finite-size "
+              "g_fit drag factor is not implemented)");
           else
             error->warning(FLERR, "fix particulate/charge: R_d > lambda_D — "
                            "OML charging exceeds its formal small-grain "

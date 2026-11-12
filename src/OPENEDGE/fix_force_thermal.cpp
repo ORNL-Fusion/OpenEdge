@@ -45,7 +45,6 @@ using namespace SPARTA_NS;
 enum { INT, DOUBLE };
 
 namespace {
-constexpr double AMU_KG = 1.66053906660e-27;
 constexpr double DEUTERIUM_MASS_AMU = 2.01410177811;
 }
 
@@ -59,7 +58,7 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
   have_ion_thermal_(0),
   have_elec_thermal_(0),
   ion_mass_amu_(DEUTERIUM_MASS_AMU),
-  ion_mass_kg_(DEUTERIUM_MASS_AMU * AMU_KG),
+  ion_mass_kg_(DEUTERIUM_MASS_AMU * PhysConst::AMU),
   ion_mass_explicit_(0),
   alpha_e_(0.71),
   store_thermal_ion_(nullptr),
@@ -266,6 +265,15 @@ void FixForceThermal::init()
       error->all(FLERR,
         "fix force/thermal: background fix must be style background");
     pd_->init();
+    // a requested thermal force needs its gradient data
+    if (!pd_->is_zones3d()) {
+      if (have_ion_thermal_ && pd_->mesh_grad_ti_r.empty() && pd_->grad_ti_r.empty())
+        error->all(FLERR, "fix force/thermal: ion thermal force requested but the "
+                   "background has no Ti gradient (mesh/grad_ti_r, mesh/grad_ti_z)");
+      if (have_elec_thermal_ && pd_->mesh_grad_te_r.empty() && pd_->grad_te_r.empty())
+        error->all(FLERR, "fix force/thermal: electron thermal force requested but the "
+                   "background has no Te gradient (mesh/grad_te_r, mesh/grad_te_z)");
+    }
     if (have_ion_thermal_ && !ion_mass_explicit_) {
       if (pd_->ion_mass_amu.size() == 1) {
         ion_mass_amu_ = pd_->ion_mass_amu[0];
@@ -285,7 +293,7 @@ void FixForceThermal::init()
     bind(srcGradTeR_, "gradTeR");
     bind(srcGradTeZ_, "gradTeZ");
   }
-  ion_mass_kg_ = ion_mass_amu_ * AMU_KG;
+  ion_mass_kg_ = ion_mass_amu_ * PhysConst::AMU;
   store_thermal_ion_ = find_store_force(
     modify, FixStoreForce::THERMAL_ION);
   store_thermal_electron_ = find_store_force(

@@ -103,6 +103,7 @@ class FixCrossFieldDiffusion : public Fix {
   // diffusion model
   int diff_model_;       // 0=none, 1=constant, 2=bohm
   double D_perp_;        // constant D_perp [m^2/s]
+  int binormal2d_;       // 2-D: also step along the binormal (default 1)
   CollGridSrc srcTe_;    // Te source for Bohm model
   double bohm_scale_;    // scale factor for Bohm (default 1.0)
 

@@ -406,6 +406,11 @@ void ComputePlasmaFields::init()
 
   memory->create(plasma_arr, ncells, "plasma/fields:plasma_arr");
   memory->create(mag_arr,    ncells, "plasma/fields:mag_arr");
+  // skipped cells and sources without B must read as zero
+  if (ncells > 0) {
+    memset((void *) plasma_arr, 0, ncells * sizeof(*plasma_arr));
+    memset((void *) mag_arr, 0, ncells * sizeof(*mag_arr));
+  }
 
   if (input_mode == MODE_BACKGROUND) {
     // Pull plasma data from fix background — no file reads
@@ -664,7 +669,10 @@ void ComputePlasmaFields::init()
       if (cells[icell].nsplit < 1)         continue;
       plasma_arr[icell] = bilinearInterpolationPlasma(icell, plasma_data);
 
-      if (has_equilibrium) {
+      // no equilibrium: mesh or constant B comes from the fix
+      const bool fix_b = !has_equilibrium && bg_fix_ &&
+        (bg_fix_->has_bfield || bg_fix_->has_const_bfield());
+      if (has_equilibrium || fix_b) {
         double xyz[3] = {
           0.5 * (cells[icell].lo[0] + cells[icell].hi[0]),
           0.5 * (cells[icell].lo[1] + cells[icell].hi[1]),
@@ -672,7 +680,8 @@ void ComputePlasmaFields::init()
             ? 0.5 * (cells[icell].lo[2] + cells[icell].hi[2])
             : 0.5 * (cells[icell].lo[1] + cells[icell].hi[1])
         };
-        mag_arr[icell] = query_bfield_at_point(xyz);
+        mag_arr[icell] = has_equilibrium ? query_bfield_at_point(xyz)
+                                         : bg_fix_->query_bfield_at_point(xyz, icell);
       }
     }
 
@@ -762,8 +771,7 @@ void ComputePlasmaFields::init()
          std::fabs(equ_data.psib - equ_data.psi_axis) < 1e-30))
       error->all(FLERR,
         "compute plasma/fields: sepdist requires an equilibrium psi map — "
-        "add `equilibrium <file>` or use a background/plasma.h5 with an "
-        "embedded equilibrium group");
+        "use a fix background plasma.h5 with an embedded equilibrium group");
   }
 
   sample_stale = 0;
@@ -786,7 +794,6 @@ void ComputePlasmaFields::compute_per_grid()
   // init() clears the flag; its reallocate() call no-ops (sizes now match).
   if (sample_stale) init();
 
-  constexpr double eQ = 1.602176634e-19;
   constexpr double tiny = 1.0e-30;
 
   Grid::ChildCell *cells = grid->cells;
@@ -856,7 +863,8 @@ void ComputePlasmaFields::compute_per_grid()
     //   2D axi (native):   x=Z, y=R, z=phi  -> Bx=Bz, By=Br, Bz=Bt
     //   3D Cartesian:      Br/Bt rotated by phi at this cell's centroid
     double phi = 0.0;
-    if (dim == 3) phi = std::atan2(xyz_c[1], xyz_c[0]);
+    if (dim == 3) phi = std::atan2(xyz_c[1] - plasma_data.column_y0,
+                                   xyz_c[0] - plasma_data.column_x0);
     double Bx, By, Bzz, Ex, Ey, Ezz, Vx, Vy, Vzz;
     OpenEdge::RZphi_force_to_sparta(Br, Bzv, Bt, dim, domain->axisymmetric,
                                      phi, Bx, By, Bzz);

@@ -27,7 +27,7 @@ using namespace SPARTA_NS;
 enum{FLOW_LOC,CONSTANT_LOC};                 // npmode
 enum{PKEEP_LOC,PINSERT_LOC,PDONE_LOC,PDISCARD_LOC,
      PENTRY_LOC,PEXIT_LOC,PSURF_LOC};        // update.cpp particle flags
-static constexpr double EV_TO_J_LOC = 1.602176634e-19;
+static constexpr double EV_TO_J_LOC = PhysConst::QE;
 static constexpr double MY_2PI_EMIT = 6.28318530717958647692;
 
 /* ---------------------------------------------------------------------- */

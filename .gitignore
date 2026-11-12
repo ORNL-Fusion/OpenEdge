@@ -149,3 +149,6 @@ examples/**/regression.log
 **/.nersc_bundle_patch/
 /doc/html_sphinx/
 /doc/src/_build/
+
+# kept local for now
+examples/verification/core_transport/

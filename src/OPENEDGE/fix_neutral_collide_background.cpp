@@ -39,8 +39,6 @@
 using namespace SPARTA_NS;
 using namespace MathConst;
 
-static constexpr double AMU_KG = 1.66053906660e-27;
-static constexpr double EV_TO_J = 1.602176634e-19;
 
 /* ---------------------------------------------------------------------- */
 
@@ -69,13 +67,13 @@ FixNeutralCollideBackground::FixNeutralCollideBackground(SPARTA *sparta,
     else error->all(FLERR,"fix neutral/collide/background: unknown channel "
                           "(use ion|neutral)");
     c->active = 1;
-    c->mass_b = 2.014 * AMU_KG;          // default: deuterium partner
+    c->mass_b = 2.014 * PhysConst::AMU;          // default: deuterium partner
     iarg++;
     while (iarg + 1 < narg) {
       if (strcmp(arg[iarg],"sigma") == 0)         c->sigma_ref = atof(arg[iarg+1]);
       else if (strcmp(arg[iarg],"gref") == 0)     c->g_ref = atof(arg[iarg+1]);
       else if (strcmp(arg[iarg],"omega") == 0)    c->omega = atof(arg[iarg+1]);
-      else if (strcmp(arg[iarg],"mass_amu") == 0) c->mass_b = atof(arg[iarg+1]) * AMU_KG;
+      else if (strcmp(arg[iarg],"mass_amu") == 0) c->mass_b = atof(arg[iarg+1]) * PhysConst::AMU;
       else break;
       iarg += 2;
     }
@@ -143,7 +141,7 @@ void FixNeutralCollideBackground::collide_channel(const Channel &c,
 {
   if (nb <= 0.0 || Tb_eV <= 0.0) return;
 
-  const double vth = std::sqrt(Tb_eV * EV_TO_J / c.mass_b);
+  const double vth = std::sqrt(Tb_eV * PhysConst::QE / c.mass_b);
 
   // partner velocity ~ drifting Maxwellian
   double vb[3];

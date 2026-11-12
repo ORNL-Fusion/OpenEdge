@@ -11,12 +11,12 @@ double li_evap_flux(double T_C, double sticking)
   double T_K = T_C + 273.15;
   if (T_K < 298.15) return 0.0;
   double P_Pa = std::pow(10.0, ANTOINE_A - ANTOINE_B / T_K) * ATM_TO_PA;
-  return sticking * P_Pa / std::sqrt(2.0 * PI * MLI * KB * T_K);
+  return sticking * P_Pa / std::sqrt(2.0 * PI * MLI * SPARTA_NS::PhysConst::KB * T_K);
 }
 
 double li_evap_cooling(double flux, double H_vap)
 {
-  return H_vap * flux / NA;
+  return H_vap * flux / SPARTA_NS::PhysConst::NA;
 }
 
 double li_adatom_flux(double T_C, double Gamma_Dp,
@@ -25,7 +25,7 @@ double li_adatom_flux(double T_C, double Gamma_Dp,
 {
   double T_K = T_C + 273.15;
   if (T_K < 1.0) return 0.0;
-  double E_surf_eV = KB * T_K / EV;
+  double E_surf_eV = SPARTA_NS::PhysConst::KB * T_K / SPARTA_NS::PhysConst::QE;
   double denom = 1.0 + A_arr * std::exp(E_eff / E_surf_eV);
   return f_ad * (Yad_Yps / denom) * Yad_D_Li * Gamma_Dp;
 }

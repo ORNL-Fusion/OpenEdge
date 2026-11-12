@@ -61,10 +61,12 @@ collide(Particle::OnePart *&ip, double &, int, double *, int, int &)
   double *v = ip->v;
 
   // determine which cap: compare particle phi to midpoint of wedge
-  double phi = atan2(x[1], x[0]);
+  // angle from the middle of the wedge, in (-pi,pi]: a wedge may span +-180 deg
+  double phi = atan2(x[1], x[0]) - phi_mid;
+  phi -= 2.0*M_PI*floor(phi/(2.0*M_PI) + 0.5);
 
   double cos_d, sin_d;
-  if (phi < phi_mid) {
+  if (phi < 0.0) {
     // hit phi_min cap -> rotate by +dphi to phi_max
     cos_d = cos_dphi;
     sin_d = sin_dphi;
@@ -87,14 +89,11 @@ collide(Particle::OnePart *&ip, double &, int, double *, int, int &)
   v[1] = vxold * sin_d + vyold * cos_d;
 
 
-  // The hybrid/GCA pusher stores persistent guiding-center state in
-  // particle custom attributes; a cap rotation moves the particle but
-  // not that stored state, leaving the guiding center outside the wedge
-  // (symptom: cap ping-pong, Nscoll ~ N every step). Invalidate the
-  // state so the pusher re-initializes it from the rotated particle.
+  // the stored guiding centre turns with the marker: v_par, mu, branch
+  // and validity are unchanged by a rotation about the axis
+  rot_cos = cos_d; rot_sin = sin_d;
   if (update->pusher)
-    update->pusher->invalidate_gc(ip - particle->particles,
-                                  Pusher::GC_INVAL_BOUNDARY);
+    update->pusher->rotate_gc(ip - particle->particles,cos_d,sin_d);
   nsingle++;
 
   return NULL;

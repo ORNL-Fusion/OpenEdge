@@ -45,9 +45,7 @@ enum IM_Kind { IM_NRHO = 1, IM_VX, IM_VY, IM_VZ, IM_TEMP_THERMAL, IM_GAMMA };
 
 namespace {
   // Boltzmann constant in eV/K
-  constexpr double KB_EV_PER_K = 8.617333262e-5;
   // 1 eV in joules
-  constexpr double EV_TO_J = 1.602176634e-19;
 
   // Thompson sputtered-atom energy distribution, truncated form of
   // Mellet PPCF 59 (2017) eq. (10) / Guterl NME 27 (2021) eq. (2.2):
@@ -92,7 +90,7 @@ namespace {
     double r1 = rng->uniform(), r2 = rng->uniform();
     if (r1 <= 0.0) r1 = 1.0e-12;
     if (r2 <= 0.0) r2 = 1.0e-12;
-    return -KB_EV_PER_K * T_K * std::log(r1 * r2);
+    return -PhysConst::KB_EV * T_K * std::log(r1 * r2);
   }
 
   // cos^n angular sampling: cos(theta) = xi^(1/(n+1)),  xi ~ U(0,1].
@@ -268,6 +266,16 @@ FixSurfaceEmitSource::~FixSurfaceEmitSource()
 void FixSurfaceEmitSource::init()
 {
   FixEmit::init();
+
+  // a new particle first moves ballistically over U*nevery*dt, no chemistry
+  if (nevery > 1 && comm->me == 0)
+    for (int i = 0; i < modify->nfix; i++)
+      if (strncmp(modify->fix[i]->style,"volume/chem/adas",16) == 0) {
+        error->warning(FLERR,"Fix surface/emit/source with nevery > 1: new "
+                       "particles are not ionized during their first move; "
+                       "use nevery 1 when prompt redeposition matters");
+        break;
+      }
 
   // bind the optional concentration-multiplier custom array (created by
   // surf_react surface/pwi at its init; both run before the first step)
@@ -1045,7 +1053,7 @@ void FixSurfaceEmitSource::perform_task()
             double phi_az = MY_2PI * random->uniform();
             double mass_sp = particle->species[ispecies].mass;
             double speed = (mass_sp > 0.0)
-              ? std::sqrt(2.0 * E_eV * EV_TO_J / mass_sp) : 0.0;
+              ? std::sqrt(2.0 * E_eV * PhysConst::QE / mass_sp) : 0.0;
             vnmag = speed * cos_th;
             vamag = speed * sin_th * std::cos(phi_az);
             vbmag = speed * sin_th * std::sin(phi_az);
@@ -1167,7 +1175,7 @@ void FixSurfaceEmitSource::perform_task()
           double phi_az = MY_2PI * random->uniform();
           double mass_sp = particle->species[ispecies].mass;
           double speed = (mass_sp > 0.0)
-            ? std::sqrt(2.0 * E_eV * EV_TO_J / mass_sp) : 0.0;
+            ? std::sqrt(2.0 * E_eV * PhysConst::QE / mass_sp) : 0.0;
           vnmag = speed * cos_th;
           vamag = speed * sin_th * std::cos(phi_az);
           vbmag = speed * sin_th * std::sin(phi_az);

@@ -284,11 +284,14 @@ void FixCrossFieldDiffusionKokkos::operator()(TagFixCrossFieldDiffusion,
   }
   if (!got_B && !has_equ_) ConstBKokkos::slot(has_const_b_, dim_, axisym_, xq, cb_br_, cb_bz_, cb_bt_, cb_bcart_, B);
   const double Bmag = Kokkos::sqrt(B[0]*B[0] + B[1]*B[1] + B[2]*B[2]);
-  if (Bmag < 1.0e-20) return;   // CPU skips everything, pinches included
+  // no field here: no diffusion, but the prescribed pinches still apply
+  // (CPU twin)
 
   // local D_perp
   double D_local = 0.0;
-  if (diff_model_ == 1) {
+  if (Bmag < 1.0e-20) {
+    D_local = 0.0;
+  } else if (diff_model_ == 1) {
     D_local = D_perp_;
   } else if (diff_model_ == 2) {
     double te = 0.0;
@@ -320,9 +323,22 @@ void FixCrossFieldDiffusionKokkos::operator()(TagFixCrossFieldDiffusion,
         const double eperp1 =  B[0] * inv_Bpol;
         rand_type rand_gen = rand_pool.get_state();
         const double xi = rand_gen.normal();
+        const double xi2 = binormal2d_ ? rand_gen.normal() : 0.0;
         rand_pool.free_state(rand_gen);
         ddx0 += sigma * xi * eperp0;
         ddx1 += sigma * xi * eperp1;
+        if (binormal2d_) {
+          // binormal step (CPU twin): in-plane part along the poloidal
+          // field, toroidal part as R' = sqrt(R^2 + s^2)
+          const double f = sigma * xi2 * (B[2] / Bmag) * inv_Bpol;
+          ddx0 += f * B[0];
+          ddx1 += f * B[1];
+          if (axisym_) {
+            const double s = sigma * xi2 * Bpol / Bmag;
+            const double R1 = p.x[1] + ddx1;
+            ddx1 += Kokkos::sqrt(R1*R1 + s*s) - R1;
+          }
+        }
       }
     } else {
     const double inv_Bmag = 1.0 / Bmag;

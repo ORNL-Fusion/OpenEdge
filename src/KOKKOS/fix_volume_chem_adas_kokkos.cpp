@@ -752,7 +752,7 @@ void FixVolumeChemAdasKokkos::operator()(TagFixChemAdas, const int &i) const
       if (atomic1_ && Ti_eV > 0.0) {
         // HYDHEL H.3 3.1.8 (D-D+ resonant CX): partner = D+ (~ne),
         // per-particle E_atom from the lab-frame kinetic energy
-        constexpr double eV_to_J_loc = 1.602176634e-19;
+        constexpr double eV_to_J_loc = PhysConst::QE;
         const double m_atom = d_species[isp].mass;
         const double v2p = p.v[0]*p.v[0] + p.v[1]*p.v[1] + p.v[2]*p.v[2];
         const double E_atom_eV = 0.5 * m_atom * v2p / eV_to_J_loc;
@@ -829,7 +829,7 @@ void FixVolumeChemAdasKokkos::operator()(TagFixChemAdas, const int &i) const
     vals[3] = m * vz0 * scale;
     vals[4] = ke * scale;
   } else {
-    constexpr double eV_to_J = 1.602176634e-19;
+    constexpr double eV_to_J = PhysConst::QE;
     const double Bmag = Kokkos::sqrt(bx*bx + by*by + bz*bz);
     double vix = 0.0, viy = 0.0, viz = 0.0;
     if (Bmag > 1e-30) {
@@ -907,8 +907,8 @@ void FixVolumeChemAdasKokkos::operator()(TagFixChemAdas, const int &i) const
   double fc_kick_x = 0.0, fc_kick_y = 0.0, fc_kick_z = 0.0;
 
   if (rtype == EXCHANGE && Ti_eV > 0.0) {
-    constexpr double kB = 1.380649e-23;
-    constexpr double eV_to_J = 1.602176634e-19;
+    constexpr double kB = PhysConst::KB;
+    constexpr double eV_to_J = PhysConst::QE;
     const double Ti_K = Ti_eV * eV_to_J / kB;
     const double m_prod = d_species[d_r_product0(best_idx)].mass;
     const double v_th = (m_prod > 0.0) ? Kokkos::sqrt(kB * Ti_K / m_prod) : 0.0;
@@ -971,7 +971,7 @@ void FixVolumeChemAdasKokkos::operator()(TagFixChemAdas, const int &i) const
     // isotropic Franck-Condon kick in the parent CM frame (~3 eV/atom,
     // independent of Ti — CPU parity)
     constexpr double E_FC_eV = 3.0;
-    constexpr double eV_to_J = 1.602176634e-19;
+    constexpr double eV_to_J = PhysConst::QE;
     const double m_prod = d_species[d_r_product0(best_idx)].mass;
     const double v_FC = (m_prod > 0.0)
                         ? Kokkos::sqrt(2.0 * E_FC_eV * eV_to_J / m_prod) : 0.0;

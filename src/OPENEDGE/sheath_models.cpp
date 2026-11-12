@@ -4,6 +4,7 @@
 ------------------------------------------------------------------------- */
 
 #include "sheath_models.h"
+#include "update.h"
 
 #include <algorithm>
 #include <cmath>
@@ -12,10 +13,6 @@ namespace SPARTA_NS {
 namespace SheathModels {
 
 namespace {
-constexpr double QE = 1.602176634e-19;
-constexpr double ME = 9.1093837015e-31;
-constexpr double AMU = 1.66053906660e-27;
-constexpr double EPS0 = 8.8541878128e-12;
 constexpr double PI = 3.14159265358979323846;
 constexpr double KMPS = 2.0;   // L_MPS = k rho_cs sin(alpha); k = 2 as in Borodkina 2015/PYEAD (was 3, Nov 2026)
 }
@@ -47,14 +44,14 @@ SheathEmagCoeffs sheath_prepare_borodkina(double te_eV, double ti_eV,
   const double ti = std::max(ti_eV, 0.0);
   const double ne = std::max(ne_m3, 1.0e-60);
   const double bmag = std::max(std::abs(bmag_T), 1.0e-20);
-  const double mD = std::max(mD_amu * AMU, 1.0e-99);
+  const double mD = std::max(mD_amu * PhysConst::AMU, 1.0e-99);
   const double alpha = std::min(std::max(alpha_normal_deg, 0.0), 89.999);
   const double ar = alpha * PI / 180.0;
-  const double lambdaD = std::sqrt(EPS0 * te / (ne * QE));
-  const double cs = std::sqrt((te + ti) * QE / mD);
-  const double rho = cs / (QE * bmag / mD);
+  const double lambdaD = std::sqrt(PhysConst::EPS0 * te / (ne * PhysConst::QE));
+  const double cs = std::sqrt((te + ti) * PhysConst::QE / mD);
+  const double rho = cs / (PhysConst::QE * bmag / mD);
   const double phi_float = 0.5 * std::log(
-      (mD / (2.0 * PI * ME)) / (1.0 + ti / te));
+      (mD / (2.0 * PI * PhysConst::ME)) / (1.0 + ti / te));
   const double phi_total = (pot_mult > 0.0) ? pot_mult * te
                                             : std::max(phi_float, 0.0) * te;
   const double lambda_w = -phi_total / te;

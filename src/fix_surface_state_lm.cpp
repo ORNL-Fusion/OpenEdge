@@ -1110,8 +1110,7 @@ void FixSurfaceStateLm::load_solps_b2pl()
     // We use cols 1..5 plus 15..16 (Rclfc, Zclfc) for (R, Z) anchoring.
     std::vector<double> xs, ws, gammas, Rs, Zs;
     char buf[1024];
-    const double m_ion_kg = solps_m_ion_amu * 1.66053906660e-27;
-    const double e_J = 1.602176634e-19;
+    const double m_ion_kg = solps_m_ion_amu * PhysConst::AMU;
     while (fgets(buf, sizeof(buf), fp)) {
       char *p = buf;
       while (*p == ' ' || *p == '\t') p++;
@@ -1135,7 +1134,7 @@ void FixSurfaceStateLm::load_solps_b2pl()
       double R_v   = cols[14];
       double Z_v   = cols[15];
       double cs = (Te_v + Ti_v > 0.0) ?
-        sqrt(e_J * (Te_v + Ti_v) / m_ion_kg) : 0.0;
+        sqrt(PhysConst::QE * (Te_v + Ti_v) / m_ion_kg) : 0.0;
       xs.push_back(x_v);
       ws.push_back(W_v);
       gammas.push_back(ne_v * cs);

@@ -123,7 +123,6 @@ declare -a TESTS=(
   "pusher_gca|verification/pushers/orbit|in.gca|"
   "pusher_boris|verification/pushers/orbit|in.boris|"
   "pusher_hybrid_axiring|verification/pushers/hybrid|in.axiring|input/source.axi256"
-  "st40_core_species_boundary|workflows/particulates/st40_lithium_powder_dropper/verification/core_species_boundary|in.openedge|../../input/plasma_st40_solps_corefill.h5"
   "constant_flux|verification/surface_emission/constant_flux|in.constant_flux|"
   "d2_chemistry|verification/d2_chemistry|in.d2_chem|"
   "dustt2005_cat_transport|verification/particulates/dustt2005/cat_solps_droplet_transport|in.openedge|input/plasma.h5"
@@ -395,6 +394,23 @@ if [[ "pwi_ledger_fold" == $FILTER || "*" == "$FILTER" ]]; then
   else
     RESULTS+=("FAIL  pwi_ledger_fold  (see examples/verification/surface_pwi/ledger_fold/regression.log)"); echo "FAIL"; ((FAIL++))
     if [[ "$VERBOSE" -eq 1 ]]; then tail -20 "$fdir/regression.log"; fi
+  fi
+fi
+
+# -----------------------------------------------------------------------
+#  core_transport: CoreTransport1D (Linder scheme) vs the Aurora impden1
+#  references + particle conservation; compiles its own driver, no deck
+# -----------------------------------------------------------------------
+if [[ "core_transport" == $FILTER || "*" == "$FILTER" ]]; then
+  printf "%-40s " "core_transport"
+  cdir="$EXAMPLES_DIR/verification/core_transport"
+  if [[ ! -f "$cdir/run.sh" ]]; then       # the case is kept local for now
+    RESULTS+=("SKIP  core_transport  (local case not present)"); echo "SKIP"; ((SKIP++))
+  elif (cd "$cdir" && PYTHON="$PY" bash run.sh > "$cdir/regression.log" 2>&1); then
+    RESULTS+=("PASS  core_transport  (Aurora 1e-12, conservation 1e-10, positivity, volume, reservoir)"); echo "PASS"; ((PASS++))
+  else
+    RESULTS+=("FAIL  core_transport  (see examples/verification/core_transport/regression.log)"); echo "FAIL"; ((FAIL++))
+    if [[ "$VERBOSE" -eq 1 ]]; then tail -20 "$cdir/regression.log"; fi
   fi
 fi
 

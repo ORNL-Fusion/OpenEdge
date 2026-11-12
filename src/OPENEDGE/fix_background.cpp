@@ -289,7 +289,11 @@ FixBackground::FixBackground(SPARTA *sparta, int narg, char **arg) :
       iarg += 2;
     } else if (strcmp(arg[iarg], "rz_axes") == 0) {
       if (iarg + 1 >= narg) error->all(FLERR, "fix background: rz_axes needs axi|planar");
-      if (strcmp(arg[iarg + 1], "axi") == 0) OpenEdge::oe_force_axi_rz = 1;
+      if (strcmp(arg[iarg + 1], "axi") == 0) {
+        if (domain->dimension == 3)
+          error->all(FLERR, "fix background: rz_axes axi is only valid in a 2d box");
+        OpenEdge::oe_force_axi_rz = 1;
+      }
       else if (strcmp(arg[iarg + 1], "planar") == 0) OpenEdge::oe_force_axi_rz = 0;
       else error->all(FLERR, "fix background: rz_axes must be axi or planar");
       iarg += 2;
@@ -1393,7 +1397,10 @@ void FixBackground::load_plasma_h5()
       double btf_val = 0.0, rtf_val = 0.0, psib_val = 0.0;
       read_scalar("equilibrium/btf",  btf_val);
       read_scalar("equilibrium/rtf",  rtf_val);
-      read_scalar("equilibrium/psib", psib_val);
+      if (!read_scalar("equilibrium/psib", psib_val))
+        throw std::runtime_error(
+          "Embedded equilibrium has no equilibrium/psib (separatrix flux); "
+          "psi_N cannot be defined");
       btf = btf_val;
       rtf = rtf_val;
       psib = psib_val;
@@ -1411,7 +1418,15 @@ void FixBackground::load_plasma_h5()
           if (psirz[k] < psi_min) psi_min = psirz[k];
         psi_axis = psi_min;
       }
+      if (psib == psi_axis)
+        throw std::runtime_error(
+          "Embedded equilibrium has equilibrium/psib equal to the axis flux; "
+          "psi_N cannot be defined");
       has_equ = 1;
+      // psi-derived B is served by query_bfield_at_point(): consumers that
+      // gate on has_bfield (cross-field diffusion, ...) must see it too,
+      // as for an equilibrium read from its own file
+      has_bfield = 1;
       if (screen)
         fprintf(screen,
                 "[background] loaded embedded equilibrium "
