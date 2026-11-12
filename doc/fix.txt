@@ -78,6 +78,7 @@ styles available in OpenEdge:
 "bfield/particle"_fix_bfield_particle.html - gyro-motion of charged particles in the background magnetic field
 "coulomb/background"_fix_coulomb_background.html - Coulomb collisions of charged particles with the background plasma
 "coulomb/binary"_fix_coulomb_binary.html - binary Coulomb collisions between charged particles in a cell
+"core/transport"_fix_core_transport.html - 1d core impurity transport model coupled to the particles at a flux surface
 "cross_field_diffusion"_fix_cross_field_diffusion.html - anomalous cross-field diffusion of charged particles
 "dt/reset"_fix_dt_reset.html - adjust global timestep dynamically
 "efield/particle"_fix_efield_particle.html - acceleration of charged particles by the background electric field

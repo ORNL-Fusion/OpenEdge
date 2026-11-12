@@ -456,9 +456,10 @@ phi-face caps of a 3d wedge of a torus.  A particle hitting one cap is
 moved to the opposite cap by rotating its position and velocity by
 +/- {dphi} degrees about the z axis (the symmetry axis of the torus);
 which cap was hit is decided by comparing the particle's toroidal
-angle with the middle of the wedge, which starts at {phi_min}.  Any
-guiding-center state stored for the particle is reset so that the
-pusher re-initializes it from the rotated position.  This style does
+angle with the middle of the wedge, which starts at {phi_min}.  The
+remaining displacement of the step (including that of fix
+cross_field_diffusion) and any guiding-center state stored for the
+particle are rotated with it; the state stays valid.  This style does
 not support surface reactions.
 
 :line

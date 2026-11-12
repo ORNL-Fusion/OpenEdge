@@ -1,0 +1,171 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix core/transport command :h3
+
+[Syntax:]
+
+fix ID core/transport bg-ID surf-group mix-ID keyword values ... :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+core/transport = style name of this fix command :l
+bg-ID = ID of a "fix background"_fix_background.html that carries the flux map (psi) :l
+surf-group = surface group of the closed core cut :l
+mix-ID = mixture holding every charge state 0..Zmax of one element, each once :l
+keyword = {psi_n} or {grid} or {dperp} or {vpinch} or {coefficients} or {profiles} or {solver} or {nevery} or {coupling} or {gc_reflect} or {fraction} or {nlaunch} or {position} or {depth} or {dlen} or {output} or {state} or {read_state} or {export} :l
+  {psi_n} value = normalized poloidal flux of the cut, in (0,1\] (required)
+  {grid} value = number of cells of the 1d core grid (default 50)
+  {dperp} value = D (m^2/s) or a file with two columns, rho_N and D
+  {vpinch} value = v (m/s, positive outward) or a file with two columns, rho_N and v
+  {coefficients} values = {effective} or {physical geometry} file
+    {effective} = dperp and vpinch are the coefficients of the volume-radius operator
+    {physical geometry} file = dperp and vpinch are the cross-field values;
+      the file gives rho_N, r_vol, g1, g2 and they are mapped as D g2 and v g1
+  {profiles} value = file with four columns: rho_N, ne (m^-3), Te (eV), Ti (eV)
+  {solver} values = {substep} or {split max_dt} seconds
+  {nevery} value = couple every this many timesteps (default 10)
+  {coupling} values = {legacy} or {auxiliary layer} h {marker_weight} w
+    {legacy} = absorb at the cut, deposit in the core, re-emit the core outflux
+    {auxiliary layer} h {marker_weight} w = two-sided exchange between a core
+      layer and a guiding-centre marker layer of width h (m, volume radius);
+      created markers carry the weight w (a number, or {auto})
+  {gc_reflect} value = another surface group that reflects guiding-centre markers
+  {fraction} value = fraction of the torus covered by the simulation domain (default 1)
+  {nlaunch}, {position}, {depth}, {dlen} = legacy coupling only (see below)
+  {output} values = file N = write core profiles every N steps
+  {state} value = file written with the core state at the output cadence and at the end of a run
+  {read_state} value = state file to start from
+  {export} value = JSON file with the grid, profiles, coefficients and rates in use :pre
+:ule
+
+[Examples:]
+
+fix fcore core/transport pd core allW psi_n 0.2 grid 200 dperp 0.3 &
+    profiles input/core_profiles.dat nevery 20 &
+    output core_1d.dat 10000 state core_state.dat
+fix fcore core/transport pd core chain psi_n 0.16 grid 46 dperp 1.0 vpinch -10.0 &
+    coefficients physical geometry input/geometry.dat profiles input/profiles.dat &
+    coupling auxiliary layer 0.01 marker_weight 8.8e-6 nevery 11 :pre
+
+[Description:]
+
+Close the plasma inside a flux surface with a one-dimensional,
+flux-surface averaged impurity transport model, and couple it to the
+Monte Carlo particles outside. The surface is the cut psi_N = {psi_n},
+represented in the deck by the closed surface group. Inside it, the
+densities of all charge states of the mixture are advanced on a grid in
+the volume radius with diffusion, convection, and ADAS ionization and
+recombination at the electron density and temperature of the {profiles}
+file. The scheme is the finite-volume method of Linder et al.,
+Nucl. Fusion 60 (2020) 096031.
+
+The fix accumulates the elapsed time over {nevery} steps and then
+advances the core model by that window, so the particle timestep may
+change during a run.
+
+{coefficients physical} takes D and v as cross-field values that are
+constant on a flux surface and maps them to the volume-radius operator
+with the flux-surface averages g2 = <|grad r_vol|^2> and
+g1 = <|grad r_vol|>. The geometry file is produced by
+tools/core_transport/core_geometry.py.
+
+{solver substep} is the reference solver. {solver split} is an implicit
+split solver that is much faster; it is first order in its internal
+step, which {max_dt} limits.
+
+[Auxiliary coupling:]
+
+Both descriptions are closed at the cut. A layer of core cells of width
+h next to the cut and a marker layer of the same width outside it
+exchange inventory at the rate set by the diffusive conductance and the
+pinch at the cut, using the exact two-box probabilities over the
+window, so that neither side can be overdrawn. Inventory owed to the
+markers waits in a pending bank until it makes a whole marker of weight
+w. Markers plus core plus pending inventory is conserved.
+
+The weight w is the number of atoms a returned marker carries, in the
+units of the particle weights. It does not change the weights of the
+particles launched elsewhere. With {marker_weight auto} the returned
+markers of a charge state take the mean weight of the markers of that
+state found in the layer in the same window; if there are none, the
+mean over all states, and if the layer is empty, the last value seen.
+Until a marker has been seen in the layer nothing is returned and the
+inventory waits in the pending bank. {auto} is the recommended setting
+when the launch weights are not uniform or change during the run.
+
+The exchange acts on guiding centres, so it needs the {gca} or {hybrid}
+mode of "global pusher"_global.html. The domain is 2d axisymmetric or
+3d; the equilibrium is axisymmetric in both. In 3d the cut is a surface
+of revolution made of triangles, either the whole torus or a wedge
+between periodic caps ("surf_collide toroidal"_surf_collide.html). The
+cap model sets the wedge: {fraction} must equal its angle over 360
+degrees (1 for the whole torus), the cut must lie inside it, and its
+two open ends must map onto each other under the cap rotation. The
+triangles must form a closed, consistently oriented surface apart from
+those two ends. A wedge run needs {global gridcut -1}.
+
+The marker layer lies between the cut surface and the flux surface a
+width h outside it. The volume between the cut surface and the psi_n
+contour (the facets of a coarse surface) is counted in the marker
+layer; the fix prints it and warns when it exceeds 5% of the layer.
+
+Ions of the chain are mirrored at the cut. A marker that the
+hybrid pusher handles with the full orbit next to the layer stops the
+run, because its position is not a guiding centre. Neutrals of the
+chain are not part of the exchange: they cross the cut along their
+straight paths and are absorbed there into the neutral state of the
+core layer; neutrals of the core model are not returned as markers. An
+ion that has just been ionized takes part with the guiding centre of
+its first-order conversion.
+
+A good choice of the window is D tau/h^2 of about 0.5, with D the
+effective diffusivity at the cut, tau the window and h the layer width.
+
+[Legacy coupling:]
+
+Chain particles that reach the cut are absorbed. Their inventory is
+deposited in the core with an exponential profile of scale {depth}
+(0 = outer cell), the core loses particles through a boundary with
+decay length {dlen}, and that outflux is re-emitted from the cut as
+{nlaunch} markers per window, either uniformly over the surface
+({position uniform}) or at the positions where particles entered
+({position entry}). It supports the Boris mode of the pusher only. The
+retained fraction depends on {depth}, which is not derived from the
+transport; the auxiliary coupling is meant to replace it.
+
+[Restart, output info:]
+
+The {state} file holds the core densities per charge state and, for the
+auxiliary coupling, the pending inventory and the window counter. A
+restarted run reads the particles from the restart file and the core
+from {read_state}.
+
+The fix computes a global scalar, the impurity content of the core
+(atoms, full torus), and a global vector of length 5: (1) inflow to the
+core and (2) outflow from it (atoms/s, full torus), (3) radiated power
+of the core (W), (4) inventory emitted as markers in the last window
+and (5) the pending inventory (atoms, full torus).
+
+[Restrictions:]
+
+This fix is part of the OPENEDGE package. Only one fix core/transport
+may be defined. It requires "fix particle/weight"_fix_particle_weight.html,
+explicit non-distributed surfaces and rate tables for the element in
+the process database. It does not run with the KOKKOS package.
+
+[Related commands:]
+
+"fix background"_fix_background.html, "fix
+cross_field_diffusion"_fix_cross_field_diffusion.html, "fix
+volume/chem/adas"_fix_volume_chem_adas.html
+
+[Default:]
+
+The option defaults are grid = 50, dperp = 0.3, vpinch = 0, coefficients
+= effective, solver = substep, nevery = 10, coupling = legacy, fraction
+= 1, nlaunch = 20, position = uniform, depth = 0.
