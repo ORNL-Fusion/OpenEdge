@@ -265,6 +265,7 @@ struct SurfHit2D {
   int tag_groupbit;            // surf group whose hits set the flag (0 = none)
   class FixCoreTransport *core_fix;   // fix core/transport: absorbs chain markers
   int core_groupbit;                  // at the core surf group (0 = off)
+  int core_neutral_groupbit;          // auxiliary coupling: chain neutrals are absorbed here
   const int *core_species;            // charge state per species, -1 = not in chain
   int gc_sync_groupbit;               // surf group that reflects guiding centres: the
                                       // stored GC follows the reflected path (0 = off)

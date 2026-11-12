@@ -9,6 +9,39 @@
 #include <stdexcept>
 
 namespace SPARTA_NS {
+// psi at (R,Z): the local tensor cubic used for the flux volumes below
+// (psi indexed [iz*nr + ir]); points outside the grid are clamped to it
+inline double core_psi_cubic(const std::vector<double> &r, const std::vector<double> &z,
+                             const std::vector<double> &psi, double R, double Z)
+{
+  const int nr = r.size(), nz = z.size();
+  R = std::min(std::max(R,r.front()),r.back());
+  Z = std::min(std::max(Z,z.front()),z.back());
+  auto weights = [](const std::vector<double> &axis, double x, int &base, double *w) {
+    base = std::max(0,std::min((int) axis.size()-4,
+      (int) (std::upper_bound(axis.begin(),axis.end(),x)-axis.begin())-2));
+    for (int i = 0; i < 4; ++i) {
+      w[i] = 1.0;
+      for (int j = 0; j < 4; ++j) if (j != i)
+        w[i] *= (x-axis[base+j])/(axis[base+i]-axis[base+j]);
+    }
+  };
+  int ir, iz; double wr[4], wz[4];
+  weights(r,R,ir,wr); weights(z,Z,iz,wz);
+  double v = 0.0;
+  for (int b = 0; b < 4; ++b) for (int a = 0; a < 4; ++a)
+    v += wz[b]*wr[a]*psi[(size_t) (iz+b)*nr+ir+a];
+  (void) nz;
+  return v;
+}
+
+// refinement of the equilibrium grid for the flux volumes: about 4e6
+// points, at least 8 per cell (pixel error of the volume inside a contour)
+inline int core_flux_refine(int nr, int nz)
+{
+  return std::max(8,std::min(32,(int) sqrt(4.0e6/((double) nr*nz))));
+}
+
 struct CoreFluxPoint { double R, Z, psi; };
 struct CoreFluxGeometry {
   double raxis;

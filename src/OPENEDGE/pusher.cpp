@@ -2022,6 +2022,8 @@ void Pusher::push_hybrid_3d_impl(int i, int icell, double dt,
       particle->edvec[particle->ewhich[gca_mode_custom]][i] = 0.0;
     if (gca_valid_custom >= 0)
       particle->edvec[particle->ewhich[gca_valid_custom]][i] = 0.0;
+    if (gca_chi_custom >= 0)             // a neutral carries no Boris residence
+      particle->edvec[particle->ewhich[gca_chi_custom]][i] = 0.0;
   };
 
   // skip mixture (dust grains): pure advection even when charged — their

@@ -36,6 +36,7 @@ class FixCoreTransport : public Fix {
   void post_run();
   double compute_scalar();        // core W content (atoms, full torus)
   double compute_vector(int);     // 0 Gamma_in 1 Gamma_out (atoms/s, torus) 2 Prad (W) 3 emitted (atoms, this window)
+                                  // 4 pending exchange inventory (atoms, torus)
 
   // called by Update::move for a chain marker hitting the core group
   void absorb(int ipart, int isurf);
@@ -73,6 +74,9 @@ class FixCoreTransport : public Fix {
   int coupling_aux;
   int reflect_groupbit;            // extra surf groups that reflect guiding centres
   double layer_h, marker_weight;   // m (r_vol); weight of created markers
+  int marker_auto;                 // 1 = created markers take the mean weight of the layer markers
+  std::vector<double> wmark;       // auto: per state, last mean weight seen in the layer (0 = none yet)
+  double wmark_all;                // auto: the same over all states
   int layer_cells;                 // core cells in the core layer
   double psi_layer, vol_core_layer, vol_marker_layer;   // outer psi_N, torus volumes
   double box_r[2], box_z[2];       // (R,Z) box enclosing the marker layer
@@ -83,7 +87,16 @@ class FixCoreTransport : public Fix {
   void build_layer();
   double psi_of_volume(double v) const;
   void exchange_window(double dt_win);
-  void create_gc_marker(int z, double R, double Z, double u[5], int id);
+  void create_gc_marker(int z, const double *x, double u[5], int id, double weight);
+  bool in_core_region(double R, double Z) const;
+  bool inside_cut(const double *x) const;        // SPARTA position, 2-D or 3-D
+  // 3-D cut: triangles of a surface of revolution, whole torus or a wedge
+  // between periodic caps (the cap model sets the angles)
+  int cut_full;                    // 1 = full torus
+  double cut_phi0, cut_dphi;       // wedge start and angle (rad)
+  std::vector<std::vector<int> > cut_bins;       // cut triangles per toroidal bin
+  double cut_angle(const double *x) const;       // angle from cut_phi0, in [0,cut_dphi) for points in the wedge
+  void build_cut3d(double &enclosed, double &sliver);
   void read_geometry();
   int nlaunch;                    // markers per window (all states)
   int position_mode;              // 0 uniform over the surface, 1 entry positions

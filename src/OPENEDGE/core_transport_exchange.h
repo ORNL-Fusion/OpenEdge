@@ -2,8 +2,8 @@
    OpenEdge: two-sided auxiliary-layer exchange between the 1-D core
    model and weighted markers. Both descriptions are closed at the
    interface; a core layer and a marker layer exchange inventory with
-   rates k_c = G/V_c (core -> markers) and k_m = G/V_m (markers -> core),
-   G from the integrated flux operator at the interface. Over one
+   rates k_c (core -> markers) and k_m (markers -> core) supplied by the
+   caller: conductance over layer volume, G/V_c and G/V_m for diffusion. Over one
    coupling interval the exact two-box probabilities are used, so
    neither side can be overdrawn. Inventory owed to the markers leaves
    the core at once and waits in a per-state pending bank until it makes
@@ -78,6 +78,10 @@ class CoreExchange {
   }
 
   double pending(int z) const { return pending_[z]; }
+  void set_pending(int z, double v) {                           // restart
+    if (!(v >= 0.0) || !std::isfinite(v)) throw std::runtime_error("core exchange: invalid pending inventory");
+    pending_[z] = v;
+  }
   double to_core(int z) const { return to_core_[z]; }           // endpoint transfers, cumulative
   double to_markers(int z) const { return to_markers_[z]; }
   double owed(int z) const { return owed_[z]; }

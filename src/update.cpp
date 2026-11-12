@@ -345,6 +345,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   tag_groupbit = 0;
   core_fix = nullptr;
   core_groupbit = 0;
+  core_neutral_groupbit = 0;
   core_species = nullptr;
   gc_sync_groupbit = 0;
   psi_nw = psi_nh = 0;
@@ -2449,20 +2450,48 @@ template < int DIM, int SURF, int OPT > void Update::move()
               // against the cut). The marker's own chord velocity is
               // mirrored too if it was incident; the stored guiding centre
               // follows the reflected path.
-              if (has_kick && gc_sync_groupbit && pusher &&
+              // Only chain ions are mirrored, with or without a kick this
+              // pass; neutrals and other species see the surf models.
+              if (gc_sync_groupbit && pusher && core_species &&
+                  core_species[particles[i].ispecies] > 0 &&
                   ((DIM == 3) ? (tri->mask & gc_sync_groupbit) : (line->mask & gc_sync_groupbit))) {
                 const double *nrm = (DIM == 3) ? tri->norm : line->norm;
                 const double n2 = (DIM == 3) ? nrm[2] : 0.0;
-                double own[3] = {v[0] - vkick0, v[1] - vkick1, v[2] - ((DIM == 3) ? vkick2 : 0.0)};
+                double kick[3] = {0.0, 0.0, 0.0};
+                if (has_kick) { kick[0] = vkick0; kick[1] = vkick1; if (DIM == 3) kick[2] = vkick2; }
+                // 3-D guiding-centre marker: v is the gyro velocity, not
+                // the path. Mirror the remaining chord itself (v_par and mu
+                // are untouched: the cut is a flux surface) and take the
+                // kick out of v, which no longer defines the path.
+                double gcend[3];
+                if (DIM == 3 && pusher->gca_end_point(i,gcend)) {
+                  // xnew is clipped to the cell face here: the end of the path is xhold
+                  const double *xe = (outface != INTERIOR) ? xhold : xnew;
+                  double rem[3] = {xe[0]-x[0], xe[1]-x[1], xe[2]-x[2]};
+                  const double rn = rem[0]*nrm[0] + rem[1]*nrm[1] + rem[2]*nrm[2];
+                  if (rn < 0.0) { rem[0] -= 2.0*rn*nrm[0]; rem[1] -= 2.0*rn*nrm[1]; rem[2] -= 2.0*rn*nrm[2]; }
+                  if (has_kick) { v[0] -= vkick0; v[1] -= vkick1; v[2] -= vkick2; has_kick = 0; }
+                  dtremain *= 1.0 - minparam*frac;
+                  if (minparam == 0.0) stuck_iterate++;
+                  else stuck_iterate = 0;
+                  if (stuck_iterate >= MAXSTUCK) {
+                    particles[i].flag = PDISCARD;
+                    nstuck++;
+                    break;
+                  }
+                  xnew[0] = x[0] + rem[0]; xnew[1] = x[1] + rem[1]; xnew[2] = x[2] + rem[2];
+                  pusher->sync_gc_position(i,xnew);
+                  exclude = minsurf;
+                  continue;
+                }
+                double own[3] = {v[0] - kick[0], v[1] - kick[1], v[2] - kick[2]};
                 const double on = own[0]*nrm[0] + own[1]*nrm[1] + own[2]*n2;
                 if (on < 0.0) { own[0] -= 2.0*on*nrm[0]; own[1] -= 2.0*on*nrm[1]; own[2] -= 2.0*on*n2; }
-                const double kn = vkick0*nrm[0] + vkick1*nrm[1] + ((DIM == 3) ? vkick2*n2 : 0.0);
-                if (kn < 0.0) {
-                  vkick0 -= 2.0*kn*nrm[0]; vkick1 -= 2.0*kn*nrm[1];
-                  if (DIM == 3) vkick2 -= 2.0*kn*n2;
-                }
-                v[0] = own[0] + vkick0; v[1] = own[1] + vkick1;
-                v[2] = own[2] + ((DIM == 3) ? vkick2 : 0.0);
+                const double kn = kick[0]*nrm[0] + kick[1]*nrm[1] + kick[2]*n2;
+                if (kn < 0.0) { kick[0] -= 2.0*kn*nrm[0]; kick[1] -= 2.0*kn*nrm[1]; kick[2] -= 2.0*kn*n2; }
+                if (has_kick) { vkick0 = kick[0]; vkick1 = kick[1]; if (DIM == 3) vkick2 = kick[2]; }
+                v[0] = own[0] + kick[0]; v[1] = own[1] + kick[1];
+                v[2] = own[2] + kick[2];
                 dtremain *= 1.0 - minparam*frac;
                 if (minparam == 0.0) stuck_iterate++;
                 else stuck_iterate = 0;
@@ -2664,9 +2693,13 @@ template < int DIM, int SURF, int OPT > void Update::move()
               // fix core/transport: a chain marker reaching the core cut
               // is absorbed into the 1-D core model (tallied, discarded
               // like surf_collide vanish, no collision or reaction)
-              if (core_groupbit &&
-                  ((DIM == 3) ? (tri->mask & core_groupbit) : (line->mask & core_groupbit)) &&
-                  core_species[particles[i].ispecies] >= 0) {
+              // (auxiliary coupling: only chain neutrals, which cross the
+              // cut ballistically)
+              const int smask_core = (DIM == 3) ? tri->mask : line->mask;
+              if ((core_groupbit && (smask_core & core_groupbit) &&
+                   core_species[particles[i].ispecies] >= 0) ||
+                  (core_neutral_groupbit && (smask_core & core_neutral_groupbit) &&
+                   core_species[particles[i].ispecies] == 0)) {
                 core_fix->absorb(i,minsurf);
                 ipart = NULL;
                 jpart = NULL;
@@ -2678,6 +2711,20 @@ template < int DIM, int SURF, int OPT > void Update::move()
               if (DIM != 3)
                 jpart = surf->sc[line->isc]->
                   collide(ipart,dtremain,minsurf,line->norm,line->isr,reaction);
+              }
+
+              // a wall changed the particle: a stored guiding-centre state
+              // describes the orbit before it. Rebuilt from the particle on
+              // the next push (caps rotate the state themselves; a
+              // transparent surf changes nothing).
+              if (pusher && !cap && ipart) {
+                const int isc_hit = (DIM == 3) ? tri->isc : line->isc;
+                if (isc_hit < 0 || !surf->sc[isc_hit]->transparent) {
+                  pusher->invalidate_gc(i, Pusher::GC_INVAL_BOUNDARY);
+                  if (jpart) pusher->invalidate_gc((int) (jpart - particle->particles), Pusher::GC_INVAL_BOUNDARY);
+                  for (int inew = nlocal_precollide; inew < particle->nlocal; inew++)
+                    pusher->invalidate_gc(inew, Pusher::GC_INVAL_BOUNDARY);
+                }
               }
 
               // fix particle/tag: a hit on a tagged surf group (e.g. the
