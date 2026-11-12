@@ -23,9 +23,10 @@ bsource = {background} fix-ID or {bfield_const} Bx By Bz or {bfield} BxSRC BySRC
   {bfield} BxSRC BySRC BzSRC = per-grid or per-particle sources for the
     field components; each is {c_ID\[col\]} or {p_name} :pre
 one or more keyword/value pairs must be appended :l
-keyword = {D_perp} or {bohm} or {pinch} or {pinch_psi} or {gradient_pinch} :l
+keyword = {D_perp} or {bohm} or {binormal} or {pinch} or {pinch_psi} or {gradient_pinch} :l
   {D_perp} value = D = constant perpendicular diffusivity (m^2/s)
   {bohm} values = \[TeSRC\] \[scale S\]
+  {binormal} value = {yes} or {no} = 2d only: also step along the direction perpendicular to B within the flux surface
     TeSRC = electron temperature source (eV), required unless
       bsource is {background}
     scale S = multiplier on the Bohm diffusivity (default 1.0)
@@ -102,6 +103,15 @@ SRC tokens are {c_ID\[col\]} for column col of a per-grid compute
 
 This command is part of the OPENEDGE package.
 
+In 2d the random step has two parts: one along the flux-surface normal
+and one along the binormal (perpendicular to B, within the flux
+surface), which in axisymmetric runs includes the outward shift in R of
+a toroidal step. Together they are the 2d projection of the isotropic
+perpendicular walk used in 3d. {binormal no} keeps only the normal
+part; on curved flux surfaces this drifts particles toward the inside
+of the curve, and it is kept only to reproduce older 2d results. The
+keyword has no effect in 3d.
+
 At least one of {D_perp}, {bohm}, {pinch} or {gradient_pinch} must be
 given; {pinch_psi} alone does not satisfy this requirement. Only one
 diffusion model is used; if both {D_perp} and {bohm} appear, the last
@@ -115,5 +125,5 @@ background"_fix_background.html
 
 [Default:]
 
-The option defaults are bohm scale = 1.0. No diffusion or pinch is
+The option defaults are bohm scale = 1.0 and binormal = yes. No diffusion or pinch is
 applied unless requested.

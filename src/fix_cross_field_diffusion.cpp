@@ -64,6 +64,7 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
   use_const_(0),
   diff_model_(DIFF_NONE),
   D_perp_(0.0),
+  binormal2d_(1),
   bohm_scale_(1.0),
   have_pinch_(0),
   v_pinch_R_(0.0),
@@ -146,6 +147,17 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
         bohm_scale_ = input->numeric(FLERR, arg[iarg++]);
       }
 
+    } else if (strcmp(arg[iarg], "binormal") == 0) {
+      // 2-D only (3-D always steps in the full perpendicular plane).
+      // yes (default): step along the flux-surface normal and the binormal.
+      // no: normal only, which drifts markers toward the axis side of
+      // curved surfaces; kept to reproduce older 2-D runs.
+      iarg++;
+      if (iarg >= narg) error->all(FLERR, "fix cross_field_diffusion binormal: need yes or no");
+      if (strcmp(arg[iarg], "yes") == 0) binormal2d_ = 1;
+      else if (strcmp(arg[iarg], "no") == 0) binormal2d_ = 0;
+      else error->all(FLERR, "fix cross_field_diffusion binormal: need yes or no");
+      iarg++;
     } else if (strcmp(arg[iarg], "pinch_psi") == 0) {
       iarg++;
       if (iarg >= narg)
@@ -394,11 +406,14 @@ void FixCrossFieldDiffusion::start_of_step()
       B2 = read_src(srcBz_, ip, icell);
     }
     const double Bmag = std::sqrt(B0*B0 + B1*B1 + B2*B2);
-    if (Bmag < 1.0e-20) continue;
+    // no field here: no diffusion, but the prescribed pinches still apply
+    const bool hasB = (Bmag >= 1.0e-20);
 
     // compute local D_perp
     double D_local = 0.0;
-    if (diff_model_ == DIFF_CONST) {
+    if (!hasB) {
+      D_local = 0.0;
+    } else if (diff_model_ == DIFF_CONST) {
       D_local = D_perp_;
     } else if (diff_model_ == DIFF_BOHM) {
       double Te_eV = 0.0;
@@ -426,6 +441,20 @@ void FixCrossFieldDiffusion::start_of_step()
           const double xi = rng_->gaussian();
           dx[ip][0] += sigma * xi * eperp0;
           dx[ip][1] += sigma * xi * eperp1;
+          if (binormal2d_) {
+            // e2 = b x e_perp: in-plane part along the poloidal field
+            // (B_tor/B); its toroidal part (B_pol/B) moves the marker
+            // outward in R, R' = sqrt(R^2 + s^2)
+            const double xi2 = rng_->gaussian();
+            const double f = sigma * xi2 * (B2 / Bmag) * inv_Bpol;
+            dx[ip][0] += f * B0;
+            dx[ip][1] += f * B1;
+            if (domain->axisymmetric) {
+              const double s = sigma * xi2 * Bpol / Bmag;
+              const double R1 = p.x[1] + dx[ip][1];
+              dx[ip][1] += std::sqrt(R1*R1 + s*s) - R1;
+            }
+          }
         }
       } else {
         const double inv_Bmag = 1.0 / Bmag;
