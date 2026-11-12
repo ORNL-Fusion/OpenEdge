@@ -44,7 +44,7 @@ storing a single lumped vector.
 
 The fix exposes a three-column per-particle array in newtons.  Its
 components are available to "dump particle"_dump.html and other
-per-particle consumers as {f_ID[1]}, {f_ID[2]}, and {f_ID[3]}.  The
+per-particle consumers as {f_ID\[1\]}, {f_ID\[2\]}, and {f_ID\[3\]}.  The
 components use OpenEdge storage-coordinate order.  In the common 2d
 axisymmetric layout, (x,y,z)=(Z,R,phi), so the force order is
 (F_Z,F_R,F_phi).
