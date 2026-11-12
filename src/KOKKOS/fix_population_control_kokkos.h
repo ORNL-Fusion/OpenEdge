@@ -7,7 +7,7 @@
     the rest are deleted with the device compaction. Total weight per
     bucket is conserved exactly, as on the CPU; which markers survive is
     random on both sides (statistical parity only).
-    HOST FALLBACK (base end_of_step): more than MAXSP species.
+    No host fallback: more than MAXSP (1024) species is an error.
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -33,7 +33,10 @@ struct TagFixPopControl_scan {};
 
 class FixPopulationControlKokkos : public FixPopulationControl, public KokkosBase {
  public:
-  enum { MAXSP = 64 };   // per-thread species counter (registers/local memory)
+  // Species are tracked per cell with a per-thread bitmask, so the only limit is
+  // MAXSP_WORDS*64 species (1024); more than that is a hard error at init, never
+  // a silent change of code path.
+  enum { MAXSP_WORDS = 16, MAXSP = MAXSP_WORDS*64 };
 
 #ifndef SPARTA_KOKKOS_EXACT
   Kokkos::Random_XorShift64_Pool<DeviceType> rand_pool;
@@ -62,6 +65,7 @@ class FixPopulationControlKokkos : public FixPopulationControl, public KokkosBas
   DAT::t_int_1d d_del;        // 1 = delete particle i
   DAT::t_int_1d d_dellist;    // compacted indices
   int warned_fallback;
+  int pop_debug_;             // OE_POP_DEBUG=1: fence and report after every stage
 };
 
 }
