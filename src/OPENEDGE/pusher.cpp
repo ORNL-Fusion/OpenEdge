@@ -2803,6 +2803,26 @@ bool Pusher::sync_gc_position(int i, const double *x)
   return true;
 }
 
+void Pusher::rotate_gc(int i, double c, double s)
+{
+  if (gca_x_custom < 0 || gca_y_custom < 0) return;
+  double &gx = particle->edvec[particle->ewhich[gca_x_custom]][i];
+  double &gy = particle->edvec[particle->ewhich[gca_y_custom]][i];
+  const double x0 = gx, y0 = gy;
+  gx = c*x0 - s*y0; gy = s*x0 + c*y0;
+}
+
+bool Pusher::gca_end_point(int i, double *X) const
+{
+  if (gca_x_custom < 0 || gca_valid_custom < 0 || gca_mode_custom < 0) return false;
+  if (particle->edvec[particle->ewhich[gca_valid_custom]][i] < 0.5 ||
+      particle->edvec[particle->ewhich[gca_mode_custom]][i] < 0.5) return false;
+  X[0] = particle->edvec[particle->ewhich[gca_x_custom]][i];
+  X[1] = particle->edvec[particle->ewhich[gca_y_custom]][i];
+  X[2] = particle->edvec[particle->ewhich[gca_z_custom]][i];
+  return true;
+}
+
 void Pusher::invalidate_gc(int i, int reason)
 {
   (void) reason;   // reasons feed diagnostics once operators land

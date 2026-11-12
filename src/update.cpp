@@ -26,6 +26,7 @@ https://github.com/ORNL-Fusion/OpenEdge
 #include "grid.h"
 #include "surf.h"
 #include "surf_collide.h"
+#include "surf_collide_toroidal.h"
 #include "surf_react.h"
 #include "input.h"
 #include "output.h"
@@ -1736,11 +1737,15 @@ template < int DIM, int SURF, int OPT > void Update::move()
         xnew[0] = x[0] + dtremain*v[0];
         xnew[1] = x[1] + dtremain*v[1];
         if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+        // 3-D guiding-centre marker: v is the gyro velocity, the end of
+        // the step is the stored guiding centre
+        if (DIM == 3 && pusher) pusher->gca_end_point(i,xnew);
       } else if (pflag == PEXIT) {
         dtremain = particles[i].dtremain;
         xnew[0] = x[0] + dtremain*v[0];
         xnew[1] = x[1] + dtremain*v[1];
         if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+        if (DIM == 3 && pusher) pusher->gca_end_point(i,xnew);
       } else if (pflag >= PSURF) {
         dtremain = particles[i].dtremain;
         xnew[0] = x[0] + dtremain*v[0];
@@ -2492,7 +2497,17 @@ template < int DIM, int SURF, int OPT > void Update::move()
               // no tallies; the particle continues from the wall point
               // with its own velocity, which already carries it back into
               // the domain.
-              if (has_kick) {
+              // A periodic cap is no wall: the whole remaining path
+              // (kick included) is rotated to the far cap after the collide.
+              SurfCollideToroidal *cap = nullptr;
+              double caprem[3] = {0.0, 0.0, 0.0};
+              if (DIM == 3 && tri->isc >= 0 && strcmp(surf->sc[tri->isc]->style,"toroidal") == 0) {
+                cap = static_cast<SurfCollideToroidal *>(surf->sc[tri->isc]);
+                // xnew is clipped to the cell face here: the end of the path is xhold
+                const double *xe = (outface != INTERIOR) ? xhold : xnew;
+                caprem[0] = xe[0]-x[0]; caprem[1] = xe[1]-x[1]; caprem[2] = xe[2]-x[2];
+              }
+              if (has_kick && !cap) {
                 v[0] -= vkick0;
                 v[1] -= vkick1;
                 if (DIM == 3) v[2] -= vkick2;
@@ -2763,6 +2778,18 @@ template < int DIM, int SURF, int OPT > void Update::move()
               xnew[0] = x[0] + dtremain*v[0];
               xnew[1] = x[1] + dtremain*v[1];
               if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+              // periodic cap: the collide rotated x, v and the stored
+              // guiding centre; the remaining path and the kick follow
+              if (cap) {
+                const double c = cap->rot_cos, sn = cap->rot_sin;
+                xnew[0] = x[0] + c*caprem[0] - sn*caprem[1];
+                xnew[1] = x[1] + sn*caprem[0] + c*caprem[1];
+                xnew[2] = x[2] + caprem[2];
+                if (has_kick) {
+                  const double k0 = vkick0, k1 = vkick1;
+                  vkick0 = c*k0 - sn*k1; vkick1 = sn*k0 + c*k1;
+                }
+              }
               // guiding-centre marker turned back at an internal cut: its
               // stored GC must end where this path ends, or the next push
               // restarts from the pre-reflection position behind the cut
@@ -2782,7 +2809,11 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 int newcell = grid->id_find_child(0,0,
                                   domain->boxlo,domain->boxhi,x);
                 if (newcell >= 0) {
-                  if (cells[newcell].proc == me) {
+                  // gridcut < 0: one move pass, every ghost cell is stored,
+                  // so the move goes on in the ghost cell like any other
+                  // cell crossing (PENTRY would sit until the next step)
+                  if (cells[newcell].proc == me ||
+                      (grid->cutoff < 0.0 && cells[newcell].nsurf >= 0)) {
                     if (DIM == 3 && SURF) {
                       if (cells[newcell].nsplit > 1 &&
                           cells[newcell].nsurf >= 0)
@@ -2806,6 +2837,19 @@ template < int DIM, int SURF, int OPT > void Update::move()
                     particles[i].dtremain = dtremain;
                     entryexit = 1;
                     nscollide_one++;
+                    // the kick must not leave this rank inside v. A
+                    // guiding-centre marker keeps the whole displacement
+                    // in its stored end point, which the receiver uses;
+                    // otherwise the untraversed remainder is dropped.
+                    if (has_kick) {
+                      v[0] -= vkick0; v[1] -= vkick1; v[2] -= vkick2;
+                      has_kick = 0;
+                      double gcend[3];
+                      if (pusher && !pusher->gca_end_point(i,gcend)) {
+                        const double back[3] = {-vkick0*dtremain, -vkick1*dtremain, -vkick2*dtremain};
+                        pusher->apply_gc_displacement(i,back);
+                      }
+                    }
                     break;
                   }
                 } else {

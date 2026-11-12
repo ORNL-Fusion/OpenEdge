@@ -238,6 +238,11 @@ class Pusher : protected Pointers {
   bool apply_parallel_impulse(int i, double dvpar);
   bool apply_gc_displacement(int i, const double *dx);
   void invalidate_gc(int i, int reason);
+  // rotation about the z axis (periodic cap): stored position only
+  void rotate_gc(int i, double c, double s);
+  // marker on the GCA branch with a valid state: X = stored guiding centre
+  // (the end point of its step). false leaves X untouched
+  bool gca_end_point(int i, double *X) const;
   // Unified sheath wall potential for surface element midx at the exact
   // event time (t_offset seconds into the current step): sheath
   // base + RF waveform, from the per-element cache. Returns
