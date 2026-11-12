@@ -183,6 +183,10 @@ void FixSurfaceEmitRecycle::init()
       if (logfile) fprintf(logfile, "fix surface/emit/recycle: wall_flux_cutoff %g m from the sample spacing\n", wall_flux_cutoff);
     }
   }
+  if (!plasma->has_wall_flux() && comm->me == 0)
+    error->warning(FLERR,"fix surface/emit/recycle: background has no "
+                   "/wall_flux samples; ion wall flux reconstructed as "
+                   "ne*cs*sin(alpha)");
   twall_by_species.assign(nspecies, twall);
   const int *mix_species = particle->mixture[imix]->species;
   for (size_t k = 0; k < twall_species_names.size(); k++) {

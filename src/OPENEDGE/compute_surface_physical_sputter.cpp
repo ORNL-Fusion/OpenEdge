@@ -657,6 +657,13 @@ void ComputeSurfacePhysicalSputter::load_plasma_from_fix(const FixBackground *pd
   mesh_ions_upar = pd->mesh_ions_upar;
   // Copy /wall_flux/ scatter (empty if plasma.h5 didn't have it).
   wall_flux_n     = pd->wall_flux.n;
+  static bool warned_no_wall_flux = false;
+  if (wall_flux_n == 0 && !warned_no_wall_flux && comm->me == 0) {
+    warned_no_wall_flux = true;
+    error->warning(FLERR,"compute surface/physical/sputter: background has "
+                   "no /wall_flux samples; ion wall flux reconstructed as "
+                   "ne*cs*sin(alpha)");
+  }
   wall_flux_nspec = pd->wall_flux.nspec;
   wall_flux_r     = pd->wall_flux.r;
   wall_flux_z     = pd->wall_flux.z;
