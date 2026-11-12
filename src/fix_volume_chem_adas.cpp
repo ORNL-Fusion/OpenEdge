@@ -1449,8 +1449,6 @@ void FixVolumeChemAdas::spawn_volume_recombination()
   const int   sp_prod  = rec_product_isp[0];
   const double m_prod  = particle->species[sp_prod].mass;
 
-  constexpr double eV_to_J = 1.602176634e-19;
-  constexpr double kB      = 1.380649e-23;
 
   auto mit = materials_rate_data.find(atomic_number);
   const bool have_tables = (mit != materials_rate_data.end());
@@ -1564,9 +1562,9 @@ void FixVolumeChemAdas::spawn_volume_recombination()
         viy = vpar * by * invB;
         viz = vpar * bz * invB;
       }
-      const double Ti_J = std::max(Ti_eV, 0.0) * eV_to_J;
-      const double Ti_K = Ti_J / kB;
-      const double v_th = (m_prod > 0.0) ? std::sqrt(kB * Ti_K / m_prod) : 0.0;
+      const double Ti_J = std::max(Ti_eV, 0.0) * PhysConst::QE;
+      const double Ti_K = Ti_J / PhysConst::KB;
+      const double v_th = (m_prod > 0.0) ? std::sqrt(PhysConst::KB * Ti_K / m_prod) : 0.0;
 
       double E_rad_J = 0.0;
       if (have_rad) {
@@ -1891,7 +1889,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
         if (rlist[ridx_map[i]].type != EXCHANGE) continue;
         const double m_atom = particle->species[isp].mass;
         const double v2p = ip->v[0]*ip->v[0] + ip->v[1]*ip->v[1] + ip->v[2]*ip->v[2];
-        const double E_atom_eV = 0.5 * m_atom * v2p / 1.602176634e-19;
+        const double E_atom_eV = 0.5 * m_atom * v2p / PhysConst::QE;
         const double lam = computeReactionLambda(
           log10_sigmav_cx_hh_cm3s(Ti_eV, E_atom_eV), dt_chem, ne_m3);
         lambda_total += lam - lambda[i];
@@ -1927,8 +1925,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
           const double m_atom = particle->species[isp].mass;
           const double vx0p = ip->v[0], vy0p = ip->v[1], vz0p = ip->v[2];
           const double v2p  = vx0p*vx0p + vy0p*vy0p + vz0p*vz0p;
-          constexpr double eV_to_J_local = 1.602176634e-19;
-          const double E_atom_eV = 0.5 * m_atom * v2p / eV_to_J_local;
+          const double E_atom_eV = 0.5 * m_atom * v2p / PhysConst::QE;
           rate_log10_cm3s = log10_sigmav_cx_hh_cm3s(Ti_eV, E_atom_eV);
         } else {
           // Impurity-H CX (ADAS CCD): partner = NEUTRAL D (mesh/dens_n).
@@ -2002,10 +1999,9 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
   double vprod[2][3] = {{ip->v[0], ip->v[1], ip->v[2]},
                         {ip->v[0], ip->v[1], ip->v[2]}};
   if (do_dissoc && rchosen->efc > 0.0) {
-    const double eV_to_J_fc = 1.602176634e-19;
     const double m0 = particle->species[rchosen->products[0]].mass;
     const double v_FC = (m0 > 0.0)
-      ? std::sqrt(2.0 * rchosen->efc * eV_to_J_fc / m0) : 0.0;
+      ? std::sqrt(2.0 * rchosen->efc * PhysConst::QE / m0) : 0.0;
     const double costh = 1.0 - 2.0 * rng_adas->uniform();
     const double sinth = std::sqrt(std::max(0.0, 1.0 - costh*costh));
     const double phi   = MY_2PI * rng_adas->uniform();
@@ -2071,7 +2067,6 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
 
     {
       // signed plasma-frame moments (both output modes)
-      constexpr double eV_to_J = 1.602176634e-19;
 
       // Ion velocity approximation: fluid parallel flow v_par * b_hat.
       const double Bmag = std::sqrt(bx*bx + by*by + bz*bz);
@@ -2088,7 +2083,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
       // Reactant charge state (neutral=0 for ionization, q=charge for recomb).
       const size_t q = static_cast<size_t>(
                          std::max(0.0, particle->species[isp0].charge));
-      const double Ti_J = Ti_eV * eV_to_J;
+      const double Ti_J = Ti_eV * PhysConst::QE;
 
       // Rate tables live in materials_rate_data[atomic_number], not the
       // unused default `rate_data` member.  The loader writes there (see
@@ -2123,14 +2118,14 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
           if (std::isfinite(plt_log10) && std::isfinite(scd_log10)) {
             // PLT [log10 W cm^3] - SCD [log10 cm^3/s] = log10 (W s) = log10 J
             const double J_per_event = std::pow(10.0, plt_log10 - scd_log10);
-            E_eff_eV += J_per_event / eV_to_J;
+            E_eff_eV += J_per_event / PhysConst::QE;
           }
         }
         dSp  = +1.0;
         dSmx = +m * vx0;
         dSmy = +m * vy0;
         dSmz = +m * vz0;
-        dQe  = -E_eff_eV * eV_to_J;
+        dQe  = -E_eff_eV * PhysConst::QE;
         // Ionization adds the neutral's KE to the ion
         // fluid. Thermalisation to local Ti happens later as a fluid
         // process, not here. No thermal subtraction.
@@ -2151,14 +2146,14 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
                               acd_log10, ReactionType::Recombination);
           if (std::isfinite(prb_log10) && std::isfinite(acd_log10)) {
             const double J_per_event = std::pow(10.0, prb_log10 - acd_log10);
-            E_rec_loss_eV = J_per_event / eV_to_J;
+            E_rec_loss_eV = J_per_event / PhysConst::QE;
           }
         }
         dSp  = -1.0;
         dSmx = -m * vix;
         dSmy = -m * viy;
         dSmz = -m * viz;
-        dQe  = -E_rec_loss_eV * eV_to_J;
+        dQe  = -E_rec_loss_eV * PhysConst::QE;
         dQi  = -(0.5 * m * vi2 + 1.5 * Ti_J);   // drift KE + thermal (3/2 kB Ti)
         break;
       }
@@ -2180,7 +2175,7 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
         // bulk-ion products enter the ion fluid with their full velocity
         dSp  = 0.0;
         dSmx = dSmy = dSmz = 0.0;
-        dQe  = -rchosen->eel * eV_to_J;
+        dQe  = -rchosen->eel * PhysConst::QE;
         dQi  = 0.0;
         for (int k = 0; k < rchosen->nproduct && k < 2; k++) {
           if (!rchosen->bulkprod[k]) continue;
@@ -2302,11 +2297,9 @@ void FixVolumeChemAdas::sample_cx_velocity(int sp_prod, double Ti_eV,
                                            const double *v_parent,
                                            double *v_post)
 {
-  const double kB = 1.380649e-23;
-  const double eV_to_J = 1.602176634e-19;
-  const double Ti_K = Ti_eV * eV_to_J / kB;
+  const double Ti_K = Ti_eV * PhysConst::QE / PhysConst::KB;
   const double m_prod = particle->species[sp_prod].mass;
-  const double v_th = (m_prod > 0.0) ? std::sqrt(kB * Ti_K / m_prod) : 0.0;
+  const double v_th = (m_prod > 0.0) ? std::sqrt(PhysConst::KB * Ti_K / m_prod) : 0.0;
 
   const double Bmag = std::sqrt(bx*bx + by*by + bz*bz);
   double vfx = 0.0, vfy = 0.0, vfz = 0.0;
@@ -2323,7 +2316,7 @@ void FixVolumeChemAdas::sample_cx_velocity(int sp_prod, double Ti_eV,
     // Maxwellian weighted by sigma_CX(E_rel)*v_rel. Post-CX neutral
     // takes the sampled ion velocity. SGCVMX is a conservative upper
     // bound on sigma*v across the relevant E_rel range.
-    const double E_lab_factor = 0.5 * m_prod / eV_to_J;
+    const double E_lab_factor = 0.5 * m_prod / PhysConst::QE;
     constexpr double SGCVMX = 1.2e-13;
     double v_post_x = 0.0, v_post_y = 0.0, v_post_z = 0.0;
     int icount = 0;

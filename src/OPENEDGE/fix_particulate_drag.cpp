@@ -262,7 +262,7 @@ void FixParticulateDrag::kick_half(double dt_half)
 
   const double mi       = A_background *
     (physics_model_ == ParticulateModel::DIS2021
-      ? 1.66053906660e-27 : update->proton_mass);
+      ? PhysConst::AMU : update->proton_mass);
   const int    dim      = domain->dimension;
   const int    axisym   = domain->axisymmetric;
 
@@ -312,7 +312,6 @@ void FixParticulateDrag::kick_half(double dt_half)
             // plasma.  DIS uses signed chi=-Phi/Te; DUSTT retains its legacy
             // negative-grain-only closure exactly.
             const double QE   = update->echarge;
-            const double EPS0 = 8.8541878128e-12;
             const double Te_eV = std::max(plasma.te, 0.0);
             const double ne    = std::max(plasma.ne, 0.0);
             double chi = chi_coulomb;
@@ -323,7 +322,7 @@ void FixParticulateDrag::kick_half(double dt_half)
               if (ew >= 0) {
                 const double Zd   = particle->edvec[ew][ip];
                 const double r_c  = std::max(rd, 1.0e-9);
-                const double phiV = Zd * QE / (4.0 * MY_PI * EPS0 * r_c);
+                const double phiV = Zd * QE / (4.0 * MY_PI * PhysConst::EPS0 * r_c);
                 if (std::isfinite(phiV)) {
                   if (physics_model_ == ParticulateModel::DIS2021)
                     chi = -phiV / Te_eV;
@@ -340,7 +339,7 @@ void FixParticulateDrag::kick_half(double dt_half)
                 const double TeJ  = Te_eV * QE;
                 const double mve2 = TiJ * (3.0 + 2.0*u*u);
                 const double b90  = rd * std::fabs(chi) * TeJ / mve2;
-                const double lamD = std::sqrt(EPS0 * TeJ / (ne * QE * QE));
+                const double lamD = std::sqrt(PhysConst::EPS0 * TeJ / (ne * QE * QE));
                 const double lams = lamD / std::sqrt(1.0 + 3.0*TeJ/mve2);
                 const double eta  = 1.0 + (rd/lams)
                                     * (1.0 + std::sqrt(Te_eV/(6.0*Ti_eV)));
@@ -458,7 +457,7 @@ double FixParticulateDrag::ion_drag_nu(double Ni, double Ti_eV, double rd_m) con
   if (Ni <= 0.0 || Ti_eV <= 0.0 || rd_m <= 0.0 || rho_d <= 0.0) return 0.0;
   const double mi    = A_background *
     (physics_model_ == ParticulateModel::DIS2021
-      ? 1.66053906660e-27 : update->proton_mass);
+      ? PhysConst::AMU : update->proton_mass);
   const double vti   = std::sqrt(2.0 * (Ti_eV * update->echarge) / mi);
   const double rho_g = Ni * mi;
   return 0.75 * (rho_g * vti) / (rho_d * rd_m);

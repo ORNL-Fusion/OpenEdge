@@ -1333,10 +1333,9 @@ void SurfReactSurfacePWI::sample_cosine_velocity(double *v, double *norm,
                                                double energy_eV, double mass)
 {
   // speed from kinetic energy: E = 0.5 * m * v^2
-  const double eV_to_J = 1.602176634e-19;
   double speed = 0.0;
   if (mass > 0.0 && energy_eV > 0.0)
-    speed = sqrt(2.0 * energy_eV * eV_to_J / mass);
+    speed = sqrt(2.0 * energy_eV * PhysConst::QE / mass);
 
   // cosine angular distribution: cos(theta) = sqrt(xi1), phi = 2*pi*xi2
   double xi1 = random->uniform();
@@ -2466,18 +2465,18 @@ int SurfReactSurfacePWI::load_or_get_trim_table(const char *name)
    the surface, Bird 1994 (DSMC) gives the outgoing velocity as:
 
      v_n  = vrm * sqrt(-ln(u1))        (flux-biased normal component)
-     v_t1 ~ Gaussian(0, sqrt(kB*T/m))  (tangential, unconstrained)
-     v_t2 ~ Gaussian(0, sqrt(kB*T/m))  (tangential, unconstrained)
+     v_t1 ~ Gaussian(0, sqrt(PhysConst::KB*T/m))  (tangential, unconstrained)
+     v_t2 ~ Gaussian(0, sqrt(PhysConst::KB*T/m))  (tangential, unconstrained)
 
-   where vrm = sqrt(2*kB*T/m) is the most-probable speed of the 3D
+   where vrm = sqrt(2*PhysConst::KB*T/m) is the most-probable speed of the 3D
    Maxwell distribution. The normal PDF is f(v_n) proportional to
    v_n * exp(-v_n^2/vrm^2), which is the FLUX distribution (i.e. the
    speed distribution of particles crossing an imaginary plane per unit
    area per unit time), not the density distribution.
 
    Invariants at steady state with R=1, f_mol=0 (pure atomic recycle):
-     <v_n> = sqrt(pi * kB * T / (2 m))    (mean outgoing normal speed)
-     <E>   = 2 kB * T                     (mean outgoing KE — NOT 3/2 kT)
+     <v_n> = sqrt(pi * PhysConst::KB * T / (2 m))    (mean outgoing normal speed)
+     <E>   = 2 PhysConst::KB * T                     (mean outgoing KE — NOT 3/2 kT)
 
    Species-agnostic: works for D, H, T, He, Li, D2, H2, any species in
    particle->species. Mass is taken from that table.
@@ -2489,8 +2488,7 @@ void SurfReactSurfacePWI::sample_thermal_flux_velocity(double *v,
 {
   if (mass <= 0.0 || T_K <= 0.0) { v[0] = v[1] = v[2] = 0.0; return; }
 
-  const double kB = 1.380649e-23;
-  double vrm = sqrt(2.0 * kB * T_K / mass);
+  double vrm = sqrt(2.0 * PhysConst::KB * T_K / mass);
   double vtan_scale = vrm / sqrt(2.0);  // = sqrt(kB*T/m)
 
   // flux-biased normal component (half-Maxwellian), always positive

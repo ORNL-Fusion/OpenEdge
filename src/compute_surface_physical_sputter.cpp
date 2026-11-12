@@ -1712,9 +1712,6 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
 void ComputeSurfacePhysicalSputter::compute_per_surf_body()
 {
   // Physical constants
-  const double QE  = 1.602176634e-19;   // elementary charge [C]
-  const double AMU = 1.66053906660e-27;  // atomic mass unit [kg]
-  const double ME  = 9.1093837015e-31;   // electron mass [kg]
 
   invoked_per_surf = update->ntimestep;
   const bool compound = !compound_mix.empty();
@@ -2069,7 +2066,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf_body()
       // of Y(E,theta), so the smoothness gain dominates the accuracy hit.
       const double ti_for_E = wf_te_ti_ok ? ti_bulk : ti;
       const double ti_eV = (std::isfinite(ti_for_E) && ti_for_E > 0.0) ? ti_for_E : 0.0;
-      const double cs_arg = (te_eV + ti_eV) * QE / (mass_amu * AMU);
+      const double cs_arg = (te_eV + ti_eV) * PhysConst::QE / (mass_amu * PhysConst::AMU);
       const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
 
       // Per-species wall-face flux. When /wall_flux/ is present in
@@ -2150,7 +2147,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf_body()
       // mi_bg is the *background* ion mass (sets the sheath); uses mass_amu
       // (default D = 2.014 amu). Do NOT use the impurity mass here.
       // For D+, Ti=Te this reduces to |e*dpsi| = 2.84*Te.
-      const double mi_over_me_bg = (mass_amu * AMU) / ME;
+      const double mi_over_me_bg = (mass_amu * PhysConst::AMU) / PhysConst::ME;
       const double ti_ratio = ti_eV / std::max(te_eV, 1.0e-30);
       const double psi_over_Te = 0.5 *
         std::log(mi_over_me_bg / (2.0 * M_PI * (1.0 + ti_ratio)));
@@ -2195,7 +2192,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf_body()
           if (!(ne_el > 0.0)) ne_el = ni;
           const double bvec[3] = {br_loc, bz_loc, bt_loc};
           const double nvec[3] = {nr_surf, nz_surf, nt_surf};
-          const double mslot = per_proj_M1[slot_to_table[s]] * AMU;
+          const double mslot = per_proj_M1[slot_to_table[s]] * PhysConst::AMU;
           ih = &iead_inline->get(te_eV, ti_eV, ne_el, bvec, nvec, mslot, z_inc,
                                  std::fabs(upar_s));
         }
@@ -2319,7 +2316,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf_body()
 
           // Chankin 2014 eq. (4): see main loop above for derivation.
           // mi_bg = mass_amu (background D+), NOT imp_mass_amu.
-          const double mi_over_me_bg = (mass_amu * AMU) / ME;
+          const double mi_over_me_bg = (mass_amu * PhysConst::AMU) / PhysConst::ME;
           const double ti_ratio = ti_imp / std::max(te_loc, 1.0e-30);
           const double psi_over_Te = 0.5 *
             std::log(mi_over_me_bg / (2.0 * M_PI * (1.0 + ti_ratio)));
@@ -2327,7 +2324,7 @@ void ComputeSurfacePhysicalSputter::compute_per_surf_body()
                                static_cast<double>(Z) * psi_over_Te * te_loc;
 
           // Isothermal ion sound speed with impurity mass.
-          const double cs_arg = (te_loc + ti_imp) * QE / (imp_mass_amu * AMU);
+          const double cs_arg = (te_loc + ti_imp) * PhysConst::QE / (imp_mass_amu * PhysConst::AMU);
           const double cs = (cs_arg > 0.0) ? std::sqrt(cs_arg) : 0.0;
 
           // Bohm flux

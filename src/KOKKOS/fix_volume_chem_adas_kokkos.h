@@ -11,7 +11,7 @@
    SUPPORTED on device (device_ok, checked in init):
      - impurity chains (atomic_number > 1): ADAS SCD/ACD/CCD rate
        lookups + PLT/PRB per-event energy tallies,
-     - standard mode (no eirene_mode), no volume_source,
+     - no volume_source,
      - rate_cache particle mode (the device is per-particle anyway),
      - tally units COUNTS or RATE, both output modes,
      - single-product reactions (ioniz/recomb/CX species swap +
@@ -19,7 +19,7 @@
    HOST FALLBACK (base class end_of_step) for everything else:
      hydrogen AMJUEL/HYDHEL channels, dissociation / two-product
      reactions (device particle creation lands with phase A1b),
-     eirene_mode, batch tallies, volume_source, rate_cache cell.
+     batch tallies, volume_source, rate_cache cell.
      A one-time warning names the reason.
 
    Sampling semantics are IDENTICAL to the CPU path: inputs come from

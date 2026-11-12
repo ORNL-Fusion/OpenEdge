@@ -508,12 +508,10 @@ void FixParticulateThermal::droplet_evaporation_model(int idrop,
   // Material properties from the grain-material registry (default Li,
   // selectable per fix with `material NAME`, tunable with the material
   // command). Values resolved/validated in init().
-  const double AM   = mat_->mass_amu * 1.66053906660e-27;  // atom mass [kg]
+  const double AM   = mat_->mass_amu * PhysConst::AMU;  // atom mass [kg]
   const double Rho  = mat_->rho;          // kg/m^3
   const double DHm  = mat_->hvap_J_mol;   // heat of vaporization [J/mol]
   const double Eps  = mat_->emissivity;   // total emissivity [-]
-  const double AN   = 6.022e+23;          // 1/mol
-  const double SB   = 5.670374419e-8;     // Stefan-Boltzmann [W/m^2/K^4]
   const double Tw4  = twall_K_*twall_K_*twall_K_*twall_K_;
   const double DT   = dt_half;
 
@@ -544,10 +542,7 @@ void FixParticulateThermal::droplet_evaporation_model(int idrop,
   if (!pd_->sample_from_particle_cache(idrop, plasma, request))
     pd_->sample_point(xs, plasma, ip->icell, idrop, request);
 
-  const double QE = 1.602176634e-19;
-  const double ME = 9.1093837015e-31;
-  const double MI = ion_mass_amu_ * 1.66053906660e-27;
-  const double EPS0 = 8.8541878128e-12;
+  const double MI = ion_mass_amu_ * PhysConst::AMU;
   const double Te = std::max(plasma.te, 0.0);
   const double Ti = std::max(plasma.ti, 0.0);
   const double ne = std::max(plasma.ne, 0.0);
@@ -573,12 +568,12 @@ void FixParticulateThermal::droplet_evaporation_model(int idrop,
           "custom vector is unavailable");
       const double Zd = particle->edvec[ew][idrop];
       const double r_c = std::max(radius, 1.0e-12);
-      const double phi_V = Zd * QE / (4.0 * MY_PI * EPS0 * r_c);
+      const double phi_V = Zd * PhysConst::QE / (4.0 * MY_PI * PhysConst::EPS0 * r_c);
       if (!std::isfinite(phi_V))
         error->one(FLERR,
           "fix particulate/thermal model dis2021: non-finite grain potential");
       const double chi = -phi_V / Te;
-      const double vti = std::sqrt(2.0 * QE * Ti / MI);
+      const double vti = std::sqrt(2.0 * PhysConst::QE * Ti / MI);
       const double dv0 = ip->v[0] - plasma.flow[0];
       const double dv1 = ip->v[1] - plasma.flow[1];
       const double dv2 = ip->v[2] - plasma.flow[2];
@@ -620,28 +615,28 @@ void FixParticulateThermal::droplet_evaporation_model(int idrop,
         if (ew >= 0) {
           const double Zd = particle->edvec[ew][idrop];
           const double r_c = (radius > 1.0e-9) ? radius : 1.0e-9;
-          const double phi_V = Zd * QE / (4.0 * MY_PI * 8.8541878128e-12 * r_c);
+          const double phi_V = Zd * PhysConst::QE / (4.0 * MY_PI * PhysConst::EPS0 * r_c);
           if (std::isfinite(phi_V) && phi_V < 0.0 && Te > 0.0)
             chi = std::max(phi_V / Te, -20.0);
         }
       }
       // One-sided thermal fluxes (per unit grain surface).
-      const double Ge = 0.25 * ne * std::sqrt(8.0*QE*Te/(MY_PI*ME))
+      const double Ge = 0.25 * ne * std::sqrt(8.0*PhysConst::QE*Te/(MY_PI*PhysConst::ME))
                         * std::exp(chi);                       // repelled e-
       const double Gi = (Ti > 0.0)
-        ? 0.25 * ni * std::sqrt(8.0*QE*Ti/(MY_PI*MI)) * (1.0 - chi*Te/std::max(Ti,1e-30))
+        ? 0.25 * ni * std::sqrt(8.0*PhysConst::QE*Ti/(MY_PI*MI)) * (1.0 - chi*Te/std::max(Ti,1e-30))
         : 0.0;                                                 // OML-attracted ions
       // Sheath-transmitted energies (zeta_e = zeta_i = 2.5, DUSTT) plus
       // ion surface-recombination energy (hydrogenic 13.6 eV).
       const double Ee = 2.5 * Te;
       const double Ei = 2.5 * std::max(Ti, 0.0) + (-chi) * Te + 13.6;
-      Qoml = QE * (Ge * Ee + Gi * Ei);
+      Qoml = PhysConst::QE * (Ge * Ee + Gi * Ei);
     }
   }
 
   double a_over_lambdaD = 0.0;
   if (ne > 0.0 && Te > 0.0) {
-    const double lambdaD = std::sqrt(EPS0 * Te / (ne * QE));
+    const double lambdaD = std::sqrt(PhysConst::EPS0 * Te / (ne * PhysConst::QE));
     if (lambdaD > 0.0 && std::isfinite(lambdaD))
       a_over_lambdaD = radius / lambdaD;
   }
@@ -744,8 +739,8 @@ void FixParticulateThermal::droplet_evaporation_model(int idrop,
     // (emissivity * sigma * (T^4 - Twall^4)) - evaporative (latent) cooling.
     // Radiation is negligible for liquid Li (~kW/m^2 at 1000 K, eps~0.1)
     // but is a LEADING term for boron (~MW/m^2 at 2300 K, eps~0.8).
-    const double q_rad = Eps * SB * (T_new*T_new*T_new*T_new - Tw4);
-    const double HF   = Qs_step - q_rad - Gevap_atoms * (DHm / AN);
+    const double q_rad = Eps * PhysConst::SIGMA_SB * (T_new*T_new*T_new*T_new - Tw4);
+    const double HF   = Qs_step - q_rad - Gevap_atoms * (DHm / PhysConst::NA);
     const double r_safe = (R_new > 1.0e-20) ? R_new : 1.0e-20;
     // Melting as apparent heat capacity: spread the latent heat of fusion
     // over a +-dTm band around Tmelt so the grain pauses there while
@@ -844,9 +839,8 @@ void FixParticulateThermal::droplet_evaporation_model(int idrop,
       plasma.grad_te[1]*plasma.grad_te[1] +
       plasma.grad_te[2]*plasma.grad_te[2]);
     if (std::isfinite(grad_mag) && grad_mag > 0.0) {
-      const double kB = 1.380649e-23;
       const double T_rocket = std::max(1.0, 0.5 * (TK + T_new));
-      const double v_thermal = std::sqrt(8.0 * kB * T_rocket / (MY_PI * AM));
+      const double v_thermal = std::sqrt(8.0 * PhysConst::KB * T_rocket / (MY_PI * AM));
       const double dmdt = evap_atoms_step * AM / DT;
       const double a_mag = rocket_eta * dmdt * v_thermal / final_mass;
       Particle::OnePart *ip_w = &particle->particles[idrop];
@@ -902,7 +896,6 @@ void FixParticulateThermal::spawn_evap_atoms(int idrop, double area,
   const int icell_ip = ip_snap->icell;
   if (icell_ip < 0) return;
 
-  const double kB = 1.380649e-23;
 
   for (int k = 0; k < n_to_emit; ++k) {
     // Pick species via cumulative fraction.
@@ -919,7 +912,7 @@ void FixParticulateThermal::spawn_evap_atoms(int idrop, double area,
     if (m_atom <= 0.0) continue;
 
     // 3D Maxwellian velocity at droplet T (sigma = sqrt(kT/m) per component).
-    const double sigma = std::sqrt(kB * TK / m_atom);
+    const double sigma = std::sqrt(PhysConst::KB * TK / m_atom);
     double u1 = std::max(random->uniform(), 1.0e-300);
     double u2 = random->uniform();
     double u3 = std::max(random->uniform(), 1.0e-300);

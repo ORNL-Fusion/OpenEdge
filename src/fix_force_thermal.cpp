@@ -45,7 +45,6 @@ using namespace SPARTA_NS;
 enum { INT, DOUBLE };
 
 namespace {
-constexpr double AMU_KG = 1.66053906660e-27;
 constexpr double DEUTERIUM_MASS_AMU = 2.01410177811;
 }
 
@@ -59,7 +58,7 @@ FixForceThermal::FixForceThermal(SPARTA *sparta, int narg, char **arg) :
   have_ion_thermal_(0),
   have_elec_thermal_(0),
   ion_mass_amu_(DEUTERIUM_MASS_AMU),
-  ion_mass_kg_(DEUTERIUM_MASS_AMU * AMU_KG),
+  ion_mass_kg_(DEUTERIUM_MASS_AMU * PhysConst::AMU),
   ion_mass_explicit_(0),
   alpha_e_(0.71),
   store_thermal_ion_(nullptr),
@@ -294,7 +293,7 @@ void FixForceThermal::init()
     bind(srcGradTeR_, "gradTeR");
     bind(srcGradTeZ_, "gradTeZ");
   }
-  ion_mass_kg_ = ion_mass_amu_ * AMU_KG;
+  ion_mass_kg_ = ion_mass_amu_ * PhysConst::AMU;
   store_thermal_ion_ = find_store_force(
     modify, FixStoreForce::THERMAL_ION);
   store_thermal_electron_ = find_store_force(

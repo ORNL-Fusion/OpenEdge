@@ -19,6 +19,11 @@
 #ifndef LIQUID_METAL_STRIP_H
 #define LIQUID_METAL_STRIP_H
 
+// physical constants only (keeps the standalone strip tool free of SPARTA)
+#define SPARTA_CONSTANTS_ONLY
+#include "update.h"
+#undef SPARTA_CONSTANTS_ONLY
+
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -31,11 +36,8 @@ namespace LiquidMetal {
 // Physical constants
 // ---------------------------------------------------------------
 
-static const double KB  = 1.380649e-23;       // Boltzmann [J/K]
 static const double MLI = 1.1526e-26;         // natural Li (6.941 amu) [kg]
 static const double ATM_TO_PA = 101325.0;     // 1 atm in Pa
-static const double NA  = 6.02214076e23;      // Avogadro
-static const double EV  = 1.602176634e-19;    // J per eV
 static const double PI  = 3.14159265358979323846;
 
 // ---------------------------------------------------------------

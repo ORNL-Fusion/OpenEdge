@@ -1,4 +1,5 @@
 #include "sheath_iead.h"
+#include "update.h"
 
 #include <algorithm>
 #include <chrono>
@@ -13,8 +14,6 @@
 using namespace SPARTA_NS;
 
 namespace {
-constexpr double QE = 1.602176634e-19;
-constexpr double AMU = 1.66053906660e-27;
 constexpr double PI = 3.14159265358979323846;
 constexpr double OMEGA_DT = 0.05;      // gyro-phase advance per substep
 constexpr long MAX_STEPS = 4000000;   // hard cap; the transit-time cap below is the real limit
@@ -179,14 +178,14 @@ SheathIead::Hist SheathIead::compute(const Key &k)
   SheathModels::SheathEmagCoeffs c = SheathModels::sheath_prepare(
       k.te, k.ti, k.ne, k.bmag, k.alpha_deg, mD_amu, 0.0);
   const double d_max = (dmax_override > 0.0) ? dmax_override : c.mps_end_m;
-  const double q = k.Z * QE;
+  const double q = k.Z * PhysConst::QE;
   const double qm = q / k.mass;
-  const double sig = std::sqrt(QE * k.ti / k.mass);      // Maxwellian at Ti
-  const double mD = mD_amu * AMU;
+  const double sig = std::sqrt(PhysConst::QE * k.ti / k.mass);      // Maxwellian at Ti
+  const double mD = mD_amu * PhysConst::AMU;
   double u;
   if (k.upar > 0.0) u = k.upar;
-  else if (drift_mode == 0) u = std::sqrt(QE * (k.te + k.ti) / (2.0 * mD));
-  else u = std::sqrt(QE * (k.te + k.ti) / mD);
+  else if (drift_mode == 0) u = std::sqrt(PhysConst::QE * (k.te + k.ti) / (2.0 * mD));
+  else u = std::sqrt(PhysConst::QE * (k.te + k.ti) / mD);
 
   // local frame: wall at z = 0, normal +z, B in the x-z plane into the wall
   const double a = k.alpha_deg * PI / 180.0;
@@ -205,7 +204,7 @@ SheathIead::Hist SheathIead::compute(const Key &k)
   if (!(dt > 0.0) || !std::isfinite(dt)) dt = 1e-12;
 
   h.emax = k.Z * c.phi_total_eV
-         + 0.5 * k.mass * (u + 4.0 * sig) * (u + 4.0 * sig) / QE + 8.0 * k.ti;
+         + 0.5 * k.mass * (u + 4.0 * sig) * (u + 4.0 * sig) / PhysConst::QE + 8.0 * k.ti;
   const double rho = (k.bmag > 0.0) ? (u + 3.0 * sig) / (qm * k.bmag) : d_max;
   // launch where the potential has decayed (10 L_MPS + 20 lambda_D, as the
   // SHEATH tracker) plus a gyro-orbit margin along the normal, but never
@@ -277,7 +276,7 @@ SheathIead::Hist SheathIead::compute(const Key &k)
     }
     if (!impacted) { nesc++; continue; }
     const double v2 = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
-    const double e = 0.5 * k.mass * v2 / QE;
+    const double e = 0.5 * k.mass * v2 / PhysConst::QE;
     const double th = std::acos(std::min(1.0, std::max(-1.0, -v[2] / std::sqrt(v2)))) * 180.0 / PI;
     int ie = static_cast<int>(e / h.emax * nE);
     int it = static_cast<int>(th / 90.0 * nT);

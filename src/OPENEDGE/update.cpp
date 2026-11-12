@@ -412,27 +412,26 @@ Update::~Update()
 
 void Update::set_units(const char *style)
 {
-  // physical constants from:
-  // http://physics.nist.gov/cuu/Constants/Table/allascii.txt
+  // physical constants: PhysConst in update.h
 
   if (strcmp(style,"cgs") == 0) {
-    boltz = 1.380649e-16;
+    boltz = PhysConst::KB * 1.0e7;   // erg/K
     mvv2e = 1.0;
     dt = 1.0;
 
   } else if (strcmp(style,"si") == 0) {
-    boltz = 1.380649e-23;
+    boltz = PhysConst::KB;
     mvv2e = 1.0;
     dt = 1.0;
-    echarge = 1.60217646e-19;
-    ev2kelvin = 11604.505;
-    proton_mass = 1.6726219e-27;
-    epsilon_0 = 8.854187817e-12;
-    electron_mass = 9.10938215e-31;
+    echarge = PhysConst::QE;
+    ev2kelvin = PhysConst::EV2K;
+    proton_mass = PhysConst::MP;
+    epsilon_0 = PhysConst::EPS0;
+    electron_mass = PhysConst::ME;
     ANGSTROM = 1e-10;
-    hbar = 1.0545718e-34;
-    joule2ev = 6.242e18;
-    c = 299792458.0;
+    hbar = PhysConst::HBAR;
+    joule2ev = 1.0 / PhysConst::QE;
+    c = PhysConst::CLIGHT;
 
 
 
@@ -2604,18 +2603,14 @@ template < int DIM, int SURF, int OPT > void Update::move()
                   const double sk_te = sk_pf.temp_e;
                   const double sk_ti = sk_pf.temp_i;
                   if (phi_uni >= 0.0 || sk_te > 0.0) {
-                    constexpr double QE_kick = 1.602176634e-19;
-                    constexpr double ME_kick = 9.1093837015e-31;
-                    constexpr double AMU_kick = 1.66053906660e-27;
-                    constexpr double PI_kick = 3.14159265358979323846;
 
-                    const double mD_kg = sheath_mD_amu * AMU_kick;
+                    const double mD_kg = sheath_mD_amu * PhysConst::AMU;
 
                     // Floating potential: phi = 0.5*ln(mD/(2*pi*me)/(1+Ti/Te)) * Te (eV)
                     const double ti_ratio =
                       (sk_te > 0.0 && sk_ti > 0.0) ? (sk_ti / sk_te) : 0.0;
                     const double phi_float_mult = (sk_te > 0.0)
-                      ? 0.5 * std::log(mD_kg / (2.0 * PI_kick * ME_kick) / (1.0 + ti_ratio))
+                      ? 0.5 * std::log(mD_kg / (2.0 * MathConst::MY_PI * PhysConst::ME) / (1.0 + ti_ratio))
                       : 0.0;
                     const double phi_eV = (phi_uni >= 0.0)
                       ? phi_uni
@@ -2633,7 +2628,7 @@ template < int DIM, int SURF, int OPT > void Update::move()
                       const double vn_toward = -vdotn;  // positive = toward wall
 
                       // New normal speed: sqrt(vn^2 + 2*Z*e*phi/m)
-                      const double dE_J = Z * QE_kick * phi_eV;
+                      const double dE_J = Z * PhysConst::QE * phi_eV;
                       const double vn_new = std::sqrt(vn_toward * vn_toward + 2.0 * dE_J / pmass);
                       const double dv = vn_new - vn_toward;  // always >= 0
 

@@ -33,6 +33,7 @@ SurfReactStyle(surface/pwi/kk,SurfReactSurfacePWIKokkos)
 #define SPARTA_SURF_REACT_SURFACE_PWI_KOKKOS_H
 
 #include "kokkos_type.h"
+#include "update.h"
 #include "surf_react_surface_pwi.h"
 #include "particle_kokkos.h"
 #include "rand_pool_wrap.h"
@@ -51,8 +52,8 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
 
   static constexpr int PWI_NANG = 18;      // = base EHIST_NANG (5-deg bins)
   static constexpr double PWI_2PI = 6.283185307179586;
-  static constexpr double PWI_EV2J = 1.602176634e-19;
-  static constexpr double PWI_KB = 1.380649e-23;
+  static constexpr double PWI_EV2J = PhysConst::QE;
+  static constexpr double PWI_KB = PhysConst::KB;
 
   SurfReactSurfacePWIKokkos(class SPARTA *, int, char **);
   SurfReactSurfacePWIKokkos(class SPARTA *);   // KKCopy shallow copy

@@ -3,6 +3,7 @@
 ------------------------------------------------------------------------- */
 
 #include "background_zones3d.h"
+#include "update.h"
 
 #include "fix_background.h"
 
@@ -20,8 +21,6 @@ using namespace SPARTA_NS;
 
 namespace {
 
-constexpr double QE = 1.602176634e-19;
-constexpr double AMU = 1.66053906660e-27;
 constexpr double PI = 3.141592653589793238462643383279502884;
 constexpr double TWO_PI = 2.0 * PI;
 
@@ -737,10 +736,10 @@ bool BackgroundZones3D::sample(const double xyz[3], PlasmaPointSample &out,
     }
     if (!(request & PLASMA_NEED_FLOW_B)) goto gradients;
     out.mach = zone.mach[c];
-    const double cs = std::sqrt(QE * std::max(0.0,
+    const double cs = std::sqrt(PhysConst::QE * std::max(0.0,
                                 static_cast<double>(zone.te[c]) +
                                 static_cast<double>(zone.ti[c])) /
-                                (ion_mass_amu_ * AMU));
+                                (ion_mass_amu_ * PhysConst::AMU));
     // flow vector is physical (along the traced direction e); the scalar
     // is the projection on B so that flow = upar * bhat, as in the 2-D
     // provider and as fix coulomb/background assumes.

@@ -794,7 +794,6 @@ void ComputePlasmaFields::compute_per_grid()
   // init() clears the flag; its reallocate() call no-ops (sizes now match).
   if (sample_stale) init();
 
-  constexpr double eQ = 1.602176634e-19;
   constexpr double tiny = 1.0e-30;
 
   Grid::ChildCell *cells = grid->cells;

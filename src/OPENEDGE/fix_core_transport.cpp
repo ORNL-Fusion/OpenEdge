@@ -44,7 +44,6 @@ using namespace SPARTA_NS;
 
 enum{PKEEP,PINSERT,PDONE,PDISCARD,PENTRY,PEXIT,PSURF};   // several files
 
-static const double QE = 1.602176634e-19;
 static const double TWOPI = 6.283185307179586;
 
 static char *copy_arg(const char *s)
@@ -930,7 +929,7 @@ void FixCoreTransport::create_gc_marker(int z, double R, double Z, double u[5], 
   if (!update->pusher->sample_gca_fields(x,icell,i,F) || !(F.Bmag > 0.0))
     error->one(FLERR,"fix core/transport: no magnetic field for a marker in the coupling layer");
   double vpar, mu;
-  GCAPusher::sample_thermal_gc(ti[ngrid-1]*QE,mass,F.Bmag,u[0],u[1],u[2],vpar,mu);
+  GCAPusher::sample_thermal_gc(ti[ngrid-1]*PhysConst::QE,mass,F.Bmag,u[0],u[1],u[2],vpar,mu);
   if (!update->pusher->set_guiding_centre(i,x,vpar,mu,F.B,u[3]))
     error->one(FLERR,"fix core/transport: the pusher refused the guiding-centre state of a created marker");
   particle->edvec[particle->ewhich[pweight_index]][i] = marker_weight;
@@ -1032,7 +1031,7 @@ void FixCoreTransport::emit_marker(int z, int isurf, const double *xs, double we
   if (dim == 2) x[2] = 0.0;
 
   // half-Maxwellian flux at T_i of the outer cell, outward along the normal
-  const double kT = ti[ngrid-1]*QE, sig = sqrt(kT/mass);
+  const double kT = ti[ngrid-1]*PhysConst::QE, sig = sqrt(kT/mass);
   double t1[3], t2[3];
   if (fabs(nrm[0]) < 0.9) { t1[0] = 0.0; t1[1] = nrm[2]; t1[2] = -nrm[1]; }
   else { t1[0] = -nrm[2]; t1[1] = 0.0; t1[2] = nrm[0]; }
@@ -1061,7 +1060,7 @@ void FixCoreTransport::emit_marker(int z, int isurf, const double *xs, double we
   pp->weight = grid->cinfo[icell].weight;
   pp->dtremain = 0.0;
   if (modify->n_update_custom) {
-    double temp_K = ti[ngrid-1]*QE/update->boltz;
+    double temp_K = ti[ngrid-1]*PhysConst::QE/update->boltz;
     double vstream[3] = {0.0,0.0,0.0};
     modify->update_custom(inew,temp_K,temp_K,temp_K,vstream);
   }
