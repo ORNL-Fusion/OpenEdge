@@ -207,6 +207,12 @@ class Pusher : protected Pointers {
   // the GC attributes, or for non-finite / unphysical inputs.
   bool set_guiding_centre(int i, const double X[3], double vpar, double mu,
                           const double B[3], double phase01);
+  // Boundary operation for a guiding-centre marker reflected at an
+  // internal surface (e.g. the core cut): move the stored X to the
+  // position the reflected path ends at, keep v_par and mu. Without it
+  // the next push restarts from the pre-reflection X. Returns false
+  // (nothing written) if the marker has no valid GC state.
+  bool sync_gc_position(int i, const double *x);
   void log_switch(int id, int oldmode, int newmode, const char *reason,
                   double d_start, double d_end, double d_sw,
                   double e_pre, double e_post, int replay);

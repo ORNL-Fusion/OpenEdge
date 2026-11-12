@@ -20,6 +20,7 @@
 #include <cstdint>
 #include "fix_core_transport.h"
 #include "core_transport_1d.h"
+#include "core_transport_exchange.h"
 #include "fix_background.h"
 #include "process_library.h"
 #include "database_paths.h"
@@ -96,6 +97,8 @@ FixCoreTransport::FixCoreTransport(SPARTA *sparta, int narg, char **arg) :
   export_file = nullptr;
   coef_physical = 0; geometry_file = nullptr; geo_axis_rho = -1.0;
   solver_split = 0; split_max_dt = 0.0;
+  reflect_groupbit = 0;
+  coupling_aux = 0; layer_h = 0.0; marker_weight = 0.0; ex = nullptr; window_index = 0;
   output_every = 0; nevery = 10;
 
   int iarg = 5;
@@ -141,6 +144,28 @@ FixCoreTransport::FixCoreTransport(SPARTA *sparta, int narg, char **arg) :
           error->all(FLERR,"fix core/transport: coefficients physical needs geometry <file>");
         coef_physical = 1; geometry_file = copy_arg(arg[iarg+3]); iarg += 4;
       } else error->all(FLERR,"fix core/transport coefficients must be effective or physical");
+    } else if (strcmp(k,"coupling") == 0) {
+      // temporary selector while the auxiliary coupling replaces the legacy one
+      need(1);
+      if (strcmp(arg[iarg+1],"legacy") == 0) { coupling_aux = 0; iarg += 2; }
+      else if (strcmp(arg[iarg+1],"auxiliary") == 0) {
+        need(5);
+        if (strcmp(arg[iarg+2],"layer") != 0 || strcmp(arg[iarg+4],"marker_weight") != 0)
+          error->all(FLERR,"fix core/transport: coupling auxiliary layer <h> marker_weight <w>");
+        coupling_aux = 1;
+        layer_h = input->numeric(FLERR,arg[iarg+3]);
+        marker_weight = input->numeric(FLERR,arg[iarg+5]);
+        if (!(layer_h > 0.0) || !(marker_weight > 0.0))
+          error->all(FLERR,"fix core/transport: layer and marker_weight must be > 0");
+        iarg += 6;
+      } else error->all(FLERR,"fix core/transport coupling must be legacy or auxiliary");
+    } else if (strcmp(k,"gc_reflect") == 0) {
+      // another closed surface that reflects guiding-centre markers (stored GC follows the path)
+      need(1);
+      int ig = surf->find_group(arg[iarg+1]);
+      if (ig < 0) error->all(FLERR,"fix core/transport: gc_reflect surf group does not exist");
+      reflect_groupbit |= surf->bitmask[ig];
+      iarg += 2;
     } else if (strcmp(k,"solver") == 0) {
       need(1);
       if (strcmp(arg[iarg+1],"substep") == 0) { solver_split = 0; iarg += 2; }
@@ -181,7 +206,7 @@ FixCoreTransport::FixCoreTransport(SPARTA *sparta, int narg, char **arg) :
   mass = particle->species[spec_of_z[0]].mass;
 
   scalar_flag = vector_flag = 1;
-  size_vector = 4;
+  size_vector = 5;
   coupling_every = nevery;
   nevery = 1;  // observe every dt, including changes within a coupling window
   global_freq = 1;
@@ -205,11 +230,13 @@ FixCoreTransport::~FixCoreTransport()
     update->core_fix = nullptr;
     update->core_groupbit = 0;
     update->core_species = nullptr;
+    if (coupling_aux) update->gc_sync_groupbit = 0;
   }
   delete [] pd_id;
   delete [] profiles_file; delete [] output_file; delete [] state_file; delete [] read_state_file;
   delete [] export_file;
   delete [] geometry_file;
+  delete ex;
   delete ct;
   delete rng;
 }
@@ -226,10 +253,19 @@ int FixCoreTransport::setmask()
 void FixCoreTransport::init()
 {
   if (sparta->kokkos) error->all(FLERR,"fix core/transport is not ported to the Kokkos mover yet");
-  // returned markers are full-orbit particles and the core hand-off is by
-  // particle position: guiding-centre and hybrid pushers are not supported
-  if (update->pusher && update->pusher->pusher_mode != Pusher::PUSHER_BORIS)
-    error->all(FLERR,"fix core/transport supports the Boris pusher only (not gca or hybrid)");
+  if (!coupling_aux) {
+    // legacy absorb/deposit/re-emit: full-orbit markers, hand-off by particle position
+    if (update->pusher && update->pusher->pusher_mode != Pusher::PUSHER_BORIS)
+      error->all(FLERR,"fix core/transport legacy coupling supports the Boris pusher only (not gca or hybrid)");
+  } else {
+    // auxiliary coupling exchanges guiding-centre inventory
+    if (!update->pusher || update->pusher->pusher_mode == Pusher::PUSHER_BORIS)
+      error->all(FLERR,"fix core/transport coupling auxiliary needs the hybrid or gca pusher");
+    if (domain->dimension != 2 || !domain->axisymmetric)
+      error->all(FLERR,"fix core/transport coupling auxiliary: only 2-D axisymmetric so far");
+    if (depth > 0.0 || dlen_in > 0.0 || position_mode != 0)
+      error->all(FLERR,"fix core/transport: depth, dlen and position belong to the legacy coupling");
+  }
   int ifix = modify->find_fix(pd_id);
   if (ifix < 0) error->all(FLERR,"fix core/transport: background fix ID not found");
   pd = dynamic_cast<FixBackground *>(modify->fix[ifix]);
@@ -245,7 +281,9 @@ void FixCoreTransport::init()
   if (update->core_fix && update->core_fix != this)
     error->all(FLERR,"only one fix core/transport is allowed");
   update->core_fix = this;
-  update->core_groupbit = groupbit;
+  update->core_groupbit = coupling_aux ? 0 : groupbit;   // auxiliary: no absorption at the cut
+  if (coupling_aux) update->gc_sync_groupbit = groupbit | reflect_groupbit;   // guiding centres reflect at the cut
+  else if (reflect_groupbit) error->all(FLERR,"fix core/transport: gc_reflect belongs to the auxiliary coupling");
   update->core_species = z_of_spec.data();
 
   if (!rng) {
@@ -260,6 +298,7 @@ void FixCoreTransport::init()
     build_surface();
     build_profiles();
     build_rates();
+    if (coupling_aux) build_layer();
     if (read_state_file) read_state();
     built = 1;
   }
@@ -643,6 +682,8 @@ void FixCoreTransport::advance_window()
   MPI_Allreduce(gin_local.data(),gin.data(),nion,MPI_DOUBLE,MPI_SUM,world);
   std::fill(gin_local.begin(),gin_local.end(),0.0);
 
+  if (coupling_aux) { exchange_window(dt_win); return; }
+
   gin_rate = 0.0;
   for (int z = 0; z < nion; z++) {
     double g = gin[z]/fraction/dt_win;                   // atoms/s, torus
@@ -684,6 +725,216 @@ void FixCoreTransport::advance_window()
     write_output();
   if (state_file && step != update->laststep && output_every > 0 && step % output_every == 0)
     write_state();
+}
+
+/* ----------------------------------------------------------------------
+   auxiliary coupling: layer geometry. The marker layer is the shell of
+   volume radius [r_x, r_x + h] outside the cut; psi_layer is its outer
+   flux surface, from the same refined flux volumes as the core grid.
+------------------------------------------------------------------------- */
+
+double FixCoreTransport::psi_of_volume(double v) const
+{
+  const int nb = (int) vcum_out.size() - 1;
+  int b = (int) (std::lower_bound(vcum_out.begin(),vcum_out.end(),v) - vcum_out.begin());
+  b = std::min(nb,std::max(1,b));
+  double f = (vcum_out[b] > vcum_out[b-1]) ? (v - vcum_out[b-1])/(vcum_out[b] - vcum_out[b-1]) : 0.0;
+  return (b - 1 + f)*vcum_out_cut/nb;
+}
+
+void FixCoreTransport::build_layer()
+{
+  layer_cells = std::max(1,(int) lround(layer_h/dr));
+  if (layer_cells > ngrid/2) error->all(FLERR,"fix core/transport: layer is wider than half the 1-D grid");
+  const double hc = layer_cells*dr, hm = layer_h;
+  vol_core_layer = 0.0;
+  for (int i = ngrid-layer_cells; i < ngrid; i++) vol_core_layer += vol[i];
+  const double vx = 2.0*M_PI*M_PI*r_axis*rvol_x*rvol_x;
+  const double vo = 2.0*M_PI*M_PI*r_axis*(rvol_x + hm)*(rvol_x + hm);
+  vol_marker_layer = vo - vx;
+  vcum_out_cut = psi_n;
+  for (int it = 0; it < 12; it++) {
+    vcum_out_cut = std::min(0.98,1.3*vcum_out_cut + 0.02);
+    try {
+      CoreFluxGeometry g(pd->equ_r,pd->equ_z,pd->psirz,pd->psi_axis,pd->psib,vcum_out_cut);
+      vcum_out = g.cumulative;
+      box_r[0] = box_z[0] = 1e300; box_r[1] = box_z[1] = -1e300;
+      for (const CoreFluxPoint &q : g.points) {
+        box_r[0] = std::min(box_r[0],q.R); box_r[1] = std::max(box_r[1],q.R);
+        box_z[0] = std::min(box_z[0],q.Z); box_z[1] = std::max(box_z[1],q.Z);
+      }
+    } catch (const std::exception &e) { error->all(FLERR,e.what()); }
+    if (vcum_out.back() >= vo) break;
+    if (vcum_out_cut >= 0.98) error->all(FLERR,"fix core/transport: marker layer does not fit inside psi_N 0.98");
+  }
+  psi_layer = psi_of_volume(vo);
+  delete ex; ex = new CoreExchange(nion);
+  if (comm->me == 0 && screen)
+    fprintf(screen,"fix core/transport: auxiliary coupling, core layer %d cells (%.3g m, %.4g m3), "
+            "marker layer psi_N %.4f..%.4f (%.3g m, %.4g m3), marker weight %.3g\n",
+            layer_cells,hc,vol_core_layer,psi_n,psi_layer,hm,vol_marker_layer,marker_weight);
+}
+
+double FixCoreTransport::pending_total() const
+{
+  double s = 0.0;
+  if (ex) for (int z = 0; z < nion; z++) s += ex->pending(z);
+  return s;
+}
+
+/* ----------------------------------------------------------------------
+   one coupling window: closed-boundary 1-D advance, then the two-sided
+   exchange. Layer membership from valid stored guiding centres; a chain
+   marker near the layer without one (Boris fallback, invalidated state)
+   is an error before any inventory moves.
+------------------------------------------------------------------------- */
+
+void FixCoreTransport::exchange_window(double dt_win)
+{
+  Pusher *pu = update->pusher;
+  ++window_index;
+
+  // pass 1 (before anything moves): classify the chain markers. In or next to the
+  // layer a marker must carry a valid stored guiding centre pushed by the GCA
+  // branch, and that guiding centre must be on the marker side of the cut.
+  Particle::OnePart *p = particle->particles;
+  const int nlocal = particle->nlocal;
+  const double *pw = particle->edvec[particle->ewhich[pweight_index]];
+  const double width = psi_layer - psi_n;
+  const double guard = psi_layer + 0.5*width, inside_tol = 0.01*width;
+  std::vector<int> layer_list;
+  long bad_loc[5] = {0,0,0,-1,-1}, bad[5];
+  for (int i = 0; i < nlocal; i++) {
+    if (z_of_spec[p[i].ispecies] < 0) continue;
+    Pusher::GuidingCentre g;
+    double R, Z;
+    if (!pu->guiding_centre(i,nullptr,g) || g.mode != 1) {
+      point_rz(p[i].x,R,Z);
+      if (psi_rz(R,Z) < guard) { bad_loc[0]++; if (g.mode != 1) bad_loc[1]++; bad_loc[3] = p[i].id; }
+      continue;
+    }
+    point_rz(g.X,R,Z);
+    const double ps = psi_rz(R,Z);
+    if (ps < psi_n - inside_tol) { bad_loc[2]++; bad_loc[4] = p[i].id; continue; }
+    if (ps < psi_layer) layer_list.push_back(i);
+  }
+  MPI_Allreduce(bad_loc,bad,3,MPI_LONG,MPI_SUM,world);
+  MPI_Allreduce(&bad_loc[3],&bad[3],2,MPI_LONG,MPI_MAX,world);
+  if (bad[0]) {
+    char msg[256];
+    snprintf(msg,256,"fix core/transport: %ld chain marker(s) in or next to the coupling layer without a valid "
+             "GCA guiding centre (%ld not on the GCA branch, the rest invalidated GCA states); e.g. marker id %ld",
+             bad[0],bad[1],bad[3]);
+    error->all(FLERR,msg);
+  }
+  if (bad[2]) {
+    char msg[256];
+    snprintf(msg,256,"fix core/transport: %ld guiding centre(s) inside the core cut (psi_N < %.6f); e.g. marker id %ld",
+             bad[2],psi_n - inside_tol,bad[4]);
+    error->all(FLERR,msg);
+  }
+
+  try {
+    if (solver_split)
+      ct->advance_split(dt_win,diff.data(),conv.data(),srate.data(),rrate.data(),nullptr,
+                        nullptr,0.0,n.data(),split_steps(dt_win));
+    else
+      ct->advance(dt_win,diff.data(),conv.data(),srate.data(),rrate.data(),nullptr,nullptr,
+                  nullptr,0.0,true,n.data());
+  } catch (const std::exception &e) { error->all(FLERR,e.what()); }
+
+  const double hc = layer_cells*dr, ell = 0.5*(hc + layer_h);
+  const double area_d = TWOPI*rvol_x*TWOPI*r_axis*diff[(size_t) ngrid - 1];   // V' D_eff at the cut
+  try { ex->set_interval(area_d/ell/vol_core_layer,area_d/ell/vol_marker_layer,dt_win); }
+  catch (const std::exception &e) { error->all(FLERR,e.what()); }
+
+  std::vector<int> dellist;
+  std::vector<double> removed_loc(nion,0.0), removed(nion,0.0);
+  for (int i : layer_list)
+    if (CoreExchange::uniform((uint64_t) (unsigned) p[i].id + ((uint64_t) p[i].ispecies << 40),
+                              (uint64_t) window_index,7) < ex->p_markers_to_core()) {
+      removed_loc[z_of_spec[p[i].ispecies]] += (pw[i] == 0.0 ? update->fnum : pw[i])/fraction;
+      dellist.push_back(i);
+    }
+  MPI_Allreduce(removed_loc.data(),removed.data(),nion,MPI_DOUBLE,MPI_SUM,world);
+
+  // pass 2: transfer (torus inventories), update the core layer, delete and create markers
+  std::vector<double> layer(nion,0.0), change(nion), wref(nion,marker_weight/fraction);
+  std::vector<int> nemit(nion,0);
+  for (int z = 0; z < nion; z++)
+    for (int i = ngrid-layer_cells; i < ngrid; i++) layer[z] += n[(size_t) z*ngrid + i]*vol[i];
+  try { ex->transfer(layer.data(),removed.data(),wref.data(),change.data(),nemit.data()); }
+  catch (const std::exception &e) { error->all(FLERR,e.what()); }
+  gin_rate = gout_rate = 0.0; emitted_window = 0.0;
+  for (int z = 0; z < nion; z++) {
+    for (int i = ngrid-layer_cells; i < ngrid; i++) {
+      size_t k = (size_t) z*ngrid + i;
+      n[k] = n[k]*(1.0 - ex->p_core_to_markers()) + removed[z]/vol_core_layer;
+    }
+    gin[z] = removed[z]*fraction; gout[z] = nemit[z]*wref[z]/dt_win;
+    gin_rate += removed[z]/dt_win; gout_rate += gout[z];
+    emitted_window += nemit[z]*marker_weight;
+  }
+  gin_total += gin_rate*dt_win; gout_total += gout_rate*dt_win; emitted_total += emitted_window;
+
+  if (!dellist.empty()) { particle->compress_reactions((int) dellist.size(),dellist.data()); particle->sorted = 0; }
+  const int nlocal0 = particle->nlocal;
+  for (int z = 0; z < nion; z++)
+    for (int m = 0; m < nemit[z]; m++) {
+      // uniform in the layer volume: R with density ~ R in the box, Z uniform, accept inside the shell
+      double R, Z, u[5];
+      for (int it = 0; ; it++) {
+        if (it > 100000) error->all(FLERR,"fix core/transport: cannot place a marker in the coupling layer");
+        R = sqrt(box_r[0]*box_r[0] + rng->uniform()*(box_r[1]*box_r[1] - box_r[0]*box_r[0]));
+        Z = box_z[0] + rng->uniform()*(box_z[1] - box_z[0]);
+        const double ps = psi_rz(R,Z);
+        if (ps >= psi_n && ps < psi_layer) break;
+      }
+      for (int k = 0; k < 5; k++) u[k] = rng->uniform();
+      create_gc_marker(z,R,Z,u,(int) (MAXSMALLINT*rng->uniform()));
+    }
+  bigint made_loc = particle->nlocal - nlocal0, made;
+  MPI_Allreduce(&made_loc,&made,1,MPI_SPARTA_BIGINT,MPI_SUM,world);
+  bigint want = 0; for (int z = 0; z < nion; z++) want += nemit[z];
+  if (made != want) error->all(FLERR,"fix core/transport: created marker count differs from the exchange's");
+  if (made_loc) particle->sorted = 0;
+
+  prad = 0.0;
+  if (!plt.empty())
+    for (int i = 0; i < ngrid; i++) {
+      double s = 0.0;
+      for (int z = 0; z < nion; z++) {
+        size_t k = (size_t) z*ngrid + i;
+        s += plt[k]*n[k];
+        if (z < nion-1) s += prb[k]*n[k + ngrid];
+      }
+      prad += vol[i]*ne[i]*s;
+    }
+  elapsed = 0.0; window_steps = 0;
+  bigint step = update->ntimestep;
+  if (output_file && step != update->laststep && output_every > 0 && step % output_every == 0) write_output();
+  if (state_file && step != update->laststep && output_every > 0 && step % output_every == 0) write_state();
+}
+
+// every rank calls this with the same arguments; only the owner of the cell creates the marker
+void FixCoreTransport::create_gc_marker(int z, double R, double Z, double u[5], int id)
+{
+  double x[3] = {Z,R,0.0}, v[3] = {0.0,0.0,0.0};          // axisymmetric slots: x = Z, y = R
+  int icell = grid->id_find_child(0,0,domain->boxlo,domain->boxhi,x);
+  if (icell < 0 || icell >= grid->nlocal) return;
+  if (grid->cells[icell].nsplit > 1) icell = update->split2d(icell,x);
+  if (icell < 0) error->one(FLERR,"fix core/transport: no cell for a marker in the coupling layer");
+  particle->add_particle(id,spec_of_z[z],icell,x,v,0.0,0.0);
+  const int i = particle->nlocal - 1;
+  GCAPusher::GCAFields F;
+  if (!update->pusher->sample_gca_fields(x,icell,i,F) || !(F.Bmag > 0.0))
+    error->one(FLERR,"fix core/transport: no magnetic field for a marker in the coupling layer");
+  double vpar, mu;
+  GCAPusher::sample_thermal_gc(ti[ngrid-1]*QE,mass,F.Bmag,u[0],u[1],u[2],vpar,mu);
+  if (!update->pusher->set_guiding_centre(i,x,vpar,mu,F.B,u[3]))
+    error->one(FLERR,"fix core/transport: the pusher refused the guiding-centre state of a created marker");
+  particle->edvec[particle->ewhich[pweight_index]][i] = marker_weight;
+  if (update->tag_index >= 0) particle->eivec[particle->ewhich[update->tag_index]][i] = 1;
 }
 
 /* ----------------------------------------------------------------------
@@ -834,7 +1085,8 @@ double FixCoreTransport::compute_vector(int i)
   if (i == 0) return gin_rate;
   if (i == 1) return gout_rate;
   if (i == 2) return prad;
-  return emitted_window;
+  if (i == 3) return emitted_window;
+  return pending_total();                    // torus atoms owed to the markers, not yet emitted
 }
 
 /* ---------------------------------------------------------------------- */
@@ -845,9 +1097,9 @@ void FixCoreTransport::write_output()
   FILE *fp = fopen(output_file,(output_fresh && !read_state_file) ? "w" : "a");
   output_fresh = false;
   if (!fp) error->one(FLERR,"fix core/transport: cannot write output file");
-  fprintf(fp,"# step %ld time %.6e Ncore %.6e Gin %.6e Gout %.6e Prad %.6e emitted %.6e Gin_total %.6e Gout_total %.6e emitted_total %.6e dt_window %.17g substeps %d\n",
+  fprintf(fp,"# step %ld time %.6e Ncore %.6e Gin %.6e Gout %.6e Prad %.6e emitted %.6e Gin_total %.6e Gout_total %.6e emitted_total %.6e dt_window %.17g substeps %d pending %.6e\n",
           (long) update->ntimestep,physical_time,compute_scalar(),gin_rate,gout_rate,prad,
-          emitted_window,gin_total,gout_total,emitted_total,last_dt_win,ct->substeps());
+          emitted_window,gin_total,gout_total,emitted_total,last_dt_win,ct->substeps(),pending_total());
   fprintf(fp,"# i rvol psiN ne Te Ti prad_density n_0 ... n_%d\n",nion-1);
   for (int i = 0; i < ngrid; i++) {
     double s = 0.0;

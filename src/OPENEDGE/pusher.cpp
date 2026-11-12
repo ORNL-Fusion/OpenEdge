@@ -2792,6 +2792,17 @@ bool Pusher::set_guiding_centre(int i, const double X[3], double vpar, double mu
   return true;
 }
 
+bool Pusher::sync_gc_position(int i, const double *x)
+{
+  if (gca_x_custom < 0 || gca_valid_custom < 0) return false;
+  if (particle->edvec[particle->ewhich[gca_valid_custom]][i] < 0.5) return false;
+  if (!std::isfinite(x[0] + x[1] + x[2])) return false;
+  particle->edvec[particle->ewhich[gca_x_custom]][i] = x[0];
+  particle->edvec[particle->ewhich[gca_y_custom]][i] = x[1];
+  particle->edvec[particle->ewhich[gca_z_custom]][i] = (domain->dimension == 2) ? 0.0 : x[2];
+  return true;
+}
+
 void Pusher::invalidate_gc(int i, int reason)
 {
   (void) reason;   // reasons feed diagnostics once operators land

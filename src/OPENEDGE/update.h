@@ -242,6 +242,8 @@ struct SurfHit2D {
   class FixCoreTransport *core_fix;   // fix core/transport: absorbs chain markers
   int core_groupbit;                  // at the core surf group (0 = off)
   const int *core_species;            // charge state per species, -1 = not in chain
+  int gc_sync_groupbit;               // surf group that reflects guiding centres: the
+                                      // stored GC follows the reflected path (0 = off)
   int psi_nw, psi_nh;         // equilibrium grid dimensions
   double psi_axis, psi_bry;   // psi at axis and boundary
   double *psi_r_grid;         // R grid [psi_nw] (owned by fix, do not free)

@@ -66,6 +66,24 @@ class FixCoreTransport : public Fix {
   int solver_split;               // 0 substep (reference), 1 implicit split
   double split_max_dt;            // largest internal step of the split solver (s)
   int split_steps(double dt_win) const;
+
+  // auxiliary-layer coupling (replaces absorb/deposit/re-emit once validated):
+  // closed 1-D boundary, a core layer of width layer_h and a guiding-centre
+  // marker layer of the same width outside the cut exchange through CoreExchange
+  int coupling_aux;
+  int reflect_groupbit;            // extra surf groups that reflect guiding centres
+  double layer_h, marker_weight;   // m (r_vol); weight of created markers
+  int layer_cells;                 // core cells in the core layer
+  double psi_layer, vol_core_layer, vol_marker_layer;   // outer psi_N, torus volumes
+  double box_r[2], box_z[2];       // (R,Z) box enclosing the marker layer
+  std::vector<double> vcum_out; double vcum_out_cut;
+  class CoreExchange *ex;
+  bigint window_index;
+  double pending_total() const;
+  void build_layer();
+  double psi_of_volume(double v) const;
+  void exchange_window(double dt_win);
+  void create_gc_marker(int z, double R, double Z, double u[5], int id);
   void read_geometry();
   int nlaunch;                    // markers per window (all states)
   int position_mode;              // 0 uniform over the surface, 1 entry positions

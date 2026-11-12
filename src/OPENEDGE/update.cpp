@@ -345,6 +345,7 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   core_fix = nullptr;
   core_groupbit = 0;
   core_species = nullptr;
+  gc_sync_groupbit = 0;
   psi_nw = psi_nh = 0;
   psi_axis = psi_bry = 0.0;
   psi_r_grid = NULL;
@@ -611,11 +612,17 @@ void Update::init()
       if (!pd)
         error->all(FLERR,
                    "global bfield_compute: fix provider must be style background");
+      pd->init();   // loads the file on first use, so has_bfield is known here
       if (comm->me == 0 && screen)
         fprintf(screen,
                 "  boris: bfield_compute '%s' bound to fix background "
                 "(has_bfield=%d, mesh_tri_b=%zu)\n",
                 pusher->pusher_plasma_cid, pd->has_bfield, pd->mesh_tri_br.size());
+      // a constant background without B is a deliberate field-free
+      // (streaming) setup; a plasma file without B is more likely a mistake
+      if (!pd->has_bfield && !bperturbflag && pd->source_mode == 0 && comm->me == 0)
+        error->warning(FLERR, "global pusher: the plasma file provides no magnetic "
+                       "field and no bfield fix is defined; charged particles see B = 0");
     }
   }
 
@@ -2432,6 +2439,43 @@ template < int DIM, int SURF, int OPT > void Update::move()
                 v[2] = minvc[2];
               }
 
+              // Internal cut that reflects guiding centres: the Brownian
+              // displacement is MIRRORED at the surface (ending the step at
+              // the wall, as for material walls below, piles markers up
+              // against the cut). The marker's own chord velocity is
+              // mirrored too if it was incident; the stored guiding centre
+              // follows the reflected path.
+              if (has_kick && gc_sync_groupbit && pusher &&
+                  ((DIM == 3) ? (tri->mask & gc_sync_groupbit) : (line->mask & gc_sync_groupbit))) {
+                const double *nrm = (DIM == 3) ? tri->norm : line->norm;
+                const double n2 = (DIM == 3) ? nrm[2] : 0.0;
+                double own[3] = {v[0] - vkick0, v[1] - vkick1, v[2] - ((DIM == 3) ? vkick2 : 0.0)};
+                const double on = own[0]*nrm[0] + own[1]*nrm[1] + own[2]*n2;
+                if (on < 0.0) { own[0] -= 2.0*on*nrm[0]; own[1] -= 2.0*on*nrm[1]; own[2] -= 2.0*on*n2; }
+                const double kn = vkick0*nrm[0] + vkick1*nrm[1] + ((DIM == 3) ? vkick2*n2 : 0.0);
+                if (kn < 0.0) {
+                  vkick0 -= 2.0*kn*nrm[0]; vkick1 -= 2.0*kn*nrm[1];
+                  if (DIM == 3) vkick2 -= 2.0*kn*n2;
+                }
+                v[0] = own[0] + vkick0; v[1] = own[1] + vkick1;
+                v[2] = own[2] + ((DIM == 3) ? vkick2 : 0.0);
+                dtremain *= 1.0 - minparam*frac;
+                if (minparam == 0.0) stuck_iterate++;
+                else stuck_iterate = 0;
+                if (stuck_iterate >= MAXSTUCK) {
+                  particles[i].flag = PDISCARD;
+                  nstuck++;
+                  break;
+                }
+                xnew[0] = x[0] + dtremain*v[0];
+                xnew[1] = x[1] + dtremain*v[1];
+                if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+                const double xend[3] = {xnew[0], xnew[1], (DIM != 2) ? xnew[2] : 0.0};
+                pusher->sync_gc_position(i,xend);
+                exclude = minsurf;
+                continue;
+              }
+
               // The diffusion step ends at the wall: strip the cross-field
               // kick from v BEFORE the sheath kick and the collision model,
               // so PWI physics (incident energy/angle, sputtering) and the
@@ -2468,6 +2512,14 @@ template < int DIM, int SURF, int OPT > void Update::move()
                   xnew[0] = x[0] + dtremain*v[0];
                   xnew[1] = x[1] + dtremain*v[1];
                   if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+                  // guiding-centre marker turned back at an internal cut: its
+                  // stored GC must end where this path ends, or the next push
+                  // restarts from the pre-reflection position behind the cut
+                  if (gc_sync_groupbit && pusher &&
+                      ((DIM == 3) ? (tri->mask & gc_sync_groupbit) : (line->mask & gc_sync_groupbit))) {
+                    const double xend[3] = {xnew[0], xnew[1], (DIM != 2) ? xnew[2] : 0.0};
+                    pusher->sync_gc_position(i,xend);
+                  }
                   exclude = minsurf;
                   continue;
                 }
@@ -2716,6 +2768,14 @@ template < int DIM, int SURF, int OPT > void Update::move()
               xnew[0] = x[0] + dtremain*v[0];
               xnew[1] = x[1] + dtremain*v[1];
               if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+              // guiding-centre marker turned back at an internal cut: its
+              // stored GC must end where this path ends, or the next push
+              // restarts from the pre-reflection position behind the cut
+              if (gc_sync_groupbit && pusher &&
+                  ((DIM == 3) ? (tri->mask & gc_sync_groupbit) : (line->mask & gc_sync_groupbit))) {
+                const double xend[3] = {xnew[0], xnew[1], (DIM != 2) ? xnew[2] : 0.0};
+                pusher->sync_gc_position(i,xend);
+              }
 
               // check if surf_collide teleported particle outside current cell
               // (occurs with toroidal periodic boundary collision model)
@@ -3078,6 +3138,13 @@ template < int DIM, int SURF, int OPT > void Update::move()
             v[1] -= vkick1;
             if (DIM == 3) v[2] -= vkick2;
             has_kick = 0;
+            // the stored guiding centre was shifted by the whole kick:
+            // take back the remainder that is dropped here
+            if (pusher) {
+              const double back[3] = {-vkick0*dtremain, -vkick1*dtremain,
+                                      (DIM == 3) ? -vkick2*dtremain : 0.0};
+              pusher->apply_gc_displacement(i,back);
+            }
           }
           break;
         }
@@ -3095,6 +3162,13 @@ template < int DIM, int SURF, int OPT > void Update::move()
             v[1] -= vkick1;
             if (DIM == 3) v[2] -= vkick2;
             has_kick = 0;
+            // the stored guiding centre was shifted by the whole kick:
+            // take back the remainder that is dropped here
+            if (pusher) {
+              const double back[3] = {-vkick0*dtremain, -vkick1*dtremain,
+                                      (DIM == 3) ? -vkick2*dtremain : 0.0};
+              pusher->apply_gc_displacement(i,back);
+            }
           }
           break;
         }
