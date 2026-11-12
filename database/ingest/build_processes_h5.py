@@ -46,6 +46,7 @@ SCHEMA_VERSION = "1.0"
 sys.path.insert(0, str(DB / "ingest"))
 from adas import (                                          # noqa: E402
     parse_adf11, load_ionization_potentials, ip_filename,
+    load_nist_ionization_energies, nist_ip_filename,
     DEFAULT_ELEMENTS, CLASSES,
 )
 
@@ -66,7 +67,7 @@ def z_from_filename(name: str) -> int:
 
 ELEMENT_SYMBOLS = {
     1:"h", 2:"he", 3:"li", 4:"be", 5:"b", 6:"c", 7:"n", 8:"o",
-    10:"ne", 18:"ar", 26:"fe", 36:"kr", 42:"mo", 54:"xe", 73:"ta", 74:"w",
+    10:"ne", 18:"ar", 26:"fe", 36:"kr", 42:"mo", 54:"xe", 74:"w",
 }
 
 
@@ -149,14 +150,20 @@ def ingest_volume_adas(fout: h5py.File) -> dict:
 
         # Ionization potentials (optional per element)
         ip_path = ip_dir / ip_filename(sym)
+        ip_source = "open-ADAS ionization_potentials"
+        if not ip_path.exists():      # no open-ADAS file: NIST ASD table
+            ip_path = ip_dir / nist_ip_filename(sym)
+            ip_source = "NIST Atomic Spectra Database"
         if ip_path.exists():
-            ip_vals = load_ionization_potentials(ip_path, Z)
+            ip_vals = (load_ionization_potentials(ip_path, Z)
+                       if ip_source.startswith("open") else
+                       load_nist_ionization_energies(ip_path, Z))
             tg = fout.require_group(f"volume/thresholds/ionization/{sym}")
             if "energy" in tg:
                 del tg["energy"]
             dsi = tg.create_dataset("energy", data=ip_vals)
             dsi.attrs["units"]  = "eV"
-            dsi.attrs["source"] = f"open-ADAS ionization_potentials ({ip_path.name})"
+            dsi.attrs["source"] = f"{ip_source} ({ip_path.name})"
             dsi.attrs["method"] = ("scalar per charge state "
                                    "(index = pre-ionization charge q=0,1,...,Z-1)")
             stats["ip_vectors"] += 1
