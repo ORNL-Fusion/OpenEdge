@@ -21,7 +21,7 @@ create_grid 4 4 4
 balance_grid rcb cell
 
 species     input/w.species W Wd
-mixture     wbeam W frac 1.0 nrho 1.0e19 temp 3.0e6 vstream 0.0 0.0 0.0
+mixture     wbeam W frac 1.0 nrho 1.0e19 temp 1.0e6 vstream 0.0 0.0 0.0
 
 read_surf   input/plate.surf group plate particle check
 read_surf   input/source.surf group source particle check
