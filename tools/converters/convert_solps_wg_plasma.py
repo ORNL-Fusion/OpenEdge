@@ -232,6 +232,21 @@ def convert(run_path: Path, b2fgmtry: Path, gfile: Path, plasma_out: Path):
     ion_idx = np.where(~is_neutral)[0]
     print(f"species: {names}  ions: {[names[i] for i in ion_idx]}")
     main = int(ion_idx[0])
+    # fluid neutral of the main ion element (B2.5 fluid-neutral runs): partner
+    # density for impurity charge exchange
+    neut = [i for i in np.where(is_neutral)[0] if zn[i] == zn[main]]
+    dens_n = na[:, neut[0]] if neut else None
+    temp_n = None
+    if neut and "tn" in state:
+        tn = np.asarray(state["tn"], dtype=np.float64)
+        if tn.size == ncv:
+            temp_n = tn.reshape(ncv) / EV
+        elif tn.size % ncv == 0:
+            temp_n = tn.reshape(ncv, -1)[:, 0] / EV
+    if neut and temp_n is None:
+        temp_n = ti.copy()
+    print("neutral density: " + (f"{names[neut[0]]}, max {dens_n.max():.3g} m^-3" if neut
+                                 else "none in b2fstate (mesh/dens_n not written)"))
 
     # mesh
     vtx_r, vtx_z, tri, tri_cell = triangulate_cells(geo)
@@ -321,6 +336,9 @@ def convert(run_path: Path, b2fgmtry: Path, gfile: Path, plasma_out: Path):
         f.create_dataset("mesh/dens_i", data=na[:, main])
         f.create_dataset("mesh/temp_i", data=ti)
         f.create_dataset("mesh/parr_flow", data=ua[:, main])
+        if dens_n is not None:
+            f.create_dataset("mesh/dens_n", data=dens_n)
+            f.create_dataset("mesh/temp_n", data=temp_n)
         f.create_dataset("mesh/grad_te_r", data=gte_r)
         f.create_dataset("mesh/grad_te_z", data=gte_z)
         f.create_dataset("mesh/grad_ti_r", data=gti_r)
