@@ -140,6 +140,7 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
   ehist_file = NULL;
   ehist_all = ehist_sput = ahist_all = ahist_sput = NULL;
   ehist_tag = ahist_tag = ehist_j = ehist_jt = NULL; ehist_last_write = -1;
+  ehist_nang = 18; ehist_dang = 5.0;
   ehist_z = NULL; ehist_nsp = 0;
   ehist_nbin = 0; ehist_every = 0; ehist_emax = 0.0;
 
@@ -182,14 +183,25 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
       // every 0 = cumulative: one growing histogram, written before dumps and at run end
       if (ehist_nbin < 1 || ehist_emax <= 0.0 || ehist_every < 0)
         error->all(FLERR,"surf_react surface/pwi ehist: bad parameters");
+      // optional: ehist <file> <nbins_E> <emax_eV> <every> nang <N>  (angle bins over 0-90 deg, default 18)
+      int ehist_extra = 0;
+      if (iarg+6 < narg && strcmp(arg[iarg+5],"nang") == 0) {
+        ehist_nang = input->inumeric(FLERR,arg[iarg+6]);
+        if (ehist_nang < 1 || ehist_nang > 900)
+          error->all(FLERR,"surf_react surface/pwi ehist: nang must be 1..900");
+        ehist_dang = 90.0/ehist_nang;
+        ehist_extra = 2;
+      }
+      if ((double) ehist_nbin * ehist_nang > 5.0e7)
+        error->all(FLERR,"surf_react surface/pwi ehist: energy x angle histogram too large");
       ehist_all = new double[ehist_nbin]();
       ehist_sput = new double[ehist_nbin]();
       ehist_tag = new double[ehist_nbin]();
-      ahist_tag = new double[EHIST_NANG]();
-      ehist_j = new double[(size_t) ehist_nbin * EHIST_NANG]();
-      ehist_jt = new double[(size_t) ehist_nbin * EHIST_NANG]();
-      ahist_all = new double[EHIST_NANG]();
-      ahist_sput = new double[EHIST_NANG]();
+      ahist_tag = new double[ehist_nang]();
+      ehist_j = new double[(size_t) ehist_nbin * ehist_nang]();
+      ehist_jt = new double[(size_t) ehist_nbin * ehist_nang]();
+      ahist_all = new double[ehist_nang]();
+      ahist_sput = new double[ehist_nang]();
       // per-species impact-E histograms (species must be defined first)
       ehist_nsp = particle->nspecies;
       if (ehist_nsp > 0) {
@@ -197,7 +209,7 @@ SurfReactSurfacePWI::SurfReactSurfacePWI(SPARTA *sparta, int narg, char **arg) :
         for (int k = 0; k < ehist_nsp; k++)
           ehist_z[k] = new double[ehist_nbin]();
       }
-      iarg += 5;
+      iarg += 5 + ehist_extra;
     } else if (strcmp(arg[iarg],"adens_surf") == 0 ||
                strcmp(arg[iarg],"sigma_surf") == 0) {
       // WallDYN-style areal-density accounting (adens = areal density).
@@ -2626,12 +2638,12 @@ void SurfReactSurfacePWI::ehist_accumulate(double E_eV, double theta_deg,
   int ie = (int) (E_eV / ehist_emax * ehist_nbin);
   if (ie < 0) ie = 0;
   if (ie >= ehist_nbin) ie = ehist_nbin - 1;   // overflow -> last bin
-  int ia = (int) (theta_deg / 5.0);
+  int ia = (int) (theta_deg / ehist_dang);
   if (ia < 0) ia = 0;
-  if (ia >= EHIST_NANG) ia = EHIST_NANG - 1;
+  if (ia >= ehist_nang) ia = ehist_nang - 1;
   ehist_all[ie] += pw;
   ahist_all[ia] += pw;
-  ehist_j[(size_t) ie * EHIST_NANG + ia] += pw;
+  ehist_j[(size_t) ie * ehist_nang + ia] += pw;
   if (sput) {
     ehist_sput[ie] += pw;
     ahist_sput[ia] += pw;
@@ -2639,7 +2651,7 @@ void SurfReactSurfacePWI::ehist_accumulate(double E_eV, double theta_deg,
   if (tag) {
     ehist_tag[ie] += pw;
     ahist_tag[ia] += pw;
-    ehist_jt[(size_t) ie * EHIST_NANG + ia] += pw;
+    ehist_jt[(size_t) ie * ehist_nang + ia] += pw;
   }
   if (ehist_z && isp >= 0 && isp < ehist_nsp) ehist_z[isp][ie] += pw;
 }
@@ -2651,7 +2663,7 @@ void SurfReactSurfacePWI::ehist_accumulate(double E_eV, double theta_deg,
 void SurfReactSurfacePWI::ehist_write()
 {
   // layout: E all | E sput | E tag | A all | A sput | A tag | J all | J tag | S per species
-  const int nb = ehist_nbin, na = EHIST_NANG;
+  const int nb = ehist_nbin, na = ehist_nang;
   const size_t nj = (size_t) nb * na;
   const int nz = (ehist_z) ? ehist_nsp*nb : 0;
   const size_t ntot = 3*nb + 3*na + 2*nj + nz;
@@ -2675,19 +2687,19 @@ void SurfReactSurfacePWI::ehist_write()
       const double *gE = glob, *gEs = glob + nb, *gEt = glob + 2*nb;
       const double *gA = glob + 3*nb, *gAs = gA + na, *gAt = gA + 2*na;
       const double *gJ = glob + 3*nb + 3*na, *gJt = gJ + nj, *gS = gJt + nj;
-      fprintf(fp,"# step %ld nbin %d emax %g nang %d dang 5 cumulative %d "
+      fprintf(fp,"# step %ld nbin %d emax %g nang %d dang %g cumulative %d "
               "columns all sput transit\n",
-              (long) update->ntimestep, nb, ehist_emax, na, ehist_every == 0);
+              (long) update->ntimestep, nb, ehist_emax, na, ehist_dang, ehist_every == 0);
       for (int i = 0; i < nb; i++)
         fprintf(fp,"E %g %.6e %.6e %.6e\n", (i+0.5)*ehist_emax/nb, gE[i], gEs[i], gEt[i]);
       for (int i = 0; i < na; i++)
-        fprintf(fp,"A %g %.6e %.6e %.6e\n", (i+0.5)*5.0, gA[i], gAs[i], gAt[i]);
+        fprintf(fp,"A %g %.6e %.6e %.6e\n", (i+0.5)*ehist_dang, gA[i], gAs[i], gAt[i]);
       // joint (E, theta): non-empty cells only, "J Ecentre Acentre w_all w_transit"
       for (int i = 0; i < nb; i++)
         for (int j = 0; j < na; j++) {
           const size_t q = (size_t) i * na + j;
           if (gJ[q] > 0.0)
-            fprintf(fp,"J %g %g %.6e %.6e\n", (i+0.5)*ehist_emax/nb, (j+0.5)*5.0, gJ[q], gJt[q]);
+            fprintf(fp,"J %g %g %.6e %.6e\n", (i+0.5)*ehist_emax/nb, (j+0.5)*ehist_dang, gJ[q], gJt[q]);
         }
       // per-species impact-E rows; skip species with no weight this window
       for (int k = 0; k < ehist_nsp && ehist_z; k++) {

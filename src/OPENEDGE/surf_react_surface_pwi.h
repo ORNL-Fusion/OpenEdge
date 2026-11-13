@@ -257,7 +257,8 @@ class SurfReactSurfacePWI : public SurfReact {
   // ehist: pweight-weighted incident (E,theta) histograms of wall impacts,
   // all impacts vs impacts that sputtered; windowed blocks appended to
   // ehist_file every ehist_every steps
-  static const int EHIST_NANG = 18;       // 5-degree angle bins, 0-90
+  int ehist_nang;                         // angle bins over 0-90 deg (default 18 = 5 deg; "nang N" after ehist)
+  double ehist_dang;                      // bin width (deg)
   char *ehist_file;
   int ehist_nbin, ehist_every;
   double ehist_emax;

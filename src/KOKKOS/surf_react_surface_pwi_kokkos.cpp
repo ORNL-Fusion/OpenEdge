@@ -60,7 +60,7 @@ SurfReactSurfacePWIKokkos::SurfReactSurfacePWIKokkos(SPARTA *sparta, int narg,
   sigma_on = ehist_on = 0;
   conc_dev_on_ = conc_dirty_ = 0;
   dep_alias_on_ = 0;
-  ncols = nbin = nsp = 0;
+  ncols = nbin = nsp = 0; PWI_NANG = 18; pwi_dang = 5.0;
   emax = fnum_c = evconv = twall_c = rough_c = 0.0;
 }
 
@@ -143,7 +143,7 @@ void SurfReactSurfacePWIKokkos::init_device_tables()
   sigma_on = (sindex_custom >= 0);
   ehist_on = (ehist_file != NULL);
   ncols = sigma_ncols;
-  nbin = ehist_nbin;
+  nbin = ehist_nbin; PWI_NANG = ehist_nang; pwi_dang = ehist_dang;
   nsp = ehist_nsp;
   emax = ehist_emax;
 

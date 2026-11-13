@@ -50,7 +50,6 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
   enum{PWI_PKEEP,PWI_PINSERT,PWI_PDONE,PWI_PDISCARD,
        PWI_PENTRY,PWI_PEXIT,PWI_PSURF};    // matches update.cpp
 
-  static constexpr int PWI_NANG = 18;      // = base EHIST_NANG (5-deg bins)
   static constexpr double PWI_2PI = 6.283185307179586;
   static constexpr double PWI_EV2J = PhysConst::QE;
   static constexpr double PWI_KB = PhysConst::KB;
@@ -150,6 +149,8 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
   int sigma_on, ehist_on;
   int ncols;                        // = sigma_ncols = nspecies
   int nbin;                         // ehist_nbin
+  int PWI_NANG;                     // ehist_nang (angle bins over 0-90 deg)
+  double pwi_dang;                  // ehist_dang
   int nsp;                          // ehist_nsp
   double emax;                      // ehist_emax
   double fnum_c, evconv, twall_c, rough_c;
@@ -500,7 +501,7 @@ class SurfReactSurfacePWIKokkos : public SurfReactSurfacePWI {
     int ie = (int) (E_eV / emax * nbin);
     if (ie < 0) ie = 0;
     if (ie >= nbin) ie = nbin - 1;
-    int ia = (int) (theta_deg / 5.0);
+    int ia = (int) (theta_deg / pwi_dang);
     if (ia < 0) ia = 0;
     if (ia >= PWI_NANG) ia = PWI_NANG - 1;
     const int offA = 3*nbin, offJ = 3*nbin + 3*PWI_NANG, nj = nbin*PWI_NANG;
