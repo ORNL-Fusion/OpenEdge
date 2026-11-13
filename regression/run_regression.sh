@@ -398,6 +398,33 @@ if [[ "pwi_ledger_fold" == $FILTER || "*" == "$FILTER" ]]; then
 fi
 
 # -----------------------------------------------------------------------
+#  emit_schedule / emit_newborn / emit_redeposition: fix surface/emit/source
+#  release schedule. Source accounting (launch modes, window, ranks, rebalance,
+#  restart, source changing in time), neutral transmission against
+#  2 E3(nu d / v) and prompt redeposition against 1 - exp(-nu/Omega); the
+#  scripts take the launcher (LAUNCH) and the rank counts (NP, NP_LIST)
+# -----------------------------------------------------------------------
+for rec in "emit_schedule|emit_schedule|scripts/check.py|emitted weight, per-step share, split runs, restart" \
+           "emit_newborn|newborn_exposure|scripts/scan.py --quick|transmission within 1 % for emission every step and batched" \
+           "emit_redeposition|prompt_redeposition|scripts/scan.py --quick|prompt redeposition in uniform B within 1 % at nu*dt 0.02"; do
+  IFS='|' read -r ename esub ecmd enote <<< "$rec"
+  if [[ "$ename" == $FILTER || "*" == "$FILTER" ]]; then
+    printf "%-40s " "$ename"
+    edir="$EXAMPLES_DIR/verification/surface_emission/$esub"
+    # a fixed launcher (srun ...) runs the one rank count it encodes; mpirun runs 1, 2 and NP
+    if [[ -n "$LAUNCHER" ]]; then le="$LAUNCHER"; ne="$NP"; else le="mpirun -np {np}"; ne="1 2 $NP"; fi
+    if [[ ! -d "$edir" ]]; then
+      RESULTS+=("SKIP  $ename  (case not present)"); echo "SKIP"; ((SKIP++))
+    elif (cd "$edir" && SPA="$EXE ${KKARGS[*]}" NP="$NP" LAUNCH="$le" NP_LIST="$ne" "$PY" $ecmd > "$edir/regression.log" 2>&1); then
+      RESULTS+=("PASS  $ename  ($enote)"); echo "PASS"; ((PASS++))
+    else
+      RESULTS+=("FAIL  $ename  (see examples/verification/surface_emission/$esub/regression.log)"); echo "FAIL"; ((FAIL++))
+      if [[ "$VERBOSE" -eq 1 ]]; then tail -20 "$edir/regression.log"; fi
+    fi
+  fi
+done
+
+# -----------------------------------------------------------------------
 #  core_transport: CoreTransport1D (Linder scheme) vs the Aurora impden1
 #  references + particle conservation; compiles its own driver, no deck
 # -----------------------------------------------------------------------
