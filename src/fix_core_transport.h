@@ -40,6 +40,8 @@ class FixCoreTransport : public Fix {
 
   // called by Update::move for a chain marker hitting the core group
   void absorb(int ipart, int isurf);
+  // Kokkos mover: weight absorbed at the cut on the device, per charge state
+  void absorb_weight(int z, double w) { gin_local[z] += w; }
 
   int groupbit;                   // core surf group
 

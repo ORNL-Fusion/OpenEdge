@@ -21,6 +21,7 @@
 #include "string.h"
 #include "update_kokkos.h"
 #include "pusher.h"
+#include "fix_core_transport.h"
 #include "compute_plasma_fields_kokkos.h"
 #include "compute_nearest_surf_grid.h"
 #include "fix_background.h"
@@ -328,6 +329,8 @@ void UpdateKokkos::init()
   oe_gc_wall_flux     = pusher->pusher_gc_wall_flux;
   oe_has_gca_customs  = 0;
   oe_gc_hooks = 31;
+  oe_core_on = oe_core_bit = oe_core_neutral_bit = oe_gc_sync_bit = 0;
+  oe_core_nz = oe_core_has_pw = 0; oe_core_fnum = 0.0;
   if (const char *e = getenv("OE_GC_HOOKS")) oe_gc_hooks = atoi(e);
   if (const char *e = getenv("OE_SKIP_POST_MIGRATE")) oe_skip_post_migrate = atoi(e);
   oe_bx_col = oe_by_col = oe_bz_col = -1;
@@ -1216,6 +1219,34 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
         oe_has_gca_customs = 1;
       }
 
+      // fix core/transport: masks, charge state per species, pweight
+      oe_core_on = 0;
+      oe_core_bit = oe_core_neutral_bit = oe_gc_sync_bit = 0;
+      if (core_fix && core_species) {
+        oe_core_bit = core_groupbit;
+        oe_core_neutral_bit = core_neutral_groupbit;
+        oe_gc_sync_bit = pusher ? gc_sync_groupbit : 0;
+        oe_core_fnum = fnum;
+        const int nsp = particle->nspecies;
+        if ((int) d_oe_core_species.extent(0) != nsp) {
+          d_oe_core_species = DAT::t_int_1d("update:core_species",nsp);
+          auto h_cs = Kokkos::create_mirror_view(d_oe_core_species);
+          int zmax = -1;
+          for (int s = 0; s < nsp; s++) { h_cs(s) = core_species[s]; zmax = MAX(zmax,core_species[s]); }
+          Kokkos::deep_copy(d_oe_core_species,h_cs);
+          oe_core_nz = zmax + 1;
+          d_oe_core_gin = DAT::t_float_1d("update:core_gin",MAX(oe_core_nz,1));
+        }
+        oe_core_has_pw = 0;
+        const int pw_core = particle->find_custom((char *) "pweight");
+        if (pw_core >= 0) {
+          particle_kk->sync(Device,CUSTOM_MASK);
+          d_oe_core_pw = particle_kk->k_edvec.h_view[particle->ewhich[pw_core]].k_view.d_view;
+          oe_core_has_pw = 1;
+        }
+        oe_core_on = 1;
+      }
+
       if (surf->nsr && sparta->kokkos->react_retry_flag)
         backup();
 
@@ -1277,6 +1308,8 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
       memcpy(h_scalars.data(),p_scalars.data(),h_scalars.span()*sizeof(int));   // host <-> pinned staging (plain memcpy)
 
       if (h_retry()) {
+        // the pass is replayed: drop what it absorbed at the core cut
+        if (oe_core_on && oe_core_nz > 0) Kokkos::deep_copy(d_oe_core_gin,0.0);
         int nlocal_new = h_nlocal();
 
         if (!sparta->kokkos->react_retry_flag) {
@@ -1309,6 +1342,16 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
               h_oe_pexit_unknown(),h_oe_pexit_teleport(),h_oe_pentry_empty());
 
     k_mlist.modify_device();
+
+    // fix core/transport: weight absorbed at the cut in this pass
+    if (oe_core_on && oe_core_nz > 0 && (oe_core_bit || oe_core_neutral_bit)) {
+      auto h_gin = Kokkos::create_mirror_view(d_oe_core_gin);
+      Kokkos::deep_copy(h_gin,d_oe_core_gin);
+      int any = 0;
+      for (int z = 0; z < oe_core_nz; z++)
+        if (h_gin(z) != 0.0) { core_fix->absorb_weight(z,h_gin(z)); any = 1; }
+      if (any) Kokkos::deep_copy(d_oe_core_gin,0.0);
+    }
 
     // END of pstart/pstop loop advecting all particles
 
@@ -1697,11 +1740,19 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
     xnew[0] = x[0] + dtremain*v[0];
     xnew[1] = x[1] + dtremain*v[1];
     if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+    // 3-D guiding-centre marker: v is the gyro velocity, the end of the
+    // step is the stored guiding centre (CPU: pusher->gca_end_point)
+    if (DIM == 3 && oe_has_gca_customs && d_oe_gca_valid(i) > 0.5 && d_oe_gca_mode(i) > 0.5) {
+      xnew[0] = d_oe_gca_x(i); xnew[1] = d_oe_gca_y(i); xnew[2] = d_oe_gca_z(i);
+    }
   } else if (pflag == PEXIT) {
     dtremain = particle_i.dtremain;
     xnew[0] = x[0] + dtremain*v[0];
     xnew[1] = x[1] + dtremain*v[1];
     if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+    if (DIM == 3 && oe_has_gca_customs && d_oe_gca_valid(i) > 0.5 && d_oe_gca_mode(i) > 0.5) {
+      xnew[0] = d_oe_gca_x(i); xnew[1] = d_oe_gca_y(i); xnew[2] = d_oe_gca_z(i);
+    }
   } else if (pflag >= PSURF) {
     dtremain = particle_i.dtremain;
     xnew[0] = x[0] + dtremain*v[0];
@@ -2231,6 +2282,82 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
             v[2] = minvc[2];
           }
 
+          // fix core/transport, internal cut that reflects guiding centres
+          // (CPU mover): the displacement of a chain ion is mirrored at the
+          // surface; the stored guiding centre follows the reflected path.
+          // Neutrals and other species see the surf models.
+          if (oe_core_on && oe_gc_sync_bit &&
+              d_oe_core_species(particle_i.ispecies) > 0 &&
+              ((DIM == 3) ? (tri->mask & oe_gc_sync_bit) : (line->mask & oe_gc_sync_bit))) {
+            const double *nrm = (DIM == 3) ? tri->norm : line->norm;
+            const double n2 = (DIM == 3) ? nrm[2] : 0.0;
+            double kick[3] = {0.0, 0.0, 0.0};
+            if (has_kick) { kick[0] = vkick0; kick[1] = vkick1; if (DIM == 3) kick[2] = vkick2; }
+            if (DIM == 3 && oe_has_gca_customs && d_oe_gca_valid(i) > 0.5 && d_oe_gca_mode(i) > 0.5) {
+              // guiding-centre marker: v is the gyro velocity, not the path.
+              // Mirror the remaining chord (v_par and mu untouched: the cut
+              // is a flux surface). xnew is clipped to the cell face here:
+              // the end of the path is xhold.
+              const double *xe = (outface != INTERIOR) ? xhold : xnew;
+              double rem[3] = {xe[0]-x[0], xe[1]-x[1], xe[2]-x[2]};
+              const double rn = rem[0]*nrm[0] + rem[1]*nrm[1] + rem[2]*nrm[2];
+              if (rn < 0.0) { rem[0] -= 2.0*rn*nrm[0]; rem[1] -= 2.0*rn*nrm[1]; rem[2] -= 2.0*rn*nrm[2]; }
+              if (has_kick) { v[0] -= vkick0; v[1] -= vkick1; v[2] -= vkick2; has_kick = 0; }
+              dtremain *= 1.0 - minparam*frac;
+              if (minparam == 0.0) stuck_iterate++;
+              else stuck_iterate = 0;
+              if (stuck_iterate >= MAXSTUCK) {
+                particle_i.flag = PDISCARD;
+                if (ATOMIC_REDUCTION == 1)
+                  Kokkos::atomic_inc(&d_nstuck());
+                else if (ATOMIC_REDUCTION == 0)
+                  d_nstuck()++;
+                else
+                  reduce.nstuck++;
+                break;
+              }
+              xnew[0] = x[0] + rem[0]; xnew[1] = x[1] + rem[1]; xnew[2] = x[2] + rem[2];
+              if (oe_has_gca_customs && d_oe_gca_valid(i) > 0.5 &&
+                  Kokkos::isfinite(xnew[0] + xnew[1] + xnew[2])) {
+                d_oe_gca_x(i) = xnew[0]; d_oe_gca_y(i) = xnew[1];
+                d_oe_gca_z(i) = (DIM == 2) ? 0.0 : xnew[2];
+              }
+              exclude = minsurf;
+              continue;
+            }
+            double own[3] = {v[0] - kick[0], v[1] - kick[1], v[2] - kick[2]};
+            const double on = own[0]*nrm[0] + own[1]*nrm[1] + own[2]*n2;
+            if (on < 0.0) { own[0] -= 2.0*on*nrm[0]; own[1] -= 2.0*on*nrm[1]; own[2] -= 2.0*on*n2; }
+            const double kn = kick[0]*nrm[0] + kick[1]*nrm[1] + kick[2]*n2;
+            if (kn < 0.0) { kick[0] -= 2.0*kn*nrm[0]; kick[1] -= 2.0*kn*nrm[1]; kick[2] -= 2.0*kn*n2; }
+            if (has_kick) { vkick0 = kick[0]; vkick1 = kick[1]; if (DIM == 3) vkick2 = kick[2]; }
+            v[0] = own[0] + kick[0]; v[1] = own[1] + kick[1];
+            v[2] = own[2] + kick[2];
+            dtremain *= 1.0 - minparam*frac;
+            if (minparam == 0.0) stuck_iterate++;
+            else stuck_iterate = 0;
+            if (stuck_iterate >= MAXSTUCK) {
+              particle_i.flag = PDISCARD;
+              if (ATOMIC_REDUCTION == 1)
+                Kokkos::atomic_inc(&d_nstuck());
+              else if (ATOMIC_REDUCTION == 0)
+                d_nstuck()++;
+              else
+                reduce.nstuck++;
+              break;
+            }
+            xnew[0] = x[0] + dtremain*v[0];
+            xnew[1] = x[1] + dtremain*v[1];
+            if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+            if (oe_has_gca_customs && d_oe_gca_valid(i) > 0.5 &&
+                Kokkos::isfinite(xnew[0] + xnew[1] + xnew[2])) {
+              d_oe_gca_x(i) = xnew[0]; d_oe_gca_y(i) = xnew[1];
+              d_oe_gca_z(i) = (DIM == 2) ? 0.0 : xnew[2];
+            }
+            exclude = minsurf;
+            continue;
+          }
+
           // A periodic cap is no wall (CPU mover, development 45492922): the
           // whole remaining path, kick included, is rotated to the far cap
           // after the collide, so the kick is not stripped there. xnew is
@@ -2275,6 +2402,16 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
               xnew[0] = x[0] + dtremain*v[0];
               xnew[1] = x[1] + dtremain*v[1];
               if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+              // guiding-centre marker turned back at an internal cut: its
+              // stored GC ends where this path ends (CPU sync_gc_position)
+              if (oe_core_on && oe_gc_sync_bit &&
+                  ((DIM == 3) ? (tri->mask & oe_gc_sync_bit) : (line->mask & oe_gc_sync_bit))) {
+                if (oe_has_gca_customs && d_oe_gca_valid(i) > 0.5 &&
+                    Kokkos::isfinite(xnew[0] + xnew[1] + xnew[2])) {
+                  d_oe_gca_x(i) = xnew[0]; d_oe_gca_y(i) = xnew[1];
+                  d_oe_gca_z(i) = (DIM == 2) ? 0.0 : xnew[2];
+                }
+              }
               exclude = minsurf;
               continue;
             }
@@ -2341,7 +2478,27 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
           if (nsurf_tally)
             iorig = particle_i;
 
-          if (DIM == 3) {
+          // fix core/transport: a chain marker reaching the core cut is
+          // absorbed into the 1-D core model (tallied, discarded like surf
+          // collide vanish, no collision or reaction). Auxiliary coupling:
+          // only chain neutrals, which cross the cut ballistically.
+          bool core_absorbed = false;
+          if (oe_core_on && (oe_core_bit || oe_core_neutral_bit)) {
+            const int smask_core = (DIM == 3) ? tri->mask : line->mask;
+            const int zc = d_oe_core_species(particle_i.ispecies);
+            if ((oe_core_bit && (smask_core & oe_core_bit) && zc >= 0) ||
+                (oe_core_neutral_bit && (smask_core & oe_core_neutral_bit) && zc == 0)) {
+              double pwc = oe_core_has_pw ? d_oe_core_pw(i) : 0.0;
+              if (pwc == 0.0) pwc = oe_core_fnum;
+              Kokkos::atomic_add(&d_oe_core_gin(zc),pwc);
+              core_absorbed = true;
+              ipart = NULL;
+              jpart = NULL;
+              reaction = 0;
+            }
+          }
+
+          if (DIM == 3 && !core_absorbed) {
             if (sc_type == 0) {
               jpart = sc_kk_specular_copy[m].obj.
                 collide_kokkos<REACT,ATOMIC_REDUCTION>(ipart,dtremain,minsurf,tri->norm,tri->isr,reaction,d_retry,d_nlocal);
@@ -2363,7 +2520,7 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
             }
           }
 
-          if (DIM != 3) {
+          if (DIM != 3 && !core_absorbed) {
             if (sc_type == 0) {
               jpart = sc_kk_specular_copy[m].obj.
                 collide_kokkos<REACT,ATOMIC_REDUCTION>(ipart,dtremain,minsurf,line->norm,line->isr,reaction,d_retry,d_nlocal);
@@ -2440,6 +2597,15 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
                 vkick0 = c*k0 - sn*k1; vkick1 = sn*k0 + c*k1;
               }
             }
+          }
+
+          // guiding-centre marker turned back at an internal cut: its stored
+          // GC ends where this path ends (CPU sync_gc_position)
+          if (oe_core_on && oe_gc_sync_bit && ipart && oe_has_gca_customs &&
+              ((DIM == 3) ? (tri->mask & oe_gc_sync_bit) : (line->mask & oe_gc_sync_bit)) &&
+              d_oe_gca_valid(i) > 0.5 && Kokkos::isfinite(xnew[0] + xnew[1] + xnew[2])) {
+            d_oe_gca_x(i) = xnew[0]; d_oe_gca_y(i) = xnew[1];
+            d_oe_gca_z(i) = (DIM == 2) ? 0.0 : xnew[2];
           }
 
           // check if surf_collide teleported particle outside current cell

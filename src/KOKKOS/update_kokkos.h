@@ -430,6 +430,17 @@ class UpdateKokkos : public Update {
   // _backup twins snapshot them across a react/retry replay
   DAT::t_float_1d d_oe_tally_pw;   // pweight custom for weighted surf tallies
   int oe_has_tally_pw;
+  // fix core/transport on the device (Update::core_*): chain markers absorbed
+  // at the core cut, guiding centres mirrored there. The absorbed weight per
+  // charge state is handed back to the fix after every move.
+  int oe_core_on;                     // 1 = fix core/transport active
+  int oe_core_bit, oe_core_neutral_bit, oe_gc_sync_bit;
+  int oe_core_nz;                     // charge states in the chain
+  int oe_core_has_pw;
+  double oe_core_fnum;
+  DAT::t_int_1d d_oe_core_species;    // charge state per species, -1 = not in chain
+  DAT::t_float_1d d_oe_core_pw;       // pweight custom
+  DAT::t_float_1d d_oe_core_gin;      // absorbed weight per charge state (this move)
   DAT::t_float_1d d_oe_sheath_bank;
   DAT::t_int_1d d_oe_tri_hint;        // per-particle mesh triangle hint (custom ivec, tri+1, 0 = none)
   int oe_tri_hint_custom = -1;        // custom index on the host, -1 = none

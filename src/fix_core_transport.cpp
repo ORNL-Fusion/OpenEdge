@@ -22,6 +22,7 @@
 #include <array>
 #include <set>
 #include "fix_core_transport.h"
+#include "sparta_masks.h"
 #include "core_transport_1d.h"
 #include "core_transport_exchange.h"
 #include "fix_background.h"
@@ -258,7 +259,16 @@ int FixCoreTransport::setmask()
 
 void FixCoreTransport::init()
 {
-  if (sparta->kokkos) error->all(FLERR,"fix core/transport is not ported to the Kokkos mover yet");
+  // Kokkos: the mover hooks (neutral absorption and guiding-centre mirror
+  // at the cut) run on the device; the window exchange runs on the host
+  // with the particles synced for that step only (start_of_step)
+  if (sparta->kokkos) {
+    if (!coupling_aux)
+      error->all(FLERR,"fix core/transport with Kokkos supports coupling auxiliary only");
+    if (domain->dimension != 3)
+      error->all(FLERR,"fix core/transport with Kokkos is 3-D only");
+    datamask_read = datamask_modify = EMPTY_MASK;
+  }
   if (!coupling_aux) {
     // legacy absorb/deposit/re-emit: full-orbit markers, hand-off by particle position
     if (update->pusher && update->pusher->pusher_mode != Pusher::PUSHER_BORIS)
@@ -948,18 +958,39 @@ void FixCoreTransport::start_of_step()
   elapsed += update->dt;
   physical_time += update->dt;
   ++window_steps;
+  // Kokkos: the particles come to the host only on the step of the exchange.
+  // ModifyKokkos syncs with datamask_read before a hook and marks
+  // datamask_modify after it: the read mask is raised here for this step's
+  // end_of_step, the modify mask only there, once the host copy is current
+  // (marking the host modified without the sync pushes a stale copy over
+  // the device particles).
+  if (sparta->kokkos) {
+    const bool fire = window_steps >= coupling_every || update->ntimestep == update->laststep;
+    datamask_modify = EMPTY_MASK;
+    datamask_read = fire ? (PARTICLE_MASK | CUSTOM_MASK) : EMPTY_MASK;
+  }
 }
 
 void FixCoreTransport::end_of_step()
 {
-  if (window_steps >= coupling_every || update->ntimestep == update->laststep)
+  if (window_steps >= coupling_every || update->ntimestep == update->laststep) {
     advance_window();
+    if (sparta->kokkos) {              // the exchange read and changed the host copy
+      datamask_modify = PARTICLE_MASK | CUSTOM_MASK;
+      datamask_read = EMPTY_MASK;
+    }
+  }
 }
 
 void FixCoreTransport::post_run()
 {
   // Also flush on timeout/early termination. A run 0 only writes state.
-  if (elapsed > 0.0) advance_window();
+  if (elapsed > 0.0) {
+    // Kokkos: the host particles are not current outside the exchange step
+    if (sparta->kokkos) error->warning(FLERR,"fix core/transport: run ended inside a coupling window; "
+                                       "the open window is not exchanged with Kokkos");
+    else advance_window();
+  }
   if (output_file) write_output();
   if (state_file) write_state();
 }
