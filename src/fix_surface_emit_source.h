@@ -128,6 +128,26 @@ class FixSurfaceEmitSource : public FixEmit {
   std::vector<class SurfReactSurfacePWI *> conc_pwi;
   int conc_pwi_resolved;
   int weights_version;           // bumped whenever cached_task_source changes
+
+  // nsource = the nevery keyword: the source is evaluated once per window of
+  // nsource steps and its markers are released over the steps of the window
+  int nsource;
+  bigint win_seen;               // window of the current source evaluation
+  bigint win_step;               // timestep of that evaluation
+  double sched_salt;
+  std::vector<double> win_task_source;
+  double win_source_total;
+  int win_task_valid;            // 0 = rebuild win_task_source (task layout changed)
+  // source held for the window, per surf: flux_owned_buf and win_conc_own keep
+  // it for the owned surfs (ownership does not change with the grid), from which
+  // flux_localghost and win_conc are spread again after a layout change
+  std::vector<double> win_conc,win_conc_own;
+  int win_stale;                 // 1 = spread the window's source again
+  int flux_owned_set;            // 1 = flux_owned_buf holds a compute's flux
+  void spread_window();
+  int window_start();
+  double sched_phi(bigint, surfint, cellint, int, int) const;
+  int sched_count(double, surfint, cellint, int, int &) const;
   double conc_factor(surfint) const;
   double task_flux(int, class Compute *, int);
   int refresh_conc_weights();

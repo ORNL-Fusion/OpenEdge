@@ -13,6 +13,7 @@
 #include "comm.h"
 #include "domain.h"
 #include "error.h"
+#include "grid.h"
 #include "mixture.h"
 #include "particle_kokkos.h"
 #include "surf_kokkos.h"
@@ -65,6 +66,7 @@ FixSurfaceEmitSourceKokkos::FixSurfaceEmitSourceKokkos(SPARTA *sparta,
   host_warm_calls_ = 0;
   cache_rebuilds_ = 0;
   src_version_uploaded_ = -1;
+  phi_win_ = -1;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -246,10 +248,41 @@ void FixSurfaceEmitSourceKokkos::upload_task_source()
   src_version_uploaded_ = weights_version;
 }
 
+/* ----------------------------------------------------------------------
+   per-task release-schedule offsets of window win (nevery > 1)
+------------------------------------------------------------------------- */
+
+void FixSurfaceEmitSourceKokkos::upload_phi(bigint win)
+{
+  const int nt = ntask;
+  if ((int) d_t_phi.extent(0) != (nt > 0 ? nt : 1)) {
+    d_t_phi = DAT::t_float_1d(Kokkos::view_alloc("emit:phi",
+                  Kokkos::WithoutInitializing), nt > 0 ? nt : 1);
+    d_t_phi2 = DAT::t_float_1d(Kokkos::view_alloc("emit:phi2",
+                  Kokkos::WithoutInitializing), nt > 0 ? nt : 1);
+  }
+  auto h_phi = Kokkos::create_mirror_view(d_t_phi);
+  auto h_phi2 = Kokkos::create_mirror_view(d_t_phi2);
+  for (int i = 0; i < nt; i++) {
+    const int isurf = tasks[i].isurf;
+    const surfint sid = (domain->dimension == 2) ? surf->lines[isurf].id
+                                                 : surf->tris[isurf].id;
+    const cellint cid = grid->cells[tasks[i].pcell].id;
+    h_phi(i) = sched_phi(win,sid,cid,-1,1);
+    h_phi2(i) = sched_phi(win,sid,cid,-1,2);
+  }
+  Kokkos::deep_copy(d_t_phi,h_phi);
+  Kokkos::deep_copy(d_t_phi2,h_phi2);
+  phi_win_ = win;
+}
+
 /* ---------------------------------------------------------------------- */
 
 void FixSurfaceEmitSourceKokkos::perform_task()
 {
+  // window snapshot first: the cache build below reads it
+  const bool newwin = window_start();
+
   // device path requires the static (cached) per-task source: the first
   // step(s) run on the host and populate/freeze the cache
   bool cache_ready = task_source_cached &&
@@ -314,16 +347,22 @@ void FixSurfaceEmitSourceKokkos::perform_task()
               update->ntimestep,host_warm_calls_,ntask);
   }
 
-  refresh_conc_weights();
+  // source held for the window of nsource steps (as the CPU path)
+  const bigint win = win_seen;
+  jwin_ = (int) ((update->ntimestep - 1) % nsource);
+  nsource_ = nsource;
+
+  if (newwin) refresh_conc_weights();
   if (cached_source_total <= 0.0) return;   // no source anywhere (CPU returns too)
-  if (!tasks_uploaded_) upload_tasks();
+  if (!tasks_uploaded_) { upload_tasks(); phi_win_ = -1; }
   else if (src_version_uploaded_ != weights_version) upload_task_source();
+  if (nsource > 1 && phi_win_ != win) upload_phi(win);
   if (ntask_ == 0 && ntask == 0) return;
 
   ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
 
   // scalars for the kernel
-  dt_eff_ = update->dt * nevery;
+  dt_eff_ = update->dt;   // first flight: within the release step
   fnum_   = update->fnum;
   src_total_ = cached_source_total;
   nlaunch_total_ = nlaunch_total;
@@ -423,12 +462,20 @@ void FixSurfaceEmitSourceKokkos::operator()(TagFixSurfEmitSource,
   rand_type rand_gen = rand_pool.get_state();
 
   const double ntarget = (double) nlaunch_total_ * s / src_total_;
-  const int ninsert = (int)(ntarget + rand_gen.drand());
+  // release schedule over the window (CPU sched_count)
+  const double phi = (nsource_ == 1) ? rand_gen.drand() : d_t_phi(i);
+  const int nwin = (int)(ntarget + phi);
+  int ninsert = nwin;
+  if (nsource_ > 1) {
+    const double phi2 = d_t_phi2(i);
+    ninsert = (int)((jwin_+1)*(double)nwin/nsource_ + phi2) -
+              (int)(jwin_*(double)nwin/nsource_ + phi2);
+  }
   if (ninsert <= 0) { rand_pool.free_state(rand_gen); return; }
 
   // stratified source conservation (CPU comment applies verbatim)
   const double w_emit = (ntarget >= 1.0)
-      ? s / ninsert
+      ? s / nwin
       : src_total_ / (double) nlaunch_total_;
 
   const int isurf = d_t_isurf(i);

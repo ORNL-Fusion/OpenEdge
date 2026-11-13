@@ -20,6 +20,8 @@
 #include "input.h"
 #include "comm.h"
 #include "random_knuth.h"
+#include "random_mars.h"
+#include "grid.h"
 #include "math_extra.h"
 #include "math_const.h"
 #include "memory.h"
@@ -28,6 +30,7 @@
 #include "surf_react_surface_pwi.h"
 
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 using namespace SPARTA_NS;
@@ -204,6 +207,16 @@ FixSurfaceEmitSource::FixSurfaceEmitSource(SPARTA *sparta, int narg, char **arg)
 
   options(narg-iarg,&arg[iarg]);
 
+  // the fix runs every step; nevery is the source-evaluation window
+  nsource = nevery;
+  nevery = 1;
+  win_seen = win_step = -1;
+  win_stale = 0;
+  flux_owned_set = 0;
+  win_source_total = 0.0;
+  win_task_valid = 0;
+  sched_salt = (nsource > 1) ? update->ranmaster->uniform() : 0.0;
+
   if (!surf->exist)
     error->all(FLERR,"Fix surface/emit/source requires surface elements");
   if (surf->implicit)
@@ -266,16 +279,6 @@ FixSurfaceEmitSource::~FixSurfaceEmitSource()
 void FixSurfaceEmitSource::init()
 {
   FixEmit::init();
-
-  // a new particle first moves ballistically over U*nevery*dt, no chemistry
-  if (nevery > 1 && comm->me == 0)
-    for (int i = 0; i < modify->nfix; i++)
-      if (strncmp(modify->fix[i]->style,"volume/chem/adas",16) == 0) {
-        error->warning(FLERR,"Fix surface/emit/source with nevery > 1: new "
-                       "particles are not ionized during their first move; "
-                       "use nevery 1 when prompt redeposition matters");
-        break;
-      }
 
   // bind the optional concentration-multiplier custom array (created by
   // surf_react surface/pwi at its init; both run before the first step)
@@ -395,6 +398,7 @@ double FixSurfaceEmitSource::flux_for_surface(surfint isurf)
 double FixSurfaceEmitSource::conc_factor(surfint isurf) const
 {
   if (conc_index < 0) return 1.0;
+  if (isurf < static_cast<surfint>(win_conc.size())) return win_conc[isurf];
   return surf->edarray_local[surf->ewhich[conc_index]][isurf][conc_col-1];
 }
 
@@ -417,9 +421,12 @@ void FixSurfaceEmitSource::spread_flux(Compute *c)
     else
       flux_localghost = NULL;
   }
-  if (nlg == 0) return;
+  // Even a rank with no local/ghost surfs can own flux requested by other
+  // ranks. Save its owned data and join the collective spread below. A null
+  // output is safe when nlg == 0: this rank receives no local surf values.
 
   // pack per-rank-owned flux into a contiguous vector of size nown
+  flux_owned_set = 1;
   flux_owned_buf.assign(nown,0.0);
   if (c->size_per_surf_cols == 0) {
     if (c->vector_surf) {
@@ -438,6 +445,31 @@ void FixSurfaceEmitSource::spread_flux(Compute *c)
                          flux_owned_buf.data(), flux_localghost);
 }
 
+/* ----------------------------------------------------------------------
+   spread the source held for the window (owned flux and conc_scale factor)
+   to the current local+ghost surfs. Collective.
+------------------------------------------------------------------------- */
+
+void FixSurfaceEmitSource::spread_window()
+{
+  const int nlg = surf->nlocal + surf->nghost;
+  if (flux_owned_set) {
+    if (flux_n_localghost != nlg) {
+      memory->destroy(flux_localghost);
+      flux_localghost = NULL;
+      flux_n_localghost = nlg;
+      if (nlg > 0)
+        memory->create(flux_localghost,nlg,"surface/emit/source:flux_localghost");
+    }
+    surf->spread_own2local(1,DOUBLE,flux_owned_buf.data(),flux_localghost);
+  }
+  if (conc_index >= 0) {
+    win_conc.assign(nlg > 0 ? nlg : 1,0.0);
+    surf->spread_own2local(1,DOUBLE,win_conc_own.data(),win_conc.data());
+  }
+  win_stale = 0;
+}
+
 /* ---------------------------------------------------------------------- */
 
 void FixSurfaceEmitSource::grid_changed()
@@ -454,6 +486,8 @@ void FixSurfaceEmitSource::grid_changed()
   conc_gen_seen = -1;
   weights_version++;
   flux_spread_valid = 0;
+  win_task_valid = 0;   // strengths rebuilt from the window's source, not re-evaluated
+  win_stale = 1;        // and that source spread to the new surf layout
 
   // for mode CONSTANT, set per-task ntarget to area fraction
   if (npmode != FLOW) {
@@ -648,11 +682,82 @@ void FixSurfaceEmitSource::create_task(int icell)
 }
 
 /* ----------------------------------------------------------------------
+   release schedule: an element with ntarget markers per window gets
+   nwin = floor(ntarget + phi1) of them and releases
+   floor((j+1) nwin/nsource + phi2) - floor(j nwin/nsource + phi2) on step j.
+   phi1, phi2 in [0,1) are independent hashes of the window and the element,
+   so the schedule needs no stored state and the release step of a marker
+   does not depend on nwin. nsource = 1: phi1 from the fix RNG as before.
+------------------------------------------------------------------------- */
+
+double FixSurfaceEmitSource::sched_phi(bigint win, surfint sid, cellint cid,
+                                       int isp, int which) const
+{
+  uint64_t h = static_cast<uint64_t>(sched_salt * 9007199254740992.0);
+  const uint64_t key[5] = {static_cast<uint64_t>(win),static_cast<uint64_t>(sid),
+                           static_cast<uint64_t>(cid),static_cast<uint64_t>(isp+1),
+                           static_cast<uint64_t>(which)};
+  for (int k = 0; k < 5; k++) {
+    h += key[k] + 0x9E3779B97F4A7C15ULL;
+    h = (h ^ (h >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    h = (h ^ (h >> 27)) * 0x94D049BB133111EBULL;
+    h ^= h >> 31;
+  }
+  return static_cast<double>(h >> 11) / 9007199254740992.0;
+}
+
+int FixSurfaceEmitSource::sched_count(double ntarget, surfint sid, cellint cid,
+                                      int isp, int &nwin) const
+{
+  if (nsource == 1) {
+    nwin = static_cast<int>(ntarget + random->uniform());
+    return nwin;
+  }
+  const int j = static_cast<int>((update->ntimestep - 1) % nsource);
+  nwin = static_cast<int>(ntarget + sched_phi(win_seen,sid,cid,isp,1));
+  const double phi = sched_phi(win_seen,sid,cid,isp,2);
+  return static_cast<int>((j+1)*static_cast<double>(nwin)/nsource + phi) -
+         static_cast<int>(j*static_cast<double>(nwin)/nsource + phi);
+}
+
+/* ----------------------------------------------------------------------
+   returns 1 on the first step of a window of nsource steps (window k =
+   steps k*nsource+1 .. (k+1)*nsource); its first call there snapshots the
+   conc_scale factors, which with the spread flux are the source held for
+   the window
+------------------------------------------------------------------------- */
+
+int FixSurfaceEmitSource::window_start()
+{
+  const bigint win = (update->ntimestep - 1) / nsource;
+  if (win == win_seen) {
+    if (win_stale) spread_window();
+    return (win_step == update->ntimestep);
+  }
+  if (win_seen < 0 && (update->ntimestep - 1) % nsource && comm->me == 0)
+    error->warning(FLERR,"Fix surface/emit/source starts inside a source "
+                   "window (restart): the source held for it is not in the "
+                   "restart file and is evaluated again at this step");
+  win_seen = win;
+  win_step = update->ntimestep;
+  if (conc_index >= 0) {
+    double **conc = surf->edarray[surf->ewhich[conc_index]];
+    win_conc_own.resize(surf->nown);
+    for (int i = 0; i < surf->nown; i++) win_conc_own[i] = conc[i][conc_col-1];
+    const int nlg = surf->nlocal + surf->nghost;
+    win_conc.assign(nlg > 0 ? nlg : 1,0.0);
+    surf->spread_own2local(1,DOUBLE,win_conc_own.data(),win_conc.data());
+  }
+  win_stale = 0;   // the flux of a new window is spread when it is evaluated
+  return 1;
+}
+
+/* ----------------------------------------------------------------------
    insert particles in grid cells with emitting surface elements
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   per-task source strengths (flux x task area x dt x nevery) and their
+   per-task source strengths (flux x task area x dt x nsource) and their
    global total, without emitting; c = upstream compute (NULL in file /
    const mode; its flux must already be spread)
 ------------------------------------------------------------------------- */
@@ -660,7 +765,7 @@ void FixSurfaceEmitSource::create_task(int icell)
 double FixSurfaceEmitSource::compute_task_source(std::vector<double> &task_source,
                                                  Compute *c)
 {
-  const double dt = update->dt * nevery;
+  const double dt = update->dt * nsource;
   task_source.assign(ntask,0.0);
 
   double source_total_me = 0.0;
@@ -743,7 +848,7 @@ int FixSurfaceEmitSource::build_task_source_cache()
     cached_source_total = compute_task_source(task_source,c);
     cached_task_source = task_source;
   } else {
-    const double dt = update->dt * nevery;
+    const double dt = update->dt * nsource;
     cached_task_flux.assign(ntask,0.0);
     cached_task_raw.assign(ntask,0.0);
     for (int i = 0; i < ntask; i++) {
@@ -811,9 +916,12 @@ void FixSurfaceEmitSource::perform_task()
   double x[3],v[3],e1[3],e2[3];
   Particle::OnePart *p;
 
-  // multiply by nevery so source_strength integrates the full inter-firing
-  // interval, preserving total flux when nevery > 1
-  const double dt = update->dt * nevery;
+  // the source is evaluated at the first step of each window of nsource
+  // steps (and after a grid change) and held for the window; dt is the
+  // window length, so source_strength is the source of the whole window
+  const double dt = update->dt * nsource;
+  const double dtstep = update->dt;
+  const bool newwin = window_start();
   int *species = particle->mixture[imix]->species;
 
   // evaluate requested per-surf flux once per timestep
@@ -829,7 +937,8 @@ void FixSurfaceEmitSource::perform_task()
     const bool flux_frozen = cpmi_s && cpmi_s->flux_is_frozen() &&
                              flux_spread_valid &&
                              flux_n_localghost == surf->nlocal + surf->nghost;
-    if (!flux_frozen) {
+    const bool flux_current = !newwin && flux_owned_set;
+    if (!flux_frozen && !flux_current) {
       c->compute_per_surf();
       // spread per-rank-owned flux into a globally-replicated vector indexed
       // by global isurf — canonical SPARTA pattern (Surf::spread_own2local)
@@ -878,21 +987,30 @@ void FixSurfaceEmitSource::perform_task()
       // reuse or (after grid_changed) rebuild the cache — flux and dt are
       // constant for static sources
       build_task_source_cache();
-      refresh_conc_weights();
+      if (newwin) refresh_conc_weights();
       if (cached_source_total <= 0.0) return;
       source_total = cached_source_total;
       task_source_ptr = cached_task_source.data();
     } else {
-      source_total = compute_task_source(task_source,c);
+      if (newwin || !win_task_valid) {
+        win_source_total = compute_task_source(win_task_source,c);
+        win_task_valid = 1;
+      }
+      source_total = win_source_total;
       if (source_total <= 0.0) return;
-      task_source_ptr = task_source.data();
+      task_source_ptr = win_task_source.data();
     }
   }
+
+  int nwin;
+  Grid::ChildCell *cells = grid->cells;
 
   for (i = 0; i < ntask; i++) {
     pcell = tasks[i].pcell;
     isurf = tasks[i].isurf;
     if (isurf >= surf->nlocal) error->one(FLERR,"Fix surface/emit/source: task surf index out of range");
+    const surfint sid = (dimension == 2) ? lines[isurf].id : tris[isurf].id;
+    const cellint cid = cells[pcell].id;
 
     if (dimension == 2) normal = lines[isurf].norm;
     else normal = tris[isurf].norm;
@@ -933,7 +1051,7 @@ void FixSurfaceEmitSource::perform_task()
         if (source_strength <= 0.0) continue;
 
         ntarget = static_cast<double>(nlaunch_total) * source_strength / source_total;
-        ninsert = static_cast<int>(ntarget + random->uniform());
+        ninsert = sched_count(ntarget,sid,cid,-1,nwin);
         if (ninsert <= 0) continue;
 
         // Stratified source conservation. Elements resolved by the budget
@@ -942,7 +1060,7 @@ void FixSurfaceEmitSource::perform_task()
         // unbiased weight is then s_i/ntarget = S_total/N, the global
         // per-particle quantum (w = s_i/ninsert would under-emit weak
         // elements by the factor ntarget in expectation).
-        if (ntarget >= 1.0) w_emit = source_strength / ninsert;
+        if (ntarget >= 1.0) w_emit = source_strength / nwin;
         else w_emit = source_total / static_cast<double>(nlaunch_total);
       } else {
         double flux;
@@ -978,7 +1096,7 @@ void FixSurfaceEmitSource::perform_task()
       for (isp = 0; isp < nspecies; isp++) {
         ispecies = species[isp];
         double ntarget_sp = ntarget * fraction[isp];
-        ninsert = static_cast<int>(ntarget_sp + random->uniform());
+        ninsert = sched_count(ntarget_sp,sid,cid,isp,nwin);
         if (ninsert <= 0) continue;
         scosine = indot / vscale[isp];
 
@@ -1075,7 +1193,7 @@ void FixSurfaceEmitSource::perform_task()
 
           p = &particle->particles[particle->nlocal-1];
           p->flag = PSURF + 1 + isurf;
-          p->dtremain = dt * random->uniform();
+          p->dtremain = dtstep * random->uniform();
 
           if (nlaunch_mode) {
             pweight_dvec = particle->edvec[pweight_ewhich];
@@ -1095,7 +1213,7 @@ void FixSurfaceEmitSource::perform_task()
 
     } else {
       if (ninsert < 0) {
-        ninsert = static_cast<int>(ntarget + random->uniform());
+        ninsert = sched_count(ntarget,sid,cid,-1,nwin);
         if (ninsert <= 0) continue;
       }
 
@@ -1197,7 +1315,7 @@ void FixSurfaceEmitSource::perform_task()
 
         p = &particle->particles[particle->nlocal-1];
         p->flag = PSURF + 1 + isurf;
-        p->dtremain = dt * random->uniform();
+        p->dtremain = dtstep * random->uniform();
 
         if (weighted_launch_mode) {
           pweight_dvec = particle->edvec[pweight_ewhich];

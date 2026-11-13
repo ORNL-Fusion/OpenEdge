@@ -72,6 +72,9 @@ class FixSurfaceEmitSourceKokkos : public FixSurfaceEmitSource,
 
   void upload_tasks();
   void upload_task_source();
+  void upload_phi(bigint);
+  bigint phi_win_;                // window held in d_t_phi (-1 = none)
+  int jwin_, nsource_;            // step within the window, window length
   int src_version_uploaded_;      // weights_version held in d_t_src
 
   // ---- static task views (uploaded per task build) ----
@@ -81,6 +84,7 @@ class FixSurfaceEmitSourceKokkos : public FixSurfaceEmitSource,
   DAT::t_float_1d d_t_path;       // 3 doubles per point
   DAT::t_float_1d d_t_frac;       // npoint-2 per task
   DAT::t_float_1d d_t_src;        // per-task source strength (static)
+  DAT::t_float_1d d_t_phi,d_t_phi2;   // per-task release-schedule offsets of the window
   DAT::t_float_1d d_cumm;         // mixture cumulative fractions
   DAT::t_int_1d d_mix_sp;         // mixture species ids
 

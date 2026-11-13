@@ -30,11 +30,11 @@ keyword = {conc_scale} or {n} or {nlaunch} or {nlaunch_total} or {flux_thresh} o
   {conc_scale} values = attr col
     attr = custom per-surf array (e.g. the surface/pwi concentrations)
     col = column (1-based) that multiplies the flux of each element
-  {n} value = Np = emit Np particles per emission step with the default
+  {n} value = Np = emit Np particles per window of nevery steps with the default
     weight (0 = flux mode)
   {nlaunch} value = N = emit N weighted particles per emitting element
-  {nlaunch_total} value = N = emit N weighted particles per emission
-    step in total, apportioned by element source strength
+  {nlaunch_total} value = N = emit N weighted particles per window of nevery
+    steps in total, apportioned by element source strength
   {flux_thresh} value = F = ignore elements with flux below F
   {normal} value = {yes} or {no} = launch along the element normal
   {model} values = {thermal} or {thermal_tsurf} name or
@@ -46,7 +46,7 @@ keyword = {conc_scale} or {n} or {nlaunch} or {nlaunch_total} or {flux_thresh} o
       (eV); optional cos_n exponent of the angular distribution and
       emax high-energy cutoff (eV, must exceed Ub)
     fixed_energy E = monoenergetic launch at E (eV)
-  {nevery} value = Nevery = emit every this many timesteps
+  {nevery} value = Nevery = evaluate the source every this many timesteps
   {perspecies} value = {yes} or {no}
   {region} value = region-ID = only emit from surface elements in region :pre
 :ule
@@ -73,16 +73,16 @@ launched particles.  Area is the axisymmetric ring area in 2d
 axisymmetric mode.
 
 In compute mode the per-surf vector, or column {flux_index} of the
-per-surf array, of the named compute is read on every emission; when
+per-surf array, of the named compute is read at each source evaluation; when
 the compute is static its values are cached.  {conc_scale} multiplies
 the flux of each element by a column of a custom per-surf array,
 typically a reaction-zone concentration written by "surf_react
 surface/pwi"_surf_react_surface_pwi.html, so that the emitted flux of
 a material is the erosion flux times its local concentration.  The
-concentration is read live: with a static compute only the flux is
-cached, and the per-element sources are re-weighted whenever
-surf_react surface/pwi updates its concentrations (every
-{adens_nevery} steps).  {conc_scale} requires a compute; it is an
+concentration is read at each source evaluation: with a static compute
+only the flux is cached, and the per-element sources are re-weighted
+at the first source evaluation after surf_react surface/pwi updates
+its concentrations (every {adens_nevery} steps).  {conc_scale} requires a compute; it is an
 error in {constant} and {file} mode.  In
 {constant} mode every element carries the same flux.  In {file} mode
 the file has the SPARTA inflow format: a section header line (NAME),
@@ -102,10 +102,10 @@ carrying the weight s_i/N.  Statistics are uniform across elements
 regardless of their strength; the total particle count scales with the
 number of emitting elements.  Suited to small emitting regions. :l
 
-{nlaunch_total} N emits N particles per emission in total, apportioned
+{nlaunch_total} N emits N particles per window in total, apportioned
 over elements in proportion to s_i (stratified source sampling).
 Elements expecting at least one particle emit exactly their own source
-each event; weaker elements fire probabilistically with the global
+each window; weaker elements fire probabilistically with the global
 weight S_total/N, which keeps the expectation unbiased.  Total emission
 is conserved for any N, so N is purely a cost/statistics knob.  Suited
 to whole-machine walls. :l
@@ -134,6 +134,31 @@ energy; production runs should set {emax} to the kinematic cutoff
 (roughly gamma*E_inc - Ub, or ~2 Te for light projectiles).
 {fixed_energy} launches every particle at the given energy.
 
+The {nevery} keyword sets how often the source is evaluated, not
+how often particles are launched.  The source is evaluated on the
+first step of each window of {nevery} timesteps and held for that
+window (the {conc_scale} factor is read at the same time, in every
+launch mode).  The particles of the window are then
+released over its timesteps: an element with N particles per window
+launches them at evenly spaced steps, starting at an offset that
+differs from element to element and from window to window, and each
+particle is born at a random time within its step.  The number of
+particles per window and their weights are the same as for a single
+launch, so {nevery} sets the cost of the source evaluation and the
+number of particles, while every new particle moves at most one
+timestep before the other fixes act on it.  The source of a window,
+the flux and the {conc_scale} factor of each element, is kept across
+successive "run"_run.html commands and across load balancing, also
+with distributed surfaces.  It is not stored in restart files.  A run
+restarted inside a window evaluates the source again at its first step
+and uses that value for the rest of the window, with a warning; the
+continuation is then not the uninterrupted run.  If the source varies
+in time, the amount emitted in that window differs by the change of
+the source since the start of the window, which can be large for a
+rapidly varying source.  Write restart files at multiples of {nevery}
+to keep the source history; the emitted amount is then the same as in
+an uninterrupted run.
+
 With {normal yes} the drift direction is the surface normal instead of
 the mixture {vstream}.  With {perspecies yes} the mixture fractions
 are applied per species to the particle count rather than sampled.
@@ -147,7 +172,7 @@ files"_restart.html.
 
 This fix computes a global vector of length 2 which can be accessed
 by various output commands.  The first element is the number of
-particles emitted on the most recent emission step, the second the
+particles emitted on the most recent timestep, the second the
 cumulative number of particles emitted since the start of the run.
 
 [Restrictions:]
