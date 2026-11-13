@@ -1,0 +1,54 @@
+# Source that changes every step, read through a compute: the flux (src flux) or the
+# conc_scale factor (src conc) is 1e20*(1+step) or (1+step). The source of a window of
+# 7 steps is the value at its first step, however the run is cut into segments.
+variable    mode    index total      # total | per
+variable    src     index flux       # flux | conc
+variable    split   index 0          # 1: run 1, 6, 10, 4 instead of run 21;  2: the same with the grid repartitioned in between
+variable    dist    index 0          # 1: distributed surfs
+variable    bal     index 0          # 1: rebalance every 2 steps
+seed        12345
+dimension   3
+boundary    r r o
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0e8
+if "${dist} == 1" then "global surfs explicit/distributed"
+timestep    1.0e-9
+create_box  0 1 0 1 0 1
+create_grid 4 4 4
+balance_grid rcb cell
+species     ../newborn_exposure/input/o.species O
+mixture     src O frac 1.0 nrho 1.0e19 temp 300.0 vstream 0.0 0.0 0.0
+read_surf   ../newborn_exposure/input/source.surf group source particle check
+surf_collide vac vanish
+surf_modify source collide vac
+fix pw      particle/weight
+
+variable    ramp equal 1+step
+variable    fval equal 1.0e20*v_ramp
+variable    one equal 1.0
+variable    f0 equal 1.0e20
+custom      surf create flux float 0
+custom      surf create conc float 1
+if "${src} == flux" then &
+  "custom surf set flux v_fval all NULL" &
+  "custom surf set conc[1] v_one all NULL" &
+  "fix changing custom 1 surf set flux v_fval all NULL" &
+else &
+  "custom surf set flux v_f0 all NULL" &
+  "custom surf set conc[1] v_ramp all NULL" &
+  "fix changing custom 1 surf set conc[1] v_ramp all NULL"
+compute fluxc property/surf source s_flux
+
+if "${mode} == total" then &
+  "fix femit surface/emit/source src source fluxc conc_scale conc 1 perspecies no normal yes nlaunch_total 50 nevery 7 model fixed_energy 5.0" &
+else &
+  "fix femit surface/emit/source src source fluxc conc_scale conc 1 perspecies no normal yes nlaunch 3 nevery 7 model fixed_energy 5.0"
+if "${bal} == 1" then "fix fbal balance 2 1.0 rcb part"
+
+compute cw  grid/weighted all species n_w
+compute sw  reduce sum c_cw[1]
+stats       21
+stats_style step np f_femit[2] c_sw
+if "${split} == 1" then "run 1" "run 6" "run 10" "run 4" &
+elif "${split} == 2" "run 1" "balance_grid rcb part" "run 6" "balance_grid rcb cell" "run 10" "balance_grid rcb part" "run 4" &
+else "run 21"

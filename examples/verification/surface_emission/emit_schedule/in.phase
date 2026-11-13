@@ -1,0 +1,25 @@
+# Emitted weight by step within the source window: elements with a fractional number of markers per
+# window of 3 steps must emit one third of their source on each step.
+variable    nsteps  index 30000
+seed        12345
+dimension   3
+boundary    r r o
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0e8
+timestep    1.0e-9
+create_box  0 1 0 1 0 1
+create_grid 2 1 1
+balance_grid rcb cell
+species     ../newborn_exposure/input/o.species O
+mixture     src O frac 1.0 nrho 1.0e19 temp 300.0 vstream 0.0 0.0 0.0
+read_surf   ../newborn_exposure/input/source.surf group source particle check
+surf_collide vac vanish
+surf_modify source collide vac
+fix pw      particle/weight
+fix femit   surface/emit/source src source constant 1.0e20 perspecies no normal yes &
+            nlaunch_total 6 nevery 3 model fixed_energy 5.0
+compute cw  grid/weighted all species n_w
+compute sw  reduce sum c_cw[1]
+stats       1
+stats_style step np f_femit[2] c_sw
+run         ${nsteps}

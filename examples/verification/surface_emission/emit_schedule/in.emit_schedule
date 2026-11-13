@@ -1,0 +1,52 @@
+# Emitted weight of fix surface/emit/source against flux * area * time, for the
+# three launch modes, with the source evaluated every ${nemit} steps.
+variable    mode    index total      # total | per | flux
+variable    nemit   index 7
+variable    nsteps  index 700
+variable    flux    index 1.0e20
+variable    dt      index 1.0e-9
+variable    seed    index 12345
+variable    bal     index 0          # 1: rebalance every 5 steps
+variable    rs      index 0          # 1: write a restart at step nrs and stop;  2: continue from it
+variable    nrs     index 353
+variable    rfile   index output/emit.restart
+
+seed        ${seed}
+dimension   3
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0e8
+timestep    ${dt}
+
+if "${rs} == 2" then "jump SELF fromrestart"
+boundary    r r o
+create_box  0 1 0 1 0 1
+create_grid 4 4 4
+balance_grid rcb cell
+species     ../newborn_exposure/input/o.species O
+mixture     src O frac 1.0 nrho 1.0e19 temp 300.0 vstream 0.0 0.0 0.0
+read_surf   ../newborn_exposure/input/source.surf group source particle check
+jump        SELF setup
+label       fromrestart
+read_restart ${rfile}
+label       setup
+
+surf_collide vac vanish
+surf_modify source collide vac
+fix pw      particle/weight
+
+if "${mode} == total" then &
+  "fix femit surface/emit/source src source constant ${flux} perspecies no normal yes nlaunch_total 50 nevery ${nemit} model fixed_energy 5.0" &
+elif "${mode} == per" &
+  "fix femit surface/emit/source src source constant ${flux} perspecies no normal yes nlaunch 3 nevery ${nemit} model fixed_energy 5.0" &
+else &
+  "fix femit surface/emit/source src source constant ${flux} perspecies no normal yes nevery ${nemit} model fixed_energy 5.0"
+if "${bal} == 1" then "fix fbal balance 5 1.0 rcb part"
+
+compute cw  grid/weighted all species n_w
+compute sw  reduce sum c_cw[1]
+stats       50
+stats_style step np f_femit[2] c_sw
+
+if "${rs} == 1" then "run ${nrs}" "write_restart ${rfile}" "jump SELF done"
+if "${rs} == 2" then "run ${nsteps} upto" else "run ${nsteps}"
+label       done

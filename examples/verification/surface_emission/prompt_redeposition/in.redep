@@ -1,0 +1,51 @@
+# Prompt redeposition in a uniform magnetic field parallel to the wall.
+# O atoms leave the wall along its normal and ionize at the rate nu; an ion born
+# at height h returns to the wall if h < rho = v/Omega, so the redeposited
+# fraction is 1 - exp(-nu/Omega), whatever the launch speed. No E, no collisions.
+variable    ne      index 5e19
+variable    Tev     index 12.0
+variable    B       index 0.1147     # Omega = q B / m = nu for O+ (nu/Omega = 1)
+variable    dt      index 1.45e-8
+variable    nemit   index 1
+variable    sub     index 1
+variable    ntrans  index 2000       # steps before the tally (multiple of nemit); 2x as many are tallied
+variable    flux    index 4.0e10
+variable    seed    index 12345
+variable    launch  index flux       # flux: fnum markers;  total: nlaunch_total ${nlt} weighted markers (device emission under Kokkos)
+variable    nlt     index 200
+
+seed        ${seed}
+dimension   3
+boundary    r r o
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0
+timestep    ${dt}
+create_box  0 1 0 1 0 0.5
+create_grid 4 4 8
+balance_grid rcb cell
+
+species     ../newborn_exposure/input/o.species O O+
+mixture     src O frac 1.0 nrho 1.0e19 temp 300.0 vstream 0.0 0.0 0.0
+read_surf   input/patch.surf group source particle check
+surf_collide vac vanish
+surf_modify source collide vac
+
+fix bg      background constant te ${Tev} ne ${ne} bcart ${B} 0.0 0.0
+global      pusher plasma bg mode boris subcycles ${sub}
+fix fchem   volume/chem/adas 1 O ../newborn_exposure/input/o.reactions
+
+fix pw      particle/weight
+if "${launch} == total" then &
+  "fix femit surface/emit/source src source constant ${flux} perspecies no normal yes nlaunch_total ${nlt} nevery ${nemit} model thompson 2.0 cos_n 20000 emax 50" &
+else &
+  "fix femit surface/emit/source src source constant ${flux} perspecies no normal yes nevery ${nemit} model thompson 2.0 cos_n 20000 emax 50"
+
+# weighted inventories (atoms): column 1 = O, column 2 = O+
+compute cw  grid/weighted all species n_w
+compute wn  reduce sum c_cw[1]
+compute wi  reduce sum c_cw[2]
+variable    nrun equal 2*v_ntrans
+stats       ${ntrans}
+stats_style step np f_femit[2] c_wn c_wi
+run         ${ntrans}
+run         ${nrun}

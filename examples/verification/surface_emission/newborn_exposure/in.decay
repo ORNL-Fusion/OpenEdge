@@ -1,0 +1,23 @@
+# 0-D decay of neutral O in the uniform plasma: N(t) = N0 exp(-nu t) gives nu.
+variable    ne     index 5e19
+variable    Tev    index 12.0
+variable    dt     index 1e-8
+seed        4711
+dimension   3
+boundary    r r r
+global      gridcut 0.0 comm/sort no
+create_box  0 1 0 1 0 1
+create_grid 4 4 4
+balance_grid rcb cell
+global      nrho 1e10 fnum 1e5 temp 300.0
+species     input/o.species O O+
+mixture     neut O frac 1
+create_particles neut n 4000000
+fix bg      background constant te ${Tev} ne ${ne}
+global      pusher plasma bg
+fix fchem   volume/chem/adas 1 O input/o.reactions
+compute cnt count O O+
+timestep    ${dt}
+stats       10
+stats_style step c_cnt[1] c_cnt[2]
+run         200

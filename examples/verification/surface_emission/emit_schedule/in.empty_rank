@@ -1,0 +1,56 @@
+# Distributed source with ranks that own surface data but touch no geometry.
+# Eight z layers per rank keep upper ranks and their ghosts away from z = 0.
+# Repartitioning x -> z within a source window exercises empty buffers again.
+variable mode index total
+variable src index flux
+variable ranks index 2
+variable repart index 0
+variable nx equal 2*v_ranks
+variable nz equal 8*v_ranks
+variable nlt equal 14*v_nx*v_nx
+seed 12345
+dimension 3
+boundary r r o
+global surfs explicit/distributed
+global gridcut 0.0 comm/sort no
+global fnum 1.0e8
+timestep 1.0e-9
+create_box 0 1 0 1 0 1
+create_grid ${nx} 2 ${nz}
+balance_grid block 1 1 ${ranks}
+species ../newborn_exposure/input/o.species O
+mixture src O frac 1.0 nrho 1.0e19 temp 300.0 vstream 0 0 0
+read_surf ../newborn_exposure/input/source.surf group source particle check
+surf_collide vac vanish
+surf_modify source collide vac
+fix pw particle/weight
+
+variable ramp equal 1+step
+variable fval equal 1.0e20*v_ramp
+variable one equal 1.0
+variable f0 equal 1.0e20
+custom surf create flux float 0
+custom surf create conc float 1
+if "${src} == flux" then &
+  "custom surf set flux v_fval all NULL" &
+  "custom surf set conc[1] v_one all NULL" &
+  "fix changing custom 1 surf set flux v_fval all NULL" &
+else &
+  "custom surf set flux v_f0 all NULL" &
+  "custom surf set conc[1] v_ramp all NULL" &
+  "fix changing custom 1 surf set conc[1] v_ramp all NULL"
+compute fluxc property/surf source s_flux
+
+if "${mode} == total" then &
+  "fix femit surface/emit/source src source fluxc conc_scale conc 1 perspecies no normal yes nlaunch_total ${nlt} nevery 7 model fixed_energy 5.0" &
+else &
+  "fix femit surface/emit/source src source fluxc conc_scale conc 1 perspecies no normal yes nlaunch 3 nevery 7 model fixed_energy 5.0"
+compute cw grid/weighted all species n_w
+compute sw reduce sum c_cw[1]
+stats 21
+stats_style step np f_femit[2] c_sw
+stats_modify flush yes
+if "${repart} == 1" then &
+  "run 1" "balance_grid block ${ranks} 1 1" &
+  "run 2" "balance_grid block 1 1 ${ranks}" "run 18" &
+else "run 21"

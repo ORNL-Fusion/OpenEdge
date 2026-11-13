@@ -1,0 +1,49 @@
+# Neutral O emitted from a plane at fixed energy into a uniform plasma; the
+# fraction crossing the plane z = d un-ionized is 2*E3(nu*d/v) exactly.
+variable    ne      index 5e19
+variable    Tev     index 12.0
+variable    dt      index 1.45e-8
+variable    nemit   index 1          # emission every nemit steps
+variable    ntrans  index 600        # steps before tallying (multiple of nemit); 5x as many are tallied
+variable    d       index 0.011275   # slab thickness = v/nu at 5 eV
+variable    flux    index 2.58e10
+variable    seed    index 12345
+variable    launch  index flux       # flux: fnum markers;  total: nlaunch_total ${nlt} (device emission under Kokkos)
+variable    nlt     index 2000       # even, with nxy 1: the two source triangles then carry equal weights
+variable    nxy     index 4
+
+seed        ${seed}
+dimension   3
+boundary    r r o
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0
+timestep    ${dt}
+
+create_box  0 1 0 1 0 ${d}
+create_grid ${nxy} ${nxy} 4
+balance_grid rcb cell
+
+species     input/o.species O O+
+mixture     src O frac 1.0 nrho 1.0e19 temp 300.0 vstream 0.0 0.0 0.0
+
+read_surf   input/source.surf group source particle check
+surf_collide vac vanish
+surf_modify source collide vac
+
+fix bg      background constant te ${Tev} ne ${ne}
+global      pusher plasma bg
+fix fchem   volume/chem/adas 1 O input/o.reactions
+
+if "${launch} == total" then &
+  "fix pw particle/weight" &
+  "fix femit surface/emit/source src source constant ${flux} perspecies no normal yes nlaunch_total ${nlt} nevery ${nemit} model fixed_energy 5.0" &
+else &
+  "fix femit surface/emit/source src source constant ${flux} perspecies no normal yes nevery ${nemit} model fixed_energy 5.0"
+
+compute cb  boundary species n
+variable    nrun equal 5*v_ntrans
+variable    ntot equal 6*v_ntrans
+fix av      ave/time 1 ${nrun} ${ntot} c_cb[1] c_cb[2] mode vector ave one
+stats       ${ntot}
+stats_style step np f_femit[2] f_av[6][1] f_av[6][2]
+run         ${ntot}
