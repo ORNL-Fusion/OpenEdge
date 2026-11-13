@@ -343,6 +343,9 @@ Update::Update(SPARTA *sparta) : Pointers(sparta)
   psi_reflect_fix = nullptr;
   tag_index = -1;
   tag_groupbit = 0;
+  tag_psi_thr = -1.0;
+  tag_psi_nevery = 10;
+  tag_psi_device = 0;
   core_fix = nullptr;
   core_groupbit = 0;
   core_neutral_groupbit = 0;

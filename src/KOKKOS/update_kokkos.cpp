@@ -107,6 +107,10 @@ UpdateKokkos::UpdateKokkos(SPARTA *sparta) : Update(sparta),
   tmp_compute_boundary_kk(sparta),
   tmp_compute_surf_kk(sparta)
 {
+  // set before any fix is created: fix particle/tag asks for no host end_of_step
+  // when the device mover applies its psi form
+  tag_psi_device = 1;
+
 
   // use 1D view for scalars to reduce GPU memory operations
 
@@ -339,6 +343,7 @@ void UpdateKokkos::init()
   oe_swlog_on = oe_swlog_cap = 0;
   oe_kick_on = oe_paid_on = oe_wave_on = oe_kick_te_on = 0;
   oe_tag_on = oe_tag_groupbit = 0;
+  oe_tagpsi_thr = -1.0;
   oe_has_raster = oe_has_ras_drag = oe_has_ras_gradte = oe_has_ras_gradti = 0;
   oe_ras_nr = oe_ras_nz = 0; oe_ras_r0 = oe_ras_dr = oe_ras_z0 = oe_ras_dz = 0.0;
   oe_psi_imix = -1; oe_psi_nw = oe_psi_nh = 0;
@@ -807,6 +812,9 @@ void UpdateKokkos::run(int nsteps)
       if (cellweightflag) particle->pre_weight();
       (this->*moveptr)();
       timer->stamp(TIME_MOVE);
+
+      // fix particle/tag, psi form (CPU: FixParticleTag::end_of_step)
+      if (tag_index >= 0 && tag_psi_thr >= 0.0 && ntimestep % tag_psi_nevery == 0) tag_psi_kokkos();
 
       // communicate particles
 
@@ -2223,13 +2231,27 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
             v[2] = minvc[2];
           }
 
+          // A periodic cap is no wall (CPU mover, development 45492922): the
+          // whole remaining path, kick included, is rotated to the far cap
+          // after the collide, so the kick is not stripped there. xnew is
+          // clipped to the cell face at this point: the end of the path is xhold.
+          const int isc_cap = (DIM == 3) ? tri->isc : -1;
+          const bool is_cap = (DIM == 3) && isc_cap >= 0 && sc_type_list[isc_cap] == 5;
+          double caprem[3] = {0.0, 0.0, 0.0};
+          double capx0 = 0.0, capy0 = 0.0;
+          if (is_cap) {
+            const double *xe = (outface != INTERIOR) ? xhold : xnew;
+            caprem[0] = xe[0]-x[0]; caprem[1] = xe[1]-x[1]; caprem[2] = xe[2]-x[2];
+            capx0 = x[0]; capy0 = x[1];
+          }
+
           // strip the cross-field kick BEFORE the collision model so
           // PWI physics never sees the phantom kick velocity; if the
           // stripped velocity no longer points at the surface, treat as
           // a graze: no collision physics, continue with own velocity
           // (same semantics as update.cpp)
 
-          if (has_kick) {
+          if (has_kick && !is_cap) {
             v[0] -= vkick0;
             v[1] -= vkick1;
             if (DIM == 3) v[2] -= vkick2;
@@ -2401,6 +2423,24 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
           xnew[0] = x[0] + dtremain*v[0];
           xnew[1] = x[1] + dtremain*v[1];
           if (DIM != 2) xnew[2] = x[2] + dtremain*v[2];
+
+          // periodic cap: the collide rotated x and v about the axis; the
+          // remaining path and the kick follow (CPU: cap->rot_cos/rot_sin;
+          // here the rotation is recovered from the position before/after)
+          if (is_cap && ipart) {
+            const double r2 = capx0*capx0 + capy0*capy0;
+            if (r2 > 0.0) {
+              const double c = (capx0*x[0] + capy0*x[1]) / r2;
+              const double sn = (capx0*x[1] - capy0*x[0]) / r2;
+              xnew[0] = x[0] + c*caprem[0] - sn*caprem[1];
+              xnew[1] = x[1] + sn*caprem[0] + c*caprem[1];
+              xnew[2] = x[2] + caprem[2];
+              if (has_kick) {
+                const double k0 = vkick0, k1 = vkick1;
+                vkick0 = c*k0 - sn*k1; vkick1 = sn*k0 + c*k1;
+              }
+            }
+          }
 
           // check if surf_collide teleported particle outside current cell
           // (occurs with toroidal periodic boundary collision model);
@@ -3085,6 +3125,27 @@ void UpdateKokkos::bind_oe_raster()
    update->psi_reflect_flag from modify->init(), which SPARTA runs AFTER
    update->init(); bind at run start (idempotent, cheap) instead.
 ------------------------------------------------------------------------- */
+
+void UpdateKokkos::tag_psi_kokkos()
+{
+  // psi form of fix particle/tag on the device: one launch over the local
+  // particles, psi_N from the map bound for fix reflect/psi (the tag's psi
+  // provider); runs before the migration, on the positions the move ended at
+  if (!oe_psi_on)
+    error->all(FLERR,"fix particle/tag psi under Kokkos needs its fix reflect/psi "
+               "bound to the device mover");
+  ParticleKokkos *particle_kk = (ParticleKokkos *) particle;
+  particle_kk->sync(Device,PARTICLE_MASK|CUSTOM_MASK);
+  d_particles = particle_kk->k_particles.view_device();
+  d_oe_transit = particle_kk->k_eivec.h_view[particle->ewhich[tag_index]].k_view.d_view;
+  oe_tagpsi_thr = tag_psi_thr;
+  copymode = 1;
+  Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType,TagUpdateTagPsi>(0,particle->nlocal),*this);
+  copymode = 0;
+  particle_kk->modify(Device,CUSTOM_MASK);
+}
+
+/* ---------------------------------------------------------------------- */
 
 void UpdateKokkos::bind_oe_psi()
 {

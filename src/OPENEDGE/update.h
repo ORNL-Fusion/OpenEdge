@@ -263,6 +263,9 @@ struct SurfHit2D {
   FixReflectPsi *psi_reflect_fix; // owns species-resolved absorption ledger
   int tag_index;               // fix particle/tag: custom "transit" index, -1 = off
   int tag_groupbit;            // surf group whose hits set the flag (0 = none)
+  double tag_psi_thr;          // psi form of fix particle/tag: flag set when psi_N < this, < 0 = off
+  int tag_psi_nevery;          // steps between psi tests
+  int tag_psi_device;          // 1 = the Kokkos mover applies the psi form (the fix then has no end_of_step)
   class FixCoreTransport *core_fix;   // fix core/transport: absorbs chain markers
   int core_groupbit;                  // at the core surf group (0 = off)
   int core_neutral_groupbit;          // auxiliary coupling: chain neutrals are absorbed here

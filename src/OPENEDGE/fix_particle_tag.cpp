@@ -68,6 +68,7 @@ FixParticleTag::~FixParticleTag()
   if (update->tag_index == tag_index) {
     update->tag_index = -1;
     update->tag_groupbit = 0;
+    update->tag_psi_thr = -1.0;
   }
   particle->remove_custom(tag_index);
 }
@@ -77,7 +78,9 @@ FixParticleTag::~FixParticleTag()
 int FixParticleTag::setmask()
 {
   int mask = 0;
-  if (psi_threshold >= 0.0) mask |= END_OF_STEP;
+  // under Kokkos the mover applies the psi form on the device (UpdateKokkos::tag_psi_kokkos):
+  // a host end_of_step would copy every particle off the device each call
+  if (psi_threshold >= 0.0 && !update->tag_psi_device) mask |= END_OF_STEP;
   return mask;
 }
 
@@ -89,6 +92,8 @@ void FixParticleTag::init()
     error->all(FLERR,"only one fix particle/tag is allowed");
   update->tag_index = tag_index;
   update->tag_groupbit = groupbit;
+  update->tag_psi_thr = psi_threshold;
+  update->tag_psi_nevery = nevery_psi;
   if (psi_fix_id) {
     int ifix = modify->find_fix(psi_fix_id);
     if (ifix < 0) error->all(FLERR,"fix particle/tag: reflect/psi fix ID not found");

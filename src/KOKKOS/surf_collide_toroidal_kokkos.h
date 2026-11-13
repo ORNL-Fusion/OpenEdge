@@ -74,9 +74,12 @@ class SurfCollideToroidalKokkos : public SurfCollideToroidal {
     double *x = ip->x;
     double *v = ip->v;
 
-    const double phi = atan2(x[1],x[0]);
+    // angle from the middle of the wedge, in (-pi,pi]: a wedge may span +-180 deg
+    // (same as SurfCollideToroidal::collide)
+    double phi = atan2(x[1],x[0]) - phi_mid;
+    phi -= 2.0*3.14159265358979323846*floor(phi/(2.0*3.14159265358979323846) + 0.5);
     const double cos_d = cos_dphi;
-    const double sin_d = (phi < phi_mid) ? sin_dphi : -sin_dphi;
+    const double sin_d = (phi < 0.0) ? sin_dphi : -sin_dphi;
 
     const double xold = x[0], yold = x[1];
     x[0] = xold*cos_d - yold*sin_d;

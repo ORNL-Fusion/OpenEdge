@@ -62,6 +62,8 @@ struct TagUpdateMove{};
 // host pcache loop and its full particle+custom D2H/H2D round-trip)
 struct TagUpdatePcacheFill{};
 
+struct TagUpdateTagPsi{};
+
 class UpdateKokkos : public Update {
  public:
   typedef UPDATE_REDUCE value_type;
@@ -152,6 +154,7 @@ class UpdateKokkos : public Update {
   double oe_const_er, oe_const_ez, oe_const_et;
   void bind_oe_equ_from_fix(class FixBackground *pd);
   void bind_oe_psi();
+  void tag_psi_kokkos();               // psi form of fix particle/tag on the device
   // nearest-wall map (grid cell -> wall element) for the Boris shell /
   // gc_wall flux, bound independently of the sheath mode (CPU uses the
   // geom compute whenever boris_near or gc_wall is on)
@@ -165,6 +168,7 @@ class UpdateKokkos : public Update {
   int oe_kick_on, oe_paid_on, oe_wave_on, oe_kick_te_on;
   DAT::t_int_1d d_oe_paid;
   int oe_tag_on, oe_tag_groupbit;      // fix particle/tag on the device
+  double oe_tagpsi_thr;                // psi form: flag when psi_N(x) < this
   DAT::t_int_1d d_oe_transit;
   DAT::t_float_1d d_oe_kick_te, d_oe_kick_ti;
   DAT::t_float_2d_lr d_oe_wave;
@@ -208,6 +212,13 @@ class UpdateKokkos : public Update {
     d_oe_swlog(k,3) = reason;       d_oe_swlog(k,4) = d_start; d_oe_swlog(k,5) = d_end;
     d_oe_swlog(k,6) = d_sw;         d_oe_swlog(k,7) = e_pre;   d_oe_swlog(k,8) = e_post;
     d_oe_swlog(k,9) = replay;
+  }
+
+  // fix particle/tag, psi form: mark a marker the first time it is found inside psi_N < threshold
+  KOKKOS_INLINE_FUNCTION
+  void operator()(TagUpdateTagPsi, const int &i) const {
+    if (d_oe_transit(i)) return;
+    if (oe_psi_norm_at(d_particles[i].x) < oe_tagpsi_thr) d_oe_transit(i) = 1;
   }
 
   KOKKOS_INLINE_FUNCTION
