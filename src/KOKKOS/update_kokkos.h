@@ -214,12 +214,14 @@ class UpdateKokkos : public Update {
     d_oe_swlog(k,9) = replay;
   }
 
+ public:   // functor entry point: Kokkos must be able to call it
   // fix particle/tag, psi form: mark a marker the first time it is found inside psi_N < threshold
   KOKKOS_INLINE_FUNCTION
   void operator()(TagUpdateTagPsi, const int &i) const {
     if (d_oe_transit(i)) return;
     if (oe_psi_norm_at(d_particles[i].x) < oe_tagpsi_thr) d_oe_transit(i) = 1;
   }
+ private:
 
   KOKKOS_INLINE_FUNCTION
   int oe_psi_bracket(const DAT::t_float_1d &g, int n, double x) const {
