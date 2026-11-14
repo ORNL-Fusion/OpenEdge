@@ -1381,15 +1381,7 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
     }
 
     // fix dt/monitor: the pass is accepted, fold its tallies (on the device)
-    if (oe_dtm_on) {
-      auto pass = d_oe_dtm_pass; auto acc = d_oe_dtm_acc;
-      Kokkos::parallel_for("update:dtm_fold",
-        Kokkos::RangePolicy<DeviceType>(0,4*oe_dtm_nsp+1),KOKKOS_LAMBDA(const int k) {
-          if (k % 4 == 2) { if (pass(k) > acc(k)) acc(k) = pass(k); }
-          else acc(k) += pass(k);
-          pass(k) = 0.0;
-        });
-    }
+    if (oe_dtm_on) dtm_fold(d_oe_dtm_pass,d_oe_dtm_acc,4*oe_dtm_nsp+1);
 
     // END of pstart/pstop loop advecting all particles
 
@@ -5341,6 +5333,16 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
    fix dt/monitor: add the device tallies of the accepted passes to the
    host tallies of the pusher
 ------------------------------------------------------------------------- */
+
+void UpdateKokkos::dtm_fold(DAT::t_float_1d pass, DAT::t_float_1d acc, int n)
+{
+  Kokkos::parallel_for("update:dtm_fold",
+    Kokkos::RangePolicy<DeviceType>(0,n),KOKKOS_LAMBDA(const int k) {
+      if (k % 4 == 2) { if (pass(k) > acc(k)) acc(k) = pass(k); }
+      else acc(k) += pass(k);
+      pass(k) = 0.0;
+    });
+}
 
 void UpdateKokkos::dtm_sync()
 {

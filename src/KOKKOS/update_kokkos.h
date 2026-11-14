@@ -221,6 +221,10 @@ class UpdateKokkos : public Update {
     if (d_oe_transit(i)) return;
     if (oe_psi_norm_at(d_particles[i].x) < oe_tagpsi_thr) d_oe_transit(i) = 1;
   }
+  // fix dt/monitor: fold the tallies of an accepted mover pass into the accumulator.
+  // Public and outside move(): CUDA does not allow a device lambda in a private member.
+  static void dtm_fold(DAT::t_float_1d pass, DAT::t_float_1d acc, int n);
+
  private:
 
   KOKKOS_INLINE_FUNCTION
