@@ -84,6 +84,26 @@ class Pusher : protected Pointers {
   int pusher_bad_dt_check;
   int pusher_bad_dt_warned;
   double pusher_bad_dt_limit;
+
+  // fix dt/monitor tallies of this rank, per species: Boris exposure
+  // (weight x substep time) assessed, the part with |q/m||B|dt_sub above
+  // bad_dt_limit, the largest value, and the guiding-centre exposure
+  // The custom attribute dtm_push travels with the particle: 0 = no Boris
+  // push in this step (or already cut), else 1 + the part of its push above
+  // the limit. A wall hit removes the exposure of the time left in the step.
+  int dtm_on;                   // 1 = a fix dt/monitor armed this step
+  bigint dtm_until;             // step it was armed for (the fix re-arms every step)
+  int dtm_nsp;                  // species count the tallies are sized for
+  int dtm_pw;                   // edvec index of pweight, -1 = use fnum
+  int dtm_attr;                 // edvec index of dtm_push
+  int dtm_last;                 // particle of the push being tallied
+  bigint dtm_last_step;
+  double dtm_last_wh,dtm_last_whbad;
+  double *dtm_wh,*dtm_whbad,*dtm_max,*dtm_whgca;
+  double dtm_nonfinite;
+  void dtm_tally(int, double, double);
+  void dtm_tally_gca(int, double);
+  void dtm_cut(int, double);
   double pusher_gca_switch;
   double pusher_boris_near;     // Boris shell size: metres, or k with `rhoL` units; 0 = off
   int    pusher_boris_near_rhol; // 1 = boris_near is k, shell = k*rho_L per particle

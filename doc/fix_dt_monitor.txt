@@ -1,0 +1,133 @@
+"OpenEdge WWW Site"_ows - "OpenEdge Documentation"_od - "OpenEdge Commands"_oc :c
+
+:link(ows,https://github.com/ORNL-Fusion/OpenEdge)
+:link(od,Manual.html)
+:link(oc,Section_commands.html#comm)
+
+:line
+
+fix dt/monitor command :h3
+
+[Syntax:]
+
+fix ID dt/monitor N :pre
+
+ID is documented in "fix"_fix.html command :ulb,l
+dt/monitor = style name of this fix command :l
+N = report every N timesteps :l
+:ule
+
+[Examples:]
+
+fix dtm dt/monitor 1000
+stats_style step np f_dtm\[1\] f_dtm\[2\] f_dtm\[3\] f_dtm\[4\] :pre
+
+[Description:]
+
+Monitor how well the timestep resolves the gyromotion of charged
+particles and the volume reactions.  The numbers are accumulated
+inside the operators while they run, so particles that hit a wall or
+react between two reports are included.  The fix reads them every N
+timesteps, sums them over processors, and prints a table at the end of
+each run.
+
+Two quantities are monitored:
+
+gyromotion: h_g = |q/m| |B| dt_sub in each Boris substep of the
+"pusher"_global.html, where dt_sub is the timestep divided by the
+number of subcycles :ulb,l
+reactions: h_r = (sum of the reaction rates of the particle) x
+(interval of "fix volume/chem/adas"_fix_volume_chem_adas.html), in
+each update of that fix :l,ule
+
+Each is compared with an advisory level: the {bad_dt_limit} of the
+"global pusher"_global.html command for gyromotion (default 0.1) and
+0.1 for reactions.  For each quantity the fix reports the largest
+value and the fraction above the level:
+
+F_g = Sum(w dt_sub, h_g > level) / Sum(w dt_sub)
+F_r = Sum(w, h_r > level) / Sum(w) :pre
+
+where w is the particle weight (the {pweight} attribute of "fix
+particle/weight"_fix_particle_weight.html, or {fnum}).  F_g is a
+fraction of the Boris exposure, weight times time, summed over the
+substeps.  F_r is a fraction of the weight summed over the updates of
+the chemistry fix, with or without a reaction, and is attributed to
+the species the particle had before the update.  Neither is a
+fraction of the number of particles.  Sums over processors are taken
+before the division.
+
+When a particle hits a wall, the time left in its step is removed from
+its Boris exposure, on whichever processor the impact occurs; periodic
+caps and transparent surfaces remove nothing.  The part above the
+level is reduced in the same proportion as the whole push, and the
+largest value still includes every substep that was integrated.  A
+particle that leaves through an open boundary of the box keeps the
+exposure of its full step.  The fix keeps the state it needs for this
+in a custom per-particle attribute named {dtm_push}.  Particles
+pushed as guiding centres do not resolve the gyromotion by design:
+their exposure is listed in the table and is not assessed.  Neutral
+particles are not part of the gyromotion numbers.
+
+A warning is printed the first time in a run that a report finds a
+value above a level.  For gyromotion it gives the number of subcycles
+that would meet the level for the fields seen up to then; this
+addresses the gyromotion only.  The reaction interval does not change
+with the subcycles: it is reduced by the timestep or by the {N} of
+"fix volume/chem/adas"_fix_volume_chem_adas.html.
+
+The table printed at the end of a run covers the whole run, including
+a last window shorter than N, and lists the values per species with
+one of these states for each quantity:
+
+below the advisory level everywhere assessed
+EXCEEDED, with the fraction and the largest value
+not assessed: no charged particle was pushed by Boris, or no chemistry
+update took place
+INVALID: non-finite values were found :ul
+
+Other processes that are active in the run but have no check yet
+(Coulomb collisions, cross-field diffusion, the sheath, the surface
+updates of "surf_react surface/pwi"_surf_react_surface_pwi.html) are
+listed in the table as not assessed.
+
+The advisory levels flag a timestep that is clearly coarse.  They are
+not an accuracy guarantee: a run below both levels can still be
+unconverged in the quantities of interest.  In the verification case
+examples/verification/surface_emission/prompt_redeposition, where both
+quantities are equal, the redeposited fraction is within 1 % of the
+exact value at 0.02 and 5 % off at 0.2.  A timestep study of the
+quantities of interest remains the test of convergence.
+
+"fix volume/chem/adas"_fix_volume_chem_adas.html caps the rate times
+interval of one reaction channel at 50.  Updates with a capped channel
+are counted in the table, and the largest value is then a lower bound.
+
+:line
+
+[Restart, output info:]
+
+No information about this fix is written to "binary restart
+files"_restart.html.
+
+This fix computes a global vector of length 4 for the last reporting
+window, which can be accessed by various output commands every N
+timesteps: (1) the largest h_g, (2) F_g, (3) the largest h_r, (4)
+F_r.  A value of -1 means the quantity was not assessed in that
+window; it is never reported as zero.
+
+[Restrictions:]
+
+This command is part of the OPENEDGE package.  Only one fix dt/monitor
+can be defined, and it must be defined after "fix
+volume/chem/adas"_fix_volume_chem_adas.html so that a report includes
+the chemistry of its timestep.  The tallies of a run start at zero.  Sheath traversal, Coulomb collisions, cross-field
+diffusion and surface updates are not monitored.
+
+[Related commands:]
+
+"global pusher"_global.html, "fix
+volume/chem/adas"_fix_volume_chem_adas.html, "compute
+dt/grid"_compute_dt_grid.html, "fix dt/reset"_fix_dt_reset.html
+
+[Default:] none

@@ -1,0 +1,4 @@
+# every O+ that hits the wall leaves as O
+
+O+ --> O
+E S 1.0

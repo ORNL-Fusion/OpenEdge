@@ -1544,6 +1544,8 @@ template < int DIM, int SURF, int OPT > void Update::move()
   niterate = 0;
   move_inner_max_one = 0;
   g_mdiag_step = (long long) ntimestep;
+  if (pusher && pusher->dtm_on && pusher->dtm_until != ntimestep)
+    pusher->dtm_on = 0;   // fix dt/monitor is gone
   g_mdiag_stage = 0;
   ntouch_one = ncomm_one = 0;
   nboundary_one = nexit_one = 0;
@@ -2698,6 +2700,13 @@ template < int DIM, int SURF, int OPT > void Update::move()
               // like surf_collide vanish, no collision or reaction)
               // (auxiliary coupling: only chain neutrals, which cross the
               // cut ballistically)
+              // fix dt/monitor: the rest of this step's push is not travelled.
+              // Before the collision, which can change species and weight.
+              if (pusher && pusher->dtm_on && !cap) {
+                const int isc_dtm = (DIM == 3) ? tri->isc : line->isc;
+                if (isc_dtm < 0 || !surf->sc[isc_dtm]->transparent)
+                  pusher->dtm_cut(i,dtremain);
+              }
               const int smask_core = (DIM == 3) ? tri->mask : line->mask;
               if ((core_groupbit && (smask_core & core_groupbit) &&
                    core_species[particles[i].ispecies] >= 0) ||

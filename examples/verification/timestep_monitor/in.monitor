@@ -1,0 +1,60 @@
+# fix dt/monitor against known values: O atoms leave a wall patch into a uniform
+# plasma with a uniform B parallel to the wall and ionize to O+ and O2+.
+#   gyromotion : |q/m| B dt/sub = Z Omega1 dt/sub for charge Z
+#   reactions  : rate x interval = nu_Z nchem dt for the incoming species
+variable    ne      index 5e19
+variable    Tev     index 12.0
+variable    B       index 0.1147
+variable    dt      index 1.45e-8
+variable    sub     index 1
+variable    nchem   index 1          # chemistry every nchem steps
+variable    limit   index 0.1        # global pusher bad_dt_limit
+variable    nsteps  index 2000
+variable    nmon    index 1000       # must divide nsteps when mon = 1 (stats reads the fix)
+variable    mon     index 1          # 0: no fix dt/monitor;  2: defined, not in the stats output
+variable    chem    index 1          # 0: no chemistry
+variable    launch  index total      # total: weighted markers of unequal weight;  flux: fnum markers
+variable    flux    index 4.0e10
+variable    seed    index 12345
+
+seed        ${seed}
+dimension   3
+boundary    r r o
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0
+timestep    ${dt}
+create_box  0 1 0 1 0 0.5
+create_grid 4 4 8
+balance_grid rcb cell
+
+species     ../surface_emission/newborn_exposure/input/o.species O O+ O2+
+mixture     src O frac 1.0 nrho 1.0e19 temp 300.0 vstream 0.0 0.0 0.0
+read_surf   ../surface_emission/prompt_redeposition/input/patch.surf group source particle check
+surf_collide vac vanish
+surf_modify source collide vac
+
+fix pw      particle/weight
+fix bg      background constant te ${Tev} ne ${ne} bcart ${B} 0.0 0.0
+global      pusher plasma bg mode boris subcycles ${sub} bad_dt_limit ${limit}
+
+if "${launch} == total" then &
+  "fix femit surface/emit/source src source constant ${flux} perspecies no normal yes nlaunch_total 20 model thompson 2.0 cos_n 20000 emax 50" &
+else &
+  "fix femit surface/emit/source src source constant ${flux} perspecies no normal yes model thompson 2.0 cos_n 20000 emax 50"
+
+# weighted inventories (atoms) of O, O+, O2+, averaged over every step of the run
+compute cw  grid/weighted all species n_w
+compute w0  reduce sum c_cw[1]
+compute w1  reduce sum c_cw[2]
+compute w2  reduce sum c_cw[3]
+fix av      ave/time 1 ${nsteps} ${nsteps} c_w0 c_w1 c_w2 ave one
+# chemistry after fix av: the inventories above are the weight each update assesses
+if "${chem} == 1" then "fix fchem volume/chem/adas ${nchem} O input/o.reactions"
+
+if "${mon} > 0" then "fix dtm dt/monitor ${nmon}"
+stats       ${nsteps}
+if "${mon} == 1" then &
+  "stats_style step np f_femit[2] f_av[1] f_av[2] f_av[3] f_dtm[1] f_dtm[2] f_dtm[3] f_dtm[4]" &
+else &
+  "stats_style step np f_femit[2] f_av[1] f_av[2] f_av[3]"
+run         ${nsteps}

@@ -1,0 +1,25 @@
+# One O atom, one chemistry update per step. The monitor is removed for two steps and
+# defined again: the last table must hold the one update of its own step.
+seed        12345
+dimension   3
+boundary    r r r
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0
+timestep    1e-8
+create_box  0 1 0 1 0 1
+create_grid 1 1 10
+balance_grid block 1 1 *
+species     ../surface_emission/newborn_exposure/input/o.species O O+ O2+
+mixture     src O nrho 1e10 temp 300
+fix bg      background constant te 12 ne 5e19 bcart 0 0 0.01
+global      pusher plasma bg mode boris subcycles 1 bad_dt_check no
+create_particles src single O 0.5 0.5 0.5 0 0 0
+fix fchem   volume/chem/adas 1 O input/o.reactions
+fix dtm     dt/monitor 1
+stats       1
+stats_style step np
+run         1
+unfix       dtm
+run         2
+fix dtm     dt/monitor 1
+run         1

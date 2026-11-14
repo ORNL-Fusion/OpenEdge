@@ -377,6 +377,11 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
     tally_flag = 0;
     nreact_one = nreact_running = 0;
     rng_adas = nullptr;
+    dtm_on = dtm_nsp = 0;
+    dtm_until = -1;
+    dtm_limit = 0.1;
+    dtm_w = dtm_wbad = dtm_max = NULL;
+    dtm_nsat = dtm_nonfinite = 0.0;
 
   // Te/ne come from the per-particle plasma cache (populated by
   // update.cpp from a configured plasma_compute / plasma_fix). For a
@@ -604,6 +609,7 @@ FixVolumeChemAdas::~FixVolumeChemAdas()
 
 memory->destroy(array_grid);
 delete rng_adas;
+delete [] dtm_w; delete [] dtm_wbad; delete [] dtm_max;
 
 if (src_species_names) {
   for (int k = 0; k < nsrc_species; k++) delete [] src_species_names[k];
@@ -1124,6 +1130,7 @@ void FixVolumeChemAdas::end_of_step_no_average()
   int nglocal = grid->nlocal;
 
   deferred_particles.clear();
+  if (dtm_on && dtm_until != update->ntimestep) dtm_on = 0;   // the monitor is gone
 
   // TALLY_BATCH_FIX: pull current cumulative N from the paired emit fix.
   // One allreduce per chem nevery step (compute_vector does the reduce
@@ -1959,6 +1966,20 @@ int FixVolumeChemAdas::attempt(Particle::OnePart *ip, int ip_index,
       ridx_map[nchan] = ridx;
       lambda_total += lam;
       nchan++;
+    }
+  }
+
+  // fix dt/monitor: every assessed update counts, with or without an event
+  if (dtm_on && nchan > 0 && isp < dtm_nsp) {
+    if (!std::isfinite(lambda_total)) dtm_nonfinite += 1.0;
+    else {
+      const double w = (pweight_ewhich >= 0 && ip_index >= 0) ?
+        particle->edvec[pweight_ewhich][ip_index] : update->fnum;
+      dtm_w[isp] += w;
+      if (lambda_total > dtm_limit) dtm_wbad[isp] += w;
+      if (lambda_total > dtm_max[isp]) dtm_max[isp] = lambda_total;
+      for (int i = 0; i < nchan; i++)
+        if (lambda[i] >= 50.0) { dtm_nsat += 1.0; break; }   // cap of computeReactionLambda
     }
   }
 

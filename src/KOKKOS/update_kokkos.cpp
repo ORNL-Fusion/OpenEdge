@@ -331,6 +331,7 @@ void UpdateKokkos::init()
   oe_gc_hooks = 31;
   oe_core_on = oe_core_bit = oe_core_neutral_bit = oe_gc_sync_bit = 0;
   oe_core_nz = oe_core_has_pw = 0; oe_core_fnum = 0.0;
+  oe_dtm_on = oe_dtm_nsp = oe_dtm_has_pw = 0; oe_dtm_limit = oe_dtm_fnum = 0.0;
   if (const char *e = getenv("OE_GC_HOOKS")) oe_gc_hooks = atoi(e);
   if (const char *e = getenv("OE_SKIP_POST_MIGRATE")) oe_skip_post_migrate = atoi(e);
   oe_bx_col = oe_by_col = oe_bz_col = -1;
@@ -1247,6 +1248,31 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
         oe_core_on = 1;
       }
 
+      // fix dt/monitor: device tallies of this pass
+      if (pusher && pusher->dtm_on && pusher->dtm_until != ntimestep)
+        pusher->dtm_on = 0;   // the monitor is gone
+      oe_dtm_on = (pusher && pusher->dtm_on &&
+                   particle->find_custom((char *) "dtm_push") >= 0) ? 1 : 0;
+      if (oe_dtm_on) {
+        particle_kk->sync(Device,CUSTOM_MASK);
+        d_oe_dtm_attr = particle_kk->k_edvec.h_view[particle->ewhich[
+          particle->find_custom((char *) "dtm_push")]].k_view.d_view;
+        oe_dtm_limit = pusher->pusher_bad_dt_limit;
+        oe_dtm_fnum = fnum;
+        if (oe_dtm_nsp != particle->nspecies || !d_oe_dtm_pass.data()) {
+          oe_dtm_nsp = particle->nspecies;
+          d_oe_dtm_pass = DAT::t_float_1d("update:dtm_pass",4*oe_dtm_nsp+1);
+          d_oe_dtm_acc = DAT::t_float_1d("update:dtm_acc",4*oe_dtm_nsp+1);
+        }
+        oe_dtm_has_pw = 0;
+        const int pw_dtm = particle->find_custom((char *) "pweight");
+        if (pw_dtm >= 0) {
+          particle_kk->sync(Device,CUSTOM_MASK);
+          d_oe_dtm_pw = particle_kk->k_edvec.h_view[particle->ewhich[pw_dtm]].k_view.d_view;
+          oe_dtm_has_pw = 1;
+        }
+      }
+
       if (surf->nsr && sparta->kokkos->react_retry_flag)
         backup();
 
@@ -1310,6 +1336,7 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
       if (h_retry()) {
         // the pass is replayed: drop what it absorbed at the core cut
         if (oe_core_on && oe_core_nz > 0) Kokkos::deep_copy(d_oe_core_gin,0.0);
+        if (oe_dtm_on) Kokkos::deep_copy(d_oe_dtm_pass,0.0);   // and its monitor tallies
         int nlocal_new = h_nlocal();
 
         if (!sparta->kokkos->react_retry_flag) {
@@ -1332,7 +1359,7 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
     }
 
     particle_kk->modify(Device,PARTICLE_MASK);
-    if (oe_has_sheath_customs || oe_has_gca_customs || sheath_paid_custom >= 0)
+    if (oe_has_sheath_customs || oe_has_gca_customs || sheath_paid_custom >= 0 || oe_dtm_on)
       particle_kk->modify(Device,CUSTOM_MASK);   // sheath_paid is written in every sheath mode
     d_particles = t_particle_1d(); // destroy reference to reduce memory use
     if (oe_pass_trace_fp && ntimestep >= oe_pass_trace_lo && ntimestep <= oe_pass_trace_hi)
@@ -1351,6 +1378,17 @@ template < int DIM, int SURF, int REACT, int OPT > void UpdateKokkos::move()
       for (int z = 0; z < oe_core_nz; z++)
         if (h_gin(z) != 0.0) { core_fix->absorb_weight(z,h_gin(z)); any = 1; }
       if (any) Kokkos::deep_copy(d_oe_core_gin,0.0);
+    }
+
+    // fix dt/monitor: the pass is accepted, fold its tallies (on the device)
+    if (oe_dtm_on) {
+      auto pass = d_oe_dtm_pass; auto acc = d_oe_dtm_acc;
+      Kokkos::parallel_for("update:dtm_fold",
+        Kokkos::RangePolicy<DeviceType>(0,4*oe_dtm_nsp+1),KOKKOS_LAMBDA(const int k) {
+          if (k % 4 == 2) { if (pass(k) > acc(k)) acc(k) = pass(k); }
+          else acc(k) += pass(k);
+          pass(k) = 0.0;
+        });
     }
 
     // END of pstart/pstop loop advecting all particles
@@ -1653,6 +1691,10 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
   // set xnew[2] to linear move for axisymmetry, will be remapped later
   // let pflag = PEXIT persist to check during axisymmetric cell crossing
 
+  // fix dt/monitor: Boris exposure of this particle's push (for the wall cut)
+  double dtm_loc[2] = {0.0, 0.0};
+  const int dtm_sp = particle_i.ispecies;
+
   if (DIM < 3) xnew[2] = 0.0;
   if (pflag == PKEEP) {
     dtremain = dt;
@@ -1662,11 +1704,14 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
       if (oe_pusher_mode != 0)
-        oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+        oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass, dtm_loc);
       else if (DIM != 3)
-        oe_boris2d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+        oe_boris2d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass, dtm_loc);
       else
-        oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+        oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass, dtm_loc);
+      // fix dt/monitor: mark the push on the particle (0 = no Boris push)
+      if (oe_dtm_on)
+        d_oe_dtm_attr(i) = (dtm_loc[0] > 0.0) ? 1.0 + dtm_loc[1]/dtm_loc[0] : 0.0;
     } else {
       xnew[0] = x[0] + dtremain*v[0];
       xnew[1] = x[1] + dtremain*v[1];
@@ -1714,11 +1759,14 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
       const double charge = d_species[ispecies].charge;
       const double mass = d_species[ispecies].mass;
       if (oe_pusher_mode != 0)
-        oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+        oe_hybrid3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass, dtm_loc);
       else if (DIM != 3)
-        oe_boris2d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+        oe_boris2d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass, dtm_loc);
       else
-        oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass);
+        oe_boris3d(i, particle_i.icell, dtremain, x, v, xnew, charge, mass, dtm_loc);
+      // fix dt/monitor: mark the push on the particle (0 = no Boris push)
+      if (oe_dtm_on)
+        d_oe_dtm_attr(i) = (dtm_loc[0] > 0.0) ? 1.0 + dtm_loc[1]/dtm_loc[0] : 0.0;
     } else {
       xnew[0] = x[0] + dtremain*v[0];
       xnew[1] = x[1] + dtremain*v[1];
@@ -2482,6 +2530,20 @@ void UpdateKokkos::operator()(TagUpdateMove<DIM,SURF,REACT,OPT,ATOMIC_REDUCTION>
           // absorbed into the 1-D core model (tallied, discarded like surf
           // collide vanish, no collision or reaction). Auxiliary coupling:
           // only chain neutrals, which cross the cut ballistically.
+          // fix dt/monitor: the rest of this step's push was not travelled
+          // (caps and transparent surfs change nothing)
+          if (oe_dtm_on && sc_type != 4 && sc_type != 5) {
+            const double adtm = d_oe_dtm_attr(i);
+            if (adtm >= 1.0) {
+              d_oe_dtm_attr(i) = 0.0;
+              if (d_species[dtm_sp].charge != 0.0 && dtremain > 0.0) {
+                const double whc = dtremain * (oe_dtm_has_pw ? d_oe_dtm_pw(i) : oe_dtm_fnum);
+                Kokkos::atomic_add(&d_oe_dtm_pass(4*dtm_sp),-whc);
+                if (adtm > 1.0) Kokkos::atomic_add(&d_oe_dtm_pass(4*dtm_sp+1),-(adtm-1.0)*whc);
+              }
+            }
+          }
+
           bool core_absorbed = false;
           if (oe_core_on && (oe_core_bit || oe_core_neutral_bit)) {
             const int smask_core = (DIM == 3) ? tri->mask : line->mask;
@@ -4174,7 +4236,7 @@ double UpdateKokkos::oe_near_signed(int midx, const double *p) const
 KOKKOS_INLINE_FUNCTION
 void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
                               double *x, double *v, double *xnew,
-                              double charge, double mass) const
+                              double charge, double mass, double *dtm_loc) const
 {
   if (charge == 0.0 ||
       (d_oe_pusher_skip.data() &&
@@ -4408,6 +4470,11 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
     }
   }
 
+  // fix dt/monitor: the fields are fixed over the call
+  if (oe_dtm_on)
+    oe_dtm_tally(i,Kokkos::fabs(qm)*Kokkos::sqrt(Brhs[0]*Brhs[0]+Brhs[1]*Brhs[1]+Brhs[2]*Brhs[2])*dt_sub,
+                 dt,dtm_loc);
+
   for (int isub = 0; isub < nsub; isub++) {
     double xold[2] = {xcur[0], xcur[1]};
     double vR = 0.0, vZ = 0.0, vphi = 0.0;
@@ -4532,7 +4599,7 @@ void UpdateKokkos::oe_boris2d(int i, int icell, double dt,
 KOKKOS_INLINE_FUNCTION
 void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
                                double *x, double *v, double *xnew,
-                               double charge, double mass) const
+                               double charge, double mass, double *dtm_loc) const
 {
   if (charge == 0.0 ||
       (d_oe_pusher_skip.data() &&
@@ -4648,6 +4715,7 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
       FS = Ft;
     };
 
+    if (oe_dtm_on) oe_dtm_tally_gca(i,dt);
     if (oe_gca_integrator == 1) {            // GCA_SIMPLE
       GCAKokkos::push_gca(qm, dt, mass, Fk.E, Fk.B, Fk.gradBmag, g);
     } else if (oe_gca_integrator == 2) {     // GCA_RK2 (midpoint)
@@ -4778,15 +4846,15 @@ void UpdateKokkos::oe_hybrid3d(int i, int icell, double dt,
       d_oe_gca_valid(i) = 0.0;                 // Boris advances x; X goes stale
       d_oe_gca_chi(i) += qm_abs * Bmag * dt;   // residence gyroangle
     }
-    if (dim2) oe_boris2d(i, icell, dt, xstart, v, xnew, charge, mass);
-    else      oe_boris3d(i, icell, dt, xstart, v, xnew, charge, mass);
+    if (dim2) oe_boris2d(i, icell, dt, xstart, v, xnew, charge, mass, dtm_loc);
+    else      oe_boris3d(i, icell, dt, xstart, v, xnew, charge, mass, dtm_loc);
   }
 }
 
 KOKKOS_INLINE_FUNCTION
 void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
                                double *x, double *v, double *xnew,
-                               double charge, double mass) const
+                               double charge, double mass, double *dtm_loc) const
 {
   // Dust grains (skip mixture) and neutrals: pure advection — grain
   // forces (gravity, drag, ablation) live in the grain fixes
@@ -5112,6 +5180,9 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
 
     double xold[3] = {xcur[0], xcur[1], xcur[2]};
 
+    if (oe_dtm_on)
+      oe_dtm_tally(i,Kokkos::fabs(qm)*Kokkos::sqrt(B[0]*B[0]+B[1]*B[1]+B[2]*B[2])*dt_sub,
+                   dt_sub,dtm_loc);
     BorisGridKokkos::push_velocity(qm, dt_sub, E, B, vcur);
     xcur[0] += vcur[0] * dt_sub;
     xcur[1] += vcur[1] * dt_sub;
@@ -5266,6 +5337,27 @@ void UpdateKokkos::oe_boris3d(int i, int icell, double dt_full,
 
 /* ---------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   fix dt/monitor: add the device tallies of the accepted passes to the
+   host tallies of the pusher
+------------------------------------------------------------------------- */
+
+void UpdateKokkos::dtm_sync()
+{
+  if (!pusher || !pusher->dtm_wh || !d_oe_dtm_acc.data()) return;
+  auto h = Kokkos::create_mirror_view(d_oe_dtm_acc);
+  Kokkos::deep_copy(h,d_oe_dtm_acc);
+  const int nsp = MIN(oe_dtm_nsp,particle->nspecies);
+  for (int s = 0; s < nsp; s++) {
+    pusher->dtm_wh[s] += h(4*s);
+    pusher->dtm_whbad[s] += h(4*s+1);
+    if (h(4*s+2) > pusher->dtm_max[s]) pusher->dtm_max[s] = h(4*s+2);
+    pusher->dtm_whgca[s] += h(4*s+3);
+  }
+  pusher->dtm_nonfinite += h(4*oe_dtm_nsp);
+  Kokkos::deep_copy(d_oe_dtm_acc,0.0);
+}
+
 void UpdateKokkos::tally_set(bigint ntimestep)
 {
   Update::tally_set(ntimestep);
@@ -5348,6 +5440,15 @@ void UpdateKokkos::backup()
     Kokkos::deep_copy(DeviceType(),d_oe_sheath_bank_backup,d_oe_sheath_bank);      // async D2D (OpenEdge perf)
     Kokkos::deep_copy(DeviceType(),d_oe_sheath_phiprev_backup,d_oe_sheath_phiprev);
   }
+  // fix dt/monitor: the push mark is written by the move kernel
+  if (oe_dtm_on) {
+    if (d_oe_dtm_attr_backup.extent(0) != d_oe_dtm_attr.extent(0))
+      d_oe_dtm_attr_backup = DAT::t_float_1d(
+          Kokkos::view_alloc("update:dtm_backup",Kokkos::WithoutInitializing),
+          d_oe_dtm_attr.extent(0));
+    Kokkos::deep_copy(DeviceType(),d_oe_dtm_attr_backup,d_oe_dtm_attr);
+  }
+
   // Phase B: the hybrid mover writes the GC-state customs; snapshot them too
   if (oe_has_gca_customs) {
     DAT::t_float_1d *src[8] = {&d_oe_gca_x,&d_oe_gca_y,&d_oe_gca_z,&d_oe_gca_vpar,
@@ -5403,6 +5504,8 @@ void UpdateKokkos::restore()
                                &d_oe_gca_mu,&d_oe_gca_mode,&d_oe_gca_valid,&d_oe_gca_chi};
     for (int k = 0; k < 8; k++) Kokkos::deep_copy(*dst[k],d_oe_gca_backup[k]);
   }
+  if (oe_dtm_on && d_oe_dtm_attr_backup.extent(0) == d_oe_dtm_attr.extent(0))
+    Kokkos::deep_copy(d_oe_dtm_attr,d_oe_dtm_attr_backup);
 
   if (surf->nsc > 0) {
     int nspec,ndiff,npist;

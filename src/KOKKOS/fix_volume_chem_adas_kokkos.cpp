@@ -144,6 +144,7 @@ FixVolumeChemAdasKokkos::FixVolumeChemAdasKokkos(SPARTA *sparta, int narg,
 #endif
             )
 {
+  dtm_on_ = dtm_nsp_ = 0; dtm_limit_ = 0.1;
 #ifdef SPARTA_KOKKOS_EXACT
   rand_pool.init(rng_adas);
 #endif
@@ -599,6 +600,16 @@ void FixVolumeChemAdasKokkos::end_of_step()
     gca_valid_slot_ = particle->ewhich[update->pusher->gca_valid_custom];
   }
 
+  if (dtm_on && dtm_until != update->ntimestep) dtm_on = 0;   // the monitor is gone
+  dtm_on_ = dtm_on;
+  if (dtm_on_) {
+    dtm_limit_ = dtm_limit;
+    if (dtm_nsp_ != particle->nspecies || !d_dtm.data()) {
+      dtm_nsp_ = particle->nspecies;
+      d_dtm = DAT::t_float_1d("chem:dtm",3*dtm_nsp_+2);
+    }
+  }
+
   if (nlocal > 0) {
     // parallel_for copies the functor (this whole fix); copymode stops
     // the copy's destructor from freeing the base-class allocations
@@ -697,6 +708,26 @@ void FixVolumeChemAdasKokkos::end_of_step()
    the supported scope (impurity ioniz/recomb/CX, single product)
 ------------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   fix dt/monitor: add the device tallies to the host tallies
+------------------------------------------------------------------------- */
+
+void FixVolumeChemAdasKokkos::dtm_sync()
+{
+  if (!dtm_w || !d_dtm.data()) return;
+  auto h = Kokkos::create_mirror_view(d_dtm);
+  Kokkos::deep_copy(h,d_dtm);
+  const int nsp = MIN(dtm_nsp_,particle->nspecies);
+  for (int s = 0; s < nsp; s++) {
+    dtm_w[s] += h(3*s);
+    dtm_wbad[s] += h(3*s+1);
+    if (h(3*s+2) > dtm_max[s]) dtm_max[s] = h(3*s+2);
+  }
+  dtm_nsat += h(3*dtm_nsp_);
+  dtm_nonfinite += h(3*dtm_nsp_+1);
+  Kokkos::deep_copy(d_dtm,0.0);
+}
+
 KOKKOS_INLINE_FUNCTION
 void FixVolumeChemAdasKokkos::operator()(TagFixChemAdas, const int &i) const
 {
@@ -788,6 +819,19 @@ void FixVolumeChemAdasKokkos::operator()(TagFixChemAdas, const int &i) const
     ridx_map[nchan] = ridx;
     lambda_total += lam;
     nchan++;
+  }
+
+  // fix dt/monitor: every assessed update counts, with or without an event
+  if (dtm_on_ && nchan > 0) {
+    if (!Kokkos::isfinite(lambda_total)) Kokkos::atomic_add(&d_dtm(3*dtm_nsp_+1),1.0);
+    else {
+      const double w = have_pweight_ ? d_pweight(i) : fnum_;
+      Kokkos::atomic_add(&d_dtm(3*isp),w);
+      if (lambda_total > dtm_limit_) Kokkos::atomic_add(&d_dtm(3*isp+1),w);
+      Kokkos::atomic_max_fetch(&d_dtm(3*isp+2),lambda_total);
+      for (int k = 0; k < nchan; k++)
+        if (lambda[k] >= 50.0) { Kokkos::atomic_add(&d_dtm(3*dtm_nsp_),1.0); break; }
+    }
   }
 
   if (nchan == 0 || lambda_total <= 0.0) return;

@@ -299,6 +299,12 @@ Pusher::Pusher(SPARTA *sparta) : Pointers(sparta)
   pusher_bad_dt_check = 1;
   pusher_bad_dt_warned = 0;
   pusher_bad_dt_limit = 0.1;
+  dtm_on = dtm_nsp = 0;
+  dtm_until = -1;
+  dtm_pw = dtm_attr = dtm_last = -1;
+  dtm_last_step = -1;
+  dtm_wh = dtm_whbad = dtm_max = dtm_whgca = NULL;
+  dtm_nonfinite = 0.0;
 
   gca_x_custom    = -1;
   gca_y_custom    = -1;
@@ -313,6 +319,7 @@ Pusher::Pusher(SPARTA *sparta) : Pointers(sparta)
 Pusher::~Pusher()
 {
   delete [] pusher_plasma_cid;
+  delete [] dtm_wh; delete [] dtm_whbad; delete [] dtm_max; delete [] dtm_whgca;
   if (switch_log_fp) fclose(switch_log_fp);
   delete [] switch_log_file;
   delete [] pusher_skip_mix;
@@ -323,6 +330,59 @@ Pusher::~Pusher()
    resolve the skip mixture (dust grains etc.) to a per-species flag —
    called from Update::init once mixtures exist
 ------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   fix dt/monitor: one Boris substep of particle i with omega_h =
+   |q/m| |B| h. The exposure is physical weight x substep time.
+------------------------------------------------------------------------- */
+
+void Pusher::dtm_tally(int i, double omega_h, double h)
+{
+  const int sp = particle->particles[i].ispecies;
+  if (sp >= dtm_nsp) return;
+  if (!std::isfinite(omega_h)) { dtm_nonfinite += 1.0; return; }
+  const double wh = h * ((dtm_pw >= 0) ? particle->edvec[dtm_pw][i] : update->fnum);
+  const double whbad = (omega_h > pusher_bad_dt_limit) ? wh : 0.0;
+  dtm_wh[sp] += wh;
+  dtm_whbad[sp] += whbad;
+  if (omega_h > dtm_max[sp]) dtm_max[sp] = omega_h;
+  if (dtm_last != i || dtm_last_step != update->ntimestep) {   // a new push
+    dtm_last = i;
+    dtm_last_step = update->ntimestep;
+    dtm_last_wh = dtm_last_whbad = 0.0;
+  }
+  dtm_last_wh += wh;
+  dtm_last_whbad += whbad;
+  if (dtm_attr >= 0 && dtm_last_wh > 0.0)
+    particle->edvec[dtm_attr][i] = 1.0 + dtm_last_whbad/dtm_last_wh;
+}
+
+void Pusher::dtm_tally_gca(int i, double h)
+{
+  const int sp = particle->particles[i].ispecies;
+  if (sp >= dtm_nsp) return;
+  dtm_whgca[sp] += h * ((dtm_pw >= 0) ? particle->edvec[dtm_pw][i] : update->fnum);
+  if (dtm_attr >= 0) particle->edvec[dtm_attr][i] = 0.0;
+}
+
+/* ----------------------------------------------------------------------
+   particle i hit a wall with dtleft of its step to go: if it was pushed by
+   Boris in this step (on any processor), that time is not part of its
+   trajectory
+------------------------------------------------------------------------- */
+
+void Pusher::dtm_cut(int i, double dtleft)
+{
+  if (dtm_attr < 0) return;
+  const double a = particle->edvec[dtm_attr][i];
+  if (a < 1.0) return;
+  particle->edvec[dtm_attr][i] = 0.0;
+  const int sp = particle->particles[i].ispecies;
+  if (sp >= dtm_nsp || particle->species[sp].charge == 0.0 || !(dtleft > 0.0)) return;
+  const double wh = dtleft * ((dtm_pw >= 0) ? particle->edvec[dtm_pw][i] : update->fnum);
+  dtm_wh[sp] -= wh;
+  dtm_whbad[sp] -= (a-1.0)*wh;
+}
 
 void Pusher::resolve_skip_species()
 {
@@ -890,6 +950,8 @@ void Pusher::push_boris_2d_impl(int i, int icell, double dt,
         pusher_bad_dt_warned = 1;
       }
     }
+    if (dtm_on)
+      dtm_tally(i,std::fabs(qm)*std::sqrt(B[0]*B[0]+B[1]*B[1]+B[2]*B[2])*dt_sub,dt_sub);
 
     double xold[2] = {xcur[0], xcur[1]};
 
@@ -1605,6 +1667,8 @@ void Pusher::push_boris_3d_impl(int i, int icell, double dt,
         pusher_bad_dt_warned = 1;
       }
     }
+    if (dtm_on)
+      dtm_tally(i,std::fabs(qm)*std::sqrt(B[0]*B[0]+B[1]*B[1]+B[2]*B[2])*dt_sub,dt_sub);
 
     double xold[3] = {xcur[0], xcur[1], xcur[2]};
     const double v_before_boris[3] = {vcur[0], vcur[1], vcur[2]};
@@ -2285,6 +2349,7 @@ void Pusher::push_hybrid_3d_impl(int i, int icell, double dt,
       }
       FS = Ft;
     };
+    if (dtm_on) dtm_tally_gca(i,dt);
     if (pusher_gca_integrator == GCA_SIMPLE) {
       GCAPusher::push_gca(qm, dt, mass, Fk.E, Fk.B, Fk.gradBmag, gca);
     } else if (pusher_gca_integrator == GCA_RK2) {

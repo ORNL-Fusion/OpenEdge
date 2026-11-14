@@ -34,6 +34,16 @@ class FixVolumeChemAdas : public Fix {
 public:
     FixVolumeChemAdas(class SPARTA*, int, char**);
     virtual ~FixVolumeChemAdas();
+
+    // fix dt/monitor tallies of this rank, per incoming species: weight of the
+    // assessed chemistry updates, the part with lambda = rate x interval above
+    // dtm_limit, the largest lambda, and the updates with a capped channel
+    int dtm_on,dtm_nsp;
+    bigint dtm_until;            // step the monitor armed dtm_on for
+    double dtm_limit;
+    double *dtm_w,*dtm_wbad,*dtm_max;
+    double dtm_nsat,dtm_nonfinite;
+    virtual void dtm_sync() {}     // Kokkos: add the device tallies to these
     int setmask();
     void init();
     void end_of_step();

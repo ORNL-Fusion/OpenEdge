@@ -1,0 +1,7 @@
+# Ionization of O and O+ (ADAS scd from database/processes.h5)
+
+O   --> O+
+I A 1.0 0.0 0.0 0.0 0.0
+
+O+  --> O2+
+I A 1.0 0.0 0.0 0.0 0.0

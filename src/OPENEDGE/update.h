@@ -177,6 +177,7 @@ struct SurfHit2D {
   // (src/OPENEDGE/pusher.{h,cpp}). Update has only this owning pointer;
   // call sites use pusher->mode, pusher->push_boris_*, etc.
   class Pusher *pusher;
+  virtual void dtm_sync() {}   // fix dt/monitor: Kokkos adds its device tallies to the pusher's
 
   // Sheath overlay applied during the pusher. The Borodkina profile sets the
   // floating potential and automatic engagement distance.

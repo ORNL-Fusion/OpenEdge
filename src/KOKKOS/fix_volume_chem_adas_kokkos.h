@@ -191,6 +191,15 @@ class FixVolumeChemAdasKokkos : public FixVolumeChemAdas, public KokkosBase {
   Kokkos::View<int, DeviceType> d_new_count;
   int nglocal_;
   double dt_chem_, fnum_;
+
+  // fix dt/monitor (device twin of the dtm_* tallies): per species weight
+  // updated, part above the level, max; then capped and non-finite counts
+  int dtm_on_, dtm_nsp_;
+  double dtm_limit_;
+  DAT::t_float_1d d_dtm;
+ public:
+  void dtm_sync();
+ private:
   int atomic_number_, tally_units_, output_mode_;
 
   // ---- compact per-event output ----

@@ -583,18 +583,51 @@ class UpdateKokkos : public Update {
   KOKKOS_INLINE_FUNCTION
   void oe_hybrid3d(int i, int icell, double dt,
                    double *x, double *v, double *xnew,
-                   double charge, double mass) const;
+                   double charge, double mass, double *dtm_loc = nullptr) const;
   // 2D / axisymmetric kick-drift Boris (device twin of Pusher::push_boris_2d,
   // without the spatial sheath -- 2D sheath errors out at init)
   KOKKOS_INLINE_FUNCTION
   void oe_boris2d(int i, int icell, double dt,
                   double *x, double *v, double *xnew,
-                  double charge, double mass) const;
+                  double charge, double mass, double *dtm_loc = nullptr) const;
 
   KOKKOS_INLINE_FUNCTION
   void oe_boris3d(int i, int icell, double dt_full,
                   double *x, double *v, double *xnew,
-                  double charge, double mass) const;
+                  double charge, double mass, double *dtm_loc = nullptr) const;
+
+  // fix dt/monitor (device twin of the Pusher dtm_* tallies): per species
+  // 4 columns (Boris exposure, part above the level, max, guiding-centre
+  // exposure), then one non-finite count. d_oe_dtm_pass holds the current
+  // mover pass and is dropped when the pass is replayed; accepted passes
+  // are folded into d_oe_dtm_acc, which dtm_sync() adds to the host tallies.
+  // d_oe_dtm_attr is the dtm_push custom (see pusher.h), which travels with
+  // the particle and is restored with it when a pass is replayed.
+  int oe_dtm_on, oe_dtm_nsp, oe_dtm_has_pw;
+  double oe_dtm_limit, oe_dtm_fnum;
+  DAT::t_float_1d d_oe_dtm_pw, d_oe_dtm_pass, d_oe_dtm_acc;
+  DAT::t_float_1d d_oe_dtm_attr, d_oe_dtm_attr_backup;
+  void dtm_sync();
+  KOKKOS_INLINE_FUNCTION
+  void oe_dtm_tally(int i, double omega_h, double h, double *dtm_loc) const {
+    const int sp = d_particles[i].ispecies;
+    if (!(omega_h == omega_h) || omega_h > 1.0e300) {
+      Kokkos::atomic_add(&d_oe_dtm_pass(4*oe_dtm_nsp),1.0);
+      return;
+    }
+    double wh = oe_dtm_has_pw ? d_oe_dtm_pw(i) : oe_dtm_fnum;
+    wh *= h;
+    const double whbad = (omega_h > oe_dtm_limit) ? wh : 0.0;
+    Kokkos::atomic_add(&d_oe_dtm_pass(4*sp),wh);
+    if (whbad > 0.0) Kokkos::atomic_add(&d_oe_dtm_pass(4*sp+1),whbad);
+    Kokkos::atomic_max_fetch(&d_oe_dtm_pass(4*sp+2),omega_h);
+    if (dtm_loc) { dtm_loc[0] += wh; dtm_loc[1] += whbad; }
+  }
+  KOKKOS_INLINE_FUNCTION
+  void oe_dtm_tally_gca(int i, double h) const {
+    const double w = oe_dtm_has_pw ? d_oe_dtm_pw(i) : oe_dtm_fnum;
+    Kokkos::atomic_add(&d_oe_dtm_pass(4*d_particles[i].ispecies+3),w*h);
+  }
 
   KOKKOS_INLINE_FUNCTION
   int split3d(int, double*) const;

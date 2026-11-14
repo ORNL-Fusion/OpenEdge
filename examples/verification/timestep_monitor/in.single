@@ -1,0 +1,34 @@
+# One O+ ion flies along B straight into the wall: the Boris exposure counted by
+# fix dt/monitor must be its weight x the time it travelled, whatever the reporting
+# interval and however many processors it crosses on the way.
+variable    z0      index 0.025      # start height (m)
+variable    vz      index -10000     # velocity toward the wall (m/s)
+variable    nsteps  index 3
+variable    nmon    index 100
+variable    rx      index 0          # 1: the wall turns O+ into O (surf_react prob)
+seed        12345
+dimension   3
+boundary    r r o
+global      gridcut 0.0 comm/sort no
+global      fnum 1.0
+timestep    1e-6
+create_box  0 1 0 1 0 0.5
+create_grid 1 1 100
+balance_grid block 1 1 *
+species     ../surface_emission/newborn_exposure/input/o.species O O+
+mixture     src O+ nrho 1e10 temp 300
+read_surf   ../surface_emission/prompt_redeposition/input/patch.surf group source particle check
+surf_collide vac vanish
+if "${rx} == 1" then &
+  "surf_collide bounce specular" &
+  "surf_react change prob input/exchange.rx" &
+  "surf_modify source collide bounce react change" &
+else &
+  "surf_modify source collide vac"
+fix bg      background constant te 12 ne 5e19 bcart 0 0 0.01
+global      pusher plasma bg mode boris subcycles 1 bad_dt_check no
+create_particles src single O+ 0.5 0.5 ${z0} 0 0 ${vz}
+fix dtm     dt/monitor ${nmon}
+stats       1
+stats_style step np
+run         ${nsteps}
