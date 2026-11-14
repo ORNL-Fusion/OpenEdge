@@ -19,6 +19,25 @@ class Error;
 // Root of the database/ tree (no trailing slash).
 std::string openedge_database_dir();
 
+// Where openedge_database_dir() came from: "OPENEDGE_ROOT", "compiled
+// default" or "working directory".
+std::string openedge_database_source();
+
+// The path as given, with its absolute form and the working directory
+// when it is relative.
+std::string path_report(const std::string &path);
+
+// "" if path is a readable regular file, else what is wrong with it
+// ("not found", "cannot be read (permission denied)", "is not a file").
+std::string file_problem(const std::string &path);
+
+// True if HDF5 recognises the file.
+bool file_is_hdf5(const std::string &path);
+
+// Error text for database/processes.h5: what failed, the path tried and
+// its origin, what to do. "" if the file can be opened.
+std::string processes_file_error();
+
 // element -> atomic number. -1 on unknown element.
 int element_to_z(const std::string &elem);
 

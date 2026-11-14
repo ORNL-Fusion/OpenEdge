@@ -28,6 +28,7 @@
 #include <stdexcept>
 
 #include "error.h"
+#include "database_paths.h"
 
 namespace SPARTA_NS {
 
@@ -84,9 +85,15 @@ void ProcessLibrary::open(const std::string &path, MPI_Comm comm,
   }
   MPI_Bcast(&ok, 1, MPI_INT, 0, comm_);
   if (!ok) {
-    if (error)
-      error->all(FLERR,
-        ("ProcessLibrary: failed to open " + path_).c_str());
+    std::string why = file_problem(path_);
+    if (why.empty()) why = file_is_hdf5(path_) ? "could not be opened by HDF5"
+                                               : "is not a valid HDF5 file";
+    // the database itself: same text as for a missing file, with the
+    // origin of the path and what to do
+    std::string msg = "OpenEdge database file " + why + ": " + path_;
+    if (path_ == openedge_database_dir() + "/processes.h5" &&
+        !processes_file_error().empty()) msg = processes_file_error();
+    if (error) error->all(FLERR, msg.c_str());
     opened_ = false;
     return;
   }
@@ -329,18 +336,41 @@ bool ProcessLibrary::load_trim_sputter(const std::string &pair,
 {
   if (!opened_) return false;
   out = TrimSputterTable{};
+  last_problem_.clear();
 
   int present = 0;
+  bool grp_found = false;   // the table exists: a failure below is an error, not "absent"
   const std::string grp = "/surface/sputter/" + pair;
   if (me_ == 0) {
     try {
       H5ErrGuard _h5err;
       H5::H5File f(path_, H5F_ACC_RDONLY);
-      if (H5Lexists(f.getId(), grp.c_str(), H5P_DEFAULT) > 0 &&
-          H5Lexists(f.getId(), (grp + "/Y").c_str(), H5P_DEFAULT) > 0) {
+      grp_found = H5Lexists(f.getId(), grp.c_str(), H5P_DEFAULT) > 0;
+      if (grp_found) {
+        for (const char *need : {"E", "theta", "Y"})
+          if (H5Lexists(f.getId(), (grp + "/" + need).c_str(), H5P_DEFAULT) <= 0 &&
+              last_problem_.empty())
+            last_problem_ = "an incomplete table: dataset " + grp + "/" + need + " is missing";
+      }
+      if (grp_found && last_problem_.empty()) {
         auto read1 = [&](const std::string &p, std::vector<double> &v,
                          int &dim_out) {
           H5::DataSet d = f.openDataSet(p);
+          // an axis is a vector: check the rank before reading the size
+          const int arank = d.getSpace().getSimpleExtentNdims();
+          if (arank != 1) {
+            std::string got = "rank " + std::to_string(arank);
+            if (arank >= 2 && arank <= 8) {
+              hsize_t ad[8];
+              d.getSpace().getSimpleExtentDims(ad, nullptr);
+              got += " (";
+              for (int r = 0; r < arank; r++) got += (r ? " x " : "") + std::to_string(ad[r]);
+              got += ")";
+            }
+            last_problem_ = "incompatible table dimensions: dataset " + p +
+                            " is " + got + ", expected rank 1 (a vector)";
+            throw H5::DataSetIException("load_trim_sputter", "axis rank");
+          }
           hsize_t dim[1] = {0};
           d.getSpace().getSimpleExtentDims(dim, nullptr);
           dim_out = static_cast<int>(dim[0]);
@@ -356,7 +386,22 @@ bool ProcessLibrary::load_trim_sputter(const std::string &pair,
         else if (H5Lexists(f.getId(), (grp + "/T").c_str(), H5P_DEFAULT) > 0)
           read1(grp + "/T", out.Tax, out.NT);
         H5::DataSet d = f.openDataSet(grp + "/Y");
-        if (out.NC > 0 || out.NT > 0) {
+        const int yrank = d.getSpace().getSimpleExtentNdims();
+        const int yneed = (out.NC > 0 || out.NT > 0) ? 3 : 2;
+        hsize_t ydims[8] = {0,0,0,0,0,0,0,0};
+        if (yrank >= 1 && yrank <= 8) d.getSpace().getSimpleExtentDims(ydims, nullptr);
+        auto mismatch = [&]() {
+          std::string got;
+          for (int r = 0; r < yrank && r < 8; r++)
+            got += (r ? " x " : "") + std::to_string(ydims[r]);
+          std::string need = (yneed == 3 ? std::to_string(out.NC > 0 ? out.NC : out.NT) + " x " : "") +
+                             std::to_string(out.NE) + " x " + std::to_string(out.NTHETA);
+          last_problem_ = "incompatible table dimensions: dataset " + grp +
+                          "/Y is " + got + ", expected " + need +
+                          " from its E, theta" + (yneed == 3 ? " and C or T" : "") + " axes";
+        };
+        if (yrank != yneed) mismatch();
+        else if (out.NC > 0 || out.NT > 0) {
           const int nlead = out.NC > 0 ? out.NC : out.NT;
           hsize_t dims[3] = {0, 0, 0};
           d.getSpace().getSimpleExtentDims(dims, nullptr);
@@ -366,7 +411,7 @@ bool ProcessLibrary::load_trim_sputter(const std::string &pair,
             out.Y.resize(size_t(nlead) * out.NE * out.NTHETA);
             d.read(out.Y.data(), H5::PredType::NATIVE_DOUBLE);
             present = 1;
-          }
+          } else mismatch();
         } else {
           hsize_t dims[2] = {0, 0};
           d.getSpace().getSimpleExtentDims(dims, nullptr);
@@ -375,7 +420,7 @@ bool ProcessLibrary::load_trim_sputter(const std::string &pair,
             out.Y.resize(size_t(out.NE) * out.NTHETA);
             d.read(out.Y.data(), H5::PredType::NATIVE_DOUBLE);
             present = 1;
-          }
+          } else mismatch();
         }
         if (present) {
           H5::Group g = f.openGroup(grp);
@@ -385,11 +430,22 @@ bool ProcessLibrary::load_trim_sputter(const std::string &pair,
           }
         }
       }
-    } catch (const H5::Exception &) {
+    } catch (const H5::Exception &e) {
       present = 0;
+      if (last_problem_.empty())
+        last_problem_ = grp_found
+          ? "an unreadable table: " + grp + " (" + e.getDetailMsg() + ")"
+          : "a database that HDF5 cannot read (" + e.getDetailMsg() + ")";
     }
   }
 
+  // every rank learns why a table was rejected
+  int nprob = static_cast<int>(last_problem_.size());
+  MPI_Bcast(&nprob, 1, MPI_INT, 0, comm_);
+  if (nprob) {
+    last_problem_.resize(nprob);
+    MPI_Bcast(&last_problem_[0], nprob, MPI_CHAR, 0, comm_);
+  }
   MPI_Bcast(&present, 1, MPI_INT, 0, comm_);
   if (!present) return false;
   int dims4[4] = {out.NE, out.NTHETA, out.NC, out.NT};

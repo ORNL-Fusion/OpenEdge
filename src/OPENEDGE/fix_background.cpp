@@ -39,6 +39,7 @@
 #include "particle.h"
 #include "update.h"
 #include "sparta_masks.h"
+#include "database_paths.h"
 
 #include <H5Cpp.h>
 #include <algorithm>
@@ -608,9 +609,46 @@ void FixBackground::post_run()
 
 /* ---------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   error text for an input file named on the fix command: what failed,
+   the file as given and resolved, what to do. "" if it can be opened.
+------------------------------------------------------------------------- */
+
+static std::string input_file_error(const std::string &who, const std::string &what,
+                                    const std::string &keyword,
+                                    const std::string &path, bool hdf5)
+{
+  std::string why = file_problem(path);
+  std::string todo;
+  if (why == "not found")
+    todo = ". Correct fix background " + keyword + " PATH, or copy the file "
+           "to that location before launching";
+  else if (!why.empty())
+    todo = ". Make it readable by this account";
+  else if (hdf5 && !file_is_hdf5(path)) {
+    why = "is not a valid HDF5 file";
+    todo = ". Regenerate it with the plasma converter";
+  }
+  if (why.empty()) return "";
+  return who + ": " + what + " " + why + ": " + path_report(path) + todo;
+}
+
+/* ---------------------------------------------------------------------- */
+
 void FixBackground::reload()
 {
   clear_loaded_data();
+
+  // the plasma file itself, before either loader touches it
+  if (source_mode == PLASMA_SOURCE_FILE) {
+    std::string perr;
+    if (comm->me == 0)
+      perr = input_file_error("fix background " + std::string(id),
+                              "Background plasma file","file",plasma_path,true);
+    int nerr = static_cast<int>(perr.size());
+    MPI_Bcast(&nerr, 1, MPI_INT, 0, world);
+    if (nerr) error->all(FLERR, comm->me == 0 ? perr.c_str() : "fix background: plasma file");
+  }
 
   if (provider_mode == 1) {
     if (domain->dimension != 3)
@@ -621,13 +659,21 @@ void FixBackground::reload()
                          zones3d_cs_te_plus_ti != 0);
       zones3d->load(plasma_path, world, comm->me);
     } catch (const std::exception &e) {
-      error->all(FLERR, e.what());
+      error->all(FLERR, ("fix background " + std::string(id) + ": " + e.what() +
+                         " [plasma file " + path_report(plasma_path) +
+                         ", format zones3d]").c_str());
     }
     has_bfield = zones3d->has_absolute_b() ? 1 : 0;
     generation++;
     if (comm->me == 0) {
       auto report = [&](FILE *fp) {
         if (!fp) return;
+        fprintf(fp,"[background] %s loaded: plasma file %s (format zones3d); "
+                "magnetic field: %s; database: %s (%s)\n",id,
+                path_report(plasma_path).c_str(),
+                zones3d->has_absolute_b() ? "plasma file, direction resolved by b_sign"
+                                          : "direction unresolved (b_sign 0)",
+                openedge_database_dir().c_str(),openedge_database_source().c_str());
         fprintf(fp,
                 "[background/zones3d] Loaded %d zones / %lld cells, "
                 "flow_sign=%+d, b_sign=%+d, ion_mass=%.6g amu, gen=%d\n",
@@ -648,13 +694,16 @@ void FixBackground::reload()
       if (source_mode == PLASMA_SOURCE_FILE) load_plasma_h5();
       else load_constant_profile();
     } catch (const H5::Exception &e) {
-      load_error = "fix background: HDF5 error while reading plasma file '" +
-                   plasma_path + "': " + e.getDetailMsg();
+      load_error = "fix background " + std::string(id) + ": plasma file " +
+                   path_report(plasma_path) + " does not match format legacy: " +
+                   e.getFuncName() + ": " + e.getDetailMsg() +
+                   ". Use the matching format legacy/format zones3d setting, "
+                   "or reconvert the input";
     } catch (const std::exception &e) {
-      load_error = e.what();
+      load_error = "fix background " + std::string(id) + ": " + e.what();
     } catch (...) {
-      load_error = "fix background: unknown error while reading plasma file '" +
-                   plasma_path + "'";
+      load_error = "fix background " + std::string(id) + ": unknown error "
+                   "while reading plasma file " + path_report(plasma_path);
     }
   }
 
@@ -1037,6 +1086,24 @@ void FixBackground::reload()
         nion, bf_src,
         has_equ ? "yes" : "no", generation);
     }
+    // what this run actually loaded, with full paths
+    const char *bsrc =
+        (const_has_bcart || const_has_bfield) ? "constant, from the fix command"
+        : !mesh_tri_br.empty() ? "plasma file mesh (mesh/vtx_b*)"
+        : has_equ_bmaps ? "plasma file /equilibrium field maps"
+        : has_equ ? "equilibrium psi with btf and rtf" : "none";
+    const std::string plasma = (source_mode == PLASMA_SOURCE_FILE)
+        ? "plasma file " + path_report(plasma_path) + " (format legacy)"
+        : std::string("constant plasma (no file)");
+    const std::string equ = !equ_path.empty()
+        ? "equilibrium file " + path_report(equ_path)
+        : std::string(has_equ ? "equilibrium from the plasma file" : "no equilibrium");
+    FILE *out[2] = {screen,logfile};
+    for (int io = 0; io < 2; io++)
+      if (out[io])
+        fprintf(out[io],"[background] %s loaded: %s; %s; magnetic field: %s; "
+                "database: %s (%s)\n",id,plasma.c_str(),equ.c_str(),bsrc,
+                openedge_database_dir().c_str(),openedge_database_source().c_str());
   }
 }
 
@@ -1229,12 +1296,6 @@ void FixBackground::load_constant_profile()
 
 void FixBackground::load_plasma_h5()
 {
-  std::ifstream probe(plasma_path, std::ios::in | std::ios::binary);
-  if (!probe.is_open())
-    throw std::runtime_error(
-      "fix background: cannot open plasma file '" + plasma_path +
-      "' (file does not exist or is not readable)");
-  probe.close();
 
   if (screen)
     fprintf(screen, "[background] Reading %s\n", plasma_path.c_str());
@@ -1248,13 +1309,43 @@ void FixBackground::load_plasma_h5()
     file.openFile(plasma_path, H5F_ACC_RDONLY);
   } catch (const H5::Exception &) {
     throw std::runtime_error(
-      "fix background: cannot open plasma file '" + plasma_path +
-      "' (not a readable HDF5 file)");
+      "plasma file could not be opened by HDF5: " + path_report(plasma_path));
   }
+
+  // a zones3d background read as a legacy (R,Z) file
+  if (file.attrExists("format")) {
+    std::string fmt;
+    H5::Attribute a = file.openAttribute("format");
+    a.read(a.getStrType(), fmt);
+    if (fmt == "openedge_background3d")
+      throw std::runtime_error(
+        "plasma file " + path_report(plasma_path) + " is a zones3d background "
+        "(root attribute format = openedge_background3d). Add 'format zones3d' "
+        "to the fix background command");
+  }
+
+  // dataset, its dimensions and what was expected
+  auto shape_error = [&](const std::string &name, H5::DataSpace &sp,
+                         const std::string &expected) {
+    const int rank = sp.getSimpleExtentNdims();
+    std::string got = "rank " + std::to_string(rank);
+    if (rank >= 1 && rank <= 8) {
+      hsize_t d[8];
+      sp.getSimpleExtentDims(d);
+      got += " (";
+      for (int r = 0; r < rank; r++) got += (r ? " x " : "") + std::to_string(d[r]);
+      got += ")";
+    }
+    throw std::runtime_error(
+      "plasma file " + path_report(plasma_path) + ": dataset /" + name + " is " +
+      got + ", expected " + expected + ". Reconvert the input with the plasma "
+      "converter");
+  };
 
   auto read1D = [&](const std::string &name, std::vector<double> &out) {
     H5::DataSet ds = file.openDataSet(name);
     H5::DataSpace sp = ds.getSpace();
+    if (sp.getSimpleExtentNdims() != 1) shape_error(name, sp, "rank 1");
     hsize_t dim;
     sp.getSimpleExtentDims(&dim);
     out.resize(dim);
@@ -1288,10 +1379,13 @@ void FixBackground::load_plasma_h5()
     auto read2D = [&](const std::string &name, std::vector<double> &out) {
       H5::DataSet ds = file.openDataSet(name);
       H5::DataSpace sp = ds.getSpace();
+      if (sp.getSimpleExtentNdims() != 2)
+        shape_error(name, sp, "rank 2 (" + std::to_string(nz) + " x " + std::to_string(nr) + ")");
       hsize_t dims[2];
       sp.getSimpleExtentDims(dims);
       if (static_cast<int>(dims[0]) != nz || static_cast<int>(dims[1]) != nr)
-        throw std::runtime_error("Shape mismatch in " + name);
+        shape_error(name, sp, std::to_string(nz) + " x " + std::to_string(nr) +
+                    " (the lengths of /z and /r)");
       out.resize(n);
       ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
     };
@@ -1894,9 +1988,22 @@ void FixBackground::load_equilibrium()
   if (comm->me == 0 && screen)
     fprintf(screen, "[background] Reading equilibrium %s\n", equ_path.c_str());
 
+  const std::string who = "fix background " + std::string(id);
+  const std::string eerr = input_file_error(who,"Equilibrium file","equilibrium",equ_path,false);
+  if (!eerr.empty()) throw std::runtime_error(eerr);
   std::ifstream fin(equ_path);
   if (!fin.is_open())
-    throw std::runtime_error("Cannot open equilibrium file: " + equ_path);
+    throw std::runtime_error(who + ": Equilibrium file could not be opened: " +
+                             path_report(equ_path));
+  // a field that is missing or short: name it with the counts
+  auto equ_error = [&](const std::string &field, int expected, int found) {
+    throw std::runtime_error(
+      who + ": equilibrium file " + path_report(equ_path) + ": " + field +
+      ": expected " + std::to_string(expected) + " value(s), found " +
+      std::to_string(found) + ". Correct fix background equilibrium PATH, or "
+      "regenerate the file in the supported format (jm, km, r(1:jm), z(1:km), "
+      "psi(j,k))");
+  };
 
   auto readDoubles = [&](int count) -> std::vector<double> {
     std::vector<double> vals;
@@ -1948,12 +2055,12 @@ void FixBackground::load_equilibrium()
     if (line.find("r(1:jm)") != std::string::npos) break;
   }
 
-  if (equ_jm < 2 || equ_km < 2)
-    throw std::runtime_error("Equilibrium: failed to parse jm/km");
+  if (equ_jm < 2) equ_error("grid size 'jm = N' (at least 2)", 1, equ_jm >= 1 ? 1 : 0);
+  if (equ_km < 2) equ_error("grid size 'km = N' (at least 2)", 1, equ_km >= 1 ? 1 : 0);
 
   equ_r = readDoubles(equ_jm);
   if (static_cast<int>(equ_r.size()) != equ_jm)
-    throw std::runtime_error("Equilibrium: incomplete r array");
+    equ_error("field r(1:jm)", equ_jm, static_cast<int>(equ_r.size()));
 
   while (std::getline(fin, line)) {
     if (line.find("z(1:km)") != std::string::npos) break;
@@ -1961,7 +2068,7 @@ void FixBackground::load_equilibrium()
 
   equ_z = readDoubles(equ_km);
   if (static_cast<int>(equ_z.size()) != equ_km)
-    throw std::runtime_error("Equilibrium: incomplete z array");
+    equ_error("field z(1:km)", equ_km, static_cast<int>(equ_z.size()));
 
   while (std::getline(fin, line)) {
     if (line.find("psi(j,k)") != std::string::npos) break;
@@ -1970,7 +2077,7 @@ void FixBackground::load_equilibrium()
   int total = equ_jm * equ_km;
   std::vector<double> psi_flat = readDoubles(total);
   if (static_cast<int>(psi_flat.size()) != total)
-    throw std::runtime_error("Equilibrium: incomplete psi array");
+    equ_error("field psi(j,k) (jm x km)", total, static_cast<int>(psi_flat.size()));
 
   psirz.resize(total);
   for (int i = 0; i < total; i++)
@@ -2531,8 +2638,10 @@ bool FixBackground::sample_point(const double xyz[3],
     if (found) {
       if ((request & PLASMA_NEED_HEAT) && !sample.has_q)
         error->one(FLERR,
-          "fix background zones3d: heat flux was requested but the "
-          "background does not provide q_par/q_perp");
+          ("Heat flux is required by a heating model but is unavailable from "
+           "background " + std::string(id) + ": plasma file " + plasma_path +
+           " has no q_par/q_perp. Supply the fields, or select a heating "
+           "model that does not use a prescribed flux").c_str());
       return true;
     }
     if (zones3d_outside_vacuum) {
@@ -2543,11 +2652,21 @@ bool FixBackground::sample_point(const double xyz[3],
     if (request & PLASMA_QUERY_SOFT) return false;
     const char *status = sample.status == PLASMA_SAMPLE_INVALID
       ? "INVALID" : "OUTSIDE";
-    char msg[320];
-    snprintf(msg, sizeof(msg),
-             "fix background zones3d: point (%.9g, %.9g, %.9g) is %s; "
-             "use 'outside vacuum' only when vacuum behavior is intended",
-             xyz[0], xyz[1], xyz[2], status);
+    // coverage (OUTSIDE) and bad data (INVALID) are different problems
+    char msg[1024];
+    if (sample.status == PLASMA_SAMPLE_INVALID)
+      snprintf(msg, sizeof(msg),
+               "fix background %s: point (%.9g, %.9g, %.9g) m (simulation x,y,z) "
+               "lies in a cell marked invalid in plasma file %s. Check the "
+               "validity mask and the fields of that cell in the input",
+               id, xyz[0], xyz[1], xyz[2], plasma_path.c_str());
+    else
+      snprintf(msg, sizeof(msg),
+               "fix background %s: point (%.9g, %.9g, %.9g) m (simulation x,y,z) "
+               "is %s the background of plasma file %s. Check the mesh coverage, "
+               "units and coordinate alignment of the input; use 'outside "
+               "vacuum' only when vacuum is intended there",
+               id, xyz[0], xyz[1], xyz[2], status, plasma_path.c_str());
     error->one(FLERR, msg);
     return false;
   }
@@ -2578,9 +2697,10 @@ bool FixBackground::sample_point(const double xyz[3],
   if (request & PLASMA_NEED_HEAT) {
     if (!has_qheatflux)
       error->one(FLERR,
-        "fix background: heat flux was requested but the plasma file "
-        "does not provide q_par/q_perp; add physical heat-flux datasets "
-        "or select a heating model that does not use prescribed flux");
+        ("Heat flux is required by a heating model but is unavailable from "
+         "background " + std::string(id) + ": plasma file " + plasma_path +
+         " has no /q_par and /q_perp datasets. Supply the fields, or select "
+         "a heating model that does not use a prescribed flux").c_str());
     sample.has_q = true;
     if (!mesh_q_par.empty() || !q_par.empty())
       sample.q_par = interp2D(q_par, R, Z, icell, iparticle);
@@ -2829,8 +2949,11 @@ FixBackground::query_bfield_at_point(const double xyz[3], int icell,
   if (provider_mode == 1) {
     if (!zones3d->has_absolute_b())
       error->one(FLERR,
-                 "fix background zones3d: an absolute magnetic-field "
-                 "vector was requested but b_sign is unresolved (0)");
+                 ("Magnetic-field direction is required by a consumer of the "
+                  "field vector (the pusher, or a fix or compute that reads B) "
+                  "but is unavailable from background " + std::string(id) +
+                  ": b_sign is 0. Set b_sign +1 or -1 from the field direction "
+                  "of the device").c_str());
     PlasmaPointSample sample;
     sample_point(xyz, sample, icell, iparticle,
                  PLASMA_NEED_THERMO | PLASMA_NEED_FLOW_B);

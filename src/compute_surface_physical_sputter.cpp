@@ -783,10 +783,21 @@ void ComputeSurfacePhysicalSputter::resolve_projectile_tables(const FixBackgroun
             return s;
           };
           std::string pair = pair_for(target_element);
+          // a table that is there but unusable stops the run: only an
+          // absent table may fall back to the analytic model
+          auto rejected = [&]() {
+            if (!lib.last_problem().empty())
+              error->all(FLERR,("compute surface/physical/sputter " + std::string(id) +
+                                ": sputter table '" + pair + "' in " + processes_path +
+                                " has " + lib.last_problem() + ". Regenerate the table "
+                                "with tools/converters/add_sputter_tables.py").c_str());
+          };
           bool loaded = lib.load_trim_sputter(pair, per_proj_sput_tbl[i]);
+          if (!loaded) rejected();
           if (!loaded && !target_like.empty()) {
             pair = pair_for(target_like);
             loaded = lib.load_trim_sputter(pair, per_proj_sput_tbl[i]);
+            if (!loaded) rejected();
           }
           if (loaded && comm->me == 0) {
             char msg[256];

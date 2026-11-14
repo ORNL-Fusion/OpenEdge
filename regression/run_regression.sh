@@ -398,6 +398,7 @@ if [[ "pwi_ledger_fold" == $FILTER || "*" == "$FILTER" ]]; then
 fi
 
 # -----------------------------------------------------------------------
+#  error_messages: failure messages of the plasma, equilibrium and database readers.
 #  dt_monitor: fix dt/monitor against known gyro and reaction values.
 #  emit_schedule / emit_newborn / emit_redeposition: fix surface/emit/source
 #  release schedule. Source accounting (launch modes, window, ranks, rebalance,
@@ -405,7 +406,8 @@ fi
 #  2 E3(nu d / v) and prompt redeposition against 1 - exp(-nu/Omega); the
 #  scripts take the launcher (LAUNCH) and the rank counts (NP, NP_LIST)
 # -----------------------------------------------------------------------
-for rec in "dt_monitor|../timestep_monitor|scripts/check.py|fix dt/monitor maxima, weighted fractions, windows, ranks" \
+for rec in "error_messages|../error_messages|scripts/check.py|input-file failures stop with file, cause and remedy" \
+           "dt_monitor|../timestep_monitor|scripts/check.py|fix dt/monitor maxima, weighted fractions, windows, ranks" \
            "emit_schedule|emit_schedule|scripts/check.py|emitted weight, per-step share, split runs, restart" \
            "emit_newborn|newborn_exposure|scripts/scan.py --quick|transmission within 1 % for emission every step and batched" \
            "emit_redeposition|prompt_redeposition|scripts/scan.py --quick|prompt redeposition in uniform B within 1 % at nu*dt 0.02"; do

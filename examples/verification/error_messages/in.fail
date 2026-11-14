@@ -1,0 +1,30 @@
+# Input-file failures: each run must stop with a message that says what failed,
+# which file, and what to do (scripts/check.py builds the broken inputs).
+variable    mode    index 0          # 0: constant plasma;  1: plasma file;  2: plasma and equilibrium files
+variable    plasma  index none       # fix background file PATH
+variable    equ     index none       # fix background equilibrium PATH
+variable    zones   index 0          # 1: read the plasma file with format zones3d
+variable    sp      index ../surface_emission/newborn_exposure/input/o.species
+variable    chem    index 0          # 1: fix volume/chem/adas (reads database/processes.h5)
+variable    elem    index B
+seed        12345
+dimension   3
+boundary    r r r
+global      gridcut 0.0 comm/sort no
+create_box  0 1 0 1 0 1
+create_grid 2 2 2
+balance_grid rcb cell
+species     ${sp} O O+
+mixture     neut O frac 1
+if "${mode} == 0" then &
+  "fix bg background constant te 12 ne 5e19" &
+elif "${mode} == 1 && ${zones} == 1" &
+  "fix bg background file ${plasma} format zones3d flow_sign 1 b_sign 1 cs_model te_plus_ti" &
+elif "${mode} == 1" &
+  "fix bg background file ${plasma}" &
+else &
+  "fix bg background file ${plasma} equilibrium ${equ}"
+global      pusher plasma bg
+if "${chem} == 1" then "fix fchem volume/chem/adas 1 ${elem} auto"
+stats       1
+run         1

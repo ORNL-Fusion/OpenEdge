@@ -60,6 +60,7 @@ class ProcessLibrary {
 
   bool is_open() const { return opened_; }
   const std::string &path() const { return path_; }
+  const std::string &last_problem() const { return last_problem_; }
 
   // Load an ADAS-class rate or radiation table for one element.
   // cls:   "scd" | "acd" | "ccd"  -> /volume/rates/<cls>/<elem>/
@@ -164,6 +165,7 @@ class ProcessLibrary {
  private:
   bool         opened_ = false;
   std::string  path_;
+  std::string  last_problem_;   // why the last table was rejected (all ranks), "" if none
   MPI_Comm     comm_ = MPI_COMM_NULL;
   int          me_   = 0;
 

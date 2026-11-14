@@ -2389,6 +2389,12 @@ int SurfReactSurfacePWI::load_or_get_sputter_table(const char *name)
           if (screen)  fputs(msg, screen);
           if (logfile) fputs(msg, logfile);
         }
+      } else if (!lib.last_problem().empty()) {
+        // a table that is there but unusable is an error, not a fallback
+        error->all(FLERR,("surf_react surface/pwi " + std::string(id) + ": sputter "
+                          "table '" + pair_lower + "' in " + processes_path + " has " +
+                          lib.last_problem() + ". Regenerate the table with "
+                          "tools/converters/add_sputter_tables.py").c_str());
       }
     }
   }
@@ -2456,10 +2462,13 @@ int SurfReactSurfacePWI::load_or_get_trim_table(const char *name)
   }
 
   if (!loaded) {
-    std::string msg = "surf_react surface/pwi: TRIM table '" + sname +
-                      "' not found in " +
-                      (processes_path.empty() ? "database/processes.h5 (file missing)"
-                                              : processes_path + " at /surface/reflection/" + pair_lower);
+    // the file itself, or the table inside it
+    std::string msg = "surf_react surface/pwi " + std::string(id) + ": ";
+    if (processes_path.empty()) msg += processes_file_error();
+    else msg += "reflection table '" + sname + "' not found: dataset group "
+                "/surface/reflection/" + pair_lower + " in " + processes_path +
+                ". Use a projectile/target pair the database holds, or add "
+                "the table with database/ingest";
     error->all(FLERR, msg.c_str());
     return -1;  // not reached
   }

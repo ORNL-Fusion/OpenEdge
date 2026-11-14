@@ -139,9 +139,8 @@ ComputeVolumeEmissivityGrid::ComputeVolumeEmissivityGrid(
   pec_nte = pec_nne = 0;
   std::string processes_path = resolve_processes_file();
   if (processes_path.empty())
-    error->all(FLERR,
-      "compute volume/emissivity/grid: cannot locate processes.h5 "
-      "(set OPENEDGE_ROOT or build with -DOPENEDGE_DATABASE_DIR)");
+    error->all(FLERR,("compute volume/emissivity/grid " + std::string(id) + ": " +
+                      processes_file_error()).c_str());
   ProcessLibrary plib;
   plib.open(processes_path, world, error);
   ProcessLibrary::PecTable pec;

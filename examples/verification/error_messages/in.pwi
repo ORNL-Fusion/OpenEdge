@@ -1,0 +1,16 @@
+# surf_react surface/pwi reading a sputter (S) or reflection (T) table from
+# database/processes.h5 (scripts/check.py builds the databases).
+variable    rc      index input/sputter.recycle
+seed        12345
+dimension   3
+boundary    o o o
+global      gridcut 0.0 comm/sort yes
+create_box  0 1 0 1 0 1
+create_grid 2 2 2
+balance_grid rcb cell
+species     ../surface_pwi/deposit_tagging/input/w.species W
+read_surf   ../surface_emission/prompt_redeposition/input/patch.surf group plate particle check
+surf_collide wall diffuse 773.15 1.0
+surf_react  pwi surface/pwi ${rc} twall 773.15
+surf_modify plate collide wall react pwi
+run         0

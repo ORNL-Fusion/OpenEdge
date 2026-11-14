@@ -9,7 +9,11 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <cerrno>
+#include <cstdio>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <hdf5.h>
 #include <unordered_map>
 
 #ifndef OPENEDGE_DATABASE_DIR
@@ -34,6 +38,71 @@ std::string openedge_database_dir()
   const std::string compiled = OPENEDGE_DATABASE_DIR;
   if (!compiled.empty()) return compiled;
   return "database";
+}
+
+std::string openedge_database_source()
+{
+  if (std::getenv("OPENEDGE_ROOT")) return "OPENEDGE_ROOT";
+  if (std::string(OPENEDGE_DATABASE_DIR).size()) return "compiled default";
+  return "working directory";
+}
+
+static std::string working_dir()
+{
+  char buf[4096];
+  return getcwd(buf, sizeof(buf)) ? std::string(buf) : std::string("?");
+}
+
+std::string path_report(const std::string &path)
+{
+  if (path.empty() || path[0] == '/') return path;
+  const std::string cwd = working_dir();
+  return path + " (resolved to " + cwd + "/" + path +
+         "; working directory " + cwd + ")";
+}
+
+std::string file_problem(const std::string &path)
+{
+  struct stat st;
+  if (stat(path.c_str(), &st) != 0) {
+    if (errno == ENOENT || errno == ENOTDIR) return "not found";
+    if (errno == EACCES) return "cannot be read (permission denied on its directory)";
+    return std::string("cannot be read (") + strerror(errno) + ")";
+  }
+  if (!S_ISREG(st.st_mode)) return "is not a file";
+  if (access(path.c_str(), R_OK) != 0) return "cannot be read (permission denied)";
+  return "";
+}
+
+// HDF5's own test: the signature may follow a user block
+bool file_is_hdf5(const std::string &path)
+{
+  htri_t ok = 0;
+  H5E_BEGIN_TRY { ok = H5Fis_hdf5(path.c_str()); } H5E_END_TRY;
+  return ok > 0;
+}
+
+std::string processes_file_error()
+{
+  const std::string p = openedge_database_dir() + "/processes.h5";
+  const std::string where = p + " (database directory from " +
+                            openedge_database_source() + ")";
+  const std::string why = file_problem(p);
+  if (why == "not found")
+    return "OpenEdge database file not found: " + where +
+           ". Set OPENEDGE_ROOT to the OpenEdge directory that holds "
+           "database/processes.h5";
+  if (why == "is not a file")
+    return "OpenEdge database path is not a file: " + where +
+           ". Put database/processes.h5 there, or set OPENEDGE_ROOT to the "
+           "OpenEdge directory that holds it";
+  if (!why.empty())
+    return "OpenEdge database file " + why + ": " + where +
+           ". Make it readable by this account";
+  if (!file_is_hdf5(p))
+    return "OpenEdge database file is not a valid HDF5 file: " + where +
+           ". Restore database/processes.h5 from the repository";
+  return "";
 }
 
 // Isotopes of hydrogen map to Z=1. Common fusion-relevant elements.
@@ -99,16 +168,33 @@ std::string resolve_reactions_file(const std::string &spec, Error *error)
     p = openedge_database_dir() + "/ingest/reactions/" + spec + ".reactions";
   }
   if (!file_exists(p)) {
-    std::string msg = "Reactions file not found: " + p;
+    // an element name falls back to this text file only when the catalogue
+    // in processes.h5 could not be used: say which of the two failed
+    std::string msg = "Reactions file " + file_problem(p) + ": " + path_report(p);
+    if (!path_looks_literal(spec)) {
+      const std::string db = processes_file_error();
+      if (!db.empty()) msg = db;
+      else msg = "No reactions for element '" + spec + "': no catalogue "
+                 "/volume/reactions/<element>/catalog in " + openedge_database_dir() +
+                 "/processes.h5 and no file " + p + ". Use an element the "
+                 "database holds, or give the path of a .reactions file";
+    }
     error->all(FLERR, msg.c_str());
   }
   return p;
 }
 
+// "" only when the path does not exist. Anything else there (a file that is
+// unreadable or not HDF5, a directory, a path whose directory denies access)
+// is returned, so that opening it stops the run instead of selecting a
+// caller's fallback for a missing database
 std::string resolve_processes_file()
 {
   std::string p = openedge_database_dir() + "/processes.h5";
-  return file_exists(p) ? p : std::string();
+  struct stat st;
+  if (stat(p.c_str(), &st) != 0 && (errno == ENOENT || errno == ENOTDIR))
+    return std::string();
+  return p;
 }
 
 std::string resolve_iead_file(const std::string &tag)

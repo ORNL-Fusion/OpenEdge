@@ -356,8 +356,7 @@ FixVolumeChemAdas::FixVolumeChemAdas(SPARTA *sparta, int narg, char **arg) :
       if (!loaded_from_processes) {
         std::string msg;
         if (processes_path.empty()) {
-          msg = "fix volume/chem/adas: database/processes.h5 not found. "
-                "Build it with database/ingest/build_processes_h5.py.";
+          msg = "fix volume/chem/adas " + std::string(id) + ": " + processes_file_error();
         } else {
           msg = "fix volume/chem/adas: element '" + elem_sym +
                 "' (Z=" + std::to_string(atomic_number) + ") not found in "

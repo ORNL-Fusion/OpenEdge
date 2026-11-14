@@ -85,8 +85,14 @@ void require_shape(const std::string &name, const std::vector<hsize_t> &got,
                    const std::vector<hsize_t> &expected)
 {
   if (got == expected) return;
-  throw std::runtime_error("background zones3d: dataset '" + name +
-                           "' has an unexpected shape");
+  auto dims = [](const std::vector<hsize_t> &d) {
+    std::string t = "rank " + std::to_string(d.size()) + " (";
+    for (size_t i = 0; i < d.size(); i++) t += (i ? " x " : "") + std::to_string(d[i]);
+    return t + ")";
+  };
+  throw std::runtime_error("background zones3d: dataset " + name + " is " +
+                           dims(got) + ", expected " + dims(expected) +
+                           ". Reconvert the input");
 }
 
 void read_float_dataset(const H5::Group &group, const std::string &name,
@@ -94,9 +100,10 @@ void read_float_dataset(const H5::Group &group, const std::string &name,
                         std::vector<float> &out)
 {
   if (!has_link(group.getId(), name))
-    throw std::runtime_error("background zones3d: missing dataset '" + name + "'");
+    throw std::runtime_error("background zones3d: missing dataset " +
+                             group.getObjName() + "/" + name + ". Reconvert the input");
   H5::DataSet ds = group.openDataSet(name);
-  require_shape(name, dataset_shape(ds), shape);
+  require_shape(group.getObjName() + "/" + name, dataset_shape(ds), shape);
   out.resize(shape_size(shape));
   ds.read(out.data(), H5::PredType::NATIVE_FLOAT);
 }
@@ -106,9 +113,10 @@ void read_double_dataset(const H5::Group &group, const std::string &name,
                          std::vector<double> &out)
 {
   if (!has_link(group.getId(), name))
-    throw std::runtime_error("background zones3d: missing dataset '" + name + "'");
+    throw std::runtime_error("background zones3d: missing dataset " +
+                             group.getObjName() + "/" + name + ". Reconvert the input");
   H5::DataSet ds = group.openDataSet(name);
-  require_shape(name, dataset_shape(ds), shape);
+  require_shape(group.getObjName() + "/" + name, dataset_shape(ds), shape);
   out.resize(shape_size(shape));
   ds.read(out.data(), H5::PredType::NATIVE_DOUBLE);
 }
@@ -118,9 +126,10 @@ void read_u8_dataset(const H5::Group &group, const std::string &name,
                      std::vector<uint8_t> &out)
 {
   if (!has_link(group.getId(), name))
-    throw std::runtime_error("background zones3d: missing dataset '" + name + "'");
+    throw std::runtime_error("background zones3d: missing dataset " +
+                             group.getObjName() + "/" + name + ". Reconvert the input");
   H5::DataSet ds = group.openDataSet(name);
-  require_shape(name, dataset_shape(ds), shape);
+  require_shape(group.getObjName() + "/" + name, dataset_shape(ds), shape);
   out.resize(shape_size(shape));
   ds.read(out.data(), H5::PredType::NATIVE_UINT8);
 }
@@ -216,16 +225,24 @@ void BackgroundZones3D::load(const std::string &path, MPI_Comm world, int me)
 void BackgroundZones3D::read_rank0(const std::string &path)
 {
   H5::H5File file(path, H5F_ACC_RDONLY);
+  if (!has_attr(file.getId(), "format"))
+    throw std::runtime_error(
+      "background zones3d: the file has no root attribute format, so it is "
+      "not a zones3d background. Remove 'format zones3d' for a legacy (R,Z) "
+      "plasma file, or reconvert the input");
   const std::string format = read_string_attr(file, "format");
   if (format != "openedge_background3d")
     throw std::runtime_error(
-      "background zones3d: root attribute format must be "
-      "'openedge_background3d'");
+      "background zones3d: root attribute format is '" + format + "', expected "
+      "'openedge_background3d'. Remove 'format zones3d' for a legacy (R,Z) "
+      "plasma file, or reconvert the input");
   if (read_int_attr(file, "version") != 1)
-    throw std::runtime_error("background zones3d: only schema version 1 is supported");
+    throw std::runtime_error("background zones3d: unsupported schema version (root "
+                             "attribute version); only version 1 is supported. Reconvert the input");
   if (read_string_attr(file, "length_units") != "m" ||
       read_string_attr(file, "phi_units") != "rad")
-    throw std::runtime_error("background zones3d: expected length=m and phi=rad");
+    throw std::runtime_error("background zones3d: unsupported units; expected root "
+                             "attributes length = m and phi = rad. Reconvert the input in SI units");
 
   ion_mass_amu_ = read_double_attr(file, "ion_mass_amu", 2.014);
   if (!(ion_mass_amu_ > 0.0))

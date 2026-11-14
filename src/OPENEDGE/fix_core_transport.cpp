@@ -762,7 +762,8 @@ void FixCoreTransport::build_rates()
 {
   ProcessLibrary lib;
   std::string path = resolve_processes_file();
-  if (path.empty()) error->all(FLERR,"fix core/transport: processes.h5 not found");
+  if (path.empty())
+    error->all(FLERR,("fix core/transport " + std::string(id) + ": " + processes_file_error()).c_str());
   lib.open(path,world,error);
   struct Tab { std::vector<double> c, lt, ln; int nq = 0, nt = 0, nd = 0; bool ok = false; };
   auto load = [&](const char *cls, Tab &t) {
