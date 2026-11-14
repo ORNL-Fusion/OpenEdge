@@ -146,6 +146,8 @@ class FixSurfaceEmitSource : public FixEmit {
   int flux_owned_set;            // 1 = flux_owned_buf holds a compute's flux
   void spread_window();
   int window_start();
+  bigint win_conc_gen;           // writers' generation held in win_conc, -1 = none
+  bigint conc_writers_gen();     // summed generation of the conc_scale writers, -1 = unknown writer
   double sched_phi(bigint, surfint, cellint, int, int) const;
   int sched_count(double, surfint, cellint, int, int &) const;
   double conc_factor(surfint) const;

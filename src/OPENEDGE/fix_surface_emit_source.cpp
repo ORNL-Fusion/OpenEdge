@@ -211,6 +211,7 @@ FixSurfaceEmitSource::FixSurfaceEmitSource(SPARTA *sparta, int narg, char **arg)
   nsource = nevery;
   nevery = 1;
   win_seen = win_step = -1;
+  win_conc_gen = -1;
   win_stale = 0;
   flux_owned_set = 0;
   win_source_total = 0.0;
@@ -741,12 +742,18 @@ int FixSurfaceEmitSource::window_start()
   win_seen = win;
   win_step = update->ntimestep;
   if (conc_index >= 0) {
-    double **conc = surf->edarray[surf->ewhich[conc_index]];
-    win_conc_own.resize(surf->nown);
-    for (int i = 0; i < surf->nown; i++) win_conc_own[i] = conc[i][conc_col-1];
-    const int nlg = surf->nlocal + surf->nghost;
-    win_conc.assign(nlg > 0 ? nlg : 1,0.0);
-    surf->spread_own2local(1,DOUBLE,win_conc_own.data(),win_conc.data());
+    // the snapshot and its spread (a collective) are redone only when a
+    // writer changed the concentrations or the surf layout changed
+    const bigint gen = conc_writers_gen();
+    if (gen < 0 || gen != win_conc_gen || win_stale || win_conc.empty()) {
+      double **conc = surf->edarray[surf->ewhich[conc_index]];
+      win_conc_own.resize(surf->nown);
+      for (int i = 0; i < surf->nown; i++) win_conc_own[i] = conc[i][conc_col-1];
+      const int nlg = surf->nlocal + surf->nghost;
+      win_conc.assign(nlg > 0 ? nlg : 1,0.0);
+      surf->spread_own2local(1,DOUBLE,win_conc_own.data(),win_conc.data());
+      win_conc_gen = gen;
+    }
   }
   win_stale = 0;   // the flux of a new window is spread when it is evaluated
   return 1;
@@ -876,17 +883,8 @@ int FixSurfaceEmitSource::build_task_source_cache()
 int FixSurfaceEmitSource::refresh_conc_weights()
 {
   if (!task_source_cached || conc_index < 0) return 0;
-  if (!conc_pwi_resolved) {
-    conc_pwi.clear();
-    for (int k = 0; k < surf->nsr; k++) {
-      auto *pwi = dynamic_cast<SurfReactSurfacePWI *>(surf->sr[k]);
-      if (pwi && pwi->conc_custom_index() == conc_index) conc_pwi.push_back(pwi);
-    }
-    conc_pwi_resolved = 1;
-  }
-  bigint gen = 0;
-  for (auto *pwi : conc_pwi) gen += pwi->conc_generation();
-  if (!conc_pwi.empty() && conc_gen_seen >= 0 && gen == conc_gen_seen) return 0;
+  const bigint gen = conc_writers_gen();
+  if (gen >= 0 && conc_gen_seen >= 0 && gen == conc_gen_seen) return 0;
 
   cached_task_source.assign(ntask,0.0);
   double total_me = 0.0;
@@ -901,9 +899,32 @@ int FixSurfaceEmitSource::refresh_conc_weights()
     total_me += s;
   }
   MPI_Allreduce(&total_me,&cached_source_total,1,MPI_DOUBLE,MPI_SUM,world);
-  conc_gen_seen = conc_pwi.empty() ? -1 : gen;
+  conc_gen_seen = gen;
   weights_version++;
   return 1;
+}
+
+/* ----------------------------------------------------------------------
+   summed generation of every surf_react surface/pwi that writes the
+   conc_scale attribute: it changes only when one of them updates the
+   concentrations. -1 if the attribute has no known writer (it may then
+   change at any time).
+------------------------------------------------------------------------- */
+
+bigint FixSurfaceEmitSource::conc_writers_gen()
+{
+  if (!conc_pwi_resolved) {
+    conc_pwi.clear();
+    for (int k = 0; k < surf->nsr; k++) {
+      auto *pwi = dynamic_cast<SurfReactSurfacePWI *>(surf->sr[k]);
+      if (pwi && pwi->conc_custom_index() == conc_index) conc_pwi.push_back(pwi);
+    }
+    conc_pwi_resolved = 1;
+  }
+  if (conc_pwi.empty()) return -1;
+  bigint gen = 0;
+  for (auto *pwi : conc_pwi) gen += pwi->conc_generation();
+  return gen;
 }
 
 void FixSurfaceEmitSource::perform_task()
