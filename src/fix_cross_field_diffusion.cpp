@@ -45,6 +45,8 @@
 #include "update.h"
 #include "fix_background.h"
 #include "openedge_geom.h"
+#include "surf.h"
+#include "compute_nearest_surf_grid.h"
 
 using namespace SPARTA_NS;
 
@@ -64,7 +66,7 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
   use_const_(0),
   diff_model_(DIFF_NONE),
   D_perp_(0.0),
-  binormal2d_(1),
+  binormal2d_(1), wall_taper_(0.0),
   bohm_scale_(1.0),
   have_pinch_(0),
   v_pinch_R_(0.0),
@@ -158,6 +160,13 @@ FixCrossFieldDiffusion::FixCrossFieldDiffusion(SPARTA *sparta, int narg, char **
       else if (strcmp(arg[iarg], "no") == 0) binormal2d_ = 0;
       else error->all(FLERR, "fix cross_field_diffusion binormal: need yes or no");
       iarg++;
+    } else if (strcmp(arg[iarg], "wall_taper") == 0) {
+      iarg++;
+      if (iarg >= narg)
+        error->all(FLERR, "fix cross_field_diffusion wall_taper: need a distance [m]");
+      wall_taper_ = input->numeric(FLERR, arg[iarg++]);
+      if (wall_taper_ < 0.0)
+        error->all(FLERR, "fix cross_field_diffusion wall_taper: distance must be >= 0");
     } else if (strcmp(arg[iarg], "pinch_psi") == 0) {
       iarg++;
       if (iarg >= narg)
@@ -335,6 +344,37 @@ void FixCrossFieldDiffusion::init()
 
 /* ---------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   signed plane distance from x to the nearest wall element of cell icell
+   (compute nearest_surf/grid, the map the pusher's boris_near shell uses);
+   positive on the plasma side. false = no element known for this cell.
+------------------------------------------------------------------------- */
+
+bool FixCrossFieldDiffusion::wall_distance(int icell, const double *x, double &d, double *nrm) const
+{
+  if (update->sheath_geom_cidx < 0) return false;
+  ComputeNearestSurfGrid *csg =
+    dynamic_cast<ComputeNearestSurfGrid *>(modify->compute[update->sheath_geom_cidx]);
+  if (!csg) return false;
+  int gcell = icell;
+  Grid::ChildCell *cells = grid->cells;
+  if (cells[icell].nsplit <= 0 && cells[icell].isplit >= 0)
+    gcell = grid->sinfo[cells[icell].isplit].icell;
+  if (gcell < 0 || gcell >= csg->nglocal) return false;
+  const int m = csg->midx_grid[gcell];
+  if (m < 0) return false;
+  if (domain->dimension == 2) {
+    Surf::Line *ln = &surf->lines[m];
+    nrm[0] = ln->norm[0]; nrm[1] = ln->norm[1]; nrm[2] = 0.0;
+    d = (x[0]-ln->p1[0])*nrm[0] + (x[1]-ln->p1[1])*nrm[1];
+  } else {
+    Surf::Tri *tr = &surf->tris[m];
+    nrm[0] = tr->norm[0]; nrm[1] = tr->norm[1]; nrm[2] = tr->norm[2];
+    d = (x[0]-tr->p1[0])*nrm[0] + (x[1]-tr->p1[1])*nrm[1] + (x[2]-tr->p1[2])*nrm[2];
+  }
+  return true;
+}
+
 void FixCrossFieldDiffusion::start_of_step()
 {
   if ((update->ntimestep % nevery) != 0) {
@@ -377,6 +417,10 @@ void FixCrossFieldDiffusion::start_of_step()
     memory->create(update->dx_cd, update->cd_nmax, 3, "update:dx_cd");
   }
   update->cd_flag = 1;
+
+  if (wall_taper_ > 0.0 && update->sheath_geom_cidx < 0)
+    error->all(FLERR,"fix cross_field_diffusion wall_taper needs the nearest-surface map "
+               "(compute nearest_surf/grid, set up by the sheath model or global pusher boris_near)");
 
   double **dx = update->dx_cd;
 
@@ -425,6 +469,22 @@ void FixCrossFieldDiffusion::start_of_step()
         Te_eV = std::max(read_src(srcTe_, ip, icell), 0.0);
       }
       D_local = bohm_scale_ * Te_eV / (16.0 * Bmag);
+    }
+
+    // near-wall taper of D_perp, with the Ito drift (dD/dn) dt along the
+    // wall normal projected perpendicular to B
+    if (wall_taper_ > 0.0 && D_local > 0.0) {
+      double dw, nw[3];
+      if (wall_distance(icell, p.x, dw, nw) && dw < wall_taper_) {
+        if (dw > 0.0) {
+          const double g = D_local / wall_taper_ * dt;
+          const double bn = (nw[0]*B0 + nw[1]*B1 + nw[2]*B2) / (Bmag*Bmag);
+          dx[ip][0] += g * (nw[0] - bn*B0);
+          dx[ip][1] += g * (nw[1] - bn*B1);
+          if (dim == 3) dx[ip][2] += g * (nw[2] - bn*B2);
+          D_local *= dw / wall_taper_;
+        } else D_local = 0.0;
+      }
     }
 
     // stochastic perpendicular displacement

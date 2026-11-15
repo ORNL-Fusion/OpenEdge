@@ -93,6 +93,11 @@ class FixCrossFieldDiffusionKokkos : public FixCrossFieldDiffusion,
   int dim_, axisym_;
   double col_x0_, col_y0_;
   double dt_eff_;                          // dt * nevery
+  // wall taper (see the base class): per-cell nearest wall element and the surf elements
+  double wall_taper_kk_;                   // 0 = off or map not bound yet
+  DAT::t_int_1d d_wall_midx_;
+  t_tri_1d d_wall_tris_;
+  t_line_1d d_wall_lines_;
   // psi-pinch gradient (device twin of pd->psi_norm_gradient_at)
   int psi_ok_;
   double psi_denom_, dr_eq_, dz_eq_;

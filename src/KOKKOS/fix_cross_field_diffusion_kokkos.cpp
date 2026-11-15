@@ -19,6 +19,8 @@
 #include "sparta_masks.h"
 #include "update.h"
 #include "update_kokkos.h"
+#include "surf_kokkos.h"
+#include "grid.h"
 #include "openedge_geom.h"
 #include "raster_kokkos.h"
 
@@ -180,6 +182,24 @@ void FixCrossFieldDiffusionKokkos::start_of_step()
   d_species   = particle_kk->k_species.d_view;
   d_dx        = update_kk->d_dx_cd;
 
+  // wall taper: the mover's per-cell nearest-wall-element map (rebuilt there
+  // when the grid changes) and the device surf elements
+  wall_taper_kk_ = 0.0;
+  if (wall_taper_ > 0.0) {
+    if (update->sheath_geom_cidx < 0)
+      error->all(FLERR,"fix cross_field_diffusion wall_taper needs the nearest-surface map "
+                 "(compute nearest_surf/grid, set up by the sheath model or global pusher boris_near)");
+    if (!update_kk->k_oe_midx_gcell.d_view.data() ||
+        (int) update_kk->k_oe_midx_gcell.d_view.extent(0) != grid->nlocal)
+      update_kk->bind_oe_midx_map();
+    d_wall_midx_ = update_kk->k_oe_midx_gcell.d_view;
+    SurfKokkos *surf_kk = (SurfKokkos *) surf;
+    surf_kk->sync(Device,ALL_MASK);
+    d_wall_tris_ = surf_kk->k_tris.d_view;
+    d_wall_lines_ = surf_kk->k_lines.d_view;
+    if (d_wall_midx_.data()) wall_taper_kk_ = wall_taper_;
+  }
+
   d_vtx_r    = update_kk->d_oe_mesh_vtx_r;
 
   has_hint_ = 0;   // triangle hint written by the pcache fill (UpdateKokkos); exact, hint-first location
@@ -309,6 +329,34 @@ void FixCrossFieldDiffusionKokkos::operator()(TagFixCrossFieldDiffusion,
   }
 
   double ddx0 = 0.0, ddx1 = 0.0, ddx2 = 0.0;
+
+  // near-wall taper of D_perp with the Ito drift (dD/dn) dt (CPU twin)
+  if (wall_taper_kk_ > 0.0 && D_local > 0.0 && p.icell >= 0 &&
+      p.icell < (int) d_wall_midx_.extent(0)) {
+    const int m = d_wall_midx_(p.icell);
+    if (m >= 0) {
+      double nw0, nw1, nw2 = 0.0, dw;
+      if (dim_ != 3) {
+        const Surf::Line &ln = d_wall_lines_[m];
+        nw0 = ln.norm[0]; nw1 = ln.norm[1];
+        dw = (p.x[0]-ln.p1[0])*nw0 + (p.x[1]-ln.p1[1])*nw1;
+      } else {
+        const Surf::Tri &tr = d_wall_tris_[m];
+        nw0 = tr.norm[0]; nw1 = tr.norm[1]; nw2 = tr.norm[2];
+        dw = (p.x[0]-tr.p1[0])*nw0 + (p.x[1]-tr.p1[1])*nw1 + (p.x[2]-tr.p1[2])*nw2;
+      }
+      if (dw < wall_taper_kk_) {
+        if (dw > 0.0) {
+          const double g = D_local / wall_taper_kk_ * dt_eff_;
+          const double bn = (nw0*B[0] + nw1*B[1] + nw2*B[2]) / (Bmag*Bmag);
+          ddx0 += g * (nw0 - bn*B[0]);
+          ddx1 += g * (nw1 - bn*B[1]);
+          if (dim_ == 3) ddx2 += g * (nw2 - bn*B[2]);
+          D_local *= dw / wall_taper_kk_;
+        } else D_local = 0.0;
+      }
+    }
+  }
 
   // stochastic perpendicular displacement (3D basis, two Gaussians)
   if (D_local > 0.0) {

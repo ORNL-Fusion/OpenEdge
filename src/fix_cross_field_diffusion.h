@@ -104,6 +104,14 @@ class FixCrossFieldDiffusion : public Fix {
   int diff_model_;       // 0=none, 1=constant, 2=bohm
   double D_perp_;        // constant D_perp [m^2/s]
   int binormal2d_;       // 2-D: also step along the binormal (default 1)
+  // wall_taper d0 [m]: D_perp is scaled by min(1, d/d0), d = distance to the
+  // nearest wall element of the particle's cell (0 = off). Anomalous D_perp
+  // describes guiding-centre transport; inside the sheath a random step of
+  // sqrt(2 D dt) (tens of microns at dt of ns) replaces the orbit and makes
+  // wall fluxes depend on dt. The Ito drift (dD/dn) dt is added so that the
+  // stationary density stays uniform.
+  double wall_taper_;
+  bool wall_distance(int icell, const double *x, double &d, double *nrm) const;
   CollGridSrc srcTe_;    // Te source for Bohm model
   double bohm_scale_;    // scale factor for Bohm (default 1.0)
 
