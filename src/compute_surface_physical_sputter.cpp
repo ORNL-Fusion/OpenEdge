@@ -407,6 +407,14 @@ ComputeSurfacePhysicalSputter::ComputeSurfacePhysicalSputter(SPARTA *sparta, int
       iead_nT = input->inumeric(FLERR,arg[iarg+2]);
       if (iead_nE < 2 || iead_nT < 2) error->all(FLERR,"iead_bins must be >= 2");
       iarg += 3;
+    } else if (strcmp(arg[iarg],"iead_cache") == 0) {
+      // iead inline only: read the histograms from FILE when it exists and was
+      // made with the same settings, write them there after a build. The
+      // tables depend only on the static plasma, so a restart skips the build.
+      if (iarg+1 >= narg) error->all(FLERR,"iead_cache needs a file name");
+      iead_cache_file = std::string(arg[iarg+1]);
+      if (iead_cache_file == "none") iead_cache_file.clear();
+      iarg += 2;
     } else if (strcmp(arg[iarg],"iead_dump") == 0) {
       if (iarg+1 >= narg) error->all(FLERR,"iead_dump needs a file name");
       iead_dump_file = std::string(arg[iarg+1]);
@@ -990,6 +998,22 @@ void ComputeSurfacePhysicalSputter::load_iead_if_requested()
                                      update->sheath_mD_amu, iead_drift));
     iead_inline->dmax_override = update->sheath_dmax;
     if (getenv("OE_IEAD_SCALE_FRAC")) iead_inline->scale_frac = atof(getenv("OE_IEAD_SCALE_FRAC"));   // convergence tests
+    if (!iead_cache_file.empty()) {
+      std::string why;
+      const size_t nread = iead_inline->load(iead_cache_file.c_str(), why);
+      size_t nmin = nread, nmax = nread;
+      MPI_Allreduce(&nread, &nmin, 1, MPI_UNSIGNED_LONG, MPI_MIN, world);
+      MPI_Allreduce(&nread, &nmax, 1, MPI_UNSIGNED_LONG, MPI_MAX, world);
+      if (nmin != nmax)
+        error->all(FLERR,"compute surface/physical/sputter: ranks read different iead_cache contents");
+      if (comm->me == 0) {
+        char msg[512];
+        if (nread) snprintf(msg, sizeof(msg), "IEAD inline: %zu histograms read from %s\n", nread, iead_cache_file.c_str());
+        else snprintf(msg, sizeof(msg), "IEAD inline: cache %s not used (%s); building\n", iead_cache_file.c_str(), why.c_str());
+        if (screen) fputs(msg, screen);
+        if (logfile) fputs(msg, logfile);
+      }
+    }
     if (comm->me == 0 && (screen || logfile)) {
       const char *dr[] = {"cs2", "cs", "flow"};
       if (screen) fprintf(screen, "IEAD inline: %d markers, %d x %d bins, drift %s\n",
@@ -1721,7 +1745,17 @@ void ComputeSurfacePhysicalSputter::compute_per_surf()
     iead_inline->collecting = 0;
     size_t npend = iead_inline->pending_count(), nall = 0;
     MPI_Allreduce(&npend, &nall, 1, MPI_UNSIGNED_LONG, MPI_SUM, world);
-    if (nall > 0) iead_inline->distribute(world);
+    if (nall > 0) {
+      iead_inline->distribute(world);
+      if (!iead_cache_file.empty() && comm->me == 0) {
+        const size_t nw = iead_inline->save(iead_cache_file.c_str());
+        if (!nw) error->warning(FLERR,"compute surface/physical/sputter: could not write iead_cache");
+        else {
+          if (screen) fprintf(screen, "IEAD inline: %zu histograms written to %s\n", nw, iead_cache_file.c_str());
+          if (logfile) fprintf(logfile, "IEAD inline: %zu histograms written to %s\n", nw, iead_cache_file.c_str());
+        }
+      }
+    }
     cache_valid = 0;
   }
   compute_per_surf_body();

@@ -13,6 +13,7 @@
 
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
 
 #include <mpi.h>
@@ -71,6 +72,13 @@ class SheathIead {
   size_t n_high_escape() const;        // histograms with > 50 % non-impacting markers
   // every cached histogram: a "# ..." header line then nE rows of nT weights
   void dump(const char *path) const;
+  // Binary cache of the histograms (iead_cache): the tables depend only on the
+  // static plasma and the IEAD settings, so a restarted run can read them back
+  // instead of recomputing. save() writes every cached histogram (tmp + rename);
+  // load() adds the file's histograms to the cache and returns how many, or 0
+  // with a reason when the file is absent or was made with other settings.
+  size_t save(const char *path) const;
+  size_t load(const char *path, std::string &why);
 
   // Distributed build: with collecting = 1, get() only records the keys it
   // would need and returns an empty histogram; distribute() then gathers the

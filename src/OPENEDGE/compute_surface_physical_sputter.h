@@ -181,6 +181,7 @@ class ComputeSurfacePhysicalSputter : public Compute {
   std::unique_ptr<class SheathIead> iead_inline;
   int iead_markers = 2000, iead_nE = 120, iead_nT = 30, iead_drift = 2;   // drift: flow
   std::string iead_dump_file;              // rank 0 writes its cache (iead_dump)
+  std::string iead_cache_file;             // binary histogram cache read at init, written after a build (iead_cache)
   size_t iead_dumped = 0;
   std::unique_ptr<IeadTable> iead_light;
   std::unique_ptr<IeadTable> iead_W;

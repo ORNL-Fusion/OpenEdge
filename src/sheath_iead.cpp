@@ -5,6 +5,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <cstdint>
 
 #include "math_extra.h"
 #include "pusher.h"
@@ -47,6 +49,79 @@ size_t SheathIead::n_high_escape() const
   size_t n = 0;
   for (const auto &kv : cache) if (kv.second.escape_frac > 0.5) n++;
   return n;
+}
+
+namespace {
+const char IEAD_MAGIC[8] = {'O','E','I','E','A','D','1','\0'};
+struct IeadCacheHeader {
+  char magic[8];
+  int32_t nE, nT, nmarkers, drift_mode, seed, pad;
+  double mD_amu, dmax_override, scale_frac;
+  uint64_t count;
+};
+}
+
+size_t SheathIead::save(const char *path) const
+{
+  const std::string tmp = std::string(path) + ".tmp";
+  FILE *fp = fopen(tmp.c_str(), "wb");
+  if (!fp) return 0;
+  IeadCacheHeader hd;
+  memset(&hd, 0, sizeof(hd));
+  memcpy(hd.magic, IEAD_MAGIC, 8);
+  hd.nE = nE; hd.nT = nT; hd.nmarkers = nmarkers; hd.drift_mode = drift_mode; hd.seed = seed;
+  hd.mD_amu = mD_amu; hd.dmax_override = dmax_override; hd.scale_frac = scale_frac;
+  hd.count = cache.size();
+  bool ok = fwrite(&hd, sizeof(hd), 1, fp) == 1;
+  for (const auto &kv : cache) {
+    if (!ok) break;
+    const Key &k = kv.first; const Hist &h = kv.second;
+    const double kd[7] = {k.te, k.ti, k.ne, k.bmag, k.alpha_deg, k.mass, k.upar};
+    const int32_t ki[2] = {k.Z, (int32_t) h.f.size()};
+    const double hv[6] = {h.emax, h.escape_frac, h.d_launch, h.dt, h.e_mean, h.th_mean};
+    const int64_t hl[2] = {h.nstep_max, h.nimpact};
+    ok = fwrite(kd, sizeof(kd), 1, fp) == 1 && fwrite(ki, sizeof(ki), 1, fp) == 1 &&
+         fwrite(hv, sizeof(hv), 1, fp) == 1 && fwrite(hl, sizeof(hl), 1, fp) == 1 &&
+         (h.f.empty() || fwrite(h.f.data(), sizeof(double), h.f.size(), fp) == h.f.size());
+  }
+  if (fclose(fp) != 0) ok = false;
+  if (!ok || rename(tmp.c_str(), path) != 0) { remove(tmp.c_str()); return 0; }
+  return cache.size();
+}
+
+size_t SheathIead::load(const char *path, std::string &why)
+{
+  FILE *fp = fopen(path, "rb");
+  if (!fp) { why = "no cache file yet"; return 0; }
+  IeadCacheHeader hd;
+  if (fread(&hd, sizeof(hd), 1, fp) != 1 || memcmp(hd.magic, IEAD_MAGIC, 8) != 0) {
+    fclose(fp); why = "not an IEAD cache file"; return 0;
+  }
+  if (hd.nE != nE || hd.nT != nT || hd.nmarkers != nmarkers || hd.drift_mode != drift_mode ||
+      hd.seed != seed || hd.mD_amu != mD_amu || hd.dmax_override != dmax_override ||
+      hd.scale_frac != scale_frac) {
+    fclose(fp); why = "made with other IEAD settings (markers, bins, drift, mD, dmax or scale)"; return 0;
+  }
+  std::map<Key, Hist> in;
+  for (uint64_t n = 0; n < hd.count; n++) {
+    double kd[7], hv[6]; int32_t ki[2]; int64_t hl[2];
+    if (fread(kd, sizeof(kd), 1, fp) != 1 || fread(ki, sizeof(ki), 1, fp) != 1 ||
+        fread(hv, sizeof(hv), 1, fp) != 1 || fread(hl, sizeof(hl), 1, fp) != 1 ||
+        ki[1] != nE * nT) { fclose(fp); why = "truncated or inconsistent cache file"; return 0; }
+    Key k; k.te = kd[0]; k.ti = kd[1]; k.ne = kd[2]; k.bmag = kd[3]; k.alpha_deg = kd[4];
+    k.mass = kd[5]; k.upar = kd[6]; k.Z = ki[0];
+    Hist h; h.nE = nE; h.nT = nT;
+    h.emax = hv[0]; h.escape_frac = hv[1]; h.d_launch = hv[2]; h.dt = hv[3]; h.e_mean = hv[4]; h.th_mean = hv[5];
+    h.nstep_max = hl[0]; h.nimpact = hl[1];
+    h.f.resize(ki[1]);
+    if (!h.f.empty() && fread(h.f.data(), sizeof(double), h.f.size(), fp) != h.f.size()) {
+      fclose(fp); why = "truncated cache file"; return 0;
+    }
+    in.emplace(k, std::move(h));
+  }
+  fclose(fp);
+  for (auto &kv : in) cache.emplace(kv.first, std::move(kv.second));
+  return in.size();
 }
 
 void SheathIead::dump(const char *path) const
