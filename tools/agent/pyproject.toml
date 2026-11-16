@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openedge-agent"
+dynamic = ["version"]
+description = "Check, plan and launch OpenEdge runs; CLI and MCP server for coding agents"
+requires-python = ">=3.8"
+license = {text = "GPL-2.0-only"}
+
+[project.optional-dependencies]
+mcp = ["mcp>=2"]
+h5 = ["h5py"]
+chat = ["anthropic"]
+
+[project.scripts]
+openedge-agent = "openedge_agent.cli:main"
+openedge-agent-mcp = "openedge_agent.mcp_server:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "openedge_agent.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["openedge_agent*"]
+
+[tool.setuptools.package-data]
+openedge_agent = ["data/*.json", "data/profiles/*.json"]

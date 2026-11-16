@@ -1,0 +1,5 @@
+{"name": "perlmutter-gpu", "about": "NERSC Perlmutter GPU nodes, Kokkos CUDA build, one rank per GPU. Example: set account and binary; check NERSC docs for current flags.",
+ "scheduler": "slurm", "launcher": "srun -n {np} -c 32 --cpu-bind=cores --gpus-per-task=1 --gpu-bind=none",
+ "sbatch": {"constraint": "gpu", "qos": "regular", "account": null, "time": "02:00:00", "nodes": 1, "ntasks-per-node": 4, "gpus-per-node": 4},
+ "modules": [], "setup": ["export SLURM_CPU_BIND=cores"],
+ "env": {}, "max_np": 64, "binary_args": ["-k", "on", "g", "1", "-sf", "kk"], "tested": false}

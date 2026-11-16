@@ -1,0 +1,3 @@
+{"name": "laptop", "about": "Local machine, Open MPI or MPICH mpirun.",
+ "scheduler": "local", "launcher": "mpirun -np {np}", "env": {}, "max_np": 8,
+ "binary_args": [], "tested": true}

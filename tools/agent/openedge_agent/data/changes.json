@@ -1,0 +1,15 @@
+{
+  "_about": "Behaviour changes that make results differ across commits. commit: first commit with the new behaviour.",
+  "entries": [
+    {"commit": "8ffdc1f", "area": "fix surface/emit/source",
+     "change": "nevery is the source evaluation window; the window's markers are released over its steps (step 1 onward) instead of in one batch. nevery 1 keeps the previous random path."},
+    {"commit": "6b82c50", "area": "fix dt/monitor",
+     "change": "New fix: gyromotion and reaction-interval monitor on CPU and Kokkos. Must follow every fix volume/chem/adas. Adds the per-particle attribute dtm_push."},
+    {"commit": "7054121", "area": "database readers",
+     "change": "An unusable database or table (wrong dimensions, missing axis, not HDF5) stops the run instead of falling back to the analytic model. Only an absent sputter table falls back, with a warning."},
+    {"commit": "556b378", "area": "fix surface/emit/source",
+     "change": "The per-window concentration snapshot is redone only when a wall model updated the concentrations: removes a per-window collective."},
+    {"commit": "a5e3dfd", "area": "wedge caps",
+     "change": "Cross-rank teleports through toroidal caps no longer lost with gridcut -1. Earlier multi-rank wedge runs lost markers at caps."}
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "_about": "Which settings are counted in timesteps, and whether changing their physical interval changes the physics. Positional step arguments of fix styles come from the doc syntax lines (Nevery, Nfreq, N, Nrepeat); entries here add or override.",
+  "physics_fix_styles": [
+    "cross_field_diffusion", "coulomb/background", "coulomb/binary", "force/thermal",
+    "volume/chem/adas", "neutral/collide/background", "particulate/drag",
+    "particulate/charge", "particulate/thermal", "surface/state/lm", "surf/temp",
+    "ablate", "population/control", "move/surf", "temp/rescale", "temp/global/rescale",
+    "adapt", "dt/reset"
+  ],
+  "positional_steps": {
+    "population/control": [["Nevery", 0]]
+  },
+  "keyword_steps": [
+    {"command": "fix", "style": "surface/emit/source", "keyword": "nevery", "default": 1, "physics": true,
+     "note": "source evaluation window; since 8ffdc1f the window's markers are released over its steps"},
+    {"command": "fix", "style": "core/transport", "keyword": "nevery", "default": 10, "physics": true,
+     "note": "core solver coupling window"},
+    {"command": "surf_react", "style": "surface/pwi", "keyword": "adens_nevery", "default": 1, "physics": true,
+     "note": "wall ledger fold interval: surface concentrations update every adens_nevery steps"}
+  ]
+}

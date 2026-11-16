@@ -1,0 +1,6 @@
+{"name": "generic-slurm", "about": "Template for a Slurm CPU cluster: copy to ~/.openedge-agent/profiles/<name>.json and fill in partition, account, modules.",
+ "scheduler": "slurm", "launcher": "srun -n {np}",
+ "sbatch": {"partition": null, "account": null, "time": "01:00:00", "nodes": 1, "ntasks": "{np}"},
+ "modules": [], "setup": [],
+ "env": {"OMPI_MCA_pml": "ob1", "OMPI_MCA_btl": "self,vader,tcp", "OMPI_MCA_btl_vader_single_copy_mechanism": "none"},
+ "max_np": 512, "binary_args": [], "tested": false}
