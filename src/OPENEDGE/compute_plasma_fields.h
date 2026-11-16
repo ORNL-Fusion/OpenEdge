@@ -187,6 +187,7 @@ class ComputePlasmaFields : public Compute {
   // psiN from this compute's own equilibrium copy (any input mode).
   // Returns 1e30 when no valid equilibrium is loaded.
   double psi_norm_from_equ(double R, double Z) const;
+  double ni_jump_cell(const double *lo, const double *hi) const;
 
 PlasmaFileParams *plasma_arr;   // size = grid->nlocal
 PlasmaFileData plasma_data;

@@ -43,7 +43,7 @@ enum {
   TI, TE, NI, NE, PARRFLOW, EPAR, QPAR, QPERP, QMAG,
   GRAD_TE_R, GRAD_TE_T, GRAD_TE_Z, GRAD_TI_R, GRAD_TI_T, GRAD_TI_Z,
   GRAD_NE_R, GRAD_NE_Z,
-  GRAD_TE_MAG, SEPDIST
+  GRAD_TE_MAG, SEPDIST, NI_JUMP
 };
 
 /* ---------------------------------------------------------------------- */
@@ -234,6 +234,7 @@ ComputePlasmaFields(SPARTA *sparta, int narg, char **arg) :
     else if (strcmp(arg[iarg],"grad_ne_z")==0) value[iv] = GRAD_NE_Z;
     else if (strcmp(arg[iarg],"grad_te_mag")==0) value[iv] = GRAD_TE_MAG;
     else if (strcmp(arg[iarg],"sepdist")==0)   value[iv] = SEPDIST;
+    else if (strcmp(arg[iarg],"ni_jump")==0)   value[iv] = NI_JUMP;
     else error->all(FLERR,"Illegal plasma/fields value");
   }
 
@@ -427,6 +428,15 @@ void ComputePlasmaFields::init()
     if (!pd)
       error->all(FLERR,
         "compute plasma/fields: background fix must be style background");
+
+    // mesh and zones3d backgrounds carry no density gradient
+    if (pd->has_mesh || pd->is_zones3d())
+      for (int iv = 0; iv < nvalue; ++iv)
+        if (value[iv] == GRAD_NE_R || value[iv] == GRAD_NE_Z)
+          error->all(FLERR,
+            "compute plasma/fields: grad_ne_r/grad_ne_z are not available "
+            "from a mesh or zones3d background; use ni_jump as a density "
+            "refinement criterion");
 
     if (pd->is_zones3d()) {
       // Native 3-D backgrounds cannot be copied into PlasmaFileData's R-Z
@@ -772,6 +782,9 @@ void ComputePlasmaFields::init()
       error->all(FLERR,
         "compute plasma/fields: sepdist requires an equilibrium psi map — "
         "use a fix background plasma.h5 with an embedded equilibrium group");
+    if (value[iv] == NI_JUMP && !(input_mode == MODE_BACKGROUND && bg_fix_))
+      error->all(FLERR,
+        "compute plasma/fields: ni_jump requires a fix background");
   }
 
   sample_stale = 0;
@@ -967,6 +980,7 @@ void ComputePlasmaFields::compute_per_grid()
           // refines a separatrix-following band. init() guarantees a psi map.
           vout = std::fabs(psi_norm_from_equ(cell_Rc, cell_Zc) - 1.0);
           break;
+        case NI_JUMP:   vout = ni_jump_cell(cells[icell].lo, cells[icell].hi); break;
         default:        vout = 0.0; break;
       }
       if (nvalue == 1) vector_grid[icell] = vout;
@@ -1714,3 +1728,37 @@ MagneticFieldFileDataParams ComputePlasmaFields::query_bfield_at_point(
   return B;
 }
 
+/* ----------------------------------------------------------------------
+   relative ion-density change across a cell: (max - min) / mean of n_i
+   on a 3x3 (3x3x3 in 3d) stencil of points spanning the cell; points
+   outside the plasma are skipped, fewer than 2 valid points give 0
+------------------------------------------------------------------------- */
+
+double ComputePlasmaFields::ni_jump_cell(const double *lo, const double *hi) const
+{
+  const int dim = domain->dimension;
+  const int nk = (dim == 3) ? 3 : 1;
+  double nmin = 0.0, nmax = 0.0, nsum = 0.0;
+  int nvalid = 0;
+  for (int k = 0; k < nk; ++k)
+    for (int j = 0; j < 3; ++j)
+      for (int i = 0; i < 3; ++i) {
+        const double xyz[3] = {
+          lo[0] + 0.5 * i * (hi[0] - lo[0]),
+          lo[1] + 0.5 * j * (hi[1] - lo[1]),
+          (dim == 3) ? lo[2] + 0.5 * k * (hi[2] - lo[2]) : 0.0};
+        PlasmaPointSample sample;
+        if (!bg_fix_->sample_point(xyz, sample, -1, -1,
+                                   PLASMA_NEED_THERMO | PLASMA_QUERY_SOFT))
+          continue;
+        const double ni = sample.ni;
+        if (!(ni > 0.0)) continue;
+        if (nvalid == 0) nmin = nmax = ni;
+        nmin = std::min(nmin, ni);
+        nmax = std::max(nmax, ni);
+        nsum += ni;
+        ++nvalid;
+      }
+  if (nvalid < 2) return 0.0;
+  return (nmax - nmin) / (nsum / nvalid);
+}
