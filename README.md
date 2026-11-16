@@ -5,9 +5,9 @@
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-green.svg)](BUILD_CMAKE.md)
 [![GPU](https://img.shields.io/badge/GPU-Kokkos%20%2F%20CUDA-76B900.svg)](BUILD_CMAKE.md)
 [![package parity](https://github.com/ORNL-Fusion/OpenEdge/actions/workflows/parity.yml/badge.svg?branch=development)](https://github.com/ORNL-Fusion/OpenEdge/actions/workflows/parity.yml)
+[![Documentation Status](https://readthedocs.org/projects/openedge-ornl/badge/?version=latest)](https://openedge-ornl.readthedocs.io/en/latest/)
 
-<!-- TODO(badges): add docs and DOI badges once hosted documentation
-     and a Zenodo DOI exist. -->
+<!-- TODO(badges): add a DOI badge once a Zenodo DOI exists. -->
 
 A kinetic transport package for plasma-material and plasma-wall
 interactions.
@@ -39,8 +39,20 @@ make -j$(nproc)     # -> ./src/spa_mpi
 
 - **Build options, GPU builds, HPC recipes:** [BUILD_CMAKE.md](BUILD_CMAKE.md)
 - **Running cases and the example suite:** [examples/README.md](examples/README.md)
-- **Users manual:** [doc/Manual.html](doc/Manual.html); rebuild the HTML or a
-  local PDF with `make -C doc html` or `make -C doc pdf`
+- **Users manual:** [openedge-ornl.readthedocs.io](https://openedge-ornl.readthedocs.io)
+
+## Documentation
+
+The users manual is on Read the Docs at
+[openedge-ornl.readthedocs.io](https://openedge-ornl.readthedocs.io).
+It covers installation, the input-script commands and the physics
+models, and is rebuilt from `doc/src` on every push to `development`.
+To build it locally:
+
+```bash
+pip install -r doc/utils/requirements.txt
+sphinx-build -b html doc/src doc/html_sphinx   # -> doc/html_sphinx/index.html
+```
 
 ## Version policy
 
