@@ -99,6 +99,20 @@ directory.  Its name is spa\_ followed by the value of the CMake
 variable SPARTA_MACHINE, which each preset sets to its own name.  The
 build above produces src/spa_mpi.
 
+The development branch changes often and may change how an input
+script behaves.  For production runs and results you need to
+reproduce, build a tagged release instead.  The releases are listed
+on the `releases page <https://github.com/ORNL-Fusion/OpenEdge/releases>`_.
+Clone one, or switch an existing checkout to it, with
+
+.. code-block:: text
+
+   git clone --branch <tag> --depth 1 https://github.com/ORNL-Fusion/OpenEdge.git
+   git fetch --tags && git switch --detach <tag>
+
+OpenEdge prints its version tag and commit when it starts.  Keep that
+line with your results.
+
 The preset files in cmake/presets are CMake cache files that set the
 compilers, flags and packages for one configuration.  The ones used
 most with OpenEdge are
