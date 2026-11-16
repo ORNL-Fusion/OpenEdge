@@ -29,6 +29,8 @@ examples/**/dump.*
 *.dump
 *.state
 *.rst
+!doc/src/*.rst
+doc/src/Manual.rst
 *.vtk
 *.vtp
 *.vtu
