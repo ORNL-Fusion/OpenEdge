@@ -1,0 +1,23 @@
+# WEST grid for manual section 4.10: uniform 50x88 grid refined on the ion-density
+# jump (compute plasma/fields ni_jump), geometry and plasma from the WEST example.
+# Run from the repo root: mpirun -np 8 spa_mac_mpi -in doc/utils/west_grid_figure/in.grid -var out <dir>
+# then: python doc/utils/west_grid_figure/plot_grid.py <dir> doc/JPG
+seed                12345
+dimension           2
+boundary            o ao p
+global              gridcut 0.0 comm/sort no
+create_box          -1.00 0.85 0.0 3.25 -0.05 0.05
+create_grid         50 88 1
+balance_grid        rcb cell
+species             examples/workflows/impurity_transport/west_tungsten_transport/input/atoms.species W
+read_surf           examples/workflows/impurity_transport/west_tungsten_transport/input/wall_fine.surf group wall particle check
+read_surf           examples/workflows/impurity_transport/west_tungsten_transport/input/core.surf group core particle check
+surf_collide        sc specular
+surf_modify         all collide sc
+fix                 pd background file examples/workflows/impurity_transport/west_tungsten_transport/input/plasma.h5 static yes
+compute             nij plasma/fields all background pd ni_jump
+adapt_grid          all refine value c_nij 0.5 0 maxlevel 4 cells 2 2 1 iterate 3
+balance_grid        rcb cell
+dump                g grid all 1 ${out}/grid.dump id proc xlo ylo xhi yhi c_nij
+write_surf          ${out}/wall.dump
+run                 0

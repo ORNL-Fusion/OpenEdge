@@ -1,0 +1,21 @@
+/* OpenEdge manual: LAMMPS-style layout and command coloring */
+.wy-nav-content { max-width: 1100px; }
+.wy-side-nav-search, .wy-nav-top { background-color: #2c4a6e; }
+.wy-side-nav-search > a, .wy-nav-top a { color: #ffffff; }
+
+.rst-content div[class^="highlight"] {
+  border: 1px solid #d6dbe1;
+  border-left: 4px solid #2c4a6e;
+  background: #f6f8fa;
+}
+.rst-content div[class^="highlight"] pre { background: transparent; font-size: 90%; }
+
+/* OpenEdge lexer tokens */
+.highlight-OpenEdge .k  { color: #00753a; font-weight: bold; }   /* command */
+.highlight-OpenEdge .nv { color: #1b4fa0; }                      /* ${var}, c_/f_/v_/s_ refs */
+.highlight-OpenEdge .m  { color: #a0522d; }                      /* numbers */
+.highlight-OpenEdge .s  { color: #b31d28; }                      /* strings */
+.highlight-OpenEdge .c1 { color: #6a737d; font-style: italic; }  /* comments */
+.highlight-OpenEdge .no { color: #6f42c1; }                      /* NULL, INF, yes/no */
+.highlight-OpenEdge .nb { color: #6f42c1; }                      /* accelerator styles */
+.highlight-OpenEdge .o, .highlight-OpenEdge .p { color: #444; }
